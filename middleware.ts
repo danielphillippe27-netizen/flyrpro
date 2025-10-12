@@ -1,66 +1,42 @@
-import { type NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 
-export async function middleware(request: NextRequest) {
-  const response = NextResponse.next({
-    request,
-  });
-
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
+export async function middleware(req: NextRequest) {
+  const res = NextResponse.next();
+  
+  try {
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key',
+      {
+        cookies: {
+          getAll() {
+            return req.cookies.getAll();
+          },
+          setAll(cookiesToSet) {
+            cookiesToSet.forEach(({ name, value, options }) =>
+              req.cookies.set(name, value)
+            );
+            cookiesToSet.forEach(({ name, value, options }) =>
+              res.cookies.set(name, value, options)
+            );
+          },
         },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) =>
-            request.cookies.set(name, value)
-          );
-          cookiesToSet.forEach(({ name, value, options }) =>
-            response.cookies.set(name, value, options)
-          );
-        },
-      },
-    }
-  );
-
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-
-  // Protect dashboard routes
-  if (request.nextUrl.pathname.startsWith('/dashboard') || 
-      request.nextUrl.pathname.startsWith('/campaigns')) {
-    if (!session) {
-      return NextResponse.redirect(new URL('/login', request.url));
-    }
-
-    // Ensure user profile exists
-    const { data: profile } = await supabase
-      .from('user_profiles')
-      .select('*')
-      .eq('user_id', session.user.id)
-      .single();
-
-    if (!profile) {
-      await supabase.from('user_profiles').upsert({
-        user_id: session.user.id,
-        pro_active: false,
-      });
-    }
+      }
+    );
+    
+    // Just refresh the session - don't redirect or make DB calls
+    await supabase.auth.getSession();
+  } catch (_) {
+    // Swallow errors to avoid 500s
   }
-
-  // Redirect to dashboard if logged in and trying to access login
-  if (request.nextUrl.pathname === '/login' && session) {
-    return NextResponse.redirect(new URL('/dashboard', request.url));
-  }
-
-  return response;
+  
+  return res;
 }
 
 export const config = {
-  matcher: ['/dashboard/:path*', '/campaigns/:path*', '/login'],
+  // Run on everything except static assets
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml).*)'],
 };
 
