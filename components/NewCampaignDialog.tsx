@@ -1,8 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { createClient } from '@/lib/supabase/client';
 import {
   Dialog,
   DialogContent,
@@ -21,36 +19,23 @@ export function NewCampaignDialog() {
   const [name, setName] = useState('');
   const [destinationUrl, setDestinationUrl] = useState('');
   const [loading, setLoading] = useState(false);
-  const router = useRouter();
-  const supabase = createClient();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
-
-      const { error } = await supabase
-        .from('campaigns')
-        .insert({
-          user_id: user.id,
-          name,
-          destination_url: destinationUrl,
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
-
+      // For now, just simulate creating a campaign
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      alert(`Campaign "${name}" created successfully! (Demo mode)`);
+      
       setOpen(false);
       setName('');
       setDestinationUrl('');
-      router.refresh();
     } catch (error) {
       console.error('Error creating campaign:', error);
-      alert(error instanceof Error ? error.message : 'Failed to create campaign');
+      alert('Failed to create campaign');
     } finally {
       setLoading(false);
     }
