@@ -1,16 +1,11 @@
 export default function HomePage() {
   return (
-    <div style={{ padding: '20px', fontFamily: 'Arial, sans-serif' }}>
-      <h1>FLYR PRO - Home</h1>
-      <p>Welcome to FLYR PRO!</p>
-      <p>Environment check:</p>
-      <ul>
-        <li>NEXT_PUBLIC_SUPABASE_URL: {process.env.NEXT_PUBLIC_SUPABASE_URL ? '✅ Set' : '❌ Missing'}</li>
-        <li>NEXT_PUBLIC_SUPABASE_ANON_KEY: {process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? '✅ Set' : '❌ Missing'}</li>
-        <li>NODE_ENV: {process.env.NODE_ENV}</li>
-      </ul>
-      <p><a href="/test">Go to Test Page</a></p>
-      <p><a href="/login">Go to Login</a></p>
-    </div>
+    <html>
+      <body>
+        <h1>FLYR PRO - Working!</h1>
+        <p>If you can see this, the basic app is working.</p>
+        <p>Time: {new Date().toISOString()}</p>
+      </body>
+    </html>
   );
 }
