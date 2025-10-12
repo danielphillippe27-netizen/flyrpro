@@ -1,3 +1,5 @@
+import Link from 'next/link';
+
 export default function LoginPage() {
   return (
     <div style={{ padding: '20px', fontFamily: 'Arial, sans-serif' }}>
@@ -9,8 +11,8 @@ export default function LoginPage() {
         <li>NEXT_PUBLIC_SUPABASE_ANON_KEY: {process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? '✅ Set' : '❌ Missing'}</li>
         <li>NODE_ENV: {process.env.NODE_ENV}</li>
       </ul>
-      <p><a href="/">Go to Home</a></p>
-      <p><a href="/test">Go to Test Page</a></p>
+      <p><Link href="/">Go to Home</Link></p>
+      <p><Link href="/test">Go to Test Page</Link></p>
     </div>
   );
 }
