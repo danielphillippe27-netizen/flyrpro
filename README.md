@@ -2,6 +2,8 @@
 
 A Next.js 15 application for managing direct mail campaigns with QR code tracking, built with Supabase and Stripe.
 
+**FORCE DEPLOY: $(date)**
+
 ## Features
 
 - 🔐 Magic link authentication via Supabase
