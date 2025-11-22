@@ -22,7 +22,7 @@ export default function PrivacyPage() {
           <section className="mb-10">
             <h2 className="text-2xl font-semibold text-gray-900 mb-4">Introduction</h2>
             <p className="text-gray-700 leading-relaxed mb-4">
-              Welcome to FLYR Pro ("we," "our," or "us"). We are committed to protecting your privacy and ensuring you have a positive experience while using our application. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use FLYR Pro, a mobile and web application designed for real estate agents to track flyer drops, build farming campaigns, generate QR codes, and manage leads.
+              Welcome to FLYR Pro (&quot;we,&quot; &quot;our,&quot; or &quot;us&quot;). We are committed to protecting your privacy and ensuring you have a positive experience while using our application. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use FLYR Pro, a mobile and web application designed for real estate agents to track flyer drops, build farming campaigns, generate QR codes, and manage leads.
             </p>
             <p className="text-gray-700 leading-relaxed">
               By using FLYR Pro, you agree to the collection and use of information in accordance with this policy. If you do not agree with our policies and practices, please do not use our application.
@@ -36,7 +36,7 @@ export default function PrivacyPage() {
             </p>
             <ul className="list-disc pl-6 mb-4 space-y-2 text-gray-700">
               <li><strong>Account Information:</strong> Email address, name, and user ID when you create an account</li>
-              <li><strong>Precise Location Data:</strong> Your device's precise location (GPS coordinates) when you use location-based features of the app</li>
+              <li><strong>Precise Location Data:</strong> Your device&apos;s precise location (GPS coordinates) when you use location-based features of the app</li>
               <li><strong>Product Interaction Data:</strong> Information about how you interact with FLYR Pro, including features you use, campaigns you create, QR codes you generate, and leads you manage</li>
               <li><strong>Crash Data:</strong> Technical information about app crashes and errors to help us improve the stability and performance of FLYR Pro</li>
               <li><strong>Contact & Lead Data:</strong> Information about contacts and leads you add to the app, including names, addresses, phone numbers, and other details you provide</li>
@@ -50,7 +50,7 @@ export default function PrivacyPage() {
               We use the information we collect for the following purposes:
             </p>
             <ul className="list-disc pl-6 mb-4 space-y-2 text-gray-700">
-              <li><strong>User Accounts:</strong> To create and manage your account, authenticate your identity, and provide access to FLYR Pro's features</li>
+              <li><strong>User Accounts:</strong> To create and manage your account, authenticate your identity, and provide access to FLYR Pro&apos;s features</li>
               <li><strong>App Functionality:</strong> To enable core features of the app, including campaign management, QR code generation, lead tracking, and location-based services</li>
               <li><strong>Analytics:</strong> To analyze how you use FLYR Pro, understand user preferences, and improve our services</li>
               <li><strong>Location Services:</strong> To display your location on maps, enable location-based features, and help you track flyer drops and farming activities</li>
@@ -165,7 +165,7 @@ export default function PrivacyPage() {
           </section>
 
           <section className="mb-10">
-            <h2 className="text-2xl font-semibold text-gray-900 mb-4">Children's Privacy</h2>
+            <h2 className="text-2xl font-semibold text-gray-900 mb-4">Children&apos;s Privacy</h2>
             <p className="text-gray-700 leading-relaxed mb-4">
               FLYR Pro is not intended for use by children under the age of 13 (or the applicable age of consent in your jurisdiction). We do not knowingly collect personal information from children under 13.
             </p>
@@ -181,7 +181,7 @@ export default function PrivacyPage() {
             </p>
             <ul className="list-disc pl-6 mb-4 space-y-2 text-gray-700">
               <li>Posting the updated Privacy Policy on this page</li>
-              <li>Updating the "Last Updated" date at the top of this policy</li>
+              <li>Updating the &quot;Last Updated&quot; date at the top of this policy</li>
               <li>Providing notice through the app or via email for significant changes</li>
             </ul>
             <p className="text-gray-700 leading-relaxed">
