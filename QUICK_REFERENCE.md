@@ -37,7 +37,7 @@ APP_BASE_URL=http://localhost:3000
 |-------|-------------|
 | `/login` | Magic link authentication |
 | `/dashboard` | Campaign list |
-| `/campaigns/[id]` | Campaign detail |
+| `/campaigns/[campaignId]` | Campaign detail |
 | `/api/upload-csv` | CSV upload |
 | `/api/generate-qrs` | Generate QR codes |
 | `/api/open` | QR scan tracking |

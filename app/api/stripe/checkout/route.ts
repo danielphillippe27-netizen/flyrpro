@@ -71,8 +71,8 @@ export async function POST(request: NextRequest) {
         },
       ],
       mode: 'subscription',
-      success_url: `${process.env.APP_BASE_URL}/dashboard?success=true`,
-      cancel_url: `${process.env.APP_BASE_URL}/dashboard?canceled=true`,
+      success_url: `${process.env.APP_BASE_URL}/home?success=true`,
+      cancel_url: `${process.env.APP_BASE_URL}/home?canceled=true`,
       metadata: {
         supabase_user_id: user.id,
       },
