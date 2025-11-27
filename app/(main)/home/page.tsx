@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -11,7 +11,7 @@ import { FarmListView } from '@/components/home/FarmListView';
 import { CreateHubView } from '@/components/CreateHubView';
 import { createClient } from '@/lib/supabase/client';
 
-export default function HomePage() {
+function HomePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [showCreateHub, setShowCreateHub] = useState(false);
@@ -171,6 +171,20 @@ export default function HomePage() {
 
       <CreateHubView open={showCreateHub} onClose={() => setShowCreateHub(false)} />
     </div>
+  );
+}
+
+export default function HomePage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-gray-600">Loading...</div>
+        </div>
+      </div>
+    }>
+      <HomePageContent />
+    </Suspense>
   );
 }
 
