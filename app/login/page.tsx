@@ -25,6 +25,14 @@ export default function LoginPage() {
   // Redirect if already authenticated
   useEffect(() => {
     const checkAuth = async () => {
+      // Use getSession first to check cookies
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        router.push('/home');
+        return;
+      }
+      
+      // Fallback to getUser
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
         router.push('/home');

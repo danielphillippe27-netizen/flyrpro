@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -13,34 +13,127 @@ import { createClient } from '@/lib/supabase/client';
 
 export default function HomePage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [showCreateHub, setShowCreateHub] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
 
   useEffect(() => {
     const supabase = createClient();
+    let hasRedirected = false;
+    
+    // Handle code exchange if coming from magic link
+    const handleCodeExchange = async () => {
+      const code = searchParams.get('code');
+      if (code) {
+        console.log("Handling code exchange:", code);
+        try {
+          const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+          if (error) {
+            console.error("Code exchange error:", error);
+            // If code exchange fails, redirect to login
+            router.replace('/login');
+            return false;
+          } else {
+            console.log("Code exchange successful:", data);
+            // Remove code from URL
+            router.replace('/home');
+            return true;
+          }
+        } catch (error) {
+          console.error("Code exchange exception:", error);
+          router.replace('/login');
+          return false;
+        }
+      }
+      return null; // No code to exchange
+    };
     
     // Check auth and redirect if not authenticated
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (!user) {
-        router.push('/login');
-        return;
+    // Use getSession first to ensure cookies are read properly
+    const checkAuth = async () => {
+      try {
+        // First, handle code exchange if present
+        const codeExchanged = await handleCodeExchange();
+        if (codeExchanged === false) {
+          // Code exchange failed, already redirected
+          setIsCheckingAuth(false);
+          return;
+        }
+        
+        // Wait a bit for cookies to be available (especially after code exchange)
+        await new Promise(resolve => setTimeout(resolve, codeExchanged ? 200 : 100));
+        
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        console.log("SESSION DEBUG:", { session, error: sessionError });
+        
+        if (session?.user) {
+          setUserId(session.user.id);
+          setIsCheckingAuth(false);
+          return;
+        }
+        
+        // Try getUser as fallback (this makes a network call)
+        const { data: { user }, error: userError } = await supabase.auth.getUser();
+        console.log("USER DEBUG:", { user, error: userError });
+        
+        if (user) {
+          setUserId(user.id);
+          setIsCheckingAuth(false);
+          return;
+        }
+        
+        // Only redirect if we've confirmed there's no user
+        if (!hasRedirected) {
+          hasRedirected = true;
+          setIsCheckingAuth(false);
+          router.push('/login');
+        }
+      } catch (error) {
+        console.error("Auth check error:", error);
+        setIsCheckingAuth(false);
+        if (!hasRedirected) {
+          hasRedirected = true;
+          router.push('/login');
+        }
       }
-      setUserId(user.id);
-    });
+    };
+    
+    checkAuth();
 
     // Listen for auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log("AUTH STATE CHANGE:", { event, session: session?.user?.id });
+      
       if (session?.user) {
         setUserId(session.user.id);
-      } else if (event === 'SIGNED_OUT') {
+        setIsCheckingAuth(false);
+      } else if (event === 'SIGNED_OUT' && !hasRedirected) {
+        hasRedirected = true;
+        setIsCheckingAuth(false);
         router.push('/login');
+      } else if (event === 'TOKEN_REFRESHED' && session?.user) {
+        // Token refreshed, user is still logged in
+        setUserId(session.user.id);
+        setIsCheckingAuth(false);
       }
     });
 
     return () => {
       subscription.unsubscribe();
     };
-  }, [router]);
+  }, [router, searchParams]);
+
+  // Show loading state while checking auth
+  if (isCheckingAuth) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-gray-600">Loading...</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">

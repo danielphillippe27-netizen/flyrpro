@@ -64,7 +64,7 @@ export default function ChallengePage() {
                 <Badge variant={challenge.is_completed ? 'default' : 'secondary'}>
                   {challenge.status}
                 </Badge>
-                <span className="text-sm text-gray-600">{challenge.type.replace('_', ' ')}</span>
+                <span className="text-sm text-gray-600">{(challenge.type || '').replace('_', ' ') || 'N/A'}</span>
               </div>
             </div>
           </div>

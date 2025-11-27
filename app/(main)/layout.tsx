@@ -2,6 +2,8 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useEffect } from 'react';
+import { createClient } from '@/lib/supabase/client';
 import { Home, Map, Plus, TrendingUp, Trophy, Users, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -21,6 +23,14 @@ export default function MainLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  
+  // Temporary session logging for debugging
+  useEffect(() => {
+    const supabase = createClient();
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      console.log("SESSION DEBUG (Layout):", session);
+    });
+  }, []);
 
   return (
     <div className="flex flex-col h-screen">

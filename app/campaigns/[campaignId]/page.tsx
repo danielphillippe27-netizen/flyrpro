@@ -187,7 +187,7 @@ export default function CampaignPage() {
                 <Badge variant={campaign.status === 'active' ? 'default' : 'secondary'}>
                   {campaign.status}
                 </Badge>
-                <span className="text-sm text-gray-600">{campaign.type.replace('_', ' ')}</span>
+                <span className="text-sm text-gray-600">{(campaign.type || '').replace('_', ' ') || 'N/A'}</span>
               </div>
             </div>
           </div>

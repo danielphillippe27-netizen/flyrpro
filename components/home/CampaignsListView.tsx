@@ -67,7 +67,7 @@ export function CampaignsListView({ userId }: { userId: string | null }) {
                 {campaign.status}
               </Badge>
             </div>
-            <p className="text-sm text-gray-600 mb-3">{campaign.type.replace('_', ' ')}</p>
+            <p className="text-sm text-gray-600 mb-3">{(campaign.type || '').replace('_', ' ') || 'N/A'}</p>
             {campaign.total_flyers > 0 && (
               <div>
                 <div className="flex justify-between text-sm mb-1">
