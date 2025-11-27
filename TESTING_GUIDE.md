@@ -45,10 +45,9 @@ The app will be available at: **http://localhost:3000**
 - [ ] Layout is responsive on mobile/desktop
 
 ### ✅ Home Tab
-- [ ] Home page loads with 3 sections (Campaigns, Challenges, Farms)
+- [ ] Home page loads with 2 sections (Campaigns, Farms)
 - [ ] "Create" button opens CreateHubView modal
 - [ ] Campaigns list displays (if any exist)
-- [ ] Challenges list displays (if any exist)
 - [ ] Farms list displays (if any exist)
 - [ ] Empty states show when no data exists
 
@@ -89,15 +88,6 @@ The app will be available at: **http://localhost:3000**
 - [ ] Can schedule touches
 - [ ] Can create leads
 
-### ✅ Challenges Tab
-- [ ] Click "Create" → "Challenge" opens challenge creation form
-- [ ] Can create challenge with type, goal, time limit
-- [ ] Challenge appears in challenges list
-- [ ] Click challenge → opens detail page
-- [ ] Progress bar updates
-- [ ] "Increment Progress" button works
-- [ ] Completion state shows when goal reached
-
 ### ✅ CRM Tab
 - [ ] Contacts hub loads
 - [ ] Contact list displays (if any exist)
@@ -137,7 +127,7 @@ The app will be available at: **http://localhost:3000**
   - Ensure iOS Supabase schema matches the types
   - Check that required tables exist:
     - campaigns, campaign_addresses, building_polygons
-    - qr_codes, farms, challenges, contacts, user_stats
+    - qr_codes, farms, contacts, user_stats
   - Verify PostGIS extension is enabled for geometry columns
 
 ### TypeScript Errors
@@ -184,14 +174,6 @@ The app will be available at: **http://localhost:3000**
 2. Schedule touches
 3. Create leads from touches
 4. View farm progress
-```
-
-### 5. Test Challenges
-```
-1. Create a challenge (e.g., "50 door knocks")
-2. Increment progress
-3. Watch progress bar update
-4. Complete challenge
 ```
 
 ---

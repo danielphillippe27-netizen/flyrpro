@@ -50,7 +50,7 @@ export function PaywallGuard({ open, onClose }: PaywallGuardProps) {
           </DialogDescription>
         </DialogHeader>
         <div className="py-6">
-          <div className="bg-gradient-to-r from-blue-50 to-purple-50 p-6 rounded-xl border">
+          <div className="bg-gradient-to-r from-red-50 dark:from-red-900/20 to-purple-50 dark:to-purple-900/20 p-6 rounded-xl border dark:border-gray-700">
             <h3 className="text-2xl font-bold mb-2">Pro Plan</h3>
             <div className="text-3xl font-bold mb-4">$29<span className="text-lg text-gray-600">/month</span></div>
             <ul className="space-y-2 text-sm">

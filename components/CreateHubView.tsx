@@ -10,7 +10,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Megaphone, MapPin, Target, QrCode, FileText, FileImage } from 'lucide-react';
+import { Megaphone, MapPin, QrCode, FileText, FileImage } from 'lucide-react';
 
 export function CreateHubView({
   open,
@@ -22,15 +22,13 @@ export function CreateHubView({
   const router = useRouter();
 
   const handleCreate = (
-    type: 'campaign' | 'farm' | 'challenge' | 'qr' | 'landing-page' | 'flyer'
+    type: 'campaign' | 'farm' | 'qr' | 'landing-page' | 'flyer'
   ) => {
     onClose();
     if (type === 'campaign') {
       router.push('/campaigns/create');
     } else if (type === 'farm') {
       router.push('/farms/create');
-    } else if (type === 'challenge') {
-      router.push('/challenges/create');
     } else if (type === 'qr') {
       router.push('/qr');
     } else if (type === 'landing-page') {
@@ -43,7 +41,7 @@ export function CreateHubView({
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[425px] max-h-[80vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[700px] max-h-[80vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Create New</DialogTitle>
           <DialogDescription>
@@ -51,90 +49,82 @@ export function CreateHubView({
           </DialogDescription>
         </DialogHeader>
         
-        <div className="grid gap-4 py-4">
-          <Button
-            variant="outline"
-            className="h-auto p-6 flex flex-col items-start"
-            onClick={() => handleCreate('campaign')}
-          >
-            <div className="flex items-center gap-3 mb-2">
-              <Megaphone className="w-6 h-6" />
-              <span className="text-lg font-semibold">Campaign</span>
-            </div>
-            <p className="text-sm text-gray-600 text-left">
-              Create a new flyer distribution or door-knocking campaign
-            </p>
-          </Button>
+        <div className="grid grid-cols-2 gap-4 py-4">
+          {/* Left Column */}
+          <div className="space-y-4">
+            <Button
+              variant="outline"
+              className="h-auto p-6 flex flex-col items-start w-full"
+              onClick={() => handleCreate('campaign')}
+            >
+              <div className="flex items-center gap-3 mb-2">
+                <Megaphone className="w-6 h-6" />
+                <span className="text-lg font-semibold">Campaign</span>
+              </div>
+              <p className="text-sm text-gray-600 text-left">
+                Create a new flyer distribution or door-knocking campaign
+              </p>
+            </Button>
 
-          <Button
-            variant="outline"
-            className="h-auto p-6 flex flex-col items-start"
-            onClick={() => handleCreate('farm')}
-          >
-            <div className="flex items-center gap-3 mb-2">
-              <MapPin className="w-6 h-6" />
-              <span className="text-lg font-semibold">Farm</span>
-            </div>
-            <p className="text-sm text-gray-600 text-left">
-              Define a territory for repeated touches
-            </p>
-          </Button>
+            <Button
+              variant="outline"
+              className="h-auto p-6 flex flex-col items-start w-full"
+              onClick={() => handleCreate('farm')}
+            >
+              <div className="flex items-center gap-3 mb-2">
+                <MapPin className="w-6 h-6" />
+                <span className="text-lg font-semibold">Farm</span>
+              </div>
+              <p className="text-sm text-gray-600 text-left">
+                Define a territory for repeated touches
+              </p>
+            </Button>
+          </div>
 
-          <Button
-            variant="outline"
-            className="h-auto p-6 flex flex-col items-start"
-            onClick={() => handleCreate('challenge')}
-          >
-            <div className="flex items-center gap-3 mb-2">
-              <Target className="w-6 h-6" />
-              <span className="text-lg font-semibold">Challenge</span>
-            </div>
-            <p className="text-sm text-gray-600 text-left">
-              Create a gamified challenge to track progress
-            </p>
-          </Button>
+          {/* Right Column */}
+          <div className="space-y-4">
+            <Button
+              variant="outline"
+              className="h-auto p-6 flex flex-col items-start w-full"
+              onClick={() => handleCreate('flyer')}
+            >
+              <div className="flex items-center gap-3 mb-2">
+                <FileImage className="w-6 h-6" />
+                <span className="text-lg font-semibold">Flyer</span>
+              </div>
+              <p className="text-sm text-gray-600 text-left">
+                Design and customize flyer templates for print
+              </p>
+            </Button>
 
-          <Button
-            variant="outline"
-            className="h-auto p-6 flex flex-col items-start"
-            onClick={() => handleCreate('qr')}
-          >
-            <div className="flex items-center gap-3 mb-2">
-              <QrCode className="w-6 h-6" />
-              <span className="text-lg font-semibold">QR Code</span>
-            </div>
-            <p className="text-sm text-gray-600 text-left">
-              Generate QR codes for campaigns and tracking
-            </p>
-          </Button>
+            <Button
+              variant="outline"
+              className="h-auto p-6 flex flex-col items-start w-full"
+              onClick={() => handleCreate('landing-page')}
+            >
+              <div className="flex items-center gap-3 mb-2">
+                <FileText className="w-6 h-6" />
+                <span className="text-lg font-semibold">Landing Page</span>
+              </div>
+              <p className="text-sm text-gray-600 text-left">
+                Create a custom landing page for your campaigns
+              </p>
+            </Button>
 
-          <Button
-            variant="outline"
-            className="h-auto p-6 flex flex-col items-start"
-            onClick={() => handleCreate('landing-page')}
-          >
-            <div className="flex items-center gap-3 mb-2">
-              <FileText className="w-6 h-6" />
-              <span className="text-lg font-semibold">Landing Page</span>
-            </div>
-            <p className="text-sm text-gray-600 text-left">
-              Create a custom landing page for your campaigns
-            </p>
-          </Button>
-
-          <Button
-            variant="outline"
-            className="h-auto p-6 flex flex-col items-start"
-            onClick={() => handleCreate('flyer')}
-          >
-            <div className="flex items-center gap-3 mb-2">
-              <FileImage className="w-6 h-6" />
-              <span className="text-lg font-semibold">Flyer</span>
-            </div>
-            <p className="text-sm text-gray-600 text-left">
-              Design and customize flyer templates for print
-            </p>
-          </Button>
+            <Button
+              variant="outline"
+              className="h-auto p-6 flex flex-col items-start w-full"
+              onClick={() => handleCreate('qr')}
+            >
+              <div className="flex items-center gap-3 mb-2">
+                <QrCode className="w-6 h-6" />
+                <span className="text-lg font-semibold">QR Code</span>
+              </div>
+              <p className="text-sm text-gray-600 text-left">
+                Generate QR codes for campaigns and tracking
+              </p>
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>

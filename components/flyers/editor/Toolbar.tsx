@@ -167,7 +167,7 @@ export function Toolbar({ campaignId, flyerId, onExport }: ToolbarProps) {
       <div className="mt-auto pt-4 border-t border-slate-800">
         <Button
           onClick={onExport}
-          className="w-full bg-blue-600 hover:bg-blue-500 text-white font-medium"
+          className="w-full bg-red-600 dark:bg-red-500 hover:bg-red-500 dark:hover:bg-red-600 text-white font-medium"
           size="sm"
         >
           Export for Print

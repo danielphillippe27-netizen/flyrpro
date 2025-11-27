@@ -219,31 +219,6 @@ export interface FarmLead {
   created_at: string;
 }
 
-// Challenge Types
-export type ChallengeType = 'door_knock' | 'flyer_drop' | 'follow_up' | 'custom';
-export type ChallengeStatus = 'active' | 'completed' | 'failed';
-
-export interface Challenge {
-  id: string;
-  creator_id: string;
-  participant_id?: string;
-  type: ChallengeType;
-  title: string;
-  description?: string;
-  goal_count: number;
-  progress_count: number;
-  time_limit_hours?: number;
-  status: ChallengeStatus;
-  created_at: string;
-  expires_at?: string;
-  completed_at?: string;
-  // Computed
-  progress_percentage?: number;
-  is_expired?: boolean;
-  time_remaining?: number;
-  is_completed?: boolean;
-}
-
 // Contact Types
 export type ContactStatus = 'hot' | 'warm' | 'cold' | 'new';
 export type ActivityType = 'knock' | 'call' | 'flyer' | 'note' | 'text' | 'email' | 'meeting';

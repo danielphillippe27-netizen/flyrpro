@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 const statusColors: Record<string, string> = {
   hot: 'bg-red-100 text-red-800',
   warm: 'bg-orange-100 text-orange-800',
-  cold: 'bg-blue-100 text-blue-800',
+  cold: 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300',
   new: 'bg-green-100 text-green-800',
 };
 

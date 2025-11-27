@@ -15,22 +15,22 @@ export function StatsHeader({ recipients }: StatsHeaderProps) {
 
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-      <div className="bg-white p-6 rounded-2xl border">
-        <div className="text-sm text-gray-600 mb-1">Total</div>
-        <div className="text-3xl font-bold">{total}</div>
+      <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl border dark:border-gray-700">
+        <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">Total</div>
+        <div className="text-3xl font-bold dark:text-white">{total}</div>
       </div>
-      <div className="bg-white p-6 rounded-2xl border">
-        <div className="text-sm text-gray-600 mb-1">Pending</div>
-        <div className="text-3xl font-bold text-gray-600">{pending}</div>
+      <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl border dark:border-gray-700">
+        <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">Pending</div>
+        <div className="text-3xl font-bold text-gray-600 dark:text-gray-300">{pending}</div>
       </div>
-      <div className="bg-white p-6 rounded-2xl border">
-        <div className="text-sm text-gray-600 mb-1">Sent</div>
-        <div className="text-3xl font-bold text-blue-600">{sent}</div>
+      <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl border dark:border-gray-700">
+        <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">Sent</div>
+        <div className="text-3xl font-bold text-red-600 dark:text-red-500">{sent}</div>
       </div>
-      <div className="bg-white p-6 rounded-2xl border">
-        <div className="text-sm text-gray-600 mb-1">Open Rate</div>
-        <div className="text-3xl font-bold text-green-600">{openRate}%</div>
-        <div className="text-xs text-gray-500 mt-1">{scanned} scanned</div>
+      <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl border dark:border-gray-700">
+        <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">Open Rate</div>
+        <div className="text-3xl font-bold text-green-600 dark:text-green-500">{openRate}%</div>
+        <div className="text-xs text-gray-500 dark:text-gray-500 mt-1">{scanned} scanned</div>
       </div>
     </div>
   );

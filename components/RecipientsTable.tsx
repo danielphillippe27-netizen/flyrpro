@@ -62,7 +62,7 @@ export function RecipientsTable({ recipients }: RecipientsTableProps) {
       case 'pending':
         return 'bg-gray-200 text-gray-800';
       case 'sent':
-        return 'bg-blue-200 text-blue-800';
+        return 'bg-red-200 dark:bg-red-900/30 text-red-800 dark:text-red-300';
       case 'scanned':
         return 'bg-green-200 text-green-800';
       default:

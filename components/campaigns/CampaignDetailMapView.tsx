@@ -25,7 +25,7 @@ export function CampaignDetailMapView({
 
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
-      style: 'mapbox://styles/mapbox/light-v11',
+      style: 'mapbox://styles/flyrpro/cmie253op00fa01qmgiri8lcb', // Light 3D Style
       center: addresses.length > 0 && addresses[0].coordinate
         ? [addresses[0].coordinate.lon, addresses[0].coordinate.lat]
         : [-79.3832, 43.6532],
@@ -34,6 +34,17 @@ export function CampaignDetailMapView({
 
     map.current.on('load', () => {
       setMapLoaded(true);
+      
+      // Hide building layers after style loads (matching iOS app behavior)
+      const style = map.current?.getStyle();
+      if (style && style.layers) {
+        style.layers.forEach((layer) => {
+          // Hide layers that contain "building" in their id
+          if (layer.id.toLowerCase().includes('building')) {
+            map.current?.setLayoutProperty(layer.id, 'visibility', 'none');
+          }
+        });
+      }
     });
 
     return () => {

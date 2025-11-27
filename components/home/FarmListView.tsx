@@ -33,14 +33,14 @@ export function FarmListView({ userId }: { userId: string | null }) {
   }, [userId]);
 
   if (loading) {
-    return <div className="text-center py-8 text-gray-600">Loading farms...</div>;
+    return <div className="text-center py-8 text-gray-600 dark:text-gray-400">Loading farms...</div>;
   }
 
   if (!userId) {
     return (
       <div className="text-center py-12">
-        <p className="text-gray-600 mb-4">Please sign in to view farms</p>
-        <Link href="/login" className="text-blue-600 hover:underline text-sm">
+        <p className="text-gray-600 dark:text-gray-400 mb-4">Please sign in to view farms</p>
+        <Link href="/login" className="text-red-600 dark:text-red-500 hover:underline text-sm">
           Sign in
         </Link>
       </div>
@@ -50,8 +50,8 @@ export function FarmListView({ userId }: { userId: string | null }) {
   if (farms.length === 0) {
     return (
       <div className="text-center py-12">
-        <p className="text-gray-600 mb-4">No farms yet</p>
-        <p className="text-sm text-gray-500">Create a farm territory to get started</p>
+        <p className="text-gray-600 dark:text-gray-400 mb-4">No farms yet</p>
+        <p className="text-sm text-gray-500 dark:text-gray-500">Create a farm territory to get started</p>
       </div>
     );
   }
@@ -68,16 +68,16 @@ export function FarmListView({ userId }: { userId: string | null }) {
               </Badge>
             </div>
             {farm.area_label && (
-              <p className="text-sm text-gray-600 mb-3">{farm.area_label}</p>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">{farm.area_label}</p>
             )}
             <div className="mb-2">
               <div className="flex justify-between text-sm mb-1">
-                <span className="text-gray-600">Progress</span>
-                <span className="font-medium">{Math.round((farm.progress || 0) * 100)}%</span>
+                <span className="text-gray-600 dark:text-gray-400">Progress</span>
+                <span className="font-medium dark:text-gray-300">{Math.round((farm.progress || 0) * 100)}%</span>
               </div>
               <Progress value={(farm.progress || 0) * 100} className="h-2" />
             </div>
-            <div className="flex justify-between text-xs text-gray-500 mt-2">
+            <div className="flex justify-between text-xs text-gray-500 dark:text-gray-500 mt-2">
               <span>{farm.frequency} touches/month</span>
               <span>
                 {new Date(farm.start_date).toLocaleDateString()} -{' '}

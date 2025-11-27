@@ -30,7 +30,7 @@ export function FlyrMapView() {
 
         map.current = new mapboxgl.Map({
           container: mapContainer.current,
-          style: 'mapbox://styles/mapbox/light-v11',
+          style: 'mapbox://styles/flyrpro/cmie253op00fa01qmgiri8lcb', // Light 3D Style
           center: [-79.3832, 43.6532], // Toronto default
           zoom: 12,
           pitch: 0,
@@ -39,6 +39,18 @@ export function FlyrMapView() {
 
         map.current.on('load', () => {
           setMapLoaded(true);
+          
+          // Hide building layers after initial style loads (matching iOS app behavior)
+          const style = map.current?.getStyle();
+          if (style && style.layers) {
+            style.layers.forEach((layer) => {
+              // Hide layers that contain "building" in their id
+              if (layer.id.toLowerCase().includes('building')) {
+                map.current?.setLayoutProperty(layer.id, 'visibility', 'none');
+              }
+            });
+          }
+          
           // Resize after load to ensure proper rendering
           setTimeout(() => {
             map.current?.resize();
@@ -70,22 +82,41 @@ export function FlyrMapView() {
     if (!map.current || !mapLoaded) return;
 
     const styleMap: Record<MapMode, string> = {
-      light: 'mapbox://styles/mapbox/light-v11',
-      dark: 'mapbox://styles/mapbox/dark-v11',
+      light: 'mapbox://styles/flyrpro/cmie253op00fa01qmgiri8lcb', // Light 3D Style
+      dark: 'mapbox://styles/flyrpro/cmie0fu21003001qt912a9r5s', // Dark 3D Style
       satellite: 'mapbox://styles/mapbox/satellite-v9',
-      campaign_3d: 'mapbox://styles/mapbox/light-v11',
+      campaign_3d: 'mapbox://styles/flyrpro/cmicjnhhu00ag01qm106bbyt7', // Custom 3D (v10, no buildings)
     };
 
     map.current.setStyle(styleMap[mapMode]);
+
+    // Hide building layers after style loads (matching iOS app behavior)
+    const hideBuildingLayers = () => {
+      if (!map.current) return;
+      
+      const style = map.current.getStyle();
+      if (style && style.layers) {
+        style.layers.forEach((layer) => {
+          // Hide layers that contain "building" in their id
+          if (layer.id.toLowerCase().includes('building')) {
+            map.current?.setLayoutProperty(layer.id, 'visibility', 'none');
+          }
+        });
+      }
+    };
 
     if (mapMode === 'campaign_3d') {
       map.current.once('style.load', () => {
         if (map.current) {
           map.current.setPitch(60);
           map.current.setBearing(-17.6);
+          hideBuildingLayers();
         }
       });
     } else {
+      map.current.once('style.load', () => {
+        hideBuildingLayers();
+      });
       if (map.current) {
         map.current.setPitch(0);
         map.current.setBearing(0);
@@ -105,10 +136,10 @@ export function FlyrMapView() {
         </div>
       )}
       {!mapLoaded && !error && (
-        <div className="absolute inset-0 flex items-center justify-center bg-gray-50 z-10">
+        <div className="absolute inset-0 flex items-center justify-center bg-gray-50 dark:bg-gray-900 z-10">
           <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
-            <p className="text-gray-600 text-sm">Loading map...</p>
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-red-600 dark:border-red-500 mx-auto mb-2"></div>
+            <p className="text-gray-600 dark:text-gray-400 text-sm">Loading map...</p>
           </div>
         </div>
       )}

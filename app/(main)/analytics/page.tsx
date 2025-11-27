@@ -203,7 +203,7 @@ export default function AnalyticsPage() {
                         <p className="text-sm text-gray-600">Views: {stats.totalViews}</p>
                         <p className="text-sm text-gray-600">Unique: {stats.totalUniqueViews}</p>
                         <p className="text-sm text-gray-600">CTA Clicks: {stats.totalCTAClicks}</p>
-                        <p className="text-sm font-semibold text-blue-600">
+                        <p className="text-sm font-semibold text-red-600 dark:text-red-500">
                           Conversion: {stats.conversionRate.toFixed(1)}%
                         </p>
                       </div>

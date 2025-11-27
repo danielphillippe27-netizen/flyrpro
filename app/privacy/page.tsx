@@ -199,10 +199,10 @@ export default function PrivacyPage() {
                 <strong>FLYR Pro</strong>
               </p>
               <p className="text-gray-700 mb-2">
-                Email: <a href="mailto:privacy@flyrpro.app" className="text-blue-600 hover:text-blue-800 underline">privacy@flyrpro.app</a>
+                Email: <a href="mailto:privacy@flyrpro.app" className="text-red-600 dark:text-red-500 hover:text-red-800 dark:hover:text-red-400 underline">privacy@flyrpro.app</a>
               </p>
               <p className="text-gray-700">
-                Website: <a href="https://www.flyrpro.app" className="text-blue-600 hover:text-blue-800 underline">www.flyrpro.app</a>
+                Website: <a href="https://www.flyrpro.app" className="text-red-600 dark:text-red-500 hover:text-red-800 dark:hover:text-red-400 underline">www.flyrpro.app</a>
               </p>
             </div>
           </section>

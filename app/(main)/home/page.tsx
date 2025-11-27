@@ -6,7 +6,6 @@ import { Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { CampaignsListView } from '@/components/home/CampaignsListView';
-import { ChallengeListView } from '@/components/home/ChallengeListView';
 import { FarmListView } from '@/components/home/FarmListView';
 import { CreateHubView } from '@/components/CreateHubView';
 import { createClient } from '@/lib/supabase/client';
@@ -127,19 +126,19 @@ function HomePageContent() {
   // Show loading state while checking auth
   if (isCheckingAuth) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
         <div className="text-center">
-          <div className="text-gray-600">Loading...</div>
+          <div className="text-gray-600 dark:text-gray-400">Loading...</div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b sticky top-0 z-10">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      <header className="bg-white dark:bg-gray-800 border-b dark:border-gray-700 sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
-          <h1 className="text-2xl font-bold">FLYR</h1>
+          <h1 className="text-2xl font-bold dark:text-white">FLYR</h1>
           <Button onClick={() => setShowCreateHub(true)} size="sm">
             <Plus className="w-4 h-4 mr-2" />
             Create
@@ -149,18 +148,13 @@ function HomePageContent() {
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         <Tabs defaultValue="campaigns" className="w-full">
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="campaigns">Campaigns</TabsTrigger>
-            <TabsTrigger value="challenges">Challenges</TabsTrigger>
             <TabsTrigger value="farms">Farms</TabsTrigger>
           </TabsList>
           
           <TabsContent value="campaigns" className="mt-6">
             <CampaignsListView userId={userId} />
-          </TabsContent>
-          
-          <TabsContent value="challenges" className="mt-6">
-            <ChallengeListView userId={userId} />
           </TabsContent>
           
           <TabsContent value="farms" className="mt-6">
@@ -177,9 +171,9 @@ function HomePageContent() {
 export default function HomePage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
         <div className="text-center">
-          <div className="text-gray-600">Loading...</div>
+          <div className="text-gray-600 dark:text-gray-400">Loading...</div>
         </div>
       </div>
     }>

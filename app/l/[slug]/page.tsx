@@ -77,10 +77,10 @@ export default function LandingPageRoute() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading...</p>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-red-600 dark:border-red-500 mx-auto mb-4"></div>
+          <p className="text-gray-600 dark:text-gray-400">Loading...</p>
         </div>
       </div>
     );
@@ -88,19 +88,19 @@ export default function LandingPageRoute() {
 
   if (error || !landingPage) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
         <div className="text-center">
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">Page Not Found</h1>
-          <p className="text-gray-600">{error || 'The landing page you are looking for does not exist.'}</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Page Not Found</h1>
+          <p className="text-gray-600 dark:text-gray-400">{error || 'The landing page you are looking for does not exist.'}</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <div className="max-w-4xl mx-auto px-4 py-12">
-        <div className="bg-white rounded-lg shadow-lg overflow-hidden">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg dark:shadow-gray-900/50 overflow-hidden">
           {/* Hero Image */}
           {landingPage.hero_url && (
             <div className="w-full h-64 md:h-96 bg-gray-200">
@@ -115,13 +115,13 @@ export default function LandingPageRoute() {
           {/* Content */}
           <div className="p-8 md:p-12">
             {landingPage.headline && (
-              <h1 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">
+              <h1 className="text-3xl md:text-4xl font-bold text-gray-900 dark:text-white mb-4">
                 {landingPage.headline}
               </h1>
             )}
 
             {landingPage.subheadline && (
-              <h2 className="text-xl md:text-2xl text-gray-600 mb-6">
+              <h2 className="text-xl md:text-2xl text-gray-600 dark:text-gray-300 mb-6">
                 {landingPage.subheadline}
               </h2>
             )}
@@ -132,7 +132,7 @@ export default function LandingPageRoute() {
                 <a
                   href={landingPage.cta_url}
                   onClick={handleCTAClick}
-                  className="inline-block bg-blue-600 text-white px-8 py-4 rounded-lg font-semibold text-lg hover:bg-blue-700 transition-colors"
+                  className="inline-block bg-red-600 dark:bg-red-500 text-white px-8 py-4 rounded-lg font-semibold text-lg hover:bg-red-700 dark:hover:bg-red-600 transition-colors"
                   target="_blank"
                   rel="noopener noreferrer"
                 >

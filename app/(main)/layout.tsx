@@ -35,7 +35,7 @@ export default function MainLayout({
   return (
     <div className="flex flex-col h-screen">
       {/* Top Tab Bar */}
-      <nav className="fixed top-0 left-0 right-0 bg-white border-b border-gray-200 z-50">
+      <nav className="fixed top-0 left-0 right-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 z-50">
         <div className="flex justify-around items-center h-16">
           {tabs.map((tab) => {
             const Icon = tab.icon;
@@ -48,8 +48,8 @@ export default function MainLayout({
                 className={cn(
                   'flex flex-col items-center justify-center flex-1 h-full transition-colors',
                   isActive
-                    ? 'text-blue-600'
-                    : 'text-gray-500 hover:text-gray-700'
+                    ? 'text-red-600 dark:text-red-500'
+                    : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
                 )}
               >
                 <Icon className="w-6 h-6 mb-1" />

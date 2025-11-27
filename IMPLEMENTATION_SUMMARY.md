@@ -12,7 +12,6 @@
   - QRCodeService
   - LandingPageService
   - FarmService (with FarmTouchService, FarmLeadService)
-  - ChallengeService
   - ContactsService
   - StatsService
   - LeaderboardService
@@ -21,8 +20,8 @@
 
 ### Phase 2: Navigation & Layout
 - ✅ Main tab navigation with 5 tabs (Home, Map, QR, CRM, Stats)
-- ✅ Home tab with swipeable sections (Campaigns, Challenges, Farms)
-- ✅ CreateHubView modal for creating campaigns/farms/challenges
+- ✅ Home tab with swipeable sections (Campaigns, Farms)
+- ✅ CreateHubView modal for creating campaigns/farms
 - ✅ Responsive bottom tab bar
 
 ### Phase 3: Enhanced Campaigns
@@ -51,19 +50,13 @@
 - ✅ Farm list view
 - ✅ Farm progress tracking
 
-### Phase 7: Challenges (Gamification)
-- ✅ Challenge creation page
-- ✅ Challenge detail page with progress tracking
-- ✅ Challenge list view
-- ✅ Progress increment functionality
-
-### Phase 8: CRM / Contacts
+### Phase 7: CRM / Contacts
 - ✅ Contacts hub view
 - ✅ Contact list with filtering
 - ✅ Contact detail sheet with activity logging
 - ✅ Contact card components
 
-### Phase 9: Stats & Leaderboard
+### Phase 8: Stats & Leaderboard
 - ✅ Stats page with personal stats and leaderboard tabs
 - ✅ Personal stats view (YouViewContent)
 - ✅ Leaderboard view with sorting
@@ -86,9 +79,6 @@ app/
   farms/
     create/page.tsx      # Create farm
     [id]/page.tsx        # Farm detail
-  challenges/
-    create/page.tsx      # Create challenge
-    [id]/page.tsx        # Challenge detail
   api/
     mapbox/
       tilequery-buildings/route.ts
@@ -97,7 +87,6 @@ components/
   CreateHubView.tsx
   home/
     CampaignsListView.tsx
-    ChallengeListView.tsx
     FarmListView.tsx
   map/
     FlyrMapView.tsx
@@ -131,7 +120,6 @@ lib/services/
   LandingPageService.ts
   LandingPageGenerator.ts
   FarmService.ts
-  ChallengeService.ts
   ContactsService.ts
   StatsService.ts
   LeaderboardService.ts
@@ -141,7 +129,6 @@ types/
   database.ts           # All database types
   campaigns.ts
   farms.ts
-  challenges.ts
   contacts.ts
   stats.ts
   landing-pages.ts
@@ -163,7 +150,6 @@ The implementation expects the iOS Supabase schema with tables:
 - qr_codes, qr_sets, batches
 - landing_pages, landing_page_templates
 - farms, farm_touches, farm_leads
-- challenges
 - contacts, contact_activities
 - user_stats
 - experiments, experiment_variants, qr_scan_events
