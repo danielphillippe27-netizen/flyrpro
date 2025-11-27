@@ -89,7 +89,7 @@ export async function GET(request: NextRequest) {
         }
 
         // Add to ZIP
-        const fileName = `${recipient.address_line.replace(/[^a-z0-9]/gi, '_')}_${recipient.id}.png`;
+        const fileName = `${(recipient.address_line || 'address').replace(/[^a-z0-9]/gi, '_')}_${recipient.id}.png`;
         zip.file(fileName, data);
       } catch (error) {
         console.error(`Error processing recipient ${recipient.id}:`, error);
