@@ -1,6 +1,8 @@
 'use client';
 
+import { Suspense } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { flyerTemplates } from '@/lib/flyerTemplates';
 import {
   Card,
@@ -18,13 +20,18 @@ import { Button } from '@/components/ui/button';
  * Displays available flyer templates in a grid layout.
  * Users can select a template to start editing.
  */
-export default function FlyersPage() {
+function FlyersTemplatesContent() {
+  const searchParams = useSearchParams();
+  // Query params are available if needed: orientation, size, finish
+  const orientation = searchParams.get('orientation');
+  const size = searchParams.get('size');
+  const finish = searchParams.get('finish');
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
-      <div className="container mx-auto px-4 py-8">
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-8">
-          <h1 className="text-4xl font-bold mb-2">Flyer Templates</h1>
-          <p className="text-slate-400">
+          <h1 className="text-2xl font-bold mb-2">Flyer Templates</h1>
+          <p className="text-gray-600">
             Choose a template to start creating your flyer
           </p>
         </div>
@@ -33,25 +40,25 @@ export default function FlyersPage() {
           {flyerTemplates.map((template) => (
             <Card
               key={template.id}
-              className="bg-slate-900 border-slate-800 hover:border-slate-700 transition-colors"
+              className="bg-white border-gray-200 hover:border-gray-300 transition-colors"
             >
               <CardHeader>
-                <CardTitle className="text-slate-100">{template.name}</CardTitle>
+                <CardTitle className="text-gray-900">{template.name}</CardTitle>
                 {template.description && (
-                  <CardDescription className="text-slate-400">
+                  <CardDescription className="text-gray-600">
                     {template.description}
                   </CardDescription>
                 )}
               </CardHeader>
               <CardContent>
-                <div className="space-y-2 text-sm text-slate-500">
+                <div className="space-y-2 text-sm text-gray-500">
                   <p>Size: {template.width} × {template.height}px</p>
                   <p>Elements: {template.elements.length}</p>
                 </div>
               </CardContent>
               <CardFooter>
                 <Link href={`/flyers/${template.id}`} className="w-full">
-                  <Button className="w-full bg-emerald-500 hover:bg-emerald-400 text-black font-medium">
+                  <Button className="w-full bg-emerald-500 hover:bg-emerald-400 text-white font-medium">
                     Use Template
                   </Button>
                 </Link>
@@ -61,6 +68,18 @@ export default function FlyersPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function FlyersTemplatesPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-gray-600">Loading...</div>
+      </div>
+    }>
+      <FlyersTemplatesContent />
+    </Suspense>
   );
 }
 

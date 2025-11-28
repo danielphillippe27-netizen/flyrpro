@@ -57,7 +57,7 @@ export default function FlyerEditorPage({
 
   if (loading) {
     return (
-      <div className="h-screen bg-slate-950 flex items-center justify-center">
+      <div className="h-screen bg-gray-50 flex items-center justify-center">
         <LoadingSpinner />
       </div>
     );
@@ -65,7 +65,7 @@ export default function FlyerEditorPage({
 
   if (error) {
     return (
-      <div className="h-screen bg-slate-950">
+      <div className="h-screen bg-gray-50">
         <ErrorState
           message={error}
           onRetry={() => window.location.reload()}
