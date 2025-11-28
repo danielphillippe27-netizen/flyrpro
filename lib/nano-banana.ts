@@ -35,8 +35,9 @@ export type FlyerGenerationResponse = {
 
 /**
  * Build a prompt for Gemini based on flyer request
+ * Exported for use in frontend to build prompts for image generation
  */
-function buildFlyerPrompt(payload: FlyerGenerationRequest): string {
+export function buildFlyerPrompt(payload: FlyerGenerationRequest): string {
   const {
     orientation,
     size,

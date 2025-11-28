@@ -61,6 +61,11 @@ function AIFlyerContent() {
   const [selectedDesignId, setSelectedDesignId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Image generation state
+  const [flyerImageUrl, setFlyerImageUrl] = useState<string | null>(null);
+  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  const [imageError, setImageError] = useState<string | null>(null);
+
   const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       setPhotos(Array.from(e.target.files));
@@ -142,6 +147,84 @@ function AIFlyerContent() {
     // For now, just log; later we'll navigate to the editor
     console.log('Selected design', designId);
   };
+
+  // Build prompt for image generation from form data
+  const buildFlyerPromptFromForm = (): string => {
+    const normalizedStyle = style === 'bold-colorful' ? 'bold-color' : style;
+    
+    let prompt = `Create a professional real estate marketing flyer.
+
+Campaign Details:
+- Type: ${campaignType.replace(/-/g, ' ')}
+- Style: ${normalizedStyle.replace(/-/g, ' ')}
+- Tone: ${tone.replace(/-/g, ' ')}
+- Brand Color: ${brandColor}
+- Call to Action: ${cta}`;
+
+    if (propertyAddress) prompt += `\n- Property Address: ${propertyAddress}`;
+    if (price) prompt += `\n- Price: ${price}`;
+    if (beds) prompt += `\n- Bedrooms: ${beds}`;
+    if (baths) prompt += `\n- Bathrooms: ${baths}`;
+    if (sqft) prompt += `\n- Square Feet: ${sqft}`;
+
+    prompt += `\n\nDesign Requirements:
+- Orientation: ${orientation}
+- Size: ${size} inches
+- Finish: ${finish}
+- Include space for headline, property details, and QR code
+- Use brand color ${brandColor} prominently
+- Professional, modern real estate marketing style`;
+
+    return prompt;
+  };
+
+  async function handleGenerateFlyerImage() {
+    // Validation
+    if (!campaignType || !cta) {
+      setImageError('Please fill in all required fields (Campaign Type and Call to Action)');
+      return;
+    }
+
+    if (!style || !tone) {
+      setImageError('Please select a style and tone');
+      return;
+    }
+
+    try {
+      setIsGeneratingImage(true);
+      setImageError(null);
+      setFlyerImageUrl(null);
+
+      // Build prompt from form data
+      const prompt = buildFlyerPromptFromForm();
+
+      // Determine aspect ratio based on orientation
+      const aspectRatio = orientation === 'vertical' ? '3:4' : '4:3';
+
+      const res = await fetch('/api/ai-flyer/image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt,
+          size: '1K',
+          aspectRatio,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `Image API error: ${res.status}`);
+      }
+
+      const data = await res.json();
+      setFlyerImageUrl(data.imageUrl);
+    } catch (err: any) {
+      console.error('AI flyer image error:', err);
+      setImageError(err?.message ?? 'Failed to generate flyer image');
+    } finally {
+      setIsGeneratingImage(false);
+    }
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -417,21 +500,83 @@ function AIFlyerContent() {
           </CardContent>
         </Card>
 
-        {/* Generate Button */}
-        <Button
-          onClick={handleGenerate}
-          disabled={isGenerating}
-          className="w-full h-12 text-base"
-          size="lg"
-        >
-          {isGenerating ? 'Generating...' : 'Generate with AI'}
-        </Button>
+        {/* Generate Buttons */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Button
+            onClick={handleGenerate}
+            disabled={isGenerating || isGeneratingImage}
+            className="w-full h-12 text-base"
+            size="lg"
+            variant="default"
+          >
+            {isGenerating ? 'Generating...' : 'Generate with AI'}
+          </Button>
+          <Button
+            onClick={handleGenerateFlyerImage}
+            disabled={isGenerating || isGeneratingImage}
+            className="w-full h-12 text-base"
+            size="lg"
+            variant="outline"
+          >
+            {isGeneratingImage ? 'Generating image...' : 'Generate flyer image'}
+          </Button>
+        </div>
 
         {/* Error Display */}
-        {error && (
+        {(error || imageError) && (
           <Card className="rounded-2xl shadow-sm border border-destructive">
             <CardContent className="pt-6">
-              <p className="text-sm text-destructive">{error}</p>
+              <p className="text-sm text-destructive">{error || imageError}</p>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Image Generation Preview */}
+        {flyerImageUrl && !isGeneratingImage && (
+          <Card className="rounded-2xl shadow-sm border">
+            <CardHeader>
+              <CardTitle>Generated Flyer Image</CardTitle>
+              <CardDescription>AI-generated flyer preview</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <img
+                  src={flyerImageUrl}
+                  alt="AI generated flyer"
+                  className="max-w-full h-auto rounded-xl shadow-lg mx-auto"
+                />
+                <div className="flex gap-2">
+                  <Button
+                    onClick={() => {
+                      // TODO: Load image into FLYR editor
+                      console.log('Loading image into editor:', flyerImageUrl);
+                    }}
+                    className="flex-1"
+                  >
+                    Use this image
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => setFlyerImageUrl(null)}
+                  >
+                    Clear
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Image Generation Loading */}
+        {isGeneratingImage && (
+          <Card className="rounded-2xl shadow-sm border">
+            <CardHeader>
+              <CardTitle>Generating flyer image…</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center justify-center py-8">
+                <Skeleton className="h-[400px] w-full max-w-md rounded-md" />
+              </div>
             </CardContent>
           </Card>
         )}
