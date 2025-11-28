@@ -1,11 +1,12 @@
 /**
- * Nano Banana Pro API Client
+ * AI Flyer Generation Client
  * 
- * Types and helper function for integrating with Nano Banana Pro
- * AI flyer generation service.
+ * Uses Google Gemini API to generate flyer design concepts.
+ * Note: Gemini generates text/descriptions. Image URLs are placeholders
+ * that can be replaced with actual image generation API calls later.
  */
 
-export type NanoBananaRequest = {
+export type FlyerGenerationRequest = {
   orientation: 'horizontal' | 'vertical';
   size: string; // e.g. "8.5x5.5"
   finish: 'glossy' | 'matte';
@@ -22,72 +23,160 @@ export type NanoBananaRequest = {
   mediaUrls?: string[]; // optional image URLs
 };
 
-export type NanoBananaDesign = {
+export type FlyerDesign = {
   id: string;
   imageUrl: string;
   description?: string;
 };
 
-export type NanoBananaResponse = {
-  designs: NanoBananaDesign[];
+export type FlyerGenerationResponse = {
+  designs: FlyerDesign[];
 };
 
 /**
- * Generate flyer designs using Nano Banana Pro API
+ * Build a prompt for Gemini based on flyer request
+ */
+function buildFlyerPrompt(payload: FlyerGenerationRequest): string {
+  const {
+    orientation,
+    size,
+    finish,
+    campaignType,
+    address,
+    price,
+    beds,
+    baths,
+    sqft,
+    cta,
+    brandColor,
+    style,
+    tone,
+  } = payload;
+
+  let prompt = `Generate 3 different flyer design concepts for a real estate marketing flyer.
+
+Specifications:
+- Orientation: ${orientation}
+- Size: ${size} inches
+- Finish: ${finish}
+- Campaign Type: ${campaignType.replace(/-/g, ' ')}
+- Style: ${style.replace(/-/g, ' ')}
+- Tone: ${tone.replace(/-/g, ' ')}
+- Brand Color: ${brandColor}
+- Call to Action: ${cta}`;
+
+  if (address) prompt += `\n- Property Address: ${address}`;
+  if (price) prompt += `\n- Price: ${price}`;
+  if (beds) prompt += `\n- Bedrooms: ${beds}`;
+  if (baths) prompt += `\n- Bathrooms: ${baths}`;
+  if (sqft) prompt += `\n- Square Feet: ${sqft}`;
+
+  prompt += `\n\nFor each of the 3 designs, provide:
+1. A brief description (2-3 sentences) of the design concept
+2. Key visual elements and layout approach
+3. How it incorporates the brand color and style
+
+Format your response as a JSON array with objects containing "description" fields.`;
+
+  return prompt;
+}
+
+/**
+ * Generate flyer designs using Google Gemini API
  * 
  * @param payload - The flyer generation request payload
  * @returns Promise resolving to the API response with generated designs
  * @throws Error if API key is missing or API call fails
  */
-export async function generateNanoBananaFlyers(
-  payload: NanoBananaRequest
-): Promise<NanoBananaResponse> {
-  // 1. Read API key from environment variable
-  const apiKey = process.env.NANO_BANANA_API_KEY;
+export async function generateFlyerDesigns(
+  payload: FlyerGenerationRequest
+): Promise<FlyerGenerationResponse> {
+  // 1. Read API key from environment variable (GEMINI_API_KEY is primary)
+  const apiKey = process.env.GEMINI_API_KEY || process.env.NANO_BANANA_API_KEY;
 
   // 2. Validate API key exists
   if (!apiKey) {
     throw new Error(
-      'NANO_BANANA_API_KEY is not configured. Please set it in your environment variables.'
+      'GEMINI_API_KEY is not configured. Please set GEMINI_API_KEY in your environment variables.'
     );
   }
 
-  // 3. Prepare API request
-  const apiUrl = 'https://api.nanobanana.pro/v1/generate-flyer';
+  // 3. Build prompt
+  const prompt = buildFlyerPrompt(payload);
+
+  // 4. Prepare Gemini API request
+  const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${apiKey}`;
 
   try {
     const response = await fetch(apiUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [{ text: prompt }],
+          },
+        ],
+      }),
     });
 
-    // 4. Handle non-OK responses
+    // 5. Handle non-OK responses with detailed error info
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(
-        `Nano Banana API error (${response.status}): ${errorText || response.statusText}`
-      );
+      console.error('Gemini API responded with non-200:', response.status, errorText);
+      throw new Error(`AI API error: ${response.status} - ${errorText || response.statusText}`);
     }
 
-    // 5. Parse and return typed response
-    const data: NanoBananaResponse = await response.json();
+    // 6. Parse response
+    const data = await response.json();
 
-    // Validate response structure
-    if (!data.designs || !Array.isArray(data.designs)) {
-      throw new Error('Invalid response format from Nano Banana API');
+    // Extract text from Gemini response
+    let descriptions: string[] = [];
+    try {
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      
+      // Try to parse JSON from response
+      const jsonMatch = text.match(/\[[\s\S]*\]/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        descriptions = parsed.map((item: any) => item.description || JSON.stringify(item));
+      } else {
+        // Fallback: split by common patterns
+        const lines = text.split(/\n+/).filter((line: string) => line.trim().length > 20);
+        descriptions = lines.slice(0, 3);
+      }
+    } catch (parseError) {
+      console.warn('Failed to parse Gemini response, using fallback descriptions');
+      descriptions = [
+        'Modern design with clean typography and strategic use of brand colors',
+        'Bold layout with vibrant imagery and compelling call-to-action placement',
+        'Elegant composition balancing visual hierarchy and information density',
+      ];
     }
 
-    return data;
+    // 7. Generate design objects with placeholder images
+    // In a real implementation, these would be generated by an image API
+    const designs: FlyerDesign[] = descriptions.slice(0, 3).map((description, index) => ({
+      id: `design-${Date.now()}-${index}`,
+      imageUrl: `https://via.placeholder.com/600x800/${payload.brandColor.replace('#', '')}/FFFFFF?text=Design+${index + 1}`,
+      description: description.substring(0, 200), // Limit description length
+    }));
+
+    return { designs };
   } catch (error) {
-    // Re-throw with context if it's not already our error
+    // Enhanced error handling
     if (error instanceof Error) {
+      console.error('AI flyer generation error:', error.message);
       throw error;
     }
-    throw new Error(`Failed to call Nano Banana API: ${String(error)}`);
+    throw new Error(`Failed to call AI service: ${String(error)}`);
   }
 }
 
+// Export legacy names for backward compatibility
+export type NanoBananaRequest = FlyerGenerationRequest;
+export type NanoBananaDesign = FlyerDesign;
+export type NanoBananaResponse = FlyerGenerationResponse;
+export const generateNanoBananaFlyers = generateFlyerDesigns;

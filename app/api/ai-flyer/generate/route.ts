@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
-  generateNanoBananaFlyers,
-  type NanoBananaRequest,
+  generateFlyerDesigns,
+  type FlyerGenerationRequest,
 } from '@/lib/nano-banana';
 
 export async function POST(request: NextRequest) {
@@ -23,12 +23,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Normalize and map the request body to NanoBananaRequest
+    // Normalize and map the request body to FlyerGenerationRequest
     // Map "bold-colorful" style to "bold-color" for API
     const normalizedStyle =
       body.style === 'bold-colorful' ? 'bold-color' : body.style;
 
-    const payload: NanoBananaRequest = {
+    const payload: FlyerGenerationRequest = {
       orientation: body.orientation as 'horizontal' | 'vertical',
       size: body.size,
       finish: body.finish as 'glossy' | 'matte',
@@ -54,26 +54,49 @@ export async function POST(request: NextRequest) {
       mediaUrls: body.mediaUrls || [],
     };
 
-    // Call Nano Banana API
-    const result = await generateNanoBananaFlyers(payload);
+    // Call AI service with enhanced error handling
+    try {
+      const result = await generateFlyerDesigns(payload);
+
+      return NextResponse.json(
+        {
+          designs: result.designs,
+        },
+        { status: 200 }
+      );
+    } catch (apiError: any) {
+      // Log detailed error for debugging
+      console.error('AI service error:', {
+        message: apiError.message,
+        stack: apiError.stack,
+        payload: { ...payload, mediaUrls: payload.mediaUrls?.length || 0 },
+      });
+
+      // Return user-friendly error
+      const errorMessage =
+        apiError instanceof Error
+          ? apiError.message
+          : 'Failed to contact AI service';
+
+      return NextResponse.json(
+        { error: errorMessage },
+        { status: 500 }
+      );
+    }
+  } catch (error: any) {
+    // Catch-all for unexpected errors
+    console.error('AI flyer generation error:', {
+      message: error?.message,
+      stack: error?.stack,
+      error,
+    });
 
     return NextResponse.json(
       {
-        designs: result.designs,
+        error: error instanceof Error
+          ? error.message
+          : 'Failed to generate AI flyer. Please try again.',
       },
-      { status: 200 }
-    );
-  } catch (error: any) {
-    console.error('AI flyer generation error:', error);
-
-    // Provide user-friendly error message
-    const errorMessage =
-      error instanceof Error
-        ? error.message
-        : 'Failed to generate AI flyer. Please try again.';
-
-    return NextResponse.json(
-      { error: errorMessage },
       { status: 500 }
     );
   }
