@@ -13,8 +13,16 @@ export async function POST(req: NextRequest) {
       process.env.NANO_BANANA_API_KEY;
 
     if (!apiKey) {
+      console.error("Missing API key. Checked:", {
+        GOOGLE_AI_STUDIO_API_KEY: !!process.env.GOOGLE_AI_STUDIO_API_KEY,
+        GEMINI_API_KEY: !!process.env.GEMINI_API_KEY,
+        NANO_BANANA_API_KEY: !!process.env.NANO_BANANA_API_KEY,
+      });
       return NextResponse.json(
-        { error: "Missing GOOGLE_AI_STUDIO_API_KEY" },
+        { 
+          error: "Missing API key", 
+          detail: "Please set GOOGLE_AI_STUDIO_API_KEY, GEMINI_API_KEY, or NANO_BANANA_API_KEY in your environment variables." 
+        },
         { status: 500 }
       );
     }
@@ -132,9 +140,17 @@ Return one template object following the FlyerTemplate interface. Generate a uni
 
     if (!res.ok) {
       const text = await res.text();
-      console.error("Gemini error", text);
+      console.error("Gemini API error:", {
+        status: res.status,
+        statusText: res.statusText,
+        response: text.substring(0, 500),
+      });
       return NextResponse.json(
-        { error: "Gemini API error", detail: text },
+        { 
+          error: "Gemini API error", 
+          detail: text.substring(0, 500),
+          status: res.status 
+        },
         { status: 500 }
       );
     }
@@ -147,8 +163,12 @@ Return one template object following the FlyerTemplate interface. Generate a uni
         .join("\n");
 
     if (!rawText) {
+      console.error("No response from Gemini:", JSON.stringify(data, null, 2));
       return NextResponse.json(
-        { error: "No response from Gemini" },
+        { 
+          error: "No response from Gemini", 
+          detail: "The API returned an empty response. Check the API response structure." 
+        },
         { status: 500 }
       );
     }
@@ -171,7 +191,7 @@ Return one template object following the FlyerTemplate interface. Generate a uni
       template = JSON.parse(jsonText) as FlyerTemplate;
     } catch (parseError) {
       console.error("JSON parse error:", parseError);
-      console.error("Raw text:", jsonText);
+      console.error("Raw text (first 1000 chars):", jsonText.substring(0, 1000));
       return NextResponse.json(
         {
           error: "Failed to parse AI response as JSON",
