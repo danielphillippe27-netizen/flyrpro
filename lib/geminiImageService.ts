@@ -76,3 +76,4 @@ Return a single high-quality PNG image.
   throw new Error('No image data found in Gemini response');
 }
 
+

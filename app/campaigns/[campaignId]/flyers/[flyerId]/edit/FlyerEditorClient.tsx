@@ -26,3 +26,4 @@ export function FlyerEditorClient({ campaignId, flyerId, initialData }: FlyerEdi
   return <FlyerEditor campaignId={campaignId} flyerId={flyerId} />;
 }
 
+

@@ -26,7 +26,16 @@ export function FlyrMapView() {
       try {
         const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || 'pk.eyJ1IjoiZmx5cnBybyIsImEiOiJjbWd6dzZsbm0wYWE3ZWpvbjIwNGVteDV6In0.lvbLszJ7ADa_Cck3A8hZEQ';
         
+        if (!token || !token.startsWith('pk.')) {
+          throw new Error('Invalid Mapbox access token');
+        }
+        
         mapboxgl.accessToken = token;
+        
+        // Set worker URL to fix potential worker loading issues
+        if (typeof window !== 'undefined') {
+          mapboxgl.workerCount = 2;
+        }
 
         map.current = new mapboxgl.Map({
           container: mapContainer.current,
@@ -40,16 +49,38 @@ export function FlyrMapView() {
         map.current.on('load', () => {
           setMapLoaded(true);
           
-          // Hide building layers after initial style loads (matching iOS app behavior)
-          const style = map.current?.getStyle();
-          if (style && style.layers) {
-            style.layers.forEach((layer) => {
-              // Hide layers that contain "building" in their id
-              if (layer.id.toLowerCase().includes('building')) {
-                map.current?.setLayoutProperty(layer.id, 'visibility', 'none');
+          // Clean up problematic layers and hide building layers
+          const cleanupLayers = () => {
+            if (!map.current) return;
+            
+            try {
+              const style = map.current.getStyle();
+              if (style && style.layers) {
+                style.layers.forEach((layer) => {
+                  // Hide layers that contain "building" in their id
+                  if (layer.id.toLowerCase().includes('building')) {
+                    map.current?.setLayoutProperty(layer.id, 'visibility', 'none');
+                  }
+                  
+                  // Remove layers that reference non-existent source layers
+                  if (layer.id && (
+                    layer.id.includes('road-label') || 
+                    layer.id.includes('road_label')
+                  )) {
+                    try {
+                      map.current.removeLayer(layer.id);
+                    } catch (err) {
+                      // Layer might not exist or already removed
+                    }
+                  }
+                });
               }
-            });
-          }
+            } catch (err) {
+              // Ignore cleanup errors
+            }
+          };
+          
+          cleanupLayers();
           
           // Resize after load to ensure proper rendering
           setTimeout(() => {
@@ -58,8 +89,75 @@ export function FlyrMapView() {
         });
 
         map.current.on('error', (e) => {
-          console.error('Mapbox error:', e);
-          setError('Failed to load map');
+          // Log full error details for debugging
+          const errorDetails = {
+            error: e.error,
+            message: e.error?.message || String(e.error),
+            type: e.type,
+            target: e.target,
+          };
+          
+          // Check if this is a non-critical source layer error
+          const errorMessage = e.error?.message || String(e.error);
+          const isSourceLayerError = errorMessage.includes('does not exist on source') || 
+                                     errorMessage.includes('Source layer');
+          
+          if (isSourceLayerError) {
+            // This is a style validation error - log but don't show to user
+            // The map will still function, just without that specific layer
+            console.warn('Mapbox style layer warning (non-critical):', errorDetails);
+            
+            // Try to remove the problematic layer after style loads
+            if (map.current) {
+              map.current.once('style.load', () => {
+                try {
+                  const style = map.current?.getStyle();
+                  if (style && style.layers) {
+                    // Find and remove layers that reference non-existent source layers
+                    style.layers.forEach((layer) => {
+                      if (layer.id && (
+                        layer.id.includes('road-label') || 
+                        layer.id.includes('road_label')
+                      )) {
+                        try {
+                          map.current?.removeLayer(layer.id);
+                          console.log(`Removed problematic layer: ${layer.id}`);
+                        } catch (removeErr) {
+                          // Layer might already be removed or not exist
+                        }
+                      }
+                    });
+                  }
+                } catch (cleanupErr) {
+                  // Ignore cleanup errors
+                }
+              });
+            }
+            return; // Don't set error state for non-critical issues
+          }
+          
+          console.error('Mapbox error:', errorDetails);
+          
+          // Only show critical errors to the user
+          setError(`Map error: ${errorMessage}`);
+        });
+
+        // Also listen for style loading errors
+        map.current.on('style.loading', () => {
+          console.log('Mapbox style loading...');
+        });
+
+        map.current.on('style.error', (e) => {
+          console.error('Mapbox style error:', e);
+          setError(`Style loading error: ${e.error?.message || 'Failed to load map style'}`);
+        });
+
+        // Handle data loading errors
+        map.current.on('data', (e) => {
+          if (e.dataType === 'error') {
+            console.error('Mapbox data error:', e);
+            setError(`Data loading error: ${e.error?.message || 'Failed to load map data'}`);
+          }
         });
       } catch (err) {
         console.error('Map initialization error:', err);
@@ -88,20 +186,41 @@ export function FlyrMapView() {
       campaign_3d: 'mapbox://styles/flyrpro/cmicjnhhu00ag01qm106bbyt7', // Custom 3D (v10, no buildings)
     };
 
-    map.current.setStyle(styleMap[mapMode]);
+    try {
+      map.current.setStyle(styleMap[mapMode]);
+    } catch (err) {
+      console.error('Error setting map style:', err);
+      setError(`Failed to load map style: ${err instanceof Error ? err.message : String(err)}`);
+    }
 
-    // Hide building layers after style loads (matching iOS app behavior)
-    const hideBuildingLayers = () => {
+    // Hide building layers and clean up problematic layers after style loads
+    const cleanupLayers = () => {
       if (!map.current) return;
       
-      const style = map.current.getStyle();
-      if (style && style.layers) {
-        style.layers.forEach((layer) => {
-          // Hide layers that contain "building" in their id
-          if (layer.id.toLowerCase().includes('building')) {
-            map.current?.setLayoutProperty(layer.id, 'visibility', 'none');
-          }
-        });
+      try {
+        const style = map.current.getStyle();
+        if (style && style.layers) {
+          style.layers.forEach((layer) => {
+            // Hide layers that contain "building" in their id
+            if (layer.id.toLowerCase().includes('building')) {
+              map.current?.setLayoutProperty(layer.id, 'visibility', 'none');
+            }
+            
+            // Remove layers that reference non-existent source layers
+            if (layer.id && (
+              layer.id.includes('road-label') || 
+              layer.id.includes('road_label')
+            )) {
+              try {
+                map.current.removeLayer(layer.id);
+              } catch (err) {
+                // Layer might not exist or already removed
+              }
+            }
+          });
+        }
+      } catch (err) {
+        // Ignore cleanup errors
       }
     };
 
@@ -110,12 +229,12 @@ export function FlyrMapView() {
         if (map.current) {
           map.current.setPitch(60);
           map.current.setBearing(-17.6);
-          hideBuildingLayers();
+          cleanupLayers();
         }
       });
     } else {
       map.current.once('style.load', () => {
-        hideBuildingLayers();
+        cleanupLayers();
       });
       if (map.current) {
         map.current.setPitch(0);

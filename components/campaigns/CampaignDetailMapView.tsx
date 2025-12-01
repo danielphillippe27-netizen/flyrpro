@@ -35,15 +35,74 @@ export function CampaignDetailMapView({
     map.current.on('load', () => {
       setMapLoaded(true);
       
-      // Hide building layers after style loads (matching iOS app behavior)
-      const style = map.current?.getStyle();
-      if (style && style.layers) {
-        style.layers.forEach((layer) => {
-          // Hide layers that contain "building" in their id
-          if (layer.id.toLowerCase().includes('building')) {
-            map.current?.setLayoutProperty(layer.id, 'visibility', 'none');
+      // Clean up problematic layers and hide building layers
+      const cleanupLayers = () => {
+        if (!map.current) return;
+        
+        try {
+          const style = map.current.getStyle();
+          if (style && style.layers) {
+            style.layers.forEach((layer) => {
+              // Hide layers that contain "building" in their id
+              if (layer.id.toLowerCase().includes('building')) {
+                map.current?.setLayoutProperty(layer.id, 'visibility', 'none');
+              }
+              
+              // Remove layers that reference non-existent source layers
+              if (layer.id && (
+                layer.id.includes('road-label') || 
+                layer.id.includes('road_label')
+              )) {
+                try {
+                  map.current.removeLayer(layer.id);
+                } catch (err) {
+                  // Layer might not exist or already removed
+                }
+              }
+            });
           }
-        });
+        } catch (err) {
+          // Ignore cleanup errors
+        }
+      };
+      
+      cleanupLayers();
+    });
+
+    // Handle non-critical source layer errors
+    map.current.on('error', (e) => {
+      const errorMessage = e.error?.message || String(e.error);
+      const isSourceLayerError = errorMessage.includes('does not exist on source') || 
+                                 errorMessage.includes('Source layer');
+      
+      if (isSourceLayerError) {
+        // This is a style validation error - log but don't show to user
+        console.warn('Mapbox style layer warning (non-critical):', errorMessage);
+        
+        // Try to remove the problematic layer after style loads
+        if (map.current) {
+          map.current.once('style.load', () => {
+            try {
+              const style = map.current?.getStyle();
+              if (style && style.layers) {
+                style.layers.forEach((layer) => {
+                  if (layer.id && (
+                    layer.id.includes('road-label') || 
+                    layer.id.includes('road_label')
+                  )) {
+                    try {
+                      map.current?.removeLayer(layer.id);
+                    } catch (removeErr) {
+                      // Layer might already be removed
+                    }
+                  }
+                });
+              }
+            } catch (cleanupErr) {
+              // Ignore cleanup errors
+            }
+          });
+        }
       }
     });
 
