@@ -126,17 +126,16 @@ Return one template object following the FlyerTemplate interface. Generate a uni
       ],
     };
 
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": apiKey,
-        },
-        body: JSON.stringify(body),
-      }
-    );
+    // Use query parameter format (proven to work in nano-banana.ts)
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+    
+    const res = await fetch(apiUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
 
     if (!res.ok) {
       const text = await res.text();
