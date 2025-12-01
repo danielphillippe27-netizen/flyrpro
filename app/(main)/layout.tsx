@@ -6,6 +6,7 @@ import { useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Home, Map, Plus, TrendingUp, Trophy, Users, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import Image from 'next/image';
 
 const tabs = [
   { href: '/home', icon: Home, label: 'Home' },
@@ -36,7 +37,18 @@ export default function MainLayout({
     <div className="flex flex-col h-screen">
       {/* Top Tab Bar */}
       <nav className="fixed top-0 left-0 right-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 z-50">
-        <div className="flex justify-around items-center h-16">
+        <div className="flex items-center h-16 px-4">
+          {/* Logo */}
+          <div className="mr-4">
+            <Image 
+              src="/flyr-logo-black.svg" 
+              alt="FLYR" 
+              width={100} 
+              height={28}
+              className="h-7 w-auto dark:invert"
+            />
+          </div>
+          <div className="flex justify-around items-center flex-1">
           {tabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = pathname === tab.href || pathname?.startsWith(tab.href + '/');
@@ -57,6 +69,7 @@ export default function MainLayout({
               </Link>
             );
           })}
+          </div>
         </div>
       </nav>
       

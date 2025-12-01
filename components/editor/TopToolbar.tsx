@@ -5,6 +5,7 @@ import { useEditorStore } from '@/lib/editor/state';
 import { IconButton } from './IconButton';
 import { Separator } from './Separator';
 import { Button } from '@/components/ui/button';
+import Image from 'next/image';
 
 interface TopToolbarProps {
   onExportPng: () => void;
@@ -35,7 +36,15 @@ export function TopToolbar({ onExportPng }: TopToolbarProps) {
   return (
     <div className="h-14 bg-slate-900 border-b border-slate-800 flex items-center px-4 gap-2">
       {/* Logo */}
-      <div className="font-bold text-lg text-slate-50 mr-4">FLYR Editor</div>
+      <div className="flex items-center gap-2 mr-4">
+        <Image 
+          src="/flyr-logo-white.svg" 
+          alt="FLYR" 
+          width={100} 
+          height={28}
+          className="h-7 w-auto"
+        />
+      </div>
 
       <Separator orientation="vertical" className="h-8" />
 

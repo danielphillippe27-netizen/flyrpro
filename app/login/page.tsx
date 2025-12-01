@@ -14,6 +14,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
+import Image from 'next/image';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -97,7 +98,15 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-1">
-          <CardTitle className="text-2xl font-bold text-center">FLYR PRO</CardTitle>
+          <div className="flex flex-col items-center mb-4">
+            <Image 
+              src="/flyr-logo-black.svg" 
+              alt="FLYR" 
+              width={150} 
+              height={40}
+              className="h-10 w-auto mb-2"
+            />
+          </div>
           <CardDescription className="text-center">
             Sign in to access your campaigns and analytics
           </CardDescription>
