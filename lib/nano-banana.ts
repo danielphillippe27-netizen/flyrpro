@@ -106,8 +106,8 @@ export async function generateFlyerDesigns(
   const prompt = buildFlyerPrompt(payload);
 
   // 4. Prepare Gemini API request
-  // Use gemini-1.5-flash with v1beta (gemini-1.5-pro doesn't work with v1beta)
-  const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+  // Use gemini-1.5-flash-001 with v1 API
+  const apiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash-001:generateContent?key=${apiKey}`;
 
   try {
     const response = await fetch(apiUrl, {
