@@ -65,11 +65,13 @@ export async function POST(request: NextRequest) {
         { status: 200 }
       );
     } catch (apiError: any) {
-      // Log detailed error for debugging
+      // Log detailed error for debugging, including full Gemini error response
       console.error('AI service error:', {
         message: apiError.message,
         stack: apiError.stack,
+        response: apiError.response?.data || apiError.response,
         payload: { ...payload, mediaUrls: payload.mediaUrls?.length || 0 },
+        fullError: apiError,
       });
 
       // Return user-friendly error

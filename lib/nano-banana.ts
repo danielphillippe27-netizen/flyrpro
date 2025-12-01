@@ -106,8 +106,8 @@ export async function generateFlyerDesigns(
   const prompt = buildFlyerPrompt(payload);
 
   // 4. Prepare Gemini API request
-  // Use gemini-1.5-flash-001 with v1 API
-  const apiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash-001:generateContent?key=${apiKey}`;
+  // Use gemini-1.5-flash with v1 API
+  const apiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
   try {
     const response = await fetch(apiUrl, {
@@ -126,8 +126,20 @@ export async function generateFlyerDesigns(
 
     // 5. Handle non-OK responses with detailed error info
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Gemini API responded with non-200:', response.status, errorText);
+      let errorText = '';
+      let errorJson = null;
+      try {
+        errorText = await response.text();
+        errorJson = JSON.parse(errorText);
+      } catch {
+        // If parsing fails, use raw text
+      }
+      console.error('Gemini API responded with non-200:', {
+        status: response.status,
+        statusText: response.statusText,
+        errorText,
+        errorJson,
+      });
       throw new Error(`AI API error: ${response.status} - ${errorText || response.statusText}`);
     }
 
