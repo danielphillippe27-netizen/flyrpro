@@ -103,8 +103,9 @@ export async function generateFlyerDesigns(
     );
   }
 
-  // 3. Use REST API directly to force v1 (SDK defaults to v1beta which doesn't support gemini-1.5-flash)
-  const apiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+  // 3. Use REST API directly to force v1 (SDK defaults to v1beta)
+  // Using gemini-2.5-flash - newest available text model (June 2025, supports 1M tokens)
+  const apiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
   try {
     const response = await fetch(apiUrl, {
