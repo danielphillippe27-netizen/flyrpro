@@ -120,14 +120,13 @@ Return one template object following the FlyerTemplate interface. Generate a uni
     const body = {
       contents: [
         {
-          role: "user",
           parts: [{ text: systemPrompt + "\n\n" + userContext }],
         },
       ],
     };
 
-    // Use query parameter format (proven to work in nano-banana.ts)
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+    // Use v1 endpoint (not v1beta) and query parameter format (proven to work in nano-banana.ts)
+    const apiUrl = `https://generativelanguage.googleapis.com/v1/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
     
     const res = await fetch(apiUrl, {
       method: "POST",
