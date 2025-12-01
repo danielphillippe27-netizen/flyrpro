@@ -6,6 +6,8 @@
  * that can be replaced with actual image generation API calls later.
  */
 
+import { getGeminiModel } from "./googleGemini";
+
 export type FlyerGenerationRequest = {
   orientation: 'horizontal' | 'vertical';
   size: string; // e.g. "8.5x5.5"
@@ -92,65 +94,27 @@ Format your response as a JSON array with objects containing "description" field
 export async function generateFlyerDesigns(
   payload: FlyerGenerationRequest
 ): Promise<FlyerGenerationResponse> {
-  // 1. Read API key from environment variable (GEMINI_API_KEY is primary)
-  const apiKey = process.env.GEMINI_API_KEY || process.env.NANO_BANANA_API_KEY;
-
-  // 2. Validate API key exists
-  if (!apiKey) {
-    throw new Error(
-      'GEMINI_API_KEY is not configured. Please set GEMINI_API_KEY in your environment variables.'
-    );
-  }
-
-  // 3. Build prompt
+  // 1. Build prompt
   const prompt = buildFlyerPrompt(payload);
 
-  // 4. Prepare Gemini API request
-  // Use gemini-1.5-flash with v1 API
-  const apiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+  // 2. Get Gemini model using SDK
+  const model = getGeminiModel("gemini-1.5-flash");
 
   try {
-    const response = await fetch(apiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
+    // 3. Generate content using SDK
+    const result = await model.generateContent([
+      {
+        role: "user",
+        parts: [{ text: prompt }],
       },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [{ text: prompt }],
-          },
-        ],
-      }),
-    });
+    ]);
 
-    // 5. Handle non-OK responses with detailed error info
-    if (!response.ok) {
-      let errorText = '';
-      let errorJson = null;
-      try {
-        errorText = await response.text();
-        errorJson = JSON.parse(errorText);
-      } catch {
-        // If parsing fails, use raw text
-      }
-      console.error('Gemini API responded with non-200:', {
-        status: response.status,
-        statusText: response.statusText,
-        errorText,
-        errorJson,
-      });
-      throw new Error(`AI API error: ${response.status} - ${errorText || response.statusText}`);
-    }
+    // 4. Extract text from Gemini response
+    const text = result.response.text();
 
-    // 6. Parse response
-    const data = await response.json();
-
-    // Extract text from Gemini response
+    // 5. Parse response text
     let descriptions: string[] = [];
     try {
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      
       // Try to parse JSON from response
       const jsonMatch = text.match(/\[[\s\S]*\]/);
       if (jsonMatch) {
@@ -182,7 +146,11 @@ export async function generateFlyerDesigns(
   } catch (error) {
     // Enhanced error handling
     if (error instanceof Error) {
-      console.error('AI flyer generation error:', error.message);
+      console.error('AI flyer generation error:', {
+        message: error.message,
+        stack: error.stack,
+        error,
+      });
       throw error;
     }
     throw new Error(`Failed to call AI service: ${String(error)}`);

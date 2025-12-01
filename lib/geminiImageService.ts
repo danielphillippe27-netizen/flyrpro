@@ -1,5 +1,7 @@
 // lib/geminiImageService.ts
 
+import { getGeminiModel } from "./googleGemini";
+
 type GenerateGeminiImageParams = {
   prompt: string;
   size?: '1K' | '2K' | '4K';
@@ -15,16 +17,6 @@ export async function generateGeminiImage({
   size = '1K',
   aspectRatio = '3:4',
 }: GenerateGeminiImageParams): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY;
-
-  if (!apiKey) {
-    throw new Error('Missing GEMINI_API_KEY in environment variables');
-  }
-
-  const model = 'gemini-3-pro-image-preview';
-
-  const url = `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${apiKey}`;
-
   // Encode size + aspect in the prompt so we don't rely on any
   // unstable imageConfig fields in the REST API.
   const fullPrompt = `
@@ -39,41 +31,40 @@ Details:
 Return a single high-quality PNG image.
 `.trim();
 
-  const body = {
-    contents: [
-      {
-        parts: [{ text: fullPrompt }],
-      },
-    ],
-  };
+  // Get Gemini model using SDK
+  const model = getGeminiModel("gemini-3-pro-image-preview");
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+  try {
+    // Generate content using SDK (can pass string directly)
+    const result = await model.generateContent(fullPrompt);
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Gemini image error ${res.status} - ${text}`);
-  }
-
-  const json = await res.json();
-
-  const candidates = json.candidates;
-  if (!candidates || !candidates[0]?.content?.parts) {
-    throw new Error('Invalid Gemini response: no candidates/parts');
-  }
-
-  for (const part of candidates[0].content.parts) {
-    if (part.inlineData?.data) {
-      const base64 = part.inlineData.data as string;
-      const mime = (part.inlineData.mimeType as string) || 'image/png';
-      return `data:${mime};base64,${base64}`;
+    const candidates = result.response.candidates ?? [];
+    if (!candidates.length || !candidates[0]?.content?.parts) {
+      throw new Error('Invalid Gemini response: no candidates/parts');
     }
-  }
 
-  throw new Error('No image data found in Gemini response');
+    // Find inline image data in parts
+    const parts = candidates[0].content.parts ?? [];
+    const inlinePart = parts.find((p: any) => p.inlineData?.data);
+
+    if (!inlinePart) {
+      throw new Error('No image data found in Gemini response');
+    }
+
+    const base64 = inlinePart.inlineData.data as string;
+    const mime = (inlinePart.inlineData.mimeType as string) || 'image/png';
+    return `data:${mime};base64,${base64}`;
+  } catch (error) {
+    if (error instanceof Error) {
+      console.error('Gemini image generation error:', {
+        message: error.message,
+        stack: error.stack,
+        error,
+      });
+      throw error;
+    }
+    throw new Error(`Failed to generate Gemini image: ${String(error)}`);
+  }
 }
 
 
