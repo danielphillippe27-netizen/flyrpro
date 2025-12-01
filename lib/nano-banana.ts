@@ -101,13 +101,8 @@ export async function generateFlyerDesigns(
   const model = getGeminiModel("gemini-1.5-flash");
 
   try {
-    // 3. Generate content using SDK
-    const result = await model.generateContent([
-      {
-        role: "user",
-        parts: [{ text: prompt }],
-      },
-    ]);
+    // 3. Generate content using SDK (can pass string directly)
+    const result = await model.generateContent(prompt);
 
     // 4. Extract text from Gemini response
     const text = result.response.text();
