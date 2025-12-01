@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FlyerTemplate, FlyerListingData } from "@/types/flyer";
 
-const GEMINI_MODEL = "gemini-1.5-flash";
+const GEMINI_MODEL = "gemini-2.5-flash";
 
 export async function POST(req: NextRequest) {
   try {
