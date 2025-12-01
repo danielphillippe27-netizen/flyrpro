@@ -6,8 +6,6 @@
  * that can be replaced with actual image generation API calls later.
  */
 
-import { getGeminiModel } from "./googleGemini";
-
 export type FlyerGenerationRequest = {
   orientation: 'horizontal' | 'vertical';
   size: string; // e.g. "8.5x5.5"
@@ -97,15 +95,50 @@ export async function generateFlyerDesigns(
   // 1. Build prompt
   const prompt = buildFlyerPrompt(payload);
 
-  // 2. Get Gemini model using SDK
-  const model = getGeminiModel("gemini-1.5-flash");
+  // 2. Get API key
+  const apiKey = process.env.GEMINI_API_KEY || process.env.NANO_BANANA_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      'GEMINI_API_KEY is not configured. Please set GEMINI_API_KEY in your environment variables.'
+    );
+  }
+
+  // 3. Use REST API directly to force v1 (SDK defaults to v1beta which doesn't support gemini-1.5-flash)
+  const apiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
   try {
-    // 3. Generate content using SDK (can pass string directly)
-    const result = await model.generateContent(prompt);
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+      }),
+    });
+
+    if (!response.ok) {
+      let errorText = '';
+      let errorJson = null;
+      try {
+        errorText = await response.text();
+        errorJson = JSON.parse(errorText);
+      } catch {
+        // If parsing fails, use raw text
+      }
+      console.error('Gemini API responded with non-200:', {
+        status: response.status,
+        statusText: response.statusText,
+        errorText,
+        errorJson,
+      });
+      throw new Error(`AI API error: ${response.status} - ${errorText || response.statusText}`);
+    }
+
+    const data = await response.json();
 
     // 4. Extract text from Gemini response
-    const text = result.response.text();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
     // 5. Parse response text
     let descriptions: string[] = [];
