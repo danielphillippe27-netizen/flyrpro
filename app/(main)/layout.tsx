@@ -39,13 +39,13 @@ export default function MainLayout({
       <nav className="fixed top-0 left-0 right-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 z-50">
         <div className="flex items-center h-16 px-4">
           {/* Logo */}
-          <div className="mr-4">
+          <div className="mr-4 flex items-center justify-center">
             <Image 
               src="/flyr-logo-black.svg" 
               alt="FLYR" 
-              width={100} 
-              height={28}
-              className="h-7 w-auto dark:invert"
+              width={24} 
+              height={24}
+              className="h-6 w-6 dark:invert"
             />
           </div>
           <div className="flex justify-around items-center flex-1">
