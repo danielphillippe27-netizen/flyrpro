@@ -62,12 +62,16 @@ export function CampaignsListView({ userId }: { userId: string | null }) {
         <Link key={campaign.id} href={`/campaigns/${campaign.id}`}>
           <Card className="p-4 hover:shadow-md transition-shadow">
             <div className="flex items-start justify-between mb-2">
-              <h3 className="font-semibold text-lg">{campaign.name}</h3>
+              <h3 className="font-semibold text-lg">{campaign.name || 'Unnamed Campaign'}</h3>
               <Badge variant={campaign.status === 'active' ? 'default' : 'secondary'}>
-                {campaign.status}
+                {campaign.status || 'draft'}
               </Badge>
             </div>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">{(campaign.type || '').replace('_', ' ') || 'N/A'}</p>
+            {campaign.type && (
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+                {(campaign.type || '').replace('_', ' ')}
+              </p>
+            )}
             {campaign.total_flyers > 0 && (
               <div>
                 <div className="flex justify-between text-sm mb-1">

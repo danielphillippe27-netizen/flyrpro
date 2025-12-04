@@ -23,6 +23,10 @@ export class CampaignsService {
 
       return {
         ...campaign,
+        // Map title to name if title exists (for backward compatibility)
+        name: campaign.title || campaign.name || 'Unnamed Campaign',
+        // Provide default type if missing
+        type: campaign.type || 'flyer',
         progress,
         progress_pct: progressPct,
       } as CampaignV2;
@@ -46,6 +50,10 @@ export class CampaignsService {
 
     return {
       ...data,
+      // Map title to name if title exists (for backward compatibility)
+      name: data.title || data.name || 'Unnamed Campaign',
+      // Provide default type if missing
+      type: data.type || 'flyer',
       progress,
       progress_pct: progressPct,
     } as CampaignV2;

@@ -9,6 +9,7 @@ import { CampaignsListView } from '@/components/home/CampaignsListView';
 import { FarmListView } from '@/components/home/FarmListView';
 import { CreateHubView } from '@/components/CreateHubView';
 import { createClient } from '@/lib/supabase/client';
+import Image from 'next/image';
 
 function HomePageContent() {
   const router = useRouter();
@@ -138,10 +139,19 @@ function HomePageContent() {
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <header className="bg-white dark:bg-gray-800 border-b dark:border-gray-700 sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
-          <h1 className="text-2xl font-bold dark:text-white">FLYR</h1>
-          <Button onClick={() => setShowCreateHub(true)} size="sm">
-            <Plus className="w-4 h-4 mr-2" />
-            Create
+          <Image 
+            src="/flyr-logo-black.svg" 
+            alt="FLYR" 
+            width={40} 
+            height={40}
+            className="h-10 w-10 dark:invert"
+          />
+          <Button 
+            onClick={() => setShowCreateHub(true)} 
+            className="bg-red-600 hover:bg-red-700 text-white rounded-full w-12 h-12 p-0 flex items-center justify-center"
+            aria-label="Create"
+          >
+            <Plus className="w-5 h-5" />
           </Button>
         </div>
       </header>

@@ -182,12 +182,16 @@ export default function CampaignPage() {
           </Button>
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-2xl font-bold">{campaign.name}</h1>
+              <h1 className="text-2xl font-bold">{campaign.name || 'Unnamed Campaign'}</h1>
               <div className="flex items-center gap-2 mt-2">
                 <Badge variant={campaign.status === 'active' ? 'default' : 'secondary'}>
-                  {campaign.status}
+                  {campaign.status || 'draft'}
                 </Badge>
-                <span className="text-sm text-gray-600">{(campaign.type || '').replace('_', ' ') || 'N/A'}</span>
+                {campaign.type && (
+                  <span className="text-sm text-gray-600">
+                    {(campaign.type || '').replace('_', ' ')}
+                  </span>
+                )}
               </div>
             </div>
           </div>
