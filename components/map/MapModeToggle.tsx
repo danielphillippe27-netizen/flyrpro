@@ -1,6 +1,6 @@
 'use client';
 
-import { Sun, Moon, Satellite, Box } from 'lucide-react';
+import { Sun, Moon, Satellite } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -9,7 +9,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 
-type MapMode = 'light' | 'dark' | 'satellite' | 'campaign_3d';
+type MapMode = 'light' | 'dark' | 'satellite';
 
 export function MapModeToggle({
   mode,
@@ -22,7 +22,6 @@ export function MapModeToggle({
     light: { icon: Sun, label: 'Light' },
     dark: { icon: Moon, label: 'Dark' },
     satellite: { icon: Satellite, label: 'Satellite' },
-    campaign_3d: { icon: Box, label: '3D Buildings' },
   };
 
   const CurrentIcon = modeConfig[mode].icon;

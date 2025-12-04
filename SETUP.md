@@ -108,7 +108,10 @@ SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 STRIPE_SECRET_KEY=sk_test_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 APP_BASE_URL=http://localhost:3000
+NEXT_PUBLIC_EDITOR_URL=https://flyr-editor-yourname.vercel.app
 ```
+
+**Note:** `NEXT_PUBLIC_EDITOR_URL` is the URL of your deployed Canva clone editor. Deploy the editor separately to Vercel (see the editor setup instructions) and add the URL here.
 
 ### 5. Run the App
 

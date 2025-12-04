@@ -6,8 +6,10 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import { MapModeToggle } from './MapModeToggle';
 import { BuildingLayers } from './BuildingLayers';
 import { MapControls } from './MapControls';
+import { ThreeDToggle } from './ThreeDToggle';
+import { Button } from '@/components/ui/button';
 
-type MapMode = 'light' | 'dark' | 'satellite' | 'campaign_3d';
+type MapMode = 'light' | 'dark' | 'satellite';
 
 export function FlyrMapView() {
   const mapContainer = useRef<HTMLDivElement>(null);
@@ -16,6 +18,7 @@ export function FlyrMapView() {
   const [mapLoaded, setMapLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
+  const [show3DBuildings, setShow3DBuildings] = useState(false);
 
   useEffect(() => {
     if (!mapContainer.current || map.current) return;
@@ -184,7 +187,6 @@ export function FlyrMapView() {
       light: 'mapbox://styles/flyrpro/cmie253op00fa01qmgiri8lcb', // Light 3D Style
       dark: 'mapbox://styles/flyrpro/cmie0fu21003001qt912a9r5s', // Dark 3D Style
       satellite: 'mapbox://styles/mapbox/satellite-v9',
-      campaign_3d: 'mapbox://styles/flyrpro/cmicjnhhu00ag01qm106bbyt7', // Custom 3D (v10, no buildings)
     };
 
     try {
@@ -225,33 +227,23 @@ export function FlyrMapView() {
       }
     };
 
-    if (mapMode === 'campaign_3d') {
-      map.current.once('style.load', () => {
-        if (map.current) {
-          map.current.setPitch(60);
-          map.current.setBearing(-17.6);
-          cleanupLayers();
-        }
-      });
-    } else {
-      map.current.once('style.load', () => {
-        cleanupLayers();
-      });
-      if (map.current && !selectedCampaignId) {
-        map.current.setPitch(0);
-        map.current.setBearing(0);
-      }
-    }
-  }, [mapMode, mapLoaded, selectedCampaignId]);
+    map.current.once('style.load', () => {
+      cleanupLayers();
+    });
+  }, [mapMode, mapLoaded]);
 
-  // Automatically switch to 3D view when a campaign is selected
+  // Handle 3D view pitch and bearing
   useEffect(() => {
-    if (selectedCampaignId && mapLoaded && map.current) {
-      setMapMode('campaign_3d');
-    } else if (!selectedCampaignId && mapMode === 'campaign_3d') {
-      setMapMode('light');
+    if (!map.current || !mapLoaded) return;
+
+    if (show3DBuildings) {
+      map.current.setPitch(60);
+      map.current.setBearing(-17.6);
+    } else {
+      map.current.setPitch(0);
+      map.current.setBearing(0);
     }
-  }, [selectedCampaignId, mapLoaded]);
+  }, [show3DBuildings, mapLoaded]);
 
 
   return (
@@ -277,12 +269,35 @@ export function FlyrMapView() {
         <>
           <div className="absolute top-4 right-4 z-10 flex flex-col gap-2">
             <MapModeToggle mode={mapMode} onModeChange={setMapMode} />
+            <ThreeDToggle enabled={show3DBuildings} onToggle={setShow3DBuildings} />
+            {show3DBuildings && !selectedCampaignId && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="bg-yellow-50/90 text-xs text-yellow-700 hover:bg-yellow-50/95 h-auto py-1 px-2 text-center border border-yellow-200"
+                disabled
+              >
+                Select a campaign to see 3D buildings
+              </Button>
+            )}
+            {show3DBuildings && selectedCampaignId && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="bg-white/90 text-xs text-gray-600 hover:bg-white/95 h-auto py-1 px-2 text-center"
+                disabled
+              >
+                Press Control to change angle
+              </Button>
+            )}
             <MapControls 
               onCampaignSelect={setSelectedCampaignId} 
               selectedCampaignId={selectedCampaignId}
             />
           </div>
-          <BuildingLayers map={map.current} campaignId={selectedCampaignId} />
+          {show3DBuildings && (
+            <BuildingLayers map={map.current} campaignId={selectedCampaignId} />
+          )}
         </>
       )}
     </div>

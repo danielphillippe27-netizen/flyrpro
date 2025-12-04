@@ -49,6 +49,7 @@ Required environment variables:
 - `STRIPE_SECRET_KEY`: Your Stripe secret key
 - `STRIPE_WEBHOOK_SECRET`: Your Stripe webhook signing secret
 - `APP_BASE_URL`: Your app URL (http://localhost:3000 for development)
+- `NEXT_PUBLIC_EDITOR_URL`: URL of your deployed Canva clone editor (e.g., `https://flyr-editor-yourname.vercel.app`)
 
 ### 3. Set Up Supabase
 
