@@ -21,7 +21,7 @@ const mockProjectData = {
   updatedAt: new Date(),
 };
 
-export default function EditorPage() {
+export default function EditorCanvaPage() {
   return (
     <QueryProvider>
       <div className="h-screen w-full">
@@ -30,6 +30,4 @@ export default function EditorPage() {
     </QueryProvider>
   );
 }
-
-
 
