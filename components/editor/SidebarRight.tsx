@@ -32,7 +32,7 @@ export function SidebarRight() {
   // No selection - show page properties
   if (selectedCount === 0) {
     return (
-      <div className="w-80 bg-slate-900 border-l border-slate-800 flex flex-col">
+      <div className="sidebar w-80 bg-slate-900 border-l border-slate-800 flex flex-col" style={{ pointerEvents: 'auto' }}>
         <Tabs defaultValue="properties" className="flex flex-col flex-1 overflow-hidden">
           <div className="p-4 border-b border-slate-800">
             <TabsList className="grid w-full grid-cols-2">

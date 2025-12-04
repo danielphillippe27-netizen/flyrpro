@@ -120,3 +120,37 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Editor-specific styles for Konva canvas */
+.canvas-wrapper {
+  position: relative;
+  z-index: 5;
+}
+
+.canvas-wrapper canvas {
+  display: block;
+}
+
+/* Sidebar z-index - ensure they're above canvas but below modals */
+[class*="sidebar"],
+[class*="Sidebar"] {
+  position: relative;
+  z-index: 10;
+}
+
+/* Textarea overlay for text editing - must be above everything */
+.konva-text-editor {
+  position: fixed;
+  z-index: 1000;
+  pointer-events: auto;
+  border: none;
+  outline: none;
+  background: transparent;
+  resize: none;
+  overflow: hidden;
+}
+
+/* Ensure decorative overlays don't block pointer events */
+[class*="overlay"]:not([class*="interactive"]) {
+  pointer-events: none;
+}

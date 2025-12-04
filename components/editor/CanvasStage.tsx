@@ -20,10 +20,12 @@ interface CanvasStageProps {
 export function CanvasStage({ containerRef, stageRef: externalStageRef }: CanvasStageProps) {
   const internalStageRef = useRef<Konva.Stage>(null);
   const stageRef = externalStageRef || internalStageRef;
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [snapGuides, setSnapGuides] = useState<Array<{ type: 'vertical' | 'horizontal'; position: number }>>([]);
   const [spacePressed, setSpacePressed] = useState(false);
+  const [editingTextId, setEditingTextId] = useState<string | null>(null);
   
   const {
     pages,
@@ -195,6 +197,125 @@ export function CanvasStage({ containerRef, stageRef: externalStageRef }: Canvas
     e.evt.preventDefault();
   }, []);
 
+  // Create text editor overlay for text editing
+  const createTextEditor = useCallback((konvaTextNode: Konva.Text, elementId: string) => {
+    const stage = stageRef.current;
+    if (!stage || !wrapperRef.current) return;
+
+    // Remove any existing text editor
+    const existingEditor = document.querySelector('.konva-text-editor') as HTMLTextAreaElement;
+    if (existingEditor) {
+      existingEditor.remove();
+    }
+
+    const container = stage.container();
+    const stageBox = container.getBoundingClientRect();
+    
+    // Get element position from store (more reliable than node position)
+    const element = elements[elementId] as TextElement;
+    if (!element) return;
+    
+    // Convert page coordinates to stage coordinates (accounting for pan and zoom)
+    const stageX = element.x * zoom + panX;
+    const stageY = element.y * zoom + panY;
+
+    // Create textarea
+    const textarea = document.createElement('textarea');
+    textarea.className = 'konva-text-editor';
+    textarea.value = konvaTextNode.text();
+    
+    // Position and style textarea to match Konva text
+    const x = stageBox.left + stageX;
+    const y = stageBox.top + stageY;
+    const width = konvaTextNode.width() * zoom;
+    const height = Math.max(konvaTextNode.height() * zoom, 20);
+
+    textarea.style.position = 'fixed';
+    textarea.style.left = `${x}px`;
+    textarea.style.top = `${y}px`;
+    textarea.style.width = `${width}px`;
+    textarea.style.height = `${height}px`;
+    textarea.style.fontSize = `${konvaTextNode.fontSize() * zoom}px`;
+    textarea.style.fontFamily = konvaTextNode.fontFamily();
+    textarea.style.fontWeight = konvaTextNode.fontStyle() || 'normal';
+    textarea.style.color = konvaTextNode.fill();
+    textarea.style.textAlign = konvaTextNode.align();
+    textarea.style.border = 'none';
+    textarea.style.outline = '1px solid #3b82f6';
+    textarea.style.background = 'rgba(255, 255, 255, 0.9)';
+    textarea.style.padding = '2px';
+    textarea.style.margin = '0';
+    textarea.style.overflow = 'hidden';
+    textarea.style.resize = 'none';
+    textarea.style.whiteSpace = 'pre-wrap';
+    textarea.style.wordWrap = 'break-word';
+
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+
+    // Handle save on Enter (without Shift)
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        saveText();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        cancelText();
+      }
+    };
+
+    // Handle save on blur
+    const handleBlur = () => {
+      saveText();
+    };
+
+    const saveText = () => {
+      const newText = textarea.value;
+      const element = elements[elementId] as TextElement;
+      if (element) {
+        updateElement(elementId, { text: newText });
+        useEditorStore.getState().pushHistory();
+      }
+      textarea.remove();
+      setEditingTextId(null);
+      stage.draw();
+      if (wrapperRef.current) {
+        wrapperRef.current.focus();
+      }
+    };
+
+    const cancelText = () => {
+      textarea.remove();
+      setEditingTextId(null);
+      stage.draw();
+      if (wrapperRef.current) {
+        wrapperRef.current.focus();
+      }
+    };
+
+    textarea.addEventListener('keydown', handleKeyDown);
+    textarea.addEventListener('blur', handleBlur);
+
+    setEditingTextId(elementId);
+  }, [elements, updateElement, stageRef, zoom, panX, panY]);
+
+  // Handle double-click on text elements
+  const handleTextDoubleClick = useCallback((e: Konva.KonvaEventObject<MouseEvent>, elementId: string) => {
+    e.cancelBubble = true;
+    const stage = stageRef.current;
+    if (!stage) return;
+
+    const element = elements[elementId] as TextElement;
+    if (!element || element.type !== 'text') return;
+
+    // Find the Konva Text node
+    const textNode = stage.findOne(`#${elementId}`) as Konva.Text;
+    if (textNode) {
+      createTextEditor(textNode, elementId);
+    }
+  }, [elements, createTextEditor]);
+
   // Render element
   const renderElement = (element: EditorElement) => {
     const isSelected = selectedIds.includes(element.id);
@@ -232,6 +353,7 @@ export function CanvasStage({ containerRef, stageRef: externalStageRef }: Canvas
             width={textEl.width}
             align={textEl.align}
             verticalAlign="middle"
+            onDblClick={(e) => handleTextDoubleClick(e, element.id)}
           />
         );
       }
@@ -298,10 +420,44 @@ export function CanvasStage({ containerRef, stageRef: externalStageRef }: Canvas
   const stageWidth = page.width * zoom;
   const stageHeight = page.height * zoom;
 
+  // Determine cursor style based on interaction mode
+  const getCursorStyle = () => {
+    if (isDraggingCanvas) return 'grabbing';
+    if (spacePressed) return 'grab';
+    return 'default';
+  };
+
+  // Update container cursor style directly
+  useEffect(() => {
+    const container = stageRef.current?.container();
+    if (container) {
+      container.style.cursor = getCursorStyle();
+    }
+  }, [isDraggingCanvas, spacePressed, stageRef]);
+
+  // Cleanup text editor on unmount
+  useEffect(() => {
+    return () => {
+      const existingEditor = document.querySelector('.konva-text-editor') as HTMLTextAreaElement;
+      if (existingEditor) {
+        existingEditor.remove();
+      }
+    };
+  }, []);
+
   return (
     <div
-      ref={containerRef}
-      className="flex-1 flex items-center justify-center overflow-hidden bg-slate-900"
+      ref={(node) => {
+        if (node) {
+          wrapperRef.current = node;
+          if (containerRef) {
+            (containerRef as React.MutableRefObject<HTMLDivElement>).current = node;
+          }
+        }
+      }}
+      className="canvas-wrapper flex-1 flex items-center justify-center overflow-hidden bg-slate-900"
+      tabIndex={0}
+      style={{ pointerEvents: 'auto' }}
       onContextMenu={(e) => e.preventDefault()}
     >
       <Stage
@@ -314,7 +470,7 @@ export function CanvasStage({ containerRef, stageRef: externalStageRef }: Canvas
         onMouseMove={handleStageMouseMove}
         onMouseUp={handleStageMouseUp}
         onContextMenu={handleContextMenu}
-        style={{ cursor: isDraggingCanvas ? 'grabbing' : spacePressed ? 'grab' : 'default' }}
+        style={{ cursor: getCursorStyle() }}
       >
         {/* Background Layer */}
         <Layer>

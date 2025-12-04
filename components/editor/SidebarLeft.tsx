@@ -136,7 +136,7 @@ export function SidebarLeft() {
   };
 
   return (
-    <div className="w-64 bg-slate-900 border-r border-slate-800 flex flex-col">
+    <div className="sidebar w-64 bg-slate-900 border-r border-slate-800 flex flex-col" style={{ pointerEvents: 'auto' }}>
       {/* Templates Section */}
       <div className="p-4 border-b border-slate-800">
         <h3 className="text-sm font-semibold text-slate-50 mb-3">Templates</h3>
