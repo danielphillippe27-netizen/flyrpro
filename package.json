@@ -65,7 +65,6 @@
     "tailwindcss-animate": "^1.0.7",
     "three": "^0.181.2",
     "unsplash-js": "^7.0.19",
-    "@uploadthing/react": "^6.7.2",
     "uploadthing": "^6.13.2",
     "use-file-picker": "^2.1.2",
     "uuidv4": "^6.2.13",
