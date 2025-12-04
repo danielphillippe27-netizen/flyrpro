@@ -8,7 +8,12 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 
-export function CampaignsListView({ userId }: { userId: string | null }) {
+interface CampaignsListViewProps {
+  userId: string | null;
+  onCampaignSelect?: (campaignId: string) => void;
+}
+
+export function CampaignsListView({ userId, onCampaignSelect }: CampaignsListViewProps) {
   const [campaigns, setCampaigns] = useState<CampaignV2[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -56,11 +61,23 @@ export function CampaignsListView({ userId }: { userId: string | null }) {
     );
   }
 
+  const handleClick = (e: React.MouseEvent, campaignId: string) => {
+    if (onCampaignSelect) {
+      e.preventDefault();
+      e.stopPropagation();
+      onCampaignSelect(campaignId);
+    }
+  };
+
   return (
     <div className="grid gap-4">
       {campaigns.map((campaign) => (
-        <Link key={campaign.id} href={`/campaigns/${campaign.id}`}>
-          <Card className="p-4 hover:shadow-md transition-shadow">
+        <Link 
+          key={campaign.id} 
+          href={`/campaigns/${campaign.id}`}
+          onClick={(e) => handleClick(e, campaign.id)}
+        >
+          <Card className="p-4 hover:shadow-md transition-shadow cursor-pointer">
             <div className="flex items-start justify-between mb-2">
               <h3 className="font-semibold text-lg">{campaign.name || 'Unnamed Campaign'}</h3>
               <Badge variant={campaign.status === 'active' ? 'default' : 'secondary'}>

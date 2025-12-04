@@ -15,6 +15,7 @@ export function FlyrMapView() {
   const [mapMode, setMapMode] = useState<MapMode>('light');
   const [mapLoaded, setMapLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!mapContainer.current || map.current) return;
@@ -236,12 +237,21 @@ export function FlyrMapView() {
       map.current.once('style.load', () => {
         cleanupLayers();
       });
-      if (map.current) {
+      if (map.current && !selectedCampaignId) {
         map.current.setPitch(0);
         map.current.setBearing(0);
       }
     }
-  }, [mapMode, mapLoaded]);
+  }, [mapMode, mapLoaded, selectedCampaignId]);
+
+  // Automatically switch to 3D view when a campaign is selected
+  useEffect(() => {
+    if (selectedCampaignId && mapLoaded && map.current) {
+      setMapMode('campaign_3d');
+    } else if (!selectedCampaignId && mapMode === 'campaign_3d') {
+      setMapMode('light');
+    }
+  }, [selectedCampaignId, mapLoaded]);
 
 
   return (
@@ -267,9 +277,12 @@ export function FlyrMapView() {
         <>
           <div className="absolute top-4 right-4 z-10 flex flex-col gap-2">
             <MapModeToggle mode={mapMode} onModeChange={setMapMode} />
-            <MapControls />
+            <MapControls 
+              onCampaignSelect={setSelectedCampaignId} 
+              selectedCampaignId={selectedCampaignId}
+            />
           </div>
-          <BuildingLayers map={map.current} />
+          <BuildingLayers map={map.current} campaignId={selectedCampaignId} />
         </>
       )}
     </div>

@@ -1,6 +1,7 @@
 'use client';
 
-import { Undo2, Redo2, ZoomIn, ZoomOut, Maximize2, AlignLeft, AlignCenter, AlignRight, AlignVerticalJustifyCenter, AlignHorizontalJustifyCenter, AlignVerticalJustifyStart, AlignVerticalJustifyEnd, Group, Ungroup, Download } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Undo2, Redo2, ZoomIn, ZoomOut, Maximize2, AlignLeft, AlignCenter, AlignRight, AlignVerticalJustifyCenter, AlignHorizontalJustifyCenter, AlignVerticalJustifyStart, AlignVerticalJustifyEnd, Group, Ungroup, Download, ArrowLeft } from 'lucide-react';
 import { useEditorStore } from '@/lib/editor/state';
 import { IconButton } from './IconButton';
 import { Separator } from './Separator';
@@ -12,6 +13,7 @@ interface TopToolbarProps {
 }
 
 export function TopToolbar({ onExportPng }: TopToolbarProps) {
+  const router = useRouter();
   const {
     selectedIds,
     zoom,
@@ -35,6 +37,15 @@ export function TopToolbar({ onExportPng }: TopToolbarProps) {
 
   return (
     <div className="h-14 bg-slate-900 border-b border-slate-800 flex items-center px-4 gap-2">
+      {/* Back Button */}
+      <IconButton
+        icon={<ArrowLeft className="w-4 h-4" />}
+        onClick={() => router.push('/home')}
+        title="Back to Home"
+      />
+
+      <Separator orientation="vertical" className="h-8" />
+
       {/* Logo */}
       <div className="flex items-center gap-2 mr-4">
         <Image 

@@ -9,7 +9,11 @@ import { FarmListView } from '@/components/home/FarmListView';
 import { List } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
-export function CampaignsFarmsDropdown() {
+interface CampaignsFarmsDropdownProps {
+  onCampaignSelect?: (campaignId: string | null) => void;
+}
+
+export function CampaignsFarmsDropdown({ onCampaignSelect }: CampaignsFarmsDropdownProps) {
   const [open, setOpen] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
 
@@ -19,6 +23,11 @@ export function CampaignsFarmsDropdown() {
       setUserId(user?.id || null);
     });
   }, []);
+
+  const handleCampaignSelect = (campaignId: string) => {
+    onCampaignSelect?.(campaignId);
+    setOpen(false);
+  };
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -38,7 +47,7 @@ export function CampaignsFarmsDropdown() {
             <TabsTrigger value="farms">Farms</TabsTrigger>
           </TabsList>
           <TabsContent value="campaigns" className="flex-1 overflow-y-auto mt-4 min-h-0">
-            <CampaignsListView userId={userId} />
+            <CampaignsListView userId={userId} onCampaignSelect={handleCampaignSelect} />
           </TabsContent>
           <TabsContent value="farms" className="flex-1 overflow-y-auto mt-4 min-h-0">
             <FarmListView userId={userId} />

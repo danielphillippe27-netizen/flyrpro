@@ -2,10 +2,15 @@
 
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { Maximize, Minimize } from 'lucide-react';
+import { Maximize, Minimize, X } from 'lucide-react';
 import { CampaignsFarmsDropdown } from './CampaignsFarmsDropdown';
 
-export function MapControls() {
+interface MapControlsProps {
+  onCampaignSelect?: (campaignId: string | null) => void;
+  selectedCampaignId?: string | null;
+}
+
+export function MapControls({ onCampaignSelect, selectedCampaignId }: MapControlsProps) {
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   useEffect(() => {
@@ -70,7 +75,19 @@ export function MapControls() {
 
   return (
     <>
-      <CampaignsFarmsDropdown />
+      <CampaignsFarmsDropdown onCampaignSelect={onCampaignSelect} />
+      {selectedCampaignId && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => onCampaignSelect?.(null)}
+          className="bg-white"
+          title="Clear campaign selection"
+        >
+          <X className="w-4 h-4 mr-2" />
+          Clear
+        </Button>
+      )}
       <Button
         variant="outline"
         size="sm"
