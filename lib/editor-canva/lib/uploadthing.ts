@@ -3,7 +3,10 @@ import {
   generateUploadDropzone,
 } from "@uploadthing/react";
  
-import type { OurFileRouter } from "@/app/api/uploadthing/core";
+// Stub type for file router - TODO: Create actual uploadthing API route
+type OurFileRouter = {
+  [key: string]: any;
+};
  
 export const UploadButton = generateUploadButton<OurFileRouter>();
 export const UploadDropzone = generateUploadDropzone<OurFileRouter>();

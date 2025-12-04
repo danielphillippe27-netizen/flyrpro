@@ -14,7 +14,7 @@ import { ResponseType, useGetTemplates } from "@/lib/editor-canva/features/proje
 
 import { cn } from "@/lib/editor-canva/lib/utils";
 import { ScrollArea } from "@/lib/editor-canva/components/ui/scroll-area";
-import { useConfirm } from "@/hooks/use-confirm";
+import { useConfirm } from "@/lib/editor-canva/hooks/use-confirm";
 
 interface TemplateSidebarProps {
   editor: Editor | undefined;
