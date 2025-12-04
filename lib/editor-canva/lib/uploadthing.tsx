@@ -1,3 +1,5 @@
+import React from 'react';
+
 // Stub components for uploadthing - TODO: Implement with actual uploadthing when React 19 support is available
 // For now, these are simple stubs that won't break the build
 
@@ -28,10 +30,10 @@ export const UploadButton = ({
   };
 
   return (
-    <button 
-      {...props}
+    <button
       onClick={handleClick}
       className={appearance?.button || "w-full px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"}
+      {...props}
     >
       {content?.button || "Upload Image"}
     </button>
