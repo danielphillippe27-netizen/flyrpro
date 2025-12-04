@@ -11,7 +11,7 @@ export default function FlyerCreatePage() {
   const router = useRouter();
 
   useEffect(() => {
-    router.replace('/flyers/editor/new');
+    router.replace('/editor');
   }, [router]);
 
   return null;

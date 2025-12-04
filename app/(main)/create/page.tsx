@@ -20,7 +20,7 @@ export default function CreatePage() {
       // TODO: Create landing page creation route
       router.push('/landing-pages/create');
     } else if (type === 'flyer') {
-      router.push('/flyers/editor/new');
+      router.push('/editor');
     }
   };
 
