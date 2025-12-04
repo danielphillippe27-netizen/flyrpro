@@ -66,12 +66,19 @@ export function BuildingLayers({ map, campaignId, onLayerReady }: BuildingLayers
         }
 
         // Fetch campaign addresses
+        console.log('Loading campaign buildings for campaign:', campaignId);
         const addresses = await CampaignsService.fetchAddresses(campaignId);
+        console.log('Fetched addresses:', addresses.length);
         const addressesWithCoords = addresses.filter(a => a.coordinate && a.id);
+        console.log('Addresses with coordinates:', addressesWithCoords.length);
         
-        if (addressesWithCoords.length === 0) return;
+        if (addressesWithCoords.length === 0) {
+          console.warn('No addresses with coordinates found');
+          return;
+        }
 
         // Request building polygons if not already available
+        console.log('Requesting building polygons...');
         await MapService.requestBuildingPolygons(
           addressesWithCoords.map(a => ({ 
             id: a.id!, 
@@ -82,14 +89,21 @@ export function BuildingLayers({ map, campaignId, onLayerReady }: BuildingLayers
 
         // Fetch building polygons
         const polygonIds = addressesWithCoords.map(a => a.id);
+        console.log('Fetching polygons for IDs:', polygonIds);
         const polygons = await MapService.fetchBuildingPolygons(polygonIds);
+        console.log('Fetched polygons:', polygons.length);
         
-        if (polygons.length === 0) return;
+        if (polygons.length === 0) {
+          console.warn('No building polygons found');
+          return;
+        }
 
         // Create point features with centroids and front_bearing
         const modelPoints = MapService.createBuildingModelPoints(polygons, 'house-model');
+        console.log('Created model points:', modelPoints.length);
         
         // Try to use Three.js layer if WebGL is supported
+        console.log('WebGL supported:', webglSupportedRef.current);
         if (webglSupportedRef.current) {
           try {
             // Remove fallback layer if it exists
@@ -102,7 +116,7 @@ export function BuildingLayers({ map, campaignId, onLayerReady }: BuildingLayers
                   map.removeSource(fallbackLayerRef.current);
                 }
               } catch (err) {
-                // Ignore
+                console.warn('Error removing fallback layer:', err);
               }
               fallbackLayerRef.current = null;
             }
@@ -114,34 +128,42 @@ export function BuildingLayers({ map, campaignId, onLayerReady }: BuildingLayers
                   map.removeLayer('three-houses');
                 }
               } catch (err) {
-                // Ignore
+                console.warn('Error removing existing Three.js layer:', err);
               }
             }
 
             // Create new Three.js layer
+            console.log('Creating Three.js layer with', modelPoints.length, 'model points');
             const threeLayer = new ThreeHouseLayer({
               glbUrl: '/3d-houses.glb',
               features: modelPoints,
               onModelLoad: () => {
-                console.log('3D models loaded successfully');
+                console.log('✅ 3D models loaded successfully');
                 onLayerReady?.(threeLayer);
               },
             });
 
             // Wait for map style to load before adding layer
-            if (map.loaded()) {
-              map.addLayer(threeLayer as any);
-              threeLayerRef.current = threeLayer;
-              onLayerReady?.(threeLayer);
-            } else {
-              map.once('style.load', () => {
+            const addLayer = () => {
+              try {
+                console.log('Adding Three.js layer to map...');
                 map.addLayer(threeLayer as any);
                 threeLayerRef.current = threeLayer;
                 onLayerReady?.(threeLayer);
-              });
+                console.log('✅ Three.js layer added successfully');
+              } catch (err) {
+                console.error('❌ Error adding Three.js layer:', err);
+                throw err;
+              }
+            };
+
+            if (map.loaded()) {
+              addLayer();
+            } else {
+              map.once('style.load', addLayer);
             }
           } catch (error) {
-            console.error('Error setting up Three.js layer, falling back to circles:', error);
+            console.error('❌ Error setting up Three.js layer, falling back to circles:', error);
             webglSupportedRef.current = false;
             // Fall through to fallback
           }

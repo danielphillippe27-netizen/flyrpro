@@ -62,18 +62,26 @@ export class ThreeHouseLayer {
   }
 
   private loadBaseModel() {
+    console.log('Loading GLB model from:', this.glbUrl);
     this.loader.load(
       this.glbUrl,
       (gltf) => {
+        console.log('✅ GLB model loaded successfully');
         this.baseModel = gltf.scene;
         if (this.map) {
+          console.log('Populating models on map...');
           this.populateModels();
         }
         this.onModelLoad?.();
       },
-      undefined,
+      (progress) => {
+        if (progress.total > 0) {
+          const percent = (progress.loaded / progress.total) * 100;
+          console.log(`Loading GLB: ${percent.toFixed(1)}%`);
+        }
+      },
       (error) => {
-        console.error('Error loading GLB model:', error);
+        console.error('❌ Error loading GLB model:', error);
       }
     );
   }
@@ -120,7 +128,12 @@ export class ThreeHouseLayer {
   }
 
   private populateModels() {
-    if (!this.baseModel || !this.map) return;
+    if (!this.baseModel || !this.map) {
+      console.warn('Cannot populate models: baseModel or map not available');
+      return;
+    }
+
+    console.log(`Populating ${this.features.length} models...`);
 
     // Clear existing models
     this.models.forEach((record) => {
@@ -128,7 +141,7 @@ export class ThreeHouseLayer {
     });
     this.models.clear();
 
-    this.features.forEach((feature) => {
+    this.features.forEach((feature, index) => {
       const id = feature.properties.address_id;
       const { front_bearing = 0 } = feature.properties;
       const coords = feature.geometry.coordinates; // [lng, lat]
@@ -174,9 +187,14 @@ export class ThreeHouseLayer {
 
       // Scale factor - adjust as needed for your model size
       // Typical house models are ~10-20m, so scale accordingly
-      // For Monopoly-style houses, 0.5-1.0 works well
-      const scaleFactor = scale * 0.5;
+      // For Monopoly-style houses, try larger scale factors
+      // Increased scale to make models more visible
+      const scaleFactor = scale * 2.0; // Increased from 0.5 to 2.0
       obj.scale.setScalar(scaleFactor);
+      
+      if (index === 0) {
+        console.log(`First model at [${coords[0]}, ${coords[1]}], mercator: [${merc.x}, ${merc.y}], scale: ${scaleFactor}`);
+      }
       
       // TODO: For hundreds of models, consider using THREE.InstancedMesh instead of cloning
       // This would significantly improve performance:
@@ -186,21 +204,30 @@ export class ThreeHouseLayer {
       this.scene.add(obj);
       this.models.set(id, { object: obj, feature });
     });
+
+    console.log(`✅ Added ${this.models.size} models to scene`);
   }
 
   onAdd(map: Map, gl: WebGLRenderingContext) {
+    console.log('ThreeHouseLayer.onAdd called');
     this.map = map;
 
     // Use Mapbox GL context - need to get the WebGL context from the map
     const canvas = map.getCanvas();
     const context = gl as WebGLRenderingContext;
     
-    this.renderer = new THREE.WebGLRenderer({
-      canvas: canvas,
-      context: context,
-      antialias: true,
-    });
-    this.renderer.autoClear = false;
+    try {
+      this.renderer = new THREE.WebGLRenderer({
+        canvas: canvas,
+        context: context,
+        antialias: true,
+      });
+      this.renderer.autoClear = false;
+      console.log('✅ Three.js renderer created');
+    } catch (error) {
+      console.error('❌ Error creating Three.js renderer:', error);
+      throw error;
+    }
 
     // Add lighting
     const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
@@ -209,14 +236,18 @@ export class ThreeHouseLayer {
 
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
     this.scene.add(ambientLight);
+    console.log('✅ Lighting added to scene');
 
     // Try to populate models once base model is loaded
     if (this.baseModel) {
+      console.log('Base model already loaded, populating models...');
       this.populateModels();
     } else {
+      console.log('Base model not loaded yet, polling...');
       // Poll until base model is loaded
       this.loadInterval = setInterval(() => {
         if (this.baseModel) {
+          console.log('Base model loaded, populating models...');
           this.populateModels();
           if (this.loadInterval) {
             clearInterval(this.loadInterval);
@@ -228,18 +259,24 @@ export class ThreeHouseLayer {
   }
 
   render(gl: WebGLRenderingContext, matrix: number[]) {
-    if (!this.renderer || !this.map) return;
+    if (!this.renderer || !this.map) {
+      return;
+    }
 
     // Update LOD based on zoom if enabled
     if (this.useLOD) {
       this.updateLOD();
     }
 
-    const m = new THREE.Matrix4().fromArray(matrix);
-    this.camera.projectionMatrix = m;
-    this.renderer.state.reset();
-    this.renderer.render(this.scene, this.camera);
-    this.renderer.resetState();
+    try {
+      const m = new THREE.Matrix4().fromArray(matrix);
+      this.camera.projectionMatrix = m;
+      this.renderer.state.reset();
+      this.renderer.render(this.scene, this.camera);
+      this.renderer.resetState();
+    } catch (error) {
+      console.error('Error rendering Three.js scene:', error);
+    }
   }
 
   onRemove() {
