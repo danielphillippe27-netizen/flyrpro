@@ -65,41 +65,18 @@ export function BuildingLayers({ map, campaignId, onLayerReady }: BuildingLayers
           return;
         }
 
-        // Fetch campaign addresses
+        // Fetch campaign buildings directly (they already have geometry and front_bearing)
         console.log('Loading campaign buildings for campaign:', campaignId);
-        const addresses = await CampaignsService.fetchAddresses(campaignId);
-        console.log('Fetched addresses:', addresses.length);
-        const addressesWithCoords = addresses.filter(a => a.coordinate && a.id);
-        console.log('Addresses with coordinates:', addressesWithCoords.length);
+        const buildings = await MapService.fetchCampaignBuildings(campaignId);
+        console.log('Fetched buildings:', buildings.length);
         
-        if (addressesWithCoords.length === 0) {
-          console.warn('No addresses with coordinates found');
+        if (buildings.length === 0) {
+          console.warn('No campaign buildings found');
           return;
         }
 
-        // Request building polygons if not already available
-        console.log('Requesting building polygons...');
-        await MapService.requestBuildingPolygons(
-          addressesWithCoords.map(a => ({ 
-            id: a.id!, 
-            lat: a.coordinate!.lat, 
-            lon: a.coordinate!.lon 
-          }))
-        );
-
-        // Fetch building polygons
-        const polygonIds = addressesWithCoords.map(a => a.id);
-        console.log('Fetching polygons for IDs:', polygonIds);
-        const polygons = await MapService.fetchBuildingPolygons(polygonIds);
-        console.log('Fetched polygons:', polygons.length);
-        
-        if (polygons.length === 0) {
-          console.warn('No building polygons found');
-          return;
-        }
-
-        // Create point features with centroids and front_bearing
-        const modelPoints = MapService.createBuildingModelPoints(polygons, 'house-model');
+        // Create point features with centroids and front_bearing from campaign_buildings
+        const modelPoints = MapService.createBuildingModelPointsFromCampaignBuildings(buildings, 'house-model');
         console.log('Created model points:', modelPoints.length);
         
         // Try to use Three.js layer if WebGL is supported
