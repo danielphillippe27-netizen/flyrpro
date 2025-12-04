@@ -45,5 +45,43 @@ export const client = {
         },
       },
     },
+    ai: {
+      'generate-image': {
+        $post: async ({ json }: { json: any }) => {
+          const res = await fetch(`${API_BASE}/ai/generate-image`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(json),
+          });
+          return res;
+        },
+      },
+      'remove-bg': {
+        $post: async ({ json }: { json: any }) => {
+          const res = await fetch(`${API_BASE}/ai/remove-bg`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(json),
+          });
+          return res;
+        },
+      },
+    },
+    subscriptions: {
+      current: {
+        $get: async () => {
+          const res = await fetch(`${API_BASE}/subscriptions/current`);
+          return res;
+        },
+      },
+      billing: {
+        $post: async () => {
+          const res = await fetch(`${API_BASE}/subscriptions/billing`, {
+            method: 'POST',
+          });
+          return res;
+        },
+      },
+    },
   },
 } as any;
