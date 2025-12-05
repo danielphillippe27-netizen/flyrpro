@@ -25,15 +25,14 @@ import { TextSidebar } from "@/lib/editor-canva/features/editor/components/text-
 import { FontSidebar } from "@/lib/editor-canva/features/editor/components/font-sidebar";
 import { ImageSidebar } from "@/lib/editor-canva/features/editor/components/image-sidebar";
 import { FilterSidebar } from "@/lib/editor-canva/features/editor/components/filter-sidebar";
-import { DrawSidebar } from "@/lib/editor-canva/features/editor/components/draw-sidebar";
-import { AiSidebar } from "@/lib/editor-canva/features/editor/components/ai-sidebar";
 import { TemplateSidebar } from "@/lib/editor-canva/features/editor/components/template-sidebar";
 import { RemoveBgSidebar } from "@/lib/editor-canva/features/editor/components/remove-bg-sidebar";
 import { LayersSidebar } from "@/lib/editor-canva/features/editor/components/layers-sidebar";
 import { SettingsSidebar } from "@/lib/editor-canva/features/editor/components/settings-sidebar";
-import { PageControls } from "@/lib/editor-canva/features/editor/components/page-controls";
 import { UploadsSidebar } from "@/lib/editor-canva/features/editor/components/uploads-sidebar";
-import { Button } from "@/lib/editor-canva/components/ui/button";
+import { BackgroundSidebar } from "@/lib/editor-canva/features/editor/components/background-sidebar";
+import { IconsSidebar } from "@/lib/editor-canva/features/editor/components/icons-sidebar";
+import { QRSidebar } from "@/lib/editor-canva/features/editor/components/qr-sidebar";
 
 interface EditorProps {
   initialData: ResponseType["data"];
@@ -72,20 +71,12 @@ export const Editor = ({ initialData }: EditorProps) => {
   });
 
   const onChangeActiveTool = useCallback((tool: ActiveTool) => {
-    if (tool === "draw") {
-      editor?.enableDrawingMode();
-    }
-
-    if (activeTool === "draw") {
-      editor?.disableDrawingMode();
-    }
-
     if (tool === activeTool) {
       return setActiveTool("select");
     }
     
     setActiveTool(tool);
-  }, [activeTool, editor]);
+  }, [activeTool]);
 
   const canvasRef = useRef(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -170,22 +161,12 @@ export const Editor = ({ initialData }: EditorProps) => {
           activeTool={activeTool}
           onChangeActiveTool={onChangeActiveTool}
         />
-        <AiSidebar
-          editor={editor}
-          activeTool={activeTool}
-          onChangeActiveTool={onChangeActiveTool}
-        />
         <RemoveBgSidebar
           editor={editor}
           activeTool={activeTool}
           onChangeActiveTool={onChangeActiveTool}
         />
         <LayersSidebar
-          editor={editor}
-          activeTool={activeTool}
-          onChangeActiveTool={onChangeActiveTool}
-        />
-        <DrawSidebar
           editor={editor}
           activeTool={activeTool}
           onChangeActiveTool={onChangeActiveTool}
@@ -200,42 +181,32 @@ export const Editor = ({ initialData }: EditorProps) => {
           activeTool={activeTool}
           onChangeActiveTool={onChangeActiveTool}
         />
-        <main className="bg-muted flex-1 overflow-auto relative flex flex-col">
+        <BackgroundSidebar
+          editor={editor}
+          activeTool={activeTool}
+          onChangeActiveTool={onChangeActiveTool}
+        />
+        <IconsSidebar
+          editor={editor}
+          activeTool={activeTool}
+          onChangeActiveTool={onChangeActiveTool}
+        />
+        <QRSidebar
+          editor={editor}
+          activeTool={activeTool}
+          onChangeActiveTool={onChangeActiveTool}
+        />
+        <main className="bg-slate-800 flex-1 overflow-auto relative flex flex-col">
           <Toolbar
             editor={editor}
             activeTool={activeTool}
             onChangeActiveTool={onChangeActiveTool}
             key={JSON.stringify(editor?.canvas.getActiveObject())}
           />
-          <div className="flex-1 h-[calc(100%-124px)] bg-muted relative" ref={containerRef}>
-            <canvas ref={canvasRef} />
-            {/* Page controls overlay - top right */}
-            <div className="absolute top-4 right-4 z-10">
-              <PageControls
-                onDuplicatePage={() => {
-                  // TODO: Implement duplicate page functionality
-                  console.log("Duplicate page");
-                }}
-                onAddPage={() => {
-                  // TODO: Implement add page functionality
-                  console.log("Add page");
-                }}
-              />
+          <div className="flex-1 h-[calc(100%-124px)] bg-slate-800 relative flex items-center justify-center p-8" ref={containerRef}>
+            <div className="bg-white shadow-xl rounded-sm inline-block">
+              <canvas ref={canvasRef} className="block" />
             </div>
-          </div>
-          {/* Add page button below canvas */}
-          <div className="flex justify-center py-2 border-t bg-white">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                // TODO: Implement add page functionality
-                console.log("Add page");
-              }}
-              className="flex items-center gap-x-2"
-            >
-              <span>+ Add page</span>
-            </Button>
           </div>
           <Footer editor={editor} />
         </main>

@@ -25,6 +25,9 @@ export const editorProjects = pgTable("editor_project", {
   thumbnailUrl: text("thumbnailUrl"),
   isTemplate: boolean("isTemplate").default(false),
   isPro: boolean("isPro").default(false),
+  campaignId: uuid("campaignId"), // Links to campaigns table
+  flyerId: uuid("flyerId"), // Links to flyers table (for reverse lookup)
+  landingPageId: uuid("landingPageId"), // Links to campaign_landing_pages table
   createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
   updatedAt: timestamp("updatedAt", { mode: "date" }).notNull().defaultNow(),
 });

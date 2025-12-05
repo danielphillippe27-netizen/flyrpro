@@ -97,7 +97,6 @@ export type ActiveTool =
   | "shapes"
   | "text"
   | "images"
-  | "draw"
   | "fill"
   | "stroke-color"
   | "stroke-width"
@@ -105,11 +104,13 @@ export type ActiveTool =
   | "opacity"
   | "filter"
   | "settings"
-  | "ai"
   | "remove-bg"
   | "templates"
   | "layers"
-  | "uploads";
+  | "uploads"
+  | "background"
+  | "icons"
+  | "qr";
 
 export const FILL_COLOR = "rgba(0,0,0,1)";
 export const STROKE_COLOR = "rgba(0,0,0,1)";

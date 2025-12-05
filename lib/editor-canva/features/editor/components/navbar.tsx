@@ -22,6 +22,7 @@ import { UserButton } from "@/lib/editor-canva/features/auth/components/user-but
 import { ActiveTool, Editor } from "@/lib/editor-canva/features/editor/types";
 import { Logo } from "@/lib/editor-canva/features/editor/components/logo";
 import { PrintSafetyIndicator } from "@/lib/editor-canva/features/editor/components/print-safety-indicator";
+import { ResourceLinks } from "@/lib/editor-canva/features/editor/components/resource-links";
 
 import { cn } from "@/lib/editor-canva/lib/utils";
 import { Hint } from "@/lib/editor-canva/components/hint";
@@ -234,6 +235,8 @@ export const Navbar = ({
               <Square className="size-4" />
             </Button>
           </Hint>
+          <Separator orientation="vertical" className="mx-2" />
+          <ResourceLinks projectId={id} />
           <Separator orientation="vertical" className="mx-2" />
           <DropdownMenu modal={false}>
             <DropdownMenuTrigger asChild>
