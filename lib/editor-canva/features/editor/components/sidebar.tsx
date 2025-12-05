@@ -3,13 +3,14 @@
 import { 
   LayoutTemplate,
   ImageIcon,
-  Pencil,
   Settings,
   Shapes,
-  Sparkles,
   Type,
   Layers,
   Upload,
+  Palette,
+  Sparkles,
+  QrCode,
 } from "lucide-react";
 
 import { ActiveTool } from "@/lib/editor-canva/features/editor/types";
@@ -58,16 +59,22 @@ export const Sidebar = ({
           onClick={() => onChangeActiveTool("shapes")}
         />
         <SidebarItem
-          icon={Pencil}
-          label="Draw"
-          isActive={activeTool === "draw"}
-          onClick={() => onChangeActiveTool("draw")}
+          icon={Palette}
+          label="Background"
+          isActive={activeTool === "background"}
+          onClick={() => onChangeActiveTool("background")}
         />
         <SidebarItem
           icon={Sparkles}
-          label="AI"
-          isActive={activeTool === "ai"}
-          onClick={() => onChangeActiveTool("ai")}
+          label="Icons"
+          isActive={activeTool === "icons"}
+          onClick={() => onChangeActiveTool("icons")}
+        />
+        <SidebarItem
+          icon={QrCode}
+          label="QR"
+          isActive={activeTool === "qr"}
+          onClick={() => onChangeActiveTool("qr")}
         />
         <SidebarItem
           icon={Layers}
