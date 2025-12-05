@@ -39,20 +39,30 @@ export async function GET(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const [project] = await db
-      .select()
-      .from(editorProjects)
-      .where(and(
-        eq(editorProjects.id, id),
-        eq(editorProjects.userId, user.id)
-      ))
-      .limit(1);
+    try {
+      const [project] = await db
+        .select()
+        .from(editorProjects)
+        .where(and(
+          eq(editorProjects.id, id),
+          eq(editorProjects.userId, user.id)
+        ))
+        .limit(1);
 
-    if (!project) {
-      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+      if (!project) {
+        return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+      }
+
+      return NextResponse.json({ data: project });
+    } catch (dbError: any) {
+      // If database is not configured, return 503
+      if (dbError.message?.includes('DATABASE_URL') || dbError.message?.includes('must be set')) {
+        return NextResponse.json({ 
+          error: 'Database not configured. Please set DATABASE_URL in environment variables.' 
+        }, { status: 503 });
+      }
+      throw dbError;
     }
-
-    return NextResponse.json({ data: project });
   } catch (error) {
     console.error('Error fetching project:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -95,23 +105,33 @@ export async function PATCH(
 
     const body = await request.json();
 
-    const [project] = await db
-      .update(editorProjects)
-      .set({
-        ...body,
-        updatedAt: new Date(),
-      })
-      .where(and(
-        eq(editorProjects.id, id),
-        eq(editorProjects.userId, user.id)
-      ))
-      .returning();
+    try {
+      const [project] = await db
+        .update(editorProjects)
+        .set({
+          ...body,
+          updatedAt: new Date(),
+        })
+        .where(and(
+          eq(editorProjects.id, id),
+          eq(editorProjects.userId, user.id)
+        ))
+        .returning();
 
-    if (!project) {
-      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+      if (!project) {
+        return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+      }
+
+      return NextResponse.json({ data: project });
+    } catch (dbError: any) {
+      // If database is not configured, return 503
+      if (dbError.message?.includes('DATABASE_URL') || dbError.message?.includes('must be set')) {
+        return NextResponse.json({ 
+          error: 'Database not configured. Please set DATABASE_URL in environment variables.' 
+        }, { status: 503 });
+      }
+      throw dbError;
     }
-
-    return NextResponse.json({ data: project });
   } catch (error) {
     console.error('Error updating project:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -152,14 +172,24 @@ export async function DELETE(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    await db
-      .delete(editorProjects)
-      .where(and(
-        eq(editorProjects.id, id),
-        eq(editorProjects.userId, user.id)
-      ));
+    try {
+      await db
+        .delete(editorProjects)
+        .where(and(
+          eq(editorProjects.id, id),
+          eq(editorProjects.userId, user.id)
+        ));
 
-    return NextResponse.json({ data: { id } });
+      return NextResponse.json({ data: { id } });
+    } catch (dbError: any) {
+      // If database is not configured, return 503
+      if (dbError.message?.includes('DATABASE_URL') || dbError.message?.includes('must be set')) {
+        return NextResponse.json({ 
+          error: 'Database not configured. Please set DATABASE_URL in environment variables.' 
+        }, { status: 503 });
+      }
+      throw dbError;
+    }
   } catch (error) {
     console.error('Error deleting project:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

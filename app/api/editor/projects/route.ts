@@ -35,13 +35,22 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const projects = await db
-      .select()
-      .from(editorProjects)
-      .where(eq(editorProjects.userId, user.id))
-      .orderBy(desc(editorProjects.updatedAt));
+    try {
+      const projects = await db
+        .select()
+        .from(editorProjects)
+        .where(eq(editorProjects.userId, user.id))
+        .orderBy(desc(editorProjects.updatedAt));
 
-    return NextResponse.json({ data: projects });
+      return NextResponse.json({ data: projects });
+    } catch (dbError: any) {
+      // If database is not configured, return empty array
+      if (dbError.message?.includes('DATABASE_URL') || dbError.message?.includes('must be set')) {
+        console.warn('Database not configured, returning empty projects list');
+        return NextResponse.json({ data: [] });
+      }
+      throw dbError;
+    }
   } catch (error) {
     console.error('Error fetching projects:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -81,22 +90,32 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { name, json, height, width } = body;
 
-    const [project] = await db
-      .insert(editorProjects)
-      .values({
-        name: name || 'Untitled',
-        userId: user.id,
-        json: json || JSON.stringify({ version: '5.3.0', objects: [] }),
-        height: height || 1080,
-        width: width || 1920,
-        isTemplate: false,
-        isPro: false,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .returning();
+    try {
+      const [project] = await db
+        .insert(editorProjects)
+        .values({
+          name: name || 'Untitled',
+          userId: user.id,
+          json: json || JSON.stringify({ version: '5.3.0', objects: [] }),
+          height: height || 1080,
+          width: width || 1920,
+          isTemplate: false,
+          isPro: false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .returning();
 
-    return NextResponse.json({ data: project });
+      return NextResponse.json({ data: project });
+    } catch (dbError: any) {
+      // If database is not configured, return error
+      if (dbError.message?.includes('DATABASE_URL') || dbError.message?.includes('must be set')) {
+        return NextResponse.json({ 
+          error: 'Database not configured. Please set DATABASE_URL in environment variables.' 
+        }, { status: 503 });
+      }
+      throw dbError;
+    }
   } catch (error) {
     console.error('Error creating project:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

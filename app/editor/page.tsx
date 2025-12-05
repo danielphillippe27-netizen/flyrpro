@@ -11,6 +11,8 @@ const mockProjectData = {
   json: JSON.stringify({
     version: '5.3.0',
     objects: [],
+    width: 1920,
+    height: 1080,
   }),
   height: 1080,
   width: 1920,
