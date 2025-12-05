@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/client';
 import type { Flyer, FlyerData } from '@/lib/flyers/types';
+import { createDefaultQRElement } from '@/lib/editor/qrDefaults';
 
 export class FlyerEditorService {
   private static client = createClient();
@@ -36,11 +37,14 @@ export class FlyerEditorService {
 
   /**
    * Create a default flyer for a campaign
+   * Automatically inserts a QR placeholder element for new flyers
    */
   static async createDefaultFlyer(campaignId: string, name: string = 'New Flyer'): Promise<Flyer> {
+    // Create default data with QR element for new flyers
+    const defaultQRElement = createDefaultQRElement();
     const defaultData: FlyerData = {
       backgroundColor: '#ffffff',
-      elements: [],
+      elements: [defaultQRElement],
     };
 
     const { data, error } = await this.client

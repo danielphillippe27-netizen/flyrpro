@@ -3,6 +3,8 @@ import QRCode from 'qrcode';
 import { createAdminClient } from '@/lib/supabase/server';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
+import { FlyerEditorService } from '@/lib/services/FlyerEditorService';
+import { flyerHasQRElement } from '@/lib/editor/qrValidation';
 
 async function checkProStatus(userId: string) {
   const supabase = createAdminClient();
@@ -43,6 +45,8 @@ export async function POST(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const campaignId = searchParams.get('campaignId');
+    const trackableParam = searchParams.get('trackable');
+    const trackable = trackableParam !== 'false'; // Default to true unless explicitly false
 
     if (!campaignId) {
       return NextResponse.json({ error: 'Campaign ID required' }, { status: 400 });
@@ -76,11 +80,93 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Check if Pro or within limits
-    const isPro = await checkProStatus(user.id);
-    const monthlyCount = await getMonthlyGeneratedCount(user.id);
-
     const adminSupabase = createAdminClient();
+
+    // For trackable exports, validate that flyer has QR element
+    if (trackable) {
+      // Get flyers for this campaign
+      const { data: flyers } = await adminSupabase
+        .from('flyers')
+        .select('id, data')
+        .eq('campaign_id', campaignId);
+
+      if (!flyers || flyers.length === 0) {
+        return NextResponse.json({ 
+          error: 'MISSING_QR',
+          message: 'No flyer found for this campaign. Please create a flyer with a QR element first.'
+        }, { status: 400 });
+      }
+
+      // Check if any flyer has a QR element
+      let hasQR = false;
+      let flyerId: string | null = null;
+
+      for (const flyer of flyers) {
+        const flyerData = flyer.data as { elements?: any[] };
+        if (flyerData.elements && flyerHasQRElement(flyerData.elements)) {
+          hasQR = true;
+          flyerId = flyer.id;
+          break;
+        }
+      }
+
+      if (!hasQR) {
+        // Return the first flyer ID so the client can add QR to it
+        const firstFlyerId = flyers[0]?.id || null;
+        return NextResponse.json({ 
+          error: 'MISSING_QR',
+          message: 'This campaign is missing a QR code in its flyer design.',
+          flyerId: firstFlyerId
+        }, { status: 400 });
+      }
+    }
+
+    // Check if Pro or within limits (only for trackable exports)
+    if (trackable) {
+      const isPro = await checkProStatus(user.id);
+      const monthlyCount = await getMonthlyGeneratedCount(user.id);
+
+      const { data: recipients } = await adminSupabase
+        .from('campaign_recipients')
+        .select('*')
+        .eq('campaign_id', campaignId)
+        .is('qr_png_url', null);
+
+      if (!recipients || recipients.length === 0) {
+        return NextResponse.json({ count: 0, message: 'No recipients need QR codes' });
+      }
+
+      // Check limits
+      if (!isPro && monthlyCount + recipients.length > 100) {
+        return NextResponse.json({ needsUpgrade: true }, { status: 402 });
+      }
+    } else {
+      // For non-trackable exports, skip QR generation
+      // Just create an export record
+      const { data: flyers } = await adminSupabase
+        .from('flyers')
+        .select('id')
+        .eq('campaign_id', campaignId)
+        .limit(1);
+
+      const flyerId = flyers?.[0]?.id || null;
+
+      // Create campaign export record
+      await adminSupabase
+        .from('campaign_exports')
+        .insert({
+          campaign_id: campaignId,
+          flyer_id: flyerId,
+          trackable: false,
+        });
+
+      return NextResponse.json({ 
+        count: 0,
+        message: 'Non-trackable export created. No QR codes generated.',
+        trackable: false
+      });
+    }
+
     const { data: recipients } = await adminSupabase
       .from('campaign_recipients')
       .select('*')
@@ -140,7 +226,25 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({ count: generatedCount });
+    // Get flyer ID for export record
+    const { data: flyers } = await adminSupabase
+      .from('flyers')
+      .select('id')
+      .eq('campaign_id', campaignId)
+      .limit(1);
+
+    const flyerId = flyers?.[0]?.id || null;
+
+    // Create campaign export record
+    await adminSupabase
+      .from('campaign_exports')
+      .insert({
+        campaign_id: campaignId,
+        flyer_id: flyerId,
+        trackable: true,
+      });
+
+    return NextResponse.json({ count: generatedCount, trackable: true });
   } catch (error) {
     console.error('Error generating QRs:', error);
     return NextResponse.json(

@@ -14,6 +14,8 @@ import { StatsHeader } from '@/components/StatsHeader';
 import { PaywallGuard } from '@/components/PaywallGuard';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { MissingQRModal } from '@/components/modals/MissingQRModal';
+import { NonTrackableExportModal } from '@/components/modals/NonTrackableExportModal';
 import type { CampaignV2, CampaignAddress } from '@/types/database';
 
 export default function CampaignPage() {
@@ -29,6 +31,10 @@ export default function CampaignPage() {
   const [generating, setGenerating] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [showPaywall, setShowPaywall] = useState(false);
+  const [showMissingQRModal, setShowMissingQRModal] = useState(false);
+  const [missingQRFlyerId, setMissingQRFlyerId] = useState<string | null>(null);
+  const [exportWithoutTracking, setExportWithoutTracking] = useState(false);
+  const [showNonTrackableModal, setShowNonTrackableModal] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -79,10 +85,10 @@ export default function CampaignPage() {
     }
   };
 
-  const handleGenerateQRs = async () => {
+  const handleGenerateQRs = async (trackable: boolean = true) => {
     setGenerating(true);
     try {
-      const response = await fetch(`/api/generate-qrs?campaignId=${campaignId}`, {
+      const response = await fetch(`/api/generate-qrs?campaignId=${campaignId}&trackable=${trackable}`, {
         method: 'POST',
       });
 
@@ -94,16 +100,59 @@ export default function CampaignPage() {
       }
 
       if (!response.ok) {
-        throw new Error(data.error || 'Generation failed');
+        // Check for MISSING_QR error
+        if (data.error === 'MISSING_QR') {
+          setMissingQRFlyerId(data.flyerId || null);
+          setShowMissingQRModal(true);
+          return;
+        }
+        throw new Error(data.error || data.message || 'Generation failed');
       }
 
       await loadData();
-      alert(`Generated ${data.count} QR codes!`);
+      if (trackable) {
+        alert(`Generated ${data.count} QR codes!`);
+      } else {
+        alert('Non-trackable export created successfully.');
+      }
+      // Reset checkbox after successful export
+      setExportWithoutTracking(false);
     } catch (error) {
       console.error('Error generating QRs:', error);
       alert(error instanceof Error ? error.message : 'Failed to generate QR codes');
     } finally {
       setGenerating(false);
+    }
+  };
+
+  const handleConfirmNonTrackableExport = async () => {
+    setShowNonTrackableModal(false);
+    await handleGenerateQRs(false);
+  };
+
+  const handleAddQR = async () => {
+    if (!missingQRFlyerId) {
+      setShowMissingQRModal(false);
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/flyers/${missingQRFlyerId}/add-qr`, {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to add QR');
+      }
+
+      // Close modal and retry QR generation
+      setShowMissingQRModal(false);
+      setMissingQRFlyerId(null);
+      await handleGenerateQRs(true);
+    } catch (error) {
+      console.error('Error adding QR:', error);
+      alert(error instanceof Error ? error.message : 'Failed to add QR element');
     }
   };
 
@@ -241,7 +290,13 @@ export default function CampaignPage() {
                   />
                 </div>
                 <Button
-                  onClick={handleGenerateQRs}
+                  onClick={() => {
+                    if (exportWithoutTracking) {
+                      setShowNonTrackableModal(true);
+                    } else {
+                      handleGenerateQRs(true);
+                    }
+                  }}
                   disabled={generating || addresses.length === 0}
                 >
                   {generating ? 'Generating...' : 'Generate QR Codes'}
@@ -254,9 +309,30 @@ export default function CampaignPage() {
                   {downloading ? 'Downloading...' : 'Download All QRs (ZIP)'}
                 </Button>
               </div>
-              <p className="text-sm text-gray-600">
+              <p className="text-sm text-gray-600 mb-4">
                 Upload a CSV with columns: address_line, city, region, postal_code
               </p>
+              
+              {/* Advanced Export Options */}
+              <div className="border-t pt-4 mt-4">
+                <div className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    id="export-without-tracking"
+                    checked={exportWithoutTracking}
+                    onChange={(e) => setExportWithoutTracking(e.target.checked)}
+                    className="mt-1 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                  />
+                  <div className="flex-1">
+                    <Label htmlFor="export-without-tracking" className="text-sm font-medium cursor-pointer">
+                      Export without tracking (no QR)
+                    </Label>
+                    <p className="text-xs text-gray-600 mt-1">
+                      You won't receive scan analytics or address-level attribution for this batch. Use this for generic print jobs that don't need performance tracking.
+                    </p>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <div className="bg-white rounded-2xl border p-6 mt-6">
@@ -274,6 +350,19 @@ export default function CampaignPage() {
       </main>
 
       <PaywallGuard open={showPaywall} onClose={() => setShowPaywall(false)} />
+      <MissingQRModal
+        open={showMissingQRModal}
+        onClose={() => {
+          setShowMissingQRModal(false);
+          setMissingQRFlyerId(null);
+        }}
+        onAddQR={handleAddQR}
+      />
+      <NonTrackableExportModal
+        open={showNonTrackableModal}
+        onClose={() => setShowNonTrackableModal(false)}
+        onConfirm={handleConfirmNonTrackableExport}
+      />
     </div>
   );
 }
