@@ -1,29 +1,33 @@
 'use client';
 
 import { useEffect } from 'react';
-import { FlyerEditor } from '@/components/flyers/editor/FlyerEditor';
-import { useFlyerEditorStore } from '@/components/flyers/editor/useFlyerEditorStore';
-import { useAutoSave } from '@/components/flyers/editor/useAutoSave';
-import type { FlyerData } from '@/lib/flyers/types';
+import { useRouter } from 'next/navigation';
 
 interface FlyerEditorClientProps {
   campaignId: string;
   flyerId: string;
-  initialData: FlyerData;
+  initialData: unknown;
 }
 
-export function FlyerEditorClient({ campaignId, flyerId, initialData }: FlyerEditorClientProps) {
-  const setFlyerData = useFlyerEditorStore((state) => state.setFlyerData);
+/**
+ * FlyerEditorClient - Redirects to the new editor
+ * The old editor has been removed in favor of the new unified editor at /editor
+ */
+export function FlyerEditorClient({ campaignId, flyerId }: FlyerEditorClientProps) {
+  const router = useRouter();
 
-  // Initialize store with fetched data
   useEffect(() => {
-    setFlyerData(initialData);
-  }, [initialData, setFlyerData]);
+    // Redirect to the new editor
+    router.replace('/editor');
+  }, [router]);
 
-  // Enable auto-save
-  useAutoSave({ flyerId, enabled: true });
-
-  return <FlyerEditor campaignId={campaignId} flyerId={flyerId} />;
+  return (
+    <div className="h-screen flex items-center justify-center">
+      <div className="text-center">
+        <p className="text-slate-400">Redirecting to new editor...</p>
+      </div>
+    </div>
+  );
 }
 
 
