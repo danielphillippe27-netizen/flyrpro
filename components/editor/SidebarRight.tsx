@@ -11,6 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { LayersPanel } from './LayersPanel';
+import { BleedWarning } from './BleedWarning';
 import type { TextElement, RectElement, CircleElement, ImageElement, QRElement } from '@/lib/editor/types';
 
 export function SidebarRight() {
@@ -322,6 +323,11 @@ export function SidebarRight() {
               {selectedElement.visible ? 'Hide' : 'Show'}
             </Button>
           </div>
+
+          <Separator />
+
+          {/* Bleed Warning */}
+          <BleedWarning element={selectedElement} />
 
           <Separator />
 

@@ -54,6 +54,7 @@ export class ContactsService {
         campaign_id: payload.campaign_id,
         farm_id: payload.farm_id,
         status: payload.status,
+        notes: payload.notes,
       })
       .select()
       .single();

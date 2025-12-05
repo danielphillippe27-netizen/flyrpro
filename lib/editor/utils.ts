@@ -66,6 +66,39 @@ export function getCanvasSnapPoints(page: EditorPage): {
 }
 
 /**
+ * Get trim and safe zone snap points for print-accurate snapping
+ */
+export function getPrintSnapPoints(): {
+  vertical: number[];
+  horizontal: number[];
+} {
+  const {
+    BLEED_INSET,
+    TRIM_WIDTH,
+    TRIM_HEIGHT,
+    SAFE_INSET,
+    SAFE_RECT,
+  } = require('@/lib/flyers/printConstants').FLYER_PRINT_CONSTANTS_HALF_LETTER;
+
+  // Trim lines (at bleed inset)
+  const trimLeft = BLEED_INSET;
+  const trimRight = BLEED_INSET + TRIM_WIDTH;
+  const trimTop = BLEED_INSET;
+  const trimBottom = BLEED_INSET + TRIM_HEIGHT;
+
+  // Safe zone lines
+  const safeLeft = SAFE_RECT.x;
+  const safeRight = SAFE_RECT.x + SAFE_RECT.width;
+  const safeTop = SAFE_RECT.y;
+  const safeBottom = SAFE_RECT.y + SAFE_RECT.height;
+
+  return {
+    vertical: [trimLeft, trimRight, safeLeft, safeRight],
+    horizontal: [trimTop, trimBottom, safeTop, safeBottom],
+  };
+}
+
+/**
  * Get snap points from other elements (excluding selected)
  */
 export function getElementSnapPoints(
@@ -131,9 +164,10 @@ export function calculateSnap(
   // Get snap points
   const canvasSnaps = getCanvasSnapPoints(page);
   const elementSnaps = getElementSnapPoints(elements, excludeIds);
+  const printSnaps = getPrintSnapPoints();
   
-  const allVertical = [...canvasSnaps.vertical, ...elementSnaps.vertical];
-  const allHorizontal = [...canvasSnaps.horizontal, ...elementSnaps.horizontal];
+  const allVertical = [...canvasSnaps.vertical, ...elementSnaps.vertical, ...printSnaps.vertical];
+  const allHorizontal = [...canvasSnaps.horizontal, ...elementSnaps.horizontal, ...printSnaps.horizontal];
   
   // Calculate element reference points
   const centerX = x + width / 2;

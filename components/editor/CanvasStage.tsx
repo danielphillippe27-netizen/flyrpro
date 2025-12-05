@@ -7,6 +7,8 @@ import { useEditorStore } from '@/lib/editor/state';
 import type { EditorElement, TextElement, RectElement, CircleElement, ImageElement, QRElement, GroupElement } from '@/lib/editor/types';
 import { CanvasBackground } from './CanvasBackground';
 import { TransformHandles } from './TransformHandles';
+import { BleedOverlay } from './BleedOverlay';
+import { FLYER_PRINT_CONSTANTS_HALF_LETTER } from '@/lib/flyers/printConstants';
 import { useKonvaImage } from '@/lib/hooks/useKonvaImage';
 import { useQrImage } from '@/lib/hooks/useQrImage';
 import { calculateSnap, getElementBounds } from '@/lib/editor/utils';
@@ -36,6 +38,8 @@ export function CanvasStage({ containerRef, stageRef: externalStageRef }: Canvas
     panX,
     panY,
     isDraggingCanvas,
+    showBleed,
+    showSafeZone,
     setSelectedIds,
     selectSingle,
     toggleSelect,
@@ -474,7 +478,17 @@ export function CanvasStage({ containerRef, stageRef: externalStageRef }: Canvas
       >
         {/* Background Layer */}
         <Layer>
-          <CanvasBackground page={page} />
+          <CanvasBackground page={page} showBleed={showBleed} />
+        </Layer>
+
+        {/* Bleed Overlay Layer */}
+        <Layer
+          x={panX}
+          y={panY}
+          scaleX={zoom}
+          scaleY={zoom}
+        >
+          <BleedOverlay showBleed={showBleed} showSafeZone={showSafeZone} />
         </Layer>
 
         {/* Guides Layer */}
@@ -497,8 +511,8 @@ export function CanvasStage({ containerRef, stageRef: externalStageRef }: Canvas
 
         {/* Elements Layer */}
         <Layer
-          x={panX}
-          y={panY}
+          x={panX + (showBleed ? FLYER_PRINT_CONSTANTS_HALF_LETTER.BLEED_INSET * zoom : 0)}
+          y={panY + (showBleed ? FLYER_PRINT_CONSTANTS_HALF_LETTER.BLEED_INSET * zoom : 0)}
           scaleX={zoom}
           scaleY={zoom}
         >
@@ -507,8 +521,8 @@ export function CanvasStage({ containerRef, stageRef: externalStageRef }: Canvas
 
         {/* Selection/Transform Layer */}
         <Layer
-          x={panX}
-          y={panY}
+          x={panX + (showBleed ? FLYER_PRINT_CONSTANTS_HALF_LETTER.BLEED_INSET * zoom : 0)}
+          y={panY + (showBleed ? FLYER_PRINT_CONSTANTS_HALF_LETTER.BLEED_INSET * zoom : 0)}
           scaleX={zoom}
           scaleY={zoom}
         >

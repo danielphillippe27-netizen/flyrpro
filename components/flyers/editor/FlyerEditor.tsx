@@ -4,9 +4,10 @@ import { useRef, useEffect, useState } from 'react';
 import { Stage, Layer, Rect, Text, Image as KonvaImage, Group, Transformer } from 'react-konva';
 import type Konva from 'konva';
 import { useFlyerEditorStore } from './useFlyerEditorStore';
-import { FLYER_PRINT_CONSTANTS } from '@/lib/flyers/printConstants';
+import { FLYER_PRINT_CONSTANTS_HALF_LETTER } from '@/lib/flyers/printConstants';
 import { Toolbar } from './Toolbar';
 import { PropertiesPanel } from './PropertiesPanel';
+import { BleedOverlay } from '@/components/editor/BleedOverlay';
 import type { FlyerElement, FlyerTextElement, FlyerImageElement, FlyerQRElement } from '@/lib/flyers/types';
 import { useKonvaImage } from '@/lib/hooks/useKonvaImage';
 import { useQrImage } from '@/lib/hooks/useQrImage';
@@ -32,6 +33,8 @@ export function FlyerEditor({ campaignId, flyerId }: FlyerEditorProps) {
     redo,
     canUndo,
     canRedo,
+    showBleed,
+    showSafeZone,
   } = useFlyerEditorStore();
 
   // Calculate scale to fit viewport
@@ -46,8 +49,8 @@ export function FlyerEditor({ campaignId, flyerId }: FlyerEditorProps) {
       const availableHeight = container.clientHeight - padding;
 
       // Base stage size is 1/3 of print size for display
-      const baseWidth = FLYER_PRINT_CONSTANTS.PRINT_WIDTH / 3;
-      const baseHeight = FLYER_PRINT_CONSTANTS.PRINT_HEIGHT / 3;
+      const baseWidth = FLYER_PRINT_CONSTANTS_HALF_LETTER.BLEED_WIDTH / 3;
+      const baseHeight = FLYER_PRINT_CONSTANTS_HALF_LETTER.BLEED_HEIGHT / 3;
 
       const scaleX = availableWidth / baseWidth;
       const scaleY = availableHeight / baseHeight;
@@ -120,8 +123,8 @@ export function FlyerEditor({ campaignId, flyerId }: FlyerEditorProps) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedElementId, deleteElement, undo, redo, canUndo, canRedo]);
 
-  const baseWidth = FLYER_PRINT_CONSTANTS.PRINT_WIDTH / 3;
-  const baseHeight = FLYER_PRINT_CONSTANTS.PRINT_HEIGHT / 3;
+  const baseWidth = FLYER_PRINT_CONSTANTS_HALF_LETTER.BLEED_WIDTH / 3;
+  const baseHeight = FLYER_PRINT_CONSTANTS_HALF_LETTER.BLEED_HEIGHT / 3;
 
   const handleStageClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
     // Deselect when clicking on empty area
@@ -134,33 +137,55 @@ export function FlyerEditor({ campaignId, flyerId }: FlyerEditorProps) {
     const stage = stageRef.current;
     if (!stage) return;
 
-    // Hide guides and transformer
-    const guidesLayer = stage.findOne('#guides-layer');
+    const {
+      BLEED_WIDTH,
+      BLEED_HEIGHT,
+      TRIM_WIDTH,
+      TRIM_HEIGHT,
+      BLEED_INSET,
+    } = FLYER_PRINT_CONSTANTS_HALF_LETTER;
+
+    // Hide bleed overlay, guides, and transformer
+    const bleedOverlayLayer = stage.findOne('#bleed-overlay-layer');
     const transformerLayer = stage.findOne('#transformer-layer');
     
-    const guidesVisible = guidesLayer?.visible();
+    const bleedVisible = bleedOverlayLayer?.visible();
     const transformerVisible = transformerLayer?.visible();
 
-    if (guidesLayer) guidesLayer.visible(false);
+    if (bleedOverlayLayer) bleedOverlayLayer.visible(false);
     if (transformerLayer) transformerLayer.visible(false);
 
     stage.batchDraw();
 
-    // Export with pixelRatio 3 to get 2625x3375 from 875x1125 base
+    // Determine export dimensions based on bleed toggle
+    const exportWidth = showBleed ? BLEED_WIDTH : TRIM_WIDTH;
+    const exportHeight = showBleed ? BLEED_HEIGHT : TRIM_HEIGHT;
+    const exportX = showBleed ? 0 : BLEED_INSET;
+    const exportY = showBleed ? 0 : BLEED_INSET;
+
+    // Export with pixelRatio 1 for exact pixel dimensions
     const dataUrl = stage.toDataURL({
-      pixelRatio: 3,
+      x: exportX,
+      y: exportY,
+      width: exportWidth,
+      height: exportHeight,
+      pixelRatio: 1,
       mimeType: 'image/png',
     });
 
     // Restore visibility
-    if (guidesLayer) guidesLayer.visible(guidesVisible ?? true);
+    if (bleedOverlayLayer) bleedOverlayLayer.visible(bleedVisible ?? false);
     if (transformerLayer) transformerLayer.visible(transformerVisible ?? true);
 
     stage.batchDraw();
 
     // Download
+    const filename = showBleed 
+      ? `flyer-${flyerId}-bleed-${BLEED_WIDTH}x${BLEED_HEIGHT}.png`
+      : `flyer-${flyerId}-trim-${TRIM_WIDTH}x${TRIM_HEIGHT}.png`;
+    
     const link = document.createElement('a');
-    link.download = `flyer-${flyerId}-export.png`;
+    link.download = filename;
     link.href = dataUrl;
     document.body.appendChild(link);
     link.click();
@@ -182,42 +207,9 @@ export function FlyerEditor({ campaignId, flyerId }: FlyerEditorProps) {
             onClick={handleStageClick}
             onTap={handleStageClick}
           >
-            {/* Guides Layer */}
-            <Layer id="guides-layer" listening={false}>
-              {/* Bleed area (outer boundary) */}
-              <Rect
-                x={0}
-                y={0}
-                width={FLYER_PRINT_CONSTANTS.PRINT_WIDTH}
-                height={FLYER_PRINT_CONSTANTS.PRINT_HEIGHT}
-                stroke="#ef4444"
-                strokeWidth={2}
-                fill="transparent"
-                opacity={0.3}
-              />
-              {/* Trim area */}
-              <Rect
-                x={FLYER_PRINT_CONSTANTS.TRIM_RECT.x}
-                y={FLYER_PRINT_CONSTANTS.TRIM_RECT.y}
-                width={FLYER_PRINT_CONSTANTS.TRIM_RECT.width}
-                height={FLYER_PRINT_CONSTANTS.TRIM_RECT.height}
-                stroke="#6b7280"
-                strokeWidth={1}
-                dash={[5, 5]}
-                fill="transparent"
-                opacity={0.5}
-              />
-              {/* Safe area */}
-              <Rect
-                x={FLYER_PRINT_CONSTANTS.SAFE_RECT.x}
-                y={FLYER_PRINT_CONSTANTS.SAFE_RECT.y}
-                width={FLYER_PRINT_CONSTANTS.SAFE_RECT.width}
-                height={FLYER_PRINT_CONSTANTS.SAFE_RECT.height}
-                stroke="#10b981"
-                strokeWidth={1}
-                fill="transparent"
-                opacity={0.4}
-              />
+            {/* Bleed Overlay Layer */}
+            <Layer id="bleed-overlay-layer" listening={false}>
+              <BleedOverlay showBleed={showBleed} showSafeZone={showSafeZone} />
             </Layer>
 
             {/* Background Layer */}
@@ -225,8 +217,8 @@ export function FlyerEditor({ campaignId, flyerId }: FlyerEditorProps) {
               <Rect
                 x={0}
                 y={0}
-                width={FLYER_PRINT_CONSTANTS.PRINT_WIDTH}
-                height={FLYER_PRINT_CONSTANTS.PRINT_HEIGHT}
+                width={FLYER_PRINT_CONSTANTS_HALF_LETTER.BLEED_WIDTH}
+                height={FLYER_PRINT_CONSTANTS_HALF_LETTER.BLEED_HEIGHT}
                 fill={flyerData.backgroundColor}
               />
             </Layer>
@@ -250,10 +242,10 @@ export function FlyerEditor({ campaignId, flyerId }: FlyerEditorProps) {
                 ref={transformerRef}
                 boundBoxFunc={(oldBox, newBox) => {
                   // Constrain to safe area with small buffer
-                  const minX = FLYER_PRINT_CONSTANTS.SAFE_RECT.x - 10;
-                  const minY = FLYER_PRINT_CONSTANTS.SAFE_RECT.y - 10;
-                  const maxX = FLYER_PRINT_CONSTANTS.SAFE_RECT.x + FLYER_PRINT_CONSTANTS.SAFE_RECT.width + 10;
-                  const maxY = FLYER_PRINT_CONSTANTS.SAFE_RECT.y + FLYER_PRINT_CONSTANTS.SAFE_RECT.height + 10;
+                  const minX = FLYER_PRINT_CONSTANTS_HALF_LETTER.SAFE_RECT.x - 10;
+                  const minY = FLYER_PRINT_CONSTANTS_HALF_LETTER.SAFE_RECT.y - 10;
+                  const maxX = FLYER_PRINT_CONSTANTS_HALF_LETTER.SAFE_RECT.x + FLYER_PRINT_CONSTANTS_HALF_LETTER.SAFE_RECT.width + 10;
+                  const maxY = FLYER_PRINT_CONSTANTS_HALF_LETTER.SAFE_RECT.y + FLYER_PRINT_CONSTANTS_HALF_LETTER.SAFE_RECT.height + 10;
 
                   if (newBox.x < minX) {
                     newBox.width -= minX - newBox.x;
@@ -297,10 +289,10 @@ function ElementRenderer({ element, isSelected, onSelect, onUpdate }: ElementRen
     const newY = node.y();
 
     // Constrain to safe area
-    const minX = FLYER_PRINT_CONSTANTS.SAFE_RECT.x;
-    const minY = FLYER_PRINT_CONSTANTS.SAFE_RECT.y;
-    const maxX = FLYER_PRINT_CONSTANTS.SAFE_RECT.x + FLYER_PRINT_CONSTANTS.SAFE_RECT.width;
-    const maxY = FLYER_PRINT_CONSTANTS.SAFE_RECT.y + FLYER_PRINT_CONSTANTS.SAFE_RECT.height;
+    const minX = FLYER_PRINT_CONSTANTS_HALF_LETTER.SAFE_RECT.x;
+    const minY = FLYER_PRINT_CONSTANTS_HALF_LETTER.SAFE_RECT.y;
+    const maxX = FLYER_PRINT_CONSTANTS_HALF_LETTER.SAFE_RECT.x + FLYER_PRINT_CONSTANTS_HALF_LETTER.SAFE_RECT.width;
+    const maxY = FLYER_PRINT_CONSTANTS_HALF_LETTER.SAFE_RECT.y + FLYER_PRINT_CONSTANTS_HALF_LETTER.SAFE_RECT.height;
 
     let constrainedX = newX;
     let constrainedY = newY;

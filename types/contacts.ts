@@ -12,6 +12,7 @@ export interface CreateContactPayload {
   campaign_id?: string;
   farm_id?: string;
   status: ContactStatus;
+  notes?: string;
 }
 
 export interface ContactWithActivities extends Contact {

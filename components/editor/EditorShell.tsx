@@ -9,6 +9,7 @@ import { SidebarRight } from './SidebarRight';
 import { LayersPanel } from './LayersPanel';
 import { useEditorStore } from '@/lib/editor/state';
 import { isInputElement } from '@/lib/editor/konvaHelpers';
+import { FLYER_PRINT_CONSTANTS_HALF_LETTER } from '@/lib/flyers/printConstants';
 
 export function EditorShell() {
   const canvasContainerRef = useRef<HTMLDivElement>(null);
@@ -23,6 +24,7 @@ export function EditorShell() {
     redo,
     zoomIn,
     zoomOut,
+    showBleed,
   } = useEditorStore();
 
   // Keyboard shortcuts
@@ -132,36 +134,79 @@ export function EditorShell() {
       return;
     }
 
+    const {
+      BLEED_WIDTH,
+      BLEED_HEIGHT,
+      TRIM_WIDTH,
+      TRIM_HEIGHT,
+      BLEED_INSET,
+    } = FLYER_PRINT_CONSTANTS_HALF_LETTER;
+
     // Get all layers
     const layers = stage.getLayers();
     
-    // Hide guides and transformer layers temporarily
-    const guidesLayer = layers[1]; // Guides layer is second
-    const transformLayer = layers[3]; // Transform layer is last
+    // Hide guides, bleed overlay, and transformer layers temporarily
+    const backgroundLayer = layers[0];
+    const bleedOverlayLayer = layers[1]; // Bleed overlay layer
+    const guidesLayer = layers[2]; // Guides layer
+    const elementsLayer = layers[3]; // Elements layer
+    const transformLayer = layers[4]; // Transform layer
     
+    const bleedVisible = bleedOverlayLayer?.visible();
     const guidesVisible = guidesLayer?.visible();
     const transformVisible = transformLayer?.visible();
 
+    // Hide overlay layers for export
+    if (bleedOverlayLayer) bleedOverlayLayer.visible(false);
     if (guidesLayer) guidesLayer.visible(false);
     if (transformLayer) transformLayer.visible(false);
 
     // Force redraw
     stage.batchDraw();
 
-    // Export with high resolution
+    // Determine export dimensions based on bleed toggle
+    const exportWidth = showBleed ? BLEED_WIDTH : TRIM_WIDTH;
+    const exportHeight = showBleed ? BLEED_HEIGHT : TRIM_HEIGHT;
+    const exportX = showBleed ? 0 : BLEED_INSET;
+    const exportY = showBleed ? 0 : BLEED_INSET;
+
+    // Save current stage state
+    const currentWidth = stage.width();
+    const currentHeight = stage.height();
+    const currentScaleX = stage.scaleX();
+    const currentScaleY = stage.scaleY();
+    const currentX = stage.x();
+    const currentY = stage.y();
+
+    // Temporarily resize stage to export size (at 1:1 scale for accurate export)
+    // We need to calculate the scale to fit the export area
+    // For now, we'll export the current view and crop/scale appropriately
+    // Better approach: create a temporary stage at full size
+    
+    // Export with pixelRatio 1 to get exact pixel dimensions
+    // The stage should be sized to show the full bleed area when bleed is on
     const dataUrl = stage.toDataURL({
-      pixelRatio: 3,
+      x: exportX,
+      y: exportY,
+      width: exportWidth,
+      height: exportHeight,
+      pixelRatio: 1,
       mimeType: 'image/png',
     });
 
     // Restore layers
+    if (bleedOverlayLayer) bleedOverlayLayer.visible(bleedVisible ?? false);
     if (guidesLayer) guidesLayer.visible(guidesVisible ?? true);
     if (transformLayer) transformLayer.visible(transformVisible ?? true);
 
     // Force redraw again
     stage.batchDraw();
 
-    downloadImage(dataUrl, 'flyr-design.png');
+    const filename = showBleed 
+      ? `flyr-design-bleed-${BLEED_WIDTH}x${BLEED_HEIGHT}.png`
+      : `flyr-design-trim-${TRIM_WIDTH}x${TRIM_HEIGHT}.png`;
+    
+    downloadImage(dataUrl, filename);
   };
 
   const downloadImage = (dataUrl: string, filename: string) => {

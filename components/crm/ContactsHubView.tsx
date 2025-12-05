@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { ContactsView } from './ContactsView';
 import { ContactFiltersView } from './ContactFiltersView';
 import { ContactDetailSheet } from './ContactDetailSheet';
+import { CreateContactDialog } from './CreateContactDialog';
 import { ContactsService } from '@/lib/services/ContactsService';
 import type { Contact, ContactStatus } from '@/types/database';
 import { createClient } from '@/lib/supabase/client';
@@ -14,15 +15,30 @@ export function ContactsHubView() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [filters, setFilters] = useState<{ status?: ContactStatus; campaignId?: string; farmId?: string }>({});
   const [userId, setUserId] = useState<string | null>(null);
 
   useEffect(() => {
+    const loadContacts = async (currentUserId: string) => {
+      try {
+        setLoading(true);
+        const data = await ContactsService.fetchContacts(currentUserId, filters);
+        setContacts(data);
+      } catch (error) {
+        console.error('Error loading contacts:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
     const supabase = createClient();
     supabase.auth.getUser().then(({ data: { user } }) => {
       setUserId(user?.id || null);
       if (user?.id) {
-        loadContacts();
+        loadContacts(user.id);
+      } else {
+        setLoading(false);
       }
     });
   }, [filters]);
@@ -30,6 +46,7 @@ export function ContactsHubView() {
   const loadContacts = async () => {
     if (!userId) return;
     try {
+      setLoading(true);
       const data = await ContactsService.fetchContacts(userId, filters);
       setContacts(data);
     } catch (error) {
@@ -40,8 +57,11 @@ export function ContactsHubView() {
   };
 
   const handleCreateContact = () => {
-    // Navigate to create contact page or open modal
-    setSelectedContact(null);
+    setCreateDialogOpen(true);
+  };
+
+  const handleContactCreated = () => {
+    loadContacts();
   };
 
   return (
@@ -68,6 +88,15 @@ export function ContactsHubView() {
           open={!!selectedContact}
           onClose={() => setSelectedContact(null)}
           onUpdate={loadContacts}
+        />
+      )}
+
+      {userId && (
+        <CreateContactDialog
+          open={createDialogOpen}
+          onClose={() => setCreateDialogOpen(false)}
+          onSuccess={handleContactCreated}
+          userId={userId}
         />
       )}
     </div>

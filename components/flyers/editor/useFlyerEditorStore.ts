@@ -4,6 +4,8 @@ import type { FlyerData, FlyerElement } from '@/lib/flyers/types';
 interface FlyerEditorState {
   flyerData: FlyerData;
   selectedElementId: string | null;
+  showBleed: boolean;
+  showSafeZone: boolean;
   history: {
     past: FlyerData[];
     future: FlyerData[];
@@ -22,6 +24,10 @@ interface FlyerEditorStore extends FlyerEditorState {
 
   // Selection actions
   setSelectedElementId: (id: string | null) => void;
+
+  // Bleed and safe zone toggles
+  toggleBleed: () => void;
+  toggleSafeZone: () => void;
 
   // History actions
   pushHistory: () => void;
@@ -43,6 +49,8 @@ export const useFlyerEditorStore = create<FlyerEditorStore>((set, get) => ({
     elements: [],
   },
   selectedElementId: null,
+  showBleed: false,
+  showSafeZone: true,
   history: {
     past: [],
     future: [],
@@ -103,7 +111,15 @@ export const useFlyerEditorStore = create<FlyerEditorStore>((set, get) => ({
   setSelectedElementId: (id: string | null) => {
     set({ selectedElementId: id });
   },
-
+  
+  toggleBleed: () => {
+    set((state) => ({ showBleed: !state.showBleed }));
+  },
+  
+  toggleSafeZone: () => {
+    set((state) => ({ showSafeZone: !state.showSafeZone }));
+  },
+  
   pushHistory: () => {
     const { flyerData, history } = get();
     const newPast = [...history.past, JSON.parse(JSON.stringify(flyerData))];

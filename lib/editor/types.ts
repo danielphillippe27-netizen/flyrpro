@@ -90,6 +90,8 @@ export interface EditorState {
   panX: number;
   panY: number;
   isDraggingCanvas: boolean;
+  showBleed: boolean;             // show bleed overlay and crop marks
+  showSafeZone: boolean;            // show safe zone guides
   history: EditorHistory;
 }
 

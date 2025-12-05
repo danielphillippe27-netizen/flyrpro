@@ -1,10 +1,11 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { Undo2, Redo2, ZoomIn, ZoomOut, Maximize2, AlignLeft, AlignCenter, AlignRight, AlignVerticalJustifyCenter, AlignHorizontalJustifyCenter, AlignVerticalJustifyStart, AlignVerticalJustifyEnd, Group, Ungroup, Download, ArrowLeft } from 'lucide-react';
+import { Undo2, Redo2, ZoomIn, ZoomOut, Maximize2, AlignLeft, AlignCenter, AlignRight, AlignVerticalJustifyCenter, AlignHorizontalJustifyCenter, AlignVerticalJustifyStart, AlignVerticalJustifyEnd, Group, Ungroup, Download, ArrowLeft, Crop, Square } from 'lucide-react';
 import { useEditorStore } from '@/lib/editor/state';
 import { IconButton } from './IconButton';
 import { Separator } from './Separator';
+import { PrintSafetyIndicator } from './PrintSafetyIndicator';
 import { Button } from '@/components/ui/button';
 import Image from 'next/image';
 
@@ -28,6 +29,11 @@ export function TopToolbar({ onExportPng }: TopToolbarProps) {
     alignSelected,
     groupSelected,
     ungroup,
+    showBleed,
+    showSafeZone,
+    toggleBleed,
+    toggleSafeZone,
+    elements,
   } = useEditorStore();
 
   const hasSelection = selectedIds.length > 0;
@@ -172,6 +178,27 @@ export function TopToolbar({ onExportPng }: TopToolbarProps) {
       )}
 
       <div className="flex-1" />
+
+      {/* Print Safety Indicator */}
+      <PrintSafetyIndicator elements={Object.values(elements)} />
+
+      <Separator orientation="vertical" className="h-8" />
+
+      {/* Bleed and Safe Zone Toggles */}
+      <IconButton
+        icon={<Crop className="w-4 h-4" />}
+        onClick={toggleBleed}
+        title={showBleed ? "Hide Bleed" : "Show Bleed"}
+        className={showBleed ? 'bg-slate-700' : ''}
+      />
+      <IconButton
+        icon={<Square className="w-4 h-4" />}
+        onClick={toggleSafeZone}
+        title={showSafeZone ? "Hide Safe Zone" : "Show Safe Zone"}
+        className={showSafeZone ? 'bg-slate-700' : ''}
+      />
+
+      <Separator orientation="vertical" className="h-8" />
 
       {/* Export */}
       <Button

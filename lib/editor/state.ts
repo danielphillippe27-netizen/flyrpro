@@ -28,11 +28,12 @@ import { getTemplateById } from './templates';
  */
 function getInitialEditorState(): EditorState {
   const pageId = generateId();
+  // Use 8.5" x 5.5" @ 300 DPI = 2550 x 1650 px (trim size)
   const page: EditorPage = {
     id: pageId,
     name: 'Page 1',
-    width: 1200,
-    height: 1600,
+    width: 2550,
+    height: 1650,
     backgroundColor: '#ffffff',
     elementIds: [],
   };
@@ -47,6 +48,8 @@ function getInitialEditorState(): EditorState {
     panX: 0,
     panY: 0,
     isDraggingCanvas: false,
+    showBleed: false,
+    showSafeZone: true,
     history: {
       past: [],
       future: [],
@@ -82,6 +85,10 @@ interface EditorStore extends EditorState {
   setPan: (x: number, y: number) => void;
   startCanvasPan: () => void;
   endCanvasPan: () => void;
+  
+  // Bleed and safe zone toggles
+  toggleBleed: () => void;
+  toggleSafeZone: () => void;
   
   // Group actions
   groupSelected: () => string | null;
@@ -357,6 +364,15 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   
   endCanvasPan: () => {
     set({ isDraggingCanvas: false });
+  },
+  
+  // Bleed and safe zone toggles
+  toggleBleed: () => {
+    set((state) => ({ showBleed: !state.showBleed }));
+  },
+  
+  toggleSafeZone: () => {
+    set((state) => ({ showSafeZone: !state.showSafeZone }));
   },
   
   // Group actions

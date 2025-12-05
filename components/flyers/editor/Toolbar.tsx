@@ -2,6 +2,7 @@
 
 import { useRef } from 'react';
 import { Button } from '@/components/ui/button';
+import { Crop, Square } from 'lucide-react';
 import { useFlyerEditorStore, generateId } from './useFlyerEditorStore';
 import { FLYER_PRINT_CONSTANTS } from '@/lib/flyers/printConstants';
 import type { FlyerTextElement, FlyerImageElement, FlyerQRElement } from '@/lib/flyers/types';
@@ -18,6 +19,10 @@ export function Toolbar({ campaignId, flyerId, onExport }: ToolbarProps) {
     addElement,
     setBackgroundColor,
     flyerData,
+    showBleed,
+    showSafeZone,
+    toggleBleed,
+    toggleSafeZone,
   } = useFlyerEditorStore();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -164,6 +169,32 @@ export function Toolbar({ campaignId, flyerId, onExport }: ToolbarProps) {
         </div>
       </div>
 
+      <div className="space-y-2">
+        <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide">
+          Print Guides
+        </h2>
+        <div className="space-y-2">
+          <Button
+            onClick={toggleBleed}
+            variant={showBleed ? "default" : "outline"}
+            className={`w-full ${showBleed ? 'bg-slate-700' : ''}`}
+            size="sm"
+          >
+            <Crop className="w-4 h-4 mr-2" />
+            {showBleed ? 'Hide Bleed' : 'Show Bleed'}
+          </Button>
+          <Button
+            onClick={toggleSafeZone}
+            variant={showSafeZone ? "default" : "outline"}
+            className={`w-full ${showSafeZone ? 'bg-slate-700' : ''}`}
+            size="sm"
+          >
+            <Square className="w-4 h-4 mr-2" />
+            {showSafeZone ? 'Hide Safe Zone' : 'Show Safe Zone'}
+          </Button>
+        </div>
+      </div>
+
       <div className="mt-auto pt-4 border-t border-slate-800">
         <Button
           onClick={onExport}
@@ -173,7 +204,7 @@ export function Toolbar({ campaignId, flyerId, onExport }: ToolbarProps) {
           Export for Print
         </Button>
         <p className="text-xs text-slate-500 mt-2 text-center">
-          8.5" × 11" + 0.125" bleed • 300 DPI
+          8.5" × 5.5" + 0.125" bleed • 300 DPI
         </p>
       </div>
 
