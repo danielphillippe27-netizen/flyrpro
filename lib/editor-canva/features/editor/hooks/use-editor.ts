@@ -1,5 +1,5 @@
 import { fabric } from "fabric";
-import { useCallback, useState, useMemo, useRef } from "react";
+import { useCallback, useState, useMemo, useRef, useEffect } from "react";
 
 import { 
   Editor, 
@@ -32,6 +32,9 @@ import { useAutoResize } from "@/lib/editor-canva/features/editor/hooks/use-auto
 import { useCanvasEvents } from "@/lib/editor-canva/features/editor/hooks/use-canvas-events";
 import { useWindowEvents } from "@/lib/editor-canva/features/editor/hooks/use-window-events";
 import { useLoadState } from "@/lib/editor-canva/features/editor/hooks/use-load-state";
+import { useBleedOverlay } from "@/lib/editor-canva/features/editor/hooks/use-bleed-overlay";
+import { useSnapToTrim } from "@/lib/editor-canva/features/editor/hooks/use-snap-to-trim";
+import { FLYER_PRINT_CONSTANTS_HALF_LETTER } from "@/lib/flyers/printConstants";
 
 const buildEditor = ({
   save,
@@ -54,46 +57,124 @@ const buildEditor = ({
   selectedObjects,
   strokeDashArray,
   setStrokeDashArray,
+  showBleed,
+  showSafeZone,
+  setShowBleed,
+  setShowSafeZone,
+  zoom,
+  setZoom,
 }: BuildEditorProps): Editor => {
   const generateSaveOptions = () => {
-    const { width, height, left, top } = getWorkspace() as fabric.Rect;
+    const workspace = getWorkspace() as fabric.Rect;
+    if (!workspace) {
+      return {
+        name: "Image",
+        format: "png",
+        quality: 1,
+        width: 0,
+        height: 0,
+        left: 0,
+        top: 0,
+      };
+    }
+
+    const { TRIM_WIDTH, TRIM_HEIGHT, BLEED_WIDTH, BLEED_HEIGHT, BLEED_INSET } = FLYER_PRINT_CONSTANTS_HALF_LETTER;
+
+    // If showBleed is true, export full bleed size, otherwise export trim size
+    const exportWidth = showBleed ? BLEED_WIDTH : TRIM_WIDTH;
+    const exportHeight = showBleed ? BLEED_HEIGHT : TRIM_HEIGHT;
+    
+    // Calculate export area
+    // If exporting trim, we need to crop from the bleed workspace
+    const workspaceLeft = workspace.left || 0;
+    const workspaceTop = workspace.top || 0;
+    const exportLeft = showBleed ? workspaceLeft : workspaceLeft + BLEED_INSET;
+    const exportTop = showBleed ? workspaceTop : workspaceTop + BLEED_INSET;
 
     return {
       name: "Image",
       format: "png",
       quality: 1,
-      width,
-      height,
-      left,
-      top,
+      width: exportWidth,
+      height: exportHeight,
+      left: exportLeft,
+      top: exportTop,
     };
   };
 
   const savePng = () => {
-    const options = generateSaveOptions();
+    // Hide overlay objects before export
+    const overlayObjects = canvas.getObjects().filter((obj: fabric.Object) => {
+      const name = obj.name || "";
+      return name.includes("bleed-zone") || name.includes("crop-mark") || name.includes("safe-zone");
+    });
+    
+    overlayObjects.forEach((obj) => {
+      obj.visible = false;
+    });
+    canvas.renderAll();
 
+    const options = generateSaveOptions();
     canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
     const dataUrl = canvas.toDataURL(options);
+
+    // Restore overlay visibility
+    overlayObjects.forEach((obj) => {
+      obj.visible = true;
+    });
+    canvas.renderAll();
 
     downloadFile(dataUrl, "png");
     autoZoom();
   };
 
   const saveSvg = () => {
-    const options = generateSaveOptions();
+    // Hide overlay objects before export
+    const overlayObjects = canvas.getObjects().filter((obj: fabric.Object) => {
+      const name = obj.name || "";
+      return name.includes("bleed-zone") || name.includes("crop-mark") || name.includes("safe-zone");
+    });
+    
+    overlayObjects.forEach((obj) => {
+      obj.visible = false;
+    });
+    canvas.renderAll();
 
+    const options = generateSaveOptions();
     canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
     const dataUrl = canvas.toDataURL(options);
+
+    // Restore overlay visibility
+    overlayObjects.forEach((obj) => {
+      obj.visible = true;
+    });
+    canvas.renderAll();
 
     downloadFile(dataUrl, "svg");
     autoZoom();
   };
 
   const saveJpg = () => {
-    const options = generateSaveOptions();
+    // Hide overlay objects before export
+    const overlayObjects = canvas.getObjects().filter((obj: fabric.Object) => {
+      const name = obj.name || "";
+      return name.includes("bleed-zone") || name.includes("crop-mark") || name.includes("safe-zone");
+    });
+    
+    overlayObjects.forEach((obj) => {
+      obj.visible = false;
+    });
+    canvas.renderAll();
 
+    const options = generateSaveOptions();
     canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
     const dataUrl = canvas.toDataURL(options);
+
+    // Restore overlay visibility
+    overlayObjects.forEach((obj) => {
+      obj.visible = true;
+    });
+    canvas.renderAll();
 
     downloadFile(dataUrl, "jpg");
     autoZoom();
@@ -149,23 +230,39 @@ const buildEditor = ({
     canRedo,
     autoZoom,
     getWorkspace,
+    getZoom: () => {
+      return canvas.getZoom();
+    },
+    setZoom: (value: number) => {
+      const clampedValue = Math.max(0.1, Math.min(4, value));
+      const center = canvas.getCenter();
+      canvas.zoomToPoint(
+        new fabric.Point(center.left, center.top),
+        clampedValue
+      );
+      setZoom(clampedValue);
+    },
     zoomIn: () => {
       let zoomRatio = canvas.getZoom();
       zoomRatio += 0.05;
       const center = canvas.getCenter();
+      const newZoom = zoomRatio > 1 ? 1 : zoomRatio;
       canvas.zoomToPoint(
         new fabric.Point(center.left, center.top),
-        zoomRatio > 1 ? 1 : zoomRatio
+        newZoom
       );
+      setZoom(newZoom);
     },
     zoomOut: () => {
       let zoomRatio = canvas.getZoom();
       zoomRatio -= 0.05;
       const center = canvas.getCenter();
+      const newZoom = zoomRatio < 0.2 ? 0.2 : zoomRatio;
       canvas.zoomToPoint(
         new fabric.Point(center.left, center.top),
-        zoomRatio < 0.2 ? 0.2 : zoomRatio,
+        newZoom,
       );
+      setZoom(newZoom);
     },
     changeSize: (value: { width: number; height: number }) => {
       const workspace = getWorkspace();
@@ -607,6 +704,38 @@ const buildEditor = ({
       return value;
     },
     selectedObjects,
+    showBleed,
+    showSafeZone,
+    toggleBleed: () => {
+      const workspace = getWorkspace();
+      if (!workspace) return;
+
+      const { TRIM_WIDTH, TRIM_HEIGHT, BLEED_WIDTH, BLEED_HEIGHT } = FLYER_PRINT_CONSTANTS_HALF_LETTER;
+
+      const newShowBleed = !showBleed;
+      setShowBleed(newShowBleed);
+
+      // Resize workspace based on bleed toggle
+      const newWidth = newShowBleed ? BLEED_WIDTH : TRIM_WIDTH;
+      const newHeight = newShowBleed ? BLEED_HEIGHT : TRIM_HEIGHT;
+
+      // Get current center to maintain position
+      const center = workspace.getCenterPoint();
+      if (center) {
+        workspace.set({
+          width: newWidth,
+          height: newHeight,
+          left: center.x - newWidth / 2,
+          top: center.y - newHeight / 2,
+        });
+        canvas.clipPath = workspace;
+        canvas.renderAll();
+        autoZoom();
+      }
+    },
+    toggleSafeZone: () => {
+      setShowSafeZone(!showSafeZone);
+    },
   };
 };
 
@@ -630,6 +759,9 @@ export const useEditor = ({
   const [strokeColor, setStrokeColor] = useState(STROKE_COLOR);
   const [strokeWidth, setStrokeWidth] = useState(STROKE_WIDTH);
   const [strokeDashArray, setStrokeDashArray] = useState<number[]>(STROKE_DASH_ARRAY);
+  const [showBleed, setShowBleed] = useState(false);
+  const [showSafeZone, setShowSafeZone] = useState(true);
+  const [zoom, setZoom] = useState(1);
 
   useWindowEvents();
 
@@ -677,6 +809,50 @@ export const useEditor = ({
     setHistoryIndex,
   });
 
+  // Get workspace for bleed overlay
+  // Recalculate when canvas or bleed state changes
+  const workspace = useMemo(() => {
+    if (!canvas) return undefined;
+    return canvas.getObjects().find((object) => object.name === "clip") as fabric.Rect | undefined;
+  }, [canvas, showBleed]);
+
+  // Integrate bleed overlay
+  useBleedOverlay({
+    canvas,
+    showBleed,
+    showSafeZone,
+    workspace,
+  });
+
+  // Integrate snap-to-trim functionality
+  useSnapToTrim({
+    canvas,
+    workspace,
+    showBleed,
+  });
+
+  // Sync zoom state with canvas zoom changes
+  useEffect(() => {
+    if (!canvas) return;
+
+    const updateZoom = () => {
+      const currentZoom = canvas.getZoom();
+      setZoom(currentZoom);
+    };
+
+    // Update zoom when canvas zoom changes
+    canvas.on('mouse:wheel', updateZoom);
+    canvas.on('object:modified', updateZoom);
+
+    // Initial zoom sync
+    updateZoom();
+
+    return () => {
+      canvas.off('mouse:wheel', updateZoom);
+      canvas.off('object:modified', updateZoom);
+    };
+  }, [canvas]);
+
   const editor = useMemo(() => {
     if (canvas) {
       return buildEditor({
@@ -700,6 +876,12 @@ export const useEditor = ({
         setStrokeDashArray,
         fontFamily,
         setFontFamily,
+        showBleed,
+        showSafeZone,
+        setShowBleed,
+        setShowSafeZone,
+        zoom,
+        setZoom,
       });
     }
 
@@ -721,6 +903,9 @@ export const useEditor = ({
     selectedObjects,
     strokeDashArray,
     fontFamily,
+    showBleed,
+    showSafeZone,
+    zoom,
   ]);
 
   const init = useCallback(

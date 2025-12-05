@@ -107,7 +107,9 @@ export type ActiveTool =
   | "settings"
   | "ai"
   | "remove-bg"
-  | "templates";
+  | "templates"
+  | "layers"
+  | "uploads";
 
 export const FILL_COLOR = "rgba(0,0,0,1)";
 export const STROKE_COLOR = "rgba(0,0,0,1)";
@@ -201,6 +203,12 @@ export type BuildEditorProps = {
   setStrokeColor: (value: string) => void;
   setStrokeWidth: (value: number) => void;
   setFontFamily: (value: string) => void;
+  showBleed: boolean;
+  showSafeZone: boolean;
+  setShowBleed: (value: boolean) => void;
+  setShowSafeZone: (value: boolean) => void;
+  zoom: number;
+  setZoom: (value: number) => void;
 };
 
 export interface Editor {
@@ -216,6 +224,8 @@ export interface Editor {
   autoZoom: () => void;
   zoomIn: () => void;
   zoomOut: () => void;
+  getZoom: () => number;
+  setZoom: (value: number) => void;
   getWorkspace: () => fabric.Object | undefined;
   changeBackground: (value: string) => void;
   changeSize: (value: { width: number; height: number }) => void;
@@ -261,4 +271,8 @@ export interface Editor {
   getActiveStrokeWidth: () => number;
   getActiveStrokeDashArray: () => number[];
   selectedObjects: fabric.Object[];
+  showBleed: boolean;
+  showSafeZone: boolean;
+  toggleBleed: () => void;
+  toggleSafeZone: () => void;
 };

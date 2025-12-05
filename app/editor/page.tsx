@@ -4,6 +4,7 @@ import { QueryProvider } from '@/lib/editor-canva/components/query-provider';
 import { Editor } from '@/lib/editor-canva/features/editor/components/editor';
 
 // Temporary mock data - will be replaced with actual project data
+// Default to 8.5" × 5.5" @ 300 DPI = 2550 × 1650 px (trim size)
 const mockProjectData = {
   id: 'temp-project',
   name: 'New Design',
@@ -11,11 +12,11 @@ const mockProjectData = {
   json: JSON.stringify({
     version: '5.3.0',
     objects: [],
-    width: 1920,
-    height: 1080,
+    width: 2550,
+    height: 1650,
   }),
-  height: 1080,
-  width: 1920,
+  height: 1650,
+  width: 2550,
   thumbnailUrl: null,
   isTemplate: false,
   isPro: false,

@@ -8,6 +8,8 @@ import {
   Shapes,
   Sparkles,
   Type,
+  Layers,
+  Upload,
 } from "lucide-react";
 
 import { ActiveTool } from "@/lib/editor-canva/features/editor/types";
@@ -38,6 +40,12 @@ export const Sidebar = ({
           onClick={() => onChangeActiveTool("images")}
         />
         <SidebarItem
+          icon={Upload}
+          label="Uploads"
+          isActive={activeTool === "uploads"}
+          onClick={() => onChangeActiveTool("uploads")}
+        />
+        <SidebarItem
           icon={Type}
           label="Text"
           isActive={activeTool === "text"}
@@ -60,6 +68,12 @@ export const Sidebar = ({
           label="AI"
           isActive={activeTool === "ai"}
           onClick={() => onChangeActiveTool("ai")}
+        />
+        <SidebarItem
+          icon={Layers}
+          label="Layers"
+          isActive={activeTool === "layers"}
+          onClick={() => onChangeActiveTool("layers")}
         />
         <SidebarItem
           icon={Settings}

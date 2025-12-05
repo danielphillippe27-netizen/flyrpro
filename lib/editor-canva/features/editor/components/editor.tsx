@@ -29,7 +29,11 @@ import { DrawSidebar } from "@/lib/editor-canva/features/editor/components/draw-
 import { AiSidebar } from "@/lib/editor-canva/features/editor/components/ai-sidebar";
 import { TemplateSidebar } from "@/lib/editor-canva/features/editor/components/template-sidebar";
 import { RemoveBgSidebar } from "@/lib/editor-canva/features/editor/components/remove-bg-sidebar";
+import { LayersSidebar } from "@/lib/editor-canva/features/editor/components/layers-sidebar";
 import { SettingsSidebar } from "@/lib/editor-canva/features/editor/components/settings-sidebar";
+import { PageControls } from "@/lib/editor-canva/features/editor/components/page-controls";
+import { UploadsSidebar } from "@/lib/editor-canva/features/editor/components/uploads-sidebar";
+import { Button } from "@/lib/editor-canva/components/ui/button";
 
 interface EditorProps {
   initialData: ResponseType["data"];
@@ -109,6 +113,7 @@ export const Editor = ({ initialData }: EditorProps) => {
         editor={editor}
         activeTool={activeTool}
         onChangeActiveTool={onChangeActiveTool}
+        projectName={initialData.name}
       />
       <div className="absolute h-[calc(100%-68px)] w-full top-[68px] flex">
         <Sidebar
@@ -175,12 +180,22 @@ export const Editor = ({ initialData }: EditorProps) => {
           activeTool={activeTool}
           onChangeActiveTool={onChangeActiveTool}
         />
+        <LayersSidebar
+          editor={editor}
+          activeTool={activeTool}
+          onChangeActiveTool={onChangeActiveTool}
+        />
         <DrawSidebar
           editor={editor}
           activeTool={activeTool}
           onChangeActiveTool={onChangeActiveTool}
         />
         <SettingsSidebar
+          editor={editor}
+          activeTool={activeTool}
+          onChangeActiveTool={onChangeActiveTool}
+        />
+        <UploadsSidebar
           editor={editor}
           activeTool={activeTool}
           onChangeActiveTool={onChangeActiveTool}
@@ -192,8 +207,35 @@ export const Editor = ({ initialData }: EditorProps) => {
             onChangeActiveTool={onChangeActiveTool}
             key={JSON.stringify(editor?.canvas.getActiveObject())}
           />
-          <div className="flex-1 h-[calc(100%-124px)] bg-muted" ref={containerRef}>
+          <div className="flex-1 h-[calc(100%-124px)] bg-muted relative" ref={containerRef}>
             <canvas ref={canvasRef} />
+            {/* Page controls overlay - top right */}
+            <div className="absolute top-4 right-4 z-10">
+              <PageControls
+                onDuplicatePage={() => {
+                  // TODO: Implement duplicate page functionality
+                  console.log("Duplicate page");
+                }}
+                onAddPage={() => {
+                  // TODO: Implement add page functionality
+                  console.log("Add page");
+                }}
+              />
+            </div>
+          </div>
+          {/* Add page button below canvas */}
+          <div className="flex justify-center py-2 border-t bg-white">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                // TODO: Implement add page functionality
+                console.log("Add page");
+              }}
+              className="flex items-center gap-x-2"
+            >
+              <span>+ Add page</span>
+            </Button>
           </div>
           <Footer editor={editor} />
         </main>

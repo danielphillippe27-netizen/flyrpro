@@ -10,13 +10,18 @@ import {
   Loader, 
   MousePointerClick, 
   Redo2, 
-  Undo2
+  Undo2,
+  Crop,
+  Square,
+  Menu,
+  Maximize2
 } from "lucide-react";
 
 import { UserButton } from "@/lib/editor-canva/features/auth/components/user-button";
 
 import { ActiveTool, Editor } from "@/lib/editor-canva/features/editor/types";
 import { Logo } from "@/lib/editor-canva/features/editor/components/logo";
+import { PrintSafetyIndicator } from "@/lib/editor-canva/features/editor/components/print-safety-indicator";
 
 import { cn } from "@/lib/editor-canva/lib/utils";
 import { Hint } from "@/lib/editor-canva/components/hint";
@@ -34,6 +39,7 @@ interface NavbarProps {
   editor: Editor | undefined;
   activeTool: ActiveTool;
   onChangeActiveTool: (tool: ActiveTool) => void;
+  projectName?: string;
 };
 
 export const Navbar = ({
@@ -41,6 +47,7 @@ export const Navbar = ({
   editor,
   activeTool,
   onChangeActiveTool,
+  projectName,
 }: NavbarProps) => {
   const data = useMutationState({
     filters: {
@@ -69,8 +76,30 @@ export const Navbar = ({
     },
   });
 
+  const canvasSizePresets = [
+    { label: "8.5\" × 11\" Letter", width: 2550, height: 3300 },
+    { label: "11\" × 8.5\" Landscape", width: 3300, height: 2550 },
+    { label: "8.5\" × 5.5\" Half Letter", width: 2550, height: 1650 },
+    { label: "5.5\" × 8.5\" Portrait", width: 1650, height: 2550 },
+    { label: "1920 × 1080 Web", width: 1920, height: 1080 },
+    { label: "1080 × 1920 Mobile", width: 1080, height: 1920 },
+  ];
+
+  const handleResize = (width: number, height: number) => {
+    editor?.changeSize({ width, height });
+  };
+
   return (
     <nav className="w-full flex items-center p-4 h-[68px] gap-x-8 border-b lg:pl-[34px]">
+      <Hint label="Menu" side="bottom" sideOffset={10}>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="lg:hidden"
+        >
+          <Menu className="size-5" />
+        </Button>
+      </Hint>
       <Logo />
       <div className="w-full flex items-center gap-x-1 h-full">
         <DropdownMenu modal={false}>
@@ -127,6 +156,29 @@ export const Navbar = ({
           </Button>
         </Hint>
         <Separator orientation="vertical" className="mx-2" />
+        <DropdownMenu modal={false}>
+          <DropdownMenuTrigger asChild>
+            <Button size="sm" variant="ghost">
+              Resize
+              <ChevronDown className="size-4 ml-2" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="min-w-60">
+            {canvasSizePresets.map((preset) => (
+              <DropdownMenuItem
+                key={preset.label}
+                onClick={() => handleResize(preset.width, preset.height)}
+                className="flex flex-col items-start gap-y-1"
+              >
+                <p className="font-medium">{preset.label}</p>
+                <p className="text-xs text-muted-foreground">
+                  {preset.width} × {preset.height} px
+                </p>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <Separator orientation="vertical" className="mx-2" />
         {isPending && ( 
           <div className="flex items-center gap-x-2">
             <Loader className="size-4 animate-spin text-muted-foreground" />
@@ -151,7 +203,38 @@ export const Navbar = ({
             </div>
           </div>
         )}
+        {/* Centered title */}
+        <div className="flex-1 flex justify-center">
+          <h1 className="text-sm font-medium text-muted-foreground">
+            {projectName || "Untitled design"}
+          </h1>
+        </div>
         <div className="ml-auto flex items-center gap-x-4">
+          {/* Print Safety Indicator */}
+          <PrintSafetyIndicator editor={editor} />
+          <Separator orientation="vertical" className="mx-2" />
+          {/* Bleed and Safe Zone Toggles */}
+          <Hint label={editor?.showBleed ? "Hide Bleed" : "Show Bleed"} side="bottom" sideOffset={10}>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => editor?.toggleBleed()}
+              className={cn(editor?.showBleed && "bg-gray-100")}
+            >
+              <Crop className="size-4" />
+            </Button>
+          </Hint>
+          <Hint label={editor?.showSafeZone ? "Hide Safe Zone" : "Show Safe Zone"} side="bottom" sideOffset={10}>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => editor?.toggleSafeZone()}
+              className={cn(editor?.showSafeZone && "bg-gray-100")}
+            >
+              <Square className="size-4" />
+            </Button>
+          </Hint>
+          <Separator orientation="vertical" className="mx-2" />
           <DropdownMenu modal={false}>
             <DropdownMenuTrigger asChild>
               <Button size="sm" variant="ghost">

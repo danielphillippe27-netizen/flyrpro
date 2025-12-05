@@ -7,7 +7,8 @@ import { ActiveTool, Editor } from "@/lib/editor-canva/features/editor/types";
 import { ToolSidebarClose } from "@/lib/editor-canva/features/editor/components/tool-sidebar-close";
 import { ToolSidebarHeader } from "@/lib/editor-canva/features/editor/components/tool-sidebar-header";
 
-import { useRemoveBg } from "@/lib/editor-canva/features/ai/api/use-remove-bg";
+import { useState } from "react";
+import { toast } from "sonner";
 
 import { cn } from "@/lib/editor-canva/lib/utils";
 import { Button } from "@/lib/editor-canva/components/ui/button";
@@ -25,30 +26,56 @@ export const RemoveBgSidebar = ({
   onChangeActiveTool,
 }: RemoveBgSidebarProps) => {
   const { shouldBlock, triggerPaywall } = usePaywall();
-  const mutation = useRemoveBg();
+  const [isRemoving, setIsRemoving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const selectedObject = editor?.selectedObjects[0];
 
   // @ts-ignore
-  const imageSrc = selectedObject?._originalElement?.currentSrc;
+  const imageSrc = selectedObject?._originalElement?.currentSrc || selectedObject?.src;
 
   const onClose = () => {
     onChangeActiveTool("select");
   };
 
-  const onClick = () => {
+  const onClick = async () => {
     if (shouldBlock) {
       triggerPaywall();
       return;
     }
 
-    mutation.mutate({
-      image: imageSrc,
-    }, {
-      onSuccess: ({ data }) => {
-        editor?.addImage(data);
-      },
-    });
+    if (!imageSrc) {
+      setError("No image selected");
+      return;
+    }
+
+    setIsRemoving(true);
+    setError(null);
+
+    try {
+      const response = await fetch('/api/background-remover', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl: imageSrc }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to remove background');
+      }
+
+      // Add the new image with transparent background
+      editor?.addImage(data.url);
+      editor?.save();
+      toast.success('Background removed – new image added.');
+    } catch (err: any) {
+      const errorMessage = err?.message || 'We couldn\'t remove the background. Please try another image.';
+      setError(errorMessage);
+      console.error('Background removal error:', err);
+    } finally {
+      setIsRemoving(false);
+    }
   };
 
   return (
@@ -59,8 +86,8 @@ export const RemoveBgSidebar = ({
       )}
     >
       <ToolSidebarHeader
-        title="Background removal"
-        description="Remove background from image using AI"
+        title="Background Remover"
+        description="Erase the background from your photo in one click. Works best on clear subjects."
       />
       {!imageSrc && (
         <div className="flex flex-col gap-y-4 items-center justify-center flex-1">
@@ -75,7 +102,7 @@ export const RemoveBgSidebar = ({
           <div className="p-4 space-y-4">
             <div className={cn(
               "relative aspect-square rounded-md overflow-hidden transition bg-muted",
-              mutation.isPending && "opacity-50",
+              isRemoving && "opacity-50",
             )}>
               <Image
                 src={imageSrc}
@@ -85,12 +112,18 @@ export const RemoveBgSidebar = ({
               />
             </div>
             <Button
-              disabled={mutation.isPending}
+              disabled={isRemoving}
               onClick={onClick}
               className="w-full"
             >
-              Remove background
+              {isRemoving ? 'Removing...' : 'Remove background'}
             </Button>
+            {error && (
+              <p className="text-xs text-red-500 mt-2">{error}</p>
+            )}
+            <p className="text-xs text-muted-foreground mt-2">
+              We'll create a new image with a transparent background so you can keep the original.
+            </p>
           </div>
         </ScrollArea>
       )}
