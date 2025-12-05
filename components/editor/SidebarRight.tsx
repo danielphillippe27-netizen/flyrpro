@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { useEditorStore } from '@/lib/editor/state';
 import { ColorPicker } from './ColorPicker';
 import { FontSelector } from './FontSelector';
@@ -12,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { LayersPanel } from './LayersPanel';
 import { BleedWarning } from './BleedWarning';
+import { toast } from 'sonner';
 import type { TextElement, RectElement, CircleElement, ImageElement, QRElement } from '@/lib/editor/types';
 
 export function SidebarRight() {
@@ -499,6 +501,50 @@ function ImageProperties({
   element: ImageElement;
   onUpdate: (partial: Partial<ImageElement>) => void;
 }) {
+  const [isRemovingBackground, setIsRemovingBackground] = useState(false);
+  const [backgroundRemoverError, setBackgroundRemoverError] = useState<string | null>(null);
+  const { pushHistory } = useEditorStore();
+
+  const handleRemoveBackground = async () => {
+    if (!element.imageUrl) {
+      setBackgroundRemoverError('No image URL to process');
+      return;
+    }
+
+    setIsRemovingBackground(true);
+    setBackgroundRemoverError(null);
+
+    try {
+      const response = await fetch('/api/background-remover', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ imageUrl: element.imageUrl }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to remove background');
+      }
+
+      // Update the image URL with the new background-removed image
+      onUpdate({ imageUrl: data.url });
+      
+      // Push to history for undo/redo support
+      pushHistory();
+
+      toast.success('Background removed – new image added.');
+    } catch (err: any) {
+      const errorMessage = err?.message || 'We couldn\'t remove the background. Please try another image.';
+      setBackgroundRemoverError(errorMessage);
+      console.error('Background removal error:', err);
+    } finally {
+      setIsRemovingBackground(false);
+    }
+  };
+
   return (
     <>
       <div>
@@ -521,6 +567,34 @@ function ImageProperties({
         <Label htmlFor="maintain-aspect" className="text-xs text-slate-300 cursor-pointer">
           Maintain Aspect Ratio
         </Label>
+      </div>
+
+      <Separator />
+
+      {/* Background Remover Section */}
+      <div className="space-y-3">
+        <div>
+          <Label className="text-xs font-semibold text-slate-50 mb-1.5 block">
+            Background Remover
+          </Label>
+          <p className="text-xs text-slate-400 mb-3">
+            Erase the background from your photo in one click. Works best on clear subjects.
+          </p>
+          <Button
+            onClick={handleRemoveBackground}
+            disabled={isRemovingBackground || !element.imageUrl}
+            className="w-full"
+            size="sm"
+          >
+            {isRemovingBackground ? 'Removing...' : 'Remove background'}
+          </Button>
+          {backgroundRemoverError && (
+            <p className="text-xs text-red-400 mt-2">{backgroundRemoverError}</p>
+          )}
+          <p className="text-xs text-slate-500 mt-2">
+            We'll create a new image with a transparent background so you can keep the original.
+          </p>
+        </div>
       </div>
     </>
   );
