@@ -83,5 +83,15 @@ export const client = {
         },
       },
     },
+    icons: {
+      $get: async ({ query }: { query?: { query?: string; page?: number; per_page?: number } }) => {
+        const params = new URLSearchParams();
+        if (query?.query) params.set('query', query.query);
+        if (query?.page) params.set('page', query.page.toString());
+        if (query?.per_page) params.set('per_page', query.per_page.toString());
+        const res = await fetch(`${API_BASE}/icons?${params}`);
+        return res;
+      },
+    },
   },
 } as any;
