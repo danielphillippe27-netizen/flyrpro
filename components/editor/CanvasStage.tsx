@@ -53,6 +53,20 @@ export function CanvasStage({ containerRef, stageRef: externalStageRef }: Canvas
   const page = pages[currentPageId];
   if (!page) return null;
 
+  // Auto-fit canvas on initial load
+  useEffect(() => {
+    if (containerRef.current && zoom === 1 && panX === 0 && panY === 0) {
+      const container = containerRef.current;
+      const containerWidth = container.clientWidth;
+      const containerHeight = container.clientHeight;
+      
+      if (containerWidth > 0 && containerHeight > 0) {
+        const { zoomToFit } = useEditorStore.getState();
+        zoomToFit(containerWidth, containerHeight);
+      }
+    }
+  }, [containerRef, zoom, panX, panY]);
+
   // Get elements in z-order
   const orderedElements = page.elementIds
     .map((id) => elements[id])
@@ -477,8 +491,24 @@ export function CanvasStage({ containerRef, stageRef: externalStageRef }: Canvas
         style={{ cursor: getCursorStyle() }}
       >
         {/* Background Layer */}
-        <Layer>
+        <Layer
+          x={panX + (showBleed ? -FLYER_PRINT_CONSTANTS_HALF_LETTER.BLEED_INSET * zoom : 0)}
+          y={panY + (showBleed ? -FLYER_PRINT_CONSTANTS_HALF_LETTER.BLEED_INSET * zoom : 0)}
+          scaleX={zoom}
+          scaleY={zoom}
+        >
           <CanvasBackground page={page} showBleed={showBleed} />
+          {/* Canvas border/outline to show the 8.5" × 5.5" trim box */}
+          <Rect
+            x={showBleed ? FLYER_PRINT_CONSTANTS_HALF_LETTER.BLEED_INSET : 0}
+            y={showBleed ? FLYER_PRINT_CONSTANTS_HALF_LETTER.BLEED_INSET : 0}
+            width={page.width}
+            height={page.height}
+            fill="transparent"
+            stroke="#64748b"
+            strokeWidth={2}
+            listening={false}
+          />
         </Layer>
 
         {/* Bleed Overlay Layer */}
