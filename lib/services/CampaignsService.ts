@@ -3,6 +3,7 @@ import type { CampaignV2, CampaignAddress, QRCode } from '@/types/database';
 import type { CreateCampaignPayload } from '@/types/campaigns';
 import { QRCodeService } from '@/lib/services/QRCodeService';
 import type { QRCodeWithScanStatus } from '@/lib/services/QRCodeService';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 export class CampaignsService {
   private static client = createClient();
@@ -174,9 +175,13 @@ export class CampaignsService {
 
   /**
    * Fetch QR codes for a campaign with scan statistics
+   * Requires a server-side Supabase client (use getSupabaseServerClient() in API routes)
    */
-  static async fetchCampaignQRScanStats(campaignId: string): Promise<QRCodeWithScanStatus[]> {
-    return QRCodeService.fetchQRCodesWithScanStatusForCampaign(campaignId);
+  static async fetchCampaignQRScanStats(
+    supabase: SupabaseClient,
+    campaignId: string
+  ): Promise<QRCodeWithScanStatus[]> {
+    return QRCodeService.fetchQRCodesWithScanStatusForCampaign(supabase, campaignId);
   }
 }
 

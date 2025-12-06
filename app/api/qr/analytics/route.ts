@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
 
     if (campaignId) {
       // Fetch QR codes with scan status for campaign
-      const qrCodesWithScans = await QRCodeService.fetchQRCodesWithScanStatusForCampaign(campaignId);
+      const qrCodesWithScans = await QRCodeService.fetchQRCodesWithScanStatusForCampaign(supabase, campaignId);
       return NextResponse.json({ data: qrCodesWithScans });
     }
 
@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
       const scanData: Record<string, number> = {};
       for (const qrCodeId of qrCodeIds) {
         try {
-          const count = await QRCodeService.getScanCountForQRCode(qrCodeId);
+          const count = await QRCodeService.getScanCountForQRCode(supabase, qrCodeId);
           scanData[qrCodeId] = count;
         } catch (error) {
           console.error(`Error fetching scan count for ${qrCodeId}:`, error);

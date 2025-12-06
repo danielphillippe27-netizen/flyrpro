@@ -1,5 +1,4 @@
 import { createClient } from '@/lib/supabase/client';
-import { getSupabaseServerClient } from '@/lib/supabase/server';
 import type { QRCode, QRSet, Batch } from '@/types/database';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -279,10 +278,13 @@ export class QRCodeService {
 
   /**
    * Create a QR code with destination type (landing page or direct link)
-   * This is a server-side method that uses getSupabaseServerClient()
+   * This is a server-side method that requires a Supabase client to be passed in
+   * Use getSupabaseServerClient() in API routes and pass the client here
    */
-  static async createQRCodeWithDestination(args: CreateQRCodeArgs): Promise<QRCodeWithDestination> {
-    const supabase = await getSupabaseServerClient();
+  static async createQRCodeWithDestination(
+    supabase: SupabaseClient,
+    args: CreateQRCodeArgs
+  ): Promise<QRCodeWithDestination> {
 
     const {
       campaignId,
@@ -328,9 +330,9 @@ export class QRCodeService {
 
   /**
    * Get scan count for a specific QR code
+   * Requires a Supabase client (use getSupabaseServerClient() in API routes)
    */
-  static async getScanCountForQRCode(qrCodeId: string): Promise<number> {
-    const supabase = await getSupabaseServerClient();
+  static async getScanCountForQRCode(supabase: SupabaseClient, qrCodeId: string): Promise<number> {
 
     const { count, error } = await supabase
       .from('qr_code_scans')
@@ -346,11 +348,12 @@ export class QRCodeService {
 
   /**
    * Fetch all QR codes for a campaign along with scan status
+   * Requires a Supabase client (use getSupabaseServerClient() in API routes)
    */
   static async fetchQRCodesWithScanStatusForCampaign(
+    supabase: SupabaseClient,
     campaignId: string
   ): Promise<QRCodeWithScanStatus[]> {
-    const supabase = await getSupabaseServerClient();
 
     const { data: qrCodes, error: qrError } = await supabase
       .from('qr_codes')

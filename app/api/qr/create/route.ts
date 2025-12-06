@@ -66,7 +66,7 @@ export async function POST(request: NextRequest) {
       qrVariant: qrVariant || null,
     };
 
-    const qrCode = await QRCodeService.createQRCodeWithDestination(args);
+    const qrCode = await QRCodeService.createQRCodeWithDestination(supabase, args);
 
     return NextResponse.json({ data: qrCode }, { status: 201 });
   } catch (error: any) {
