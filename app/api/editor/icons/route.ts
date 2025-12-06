@@ -1,36 +1,36 @@
 import { NextRequest, NextResponse } from "next/server";
 
 interface FreepikIcon {
-  id: string;
-  type: string;
-  attributes: {
-    name: string;
-    description: string;
-    tags: string[];
-    downloads: number;
-    premium: boolean;
-    vector: boolean;
-    files: {
-      preview: {
-        url: string;
+  id?: string;
+  type?: string;
+  attributes?: {
+    name?: string;
+    description?: string;
+    tags?: string[];
+    downloads?: number;
+    premium?: boolean;
+    vector?: boolean;
+    files?: {
+      preview?: {
+        url?: string;
       };
-      download: {
-        url: string;
+      download?: {
+        url?: string;
       };
     };
   };
-  links: {
-    self: string;
+  links?: {
+    self?: string;
   };
 }
 
 interface FreepikIconsResponse {
-  data: FreepikIcon[];
-  meta: {
-    total: number;
-    per_page: number;
-    current_page: number;
-    last_page: number;
+  data?: FreepikIcon[];
+  meta?: {
+    total?: number;
+    per_page?: number;
+    current_page?: number;
+    last_page?: number;
   };
 }
 
@@ -83,27 +83,53 @@ export async function GET(request: NextRequest) {
 
     const data: FreepikIconsResponse = await response.json();
 
-    // Transform the response to a simpler format
-    const icons = data.data.map((icon) => ({
-      id: icon.id,
-      name: icon.attributes.name,
-      description: icon.attributes.description,
-      previewUrl: icon.attributes.files.preview.url,
-      downloadUrl: icon.attributes.files.download.url,
-      tags: icon.attributes.tags,
-      premium: icon.attributes.premium,
-      vector: icon.attributes.vector,
-      downloads: icon.attributes.downloads,
-      link: icon.links.self,
-    }));
+    // Validate response structure
+    if (!data || !data.data || !Array.isArray(data.data)) {
+      console.error("Invalid Freepik API response structure:", JSON.stringify(data, null, 2));
+      return NextResponse.json(
+        {
+          error: "Invalid response from Freepik API",
+          detail: "Response data structure is not as expected",
+        },
+        { status: 500 }
+      );
+    }
+
+    // Transform the response to a simpler format with null checks
+    const icons = data.data
+      .filter((icon) => {
+        // Only include icons that have all required fields
+        return (
+          icon &&
+          icon.id &&
+          icon.attributes &&
+          icon.attributes.files &&
+          icon.attributes.files.preview &&
+          icon.attributes.files.preview.url &&
+          icon.attributes.files.download &&
+          icon.attributes.files.download.url
+        );
+      })
+      .map((icon) => ({
+        id: icon.id,
+        name: icon.attributes?.name || "Untitled Icon",
+        description: icon.attributes?.description || "",
+        previewUrl: icon.attributes.files.preview.url,
+        downloadUrl: icon.attributes.files.download.url,
+        tags: icon.attributes?.tags || [],
+        premium: icon.attributes?.premium || false,
+        vector: icon.attributes?.vector || false,
+        downloads: icon.attributes?.downloads || 0,
+        link: icon.links?.self || "",
+      }));
 
     return NextResponse.json({
       data: icons,
       meta: {
-        total: data.meta.total,
-        per_page: data.meta.per_page,
-        current_page: data.meta.current_page,
-        last_page: data.meta.last_page,
+        total: data.meta?.total || icons.length,
+        per_page: data.meta?.per_page || perPage,
+        current_page: data.meta?.current_page || page,
+        last_page: data.meta?.last_page || 1,
       },
     });
   } catch (error: any) {
