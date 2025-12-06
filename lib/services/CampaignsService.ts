@@ -1,6 +1,8 @@
 import { createClient } from '@/lib/supabase/client';
-import type { CampaignV2, CampaignAddress } from '@/types/database';
+import type { CampaignV2, CampaignAddress, QRCode } from '@/types/database';
 import type { CreateCampaignPayload } from '@/types/campaigns';
+import { QRCodeService } from '@/lib/services/QRCodeService';
+import type { QRCodeWithScanStatus } from '@/lib/services/QRCodeService';
 
 export class CampaignsService {
   private static client = createClient();
@@ -150,6 +152,31 @@ export class CampaignsService {
       .eq('id', id);
 
     if (error) throw error;
+  }
+
+  // ============================================
+  // QR Code Helper Methods
+  // ============================================
+
+  /**
+   * Fetch all QR codes for a campaign
+   */
+  static async fetchCampaignQRCodes(campaignId: string): Promise<QRCode[]> {
+    const { data, error } = await this.client
+      .from('qr_codes')
+      .select('*')
+      .eq('campaign_id', campaignId)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    return data || [];
+  }
+
+  /**
+   * Fetch QR codes for a campaign with scan statistics
+   */
+  static async fetchCampaignQRScanStats(campaignId: string): Promise<QRCodeWithScanStatus[]> {
+    return QRCodeService.fetchQRCodesWithScanStatusForCampaign(campaignId);
   }
 }
 

@@ -196,15 +196,15 @@ export const Editor = ({ initialData }: EditorProps) => {
           activeTool={activeTool}
           onChangeActiveTool={onChangeActiveTool}
         />
-        <main className="bg-slate-800 flex-1 overflow-auto relative flex flex-col">
+        <main className="bg-[#1a1a1a] flex-1 overflow-auto relative flex flex-col">
           <Toolbar
             editor={editor}
             activeTool={activeTool}
             onChangeActiveTool={onChangeActiveTool}
             key={JSON.stringify(editor?.canvas.getActiveObject())}
           />
-          <div className="flex-1 h-[calc(100%-124px)] bg-slate-800 relative flex items-center justify-center p-8" ref={containerRef}>
-            <div className="bg-white shadow-xl rounded-sm inline-block">
+          <div className="flex-1 h-[calc(100%-124px)] bg-[#1a1a1a] relative flex items-center justify-center p-8" ref={containerRef}>
+            <div className="bg-white shadow-2xl rounded-lg inline-block" style={{ boxShadow: '0 20px 60px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(0, 0, 0, 0.1)' }}>
               <canvas ref={canvasRef} className="block" />
             </div>
           </div>

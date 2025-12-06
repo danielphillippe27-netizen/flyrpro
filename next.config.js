@@ -9,7 +9,11 @@ const nextConfig = {
     ignoreBuildErrors: true,
   },
   async rewrites() {
-    // QR code redirects go to Supabase Edge Function
+    // QR code redirects: Primary handler is /api/q/[slug] (local Next.js API route)
+    // This rewrite to Supabase Edge Function is kept as a fallback for:
+    // - Environments where the app route is not used
+    // - Support for q subdomain if present
+    // - Backward compatibility with existing production behavior
     // The Edge Function then redirects to https://flyrpro.app/l/<landing_page_slug>
     // Landing pages at /l/<slug> are handled by Next.js route
     return [

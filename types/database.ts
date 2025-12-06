@@ -97,6 +97,19 @@ export interface QRCode {
   created_at: string;
   updated_at: string;
   metadata?: QRCodeMetadata;
+  destination_type?: 'landingPage' | 'directLink' | null;
+  direct_url?: string | null;
+}
+
+export interface QRCodeScan {
+  id: string;
+  qr_code_id: string | null;
+  address_id: string | null;
+  scanned_at: string; // ISO timestamp
+  device_info?: string | null;
+  user_agent?: string | null;
+  ip_address?: string | null;
+  referrer?: string | null;
 }
 
 export interface QRCodeMetadata {

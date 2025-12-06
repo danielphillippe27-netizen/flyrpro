@@ -273,8 +273,16 @@ const buildEditor = ({
     },
     changeBackground: (value: string) => {
       const workspace = getWorkspace();
-      workspace?.set({ fill: value });
-      canvas.renderAll();
+      if (!workspace) {
+        console.warn("Workspace not found, cannot change background");
+        return;
+      }
+      // Set the fill color
+      workspace.set({ fill: value });
+      // Ensure workspace is at the back (lowest z-index) so it appears as background
+      canvas.sendToBack(workspace);
+      // Force a re-render to show the background change
+      canvas.requestRenderAll();
       save();
     },
     enableDrawingMode: () => {
@@ -807,6 +815,8 @@ export const useEditor = ({
     initialState,
     canvasHistory,
     setHistoryIndex,
+    defaultWidth: initialWidth,
+    defaultHeight: initialHeight,
   });
 
   // Get workspace for bleed overlay
