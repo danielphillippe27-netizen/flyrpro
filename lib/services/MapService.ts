@@ -272,5 +272,141 @@ export class MapService {
         };
       });
   }
+
+  /**
+   * Generate a Monopoly house footprint polygon
+   * Creates an 8m × 8m rectangle with a triangular roof peak (3m depth)
+   * Centered at the given coordinate
+   * 
+   * @param center - [lon, lat] center point
+   * @param widthMeters - Width of house base (default 8m)
+   * @param depthMeters - Depth of house base (default 8m)
+   * @param roofDepthMeters - Depth of triangular roof peak (default 3m)
+   * @param frontBearing - Rotation angle in degrees (0-360, where 0 is north)
+   * @returns GeoJSON Polygon representing the house footprint
+   */
+  static makeHouseFootprint(
+    center: [number, number],
+    widthMeters: number = 8,
+    depthMeters: number = 8,
+    roofDepthMeters: number = 3,
+    frontBearing: number = 0
+  ): GeoJSON.Polygon {
+    const [centerLon, centerLat] = center;
+    
+    // Convert meters to degrees (approximate, works well for small distances)
+    // 1 degree latitude ≈ 111,000 meters
+    // 1 degree longitude ≈ 111,000 * cos(latitude) meters
+    const latToMeters = 111000;
+    const lonToMeters = 111000 * Math.cos(centerLat * Math.PI / 180);
+    
+    const halfWidth = widthMeters / 2 / lonToMeters;
+    const halfDepth = depthMeters / 2 / latToMeters;
+    const roofDepth = roofDepthMeters / latToMeters;
+    
+    // Create house shape: rectangle base + triangular roof peak
+    // Start with rectangle corners (before rotation)
+    const corners: [number, number][] = [
+      [-halfWidth, -halfDepth], // Bottom-left
+      [halfWidth, -halfDepth],  // Bottom-right
+      [halfWidth, halfDepth],   // Top-right
+      [-halfWidth, halfDepth],  // Top-left
+    ];
+    
+    // Add roof peak at the front (top of rectangle)
+    // Roof peak extends forward (in the direction of front bearing)
+    const roofPeak: [number, number] = [0, halfDepth + roofDepth];
+    
+    // Rotate all points around center based on front bearing
+    const bearingRad = (frontBearing * Math.PI) / 180;
+    const cosBearing = Math.cos(bearingRad);
+    const sinBearing = Math.sin(bearingRad);
+    
+    const rotatePoint = (point: [number, number]): [number, number] => {
+      const [x, y] = point;
+      const rotatedX = x * cosBearing - y * sinBearing;
+      const rotatedY = x * sinBearing + y * cosBearing;
+      return [rotatedX, rotatedY];
+    };
+    
+    // Rotate all corners and roof peak
+    const rotatedCorners = corners.map(rotatePoint);
+    const rotatedRoofPeak = rotatePoint(roofPeak);
+    
+    // Build polygon: rectangle + roof peak
+    // Order: bottom-left → bottom-right → top-right → roof peak → top-left → back to start
+    const polygon: [number, number][] = [
+      [centerLon + rotatedCorners[0][0], centerLat + rotatedCorners[0][1]], // Bottom-left
+      [centerLon + rotatedCorners[1][0], centerLat + rotatedCorners[1][1]], // Bottom-right
+      [centerLon + rotatedCorners[2][0], centerLat + rotatedCorners[2][1]], // Top-right
+      [centerLon + rotatedRoofPeak[0], centerLat + rotatedRoofPeak[1]],    // Roof peak
+      [centerLon + rotatedCorners[3][0], centerLat + rotatedCorners[3][1]], // Top-left
+      [centerLon + rotatedCorners[0][0], centerLat + rotatedCorners[0][1]], // Close polygon
+    ];
+    
+    return {
+      type: 'Polygon',
+      coordinates: [polygon],
+    };
+  }
+
+  /**
+   * Convert campaign buildings to house-shaped polygon features for 2D extrusion
+   * Creates Monopoly house footprints at building centroids
+   */
+  static convertCampaignBuildingsToHouseFeatureCollection(
+    buildings: CampaignBuilding[],
+    statusMap?: Map<string, 'pending' | 'done'>
+  ): GeoJSON.FeatureCollection {
+    const features: GeoJSON.Feature[] = buildings
+      .filter((building) => building.geometry)
+      .map((building) => {
+        // Parse geometry to get centroid
+        let geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon;
+        try {
+          if (typeof building.geometry === 'string') {
+            const parsed = JSON.parse(building.geometry);
+            geometry = parsed.type === 'Feature' ? parsed.geometry : parsed;
+          } else {
+            geometry = building.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon;
+          }
+        } catch (e) {
+          console.error('Error parsing building geometry:', e);
+          return null;
+        }
+        
+        const centroid = this.calculatePolygonCentroid(geometry);
+        const frontBearing = building.front_bearing ?? this.calculateFrontBearing(geometry);
+        
+        // Generate house footprint
+        const houseFootprint = this.makeHouseFootprint(
+          centroid,
+          8, // 8m width
+          8, // 8m depth
+          3, // 3m roof depth
+          frontBearing
+        );
+        
+        // Determine status (default to pending if not provided)
+        const status = statusMap?.get(building.address_id) || 'pending';
+        
+        return {
+          type: 'Feature',
+          geometry: houseFootprint,
+          properties: {
+            address_id: building.address_id,
+            height: building.height_m || 18.0, // Default 18m height
+            min_height: building.min_height_m || 0.0,
+            status: status,
+          },
+        };
+      })
+      .filter((f): f is GeoJSON.Feature => f !== null);
+    
+    return {
+      type: 'FeatureCollection',
+      features,
+    };
+  }
 }
 

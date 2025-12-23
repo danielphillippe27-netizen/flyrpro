@@ -28,7 +28,7 @@ export function StatsHeader({ recipients }: StatsHeaderProps) {
         <div className="text-3xl font-bold text-red-600 dark:text-red-500">{sent}</div>
       </div>
       <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl border dark:border-gray-700">
-        <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">Open Rate</div>
+        <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">Scan Rate</div>
         <div className="text-3xl font-bold text-green-600 dark:text-green-500">{openRate}%</div>
         <div className="text-xs text-gray-500 dark:text-gray-500 mt-1">{scanned} scanned</div>
       </div>

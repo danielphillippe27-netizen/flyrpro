@@ -5,17 +5,21 @@ import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import type { CampaignAddress } from '@/types/database';
 import { MapService } from '@/lib/services/MapService';
+import { BuildingLayers, type RenderingMode } from '@/components/map/BuildingLayers';
 
 export function CampaignDetailMapView({
   campaignId,
   addresses,
+  mode = '3d',
 }: {
   campaignId: string;
   addresses: CampaignAddress[];
+  mode?: RenderingMode;
 }) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
+  const boundsFittedRef = useRef(false);
 
   useEffect(() => {
     if (!mapContainer.current || map.current) return;
@@ -23,12 +27,34 @@ export function CampaignDetailMapView({
     const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || 'pk.eyJ1IjoiZmx5cnBybyIsImEiOiJjbWd6dzZsbm0wYWE3ZWpvbjIwNGVteDV6In0.lvbLszJ7ADa_Cck3A8hZEQ';
     mapboxgl.accessToken = token;
 
+    // Helper to get initial center from addresses
+    const getInitialCenter = (): [number, number] => {
+      if (addresses.length > 0) {
+        // Try first address coordinate
+        if (addresses[0].coordinate) {
+          return [addresses[0].coordinate.lon, addresses[0].coordinate.lat];
+        }
+        // Try parsing geom
+        if (addresses[0].geom) {
+          try {
+            const geom = typeof addresses[0].geom === 'string' 
+              ? JSON.parse(addresses[0].geom) 
+              : addresses[0].geom;
+            if (geom && geom.coordinates && Array.isArray(geom.coordinates) && geom.coordinates.length >= 2) {
+              return [geom.coordinates[0], geom.coordinates[1]];
+            }
+          } catch (e) {
+            // Fall through to default
+          }
+        }
+      }
+      return [-79.3832, 43.6532]; // Toronto default
+    };
+
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
       style: 'mapbox://styles/flyrpro/cmie253op00fa01qmgiri8lcb', // Light 3D Style
-      center: addresses.length > 0 && addresses[0].coordinate
-        ? [addresses[0].coordinate.lon, addresses[0].coordinate.lat]
-        : [-79.3832, 43.6532],
+      center: getInitialCenter(),
       zoom: 12,
     });
 
@@ -112,50 +138,103 @@ export function CampaignDetailMapView({
   }, []);
 
   useEffect(() => {
-    if (!map.current || !mapLoaded || addresses.length === 0) return;
+    if (!map.current || !mapLoaded) return;
 
-    // Add markers for addresses
-    addresses.forEach((address) => {
+    // Helper function to parse coordinate from address
+    const getCoordinate = (address: CampaignAddress): { lon: number; lat: number } | null => {
+      // First try direct coordinate
       if (address.coordinate) {
-        const el = document.createElement('div');
-        el.className = 'marker';
-        el.style.width = '20px';
-        el.style.height = '20px';
-        el.style.borderRadius = '50%';
-        el.style.backgroundColor = address.visited ? '#10b981' : '#3b82f6';
-        el.style.border = '2px solid white';
-        el.style.cursor = 'pointer';
-
-        new mapboxgl.Marker(el)
-          .setLngLat([address.coordinate.lon, address.coordinate.lat])
-          .setPopup(
-            new mapboxgl.Popup().setHTML(`
-              <div>
-                <p class="font-semibold">${address.address}</p>
-                <p class="text-sm text-gray-600">${address.visited ? 'Visited' : 'Not visited'}</p>
-              </div>
-            `)
-          )
-          .addTo(map.current!);
+        return address.coordinate;
       }
-    });
+      
+      // Try parsing from geom (PostGIS geometry)
+      if (address.geom) {
+        try {
+          const geom = typeof address.geom === 'string' ? JSON.parse(address.geom) : address.geom;
+          if (geom && geom.coordinates) {
+            // PostGIS Point: [lon, lat]
+            if (Array.isArray(geom.coordinates) && geom.coordinates.length >= 2) {
+              return { lon: geom.coordinates[0], lat: geom.coordinates[1] };
+            }
+          }
+        } catch (e) {
+          console.warn('Failed to parse geometry for address:', address.id, e);
+        }
+      }
+      
+      return null;
+    };
 
-    // Fit bounds to show all addresses
-    if (addresses.some(a => a.coordinate)) {
-      const bounds = new mapboxgl.LngLatBounds();
+    // Clear existing markers first
+    const existingMarkers: mapboxgl.Marker[] = [];
+    
+    // Add markers for addresses
+    if (addresses.length > 0) {
       addresses.forEach((address) => {
-        if (address.coordinate) {
-          bounds.extend([address.coordinate.lon, address.coordinate.lat]);
+        const coord = getCoordinate(address);
+        
+        if (coord) {
+          const el = document.createElement('div');
+          el.className = 'marker';
+          el.style.width = '20px';
+          el.style.height = '20px';
+          el.style.borderRadius = '50%';
+          el.style.backgroundColor = address.visited ? '#10b981' : '#3b82f6';
+          el.style.border = '2px solid white';
+          el.style.cursor = 'pointer';
+
+          const marker = new mapboxgl.Marker(el)
+            .setLngLat([coord.lon, coord.lat])
+            .setPopup(
+              new mapboxgl.Popup().setHTML(`
+                <div>
+                  <p class="font-semibold">${address.address}</p>
+                  <p class="text-sm text-gray-600">${address.visited ? 'Visited' : 'Not visited'}</p>
+                </div>
+              `)
+            )
+            .addTo(map.current!);
+          
+          existingMarkers.push(marker);
         }
       });
-      map.current.fitBounds(bounds, { padding: 50 });
+
+      // Fit bounds to show all addresses - wait a bit for map to be ready and markers to be added
+      const addressesWithCoords = addresses
+        .map(addr => getCoordinate(addr))
+        .filter((coord): coord is { lon: number; lat: number } => coord !== null);
+
+      if (addressesWithCoords.length > 0 && !boundsFittedRef.current) {
+        // Use setTimeout to ensure map is fully ready and markers are added
+        setTimeout(() => {
+          if (!map.current || boundsFittedRef.current) return;
+          
+          const bounds = new mapboxgl.LngLatBounds();
+          addressesWithCoords.forEach((coord) => {
+            bounds.extend([coord.lon, coord.lat]);
+          });
+          
+          // Only fit bounds if we have valid bounds
+          if (!bounds.isEmpty()) {
+            boundsFittedRef.current = true;
+            map.current.fitBounds(bounds, { 
+              padding: 100, 
+              maxZoom: 18,
+              duration: 1000 // Smooth animation
+            });
+          }
+        }, 200); // Small delay to ensure markers are rendered
+      }
     }
 
-    // Load building polygons
+    // Load building polygons (2D fallback/overlay)
     const loadBuildings = async () => {
       const addressesWithCoords = addresses
-        .filter(a => a.coordinate && a.id)
-        .map(a => ({ id: a.id!, lat: a.coordinate!.lat, lon: a.coordinate!.lon }));
+        .map(addr => {
+          const coord = getCoordinate(addr);
+          return coord && addr.id ? { id: addr.id, lat: coord.lat, lon: coord.lon } : null;
+        })
+        .filter((a): a is { id: string; lat: number; lon: number } => a !== null);
 
       if (addressesWithCoords.length > 0) {
         try {
@@ -211,8 +290,40 @@ export function CampaignDetailMapView({
     };
 
     loadBuildings();
+
+    // Cleanup markers on unmount or address change
+    return () => {
+      existingMarkers.forEach(marker => marker.remove());
+      boundsFittedRef.current = false; // Reset when addresses change
+    };
   }, [mapLoaded, addresses]);
 
-  return <div ref={mapContainer} className="h-full w-full" />;
+  // Auto-set pitch for 3D mode (matching iOS behavior)
+  useEffect(() => {
+    if (!map.current || !mapLoaded) return;
+    
+    if (mode === '3d') {
+      // Set pitch to 60° for 3D view (matching iOS)
+      map.current.easeTo({
+        pitch: 60,
+        duration: 1000,
+      });
+    } else {
+      // Reset pitch for 2D view
+      map.current.easeTo({
+        pitch: 0,
+        duration: 1000,
+      });
+    }
+  }, [mapLoaded, mode]);
+
+  return (
+    <>
+      <div ref={mapContainer} className="h-full w-full" />
+      {map.current && mapLoaded && (
+        <BuildingLayers map={map.current} campaignId={campaignId} mode={mode} />
+      )}
+    </>
+  );
 }
 

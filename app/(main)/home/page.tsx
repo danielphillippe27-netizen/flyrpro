@@ -22,47 +22,21 @@ function HomePageContent() {
     const supabase = createClient();
     let hasRedirected = false;
     
-    // Handle code exchange if coming from magic link
-    const handleCodeExchange = async () => {
-      const code = searchParams.get('code');
-      if (code) {
-        console.log("Handling code exchange:", code);
-        try {
-          const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-          if (error) {
-            console.error("Code exchange error:", error);
-            // If code exchange fails, redirect to login
-            router.replace('/login');
-            return false;
-          } else {
-            console.log("Code exchange successful:", data);
-            // Remove code from URL
-            router.replace('/home');
-            return true;
-          }
-        } catch (error) {
-          console.error("Code exchange exception:", error);
-          router.replace('/login');
-          return false;
-        }
-      }
-      return null; // No code to exchange
-    };
+    // Handle old magic links that redirect directly to /home?code=...
+    // Redirect them to the callback route
+    const code = searchParams.get('code');
+    if (code) {
+      // Old magic link - redirect to callback route
+      router.replace(`/auth/callback?code=${code}&next=/home`);
+      return;
+    }
     
     // Check auth and redirect if not authenticated
-    // Use getSession first to ensure cookies are read properly
+    // Code exchange is now handled by /auth/callback route
     const checkAuth = async () => {
       try {
-        // First, handle code exchange if present
-        const codeExchanged = await handleCodeExchange();
-        if (codeExchanged === false) {
-          // Code exchange failed, already redirected
-          setIsCheckingAuth(false);
-          return;
-        }
-        
-        // Wait a bit for cookies to be available (especially after code exchange)
-        await new Promise(resolve => setTimeout(resolve, codeExchanged ? 200 : 100));
+        // Small delay to ensure cookies are available
+        await new Promise(resolve => setTimeout(resolve, 100));
         
         const { data: { session }, error: sessionError } = await supabase.auth.getSession();
         console.log("SESSION DEBUG:", { session, error: sessionError });

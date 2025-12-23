@@ -61,20 +61,32 @@ export default function LoginPage() {
     setMessage(null);
 
     try {
+      // Dynamically determine redirect URL based on current origin
+      const redirectUrl = `${window.location.origin}/auth/callback?next=/home`;
+      
+      // Debug: Log the redirect URL being sent
+      console.log('🔐 Auth Redirect URL:', redirectUrl);
+      console.log('🌐 Current Origin:', window.location.origin);
+      
       const { error } = await supabase.auth.signInWithOtp({
         email,
         options: {
-          emailRedirectTo: `${window.location.origin}/home`,
+          emailRedirectTo: redirectUrl,
         },
       });
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ Supabase Auth Error:', error);
+        throw error;
+      }
 
+      console.log('✅ Magic link sent successfully');
       setMessage({
         type: 'success',
         text: 'Check your email for the magic link to sign in!',
       });
     } catch (error: any) {
+      console.error('❌ Sign in error:', error);
       setMessage({
         type: 'error',
         text: error.message || 'Failed to send magic link. Please try again.',
@@ -89,15 +101,28 @@ export default function LoginPage() {
     setMessage(null);
 
     try {
+      // Dynamically determine redirect URL based on current origin
+      const redirectUrl = `${window.location.origin}/auth/callback?next=/home`;
+      
+      // Debug: Log the redirect URL being sent
+      console.log('🔐 Apple OAuth Redirect URL:', redirectUrl);
+      console.log('🌐 Current Origin:', window.location.origin);
+      
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'apple',
         options: {
-          redirectTo: `${window.location.origin}/home`,
+          redirectTo: redirectUrl,
         },
       });
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ Apple OAuth Error:', error);
+        throw error;
+      }
+      
+      console.log('✅ Apple OAuth redirect initiated');
     } catch (error: any) {
+      console.error('❌ Apple sign in error:', error);
       setMessage({
         type: 'error',
         text: error.message || 'Failed to sign in with Apple. Please try again.',

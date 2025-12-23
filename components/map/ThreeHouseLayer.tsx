@@ -41,7 +41,7 @@ export class ThreeHouseLayer {
   private lodThreshold: number = 15; // Switch to high LOD above this zoom
 
   constructor(options: ThreeHouseLayerOptions) {
-    this.id = 'three-houses';
+    this.id = 'flyr-campaign-buildings-model-layer';
     this.type = 'custom';
     this.renderingMode = '3d';
     this.camera = new THREE.Camera();
