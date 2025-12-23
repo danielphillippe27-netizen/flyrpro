@@ -111,3 +111,6 @@ export const useSnapToTrim = ({
   }, [canvas, workspace, showBleed]);
 };
 
+
+
+

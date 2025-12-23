@@ -9,3 +9,6 @@ CREATE INDEX IF NOT EXISTS idx_editor_project_campaign_id ON editor_project(camp
 CREATE INDEX IF NOT EXISTS idx_editor_project_flyer_id ON editor_project(flyer_id);
 CREATE INDEX IF NOT EXISTS idx_editor_project_landing_page_id ON editor_project(landing_page_id);
 
+
+
+

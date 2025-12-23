@@ -43,3 +43,6 @@ CREATE INDEX IF NOT EXISTS idx_qr_code_scans_address_id
   ON public.qr_code_scans(address_id)
   WHERE address_id IS NOT NULL;
 
+
+
+

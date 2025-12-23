@@ -109,3 +109,6 @@ export const UploadsSidebar = ({ editor, activeTool, onChangeActiveTool }: Uploa
   );
 };
 
+
+
+

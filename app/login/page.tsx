@@ -22,26 +22,38 @@ export default function LoginPage() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const router = useRouter();
   const supabase = createClient();
+  const [hasChecked, setHasChecked] = useState(false);
 
   // Redirect if already authenticated
   useEffect(() => {
+    if (hasChecked) return; // Prevent multiple checks
+    
     const checkAuth = async () => {
+      setHasChecked(true);
+      
+      // Add a small delay to ensure cookies are available
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
       // Use getSession first to check cookies
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
       if (session?.user) {
-        router.push('/home');
+        router.replace('/home'); // Use replace instead of push
         return;
       }
       
-      // Fallback to getUser
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        router.push('/home');
+      // Only try getUser if getSession failed and we're sure there's no session
+      if (!session && !sessionError) {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          router.replace('/home');
+        }
       }
     };
+    
     checkAuth();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [hasChecked]);
 
   const handleEmailSignIn = async (e: React.FormEvent) => {
     e.preventDefault();

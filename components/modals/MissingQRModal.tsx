@@ -42,3 +42,6 @@ export function MissingQRModal({ open, onClose, onAddQR }: MissingQRModalProps) 
   );
 }
 
+
+
+

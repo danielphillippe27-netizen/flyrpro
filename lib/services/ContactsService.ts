@@ -43,11 +43,16 @@ export class ContactsService {
   }
 
   static async createContact(userId: string, payload: CreateContactPayload): Promise<Contact> {
+    // Concatenate first_name and last_name into full_name
+    const full_name = payload.last_name
+      ? `${payload.first_name.trim()} ${payload.last_name.trim()}`.trim()
+      : payload.first_name.trim();
+
     const { data, error } = await this.client
       .from('contacts')
       .insert({
         user_id: userId,
-        full_name: payload.full_name,
+        full_name: full_name,
         phone: payload.phone,
         email: payload.email,
         address: payload.address,

@@ -117,3 +117,6 @@ Some features may need additional setup:
 - All editor components for Tailwind class compatibility
 - Auth-dependent components for Supabase integration
 
+
+
+

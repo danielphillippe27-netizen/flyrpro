@@ -16,3 +16,6 @@ export function flyerHasQRElement(elements: FlyerElement[]): boolean {
   return elements.some((el) => el.type === 'qr');
 }
 
+
+
+

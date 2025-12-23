@@ -31,7 +31,8 @@ export function CreateContactDialog({
 }: CreateContactDialogProps) {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
-    full_name: '',
+    first_name: '',
+    last_name: '',
     phone: '',
     email: '',
     address: '',
@@ -41,25 +42,27 @@ export function CreateContactDialog({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.full_name || !formData.address) {
-      alert('Please fill in required fields: Name and Address');
+    if (!formData.first_name.trim()) {
+      alert('Please fill in the required field: First Name');
       return;
     }
 
     setLoading(true);
     try {
       await ContactsService.createContact(userId, {
-        full_name: formData.full_name,
-        phone: formData.phone || undefined,
-        email: formData.email || undefined,
-        address: formData.address,
+        first_name: formData.first_name.trim(),
+        last_name: formData.last_name.trim() || undefined,
+        phone: formData.phone.trim() || undefined,
+        email: formData.email.trim() || undefined,
+        address: formData.address.trim() || undefined,
         status: formData.status,
-        notes: formData.notes || undefined,
+        notes: formData.notes.trim() || undefined,
       });
 
       // Reset form
       setFormData({
-        full_name: '',
+        first_name: '',
+        last_name: '',
         phone: '',
         email: '',
         address: '',
@@ -80,7 +83,8 @@ export function CreateContactDialog({
   const handleClose = () => {
     if (!loading) {
       setFormData({
-        full_name: '',
+        first_name: '',
+        last_name: '',
         phone: '',
         email: '',
         address: '',
@@ -102,30 +106,39 @@ export function CreateContactDialog({
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <Label htmlFor="full_name">
-              Full Name <span className="text-red-500">*</span>
-            </Label>
-            <Input
-              id="full_name"
-              value={formData.full_name}
-              onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
-              placeholder="John Doe"
-              required
-              disabled={loading}
-            />
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="first_name">
+                First Name <span className="text-red-500">*</span>
+              </Label>
+              <Input
+                id="first_name"
+                value={formData.first_name}
+                onChange={(e) => setFormData({ ...formData, first_name: e.target.value })}
+                placeholder="John"
+                required
+                disabled={loading}
+              />
+            </div>
+            <div>
+              <Label htmlFor="last_name">Last Name</Label>
+              <Input
+                id="last_name"
+                value={formData.last_name}
+                onChange={(e) => setFormData({ ...formData, last_name: e.target.value })}
+                placeholder="Doe"
+                disabled={loading}
+              />
+            </div>
           </div>
 
           <div>
-            <Label htmlFor="address">
-              Address <span className="text-red-500">*</span>
-            </Label>
+            <Label htmlFor="address">Address</Label>
             <Textarea
               id="address"
               value={formData.address}
               onChange={(e) => setFormData({ ...formData, address: e.target.value })}
               placeholder="123 Main St, City, State ZIP"
-              required
               disabled={loading}
               rows={2}
             />
@@ -197,7 +210,7 @@ export function CreateContactDialog({
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={loading || !formData.full_name || !formData.address}>
+            <Button type="submit" disabled={loading || !formData.first_name.trim()}>
               {loading ? 'Creating...' : 'Create Contact'}
             </Button>
           </div>

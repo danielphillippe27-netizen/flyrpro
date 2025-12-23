@@ -63,3 +63,6 @@ This will create the `editor_project` table in your Supabase database.
 - Add Unsplash integration for stock images
 - Customize the editor UI to match FLYR branding
 
+
+
+

@@ -5,10 +5,11 @@ import type { Contact, ContactActivity, ContactStatus, ActivityType } from './da
 export { type Contact, type ContactActivity, type ContactStatus, type ActivityType };
 
 export interface CreateContactPayload {
-  full_name: string;
+  first_name: string;
+  last_name?: string;
   phone?: string;
   email?: string;
-  address: string;
+  address?: string;
   campaign_id?: string;
   farm_id?: string;
   status: ContactStatus;
