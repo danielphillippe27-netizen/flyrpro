@@ -289,7 +289,7 @@ export class ThreeHouseLayer {
       
       // Collision fail-safe: Use townhouse model if width < 4m
       const widthMeters = feature.properties.width_meters ?? 10;
-      const isTownhouse = feature.properties.is_townhouse ?? false || widthMeters < 4;
+      const isTownhouse = (feature.properties.is_townhouse ?? false) || widthMeters < 4;
 
       // Calculate the final scale factor for use in shadow sizing
       // This ensures scaleFactor is always defined and accessible
