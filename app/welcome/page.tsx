@@ -1,11 +1,11 @@
 'use client';
 
 import { useSearchParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import type { CampaignAddress } from '@/types/database';
 
-export default function WelcomePage() {
+function WelcomeContent() {
   const searchParams = useSearchParams();
   const addressId = searchParams.get('id');
   const supabase = createClient();
@@ -109,5 +109,20 @@ export default function WelcomePage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function WelcomePage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+        <div className="text-center">
+          <div className="mb-4 h-10 w-10 rounded-full border-4 border-gray-300 border-t-black animate-spin mx-auto" />
+          <p className="text-gray-600 dark:text-gray-400">Loading...</p>
+        </div>
+      </div>
+    }>
+      <WelcomeContent />
+    </Suspense>
   );
 }
