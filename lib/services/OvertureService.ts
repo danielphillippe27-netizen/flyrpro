@@ -5,15 +5,8 @@
  * from Overture S3 buckets using DuckDB via MotherDuck (cloud) or local DuckDB.
  */
 
-// @ts-ignore - duckdb types may not be available until package is installed
-// DuckDB is optional - MotherDuck is the recommended approach for Vercel
-let duckdb: any;
-try {
-  duckdb = require('duckdb');
-} catch (e) {
-  // DuckDB not available - will use MotherDuck only
-  console.warn('[Overture] DuckDB package not available, using MotherDuck only');
-}
+// @ts-ignore - duckdb types may not be available
+import duckdb from 'duckdb';
 
 // --- Singleton Setup ---
 // We attach the database instance and connection to the global object to survive Next.js hot-reloads.
@@ -91,19 +84,12 @@ export class OvertureService {
 
     console.log(`[Overture] Initializing DuckDB Singleton (${this.USE_MOTHERDUCK ? 'MotherDuck' : 'Local'})...`);
     
-    // If using local DuckDB but package is not available, throw error
-    if (!this.USE_MOTHERDUCK && !duckdb) {
-      throw new Error('DuckDB package is required for local DuckDB. Install it with: npm install duckdb. Or use MotherDuck by setting MOTHERDUCK_TOKEN environment variable.');
-    }
-
     // Try each connection string format
     let lastError: Error | null = null;
     for (const dbPath of connectionStrings) {
       try {
         // Create the database instance ONCE
-        if (!duckdb) {
-          throw new Error('DuckDB package not available. Use MotherDuck by setting MOTHERDUCK_TOKEN.');
-        }
+        // If token exists, connect to Cloud. If not, fallback to local (which crashes on Vercel).
         const db = new duckdb.Database(dbPath);
         
         // For MotherDuck, wait a bit for initialization
