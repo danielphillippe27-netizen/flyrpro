@@ -22,8 +22,11 @@ interface Recipient {
   postal_code: string;
   status: string;
   qr_png_url: string | null;
+  qr_code_base64?: string | null;  // NEW: Add QR code base64
   sent_at: string | null;
   scanned_at: string | null;
+  street_name?: string;
+  seq?: number;
 }
 
 interface RecipientsTableProps {
@@ -40,17 +43,18 @@ export function RecipientsTable({ recipients }: RecipientsTableProps) {
     setLoading(recipientId);
     try {
       const { error } = await supabase
-        .from('campaign_recipients')
+        .from('campaign_addresses')
         .update({
-          status: 'sent',
-          sent_at: new Date().toISOString(),
+          visited: true,
         })
         .eq('id', recipientId);
 
-      if (error) throw error;
+      if (error) {
+        throw error;
+      }
       router.refresh();
     } catch (error) {
-      console.error('Error marking as sent:', error);
+      console.error('Error marking as visited:', error);
       alert('Failed to update status');
     } finally {
       setLoading(null);
@@ -73,7 +77,7 @@ export function RecipientsTable({ recipients }: RecipientsTableProps) {
   if (recipients.length === 0) {
     return (
       <div className="text-center py-12 text-gray-500">
-        No recipients yet. Upload a CSV to get started.
+        No addresses yet. Create a campaign with addresses or upload a CSV to get started.
       </div>
     );
   }
@@ -84,9 +88,9 @@ export function RecipientsTable({ recipients }: RecipientsTableProps) {
         <TableHeader>
           <TableRow>
             <TableHead>Address</TableHead>
-            <TableHead>City</TableHead>
-            <TableHead>Region</TableHead>
+            <TableHead>Street</TableHead>
             <TableHead>Postal Code</TableHead>
+            <TableHead>QR Code</TableHead>
             <TableHead>Status</TableHead>
             <TableHead>Actions</TableHead>
           </TableRow>
@@ -94,10 +98,34 @@ export function RecipientsTable({ recipients }: RecipientsTableProps) {
         <TableBody>
           {recipients.map((recipient) => (
             <TableRow key={recipient.id}>
-              <TableCell className="font-medium">{recipient.address_line}</TableCell>
-              <TableCell>{recipient.city}</TableCell>
-              <TableCell>{recipient.region}</TableCell>
-              <TableCell>{recipient.postal_code}</TableCell>
+              <TableCell className="font-medium">
+                {recipient.address_line || 'N/A'}
+                {recipient.seq !== undefined && (
+                  <span className="text-xs text-gray-500 ml-2">#{recipient.seq}</span>
+                )}
+              </TableCell>
+              <TableCell>{recipient.street_name || recipient.city || '-'}</TableCell>
+              <TableCell>{recipient.postal_code || '-'}</TableCell>
+              <TableCell className="px-6 py-4 whitespace-nowrap">
+                {recipient.qr_code_base64 ? (
+                  <div className="flex items-center">
+                    <img 
+                      src={recipient.qr_code_base64} 
+                      alt="QR Code" 
+                      className="h-12 w-12 border rounded-md"
+                    />
+                    <a 
+                      href={recipient.qr_code_base64} 
+                      download={`${recipient.address_line.replace(/[^a-zA-Z0-9]/g, '-')}.png`}
+                      className="ml-2 text-blue-600 hover:text-blue-800 text-xs"
+                    >
+                      ↓
+                    </a>
+                  </div>
+                ) : (
+                  <span className="text-gray-400 text-xs italic">Not generated</span>
+                )}
+              </TableCell>
               <TableCell>
                 <Badge className={getStatusColor(recipient.status)} variant="secondary">
                   {recipient.status}
@@ -111,7 +139,7 @@ export function RecipientsTable({ recipients }: RecipientsTableProps) {
                     onClick={() => handleMarkSent(recipient.id)}
                     disabled={loading === recipient.id}
                   >
-                    {loading === recipient.id ? 'Updating...' : 'Mark Sent'}
+                    {loading === recipient.id ? 'Updating...' : 'Mark Visited'}
                   </Button>
                 )}
                 {recipient.qr_png_url && (

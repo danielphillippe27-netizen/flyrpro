@@ -5,18 +5,68 @@ import type { Map } from 'mapbox-gl';
 import mapboxgl from 'mapbox-gl';
 import { MapService, type BuildingModelPoint } from '@/lib/services/MapService';
 import { CampaignsService } from '@/lib/services/CampaignsService';
+import { BuildingService } from '@/lib/services/BuildingService';
 import { ThreeHouseLayer } from './ThreeHouseLayer';
+import { createClient } from '@/lib/supabase/client';
+import type { Building as BuildingType } from '@/types/database';
 
 export type RenderingMode = '3d' | '2d';
+
+// Helper: Calculate the Top-Left and Bottom-Right of all your data
+function getBoundingBox(features: GeoJSON.Feature[]): [[number, number], [number, number]] | null {
+  if (!features || features.length === 0) return null;
+
+  let minLng = 180, minLat = 90, maxLng = -180, maxLat = -90;
+
+  features.forEach(f => {
+    // Handle both Points (pins) and Polygons (buildings)
+    let coords: number[] | number[][] = [];
+    
+    if (f.geometry.type === 'Polygon') {
+      // For Polygon, get all coordinates from the first ring
+      const ring = f.geometry.coordinates[0];
+      ring.forEach((coord: number[]) => {
+        const [lng, lat] = coord;
+        if (typeof lng === 'number' && typeof lat === 'number' && !isNaN(lng) && !isNaN(lat)) {
+          if (lng < minLng) minLng = lng;
+          if (lng > maxLng) maxLng = lng;
+          if (lat < minLat) minLat = lat;
+          if (lat > maxLat) maxLat = lat;
+        }
+      });
+    } else if (f.geometry.type === 'Point') {
+      // For Point, coordinates are [lng, lat]
+      const [lng, lat] = f.geometry.coordinates;
+      if (typeof lng === 'number' && typeof lat === 'number' && !isNaN(lng) && !isNaN(lat)) {
+        if (lng < minLng) minLng = lng;
+        if (lng > maxLng) maxLng = lng;
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+      }
+    }
+  });
+
+  // Check if we found any valid coordinates
+  if (minLng === 180 || minLat === 90 || maxLng === -180 || maxLat === -90) {
+    return null;
+  }
+
+  return [
+    [minLng, minLat], // Southwest corner
+    [maxLng, maxLat]  // Northeast corner
+  ];
+}
 
 interface BuildingLayersProps {
   map: Map;
   campaignId?: string | null;
   mode?: RenderingMode; // '3d' for GLB models, '2d' for extruded polygons
   onLayerReady?: (layer: ThreeHouseLayer | null) => void;
+  onMarkerClick?: (addressId: string) => void; // Legacy: address-based callback
+  onBuildingClick?: (buildingId: string) => void; // Gold Standard: building UUID callback
 }
 
-export function BuildingLayers({ map, campaignId, mode = '3d', onLayerReady }: BuildingLayersProps) {
+export function BuildingLayers({ map, campaignId, mode = '3d', onLayerReady, onMarkerClick, onBuildingClick }: BuildingLayersProps) {
   const threeLayerRef = useRef<ThreeHouseLayer | null>(null);
   const fallbackLayerRef = useRef<string | null>(null);
   const extrusionLayerRef = useRef<string | null>(null);
@@ -73,6 +123,9 @@ export function BuildingLayers({ map, campaignId, mode = '3d', onLayerReady }: B
               if (map.getLayer('flyr-campaign-buildings-extrusion')) {
                 map.removeLayer('flyr-campaign-buildings-extrusion');
               }
+              if (map.getLayer('address-pins')) {
+                map.removeLayer('address-pins');
+              }
               if (map.getSource('flyr-campaign-buildings-source')) {
                 map.removeSource('flyr-campaign-buildings-source');
               }
@@ -84,161 +137,242 @@ export function BuildingLayers({ map, campaignId, mode = '3d', onLayerReady }: B
           return;
         }
 
-        // First, try to fetch campaign buildings directly (they already have geometry and front_bearing)
-        console.log(`Loading campaign buildings for campaign: ${campaignId} in ${mode} mode`);
-        let buildings = await MapService.fetchCampaignBuildings(campaignId);
-        console.log('Fetched campaign_buildings:', buildings.length);
+        console.log(`[Frontend] Loading campaign: ${campaignId}`);
         
+        // 1. Fetch Buildings (Polygons)
+        let buildings: any[] = [];
+        try {
+          const buildingRes = await fetch(`/api/campaigns/${campaignId}/buildings`);
+          if (buildingRes.ok) {
+            buildings = await buildingRes.json();
+            console.log(`Fetched ${buildings.length} buildings from API`);
+          }
+        } catch (error) {
+          console.warn('Error fetching buildings from API:', error);
+        }
+
+        // 2. Fetch Addresses (Points) - always fetch for 3D mode
+        let addresses: any[] = [];
+        try {
+          const addressRes = await fetch(`/api/campaigns/${campaignId}/addresses`);
+          if (addressRes.ok) {
+            const rawResponse = await addressRes.json();
+            // DEBUG: Log raw response structure
+            console.log('[Frontend] Raw API response:', {
+              isArray: Array.isArray(rawResponse),
+              length: Array.isArray(rawResponse) ? rawResponse.length : 'N/A',
+              type: typeof rawResponse,
+              hasData: 'data' in rawResponse,
+              firstItem: Array.isArray(rawResponse) && rawResponse.length > 0 ? {
+                keys: Object.keys(rawResponse[0]),
+                hasGeometry: 'geometry' in rawResponse[0],
+                geometryType: rawResponse[0].geometry ? typeof rawResponse[0].geometry : 'N/A',
+                geometrySample: rawResponse[0].geometry ? JSON.stringify(rawResponse[0].geometry).substring(0, 200) : 'N/A',
+                properties: rawResponse[0].properties || 'N/A',
+              } : 'N/A',
+            });
+            
+            // Handle both array and object with data property
+            addresses = Array.isArray(rawResponse) ? rawResponse : (rawResponse.data || []);
+            console.log(`[Frontend] Fetched ${addresses.length} addresses.`);
+          } else {
+            console.error('[Frontend] Address API returned non-OK status:', addressRes.status, addressRes.statusText);
+            const errorText = await addressRes.text();
+            console.error('[Frontend] Error response body:', errorText);
+          }
+        } catch (error) {
+          console.error('[Frontend] Error fetching addresses from API:', error);
+        }
+
+        let mapFeatures: GeoJSON.Feature[] = [];
+
+        if (mode === '3d') {
+          // --- 3D MONOPOLY MODE ---
+          console.log('3D Mode: Using Address Points for Models');
+
+          const validFeatures: GeoJSON.Feature[] = [];
+          addresses.forEach((a: any, index: number) => {
+            try {
+              // DEBUG: Log first address structure
+              if (index === 0) {
+                console.log('[Frontend] Processing first address:', {
+                  keys: Object.keys(a),
+                  hasGeometry: 'geometry' in a,
+                  geometryType: a.geometry ? typeof a.geometry : 'N/A',
+                  geometryValue: a.geometry ? JSON.stringify(a.geometry).substring(0, 200) : 'N/A',
+                  hasProperties: 'properties' in a,
+                  properties: a.properties || 'N/A',
+                });
+              }
+
+              // The API should return GeoJSON features, so geometry should already be parsed
+              // But handle both cases: string or object
+              let geometry = a.geometry;
+              if (typeof geometry === 'string') {
+                try {
+                  geometry = JSON.parse(geometry);
+                } catch (e) {
+                  console.warn(`[Frontend] Failed to parse geometry string for address ${a.properties?.id}:`, e);
+                  return;
+                }
+              }
+
+              if (!geometry || !geometry.type || !geometry.coordinates) {
+                console.warn(`[Frontend] Skipping address with invalid geometry: ${a.properties?.id}`, {
+                  geometry,
+                  hasGeometry: !!geometry,
+                  geometryType: geometry?.type,
+                  hasCoordinates: !!geometry?.coordinates,
+                });
+                return;
+              }
+
+              validFeatures.push({
+                type: 'Feature' as const,
+                geometry: geometry,
+                properties: {
+                  id: a.properties?.id,
+                  height: 10,
+                  min_height: 0,
+                  type: 'address',
+                  address_id: a.properties?.id,
+                  house_bearing: a.properties?.house_bearing || 0,
+                },
+              });
+            } catch (e) {
+              console.warn(`[Frontend] Skipping invalid address ID ${a.properties?.id}:`, e);
+            }
+          });
+
+          mapFeatures = validFeatures;
+          console.log(`Prepared ${mapFeatures.length} model points from ${addresses.length} addresses.`);
+        } else {
+          // --- 2D CITY MODE ---
+          if (buildings && buildings.length > 0) {
+            console.log('Using 2D buildings (Polygons)');
+            mapFeatures = buildings.map((b: any) => ({
+              type: 'Feature' as const,
+              geometry: b.geometry,
+              properties: {
+                height: b.properties?.height || b.height || 10,
+                min_height: b.properties?.min_height || 0,
+                type: 'building',
+                building_id: b.properties?.building_id,
+                address_id: b.properties?.address_id,
+              },
+            }));
+          } else {
+            console.log('No 3D buildings found. Falling back to addresses.');
+            const validFeatures: GeoJSON.Feature[] = [];
+            addresses.forEach((a: any, index: number) => {
+              try {
+                // DEBUG: Log first address structure
+                if (index === 0) {
+                  console.log('[Frontend] Processing first address (2D fallback):', {
+                    keys: Object.keys(a),
+                    hasGeometry: 'geometry' in a,
+                    geometryType: a.geometry ? typeof a.geometry : 'N/A',
+                    geometryValue: a.geometry ? JSON.stringify(a.geometry).substring(0, 200) : 'N/A',
+                    hasProperties: 'properties' in a,
+                    properties: a.properties || 'N/A',
+                  });
+                }
+
+                // The API should return GeoJSON features, so geometry should already be parsed
+                // But handle both cases: string or object
+                let geometry = a.geometry;
+                if (typeof geometry === 'string') {
+                  try {
+                    geometry = JSON.parse(geometry);
+                  } catch (e) {
+                    console.warn(`[Frontend] Failed to parse geometry string for address ${a.properties?.id}:`, e);
+                    return;
+                  }
+                }
+
+                if (!geometry || !geometry.type || !geometry.coordinates) {
+                  console.warn(`[Frontend] Skipping address with invalid geometry: ${a.properties?.id}`, {
+                    geometry,
+                    hasGeometry: !!geometry,
+                    geometryType: geometry?.type,
+                    hasCoordinates: !!geometry?.coordinates,
+                  });
+                  return;
+                }
+
+                validFeatures.push({
+                  type: 'Feature' as const,
+                  geometry: geometry,
+                  properties: {
+                    id: a.properties?.id,
+                    height: 10,
+                    min_height: 0,
+                    type: 'address',
+                    address_id: a.properties?.id,
+                    house_bearing: a.properties?.house_bearing || 0,
+                  },
+                });
+              } catch (e) {
+                console.warn(`[Frontend] Skipping invalid address ID ${a.properties?.id}:`, e);
+              }
+            });
+
+            mapFeatures = validFeatures;
+            console.log(`Prepared ${mapFeatures.length} address features from ${addresses.length} addresses.`);
+          }
+        }
+
+        if (mapFeatures.length === 0) {
+          console.warn('No data found for this campaign (neither buildings nor addresses).');
+          return;
+        }
+
+        // Convert to the format expected by the rendering logic
         let modelPoints: BuildingModelPoint[] = [];
         let houseFeatures: GeoJSON.FeatureCollection | null = null;
 
-        if (buildings.length > 0) {
-          // Use campaign_buildings if available
-          if (mode === '3d') {
-            modelPoints = MapService.createBuildingModelPointsFromCampaignBuildings(buildings, 'flyr-monopoly-house-model');
-            console.log('Created model points from campaign_buildings:', modelPoints.length);
-          } else {
-            // 2D mode: Create house-shaped polygons
-            houseFeatures = MapService.convertCampaignBuildingsToHouseFeatureCollection(buildings);
-            console.log('Created house features from campaign_buildings:', houseFeatures.features.length);
-          }
+        // Convert mapFeatures to the format expected by rendering logic
+        if (mode === '3d') {
+          // Convert to modelPoints for 3D mode
+          modelPoints = mapFeatures
+            .filter(f => f.geometry.type === 'Point')
+            .map(feature => {
+              const props = feature.properties || {};
+              return {
+                type: 'Feature' as const,
+                geometry: {
+                  type: 'Point' as const,
+                  coordinates: feature.geometry.type === 'Point' 
+                    ? feature.geometry.coordinates as [number, number]
+                    : [0, 0] as [number, number],
+                },
+                properties: {
+                  'model-id': 'flyr-monopoly-house-model',
+                  'front_bearing': props.house_bearing || 0,
+                  'house_bearing': props.house_bearing || 0,
+                  address_id: props.address_id || props.id,
+                  building_id: props.building_id,
+                },
+              };
+            });
+          console.log(`Created ${modelPoints.length} model points from mapFeatures`);
         } else {
-          // Fallback: Use addresses and building polygons
-          console.log('No campaign_buildings found, falling back to addresses and building polygons');
-          const addresses = await CampaignsService.fetchAddresses(campaignId);
-          
-          // Get addresses with coordinates
-          const addressesWithCoords = addresses
-            .map(addr => {
-              let coord = addr.coordinate;
-              if (!coord && addr.geom) {
-                try {
-                  const geom = typeof addr.geom === 'string' ? JSON.parse(addr.geom) : addr.geom;
-                  if (geom && geom.coordinates) {
-                    coord = { lon: geom.coordinates[0], lat: geom.coordinates[1] };
-                  }
-                } catch (e) {
-                  return null;
-                }
-              }
-              return coord && addr.id ? { id: addr.id, lat: coord.lat, lon: coord.lon } : null;
-            })
-            .filter((a): a is { id: string; lat: number; lon: number } => a !== null);
-
-          if (addressesWithCoords.length > 0) {
-            try {
-              // Request building polygons
-              await MapService.requestBuildingPolygons(addressesWithCoords);
-              
-              // Fetch building polygons
-              const polygonIds = addressesWithCoords.map(a => a.id);
-              const polygons = await MapService.fetchBuildingPolygons(polygonIds);
-              
-              if (polygons.length > 0) {
-                if (mode === '3d') {
-                  // Create model points from building polygons
-                  modelPoints = MapService.createBuildingModelPoints(polygons, 'flyr-monopoly-house-model');
-                  console.log('Created model points from building polygons:', modelPoints.length);
-                } else {
-                  // 2D mode: Convert polygons to house shapes
-                  // For 2D mode, we need to create house footprints from polygon centroids
-                  const buildingData = polygons.map(poly => {
-                    const geom = JSON.parse(poly.geom) as GeoJSON.Polygon | GeoJSON.MultiPolygon;
-                    const centroid = MapService.calculatePolygonCentroid(geom);
-                    const frontBearing = MapService.calculateFrontBearing(geom);
-                    return {
-                      id: poly.address_id, // Use address_id as building id
-                      campaign_id: campaignId,
-                      address_id: poly.address_id,
-                      building_id: undefined,
-                      geometry: JSON.stringify(geom), // Convert back to string for consistency
-                      height_m: 18.0,
-                      min_height_m: 0.0,
-                      front_bearing: frontBearing,
-                      source: 'building_polygon',
-                      created_at: new Date().toISOString(),
-                      updated_at: new Date().toISOString(),
-                    };
-                  });
-                  houseFeatures = MapService.convertCampaignBuildingsToHouseFeatureCollection(buildingData);
-                  console.log('Created house features from building polygons:', houseFeatures.features.length);
-                }
-              } else {
-                // Last resort: Create points directly from address coordinates
-                console.log('No building polygons found, using address coordinates directly');
-                if (mode === '3d') {
-                  modelPoints = addressesWithCoords.map(addr => ({
-                    type: 'Feature' as const,
-                    geometry: {
-                      type: 'Point' as const,
-                      coordinates: [addr.lon, addr.lat] as [number, number],
-                    },
-                    properties: {
-                      'model-id': 'flyr-monopoly-house-model',
-                      'front_bearing': 0, // Default bearing
-                      address_id: addr.id,
-                    },
-                  }));
-                  console.log('Created model points from addresses:', modelPoints.length);
-                } else {
-                  // 2D mode: Create house footprints at address coordinates
-                  const buildingData = addressesWithCoords.map(addr => ({
-                    id: addr.id,
-                    campaign_id: campaignId,
-                    address_id: addr.id,
-                    building_id: undefined,
-                    geometry: JSON.stringify({
-                      type: 'Point',
-                      coordinates: [addr.lon, addr.lat],
-                    }),
-                    height_m: 18.0,
-                    min_height_m: 0.0,
-                    front_bearing: 0,
-                    source: 'address_coordinate',
-                    created_at: new Date().toISOString(),
-                    updated_at: new Date().toISOString(),
-                  }));
-                  houseFeatures = MapService.convertCampaignBuildingsToHouseFeatureCollection(buildingData);
-                  console.log('Created house features from addresses:', houseFeatures.features.length);
-                }
-              }
-            } catch (error) {
-              console.error('Error loading building polygons:', error);
-              // Still try to create points from coordinates
-              if (mode === '3d') {
-                modelPoints = addressesWithCoords.map(addr => ({
-                  type: 'Feature' as const,
-                  geometry: {
-                    type: 'Point' as const,
-                    coordinates: [addr.lon, addr.lat] as [number, number],
-                  },
-                  properties: {
-                    'model-id': 'flyr-monopoly-house-model',
-                    'front_bearing': 0,
-                    address_id: addr.id,
-                  },
-                }));
-              } else {
-                const buildingData = addressesWithCoords.map(addr => ({
-                  id: addr.id,
-                  campaign_id: campaignId,
-                  address_id: addr.id,
-                  building_id: undefined,
-                  geometry: JSON.stringify({
-                    type: 'Point',
-                    coordinates: [addr.lon, addr.lat],
-                  }),
-                  height_m: 18.0,
-                  min_height_m: 0.0,
-                  front_bearing: 0,
-                  source: 'address_coordinate',
-                  created_at: new Date().toISOString(),
-                  updated_at: new Date().toISOString(),
-                }));
-                houseFeatures = MapService.convertCampaignBuildingsToHouseFeatureCollection(buildingData);
-              }
-            }
-          }
+          // Convert to houseFeatures for 2D mode
+          houseFeatures = {
+            type: 'FeatureCollection' as const,
+            features: mapFeatures.map(feature => {
+              const props = feature.properties || {};
+              return {
+                ...feature,
+                properties: {
+                  ...props,
+                  height: props.height || 10,
+                  min_height: props.min_height || 0,
+                },
+              };
+            }),
+          };
+          console.log(`Created ${houseFeatures.features.length} house features from mapFeatures`);
         }
         
         // Check if we have data to render
@@ -277,7 +411,7 @@ export function BuildingLayers({ map, campaignId, mode = '3d', onLayerReady }: B
             });
           }
 
-          // Add or update FillExtrusionLayer
+          // Add or update FillExtrusionLayer (Only works for Polygons)
           const layerId = 'flyr-campaign-buildings-extrusion';
           if (!map.getLayer(layerId)) {
             map.addLayer({
@@ -285,6 +419,7 @@ export function BuildingLayers({ map, campaignId, mode = '3d', onLayerReady }: B
               type: 'fill-extrusion',
               source: sourceId,
               minzoom: 13,
+              filter: ['==', '$type', 'Polygon'], // Only Polygons
               paint: {
                 'fill-extrusion-color': [
                   'case',
@@ -300,23 +435,52 @@ export function BuildingLayers({ map, campaignId, mode = '3d', onLayerReady }: B
           }
           extrusionLayerRef.current = layerId;
 
-          // Fit bounds to show all buildings - but let CampaignDetailMapView handle initial bounds
-          // Only fit if we have valid data and map is ready
-          if (houseFeatures.features.length > 0) {
+          // Add Circle Layer for Points (address pins)
+          const circleLayerId = 'address-pins';
+          if (!map.getLayer(circleLayerId)) {
+            map.addLayer({
+              id: circleLayerId,
+              type: 'circle',
+              source: sourceId,
+              filter: ['==', '$type', 'Point'], // Only Points
+              paint: {
+                'circle-radius': 6,
+                'circle-color': '#FF5722', // Orange dots
+                'circle-stroke-width': 2,
+                'circle-stroke-color': '#FFFFFF',
+              },
+            });
+          }
+
+          // 4. AUTO-ZOOM for 2D mode
+          if (mapFeatures.length > 0) {
             setTimeout(() => {
               if (!map) return;
+              
               const bounds = new mapboxgl.LngLatBounds();
-              houseFeatures.features.forEach((feature) => {
-                if (feature.geometry.type === 'Polygon') {
-                  feature.geometry.coordinates[0].forEach((coord: [number, number]) => {
-                    bounds.extend(coord);
+              mapFeatures.forEach((feature: GeoJSON.Feature) => {
+                // Specific check for Point vs Polygon coordinates
+                if (feature.geometry.type === 'Point') {
+                  const coords = feature.geometry.coordinates as [number, number];
+                  bounds.extend(coords);
+                } else if (feature.geometry.type === 'Polygon') {
+                  // For polygons, extend bounds with all coordinates in the first ring
+                  feature.geometry.coordinates[0].forEach((coord: number[]) => {
+                    bounds.extend(coord as [number, number]);
                   });
                 }
               });
+
               if (!bounds.isEmpty()) {
-                map.fitBounds(bounds, { padding: 100, maxZoom: 18, duration: 1000 });
+                console.log('Zooming to campaign area (2D mode)...');
+                map.fitBounds(bounds, {
+                  padding: 100,
+                  pitch: 60, // Tilted 3D view
+                  maxZoom: 18,
+                  duration: 1500
+                });
               }
-            }, 300); // Wait for extrusion layer to render
+            }, 300); // Wait for layers to render
           }
 
           return; // Done with 2D mode
@@ -370,13 +534,50 @@ export function BuildingLayers({ map, campaignId, mode = '3d', onLayerReady }: B
 
             // Create new Three.js layer
             console.log('Creating Three.js layer with', modelPoints.length, 'model points');
+            // Create click handler that supports building_id, gers_id, and address_id
+            const handleMarkerClick = (id: string) => {
+              // Check if this is a building_id, gers_id, or address_id
+              const point = modelPoints.find(p => 
+                p.properties.building_id === id || 
+                p.properties.gers_id === id ||
+                p.properties.address_id === id
+              );
+              
+              if (point?.properties.building_id && onBuildingClick) {
+                // Gold Standard: Use building UUID
+                onBuildingClick(point.properties.building_id);
+              } else if (point?.properties.gers_id && onBuildingClick) {
+                // Overture: Use GERS ID to find building
+                // Fetch building by GERS ID and use its UUID
+                BuildingService.fetchBuildingByGersId(point.properties.gers_id)
+                  .then(building => {
+                    if (building && onBuildingClick) {
+                      onBuildingClick(building.id);
+                    }
+                  })
+                  .catch(() => {
+                    // Fallback to legacy if building not found
+                    if (point?.properties.address_id && onMarkerClick) {
+                      onMarkerClick(point.properties.address_id);
+                    }
+                  });
+              } else if (point?.properties.address_id && onMarkerClick) {
+                // Legacy: Use address ID
+                onMarkerClick(point.properties.address_id);
+              } else if (onMarkerClick) {
+                // Fallback to legacy callback
+                onMarkerClick(id);
+              }
+            };
+            
             const threeLayer = new ThreeHouseLayer({
-              glbUrl: '/3d-houses.glb',
+              glbUrl: '/House 2026.glb',
               features: modelPoints,
               onModelLoad: () => {
                 console.log('✅ 3D models loaded successfully');
                 onLayerReady?.(threeLayer);
               },
+              onMarkerClick: handleMarkerClick,
             });
 
             // Wait for map style to load before adding layer
@@ -407,9 +608,17 @@ export function BuildingLayers({ map, campaignId, mode = '3d', onLayerReady }: B
 
         // Fallback to circle markers if WebGL not supported or Three.js failed
         if (!webglSupportedRef.current || !threeLayerRef.current) {
+          // Ensure all features have explicit IDs for Mapbox stability
           const geojson = {
             type: 'FeatureCollection' as const,
-            features: modelPoints,
+            features: modelPoints.map((feature, index) => {
+              const props = feature.properties || {};
+              const featureId = (props as any).id || props.address_id || props.building_id || `feature-${index}`;
+              return {
+                ...feature,
+                id: featureId
+              };
+            }),
           };
 
           const sourceId = 'building-models-fallback';
@@ -439,19 +648,41 @@ export function BuildingLayers({ map, campaignId, mode = '3d', onLayerReady }: B
           fallbackLayerRef.current = sourceId;
         }
 
-        // Fit bounds to show all buildings - but let CampaignDetailMapView handle initial bounds
-        // Only fit if we have valid data and map is ready
-        if (modelPoints.length > 0) {
+        // 4. AUTO-ZOOM (The "Insurance Policy" - Fly To Fix)
+        // Calculate bounds so the map FORCES the pins into view
+        // This ensures pins are visible even if map starts centered elsewhere
+        if (mapFeatures.length > 0) {
           setTimeout(() => {
             if (!map) return;
+            
             const bounds = new mapboxgl.LngLatBounds();
-            modelPoints.forEach((point) => {
-              bounds.extend(point.geometry.coordinates as [number, number]);
+            mapFeatures.forEach((feature: GeoJSON.Feature) => {
+              // Specific check for Point vs Polygon coordinates
+              if (feature.geometry.type === 'Point') {
+                const coords = feature.geometry.coordinates as [number, number];
+                if (coords && coords.length >= 2 && !isNaN(coords[0]) && !isNaN(coords[1])) {
+                  bounds.extend(coords);
+                }
+              } else if (feature.geometry.type === 'Polygon') {
+                // For polygons, extend bounds with all coordinates in the first ring
+                feature.geometry.coordinates[0].forEach((coord: number[]) => {
+                  if (coord && coord.length >= 2 && !isNaN(coord[0]) && !isNaN(coord[1])) {
+                    bounds.extend(coord as [number, number]);
+                  }
+                });
+              }
             });
-            if (!bounds.isEmpty()) {
-              map.fitBounds(bounds, { padding: 100, maxZoom: 18, duration: 1000 });
+
+            if (!bounds.isEmpty() && map) {
+              console.log(`Auto-zooming to ${mapFeatures.length} features...`);
+              map.fitBounds(bounds, {
+                padding: 80, // Padding around the bounds
+                pitch: mode === '3d' ? 60 : 0, // Tilted 3D view for 3d mode
+                maxZoom: 18,
+                duration: 1000 // Smooth animation
+              });
             }
-          }, 500); // Wait for 3D models to start loading
+          }, mode === '3d' ? 500 : 300); // Wait for layers to render
         }
       } catch (error) {
         console.error('Error loading campaign buildings:', error);
@@ -492,6 +723,46 @@ export function BuildingLayers({ map, campaignId, mode = '3d', onLayerReady }: B
       }
     };
   }, [map, campaignId, mode]);
+
+  // Real-time subscription for campaign buildings
+  useEffect(() => {
+    if (!map || !campaignId || !threeLayerRef.current) return;
+
+    const supabase = createClient();
+    const channel = supabase
+      .channel(`campaign-buildings-realtime-${campaignId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'buildings',
+          filter: `campaign_id=eq.${campaignId}`
+        },
+        async (payload) => {
+          const newBuilding = payload.new as BuildingType;
+          
+          // Animate building in
+          if (threeLayerRef.current && newBuilding) {
+            try {
+              // Fetch full building data if needed
+              const building = await BuildingService.fetchBuilding(newBuilding.id);
+              if (building && threeLayerRef.current) {
+                // Trigger animation in ThreeHouseLayer
+                threeLayerRef.current.animateBuildingIn(building);
+              }
+            } catch (error) {
+              console.error('Error animating new building:', error);
+            }
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [map, campaignId]);
 
   return null;
 }

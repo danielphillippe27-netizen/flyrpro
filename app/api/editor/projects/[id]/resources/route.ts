@@ -81,16 +81,15 @@ export async function GET(
             name: campaign.name || 'Unnamed Campaign',
           };
 
-          // Fetch QR codes for this campaign
-          // Check both qr_codes table and campaign_recipients with QR codes
+          // Fetch QR codes for this campaign from qr_codes table
           const { data: qrCodes } = await supabase
             .from('qr_codes')
             .select('id, slug')
             .eq('campaign_id', campaign.id);
 
-          // Also check campaign_recipients for QR codes
-          const { data: recipients } = await supabase
-            .from('campaign_recipients')
+          // Also check campaign_addresses for QR codes (addresses with QR PNG URLs)
+          const { data: addresses } = await supabase
+            .from('campaign_addresses')
             .select('id, qr_png_url')
             .eq('campaign_id', campaign.id)
             .not('qr_png_url', 'is', null);
@@ -100,10 +99,10 @@ export async function GET(
               id: qr.id,
               slug: qr.slug || undefined,
             }));
-          } else if (recipients && recipients.length > 0) {
-            // Use recipient IDs as QR code indicators
-            resources.qrCodes = recipients.map((rec) => ({
-              id: rec.id,
+          } else if (addresses && addresses.length > 0) {
+            // Use address IDs as QR code indicators
+            resources.qrCodes = addresses.map((addr) => ({
+              id: addr.id,
               slug: undefined,
             }));
           }

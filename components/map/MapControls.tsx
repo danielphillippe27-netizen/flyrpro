@@ -8,9 +8,10 @@ import { CampaignsFarmsDropdown } from './CampaignsFarmsDropdown';
 interface MapControlsProps {
   onCampaignSelect?: (campaignId: string | null) => void;
   selectedCampaignId?: string | null;
+  selectedCampaignName?: string | null;
 }
 
-export function MapControls({ onCampaignSelect, selectedCampaignId }: MapControlsProps) {
+export function MapControls({ onCampaignSelect, selectedCampaignId, selectedCampaignName }: MapControlsProps) {
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   useEffect(() => {
@@ -75,7 +76,14 @@ export function MapControls({ onCampaignSelect, selectedCampaignId }: MapControl
 
   return (
     <>
-      <CampaignsFarmsDropdown onCampaignSelect={onCampaignSelect} />
+      <div className="flex flex-col gap-1">
+        <CampaignsFarmsDropdown onCampaignSelect={onCampaignSelect} />
+        {selectedCampaignName && (
+          <div className="bg-white/90 backdrop-blur-sm rounded-md px-2 py-1 text-xs font-medium text-gray-700 text-center border border-gray-200 shadow-sm">
+            {selectedCampaignName}
+          </div>
+        )}
+      </div>
       {selectedCampaignId && (
         <Button
           variant="outline"

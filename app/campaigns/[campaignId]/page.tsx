@@ -17,17 +17,19 @@ import { Label } from '@/components/ui/label';
 import { MissingQRModal } from '@/components/modals/MissingQRModal';
 import { NonTrackableExportModal } from '@/components/modals/NonTrackableExportModal';
 import type { CampaignV2, CampaignAddress } from '@/types/database';
+import JSZip from 'jszip';
+import { saveAs } from 'file-saver';
+import { createClient } from '@/lib/supabase/client';
 
 export default function CampaignPage() {
   const params = useParams();
   const router = useRouter();
   const campaignId = params.campaignId as string;
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [campaign, setCampaign] = useState<CampaignV2 | null>(null);
   const [addresses, setAddresses] = useState<CampaignAddress[]>([]);
   const [loading, setLoading] = useState(true);
-  const [uploading, setUploading] = useState(false);
+  // Removed syncing state - no longer needed for mission-based provisioning
   const [generating, setGenerating] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [showPaywall, setShowPaywall] = useState(false);
@@ -35,15 +37,35 @@ export default function CampaignPage() {
   const [missingQRFlyerId, setMissingQRFlyerId] = useState<string | null>(null);
   const [exportWithoutTracking, setExportWithoutTracking] = useState(false);
   const [showNonTrackableModal, setShowNonTrackableModal] = useState(false);
+  const [destinationUrl, setDestinationUrl] = useState("");
+  const [isSavingUrl, setIsSavingUrl] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
+      console.log('Loading campaign:', campaignId);
       const campaignData = await CampaignsService.fetchCampaign(campaignId);
+      
+      if (!campaignData) {
+        console.error('Campaign not found:', campaignId);
+        return;
+      }
+      
+      console.log('Campaign loaded:', campaignData);
+      
+      // Fetch from campaign_addresses (primary source for addresses)
       const addressesData = await CampaignsService.fetchAddresses(campaignId);
+      console.log('Addresses loaded:', addressesData.length);
+      
       setCampaign(campaignData);
       setAddresses(addressesData);
     } catch (error) {
       console.error('Error loading campaign:', error);
+      if (error instanceof Error) {
+        console.error('Error details:', {
+          message: error.message,
+          stack: error.stack,
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -53,43 +75,29 @@ export default function CampaignPage() {
     loadData();
   }, [loadData]);
 
-  const handleUploadCSV = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setUploading(true);
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const response = await fetch(`/api/upload-csv?campaignId=${campaignId}`, {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Upload failed');
-      }
-
-      await loadData();
-      alert('CSV uploaded successfully!');
-    } catch (error) {
-      console.error('Error uploading CSV:', error);
-      alert(error instanceof Error ? error.message : 'Failed to upload CSV');
-    } finally {
-      setUploading(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
+  // Load existing video_url when campaign data is available
+  useEffect(() => {
+    if (campaign?.video_url) {
+      setDestinationUrl(campaign.video_url);
     }
-  };
+  }, [campaign]);
+
+  // Removed handleSyncNeighborhood - buildings are now provisioned during campaign creation
+  // Mission-based provisioning: buildings are generated when territory is defined
 
   const handleGenerateQRs = async (trackable: boolean = true) => {
     setGenerating(true);
     try {
-      const response = await fetch(`/api/generate-qrs?campaignId=${campaignId}&trackable=${trackable}`, {
+      const response = await fetch('/api/generate-qrs', {
         method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          campaignId: campaignId,
+          trackable: trackable,
+          baseUrl: typeof window !== 'undefined' ? window.location.origin : undefined,
+        }),
       });
 
       const data = await response.json();
@@ -128,6 +136,72 @@ export default function CampaignPage() {
   const handleConfirmNonTrackableExport = async () => {
     setShowNonTrackableModal(false);
     await handleGenerateQRs(false);
+  };
+
+  const handleSaveUrl = async () => {
+    setIsSavingUrl(true);
+    try {
+      const supabase = createClient();
+      const { error } = await supabase
+        .from('campaigns')
+        .update({ video_url: destinationUrl || null })
+        .eq('id', campaignId);
+      
+      if (error) {
+        alert("Error saving URL: " + error.message);
+      } else {
+        alert("Destination URL Saved! All QR codes now point here.");
+        await loadData(); // Reload to get updated campaign data
+      }
+    } catch (error) {
+      alert("Error saving URL");
+    } finally {
+      setIsSavingUrl(false);
+    }
+  };
+
+  const handleDownloadForCanva = async () => {
+    if (!addresses || addresses.length === 0) {
+      alert("No addresses to download");
+      return;
+    }
+
+    const zip = new JSZip();
+    const imgFolder = zip.folder("qr-images");
+    
+    // CSV header - ImageFilename must match filenames exactly for Canva Bulk Create
+    let csvContent = "Address,City,State,Zip,ImageFilename\n";
+
+    addresses.forEach((addr) => {
+      if (addr.qr_code_base64) {
+        // 1. Clean filename (remove weird characters, limit length)
+        const cleanAddress = (addr.formatted || addr.address || 'address')
+          .replace(/[^a-zA-Z0-9 ]/g, "")
+          .trim()
+          .replace(/\s+/g, '-')
+          .substring(0, 50);
+        const filename = `${cleanAddress}.png`;
+
+        // 2. Extract base64 data (strip data:image/png;base64, prefix)
+        const base64Data = addr.qr_code_base64.split(',')[1];
+        imgFolder?.file(filename, base64Data, { base64: true });
+
+        // 3. Build CSV row
+        // Extract city/state from formatted address if available
+        const addressParts = (addr.formatted || addr.address || '').split(',');
+        const city = addressParts.length > 1 ? addressParts[1].trim() : '';
+        const state = addressParts.length > 2 ? addressParts[2].trim() : '';
+        
+        csvContent += `"${addr.formatted || addr.address || ''}","${city}","${state}","${addr.postal_code || ''}","${filename}"\n`;
+      }
+    });
+
+    // 4. Add CSV to ZIP root
+    zip.file("canva_bulk_data.csv", csvContent);
+
+    // 5. Generate and download
+    const content = await zip.generateAsync({ type: "blob" });
+    saveAs(content, `campaign-qrs-canva.zip`);
   };
 
   const handleAddQR = async () => {
@@ -209,17 +283,20 @@ export default function CampaignPage() {
     );
   }
 
-  // Convert addresses to recipients format for StatsHeader
-  const recipients = addresses.map((addr) => ({
+  // Convert addresses from campaign_addresses to the format expected by StatsHeader and RecipientsTable
+  const formattedRecipients = addresses.map((addr) => ({
     id: addr.id,
-    address_line: addr.address,
+    address_line: addr.formatted || addr.address || '',
     city: '',
     region: '',
     postal_code: addr.postal_code || '',
     status: addr.visited ? 'scanned' : 'pending',
     qr_png_url: null,
+    qr_code_base64: addr.qr_code_base64 || null,  // NEW: Include QR code
     sent_at: null,
     scanned_at: addr.visited ? new Date().toISOString() : null,
+    street_name: addr.street_name,
+    seq: addr.seq,
   }));
 
   return (
@@ -242,13 +319,20 @@ export default function CampaignPage() {
                   </span>
                 )}
               </div>
+              {addresses.length > 0 && (
+                <div className="mt-3">
+                  <span className="text-sm font-medium text-gray-700">
+                    Addresses loaded: {addresses.length}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-        <StatsHeader recipients={recipients} />
+        <StatsHeader recipients={formattedRecipients} />
 
         {campaign.total_flyers > 0 && (
           <div className="bg-white rounded-2xl border p-6">
@@ -271,24 +355,37 @@ export default function CampaignPage() {
           </TabsList>
 
           <TabsContent value="addresses" className="mt-6">
+            {/* QR Destination URL Input */}
+            <div className="bg-white p-6 rounded-lg shadow mb-6 border border-gray-200">
+              <h3 className="text-lg font-medium text-gray-900 mb-4">📍 QR Destination</h3>
+              <div className="flex gap-4">
+                <div className="flex-grow">
+                  <label htmlFor="url" className="sr-only">Destination URL</label>
+                  <input
+                    type="url"
+                    id="url"
+                    placeholder="https://youtube.com/watch?v=..."
+                    className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border"
+                    value={destinationUrl}
+                    onChange={(e) => setDestinationUrl(e.target.value)}
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Where should users go when they scan? (Leave empty to use the "Welcome" page).
+                  </p>
+                </div>
+                <button
+                  onClick={handleSaveUrl}
+                  disabled={isSavingUrl}
+                  className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none disabled:opacity-50"
+                >
+                  {isSavingUrl ? "Saving..." : "Link URL"}
+                </button>
+              </div>
+            </div>
+
             <div className="bg-white rounded-2xl border p-6">
               <h2 className="text-xl font-bold mb-4">Campaign Controls</h2>
               <div className="flex flex-wrap gap-4 mb-6">
-                <div>
-                  <Label htmlFor="csv-upload" className="cursor-pointer">
-                    <Button disabled={uploading} asChild>
-                      <span>{uploading ? 'Uploading...' : 'Upload CSV'}</span>
-                    </Button>
-                  </Label>
-                  <Input
-                    id="csv-upload"
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".csv"
-                    onChange={handleUploadCSV}
-                    className="hidden"
-                  />
-                </div>
                 <Button
                   onClick={() => {
                     if (exportWithoutTracking) {
@@ -297,20 +394,27 @@ export default function CampaignPage() {
                       handleGenerateQRs(true);
                     }
                   }}
-                  disabled={generating || addresses.length === 0}
+                  disabled={generating || formattedRecipients.length === 0}
                 >
                   {generating ? 'Generating...' : 'Generate QR Codes'}
                 </Button>
                 <Button
+                  onClick={handleDownloadForCanva}
+                  disabled={!addresses || addresses.length === 0 || addresses.filter(a => a.qr_code_base64).length === 0}
+                  variant="outline"
+                >
+                  Download for Canva (ZIP)
+                </Button>
+                <Button
                   onClick={handleDownloadZip}
-                  disabled={downloading || addresses.filter(a => a.visited).length === 0}
+                  disabled={downloading || formattedRecipients.filter((r: any) => r.status === 'scanned').length === 0}
                   variant="outline"
                 >
                   {downloading ? 'Downloading...' : 'Download All QRs (ZIP)'}
                 </Button>
               </div>
               <p className="text-sm text-gray-600 mb-4">
-                Upload a CSV with columns: address_line, city, region, postal_code
+                Buildings are automatically provisioned when you create a campaign with a territory boundary. The map shows only buildings for this campaign.
               </p>
               
               {/* Advanced Export Options */}
@@ -337,7 +441,7 @@ export default function CampaignPage() {
 
             <div className="bg-white rounded-2xl border p-6 mt-6">
               <h2 className="text-xl font-bold mb-4">Addresses</h2>
-              <RecipientsTable recipients={recipients} campaignId={campaignId} />
+              <RecipientsTable recipients={formattedRecipients} campaignId={campaignId} />
             </div>
           </TabsContent>
 

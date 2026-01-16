@@ -19,7 +19,7 @@ export async function GET(
     // Lookup QR code by slug
     const { data: qrCode, error: qrError } = await supabase
       .from('qr_codes')
-      .select('id, slug, destination_type, direct_url, landing_page_id, address_id')
+      .select('id, slug, destination_type, direct_url, landing_page_id, address_id, campaign_id')
       .eq('slug', slug)
       .single();
 
@@ -86,31 +86,75 @@ export async function GET(
       );
     }
 
+    // Bot detection - filter out common bots and preview scanners
+    const userAgent = request.headers.get('user-agent') || '';
+    const isBot = /bot|crawler|spider|preview|scanner|mail|email|facebookexternalhit|linkedinbot|twitterbot|slackbot|whatsapp|telegram|skype|bingpreview|googlebot|baiduspider|yandex|sogou|exabot|facebot|ia_archiver/i.test(userAgent);
+    
     // Record scan in qr_code_scans (non-blocking - don't fail redirect if this fails)
-    try {
-      const userAgent = request.headers.get('user-agent') || null;
-      const forwardedFor = request.headers.get('x-forwarded-for');
-      const realIp = request.headers.get('x-real-ip');
-      const ipAddress = forwardedFor?.split(',')[0]?.trim() || realIp || null;
-      const referrer = request.headers.get('referer') || request.headers.get('referrer') || null;
+    // Only record if not a bot to maintain accurate scan rates
+    if (!isBot && qrCode.address_id) {
+      try {
+        const forwardedFor = request.headers.get('x-forwarded-for');
+        const realIp = request.headers.get('x-real-ip');
+        const ipAddress = forwardedFor?.split(',')[0]?.trim() || realIp || null;
+        const referrer = request.headers.get('referer') || request.headers.get('referrer') || null;
 
-      const { error: scanError } = await supabase
-        .from('qr_code_scans')
-        .insert({
-          qr_code_id: qrCode.id,
-          address_id: qrCode.address_id || null,
-          user_agent: userAgent,
-          ip_address: ipAddress,
-          referrer: referrer,
-          scanned_at: new Date().toISOString(),
-        });
+        // Get address visited status and campaign_id to check if this is a unique scan
+        const { data: address } = await supabase
+          .from('campaign_addresses')
+          .select('visited, campaign_id')
+          .eq('id', qrCode.address_id)
+          .single();
 
-      if (scanError) {
-        console.error('Error recording QR scan:', scanError);
+        // Check if this is a unique scan (first scan for this address)
+        const isFirstScan = address && !address.visited;
+        
+        // Use campaign_id from qr_code if available, otherwise use from address
+        const campaignId = qrCode.campaign_id || address?.campaign_id || null;
+
+        // Insert scan record
+        const { error: scanError } = await supabase
+          .from('qr_code_scans')
+          .insert({
+            qr_code_id: qrCode.id,
+            address_id: qrCode.address_id,
+            user_agent: userAgent,
+            ip_address: ipAddress,
+            referrer: referrer,
+            scanned_at: new Date().toISOString(),
+          });
+
+        if (scanError) {
+          console.error('Error recording QR scan:', scanError);
+        } else if (address && isFirstScan) {
+          // Update address visited status (mark as scanned)
+          await supabase
+            .from('campaign_addresses')
+            .update({ visited: true })
+            .eq('id', qrCode.address_id);
+
+          // Increment campaign scan count (only for first scan to track unique homes)
+          if (campaignId) {
+            const { data: campaign } = await supabase
+              .from('campaigns')
+              .select('scans')
+              .eq('id', campaignId)
+              .single();
+
+            const currentScans = campaign?.scans || 0;
+            await supabase
+              .from('campaigns')
+              .update({ scans: currentScans + 1 })
+              .eq('id', campaignId);
+          }
+        }
+      } catch (scanErr) {
+        console.error('Failed to record QR scan:', scanErr);
+        // Continue with redirect even if scan recording fails
       }
-    } catch (scanErr) {
-      console.error('Failed to record QR scan:', scanErr);
-      // Continue with redirect even if scan recording fails
+    } else if (isBot) {
+      // Log bot scan for analytics but don't count toward scan rate
+      console.log(`Bot scan detected (${userAgent.substring(0, 50)}), not counted toward scan rate`);
     }
 
     // Return 302 redirect

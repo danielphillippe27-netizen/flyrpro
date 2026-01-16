@@ -8,6 +8,14 @@ const nextConfig = {
     // Ignore TypeScript errors during builds
     ignoreBuildErrors: true,
   },
+  // Exclude problematic native modules from server-side bundling
+  // CRITICAL: DuckDB uses native C++ bindings that break if Webpack tries to bundle them
+  // This tells Next.js: "Don't touch DuckDB, run it as native node code"
+  serverExternalPackages: [
+    '@mapbox/node-pre-gyp',
+    'duckdb',           // Required for MotherDuck connections to work
+    '@duckdb/node-api',
+  ],
   async rewrites() {
     // QR code redirects: Primary handler is /api/q/[slug] (local Next.js API route)
     // This rewrite to Supabase Edge Function is kept as a fallback for:

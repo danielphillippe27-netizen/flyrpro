@@ -43,8 +43,21 @@ export class CampaignsService {
       .eq('id', id)
       .single();
 
-    if (error) throw error;
-    if (!data) return null;
+    if (error) {
+      console.error('Error fetching campaign:', {
+        id,
+        error: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
+      });
+      throw error;
+    }
+    
+    if (!data) {
+      console.warn('Campaign not found:', id);
+      return null;
+    }
 
     const totalFlyers = data.total_flyers || 0;
     const scans = data.scans || 0;
@@ -53,6 +66,8 @@ export class CampaignsService {
 
     return {
       ...data,
+      // Map user_id to owner_id if needed for compatibility (database may have either)
+      owner_id: data.owner_id || data.user_id || '',
       // Map title to name if title exists (for backward compatibility)
       name: data.title || data.name || 'Unnamed Campaign',
       // Provide default type if missing
@@ -68,6 +83,8 @@ export class CampaignsService {
       .insert({
         owner_id: userId,
         name: payload.name,
+        title: payload.name, // Set title to match name for database constraint
+        description: '', // Set empty description to satisfy NOT NULL constraint
         type: payload.type,
         address_source: payload.address_source,
         seed_query: payload.seed_query,
@@ -94,14 +111,38 @@ export class CampaignsService {
   }
 
   static async fetchAddresses(campaignId: string): Promise<CampaignAddress[]> {
-    const { data, error } = await this.client
-      .from('campaign_addresses')
-      .select('*')
-      .eq('campaign_id', campaignId)
-      .order('created_at', { ascending: false });
+    try {
+      const { data, error } = await this.client
+        .from('campaign_addresses_geojson')
+        .select('*, qr_code_base64')  // Explicitly include qr_code_base64
+        .eq('campaign_id', campaignId)
+        .order('seq', { ascending: true });
 
-    if (error) throw error;
-    return data || [];
+      if (error) {
+        console.error('Error fetching campaign addresses:', error);
+        // Return empty array instead of throwing for graceful degradation
+        if (error.code === 'PGRST205' || error.message?.includes('schema cache')) {
+          console.warn('campaign_addresses table not found, returning empty array');
+          return [];
+        }
+        throw error;
+      }
+      return (data || []) as unknown as CampaignAddress[];
+    } catch (error) {
+      console.error('Error fetching addresses, returning empty array:', error);
+      // Gracefully handle errors - return empty array instead of crashing
+      return [];
+    }
+  }
+
+  /**
+   * @deprecated This method is deprecated. Use fetchAddresses() instead.
+   * CSV uploads now go directly to campaign_addresses table.
+   * This method is kept for backward compatibility but always returns an empty array.
+   */
+  static async fetchRecipients(campaignId: string): Promise<any[]> {
+    console.warn('fetchRecipients() is deprecated. Use fetchAddresses() instead.');
+    return [];
   }
 
   static async bulkAddAddresses(

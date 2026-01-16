@@ -6,6 +6,7 @@ export interface Campaign {
   name: string;
   type: 'letters' | 'flyers';
   destination_url: string;
+  video_url?: string; // Optional video URL to redirect to when QR code is scanned
   created_at: string;
 }
 
@@ -46,6 +47,11 @@ export interface CampaignV2 {
   created_at: string;
   status: CampaignStatus;
   seed_query?: string;
+  video_url?: string; // Optional video URL to redirect to when QR code is scanned
+  territory_boundary?: {
+    type: 'Polygon';
+    coordinates: number[][][];
+  };
   // Computed
   progress?: number;
   progress_pct?: number;
@@ -58,6 +64,8 @@ export interface CampaignAddress {
   formatted?: string;
   postal_code?: string;
   source: AddressSource;
+  source_id?: string; // Overture GERS ID or other source identifier
+  seq?: number; // Sequence number for ordering
   visited?: boolean;
   coordinate?: {
     lat: number;
@@ -66,6 +74,18 @@ export interface CampaignAddress {
   geom?: string; // PostGIS geometry
   created_at: string;
   building_outline?: Coordinate[][];
+  // Street orientation fields
+  road_bearing?: number; // 0-360 degree angle of the road
+  house_bearing?: number; // Final calculated bearing for house model (road_bearing ± 90)
+  street_name?: string; // Extracted street name for block grouping
+  is_oriented?: boolean; // Whether orientation has been computed
+  orientation_locked?: boolean; // Prevents automatic recalculation if manually set
+  // Scan tracking fields
+  scans?: number; // Total number of times this address QR code has been scanned
+  last_scanned_at?: string; // Timestamp of the most recent QR code scan
+  // QR code fields
+  qr_code_base64?: string; // Base64-encoded QR code image (data URL format)
+  purl?: string; // Tracking URL for QR code scans (e.g., /api/scan?id={address_id})
 }
 
 export interface Coordinate {
@@ -319,5 +339,35 @@ export interface QRScanEvent {
   landing_page_id?: string;
   device_type?: string;
   city?: string;
+  created_at: string;
+}
+
+// Gold Standard GERS Building Types
+export type BuildingStatus = 'default' | 'not_home' | 'interested' | 'dnc';
+
+export interface Building {
+  id: string; // UUID (surrogate key)
+  gers_id: string; // Overture GERS ID (unique external anchor)
+  campaign_id: string; // Campaign ID that owns this building
+  geom: string; // PostGIS MultiPolygon geometry (GeoJSON string)
+  centroid: string; // PostGIS Point geometry (GeoJSON string)
+  latest_status: BuildingStatus; // Cached status from trigger
+  is_hidden: boolean;
+  // Overture metadata (optional, stored in JSONB or separate columns)
+  height?: number; // Building height in meters
+  house_name?: string; // Building name from Overture
+  addr_housenumber?: string; // House number from Overture address
+  addr_street?: string; // Street name from Overture address
+  addr_unit?: string; // Unit number from Overture address
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BuildingInteraction {
+  id: string;
+  building_id: string;
+  status: BuildingStatus;
+  notes?: string;
+  user_id?: string;
   created_at: string;
 }

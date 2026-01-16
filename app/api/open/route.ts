@@ -4,39 +4,39 @@ import { createAdminClient } from '@/lib/supabase/server';
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
-    const recipientId = searchParams.get('id');
+    // Support both 'id' (legacy) and 'addressId' (new) parameters
+    const addressId = searchParams.get('addressId') || searchParams.get('id');
 
-    if (!recipientId) {
+    if (!addressId) {
       return NextResponse.redirect(new URL('/thank-you', request.url));
     }
 
     const supabase = createAdminClient();
 
-    // Update recipient status
+    // Update address visited status
     const { error: updateError } = await supabase
-      .from('campaign_recipients')
+      .from('campaign_addresses')
       .update({
-        status: 'scanned',
-        scanned_at: new Date().toISOString(),
+        visited: true,
       })
-      .eq('id', recipientId);
+      .eq('id', addressId);
 
     if (updateError) {
-      console.error('Error updating recipient:', updateError);
+      console.error('Error updating address:', updateError);
     }
 
     // Get campaign destination URL
-    const { data: recipient } = await supabase
-      .from('campaign_recipients')
+    const { data: address } = await supabase
+      .from('campaign_addresses')
       .select('campaign_id')
-      .eq('id', recipientId)
+      .eq('id', addressId)
       .single();
 
-    if (recipient) {
+    if (address) {
       const { data: campaign } = await supabase
         .from('campaigns')
         .select('destination_url')
-        .eq('id', recipient.campaign_id)
+        .eq('id', address.campaign_id)
         .single();
 
       if (campaign?.destination_url) {

@@ -7,7 +7,12 @@ import { MapModeToggle } from './MapModeToggle';
 import { BuildingLayers } from './BuildingLayers';
 import { MapControls } from './MapControls';
 import { ThreeDToggle } from './ThreeDToggle';
+import { OrientHousesButton } from './OrientHousesButton';
+import { AddressOrientationPanel } from './AddressOrientationPanel';
+import { HouseDetailPanel } from './HouseDetailPanel';
 import { Button } from '@/components/ui/button';
+import { CampaignsService } from '@/lib/services/CampaignsService';
+import type { CampaignV2, CampaignAddress } from '@/types/database';
 
 type MapMode = 'light' | 'dark' | 'satellite';
 
@@ -18,7 +23,14 @@ export function FlyrMapView() {
   const [mapLoaded, setMapLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
+  const [selectedCampaign, setSelectedCampaign] = useState<CampaignV2 | null>(null);
+  const [campaignAddresses, setCampaignAddresses] = useState<CampaignAddress[]>([]);
   const [show3DBuildings, setShow3DBuildings] = useState(false);
+  const [selectedAddress, setSelectedAddress] = useState<CampaignAddress | null>(null);
+  const [orientationPanelOpen, setOrientationPanelOpen] = useState(false);
+  const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(null);
+  const [housePanelOpen, setHousePanelOpen] = useState(false);
+  const boundsFittedRef = useRef(false);
 
   useEffect(() => {
     if (!mapContainer.current || map.current) return;
@@ -245,6 +257,141 @@ export function FlyrMapView() {
     }
   }, [show3DBuildings, mapLoaded]);
 
+  // Fetch campaign data and addresses when selectedCampaignId changes
+  const fetchCampaignData = async () => {
+    if (!selectedCampaignId) {
+      setSelectedCampaign(null);
+      setCampaignAddresses([]);
+      boundsFittedRef.current = false;
+      return;
+    }
+
+    try {
+      const [campaign, addresses] = await Promise.all([
+        CampaignsService.fetchCampaign(selectedCampaignId),
+        CampaignsService.fetchAddresses(selectedCampaignId),
+      ]);
+      
+      setSelectedCampaign(campaign);
+      setCampaignAddresses(addresses || []);
+      boundsFittedRef.current = false; // Reset bounds fitting for new campaign
+    } catch (error) {
+      console.error('Error fetching campaign data:', error);
+      setSelectedCampaign(null);
+      setCampaignAddresses([]);
+    }
+  };
+
+  useEffect(() => {
+    fetchCampaignData();
+  }, [selectedCampaignId]);
+
+  // Refresh handler for orientation completion
+  const handleOrientationComplete = () => {
+    if (selectedCampaignId) {
+      fetchCampaignData();
+    }
+  };
+
+  // Handle marker click (legacy address-based)
+  const handleMarkerClick = (addressId: string) => {
+    const address = campaignAddresses.find((addr) => addr.id === addressId);
+    if (address) {
+      setSelectedAddress(address);
+      setOrientationPanelOpen(true);
+    }
+  };
+
+  // Handle building click (Gold Standard: building UUID)
+  const handleBuildingClick = (buildingId: string) => {
+    setSelectedBuildingId(buildingId);
+    setHousePanelOpen(true);
+  };
+
+  // Handle orientation panel update
+  const handleOrientationUpdate = () => {
+    if (selectedCampaignId) {
+      fetchCampaignData();
+    }
+  };
+
+  // Helper function to extract coordinates from CampaignAddress
+  const getCoordinate = (address: CampaignAddress): { lon: number; lat: number } | null => {
+    // First try direct coordinate
+    if (address.coordinate) {
+      return address.coordinate;
+    }
+    
+    // Try parsing from geom (PostGIS geometry)
+    if (address.geom) {
+      try {
+        // Check if it's already an object
+        let geom = typeof address.geom === 'string' ? address.geom : JSON.stringify(address.geom);
+        
+        // Try to parse as JSON first
+        try {
+          const parsed = JSON.parse(geom);
+          if (parsed && parsed.coordinates) {
+            // PostGIS Point: [lon, lat]
+            if (Array.isArray(parsed.coordinates) && parsed.coordinates.length >= 2) {
+              return { lon: parsed.coordinates[0], lat: parsed.coordinates[1] };
+            }
+          }
+        } catch (jsonError) {
+          // Not valid JSON - might be WKT or PostGIS binary format
+          // Try to extract coordinates from WKT format like "POINT(lon lat)"
+          const wktMatch = geom.match(/POINT\s*\(\s*([-\d.]+)\s+([-\d.]+)\s*\)/i);
+          if (wktMatch) {
+            return { lon: parseFloat(wktMatch[1]), lat: parseFloat(wktMatch[2]) };
+          }
+          // If it's already an object with coordinates
+          if (typeof address.geom === 'object' && address.geom.coordinates) {
+            const coords = address.geom.coordinates;
+            if (Array.isArray(coords) && coords.length >= 2) {
+              return { lon: coords[0], lat: coords[1] };
+            }
+          }
+        }
+      } catch (e) {
+        // Silently skip invalid geometries - don't spam console
+        // console.warn('Failed to parse geometry for address:', address.id, e);
+      }
+    }
+    
+    return null;
+  };
+
+  // Fit map bounds to campaign addresses
+  useEffect(() => {
+    if (!map.current || !mapLoaded || campaignAddresses.length === 0 || boundsFittedRef.current) return;
+
+    const addressesWithCoords = campaignAddresses
+      .map(addr => getCoordinate(addr))
+      .filter((coord): coord is { lon: number; lat: number } => coord !== null);
+
+    if (addressesWithCoords.length > 0) {
+      // Use setTimeout to ensure map is fully ready
+      setTimeout(() => {
+        if (!map.current || boundsFittedRef.current) return;
+        
+        const bounds = new mapboxgl.LngLatBounds();
+        addressesWithCoords.forEach((coord) => {
+          bounds.extend([coord.lon, coord.lat]);
+        });
+        
+        // Only fit bounds if we have valid bounds
+        if (!bounds.isEmpty()) {
+          boundsFittedRef.current = true;
+          map.current.fitBounds(bounds, { 
+            padding: 100, 
+            maxZoom: 18,
+            duration: 1000 // Smooth animation
+          });
+        }
+      }, 200); // Small delay to ensure map is ready
+    }
+  }, [campaignAddresses, mapLoaded]);
+
 
   return (
     <div className="relative h-full w-full">
@@ -267,6 +414,10 @@ export function FlyrMapView() {
       <div ref={mapContainer} className="h-full w-full min-h-[400px]" />
       {mapLoaded && map.current && !error && (
         <>
+          <OrientHousesButton 
+            campaignId={selectedCampaignId} 
+            onComplete={handleOrientationComplete}
+          />
           <div className="absolute top-4 right-4 z-10 flex flex-col gap-2">
             <MapModeToggle mode={mapMode} onModeChange={setMapMode} />
             <ThreeDToggle enabled={show3DBuildings} onToggle={setShow3DBuildings} />
@@ -293,13 +444,37 @@ export function FlyrMapView() {
             <MapControls 
               onCampaignSelect={setSelectedCampaignId} 
               selectedCampaignId={selectedCampaignId}
+              selectedCampaignName={selectedCampaign?.name || null}
             />
           </div>
           {show3DBuildings && (
-            <BuildingLayers map={map.current} campaignId={selectedCampaignId} />
+            <BuildingLayers 
+              map={map.current} 
+              campaignId={selectedCampaignId}
+              onMarkerClick={handleMarkerClick}
+              onBuildingClick={handleBuildingClick}
+            />
           )}
         </>
       )}
+      <AddressOrientationPanel
+        address={selectedAddress}
+        open={orientationPanelOpen}
+        onClose={() => {
+          setOrientationPanelOpen(false);
+          setSelectedAddress(null);
+        }}
+        onUpdate={handleOrientationUpdate}
+      />
+      <HouseDetailPanel
+        buildingId={selectedBuildingId}
+        open={housePanelOpen}
+        onClose={() => {
+          setHousePanelOpen(false);
+          setSelectedBuildingId(null);
+        }}
+        onUpdate={handleOrientationUpdate}
+      />
     </div>
   );
 }
