@@ -1,10 +1,28 @@
-import duckdb from 'duckdb';
+// DuckDB is dynamically imported to avoid Vercel build failures
+// The native binary is not compatible with Vercel's serverless environment
+// This service is primarily used by Node scripts (not API routes on Vercel)
+type DuckDBModule = typeof import('duckdb');
+let duckdb: DuckDBModule | null = null;
 
 // Global singleton for DuckDB connection (shared with OvertureService)
 const globalForDuckDB = globalThis as unknown as {
-  overtureDb: duckdb.Database | undefined;
-  overtureConnection: duckdb.Connection | undefined;
+  overtureDb: any | undefined;
+  overtureConnection: any | undefined;
 };
+
+async function getDuckDB(): Promise<DuckDBModule> {
+  if (!duckdb) {
+    try {
+      duckdb = await import('duckdb');
+    } catch (error: any) {
+      throw new Error(
+        `DuckDB native module failed to load. This service is only available in Node.js scripts, not Vercel serverless. ` +
+        `Error: ${error.message}`
+      );
+    }
+  }
+  return duckdb;
+}
 
 export interface UnifiedBuildingFeature {
   building_id: string;
@@ -36,7 +54,7 @@ export class MotherDuckUnifiedService {
   /**
    * Get or create DuckDB database connection
    */
-  private static async getDatabase(): Promise<duckdb.Database> {
+  private static async getDatabase(): Promise<any> {
     if (globalForDuckDB.overtureDb) {
       return globalForDuckDB.overtureDb;
     }
@@ -48,6 +66,9 @@ export class MotherDuckUnifiedService {
       throw new Error('MotherDuck token is required but not provided.');
     }
 
+    // Dynamically import DuckDB to avoid Vercel build failures
+    const duckdbModule = await getDuckDB();
+
     // Use simple connection string - rely on MOTHERDUCK_TOKEN environment variable
     const connectionString = this.USE_MOTHERDUCK ? 'md:' : ':memory:';
 
@@ -55,7 +76,7 @@ export class MotherDuckUnifiedService {
     console.log(`[MotherDuckUnified] Using connection string: ${connectionString}`);
 
     try {
-      const db = new duckdb.Database(connectionString);
+      const db = new duckdbModule.Database(connectionString);
 
       if (this.USE_MOTHERDUCK) {
         // Give MotherDuck a moment to establish connection
@@ -74,18 +95,12 @@ export class MotherDuckUnifiedService {
       });
       throw error;
     }
-
-    throw new Error(
-      `Failed to initialize MotherDuck database. ` +
-      `Last error: ${lastError?.message}. ` +
-      `Please verify: 1) MOTHERDUCK_TOKEN is valid, 2) Network connectivity, 3) SSL certificates.`
-    );
   }
 
   /**
    * Get or create connection with spatial extension
    */
-  private static async getConnection(): Promise<duckdb.Connection> {
+  private static async getConnection(): Promise<any> {
     if (globalForDuckDB.overtureConnection) {
       return globalForDuckDB.overtureConnection;
     }

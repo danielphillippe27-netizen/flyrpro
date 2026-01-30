@@ -181,7 +181,7 @@ export async function GET(
     // This ensures fill-extrusion has actual polygons to render, even without Overture footprints
     if (unifiedFeatures.length === 0 && addresses.length > 0) {
       // Import parsePointGeometry from addresses route
-      const { parsePointGeometry } = await import('./addresses/route');
+      const { parsePointGeometry } = await import('../addresses/route');
 
       addresses.forEach((addr: any) => {
         // Try to get coordinates from GeoJSON geometry (from campaign_addresses_geojson view)

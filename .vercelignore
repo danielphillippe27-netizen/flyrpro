@@ -1,0 +1,21 @@
+# Large data files - not needed for deployment
+AddressDatabase2025.sqlite
+*.sqlite
+master_addresses_parquet/
+
+# 3D model source files at root (public/ ones are fine)
+/*.glb
+
+# Debug scripts
+debug-*.js
+
+# IDE
+.cursor/
+
+# Development files
+*.log
+.env*
+.DS_Store
+
+# Parquet files
+*.parquet
