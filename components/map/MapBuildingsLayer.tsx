@@ -5,18 +5,25 @@ import type { Map } from 'mapbox-gl';
 import mapboxgl from 'mapbox-gl';
 import { createClient } from '@/lib/supabase/client';
 import type { BuildingFeatureCollection, BuildingProperties, GetBuildingsInBboxParams } from '@/types/map-buildings';
-import type { ViewMode } from './ViewModeToggle';
+import { MAP_STATUS_CONFIG, type StatusFilters } from '@/lib/constants/mapStatus';
 
 interface MapBuildingsLayerProps {
   map: Map;
   campaignId?: string | null;
-  viewMode?: ViewMode;
+  statusFilters?: StatusFilters;
   showOrphans?: boolean; // Toggle to show/hide orphan buildings (buildings without address links)
   onBuildingClick?: (buildingId: string) => void;
   onAddToCRM?: (data: { address: string; addressId?: string; gersId?: string; campaignId?: string }) => void;
 }
 
-export function MapBuildingsLayer({ map, campaignId, viewMode = 'standard', showOrphans = true, onBuildingClick, onAddToCRM }: MapBuildingsLayerProps) {
+const defaultStatusFilters: StatusFilters = {
+  QR_SCANNED: true,
+  CONVERSATIONS: true,
+  TOUCHED: true,
+  UNTOUCHED: true,
+};
+
+export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStatusFilters, showOrphans = true, onBuildingClick, onAddToCRM }: MapBuildingsLayerProps) {
   const [features, setFeatures] = useState<BuildingFeatureCollection | null>(null);
   const [zoomLevel, setZoomLevel] = useState(15);
   const sourceId = 'map-buildings-source';
@@ -28,83 +35,91 @@ export function MapBuildingsLayer({ map, campaignId, viewMode = 'standard', show
   const fetchTimeout = useRef<NodeJS.Timeout>();
   const isMountedRef = useRef(true);
 
-  // Generate filter expression based on showOrphans toggle
+  // Generate filter expression based on showOrphans toggle and statusFilters
   // When showOrphans=false in campaign mode, only show buildings with feature_status='matched'
+  // StatusFilters control which status categories are visible
   // NOTE: fill-extrusion layers don't need geometry type filter - they only render polygon-like geometries
-  const getFilterExpression = (showAll: boolean, isCampaignMode: boolean): any[] | undefined => {
-    if (!isCampaignMode || showAll) {
-      // Show all features - no filter needed for fill-extrusion (it only renders polygons anyway)
+  const getFilterExpression = (showAll: boolean, isCampaignMode: boolean, filters: StatusFilters): any[] | undefined => {
+    // Build status visibility conditions based on filters
+    const statusConditions: any[] = [];
+    
+    // Helper to get effective status for a feature
+    // Priority: QR_SCANNED (scans_total > 0) > CONVERSATIONS (hot) > TOUCHED (visited) > UNTOUCHED (not_visited)
+    const getStatusValue = () => ['coalesce', ['feature-state', 'status'], ['get', 'status'], 'not_visited'];
+    const getScansTotal = () => ['coalesce', ['get', 'scans_total'], 0];
+    const getQrScanned = () => ['coalesce', ['get', 'qr_scanned'], false];
+    
+    // QR_SCANNED: qr_scanned === true OR scans_total > 0
+    const isQrScanned = ['any', ['==', getQrScanned(), true], ['>', getScansTotal(), 0]];
+    // CONVERSATIONS: status === 'hot' AND not QR scanned
+    const isConversation = ['all', ['==', getStatusValue(), 'hot'], ['!', isQrScanned]];
+    // TOUCHED: status === 'visited' AND not QR scanned
+    const isTouched = ['all', ['==', getStatusValue(), 'visited'], ['!', isQrScanned]];
+    // UNTOUCHED: status === 'not_visited' (default)
+    const isUntouched = ['==', getStatusValue(), 'not_visited'];
+    
+    // Add conditions for enabled statuses
+    if (filters.QR_SCANNED) statusConditions.push(isQrScanned);
+    if (filters.CONVERSATIONS) statusConditions.push(isConversation);
+    if (filters.TOUCHED) statusConditions.push(isTouched);
+    if (filters.UNTOUCHED) statusConditions.push(isUntouched);
+    
+    // If no statuses enabled, hide all features
+    if (statusConditions.length === 0) {
+      return ['==', 1, 0]; // Always false - hide everything
+    }
+    
+    // If all statuses enabled, check orphan filter only
+    const allEnabled = filters.QR_SCANNED && filters.CONVERSATIONS && filters.TOUCHED && filters.UNTOUCHED;
+    
+    // Combine with orphan filter if in campaign mode
+    if (isCampaignMode && !showAll) {
+      // Campaign mode with showOrphans=false: only show matched buildings AND matching status
+      if (allEnabled) {
+        return ['==', ['get', 'feature_status'], 'matched'];
+      }
+      return ['all', 
+        ['==', ['get', 'feature_status'], 'matched'],
+        ['any', ...statusConditions]
+      ];
+    }
+    
+    // If all statuses enabled and not filtering orphans, no filter needed
+    if (allEnabled) {
       return undefined;
     }
-    // Campaign mode with showOrphans=false: only show matched buildings
-    return ['==', ['get', 'feature_status'], 'matched'];
+    
+    // Return status filter only
+    return ['any', ...statusConditions];
   };
 
-  // Generate color expression based on view mode and stable linker (feature_status)
-  // When campaignId is set and not QR view: use feature_status (matched=red, orphan_building=grey)
+  // Generate unified color expression based on status priority
+  // Priority: QR_SCANNED > CONVERSATIONS > TOUCHED > UNTOUCHED
   // Uses ['feature-state', 'status'] for real-time updates via setFeatureState(),
   // with fallback to ['get', 'status'] for initial data from properties
-  const getColorExpression = (mode: ViewMode, useStableLinkerColors?: boolean): any => {
-    if (useStableLinkerColors) {
-      // Stable linker: matched (red), orphan_building (grey)
-      return [
-        'case',
-        ['==', ['coalesce', ['get', 'feature_status'], ''], 'matched'],
-        '#ef4444', // Red for matched (has link)
-        '#6b7280'  // Grey for orphan_building (no link)
-      ] as any;
-    }
-    if (mode === 'qr') {
-      // QR View: Black for not_scanned, Gold for scanned
-      // Priority: feature-state (real-time) > properties (initial load) > default
-      return [
-        'case',
-        ['==', 
-          ['coalesce', 
-            ['feature-state', 'status'],  // Real-time state (priority)
-            ['get', 'status'],             // Initial property fallback
-            'not_visited'
-          ], 
-          'visited'
-        ],
-        '#facc15', // Gold for scanned
-        ['==', 
-          ['coalesce', 
-            ['feature-state', 'status'],
-            ['get', 'status'],
-            'not_visited'
-          ], 
-          'hot'
-        ],
-        '#fbbf24', // Brighter gold for hot
-        '#1a1a1a'  // Black for not_scanned
-      ] as any;
-    } else {
-      // Standard/Work View: Red for not_visited, Green for visited
-      // Priority: feature-state (real-time) > properties (initial load) > default
-      return [
-        'case',
-        ['==', 
-          ['coalesce', 
-            ['feature-state', 'status'],  // Real-time state (priority)
-            ['get', 'status'],             // Initial property fallback
-            'not_visited'
-          ], 
-          'visited'
-        ],
-        '#22c55e', // Green for visited/scanned
-        ['==', 
-          ['coalesce', 
-            ['feature-state', 'status'],
-            ['get', 'status'],
-            'not_visited'
-          ], 
-          'hot'
-        ],
-        '#f59e0b', // Orange for hot
-        '#ef4444'  // Red for not_visited (default)
-      ] as any;
-    }
+  const getColorExpression = (): any => {
+    // Helper expressions
+    const getStatusValue = () => ['coalesce', ['feature-state', 'status'], ['get', 'status'], 'not_visited'];
+    const getScansTotal = () => ['coalesce', ['get', 'scans_total'], 0];
+    const getQrScanned = () => ['coalesce', ['get', 'qr_scanned'], false];
+    
+    return [
+      'case',
+      // QR_SCANNED (highest priority): qr_scanned === true OR scans_total > 0
+      ['any', ['==', getQrScanned(), true], ['>', getScansTotal(), 0]],
+      MAP_STATUS_CONFIG.QR_SCANNED.color, // Yellow
+      
+      // CONVERSATIONS: status === 'hot'
+      ['==', getStatusValue(), 'hot'],
+      MAP_STATUS_CONFIG.CONVERSATIONS.color, // Blue
+      
+      // TOUCHED: status === 'visited'
+      ['==', getStatusValue(), 'visited'],
+      MAP_STATUS_CONFIG.TOUCHED.color, // Green
+      
+      // UNTOUCHED (default): status === 'not_visited' or fallback
+      MAP_STATUS_CONFIG.UNTOUCHED.color // Red
+    ] as any;
   };
 
   // Track if campaign data has been loaded (for "fetch once, render forever" pattern)
@@ -427,7 +442,7 @@ export function MapBuildingsLayer({ map, campaignId, viewMode = 'standard', show
       try {
         // NOTE: Shadow layer removed to fix "dark square" visual artifact
         // The 3D fill-extrusion with proper lighting provides sufficient visual depth
-        const filterExpr = getFilterExpression(showOrphans, !!campaignId);
+        const filterExpr = getFilterExpression(showOrphans, !!campaignId, statusFilters);
 
         // Add the main building layer
         // Add without beforeId to place at end (on top of everything, including labels)
@@ -437,7 +452,7 @@ export function MapBuildingsLayer({ map, campaignId, viewMode = 'standard', show
           source: sourceId,
           minzoom: 12,
           paint: {
-            'fill-extrusion-color': getColorExpression(viewMode, !!campaignId && viewMode !== 'qr'),
+            'fill-extrusion-color': getColorExpression(),
             'fill-extrusion-vertical-gradient': true,
             'fill-extrusion-height': ['coalesce', ['get', 'height'], ['get', 'height_m'], 10] as any,
             'fill-extrusion-base': 0,
@@ -495,8 +510,8 @@ export function MapBuildingsLayer({ map, campaignId, viewMode = 'standard', show
           layerExists: !!addedLayer,
           opacity: paintOpacity,
           currentZoom,
-          viewMode,
-          colorExpression: getColorExpression(viewMode, !!campaignId && viewMode !== 'qr'),
+          statusFilters,
+          colorExpression: getColorExpression(),
           sampleFeatureStatus: features.features[0]?.properties?.status,
         });
         
@@ -688,9 +703,9 @@ export function MapBuildingsLayer({ map, campaignId, viewMode = 'standard', show
     } else {
         // Update paint properties for existing layer to ensure opacity is correct
         try {
-        const colorExpr = getColorExpression(viewMode, !!campaignId && viewMode !== 'qr');
+        const colorExpr = getColorExpression();
         console.log('[MapBuildingsLayer] Updating existing layer colors', {
-          viewMode,
+          statusFilters,
           colorExpression: colorExpr,
           layerId,
         });
@@ -722,7 +737,7 @@ export function MapBuildingsLayer({ map, campaignId, viewMode = 'standard', show
               source: sourceId,
               minzoom: (layerConfig as any).minzoom || 12,
               paint: {
-                'fill-extrusion-color': getColorExpression(viewMode, !!campaignId && viewMode !== 'qr'),
+                'fill-extrusion-color': getColorExpression(),
                 'fill-extrusion-vertical-gradient': true,
                 'fill-extrusion-height': currentPaint.height || ['coalesce', ['get', 'height'], ['get', 'height_m'], 10],
                 'fill-extrusion-base': currentPaint.base || 0,
@@ -786,27 +801,29 @@ export function MapBuildingsLayer({ map, campaignId, viewMode = 'standard', show
       map.off('idle', onIdle);
       map.off('style.load', onStyleLoad);
     };
-  }, [map, features, zoomLevel, onBuildingClick, viewMode, campaignId, supabase, onAddToCRM, showOrphans]);
+  }, [map, features, zoomLevel, onBuildingClick, statusFilters, campaignId, supabase, onAddToCRM, showOrphans]);
 
-  // Update color when viewMode or campaignId changes (stable linker uses feature_status when campaignId set)
+  // Update color and filter when statusFilters or campaignId changes
   useEffect(() => {
     if (!map || !map.getLayer(layerId)) return;
     
     try {
-      const colorExpr = getColorExpression(viewMode, !!campaignId && viewMode !== 'qr');
-      console.log('[MapBuildingsLayer] Updating color for viewMode/campaignId change', { viewMode, campaignId, colorExpr });
+      const colorExpr = getColorExpression();
+      const filterExpr = getFilterExpression(showOrphans, !!campaignId, statusFilters);
+      console.log('[MapBuildingsLayer] Updating color/filter for statusFilters change', { statusFilters, campaignId, colorExpr, filterExpr });
       map.setPaintProperty(layerId, 'fill-extrusion-color', colorExpr);
+      map.setFilter(layerId, filterExpr);
     } catch (err) {
-      console.error('[MapBuildingsLayer] Error updating color for viewMode:', err);
+      console.error('[MapBuildingsLayer] Error updating color/filter:', err);
     }
-  }, [map, viewMode, campaignId, layerId]);
+  }, [map, statusFilters, campaignId, layerId, showOrphans]);
 
   // Update filter when showOrphans changes (toggle visibility of orphan buildings)
   useEffect(() => {
     if (!map) return;
     
     const updateFilters = () => {
-      const filterExpr = getFilterExpression(showOrphans, !!campaignId);
+      const filterExpr = getFilterExpression(showOrphans, !!campaignId, statusFilters);
       console.log('[MapBuildingsLayer] Updating filter for showOrphans change', { showOrphans, campaignId, filterExpr });
       
       try {
@@ -828,7 +845,7 @@ export function MapBuildingsLayer({ map, campaignId, viewMode = 'standard', show
     return () => {
       map.off('load', updateFilters);
     };
-  }, [map, showOrphans, campaignId, layerId]);
+  }, [map, showOrphans, campaignId, statusFilters, layerId]);
 
   // Re-apply lighting and refresh colors when map style loads (important for dark mode)
   useEffect(() => {
@@ -846,7 +863,7 @@ export function MapBuildingsLayer({ map, campaignId, viewMode = 'standard', show
 
         // Refresh colors after style change (ensures they're applied correctly)
         if (map.getLayer(layerId)) {
-          map.setPaintProperty(layerId, 'fill-extrusion-color', getColorExpression(viewMode, !!campaignId && viewMode !== 'qr'));
+          map.setPaintProperty(layerId, 'fill-extrusion-color', getColorExpression());
           map.setPaintProperty(layerId, 'fill-extrusion-opacity', 1.0);
           map.setPaintProperty(layerId, 'fill-extrusion-vertical-gradient', true);
         }
@@ -866,7 +883,7 @@ export function MapBuildingsLayer({ map, campaignId, viewMode = 'standard', show
     return () => {
       map.off('style.load', applyLightingAndColors);
     };
-  }, [map, viewMode, layerId]);
+  }, [map, layerId]);
 
   // Real-time subscription for building_stats updates
   // When a QR code is scanned, building_stats is updated via trigger

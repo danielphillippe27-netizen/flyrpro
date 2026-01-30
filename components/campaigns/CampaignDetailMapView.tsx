@@ -6,10 +6,11 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import type { CampaignAddress } from '@/types/database';
 import { MapBuildingsLayer } from '@/components/map/MapBuildingsLayer';
 import { MapModeToggle } from '@/components/map/MapModeToggle';
-import { ViewModeToggle, type ViewMode } from '@/components/map/ViewModeToggle';
+import { MapLegend } from '@/components/map/MapLegend';
 import { LocationCard } from '@/components/map/LocationCard';
 import { CreateContactDialog } from '@/components/crm/CreateContactDialog';
 import { createClient } from '@/lib/supabase/client';
+import { DEFAULT_STATUS_FILTERS, type MapStatusKey, type StatusFilters } from '@/lib/constants/mapStatus';
 
 type MapMode = 'light' | 'dark' | 'satellite';
 
@@ -23,7 +24,7 @@ export function CampaignDetailMapView({
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const [mapMode, setMapMode] = useState<MapMode>('light');
-  const [viewMode, setViewMode] = useState<ViewMode>('standard');
+  const [statusFilters, setStatusFilters] = useState<StatusFilters>(DEFAULT_STATUS_FILTERS);
   const [mapLoaded, setMapLoaded] = useState(false);
   const boundsFittedRef = useRef(false);
   const initAttemptedRef = useRef(false);
@@ -407,14 +408,23 @@ export function CampaignDetailMapView({
         <>
           <div className="absolute top-4 right-4 z-10 flex flex-col gap-2">
             <MapModeToggle mode={mapMode} onModeChange={setMapMode} />
-            <ViewModeToggle mode={viewMode} onModeChange={setViewMode} />
           </div>
           <MapBuildingsLayer 
             map={map.current} 
             campaignId={campaignId}
-            viewMode={viewMode}
+            statusFilters={statusFilters}
             onBuildingClick={handleBuildingClick}
           />
+          
+          {/* Map Legend with status filters - bottom left, moves up if LocationCard is open */}
+          <div className={`absolute left-4 z-10 ${locationCardOpen && selectedBuildingId ? 'bottom-[220px]' : 'bottom-6'}`}>
+            <MapLegend
+              statusFilters={statusFilters}
+              onFilterChange={(key: MapStatusKey, enabled: boolean) => {
+                setStatusFilters(prev => ({ ...prev, [key]: enabled }));
+              }}
+            />
+          </div>
           
           {/* Location Card - floating card when building is clicked */}
           {locationCardOpen && selectedBuildingId && (

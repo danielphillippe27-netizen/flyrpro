@@ -4,20 +4,22 @@
  * This script pre-loads data into MotherDuck for fast HTTP API querying:
  * - Buildings: From Overture Maps (US + Canada)
  * - Addresses: From your private 160M address database in S3
+ * - Roads: From Overture Maps (US + Canada) - for street matching & house orientation
  * 
  * Run with: npx tsx scripts/load-overture-to-motherduck.ts
  * 
  * Prerequisites:
  * - MOTHERDUCK_TOKEN environment variable set
  * - AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY for private S3 bucket
- * - Sufficient MotherDuck storage quota
+ * - Sufficient MotherDuck storage quota (~40-60GB recommended)
  * 
  * Data loaded:
  * - overture_na.buildings: US + Canada residential buildings (Overture)
  * - overture_na.addresses: 160M US addresses (your private S3 database)
+ * - overture_na.roads: US + Canada roads (residential, secondary, tertiary, primary)
  * 
- * Estimated size: ~10-20GB total
- * Estimated time: 45-75 minutes (one-time setup)
+ * Estimated size: ~40-60GB total
+ * Estimated time: 90-150 minutes (one-time setup)
  */
 
 import { config } from 'dotenv';
@@ -105,10 +107,11 @@ async function main() {
 
     // Fresh database - no need to check/cleanup tables
 
-    // Configuration - Overture for buildings
+    // Configuration - Overture for buildings and roads
     const OVERTURE_RELEASE = '2025-12-17.0';
     const OVERTURE_S3_REGION = 'us-west-2';
     const BUILDINGS_BUCKET = `s3://overturemaps-us-west-2/release/${OVERTURE_RELEASE}/theme=buildings/type=building/*`;
+    const ROADS_BUCKET = `s3://overturemaps-us-west-2/release/${OVERTURE_RELEASE}/theme=transportation/type=segment/*`;
 
     // Configuration - Private address database
     const PRIVATE_S3_REGION = process.env.FLYR_ADDRESSES_S3_REGION || 'us-east-1';
@@ -223,14 +226,61 @@ async function main() {
       console.log('✓ Index created\n');
     }
 
+    // Create roads table from Overture (for street matching and house orientation)
+    {
+      console.log('\n--- Loading US + Canada Roads ---');
+      console.log('This may take 30-60 minutes...');
+      console.log(`Source: ${ROADS_BUCKET}`);
+      console.log(`Filter: North America bbox, residential/secondary/tertiary/primary classes only\n`);
+
+      const startRoads = Date.now();
+
+      // Switch back to Overture S3 region (no auth needed for public bucket)
+      await runExec(`SET s3_region='${OVERTURE_S3_REGION}';`);
+      await runExec(`SET s3_access_key_id='';`);
+      await runExec(`SET s3_secret_access_key='';`);
+
+      await runExec(`
+        CREATE TABLE roads AS
+        SELECT 
+          id as gers_id,
+          ST_AsGeoJSON(geometry) as geometry_json,
+          bbox.xmin as bbox_west,
+          bbox.ymin as bbox_south,
+          bbox.xmax as bbox_east,
+          bbox.ymax as bbox_north,
+          class,
+          COALESCE(names.primary, '') as name
+        FROM read_parquet('${ROADS_BUCKET}', hive_partitioning=1)
+        WHERE 
+          bbox.xmin BETWEEN ${NA_BBOX.west} AND ${NA_BBOX.east}
+          AND bbox.ymin BETWEEN ${NA_BBOX.south} AND ${NA_BBOX.north}
+          AND class IN ('residential', 'secondary', 'tertiary', 'primary')
+          AND geometry IS NOT NULL;
+      `);
+
+      const roadTime = Math.round((Date.now() - startRoads) / 1000);
+      console.log(`✓ Roads loaded in ${roadTime}s`);
+
+      // Count roads
+      const roadCount = await runQuery('SELECT COUNT(*) as cnt FROM roads;');
+      console.log(`✓ Total roads: ${roadCount[0]?.cnt?.toLocaleString()}\n`);
+
+      // Create spatial index
+      console.log('Creating roads bbox index...');
+      await runExec('CREATE INDEX IF NOT EXISTS idx_roads_bbox ON roads(bbox_west, bbox_south, bbox_east, bbox_north);');
+      console.log('✓ Index created\n');
+    }
+
     // Final summary
     console.log('\n=== Setup Complete ===');
     console.log(`Database: ${DB_NAME}`);
     console.log('Tables:');
     console.log('  - buildings: Overture Maps (US + Canada residential)');
     console.log('  - addresses: Your private 160M database (US)');
+    console.log('  - roads: Overture Maps (US + Canada, residential/secondary/tertiary/primary)');
     console.log('\nYou can now query this data via the MotherDuck HTTP API!');
-    console.log('Campaign creation will work on Vercel.');
+    console.log('Campaign creation will work on Vercel with full road support.');
 
   } catch (error: any) {
     console.error('\n❌ Error:', error.message);

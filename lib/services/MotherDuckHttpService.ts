@@ -75,10 +75,11 @@ export class MotherDuckHttpService {
   private static readonly ROW_LIMIT = 2000; // Stay under 2,048 API limit
   
   // Pre-loaded MotherDuck database (run load-overture-to-motherduck.ts first)
-  // Contains US + Canada buildings and addresses
+  // Contains US + Canada buildings, addresses, and roads
   private static readonly MOTHERDUCK_DATABASE = 'overture_na';
   private static readonly BUILDINGS_TABLE = 'overture_na.buildings';
   private static readonly ADDRESSES_TABLE = 'overture_na.addresses';
+  private static readonly ROADS_TABLE = 'overture_na.roads';
 
   private static get MOTHERDUCK_TOKEN(): string | undefined {
     return process.env.MOTHERDUCK_TOKEN;
@@ -401,13 +402,62 @@ LIMIT ${this.ROW_LIMIT};
   /**
    * Get transportation segments inside a polygon using HTTP API
    * 
-   * Note: Roads are not pre-loaded into MotherDuck to save storage/time.
-   * Returns empty array - roads can be added later if needed.
+   * Queries pre-loaded data in overture_na.roads table.
+   * Run load-overture-to-motherduck.ts first to populate the table.
    */
   static async getRoadsInPolygon(input: any): Promise<OvertureTransportation[]> {
-    console.log('[MotherDuckHttp] Roads not pre-loaded in MotherDuck, returning empty array');
-    console.log('[MotherDuckHttp] To add roads, update load-overture-to-motherduck.ts');
-    return [];
+    console.log('[MotherDuckHttp] Fetching roads from overture_na database...');
+
+    // Parse polygon from various input formats
+    let polygon = input;
+    if (input.type === 'FeatureCollection' && input.features?.length > 0) {
+      polygon = input.features[0].geometry;
+    } else if (input.type === 'Feature') {
+      polygon = input.geometry;
+    }
+
+    if (!polygon || !polygon.coordinates) {
+      console.error('[MotherDuckHttp] Invalid polygon for roads:', JSON.stringify(input).substring(0, 100));
+      return [];
+    }
+
+    // Calculate BBox for coarse filter
+    const bbox = this.calculateBBox(polygon);
+    console.log(`[MotherDuckHttp] Roads BBox: [${bbox.west}, ${bbox.south}, ${bbox.east}, ${bbox.north}]`);
+
+    // Query pre-loaded MotherDuck table (fast - no S3 scanning)
+    const query = `
+SELECT 
+    gers_id,
+    geometry_json as geometry,
+    class,
+    name
+FROM ${this.ROADS_TABLE}
+WHERE 
+    bbox_west <= ${bbox.east} AND bbox_east >= ${bbox.west}
+    AND bbox_south <= ${bbox.north} AND bbox_north >= ${bbox.south}
+LIMIT ${this.ROW_LIMIT};
+`;
+
+    try {
+      const result = await this.executeQuery(query, this.MOTHERDUCK_DATABASE);
+      const processed = this.processTransportationResults(result);
+      console.log(`[MotherDuckHttp] BBox query returned ${processed.length} roads`);
+      
+      // For roads, we don't filter by polygon (they're lines, not points)
+      // The bbox filter is sufficient for most use cases
+      return processed;
+    } catch (error: any) {
+      console.error('[MotherDuckHttp] Roads query error:', error.message);
+      // Provide helpful error if table doesn't exist
+      if (error.message.includes('does not exist') || error.message.includes('not found')) {
+        console.warn(
+          '[MotherDuckHttp] Roads table not found. Run: npx tsx scripts/load-overture-to-motherduck.ts'
+        );
+        return []; // Return empty instead of throwing - roads are optional
+      }
+      throw error;
+    }
   }
   
   /**
