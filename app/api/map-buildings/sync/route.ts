@@ -1,8 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { BuildingSyncService, type BoundingBox } from '@/lib/services/BuildingSyncService';
+// BuildingSyncService is dynamically imported to avoid DuckDB native module issues on Vercel
+// import { BuildingSyncService, type BoundingBox } from '@/lib/services/BuildingSyncService';
 
 // Ensure Node.js runtime (MotherDuck/DuckDB requires Node, not Edge)
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+interface BoundingBox {
+  west: number;
+  south: number;
+  east: number;
+  north: number;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -55,6 +64,9 @@ export async function POST(request: NextRequest) {
     if (region) {
       console.log(`[API] Region: ${region}`);
     }
+
+    // Dynamic import to avoid DuckDB native module issues on Vercel build
+    const { BuildingSyncService } = await import('@/lib/services/BuildingSyncService');
 
     // Perform sync
     let result;

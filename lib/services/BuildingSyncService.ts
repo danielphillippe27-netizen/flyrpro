@@ -2,11 +2,32 @@
  * Building Sync Service
  * Syncs building footprints from MotherDuck views to Supabase map_buildings table
  * Uses WKB geometry format for efficient transfer
+ * 
+ * NOTE: DuckDB is dynamically imported to avoid Vercel build failures.
+ * The native binary is not compatible with Vercel's serverless environment.
+ * This service is primarily used by Node.js scripts, not API routes on Vercel.
  */
 
-// @ts-ignore - duckdb types may not be available
-import duckdb from 'duckdb';
 import { createAdminClient } from '@/lib/supabase/server';
+
+// DuckDB is dynamically imported - see getDuckDB() below
+type DuckDBModule = typeof import('duckdb');
+let duckdbModule: DuckDBModule | null = null;
+
+async function getDuckDB(): Promise<DuckDBModule> {
+  if (!duckdbModule) {
+    try {
+      // @ts-ignore - duckdb types may not be available
+      duckdbModule = await import('duckdb');
+    } catch (error: any) {
+      throw new Error(
+        `DuckDB native module failed to load. This service is only available in Node.js scripts, not Vercel serverless. ` +
+        `Error: ${error.message}`
+      );
+    }
+  }
+  return duckdbModule;
+}
 
 // Reuse OvertureService singleton pattern
 const globalForDuckDB = global as unknown as { 
@@ -57,6 +78,9 @@ export class BuildingSyncService {
     if (this.USE_MOTHERDUCK && !this.MOTHERDUCK_TOKEN) {
       throw new Error('MotherDuck token is required but not provided.');
     }
+
+    // Dynamically import DuckDB to avoid Vercel build failures
+    const duckdb = await getDuckDB();
 
     // Use simple connection string - rely on MOTHERDUCK_TOKEN environment variable
     const connectionString = this.USE_MOTHERDUCK ? 'md:' : ':memory:';
