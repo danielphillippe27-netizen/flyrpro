@@ -4,14 +4,16 @@ import { useEffect, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { MapModeToggle } from './MapModeToggle';
-import { BuildingLayers } from './BuildingLayers';
+import { ViewModeToggle, type ViewMode } from './ViewModeToggle';
+import { MapBuildingsLayer } from './MapBuildingsLayer';
 import { MapControls } from './MapControls';
-import { ThreeDToggle } from './ThreeDToggle';
-import { OrientHousesButton } from './OrientHousesButton';
 import { AddressOrientationPanel } from './AddressOrientationPanel';
 import { HouseDetailPanel } from './HouseDetailPanel';
+import { LocationCard } from './LocationCard';
+import { CreateContactDialog } from '@/components/crm/CreateContactDialog';
 import { Button } from '@/components/ui/button';
 import { CampaignsService } from '@/lib/services/CampaignsService';
+import { createClient } from '@/lib/supabase/client';
 import type { CampaignV2, CampaignAddress } from '@/types/database';
 
 type MapMode = 'light' | 'dark' | 'satellite';
@@ -20,17 +22,32 @@ export function FlyrMapView() {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const [mapMode, setMapMode] = useState<MapMode>('light');
+  const [viewMode, setViewMode] = useState<ViewMode>('standard');
   const [mapLoaded, setMapLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
   const [selectedCampaign, setSelectedCampaign] = useState<CampaignV2 | null>(null);
   const [campaignAddresses, setCampaignAddresses] = useState<CampaignAddress[]>([]);
   const [show3DBuildings, setShow3DBuildings] = useState(false);
+  const [useFillExtrusion, setUseFillExtrusion] = useState(true);
   const [selectedAddress, setSelectedAddress] = useState<CampaignAddress | null>(null);
   const [orientationPanelOpen, setOrientationPanelOpen] = useState(false);
   const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(null);
   const [housePanelOpen, setHousePanelOpen] = useState(false);
+  const [locationCardOpen, setLocationCardOpen] = useState(false);
+  const [createContactDialogOpen, setCreateContactDialogOpen] = useState(false);
+  const [contactDialogData, setContactDialogData] = useState<{ address: string; addressId?: string; gersId?: string; campaignId?: string } | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
   const boundsFittedRef = useRef(false);
+  const [campaignBbox, setCampaignBbox] = useState<{ minLon: number; minLat: number; maxLon: number; maxLat: number } | null>(null);
+
+  // Get user ID on mount
+  useEffect(() => {
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setUserId(user?.id || null);
+    });
+  }, []);
 
   useEffect(() => {
     if (!mapContainer.current || map.current) return;
@@ -262,23 +279,27 @@ export function FlyrMapView() {
     if (!selectedCampaignId) {
       setSelectedCampaign(null);
       setCampaignAddresses([]);
+      setCampaignBbox(null);
       boundsFittedRef.current = false;
       return;
     }
 
     try {
-      const [campaign, addresses] = await Promise.all([
+      const [campaign, addresses, bbox] = await Promise.all([
         CampaignsService.fetchCampaign(selectedCampaignId),
         CampaignsService.fetchAddresses(selectedCampaignId),
+        CampaignsService.fetchCampaignBoundingBox(selectedCampaignId),
       ]);
       
       setSelectedCampaign(campaign);
       setCampaignAddresses(addresses || []);
+      setCampaignBbox(bbox);
       boundsFittedRef.current = false; // Reset bounds fitting for new campaign
     } catch (error) {
       console.error('Error fetching campaign data:', error);
       setSelectedCampaign(null);
       setCampaignAddresses([]);
+      setCampaignBbox(null);
     }
   };
 
@@ -286,12 +307,27 @@ export function FlyrMapView() {
     fetchCampaignData();
   }, [selectedCampaignId]);
 
-  // Refresh handler for orientation completion
-  const handleOrientationComplete = () => {
-    if (selectedCampaignId) {
-      fetchCampaignData();
-    }
-  };
+  // Fit camera to campaign bounding box when campaign is selected and map is loaded
+  useEffect(() => {
+    if (!map.current || !mapLoaded || !selectedCampaignId || !campaignBbox || boundsFittedRef.current) return;
+
+    setTimeout(() => {
+      if (!map.current || boundsFittedRef.current) return;
+      
+      const bounds = new mapboxgl.LngLatBounds(
+        [campaignBbox.minLon, campaignBbox.minLat],
+        [campaignBbox.maxLon, campaignBbox.maxLat]
+      );
+      
+      boundsFittedRef.current = true;
+      map.current.fitBounds(bounds, {
+        padding: 100,
+        maxZoom: 18,
+        duration: 1000, // Smooth animation
+      });
+    }, 100);
+  }, [selectedCampaignId, campaignBbox, mapLoaded]);
+
 
   // Handle marker click (legacy address-based)
   const handleMarkerClick = (addressId: string) => {
@@ -303,9 +339,39 @@ export function FlyrMapView() {
   };
 
   // Handle building click (Gold Standard: building UUID)
+  const handleAddToCRM = (data: { address: string; addressId?: string; gersId?: string; campaignId?: string }) => {
+    setContactDialogData(data);
+    setCreateContactDialogOpen(true);
+  };
+
   const handleBuildingClick = (buildingId: string) => {
     setSelectedBuildingId(buildingId);
+    setLocationCardOpen(true);
+  };
+
+  // Open detailed panel (from LocationCard "Log Visit" action)
+  const handleOpenDetailPanel = () => {
+    setLocationCardOpen(false);
     setHousePanelOpen(true);
+  };
+
+  // Handle navigate action from LocationCard
+  const handleNavigateToBuilding = () => {
+    // Could open Google Maps or Apple Maps with the address
+    // For now, just log - can be expanded later
+    console.log('Navigate to building:', selectedBuildingId);
+  };
+
+  // Handle adding contact from LocationCard
+  const handleAddContactFromCard = () => {
+    if (selectedBuildingId && selectedCampaignId) {
+      setContactDialogData({
+        address: '',
+        gersId: selectedBuildingId,
+        campaignId: selectedCampaignId,
+      });
+      setCreateContactDialogOpen(true);
+    }
   };
 
   // Handle orientation panel update
@@ -361,9 +427,9 @@ export function FlyrMapView() {
     return null;
   };
 
-  // Fit map bounds to campaign addresses
+  // Fit map bounds to campaign addresses when campaign is selected
   useEffect(() => {
-    if (!map.current || !mapLoaded || campaignAddresses.length === 0 || boundsFittedRef.current) return;
+    if (!map.current || !mapLoaded || !selectedCampaignId || campaignAddresses.length === 0 || boundsFittedRef.current) return;
 
     const addressesWithCoords = campaignAddresses
       .map(addr => getCoordinate(addr))
@@ -390,7 +456,7 @@ export function FlyrMapView() {
         }
       }, 200); // Small delay to ensure map is ready
     }
-  }, [campaignAddresses, mapLoaded]);
+  }, [selectedCampaignId, campaignAddresses, mapLoaded]);
 
 
   return (
@@ -414,31 +480,19 @@ export function FlyrMapView() {
       <div ref={mapContainer} className="h-full w-full min-h-[400px]" />
       {mapLoaded && map.current && !error && (
         <>
-          <OrientHousesButton 
-            campaignId={selectedCampaignId} 
-            onComplete={handleOrientationComplete}
-          />
           <div className="absolute top-4 right-4 z-10 flex flex-col gap-2">
             <MapModeToggle mode={mapMode} onModeChange={setMapMode} />
-            <ThreeDToggle enabled={show3DBuildings} onToggle={setShow3DBuildings} />
-            {show3DBuildings && !selectedCampaignId && (
+            {useFillExtrusion && selectedCampaignId && (
+              <ViewModeToggle mode={viewMode} onModeChange={setViewMode} />
+            )}
+            {useFillExtrusion && !selectedCampaignId && (
               <Button
                 variant="ghost"
                 size="sm"
                 className="bg-yellow-50/90 text-xs text-yellow-700 hover:bg-yellow-50/95 h-auto py-1 px-2 text-center border border-yellow-200"
                 disabled
               >
-                Select a campaign to see 3D buildings
-              </Button>
-            )}
-            {show3DBuildings && selectedCampaignId && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="bg-white/90 text-xs text-gray-600 hover:bg-white/95 h-auto py-1 px-2 text-center"
-                disabled
-              >
-                Press Control to change angle
+                Select a campaign to see buildings
               </Button>
             )}
             <MapControls 
@@ -447,13 +501,19 @@ export function FlyrMapView() {
               selectedCampaignName={selectedCampaign?.name || null}
             />
           </div>
-          {show3DBuildings && (
-            <BuildingLayers 
-              map={map.current} 
-              campaignId={selectedCampaignId}
-              onMarkerClick={handleMarkerClick}
-              onBuildingClick={handleBuildingClick}
-            />
+          {useFillExtrusion && (
+            <>
+              {/* #region agent log */}
+              {(() => { fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'FlyrMapView.tsx:439',message:'Rendering MapBuildingsLayer',data:{useFillExtrusion,hasMap:!!map.current,selectedCampaignId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{}); return null; })()}
+              {/* #endregion */}
+              <MapBuildingsLayer 
+                map={map.current} 
+                campaignId={selectedCampaignId}
+                viewMode={viewMode}
+                onBuildingClick={handleBuildingClick}
+                onAddToCRM={handleAddToCRM}
+              />
+            </>
           )}
         </>
       )}
@@ -466,6 +526,24 @@ export function FlyrMapView() {
         }}
         onUpdate={handleOrientationUpdate}
       />
+      
+      {/* Location Card - floating card on map when building is clicked */}
+      {locationCardOpen && selectedBuildingId && selectedCampaignId && (
+        <div className="absolute bottom-6 left-4 z-20">
+          <LocationCard
+            gersId={selectedBuildingId}
+            campaignId={selectedCampaignId}
+            onClose={() => {
+              setLocationCardOpen(false);
+              setSelectedBuildingId(null);
+            }}
+            onNavigate={handleNavigateToBuilding}
+            onLogVisit={handleOpenDetailPanel}
+            onAddContact={handleAddContactFromCard}
+          />
+        </div>
+      )}
+
       <HouseDetailPanel
         buildingId={selectedBuildingId}
         open={housePanelOpen}
@@ -475,6 +553,24 @@ export function FlyrMapView() {
         }}
         onUpdate={handleOrientationUpdate}
       />
+      {userId && (
+        <CreateContactDialog
+          open={createContactDialogOpen}
+          onClose={() => {
+            setCreateContactDialogOpen(false);
+            setContactDialogData(null);
+          }}
+          onSuccess={() => {
+            setCreateContactDialogOpen(false);
+            setContactDialogData(null);
+            // Optionally refresh map data or show success message
+          }}
+          userId={userId}
+          initialAddress={contactDialogData?.address}
+          initialAddressId={contactDialogData?.addressId}
+          initialCampaignId={contactDialogData?.campaignId}
+        />
+      )}
     </div>
   );
 }

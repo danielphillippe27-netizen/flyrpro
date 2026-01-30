@@ -52,6 +52,7 @@ export interface CampaignV2 {
     type: 'Polygon';
     coordinates: number[][][];
   };
+  bbox?: number[]; // Bounding box: [min_lon, min_lat, max_lon, max_lat]
   // Computed
   progress?: number;
   progress_pct?: number;
@@ -64,7 +65,7 @@ export interface CampaignAddress {
   formatted?: string;
   postal_code?: string;
   source: AddressSource;
-  source_id?: string; // Overture GERS ID or other source identifier
+  gers_id?: string; // Overture GERS ID or other source identifier - UUID v4 format (128-bit)
   seq?: number; // Sequence number for ordering
   visited?: boolean;
   coordinate?: {
@@ -77,9 +78,14 @@ export interface CampaignAddress {
   // Street orientation fields
   road_bearing?: number; // 0-360 degree angle of the road
   house_bearing?: number; // Final calculated bearing for house model (road_bearing ± 90)
-  street_name?: string; // Extracted street name for block grouping
+  street_name?: string; // Street name from Overture address data (also used for block grouping)
   is_oriented?: boolean; // Whether orientation has been computed
   orientation_locked?: boolean; // Prevents automatic recalculation if manually set
+  // Structured address components from Overture
+  house_number?: string; // House/unit number from Overture address data
+  locality?: string; // Town/City from Overture address data
+  region?: string; // Province/State from Overture address data
+  building_gers_id?: string; // Parent building GERS ID from Overture (parent_id) for handshake optimization
   // Scan tracking fields
   scans?: number; // Total number of times this address QR code has been scanned
   last_scanned_at?: string; // Timestamp of the most recent QR code scan
@@ -269,6 +275,8 @@ export interface Contact {
   last_contacted?: string;
   notes?: string;
   reminder_date?: string;
+  gers_id?: string; // Overture GERS ID linking to map_buildings.gers_id
+  address_id?: string; // FK to campaign_addresses.id
   created_at: string;
   updated_at: string;
 }
@@ -343,11 +351,11 @@ export interface QRScanEvent {
 }
 
 // Gold Standard GERS Building Types
-export type BuildingStatus = 'default' | 'not_home' | 'interested' | 'dnc';
+export type BuildingStatus = 'default' | 'not_home' | 'interested' | 'dnc' | 'available';
 
 export interface Building {
   id: string; // UUID (surrogate key)
-  gers_id: string; // Overture GERS ID (unique external anchor)
+  gers_id: string; // Overture GERS ID (unique external anchor) - UUID v4 format (128-bit)
   campaign_id: string; // Campaign ID that owns this building
   geom: string; // PostGIS MultiPolygon geometry (GeoJSON string)
   centroid: string; // PostGIS Point geometry (GeoJSON string)

@@ -36,6 +36,7 @@ STRIPE_WEBHOOK_SECRET=your-webhook-secret
 APP_BASE_URL=https://your-app-name.vercel.app
 NEXT_PUBLIC_EDITOR_URL=https://your-editor-url.vercel.app
 NEXT_PUBLIC_MAPBOX_TOKEN=your-mapbox-token
+MOTHERDUCK_TOKEN=your-motherduck-token
 ```
 
 ### How to Add:

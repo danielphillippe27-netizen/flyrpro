@@ -4,23 +4,81 @@ import { useEffect, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import type { CampaignAddress } from '@/types/database';
-import { MapService } from '@/lib/services/MapService';
-import { BuildingLayers, type RenderingMode } from '@/components/map/BuildingLayers';
+import { MapBuildingsLayer } from '@/components/map/MapBuildingsLayer';
+import { MapModeToggle } from '@/components/map/MapModeToggle';
+import { ViewModeToggle, type ViewMode } from '@/components/map/ViewModeToggle';
+import { LocationCard } from '@/components/map/LocationCard';
+import { CreateContactDialog } from '@/components/crm/CreateContactDialog';
+import { createClient } from '@/lib/supabase/client';
+
+type MapMode = 'light' | 'dark' | 'satellite';
 
 export function CampaignDetailMapView({
   campaignId,
   addresses,
-  mode = '3d',
 }: {
   campaignId: string;
   addresses: CampaignAddress[];
-  mode?: RenderingMode;
 }) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
+  const [mapMode, setMapMode] = useState<MapMode>('light');
+  const [viewMode, setViewMode] = useState<ViewMode>('standard');
   const [mapLoaded, setMapLoaded] = useState(false);
   const boundsFittedRef = useRef(false);
   const initAttemptedRef = useRef(false);
+  
+  // Location Card state
+  const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(null);
+  const [locationCardOpen, setLocationCardOpen] = useState(false);
+  
+  // Create Contact Dialog state
+  const [createContactOpen, setCreateContactOpen] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [selectedAddressId, setSelectedAddressId] = useState<string | undefined>(undefined);
+  const [selectedAddressText, setSelectedAddressText] = useState<string | undefined>(undefined);
+
+  // Get user ID on mount
+  useEffect(() => {
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setUserId(user?.id || null);
+    });
+  }, []);
+
+  // Handle building click - opens LocationCard
+  const handleBuildingClick = (buildingId: string) => {
+    console.log('Building clicked:', buildingId);
+    setSelectedBuildingId(buildingId);
+    setLocationCardOpen(true);
+  };
+
+  // Handle closing the location card
+  const handleCloseLocationCard = () => {
+    setLocationCardOpen(false);
+    setSelectedBuildingId(null);
+  };
+
+  // Handle adding a contact from LocationCard
+  const handleAddContact = (addressId?: string, addressText?: string) => {
+    setSelectedAddressId(addressId);
+    setSelectedAddressText(addressText);
+    setCreateContactOpen(true);
+  };
+
+  // Handle contact creation success
+  const handleContactCreated = () => {
+    setCreateContactOpen(false);
+    setSelectedAddressId(undefined);
+    setSelectedAddressText(undefined);
+    // Refresh the location card data
+    if (selectedBuildingId) {
+      // Force re-render by toggling
+      const currentId = selectedBuildingId;
+      setSelectedBuildingId(null);
+      setTimeout(() => setSelectedBuildingId(currentId), 100);
+    }
+  };
 
   useEffect(() => {
     if (!mapContainer.current || map.current || initAttemptedRef.current) return;
@@ -40,75 +98,60 @@ export function CampaignDetailMapView({
       const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || 'pk.eyJ1IjoiZmx5cnBybyIsImEiOiJjbWd6dzZsbm0wYWE3ZWpvbjIwNGVteDV6In0.lvbLszJ7ADa_Cck3A8hZEQ';
       mapboxgl.accessToken = token;
 
-      // Helper to get initial center from addresses (uses same parsing logic as getCoordinate)
+      // Helper to get initial center from addresses (GeoJSON-first approach)
       const getInitialCenter = (): [number, number] => {
         if (addresses.length > 0) {
           const addr = addresses[0];
-          // Try first address coordinate
+          
+          // Try direct coordinate first
           if (addr.coordinate) {
             return [addr.coordinate.lon, addr.coordinate.lat];
           }
           
-          // Try parsing geom using robust parsing logic
-          if (addr.geom) {
+          // GeoJSON-first: Check geometry field (type assertion for view fields)
+          const addrWithGeo = addr as CampaignAddress & { geometry?: any; geom_json?: any };
+          let geometry = addrWithGeo.geometry;
+          if (typeof geometry === 'string') {
             try {
-              let geomData: any = addr.geom;
-
-              // If it's a string, try to parse it
-              if (typeof geomData === 'string') {
-                try {
-                  geomData = JSON.parse(geomData);
-                } catch (jsonError) {
-                  // Not valid JSON - try WKT format
-                  const wktPatterns = [
-                    /POINT\s*\(\s*([-\d.]+)\s+([-\d.]+)\s*\)/i,
-                    /POINT\s*\(\s*([-\d.]+)\s*,\s*([-\d.]+)\s*\)/i,
-                    /SRID=\d+;POINT\s*\(\s*([-\d.]+)\s+([-\d.]+)\s*\)/i,
-                  ];
-
-                  for (const pattern of wktPatterns) {
-                    const match = geomData.match(pattern);
-                    if (match) {
-                      const lon = parseFloat(match[1]);
-                      const lat = parseFloat(match[2]);
-                      if (!isNaN(lon) && !isNaN(lat)) {
-                        return [lon, lat];
-                      }
-                    }
-                  }
-                  // Fall through to default if WKT parsing fails
-                }
-              }
-
-              // Handle GeoJSON Point object
-              if (typeof geomData === 'object' && geomData !== null) {
-                if (geomData.type === 'Point' && Array.isArray(geomData.coordinates) && geomData.coordinates.length >= 2) {
-                  const lon = geomData.coordinates[0];
-                  const lat = geomData.coordinates[1];
+              geometry = JSON.parse(geometry);
+            } catch {
+              // Not valid JSON
+            }
+          }
+          
+          if (geometry && typeof geometry === 'object' && geometry.type === 'Point') {
+            const coords = geometry.coordinates;
+            if (Array.isArray(coords) && coords.length >= 2) {
+              const [lon, lat] = coords;
                   if (typeof lon === 'number' && typeof lat === 'number' && !isNaN(lon) && !isNaN(lat)) {
                     return [lon, lat];
                   }
                 }
-                // Handle object with direct coordinates property
-                if (Array.isArray(geomData.coordinates) && geomData.coordinates.length >= 2) {
-                  const lon = geomData.coordinates[0];
-                  const lat = geomData.coordinates[1];
+          }
+          
+          // Fallback: Check geom_json
+          if (addrWithGeo.geom_json && typeof addrWithGeo.geom_json === 'object' && addrWithGeo.geom_json.type === 'Point') {
+            const coords = addrWithGeo.geom_json.coordinates;
+            if (Array.isArray(coords) && coords.length >= 2) {
+              const [lon, lat] = coords;
                   if (typeof lon === 'number' && typeof lat === 'number' && !isNaN(lon) && !isNaN(lat)) {
                     return [lon, lat];
                   }
-                }
-              }
-            } catch (e) {
-              // Fall through to default
             }
           }
         }
         return [-79.3832, 43.6532]; // Toronto default
       };
 
+      const styleMap: Record<MapMode, string> = {
+        light: 'mapbox://styles/flyrpro/cmie253op00fa01qmgiri8lcb', // Light 3D Style
+        dark: 'mapbox://styles/flyrpro/cmie0fu21003001qt912a9r5s', // Dark 3D Style
+        satellite: 'mapbox://styles/mapbox/satellite-v9',
+      };
+
       map.current = new mapboxgl.Map({
         container: mapContainer.current,
-        style: 'mapbox://styles/flyrpro/cmie253op00fa01qmgiri8lcb', // Light 3D Style
+        style: styleMap[mapMode],
         center: getInitialCenter(),
         zoom: 12,
       });
@@ -135,7 +178,7 @@ export function CampaignDetailMapView({
                   layer.id.includes('road_label')
                 )) {
                   try {
-                    map.current.removeLayer(layer.id);
+                    map.current?.removeLayer(layer.id);
                   } catch (err) {
                     // Layer might not exist or already removed
                   }
@@ -211,159 +254,60 @@ export function CampaignDetailMapView({
   useEffect(() => {
     if (!map.current || !mapLoaded) return;
 
-    // Robust helper function to parse coordinate from address geom field
-    // Handles: GeoJSON objects, GeoJSON strings, WKT strings, and direct coordinate objects
+    // GeoJSON-first helper: Extract coordinates from GeoJSON geometry
+    // Addresses from campaign_addresses_geojson view should already be GeoJSON
     const getCoordinate = (address: CampaignAddress): { lon: number; lat: number } | null => {
-      // First try direct coordinate
+      // First try direct coordinate (backward compatibility)
       if (address.coordinate) {
         return address.coordinate;
       }
       
-      // Try parsing from geom (PostGIS geometry)
-      if (!address.geom) {
-        return null;
+      // GeoJSON-first: Check for geometry field (from campaign_addresses_geojson view)
+      // Type assertion needed because CampaignAddress type doesn't include view fields
+      const addrWithGeo = address as CampaignAddress & { geometry?: any; geom_json?: any };
+      let geometry = addrWithGeo.geometry;
+      
+      // If geometry is a string, parse it
+      if (typeof geometry === 'string') {
+        try {
+          geometry = JSON.parse(geometry);
+        } catch {
+          // Not valid JSON, try next option
+        }
       }
-
-      try {
-        let geomData: any = address.geom;
-
-        // If it's a string, try to parse it
-        if (typeof geomData === 'string') {
-          // Try parsing as JSON first (GeoJSON string)
-          try {
-            geomData = JSON.parse(geomData);
-          } catch (jsonError) {
-            // Not valid JSON - try WKT format
-            // Handle various WKT formats: "POINT(lng lat)", "POINT (lng lat)", "POINT(lng, lat)", etc.
-            const wktPatterns = [
-              /POINT\s*\(\s*([-\d.]+)\s+([-\d.]+)\s*\)/i,  // Standard: POINT(lng lat)
-              /POINT\s*\(\s*([-\d.]+)\s*,\s*([-\d.]+)\s*\)/i,  // With comma: POINT(lng, lat)
-              /SRID=\d+;POINT\s*\(\s*([-\d.]+)\s+([-\d.]+)\s*\)/i,  // With SRID: SRID=4326;POINT(lng lat)
-            ];
-
-            for (const pattern of wktPatterns) {
-              const match = geomData.match(pattern);
-              if (match) {
-                const lon = parseFloat(match[1]);
-                const lat = parseFloat(match[2]);
-                if (!isNaN(lon) && !isNaN(lat)) {
+      
+      // Extract coordinates from GeoJSON Point
+      if (geometry && typeof geometry === 'object') {
+        if (geometry.type === 'Point' && Array.isArray(geometry.coordinates) && geometry.coordinates.length >= 2) {
+          const [lon, lat] = geometry.coordinates;
+          if (typeof lon === 'number' && typeof lat === 'number' && !isNaN(lon) && !isNaN(lat)) {
                   return { lon, lat };
                 }
               }
             }
             
-            // If WKT parsing failed, return null
-            console.warn('Failed to parse WKT geometry for address:', address.id, 'geom:', geomData);
-            return null;
-          }
-        }
-
-        // Now geomData should be an object (either original or parsed from JSON)
-        if (typeof geomData !== 'object' || geomData === null) {
-          console.warn('Invalid geometry format for address:', address.id, 'geom type:', typeof geomData);
-          return null;
-        }
-
-        // Handle GeoJSON Point object: { type: 'Point', coordinates: [lng, lat] }
-        if (geomData.type === 'Point' && Array.isArray(geomData.coordinates)) {
-          if (geomData.coordinates.length >= 2) {
-            const lon = geomData.coordinates[0];
-            const lat = geomData.coordinates[1];
-            if (typeof lon === 'number' && typeof lat === 'number' && !isNaN(lon) && !isNaN(lat)) {
-              return { lon, lat };
-            }
-          }
-        }
-
-        // Handle object with direct coordinates property: { coordinates: [lng, lat] }
-        if (Array.isArray(geomData.coordinates) && geomData.coordinates.length >= 2) {
-          const lon = geomData.coordinates[0];
-          const lat = geomData.coordinates[1];
+      // Fallback: Check geom_json field (from view)
+      if (addrWithGeo.geom_json && typeof addrWithGeo.geom_json === 'object' && addrWithGeo.geom_json.type === 'Point') {
+        const coords = addrWithGeo.geom_json.coordinates;
+        if (Array.isArray(coords) && coords.length >= 2) {
+          const [lon, lat] = coords;
           if (typeof lon === 'number' && typeof lat === 'number' && !isNaN(lon) && !isNaN(lat)) {
-            return { lon, lat };
-          }
-        }
-
-        // Handle nested geometry objects (some Supabase formats)
-        if (geomData.geometry && typeof geomData.geometry === 'object') {
-          if (geomData.geometry.coordinates && Array.isArray(geomData.geometry.coordinates) && geomData.geometry.coordinates.length >= 2) {
-            const lon = geomData.geometry.coordinates[0];
-            const lat = geomData.geometry.coordinates[1];
-            if (typeof lon === 'number' && typeof lat === 'number' && !isNaN(lon) && !isNaN(lat)) {
               return { lon, lat };
             }
           }
         }
 
-        console.warn('Could not extract coordinates from geometry for address:', address.id, 'geom structure:', JSON.stringify(geomData).substring(0, 200));
         return null;
-      } catch (e) {
-        console.warn('Failed to parse geometry for address:', address.id, 'geom type:', typeof address.geom, 'error:', e);
-        return null;
-      }
     };
 
-    // Clear existing markers first
-    const existingMarkers: mapboxgl.Marker[] = [];
-    
-    // Add markers for addresses
+    // Fit bounds to show all addresses - buildings are shown via fill extrusions from MapBuildingsLayer
     if (addresses.length > 0) {
-      console.log('Processing addresses for markers:', addresses.length);
-      let coordsFound = 0;
-      
-      addresses.forEach((address) => {
-        const coord = getCoordinate(address);
-        
-        if (coord) {
-          coordsFound++;
-          const el = document.createElement('div');
-          el.className = 'marker';
-          el.style.width = '20px';
-          el.style.height = '20px';
-          el.style.borderRadius = '50%';
-          el.style.backgroundColor = address.visited ? '#10b981' : '#3b82f6';
-          el.style.border = '2px solid white';
-          el.style.cursor = 'pointer';
-
-          const marker = new mapboxgl.Marker(el)
-            .setLngLat([coord.lon, coord.lat])
-            .setPopup(
-              new mapboxgl.Popup().setHTML(`
-                <div>
-                  <p class="font-semibold">${address.formatted || address.address || 'Address'}</p>
-                  <p class="text-sm text-gray-600">${address.visited ? 'Visited' : 'Not visited'}</p>
-                </div>
-              `)
-            )
-            .addTo(map.current!);
-          
-          existingMarkers.push(marker);
-        } else {
-          // Enhanced logging to help diagnose parsing issues
-          const geomInfo = address.geom 
-            ? (typeof address.geom === 'string' 
-                ? `string (${address.geom.substring(0, 100)}...)` 
-                : `object (${JSON.stringify(address.geom).substring(0, 100)}...)`)
-            : 'undefined';
-          console.warn('No coordinate found for address:', {
-            id: address.id,
-            hasCoordinate: !!address.coordinate,
-            hasGeom: !!address.geom,
-            geomType: typeof address.geom,
-            geomInfo,
-          });
-        }
-      });
-      
-      console.log(`Successfully created ${coordsFound} markers out of ${addresses.length} addresses`);
-
-      // Fit bounds to show all addresses - wait a bit for map to be ready and markers to be added
       const addressesWithCoords = addresses
         .map(addr => getCoordinate(addr))
         .filter((coord): coord is { lon: number; lat: number } => coord !== null);
 
       if (addressesWithCoords.length > 0 && !boundsFittedRef.current) {
-        // Use setTimeout to ensure map is fully ready and markers are added
+        // Use setTimeout to ensure map is fully ready
         setTimeout(() => {
           if (!map.current || boundsFittedRef.current) return;
           
@@ -381,107 +325,128 @@ export function CampaignDetailMapView({
               duration: 1000 // Smooth animation
             });
           }
-        }, 200); // Small delay to ensure markers are rendered
+        }, 200);
       }
     }
 
-    // Load building polygons (2D fallback/overlay)
-    const loadBuildings = async () => {
-      const addressesWithCoords = addresses
-        .map(addr => {
-          const coord = getCoordinate(addr);
-          return coord && addr.id ? { id: addr.id, lat: coord.lat, lon: coord.lon } : null;
-        })
-        .filter((a): a is { id: string; lat: number; lon: number } => a !== null);
+    // Buildings are handled by MapBuildingsLayer component which provides fill extrusions
 
-      if (addressesWithCoords.length > 0) {
-        try {
-          await MapService.requestBuildingPolygons(addressesWithCoords);
-          // Fetch and render polygons
-          const polygonIds = addressesWithCoords.map(a => a.id);
-          const polygons = await MapService.fetchBuildingPolygons(polygonIds);
-          
-          // Render polygons on map
-          if (polygons.length > 0 && map.current) {
-            const geojson = {
-              type: 'FeatureCollection' as const,
-              features: polygons.map((polygon) => ({
-                type: 'Feature' as const,
-                geometry: JSON.parse(polygon.geom),
-                properties: { address_id: polygon.address_id },
-              })),
-            };
-
-            if (map.current.getSource('buildings')) {
-              (map.current.getSource('buildings') as mapboxgl.GeoJSONSource).setData(geojson);
-            } else {
-              map.current.addSource('buildings', {
-                type: 'geojson',
-                data: geojson,
-              });
-
-              map.current.addLayer({
-                id: 'buildings-fill',
-                type: 'fill',
-                source: 'buildings',
-                paint: {
-                  'fill-color': '#3b82f6',
-                  'fill-opacity': 0.3,
-                },
-              });
-
-              map.current.addLayer({
-                id: 'buildings-line',
-                type: 'line',
-                source: 'buildings',
-                paint: {
-                  'line-color': '#3b82f6',
-                  'line-width': 2,
-                },
-              });
-            }
-          }
-        } catch (error) {
-          console.error('Error loading building polygons:', error);
-        }
-      }
-    };
-
-    loadBuildings();
-
-    // Cleanup markers on unmount or address change
+    // Cleanup on unmount or address change
     return () => {
-      existingMarkers.forEach(marker => marker.remove());
       boundsFittedRef.current = false; // Reset when addresses change
     };
   }, [mapLoaded, addresses]);
 
-  // Auto-set pitch for 3D mode (matching iOS behavior)
+  // Handle map style changes when mapMode changes
+  useEffect(() => {
+    if (!map.current || !mapLoaded) return;
+
+    const styleMap: Record<MapMode, string> = {
+      light: 'mapbox://styles/flyrpro/cmie253op00fa01qmgiri8lcb', // Light 3D Style
+      dark: 'mapbox://styles/flyrpro/cmie0fu21003001qt912a9r5s', // Dark 3D Style
+      satellite: 'mapbox://styles/mapbox/satellite-v9',
+    };
+
+    try {
+      map.current.setStyle(styleMap[mapMode]);
+    } catch (err) {
+      console.error('Error setting map style:', err);
+    }
+
+    // Hide building layers and clean up problematic layers after style loads
+    const cleanupLayers = () => {
+      if (!map.current) return;
+      
+      try {
+        const style = map.current.getStyle();
+        if (style && style.layers) {
+          style.layers.forEach((layer) => {
+            // Hide layers that contain "building" in their id
+            if (layer.id.toLowerCase().includes('building')) {
+              map.current?.setLayoutProperty(layer.id, 'visibility', 'none');
+            }
+            
+            // Remove layers that reference non-existent source layers
+            if (layer.id && (
+              layer.id.includes('road-label') || 
+              layer.id.includes('road_label')
+            )) {
+              try {
+                map.current?.removeLayer(layer.id);
+              } catch (err) {
+                // Layer might not exist or already removed
+              }
+            }
+          });
+        }
+      } catch (err) {
+        // Ignore cleanup errors
+      }
+    };
+
+    map.current.once('style.load', () => {
+      cleanupLayers();
+    });
+  }, [mapMode, mapLoaded]);
+
+  // Auto-set pitch for 3D view (fill-extrusion buildings look better with pitch)
   useEffect(() => {
     if (!map.current || !mapLoaded) return;
     
-    if (mode === '3d') {
-      // Set pitch to 60° for 3D view (matching iOS)
-      map.current.easeTo({
-        pitch: 60,
-        duration: 1000,
-      });
-    } else {
-      // Reset pitch for 2D view
-      map.current.easeTo({
-        pitch: 0,
-        duration: 1000,
-      });
-    }
-  }, [mapLoaded, mode]);
+    // Set pitch to 60° for better 3D building visualization
+    map.current.easeTo({
+      pitch: 60,
+      duration: 1000,
+    });
+  }, [mapLoaded]);
 
   return (
-    <>
+    <div className="h-full w-full relative">
       <div ref={mapContainer} className="h-full w-full" />
       {map.current && mapLoaded && (
-        <BuildingLayers map={map.current} campaignId={campaignId} mode={mode} />
+        <>
+          <div className="absolute top-4 right-4 z-10 flex flex-col gap-2">
+            <MapModeToggle mode={mapMode} onModeChange={setMapMode} />
+            <ViewModeToggle mode={viewMode} onModeChange={setViewMode} />
+          </div>
+          <MapBuildingsLayer 
+            map={map.current} 
+            campaignId={campaignId}
+            viewMode={viewMode}
+            onBuildingClick={handleBuildingClick}
+          />
+          
+          {/* Location Card - floating card when building is clicked */}
+          {locationCardOpen && selectedBuildingId && (
+            <div className="absolute bottom-6 left-4 z-20">
+              <LocationCard
+                gersId={selectedBuildingId}
+                campaignId={campaignId}
+                onClose={handleCloseLocationCard}
+                onAddContact={handleAddContact}
+              />
+            </div>
+          )}
+        </>
       )}
-    </>
+      
+      {/* Create Contact Dialog */}
+      {userId && (
+        <CreateContactDialog
+          open={createContactOpen}
+          onClose={() => {
+            setCreateContactOpen(false);
+            setSelectedAddressId(undefined);
+            setSelectedAddressText(undefined);
+          }}
+          onSuccess={handleContactCreated}
+          userId={userId}
+          initialAddress={selectedAddressText}
+          initialAddressId={selectedAddressId}
+          initialCampaignId={campaignId}
+        />
+      )}
+    </div>
   );
 }
 

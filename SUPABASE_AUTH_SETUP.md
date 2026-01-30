@@ -92,3 +92,4 @@ This means Supabase doesn't recognize the redirect URL. Add it to the **Redirect
 - ✅ Old magic links are handled gracefully
 - ⚠️ **Action Required**: Add redirect URLs to Supabase dashboard
 
+

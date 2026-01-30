@@ -3,20 +3,17 @@
 import { useEffect, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
-import { ThreeHouseLayer } from './ThreeHouseLayer';
-import type { BuildingModelPoint } from '@/lib/services/MapService';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 
 /**
  * OvertureMap Component
  * 
- * Visualizes Overture building data using 3D GLB models on a Mapbox map.
- * Fetches building data from /api/overture/buildings and renders using Three.js.
+ * Visualizes Overture building data using fill-extrusion layers on a Mapbox map.
+ * Fetches building data from /api/overture/buildings and renders using Mapbox fill-extrusion.
  */
 export function OvertureMap() {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
-  const threeLayerRef = useRef<ThreeHouseLayer | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -119,58 +116,88 @@ export function OvertureMap() {
         return;
       }
 
-      // Verify centroid in properties
-      if (data.features[0]?.properties?.centroid) {
-        console.log('✅ Centroid found in properties:', data.features[0].properties.centroid);
-      } else {
-        console.warn('⚠️ Centroid not found in properties');
-      }
-
-      // Transform GeoJSON features to BuildingModelPoint[] format
-      const modelPoints: BuildingModelPoint[] = data.features.map((feature: any) => {
-        const centroid = feature.properties.centroid; // [lng, lat]
+      // Transform features to fill-extrusion format
+      // Convert Point centroids to simple square Polygons for extrusion
+      const extrusionFeatures: GeoJSON.Feature[] = data.features.map((feature: any) => {
+        const centroid = feature.properties.centroid || feature.geometry.coordinates; // [lng, lat]
+        const height = feature.properties.height || feature.properties.levels 
+          ? (feature.properties.levels || 2) * 3 
+          : 10; // Default 10m or levels * 3m
+        
+        // Create a small square polygon around the centroid (approximately 10m x 10m)
+        const size = 0.00005; // ~5.5 meters
+        const polygon: GeoJSON.Polygon = {
+          type: 'Polygon',
+          coordinates: [[
+            [centroid[0] - size, centroid[1] - size],
+            [centroid[0] + size, centroid[1] - size],
+            [centroid[0] + size, centroid[1] + size],
+            [centroid[0] - size, centroid[1] + size],
+            [centroid[0] - size, centroid[1] - size],
+          ]],
+        };
         
         return {
           type: 'Feature',
-          geometry: {
-            type: 'Point',
-            coordinates: centroid, // [lng, lat]
-          },
+          geometry: polygon,
           properties: {
-            'model-id': feature.properties.id || `building-${Math.random()}`,
-            'front_bearing': 0, // Default bearing
-            'house_bearing': 0, // Default bearing
-            'gers_id': feature.properties.id,
-            'height_m': feature.properties.height || null,
-            'latest_status': 'default',
+            id: feature.properties.id,
+            height: height,
+            min_height: 0,
+            gers_id: feature.properties.id,
+            status: 'default',
           },
         };
       });
 
-      console.log(`Transformed ${modelPoints.length} buildings to model points`);
+      const featureCollection: GeoJSON.FeatureCollection = {
+        type: 'FeatureCollection',
+        features: extrusionFeatures,
+      };
 
-      // Create ThreeHouseLayer with GLB model
-      const threeLayer = new ThreeHouseLayer({
-        glbUrl: '/House 2026.glb',
-        features: modelPoints,
-        onModelLoad: () => {
-          console.log('✅ 3D GLB models loaded successfully');
-          setLoading(false);
-        },
-      });
+      console.log(`Transformed ${extrusionFeatures.length} buildings to fill-extrusion features`);
 
-      // Add layer to map
+      // Add source and layer to map
       const addLayer = () => {
         try {
           if (!map.current) return;
           
-          console.log('Adding Three.js layer to map...');
-          map.current.addLayer(threeLayer as any);
-          threeLayerRef.current = threeLayer;
-          console.log('✅ Three.js layer added successfully');
+          const sourceId = 'overture-buildings-source';
+          const layerId = 'overture-buildings-extrusion';
+          
+          // Add or update source
+          if (map.current.getSource(sourceId)) {
+            (map.current.getSource(sourceId) as mapboxgl.GeoJSONSource).setData(featureCollection);
+          } else {
+            map.current.addSource(sourceId, {
+              type: 'geojson',
+              data: featureCollection,
+            });
+          }
+          
+          // Add fill-extrusion layer if it doesn't exist
+          if (!map.current.getLayer(layerId)) {
+            map.current.addLayer({
+              id: layerId,
+              type: 'fill-extrusion',
+              source: sourceId,
+              minzoom: 13,
+              filter: ['==', '$type', 'Polygon'],
+              paint: {
+                'fill-extrusion-color': '#6b7280', // Gray
+                'fill-extrusion-opacity': 0.9,
+                'fill-extrusion-height': ['get', 'height'],
+                'fill-extrusion-base': ['get', 'min_height'],
+                'fill-extrusion-vertical-gradient': true,
+              },
+            });
+          }
+          
+          console.log('✅ Fill-extrusion layer added successfully');
+          setLoading(false);
         } catch (err) {
-          console.error('❌ Error adding Three.js layer:', err);
-          setError('Failed to render 3D models');
+          console.error('❌ Error adding fill-extrusion layer:', err);
+          setError('Failed to render buildings');
           setLoading(false);
         }
       };

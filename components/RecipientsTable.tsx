@@ -26,6 +26,8 @@ interface Recipient {
   sent_at: string | null;
   scanned_at: string | null;
   street_name?: string;
+  house_number?: string;
+  locality?: string;
   seq?: number;
 }
 
@@ -88,7 +90,6 @@ export function RecipientsTable({ recipients }: RecipientsTableProps) {
         <TableHeader>
           <TableRow>
             <TableHead>Address</TableHead>
-            <TableHead>Street</TableHead>
             <TableHead>Postal Code</TableHead>
             <TableHead>QR Code</TableHead>
             <TableHead>Status</TableHead>
@@ -99,12 +100,10 @@ export function RecipientsTable({ recipients }: RecipientsTableProps) {
           {recipients.map((recipient) => (
             <TableRow key={recipient.id}>
               <TableCell className="font-medium">
-                {recipient.address_line || 'N/A'}
-                {recipient.seq !== undefined && (
-                  <span className="text-xs text-gray-500 ml-2">#{recipient.seq}</span>
-                )}
+                {recipient.house_number && recipient.street_name 
+                  ? `${recipient.house_number} ${recipient.street_name}`
+                  : recipient.address_line || 'N/A'}
               </TableCell>
-              <TableCell>{recipient.street_name || recipient.city || '-'}</TableCell>
               <TableCell>{recipient.postal_code || '-'}</TableCell>
               <TableCell className="px-6 py-4 whitespace-nowrap">
                 {recipient.qr_code_base64 ? (

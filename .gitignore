@@ -39,3 +39,20 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Additional critical patterns
+.pnp.js
+/dist
+ts-debug.log*
+.env*.local
+
+# IDE
+.cursor/
+
+# Binary/Data files
+*.sqlite
+/*.glb
+master_addresses_parquet/
+
+# Debug scripts
+debug-*.js

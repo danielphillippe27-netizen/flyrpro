@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -21,6 +21,9 @@ interface CreateContactDialogProps {
   onClose: () => void;
   onSuccess: () => void;
   userId: string;
+  initialAddress?: string;
+  initialAddressId?: string;
+  initialCampaignId?: string;
 }
 
 export function CreateContactDialog({
@@ -28,6 +31,9 @@ export function CreateContactDialog({
   onClose,
   onSuccess,
   userId,
+  initialAddress,
+  initialAddressId,
+  initialCampaignId,
 }: CreateContactDialogProps) {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -35,10 +41,17 @@ export function CreateContactDialog({
     last_name: '',
     phone: '',
     email: '',
-    address: '',
+    address: initialAddress || '',
     status: 'new' as ContactStatus,
     notes: '',
   });
+
+  // Update form data when initial values change
+  useEffect(() => {
+    if (initialAddress) {
+      setFormData(prev => ({ ...prev, address: initialAddress }));
+    }
+  }, [initialAddress]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,15 +62,31 @@ export function CreateContactDialog({
 
     setLoading(true);
     try {
-      await ContactsService.createContact(userId, {
-        first_name: formData.first_name.trim(),
-        last_name: formData.last_name.trim() || undefined,
-        phone: formData.phone.trim() || undefined,
-        email: formData.email.trim() || undefined,
-        address: formData.address.trim() || undefined,
-        status: formData.status,
-        notes: formData.notes.trim() || undefined,
-      });
+      // Use createContactWithAddress if address_id is provided
+      if (initialAddressId) {
+        await ContactsService.createContactWithAddress(userId, {
+          first_name: formData.first_name.trim(),
+          last_name: formData.last_name.trim() || undefined,
+          phone: formData.phone.trim() || undefined,
+          email: formData.email.trim() || undefined,
+          address: formData.address.trim() || undefined,
+          campaign_id: initialCampaignId,
+          status: formData.status,
+          notes: formData.notes.trim() || undefined,
+          address_id: initialAddressId,
+        });
+      } else {
+        await ContactsService.createContact(userId, {
+          first_name: formData.first_name.trim(),
+          last_name: formData.last_name.trim() || undefined,
+          phone: formData.phone.trim() || undefined,
+          email: formData.email.trim() || undefined,
+          address: formData.address.trim() || undefined,
+          campaign_id: initialCampaignId,
+          status: formData.status,
+          notes: formData.notes.trim() || undefined,
+        });
+      }
 
       // Reset form
       setFormData({
@@ -74,7 +103,8 @@ export function CreateContactDialog({
       onClose();
     } catch (error) {
       console.error('Error creating contact:', error);
-      alert('Failed to create contact. Please try again.');
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      alert(`Failed to create contact: ${errorMessage}`);
     } finally {
       setLoading(false);
     }

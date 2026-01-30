@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { CampaignsService } from '@/lib/services/CampaignsService';
+import { CampaignsService, type CampaignStats } from '@/lib/services/CampaignsService';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
@@ -28,6 +28,14 @@ export default function CampaignPage() {
 
   const [campaign, setCampaign] = useState<CampaignV2 | null>(null);
   const [addresses, setAddresses] = useState<CampaignAddress[]>([]);
+  const [campaignStats, setCampaignStats] = useState<CampaignStats>({
+    addresses: 0,
+    buildings: 0,
+    visited: 0,
+    scanned: 0,
+    scan_rate: 0,
+    progress_pct: 0,
+  });
   const [loading, setLoading] = useState(true);
   // Removed syncing state - no longer needed for mission-based provisioning
   const [generating, setGenerating] = useState(false);
@@ -56,8 +64,13 @@ export default function CampaignPage() {
       const addressesData = await CampaignsService.fetchAddresses(campaignId);
       console.log('Addresses loaded:', addressesData.length);
       
+      // Fetch surgical campaign stats from RPC
+      const statsData = await CampaignsService.fetchCampaignStats(campaignId);
+      console.log('Campaign stats loaded:', statsData);
+      
       setCampaign(campaignData);
       setAddresses(addressesData);
+      setCampaignStats(statsData);
     } catch (error) {
       console.error('Error loading campaign:', error);
       if (error instanceof Error) {
@@ -287,8 +300,8 @@ export default function CampaignPage() {
   const formattedRecipients = addresses.map((addr) => ({
     id: addr.id,
     address_line: addr.formatted || addr.address || '',
-    city: '',
-    region: '',
+    city: addr.locality || '',
+    region: addr.region || '',
     postal_code: addr.postal_code || '',
     status: addr.visited ? 'scanned' : 'pending',
     qr_png_url: null,
@@ -296,6 +309,8 @@ export default function CampaignPage() {
     sent_at: null,
     scanned_at: addr.visited ? new Date().toISOString() : null,
     street_name: addr.street_name,
+    house_number: addr.house_number,
+    locality: addr.locality,
     seq: addr.seq,
   }));
 
@@ -332,18 +347,18 @@ export default function CampaignPage() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-        <StatsHeader recipients={formattedRecipients} />
+        <StatsHeader stats={campaignStats} />
 
-        {campaign.total_flyers > 0 && (
-          <div className="bg-white rounded-2xl border p-6">
+        {campaignStats.buildings > 0 && (
+          <div className="bg-white dark:bg-gray-800 rounded-2xl border dark:border-gray-700 p-6">
             <div className="flex justify-between items-center mb-2">
-              <span className="text-sm font-medium text-gray-600">Campaign Progress</span>
-              <span className="text-sm font-bold">{campaign.progress_pct || 0}%</span>
+              <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Campaign Progress</span>
+              <span className="text-sm font-bold dark:text-white">{campaignStats.progress_pct}%</span>
             </div>
-            <Progress value={campaign.progress_pct || 0} className="h-3" />
-            <div className="flex justify-between text-xs text-gray-500 mt-2">
-              <span>{campaign.scans || 0} scans</span>
-              <span>{campaign.total_flyers} total addresses</span>
+            <Progress value={campaignStats.progress_pct} className="h-3" />
+            <div className="flex justify-between text-xs text-gray-500 dark:text-gray-500 mt-2">
+              <span>{campaignStats.visited} visited</span>
+              <span>{campaignStats.buildings} total buildings</span>
             </div>
           </div>
         )}

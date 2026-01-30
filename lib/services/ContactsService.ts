@@ -126,5 +126,68 @@ export class ContactsService {
     if (error) throw error;
     return data || [];
   }
+
+  /**
+   * Link a contact to an address by address_id
+   * This automatically sets both address_id and gers_id (from campaign_addresses.gers_id)
+   * @param contactId - The contact ID to link
+   * @param addressId - The campaign_addresses.id to link to
+   * @returns The updated contact with address_id and gers_id set
+   */
+  static async linkContactToAddress(contactId: string, addressId: string): Promise<Contact> {
+    // First, fetch the address to get its gers_id
+    const { data: address, error: addressError } = await this.client
+      .from('campaign_addresses')
+      .select('id, gers_id, campaign_id')
+      .eq('id', addressId)
+      .single();
+
+    if (addressError) {
+      throw new Error(`Failed to fetch address: ${addressError.message}`);
+    }
+
+    if (!address) {
+      throw new Error(`Address not found: ${addressId}`);
+    }
+
+    // Update contact with both address_id and gers_id
+    const updates: Partial<Contact> = {
+      address_id: addressId,
+      gers_id: address.gers_id || undefined,
+      campaign_id: address.campaign_id || undefined,
+    };
+
+    const { data: updatedContact, error: updateError } = await this.client
+      .from('contacts')
+      .update(updates)
+      .eq('id', contactId)
+      .select()
+      .single();
+
+    if (updateError) {
+      throw new Error(`Failed to link contact to address: ${updateError.message}`);
+    }
+
+    return updatedContact;
+  }
+
+  /**
+   * Update createContact to optionally accept address_id and auto-link
+   * This is a wrapper that calls linkContactToAddress after creation if address_id is provided
+   */
+  static async createContactWithAddress(
+    userId: string,
+    payload: CreateContactPayload & { address_id?: string }
+  ): Promise<Contact> {
+    // Create contact first
+    const contact = await this.createContact(userId, payload);
+
+    // If address_id is provided, link it
+    if (payload.address_id) {
+      return await this.linkContactToAddress(contact.id, payload.address_id);
+    }
+
+    return contact;
+  }
 }
 

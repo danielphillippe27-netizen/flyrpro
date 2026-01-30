@@ -20,6 +20,14 @@ function HomePageContent() {
 
   useEffect(() => {
     const supabase = createClient();
+    
+    // Safety check: ensure Supabase client is properly initialized
+    if (!supabase || !supabase.auth) {
+      console.error('❌ Supabase client not properly initialized');
+      router.push('/login');
+      return;
+    }
+    
     let hasRedirected = false;
     
     // Handle old magic links that redirect directly to /home?code=...
@@ -76,7 +84,7 @@ function HomePageContent() {
     checkAuth();
 
     // Listen for auth state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    const authStateChangeResult = supabase.auth.onAuthStateChange((event, session) => {
       console.log("AUTH STATE CHANGE:", { event, session: session?.user?.id });
       
       if (session?.user) {
@@ -94,7 +102,10 @@ function HomePageContent() {
     });
 
     return () => {
-      subscription.unsubscribe();
+      // Safely unsubscribe only if subscription exists
+      if (authStateChangeResult?.data?.subscription) {
+        authStateChangeResult.data.subscription.unsubscribe();
+      }
     };
   }, [router, searchParams]);
 

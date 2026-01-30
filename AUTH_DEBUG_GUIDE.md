@@ -231,3 +231,4 @@ If you've tried everything above:
    - Run: `cat .env.local | grep SUPABASE`
    - Make sure URLs match your Supabase project
 
+

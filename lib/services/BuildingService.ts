@@ -301,32 +301,40 @@ export class BuildingService {
       .from('buildings')
       .select('*')
       .eq('id', buildingId)
-      .single();
+      .maybeSingle(); // Use maybeSingle() to handle missing buildings gracefully
 
     if (error) {
-      console.error('Error fetching building:', error);
+      // Only log non-404 errors (PGRST116 is expected when building doesn't exist)
+      if (error.code !== 'PGRST116') {
+        console.error('Error fetching building:', error);
+      }
       return null;
     }
 
-    return data as Building;
+    return data as Building | null;
   }
 
   /**
    * Fetch building by GERS ID
    */
   static async fetchBuildingByGersId(gersId: string): Promise<Building | null> {
+    // During UUID migration: query both gers_id (text) and gers_id_uuid (uuid) columns
+    // After migration: will query only gers_id_uuid
     const { data, error } = await this.client
       .from('buildings')
       .select('*')
-      .eq('gers_id', gersId)
-      .single();
+      .or(`gers_id.eq.${gersId},gers_id_uuid.eq.${gersId}`)
+      .maybeSingle(); // Use maybeSingle() to handle missing buildings gracefully
 
     if (error) {
-      console.error('Error fetching building by GERS ID:', error);
+      // Only log non-404 errors (PGRST116 is expected when building doesn't exist)
+      if (error.code !== 'PGRST116') {
+        console.error('Error fetching building by GERS ID:', error);
+      }
       return null;
     }
 
-    return data as Building;
+    return data as Building | null;
   }
 
   /**

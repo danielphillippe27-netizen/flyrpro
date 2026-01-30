@@ -59,10 +59,16 @@ export function HouseDetailPanel({
 
     setLoading(true);
     try {
-      const [buildingData, interactionData] = await Promise.all([
-        BuildingService.fetchBuilding(buildingId),
-        BuildingService.fetchBuildingInteractions(buildingId),
-      ]);
+      // buildingId is actually a gers_id from the map click
+      const buildingData = await BuildingService.fetchBuildingByGersId(buildingId);
+      
+      if (!buildingData) {
+        console.error('Building not found for GERS ID:', buildingId);
+        return;
+      }
+
+      // Once we have the building, use its internal ID for interactions
+      const interactionData = await BuildingService.fetchBuildingInteractions(buildingData.id);
 
       setBuilding(buildingData);
       setInteractions(interactionData || []);
@@ -79,11 +85,12 @@ export function HouseDetailPanel({
   };
 
   const handleCreateInteraction = async () => {
-    if (!buildingId || saving) return;
+    if (!buildingId || !building || saving) return;
 
     setSaving(true);
     try {
-      await BuildingService.createInteraction(buildingId, newStatus, newNotes || undefined);
+      // Use the building's internal ID for interactions
+      await BuildingService.createInteraction(building.id, newStatus, newNotes || undefined);
       
       // Reload data to get updated status (trigger will update latest_status)
       await loadBuildingData();
@@ -102,7 +109,7 @@ export function HouseDetailPanel({
   };
 
   const handleHideBuilding = async () => {
-    if (!buildingId || saving) return;
+    if (!buildingId || !building || saving) return;
 
     if (!confirm('Are you sure you want to hide this building? It will no longer appear on the map.')) {
       return;
@@ -110,7 +117,8 @@ export function HouseDetailPanel({
 
     setSaving(true);
     try {
-      const success = await BuildingService.hideBuilding(buildingId);
+      // Use the building's internal ID for hiding
+      const success = await BuildingService.hideBuilding(building.id);
       if (success) {
         onUpdate();
         onClose();
@@ -131,6 +139,8 @@ export function HouseDetailPanel({
         return 'text-green-600 bg-green-50 border-green-200';
       case 'dnc':
         return 'text-red-600 bg-red-50 border-red-200';
+      case 'available':
+        return 'text-red-600 bg-red-50 border-red-200'; // Red (for newly provisioned buildings)
       case 'not_home':
         return 'text-orange-600 bg-orange-50 border-orange-200';
       case 'default':
@@ -145,6 +155,8 @@ export function HouseDetailPanel({
         return 'Interested';
       case 'dnc':
         return 'Do Not Contact';
+      case 'available':
+        return 'Available';
       case 'not_home':
         return 'Not Home';
       case 'default':

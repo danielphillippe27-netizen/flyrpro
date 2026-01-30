@@ -29,25 +29,33 @@ export default function LoginPage() {
     if (hasChecked) return; // Prevent multiple checks
     
     const checkAuth = async () => {
-      setHasChecked(true);
-      
-      // Add a small delay to ensure cookies are available
-      await new Promise(resolve => setTimeout(resolve, 100));
-      
-      // Use getSession first to check cookies
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      
-      if (session?.user) {
-        router.replace('/home'); // Use replace instead of push
-        return;
-      }
-      
-      // Only try getUser if getSession failed and we're sure there's no session
-      if (!session && !sessionError) {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          router.replace('/home');
+      try {
+        setHasChecked(true);
+        
+        // Add a small delay to ensure cookies are available
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // Use getSession first to check cookies
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        
+        if (session?.user) {
+          console.log('✅ User already authenticated, redirecting to /home');
+          router.replace('/home'); // Use replace instead of push
+          return;
         }
+        
+        // Only try getUser if getSession failed and we're sure there's no session
+        if (!session && !sessionError) {
+          const { data: { user }, error: userError } = await supabase.auth.getUser();
+          if (user) {
+            console.log('✅ User found via getUser, redirecting to /home');
+            router.replace('/home');
+          }
+          // Silently continue if no user - they need to log in
+        }
+      } catch (error) {
+        console.error('❌ Auth check error:', error);
+        // Don't redirect on error, let user try to log in
       }
     };
     
@@ -141,7 +149,9 @@ export default function LoginPage() {
               alt="FLYR" 
               width={150} 
               height={40}
-              className="h-10 w-auto mb-2"
+              className="mb-2 h-10"
+              style={{ width: 'auto' }}
+              priority
             />
           </div>
           <CardDescription className="text-center">

@@ -12,8 +12,27 @@ const WKT_POINT_PATTERNS = [
   /SRID=\d+;POINT\s*\(\s*([-\d.]+)\s+([-\d.]+)\s*\)/i,
 ];
 
-function parsePointGeometry(address: any): PointGeometry | null {
-  // NEW: Check for 'geometry' field first (from updated Supabase view)
+export function parsePointGeometry(address: any): PointGeometry | null {
+  // NEW: Check for 'geom_json' field first (from Supabase view with ST_AsGeoJSON conversion)
+  if (address.geom_json) {
+    const geomJson = address.geom_json;
+    if (typeof geomJson === 'object' && geomJson !== null) {
+      if (geomJson.type === 'Point' && Array.isArray(geomJson.coordinates) && geomJson.coordinates.length >= 2) {
+        return { type: 'Point', coordinates: [geomJson.coordinates[0], geomJson.coordinates[1]] };
+      }
+    } else if (typeof geomJson === 'string') {
+      try {
+        const parsed = JSON.parse(geomJson);
+        if (parsed?.type === 'Point' && Array.isArray(parsed.coordinates) && parsed.coordinates.length >= 2) {
+          return { type: 'Point', coordinates: [parsed.coordinates[0], parsed.coordinates[1]] };
+        }
+      } catch {
+        // Ignore parsing errors
+      }
+    }
+  }
+  
+  // Check for 'geometry' field (from updated Supabase view)
   if (address.geometry) {
     if (typeof address.geometry === 'string') {
       try {
@@ -57,6 +76,35 @@ function parsePointGeometry(address: any): PointGeometry | null {
   // LEGACY: Check for 'geom' field (backward compatibility)
   if (address.geom) {
     if (typeof address.geom === 'string') {
+      // Check if it's WKB hex format (PostGIS binary)
+      const isWKBHex = /^[0-9A-Fa-f]{16,}$/.test(address.geom) && (address.geom.startsWith('01') || address.geom.startsWith('00'));
+      
+      if (isWKBHex && address.geom.length >= 50) {
+        try {
+          // Parse WKB hex Point format (EWKB with SRID)
+          // Format: [endian][type][SRID flag][SRID][lon][lat]
+          // Header: 1 + 4 + 1 + 4 = 10 bytes = 20 hex chars
+          const headerLength = 20;
+          if (address.geom.length >= headerLength + 32) {
+            const lonHex = address.geom.substring(headerLength, headerLength + 16);
+            const latHex = address.geom.substring(headerLength + 16, headerLength + 32);
+            
+            // Convert hex to Buffer and parse as little-endian double
+            const lonBuffer = Buffer.from(lonHex, 'hex');
+            const latBuffer = Buffer.from(latHex, 'hex');
+            
+            const lon = lonBuffer.readDoubleLE(0);
+            const lat = latBuffer.readDoubleLE(0);
+            
+            if (!isNaN(lon) && !isNaN(lat) && Math.abs(lon) <= 180 && Math.abs(lat) <= 90) {
+              return { type: 'Point', coordinates: [lon, lat] };
+            }
+          }
+        } catch (wkbError) {
+          // WKB parsing failed, continue to other formats
+        }
+      }
+      
       try {
         const parsed = JSON.parse(address.geom);
         if (parsed?.type === 'Point' && Array.isArray(parsed.coordinates)) {

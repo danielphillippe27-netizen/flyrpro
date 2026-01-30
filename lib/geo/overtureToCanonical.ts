@@ -17,22 +17,17 @@ export function mapOvertureToCanonical(
   campaignId: string,
   seq: number
 ): CanonicalCampaignAddress {
-  // Build formatted address from components
-  const addressParts: string[] = [];
+  // Build formatted address in North American format: "house_number street_name"
+  // e.g., "714 Mason Street"
+  let formatted = 'Address not available';
   
-  // Add street address (may include house number)
-  if (address.street) {
-    addressParts.push(address.street);
+  if (address.house_number && address.street) {
+    formatted = `${address.house_number} ${address.street}`;
+  } else if (address.street) {
+    formatted = address.street;
+  } else if (address.house_number) {
+    formatted = address.house_number;
   }
-  
-  // Add unit if present
-  if (address.unit) {
-    addressParts.push(address.unit);
-  }
-  
-  const formatted = addressParts.length > 0 
-    ? addressParts.join(', ')
-    : 'Address not available';
 
   // Extract lat/lng from geometry (Point)
   let lat = 0;
@@ -57,6 +52,11 @@ export function mapOvertureToCanonical(
     seq,
     visited: false,
     geom,
-    source_id: address.gers_id,
+    gers_id: address.gers_id,
+    house_number: address.house_number || null,
+    street_name: address.street || null,
+    locality: address.locality || null,
+    region: address.region || null,
+    building_gers_id: address.building_gers_id || null,
   };
 }

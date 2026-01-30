@@ -1,25 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
-import { OvertureService, type BoundingBox } from '@/lib/services/OvertureService';
-import { BuildingService } from '@/lib/services/BuildingService';
-import { mapOvertureToCanonical } from '@/lib/geo/overtureToCanonical';
-import * as turf from '@turf/turf';
-import type { Building } from '@/types/database';
+import { OvertureService } from '@/lib/services/OvertureService';
 
 // FIX: Ensure Node.js runtime (MotherDuck/DuckDB requires Node, not Edge)
 export const runtime = 'nodejs';
 
 interface ProvisionRequest {
   campaign_id: string;
-  boundary: {
-    type: 'Polygon';
-    coordinates: number[][][];
-  } | {
-    west: number;
-    south: number;
-    east: number;
-    north: number;
-  };
 }
 
 // Retry wrapper with exponential backoff
@@ -66,18 +53,10 @@ export async function POST(request: NextRequest) {
   try {
     const body: ProvisionRequest = await request.json();
     campaign_id = body.campaign_id;
-    const { boundary } = body;
     
     if (!campaign_id) {
       return NextResponse.json(
         { error: 'Campaign ID required' },
-        { status: 400 }
-      );
-    }
-
-    if (!boundary) {
-      return NextResponse.json(
-        { error: 'Boundary (Polygon or BBox) required' },
         { status: 400 }
       );
     }
@@ -107,291 +86,390 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // FIX: Check if already provisioned (idempotency)
-    const { data: existingCampaign } = await supabase
+    // SURGICAL PROVISIONING: Get campaign territory_boundary polygon
+    console.log('[Provision] Surgical: Getting campaign territory boundary...');
+    
+    const { data: campaignData, error: campaignDataError } = await supabase
       .from('campaigns')
-      .select('provision_status, territory_boundary')
+      .select('territory_boundary')
       .eq('id', campaign_id)
       .single();
+
+    const polygon = campaignData?.territory_boundary;
     
-    // If already provisioned and status is 'ready', return early
-    if (existingCampaign?.provision_status === 'ready') {
-      const { count } = await supabase
-        .from('buildings')
-        .select('*', { count: 'exact', head: true })
-        .eq('campaign_id', campaign_id);
-      
-      const { count: addressCount } = await supabase
-        .from('campaign_addresses')
-        .select('*', { count: 'exact', head: true })
-        .eq('campaign_id', campaign_id);
-      
-      return NextResponse.json({
-        success: true,
-        count: count || 0,
-        buildings: count || 0,
-        addresses: addressCount || 0,
-        message: 'Campaign already provisioned',
-        skipped: true
-      });
+    if (!polygon) {
+      console.error('[Provision] No territory_boundary found for campaign');
+      return NextResponse.json(
+        { error: 'No territory boundary defined. Please draw a polygon on the map when creating the campaign.' },
+        { status: 400 }
+      );
     }
     
+    console.log('[Provision] Surgical: Using polygon for precision filtering');
+
     // Update status to 'pending'
     await supabase
       .from('campaigns')
       .update({ provision_status: 'pending' })
       .eq('id', campaign_id);
 
-    // Convert boundary to bbox if Polygon provided
-    let bbox: BoundingBox;
-    let isPolygon = 'coordinates' in boundary;
-    
-    if (isPolygon) {
-      // Extract bbox from Polygon coordinates
-      const coords = boundary.coordinates[0];
-      const lons = coords.map(c => c[0]);
-      const lats = coords.map(c => c[1]);
-      bbox = {
-        west: Math.min(...lons),
-        south: Math.min(...lats),
-        east: Math.max(...lons),
-        north: Math.max(...lats)
-      };
-    } else {
-      bbox = boundary;
-    }
-
     // Wrap provisioning in retry logic
     const result = await retryWithBackoff(async () => {
-      // Step 1: Extract buildings from Overture
-      // Progress: "Scanning 3D Shapes..."
-      console.log('Scanning 3D Shapes from Overture for campaign:', campaign_id);
-      const buildings = await OvertureService.extractBuildings(bbox);
-      console.log(`Extracted ${buildings.length} buildings from Overture`);
+      // SURGICAL PROVISIONING: Fetch ONLY data inside the exact polygon
+      // No Wide Net, no BBox corners grabbing neighbors
+      console.log('[Provision] Surgical: Fetching addresses inside polygon from MotherDuck...');
+      const addresses = await OvertureService.getAddressesInPolygon(polygon);
+      console.log(`[Provision] Surgical: Fetched ${addresses.length} addresses`);
 
-    // Step 2: Filter buildings within polygon if Polygon provided
-    // Progress: "Matching Addresses..."
-    let filteredBuildings = buildings;
-    if (isPolygon) {
-      console.log('Matching Addresses to territory boundary...');
-      const polygon = turf.polygon(boundary.coordinates);
-      filteredBuildings = buildings.filter(b => {
-        const point = turf.point(b.centroid.coordinates);
-        return turf.booleanPointInPolygon(point, polygon);
-      });
-      console.log(`Filtered to ${filteredBuildings.length} buildings within polygon`);
-    }
+      console.log('[Provision] Surgical: Fetching buildings inside polygon from MotherDuck...');
+      const buildings = await OvertureService.getBuildingsInPolygon(polygon);
+      console.log(`[Provision] Surgical: Fetched ${buildings.length} buildings`);
 
-    // Step 2.5: Fetch and save addresses from polygon if Polygon provided
-    let addressCount = 0;
-    if (isPolygon) {
-      console.log('Fetching addresses inside polygon boundary...');
-      try {
-        // 1. Get addresses from Overture using the polygon
-        const addresses = await OvertureService.getAddressesInPolygon(boundary);
-        
-        if (addresses.length > 0) {
-          // 2. Map to Canonical Format
-          const canonicalAddresses = addresses.map((addr, index) => 
-            mapOvertureToCanonical(addr, campaign_id, index)
-          );
+      console.log('[Provision] Surgical: Fetching roads inside polygon from MotherDuck...');
+      const roads = await OvertureService.getRoadsInPolygon(polygon);
+      console.log(`[Provision] Surgical: Fetched ${roads.length} roads`);
 
-          // --- THE FIX: DEDUPLICATION ---
-          // We create a Map using 'source_id' as the key.
-          // If a duplicate ID exists, the Map automatically overwrites it, leaving only 1 unique copy.
-          const uniqueAddressesMap = new Map();
-          
-          canonicalAddresses.forEach(addr => {
-            uniqueAddressesMap.set(addr.source_id, {
-              campaign_id: addr.campaign_id,
-              formatted: addr.formatted,
-              postal_code: addr.postal_code,
-              source: addr.source,
-              visited: false, // Default to unvisited
-              geom: addr.geom,
-              source_id: addr.source_id,
-            });
-          });
-
-          // Convert Map back to an Array for Supabase
-          const uniqueInsertData = Array.from(uniqueAddressesMap.values());
-          // -----------------------------
-
-          console.log(`Inserting ${uniqueInsertData.length} unique addresses (filtered from ${addresses.length}) from Polygon...`);
-
-          // 4. Save to Supabase
-          const { error: insertError } = await supabase
-            .from('campaign_addresses')
-            .upsert(uniqueInsertData, { onConflict: 'campaign_id,source_id' });
-
-          if (insertError) {
-            console.error('Error saving polygon addresses:', insertError);
-          } else {
-            addressCount = uniqueInsertData.length;
-            console.log(`Successfully saved ${addressCount} addresses from polygon`);
-            
-            // 5. Update Campaign Count ONLY if save was successful
-            const { count: totalCount } = await supabase
-              .from('campaign_addresses')
-              .select('*', { count: 'exact', head: true })
-              .eq('campaign_id', campaign_id);
-
-            if (totalCount !== null) {
-              await supabase
-                .from('campaigns')
-                .update({ total_flyers: totalCount })
-                .eq('id', campaign_id);
-            }
-          }
-        } else {
-          console.log('No addresses found inside polygon boundary');
-        }
-      } catch (addressError) {
-        console.error('Error fetching addresses from polygon:', addressError);
-        // Don't fail the entire request if address fetching fails
-      }
-    }
-
-    // Step 3: Extract transportation segments for orientation
-    console.log('Fetching transportation segments for road-facing orientation...');
-    const transportation = await OvertureService.extractTransportation(bbox);
-    console.log(`Extracted ${transportation.length} transportation segments`);
-
-    // Step 4: Insert transportation segments (needed for orientation)
-    let transportCount = 0;
-    for (const segment of transportation) {
-      try {
-        const { error } = await supabase
-          .from('overture_transportation')
-          .upsert({
-            gers_id: segment.gers_id,
-            geom: JSON.stringify(segment.geometry), // Supabase handles GeoJSON strings
-            class: segment.class,
-          }, {
-            onConflict: 'gers_id',
-          });
-
-        if (!error) {
-          transportCount++;
-        }
-      } catch (err) {
-        console.error(`Error inserting transportation ${segment.gers_id}:`, err);
-      }
-    }
-
-    // Step 5: Provision buildings with orientation and campaign_id
-    // Process all buildings with orientation calculation, then batch upsert
-    // Progress: "Calculating Street Facing..." (centroid-to-road vector)
-    console.log('Calculating Street Facing using centroid-to-road vector...');
-    const buildingsToUpsert: any[] = [];
-    let errorCount = 0;
-
-    // Process buildings in parallel batches for better performance
-    // Each building gets orientation calculated using centroid-to-road vector
-    // This ensures 100% accuracy even on curved suburban roads (North Oshawa)
-    const batchSize = 50;
-    for (let i = 0; i < filteredBuildings.length; i += batchSize) {
-      const batch = filteredBuildings.slice(i, i + batchSize);
-      console.log(`Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(filteredBuildings.length / batchSize)} (${batch.length} buildings)`);
+      console.log('[Provision] Stable Linker: Preparing payloads for ingest...');
       
-      await Promise.all(
-        batch.map(async (building) => {
-          try {
-            // Find nearest transportation segment for orientation
-            // Uses centroid-to-road vector for 100% accuracy in suburban curves
-            const roadSegment = await BuildingService.findNearestTransportationSegment(
-              building as Building
-            );
+      // Helper: Validate GeoJSON has valid coordinates
+      const isValidGeoJSON = (geojson: any): boolean => {
+        if (!geojson || !geojson.type || !geojson.coordinates) return false;
+        if (!Array.isArray(geojson.coordinates)) return false;
+        
+        // Check for empty coordinates
+        if (geojson.coordinates.length === 0) return false;
+        
+        // For Point: coordinates should be [lng, lat]
+        if (geojson.type === 'Point') {
+          return geojson.coordinates.length >= 2 && 
+                 typeof geojson.coordinates[0] === 'number' &&
+                 typeof geojson.coordinates[1] === 'number' &&
+                 !isNaN(geojson.coordinates[0]) &&
+                 !isNaN(geojson.coordinates[1]);
+        }
+        
+        // For LineString: need at least 2 points
+        if (geojson.type === 'LineString') {
+          return geojson.coordinates.length >= 2;
+        }
+        
+        // For MultiLineString: need at least one line with 2+ points
+        if (geojson.type === 'MultiLineString') {
+          return geojson.coordinates.length >= 1 && 
+                 geojson.coordinates[0].length >= 2;
+        }
+        
+        // For Polygon/MultiPolygon: need at least one ring with points
+        if (geojson.type === 'Polygon') {
+          return geojson.coordinates.length > 0 && 
+                 geojson.coordinates[0].length >= 4; // Ring needs 4+ points (closed)
+        }
+        
+        if (geojson.type === 'MultiPolygon') {
+          return geojson.coordinates.length > 0 &&
+                 geojson.coordinates[0].length > 0 &&
+                 geojson.coordinates[0][0].length >= 4;
+        }
+        
+        return true; // Other types, assume valid
+      };
 
-            // Calculate orientation using centroid-to-road vector
-            // Gold Standard: Find nearestPointOnRoad from centroid, then calculate bearing
-            // This ensures perfect accuracy even on curved roads (North Oshawa)
-            let houseBearing = 0;
-            let setbackPoint = building.centroid;
-            
-            if (roadSegment) {
-              // Calculate house bearing: centroid -> nearestPointOnRoad
-              const orientation = BuildingService.calculateHouseBearing(
-                building as Building,
-                roadSegment
-              );
-              houseBearing = orientation.houseBearing;
-              
-              // Calculate 10m setback: move along vector from nearestPointOnRoad -> centroid
-              setbackPoint = BuildingService.calculateSetback(
-                building.centroid,
-                orientation.nearestPointOnRoad,
-                10 // 10 meters per Overture standard
-              );
-            }
+      // Prepare addresses data for RPC (include formatted for ingest)
+      const addressesForRPC = addresses
+        .map(address => {
+          let geojson = typeof address.geometry === 'string'
+            ? JSON.parse(address.geometry)
+            : address.geometry;
 
-            // Prepare building data for batch upsert
-            buildingsToUpsert.push({
-              gers_id: building.gers_id,
-              campaign_id: campaign_id,
-              geom: JSON.stringify(building.geometry), // PostGIS handles GeoJSON conversion
-              centroid: JSON.stringify(building.centroid),
-              latest_status: 'default',
-              is_hidden: false,
-              // Overture metadata
-              height: building.height,
-              house_name: building.house_name,
-              addr_housenumber: building.addr_housenumber,
-              addr_street: building.addr_street,
-              addr_unit: building.addr_unit,
-            });
-          } catch (err) {
-            console.error(`Error processing building ${building.gers_id}:`, err);
-            errorCount++;
+          if (!geojson || geojson.type !== 'Point') {
+            geojson = { type: 'Point', coordinates: [0, 0] };
           }
+
+          const formatted =
+            (address.formatted ?? [address.house_number, address.street, address.postcode].filter(Boolean).join(' ').trim()) || '';
+
+          return {
+            gers_id: address.gers_id,
+            geometry: geojson,
+            house_number: address.house_number,
+            street_name: address.street,
+            postal_code: address.postcode,
+            locality: address.locality,
+            formatted,
+          };
         })
-      );
-    }
+        .filter(addr => addr.gers_id && isValidGeoJSON(addr.geometry));
 
-    // Single batch upsert for all buildings (minimizes database overhead)
-    // Progress: "Finalizing Mission Territory..."
-    console.log('Finalizing Mission Territory...');
-    let provisionedCount = 0;
-    if (buildingsToUpsert.length > 0) {
-      const { data, error } = await supabase
+      // Prepare buildings data for RPC (filter out invalid geometries)
+      const buildingsForRPC = buildings
+        .map(building => {
+          let geojson = typeof building.geometry === 'string'
+            ? JSON.parse(building.geometry)
+            : building.geometry;
+
+          // Convert Polygon to MultiPolygon for consistency
+          if (geojson && geojson.type === 'Polygon' && geojson.coordinates) {
+            geojson = { type: 'MultiPolygon', coordinates: [geojson.coordinates] };
+          }
+
+          return {
+            gers_id: building.gers_id,
+            geometry: geojson,
+            height: building.height || 8,
+          };
+        })
+        .filter(bld => bld.gers_id && bld.geometry && isValidGeoJSON(bld.geometry));
+
+      // Prepare roads data for RPC (filter out invalid geometries)
+      const roadsForRPC = roads
+        .map(road => {
+          const geometry = typeof road.geometry === 'string'
+            ? JSON.parse(road.geometry) as GeoJSON.LineString
+            : road.geometry;
+          return {
+            gers_id: road.gers_id,
+            geometry: geometry,
+          };
+        })
+        .filter(rd => rd.gers_id && rd.geometry && isValidGeoJSON(rd.geometry));
+
+      // Log counts after filtering
+      console.log(`[Provision] After validation: ${addressesForRPC.length} addresses, ${buildingsForRPC.length} buildings, ${roadsForRPC.length} roads`);
+      if (addresses.length !== addressesForRPC.length) {
+        console.warn(`[Provision] Filtered out ${addresses.length - addressesForRPC.length} invalid addresses`);
+      }
+      if (buildings.length !== buildingsForRPC.length) {
+        console.warn(`[Provision] Filtered out ${buildings.length - buildingsForRPC.length} invalid buildings`);
+      }
+      if (roads.length !== roadsForRPC.length) {
+        console.warn(`[Provision] Filtered out ${roads.length - roadsForRPC.length} invalid roads`);
+      }
+
+      // Stable Linker: Step 1 - Ingest raw addresses, buildings, and roads (no linking)
+      console.log('[Provision] Stable Linker: Ingesting raw addresses, buildings, and roads...');
+      const { data: ingestResult, error: ingestError } = await supabase.rpc('ingest_campaign_raw_data', {
+        p_campaign_id: campaign_id,
+        p_addresses: addressesForRPC,
+        p_buildings: buildingsForRPC,
+        p_roads: roadsForRPC,
+      });
+
+      if (ingestError) {
+        console.error('[Provision] Ingest failed:', ingestError);
+        throw new Error(`Ingest failed: ${ingestError.message}`);
+      }
+
+      const addressesSaved = ingestResult?.addresses_saved ?? 0;
+      const buildingsSaved = ingestResult?.buildings_saved ?? 0;
+      const roadsSaved = ingestResult?.roads_saved ?? 0;
+      const buildingsDeleted = ingestResult?.buildings_deleted ?? 0;
+      console.log(`[Provision] Ingest complete: ${addressesSaved} addresses, ${buildingsSaved} buildings, ${roadsSaved} roads (deleted ${buildingsDeleted} old buildings)`);
+
+      // Verification: Confirm actual building count in DB matches expected
+      const { count: actualBuildingCount } = await supabase
         .from('buildings')
-        .upsert(buildingsToUpsert, {
-          onConflict: 'gers_id',
-        });
+        .select('*', { count: 'exact', head: true })
+        .eq('campaign_id', campaign_id);
 
-      if (error) {
-        console.error('Error batch upserting buildings:', error);
-        errorCount += buildingsToUpsert.length;
-      } else {
-        provisionedCount = buildingsToUpsert.length;
-        console.log(`Successfully provisioned ${provisionedCount} buildings for campaign ${campaign_id}`);
-      }
-    }
-
-      // Step 6: Update campaign territory_boundary if Polygon provided
-      if (isPolygon) {
-        await supabase
-          .from('campaigns')
-          .update({
-            territory_boundary: JSON.stringify(boundary) // Supabase handles GeoJSON strings
-          })
-          .eq('id', campaign_id);
+      console.log(`[Provision] Verification: Actual buildings in DB for campaign: ${actualBuildingCount}`);
+      
+      if (actualBuildingCount !== buildingsSaved) {
+        console.warn(`[Provision] WARNING: Building count mismatch! DB has ${actualBuildingCount}, expected ${buildingsSaved}`);
       }
 
-      // Update status to 'ready' on success
+      // Stable Linker: Step 2a - Run multi-pass spatial linker into building_address_links
+      console.log('[Provision] Stable Linker: Linking addresses to buildings (COVERS → NEAREST 25m)...');
+      const { data: linkResult, error: linkError } = await supabase.rpc('link_campaign_data', {
+        p_campaign_id: campaign_id,
+      });
+
+      if (linkError) {
+        console.error('[Provision] Link failed:', linkError);
+        throw new Error(`Link failed: ${linkError.message}`);
+      }
+
+      let linksCreated = linkResult?.links_created ?? 0;
+      const orphanCount = linkResult?.orphan_buildings ?? 0;
+      console.log(`[Provision] Initial link complete: ${linksCreated} links created, ${orphanCount} orphan buildings`);
+
+      // =============================================================================
+      // DISCOVERY BRAIN: Reverse geocode orphan buildings to find missing addresses
+      // =============================================================================
+      let discoveredAddresses = 0;
+      let cacheHits = 0;
+      let apiCalls = 0;
+
+      if (orphanCount > 0) {
+        console.log(`[Provision] Discovery Brain: Finding addresses for ${orphanCount} orphan buildings...`);
+
+        // Step 2b: Get linked building IDs first (fix for Supabase filter crash)
+        const { data: linkedBuildings } = await supabase
+          .from('building_address_links')
+          .select('building_id')
+          .eq('campaign_id', campaign_id);
+
+        const linkedBuildingIds = (linkedBuildings || []).map(b => b.building_id);
+        console.log(`[Provision] Discovery Brain: Found ${linkedBuildingIds.length} linked building IDs`);
+
+        // Query orphan buildings (buildings NOT in the linked set)
+        let orphanQuery = supabase
+          .from('buildings')
+          .select('id, gers_id, centroid')
+          .eq('campaign_id', campaign_id);
+
+        // Only apply the NOT IN filter if there are linked buildings
+        if (linkedBuildingIds.length > 0) {
+          orphanQuery = orphanQuery.not('id', 'in', `(${linkedBuildingIds.join(',')})`);
+        }
+
+        const { data: orphanBuildings, error: orphanError } = await orphanQuery;
+
+        if (orphanError) {
+          console.warn('[Provision] Discovery Brain: Error finding orphans:', orphanError.message);
+        } else if (orphanBuildings && orphanBuildings.length > 0) {
+          console.log(`[Provision] Discovery Brain: Processing ${orphanBuildings.length} orphan buildings...`);
+
+          for (const building of orphanBuildings) {
+            try {
+              // Parse centroid - could be GeoJSON object or PostGIS format
+              let centroidCoords: [number, number] | null = null;
+              
+              if (building.centroid) {
+                if (typeof building.centroid === 'object' && building.centroid.coordinates) {
+                  // GeoJSON format: { type: "Point", coordinates: [lon, lat] }
+                  centroidCoords = building.centroid.coordinates as [number, number];
+                } else if (typeof building.centroid === 'string') {
+                  // Try parsing as GeoJSON string
+                  try {
+                    const parsed = JSON.parse(building.centroid);
+                    if (parsed.coordinates) {
+                      centroidCoords = parsed.coordinates as [number, number];
+                    }
+                  } catch {
+                    // Might be WKT format, skip for now
+                  }
+                }
+              }
+
+              if (!centroidCoords || centroidCoords.length < 2) {
+                console.warn(`[Provision] Discovery Brain: No valid centroid for building ${building.gers_id}`);
+                continue;
+              }
+
+              const [lon, lat] = centroidCoords;
+
+              // Step 1: Check global cache first
+              const { data: cached } = await supabase
+                .from('global_address_cache')
+                .select('*')
+                .eq('gers_id', building.gers_id)
+                .maybeSingle();
+
+              let addressData: {
+                house_number: string;
+                street_name: string;
+                postal_code: string;
+                formatted_address: string;
+              } | null = null;
+
+              if (cached) {
+                // Cache hit!
+                cacheHits++;
+                addressData = {
+                  house_number: cached.house_number || '',
+                  street_name: cached.street_name || '',
+                  postal_code: cached.postal_code || '',
+                  formatted_address: cached.formatted_address || '',
+                };
+                console.log(`[Provision] Discovery Brain: Cache hit for ${building.gers_id}`);
+              } else {
+                // Cache miss - call Mapbox reverse geocode
+                apiCalls++;
+                addressData = await OvertureService.reverseGeocode(lat, lon);
+
+                if (addressData) {
+                  // Save to global cache for future use
+                  await supabase.from('global_address_cache').upsert({
+                    gers_id: building.gers_id,
+                    house_number: addressData.house_number,
+                    street_name: addressData.street_name,
+                    postal_code: addressData.postal_code,
+                    formatted_address: addressData.formatted_address,
+                    centroid: { type: 'Point', coordinates: [lon, lat] },
+                    source: 'mapbox',
+                  });
+                  console.log(`[Provision] Discovery Brain: Cached geocode for ${building.gers_id}`);
+                }
+              }
+
+              // Step 2: Insert discovered address into campaign_addresses
+              if (addressData && addressData.house_number && addressData.street_name) {
+                // Generate a unique gers_id for the discovered address
+                const discoveredGersId = `discovered-${building.gers_id}`;
+
+                const { error: insertError } = await supabase
+                  .from('campaign_addresses')
+                  .insert({
+                    campaign_id: campaign_id,
+                    gers_id: discoveredGersId,
+                    house_number: addressData.house_number,
+                    street_name: addressData.street_name,
+                    postal_code: addressData.postal_code,
+                    formatted: addressData.formatted_address,
+                    geom: { type: 'Point', coordinates: [lon, lat] },
+                  });
+
+                if (insertError) {
+                  console.warn(`[Provision] Discovery Brain: Failed to insert address for ${building.gers_id}:`, insertError.message);
+                } else {
+                  discoveredAddresses++;
+                }
+              }
+            } catch (err) {
+              console.warn(`[Provision] Discovery Brain: Error processing building ${building.gers_id}:`, err);
+            }
+          }
+
+          console.log(`[Provision] Discovery Brain: Discovered ${discoveredAddresses} addresses (${cacheHits} cache hits, ${apiCalls} API calls)`);
+
+          // Step 2c: Final link to snap discovered addresses to orphan buildings
+          if (discoveredAddresses > 0) {
+            console.log('[Provision] Discovery Brain: Running final link to snap discovered addresses...');
+            const { data: finalLinkResult, error: finalLinkError } = await supabase.rpc('link_campaign_data', {
+              p_campaign_id: campaign_id,
+            });
+
+            if (finalLinkError) {
+              console.warn('[Provision] Discovery Brain: Final link failed:', finalLinkError.message);
+            } else {
+              linksCreated = finalLinkResult?.links_created ?? linksCreated;
+              console.log(`[Provision] Discovery Brain: Final link complete, now ${linksCreated} total links`);
+            }
+          }
+        }
+      }
+      // =============================================================================
+      // END DISCOVERY BRAIN
+      // =============================================================================
+
       await supabase
         .from('campaigns')
         .update({ provision_status: 'ready' })
         .eq('id', campaign_id);
 
-      return { 
+      return {
         success: true,
-        count: provisionedCount,
-        buildings: provisionedCount,
-        addresses: addressCount,
-        transportation: transportCount,
-        errors: errorCount,
-        message: `Provisioned ${provisionedCount} buildings and ${addressCount} addresses for campaign ${campaign_id}`
+        addresses_saved: addressesSaved,
+        buildings_saved: buildingsSaved,
+        roads_saved: roadsSaved,
+        links_created: linksCreated,
+        discovered_addresses: discoveredAddresses,
+        cache_hits: cacheHits,
+        api_calls: apiCalls,
+        orphan_buildings: orphanCount - discoveredAddresses,
+        total_addresses: addressesSaved + discoveredAddresses,
+        total_buildings: linksCreated,
+        message: `Zero-Gap provisioning complete: ${addressesSaved} addresses, ${buildingsSaved} buildings, ${roadsSaved} roads ingested; ${linksCreated} links. Discovery Brain: ${discoveredAddresses} addresses discovered (${cacheHits} cached, ${apiCalls} API calls).`,
       };
     });
 

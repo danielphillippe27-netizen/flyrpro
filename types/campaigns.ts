@@ -10,6 +10,8 @@ export interface CreateCampaignPayload {
   address_source: AddressSource;
   seed_query?: string;
   addresses?: Omit<CampaignAddress, 'id' | 'campaign_id' | 'created_at'>[];
+  bbox?: number[]; // Bounding box: [min_lon, min_lat, max_lon, max_lat]
+  territory_boundary?: { type: 'Polygon'; coordinates: number[][][] }; // User's drawn polygon
 }
 
 export interface CampaignWithAddresses extends CampaignV2 {
