@@ -4,10 +4,11 @@
  * This service handles extraction of buildings and transportation segments
  * from Overture S3 buckets using DuckDB via MotherDuck (cloud) or local DuckDB.
  * 
- * NOTE: DuckDB is dynamically imported to avoid Vercel build failures.
- * The native binary is not compatible with Vercel's serverless environment.
- * This service is primarily used by Node.js scripts, not API routes on Vercel.
+ * On Vercel, uses MotherDuck HTTP API (no native binaries required).
+ * Locally, uses native DuckDB for faster performance.
  */
+
+import { MotherDuckHttpService } from './MotherDuckHttpService';
 
 // DuckDB is dynamically imported - see getDuckDB() below
 type DuckDBModule = typeof import('duckdb');
@@ -87,6 +88,19 @@ export class OvertureService {
   // MotherDuck configuration
   private static readonly MOTHERDUCK_TOKEN = process.env.MOTHERDUCK_TOKEN;
   private static readonly USE_MOTHERDUCK: boolean = !!process.env.MOTHERDUCK_TOKEN;
+  
+  /**
+   * Use HTTP API on Vercel (no native binaries), native DuckDB locally
+   * - On Vercel: Uses MotherDuckHttpService (HTTP calls to api.motherduck.com)
+   * - Locally: Uses native DuckDB for faster performance
+   */
+  private static get USE_HTTP_API(): boolean {
+    // Check if running on Vercel (production or preview)
+    const isVercel = !!process.env.VERCEL || !!process.env.VERCEL_ENV;
+    // Also check if HTTP API is explicitly requested
+    const forceHttp = process.env.FORCE_MOTHERDUCK_HTTP === 'true';
+    return (isVercel || forceHttp) && MotherDuckHttpService.isAvailable();
+  }
 
   /**
    * Get or Create the Singleton Database Instance
@@ -430,8 +444,25 @@ WHERE
    * SURGICAL PROVISIONING: Get buildings inside a polygon
    * Uses ST_Intersects at the MotherDuck level for precision filtering
    * No neighbors from BBox corners - only buildings touching your drawing
+   * 
+   * NOTE: On Vercel, this method throws an error because the HTTP API cannot
+   * query Overture S3 directly (55s timeout exceeded). Provisioning must be
+   * done locally using native DuckDB, then deployed to Vercel.
    */
   static async getBuildingsInPolygon(input: any): Promise<OvertureBuilding[]> {
+    // On Vercel, fail fast with clear guidance
+    if (this.USE_HTTP_API) {
+      console.error('[Overture] ERROR: Cannot provision Overture data on Vercel');
+      console.error('[Overture] The HTTP API has a 55s timeout that is too short for Overture S3 queries.');
+      console.error('[Overture] Please provision data locally using: npm run provision');
+      throw new Error(
+        'Provisioning is not supported on Vercel. ' +
+        'The MotherDuck HTTP API cannot query Overture S3 data within the 55-second timeout. ' +
+        'Please provision your campaign locally before deploying. ' +
+        'Run: npm run provision OR use the app locally at http://localhost:3000'
+      );
+    }
+    
     console.log('[Overture] Surgical: Fetching buildings inside polygon...');
 
     // --- ROBUST GEOJSON PARSING ---
@@ -929,8 +960,22 @@ WHERE bbox.xmin BETWEEN ${bbox.west} AND ${bbox.east}
   /**
    * SURGICAL PROVISIONING: Get roads inside a polygon
    * Uses ST_Intersects at the MotherDuck level for precision filtering
+   * 
+   * NOTE: On Vercel, this method throws an error because the HTTP API cannot
+   * query Overture S3 directly (55s timeout exceeded). Provisioning must be
+   * done locally using native DuckDB, then deployed to Vercel.
    */
   static async getRoadsInPolygon(input: any): Promise<OvertureTransportation[]> {
+    // On Vercel, fail fast with clear guidance
+    if (this.USE_HTTP_API) {
+      console.error('[Overture] ERROR: Cannot provision Overture data on Vercel');
+      throw new Error(
+        'Provisioning is not supported on Vercel. ' +
+        'The MotherDuck HTTP API cannot query Overture S3 data within the 55-second timeout. ' +
+        'Please provision your campaign locally before deploying.'
+      );
+    }
+    
     console.log('[Overture] Surgical: Fetching roads inside polygon...');
 
     // --- ROBUST GEOJSON PARSING ---
@@ -1123,8 +1168,22 @@ WHERE
    * SURGICAL PROVISIONING: Get addresses inside a polygon
    * Queries BOTH private S3 (160M addresses) AND Overture with SQL-level filtering
    * Uses ST_Intersects at MotherDuck level - no client-side filtering needed
+   * 
+   * NOTE: On Vercel, this method throws an error because the HTTP API cannot
+   * query Overture S3 directly (55s timeout exceeded). Provisioning must be
+   * done locally using native DuckDB, then deployed to Vercel.
    */
   static async getAddressesInPolygon(input: any): Promise<OvertureAddress[]> {
+    // On Vercel, fail fast with clear guidance
+    if (this.USE_HTTP_API) {
+      console.error('[Overture] ERROR: Cannot provision Overture data on Vercel');
+      throw new Error(
+        'Provisioning is not supported on Vercel. ' +
+        'The MotherDuck HTTP API cannot query Overture S3 data within the 55-second timeout. ' +
+        'Please provision your campaign locally before deploying.'
+      );
+    }
+    
     console.log('[Overture] Surgical: Fetching addresses inside polygon...');
 
     // --- ROBUST GEOJSON PARSING ---
