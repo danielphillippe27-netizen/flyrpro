@@ -158,22 +158,13 @@ export async function POST(request: NextRequest) {
         building_gers_id: addr.building_gers_id || null,
       }));
 
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'generate-address-list/route.ts:126',message:'Raw insert data prepared',data:{totalCount:rawInsertData.length,hasGersId:rawInsertData.every(i=>i.gers_id!==undefined),gersIdNullCount:rawInsertData.filter(i=>!i.gers_id||i.gers_id==='').length,gersIdSample:rawInsertData.slice(0,3).map(i=>i.gers_id),sampleItem:rawInsertData[0]?{campaign_id:rawInsertData[0].campaign_id,formatted:rawInsertData[0].formatted,gers_id:rawInsertData[0].gers_id}:null},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
 
       // 2. DEDUPLICATE: Remove records with duplicate (campaign_id, gers_id) combination
       // Filter out items without gers_id - they can't use the unique constraint for onConflict
       const itemsWithGersId = rawInsertData.filter(item => item.gers_id != null && item.gers_id !== '');
       
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'generate-address-list/route.ts:135',message:'Filtering items with gers_id',data:{totalItems:rawInsertData.length,itemsWithGersId:itemsWithGersId.length,itemsWithoutGersId:rawInsertData.length-itemsWithGersId.length,firstItemGersId:rawInsertData[0]?.gers_id},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'C'})}).catch(()=>{});
-      // #endregion
       
       if (itemsWithGersId.length === 0) {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'generate-address-list/route.ts:140',message:'No items with gers_id found',data:{totalItems:rawInsertData.length,allGersIds:rawInsertData.map(i=>i.gers_id)},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'C'})}).catch(()=>{});
-        // #endregion
         throw new Error('No addresses with gers_id found. All addresses must have a gers_id from Overture.');
       }
       
@@ -183,13 +174,7 @@ export async function POST(request: NextRequest) {
 
       console.log(`Step 3: Upserting ${uniqueInsertData.length} unique rows (filtered from ${rawInsertData.length}, ${rawInsertData.length - itemsWithGersId.length} without gers_id) to Supabase...`);
 
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'generate-address-list/route.ts:151',message:'Before upsert - checking data structure',data:{uniqueInsertDataCount:uniqueInsertData.length,firstItemKeys:uniqueInsertData[0]?Object.keys(uniqueInsertData[0]):null,hasGersId:uniqueInsertData[0]?.gers_id!==undefined,onConflictTarget:'campaign_id,gers_id',itemsWithoutGersId:rawInsertData.length-itemsWithGersId.length,firstItemSample:uniqueInsertData[0]?{campaign_id:uniqueInsertData[0].campaign_id,gers_id:uniqueInsertData[0].gers_id}:null},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
 
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'generate-address-list/route.ts:137',message:'Attempting upsert with onConflict',data:{onConflict:'campaign_id,gers_id',uniqueInsertDataSample:uniqueInsertData.slice(0,2).map(i=>({campaign_id:i.campaign_id,formatted:i.formatted,gers_id:i.gers_id}))},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
 
       // 3. Upsert the CLEAN list using the existing unique constraint
       const { data: insertedData, error: insertError } = await supabase
@@ -199,14 +184,8 @@ export async function POST(request: NextRequest) {
         })
         .select();
 
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'generate-address-list/route.ts:144',message:'After upsert - error check',data:{hasError:!!insertError,errorMessage:insertError?.message,errorCode:insertError?.code,errorDetails:insertError?.details,errorHint:insertError?.hint,insertedCount:insertedData?.length||0,uniqueInsertDataLength:uniqueInsertData.length,firstItemGersId:uniqueInsertData[0]?.gers_id},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
 
       if (insertError) {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'generate-address-list/route.ts:173',message:'Upsert error details',data:{errorMessage:insertError.message,errorCode:insertError.code,errorDetails:insertError.details,errorHint:insertError.hint,fullError:JSON.stringify(insertError),uniqueInsertDataLength:uniqueInsertData.length,firstItem:uniqueInsertData[0],onConflictUsed:'campaign_id,gers_id'},timestamp:Date.now(),sessionId:'debug-session',runId:'run3',hypothesisId:'A'})}).catch(()=>{});
-        // #endregion
         
         // Enhanced error message with troubleshooting info
         const errorMsg = `Supabase Upsert Error: ${insertError.message}`;

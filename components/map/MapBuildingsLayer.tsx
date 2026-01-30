@@ -110,11 +110,8 @@ export function MapBuildingsLayer({ map, campaignId, viewMode = 'standard', show
   // Track if campaign data has been loaded (for "fetch once, render forever" pattern)
   const campaignDataLoadedRef = useRef<string | null>(null);
 
-  // #region agent log
   useEffect(() => {
-    fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'MapBuildingsLayer.tsx:15',message:'Component mounted',data:{hasMap:!!map,hasCampaignId:!!campaignId,campaignId,mapLoaded:map?.loaded?.()},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
   }, [map, campaignId]);
-  // #endregion
 
   // CAMPAIGN MODE: Fetch ALL campaign features once (no viewport filtering)
   // This enables "fetch once, render forever" for buttery smooth pan/zoom
@@ -154,9 +151,6 @@ export function MapBuildingsLayer({ map, campaignId, viewMode = 'standard', show
   const fetchBuildingsInViewport = useCallback(async (bounds: { ne: [number, number]; sw: [number, number] }) => {
     if (!isMountedRef.current) return;
 
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'MapBuildingsLayer.tsx:27',message:'fetchBuildingsInViewport called',data:{bounds,isMounted:isMountedRef.current},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-    // #endregion
 
     try {
       const rpcParams = {
@@ -409,9 +403,6 @@ export function MapBuildingsLayer({ map, campaignId, viewMode = 'standard', show
 
       // Create source if it doesn't exist yet (source update already handled above)
       if (!source) {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'MapBuildingsLayer.tsx:219',message:'Creating new source',data:{featuresCount:features.features.length,featureTypes:features.features.map(f=>f.geometry?.type),firstFeatureGeometry:features.features[0]?.geometry?.type},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-        // #endregion
         try {
           map.addSource(sourceId, {
             type: 'geojson',
@@ -425,13 +416,7 @@ export function MapBuildingsLayer({ map, campaignId, viewMode = 'standard', show
             // Tolerance for geometry simplification (smaller = more detail)
             tolerance: 0.5,
           });
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'MapBuildingsLayer.tsx:226',message:'Source created',data:{sourceExists:!!map.getSource(sourceId),sourceType:map.getSource(sourceId)?.type},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-          // #endregion
         } catch (err) {
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'MapBuildingsLayer.tsx:228',message:'Error adding source',data:{error:String(err)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-          // #endregion
           console.error('Error adding source:', err);
           return;
         }
@@ -439,9 +424,6 @@ export function MapBuildingsLayer({ map, campaignId, viewMode = 'standard', show
 
       // Add or update fill-extrusion layer
     if (!map.getLayer(layerId)) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'MapBuildingsLayer.tsx:140',message:'Adding fill-extrusion layer',data:{layerId,sourceId,featuresCount:features.features.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-      // #endregion
       try {
         // NOTE: Shadow layer removed to fix "dark square" visual artifact
         // The 3D fill-extrusion with proper lighting provides sufficient visual depth
@@ -505,9 +487,6 @@ export function MapBuildingsLayer({ map, campaignId, viewMode = 'standard', show
         const layerAbove = layerIndex > 0 ? allLayers[layerIndex - 1] : null;
         const layerBelow = layerIndex < allLayers.length - 1 ? allLayers[layerIndex + 1] : null;
         
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'MapBuildingsLayer.tsx:290',message:'Layer verification',data:{layerExists:!!addedLayer,layerId,currentZoom,layerMinzoom,zoomMeetsMinzoom:currentZoom >= (layerMinzoom || 0),layerVisibility,paintOpacity,paintColor,paintHeight,paintGradient,sourceFeatureCount,sourceHasData:!!sourceData,layerIndex,layerAbove:layerAbove?.id,layerAboveType:layerAbove?.type,layerBelow:layerBelow?.id,layerBelowType:layerBelow?.type},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-        // #endregion
         
         console.log('[MapBuildingsLayer] Building layer added successfully', {
           layerId,
@@ -521,9 +500,6 @@ export function MapBuildingsLayer({ map, campaignId, viewMode = 'standard', show
           sampleFeatureStatus: features.features[0]?.properties?.status,
         });
         
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'MapBuildingsLayer.tsx:163',message:'Layer added successfully',data:{layerId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-        // #endregion
 
         // Helpers used in click handler (must be defined before popup content)
         const escapeHtml = (text: string): string => {
@@ -707,20 +683,11 @@ export function MapBuildingsLayer({ map, campaignId, viewMode = 'standard', show
           }
         });
       } catch (err) {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'MapBuildingsLayer.tsx:163',message:'Error adding layer',data:{error:String(err),layerId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-        // #endregion
         console.error('Error adding fill-extrusion layer:', err);
       }
     } else {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'MapBuildingsLayer.tsx:189',message:'Layer already exists',data:{layerId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-      // #endregion
         // Update paint properties for existing layer to ensure opacity is correct
         try {
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'MapBuildingsLayer.tsx:479',message:'Updating existing layer',data:{layerId,layerExists:!!map.getLayer(layerId),currentOpacity:map.getPaintProperty(layerId,'fill-extrusion-opacity'),currentColor:map.getPaintProperty(layerId,'fill-extrusion-color')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-        // #endregion
         const colorExpr = getColorExpression(viewMode, !!campaignId && viewMode !== 'qr');
         console.log('[MapBuildingsLayer] Updating existing layer colors', {
           viewMode,
@@ -731,9 +698,6 @@ export function MapBuildingsLayer({ map, campaignId, viewMode = 'standard', show
         map.setPaintProperty(layerId, 'fill-extrusion-color', colorExpr);
         map.setPaintProperty(layerId, 'fill-extrusion-vertical-gradient', true);
         
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'MapBuildingsLayer.tsx:483',message:'Paint properties updated',data:{opacity:map.getPaintProperty(layerId,'fill-extrusion-opacity'),color:map.getPaintProperty(layerId,'fill-extrusion-color'),gradient:map.getPaintProperty(layerId,'fill-extrusion-vertical-gradient')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-        // #endregion
         
         // Move layer to the end (on top of everything)
         try {
@@ -775,9 +739,6 @@ export function MapBuildingsLayer({ map, campaignId, viewMode = 'standard', show
           console.log('Layer move to end error:', moveErr);
         }
       } catch (err) {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'MapBuildingsLayer.tsx:502',message:'Error updating layer',data:{error:String(err)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-        // #endregion
         console.error('Error updating layer paint properties:', err);
       }
     }
@@ -787,9 +748,6 @@ export function MapBuildingsLayer({ map, campaignId, viewMode = 'standard', show
         const finalLayer = map.getLayer(layerId);
         const finalSource = map.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined;
         const finalSourceData = finalSource ? (finalSource as any)._data : null;
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'MapBuildingsLayer.tsx:506',message:'Final layer check',data:{layerExists:!!finalLayer,sourceExists:!!finalSource,sourceHasData:!!finalSourceData,sourceFeatureCount:finalSourceData?.features?.length,currentZoom:map.getZoom(),layerMinzoom:finalLayer ? (finalLayer as any).minzoom : null},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-        // #endregion
       }, 100);
     }; // End of updateLayers function
 

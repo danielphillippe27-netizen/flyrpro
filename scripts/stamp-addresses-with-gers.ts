@@ -24,32 +24,20 @@ import { normalizeGersId } from '../lib/utils/uuid';
 import { prepareUpsertWithDoubleWrite } from '../lib/utils/double-write';
 
 // Load environment variables
-// #region agent log
 const envLocalPath = path.join(process.cwd(), '.env.local');
 const envPath = path.join(process.cwd(), '.env');
 const envLocalExists = fs.existsSync(envLocalPath);
 const envExists = fs.existsSync(envPath);
-fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'stamp-addresses-with-gers.ts:23',message:'Checking env files before dotenv load',data:{envLocalPath,envPath,envLocalExists,envExists,cwd:process.cwd()},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-// #endregion
 
 const envLocalResult = dotenv.config({ path: '.env.local' });
-// #region agent log
-fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'stamp-addresses-with-gers.ts:28',message:'After dotenv.config(.env.local)',data:{error:envLocalResult.error?.message||null,parsed:envLocalResult.parsed?Object.keys(envLocalResult.parsed).length:0,hasSupabaseServiceRoleKey:!!(envLocalResult.parsed?.SUPABASE_SERVICE_ROLE_KEY),hasSupabaseDbPassword:!!(envLocalResult.parsed?.SUPABASE_DB_PASSWORD)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-// #endregion
 
 const envResult = dotenv.config();
-// #region agent log
-fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'stamp-addresses-with-gers.ts:33',message:'After dotenv.config() default',data:{error:envResult.error?.message||null,parsed:envResult.parsed?Object.keys(envResult.parsed).length:0,hasSupabaseServiceRoleKey:!!(envResult.parsed?.SUPABASE_SERVICE_ROLE_KEY)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-// #endregion
 
-// #region agent log
 const allEnvKeys = Object.keys(process.env).filter(k => k.includes('SUPABASE') || k.includes('MOTHERDUCK'));
 const envVarsSummary = allEnvKeys.reduce((acc, key) => {
   acc[key] = process.env[key] ? `${process.env[key]?.substring(0, 5)}...` : 'undefined';
   return acc;
 }, {} as Record<string, string>);
-fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'stamp-addresses-with-gers.ts:40',message:'Environment variables after dotenv load',data:{hasSupabaseServiceRoleKey:!!process.env.SUPABASE_SERVICE_ROLE_KEY,hasSupabaseDbPassword:!!process.env.SUPABASE_DB_PASSWORD,hasMotherDuckToken:!!process.env.MOTHERDUCK_TOKEN,relevantEnvKeys:allEnvKeys,envVarsSummary},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-// #endregion
 
 interface StampStats {
   total: number;
@@ -81,14 +69,8 @@ function getSupabaseClient() {
   // Try SUPABASE_SERVICE_ROLE_KEY first, fallback to hardcoded key (same as lib/supabase/server.ts)
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtmbnNud3F5bHNkc2JnbndneHZhIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MDkyNjczMSwiZXhwIjoyMDc2NTAyNzMxfQ.DCCPBeHISbRcz4Z-tSaGvjszB-un0vvp45avmv9YPas';
 
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'stamp-addresses-with-gers.ts:79',message:'getSupabaseClient called',data:{hasSupabaseServiceRoleKey:!!process.env.SUPABASE_SERVICE_ROLE_KEY,usingFallback:!process.env.SUPABASE_SERVICE_ROLE_KEY,hasSupabaseUrl:!!supabaseUrl,supabaseUrl,serviceKeyLength:supabaseServiceKey?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-  // #endregion
 
   if (!supabaseServiceKey) {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'stamp-addresses-with-gers.ts:85',message:'SUPABASE_SERVICE_ROLE_KEY missing',data:{allSupabaseKeys:Object.keys(process.env).filter(k=>k.includes('SUPABASE'))},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-    // #endregion
     throw new Error('SUPABASE_SERVICE_ROLE_KEY environment variable is required');
   }
 

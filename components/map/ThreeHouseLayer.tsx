@@ -117,9 +117,6 @@ export class ThreeHouseLayer {
         const center = box.getCenter(new THREE.Vector3());
         const size = box.getSize(new THREE.Vector3());
 
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ThreeHouseLayer.tsx:113',message:'GLB model bounding box',data:{sizeX:size.x,sizeY:size.y,sizeZ:size.z,centerX:center.x,centerY:center.y,centerZ:center.z},timestamp:Date.now(),sessionId:'debug-session',runId:'run4',hypothesisId:'F'})}).catch(()=>{});
-        // #endregion
 
         // Store the model's native size for scaling calculations
         this.baseModelSize = size.clone();
@@ -213,13 +210,7 @@ export class ThreeHouseLayer {
   }
 
   private populateModels() {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ThreeHouseLayer.tsx:213',message:'populateModels ENTRY',data:{hasBaseModel:!!this.baseModel,hasMap:!!this.map,featuresCount:this.features.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4'})}).catch(()=>{});
-    // #endregion
     if (!this.baseModel || !this.map) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ThreeHouseLayer.tsx:217',message:'populateModels EARLY EXIT',data:{hasBaseModel:!!this.baseModel,hasMap:!!this.map},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4'})}).catch(()=>{});
-      // #endregion
       console.warn('Cannot populate models: baseModel or map not available');
       return;
     }
@@ -232,75 +223,51 @@ export class ThreeHouseLayer {
     });
     this.models.clear();
 
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ThreeHouseLayer.tsx:228',message:'populateModels BEFORE LOOP',data:{featuresCount:this.features.length,modelsCleared:true},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4'})}).catch(()=>{});
-    // #endregion
 
     this.features.forEach((feature, index) => {
       try {
       const id = feature.properties.address_id;
         
-        // #region agent log
         if (index < 3) {
-          fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ThreeHouseLayer.tsx:232',message:'Feature processing START',data:{index,hasId:!!id,houseBearing:feature.properties.house_bearing,frontBearing:feature.properties.front_bearing,roadBearing:feature.properties.road_bearing},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1-H3'})}).catch(()=>{});
         }
-        // #endregion
         
         // Get bearing from feature properties with smart fallback
         // Priority: house_bearing > front_bearing > road_bearing + 90° > 0
         let bearing = feature.properties.house_bearing ?? feature.properties.front_bearing;
         
-        // #region agent log
         if (index < 3) {
-          fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ThreeHouseLayer.tsx:240',message:'Bearing AFTER first fallback',data:{index,bearing,isUndefined:bearing===undefined,isNull:bearing===null,isNaN:isNaN(bearing as number)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1-H3'})}).catch(()=>{});
         }
-        // #endregion
         
         // If no house bearing, try to calculate from road bearing (perpendicular to road)
         if (bearing === undefined || bearing === null) {
           const roadBearing = feature.properties.road_bearing;
           
-          // #region agent log
           if (index < 3) {
-            fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ThreeHouseLayer.tsx:247',message:'Bearing fallback check',data:{index,roadBearing,roadBearingType:typeof roadBearing,roadBearingIsUndefined:roadBearing===undefined,roadBearingIsNull:roadBearing===null,roadBearingIsNaN:isNaN(roadBearing as number)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1-H3'})}).catch(()=>{});
           }
-          // #endregion
           
           if (roadBearing !== undefined && roadBearing !== null && !isNaN(roadBearing as number)) {
             // House faces perpendicular to road (default to right side: road_bearing + 90°)
             bearing = (roadBearing as number) + 90;
             if (bearing >= 360) bearing -= 360;
             
-            // #region agent log
             if (index < 3) {
-              fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ThreeHouseLayer.tsx:252',message:'Bearing calculated from road',data:{index,roadBearing,bearing,isNaN:isNaN(bearing)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1-H3'})}).catch(()=>{});
             }
-            // #endregion
           } else {
             // Last resort: face north (0°)
             bearing = 0;
             
-            // #region agent log
             if (index < 3) {
-              fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ThreeHouseLayer.tsx:259',message:'Bearing defaulted to 0',data:{index},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1-H3'})}).catch(()=>{});
             }
-            // #endregion
           }
         }
         
         // Ensure bearing is a valid number
         if (isNaN(bearing as number) || bearing === undefined || bearing === null) {
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ThreeHouseLayer.tsx:265',message:'Bearing INVALID - forcing to 0',data:{index,bearing,isNaN:isNaN(bearing as number)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1-H3'})}).catch(()=>{});
-          // #endregion
           bearing = 0;
         }
         
-        // #region agent log
         if (index < 3) {
-          fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ThreeHouseLayer.tsx:270',message:'Bearing FINAL',data:{index,bearing,bearingType:typeof bearing,isNaN:isNaN(bearing)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1-H3'})}).catch(()=>{});
         }
-        // #endregion
         
         // Log bearing for debugging (first 5 models)
         if (index < 5) {
@@ -389,11 +356,8 @@ export class ThreeHouseLayer {
       // If model is on its side, rotate 90 degrees on X axis to stand it upright
       obj.rotation.x = Math.PI / 2; // Rotate +90 degrees on X axis to stand upright
         
-        // #region agent log
         if (index < 3) {
-          fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ThreeHouseLayer.tsx:320',message:'BEFORE rotation.z calculation',data:{index,bearing,bearingType:typeof bearing,isNaN:isNaN(bearing)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H2'})}).catch(()=>{});
         }
-        // #endregion
       
       // Rotate to bearing around Z axis (compass direction)
       // house_bearing is already calculated with vector-based orientation in BuildingService
@@ -401,11 +365,8 @@ export class ThreeHouseLayer {
       // Z-axis rotation: negative because Three.js uses left-handed coordinate system
         const rotationZ = (bearing * Math.PI) / 180 * -1;
         
-        // #region agent log
         if (index < 3) {
-          fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ThreeHouseLayer.tsx:328',message:'AFTER rotation.z calculation',data:{index,bearing,rotationZ,rotationZIsNaN:isNaN(rotationZ)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H2'})}).catch(()=>{});
         }
-        // #endregion
         
         obj.rotation.z = rotationZ;
       
@@ -425,11 +386,8 @@ export class ThreeHouseLayer {
         ? Math.max(this.baseModelSize.x, this.baseModelSize.y, this.baseModelSize.z)
         : 1; // Fallback to 1 if size not available
       
-      // #region agent log
       if (index < 3) {
-        fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ThreeHouseLayer.tsx:428',message:'Scale calculation inputs',data:{index,targetSizeMeters,modelMaxDimension,metersPerMercatorUnit},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'H6'})}).catch(()=>{});
       }
-      // #endregion
       
       // FIXED SCALE CALCULATION - Using zoom-based approach:
       // The issue: Mercator coordinates are 0-1 for entire world, making scale calculations tricky
@@ -455,11 +413,8 @@ export class ThreeHouseLayer {
       
       const baseScaleFactor = scaleRatio * metersPerMercatorUnit * SCALE_MULTIPLIER;
       
-      // #region agent log
       if (index < 3) {
-        fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ThreeHouseLayer.tsx:463',message:'Scale calculation results',data:{index,scaleRatio,baseScaleFactor,SCALE_MULTIPLIER,BASE_MULTIPLIER,currentZoom,zoomFactor},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'H6'})}).catch(()=>{});
       }
-      // #endregion
 
       // Apply dynamic scale factor from properties (already calculated with 70% rule in BuildingService)
       const dynamicScale = feature.properties.scale_factor ?? 1.0;
@@ -475,18 +430,12 @@ export class ThreeHouseLayer {
       const scaleFactor = baseScaleFactor * dynamicScale * collisionScaleReduction;
 
       // Apply scaling: for townhouses, use narrower width (0.4x) and taller height (1.5x)
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ThreeHouseLayer.tsx:253',message:'Before scaling - scale values',data:{index,baseScaleFactor,dynamicScale,isTownhouse},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
       if (isTownhouse) {
         // Townhouse: width based on neighborDistance, depth increased by 1.2x, taller height
         // Width scaling is already in dynamicScale (calculated from neighborDistance)
         const townhouseScaleX = baseScaleFactor * dynamicScale;
         const townhouseScaleY = baseScaleFactor * dynamicScale * 1.2; // Increase depth by 1.2x for narrow, deep units
         const townhouseScaleZ = baseScaleFactor * dynamicScale * 1.5;
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ThreeHouseLayer.tsx:256',message:'Townhouse scaling applied',data:{index,scaleX:townhouseScaleX,scaleY:townhouseScaleY,scaleZ:townhouseScaleZ},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-        // #endregion
         obj.scale.set(
           townhouseScaleX, // Narrower width
           townhouseScaleY,        // Normal depth
@@ -495,16 +444,10 @@ export class ThreeHouseLayer {
       } else {
         // Standard house: uniform scaling with dynamic factor
         const finalScale = baseScaleFactor * dynamicScale;
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ThreeHouseLayer.tsx:262',message:'Standard house scaling applied',data:{index,finalScale},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-        // #endregion
         obj.scale.setScalar(finalScale);
       }
       
-      // #region agent log
       const computedScale = baseScaleFactor * dynamicScale;
-      fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ThreeHouseLayer.tsx:275',message:'Before log statement - computed scale values',data:{index,computedScale,baseScaleFactor,dynamicScale,isTownhouse},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
       // Debug logging for first model
       if (index === 0) {
         console.log(`First model at [${finalCoords[0]}, ${finalCoords[1]}], mercator: [${finalMerc.x}, ${finalMerc.y}]`);
@@ -552,13 +495,10 @@ export class ThreeHouseLayer {
 
       this.scene.add(obj);
       
-        // #region agent log
         if (index < 10) {
           const worldPos = new THREE.Vector3();
           obj.getWorldPosition(worldPos);
-          fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ThreeHouseLayer.tsx:447',message:'Model added to scene',data:{index,worldPosX:worldPos.x,worldPosY:worldPos.y,worldPosZ:worldPos.z,objScaleX:obj.scale.x,objScaleY:obj.scale.y,objScaleZ:obj.scale.z,mercatorX:finalMerc.x,mercatorY:finalMerc.y,lng:finalCoords[0],lat:finalCoords[1],sceneChildrenCount:this.scene.children.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run3',hypothesisId:'H7'})}).catch(()=>{});
         }
-        // #endregion
       
       // Store townhouse metadata for UI feedback
       const unitIndex = feature.properties.townhouse_unit_index;
@@ -570,9 +510,6 @@ export class ThreeHouseLayer {
         unitIndex,
       });
       } catch (error) {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ThreeHouseLayer.tsx:461',message:'ERROR in feature processing',data:{index,error:String(error),errorStack:error instanceof Error ? error.stack : 'no stack'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4-H5'})}).catch(()=>{});
-        // #endregion
         console.error(`Error processing feature ${index}:`, error);
         // Continue with next feature instead of breaking entire loop
       }
@@ -581,9 +518,6 @@ export class ThreeHouseLayer {
     // Apply collision detection and resolution
     this.detectAndResolveCollisions();
 
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ThreeHouseLayer.tsx:475',message:'populateModels EXIT',data:{modelsAdded:this.models.size,sceneChildrenCount:this.scene.children.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4'})}).catch(()=>{});
-    // #endregion
 
     console.log(`✅ Added ${this.models.size} models to scene`);
   }
@@ -757,9 +691,6 @@ export class ThreeHouseLayer {
   }
 
   onAdd(map: Map, gl: WebGLRenderingContext) {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ThreeHouseLayer.tsx:594',message:'onAdd called',data:{hasBaseModel:!!this.baseModel,featuresCount:this.features.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-    // #endregion
     console.log('ThreeHouseLayer.onAdd called');
     this.map = map;
 
@@ -865,7 +796,6 @@ export class ThreeHouseLayer {
   render(gl: WebGLRenderingContext, matrix: number[]) {
     this.renderCallCount++;
     // Log first 3 render calls to verify render is being invoked
-    // #region agent log
     if (this.renderCallCount <= 3) {
       const firstModel = this.models.size > 0 ? Array.from(this.models.values())[0] : null;
       const firstModelWorldPos = firstModel ? (() => {
@@ -873,9 +803,7 @@ export class ThreeHouseLayer {
         firstModel.object.getWorldPosition(pos);
         return {x: pos.x, y: pos.y, z: pos.z};
       })() : null;
-      fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ThreeHouseLayer.tsx:696',message:'render() called',data:{callCount:this.renderCallCount,hasRenderer:!!this.renderer,hasMap:!!this.map,modelsCount:this.models.size,sceneChildrenCount:this.scene.children.length,firstModelWorldPos,cameraPosX:this.camera.position.x,cameraPosY:this.camera.position.y,cameraPosZ:this.camera.position.z},timestamp:Date.now(),sessionId:'debug-session',runId:'run5',hypothesisId:'E-G'})}).catch(()=>{});
     }
-    // #endregion
     if (!this.renderer || !this.map) {
       return;
     }
@@ -901,9 +829,6 @@ export class ThreeHouseLayer {
   }
 
   onRemove() {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/a6f366c9-64c5-41b8-a570-53cdd9ef80a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ThreeHouseLayer.tsx:778',message:'onRemove() called',data:{modelsCount:this.models.size,sceneChildrenCount:this.scene.children.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run6',hypothesisId:'J'})}).catch(()=>{});
-    // #endregion
     if (this.loadInterval) {
       clearInterval(this.loadInterval);
       this.loadInterval = null;

@@ -317,9 +317,10 @@ export async function POST(request: NextRequest) {
         console.log(`[Provision] Discovery Brain: Found ${linkedBuildingIds.length} linked building IDs`);
 
         // Query orphan buildings (buildings NOT in the linked set)
+        // Include geom so we can compute centroid if centroid column is null
         let orphanQuery = supabase
           .from('buildings')
-          .select('id, gers_id, centroid')
+          .select('id, gers_id, centroid, geom')
           .eq('campaign_id', campaign_id);
 
         // Only apply the NOT IN filter if there are linked buildings
@@ -333,6 +334,40 @@ export async function POST(request: NextRequest) {
           console.warn('[Provision] Discovery Brain: Error finding orphans:', orphanError.message);
         } else if (orphanBuildings && orphanBuildings.length > 0) {
           console.log(`[Provision] Discovery Brain: Processing ${orphanBuildings.length} orphan buildings...`);
+
+          // Helper function to compute centroid from polygon geometry
+          const computeCentroidFromGeom = (geom: any): [number, number] | null => {
+            try {
+              let geometry = geom;
+              if (typeof geom === 'string') {
+                geometry = JSON.parse(geom);
+              }
+              
+              if (!geometry || !geometry.coordinates) return null;
+              
+              // Get the outer ring coordinates
+              let coords: number[][];
+              if (geometry.type === 'MultiPolygon') {
+                coords = geometry.coordinates[0]?.[0] || [];
+              } else if (geometry.type === 'Polygon') {
+                coords = geometry.coordinates[0] || [];
+              } else {
+                return null;
+              }
+              
+              if (coords.length === 0) return null;
+              
+              // Calculate centroid by averaging coordinates
+              let sumLon = 0, sumLat = 0;
+              for (const coord of coords) {
+                sumLon += coord[0];
+                sumLat += coord[1];
+              }
+              return [sumLon / coords.length, sumLat / coords.length];
+            } catch {
+              return null;
+            }
+          };
 
           for (const building of orphanBuildings) {
             try {
@@ -355,9 +390,17 @@ export async function POST(request: NextRequest) {
                   }
                 }
               }
+              
+              // FALLBACK: If no centroid, compute from geometry
+              if ((!centroidCoords || centroidCoords.length < 2) && building.geom) {
+                centroidCoords = computeCentroidFromGeom(building.geom);
+                if (centroidCoords) {
+                  console.log(`[Provision] Discovery Brain: Computed centroid from geom for ${building.gers_id}`);
+                }
+              }
 
               if (!centroidCoords || centroidCoords.length < 2) {
-                console.warn(`[Provision] Discovery Brain: No valid centroid for building ${building.gers_id}`);
+                console.warn(`[Provision] Discovery Brain: No valid centroid or geom for building ${building.gers_id}`);
                 continue;
               }
 
