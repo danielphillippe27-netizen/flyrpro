@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
-import { OvertureService } from '@/lib/services/OvertureService';
+// OvertureService is dynamically imported to avoid DuckDB native module issues on Vercel
+// import { OvertureService } from '@/lib/services/OvertureService';
 import { MapService } from '@/lib/services/MapService';
 import { mapOvertureToCanonical } from '@/lib/geo/overtureToCanonical';
 import type { CanonicalCampaignAddress } from '@/lib/geo/types';
 
 // FIX: Ensure Node.js runtime (MotherDuck/DuckDB requires Node, not Edge)
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 interface GenerateAddressListRequest {
   campaign_id: string;
@@ -72,6 +74,9 @@ export async function POST(request: NextRequest) {
     }
 
     // --- Step 1: Fetch addresses from Overture ---
+    // Dynamic import to avoid DuckDB native module issues on Vercel build
+    const { OvertureService } = await import('@/lib/services/OvertureService');
+    
     let addresses = [];
     
     if (polygon) {

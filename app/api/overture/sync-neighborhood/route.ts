@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
-import { OvertureService } from '@/lib/services/OvertureService';
+// OvertureService is dynamically imported to avoid DuckDB native module issues on Vercel
+// import { OvertureService } from '@/lib/services/OvertureService';
 
 // FIX: Ensure Node.js runtime (MotherDuck/DuckDB requires Node, not Edge)
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   try {
@@ -24,6 +26,9 @@ export async function POST(request: NextRequest) {
     }
 
     const supabase = createAdminClient();
+
+    // Dynamic import to avoid DuckDB native module issues on Vercel build
+    const { OvertureService } = await import('@/lib/services/OvertureService');
 
     // Step 1: Extract buildings from Overture
     console.log('Fetching 3D Shapes from Overture...');

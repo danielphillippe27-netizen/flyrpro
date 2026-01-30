@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
-import { OvertureService } from '@/lib/services/OvertureService';
+// OvertureService is dynamically imported to avoid DuckDB native module issues on Vercel
+// import { OvertureService } from '@/lib/services/OvertureService';
 
 // FIX: Ensure Node.js runtime (MotherDuck/DuckDB requires Node, not Edge)
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 interface ProvisionRequest {
   campaign_id: string;
@@ -115,6 +117,9 @@ export async function POST(request: NextRequest) {
 
     // Wrap provisioning in retry logic
     const result = await retryWithBackoff(async () => {
+      // Dynamic import to avoid DuckDB native module issues on Vercel build
+      const { OvertureService } = await import('@/lib/services/OvertureService');
+      
       // SURGICAL PROVISIONING: Fetch ONLY data inside the exact polygon
       // No Wide Net, no BBox corners grabbing neighbors
       console.log('[Provision] Surgical: Fetching addresses inside polygon from MotherDuck...');

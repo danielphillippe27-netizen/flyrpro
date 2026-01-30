@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { MotherDuckUnifiedService } from '@/lib/services/MotherDuckUnifiedService';
+// MotherDuckUnifiedService is dynamically imported to avoid DuckDB native module issues on Vercel
+// import { MotherDuckUnifiedService } from '@/lib/services/MotherDuckUnifiedService';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 /**
  * Create an 8-sided polygon buffer around a point
@@ -72,6 +74,8 @@ export async function GET(
     if (motherDuckEnabled && supabasePassword) {
       try {
         console.log(`[buildings-unified] Using MotherDuck for campaign ${campaignId}`);
+        // Dynamic import to avoid DuckDB native module issues on Vercel build
+        const { MotherDuckUnifiedService } = await import('@/lib/services/MotherDuckUnifiedService');
         const unifiedBuildings = await MotherDuckUnifiedService.fetchUnifiedBuildingsWithSQL(
           campaignId,
           supabasePassword

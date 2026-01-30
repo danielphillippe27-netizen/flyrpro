@@ -1,8 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { OvertureService, type BoundingBox } from '@/lib/services/OvertureService';
+// OvertureService is dynamically imported to avoid DuckDB native module issues on Vercel
+// import { OvertureService, type BoundingBox } from '@/lib/services/OvertureService';
 
 // FIX: Ensure Node.js runtime (MotherDuck/DuckDB requires Node, not Edge)
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+interface BoundingBox {
+  west: number;
+  south: number;
+  east: number;
+  north: number;
+}
 
 /**
  * GET endpoint for fetching Overture building data as GeoJSON
@@ -25,6 +34,9 @@ export async function GET(request: NextRequest) {
       north: maxy,
     };
 
+    // Dynamic import to avoid DuckDB native module issues on Vercel build
+    const { OvertureService } = await import('@/lib/services/OvertureService');
+    
     // Use OvertureService to extract buildings
     const buildings = await OvertureService.extractBuildings(bbox);
 
