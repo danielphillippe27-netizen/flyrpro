@@ -3,7 +3,8 @@
  * 
  * Run with: npx tsx scripts/test-motherduck-http.ts
  * 
- * Tests the HTTP API by executing a simple query against MotherDuck.
+ * Tests the HTTP API by querying the pre-loaded overture_flyr database.
+ * Run load-overture-to-motherduck.ts first to populate the database.
  */
 
 import { config } from 'dotenv';
@@ -37,7 +38,7 @@ async function main() {
   try {
     const result = await MotherDuckHttpService.executeQuery(
       'SELECT 1 as test_value, current_timestamp as query_time',
-      'my_db'
+      'overture_flyr'
     );
     console.log('Result:', JSON.stringify(result, null, 2));
     console.log('✓ Simple query succeeded\n');
@@ -46,67 +47,49 @@ async function main() {
     process.exit(1);
   }
 
-  // Test 2: Query Overture S3 data
-  // Note: MotherDuck MCP API handles S3 region configuration automatically
-  // Do NOT use SET s3_region as it's locked in the hosted environment
-  console.log('--- Test 2: Count buildings in small bbox ---');
+  // Test 2: Count buildings in pre-loaded database
+  console.log('--- Test 2: Count buildings in overture_flyr ---');
   try {
-    const query = `
-SELECT COUNT(*) as building_count
-FROM read_parquet('s3://overturemaps-us-west-2/release/2025-12-17.0/theme=buildings/type=building/*', hive_partitioning=1)
-WHERE bbox.xmin <= -122.40 AND bbox.xmax >= -122.41
-  AND bbox.ymin <= 37.78 AND bbox.ymax >= 37.77
-LIMIT 1;
-`;
-    const result = await MotherDuckHttpService.executeQuery(query, 'my_db');
-    console.log('Building count in SF area:', result[0]?.building_count);
-    console.log('✓ S3 query succeeded\n');
-  } catch (error) {
-    console.error('✗ S3 query failed:', error);
-    console.log('(This might fail due to row limits or timeout - not critical)\n');
-  }
-
-  // Test 3: Direct query with very small bbox (just a few buildings)
-  console.log('--- Test 3: Direct query with tiny bbox ---');
-  try {
-    // Use a very small area - just ~100 meters
-    const tinyQuery = `
-SELECT 
-    id as gers_id,
-    ST_AsGeoJSON(geometry) AS geometry,
-    COALESCE(height, 8) as height
-FROM read_parquet('s3://overturemaps-us-west-2/release/2025-12-17.0/theme=buildings/type=building/*', hive_partitioning=1)
-WHERE bbox.xmin BETWEEN -122.4015 AND -122.4005
-  AND bbox.ymin BETWEEN 37.7875 AND 37.7885
-LIMIT 10;
-`;
-    const result = await MotherDuckHttpService.executeQuery(tinyQuery, 'my_db');
-    console.log(`Found ${result.length} buildings in tiny bbox`);
-    if (result.length > 0) {
-      console.log('First building gers_id:', result[0].gers_id);
-    }
-    console.log('✓ Tiny bbox query succeeded\n');
+    const result = await MotherDuckHttpService.executeQuery(
+      'SELECT COUNT(*) as total FROM overture_flyr.buildings',
+      'overture_flyr'
+    );
+    console.log('Total buildings in database:', result[0]?.total?.toLocaleString());
+    console.log('✓ Building count succeeded\n');
   } catch (error: any) {
-    console.error('✗ Tiny bbox query failed:', error.message);
-    console.log('(Overture S3 queries may time out - this is a known limitation)\n');
+    console.error('✗ Building count failed:', error.message);
+    console.log('(Run load-overture-to-motherduck.ts first to populate the database)\n');
   }
 
-  // Test 4: Test polygon query method with tiny polygon
-  console.log('--- Test 4: getBuildingsInPolygon with tiny polygon ---');
+  // Test 3: Count addresses in pre-loaded database
+  console.log('--- Test 3: Count addresses in overture_flyr ---');
   try {
-    // Even smaller polygon - ~100m x 100m
-    const tinyPolygon = {
+    const result = await MotherDuckHttpService.executeQuery(
+      'SELECT COUNT(*) as total FROM overture_flyr.addresses',
+      'overture_flyr'
+    );
+    console.log('Total addresses in database:', result[0]?.total?.toLocaleString());
+    console.log('✓ Address count succeeded\n');
+  } catch (error: any) {
+    console.error('✗ Address count failed:', error.message);
+    console.log('(Run load-overture-to-motherduck.ts first to populate the database)\n');
+  }
+
+  // Test 4: Query buildings in a small San Francisco polygon
+  console.log('--- Test 4: getBuildingsInPolygon (SF neighborhood) ---');
+  try {
+    const sfPolygon = {
       type: 'Polygon',
       coordinates: [[
-        [-122.4015, 37.7875],
-        [-122.4005, 37.7875],
-        [-122.4005, 37.7885],
-        [-122.4015, 37.7885],
-        [-122.4015, 37.7875],
+        [-122.42, 37.77],
+        [-122.40, 37.77],
+        [-122.40, 37.79],
+        [-122.42, 37.79],
+        [-122.42, 37.77],
       ]],
     };
-    const buildings = await MotherDuckHttpService.getBuildingsInPolygon(tinyPolygon);
-    console.log(`Found ${buildings.length} buildings in tiny polygon`);
+    const buildings = await MotherDuckHttpService.getBuildingsInPolygon(sfPolygon);
+    console.log(`Found ${buildings.length} buildings in SF polygon`);
     if (buildings.length > 0) {
       console.log('First building:', {
         gers_id: buildings[0].gers_id,
@@ -116,7 +99,32 @@ LIMIT 10;
     console.log('✓ getBuildingsInPolygon succeeded\n');
   } catch (error: any) {
     console.error('✗ getBuildingsInPolygon failed:', error.message);
-    console.log('(Overture S3 queries may time out due to 55s MCP API limit)\n');
+  }
+
+  // Test 5: Query addresses in a small polygon
+  console.log('--- Test 5: getAddressesInPolygon (SF neighborhood) ---');
+  try {
+    const sfPolygon = {
+      type: 'Polygon',
+      coordinates: [[
+        [-122.42, 37.77],
+        [-122.40, 37.77],
+        [-122.40, 37.79],
+        [-122.42, 37.79],
+        [-122.42, 37.77],
+      ]],
+    };
+    const addresses = await MotherDuckHttpService.getAddressesInPolygon(sfPolygon);
+    console.log(`Found ${addresses.length} addresses in SF polygon`);
+    if (addresses.length > 0) {
+      console.log('First address:', {
+        gers_id: addresses[0].gers_id,
+        formatted: addresses[0].formatted,
+      });
+    }
+    console.log('✓ getAddressesInPolygon succeeded\n');
+  } catch (error: any) {
+    console.error('✗ getAddressesInPolygon failed:', error.message);
   }
 
   console.log('=== All tests completed ===');

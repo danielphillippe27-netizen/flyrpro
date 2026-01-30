@@ -7,17 +7,17 @@
  * API Endpoint: https://api.motherduck.com/mcp
  * Protocol: JSON-RPC 2.0 / MCP (Model Context Protocol)
  * 
- * IMPORTANT LIMITATIONS:
- * - 55 second timeout (queries exceeding this are cancelled)
- * - 2,000 rows per request (we set this limit, API max is 2,048)
+ * IMPORTANT: This service queries pre-loaded data in the `overture_flyr` 
+ * MotherDuck database. Before using on Vercel, you must run:
+ *   npx tsx scripts/load-overture-to-motherduck.ts
+ * 
+ * This loads US buildings/addresses into MotherDuck for fast HTTP queries.
+ * Direct S3 queries timeout due to the 55-second API limit.
+ * 
+ * Limitations:
+ * - 55 second timeout
+ * - 2,000 rows per request (API max is 2,048)
  * - Read-only operations
- * 
- * CRITICAL: Querying Overture S3 directly (s3://overturemaps-*) times out
- * because the parquet files are too large. The HTTP API is only suitable for:
- * - Pre-loaded MotherDuck databases with indexed data
- * - Small, simple queries (no large parquet scans)
- * 
- * For Overture provisioning, use native DuckDB locally instead.
  */
 
 export interface MotherDuckQueryResult {
@@ -72,13 +72,13 @@ export interface BoundingBox {
 
 export class MotherDuckHttpService {
   private static readonly MCP_ENDPOINT = 'https://api.motherduck.com/mcp';
-  private static readonly OVERTURE_RELEASE = '2025-12-17.0';
-  private static readonly S3_REGION = 'us-west-2';
   private static readonly ROW_LIMIT = 2000; // Stay under 2,048 API limit
   
-  private static readonly BUILDINGS_BUCKET = `s3://overturemaps-us-west-2/release/${MotherDuckHttpService.OVERTURE_RELEASE}/theme=buildings/type=building/*`;
-  private static readonly ADDRESSES_BUCKET = `s3://overturemaps-us-west-2/release/${MotherDuckHttpService.OVERTURE_RELEASE}/theme=addresses/type=address/*`;
-  private static readonly TRANSPORTATION_BUCKET = `s3://overturemaps-us-west-2/release/${MotherDuckHttpService.OVERTURE_RELEASE}/theme=transportation/type=segment/*`;
+  // Pre-loaded MotherDuck database (run load-overture-to-motherduck.ts first)
+  // Contains US + Canada buildings and addresses
+  private static readonly MOTHERDUCK_DATABASE = 'overture_na';
+  private static readonly BUILDINGS_TABLE = 'overture_na.buildings';
+  private static readonly ADDRESSES_TABLE = 'overture_na.addresses';
 
   private static get MOTHERDUCK_TOKEN(): string | undefined {
     return process.env.MOTHERDUCK_TOKEN;
@@ -248,11 +248,11 @@ export class MotherDuckHttpService {
   /**
    * Get buildings inside a polygon using HTTP API
    * 
-   * Note: Uses bbox filtering at SQL level for performance (avoids 55s timeout).
-   * Client-side polygon filtering is applied after fetching results.
+   * Queries pre-loaded data in overture_flyr.buildings table.
+   * Run load-overture-to-motherduck.ts first to populate the table.
    */
   static async getBuildingsInPolygon(input: any): Promise<OvertureBuilding[]> {
-    console.log('[MotherDuckHttp] Fetching buildings inside polygon...');
+    console.log('[MotherDuckHttp] Fetching buildings from overture_flyr database...');
 
     // Parse polygon from various input formats
     let polygon = input;
@@ -271,26 +271,22 @@ export class MotherDuckHttpService {
     const bbox = this.calculateBBox(polygon);
     console.log(`[MotherDuckHttp] Polygon BBox: [${bbox.west}, ${bbox.south}, ${bbox.east}, ${bbox.north}]`);
 
-    // Note: MotherDuck MCP API handles S3 region configuration automatically
-    // Use bbox filtering only at SQL level (ST_Intersects times out on large scans)
-    // Avoid ST_AsGeoJSON which is expensive - use geometry directly
-    // Client-side polygon filtering is applied after
+    // Query pre-loaded MotherDuck table (fast - no S3 scanning)
     const query = `
 SELECT 
-    id as gers_id,
-    geometry,
-    COALESCE(height, (num_floors * 3.5), 8) as height
-FROM read_parquet('${this.BUILDINGS_BUCKET}', hive_partitioning=1)
+    gers_id,
+    geometry_json as geometry,
+    height,
+    name as house_name
+FROM ${this.BUILDINGS_TABLE}
 WHERE 
-    bbox.xmin BETWEEN ${bbox.west} AND ${bbox.east}
-    AND bbox.ymin BETWEEN ${bbox.south} AND ${bbox.north}
-    AND (subtype = 'residential' OR subtype IS NULL)
-    AND (class IS NULL OR class NOT IN ('garage', 'shed'))
+    bbox_west <= ${bbox.east} AND bbox_east >= ${bbox.west}
+    AND bbox_south <= ${bbox.north} AND bbox_north >= ${bbox.south}
 LIMIT ${this.ROW_LIMIT};
 `;
 
     try {
-      const result = await this.executeQuery(query);
+      const result = await this.executeQuery(query, this.MOTHERDUCK_DATABASE);
       const processed = this.processBuildingResults(result);
       console.log(`[MotherDuckHttp] BBox query returned ${processed.length} buildings`);
       
@@ -300,6 +296,12 @@ LIMIT ${this.ROW_LIMIT};
       return filtered;
     } catch (error: any) {
       console.error('[MotherDuckHttp] Buildings query error:', error.message);
+      // Provide helpful error if table doesn't exist
+      if (error.message.includes('does not exist') || error.message.includes('not found')) {
+        throw new Error(
+          'MotherDuck database not initialized. Please run: npx tsx scripts/load-overture-to-motherduck.ts'
+        );
+      }
       throw error;
     }
   }
@@ -320,11 +322,11 @@ LIMIT ${this.ROW_LIMIT};
   /**
    * Get addresses inside a polygon using HTTP API
    * 
-   * Note: Uses bbox filtering at SQL level for performance (avoids 55s timeout).
-   * Client-side polygon filtering is applied after fetching results.
+   * Queries pre-loaded data in overture_flyr.addresses table.
+   * Run load-overture-to-motherduck.ts first to populate the table.
    */
   static async getAddressesInPolygon(input: any): Promise<OvertureAddress[]> {
-    console.log('[MotherDuckHttp] Fetching addresses inside polygon...');
+    console.log('[MotherDuckHttp] Fetching addresses from overture_flyr database...');
 
     // Parse polygon from various input formats
     let polygon = input;
@@ -343,29 +345,27 @@ LIMIT ${this.ROW_LIMIT};
     const bbox = this.calculateBBox(polygon);
     console.log(`[MotherDuckHttp] Polygon BBox: [${bbox.west}, ${bbox.south}, ${bbox.east}, ${bbox.north}]`);
 
-    // Note: MotherDuck MCP API handles S3 region configuration automatically
-    // Use bbox filtering only at SQL level (ST_Intersects times out on large scans)
-    // Avoid ST_AsGeoJSON which is expensive - use geometry directly
+    // Query pre-loaded MotherDuck table (fast - no S3 scanning)
     const query = `
 SELECT 
-    id as gers_id,
-    geometry,
-    number as house_number,
-    street as street_name,
+    gers_id,
+    geometry_json as geometry,
+    house_number,
+    street_name,
     unit,
-    postcode as postal_code,
-    address_levels[1].value as locality,
-    address_levels[2].value as region,
+    postal_code,
+    locality,
+    region,
     country
-FROM read_parquet('${this.ADDRESSES_BUCKET}', hive_partitioning=1)
+FROM ${this.ADDRESSES_TABLE}
 WHERE 
-    bbox.xmin BETWEEN ${bbox.west} AND ${bbox.east}
-    AND bbox.ymin BETWEEN ${bbox.south} AND ${bbox.north}
+    bbox_west <= ${bbox.east} AND bbox_east >= ${bbox.west}
+    AND bbox_south <= ${bbox.north} AND bbox_north >= ${bbox.south}
 LIMIT ${this.ROW_LIMIT};
 `;
 
     try {
-      const result = await this.executeQuery(query);
+      const result = await this.executeQuery(query, this.MOTHERDUCK_DATABASE);
       const processed = this.processAddressResults(result);
       console.log(`[MotherDuckHttp] BBox query returned ${processed.length} addresses`);
       
@@ -375,6 +375,12 @@ LIMIT ${this.ROW_LIMIT};
       return filtered;
     } catch (error: any) {
       console.error('[MotherDuckHttp] Addresses query error:', error.message);
+      // Provide helpful error if table doesn't exist
+      if (error.message.includes('does not exist') || error.message.includes('not found')) {
+        throw new Error(
+          'MotherDuck database not initialized. Please run: npx tsx scripts/load-overture-to-motherduck.ts'
+        );
+      }
       throw error;
     }
   }
@@ -395,53 +401,13 @@ LIMIT ${this.ROW_LIMIT};
   /**
    * Get transportation segments inside a polygon using HTTP API
    * 
-   * Note: Uses bbox filtering at SQL level for performance (avoids 55s timeout).
-   * Roads are not filtered by polygon on client side (they cross boundaries).
+   * Note: Roads are not pre-loaded into MotherDuck to save storage/time.
+   * Returns empty array - roads can be added later if needed.
    */
   static async getRoadsInPolygon(input: any): Promise<OvertureTransportation[]> {
-    console.log('[MotherDuckHttp] Fetching roads inside polygon...');
-
-    // Parse polygon from various input formats
-    let polygon = input;
-    if (input.type === 'FeatureCollection' && input.features?.length > 0) {
-      polygon = input.features[0].geometry;
-    } else if (input.type === 'Feature') {
-      polygon = input.geometry;
-    }
-
-    if (!polygon || !polygon.coordinates) {
-      console.error('[MotherDuckHttp] Invalid polygon:', JSON.stringify(input).substring(0, 100));
-      return [];
-    }
-
-    // Calculate BBox for coarse filter
-    const bbox = this.calculateBBox(polygon);
-
-    // Note: MotherDuck MCP API handles S3 region configuration automatically
-    // Use bbox filtering only (roads often cross polygon boundaries anyway)
-    // Avoid ST_AsGeoJSON which is expensive - use geometry directly
-    const query = `
-SELECT 
-    id as gers_id,
-    geometry,
-    class
-FROM read_parquet('${this.TRANSPORTATION_BUCKET}', hive_partitioning=1)
-WHERE 
-    bbox.xmin BETWEEN ${bbox.west} AND ${bbox.east}
-    AND bbox.ymin BETWEEN ${bbox.south} AND ${bbox.north}
-    AND class IN ('primary', 'secondary', 'tertiary', 'residential', 'unclassified')
-LIMIT ${this.ROW_LIMIT};
-`;
-
-    try {
-      const result = await this.executeQuery(query);
-      const processed = this.processTransportationResults(result);
-      console.log(`[MotherDuckHttp] Found ${processed.length} roads in bbox`);
-      return processed;
-    } catch (error: any) {
-      console.error('[MotherDuckHttp] Roads query error:', error.message);
-      throw error;
-    }
+    console.log('[MotherDuckHttp] Roads not pre-loaded in MotherDuck, returning empty array');
+    console.log('[MotherDuckHttp] To add roads, update load-overture-to-motherduck.ts');
+    return [];
   }
   
   /**
