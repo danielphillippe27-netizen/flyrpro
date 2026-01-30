@@ -290,17 +290,33 @@ export function MapBuildingsLayer({ map, campaignId, viewMode = 'standard', show
     }
 
     const doFetch = () => {
-      console.log('[MapBuildingsLayer] doFetch called, map.loaded():', map.loaded());
-      if (map.loaded()) {
-        // Update zoom level for layer visibility
+      console.log('[MapBuildingsLayer] doFetch called, map.loaded():', map.loaded(), 'isStyleLoaded:', map.isStyleLoaded());
+      
+      // Use isStyleLoaded() which is sufficient for our RPC call
+      // map.loaded() waits for ALL resources (tiles, etc.) which takes too long
+      if (map.isStyleLoaded()) {
+        console.log('[MapBuildingsLayer] Style loaded, fetching campaign data now');
         setZoomLevel(map.getZoom());
         fetchCampaignData();
       } else {
-        console.log('[MapBuildingsLayer] Map not loaded, waiting for load event');
-        map.once('load', () => {
+        console.log('[MapBuildingsLayer] Style not loaded, waiting for style.load event');
+        // Use 'style.load' event which fires when style is ready (more reliable than 'load')
+        map.once('style.load', () => {
+          console.log('[MapBuildingsLayer] style.load event fired, fetching data');
           setZoomLevel(map.getZoom());
           fetchCampaignData();
         });
+        
+        // Fallback: Also try 'idle' event in case style.load already fired
+        const idleHandler = () => {
+          if (!campaignDataLoadedRef.current) {
+            console.log('[MapBuildingsLayer] idle event fired, fetching data as fallback');
+            setZoomLevel(map.getZoom());
+            fetchCampaignData();
+          }
+          map.off('idle', idleHandler);
+        };
+        map.once('idle', idleHandler);
       }
     };
     doFetch();
