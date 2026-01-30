@@ -272,7 +272,16 @@ export function MapBuildingsLayer({ map, campaignId, viewMode = 'standard', show
   // CAMPAIGN MODE: Fetch full campaign data once when campaignId is set
   // This is the "fetch once, render forever" pattern for smooth pan/zoom
   useEffect(() => {
-    if (!map || !campaignId) return;
+    console.log('[MapBuildingsLayer] Campaign fetch effect running:', { 
+      hasMap: !!map, 
+      campaignId, 
+      alreadyLoaded: campaignDataLoadedRef.current 
+    });
+    
+    if (!map || !campaignId) {
+      console.log('[MapBuildingsLayer] Skipping fetch - missing map or campaignId:', { hasMap: !!map, campaignId });
+      return;
+    }
     
     // Only fetch if we haven't already loaded this campaign's data
     if (campaignDataLoadedRef.current === campaignId) {
@@ -281,11 +290,13 @@ export function MapBuildingsLayer({ map, campaignId, viewMode = 'standard', show
     }
 
     const doFetch = () => {
+      console.log('[MapBuildingsLayer] doFetch called, map.loaded():', map.loaded());
       if (map.loaded()) {
         // Update zoom level for layer visibility
         setZoomLevel(map.getZoom());
         fetchCampaignData();
       } else {
+        console.log('[MapBuildingsLayer] Map not loaded, waiting for load event');
         map.once('load', () => {
           setZoomLevel(map.getZoom());
           fetchCampaignData();
