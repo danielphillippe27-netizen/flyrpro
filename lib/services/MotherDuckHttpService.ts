@@ -98,8 +98,8 @@ export class MotherDuckHttpService {
    * Uses MCP Streamable HTTP transport with JSON-RPC 2.0 messages.
    * Handles both JSON and SSE response formats.
    * 
-   * NOTE: We intentionally omit the 'database' parameter to avoid SET schema errors.
-   * Instead, we use fully qualified table names (e.g., overture_na.buildings).
+   * NOTE: We use 'my_db' as database context and fully qualified table names (overture_na.X)
+   * for cross-database queries. This matches how the MotherDuck UI works.
    */
   static async executeQuery(sql: string, _database?: string): Promise<any[]> {
     if (!this.MOTHERDUCK_TOKEN) {
@@ -111,13 +111,14 @@ export class MotherDuckHttpService {
 
     try {
       // MCP Protocol: JSON-RPC 2.0 request format for tool call
-      // NOTE: Omitting 'database' param to avoid "SET schema" errors - using fully qualified table names instead
+      // Use 'my_db' as context (default MotherDuck database) with fully qualified table names
       const requestBody = {
         jsonrpc: '2.0',
         method: 'tools/call',
         params: {
           name: 'query',
           arguments: {
+            database: 'my_db',
             sql,
           },
         },
