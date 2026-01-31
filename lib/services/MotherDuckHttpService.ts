@@ -77,7 +77,8 @@ export class MotherDuckHttpService {
   // Pre-loaded MotherDuck database (run load-overture-to-motherduck.ts first)
   // Contains US + Canada buildings, addresses, and roads
   // Note: Use fully qualified names (database.schema.table) to avoid MCP SET schema issues
-  private static readonly MOTHERDUCK_DATABASE = 'my_db'; // Use default database context
+  // sample_data is a default MotherDuck database that's always available as context
+  private static readonly MOTHERDUCK_DATABASE = 'sample_data';
   private static readonly BUILDINGS_TABLE = 'overture_na.main.buildings';
   private static readonly ADDRESSES_TABLE = 'overture_na.main.addresses';
   private static readonly ROADS_TABLE = 'overture_na.main.roads';
@@ -294,7 +295,7 @@ LIMIT ${this.ROW_LIMIT};
 `;
 
     try {
-      const result = await this.executeQuery(query);
+      const result = await this.executeQuery(query, this.MOTHERDUCK_DATABASE);
       const processed = this.processBuildingResults(result);
       console.log(`[MotherDuckHttp] BBox query returned ${processed.length} buildings`);
       
@@ -373,7 +374,7 @@ LIMIT ${this.ROW_LIMIT};
 `;
 
     try {
-      const result = await this.executeQuery(query);
+      const result = await this.executeQuery(query, this.MOTHERDUCK_DATABASE);
       const processed = this.processAddressResults(result);
       console.log(`[MotherDuckHttp] BBox query returned ${processed.length} addresses`);
       
@@ -470,7 +471,7 @@ LIMIT ${this.ROW_LIMIT};
 `;
 
     try {
-      const result = await this.executeQuery(query);
+      const result = await this.executeQuery(query, this.MOTHERDUCK_DATABASE);
       const processed = this.processTransportationResults(result);
       console.log(`[MotherDuckHttp] BBox query returned ${processed.length} roads`);
       
