@@ -76,10 +76,11 @@ export class MotherDuckHttpService {
   
   // Pre-loaded MotherDuck database (run load-overture-to-motherduck.ts first)
   // Contains US + Canada buildings, addresses, and roads
+  // Note: Table names are NOT prefixed with database - the MCP API handles USE database internally
   private static readonly MOTHERDUCK_DATABASE = 'overture_na';
-  private static readonly BUILDINGS_TABLE = 'overture_na.buildings';
-  private static readonly ADDRESSES_TABLE = 'overture_na.addresses';
-  private static readonly ROADS_TABLE = 'overture_na.roads';
+  private static readonly BUILDINGS_TABLE = 'buildings';
+  private static readonly ADDRESSES_TABLE = 'addresses';
+  private static readonly ROADS_TABLE = 'roads';
 
   private static get MOTHERDUCK_TOKEN(): string | undefined {
     return process.env.MOTHERDUCK_TOKEN;
@@ -400,13 +401,29 @@ LIMIT ${this.ROW_LIMIT};
   }
 
   /**
+   * Options for getRoadsInPolygon query
+   */
+  static readonly ROAD_LAYER_CORE = 1;      // residential, tertiary, secondary, primary
+  static readonly ROAD_LAYER_ROUTING = 2;   // service, living_street, unclassified
+
+  /**
    * Get transportation segments inside a polygon using HTTP API
    * 
    * Queries pre-loaded data in overture_na.roads table.
    * Run load-overture-to-motherduck.ts first to populate the table.
+   * 
+   * @param input - Polygon geometry (GeoJSON Feature, FeatureCollection, or Geometry)
+   * @param options.includeLayers - Array of layer numbers to include (default: [1] for core roads only)
+   *   - Layer 1 (ROAD_LAYER_CORE): residential, tertiary, secondary, primary - for house snapping
+   *   - Layer 2 (ROAD_LAYER_ROUTING): service, living_street, unclassified - for GPS replay, condo access
    */
-  static async getRoadsInPolygon(input: any): Promise<OvertureTransportation[]> {
-    console.log('[MotherDuckHttp] Fetching roads from overture_na database...');
+  static async getRoadsInPolygon(
+    input: any,
+    options?: { includeLayers?: number[] }
+  ): Promise<OvertureTransportation[]> {
+    // Default to Layer 1 only (core roads for house snapping)
+    const layers = options?.includeLayers ?? [this.ROAD_LAYER_CORE];
+    console.log(`[MotherDuckHttp] Fetching roads from overture_na database (layers: ${layers.join(',')})...`);
 
     // Parse polygon from various input formats
     let polygon = input;
@@ -425,6 +442,12 @@ LIMIT ${this.ROW_LIMIT};
     const bbox = this.calculateBBox(polygon);
     console.log(`[MotherDuckHttp] Roads BBox: [${bbox.west}, ${bbox.south}, ${bbox.east}, ${bbox.north}]`);
 
+    // Build layer filter clause
+    // If layer column doesn't exist yet (pre-migration), query all roads
+    const layerFilter = layers.length > 0 
+      ? `AND (layer IS NULL OR layer IN (${layers.join(',')}))` 
+      : '';
+
     // Query pre-loaded MotherDuck table (fast - no S3 scanning)
     const query = `
 SELECT 
@@ -436,6 +459,7 @@ FROM ${this.ROADS_TABLE}
 WHERE 
     bbox_west <= ${bbox.east} AND bbox_east >= ${bbox.west}
     AND bbox_south <= ${bbox.north} AND bbox_north >= ${bbox.south}
+    ${layerFilter}
 LIMIT ${this.ROW_LIMIT};
 `;
 
