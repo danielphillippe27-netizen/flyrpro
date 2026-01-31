@@ -98,8 +98,11 @@ export class MotherDuckHttpService {
    * 
    * Uses MCP Streamable HTTP transport with JSON-RPC 2.0 messages.
    * Handles both JSON and SSE response formats.
+   * 
+   * @param sql - SQL query to execute (use fully qualified table names: database.schema.table)
+   * @param database - Optional database context (omit to use fully qualified names only)
    */
-  static async executeQuery(sql: string, database: string = 'my_db'): Promise<any[]> {
+  static async executeQuery(sql: string, database?: string): Promise<any[]> {
     if (!this.MOTHERDUCK_TOKEN) {
       throw new Error('MOTHERDUCK_TOKEN is required for HTTP API');
     }
@@ -109,15 +112,18 @@ export class MotherDuckHttpService {
 
     try {
       // MCP Protocol: JSON-RPC 2.0 request format for tool call
+      // Only include database in arguments if provided
+      const queryArgs: { sql: string; database?: string } = { sql };
+      if (database) {
+        queryArgs.database = database;
+      }
+      
       const requestBody = {
         jsonrpc: '2.0',
         method: 'tools/call',
         params: {
           name: 'query',
-          arguments: {
-            database,
-            sql,
-          },
+          arguments: queryArgs,
         },
         id: Date.now(),
       };
@@ -288,7 +294,7 @@ LIMIT ${this.ROW_LIMIT};
 `;
 
     try {
-      const result = await this.executeQuery(query, this.MOTHERDUCK_DATABASE);
+      const result = await this.executeQuery(query);
       const processed = this.processBuildingResults(result);
       console.log(`[MotherDuckHttp] BBox query returned ${processed.length} buildings`);
       
@@ -367,7 +373,7 @@ LIMIT ${this.ROW_LIMIT};
 `;
 
     try {
-      const result = await this.executeQuery(query, this.MOTHERDUCK_DATABASE);
+      const result = await this.executeQuery(query);
       const processed = this.processAddressResults(result);
       console.log(`[MotherDuckHttp] BBox query returned ${processed.length} addresses`);
       
@@ -464,7 +470,7 @@ LIMIT ${this.ROW_LIMIT};
 `;
 
     try {
-      const result = await this.executeQuery(query, this.MOTHERDUCK_DATABASE);
+      const result = await this.executeQuery(query);
       const processed = this.processTransportationResults(result);
       console.log(`[MotherDuckHttp] BBox query returned ${processed.length} roads`);
       
