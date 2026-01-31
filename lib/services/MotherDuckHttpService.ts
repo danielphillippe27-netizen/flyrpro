@@ -76,11 +76,11 @@ export class MotherDuckHttpService {
   
   // Pre-loaded MotherDuck database (run load-overture-to-motherduck.ts first)
   // Contains US + Canada buildings, addresses, and roads
-  // Note: Table names are NOT prefixed with database - the MCP API handles USE database internally
-  private static readonly MOTHERDUCK_DATABASE = 'overture_na';
-  private static readonly BUILDINGS_TABLE = 'buildings';
-  private static readonly ADDRESSES_TABLE = 'addresses';
-  private static readonly ROADS_TABLE = 'roads';
+  // Note: Use fully qualified names (database.schema.table) to avoid MCP SET schema issues
+  private static readonly MOTHERDUCK_DATABASE = 'my_db'; // Use default database context
+  private static readonly BUILDINGS_TABLE = 'overture_na.main.buildings';
+  private static readonly ADDRESSES_TABLE = 'overture_na.main.addresses';
+  private static readonly ROADS_TABLE = 'overture_na.main.roads';
 
   private static get MOTHERDUCK_TOKEN(): string | undefined {
     return process.env.MOTHERDUCK_TOKEN;
