@@ -370,23 +370,21 @@ LIMIT ${this.ROW_LIMIT};
 
     try {
       console.log(`[MotherDuckHttp] Executing address query for bbox: W=${bbox.west}, S=${bbox.south}, E=${bbox.east}, N=${bbox.north}`);
-      console.log(`[MotherDuckHttp] Full query:\n${query}`);
       
       const result = await this.executeQuery(query, this.MOTHERDUCK_DATABASE);
-      console.log(`[MotherDuckHttp] Raw result count: ${result?.length || 0}`);
-      if (result?.length > 0) {
-        console.log(`[MotherDuckHttp] First raw row:`, JSON.stringify(result[0]).substring(0, 200));
-      }
-      
       const processed = this.processAddressResults(result);
-      console.log(`[MotherDuckHttp] BBox query returned ${processed.length} addresses`);
-      if (processed.length > 0) {
-        console.log(`[MotherDuckHttp] First processed address:`, JSON.stringify(processed[0]).substring(0, 200));
-      }
       
       // Apply client-side polygon filtering for precision
       const filtered = this.filterAddressesByPolygon(processed, polygon);
-      console.log(`[MotherDuckHttp] After polygon filter: ${filtered.length} addresses inside polygon`);
+      
+      console.log(`[MotherDuckHttp] Results: raw=${result?.length || 0}, processed=${processed.length}, filtered=${filtered.length}`);
+      
+      // If no results, throw with debug info so user can see what happened
+      if (filtered.length === 0) {
+        const debugInfo = `bbox=[${bbox.west.toFixed(4)},${bbox.south.toFixed(4)},${bbox.east.toFixed(4)},${bbox.north.toFixed(4)}] rawRows=${result?.length || 0} processed=${processed.length}`;
+        throw new Error(`No addresses in area. Debug: ${debugInfo}. Make sure you're drawing in a US location.`);
+      }
+      
       return filtered;
     } catch (error: any) {
       console.error('[MotherDuckHttp] Addresses query error:', error.message);
