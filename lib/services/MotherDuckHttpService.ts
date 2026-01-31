@@ -76,10 +76,10 @@ export class MotherDuckHttpService {
   
   // Pre-loaded MotherDuck database (run load-overture-to-motherduck.ts first)
   // Contains US + Canada buildings, addresses, and roads
-  // Note: Use fully qualified names (database.schema.table) and omit database param to avoid SET schema issues
-  private static readonly BUILDINGS_TABLE = 'overture_na.main.buildings';
-  private static readonly ADDRESSES_TABLE = 'overture_na.main.addresses';
-  private static readonly ROADS_TABLE = 'overture_na.main.roads';
+  private static readonly MOTHERDUCK_DATABASE = 'overture_na';
+  private static readonly BUILDINGS_TABLE = 'overture_na.buildings';
+  private static readonly ADDRESSES_TABLE = 'overture_na.addresses';
+  private static readonly ROADS_TABLE = 'overture_na.roads';
 
   private static get MOTHERDUCK_TOKEN(): string | undefined {
     return process.env.MOTHERDUCK_TOKEN;
@@ -97,11 +97,8 @@ export class MotherDuckHttpService {
    * 
    * Uses MCP Streamable HTTP transport with JSON-RPC 2.0 messages.
    * Handles both JSON and SSE response formats.
-   * 
-   * @param sql - SQL query to execute (use fully qualified table names: database.schema.table)
-   * @param database - Optional database context (omit to use fully qualified names only)
    */
-  static async executeQuery(sql: string, database?: string): Promise<any[]> {
+  static async executeQuery(sql: string, database: string = 'my_db'): Promise<any[]> {
     if (!this.MOTHERDUCK_TOKEN) {
       throw new Error('MOTHERDUCK_TOKEN is required for HTTP API');
     }
@@ -111,18 +108,15 @@ export class MotherDuckHttpService {
 
     try {
       // MCP Protocol: JSON-RPC 2.0 request format for tool call
-      // Only include database in arguments if provided
-      const queryArgs: { sql: string; database?: string } = { sql };
-      if (database) {
-        queryArgs.database = database;
-      }
-      
       const requestBody = {
         jsonrpc: '2.0',
         method: 'tools/call',
         params: {
           name: 'query',
-          arguments: queryArgs,
+          arguments: {
+            database,
+            sql,
+          },
         },
         id: Date.now(),
       };
@@ -293,7 +287,7 @@ LIMIT ${this.ROW_LIMIT};
 `;
 
     try {
-      const result = await this.executeQuery(query);
+      const result = await this.executeQuery(query, this.MOTHERDUCK_DATABASE);
       const processed = this.processBuildingResults(result);
       console.log(`[MotherDuckHttp] BBox query returned ${processed.length} buildings`);
       
@@ -372,7 +366,7 @@ LIMIT ${this.ROW_LIMIT};
 `;
 
     try {
-      const result = await this.executeQuery(query);
+      const result = await this.executeQuery(query, this.MOTHERDUCK_DATABASE);
       const processed = this.processAddressResults(result);
       console.log(`[MotherDuckHttp] BBox query returned ${processed.length} addresses`);
       
@@ -406,29 +400,13 @@ LIMIT ${this.ROW_LIMIT};
   }
 
   /**
-   * Options for getRoadsInPolygon query
-   */
-  static readonly ROAD_LAYER_CORE = 1;      // residential, tertiary, secondary, primary
-  static readonly ROAD_LAYER_ROUTING = 2;   // service, living_street, unclassified
-
-  /**
    * Get transportation segments inside a polygon using HTTP API
    * 
    * Queries pre-loaded data in overture_na.roads table.
    * Run load-overture-to-motherduck.ts first to populate the table.
-   * 
-   * @param input - Polygon geometry (GeoJSON Feature, FeatureCollection, or Geometry)
-   * @param options.includeLayers - Array of layer numbers to include (default: [1] for core roads only)
-   *   - Layer 1 (ROAD_LAYER_CORE): residential, tertiary, secondary, primary - for house snapping
-   *   - Layer 2 (ROAD_LAYER_ROUTING): service, living_street, unclassified - for GPS replay, condo access
    */
-  static async getRoadsInPolygon(
-    input: any,
-    options?: { includeLayers?: number[] }
-  ): Promise<OvertureTransportation[]> {
-    // Default to Layer 1 only (core roads for house snapping)
-    const layers = options?.includeLayers ?? [this.ROAD_LAYER_CORE];
-    console.log(`[MotherDuckHttp] Fetching roads from overture_na database (layers: ${layers.join(',')})...`);
+  static async getRoadsInPolygon(input: any): Promise<OvertureTransportation[]> {
+    console.log('[MotherDuckHttp] Fetching roads from overture_na database...');
 
     // Parse polygon from various input formats
     let polygon = input;
@@ -447,12 +425,6 @@ LIMIT ${this.ROW_LIMIT};
     const bbox = this.calculateBBox(polygon);
     console.log(`[MotherDuckHttp] Roads BBox: [${bbox.west}, ${bbox.south}, ${bbox.east}, ${bbox.north}]`);
 
-    // Build layer filter clause
-    // If layer column doesn't exist yet (pre-migration), query all roads
-    const layerFilter = layers.length > 0 
-      ? `AND (layer IS NULL OR layer IN (${layers.join(',')}))` 
-      : '';
-
     // Query pre-loaded MotherDuck table (fast - no S3 scanning)
     const query = `
 SELECT 
@@ -464,12 +436,11 @@ FROM ${this.ROADS_TABLE}
 WHERE 
     bbox_west <= ${bbox.east} AND bbox_east >= ${bbox.west}
     AND bbox_south <= ${bbox.north} AND bbox_north >= ${bbox.south}
-    ${layerFilter}
 LIMIT ${this.ROW_LIMIT};
 `;
 
     try {
-      const result = await this.executeQuery(query);
+      const result = await this.executeQuery(query, this.MOTHERDUCK_DATABASE);
       const processed = this.processTransportationResults(result);
       console.log(`[MotherDuckHttp] BBox query returned ${processed.length} roads`);
       
