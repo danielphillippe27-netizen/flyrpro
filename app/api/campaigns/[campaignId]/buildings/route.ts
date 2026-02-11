@@ -37,7 +37,7 @@ export async function GET(
       .from('campaign_snapshots')
       .select('bucket, buildings_key, buildings_count')
       .eq('campaign_id', campaignId)
-      .single();
+      .maybeSingle();
     
     if (snapshotError || !snapshot?.buildings_key) {
       console.log('[API] No snapshot found, returning empty');

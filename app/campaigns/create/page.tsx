@@ -441,7 +441,7 @@ if (!features || features.features.length === 0) {
               onChange={(e) => setName(e.target.value)}
               required
               placeholder="Campaign Name"
-              className="w-48"
+              className="w-48 bg-gray-200 dark:bg-gray-700"
             />
           </div>
 
@@ -449,11 +449,11 @@ if (!features || features.features.length === 0) {
           <div className="flex items-center gap-2">
             <Label className="text-sm font-medium text-foreground whitespace-nowrap">Type</Label>
             <Select value={type} onValueChange={(v) => setType(v as CampaignType)}>
-              <SelectTrigger className="w-32">
+              <SelectTrigger className={`w-32 bg-gray-200 dark:bg-gray-700 ${type === 'flyer' ? 'text-red-500' : ''}`}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="flyer">Flyer</SelectItem>
+                <SelectItem value="flyer" className="text-red-500">Flyer</SelectItem>
                 <SelectItem value="door_knock">Door Knock</SelectItem>
                 <SelectItem value="event">Event</SelectItem>
                 <SelectItem value="survey">Survey</SelectItem>
@@ -473,6 +473,7 @@ if (!features || features.features.length === 0) {
               onSelect={handleMapSearchSelect}
               placeholder="Jump to address..."
               className="flex-1"
+              inputClassName="bg-gray-200 dark:bg-gray-700"
             />
           </div>
 

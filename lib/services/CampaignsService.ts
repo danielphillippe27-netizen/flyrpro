@@ -322,7 +322,7 @@ export class CampaignsService {
           .from('campaign_snapshots')
           .select('buildings_count')
           .eq('campaign_id', campaignId)
-          .single();
+          .maybeSingle();
         
         const buildingCount = legacyBuildingCount || snapshot?.buildings_count || 0;
 
@@ -358,7 +358,7 @@ export class CampaignsService {
           .from('campaign_snapshots')
           .select('buildings_count')
           .eq('campaign_id', campaignId)
-          .single();
+          .maybeSingle();
         buildingCount = snapshot?.buildings_count || 0;
       } catch {
         // Ignore snapshot lookup errors

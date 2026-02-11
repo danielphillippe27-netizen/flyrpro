@@ -17,6 +17,7 @@ interface AddressAutocompleteProps {
   placeholder?: string;
   disabled?: boolean;
   className?: string;
+  inputClassName?: string;
 }
 
 export function AddressAutocomplete({
@@ -26,6 +27,7 @@ export function AddressAutocomplete({
   placeholder = 'Enter a starting address',
   disabled = false,
   className,
+  inputClassName,
 }: AddressAutocompleteProps) {
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -204,7 +206,7 @@ export function AddressAutocomplete({
           autoComplete="off"
           autoCapitalize="off"
           autoCorrect="off"
-          className="w-full"
+          className={inputClassName ? `w-full ${inputClassName}` : 'w-full'}
         />
         {isLoading && (
           <div className="absolute right-3 top-1/2 -translate-y-1/2">
