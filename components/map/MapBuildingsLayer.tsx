@@ -207,7 +207,8 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
         buildingCount: parentBuildings?.features?.length || 0,
       });
 
-      // If we have buildings from S3, merge: units for multi-unit buildings, parent building for detached
+      // If we have buildings from S3, merge: units for multi-unit buildings, parent building for detached.
+      // Publish every fetched building (no dropping); visibility is controlled via layer filter / feature stats.
       if (hasBuildings) {
         const parentFeatures = parentBuildings?.features ?? [];
 

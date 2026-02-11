@@ -7,6 +7,9 @@ import { CampaignMarkersLayer } from './CampaignMarkersLayer';
 import { MapBuildingsLayer } from './MapBuildingsLayer';
 import { MapInfoButton } from './MapInfoButton';
 import { RouteLayer } from './RouteLayer';
+import { UserLocationLayer } from './UserLocationLayer';
+import { LocateFixed } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { AddressOrientationPanel } from './AddressOrientationPanel';
 import { HouseDetailPanel } from './HouseDetailPanel';
 import { LocationCard } from './LocationCard';
@@ -45,6 +48,7 @@ export function FlyrMapView() {
   const [userId, setUserId] = useState<string | null>(null);
   const boundsFittedRef = useRef(false);
   const [campaignBbox, setCampaignBbox] = useState<{ minLon: number; minLat: number; maxLon: number; maxLat: number } | null>(null);
+  const [showUserLocation, setShowUserLocation] = useState(false);
 
   // Get user ID on mount
   useEffect(() => {
@@ -489,7 +493,36 @@ export function FlyrMapView() {
             selectedCampaignId={selectedCampaignId}
             onCampaignSelect={setSelectedCampaignId}
           />
+          <UserLocationLayer
+            map={map.current}
+            mapLoaded={mapLoaded}
+            showUserLocation={showUserLocation}
+            onLocationFound={(lng, lat) => {
+              map.current?.flyTo({ center: [lng, lat], zoom: 15, duration: 800 });
+            }}
+            onLocationError={(err) => {
+              console.warn('Geolocation error:', err.message);
+            }}
+          />
         </>
+      )}
+      {mapLoaded && !error && (
+        <div className="absolute top-14 left-3 z-10">
+          <Button
+            variant="secondary"
+            size="icon"
+            className={`h-9 w-9 rounded-full shadow-md border ${
+              showUserLocation
+                ? 'bg-blue-100 dark:bg-blue-900/40 border-blue-300 dark:border-blue-700'
+                : 'bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 border-gray-200 dark:border-gray-700'
+            }`}
+            onClick={() => setShowUserLocation((v) => !v)}
+            aria-label="Show my location"
+            title="My location"
+          >
+            <LocateFixed className={`h-5 w-5 ${showUserLocation ? 'text-blue-600 dark:text-blue-400' : 'text-gray-600 dark:text-gray-400'}`} strokeWidth={2.5} />
+          </Button>
+        </div>
       )}
       <AddressOrientationPanel
         address={selectedAddress}

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { getSupabaseServerClient } from '@/lib/supabase/server';
 import { StableLinkerService } from '@/lib/services/StableLinkerService';
 
 export const runtime = 'nodejs';
@@ -19,7 +19,7 @@ export async function POST(
   console.log(`[API] POST /campaigns/${campaignId}/orphans/${orphanId}/assign`);
   
   try {
-    const supabase = await createClient();
+    const supabase = await getSupabaseServerClient();
     
     // Check if user is authenticated
     const { data: { user }, error: userError } = await supabase.auth.getUser();

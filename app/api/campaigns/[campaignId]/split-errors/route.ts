@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { getSupabaseServerClient } from '@/lib/supabase/server';
 import { TownhouseSplitterService } from '@/lib/services/TownhouseSplitterService';
 
 export const runtime = 'nodejs';
@@ -19,7 +19,7 @@ export async function GET(
   console.log(`[API] GET /campaigns/${campaignId}/split-errors`);
   
   try {
-    const supabase = await createClient();
+    const supabase = await getSupabaseServerClient();
     
     // Check authentication
     const { data: { user }, error: userError } = await supabase.auth.getUser();
