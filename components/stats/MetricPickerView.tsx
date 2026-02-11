@@ -11,8 +11,8 @@ export function MetricPickerView({
   onSortChange: (sortBy: LeaderboardSortBy) => void;
 }) {
   return (
-    <div className="bg-white rounded-lg border p-4">
-      <label className="text-sm font-medium mb-2 block">Sort by</label>
+    <div className="bg-card rounded-lg border border-border p-4">
+      <label className="text-sm font-medium text-muted-foreground mb-2 block">Sort by</label>
       <Select value={sortBy} onValueChange={(v) => onSortChange(v as LeaderboardSortBy)}>
         <SelectTrigger className="w-full md:w-[200px]">
           <SelectValue />

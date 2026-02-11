@@ -44,6 +44,7 @@ export function CreateContactDialog({
     address: initialAddress || '',
     status: 'new' as ContactStatus,
     notes: '',
+    tags: '',
   });
 
   // Update form data when initial values change
@@ -74,6 +75,7 @@ export function CreateContactDialog({
           status: formData.status,
           notes: formData.notes.trim() || undefined,
           address_id: initialAddressId,
+          tags: formData.tags.trim() || undefined,
         });
       } else {
         await ContactsService.createContact(userId, {
@@ -85,6 +87,7 @@ export function CreateContactDialog({
           campaign_id: initialCampaignId,
           status: formData.status,
           notes: formData.notes.trim() || undefined,
+          tags: formData.tags.trim() || undefined,
         });
       }
 
@@ -97,6 +100,7 @@ export function CreateContactDialog({
         address: '',
         status: 'new',
         notes: '',
+        tags: '',
       });
 
       onSuccess();
@@ -120,6 +124,7 @@ export function CreateContactDialog({
         address: '',
         status: 'new',
         notes: '',
+        tags: '',
       });
       onClose();
     }
@@ -131,7 +136,7 @@ export function CreateContactDialog({
         <DialogHeader>
           <DialogTitle>Add New Contact</DialogTitle>
           <DialogDescription>
-            Create a new contact in your CRM
+            Add a new lead
           </DialogDescription>
         </DialogHeader>
 
@@ -228,6 +233,17 @@ export function CreateContactDialog({
               placeholder="Additional notes about this contact..."
               disabled={loading}
               rows={3}
+            />
+          </div>
+
+          <div>
+            <Label htmlFor="tags">Tags</Label>
+            <Input
+              id="tags"
+              value={formData.tags}
+              onChange={(e) => setFormData({ ...formData, tags: e.target.value })}
+              placeholder="Tag1, Tag2, Tag3"
+              disabled={loading}
             />
           </div>
 

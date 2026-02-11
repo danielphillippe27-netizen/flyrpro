@@ -18,10 +18,10 @@ export const runtime = 'nodejs';
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { gersId: string } }
+  { params }: { params: Promise<{ gersId: string }> }
 ) {
   try {
-    const { gersId } = params;
+    const { gersId } = await params;
 
     if (!gersId) {
       return NextResponse.json(

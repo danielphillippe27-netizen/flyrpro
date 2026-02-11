@@ -311,14 +311,24 @@ export class CampaignsService {
           .select('*', { count: 'exact', head: true })
           .eq('campaign_id', campaignId);
         
-        const { count: buildingCount } = await this.client
+        // Check legacy buildings table
+        const { count: legacyBuildingCount } = await this.client
           .from('buildings')
           .select('*', { count: 'exact', head: true })
           .eq('campaign_id', campaignId);
+        
+        // Check new snapshot-based architecture (S3 stored buildings)
+        const { data: snapshot } = await this.client
+          .from('campaign_snapshots')
+          .select('buildings_count')
+          .eq('campaign_id', campaignId)
+          .single();
+        
+        const buildingCount = legacyBuildingCount || snapshot?.buildings_count || 0;
 
         return {
           addresses: addressCount || 0,
-          buildings: buildingCount || 0,
+          buildings: buildingCount,
           visited: 0,
           scanned: 0,
           scan_rate: 0,
@@ -340,9 +350,24 @@ export class CampaignsService {
     // Handle case where data might be a string (JSONB serialization)
     const stats = typeof data === 'string' ? JSON.parse(data) : data;
     
+    // If RPC returns 0 buildings, check snapshot (Gold Standard architecture)
+    let buildingCount = stats?.buildings || 0;
+    if (buildingCount === 0) {
+      try {
+        const { data: snapshot } = await this.client
+          .from('campaign_snapshots')
+          .select('buildings_count')
+          .eq('campaign_id', campaignId)
+          .single();
+        buildingCount = snapshot?.buildings_count || 0;
+      } catch {
+        // Ignore snapshot lookup errors
+      }
+    }
+    
     return {
       addresses: stats?.addresses || 0,
-      buildings: stats?.buildings || 0,
+      buildings: buildingCount,
       visited: stats?.visited || 0,
       scanned: stats?.scanned || 0,
       scan_rate: stats?.scan_rate || 0,

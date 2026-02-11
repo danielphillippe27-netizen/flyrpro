@@ -11,13 +11,13 @@ export function LeaderboardView({
   loading: boolean;
 }) {
   if (loading) {
-    return <div className="text-center py-8 text-gray-600">Loading leaderboard...</div>;
+    return <div className="text-center py-8 text-muted-foreground">Loading leaderboard...</div>;
   }
 
   if (entries.length === 0) {
     return (
-      <div className="text-center py-12 bg-white rounded-lg border">
-        <p className="text-gray-600">No leaderboard entries yet</p>
+      <div className="text-center py-12 bg-card rounded-lg border border-border">
+        <p className="text-muted-foreground">No leaderboard entries yet</p>
       </div>
     );
   }

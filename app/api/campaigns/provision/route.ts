@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
-// OvertureService is dynamically imported to avoid DuckDB native module issues on Vercel
-// import { OvertureService } from '@/lib/services/OvertureService';
+import { TileLambdaService } from '@/lib/services/TileLambdaService';
+import { RoutingService } from '@/lib/services/RoutingService';
+import { StableLinkerService, DataIntegrityError } from '@/lib/services/StableLinkerService';
+import { TownhouseSplitterService } from '@/lib/services/TownhouseSplitterService';
 
-// FIX: Ensure Node.js runtime (MotherDuck/DuckDB requires Node, not Edge)
+// FIX: Ensure Node.js runtime
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -25,17 +27,17 @@ async function retryWithBackoff<T>(
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
       
-      // Don't retry on non-connection errors
       const isConnectionError = 
         lastError.message.includes('closed') ||
         lastError.message.includes('Connection Error') ||
-        lastError.message.includes('established');
+        lastError.message.includes('established') ||
+        lastError.message.includes('timeout');
       
       if (!isConnectionError || attempt === maxAttempts) {
         throw lastError;
       }
       
-      const delay = baseDelay * Math.pow(2, attempt - 1); // 200ms, 400ms, 800ms
+      const delay = baseDelay * Math.pow(2, attempt - 1);
       console.warn(`[Provision] Retry attempt ${attempt}/${maxAttempts} after ${delay}ms...`);
       await new Promise(resolve => setTimeout(resolve, delay));
     }
@@ -45,10 +47,9 @@ async function retryWithBackoff<T>(
 }
 
 export async function POST(request: NextRequest) {
-  // FIX: Log MotherDuck env vars on server
-  console.log('[Provision] MD token exists?', !!process.env.MOTHERDUCK_TOKEN);
-  console.log('[Provision] MD token length:', process.env.MOTHERDUCK_TOKEN?.length || 0);
-  console.log('[Provision] Using MotherDuck:', !!process.env.MOTHERDUCK_TOKEN);
+  console.log('[Provision] Starting GOLD STANDARD hybrid provisioning...');
+  console.log('[Provision] Lambda URL exists?', !!process.env.SLICE_LAMBDA_URL);
+  console.log('[Provision] Secret exists?', !!process.env.SLICE_SHARED_SECRET);
   
   let campaign_id: string | null = null;
   
@@ -63,12 +64,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Validate Lambda configuration
+    if (!process.env.SLICE_LAMBDA_URL || !process.env.SLICE_SHARED_SECRET) {
+      return NextResponse.json(
+        { error: 'Lambda not configured. Set SLICE_LAMBDA_URL and SLICE_SHARED_SECRET.' },
+        { status: 500 }
+      );
+    }
+
     const supabase = createAdminClient();
 
-    // Validate campaign ownership
+    // Get campaign with territory boundary
     const { data: campaign, error: campaignError } = await supabase
       .from('campaigns')
-      .select('owner_id')
+      .select('owner_id, territory_boundary, region')
       .eq('id', campaign_id)
       .single();
 
@@ -79,35 +88,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check ownership (campaigns table has owner_id)
-    const ownerId = (campaign as any).owner_id;
-    if (!ownerId) {
-      return NextResponse.json(
-        { error: 'Campaign ownership cannot be determined' },
-        { status: 400 }
-      );
-    }
-
-    // SURGICAL PROVISIONING: Get campaign territory_boundary polygon
-    console.log('[Provision] Surgical: Getting campaign territory boundary...');
-    
-    const { data: campaignData, error: campaignDataError } = await supabase
-      .from('campaigns')
-      .select('territory_boundary')
-      .eq('id', campaign_id)
-      .single();
-
-    const polygon = campaignData?.territory_boundary;
+    const polygon = campaign.territory_boundary;
     
     if (!polygon) {
-      console.error('[Provision] No territory_boundary found for campaign');
       return NextResponse.json(
         { error: 'No territory boundary defined. Please draw a polygon on the map when creating the campaign.' },
         { status: 400 }
       );
     }
+
+    // Determine region code (ON for Ontario, etc.)
+    const regionCode = (campaign.region || 'ON').toUpperCase();
     
-    console.log('[Provision] Surgical: Using polygon for precision filtering');
+    console.log('[Provision] Campaign:', campaign_id);
+    console.log('[Provision] Region:', regionCode);
 
     // Update status to 'pending'
     await supabase
@@ -115,415 +109,324 @@ export async function POST(request: NextRequest) {
       .update({ provision_status: 'pending' })
       .eq('id', campaign_id);
 
-    // Wrap provisioning in retry logic
+    // =============================================================================
+    // GOLD STANDARD: Hybrid Provisioning with Lambda + S3
+    // =============================================================================
+    
     const result = await retryWithBackoff(async () => {
-      // Dynamic import to avoid DuckDB native module issues on Vercel build
-      const { OvertureService } = await import('@/lib/services/OvertureService');
-      
-      // SURGICAL PROVISIONING: Fetch ONLY data inside the exact polygon
-      // No Wide Net, no BBox corners grabbing neighbors
-      console.log('[Provision] Surgical: Fetching addresses inside polygon from MotherDuck...');
-      const addresses = await OvertureService.getAddressesInPolygon(polygon);
-      console.log(`[Provision] Surgical: Fetched ${addresses.length} addresses`);
-
-      console.log('[Provision] Surgical: Fetching buildings inside polygon from MotherDuck...');
-      const buildings = await OvertureService.getBuildingsInPolygon(polygon);
-      console.log(`[Provision] Surgical: Fetched ${buildings.length} buildings`);
-
-      console.log('[Provision] Surgical: Fetching roads inside polygon from MotherDuck...');
-      const roads = await OvertureService.getRoadsInPolygon(polygon);
-      console.log(`[Provision] Surgical: Fetched ${roads.length} roads`);
-
-      console.log('[Provision] Stable Linker: Preparing payloads for ingest...');
-      
-      // Helper: Validate GeoJSON has valid coordinates
-      const isValidGeoJSON = (geojson: any): boolean => {
-        if (!geojson || !geojson.type || !geojson.coordinates) return false;
-        if (!Array.isArray(geojson.coordinates)) return false;
-        
-        // Check for empty coordinates
-        if (geojson.coordinates.length === 0) return false;
-        
-        // For Point: coordinates should be [lng, lat]
-        if (geojson.type === 'Point') {
-          return geojson.coordinates.length >= 2 && 
-                 typeof geojson.coordinates[0] === 'number' &&
-                 typeof geojson.coordinates[1] === 'number' &&
-                 !isNaN(geojson.coordinates[0]) &&
-                 !isNaN(geojson.coordinates[1]);
+      // Step 1: Call Lambda to generate snapshots from flyr-data-lake
+      console.log('[Provision] Step 1: Calling Tile Lambda...');
+      const snapshot = await TileLambdaService.generateSnapshots(
+        polygon as GeoJSON.Polygon,
+        regionCode,
+        campaign_id!,
+        {
+          limitBuildings: 10000,   // Generous limits for full coverage
+          limitAddresses: 10000,
+          limitRoads: 5000,
+          includeRoads: true,
         }
-        
-        // For LineString: need at least 2 points
-        if (geojson.type === 'LineString') {
-          return geojson.coordinates.length >= 2;
-        }
-        
-        // For MultiLineString: need at least one line with 2+ points
-        if (geojson.type === 'MultiLineString') {
-          return geojson.coordinates.length >= 1 && 
-                 geojson.coordinates[0].length >= 2;
-        }
-        
-        // For Polygon/MultiPolygon: need at least one ring with points
-        if (geojson.type === 'Polygon') {
-          return geojson.coordinates.length > 0 && 
-                 geojson.coordinates[0].length >= 4; // Ring needs 4+ points (closed)
-        }
-        
-        if (geojson.type === 'MultiPolygon') {
-          return geojson.coordinates.length > 0 &&
-                 geojson.coordinates[0].length > 0 &&
-                 geojson.coordinates[0][0].length >= 4;
-        }
-        
-        return true; // Other types, assume valid
-      };
+      );
 
-      // Prepare addresses data for RPC (include formatted for ingest)
-      const addressesForRPC = addresses
-        .map(address => {
-          let geojson = typeof address.geometry === 'string'
-            ? JSON.parse(address.geometry)
-            : address.geometry;
+      // Step 2: Download addresses from S3 (the only thing we ingest)
+      console.log('[Provision] Step 2: Downloading addresses from S3...');
+      const addressData = await TileLambdaService.downloadAddresses(snapshot.urls.addresses);
 
-          if (!geojson || geojson.type !== 'Point') {
-            geojson = { type: 'Point', coordinates: [0, 0] };
-          }
+      // Step 3: Convert to lean campaign_addresses format
+      console.log('[Provision] Step 3: Converting to lean format...');
+      const addressesToInsert = TileLambdaService.convertToCampaignAddresses(
+        addressData.features,
+        campaign_id!
+      );
 
-          const formatted =
-            (address.formatted ?? [address.house_number, address.street, address.postcode].filter(Boolean).join(' ').trim()) || '';
-
-          return {
-            gers_id: address.gers_id,
-            geometry: geojson,
-            house_number: address.house_number,
-            street_name: address.street,
-            postal_code: address.postcode,
-            locality: address.locality,
-            formatted,
-          };
-        })
-        .filter(addr => addr.gers_id && isValidGeoJSON(addr.geometry));
-
-      // Prepare buildings data for RPC (filter out invalid geometries)
-      const buildingsForRPC = buildings
-        .map(building => {
-          let geojson = typeof building.geometry === 'string'
-            ? JSON.parse(building.geometry)
-            : building.geometry;
-
-          // Convert Polygon to MultiPolygon for consistency
-          if (geojson && geojson.type === 'Polygon' && geojson.coordinates) {
-            geojson = { type: 'MultiPolygon', coordinates: [geojson.coordinates] };
-          }
-
-          return {
-            gers_id: building.gers_id,
-            geometry: geojson,
-            height: building.height || 8,
-          };
-        })
-        .filter(bld => bld.gers_id && bld.geometry && isValidGeoJSON(bld.geometry));
-
-      // Prepare roads data for RPC (filter out invalid geometries)
-      const roadsForRPC = roads
-        .map(road => {
-          const geometry = typeof road.geometry === 'string'
-            ? JSON.parse(road.geometry) as GeoJSON.LineString
-            : road.geometry;
-          return {
-            gers_id: road.gers_id,
-            geometry: geometry,
-          };
-        })
-        .filter(rd => rd.gers_id && rd.geometry && isValidGeoJSON(rd.geometry));
-
-      // Log counts after filtering
-      console.log(`[Provision] After validation: ${addressesForRPC.length} addresses, ${buildingsForRPC.length} buildings, ${roadsForRPC.length} roads`);
-      if (addresses.length !== addressesForRPC.length) {
-        console.warn(`[Provision] Filtered out ${addresses.length - addressesForRPC.length} invalid addresses`);
-      }
-      if (buildings.length !== buildingsForRPC.length) {
-        console.warn(`[Provision] Filtered out ${buildings.length - buildingsForRPC.length} invalid buildings`);
-      }
-      if (roads.length !== roadsForRPC.length) {
-        console.warn(`[Provision] Filtered out ${roads.length - roadsForRPC.length} invalid roads`);
-      }
-
-      // Stable Linker: Step 1 - Ingest raw addresses, buildings, and roads (no linking)
-      console.log('[Provision] Stable Linker: Ingesting raw addresses, buildings, and roads...');
-      const { data: ingestResult, error: ingestError } = await supabase.rpc('ingest_campaign_raw_data', {
-        p_campaign_id: campaign_id,
-        p_addresses: addressesForRPC,
-        p_buildings: buildingsForRPC,
-        p_roads: roadsForRPC,
-      });
-
-      if (ingestError) {
-        console.error('[Provision] Ingest failed:', ingestError);
-        throw new Error(`Ingest failed: ${ingestError.message}`);
-      }
-
-      const addressesSaved = ingestResult?.addresses_saved ?? 0;
-      const buildingsSaved = ingestResult?.buildings_saved ?? 0;
-      const roadsSaved = ingestResult?.roads_saved ?? 0;
-      const buildingsDeleted = ingestResult?.buildings_deleted ?? 0;
-      console.log(`[Provision] Ingest complete: ${addressesSaved} addresses, ${buildingsSaved} buildings, ${roadsSaved} roads (deleted ${buildingsDeleted} old buildings)`);
-
-      // Verification: Confirm actual building count in DB matches expected
-      const { count: actualBuildingCount } = await supabase
-        .from('buildings')
-        .select('*', { count: 'exact', head: true })
+      // Step 4: Clear existing addresses for this campaign (clean slate)
+      console.log('[Provision] Step 4: Clearing existing addresses...');
+      const { error: deleteError } = await supabase
+        .from('campaign_addresses')
+        .delete()
         .eq('campaign_id', campaign_id);
 
-      console.log(`[Provision] Verification: Actual buildings in DB for campaign: ${actualBuildingCount}`);
+      if (deleteError) {
+        console.warn('[Provision] Error clearing addresses:', deleteError.message);
+      }
+
+      // Step 5: Insert addresses in batches
+      console.log('[Provision] Step 5: Inserting', addressesToInsert.length, 'addresses...');
+      const batchSize = 500;
+      let insertedCount = 0;
       
-      if (actualBuildingCount !== buildingsSaved) {
-        console.warn(`[Provision] WARNING: Building count mismatch! DB has ${actualBuildingCount}, expected ${buildingsSaved}`);
-      }
-
-      // Stable Linker: Step 2a - Run multi-pass spatial linker into building_address_links
-      console.log('[Provision] Stable Linker: Linking addresses to buildings (COVERS → NEAREST 25m)...');
-      const { data: linkResult, error: linkError } = await supabase.rpc('link_campaign_data', {
-        p_campaign_id: campaign_id,
-      });
-
-      if (linkError) {
-        console.error('[Provision] Link failed:', linkError);
-        throw new Error(`Link failed: ${linkError.message}`);
-      }
-
-      let linksCreated = linkResult?.links_created ?? 0;
-      const orphanCount = linkResult?.orphan_buildings ?? 0;
-      console.log(`[Provision] Initial link complete: ${linksCreated} links created, ${orphanCount} orphan buildings`);
-
-      // =============================================================================
-      // DISCOVERY BRAIN: Reverse geocode orphan buildings to find missing addresses
-      // =============================================================================
-      let discoveredAddresses = 0;
-      let cacheHits = 0;
-      let apiCalls = 0;
-
-      if (orphanCount > 0) {
-        console.log(`[Provision] Discovery Brain: Finding addresses for ${orphanCount} orphan buildings...`);
-
-        // Step 2b: Get linked building IDs first (fix for Supabase filter crash)
-        const { data: linkedBuildings } = await supabase
-          .from('building_address_links')
-          .select('building_id')
-          .eq('campaign_id', campaign_id);
-
-        const linkedBuildingIds = (linkedBuildings || []).map(b => b.building_id);
-        console.log(`[Provision] Discovery Brain: Found ${linkedBuildingIds.length} linked building IDs`);
-
-        // Query orphan buildings (buildings NOT in the linked set)
-        // Include geom so we can compute centroid if centroid column is null
-        let orphanQuery = supabase
-          .from('buildings')
-          .select('id, gers_id, centroid, geom')
-          .eq('campaign_id', campaign_id);
-
-        // Only apply the NOT IN filter if there are linked buildings
-        if (linkedBuildingIds.length > 0) {
-          orphanQuery = orphanQuery.not('id', 'in', `(${linkedBuildingIds.join(',')})`);
-        }
-
-        const { data: orphanBuildings, error: orphanError } = await orphanQuery;
-
-        if (orphanError) {
-          console.warn('[Provision] Discovery Brain: Error finding orphans:', orphanError.message);
-        } else if (orphanBuildings && orphanBuildings.length > 0) {
-          console.log(`[Provision] Discovery Brain: Processing ${orphanBuildings.length} orphan buildings...`);
-
-          // Helper function to compute centroid from polygon geometry
-          const computeCentroidFromGeom = (geom: any): [number, number] | null => {
-            try {
-              let geometry = geom;
-              if (typeof geom === 'string') {
-                geometry = JSON.parse(geom);
-              }
-              
-              if (!geometry || !geometry.coordinates) return null;
-              
-              // Get the outer ring coordinates
-              let coords: number[][];
-              if (geometry.type === 'MultiPolygon') {
-                coords = geometry.coordinates[0]?.[0] || [];
-              } else if (geometry.type === 'Polygon') {
-                coords = geometry.coordinates[0] || [];
-              } else {
-                return null;
-              }
-              
-              if (coords.length === 0) return null;
-              
-              // Calculate centroid by averaging coordinates
-              let sumLon = 0, sumLat = 0;
-              for (const coord of coords) {
-                sumLon += coord[0];
-                sumLat += coord[1];
-              }
-              return [sumLon / coords.length, sumLat / coords.length];
-            } catch {
-              return null;
-            }
-          };
-
-          for (const building of orphanBuildings) {
-            try {
-              // Parse centroid - could be GeoJSON object or PostGIS format
-              let centroidCoords: [number, number] | null = null;
-              
-              if (building.centroid) {
-                if (typeof building.centroid === 'object' && building.centroid.coordinates) {
-                  // GeoJSON format: { type: "Point", coordinates: [lon, lat] }
-                  centroidCoords = building.centroid.coordinates as [number, number];
-                } else if (typeof building.centroid === 'string') {
-                  // Try parsing as GeoJSON string
-                  try {
-                    const parsed = JSON.parse(building.centroid);
-                    if (parsed.coordinates) {
-                      centroidCoords = parsed.coordinates as [number, number];
-                    }
-                  } catch {
-                    // Might be WKT format, skip for now
-                  }
-                }
-              }
-              
-              // FALLBACK: If no centroid, compute from geometry
-              if ((!centroidCoords || centroidCoords.length < 2) && building.geom) {
-                centroidCoords = computeCentroidFromGeom(building.geom);
-                if (centroidCoords) {
-                  console.log(`[Provision] Discovery Brain: Computed centroid from geom for ${building.gers_id}`);
-                }
-              }
-
-              if (!centroidCoords || centroidCoords.length < 2) {
-                console.warn(`[Provision] Discovery Brain: No valid centroid or geom for building ${building.gers_id}`);
-                continue;
-              }
-
-              const [lon, lat] = centroidCoords;
-
-              // Step 1: Check global cache first
-              const { data: cached } = await supabase
-                .from('global_address_cache')
-                .select('*')
-                .eq('gers_id', building.gers_id)
-                .maybeSingle();
-
-              let addressData: {
-                house_number: string;
-                street_name: string;
-                postal_code: string;
-                formatted_address: string;
-              } | null = null;
-
-              if (cached) {
-                // Cache hit!
-                cacheHits++;
-                addressData = {
-                  house_number: cached.house_number || '',
-                  street_name: cached.street_name || '',
-                  postal_code: cached.postal_code || '',
-                  formatted_address: cached.formatted_address || '',
-                };
-                console.log(`[Provision] Discovery Brain: Cache hit for ${building.gers_id}`);
-              } else {
-                // Cache miss - call Mapbox reverse geocode
-                apiCalls++;
-                addressData = await OvertureService.reverseGeocode(lat, lon);
-
-                if (addressData) {
-                  // Save to global cache for future use
-                  await supabase.from('global_address_cache').upsert({
-                    gers_id: building.gers_id,
-                    house_number: addressData.house_number,
-                    street_name: addressData.street_name,
-                    postal_code: addressData.postal_code,
-                    formatted_address: addressData.formatted_address,
-                    centroid: { type: 'Point', coordinates: [lon, lat] },
-                    source: 'mapbox',
-                  });
-                  console.log(`[Provision] Discovery Brain: Cached geocode for ${building.gers_id}`);
-                }
-              }
-
-              // Step 2: Insert discovered address into campaign_addresses
-              if (addressData && addressData.house_number && addressData.street_name) {
-                // Generate a unique gers_id for the discovered address
-                const discoveredGersId = `discovered-${building.gers_id}`;
-
-                const { error: insertError } = await supabase
-                  .from('campaign_addresses')
-                  .insert({
-                    campaign_id: campaign_id,
-                    gers_id: discoveredGersId,
-                    house_number: addressData.house_number,
-                    street_name: addressData.street_name,
-                    postal_code: addressData.postal_code,
-                    formatted: addressData.formatted_address,
-                    geom: { type: 'Point', coordinates: [lon, lat] },
-                  });
-
-                if (insertError) {
-                  console.warn(`[Provision] Discovery Brain: Failed to insert address for ${building.gers_id}:`, insertError.message);
-                } else {
-                  discoveredAddresses++;
-                }
-              }
-            } catch (err) {
-              console.warn(`[Provision] Discovery Brain: Error processing building ${building.gers_id}:`, err);
-            }
-          }
-
-          console.log(`[Provision] Discovery Brain: Discovered ${discoveredAddresses} addresses (${cacheHits} cache hits, ${apiCalls} API calls)`);
-
-          // Step 2c: Final link to snap discovered addresses to orphan buildings
-          if (discoveredAddresses > 0) {
-            console.log('[Provision] Discovery Brain: Running final link to snap discovered addresses...');
-            const { data: finalLinkResult, error: finalLinkError } = await supabase.rpc('link_campaign_data', {
-              p_campaign_id: campaign_id,
-            });
-
-            if (finalLinkError) {
-              console.warn('[Provision] Discovery Brain: Final link failed:', finalLinkError.message);
-            } else {
-              linksCreated = finalLinkResult?.links_created ?? linksCreated;
-              console.log(`[Provision] Discovery Brain: Final link complete, now ${linksCreated} total links`);
-            }
-          }
+      for (let i = 0; i < addressesToInsert.length; i += batchSize) {
+        const batch = addressesToInsert.slice(i, i + batchSize);
+        const { error: insertError } = await supabase
+          .from('campaign_addresses')
+          .insert(batch);
+        
+        if (insertError) {
+          console.error(`[Provision] Error inserting batch ${i / batchSize + 1}:`, insertError.message);
+        } else {
+          insertedCount += batch.length;
         }
       }
-      // =============================================================================
-      // END DISCOVERY BRAIN
-      // =============================================================================
 
-      await supabase
+      console.log('[Provision] Successfully inserted', insertedCount, 'addresses');
+
+      // Step 6: Store S3 snapshot URLs
+      // Buildings and Roads stay in S3 - app renders directly from there
+      console.log('[Provision] Step 6: Storing S3 URLs...');
+      
+      // Update campaigns table (may fail if columns don't exist yet, that's ok)
+      const { error: updateError } = await supabase
         .from('campaigns')
-        .update({ provision_status: 'ready' })
+        .update({
+          provision_status: 'ready',
+          provisioned_at: new Date().toISOString(),
+        })
         .eq('id', campaign_id);
 
+      if (updateError) {
+        console.warn('[Provision] Error updating campaign status:', updateError.message);
+      }
+
+      // Store detailed snapshot info in campaign_snapshots table
+      const { error: snapshotError } = await supabase
+        .from('campaign_snapshots')
+        .upsert({
+          campaign_id: campaign_id!,
+          bucket: snapshot.bucket,
+          prefix: snapshot.prefix,
+          buildings_key: snapshot.s3_keys.buildings,
+          addresses_key: snapshot.s3_keys.addresses,
+          roads_key: snapshot.s3_keys.roads || null,
+          metadata_key: snapshot.s3_keys.metadata,
+          buildings_url: snapshot.urls.buildings,
+          addresses_url: snapshot.urls.addresses,
+          roads_url: snapshot.urls.roads || null,
+          metadata_url: snapshot.urls.metadata,
+          buildings_count: snapshot.counts.buildings,
+          addresses_count: snapshot.counts.addresses,
+          roads_count: snapshot.counts.roads,
+          overture_release: snapshot.metadata?.overture_release,
+          tile_metrics: snapshot.metadata?.tile_metrics || null,
+          expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), // 30 days
+        }, {
+          onConflict: 'campaign_id',
+        });
+
+      if (snapshotError) {
+        console.warn('[Provision] Error storing snapshot metadata:', snapshotError.message);
+        // Don't fail - the addresses are already ingested
+      }
+
+      // =============================================================================
+      // STAGE 1: PEDESTRIAN ROUTING - "The Daily Loop"
+      // =============================================================================
+      let optimizedPathGeometry: GeoJSON.LineString | null = null;
+      let optimizedPathInfo: {
+        totalDistanceKm: number;
+        totalTimeMinutes: number;
+        waypointCount: number;
+      } | null = null;
+
+      // Only calculate route if we have addresses and Stadia API is configured
+      if (insertedCount >= 2 && process.env.STADIA_API_KEY) {
+        console.log('[Provision] Stage 1: Calculating optimized walking loop...');
+        
+        try {
+          // Grab the first 20 addresses for the optimized route
+          // (More than 20 gets expensive/slow for the TSP solver)
+          const addressesForRoute = addressesToInsert.slice(0, 20);
+          
+          // Convert to format needed by RoutingService {lat, lon}
+          const routeCoords = addressesForRoute.map((addr) => ({
+            lat: addr.geom.coordinates[1], // GeoJSON is [lon, lat]
+            lon: addr.geom.coordinates[0],
+          }));
+
+          // Calculate optimized loop using Valhalla TSP solver
+          const loopResult = await RoutingService.getOptimizedWalkingLoop(routeCoords);
+          
+          // Convert to GeoJSON LineString
+          optimizedPathGeometry = RoutingService.toGeoJSONLineString(loopResult.polyline);
+          
+          optimizedPathInfo = {
+            totalDistanceKm: loopResult.summary.length,
+            totalTimeMinutes: Math.round(loopResult.summary.time / 60),
+            waypointCount: addressesForRoute.length,
+          };
+
+          console.log(`[Provision] Optimized loop: ${optimizedPathInfo.totalDistanceKm.toFixed(2)}km, ${optimizedPathInfo.totalTimeMinutes}min, ${optimizedPathInfo.waypointCount} stops`);
+
+          // Store the optimized path in campaign_snapshots
+          const { error: pathError } = await supabase
+            .from('campaign_snapshots')
+            .update({
+              optimized_path_geometry: optimizedPathGeometry,
+              optimized_path_distance_km: optimizedPathInfo.totalDistanceKm,
+              optimized_path_time_minutes: optimizedPathInfo.totalTimeMinutes,
+            })
+            .eq('campaign_id', campaign_id);
+
+          if (pathError) {
+            console.warn('[Provision] Error storing optimized path:', pathError.message);
+          }
+
+        } catch (routingError) {
+          // Don't fail provisioning if routing fails
+          console.warn('[Provision] Routing calculation failed:', routingError);
+        }
+      } else {
+        console.log('[Provision] Skipping routing: insufficient addresses or no STADIA_API_KEY');
+      }
+      // =============================================================================
+      // END PEDESTRIAN ROUTING
+      // =============================================================================
+
+      // =============================================================================
+      // GOLD STANDARD STABLE LINKER: 4-Tier Spatial Matching
+      // =============================================================================
+      console.log('[Provision] Gold Standard Stable Linker: Running 4-tier spatial matching...');
+      let spatialJoinSummary = {
+        matched: 0,
+        orphans: 0,
+        suspect: 0,
+        avgConfidence: 0,
+        coveragePercent: 0,
+        matchBreakdown: {
+          containmentVerified: 0,
+          containmentSuspect: 0,
+          pointOnSurface: 0,
+          proximityVerified: 0,
+          proximityFallback: 0,
+        },
+      };
+      
+      try {
+        // Download buildings from S3
+        console.log(`[Provision] Fetching buildings from: ${snapshot.urls.buildings}`);
+        const buildingsResponse = await fetch(snapshot.urls.buildings);
+        if (!buildingsResponse.ok) {
+          throw new Error(`Failed to fetch buildings: ${buildingsResponse.status}`);
+        }
+        
+        const buildingsGeoJSON = await buildingsResponse.json();
+        console.log(`[Provision] Downloaded ${buildingsGeoJSON.features?.length || 0} buildings from S3`);
+        
+        // Debug: Log first building structure
+        if (buildingsGeoJSON.features?.length > 0) {
+          const first = buildingsGeoJSON.features[0];
+          console.log('[Provision] Sample building:', {
+            id: first.properties?.gers_id,
+            geomType: first.geometry?.type,
+            coordCount: first.geometry?.coordinates?.[0]?.length,
+            props: Object.keys(first.properties || {})
+          });
+        }
+        
+        // Run Gold Standard Spatial Join
+        console.log('[Provision] Starting Stable Linker...');
+        const linkerService = new StableLinkerService(supabase);
+        spatialJoinSummary = await linkerService.runSpatialJoin(
+          campaign_id!,
+          buildingsGeoJSON,
+          snapshot.metadata?.overture_release || '2026-01-21.0'
+        );
+
+        console.log('[Provision] Spatial join complete:', spatialJoinSummary);
+        if (spatialJoinSummary?.processing_metadata) {
+          console.log('[Provision] Processing metadata:', spatialJoinSummary.processing_metadata);
+        }
+      } catch (linkerError) {
+        if (linkerError instanceof DataIntegrityError) {
+          console.warn('[Provision] DataIntegrityError (address sent to orphans):', linkerError.message, 'building_ids:', linkerError.buildingIds);
+        } else {
+          console.error('[Provision] Gold Standard Stable Linker FAILED:', linkerError);
+          console.error('[Provision] Error stack:', (linkerError as Error).stack);
+        }
+        // Don't fail provisioning if linking fails
+      }
+      // =============================================================================
+      // END GOLD STANDARD STABLE LINKER
+      // =============================================================================
+
+      // =============================================================================
+      // GOLD STANDARD TOWNHOUSE SPLITTING: Geometric Unit Division
+      // =============================================================================
+      console.log('[Provision] Gold Standard Townhouse Splitter: Processing multi-unit buildings...');
+      let townhouseSummary = {
+        total_buildings: 0,
+        townhouses_detected: 0,
+        apartments_skipped: 0,
+        units_created: 0,
+        errors_logged: 0,
+        avg_units_per_townhouse: 0,
+      };
+      
+      try {
+        // Download buildings from S3 for geometric processing
+        const buildingsResponse = await fetch(snapshot.urls.buildings);
+        if (!buildingsResponse.ok) {
+          throw new Error(`Failed to fetch buildings: ${buildingsResponse.status}`);
+        }
+        
+        const buildingsGeoJSON = await buildingsResponse.json();
+        
+        // Run townhouse splitting
+        const splitterService = new TownhouseSplitterService(supabase);
+        townhouseSummary = await splitterService.processCampaignTownhouses(
+          campaign_id!,
+          buildingsGeoJSON,
+          snapshot.metadata?.overture_release || '2026-01-21.0'
+        );
+        
+        console.log('[Provision] Townhouse splitting complete:', townhouseSummary);
+        
+      } catch (splitterError) {
+        console.warn('[Provision] Townhouse splitting failed:', splitterError);
+        // Don't fail provisioning if splitting fails
+      }
+      // =============================================================================
+      // END GOLD STANDARD TOWNHOUSE SPLITTING
+      // =============================================================================
+
+      // =============================================================================
+      // END GOLD STANDARD WORKFLOW
+      // =============================================================================
+      
       return {
         success: true,
-        addresses_saved: addressesSaved,
-        buildings_saved: buildingsSaved,
-        roads_saved: roadsSaved,
-        links_created: linksCreated,
-        discovered_addresses: discoveredAddresses,
-        cache_hits: cacheHits,
-        api_calls: apiCalls,
-        orphan_buildings: orphanCount - discoveredAddresses,
-        total_addresses: addressesSaved + discoveredAddresses,
-        total_buildings: linksCreated,
-        message: `Zero-Gap provisioning complete: ${addressesSaved} addresses, ${buildingsSaved} buildings, ${roadsSaved} roads ingested; ${linksCreated} links. Discovery Brain: ${discoveredAddresses} addresses discovered (${cacheHits} cached, ${apiCalls} API calls).`,
+        campaign_id: snapshot.campaign_id,
+        addresses_saved: insertedCount,
+        buildings_saved: snapshot.counts.buildings,
+        roads_count: snapshot.counts.roads,
+        links_created: spatialJoinSummary.matched,
+        units_created: townhouseSummary.units_created,
+        spatial_join: spatialJoinSummary,
+        townhouse_split: townhouseSummary,
+        map_layers: {
+          buildings: snapshot.urls.buildings,  // iOS renders directly from S3
+          roads: snapshot.urls.roads,          // iOS renders directly from S3
+        },
+        snapshot_metadata: {
+          bucket: snapshot.bucket,
+          prefix: snapshot.prefix,
+          overture_release: snapshot.metadata?.overture_release,
+          tile_metrics: snapshot.metadata?.tile_metrics,
+        },
+        warning: snapshot.warning,
+        optimized_path: optimizedPathInfo ? {
+          distance_km: optimizedPathInfo.totalDistanceKm,
+          time_minutes: optimizedPathInfo.totalTimeMinutes,
+          waypoint_count: optimizedPathInfo.waypointCount,
+        } : null,
+        message: `Gold Standard provisioning complete: ${insertedCount} leads ready. Buildings (${snapshot.counts.buildings}) and roads (${snapshot.counts.roads}) served from S3.` +
+          (optimizedPathInfo ? ` Optimized walking loop: ${optimizedPathInfo.totalDistanceKm.toFixed(2)}km, ${optimizedPathInfo.totalTimeMinutes}min.` : ''),
       };
     });
 
     return NextResponse.json(result);
+    
   } catch (error) {
-    console.error('Error provisioning campaign:', error);
+    console.error('[Provision] Error:', error);
     
     // Update status to 'failed'
     if (campaign_id) {
@@ -534,7 +437,7 @@ export async function POST(request: NextRequest) {
           .update({ provision_status: 'failed' })
           .eq('id', campaign_id);
       } catch (updateError) {
-        console.error('Failed to update provision_status:', updateError);
+        console.error('[Provision] Failed to update provision_status:', updateError);
       }
     }
     
@@ -544,4 +447,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-

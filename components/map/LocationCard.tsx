@@ -14,12 +14,15 @@ import {
   Check,
   AlertCircle,
   MapPin,
+  ChevronLeft,
 } from 'lucide-react';
 import type { Contact } from '@/types/contacts';
 
 interface LocationCardProps {
   gersId: string;
   campaignId: string;
+  preferredAddressId?: string | null; // For unit slices - show specific address
+  onSelectAddress?: (addressId: string | null) => void; // Pick address from dropdown or Back to list (null)
   onClose: () => void;
   onNavigate?: () => void;
   onLogVisit?: () => void;
@@ -35,6 +38,8 @@ interface LocationCardProps {
 export function LocationCard({
   gersId,
   campaignId,
+  preferredAddressId,
+  onSelectAddress,
   onClose,
   onNavigate,
   onLogVisit,
@@ -46,10 +51,16 @@ export function LocationCard({
     isLoading,
     error,
     address,
+    addresses,
     residents,
     qrStatus,
     addressLinked,
-  } = useBuildingData(gersId, campaignId);
+  } = useBuildingData(gersId, campaignId, preferredAddressId);
+
+  const isMultiAddress = addresses.length > 1;
+  const isListMode =
+    isMultiAddress &&
+    (!preferredAddressId || !addresses.some((a) => a.id === preferredAddressId));
 
   // Format residents display text
   const getResidentsText = (contacts: Contact[]): string => {
@@ -168,149 +179,190 @@ export function LocationCard({
       {/* Main Content - Address Found */}
       {!isLoading && !error && addressLinked && address && (
         <>
-          {/* Header */}
-          <div className="px-5 pt-5 pb-3">
-            <div className="flex items-start justify-between pr-8">
-              <div className="min-w-0 flex-1">
-                <h2 className="text-lg font-semibold text-gray-900 truncate">
-                  {address.street}
-                </h2>
-                <p className="text-sm text-gray-500 truncate">
-                  {[address.locality, address.region, address.postalCode]
-                    .filter(Boolean)
-                    .join(', ') || 'Location details unavailable'}
-                </p>
-              </div>
-              <Badge variant={statusBadge.variant} className="ml-2 shrink-0">
-                {statusBadge.text}
-              </Badge>
-            </div>
-          </div>
-
-          {/* Content Rows */}
-          <div className="px-5 pb-4 space-y-2">
-            {/* Residents Row */}
-            <button
-              onClick={() => {
-                if (residents.length > 0 && onEditContact) {
-                  onEditContact(residents[0].id);
-                } else if (onAddContact) {
-                  onAddContact(address.id, address.formatted);
-                }
-              }}
-              className="w-full flex items-center gap-3 p-3 rounded-xl bg-gray-50 hover:bg-gray-100 transition-colors text-left"
-            >
-              <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
-                <Users className="w-4 h-4 text-blue-600" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-gray-900 truncate">
-                  {getResidentsText(residents)}
-                </p>
-                <p className="text-xs text-gray-500">
-                  {residents.length === 0 ? 'Add a resident' : `${residents.length} resident${residents.length !== 1 ? 's' : ''}`}
-                </p>
-              </div>
-              {residents.length === 0 && (
-                <UserPlus className="w-4 h-4 text-gray-400 shrink-0" />
-              )}
-            </button>
-
-            {/* Resident Notes - Show if any resident has notes */}
-            {residents.length > 0 && residents.some(r => r.notes) && (
-              <div className="p-3 rounded-xl bg-amber-50 border border-amber-100">
-                <p className="text-xs font-medium text-amber-700 mb-1">Notes</p>
-                {residents.filter(r => r.notes).map((resident, idx) => (
-                  <p key={resident.id} className="text-sm text-amber-900">
-                    {residents.length > 1 && <span className="font-medium">{resident.full_name}: </span>}
-                    {resident.notes}
-                  </p>
+          {/* Multi-address list mode: count + clickable list of all addresses */}
+          {isListMode && (
+            <div className="px-5 pt-5 pb-5">
+              <h2 className="text-lg font-semibold text-gray-900 pr-8">
+                {addresses.length} addresses
+              </h2>
+              <p className="text-xs text-gray-500 mt-1 mb-2">Tap an address for details</p>
+              <ul className="space-y-1 max-h-64 overflow-y-auto">
+                {addresses.map((a) => (
+                  <li key={a.id}>
+                    <button
+                      type="button"
+                      onClick={() => onSelectAddress?.(a.id)}
+                      className="w-full flex items-center gap-2 p-2.5 rounded-lg text-left text-sm text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors border border-transparent hover:border-gray-200"
+                    >
+                      <MapPin className="w-4 h-4 text-gray-400 shrink-0" />
+                      <span className="truncate flex-1">{a.formatted || a.street}</span>
+                    </button>
+                  </li>
                 ))}
-              </div>
-            )}
+              </ul>
+            </div>
+          )}
 
-            {/* QR Status Row */}
-            <div className="flex items-center gap-3 p-3 rounded-xl bg-gray-50">
-              <div
-                className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${
-                  qrStatus.hasFlyer
-                    ? qrStatus.totalScans > 0
-                      ? 'bg-green-100'
-                      : 'bg-orange-100'
-                    : 'bg-gray-100'
-                }`}
-              >
-                <QrCode
-                  className={`w-4 h-4 ${
-                    qrStatus.hasFlyer
-                      ? qrStatus.totalScans > 0
-                        ? 'text-green-600'
-                        : 'text-orange-600'
-                      : 'text-gray-400'
-                  }`}
-                />
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-gray-900">
-                  {qrStatus.hasFlyer
-                    ? qrStatus.totalScans > 0
-                      ? `Scanned ${qrStatus.totalScans}x`
-                      : 'Flyer delivered'
-                    : 'No QR code'}
-                </p>
-                <p className="text-xs text-gray-500">
-                  {qrStatus.lastScannedAt
-                    ? `Last: ${qrStatus.lastScannedAt.toLocaleDateString()}`
-                    : qrStatus.hasFlyer
-                    ? 'Not scanned yet'
-                    : 'Generate in campaign'}
-                </p>
-              </div>
-              {qrStatus.totalScans > 0 && (
-                <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center shrink-0">
-                  <Check className="w-3.5 h-3.5 text-white" />
+          {/* Single-address mode: full card (multi with Back to list, or single address) */}
+          {!isListMode && (
+            <>
+              {/* Header */}
+              <div className="px-5 pt-5 pb-3">
+                {isMultiAddress && onSelectAddress && (
+                  <button
+                    type="button"
+                    onClick={() => onSelectAddress(null)}
+                    className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 mb-2"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                    Back to list
+                  </button>
+                )}
+                <div className="flex items-start justify-between pr-8">
+                  <div className="min-w-0 flex-1">
+                    <h2 className="text-lg font-semibold text-gray-900 truncate">
+                      {address.street}
+                    </h2>
+                    <p className="text-sm text-gray-500 truncate">
+                      {isMultiAddress
+                        ? `${addresses.length} addresses at this building`
+                        : [address.locality, address.region, address.postalCode]
+                            .filter(Boolean)
+                            .join(', ') || 'Location details unavailable'}
+                    </p>
+                  </div>
+                  <Badge variant={statusBadge.variant} className="ml-2 shrink-0">
+                    {statusBadge.text}
+                  </Badge>
                 </div>
-              )}
-            </div>
-          </div>
+              </div>
 
-          {/* Action Footer */}
-          <div className="px-5 pb-5 pt-2 border-t border-gray-100">
-            <div className="flex gap-2">
-              {onNavigate && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={onNavigate}
-                  className="flex-1 gap-1.5"
+              {/* Content Rows - only for single-address view */}
+              <div className="px-5 pb-4 space-y-2">
+                {/* Residents Row */}
+                <button
+                  onClick={() => {
+                    if (residents.length > 0 && onEditContact) {
+                      onEditContact(residents[0].id);
+                    } else if (onAddContact) {
+                      onAddContact(address.id, address.formatted);
+                    }
+                  }}
+                  className="w-full flex items-center gap-3 p-3 rounded-xl bg-gray-50 hover:bg-gray-100 transition-colors text-left"
                 >
-                  <Navigation className="w-4 h-4" />
-                  Navigate
-                </Button>
-              )}
-              {onLogVisit && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={onLogVisit}
-                  className="flex-1 gap-1.5"
-                >
-                  <ClipboardList className="w-4 h-4" />
-                  Log Visit
-                </Button>
-              )}
-              {onAddContact && (
-                <Button
-                  size="sm"
-                  onClick={() => onAddContact(address?.id, address?.formatted)}
-                  className="flex-1 gap-1.5"
-                >
-                  <UserPlus className="w-4 h-4" />
-                  Add
-                </Button>
-              )}
-            </div>
-          </div>
+                  <div className="w-9 h-9 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center shrink-0">
+                    <Users className="w-4 h-4 text-red-600 dark:text-red-400" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-gray-900 truncate">
+                      {getResidentsText(residents)}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {residents.length === 0 ? 'Add a resident' : `${residents.length} resident${residents.length !== 1 ? 's' : ''}`}
+                    </p>
+                  </div>
+                  {residents.length === 0 && (
+                    <UserPlus className="w-4 h-4 text-gray-400 shrink-0" />
+                  )}
+                </button>
+
+                {/* Resident Notes */}
+                {residents.length > 0 && residents.some((r) => r.notes) && (
+                  <div className="p-3 rounded-xl bg-amber-50 border border-amber-100">
+                    <p className="text-xs font-medium text-amber-700 mb-1">Notes</p>
+                    {residents.filter((r) => r.notes).map((resident) => (
+                      <p key={resident.id} className="text-sm text-amber-900">
+                        {residents.length > 1 && <span className="font-medium">{resident.full_name}: </span>}
+                        {resident.notes}
+                      </p>
+                    ))}
+                  </div>
+                )}
+
+                {/* QR Status Row */}
+                <div className="flex items-center gap-3 p-3 rounded-xl bg-gray-50">
+                  <div
+                    className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${
+                      qrStatus.hasFlyer
+                        ? qrStatus.totalScans > 0
+                          ? 'bg-green-100'
+                          : 'bg-orange-100'
+                        : 'bg-gray-100'
+                    }`}
+                  >
+                    <QrCode
+                      className={`w-4 h-4 ${
+                        qrStatus.hasFlyer
+                          ? qrStatus.totalScans > 0
+                            ? 'text-green-600'
+                            : 'text-orange-600'
+                          : 'text-gray-400'
+                      }`}
+                    />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-gray-900">
+                      {qrStatus.hasFlyer
+                        ? qrStatus.totalScans > 0
+                          ? `Scanned ${qrStatus.totalScans}x`
+                          : 'Flyer delivered'
+                        : 'No QR code'}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {qrStatus.lastScannedAt
+                        ? `Last: ${qrStatus.lastScannedAt.toLocaleDateString()}`
+                        : qrStatus.hasFlyer
+                          ? 'Not scanned yet'
+                          : 'Generate in campaign'}
+                    </p>
+                  </div>
+                  {qrStatus.totalScans > 0 && (
+                    <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center shrink-0">
+                      <Check className="w-3.5 h-3.5 text-white" />
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Action Footer */}
+              <div className="px-5 pb-5 pt-2 border-t border-gray-100">
+                <div className="flex gap-2">
+                  {onNavigate && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={onNavigate}
+                      className="flex-1 gap-1.5"
+                    >
+                      <Navigation className="w-4 h-4" />
+                      Navigate
+                    </Button>
+                  )}
+                  {onLogVisit && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={onLogVisit}
+                      className="flex-1 gap-1.5"
+                    >
+                      <ClipboardList className="w-4 h-4" />
+                      Log Visit
+                    </Button>
+                  )}
+                  {onAddContact && (
+                    <Button
+                      size="sm"
+                      onClick={() => onAddContact(address?.id, address?.formatted)}
+                      className="flex-1 gap-1.5"
+                    >
+                      <UserPlus className="w-4 h-4" />
+                      Add
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
         </>
       )}
     </div>

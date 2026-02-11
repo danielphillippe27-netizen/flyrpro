@@ -97,6 +97,29 @@ export function ContactDetailSheet({
           )}
 
           <div>
+            <Label>Tags</Label>
+            <Input
+              defaultValue={contact.tags ?? ''}
+              placeholder="Tag1, Tag2"
+              disabled={loading}
+              onBlur={async (e) => {
+                const value = e.target.value.trim();
+                if (value === (contact.tags ?? '')) return;
+                setLoading(true);
+                try {
+                  await ContactsService.updateContact(contact.id, { tags: value || undefined });
+                  onUpdate();
+                } catch (err) {
+                  console.error('Error updating tags:', err);
+                } finally {
+                  setLoading(false);
+                }
+              }}
+              className="mt-1"
+            />
+          </div>
+
+          <div>
             <Label>Quick Actions</Label>
             <div className="flex gap-2 mt-2">
               <Button

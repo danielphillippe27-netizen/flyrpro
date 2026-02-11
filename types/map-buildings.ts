@@ -56,6 +56,7 @@ export interface BuildingProperties {
   status: 'not_visited' | 'visited' | 'hot';
   scans_today: number;
   scans_total: number;
+  qr_scanned?: boolean; // True when scans_total > 0, used for yellow color
   last_scan_seconds_ago: number | null;
   unit_points?: GeoJSON.MultiPoint | null; // Parsed GeoJSON geometry
   divider_lines?: GeoJSON.MultiLineString | null; // Parsed GeoJSON geometry
@@ -67,6 +68,8 @@ export interface BuildingProperties {
   match_method?: string | null;
   /** Formatted address from linked campaign_addresses. From rpc_get_campaign_map_features. */
   address_text?: string | null;
+  /** Unique id for Mapbox promoteId (unit id for slices, gers_id for detached). Used for setFeatureState. */
+  feature_id?: string;
 }
 
 // GeoJSON Feature with BuildingProperties

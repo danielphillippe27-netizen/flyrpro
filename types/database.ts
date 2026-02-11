@@ -28,6 +28,12 @@ export interface UserProfile {
   pro_active: boolean;
   stripe_customer_id: string | null;
   created_at: string;
+  /** Weekly doors goal for Home dashboard */
+  weekly_door_goal?: number | null;
+  /** Optional weekly sessions goal */
+  weekly_sessions_goal?: number | null;
+  /** Optional weekly minutes doorknocking goal */
+  weekly_minutes_goal?: number | null;
 }
 
 // Enhanced Campaign Types (iOS Schema)
@@ -92,6 +98,11 @@ export interface CampaignAddress {
   // QR code fields
   qr_code_base64?: string; // Base64-encoded QR code image (data URL format)
   purl?: string; // Tracking URL for QR code scans (e.g., /api/scan?id={address_id})
+  // Route optimization fields (CVRP)
+  cluster_id?: number | null; // CVRP cluster assignment (agent_id)
+  sequence?: number | null; // Stop sequence within cluster route
+  walk_time_sec?: number | null; // Walking time from depot to this stop
+  distance_m?: number | null; // Walking distance from depot to this stop
 }
 
 export interface Coordinate {
@@ -277,6 +288,7 @@ export interface Contact {
   reminder_date?: string;
   gers_id?: string; // Overture GERS ID linking to map_buildings.gers_id
   address_id?: string; // FK to campaign_addresses.id
+  tags?: string; // Comma-separated or single tag
   created_at: string;
   updated_at: string;
 }
@@ -290,19 +302,28 @@ export interface ContactActivity {
   created_at: string;
 }
 
-// Stats Types
+// Stats Types (public.user_stats)
 export interface UserStats {
   id: string;
   user_id: string;
+  day_streak: number;
+  best_streak: number;
+  doors_knocked: number;
   flyers: number;
   conversations: number;
   leads_created: number;
+  qr_codes_scanned: number;
   distance_walked: number; // km
   time_tracked: number; // minutes
-  day_streak: number;
-  best_streak: number;
+  conversation_per_door: number;
+  conversation_lead_rate: number;
+  qr_code_scan_rate: number;
+  qr_code_lead_rate: number;
+  streak_days: string[] | null;
   xp: number;
+  routes_walked?: number;
   updated_at: string;
+  created_at: string | null;
 }
 
 export type LeaderboardSortBy = 'flyers' | 'conversations' | 'leads' | 'distance' | 'time';

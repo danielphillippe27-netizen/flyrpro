@@ -1,19 +1,20 @@
 /**
  * MotherDuck HTTP Service
- * 
+ *
+ * Legacy / script-only: app routes use Tile Lambda + S3; this service is not used by the web app.
  * Executes SQL queries against MotherDuck using the MCP HTTP API.
  * This service works on Vercel serverless without native binary dependencies.
- * 
+ *
  * API Endpoint: https://api.motherduck.com/mcp
  * Protocol: JSON-RPC 2.0 / MCP (Model Context Protocol)
- * 
- * IMPORTANT: This service queries pre-loaded data in the `overture_flyr` 
+ *
+ * IMPORTANT: This service queries pre-loaded data in the `overture_flyr`
  * MotherDuck database. Before using on Vercel, you must run:
  *   npx tsx scripts/load-overture-to-motherduck.ts
- * 
+ *
  * This loads US buildings/addresses into MotherDuck for fast HTTP queries.
  * Direct S3 queries timeout due to the 55-second API limit.
- * 
+ *
  * Limitations:
  * - 55 second timeout
  * - 2,000 rows per request (API max is 2,048)

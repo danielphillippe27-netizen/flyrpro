@@ -11,9 +11,9 @@ export interface ResolvedAddress {
   id: string;           // UUID (campaign_addresses.id)
   street: string;       // house_number + street_name combined
   formatted: string;    // Full formatted address
-  locality: string;     // City
-  region: string;       // State/Province
-  postalCode: string;   // Postal/ZIP code
+  locality: string;     // City (not in simplified schema)
+  region: string;       // State/Province (not in simplified schema)
+  postalCode: string;   // Postal/ZIP code (not in simplified schema)
   houseNumber: string;  // Just the house number
   streetName: string;   // Just the street name
   gersId: string;       // The building's GERS ID
@@ -35,6 +35,8 @@ export interface BuildingData {
   isLoading: boolean;
   error: Error | null;
   address: ResolvedAddress | null;
+  /** All addresses linked to this building (e.g. 6 units). Same as [address] when only one. */
+  addresses: ResolvedAddress[];
   residents: Contact[];
   qrStatus: QrStatus;
   buildingExists: boolean;  // Whether we found a building with this gers_id
@@ -55,11 +57,13 @@ export interface BuildingData {
  */
 export function useBuildingData(
   gersId: string | null,
-  campaignId: string | null
+  campaignId: string | null,
+  preferredAddressId?: string | null  // For unit slices - fetch specific address
 ): BuildingData {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [address, setAddress] = useState<ResolvedAddress | null>(null);
+  const [addresses, setAddresses] = useState<ResolvedAddress[]>([]);
   const [residents, setResidents] = useState<Contact[]>([]);
   const [qrStatus, setQrStatus] = useState<QrStatus>({
     hasFlyer: false,
@@ -72,6 +76,7 @@ export function useBuildingData(
   const fetchData = useCallback(async () => {
     if (!gersId || !campaignId) {
       setAddress(null);
+      setAddresses([]);
       setResidents([]);
       setQrStatus({ hasFlyer: false, totalScans: 0, lastScannedAt: null });
       setBuildingExists(false);
@@ -81,167 +86,122 @@ export function useBuildingData(
 
     setIsLoading(true);
     setError(null);
+    
+    console.log('[useBuildingData] Fetching:', { gersId, campaignId, preferredAddressId });
 
     try {
       const supabase = createClient();
 
-      // Step 1: Check if building exists with this gers_id
-      // Try to find address directly via gers_id match on campaign_addresses
-      const { data: addressData, error: addressError } = await supabase
-        .from('campaign_addresses')
-        .select(`
-          id,
-          house_number,
-          street_name,
-          formatted,
-          locality,
-          region,
-          postal_code,
-          gers_id,
-          scans,
-          last_scanned_at,
-          qr_code_base64
-        `)
-        .eq('campaign_id', campaignId)
-        .or(`gers_id.eq.${gersId},building_gers_id.eq.${gersId}`)
-        .maybeSingle();
-
-      if (addressError) {
-        throw new Error(`Failed to fetch address: ${addressError.message}`);
-      }
-
-      // If no direct match, try via building_address_links
-      let resolvedAddress = addressData;
-      if (!resolvedAddress) {
-        // First find the building
-        const { data: buildingData } = await supabase
-          .from('buildings')
-          .select('id, gers_id')
-          .eq('gers_id', gersId)
-          .maybeSingle();
-
-        if (buildingData) {
-          setBuildingExists(true);
-
-          // Then find linked address via building_address_links
-          const { data: linkData } = await supabase
-            .from('building_address_links')
-            .select(`
-              address_id,
-              campaign_addresses!inner (
-                id,
-                house_number,
-                street_name,
-                formatted,
-                locality,
-                region,
-                postal_code,
-                gers_id,
-                scans,
-                last_scanned_at,
-                qr_code_base64
-              )
-            `)
-            .eq('campaign_id', campaignId)
-            .eq('building_id', buildingData.id)
-            .eq('is_primary', true)
-            .maybeSingle();
-
-          if (linkData?.campaign_addresses) {
-            // Handle both array and single object responses from Supabase
-            const addrData = Array.isArray(linkData.campaign_addresses)
-              ? linkData.campaign_addresses[0]
-              : linkData.campaign_addresses;
-            resolvedAddress = addrData;
-          }
-        } else {
-          // Also check map_buildings table
-          const { data: mapBuildingData } = await supabase
-            .from('map_buildings')
-            .select('id, gers_id, address_id')
-            .eq('gers_id', gersId)
-            .maybeSingle();
-
-          if (mapBuildingData) {
-            setBuildingExists(true);
-
-            if (mapBuildingData.address_id) {
-              // Fetch the linked address
-              const { data: linkedAddr } = await supabase
-                .from('campaign_addresses')
-                .select(`
-                  id,
-                  house_number,
-                  street_name,
-                  formatted,
-                  locality,
-                  region,
-                  postal_code,
-                  gers_id,
-                  scans,
-                  last_scanned_at,
-                  qr_code_base64
-                `)
-                .eq('id', mapBuildingData.address_id)
-                .maybeSingle();
-
-              resolvedAddress = linkedAddr;
-            }
-          }
-        }
-      } else {
-        setBuildingExists(true);
-      }
-
-      // Process the resolved address
-      if (resolvedAddress) {
-        setAddressLinked(true);
-
-        // Build the street string
-        const street = [resolvedAddress.house_number, resolvedAddress.street_name]
-          .filter(Boolean)
-          .join(' ') || resolvedAddress.formatted || 'Unknown Address';
-
-        setAddress({
-          id: resolvedAddress.id,
+      const toResolved = (raw: { id: string; house_number?: string | null; street_name?: string | null; formatted?: string | null; gers_id?: string | null }): ResolvedAddress => {
+        const street = [raw.house_number, raw.street_name].filter(Boolean).join(' ') || raw.formatted || 'Unknown Address';
+        return {
+          id: raw.id,
           street,
-          formatted: resolvedAddress.formatted || street,
-          locality: resolvedAddress.locality || '',
-          region: resolvedAddress.region || '',
-          postalCode: resolvedAddress.postal_code || '',
-          houseNumber: resolvedAddress.house_number || '',
-          streetName: resolvedAddress.street_name || '',
-          gersId: resolvedAddress.gers_id || gersId,
-        });
+          formatted: raw.formatted || street,
+          locality: '',
+          region: '',
+          postalCode: '',
+          houseNumber: raw.house_number || '',
+          streetName: raw.street_name || '',
+          gersId: raw.gers_id || gersId,
+        };
+      };
 
-        // Set QR status
-        setQrStatus({
-          hasFlyer: !!(resolvedAddress.qr_code_base64 || (resolvedAddress.scans && resolvedAddress.scans > 0)),
-          totalScans: resolvedAddress.scans || 0,
-          lastScannedAt: resolvedAddress.last_scanned_at
-            ? new Date(resolvedAddress.last_scanned_at)
-            : null,
-        });
+      // FIRST: Fetch ALL address IDs linked to this building (e.g. 6 for a townhouse).
+      // Two-step query avoids join shape issues: get address_ids from links, then fetch addresses.
+      let resolvedAddress: { id: string; house_number?: string | null; street_name?: string | null; formatted?: string | null; gers_id?: string | null } | null = null;
+      let resolvedList: ResolvedAddress[] | null = null;
 
-        // Step 2: Fetch contacts linked to this address
+      const { data: linkRows, error: linkError } = await supabase
+        .from('building_address_links')
+        .select('address_id')
+        .eq('campaign_id', campaignId)
+        .eq('building_id', gersId);
+
+      if (linkError) {
+        console.error('[useBuildingData] Link query error:', linkError);
+      }
+
+      const addressIds = (linkRows || []).map((r: { address_id: string }) => r.address_id).filter(Boolean);
+      if (addressIds.length > 0) {
+        setBuildingExists(true);
+        const { data: addressRows, error: addrError } = await supabase
+          .from('campaign_addresses')
+          .select('id, house_number, street_name, formatted, gers_id')
+          .eq('campaign_id', campaignId)
+          .in('id', addressIds);
+
+        if (addrError) {
+          console.error('[useBuildingData] Address fetch error:', addrError);
+        } else if (addressRows && addressRows.length > 0) {
+          // Preserve order from links (first linked = first in list)
+          const orderMap = new Map(addressIds.map((id, i) => [id, i]));
+          const sorted = [...addressRows].sort((a, b) => (orderMap.get(a.id) ?? 0) - (orderMap.get(b.id) ?? 0));
+          resolvedList = sorted.map((raw) => toResolved(raw));
+        }
+      }
+
+      // If we have multiple links, use them (primary = preferred address if in list, else first)
+      if (resolvedList && resolvedList.length > 0) {
+        let primary = resolvedList[0];
+        if (preferredAddressId) {
+          const preferred = resolvedList.find((a) => a.id === preferredAddressId);
+          if (preferred) primary = preferred;
+        }
+        setAddress(primary);
+        setAddresses(resolvedList);
+        setAddressLinked(true);
+        setQrStatus({ hasFlyer: false, totalScans: 0, lastScannedAt: null });
+
         const { data: contactsData, error: contactsError } = await supabase
           .from('contacts')
           .select('*')
-          .eq('address_id', resolvedAddress.id)
+          .eq('address_id', primary.id)
           .order('created_at', { ascending: false });
-
-        if (contactsError) {
-          console.warn('Failed to fetch contacts:', contactsError.message);
-          setResidents([]);
-        } else {
-          setResidents((contactsData || []) as Contact[]);
-        }
+        if (contactsError) setResidents([]);
+        else setResidents((contactsData || []) as Contact[]);
       } else {
-        // No address found
-        setAddressLinked(false);
-        setAddress(null);
-        setResidents([]);
-        setQrStatus({ hasFlyer: false, totalScans: 0, lastScannedAt: null });
+        // No links: fall back to single-address resolution (preferred or direct match)
+        if (preferredAddressId) {
+          const { data: preferredAddress, error: preferredError } = await supabase
+            .from('campaign_addresses')
+            .select(`id, house_number, street_name, formatted, gers_id`)
+            .eq('id', preferredAddressId)
+            .eq('campaign_id', campaignId)
+            .maybeSingle();
+          if (!preferredError && preferredAddress) resolvedAddress = preferredAddress;
+        }
+        if (!resolvedAddress) {
+          const { data: addressData, error: addressError } = await supabase
+            .from('campaign_addresses')
+            .select(`id, house_number, street_name, formatted, gers_id`)
+            .eq('campaign_id', campaignId)
+            .or(`gers_id.eq.${gersId},building_gers_id.eq.${gersId}`)
+            .maybeSingle();
+          if (addressError) throw new Error(`Failed to fetch address: ${addressError.message}`);
+          resolvedAddress = addressData;
+          if (resolvedAddress) setBuildingExists(true);
+        }
+        if (resolvedAddress) {
+          const resolved = toResolved(resolvedAddress);
+          setAddress(resolved);
+          setAddresses([resolved]);
+          setAddressLinked(true);
+          setQrStatus({ hasFlyer: false, totalScans: 0, lastScannedAt: null });
+          const { data: contactsData, error: contactsError } = await supabase
+            .from('contacts')
+            .select('*')
+            .eq('address_id', resolvedAddress.id)
+            .order('created_at', { ascending: false });
+          if (contactsError) setResidents([]);
+          else setResidents((contactsData || []) as Contact[]);
+        } else {
+          setAddressLinked(false);
+          setAddress(null);
+          setAddresses([]);
+          setResidents([]);
+          setQrStatus({ hasFlyer: false, totalScans: 0, lastScannedAt: null });
+        }
       }
     } catch (err) {
       console.error('Error in useBuildingData:', err);
@@ -249,17 +209,21 @@ export function useBuildingData(
     } finally {
       setIsLoading(false);
     }
-  }, [gersId, campaignId]);
+  }, [gersId, campaignId, preferredAddressId]);
 
   // Fetch data when gersId or campaignId changes
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
+  // Note: Realtime subscriptions disabled - replication not available
+  // Card will refresh when closed and reopened
+
   return {
     isLoading,
     error,
     address,
+    addresses,
     residents,
     qrStatus,
     buildingExists,

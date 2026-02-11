@@ -4,6 +4,13 @@ import { useEffect, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
+import { MapInfoButton } from '@/components/map/MapInfoButton';
+import { useTheme } from '@/lib/theme-provider';
+
+const MAP_STYLES = {
+  light: 'mapbox://styles/fliper27/cml6z0dhg002301qo9xxc08k4',
+  dark: 'mapbox://styles/fliper27/cml6zc5pq002801qo4lh13o19',
+} as const;
 
 /**
  * OvertureMap Component
@@ -12,6 +19,7 @@ import { LoadingSpinner } from '@/components/LoadingSpinner';
  * Fetches building data from /api/overture/buildings and renders using Mapbox fill-extrusion.
  */
 export function OvertureMap() {
+  const { theme } = useTheme();
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
@@ -39,14 +47,13 @@ export function OvertureMap() {
 
     mapboxgl.accessToken = token;
 
-    // Set worker URL to fix potential worker loading issues
     if (typeof window !== 'undefined') {
       mapboxgl.workerCount = 2;
     }
 
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
-      style: 'mapbox://styles/mapbox/dark-v11',
+      style: MAP_STYLES[theme] ?? MAP_STYLES.light,
       center: [-78.688, 43.914], // Bowmanville, ON
       zoom: 15.5,
       pitch: 45,
@@ -88,6 +95,30 @@ export function OvertureMap() {
       }
     };
   }, []);
+
+  // Sync map style with app theme (light/dark)
+  useEffect(() => {
+    if (!map.current || !mapLoaded) return;
+    const styleUrl = MAP_STYLES[theme] ?? MAP_STYLES.light;
+    try {
+      map.current.setStyle(styleUrl);
+      map.current.once('style.load', () => {
+        try {
+          const style = map.current?.getStyle();
+          if (style?.layers) {
+            style.layers.forEach((layer) => {
+              if (layer.id.toLowerCase().includes('building')) {
+                map.current?.setLayoutProperty(layer.id, 'visibility', 'none');
+              }
+            });
+          }
+        } catch {}
+        loadBuildings();
+      });
+    } catch (err) {
+      console.error('Error setting map style:', err);
+    }
+  }, [theme, mapLoaded]);
 
   const loadBuildings = async () => {
     if (!map.current) return;
@@ -217,7 +248,8 @@ export function OvertureMap() {
   return (
     <div className="relative w-full h-full">
       <div ref={mapContainer} className="w-full h-full" />
-      
+      <MapInfoButton show={mapLoaded && !error} />
+
       {/* Loading overlay */}
       {loading && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/20 z-10">

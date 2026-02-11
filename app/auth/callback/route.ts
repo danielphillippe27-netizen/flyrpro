@@ -1,73 +1,57 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@supabase/ssr';
+import { NextResponse } from 'next/server';
+import { createServerClient, type CookieOptions } from '@supabase/ssr';
+import { cookies } from 'next/headers';
 
-// Get environment variables with fallbacks (same as lib/supabase/server.ts)
-const SUPABASE_URL = (process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://kfnsnwqylsdsbgnwgxva.supabase.co').trim().replace(/\/$/, '');
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtmbnNud3F5bHNkc2JnbndneHZhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA5MjY3MzEsImV4cCI6MjA3NjUwMjczMX0.k2TZKPi3VxAVpEGggLiROYvfVu2nV_oSqBt2GM4jX-Y';
-
-export async function GET(request: NextRequest) {
-  const requestUrl = new URL(request.url);
-  const code = requestUrl.searchParams.get('code');
-  const next = requestUrl.searchParams.get('next') || '/home';
-
-  console.log('🔐 Auth Callback:', {
-    origin: requestUrl.origin,
-    code: code ? 'present' : 'missing',
-    next,
-    fullUrl: requestUrl.toString(),
-    hasSupabaseUrl: !!SUPABASE_URL,
-    hasSupabaseKey: !!SUPABASE_ANON_KEY,
-  });
-
-  // Create response object to set cookies
-  // Use requestUrl.origin to ensure we stay on the same domain
-  const redirectUrl = new URL(next, requestUrl.origin);
-  const response = NextResponse.redirect(redirectUrl);
+export async function GET(request: Request) {
+  const { searchParams, origin } = new URL(request.url);
+  const code = searchParams.get('code');
+  const next = searchParams.get('next') ?? '/home';
+  const errorParam = searchParams.get('error');
+  const errorDescription = searchParams.get('error_description') ?? '';
 
   if (code) {
-    try {
-      const supabase = createServerClient(
-        SUPABASE_URL,
-        SUPABASE_ANON_KEY,
-        {
-          cookies: {
-            getAll() {
-              return request.cookies.getAll();
-            },
-            setAll(cookiesToSet) {
-              cookiesToSet.forEach(({ name, value, options }) => {
-                // Set cookies in both request and response
-                request.cookies.set(name, value);
-                response.cookies.set(name, value, options);
-              });
-            },
+    const cookieStore = await cookies();
+
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          get(name: string) {
+            return cookieStore.get(name)?.value;
           },
-        }
-      );
-
-      const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-
-      if (error) {
-        console.error('❌ Code exchange error:', error);
-        // Redirect to login with error message
-        const loginUrl = new URL('/login', requestUrl.origin);
-        loginUrl.searchParams.set('error', 'auth_failed');
-        return NextResponse.redirect(loginUrl);
+          set(name: string, value: string, options: CookieOptions) {
+            cookieStore.set({ name, value, ...options });
+          },
+          remove(name: string, options: CookieOptions) {
+            cookieStore.set({ name, value: '', ...options });
+          },
+        },
       }
+    );
 
-      console.log('✅ Code exchange successful, redirecting to:', redirectUrl.toString());
-      // Successfully exchanged code for session, redirect to next page
-      return response;
-    } catch (error) {
-      console.error('❌ Callback route error:', error);
-      const loginUrl = new URL('/login', requestUrl.origin);
-      loginUrl.searchParams.set('error', 'callback_error');
-      return NextResponse.redirect(loginUrl);
+    const { error } = await supabase.auth.exchangeCodeForSession(code);
+
+    if (!error) {
+      return NextResponse.redirect(`${origin}${next}`);
     }
+
+    console.error('Auth callback error:', error);
+    const loginUrl = new URL('/login', origin);
+    if (error.message?.includes('code verifier') || (error as { code?: string }).code === 'pkce_code_verifier_not_found') {
+      loginUrl.searchParams.set('error', 'pkce_verifier_mismatch');
+    } else {
+      loginUrl.searchParams.set('error', 'auth_failed');
+    }
+    return NextResponse.redirect(loginUrl);
   }
 
-  // If no code, redirect to login
-  console.warn('⚠️ No code parameter in callback URL');
-  return NextResponse.redirect(new URL('/login', requestUrl.origin));
+  // No code: e.g. Apple/Google error or user cancelled
+  const loginUrl = new URL('/login', origin);
+  if (errorParam) {
+    loginUrl.searchParams.set('error', errorParam === 'access_denied' ? 'apple_exchange_failed' : 'auth_failed');
+    if (errorDescription) loginUrl.searchParams.set('error_description', errorDescription);
+  }
+  return NextResponse.redirect(loginUrl);
 }
 

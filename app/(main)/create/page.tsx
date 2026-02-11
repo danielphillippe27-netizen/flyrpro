@@ -27,12 +27,12 @@ export default function CreatePage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+        <div className="max-w-7xl px-4 sm:px-6 lg:px-8 py-4">
           <h1 className="text-2xl font-bold">Create New</h1>
           <p className="text-gray-600 mt-1">Choose what you'd like to create</p>
         </div>
       </header>
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
         <div className="grid grid-cols-2 gap-4 max-w-4xl">
           {/* Left Column */}
           <div className="space-y-4">

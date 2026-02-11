@@ -1,106 +1,79 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
-import { BuildingService } from '@/lib/services/BuildingService';
-import { MapService } from '@/lib/services/MapService';
-import { MapBuildingsService } from '@/lib/services/MapBuildingsService';
+import { createAdminClient } from '@/lib/supabase/server';
+import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { gunzipSync } from 'zlib';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+// Initialize S3 client
+const s3Client = new S3Client({
+  region: process.env.AWS_REGION || 'us-east-2',
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
+  },
+});
 
 /**
- * GET endpoint for fetching campaign buildings as GeoJSON
- * Returns buildings with geometry for the specified campaign
- * Priority: map_buildings (for fill-extrusion) > buildings > campaign_buildings
+ * GET /api/campaigns/[campaignId]/buildings
+ * 
+ * Returns building GeoJSON for a campaign.
+ * Fetches fresh data from S3 (handles expired pre-signed URLs).
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { campaignId: string } }
+  { params }: { params: Promise<{ campaignId: string }> }
 ) {
+  const { campaignId } = await params;
+  
+  console.log(`[API] GET /campaigns/${campaignId}/buildings`);
+  
   try {
-    const { campaignId } = params;
-
-    if (!campaignId) {
-      return NextResponse.json({ error: 'campaignId is required' }, { status: 400 });
+    const supabase = createAdminClient();
+    
+    // Get campaign snapshot info
+    const { data: snapshot, error: snapshotError } = await supabase
+      .from('campaign_snapshots')
+      .select('bucket, buildings_key, buildings_count')
+      .eq('campaign_id', campaignId)
+      .single();
+    
+    if (snapshotError || !snapshot?.buildings_key) {
+      console.log('[API] No snapshot found, returning empty');
+      return NextResponse.json({
+        type: 'FeatureCollection',
+        features: []
+      });
     }
-
-    // Priority 1: Try map_buildings table (for fill-extrusion visualization)
-    let buildings: any[] = [];
-    try {
-      const mapBuildings = await MapBuildingsService.fetchCampaignBuildings(campaignId);
-      if (mapBuildings.length > 0) {
-        buildings = mapBuildings;
-      }
-    } catch (error) {
-      console.warn('Error fetching from map_buildings, trying fallback:', error);
-    }
-
-    // Priority 2: Fallback to GERS buildings (buildings table)
-    if (buildings.length === 0) {
-      try {
-        buildings = await BuildingService.fetchCampaignBuildings(campaignId);
-      } catch (error) {
-        console.warn('Error fetching from buildings table:', error);
-      }
-    }
-
-    // Priority 3: Fallback to legacy campaign_buildings
-    if (buildings.length === 0) {
-      try {
-        buildings = await MapService.fetchCampaignBuildings(campaignId);
-      } catch (error) {
-        console.warn('Error fetching from campaign_buildings:', error);
-      }
-    }
-
-    // Transform to GeoJSON features
-    const features = buildings.map((building: any) => {
-      let geometry;
-      try {
-        // Handle different geometry field names
-        let geomData = building.geom || building.geometry;
-        
-        // Parse geometry if it's a string
-        if (typeof geomData === 'string') {
-          geometry = JSON.parse(geomData);
-        } else if (geomData) {
-          geometry = geomData;
-        } else {
-          console.warn('Building has no geometry:', building.id);
-          return null;
-        }
-      } catch (e) {
-        console.warn('Failed to parse building geometry:', e);
-        return null;
-      }
-
-      return {
-        type: 'Feature',
-        geometry,
-        properties: {
-          id: building.id,
-          building_id: building.building_id || building.id,
-          address_id: building.address_id,
-          gers_id: building.gers_id || building.source_id || null, // GERS ID for building-address bridge
-          // Building height in meters from map_buildings table (for fill-extrusion)
-          height_m: building.height_m || building.height || 10,
-          min_height: building.min_height_m || building.min_height || 0,
-          front_bearing: building.front_bearing || 0,
-          source: building.source || 'unknown',
-        },
-      };
-    }).filter((f): f is NonNullable<typeof f> => f !== null);
-
-    // Return as FeatureCollection for Mapbox
-    return NextResponse.json({
-      type: 'FeatureCollection',
-      features,
+    
+    console.log(`[API] Fetching from S3: ${snapshot.bucket}/${snapshot.buildings_key}`);
+    
+    // Fetch fresh from S3
+    const command = new GetObjectCommand({
+      Bucket: snapshot.bucket,
+      Key: snapshot.buildings_key,
     });
+    
+    const response = await s3Client.send(command);
+    const bodyBuffer = await response.Body?.transformToByteArray();
+    
+    if (!bodyBuffer) {
+      throw new Error('Empty response from S3');
+    }
+    
+    // Decompress gzip content
+    const decompressed = gunzipSync(Buffer.from(bodyBuffer));
+    const geojson = JSON.parse(decompressed.toString('utf-8'));
+    
+    console.log(`[API] Returning ${geojson.features?.length || 0} buildings`);
+    
+    return NextResponse.json(geojson);
+    
   } catch (error) {
-    console.error('Error fetching campaign buildings:', error);
+    console.error('[API] Error fetching buildings:', error);
     return NextResponse.json(
-      { 
-        error: 'Failed to fetch building data',
-        message: error instanceof Error ? error.message : 'Unknown error'
-      },
+      { error: error instanceof Error ? error.message : 'Failed to fetch buildings' },
       { status: 500 }
     );
   }

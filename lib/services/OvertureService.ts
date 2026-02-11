@@ -1,9 +1,10 @@
 /**
  * Overture Service - Thin wrapper around MotherDuck HTTP API
- * 
+ *
+ * Legacy / script-only: app routes (provision, generate-address-list) use Tile Lambda + S3, not this service.
  * This service provides a simple interface for querying Overture Maps data
  * through the MotherDuck HTTP API. All data is pre-loaded into MotherDuck.
- * 
+ *
  * Before using, run: npx tsx scripts/load-overture-to-motherduck.ts
  */
 

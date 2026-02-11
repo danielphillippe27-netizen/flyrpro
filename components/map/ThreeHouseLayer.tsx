@@ -471,7 +471,7 @@ export class ThreeHouseLayer {
           map: this.shadowTexture,
           transparent: true,
           depthWrite: false,
-          opacity: 0.4,
+          opacity: 0.25,
           blending: THREE.MultiplyBlending,
           premultipliedAlpha: true,
         });

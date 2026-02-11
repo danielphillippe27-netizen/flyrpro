@@ -916,8 +916,9 @@ export class MapService {
       centerX, centerY, radius   // Outer circle (edge)
     );
     
-    // Gradient from semi-transparent black at center to fully transparent at edges
-    gradient.addColorStop(0, 'rgba(0, 0, 0, 0.5)');
+    // Gradient from semi-transparent black at center to fully transparent at edges (softer shadow)
+    gradient.addColorStop(0, 'rgba(0, 0, 0, 0.25)');
+    gradient.addColorStop(0.5, 'rgba(0, 0, 0, 0.08)');
     gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
     
     // Fill canvas with gradient

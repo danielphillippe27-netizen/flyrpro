@@ -49,13 +49,16 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     setThemeState((prev) => (prev === 'dark' ? 'light' : 'dark'));
   };
 
-  // Prevent flash of wrong theme
-  if (!mounted) {
-    return <>{children}</>;
-  }
+  // Always provide context so useTheme() never throws (e.g. on first paint before mount).
+  // Use current theme when mounted; otherwise 'light' so children can render.
+  const value = {
+    theme: mounted ? theme : 'light',
+    setTheme,
+    toggleTheme,
+  };
 
   return (
-    <ThemeContext.Provider value={{ theme, setTheme, toggleTheme }}>
+    <ThemeContext.Provider value={value}>
       {children}
     </ThemeContext.Provider>
   );

@@ -3,26 +3,29 @@
 import { useEffect, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
-import { MapModeToggle } from './MapModeToggle';
+import { CampaignMarkersLayer } from './CampaignMarkersLayer';
 import { MapBuildingsLayer } from './MapBuildingsLayer';
-import { MapControls } from './MapControls';
-import { MapLegend } from './MapLegend';
+import { MapInfoButton } from './MapInfoButton';
+import { RouteLayer } from './RouteLayer';
 import { AddressOrientationPanel } from './AddressOrientationPanel';
 import { HouseDetailPanel } from './HouseDetailPanel';
 import { LocationCard } from './LocationCard';
 import { CreateContactDialog } from '@/components/crm/CreateContactDialog';
-import { Button } from '@/components/ui/button';
 import { CampaignsService } from '@/lib/services/CampaignsService';
 import { createClient } from '@/lib/supabase/client';
-import { DEFAULT_STATUS_FILTERS, type MapStatusKey, type StatusFilters } from '@/lib/constants/mapStatus';
+import { useTheme } from '@/lib/theme-provider';
+import { DEFAULT_STATUS_FILTERS, type StatusFilters } from '@/lib/constants/mapStatus';
 import type { CampaignV2, CampaignAddress } from '@/types/database';
 
-type MapMode = 'light' | 'dark' | 'satellite';
+const MAP_STYLES = {
+  light: 'mapbox://styles/fliper27/cml6z0dhg002301qo9xxc08k4',
+  dark: 'mapbox://styles/fliper27/cml6zc5pq002801qo4lh13o19',
+} as const;
 
 export function FlyrMapView() {
+  const { theme } = useTheme();
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
-  const [mapMode, setMapMode] = useState<MapMode>('light');
   const [statusFilters, setStatusFilters] = useState<StatusFilters>(DEFAULT_STATUS_FILTERS);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,6 +37,7 @@ export function FlyrMapView() {
   const [selectedAddress, setSelectedAddress] = useState<CampaignAddress | null>(null);
   const [orientationPanelOpen, setOrientationPanelOpen] = useState(false);
   const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(null);
+  const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
   const [housePanelOpen, setHousePanelOpen] = useState(false);
   const [locationCardOpen, setLocationCardOpen] = useState(false);
   const [createContactDialogOpen, setCreateContactDialogOpen] = useState(false);
@@ -73,7 +77,7 @@ export function FlyrMapView() {
 
         map.current = new mapboxgl.Map({
           container: mapContainer.current,
-          style: 'mapbox://styles/flyrpro/cmie253op00fa01qmgiri8lcb', // Light 3D Style
+          style: MAP_STYLES[theme] ?? MAP_STYLES.light,
           center: [-79.3832, 43.6532], // Toronto default
           zoom: 12,
           pitch: 0,
@@ -210,57 +214,41 @@ export function FlyrMapView() {
     };
   }, []);
 
+  // Sync map style with app theme (light/dark)
   useEffect(() => {
     if (!map.current || !mapLoaded) return;
 
-    const styleMap: Record<MapMode, string> = {
-      light: 'mapbox://styles/flyrpro/cmie253op00fa01qmgiri8lcb', // Light 3D Style
-      dark: 'mapbox://styles/flyrpro/cmie0fu21003001qt912a9r5s', // Dark 3D Style
-      satellite: 'mapbox://styles/mapbox/satellite-v9',
-    };
-
+    const styleUrl = MAP_STYLES[theme] ?? MAP_STYLES.light;
     try {
-      map.current.setStyle(styleMap[mapMode]);
+      map.current.setStyle(styleUrl);
     } catch (err) {
       console.error('Error setting map style:', err);
       setError(`Failed to load map style: ${err instanceof Error ? err.message : String(err)}`);
     }
 
-    // Hide building layers and clean up problematic layers after style loads
     const cleanupLayers = () => {
       if (!map.current) return;
-      
       try {
         const style = map.current.getStyle();
-        if (style && style.layers) {
+        if (style?.layers) {
           style.layers.forEach((layer) => {
-            // Hide layers that contain "building" in their id
             if (layer.id.toLowerCase().includes('building')) {
               map.current?.setLayoutProperty(layer.id, 'visibility', 'none');
             }
-            
-            // Remove layers that reference non-existent source layers
-            if (layer.id && (
-              layer.id.includes('road-label') || 
-              layer.id.includes('road_label')
-            )) {
+            if (layer.id && (layer.id.includes('road-label') || layer.id.includes('road_label'))) {
               try {
                 map.current.removeLayer(layer.id);
-              } catch (err) {
-                // Layer might not exist or already removed
-              }
+              } catch {}
             }
           });
         }
-      } catch (err) {
-        // Ignore cleanup errors
-      }
+      } catch {}
     };
 
     map.current.once('style.load', () => {
       cleanupLayers();
     });
-  }, [mapMode, mapLoaded]);
+  }, [theme, mapLoaded]);
 
   // Handle 3D view pitch and bearing
   useEffect(() => {
@@ -345,8 +333,9 @@ export function FlyrMapView() {
     setCreateContactDialogOpen(true);
   };
 
-  const handleBuildingClick = (buildingId: string) => {
+  const handleBuildingClick = (buildingId: string, addressId?: string) => {
     setSelectedBuildingId(buildingId);
+    setSelectedAddressId(addressId ?? null);
     setLocationCardOpen(true);
   };
 
@@ -479,48 +468,27 @@ export function FlyrMapView() {
         </div>
       )}
       <div ref={mapContainer} className="h-full w-full min-h-[400px]" />
-      {mapLoaded && map.current && !error && (
+      <MapInfoButton show={mapLoaded && !error} />
+      {mapLoaded && map.current && !error && useFillExtrusion && (
         <>
-          <div className="absolute top-4 right-4 z-10 flex flex-col gap-2">
-            <MapModeToggle mode={mapMode} onModeChange={setMapMode} />
-            {useFillExtrusion && !selectedCampaignId && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="bg-yellow-50/90 text-xs text-yellow-700 hover:bg-yellow-50/95 h-auto py-1 px-2 text-center border border-yellow-200"
-                disabled
-              >
-                Select a campaign to see buildings
-              </Button>
-            )}
-            <MapControls 
-              onCampaignSelect={setSelectedCampaignId} 
-              selectedCampaignId={selectedCampaignId}
-              selectedCampaignName={selectedCampaign?.name || null}
-            />
-          </div>
-          {useFillExtrusion && (
-            <>
-              <MapBuildingsLayer 
-                map={map.current} 
-                campaignId={selectedCampaignId}
-                statusFilters={statusFilters}
-                onBuildingClick={handleBuildingClick}
-                onAddToCRM={handleAddToCRM}
-              />
-              {/* Map Legend with status filters - bottom left */}
-              {selectedCampaignId && (
-                <div className="absolute bottom-6 left-4 z-10">
-                  <MapLegend
-                    statusFilters={statusFilters}
-                    onFilterChange={(key: MapStatusKey, enabled: boolean) => {
-                      setStatusFilters(prev => ({ ...prev, [key]: enabled }));
-                    }}
-                  />
-                </div>
-              )}
-            </>
-          )}
+          <MapBuildingsLayer 
+            map={map.current} 
+            campaignId={selectedCampaignId}
+            statusFilters={statusFilters}
+            onBuildingClick={handleBuildingClick}
+            onAddToCRM={handleAddToCRM}
+          />
+          <RouteLayer 
+            map={map.current}
+            campaignId={selectedCampaignId}
+          />
+          <CampaignMarkersLayer
+            map={map.current}
+            mapLoaded={mapLoaded}
+            userId={userId}
+            selectedCampaignId={selectedCampaignId}
+            onCampaignSelect={setSelectedCampaignId}
+          />
         </>
       )}
       <AddressOrientationPanel
@@ -539,9 +507,12 @@ export function FlyrMapView() {
           <LocationCard
             gersId={selectedBuildingId}
             campaignId={selectedCampaignId}
+            preferredAddressId={selectedAddressId}
+            onSelectAddress={(id) => setSelectedAddressId(id ?? null)}
             onClose={() => {
               setLocationCardOpen(false);
               setSelectedBuildingId(null);
+              setSelectedAddressId(null);
             }}
             onNavigate={handleNavigateToBuilding}
             onLogVisit={handleOpenDetailPanel}

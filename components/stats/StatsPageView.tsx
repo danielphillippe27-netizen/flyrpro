@@ -1,8 +1,6 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { LeaderboardContentView } from './LeaderboardContentView';
 import { YouViewContent } from './YouViewContent';
 import { createClient } from '@/lib/supabase/client';
 
@@ -17,20 +15,9 @@ export function StatsPageView() {
   }, []);
 
   return (
-    <Tabs defaultValue="you" className="w-full">
-      <TabsList className="grid w-full grid-cols-2">
-        <TabsTrigger value="you">You</TabsTrigger>
-        <TabsTrigger value="leaderboard">Leaderboard</TabsTrigger>
-      </TabsList>
-
-      <TabsContent value="you" className="mt-6">
-        <YouViewContent userId={userId} />
-      </TabsContent>
-
-      <TabsContent value="leaderboard" className="mt-6">
-        <LeaderboardContentView />
-      </TabsContent>
-    </Tabs>
+    <div className="mt-6">
+      <YouViewContent userId={userId} />
+    </div>
   );
 }
 

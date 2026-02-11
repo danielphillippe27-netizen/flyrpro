@@ -1,15 +1,37 @@
 import { createBrowserClient } from '@supabase/ssr';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
-export function createClient() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://kfnsnwqylsdsbgnwgxva.supabase.co';
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtmbnNud3F5bHNkc2JnbndneHZhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA5MjY3MzEsImV4cCI6MjA3NjUwMjczMX0.k2TZKPi3VxAVpEGggLiROYvfVu2nV_oSqBt2GM4jX-Y';
-  
-  // Ensure URL doesn't have trailing slash - handle undefined/null safely
-  const cleanUrl = supabaseUrl ? supabaseUrl.trim().replace(/\/$/, '') : 'https://kfnsnwqylsdsbgnwgxva.supabase.co';
-  
+/**
+ * Browser Supabase client. Stores PKCE code verifier in cookies (via @supabase/ssr)
+ * so the callback route can read it. Use this when initiating OAuth (Google, Apple).
+ */
+export function createClient(): SupabaseClient {
   return createBrowserClient(
-    cleanUrl,
-    supabaseAnonKey
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 }
 
+/**
+ * Use in useEffect only (browser). Defers client creation to avoid auth-js
+ * "Cannot read properties of undefined (reading 'call')" during hydration.
+ */
+export function getClientAsync(): Promise<SupabaseClient> {
+  if (typeof window === 'undefined') {
+    return Promise.reject(new Error('getClientAsync() must only be called in the browser.'));
+  }
+  return new Promise((resolve, reject) => {
+    const run = () => {
+      try {
+        resolve(createClient());
+      } catch (err) {
+        reject(err);
+      }
+    };
+    if (typeof requestAnimationFrame !== 'undefined') {
+      requestAnimationFrame(() => setTimeout(run, 0));
+    } else {
+      setTimeout(run, 50);
+    }
+  });
+}

@@ -1,12 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createAdminClient } from '@/lib/supabase/server';
-// OvertureService is dynamically imported to avoid DuckDB native module issues on Vercel
-// import { OvertureService } from '@/lib/services/OvertureService';
+import { createAdminClient, getSupabaseServerClient } from '@/lib/supabase/server';
+import { TileLambdaService, type AddressFeature } from '@/lib/services/TileLambdaService';
 import { MapService } from '@/lib/services/MapService';
 import { mapOvertureToCanonical } from '@/lib/geo/overtureToCanonical';
 import type { CanonicalCampaignAddress } from '@/lib/geo/types';
 
-// FIX: Ensure Node.js runtime (MotherDuck/DuckDB requires Node, not Edge)
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -24,130 +22,223 @@ interface GenerateAddressListRequest {
   };
 }
 
-export async function POST(request: NextRequest) {
-  console.log('--- DEBUG START ---');
-  
-  // 1. DEBUG TOKEN
-  const token = process.env.MOTHERDUCK_TOKEN;
-  if (token) {
-    console.log(`Token Status: FOUND`);
-    console.log(`Token Length: ${token.length}`);
-    console.log(`Token Start: ${token.substring(0, 10)}...`);
-    console.log(`Token End: ...${token.substring(token.length - 10)}`);
-    // Check for accidental quotes
-    if (token.startsWith('"') || token.startsWith("'")) {
-      console.error('CRITICAL ERROR: Token has invalid quotes in .env file!');
-    }
-    // Check for whitespace
-    if (token.trim().length !== token.length) {
-      console.error('CRITICAL ERROR: Token has hidden spaces!');
-    }
-  } else {
-    console.log('Token Status: NOT FOUND (Using Local DuckDB)');
-  }
+/** Address shape compatible with mapOvertureToCanonical */
+interface LambdaAddressShape {
+  gers_id: string;
+  geometry: {
+    type: 'Point';
+    coordinates: [number, number];
+  };
+  house_number?: string;
+  street?: string;
+  locality?: string;
+  postcode?: string;
+  region?: string;
+  formatted?: string;
+}
 
-  console.log('--- Starting Address Generation ---');
-  
+/** Convert Lambda AddressFeature to shape expected by mapOvertureToCanonical */
+function lambdaFeatureToAddressShape(f: AddressFeature): LambdaAddressShape {
+  return {
+    gers_id: f.properties.gers_id,
+    geometry: f.geometry,
+    house_number: f.properties.house_number,
+    street: f.properties.street_name,
+    locality: f.properties.city,
+    postcode: f.properties.postal_code,
+    region: f.properties.state,
+    formatted: f.properties.formatted || f.properties.label,
+  };
+}
+
+/** Build a ~2km bbox polygon around a point (for closest-home mode). */
+function bboxPolygonAroundPoint(lat: number, lon: number, radiusKm: number = 2): GeoJSON.Polygon {
+  const latDelta = radiusKm / 111;
+  const lngDelta = radiusKm / (111 * Math.cos((lat * Math.PI) / 180));
+  return {
+    type: 'Polygon',
+    coordinates: [[
+      [lon - lngDelta, lat - latDelta],
+      [lon + lngDelta, lat - latDelta],
+      [lon + lngDelta, lat + latDelta],
+      [lon - lngDelta, lat + latDelta],
+      [lon - lngDelta, lat - latDelta],
+    ]],
+  };
+}
+
+/** Sort addresses by distance to (lat, lon) and return the first `limit`. */
+function sortByDistanceAndTake(
+  features: AddressFeature[],
+  lat: number,
+  lon: number,
+  limit: number
+): AddressFeature[] {
+  const withDistance = features.map((f) => {
+    const [lng, featLat] = f.geometry.coordinates;
+    const distance = Math.sqrt(
+      Math.pow((featLat - lat) * 111, 2) +
+        Math.pow((lng - lon) * 111 * Math.cos((lat * Math.PI) / 180), 2)
+    );
+    return { f, distance };
+  });
+  withDistance.sort((a, b) => a.distance - b.distance);
+  return withDistance.slice(0, limit).map((x) => x.f);
+}
+
+export async function POST(request: NextRequest) {
   try {
+    if (!process.env.SLICE_LAMBDA_URL || !process.env.SLICE_SHARED_SECRET) {
+      return NextResponse.json(
+        { error: 'Lambda not configured. Set SLICE_LAMBDA_URL and SLICE_SHARED_SECRET.' },
+        { status: 500 }
+      );
+    }
+
     const body: GenerateAddressListRequest = await request.json();
     const { campaign_id, starting_address, count = 50, coordinates: providedCoordinates, polygon } = body;
 
-    // Validate input
     if (!campaign_id) return NextResponse.json({ error: 'campaign_id is required' }, { status: 400 });
-    
-    // Either starting_address (for closest_home/same_street) or polygon (for map territory) is required
     if (!starting_address && !polygon) {
       return NextResponse.json({ error: 'Either starting_address or polygon is required' }, { status: 400 });
     }
 
-    const supabase = createAdminClient();
+    // 1. Require authenticated user (session) – identifies who is making the request
+    const supabaseSession = await getSupabaseServerClient();
+    const { data: { user }, error: authError } = await supabaseSession.auth.getUser();
+    if (authError || !user) {
+      console.error('[generate-address-list] No session:', authError?.message);
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
-    // Validate campaign exists
-    const { data: campaign, error: campaignError } = await supabase
+    // 2. Campaign lookup with admin client (sees all rows; same DB as create) then enforce ownership
+    let supabaseAdmin;
+    try {
+      supabaseAdmin = createAdminClient();
+    } catch (err: any) {
+      console.error('[generate-address-list] Admin client failed:', err?.message);
+      return NextResponse.json(
+        {
+          error: 'Server configuration error. Set SUPABASE_SERVICE_ROLE_KEY in .env.local (Supabase Dashboard → Project Settings → API → service_role).',
+        },
+        { status: 503 }
+      );
+    }
+
+    const { data: campaign, error: campaignError } = await supabaseAdmin
       .from('campaigns')
-      .select('owner_id')
+      .select('owner_id, region')
       .eq('id', campaign_id)
       .single();
 
     if (campaignError || !campaign) {
-      return NextResponse.json({ error: 'Campaign not found in Supabase' }, { status: 404 });
+      console.error('[generate-address-list] Campaign lookup failed:', {
+        campaign_id,
+        user_id: user.id,
+        code: campaignError?.code,
+        message: campaignError?.message,
+      });
+      return NextResponse.json(
+        { error: 'Campaign not found or access denied' },
+        { status: 404 }
+      );
     }
 
-    // --- Step 1: Fetch addresses from Overture ---
-    // Dynamic import to avoid DuckDB native module issues on Vercel build
-    const { OvertureService } = await import('@/lib/services/OvertureService');
-    
-    let addresses = [];
-    
+    if (campaign.owner_id !== user.id) {
+      return NextResponse.json(
+        { error: 'Campaign not found or access denied' },
+        { status: 404 }
+      );
+    }
+
+    console.log('[generate-address-list] Campaign found:', campaign_id);
+
+    const regionCode = (campaign.region || 'ON').toUpperCase();
+
+    let addressFeatures: AddressFeature[] = [];
+
     if (polygon) {
-      // Polygon mode: Fetch addresses inside polygon
-      console.log('Step 1: Fetching addresses from polygon...');
+      console.log('[generate-address-list] Polygon mode: fetching addresses via Lambda...');
       try {
-        addresses = await OvertureService.getAddressesInPolygon(polygon);
-        console.log(`Found ${addresses.length} addresses from polygon`);
+        const snapshot = await TileLambdaService.generateSnapshots(
+          polygon as GeoJSON.Polygon,
+          regionCode,
+          campaign_id,
+          { limitAddresses: 5000, limitBuildings: 0, includeRoads: false }
+        );
+        const addressData = await TileLambdaService.downloadAddresses(snapshot.urls.addresses);
+        addressFeatures = addressData.features || [];
+        console.log(`[generate-address-list] Found ${addressFeatures.length} addresses from polygon`);
       } catch (err: any) {
-        console.error('Overture Polygon Query Error:', err);
-        return NextResponse.json({ error: `Overture Data Error: ${err.message}` }, { status: 500 });
+        console.error('[generate-address-list] Lambda polygon error:', err);
+        return NextResponse.json(
+          { error: `Address data error: ${err.message}` },
+          { status: 500 }
+        );
       }
     } else if (starting_address) {
-      // Closest Home mode: Geocode and find nearest addresses
-      // --- Step 1a: Geocoding ---
       let coordinates: { lat: number; lon: number };
-      
+
       if (providedCoordinates) {
         coordinates = { lat: providedCoordinates.lat, lon: providedCoordinates.lng };
-        console.log(`Step 1: Using provided coordinates: ${coordinates.lat}, ${coordinates.lon}`);
       } else {
-        console.log(`Step 1: Geocoding address: ${starting_address}`);
         try {
           const geocoded = await MapService.geocodeAddress(starting_address);
-          if (!geocoded) {
-            throw new Error(`Geocoding returned null for: ${starting_address}`);
-          }
+          if (!geocoded) throw new Error(`Geocoding returned null for: ${starting_address}`);
           coordinates = geocoded;
-          console.log(`Geocoded to: ${coordinates.lat}, ${coordinates.lon}`);
         } catch (err: any) {
           console.error('Geocoding failed:', err);
           return NextResponse.json({ error: `Geocoding failed: ${err.message}` }, { status: 400 });
         }
       }
 
-      // --- Step 1b: Overture/MotherDuck Query ---
-      console.log(`Step 2: Querying Overture for ${count} addresses...`);
+      console.log(`[generate-address-list] Closest-home mode: querying Lambda for ${count} addresses near point...`);
       try {
-        // Set a strict timeout for the Overture query (e.g., 25 seconds to avoid Vercel 30s limit hard crash)
-        const overturePromise = OvertureService.getNearestHomes(coordinates.lat, coordinates.lon, count);
-        
-        // Simple timeout wrapper
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Overture query timed out (>25s)')), 25000)
+        const bboxPolygon = bboxPolygonAroundPoint(coordinates.lat, coordinates.lon, 2);
+        const snapshot = await TileLambdaService.generateSnapshots(
+          bboxPolygon,
+          regionCode,
+          campaign_id,
+          {
+            limitAddresses: Math.max(count * 2, 500),
+            limitBuildings: 0,
+            includeRoads: false,
+          }
         );
-
-        addresses = await Promise.race([overturePromise, timeoutPromise]) as any[];
+        const addressData = await TileLambdaService.downloadAddresses(snapshot.urls.addresses);
+        const allFeatures = addressData.features || [];
+        addressFeatures = sortByDistanceAndTake(allFeatures, coordinates.lat, coordinates.lon, count);
+        console.log(`[generate-address-list] Found ${addressFeatures.length} nearest addresses`);
       } catch (err: any) {
-        console.error('Overture Query Error:', err);
-        return NextResponse.json({ error: `Overture Data Error: ${err.message}` }, { status: 500 });
+        console.error('[generate-address-list] Lambda closest-home error:', err);
+        return NextResponse.json(
+          { error: `Address data error: ${err.message}` },
+          { status: 500 }
+        );
       }
     }
 
-    if (!addresses || addresses.length === 0) {
-      return NextResponse.json({ inserted_count: 0, preview: [], message: polygon ? 'No addresses found in polygon' : 'No addresses found near location' });
+    if (!addressFeatures.length) {
+      return NextResponse.json({
+        inserted_count: 0,
+        preview: [],
+        message: polygon ? 'No addresses found in polygon' : 'No addresses found near location',
+      });
     }
-    console.log(`Found ${addresses.length} addresses from Overture`);
 
-    // --- Step 3: Mapping & Database Insert ---
+    const addresses: LambdaAddressShape[] = addressFeatures.map(lambdaFeatureToAddressShape);
+
     try {
-      const canonicalAddresses: CanonicalCampaignAddress[] = addresses.map(
-        (address, index) => mapOvertureToCanonical(address, campaign_id, index)
+      const canonicalAddresses: CanonicalCampaignAddress[] = addresses.map((address, index) =>
+        // Cast to any because mapOvertureToCanonical expects OvertureAddress but our LambdaAddressShape is compatible
+        mapOvertureToCanonical(address as any, campaign_id, index)
       );
 
-      // 1. Prepare raw insert data
-      const rawInsertData = canonicalAddresses.map(addr => ({
+      const rawInsertData = canonicalAddresses.map((addr) => ({
         campaign_id: addr.campaign_id,
         formatted: addr.formatted,
         postal_code: addr.postal_code,
         source: addr.source,
-        // seq: addr.seq,  // Removed: Let the database auto-generate the sequence number
         visited: addr.visited || false,
         geom: addr.geom,
         gers_id: addr.gers_id,
@@ -158,80 +249,44 @@ export async function POST(request: NextRequest) {
         building_gers_id: addr.building_gers_id || null,
       }));
 
+      const itemsWithGersId = rawInsertData.filter((item) => item.gers_id != null && item.gers_id !== '');
 
-      // 2. DEDUPLICATE: Remove records with duplicate (campaign_id, gers_id) combination
-      // Filter out items without gers_id - they can't use the unique constraint for onConflict
-      const itemsWithGersId = rawInsertData.filter(item => item.gers_id != null && item.gers_id !== '');
-      
-      
       if (itemsWithGersId.length === 0) {
         throw new Error('No addresses with gers_id found. All addresses must have a gers_id from Overture.');
       }
-      
+
       const uniqueInsertData = Array.from(
-        new Map(itemsWithGersId.map(item => [`${item.campaign_id}-${item.gers_id}`, item])).values()
+        new Map(itemsWithGersId.map((item) => [`${item.campaign_id}-${item.gers_id}`, item])).values()
       );
 
-      console.log(`Step 3: Upserting ${uniqueInsertData.length} unique rows (filtered from ${rawInsertData.length}, ${rawInsertData.length - itemsWithGersId.length} without gers_id) to Supabase...`);
-
-
-
-      // 3. Upsert the CLEAN list using the existing unique constraint
-      const { data: insertedData, error: insertError } = await supabase
+      const { data: insertedData, error: insertError } = await supabaseAdmin
         .from('campaign_addresses')
-        .upsert(uniqueInsertData, {
-          onConflict: 'campaign_id,gers_id',
-        })
+        .upsert(uniqueInsertData, { onConflict: 'campaign_id,gers_id' })
         .select();
 
-
       if (insertError) {
-        
-        // Enhanced error message with troubleshooting info
-        const errorMsg = `Supabase Upsert Error: ${insertError.message}`;
-        console.error('[generate-address-list] Upsert failed:', {
-          error: insertError,
-          errorCode: insertError.code,
-          errorHint: insertError.hint,
-          dataCount: uniqueInsertData.length,
-          firstItem: uniqueInsertData[0],
-          onConflict: 'campaign_id,gers_id',
-          troubleshooting: 'If error mentions "no unique constraint", run migration 20250128000006_standardize_gers_id_columns.sql'
-        });
-        
-        throw new Error(errorMsg);
+        console.error('[generate-address-list] Upsert failed:', insertError);
+        throw new Error(`Supabase Upsert Error: ${insertError.message}`);
       }
 
       const insertedCount = insertedData?.length || 0;
-      console.log(`Successfully inserted ${insertedCount} addresses`);
 
-      // Update total count asynchronously (don't await strictly if speed is concern, but good to keep sync)
-      const { count: totalCount } = await supabase
+      const { count: totalCount } = await supabaseAdmin
         .from('campaign_addresses')
         .select('*', { count: 'exact', head: true })
         .eq('campaign_id', campaign_id);
 
       if (totalCount !== null) {
-        await supabase.from('campaigns').update({ total_flyers: totalCount }).eq('id', campaign_id);
+        await supabaseAdmin.from('campaigns').update({ total_flyers: totalCount }).eq('id', campaign_id);
       }
 
-      // Update campaign bbox from addresses (automatic calculation for Closest Home tool)
       try {
-        const { error: bboxError } = await supabase.rpc('update_campaign_bbox', {
-          p_campaign_id: campaign_id,
-        });
-        if (bboxError) {
-          console.error('Error updating campaign bbox:', bboxError);
-          // Don't fail the request if bbox update fails - it's not critical
-        } else {
-          console.log('Successfully updated campaign bbox from addresses');
-        }
-      } catch (bboxUpdateError) {
-        console.error('Failed to update campaign bbox:', bboxUpdateError);
-        // Don't fail the request if bbox update fails - it's not critical
+        await supabaseAdmin.rpc('update_campaign_bbox', { p_campaign_id: campaign_id });
+      } catch {
+        // Non-critical
       }
 
-      const preview = (insertedData || []).slice(0, 10).map(addr => ({
+      const preview = (insertedData || []).slice(0, 10).map((addr) => ({
         id: addr.id,
         formatted: addr.formatted,
         postal_code: addr.postal_code,
@@ -240,15 +295,12 @@ export async function POST(request: NextRequest) {
       }));
 
       return NextResponse.json({ inserted_count: insertedCount, preview });
-
     } catch (err: any) {
       console.error('Database Step Error:', err);
       return NextResponse.json({ error: `Database Error: ${err.message}` }, { status: 500 });
     }
-
   } catch (error: any) {
     console.error('Unhandled API Error:', error);
-    // Return the actual error message to the client for debugging
     return NextResponse.json(
       { error: error.message || 'Unknown server error' },
       { status: 500 }

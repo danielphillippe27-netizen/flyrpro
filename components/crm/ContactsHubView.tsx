@@ -1,32 +1,37 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Plus } from 'lucide-react';
+import { Plus, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { ContactsView } from './ContactsView';
-import { ContactFiltersView } from './ContactFiltersView';
+import { LeadsTableView } from './LeadsTableView';
 import { ContactDetailSheet } from './ContactDetailSheet';
 import { CreateContactDialog } from './CreateContactDialog';
 import { ContactsService } from '@/lib/services/ContactsService';
-import type { Contact, ContactStatus } from '@/types/database';
+import { StatsService } from '@/lib/services/StatsService';
+import type { Contact, UserStats } from '@/types/database';
 import { createClient } from '@/lib/supabase/client';
 
 export function ContactsHubView() {
   const [contacts, setContacts] = useState<Contact[]>([]);
+  const [userStats, setUserStats] = useState<UserStats | null>(null);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
-  const [filters, setFilters] = useState<{ status?: ContactStatus; campaignId?: string; farmId?: string }>({});
   const [userId, setUserId] = useState<string | null>(null);
 
   useEffect(() => {
-    const loadContacts = async (currentUserId: string) => {
+    const load = async (currentUserId: string) => {
       try {
         setLoading(true);
-        const data = await ContactsService.fetchContacts(currentUserId, filters);
-        setContacts(data);
+        const [contactsData, statsData] = await Promise.all([
+          ContactsService.fetchContacts(currentUserId),
+          StatsService.fetchUserStats(currentUserId),
+        ]);
+        setContacts(contactsData);
+        setUserStats(statsData ?? null);
       } catch (error) {
-        console.error('Error loading contacts:', error);
+        console.error('Error loading contacts or stats:', error);
       } finally {
         setLoading(false);
       }
@@ -36,21 +41,25 @@ export function ContactsHubView() {
     supabase.auth.getUser().then(({ data: { user } }) => {
       setUserId(user?.id || null);
       if (user?.id) {
-        loadContacts(user.id);
+        load(user.id);
       } else {
         setLoading(false);
       }
     });
-  }, [filters]);
+  }, []);
 
   const loadContacts = async () => {
     if (!userId) return;
     try {
       setLoading(true);
-      const data = await ContactsService.fetchContacts(userId, filters);
-      setContacts(data);
+      const [contactsData, statsData] = await Promise.all([
+        ContactsService.fetchContacts(userId),
+        StatsService.fetchUserStats(userId),
+      ]);
+      setContacts(contactsData);
+      setUserStats(statsData ?? null);
     } catch (error) {
-      console.error('Error loading contacts:', error);
+      console.error('Error loading contacts or stats:', error);
     } finally {
       setLoading(false);
     }
@@ -64,20 +73,44 @@ export function ContactsHubView() {
     loadContacts();
   };
 
+  const handleSyncToCrm = async () => {
+    setSyncing(true);
+    try {
+      const res = await fetch('/api/leads/sync-crm', { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data?.error ?? 'Sync to CRM failed.');
+        return;
+      }
+      alert(data?.message ?? 'Leads synced to CRM.');
+    } catch (e) {
+      console.error('Sync to CRM error:', e);
+      alert('Sync to CRM failed.');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   return (
     <div>
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-xl font-semibold">Contacts</h2>
-        <Button onClick={handleCreateContact}>
+      <div className="flex justify-end gap-2 mb-6">
+        <Button
+          variant="outline"
+          onClick={handleSyncToCrm}
+          disabled={syncing || loading}
+        >
+          <RefreshCw className={`w-4 h-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
+          {syncing ? 'Syncing…' : 'Sync to CRM'}
+        </Button>
+        <Button onClick={handleCreateContact} className="bg-primary text-primary-foreground hover:bg-primary/90">
           <Plus className="w-4 h-4 mr-2" />
           Add Contact
         </Button>
       </div>
 
-      <ContactFiltersView filters={filters} onFiltersChange={setFilters} />
-
-      <ContactsView
+      <LeadsTableView
         contacts={contacts}
+        userStats={userStats}
         loading={loading}
         onContactSelect={setSelectedContact}
       />

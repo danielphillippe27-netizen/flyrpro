@@ -15,6 +15,7 @@ export interface CreateContactPayload {
   status: ContactStatus;
   notes?: string;
   address_id?: string; // Optional: link to campaign_addresses.id
+  tags?: string; // Optional comma-separated tags
 }
 
 export interface ContactWithActivities extends Contact {

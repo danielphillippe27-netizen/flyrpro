@@ -60,6 +60,7 @@ export class ContactsService {
         farm_id: payload.farm_id,
         status: payload.status,
         notes: payload.notes,
+        tags: payload.tags ?? undefined,
       })
       .select()
       .single();

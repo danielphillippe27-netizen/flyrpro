@@ -2,13 +2,23 @@ import { createClient } from '@supabase/supabase-js';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 
+const DEFAULT_SUPABASE_URL = 'https://kfnsnwqylsdsbgnwgxva.supabase.co';
+const DEFAULT_SERVICE_ROLE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtmbnNud3F5bHNkc2JnbndneHZhIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MDkyNjczMSwiZXhwIjoyMDc2NTAyNzMxfQ.DCCPBeHISbRcz4Z-tSaGvjszB-un0vvp45avmv9YPas';
+
 export function createAdminClient() {
-  // Support both SUPABASE_URL (server-only) and NEXT_PUBLIC_SUPABASE_URL
-  const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://kfnsnwqylsdsbgnwgxva.supabase.co';
-  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtmbnNud3F5bHNkc2JnbndneHZhIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MDkyNjczMSwiZXhwIjoyMDc2NTAyNzMxfQ.DCCPBeHISbRcz4Z-tSaGvjszB-un0vvp45avmv9YPas';
-  
-  // Ensure URL doesn't have trailing slash - handle undefined/null safely
-  const cleanUrl = supabaseUrl ? supabaseUrl.trim().replace(/\/$/, '') : 'https://kfnsnwqylsdsbgnwgxva.supabase.co';
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || DEFAULT_SUPABASE_URL;
+  const cleanUrl = supabaseUrl.trim().replace(/\/$/, '');
+
+  // If using a custom project URL, require explicit service role key (avoid "Invalid API key" from wrong fallback)
+  const supabaseServiceKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    (cleanUrl === DEFAULT_SUPABASE_URL ? DEFAULT_SERVICE_ROLE_KEY : null);
+
+  if (!supabaseServiceKey) {
+    throw new Error(
+      'SUPABASE_SERVICE_ROLE_KEY is required for this project. Set it in .env.local (Supabase Dashboard → Project Settings → API → service_role secret).'
+    );
+  }
 
   return createClient(cleanUrl, supabaseServiceKey, {
     auth: {

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import type { Map } from 'mapbox-gl';
 import mapboxgl from 'mapbox-gl';
 import { createClient } from '@/lib/supabase/client';
-import type { BuildingFeatureCollection, BuildingProperties, GetBuildingsInBboxParams } from '@/types/map-buildings';
+import type { BuildingFeatureCollection, BuildingFeature, BuildingProperties, GetBuildingsInBboxParams } from '@/types/map-buildings';
 import { MAP_STATUS_CONFIG, type StatusFilters } from '@/lib/constants/mapStatus';
 
 interface MapBuildingsLayerProps {
@@ -12,7 +12,7 @@ interface MapBuildingsLayerProps {
   campaignId?: string | null;
   statusFilters?: StatusFilters;
   showOrphans?: boolean; // Toggle to show/hide orphan buildings (buildings without address links)
-  onBuildingClick?: (buildingId: string) => void;
+  onBuildingClick?: (buildingId: string, addressId?: string) => void;
   onAddToCRM?: (data: { address: string; addressId?: string; gersId?: string; campaignId?: string }) => void;
 }
 
@@ -23,6 +23,57 @@ const defaultStatusFilters: StatusFilters = {
   UNTOUCHED: true,
 };
 
+/** Scale factor for building footprints (1 = unchanged, <1 = skinnier). */
+const FOOTPRINT_SCALE = 0.65;
+
+/**
+ * Scale a polygon ring toward a centroid by a factor (in place).
+ */
+function scaleRing(
+  ring: number[][],
+  cx: number,
+  cy: number,
+  scale: number
+): void {
+  for (let i = 0; i < ring.length; i++) {
+    ring[i][0] = cx + (ring[i][0] - cx) * scale;
+    ring[i][1] = cy + (ring[i][1] - cy) * scale;
+  }
+}
+
+/**
+ * Compute centroid of a ring (average of coordinates).
+ */
+function ringCentroid(ring: number[][]): [number, number] {
+  let sx = 0, sy = 0, n = ring.length;
+  if (n === 0) return [0, 0];
+  for (let i = 0; i < n; i++) {
+    sx += ring[i][0];
+    sy += ring[i][1];
+  }
+  return [sx / n, sy / n];
+}
+
+/**
+ * Scale polygon or multi-polygon geometry toward its centroid(s) to make footprints skinnier.
+ */
+function scaleFootprint(geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon, scale: number): void {
+  if (geometry.type === 'Polygon') {
+    const coords = geometry.coordinates;
+    if (coords.length > 0) {
+      const [cx, cy] = ringCentroid(coords[0]);
+      coords.forEach((ring) => scaleRing(ring, cx, cy, scale));
+    }
+  } else if (geometry.type === 'MultiPolygon') {
+    geometry.coordinates.forEach((poly) => {
+      if (poly.length > 0) {
+        const [cx, cy] = ringCentroid(poly[0]);
+        poly.forEach((ring) => scaleRing(ring, cx, cy, scale));
+      }
+    });
+  }
+}
+
 export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStatusFilters, showOrphans = true, onBuildingClick, onAddToCRM }: MapBuildingsLayerProps) {
   const [features, setFeatures] = useState<BuildingFeatureCollection | null>(null);
   const [zoomLevel, setZoomLevel] = useState(15);
@@ -32,7 +83,7 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
   const supabase = createClient();
   
   // Debounce fetching to prevent spamming Supabase during rapid panning
-  const fetchTimeout = useRef<NodeJS.Timeout>();
+  const fetchTimeout = useRef<NodeJS.Timeout | undefined>(undefined);
   const isMountedRef = useRef(true);
 
   // Generate filter expression based on showOrphans toggle and statusFilters
@@ -45,9 +96,10 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
     
     // Helper to get effective status for a feature
     // Priority: QR_SCANNED (scans_total > 0) > CONVERSATIONS (hot) > TOUCHED (visited) > UNTOUCHED (not_visited)
+    // Check feature-state first (real-time updates), then source properties (initial load)
     const getStatusValue = () => ['coalesce', ['feature-state', 'status'], ['get', 'status'], 'not_visited'];
-    const getScansTotal = () => ['coalesce', ['get', 'scans_total'], 0];
-    const getQrScanned = () => ['coalesce', ['get', 'qr_scanned'], false];
+    const getScansTotal = () => ['coalesce', ['feature-state', 'scans_total'], ['get', 'scans_total'], 0];
+    const getQrScanned = () => ['coalesce', ['feature-state', 'qr_scanned'], ['get', 'qr_scanned'], false];
     
     // QR_SCANNED: qr_scanned === true OR scans_total > 0
     const isQrScanned = ['any', ['==', getQrScanned(), true], ['>', getScansTotal(), 0]];
@@ -95,13 +147,13 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
 
   // Generate unified color expression based on status priority
   // Priority: QR_SCANNED > CONVERSATIONS > TOUCHED > UNTOUCHED
-  // Uses ['feature-state', 'status'] for real-time updates via setFeatureState(),
-  // with fallback to ['get', 'status'] for initial data from properties
+  // Uses ['feature-state', ...] for real-time updates via setFeatureState(),
+  // with fallback to ['get', ...] for initial data from properties
   const getColorExpression = (): any => {
-    // Helper expressions
+    // Helper expressions - check feature-state first (real-time), then source properties (initial load)
     const getStatusValue = () => ['coalesce', ['feature-state', 'status'], ['get', 'status'], 'not_visited'];
-    const getScansTotal = () => ['coalesce', ['get', 'scans_total'], 0];
-    const getQrScanned = () => ['coalesce', ['get', 'qr_scanned'], false];
+    const getScansTotal = () => ['coalesce', ['feature-state', 'scans_total'], ['get', 'scans_total'], 0];
+    const getQrScanned = () => ['coalesce', ['feature-state', 'qr_scanned'], ['get', 'qr_scanned'], false];
     
     return [
       'case',
@@ -130,12 +182,150 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
 
   // CAMPAIGN MODE: Fetch ALL campaign features once (no viewport filtering)
   // This enables "fetch once, render forever" for buttery smooth pan/zoom
+  // Load BOTH: split units (Supabase) + parent buildings (S3). Merge: use units when available, else parent building (detached).
   const fetchCampaignData = useCallback(async () => {
     if (!isMountedRef.current || !campaignId) return;
 
     console.log('[MapBuildingsLayer] Campaign Mode: Fetching full campaign data', { campaignId });
 
     try {
+      // Fetch units from Supabase and buildings from our API (avoids expired S3 URLs)
+      const { data: units, error: unitsError } = await supabase
+        .from('building_units')
+        .select('*, campaign_addresses(house_number, street_name, formatted)')
+        .eq('campaign_id', campaignId);
+
+      // Check if we have a snapshot by trying the API
+      const buildingsResponse = await fetch(`/api/campaigns/${campaignId}/buildings`);
+      const parentBuildings = buildingsResponse.ok ? await buildingsResponse.json() : null;
+      const hasBuildings = parentBuildings?.features?.length > 0;
+
+      console.log('[MapBuildingsLayer] Data loaded:', {
+        unitsCount: units?.length || 0,
+        unitsError: unitsError?.message,
+        hasBuildings,
+        buildingCount: parentBuildings?.features?.length || 0,
+      });
+
+      // If we have buildings from S3, merge: units for multi-unit buildings, parent building for detached
+      if (hasBuildings) {
+        const parentFeatures = parentBuildings?.features ?? [];
+
+        const mergedFeatures: BuildingFeature[] = [];
+
+        console.log('[MapBuildingsLayer] Merging units with parent buildings:', {
+          parentBuildings: parentFeatures.length,
+          units: units?.length || 0,
+        });
+
+        for (const b of parentFeatures) {
+          // S3 buildings have gers_id in properties, not id at feature level
+          const gersId = b.properties?.gers_id;                  // GERS ID (for matching units)
+          const buildingUnits = !unitsError && units?.length
+            ? units.filter((u: { parent_building_id: string }) => u.parent_building_id === gersId)
+            : [];
+          
+          if (buildingUnits.length > 0 || parentFeatures.length <= 3) {
+            console.log('[MapBuildingsLayer] Building merge:', {
+              gersId: gersId?.slice(0, 20),
+              unitCount: buildingUnits.length,
+            });
+          }
+
+          if (buildingUnits.length > 0) {
+            // Multi-unit: emit one feature per slice (use unit geometry and address)
+            // Add slight height offset so units are visually distinct
+            buildingUnits.forEach((u, index) => {
+              const heightOffset = index * 0.5; // Each unit 0.5m higher
+              mergedFeatures.push({
+                type: 'Feature',
+                id: u.id,
+                geometry: u.unit_geometry as GeoJSON.Polygon,
+                properties: {
+                  ...(b.properties || {}),
+                  height: (b.properties?.height || 10) + heightOffset, // Stagger heights
+                  gers_id: gersId,  // Parent building GERS ID
+                  feature_id: u.id,
+                  unit_id: u.id,
+                  unit_number: u.unit_number,
+                  address_id: u.address_id,
+                  status: u.status,
+                  parent_type: u.parent_type,
+                  house_number: u.campaign_addresses?.house_number,
+                  street_name: u.campaign_addresses?.street_name,
+                  address_text: u.campaign_addresses?.formatted ?? (b.properties?.address_text),
+                  layer: 'units',
+                } as Partial<BuildingProperties> as BuildingProperties,
+              } as BuildingFeature);
+            });
+          } else {
+            // Single-family detached: emit parent building as-is with unique feature_id for Mapbox
+            const fid = gersId ?? b.id ?? crypto.randomUUID();
+            mergedFeatures.push({
+              type: 'Feature',
+              id: fid,
+              geometry: b.geometry,
+              properties: {
+                ...(b.properties || {}),
+                gers_id: gersId,
+                feature_id: fid,
+                layer: 'buildings',
+              } as Partial<BuildingProperties> as BuildingProperties,
+            } as BuildingFeature);
+          }
+        }
+
+        if (isMountedRef.current) {
+          const collection: BuildingFeatureCollection = {
+            type: 'FeatureCollection',
+            features: mergedFeatures,
+          };
+          console.log('[MapBuildingsLayer] Merged units + detached:', {
+            featuresCount: mergedFeatures.length,
+            unitFeatures: mergedFeatures.filter((f: BuildingFeature) => f.properties?.unit_id).length,
+            detachedFeatures: mergedFeatures.filter((f: BuildingFeature) => !f.properties?.unit_id).length,
+            campaignId,
+            mode: 'merged-snapshot',
+          });
+          campaignDataLoadedRef.current = campaignId;
+          setFeatures(collection);
+          return;
+        }
+      }
+
+      // No S3 snapshot: if we have units only, show just units (legacy)
+      if (!unitsError && units && units.length > 0) {
+        const unitsGeoJSON: BuildingFeatureCollection = {
+          type: 'FeatureCollection',
+          features: units.map((u: { id: string; unit_geometry: GeoJSON.Polygon; parent_building_id: string; unit_number: number; address_id: string | null; status: string; parent_type: string; campaign_addresses?: { house_number: string | null; street_name: string | null; formatted: string | null } }) => ({
+            type: 'Feature' as const,
+            id: u.id,
+            geometry: u.unit_geometry as GeoJSON.Polygon,
+            properties: {
+              gers_id: u.parent_building_id,
+              feature_id: u.id,
+              unit_id: u.id,
+              unit_number: u.unit_number,
+              address_id: u.address_id,
+              status: u.status,
+              parent_type: u.parent_type,
+              house_number: u.campaign_addresses?.house_number,
+              street_name: u.campaign_addresses?.street_name,
+              address_text: u.campaign_addresses?.formatted,
+              layer: 'units',
+            } as Partial<BuildingProperties> as BuildingProperties,
+          })) as BuildingFeature[],
+        };
+        if (isMountedRef.current) {
+          campaignDataLoadedRef.current = campaignId;
+          setFeatures(unitsGeoJSON);
+          return;
+        }
+      }
+
+      // FALLBACK: Legacy mode
+      console.log('[MapBuildingsLayer] Falling back to Supabase RPC');
+      
       const { data, error } = await supabase.rpc('rpc_get_campaign_full_features', {
         p_campaign_id: campaignId
       });
@@ -148,7 +338,7 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
       if (data && isMountedRef.current) {
         const parsedData = typeof data === 'string' ? JSON.parse(data) : data;
         
-        console.log('[MapBuildingsLayer] Campaign data loaded (full):', {
+        console.log('[MapBuildingsLayer] Campaign data loaded:', {
           featuresCount: parsedData?.features?.length,
           campaignId,
           mode: 'campaign-persistence',
@@ -403,15 +593,40 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
 
       const source = map.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined;
 
+      // Ensure every feature has feature_id for promoteId (required for setFeatureState)
+      // Scale footprints toward centroid so markers appear skinnier on the map
+      const normalizedFeatures: BuildingFeatureCollection | null = features
+        ? {
+            type: 'FeatureCollection',
+            features: features.features.map((f) => {
+              const props = f.properties ?? {};
+              const fid = props.feature_id ?? props.gers_id ?? f.id ?? (props as any).id;
+              const geom = f.geometry;
+              const scaledGeom =
+                geom?.type === 'Polygon' || geom?.type === 'MultiPolygon'
+                  ? (JSON.parse(JSON.stringify(geom)) as GeoJSON.Polygon | GeoJSON.MultiPolygon)
+                  : geom;
+              if (scaledGeom && (scaledGeom.type === 'Polygon' || scaledGeom.type === 'MultiPolygon')) {
+                scaleFootprint(scaledGeom, FOOTPRINT_SCALE);
+              }
+              return {
+                ...f,
+                geometry: (scaledGeom ?? geom) as GeoJSON.Polygon,
+                properties: { ...props, feature_id: fid ?? (f as any).id },
+              };
+            }),
+          } as BuildingFeatureCollection
+        : null;
+
       // If source already exists and we have features, update the data immediately
       // This handles the race condition where features arrive after source was created
-      if (source && features) {
-        console.log('[MapBuildingsLayer] Updating existing source with', features.features.length, 'features');
-        source.setData(features);
+      if (source && normalizedFeatures) {
+        console.log('[MapBuildingsLayer] Updating existing source with', normalizedFeatures.features.length, 'features');
+        source.setData(normalizedFeatures);
       }
 
       // Check if we should proceed with layer creation/updates
-      if (!features || features.features.length === 0 || zoomLevel < 12) {
+      if (!normalizedFeatures || normalizedFeatures.features.length === 0 || zoomLevel < 12) {
         console.log('[MapBuildingsLayer] Skipping layer creation:', { hasFeatures: !!features, featuresCount: features?.features?.length, zoomLevel });
         return;
       }
@@ -421,10 +636,10 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
         try {
           map.addSource(sourceId, {
             type: 'geojson',
-            data: features,
+            data: normalizedFeatures,
             // promoteId enables setFeatureState() for real-time color updates
-            // Features are identified by their gers_id property
-            promoteId: 'gers_id',
+            // Use feature_id (unique per feature: unit id or gers_id for detached)
+            promoteId: 'feature_id',
             // Buffer extends tile loading 512px beyond viewport edge
             // This prevents edge-clipping when panning in campaign mode
             buffer: 512,
@@ -468,6 +683,8 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
         // Add without beforeId - this places it at the end (on top of everything)
         map.addLayer(layerConfig);
 
+        // Outline layer removed to eliminate dark shadow effect underneath buildings
+
         // Set map lighting for 3D depth visualization
         // Use 'map' anchor instead of 'viewport' to avoid lighting warnings and ensure consistent 3D depth
         try {
@@ -505,14 +722,14 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
         
         console.log('[MapBuildingsLayer] Building layer added successfully', {
           layerId,
-          featuresCount: features.features.length,
+          featuresCount: normalizedFeatures.features.length,
           zoomLevel,
           layerExists: !!addedLayer,
           opacity: paintOpacity,
           currentZoom,
           statusFilters,
           colorExpression: getColorExpression(),
-          sampleFeatureStatus: features.features[0]?.properties?.status,
+          sampleFeatureStatus: normalizedFeatures.features[0]?.properties?.status,
         });
         
 
@@ -528,21 +745,44 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
             case 'warm': return '#f59e0b';
             case 'cold': return '#6b7280';
             case 'new':
-            default: return '#3b82f6';
+            default: return '#dc2626';
           }
         };
 
         // Add click handler to fetch and display resident data
         const clickHandler = async (e: mapboxgl.MapLayerMouseEvent) => {
-          if (!e.features || e.features.length === 0) return;
+          console.log('[MapBuildingsLayer] Click event:', {
+            featureCount: e.features?.length,
+            point: e.point,
+          });
+          
+          if (!e.features || e.features.length === 0) {
+            console.log('[MapBuildingsLayer] No features at click location');
+            return;
+          }
           
           const feature = e.features[0];
           const props = feature.properties as BuildingProperties;
+          
           const gersId = props.gers_id;
           
+          // UNIT MODE: If this is a unit slice, pass address_id to show specific unit
+          if (props.unit_id && props.address_id && onBuildingClick) {
+            console.log('[MapBuildingsLayer] Unit clicked:', {
+              unit_id: props.unit_id,
+              unit_number: props.unit_number,
+              address_id: props.address_id,
+              address_text: props.address_text,
+            });
+            
+            // Pass both gersId (parent building) and address_id (specific unit)
+            onBuildingClick(gersId, props.address_id);
+            return; // Early return - we've handled the click
+          }
+          
           // If no gers_id, fall back to onBuildingClick with id
-          // Note: HouseDetailPanel expects gers_id, but will handle id as fallback
           if (!gersId) {
+            console.log('[MapBuildingsLayer] No gers_id, using fallback');
             if (props.id && onBuildingClick) {
               onBuildingClick(props.id);
             }
@@ -592,8 +832,18 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
               campaignId: campaignId || undefined,
             };
             
+            // Unit header - show unit number/house number prominently for slices (red accent)
+            const unitHeader = props.unit_number 
+              ? `<div style="background: #dc2626; color: white; padding: 8px 12px; margin: -12px -12px 12px -12px; font-weight: 600; font-size: 18px;">🏠 Unit ${escapeHtml(props.unit_number)}</div>`
+              : '';
+            const addressHeader = addressInfo.address 
+              ? `<div style="font-weight: 500; margin-bottom: 8px; color: #374151;">${escapeHtml(addressInfo.address)}</div>` 
+              : '';
+            
             if (contacts && contacts.length > 0) {
               popupContent = '<div style="padding: 12px; max-width: 300px;">';
+              popupContent += unitHeader;
+              popupContent += addressHeader;
               if (props.match_method) {
                 popupContent += '<div style="font-size: 0.75rem; color: #6b7280; margin-bottom: 8px;">Linked via: ' + escapeHtml(props.match_method) + '</div>';
               }
@@ -625,9 +875,11 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
               
               popupContent += '</div>';
             } else {
-              // No contacts found - show "Add to CRM" button
+              // No contacts found - show "Add to Leads" button
               const addressDisplay = addressInfo.address ? escapeHtml(addressInfo.address) : 'this address';
               popupContent = '<div style="padding: 12px; max-width: 280px;">';
+              popupContent += unitHeader;
+              popupContent += addressHeader;
               if (props.match_method) {
                 popupContent += '<div style="font-size: 0.75rem; color: #6b7280; margin-bottom: 6px;">Linked via: ' + escapeHtml(props.match_method) + '</div>';
               }
@@ -637,7 +889,7 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
               if (onAddToCRM) {
                 // Generate unique ID for this button
                 buttonId = `add-to-crm-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-                popupContent += `<button id="${buttonId}" style="width: 100%; background: #3b82f6; color: white; border: none; padding: 8px 16px; border-radius: 6px; font-weight: 500; font-size: 0.875rem; cursor: pointer; transition: background 0.2s;" onmouseover="this.style.background='#2563eb'" onmouseout="this.style.background='#3b82f6'">Add to CRM</button>`;
+                popupContent += `<button id="${buttonId}" style="width: 100%; background: #dc2626; color: white; border: none; padding: 8px 16px; border-radius: 6px; font-weight: 500; font-size: 0.875rem; cursor: pointer; transition: background 0.2s;" onmouseover="this.style.background='#b91c1c'" onmouseout="this.style.background='#dc2626'">Add to Leads</button>`;
               }
               
               popupContent += '</div>';
@@ -657,7 +909,7 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
               .setHTML(popupContent)
               .addTo(map);
 
-            // If "Add to CRM" button exists, attach click handler
+            // If "Add to Leads" button exists, attach click handler
             if (buttonId && onAddToCRM) {
               // Use setTimeout to ensure DOM is ready
               setTimeout(() => {
@@ -892,6 +1144,8 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
   useEffect(() => {
     if (!map || !campaignId) return;
 
+    console.log('[MapBuildingsLayer] Setting up real-time subscription for building_stats, campaignId:', campaignId);
+
     const channel = supabase
       .channel(`building-stats-realtime-${campaignId}`)
       .on(
@@ -902,34 +1156,132 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
           table: 'building_stats',
         },
         (payload) => {
+          console.log('[MapBuildingsLayer] Received building_stats change:', payload);
+          
           if (payload.new && isMountedRef.current) {
             const newProps = payload.new as any;
             const updatedGersId = newProps.gers_id;
             const newStatus = newProps.status;
+            const scansTotal = newProps.scans_total || 0;
             
             console.log('[MapBuildingsLayer] Real-time building_stats update:', {
               gers_id: updatedGersId,
               status: newStatus,
-              scans_total: newProps.scans_total,
+              scans_total: scansTotal,
+              payload_type: payload.eventType,
             });
             
             // Use setFeatureState for instant color update (no full re-render)
-            // This is much more efficient than source.setData() for single feature updates
-            if (updatedGersId && newStatus) {
+            // Features use promoteId: 'feature_id' (unit id or gers_id for detached). building_stats is keyed by gers_id.
+            // So we update every feature whose gers_id matches (one for detached, multiple for unit slices).
+            if (updatedGersId) {
               try {
-                map.setFeatureState(
-                  { source: sourceId, id: updatedGersId },
-                  { status: newStatus }
-                );
-                console.log('[MapBuildingsLayer] setFeatureState:', updatedGersId, '->', newStatus);
+                const featureState = { 
+                  status: newStatus,
+                  scans_total: scansTotal,
+                  qr_scanned: scansTotal > 0, // Mark as QR scanned if any scans
+                };
+                const source = map.getSource(sourceId) as mapboxgl.GeoJSONSource & { _data?: GeoJSON.FeatureCollection } | undefined;
+                const data = source?._data;
+                const featuresToUpdate = data?.features?.filter(
+                  (f: GeoJSON.Feature) => (f.properties as any)?.gers_id === updatedGersId
+                ) ?? [];
+                const ids = featuresToUpdate
+                  .map((f: GeoJSON.Feature) => (f.properties as any)?.feature_id)
+                  .filter(Boolean);
+                if (ids.length === 0) {
+                  // Fallback: treat gers_id as feature id (detached or legacy data without feature_id)
+                  ids.push(updatedGersId);
+                }
+                for (const id of ids) {
+                  map.setFeatureState({ source: sourceId, id }, featureState);
+                }
+                console.log('[MapBuildingsLayer] setFeatureState success:', updatedGersId, '->', ids.length, 'features', featureState);
               } catch (err) {
                 console.warn('[MapBuildingsLayer] setFeatureState error (feature may not exist yet):', err);
+              }
+            } else {
+              console.warn('[MapBuildingsLayer] No gers_id in building_stats update - cannot update feature state');
+            }
+          }
+        }
+      )
+      .subscribe((status, err) => {
+        console.log('[MapBuildingsLayer] Realtime subscription status:', status);
+        if (err) {
+          console.error('[MapBuildingsLayer] Realtime subscription error:', err);
+        }
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [map, campaignId, supabase]);
+
+  // Real-time subscription for scan_events (direct scan tracking)
+  // This is a fallback in case building_stats trigger fails or realtime isn't enabled
+  useEffect(() => {
+    if (!map || !campaignId) return;
+
+    console.log('[MapBuildingsLayer] Setting up real-time subscription for scan_events, campaignId:', campaignId);
+
+    const channel = supabase
+      .channel(`scan-events-realtime-${campaignId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'scan_events',
+          filter: `campaign_id=eq.${campaignId}`,
+        },
+        async (payload) => {
+          console.log('[MapBuildingsLayer] Received scan_event INSERT:', payload);
+          
+          if (payload.new && isMountedRef.current) {
+            const newScan = payload.new as any;
+            const buildingId = newScan.building_id;
+            
+            // Look up the gers_id for this building
+            if (buildingId) {
+              try {
+                const { data: building, error } = await supabase
+                  .from('buildings')
+                  .select('gers_id')
+                  .eq('id', buildingId)
+                  .single();
+                
+                if (building?.gers_id) {
+                  console.log('[MapBuildingsLayer] Found gers_id for building:', building.gers_id);
+                  
+                  // Update feature state to show as QR scanned
+                  const featureState = { 
+                    status: 'visited',
+                    scans_total: 1, // At least 1 scan
+                    qr_scanned: true,
+                  };
+                  
+                  map.setFeatureState(
+                    { source: sourceId, id: building.gers_id },
+                    featureState
+                  );
+                  console.log('[MapBuildingsLayer] setFeatureState from scan_events:', building.gers_id, '->', featureState);
+                } else {
+                  console.warn('[MapBuildingsLayer] Could not find gers_id for building:', buildingId, error);
+                }
+              } catch (err) {
+                console.error('[MapBuildingsLayer] Error looking up building gers_id:', err);
               }
             }
           }
         }
       )
-      .subscribe();
+      .subscribe((status, err) => {
+        console.log('[MapBuildingsLayer] scan_events subscription status:', status);
+        if (err) {
+          console.error('[MapBuildingsLayer] scan_events subscription error:', err);
+        }
+      });
 
     return () => {
       supabase.removeChannel(channel);

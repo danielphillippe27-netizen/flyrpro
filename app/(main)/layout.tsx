@@ -2,19 +2,24 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect } from 'react';
-import { createClient } from '@/lib/supabase/client';
-import { Home, Map, Plus, TrendingUp, Trophy, Users, Settings } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { getClientAsync } from '@/lib/supabase/client';
+import { Home, Map, Trophy, Users, Settings, Target, Hexagon, Gauge, Plug } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import Image from 'next/image';
 
+const SIDEBAR_COLLAPSED_W = 48;   // 3rem – icons only
+const SIDEBAR_EXPANDED_W = 160;   // 10rem – icons + labels
+
 const tabs = [
   { href: '/home', icon: Home, label: 'Home' },
+  { href: '/campaigns', icon: Target, label: 'Campaigns' },
+  { href: '/farms', icon: Hexagon, label: 'Territories' },
   { href: '/map', icon: Map, label: 'Map' },
-  { href: '/crm', icon: Users, label: 'CRM' },
-  { href: '/create', icon: Plus, label: 'Create' },
-  { href: '/analytics', icon: TrendingUp, label: 'Analytics' },
+  { href: '/leads', icon: Users, label: 'Leads' },
   { href: '/leaderboard', icon: Trophy, label: 'Leaderboard' },
+  { href: '/stats', icon: Gauge, label: 'Performance' },
+  { href: '/settings/integrations', icon: Plug, label: 'Integrations' },
   { href: '/settings', icon: Settings, label: 'Settings' },
 ];
 
@@ -24,57 +29,117 @@ export default function MainLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  
-  // Temporary session logging for debugging
+  const [sidebarExpanded, setSidebarExpanded] = useState(false);
+
   useEffect(() => {
-    const supabase = createClient();
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      console.log("SESSION DEBUG (Layout):", session);
-    });
+    getClientAsync()
+      .then((supabase) => supabase.auth.getSession())
+      .then(({ data: { session } }) => {
+        if (session) console.log("SESSION DEBUG (Layout):", session);
+      })
+      .catch((err) => console.warn("Layout session check:", err));
   }, []);
 
   return (
     <div className="flex flex-row h-screen">
-      {/* Left Sidebar */}
-      <nav className="fixed left-0 top-0 bottom-0 w-20 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 z-50">
-        <div className="flex flex-col items-center h-full py-4">
-          {/* Logo */}
-          <div className="mb-6 flex items-center justify-center">
-            <Image 
-              src="/flyr-logo-black.svg" 
-              alt="FLYR" 
-              width={32} 
+      {/* Left Sidebar – FLYR logo at top, spaced nav below */}
+      <nav
+        className="fixed left-0 top-0 bottom-0 bg-white dark:bg-sidebar z-50 flex flex-col py-4 pl-0 pr-0 transition-[width] duration-200 ease-out"
+        style={{ width: sidebarExpanded ? SIDEBAR_EXPANDED_W : SIDEBAR_COLLAPSED_W }}
+        onMouseEnter={() => setSidebarExpanded(true)}
+        onMouseLeave={() => setSidebarExpanded(false)}
+      >
+        {/* FLYR logo at top of sidebar – no right padding so content meets main area */}
+        <div className={cn('flex items-center shrink-0 mb-6 w-full', sidebarExpanded ? 'px-3 justify-start' : 'justify-center px-0')}>
+          <Link href="/home" className="flex items-center gap-2 min-h-[40px] rounded-lg w-full px-2 hover:opacity-90 transition-opacity">
+            <Image
+              src="/flyr-logo-black.svg"
+              alt="FLYR"
+              width={32}
               height={32}
-              className="h-8 w-8 dark:invert"
+              className="h-8 w-8 dark:hidden shrink-0"
             />
-          </div>
-          <div className="flex flex-col items-center justify-start flex-1 gap-2">
+            <Image
+              src="/flyr-logo-white.svg"
+              alt="FLYR"
+              width={32}
+              height={32}
+              className="h-8 w-8 hidden dark:block shrink-0"
+            />
+            <span
+              className={cn(
+                'font-semibold text-foreground text-sm whitespace-nowrap overflow-hidden transition-opacity duration-200',
+                sidebarExpanded ? 'opacity-100' : 'opacity-0 w-0 sr-only'
+              )}
+            >
+              FLYR
+            </span>
+          </Link>
+        </div>
+        <div className="flex flex-col items-stretch justify-start flex-1 gap-2 overflow-hidden min-h-0 w-full px-1.5">
           {tabs.map((tab) => {
             const Icon = tab.icon;
-            const isActive = pathname === tab.href || pathname?.startsWith(tab.href + '/');
+            // Special handling for settings - don't highlight when on integrations
+            const isIntegrations = tab.href === '/settings/integrations';
+            const isSettings = tab.href === '/settings';
+            const onIntegrations = pathname?.startsWith('/settings/integrations');
             
+            let isActive;
+            if (isIntegrations) {
+              isActive = pathname === '/settings/integrations';
+            } else if (isSettings) {
+              isActive = pathname === '/settings' || (pathname?.startsWith('/settings/') && !onIntegrations);
+            } else {
+              isActive = pathname === tab.href || pathname?.startsWith(tab.href + '/');
+            }
             return (
               <Link
                 key={tab.href}
                 href={tab.href}
                 className={cn(
-                  'flex flex-col items-center justify-center w-full py-3 transition-colors',
+                  'flex items-center gap-2.5 py-3 rounded-lg w-full transition-colors min-h-[44px]',
+                  sidebarExpanded ? 'px-3 justify-start' : 'justify-center px-0',
                   isActive
-                    ? 'text-red-600 dark:text-red-500'
-                    : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+                    ? 'text-primary bg-primary/10'
+                    : 'text-gray-500 hover:text-gray-700 dark:text-sidebar-foreground/80 dark:hover:text-sidebar-foreground hover:bg-muted/50'
                 )}
                 title={tab.label}
+                aria-label={tab.label}
               >
-                <Icon className="w-6 h-6 mb-1" />
-                <span className="text-xs font-medium">{tab.label}</span>
+                <Icon className="w-5 h-5 shrink-0" />
+                <span
+                  className={cn(
+                    'text-sm font-medium whitespace-nowrap overflow-hidden',
+                    sidebarExpanded ? 'opacity-100' : 'opacity-0 w-0 sr-only'
+                  )}
+                >
+                  {tab.label}
+                </span>
               </Link>
             );
           })}
-          </div>
         </div>
       </nav>
-      
-      <main className="flex-1 overflow-auto ml-20">{children}</main>
+
+      {/* Main content – flush against sidebar, same background as pages */}
+      <div
+        className="flex flex-1 flex-col min-w-0 min-h-0 p-0 bg-gray-50 dark:bg-background transition-[margin-left] duration-200 ease-out"
+        style={{ marginLeft: sidebarExpanded ? SIDEBAR_EXPANDED_W : SIDEBAR_COLLAPSED_W }}
+      >
+        {/* Only constrain height on campaigns/territory so their two panels scroll independently; other pages scroll in main */}
+        <main className="flex flex-1 flex-col min-h-0 p-0 m-0 overflow-auto">
+          <div
+            className={cn(
+              'flex flex-col min-h-0',
+              pathname?.startsWith('/campaigns') || pathname?.startsWith('/farms')
+                ? 'flex-1 flex flex-col overflow-hidden min-h-0 [&>*]:flex-1 [&>*]:min-h-0'
+                : 'min-h-full'
+            )}
+          >
+            {children}
+          </div>
+        </main>
+      </div>
     </div>
   );
 }

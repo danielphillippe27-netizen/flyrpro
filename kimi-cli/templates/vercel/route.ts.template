@@ -1,0 +1,22 @@
+export async function POST(req: Request) {
+  const body = await req.json();
+  
+  const lambdaUrl = process.env.SLICE_LAMBDA_URL!;
+  const secret = process.env.SLICE_SHARED_SECRET!;
+  
+  const response = await fetch(lambdaUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-slice-secret": secret
+    },
+    body: JSON.stringify(body),
+  });
+  
+  const text = await response.text();
+  
+  return new Response(text, { 
+    status: response.status, 
+    headers: { "Content-Type": "application/json" } 
+  });
+}

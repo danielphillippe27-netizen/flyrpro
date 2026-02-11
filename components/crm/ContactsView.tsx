@@ -13,14 +13,14 @@ export function ContactsView({
   onContactSelect: (contact: Contact) => void;
 }) {
   if (loading) {
-    return <div className="text-center py-8 text-gray-600">Loading contacts...</div>;
+    return <div className="text-center py-8 text-muted-foreground">Loading contacts...</div>;
   }
 
   if (contacts.length === 0) {
     return (
-      <div className="text-center py-12 bg-white rounded-lg border">
-        <p className="text-gray-600 mb-2">No contacts found</p>
-        <p className="text-sm text-gray-500">Add your first contact to get started</p>
+      <div className="text-center py-12 bg-card rounded-lg border border-border">
+        <p className="text-muted-foreground mb-2">No contacts found</p>
+        <p className="text-sm text-muted-foreground">Add your first contact to get started</p>
       </div>
     );
   }

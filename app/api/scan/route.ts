@@ -16,10 +16,10 @@ export async function GET(request: NextRequest) {
     // Use admin client to bypass RLS for tracking
     const supabase = createAdminClient();
 
-    // Fetch address to get campaign_id and gers_id
+    // Fetch address to get campaign_id
     const { data: address, error: addressError } = await supabase
       .from('campaign_addresses')
-      .select('campaign_id, gers_id')
+      .select('campaign_id')
       .eq('id', addressId)
       .single();
 
@@ -31,24 +31,32 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(welcomeUrl, { status: 302 });
     }
 
-    // Look up the building using GERS ID from campaign_addresses
+    // Look up the building using the stable linker (building_address_links table)
+    // This is more reliable than matching by gers_id because:
+    // 1. Overture Address GERS IDs and Building GERS IDs are different
+    // 2. The linker explicitly maps address_id → building_id
     let buildingId: string | null = null;
-    if (address.gers_id) {
-      try {
-        const { data: building, error: buildingError } = await supabase
-          .from('buildings')
-          .select('id')
-          .eq('gers_id', address.gers_id)
-          .single();
+    let buildingGersId: string | null = null;
+    
+    try {
+      const { data: link, error: linkError } = await supabase
+        .from('building_address_links')
+        .select('building_id, buildings!inner(id, gers_id)')
+        .eq('address_id', addressId)
+        .eq('campaign_id', address.campaign_id)
+        .single();
 
-        if (!buildingError && building) {
-          buildingId = building.id;
-        } else {
-          console.error('Error finding building by gers_id:', buildingError);
-        }
-      } catch (buildingLookupError) {
-        console.error('Failed to lookup building:', buildingLookupError);
+      if (!linkError && link) {
+        buildingId = link.building_id;
+        // TypeScript: link.buildings is the joined building record
+        const building = link.buildings as { id: string; gers_id: string | null };
+        buildingGersId = building?.gers_id || null;
+        console.log('Found building via stable linker:', { buildingId, buildingGersId });
+      } else {
+        console.warn('No building_address_link found for address:', addressId, linkError?.message);
       }
+    } catch (linkLookupError) {
+      console.error('Failed to lookup building via linker:', linkLookupError);
     }
 
     // Insert scan event if we found a building
@@ -71,6 +79,50 @@ export async function GET(request: NextRequest) {
         console.error('Failed to insert scan event:', scanEventInsertError);
         // Continue with redirect even if scan event insertion fails
       }
+    }
+
+    // IMPORTANT: Update building_stats using the BUILDING's gers_id (not address gers_id)
+    // This ensures the map updates correctly because the RPC joins building_stats on buildings.gers_id
+    // Using the stable linker's buildingGersId ensures perfect matching with the 3D buildings
+    if (buildingGersId) {
+      try {
+        // Use the RPC function for atomic upsert (handles both insert and update cases)
+        const { error: rpcError } = await supabase.rpc('increment_building_scans', {
+          p_gers_id: buildingGersId,
+          p_campaign_id: address.campaign_id,
+        });
+        
+        if (rpcError) {
+          console.error('Error incrementing building scans via RPC:', rpcError);
+          
+          // Fallback: Try direct insert/update
+          const { error: directError } = await supabase
+            .from('building_stats')
+            .upsert({
+              gers_id: buildingGersId,
+              campaign_id: address.campaign_id,
+              scans_total: 1,
+              scans_today: 1,
+              status: 'visited',
+              last_scan_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            }, {
+              onConflict: 'gers_id',
+            });
+          
+          if (directError) {
+            console.error('Error with direct building_stats upsert:', directError);
+          } else {
+            console.log('Direct upsert succeeded for building gers_id:', buildingGersId);
+          }
+        } else {
+          console.log('Updated building_stats via RPC for building gers_id:', buildingGersId);
+        }
+      } catch (statsInsertError) {
+        console.error('Failed to update building_stats:', statsInsertError);
+      }
+    } else {
+      console.warn('No building gers_id found (no stable link), cannot update building_stats for map. Address:', addressId);
     }
 
     // Track the scan using the secure RPC function (legacy tracking)
