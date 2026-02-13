@@ -256,9 +256,10 @@ async function persistQRAsset(
   const houseNum = params.addressData.AddressLine.match(/^\d+/)?.[0] || null;
   const streetName = params.addressData.AddressLine.replace(/^\d+\s*/, '').trim();
   
+  // Try to insert - if duplicate, fetch existing
   const { data, error } = await supabase
     .from('campaign_addresses')
-    .upsert({
+    .insert({
       campaign_id: params.campaignId,
       formatted: formattedAddress,
       postal_code: params.addressData.PostalCode,
@@ -268,15 +269,31 @@ async function persistQRAsset(
       source: 'canva_bulk',
       source_id: sourceId,
       visited: false,
-    }, {
-      onConflict: 'campaign_id,source_id', // Unique constraint columns
     })
     .select('id')
     .single();
 
   if (error) {
+    // If duplicate, fetch the existing address
+    if (error.code === '23505') { // Unique violation
+      console.log('[CanvaQR] Address already exists, fetching existing:', sourceId);
+      const { data: existing, error: fetchError } = await supabase
+        .from('campaign_addresses')
+        .select('id')
+        .eq('campaign_id', params.campaignId)
+        .eq('source_id', sourceId)
+        .single();
+      
+      if (fetchError) {
+        console.error('[CanvaQR] Error fetching existing address:', fetchError);
+        return null;
+      }
+      
+      console.log('[CanvaQR] Found existing address ID:', existing?.id);
+      return existing?.id || null;
+    }
+    
     console.error('[CanvaQR] DB persist error:', error);
-    // Don't throw - we can still return the CSV even if DB storage fails
     return null;
   }
 
