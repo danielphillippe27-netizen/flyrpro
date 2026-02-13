@@ -311,14 +311,29 @@ async function processRow(
     
     console.log(`[CanvaQR] [${rowNum}] Processing: ${filename}`);
 
-    // Build encoded URL with tracking params
+    // FIRST: Persist to DB to get the actual address ID
+    const supabase = createAdminClient();
+    const addressId = await persistQRAsset(supabase, {
+      userId,
+      campaignId,
+      addressData: row,
+      filename,
+      s3Key,
+      publicUrl: '', // Will update after S3 upload
+      encodedUrl: '', // Will update after we have the URL
+    });
+
+    if (!addressId) {
+      throw new Error('Failed to create or find address in database');
+    }
+
+    console.log(`[CanvaQR] [${rowNum}] Address ID: ${addressId}`);
+
+    // Build encoded URL WITH the actual address ID for proper tracking
     const encodedUrl = new URL(baseUrl);
+    encodedUrl.searchParams.set('id', addressId); // Use actual DB ID for tracking
     encodedUrl.searchParams.set('campaignId', campaignId);
     encodedUrl.searchParams.set('address', row.AddressLine);
-    encodedUrl.searchParams.set('city', row.City);
-    encodedUrl.searchParams.set('province', row.Province);
-    encodedUrl.searchParams.set('postalCode', row.PostalCode);
-    encodedUrl.searchParams.set('source', 'canva');
     
     const encodedUrlString = encodedUrl.toString();
 
@@ -328,19 +343,22 @@ async function processRow(
     // Upload to S3
     const { uploaded, url: publicUrl } = await uploadToS3(s3Key, qrBuffer, skipExisting);
 
-    // Persist to DB (fire and forget - don't await for speed)
-    const supabase = createAdminClient();
-    persistQRAsset(supabase, {
-      userId,
-      campaignId,
-      addressData: row,
-      filename,
-      s3Key,
-      publicUrl,
-      encodedUrl: encodedUrlString,
-    }).catch((err) => {
-      console.error(`[CanvaQR] [${rowNum}] DB persist failed:`, err);
-    });
+    // Update the address record with the final URL
+    await supabase
+      .from('campaign_addresses')
+      .update({ 
+        purl: encodedUrlString,
+        metadata: {
+          canva_qr: {
+            filename,
+            s3_key: s3Key,
+            public_url: publicUrl,
+            encoded_url: encodedUrlString,
+            generated_at: new Date().toISOString(),
+          },
+        }
+      })
+      .eq('id', addressId);
 
     console.log(`[CanvaQR] [${rowNum}] ${uploaded ? 'Uploaded' : 'Exists'}: ${publicUrl}`);
 
