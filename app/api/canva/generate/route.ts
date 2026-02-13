@@ -250,12 +250,12 @@ async function persistQRAsset(
     params.addressData.PostalCode,
   ].filter(Boolean).join(', ');
   
-  // STEP 1: Try to find existing address by formatted address
+  // STEP 1: Try to find existing address by formatted address (using geojson view)
   const { data: existingAddress, error: findError } = await supabase
-    .from('campaign_addresses')
-    .select('id, formatted, purl')
+    .from('campaign_addresses_geojson')
+    .select('id, address, formatted, purl, house_number, street_name, postal_code')
     .eq('campaign_id', params.campaignId)
-    .ilike('formatted', `%${params.addressData.AddressLine}%`)
+    .ilike('address', `%${params.addressData.AddressLine}%`)
     .maybeSingle();
   
   if (existingAddress) {
@@ -269,8 +269,8 @@ async function persistQRAsset(
   
   if (houseNum && streetName) {
     const { data: candidates, error: searchError } = await supabase
-      .from('campaign_addresses')
-      .select('id, formatted, house_number, street_name')
+      .from('campaign_addresses_geojson')
+      .select('id, address, formatted, house_number, street_name')
       .eq('campaign_id', params.campaignId)
       .ilike('house_number', houseNum)
       .ilike('street_name', `%${streetName}%`)
@@ -285,8 +285,8 @@ async function persistQRAsset(
   // STEP 3: Last resort - try to match by postal code + house number
   if (houseNum && params.addressData.PostalCode) {
     const { data: postalMatch, error: postalError } = await supabase
-      .from('campaign_addresses')
-      .select('id, formatted, postal_code, house_number')
+      .from('campaign_addresses_geojson')
+      .select('id, address, formatted, postal_code, house_number')
       .eq('campaign_id', params.campaignId)
       .ilike('postal_code', params.addressData.PostalCode.trim())
       .ilike('house_number', houseNum)
