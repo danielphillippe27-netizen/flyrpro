@@ -227,7 +227,8 @@ function generateAddressSourceId(addressData: CanvaRow): string {
 }
 
 /**
- * Persist QR asset to database
+ * Find or create QR asset in database
+ * For Canva: Finds existing address by formatted address match
  */
 async function persistQRAsset(
   supabase: ReturnType<typeof createAdminClient>,
@@ -241,10 +242,7 @@ async function persistQRAsset(
     encodedUrl: string;
   }
 ): Promise<string | null> {
-  // Generate unique source_id for this address
-  const sourceId = generateAddressSourceId(params.addressData);
-  
-  // Build formatted address from components (this goes into the 'formatted' column)
+  // Build formatted address from components
   const formattedAddress = [
     params.addressData.AddressLine,
     params.addressData.City,
@@ -252,53 +250,61 @@ async function persistQRAsset(
     params.addressData.PostalCode,
   ].filter(Boolean).join(', ');
   
-  // Extract house number and street name from address line
-  const houseNum = params.addressData.AddressLine.match(/^\d+/)?.[0] || null;
-  const streetName = params.addressData.AddressLine.replace(/^\d+\s*/, '').trim();
-  
-  // Try to insert - if duplicate, fetch existing
-  const { data, error } = await supabase
+  // STEP 1: Try to find existing address by formatted address
+  const { data: existingAddress, error: findError } = await supabase
     .from('campaign_addresses')
-    .insert({
-      campaign_id: params.campaignId,
-      formatted: formattedAddress,
-      postal_code: params.addressData.PostalCode,
-      house_number: houseNum,
-      street_name: streetName,
-      // Set source and source_id for unique constraint
-      source: 'canva_bulk',
-      source_id: sourceId,
-      visited: false,
-    })
-    .select('id')
-    .single();
-
-  if (error) {
-    // If duplicate, fetch the existing address
-    if (error.code === '23505') { // Unique violation
-      console.log('[CanvaQR] Address already exists, fetching existing:', sourceId);
-      const { data: existing, error: fetchError } = await supabase
-        .from('campaign_addresses')
-        .select('id')
-        .eq('campaign_id', params.campaignId)
-        .eq('source_id', sourceId)
-        .single();
-      
-      if (fetchError) {
-        console.error('[CanvaQR] Error fetching existing address:', fetchError);
-        return null;
-      }
-      
-      console.log('[CanvaQR] Found existing address ID:', existing?.id);
-      return existing?.id || null;
-    }
-    
-    console.error('[CanvaQR] DB persist error:', error);
-    return null;
+    .select('id, formatted, purl')
+    .eq('campaign_id', params.campaignId)
+    .ilike('formatted', `%${params.addressData.AddressLine}%`)
+    .maybeSingle();
+  
+  if (existingAddress) {
+    console.log('[CanvaQR] Found existing address:', existingAddress.id);
+    return existingAddress.id;
   }
-
-  console.log('[CanvaQR] Persisted address with ID:', data?.id);
-  return data?.id || null;
+  
+  // STEP 2: Try broader search - match by house number and street name
+  const houseNum = params.addressData.AddressLine.match(/^\d+/)?.[0];
+  const streetName = params.addressData.AddressLine.replace(/^\d+\s*/, '').trim().toLowerCase();
+  
+  if (houseNum && streetName) {
+    const { data: candidates, error: searchError } = await supabase
+      .from('campaign_addresses')
+      .select('id, formatted, house_number, street_name')
+      .eq('campaign_id', params.campaignId)
+      .ilike('house_number', houseNum)
+      .ilike('street_name', `%${streetName}%`)
+      .limit(5);
+    
+    if (candidates && candidates.length > 0) {
+      console.log('[CanvaQR] Found address by house/street match:', candidates[0].id);
+      return candidates[0].id;
+    }
+  }
+  
+  // STEP 3: Last resort - try to match by postal code + house number
+  if (houseNum && params.addressData.PostalCode) {
+    const { data: postalMatch, error: postalError } = await supabase
+      .from('campaign_addresses')
+      .select('id, formatted, postal_code, house_number')
+      .eq('campaign_id', params.campaignId)
+      .ilike('postal_code', params.addressData.PostalCode.trim())
+      .ilike('house_number', houseNum)
+      .maybeSingle();
+    
+    if (postalMatch) {
+      console.log('[CanvaQR] Found address by postal+house match:', postalMatch.id);
+      return postalMatch.id;
+    }
+  }
+  
+  console.error('[CanvaQR] Could not find address in campaign:', {
+    campaignId: params.campaignId,
+    addressLine: params.addressData.AddressLine,
+    postalCode: params.addressData.PostalCode,
+  });
+  
+  return null;
 }
 
 /**
