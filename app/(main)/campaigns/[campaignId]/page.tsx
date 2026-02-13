@@ -9,12 +9,14 @@ import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { CampaignDetailMapView } from '@/components/campaigns/CampaignDetailMapView';
 import { OptimizedRouteView } from '@/components/campaigns/OptimizedRouteView';
+import { LoadingScreen } from '@/components/LoadingScreen';
 import { RecipientsTable } from '@/components/RecipientsTable';
 import { StatsHeader } from '@/components/StatsHeader';
 import { PaywallGuard } from '@/components/PaywallGuard';
 import { Label } from '@/components/ui/label';
 import { MissingQRModal } from '@/components/modals/MissingQRModal';
 import { NonTrackableExportModal } from '@/components/modals/NonTrackableExportModal';
+import { DeleteQRCodesButton } from '@/components/qr/DeleteQRCodesButton';
 import type { CampaignV2, CampaignAddress } from '@/types/database';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
@@ -36,7 +38,6 @@ export default function CampaignDetailPage() {
   });
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
-  const [downloading, setDownloading] = useState(false);
   const [showPaywall, setShowPaywall] = useState(false);
   const [showMissingQRModal, setShowMissingQRModal] = useState(false);
   const [missingQRFlyerId, setMissingQRFlyerId] = useState<string | null>(null);
@@ -44,7 +45,10 @@ export default function CampaignDetailPage() {
   const [showNonTrackableModal, setShowNonTrackableModal] = useState(false);
   const [destinationUrl, setDestinationUrl] = useState('');
   const [isSavingUrl, setIsSavingUrl] = useState(false);
-  
+  const [notes, setNotes] = useState('');
+  const [isSavingNotes, setIsSavingNotes] = useState(false);
+  const [notesDirty, setNotesDirty] = useState(false);
+  const [generatingCanva, setGeneratingCanva] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -69,6 +73,10 @@ export default function CampaignDetailPage() {
   useEffect(() => {
     if (campaign?.video_url) setDestinationUrl(campaign.video_url);
   }, [campaign]);
+
+  useEffect(() => {
+    if (campaign?.notes !== undefined) setNotes(campaign.notes ?? '');
+  }, [campaign?.notes]);
 
   const handleGenerateQRs = async (trackable: boolean = true) => {
     setGenerating(true);
@@ -110,6 +118,72 @@ export default function CampaignDetailPage() {
   const handleConfirmNonTrackableExport = async () => {
     setShowNonTrackableModal(false);
     await handleGenerateQRs(false);
+  };
+
+  // Generate Canva-ready QRs with S3 upload and CSV download
+  const handleGenerateCanvaQRs = async () => {
+    if (!addresses?.length) {
+      alert('No addresses to generate QRs for');
+      return;
+    }
+
+    setGeneratingCanva(true);
+    try {
+      // Transform addresses to Canva format
+      const rows = addresses.map((addr) => {
+        const parts = (addr.formatted || addr.address || '').split(', ');
+        return {
+          AddressLine: addr.address || parts[0] || '',
+          City: addr.locality || parts[1] || '',
+          Province: addr.region || parts[2] || '',
+          PostalCode: addr.postal_code || '',
+        };
+      });
+
+      const response = await fetch('/api/canva/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          campaignId,
+          baseUrl: `${typeof window !== 'undefined' ? window.location.origin : 'https://flyrpro.app'}/api/scan`,
+          rows,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP ${response.status}`);
+      }
+
+      // Get filename from header
+      const contentDisposition = response.headers.get('Content-Disposition') || '';
+      const filenameMatch = contentDisposition.match(/filename="(.+)"/);
+      const filename = filenameMatch ? filenameMatch[1] : 'canva_bulk.csv';
+
+      // Get metrics from headers
+      const uploaded = response.headers.get('X-Canva-Uploaded') || '0';
+      const existing = response.headers.get('X-Canva-Existing') || '0';
+      const failed = response.headers.get('X-Canva-Failed') || '0';
+
+      // Download the CSV
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+
+      alert(`Canva CSV generated!\n${uploaded} uploaded, ${existing} existing, ${failed} failed`);
+      await loadData();
+    } catch (error) {
+      console.error('Error generating Canva QRs:', error);
+      alert(error instanceof Error ? error.message : 'Failed to generate Canva QRs');
+    } finally {
+      setGeneratingCanva(false);
+    }
   };
 
   const handleSaveUrl = async () => {
@@ -157,8 +231,42 @@ export default function CampaignDetailPage() {
       }
     });
     zip.file('canva_bulk_data.csv', csvContent);
+    const howToCanva = `How to insert into Canva (Bulk Create)
+
+1. In Canva, go to Apps and open "Bulk Create" (or search for it).
+2. Upload the CSV: Use "canva_bulk_data.csv" from this ZIP.
+   - Canva will use the columns: Address, City, State, Zip, ImageFilename.
+3. Add the QR images:
+   - The folder "qr-images" contains one PNG per address.
+   - In Bulk Create, map the "ImageFilename" column to your design's image placeholder so each row gets the matching QR image.
+4. Design your layout with one image placeholder for the QR code; Bulk Create will fill it from the CSV + qr-images.
+5. Generate and download your merged designs.
+
+Tip: Keep qr-images and canva_bulk_data.csv in the same place so paths match (or upload the folder to Canva and use the filenames from the CSV).
+`;
+    zip.file('HOW_TO_INSERT_INTO_CANVA.txt', howToCanva);
     const content = await zip.generateAsync({ type: 'blob' });
     saveAs(content, 'campaign-qrs-canva.zip');
+  };
+
+  const handleSaveNotes = async () => {
+    if (!campaignId) return;
+    setIsSavingNotes(true);
+    try {
+      const supabase = createClient();
+      const { error } = await supabase
+        .from('campaigns')
+        .update({ notes: notes || null })
+        .eq('id', campaignId);
+      if (error) throw error;
+      setNotesDirty(false);
+      await loadData();
+    } catch (e) {
+      console.error('Error saving notes:', e);
+      alert(e instanceof Error ? e.message : 'Failed to save notes');
+    } finally {
+      setIsSavingNotes(false);
+    }
   };
 
   const handleAddQR = async () => {
@@ -181,39 +289,12 @@ export default function CampaignDetailPage() {
     }
   };
 
-  const handleDownloadZip = async () => {
-    setDownloading(true);
-    try {
-      const response = await fetch(`/api/zip-qrs?campaignId=${campaignId}`);
-      const data = await response.json();
-      if (data.needsUpgrade) {
-        setShowPaywall(true);
-        return;
-      }
-      if (!response.ok) throw new Error('Download failed');
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `campaign-${campaignId}-qr-codes.zip`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-    } catch (error) {
-      console.error('Error downloading ZIP:', error);
-      alert('Failed to download QR codes');
-    } finally {
-      setDownloading(false);
-    }
-  };
-
 
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[320px] text-muted-foreground">
-        Loading...
+      <div className="flex items-center justify-center min-h-[320px]">
+        <LoadingScreen variant="inline" />
       </div>
     );
   }
@@ -272,12 +353,16 @@ export default function CampaignDetailPage() {
             <TabsTrigger value="addresses">Addresses</TabsTrigger>
             <TabsTrigger value="qr">QR Codes</TabsTrigger>
             <TabsTrigger value="route">Optimized route</TabsTrigger>
+            <TabsTrigger value="notes">Notes</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="map" className="mt-4">
+          <TabsContent value="map" className="mt-4 space-y-4">
             <div className="bg-card rounded-xl border border-border overflow-hidden" style={{ height: '560px' }}>
               <CampaignDetailMapView campaignId={campaignId} addresses={addresses} />
             </div>
+            <Button className="w-full h-12 text-base font-semibold rounded-xl bg-primary hover:bg-primary/90" size="lg">
+              Start Session
+            </Button>
           </TabsContent>
 
           <TabsContent value="addresses" className="mt-4">
@@ -317,7 +402,14 @@ export default function CampaignDetailPage() {
                   }
                   disabled={generating || formattedRecipients.length === 0}
                 >
-                  {generating ? 'Generating...' : 'Generate QR Codes'}
+                  {generating ? 'Generating...' : 'Generate QR Codes (In-App)'}
+                </Button>
+                <Button
+                  onClick={handleGenerateCanvaQRs}
+                  disabled={generatingCanva || !addresses?.length}
+                  variant="secondary"
+                >
+                  {generatingCanva ? 'Generating...' : 'Generate for Canva (S3 + CSV)'}
                 </Button>
                 <Button
                   onClick={handleDownloadForCanva}
@@ -328,19 +420,14 @@ export default function CampaignDetailPage() {
                   variant="outline"
                   size="sm"
                 >
-                  Download for Canva (ZIP)
+                  Download (ZIP)
                 </Button>
-                <Button
-                  onClick={handleDownloadZip}
-                  disabled={
-                    downloading ||
-                    formattedRecipients.filter((r: { status: string }) => r.status === 'scanned').length === 0
-                  }
+                <DeleteQRCodesButton
+                  campaignId={campaignId}
+                  onDeleted={loadData}
                   variant="outline"
                   size="sm"
-                >
-                  {downloading ? 'Downloading...' : 'Download All QRs (ZIP)'}
-                </Button>
+                />
               </div>
               <div className="flex items-start gap-3 pt-3 border-t border-border">
                 <input
@@ -371,6 +458,33 @@ export default function CampaignDetailPage() {
                 setAddresses(freshAddresses as CampaignAddress[]);
               }}
             />
+          </TabsContent>
+
+          <TabsContent value="notes" className="mt-4">
+            <div className="bg-card p-4 rounded-xl border border-border">
+              <h2 className="text-sm font-semibold text-foreground mb-3">Campaign notes</h2>
+              <p className="text-xs text-muted-foreground mb-2">
+                Free-form notes for this campaign (territory, goals, follow-ups, etc.).
+              </p>
+              <textarea
+                className="w-full min-h-[200px] rounded-md border border-input bg-background px-3 py-2 text-sm font-mono resize-y"
+                placeholder="Add notes..."
+                value={notes}
+                onChange={(e) => {
+                  setNotes(e.target.value);
+                  setNotesDirty(true);
+                }}
+              />
+              <div className="mt-3 flex justify-end">
+                <Button
+                  size="sm"
+                  onClick={handleSaveNotes}
+                  disabled={!notesDirty || isSavingNotes}
+                >
+                  {isSavingNotes ? 'Saving...' : 'Save notes'}
+                </Button>
+              </div>
+            </div>
           </TabsContent>
         </Tabs>
       </main>
