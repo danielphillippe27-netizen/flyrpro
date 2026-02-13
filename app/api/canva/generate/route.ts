@@ -244,8 +244,6 @@ async function persistQRAsset(
   // Generate unique source_id for this address
   const sourceId = generateAddressSourceId(params.addressData);
   
-  // Use campaign_addresses table with canva-specific columns
-  // Store the S3 reference in a JSONB field or dedicated columns
   // Build formatted address from components (this goes into the 'formatted' column)
   const formattedAddress = [
     params.addressData.AddressLine,
@@ -254,26 +252,18 @@ async function persistQRAsset(
     params.addressData.PostalCode,
   ].filter(Boolean).join(', ');
   
+  // Extract house number and street name from address line
+  const houseNum = params.addressData.AddressLine.match(/^\d+/)?.[0] || null;
+  const streetName = params.addressData.AddressLine.replace(/^\d+\s*/, '').trim();
+  
   const { data, error } = await supabase
     .from('campaign_addresses')
     .upsert({
       campaign_id: params.campaignId,
       formatted: formattedAddress,
-      locality: params.addressData.City,
-      region: params.addressData.Province,
       postal_code: params.addressData.PostalCode,
-      house_number: params.addressData.AddressLine.match(/^\d+/)?.[0] || null,
-      // Store Canva QR metadata in metadata JSONB
-      metadata: {
-        canva_qr: {
-          filename: params.filename,
-          s3_key: params.s3Key,
-          public_url: params.publicUrl,
-          encoded_url: params.encodedUrl,
-          generated_at: new Date().toISOString(),
-        },
-        address_line: params.addressData.AddressLine, // Store original address line
-      },
+      house_number: houseNum,
+      street_name: streetName,
       // Set source and source_id for unique constraint
       source: 'canva_bulk',
       source_id: sourceId,
@@ -351,15 +341,6 @@ async function processRow(
       .from('campaign_addresses')
       .update({ 
         purl: encodedUrlString,
-        metadata: {
-          canva_qr: {
-            filename,
-            s3_key: s3Key,
-            public_url: publicUrl,
-            encoded_url: encodedUrlString,
-            generated_at: new Date().toISOString(),
-          },
-        }
       })
       .eq('id', addressId);
 
