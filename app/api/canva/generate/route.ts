@@ -360,7 +360,7 @@ export async function POST(request: NextRequest) {
     // ---------------------------------------------------------------------
     // 1. AUTHENTICATION
     // ---------------------------------------------------------------------
-    const supabase = getSupabaseServerClient();
+    const supabase = await getSupabaseServerClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     
     if (authError || !user) {
