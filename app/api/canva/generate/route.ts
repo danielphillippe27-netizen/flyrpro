@@ -246,21 +246,23 @@ async function persistQRAsset(
   
   // Use campaign_addresses table with canva-specific columns
   // Store the S3 reference in a JSONB field or dedicated columns
+  // Build formatted address from components (this goes into the 'formatted' column)
+  const formattedAddress = [
+    params.addressData.AddressLine,
+    params.addressData.City,
+    params.addressData.Province,
+    params.addressData.PostalCode,
+  ].filter(Boolean).join(', ');
+  
   const { data, error } = await supabase
     .from('campaign_addresses')
     .upsert({
       campaign_id: params.campaignId,
-      // Build formatted address from components
-      formatted: [
-        params.addressData.AddressLine,
-        params.addressData.City,
-        params.addressData.Province,
-        params.addressData.PostalCode,
-      ].filter(Boolean).join(', '),
-      address: params.addressData.AddressLine,
+      formatted: formattedAddress,
       locality: params.addressData.City,
       region: params.addressData.Province,
       postal_code: params.addressData.PostalCode,
+      house_number: params.addressData.AddressLine.match(/^\d+/)?.[0] || null,
       // Store Canva QR metadata in metadata JSONB
       metadata: {
         canva_qr: {
@@ -270,6 +272,7 @@ async function persistQRAsset(
           encoded_url: params.encodedUrl,
           generated_at: new Date().toISOString(),
         },
+        address_line: params.addressData.AddressLine, // Store original address line
       },
       // Set source and source_id for unique constraint
       source: 'canva_bulk',
