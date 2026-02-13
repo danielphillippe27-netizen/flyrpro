@@ -59,6 +59,7 @@ interface ProcessedRow extends CanvaRow {
   EncodedURL: string;
   S3Key: string;
   QRBase64: string;
+  QRImage: string; // Local path for Affinity/Illustrator
   Error?: string;
 }
 
@@ -373,6 +374,7 @@ CSV COLUMNS EXPLAINED
 - ImageFilename: Name of the QR image file (in qr-images/ folder)
 - ImageURL: Public S3 URL (use this for images in Canva)
 - EncodedURL: The scan tracking URL embedded in each QR
+- QRImage: Relative path to QR file (qr-images/filename.png) for Affinity/Illustrator
 - QRBase64: QR image as base64 text (for custom integrations)
 - S3Key: Internal AWS S3 path
 - Error: Any errors during generation (empty if successful)
@@ -390,40 +392,105 @@ Step 2: Upload the CSV
   - Select: canva_bulk_${campaignId}.csv
   - Canva will read the columns automatically
 
-Step 3: Connect Data to Your Design
+Step 1: Upload QR images to Canva (REQUIRED)
+  - Go to canva.com and open your design
+  - Go to the "Uploads" tab (left sidebar)
+  - Click "Upload files"
+  - Select ALL the PNG files from the qr-images/ folder in this ZIP
+  - Wait for all uploads to complete
+
+Step 2: Open Bulk Create
+  - Click "Apps" in the left sidebar
+  - Search for and open "Bulk Create"
+
+Step 3: Upload the CSV
+  - In Bulk Create, click "Upload CSV"
+  - Select: canva_bulk_${campaignId}.csv
+
+Step 4: Connect Data to Your Design
   - For TEXT elements (address, city, etc.):
     * Click on a text box in your design
-    * In Bulk Create, click the column name to connect it
-    * Example: Connect "AddressLine" to your address text box
+    * In Bulk Create, click the field name (<<AddressLine>>, <<City>>, etc.)
   
   - For the QR CODE image:
-    * Add an image placeholder to your design
-    * In Bulk Create, select "ImageURL" column
-    * Canva will automatically fetch the QR images from the URLs
+    * Add an "Image Frame" to your design (Elements > Frames)
+    * Click the frame to select it
+    * In Bulk Create, connect the "ImageFilename" column
+    * Canva will match the filenames to your uploaded images
 
-Step 4: Generate Your Designs
-  - Click "Generate" in Bulk Create
-  - Canva will create one design per row with unique QR codes
-  - Download or save your designs
+Step 5: Generate designs
+  - Click "Generate" 
+  - Canva will create one page per row with the matching QR code
 
-ALTERNATIVE: Using Local QR Images
------------------------------------
-If you prefer to upload images manually instead of using URLs:
+IMPORTANT: Canva cannot use external URLs (ImageURL column). You MUST upload
+the PNG files to Canva first, then match by filename using ImageFilename column.
 
-1. In the CSV, look at the "ImageFilename" column
-2. Find the matching file in the "qr-images/" folder
-3. Upload these images to Canva separately
-4. Connect the "ImageFilename" column to your image element
+ALTERNATIVE: Using QRBase64 (Not for Canva)
+--------------------------------------------
+The CSV includes a "QRBase64" column with QR images as base64 text.
+This is useful for custom integrations but NOT supported by Canva.
+Use the qr-images/ folder + ImageFilename column for Canva instead.
 
-ALTERNATIVE: Using QRBase64 (Embedded Images)
-----------------------------------------------
-The CSV also includes a "QRBase64" column with the QR image embedded as base64 text.
-This is useful for:
-- Systems that support inline base64 images
-- Creating self-contained CSV files (no external image dependencies)
-- Custom integrations that need the raw image data
+================================================================================
+AFFINITY PUBLISHER / DESIGNER - DATA MERGE
+================================================================================
 
-Note: Canva does NOT support base64 images in Bulk Create - use ImageURL instead.
+Step 1: Extract the ZIP file
+  - Extract to a folder on your computer (e.g., Desktop/FLYR_QR/)
+  - Keep the CSV and qr-images/ folder together
+
+Step 2: Update file paths (IMPORTANT)
+  - Open the CSV in Excel or a text editor
+  - Find the "QRImage" column
+  - Replace "qr-images/" with the FULL path to your extracted folder
+  
+  Example (Mac):
+  Before: qr-images/602-DOWN-CRES-OSHAWA-ON-L1H8K4.png
+  After:  /Users/daniel/Desktop/FLYR_QR/qr-images/602-DOWN-CRES-OSHAWA-ON-L1H8K4.png
+  
+  Example (Windows):
+  Before: qr-images/602-DOWN-CRES-OSHAWA-ON-L1H8K4.png
+  After:  C:\\Users\\Daniel\\Desktop\\FLYR_QR\\qr-images\\602-DOWN-CRES-OSHAWA-ON-L1H8K4.png
+  
+  Save the CSV.
+
+Step 3: Build your template in Affinity Publisher
+  - Create your flyer layout
+  - Add text boxes for AddressLine, City, Province, PostalCode
+  - Add an image frame for the QR code (File → Place any QR png as placeholder)
+
+Step 4: Connect the data source
+  - Window → Data Merge Manager
+  - Click "Add Data Source" → select your CSV
+  - You'll see all columns listed
+
+Step 5: Connect text fields
+  - Click a text box
+  - In Data Merge Manager, click the field name (<<AddressLine>>, <<City>>, etc.)
+
+Step 6: Connect the QR image
+  - Click your QR image frame
+  - In Data Merge Manager, click "QRImage" field
+  - Choose "Insert as Image" (right-click menu)
+
+Step 7: Generate
+  - Click "Generate" or "Create Merged Document"
+  - Choose "All records"
+  - Affinity will create one page per row with the correct QR image
+
+TROUBLESHOOTING (Affinity)
+--------------------------
+"Image not found" error?
+  - Make sure you updated the QRImage column with FULL file paths
+  - Check that PNG files actually exist at those locations
+  - Avoid spaces and special characters in folder paths
+
+QR not fitting the frame?
+  - Select the image frame → set scaling to "Fit" or "Fill"
+
+Using Affinity Designer instead of Publisher?
+  - Designer has limited data merge. Use Publisher for bulk pages.
+  - Or use the Canva workflow instead (export to PDF from Canva).
 
 QR CODE TRACKING
 ----------------
@@ -561,12 +628,14 @@ export async function POST(request: NextRequest) {
     // ---------------------------------------------------------------------
     const outputRows: ProcessedRow[] = limitedRows.map((row, index) => {
       const result = results[index];
+      const filename = result.filename || generateFilename(row, index);
       return {
         ...row,
         ImageURL: result.publicUrl || '',
         EncodedURL: result.encodedUrl || '',
         S3Key: result.s3Key || '',
         QRBase64: result.qrBase64 || '',
+        QRImage: `qr-images/${filename}`, // Relative path for Affinity/Illustrator
         Error: result.error || '',
       };
     });
@@ -588,6 +657,7 @@ export async function POST(request: NextRequest) {
         'EncodedURL',
         'S3Key',
         'ImageURL',
+        'QRImage',
         'QRBase64',
         'Error',
       ],
