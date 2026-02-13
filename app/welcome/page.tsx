@@ -37,7 +37,7 @@ function WelcomeContent() {
       if (addressId) {
         console.log('Welcome page: Fetching by address ID:', addressId);
         const { data: address, error: fetchError } = await supabase
-          .from('campaign_addresses')
+          .from('campaign_addresses_geojson')
           .select('*')
           .eq('id', addressId)
           .single();

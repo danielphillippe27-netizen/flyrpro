@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
       
       const fetchCandidates = async (predicate: (q: ReturnType<typeof supabase.from>) => ReturnType<typeof supabase.from>) => {
         const q = supabase
-          .from('campaign_addresses')
+          .from('campaign_addresses_geojson')
           .select('id, campaign_id, address, formatted, locality, region, postal_code, house_number')
           .eq('campaign_id', campaignId);
         const { data } = await predicate(q).limit(20);
@@ -117,7 +117,7 @@ export async function GET(request: NextRequest) {
       // Strategy 5: Last resort - fetch all addresses for campaign, match in JS (handles any formatting)
       if (!addressId) {
         const { data: allRows } = await supabase
-          .from('campaign_addresses')
+          .from('campaign_addresses_geojson')
           .select('id, address, formatted, locality, region, postal_code, house_number')
           .eq('campaign_id', campaignId)
           .limit(500);
@@ -164,7 +164,7 @@ export async function GET(request: NextRequest) {
 
     // Fetch full address record to get campaign_id and other details
     const { data: address, error: addressError } = await supabase
-      .from('campaign_addresses')
+      .from('campaign_addresses_geojson')
       .select('id, campaign_id, address, formatted')
       .eq('id', addressId)
       .single();
