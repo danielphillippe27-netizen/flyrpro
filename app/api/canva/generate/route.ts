@@ -207,6 +207,26 @@ async function uploadToS3(
 }
 
 /**
+ * Generate a source_id for Canva address entries
+ * Creates a unique identifier based on address components
+ */
+function generateAddressSourceId(addressData: CanvaRow): string {
+  const components = [
+    addressData.AddressLine,
+    addressData.City,
+    addressData.Province,
+    addressData.PostalCode,
+  ].filter(Boolean).join('-').toLowerCase();
+  
+  // Sanitize: replace non-alphanumeric with dash, collapse multiple dashes
+  return components
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .substring(0, 200);
+}
+
+/**
  * Persist QR asset to database
  */
 async function persistQRAsset(
@@ -220,10 +240,13 @@ async function persistQRAsset(
     publicUrl: string;
     encodedUrl: string;
   }
-): Promise<void> {
+): Promise<string | null> {
+  // Generate unique source_id for this address
+  const sourceId = generateAddressSourceId(params.addressData);
+  
   // Use campaign_addresses table with canva-specific columns
   // Store the S3 reference in a JSONB field or dedicated columns
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('campaign_addresses')
     .upsert({
       campaign_id: params.campaignId,
@@ -235,6 +258,9 @@ async function persistQRAsset(
         params.addressData.PostalCode,
       ].filter(Boolean).join(', '),
       address: params.addressData.AddressLine,
+      locality: params.addressData.City,
+      region: params.addressData.Province,
+      postal_code: params.addressData.PostalCode,
       // Store Canva QR metadata in metadata JSONB
       metadata: {
         canva_qr: {
@@ -245,17 +271,24 @@ async function persistQRAsset(
           generated_at: new Date().toISOString(),
         },
       },
-      // Set source to identify Canva bulk entries
+      // Set source and source_id for unique constraint
       source: 'canva_bulk',
+      source_id: sourceId,
       visited: false,
     }, {
-      onConflict: 'campaign_id,address', // Upsert by campaign + address
-    });
+      onConflict: 'campaign_id,source_id', // Unique constraint columns
+    })
+    .select('id')
+    .single();
 
   if (error) {
     console.error('[CanvaQR] DB persist error:', error);
     // Don't throw - we can still return the CSV even if DB storage fails
+    return null;
   }
+
+  console.log('[CanvaQR] Persisted address with ID:', data?.id);
+  return data?.id || null;
 }
 
 /**

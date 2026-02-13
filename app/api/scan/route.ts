@@ -2,39 +2,148 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 
 export async function GET(request: NextRequest) {
+  const searchParams = request.nextUrl.searchParams;
+  
+  // Extract all possible params first for logging/debugging
+  const rawId = searchParams.get('id');
+  const campaignId = searchParams.get('campaignId');
+  const addressLine = searchParams.get('address') || searchParams.get('AddressLine');
+  const city = searchParams.get('city') || searchParams.get('City');
+  const province = searchParams.get('province') || searchParams.get('Province');
+  const postalCode = searchParams.get('postalCode') || searchParams.get('PostalCode');
+  
+  console.log('Scan request received:', {
+    id: rawId,
+    campaignId,
+    address: addressLine,
+    city,
+    province,
+    postalCode,
+    url: request.url
+  });
+
   try {
-    // Extract addressId from searchParams
-    const addressId = request.nextUrl.searchParams.get('id');
-
-    if (!addressId) {
-      return NextResponse.json(
-        { error: 'Address ID is required' },
-        { status: 400 }
-      );
-    }
-
-    // Use admin client to bypass RLS for tracking
+    let addressId: string | null = rawId;
+    
     const supabase = createAdminClient();
 
-    // Fetch address to get campaign_id
+    // If no id, try to resolve from campaignId + address (e.g. Canva-generated QR)
+    if (!addressId && campaignId && addressLine) {
+      console.log('Attempting to resolve address from Canva-style params:', { campaignId, addressLine });
+      
+      // Try multiple matching strategies
+      const line = addressLine.trim();
+      const lineLower = line.toLowerCase();
+      
+      // Strategy 1: Try exact match on address field
+      let { data: exactMatch, error: exactError } = await supabase
+        .from('campaign_addresses')
+        .select('id, campaign_id, address, formatted, locality, region, postal_code')
+        .eq('campaign_id', campaignId)
+        .ilike('address', line)
+        .maybeSingle();
+      
+      if (exactMatch) {
+        console.log('Found exact address match:', exactMatch.id);
+        addressId = exactMatch.id;
+      } else {
+        // Strategy 2: Try match on formatted field
+        let { data: formattedMatch, error: formattedError } = await supabase
+          .from('campaign_addresses')
+          .select('id, campaign_id, address, formatted, locality, region, postal_code')
+          .eq('campaign_id', campaignId)
+          .ilike('formatted', line)
+          .maybeSingle();
+        
+        if (formattedMatch) {
+          console.log('Found formatted address match:', formattedMatch.id);
+          addressId = formattedMatch.id;
+        } else {
+          // Strategy 3: Partial match - address contains the query
+          let { data: partialMatches, error: partialError } = await supabase
+            .from('campaign_addresses')
+            .select('id, campaign_id, address, formatted, locality, region, postal_code')
+            .eq('campaign_id', campaignId)
+            .or(`address.ilike.%${line}%,formatted.ilike.%${line}%`)
+            .limit(10);
+          
+          if (partialMatches && partialMatches.length > 0) {
+            // Try to find best match by scoring
+            const scored = partialMatches.map(row => {
+              let score = 0;
+              const rowAddress = (row.address || '').toLowerCase();
+              const rowFormatted = (row.formatted || '').toLowerCase();
+              
+              // Higher score for exact or closer matches
+              if (rowAddress === lineLower || rowFormatted === lineLower) score += 100;
+              else if (rowAddress.includes(lineLower) || rowFormatted.includes(lineLower)) score += 50;
+              else if (lineLower.includes(rowAddress) || lineLower.includes(rowFormatted)) score += 30;
+              
+              // Bonus for city/province match if provided
+              if (city && (row.locality || '').toLowerCase().includes(city.toLowerCase())) score += 20;
+              if (province && (row.region || '').toLowerCase().includes(province.toLowerCase())) score += 20;
+              
+              return { row, score };
+            }).sort((a, b) => b.score - a.score);
+            
+            console.log('Found partial address match:', scored[0].row.id, 'with score:', scored[0].score);
+            addressId = scored[0].row.id;
+          } else {
+            // Strategy 4: Very loose match - try token matching for house number + street
+            // Extract potential house number
+            const houseNumberMatch = line.match(/^\d+/);
+            if (houseNumberMatch) {
+              const houseNumber = houseNumberMatch[0];
+              let { data: houseMatches, error: houseError } = await supabase
+                .from('campaign_addresses')
+                .select('id, campaign_id, address, formatted, house_number')
+                .eq('campaign_id', campaignId)
+                .ilike('house_number', houseNumber)
+                .limit(20);
+              
+              if (houseMatches && houseMatches.length > 0) {
+                console.log('Found house number match:', houseMatches[0].id);
+                addressId = houseMatches[0].id;
+              }
+            }
+          }
+        }
+      }
+      
+      if (!addressId) {
+        console.error('Failed to resolve address for Canva-style QR:', { campaignId, addressLine });
+      }
+    }
+
+    // If still no addressId, we can't track the scan properly
+    // But we still redirect to welcome so user doesn't see an error
+    if (!addressId) {
+      console.warn('No address ID resolved, redirecting to welcome without tracking');
+      const welcomeUrl = new URL('/welcome', request.url);
+      // Preserve any params we got for debugging
+      if (campaignId) welcomeUrl.searchParams.set('campaignId', campaignId);
+      if (addressLine) welcomeUrl.searchParams.set('address', addressLine);
+      return NextResponse.redirect(welcomeUrl, { status: 302 });
+    }
+
+    // Fetch full address record to get campaign_id and other details
     const { data: address, error: addressError } = await supabase
       .from('campaign_addresses')
-      .select('campaign_id')
+      .select('id, campaign_id, address, formatted')
       .eq('id', addressId)
       .single();
 
     if (addressError || !address) {
       console.error('Error fetching address:', addressError);
-      // Redirect to welcome page even if address lookup fails
+      // Still redirect to welcome, but include the ID we tried
       const welcomeUrl = new URL('/welcome', request.url);
       welcomeUrl.searchParams.set('id', addressId);
       return NextResponse.redirect(welcomeUrl, { status: 302 });
     }
 
+    console.log('Processing scan for address:', { addressId: address.id, campaignId: address.campaign_id });
+
     // Look up the building using the stable linker (building_address_links table)
-    // This is more reliable than matching by gers_id because:
-    // 1. Overture Address GERS IDs and Building GERS IDs are different
-    // 2. The linker explicitly maps address_id → building_id
     let buildingId: string | null = null;
     let buildingGersId: string | null = null;
     
@@ -48,7 +157,6 @@ export async function GET(request: NextRequest) {
 
       if (!linkError && link) {
         buildingId = link.building_id;
-        // TypeScript: link.buildings is the joined building record
         const building = link.buildings as { id: string; gers_id: string | null };
         buildingGersId = building?.gers_id || null;
         console.log('Found building via stable linker:', { buildingId, buildingGersId });
@@ -59,34 +167,29 @@ export async function GET(request: NextRequest) {
       console.error('Failed to lookup building via linker:', linkLookupError);
     }
 
-    // Insert scan event if we found a building
-    if (buildingId) {
-      try {
-        const { error: scanEventError } = await supabase
-          .from('scan_events')
-          .insert({
-            building_id: buildingId,
-            campaign_id: address.campaign_id,
-            address_id: addressId,
-            scanned_at: new Date().toISOString(),
-          });
+    // Insert scan event for analytics (always try to track)
+    try {
+      const { error: scanEventError } = await supabase
+        .from('scan_events')
+        .insert({
+          building_id: buildingId,
+          campaign_id: address.campaign_id,
+          address_id: addressId,
+          scanned_at: new Date().toISOString(),
+        });
 
-        if (scanEventError) {
-          console.error('Error inserting scan event:', scanEventError);
-          // Continue with redirect even if scan event insertion fails
-        }
-      } catch (scanEventInsertError) {
-        console.error('Failed to insert scan event:', scanEventInsertError);
-        // Continue with redirect even if scan event insertion fails
+      if (scanEventError) {
+        console.error('Error inserting scan event:', scanEventError);
+      } else {
+        console.log('Scan event recorded for address:', addressId);
       }
+    } catch (scanEventInsertError) {
+      console.error('Failed to insert scan event:', scanEventInsertError);
     }
 
-    // IMPORTANT: Update building_stats using the BUILDING's gers_id (not address gers_id)
-    // This ensures the map updates correctly because the RPC joins building_stats on buildings.gers_id
-    // Using the stable linker's buildingGersId ensures perfect matching with the 3D buildings
+    // Update building_stats for map visualization
     if (buildingGersId) {
       try {
-        // Use the RPC function for atomic upsert (handles both insert and update cases)
         const { error: rpcError } = await supabase.rpc('increment_building_scans', {
           p_gers_id: buildingGersId,
           p_campaign_id: address.campaign_id,
@@ -112,8 +215,6 @@ export async function GET(request: NextRequest) {
           
           if (directError) {
             console.error('Error with direct building_stats upsert:', directError);
-          } else {
-            console.log('Direct upsert succeeded for building gers_id:', buildingGersId);
           }
         } else {
           console.log('Updated building_stats via RPC for building gers_id:', buildingGersId);
@@ -121,26 +222,24 @@ export async function GET(request: NextRequest) {
       } catch (statsInsertError) {
         console.error('Failed to update building_stats:', statsInsertError);
       }
-    } else {
-      console.warn('No building gers_id found (no stable link), cannot update building_stats for map. Address:', addressId);
     }
 
-    // Track the scan using the secure RPC function (legacy tracking)
+    // Track the scan using the secure RPC function (legacy tracking on campaign_addresses)
     try {
       const { error: scanError } = await supabase.rpc('increment_scan', {
         row_id: addressId,
       });
 
       if (scanError) {
-        console.error('Error tracking scan:', scanError);
-        // Continue with redirect even if tracking fails
+        console.error('Error tracking scan via increment_scan RPC:', scanError);
+      } else {
+        console.log('Incremented scan count for address:', addressId);
       }
     } catch (trackingError) {
       console.error('Failed to track scan:', trackingError);
-      // Continue with redirect even if tracking fails
     }
 
-    // Fetch campaign to get video_url
+    // Fetch campaign to get video_url for redirect
     const { data: campaign, error: campaignError } = await supabase
       .from('campaigns')
       .select('video_url')
@@ -151,28 +250,25 @@ export async function GET(request: NextRequest) {
       console.error('Error fetching campaign:', campaignError);
     }
 
-    // Check if video_url exists and is not empty
+    // Redirect based on campaign configuration
     if (campaign?.video_url && campaign.video_url.trim() !== '') {
-      // Redirect to video URL
+      console.log('Redirecting to video URL:', campaign.video_url);
       return NextResponse.redirect(campaign.video_url, { status: 302 });
     }
 
-    // Fallback: Redirect to welcome page
+    // Fallback: Redirect to welcome page with address ID
     const welcomeUrl = new URL('/welcome', request.url);
     welcomeUrl.searchParams.set('id', addressId);
+    console.log('Redirecting to welcome page:', welcomeUrl.toString());
     return NextResponse.redirect(welcomeUrl, { status: 302 });
+    
   } catch (error) {
     console.error('Error in scan handler:', error);
-    // Fallback to welcome page on any error
-    const addressId = request.nextUrl.searchParams.get('id');
-    if (addressId) {
-      const welcomeUrl = new URL('/welcome', request.url);
-      welcomeUrl.searchParams.set('id', addressId);
-      return NextResponse.redirect(welcomeUrl, { status: 302 });
-    }
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    // Fallback to welcome page on any error, preserving params for debugging
+    const welcomeUrl = new URL('/welcome', request.url);
+    if (rawId) welcomeUrl.searchParams.set('id', rawId);
+    if (campaignId) welcomeUrl.searchParams.set('campaignId', campaignId);
+    if (addressLine) welcomeUrl.searchParams.set('address', addressLine);
+    return NextResponse.redirect(welcomeUrl, { status: 302 });
   }
 }
