@@ -58,6 +58,7 @@ interface ProcessedRow extends CanvaRow {
   ImageURL: string;
   EncodedURL: string;
   S3Key: string;
+  QRBase64: string;
   Error?: string;
 }
 
@@ -70,6 +71,7 @@ interface ProcessResult {
   status: 'uploaded' | 'exists' | 'failed';
   error?: string;
   qrBuffer?: Buffer; // For including in ZIP
+  qrBase64?: string; // For CSV embedding
 }
 
 // ============================================================================
@@ -308,6 +310,9 @@ async function processRow(
 
     console.log(`[CanvaQR] [${rowNum}] ${uploaded ? 'Uploaded' : 'Exists'}: ${publicUrl}`);
 
+    // Generate base64 for CSV embedding
+    const qrBase64 = qrBuffer.toString('base64');
+
     return {
       row: rowNum,
       filename,
@@ -316,6 +321,7 @@ async function processRow(
       encodedUrl: encodedUrlString,
       status: uploaded ? 'uploaded' : 'exists',
       qrBuffer, // Include buffer for ZIP
+      qrBase64, // Include base64 for CSV
     };
   } catch (error: any) {
     console.error(`[CanvaQR] [${rowNum}] Error:`, error.message);
@@ -361,6 +367,16 @@ WHAT'S IN THIS ZIP
 2. qr-images/                    - Folder with all QR code PNG files
 3. README.txt                    - This file
 
+CSV COLUMNS EXPLAINED
+---------------------
+- AddressLine, City, Province, PostalCode: Address data for text fields
+- ImageFilename: Name of the QR image file (in qr-images/ folder)
+- ImageURL: Public S3 URL (use this for images in Canva)
+- EncodedURL: The scan tracking URL embedded in each QR
+- QRBase64: QR image as base64 text (for custom integrations)
+- S3Key: Internal AWS S3 path
+- Error: Any errors during generation (empty if successful)
+
 HOW TO USE WITH CANVA BULK CREATE
 ----------------------------------
 
@@ -398,6 +414,16 @@ If you prefer to upload images manually instead of using URLs:
 2. Find the matching file in the "qr-images/" folder
 3. Upload these images to Canva separately
 4. Connect the "ImageFilename" column to your image element
+
+ALTERNATIVE: Using QRBase64 (Embedded Images)
+----------------------------------------------
+The CSV also includes a "QRBase64" column with the QR image embedded as base64 text.
+This is useful for:
+- Systems that support inline base64 images
+- Creating self-contained CSV files (no external image dependencies)
+- Custom integrations that need the raw image data
+
+Note: Canva does NOT support base64 images in Bulk Create - use ImageURL instead.
 
 QR CODE TRACKING
 ----------------
@@ -540,6 +566,7 @@ export async function POST(request: NextRequest) {
         ImageURL: result.publicUrl || '',
         EncodedURL: result.encodedUrl || '',
         S3Key: result.s3Key || '',
+        QRBase64: result.qrBase64 || '',
         Error: result.error || '',
       };
     });
@@ -561,6 +588,7 @@ export async function POST(request: NextRequest) {
         'EncodedURL',
         'S3Key',
         'ImageURL',
+        'QRBase64',
         'Error',
       ],
     });
