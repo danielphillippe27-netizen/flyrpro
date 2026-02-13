@@ -30,88 +30,121 @@ export async function GET(request: NextRequest) {
     // If no id, try to resolve from campaignId + address (e.g. Canva-generated QR)
     if (!addressId && campaignId && addressLine) {
       console.log('Attempting to resolve address from Canva-style params:', { campaignId, addressLine });
+      // Normalize: collapse spaces, trim (Canva often sends "2 PATTERSON CRES  , AJAX , ON L1S6R1")
+      const normalized = addressLine
+        .trim()
+        .replace(/\s+/g, ' ')
+        .replace(/\s*,\s*/g, ', ')
+        .toLowerCase();
+      const line = normalized;
+      const lineLower = line;
+      // Street-only part (before first comma) for flexible matching
+      const streetPart = line.split(',')[0]?.trim() || line;
       
-      // Try multiple matching strategies
-      const line = addressLine.trim();
-      const lineLower = line.toLowerCase();
-      
-      // Strategy 1: Try exact match on address field
-      let { data: exactMatch, error: exactError } = await supabase
-        .from('campaign_addresses')
-        .select('id, campaign_id, address, formatted, locality, region, postal_code')
-        .eq('campaign_id', campaignId)
-        .ilike('address', line)
-        .maybeSingle();
-      
-      if (exactMatch) {
-        console.log('Found exact address match:', exactMatch.id);
-        addressId = exactMatch.id;
-      } else {
-        // Strategy 2: Try match on formatted field
-        let { data: formattedMatch, error: formattedError } = await supabase
+      const fetchCandidates = async (predicate: (q: ReturnType<typeof supabase.from>) => ReturnType<typeof supabase.from>) => {
+        const q = supabase
           .from('campaign_addresses')
-          .select('id, campaign_id, address, formatted, locality, region, postal_code')
+          .select('id, campaign_id, address, formatted, locality, region, postal_code, house_number')
+          .eq('campaign_id', campaignId);
+        const { data } = await predicate(q).limit(20);
+        return data || [];
+      };
+      
+      // Strategy 1: Exact match on address or formatted (use streetPart to avoid comma in .or())
+      let candidates = await fetchCandidates((q) => {
+        const s = streetPart.replace(/'/g, "''");
+        return q.or(`address.ilike.${s},formatted.ilike.${s}`);
+      });
+      if (candidates.length > 0) {
+        const fullMatch = candidates.find(
+          (r) => (r.address || '').toLowerCase() === line || (r.formatted || '').toLowerCase() === line
+        );
+        addressId = (fullMatch || candidates[0]).id;
+        console.log('Found exact address match:', addressId);
+      }
+      
+      // Strategy 2: Contains full normalized string
+      if (!addressId) {
+        const escaped = line.replace(/%/g, '\\%').replace(/_/g, '\\_');
+        candidates = await fetchCandidates((q) => q.or(`address.ilike.%${escaped}%,formatted.ilike.%${escaped}%`));
+        if (candidates.length > 0) {
+          const scored = candidates.map((row) => {
+            let score = 0;
+            const a = (row.address || '').toLowerCase();
+            const f = (row.formatted || '').toLowerCase();
+            if (a === line || f === line) score += 100;
+            else if (a.includes(line) || f.includes(line)) score += 50;
+            else if (line.includes(a) || line.includes(f)) score += 30;
+            if (city && (row.locality || '').toLowerCase().includes(city.toLowerCase().trim())) score += 20;
+            if (postalCode && (row.postal_code || '').toLowerCase().includes(postalCode.toLowerCase().trim())) score += 15;
+            return { row, score };
+          }).sort((x, y) => y.score - x.score);
+          addressId = scored[0].row.id;
+          console.log('Found contains match:', addressId, 'score:', scored[0].score);
+        }
+      }
+      
+      // Strategy 3: Street-only match (e.g. "2 patterson cres" from "2 patterson cres, ajax, on l1s6r1")
+      if (!addressId && streetPart.length >= 5) {
+        const escapedStreet = streetPart.replace(/%/g, '\\%').replace(/_/g, '\\_');
+        candidates = await fetchCandidates((q) => q.or(`address.ilike.%${escapedStreet}%,formatted.ilike.%${escapedStreet}%`));
+        if (candidates.length > 0) {
+          // Prefer row whose address/formatted starts with street part
+          const best = candidates.find(
+            (r) =>
+              (r.address || '').toLowerCase().startsWith(streetPart) ||
+              (r.formatted || '').toLowerCase().startsWith(streetPart)
+          ) || candidates[0];
+          addressId = best.id;
+          console.log('Found street-only match:', addressId);
+        }
+      }
+      
+      // Strategy 4: House number + postal (when province has postal merged like "ON L1S6R1")
+      if (!addressId && postalCode) {
+        const houseNum = line.match(/^\d+/)?.[0];
+        if (houseNum) {
+          candidates = await fetchCandidates((q) =>
+            q.ilike('house_number', houseNum).ilike('postal_code', `%${postalCode.trim()}%`)
+          );
+          if (candidates.length > 0) {
+            addressId = candidates[0].id;
+            console.log('Found house+postal match:', addressId);
+          }
+        }
+      }
+      
+      // Strategy 5: Last resort - fetch all addresses for campaign, match in JS (handles any formatting)
+      if (!addressId) {
+        const { data: allRows } = await supabase
+          .from('campaign_addresses')
+          .select('id, address, formatted, locality, region, postal_code, house_number')
           .eq('campaign_id', campaignId)
-          .ilike('formatted', line)
-          .maybeSingle();
-        
-        if (formattedMatch) {
-          console.log('Found formatted address match:', formattedMatch.id);
-          addressId = formattedMatch.id;
-        } else {
-          // Strategy 3: Partial match - address contains the query
-          let { data: partialMatches, error: partialError } = await supabase
-            .from('campaign_addresses')
-            .select('id, campaign_id, address, formatted, locality, region, postal_code')
-            .eq('campaign_id', campaignId)
-            .or(`address.ilike.%${line}%,formatted.ilike.%${line}%`)
-            .limit(10);
-          
-          if (partialMatches && partialMatches.length > 0) {
-            // Try to find best match by scoring
-            const scored = partialMatches.map(row => {
-              let score = 0;
-              const rowAddress = (row.address || '').toLowerCase();
-              const rowFormatted = (row.formatted || '').toLowerCase();
-              
-              // Higher score for exact or closer matches
-              if (rowAddress === lineLower || rowFormatted === lineLower) score += 100;
-              else if (rowAddress.includes(lineLower) || rowFormatted.includes(lineLower)) score += 50;
-              else if (lineLower.includes(rowAddress) || lineLower.includes(rowFormatted)) score += 30;
-              
-              // Bonus for city/province match if provided
-              if (city && (row.locality || '').toLowerCase().includes(city.toLowerCase())) score += 20;
-              if (province && (row.region || '').toLowerCase().includes(province.toLowerCase())) score += 20;
-              
-              return { row, score };
-            }).sort((a, b) => b.score - a.score);
-            
-            console.log('Found partial address match:', scored[0].row.id, 'with score:', scored[0].score);
-            addressId = scored[0].row.id;
-          } else {
-            // Strategy 4: Very loose match - try token matching for house number + street
-            // Extract potential house number
-            const houseNumberMatch = line.match(/^\d+/);
-            if (houseNumberMatch) {
-              const houseNumber = houseNumberMatch[0];
-              let { data: houseMatches, error: houseError } = await supabase
-                .from('campaign_addresses')
-                .select('id, campaign_id, address, formatted, house_number')
-                .eq('campaign_id', campaignId)
-                .ilike('house_number', houseNumber)
-                .limit(20);
-              
-              if (houseMatches && houseMatches.length > 0) {
-                console.log('Found house number match:', houseMatches[0].id);
-                addressId = houseMatches[0].id;
-              }
+          .limit(500);
+        if (allRows?.length) {
+          const norm = (s: string) => (s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+          const postal = (postalCode || '').toLowerCase().trim().replace(/\s/g, '');
+          const houseNum = line.match(/^\d+/)?.[0];
+          for (const row of allRows) {
+            const a = norm(row.address || '');
+            const f = norm(row.formatted || '');
+            const rowPostal = (row.postal_code || '').toLowerCase().replace(/\s/g, '');
+            if (streetPart.length >= 5 && (a.includes(streetPart) || f.includes(streetPart) || a.startsWith(streetPart) || f.startsWith(streetPart))) {
+              addressId = row.id;
+              console.log('Found last-resort street match:', addressId);
+              break;
+            }
+            if (postal && rowPostal && rowPostal.includes(postal) && houseNum && (row.house_number || a || f).includes(houseNum)) {
+              addressId = row.id;
+              console.log('Found last-resort postal+house match:', addressId);
+              break;
             }
           }
         }
       }
       
       if (!addressId) {
-        console.error('Failed to resolve address for Canva-style QR:', { campaignId, addressLine });
+        console.error('Failed to resolve address for Canva-style QR:', { campaignId, addressLine, streetPart, postalCode });
       }
     }
 
@@ -120,9 +153,12 @@ export async function GET(request: NextRequest) {
     if (!addressId) {
       console.warn('No address ID resolved, redirecting to welcome without tracking');
       const welcomeUrl = new URL('/welcome', request.url);
-      // Preserve any params we got for debugging
       if (campaignId) welcomeUrl.searchParams.set('campaignId', campaignId);
       if (addressLine) welcomeUrl.searchParams.set('address', addressLine);
+      if (city) welcomeUrl.searchParams.set('city', city);
+      if (province) welcomeUrl.searchParams.set('province', province);
+      if (postalCode) welcomeUrl.searchParams.set('postalCode', postalCode);
+      console.log('Redirecting to welcome with params:', { campaignId, addressLine, city, province, postalCode, finalUrl: welcomeUrl.toString() });
       return NextResponse.redirect(welcomeUrl, { status: 302 });
     }
 

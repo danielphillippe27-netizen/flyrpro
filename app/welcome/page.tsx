@@ -21,6 +21,10 @@ function WelcomeContent() {
   const [debugInfo, setDebugInfo] = useState<string>('');
 
   useEffect(() => {
+    // Debug: log all received params
+    const allParams = Array.from(searchParams.entries()).map(([k,v]) => `${k}=${v.substring(0,30)}`).join('&');
+    console.log('Welcome page received params:', allParams);
+    console.log('Parsed:', { addressId, campaignId, addressLine, city, province });
     // Try to load address data - either by ID or by resolving from Canva-style params
     loadAddressData();
   }, [addressId, campaignId, addressLine]);
@@ -51,95 +55,31 @@ function WelcomeContent() {
         }
       }
       
-      // If no ID but have campaignId + address, try to resolve
+      // If no ID but have campaignId + address, resolve via API (server has permissions)
       if (!addressId && campaignId && addressLine) {
-        console.log('Welcome page: Attempting to resolve address:', { campaignId, addressLine });
         setDebugInfo(`Resolving: campaign=${campaignId}, address=${addressLine}`);
-        
-        const line = addressLine.trim();
-        const lineLower = line.toLowerCase();
-        
-        // Strategy 1: Exact match on address
-        const { data: exactMatch, error: exactError } = await supabase
-          .from('campaign_addresses')
-          .select('*')
-          .eq('campaign_id', campaignId)
-          .ilike('address', line)
-          .maybeSingle();
-        
-        if (exactMatch) {
-          console.log('Welcome page: Found exact match:', exactMatch.id);
-          setData(exactMatch);
+        const params = new URLSearchParams({ campaignId, address: addressLine });
+        if (city) params.set('city', city);
+        if (province) params.set('province', province);
+        const postal = searchParams.get('postalCode') || searchParams.get('PostalCode');
+        if (postal) params.set('postalCode', postal);
+        const res = await fetch(`/api/welcome/resolve?${params}`);
+        if (res.ok) {
+          const addressData = await res.json();
+          setData(addressData as CampaignAddress);
           return;
         }
-        
-        // Strategy 2: Match on formatted
-        const { data: formattedMatch, error: formattedError } = await supabase
-          .from('campaign_addresses')
-          .select('*')
-          .eq('campaign_id', campaignId)
-          .ilike('formatted', line)
-          .maybeSingle();
-        
-        if (formattedMatch) {
-          console.log('Welcome page: Found formatted match:', formattedMatch.id);
-          setData(formattedMatch);
-          return;
-        }
-        
-        // Strategy 3: Partial match
-        const { data: partialMatches, error: partialError } = await supabase
-          .from('campaign_addresses')
-          .select('*')
-          .eq('campaign_id', campaignId)
-          .or(`address.ilike.%${line}%,formatted.ilike.%${line}%`)
-          .limit(10);
-        
-        if (partialMatches && partialMatches.length > 0) {
-          // Score matches
-          const scored = partialMatches.map(row => {
-            let score = 0;
-            const rowAddress = (row.address || '').toLowerCase();
-            const rowFormatted = (row.formatted || '').toLowerCase();
-            
-            if (rowAddress === lineLower || rowFormatted === lineLower) score += 100;
-            else if (rowAddress.includes(lineLower) || rowFormatted.includes(lineLower)) score += 50;
-            else if (lineLower.includes(rowAddress) || lineLower.includes(rowFormatted)) score += 30;
-            
-            if (city && (row.locality || '').toLowerCase().includes(city.toLowerCase())) score += 20;
-            if (province && (row.region || '').toLowerCase().includes(province.toLowerCase())) score += 20;
-            
-            return { row, score };
-          }).sort((a, b) => b.score - a.score);
-          
-          console.log('Welcome page: Found partial match:', scored[0].row.id);
-          setData(scored[0].row);
-          return;
-        }
-        
-        // Strategy 4: House number match
-        const houseNumberMatch = line.match(/^\d+/);
-        if (houseNumberMatch) {
-          const houseNumber = houseNumberMatch[0];
-          const { data: houseMatches, error: houseError } = await supabase
-            .from('campaign_addresses')
-            .select('*')
-            .eq('campaign_id', campaignId)
-            .ilike('house_number', houseNumber)
-            .limit(20);
-          
-          if (houseMatches && houseMatches.length > 0) {
-            console.log('Welcome page: Found house number match:', houseMatches[0].id);
-            setData(houseMatches[0]);
-            return;
-          }
-        }
-        
-        setDebugInfo(`Could not resolve address. Campaign: ${campaignId}, Address: ${addressLine}`);
-        setError('Address not found - Please check the QR code or contact support');
+        setDebugInfo(`Could not resolve. Campaign: ${campaignId}, Address: ${addressLine}`);
+        setError('This address wasn’t found in our system. The flyer may be for a different campaign or the address may not be loaded yet.');
       } else {
-        // No ID and no resolution params
-        setError('Invalid QR Code - Missing address information');
+        // No ID and no resolution params - show exactly what's missing
+        const missing = [];
+        if (!addressId) missing.push('id');
+        if (!campaignId) missing.push('campaignId');
+        if (!addressLine) missing.push('address');
+        const urlParams = Array.from(searchParams.entries()).map(([k,v]) => `${k}=${v.substring(0,20)}`).join('&');
+        setDebugInfo(`Missing: ${missing.join(', ')} | URL params: ${urlParams}`);
+        setError(`QR code missing: ${missing.join(', ')}. Please check the QR code URL.`);
       }
     } catch (err) {
       console.error('Error loading address data:', err);
