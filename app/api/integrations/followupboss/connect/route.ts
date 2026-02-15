@@ -39,20 +39,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // FUB API keys (fka_...) are 40+ characters; reject truncated or invalid length to avoid storing broken keys
-    const FUB_MIN_KEY_LENGTH = 40;
-    if (apiKey.length < FUB_MIN_KEY_LENGTH) {
-      return NextResponse.json(
-        {
-          error: `API key looks incomplete (${apiKey.length} characters). Follow Up Boss keys are usually 40+ characters. Please copy the full key from Follow Up Boss → Admin → API.`,
-        },
-        { status: 400 }
-      );
-    }
-
-    // Debug: log length only (do not log full key in production)
-    console.log('FUB API Key length:', apiKey.length);
-
     // Get current user
     const supabase = await getSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
