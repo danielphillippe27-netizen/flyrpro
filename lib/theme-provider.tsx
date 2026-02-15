@@ -13,7 +13,7 @@ interface ThemeContextType {
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>('light');
+  const [theme, setThemeState] = useState<Theme>('dark');
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -23,9 +23,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     if (savedTheme) {
       setThemeState(savedTheme);
     } else {
-      // Check system preference
-      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      setThemeState(prefersDark ? 'dark' : 'light');
+      // No saved preference: default to dark
+      setThemeState('dark');
     }
   }, []);
 
@@ -50,9 +49,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   };
 
   // Always provide context so useTheme() never throws (e.g. on first paint before mount).
-  // Use current theme when mounted; otherwise 'light' so children can render.
+  // Use current theme when mounted; otherwise 'dark' so children can render.
   const value = {
-    theme: mounted ? theme : 'light',
+    theme: mounted ? theme : 'dark',
     setTheme,
     toggleTheme,
   };

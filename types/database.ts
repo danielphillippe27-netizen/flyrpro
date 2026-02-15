@@ -36,6 +36,29 @@ export interface UserProfile {
   weekly_minutes_goal?: number | null;
 }
 
+/** Entitlements: source of truth for plan/status (web + iOS). */
+export type EntitlementPlan = 'free' | 'pro' | 'team';
+export type EntitlementSource = 'none' | 'stripe' | 'apple';
+
+export interface Entitlement {
+  user_id: string;
+  plan: EntitlementPlan;
+  is_active: boolean;
+  source: EntitlementSource;
+  stripe_customer_id: string | null;
+  stripe_subscription_id: string | null;
+  current_period_end: string | null;
+  updated_at: string;
+}
+
+/** Public snapshot returned by GET /api/billing/entitlement (no internal IDs). */
+export interface EntitlementSnapshot {
+  plan: EntitlementPlan;
+  is_active: boolean;
+  source: EntitlementSource;
+  current_period_end: string | null;
+}
+
 // Enhanced Campaign Types (iOS Schema)
 export type CampaignType = 'flyer' | 'door_knock' | 'event' | 'survey' | 'gift' | 'pop_by' | 'open_house';
 export type AddressSource = 'closest_home' | 'import_list' | 'map' | 'same_street';

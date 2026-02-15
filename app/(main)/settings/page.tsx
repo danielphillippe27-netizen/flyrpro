@@ -47,11 +47,20 @@ interface UserProfile {
   stripe_customer_id: string | null;
 }
 
+interface EntitlementSnapshot {
+  plan: string;
+  is_active: boolean;
+  source: string;
+  current_period_end: string | null;
+  upgrade_price_id?: string;
+}
+
 function SettingsPageContent() {
   const { theme, setTheme } = useTheme();
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [entitlement, setEntitlement] = useState<EntitlementSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [loggingOut, setLoggingOut] = useState(false);
   const [goals, setGoals] = useState<{ weekly_door_goal: number; weekly_sessions_goal: number | null; weekly_minutes_goal: number | null } | null>(null);
@@ -88,6 +97,11 @@ function SettingsPageContent() {
           if (newProfile) {
             setProfile(newProfile);
           }
+        }
+        const entRes = await fetch('/api/billing/entitlement', { credentials: 'include' });
+        if (entRes.ok) {
+          const entData = await entRes.json();
+          setEntitlement(entData);
         }
       } else {
         router.push('/login');
@@ -151,20 +165,27 @@ function SettingsPageContent() {
   };
 
   const handleUpgrade = async () => {
+    const priceId = entitlement?.upgrade_price_id;
+    if (!priceId) {
+      router.push('/billing');
+      return;
+    }
     try {
-      const response = await fetch('/api/stripe/checkout', {
+      const response = await fetch('/api/billing/stripe/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ priceId: 'price_pro_monthly' }),
+        credentials: 'include',
+        body: JSON.stringify({ priceId }),
       });
-
-      const { url } = await response.json();
-      if (url) {
-        window.location.href = url;
+      const data = await response.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        router.push('/billing');
       }
     } catch (error) {
       console.error('Error creating checkout:', error);
-      alert('Failed to create checkout session');
+      router.push('/billing');
     }
   };
 
@@ -222,7 +243,7 @@ function SettingsPageContent() {
             </CardContent>
           </Card>
 
-          {/* Subscription Section */}
+          {/* Subscription Section — source of truth: entitlements */}
           <Card>
             <CardHeader>
               <div className="flex items-center gap-2">
@@ -234,28 +255,32 @@ function SettingsPageContent() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between flex-wrap gap-2">
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
                     <p className="text-base font-medium dark:text-white">Plan</p>
-                    {profile?.pro_active ? (
+                    {entitlement?.is_active && (entitlement.plan === 'pro' || entitlement.plan === 'team') ? (
                       <Badge className="bg-green-500 hover:bg-green-600">Pro</Badge>
                     ) : (
                       <Badge variant="outline">Free</Badge>
                     )}
                   </div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">
-                    {profile?.pro_active 
+                    {entitlement?.is_active
                       ? 'You have access to all Pro features'
-                      : 'Upgrade to Pro for unlimited QR codes and advanced features'
-                    }
+                      : 'Upgrade to Pro for unlimited QR codes and advanced features'}
                   </p>
                 </div>
-                {!profile?.pro_active && (
-                  <Button onClick={handleUpgrade} size="sm">
-                    Upgrade to Pro
+                <div className="flex gap-2">
+                  {!entitlement?.is_active && (
+                    <Button onClick={handleUpgrade} size="sm">
+                      Upgrade to Pro
+                    </Button>
+                  )}
+                  <Button variant="outline" size="sm" asChild>
+                    <a href="/billing">Manage billing</a>
                   </Button>
-                )}
+                </div>
               </div>
             </CardContent>
           </Card>

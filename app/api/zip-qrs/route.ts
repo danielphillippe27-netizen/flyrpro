@@ -4,17 +4,7 @@ import { createAdminClient } from '@/lib/supabase/server';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { CampaignsService } from '@/lib/services/CampaignsService';
-
-async function checkProStatus(userId: string) {
-  const supabase = createAdminClient();
-  const { data: profile } = await supabase
-    .from('user_profiles')
-    .select('pro_active')
-    .eq('user_id', userId)
-    .single();
-
-  return profile?.pro_active || false;
-}
+import { getEntitlementForUser, canUsePro } from '@/app/lib/billing/entitlements';
 
 export async function GET(request: NextRequest) {
   try {
@@ -53,11 +43,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Check if Pro (optional check for ZIP)
-    const isPro = await checkProStatus(user.id);
-    if (!isPro) {
-      // You can choose to gate ZIP downloads
-      // return NextResponse.json({ needsUpgrade: true }, { status: 402 });
+    const entitlement = await getEntitlementForUser(user.id);
+    if (!canUsePro(entitlement)) {
+      return NextResponse.json(
+        { needsUpgrade: true, error: 'Pro subscription required to download ZIP' },
+        { status: 402 }
+      );
     }
 
     const adminSupabase = createAdminClient();
