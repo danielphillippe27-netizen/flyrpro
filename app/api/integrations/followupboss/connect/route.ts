@@ -39,6 +39,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // FUB API keys (fka_...) are 40+ characters; reject truncated or invalid length to avoid storing broken keys
+    const FUB_MIN_KEY_LENGTH = 40;
+    if (apiKey.length < FUB_MIN_KEY_LENGTH) {
+      return NextResponse.json(
+        {
+          error: `API key looks incomplete (${apiKey.length} characters). Follow Up Boss keys are usually 40+ characters. Please copy the full key from Follow Up Boss → Admin → API.`,
+        },
+        { status: 400 }
+      );
+    }
+
+    // Debug: log length only (do not log full key in production)
+    console.log('FUB API Key length:', apiKey.length);
+
     // Get current user
     const supabase = await getSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -113,14 +127,15 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // After writing to crm_connections, also write to user_integrations so the iOS Edge Function (crm_sync) can find the token
+    // After writing to crm_connections, also write to user_integrations so the iOS Edge Function (crm_sync) can find the token.
+    // Store the full API key (no truncation). user_integrations.api_key must be TEXT, not VARCHAR(n).
     const { error: integrationError } = await supabase
       .from('user_integrations')
       .upsert(
         {
           user_id: user.id,
           provider: 'fub',
-          api_key: apiKey,
+          api_key: apiKey, // full key, 40+ chars; column must be TEXT
           updated_at: new Date().toISOString(),
         },
         { onConflict: 'user_id,provider' }
