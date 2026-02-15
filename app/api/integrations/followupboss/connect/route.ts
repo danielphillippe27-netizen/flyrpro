@@ -113,6 +113,24 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // After writing to crm_connections, also write to user_integrations so the iOS Edge Function (crm_sync) can find the token
+    const { error: integrationError } = await supabase
+      .from('user_integrations')
+      .upsert(
+        {
+          user_id: user.id,
+          provider: 'fub',
+          api_key: apiKey,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'user_id,provider' }
+      );
+
+    if (integrationError) {
+      console.error('Failed to write to user_integrations:', integrationError);
+      // Don't fail the whole request, just log it
+    }
+
     return NextResponse.json({
       success: true,
       message: 'Successfully connected to Follow Up Boss',
