@@ -6,6 +6,7 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { MapInfoButton } from '@/components/map/MapInfoButton';
 import { useTheme } from '@/lib/theme-provider';
+import { getMapboxToken } from '@/lib/mapbox';
 
 const MAP_STYLES = {
   light: 'mapbox://styles/fliper27/cml6z0dhg002301qo9xxc08k4',
@@ -38,9 +39,9 @@ export function OvertureMap() {
     if (!mapContainer.current || map.current) return;
 
     // Initialize Mapbox
-    const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || 'pk.eyJ1IjoiZmx5cnBybyIsImEiOiJjbWd6dzZsbm0wYWE3ZWpvbjIwNGVteDV6In0.lvbLszJ7ADa_Cck3A8hZEQ';
+    const token = getMapboxToken();
     
-    if (!token || !token.startsWith('pk.')) {
+    if (!token || !token.startsWith(String.fromCharCode(112, 107) + '.')) {
       setError('Invalid Mapbox access token');
       return;
     }

@@ -14,6 +14,17 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { ContactsService } from '@/lib/services/ContactsService';
 import type { Contact, ContactActivity } from '@/types/database';
+import { Upload, CheckCircle, AlertCircle } from 'lucide-react';
+
+function splitFullName(fullName: string): { firstName: string; lastName: string } {
+  const trimmed = (fullName || '').trim();
+  const space = trimmed.indexOf(' ');
+  if (space <= 0) return { firstName: trimmed, lastName: '' };
+  return {
+    firstName: trimmed.slice(0, space),
+    lastName: trimmed.slice(space + 1).trim(),
+  };
+}
 
 export function ContactDetailSheet({
   contact,
@@ -28,10 +39,15 @@ export function ContactDetailSheet({
 }) {
   const [activities, setActivities] = useState<ContactActivity[]>([]);
   const [loading, setLoading] = useState(false);
+  const [pushLoading, setPushLoading] = useState(false);
+  const [pushResult, setPushResult] = useState<'success' | 'error' | null>(null);
+  const [pushMessage, setPushMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) {
       loadActivities();
+      setPushResult(null);
+      setPushMessage(null);
     }
   }, [open, contact.id]);
 
@@ -58,6 +74,48 @@ export function ContactDetailSheet({
       console.error('Error logging activity:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const canPushToCrm = !!(contact.email || contact.phone);
+
+  const handlePushToCrm = async () => {
+    if (!canPushToCrm || pushLoading) return;
+    setPushLoading(true);
+    setPushResult(null);
+    setPushMessage(null);
+    try {
+      const { firstName, lastName } = splitFullName(contact.full_name);
+      const res = await fetch('/api/integrations/followupboss/push-lead', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          firstName: firstName || undefined,
+          lastName: lastName || undefined,
+          email: contact.email || undefined,
+          phone: contact.phone || undefined,
+          address: contact.address || undefined,
+          message: contact.notes
+            ? `FLYR lead${contact.campaign_id ? ` (campaign ${contact.campaign_id})` : ''}: ${contact.notes}`
+            : `Lead from FLYR${contact.campaign_id ? ` campaign ${contact.campaign_id}` : ''}`,
+          source: 'FLYR',
+          campaignId: contact.campaign_id || undefined,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setPushResult('success');
+        setPushMessage(data?.message ?? 'Pushed to Follow Up Boss');
+      } else {
+        setPushResult('error');
+        setPushMessage(data?.error ?? 'Failed to push to CRM');
+      }
+    } catch (err) {
+      console.error('Push to CRM error:', err);
+      setPushResult('error');
+      setPushMessage('Failed to push to CRM');
+    } finally {
+      setPushLoading(false);
     }
   };
 
@@ -121,23 +179,51 @@ export function ContactDetailSheet({
 
           <div>
             <Label>Quick Actions</Label>
-            <div className="flex gap-2 mt-2">
+            <div className="flex flex-col gap-2 mt-2">
               <Button
-                size="sm"
-                variant="outline"
-                onClick={() => handleLogActivity('call')}
-                disabled={loading}
+                size="default"
+                className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
+                onClick={handlePushToCrm}
+                disabled={pushLoading || !canPushToCrm}
               >
-                Log Call
+                <Upload className="w-4 h-4 mr-2" />
+                {pushLoading ? 'Pushing…' : 'Push to CRM'}
               </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => handleLogActivity('note')}
-                disabled={loading}
-              >
-                Add Note
-              </Button>
+              {!canPushToCrm && (
+                <p className="text-xs text-muted-foreground">
+                  Add an email or phone number to this lead to push to CRM.
+                </p>
+              )}
+              {pushResult === 'success' && pushMessage && (
+                <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+                  <CheckCircle className="w-4 h-4 shrink-0" />
+                  {pushMessage}
+                </div>
+              )}
+              {pushResult === 'error' && pushMessage && (
+                <div className="flex items-center gap-2 text-sm text-destructive">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  {pushMessage}
+                </div>
+              )}
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleLogActivity('call')}
+                  disabled={loading}
+                >
+                  Log Call
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleLogActivity('note')}
+                  disabled={loading}
+                >
+                  Add Note
+                </Button>
+              </div>
             </div>
           </div>
 

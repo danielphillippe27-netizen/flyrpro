@@ -310,7 +310,24 @@ Tip: Keep qr-images and canva_bulk_data.csv in the same place so paths match (or
     );
   }
 
-  const formattedRecipients = addresses.map((addr) => ({
+  // Dedupe by logical address: one row per (formatted + postal_code), prefer scanned
+  const addressKey = (addr: CampaignAddress) =>
+    `${(addr.formatted || addr.address || '').trim().toLowerCase()}|${(addr.postal_code || '').trim().toLowerCase()}`;
+  const seen = new Map<string, CampaignAddress>();
+  for (const addr of addresses) {
+    const key = addressKey(addr);
+    const existing = seen.get(key);
+    if (!existing) {
+      seen.set(key, addr);
+    } else if (addr.visited && !existing.visited) {
+      seen.set(key, addr);
+    } else if (addr.visited === existing.visited && (addr.id < existing.id)) {
+      seen.set(key, addr);
+    }
+  }
+  const dedupedAddresses = Array.from(seen.values());
+
+  const formattedRecipients = dedupedAddresses.map((addr) => ({
     id: addr.id,
     address_line: addr.formatted || addr.address || '',
     city: addr.locality || '',

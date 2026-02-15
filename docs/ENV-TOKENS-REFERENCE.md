@@ -29,14 +29,8 @@ These are now **required** or explicitly checked by the app:
 ### Mapbox
 | Variable | Where to get it |
 |----------|-----------------|
-| `NEXT_PUBLIC_MAPBOX_TOKEN` | mapbox.com → Account → Access tokens (public, pk.*) |
+| `NEXT_PUBLIC_MAPBOX_TOKEN` | mapbox.com → Account → Access tokens (public) |
 | `MAPBOX_TOKEN` | Same; used server-side for geocoding |
-
-### CVRP routing Lambda
-| Variable | Where to get it |
-|----------|-----------------|
-| `CVRP_LAMBDA_URL` | AWS API Gateway URL for your CVRP/optimize Lambda |
-| `CVRP_LAMBDA_SECRET` | Value you set in Lambda env; app sends it as `x-flyr-secret` / `x-cvrp-secret` |
 
 ### Slice / address Lambda (Gold Standard)
 | Variable | Where to get it |
@@ -44,10 +38,10 @@ These are now **required** or explicitly checked by the app:
 | `SLICE_LAMBDA_URL` | Lambda function URL for flyr-slice (or your slice function) |
 | `SLICE_SHARED_SECRET` | Must match `SLICE_SHARED_SECRET` in Lambda env (from kimi-cli deploy) |
 
-### Stadia Maps (Valhalla routing)
+### Stadia Maps (optional route geometry)
 | Variable | Where to get it |
 |----------|-----------------|
-| `STADIA_API_KEY` | stadiamaps.com → API key |
+| `STADIA_API_KEY` | stadiamaps.com → API key. Only needed when route polyline is requested (e.g. provision snapshot path). Routing order uses Street-Block-Sweep-Snake only (no Valhalla sequencing). |
 
 ### AWS (S3 / legacy)
 | Variable | Where to get it |
@@ -62,6 +56,8 @@ These are now **required** or explicitly checked by the app:
 | Variable | Where to get it |
 |----------|-----------------|
 | `ENCRYPTION_KEY` | 32-character key for encrypting CRM API keys in DB (e.g. `openssl rand -base64 32 \| cut -c1-32`) |
+
+BoldTrail API tokens are stored encrypted in `crm_connections` (provider `boldtrail`). Follow Up Boss API keys use the same table (provider `followupboss`).
 
 ### Optional / other
 | Variable | Where to get it |

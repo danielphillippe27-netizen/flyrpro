@@ -13,6 +13,7 @@ This documentation package contains everything you need to implement the "linked
 | **IOS_DATA_FLOW_DIAGRAM.md** | Visual architecture and data flow | 15 min |
 | **IOS_LOGIC_TRANSLATION.md** | TypeScript → Swift translations | 30 min |
 | **IOS_IMPLEMENTATION_GUIDE.md** | Complete technical reference | 60 min |
+| **FOLLOW_UP_BOSS_AND_IOS_GUIDE.md** | Follow Up Boss & iOS: how we're linked, API contract, connect from the app | 15 min |
 
 ## 🚀 Quick Start (5 Steps)
 
@@ -21,6 +22,10 @@ This documentation package contains everything you need to implement the "linked
 3. **Review** `IOS_DATA_FLOW_DIAGRAM.md` - Visualize the architecture
 4. **Implement** following the checklist in the summary
 5. **Reference** the other docs as needed during implementation
+
+## 🔗 Follow Up Boss & iOS
+
+For how FLYR is linked to Follow Up Boss and how users can connect from the iOS app (API contract, auth, WebView vs native), see **[FOLLOW_UP_BOSS_AND_IOS_GUIDE.md](FOLLOW_UP_BOSS_AND_IOS_GUIDE.md)**.
 
 ## 🎯 What This Feature Does
 

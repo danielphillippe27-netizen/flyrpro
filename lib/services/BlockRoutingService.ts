@@ -1,18 +1,16 @@
 /**
- * Block Routing Service - Human-like walking route optimization
- * 
- * Solves the "weird route" problem by:
- * 1. Grouping addresses into "block stops" (contiguous street segments)
- * 2. Running CVRP on block stops (not individual addresses)
- * 3. Expanding each block into a local door order
- * 
- * This produces routes that look like a human walking streets,
- * not a solver creating weird long connectors and outer loops.
+ * Block Routing Service - Street-Block-Sweep-Snake routing
+ *
+ * Single method: buildRoute. No CVRP, TSP, or Valhalla sequencing.
+ * Pipeline: group by street → split into runs (blocks) → order blocks by sweep from depot
+ * → snake addresses within each block → concatenate with sequence_index.
+ * Optional: Valhalla only for polyline geometry when include_geometry=true.
  */
 
 import * as turf from '@turf/turf';
 import type { Feature, Point, LineString } from '@turf/turf';
 import { createAdminClient } from '@/lib/supabase/server';
+import { RoutingService } from './RoutingService';
 
 export interface BlockAddress {
   id: string;
@@ -37,34 +35,45 @@ export interface BlockStop {
   };
 }
 
+/** Input address shape for buildRoute (id + coords + optional display fields) */
+export interface BuildRouteAddress {
+  id: string;
+  lat: number;
+  lon: number;
+  house_number?: string;
+  street_name?: string;
+  formatted?: string;
+}
+
+/** Output stop: address fields + 0-based sequence_index */
+export interface OrderedAddress extends BuildRouteAddress {
+  sequence_index: number;
+}
+
+export interface BuildRouteOptions {
+  include_geometry?: boolean;
+  /** For splitIntoRuns gap (meters), default 50 */
+  threshold_meters?: number;
+  /** For sweep NN post-process (meters); if distance(block_i, block_i+1) > this, swap with closer block. Default 500. */
+  sweep_nn_threshold_m?: number;
+}
+
+export interface BuildRouteResult {
+  stops: OrderedAddress[];
+  geometry?: {
+    polyline: string;
+    distance_m: number;
+    time_sec: number;
+  };
+}
+
 export interface BlockRouteOptions {
-  /** Enable block optimization (default: true) */
-  enabled?: boolean;
-  /** Target number of block stops (default: 50) */
-  targetBlockSize?: number;
   /** Break run when distance between consecutive points > this (meters) (default: 50) */
   maxRunGapM?: number;
-  /** Minimum addresses to use block optimization (default: 80) */
-  minAddressesForBlocks?: number;
   /** Maximum addresses per block before splitting (default: 30) */
   maxAddressesPerBlock?: number;
   /** Enable walkway projection ordering within blocks (default: true) */
   useWalkwayProjection?: boolean;
-}
-
-export interface BlockOptimizationResult {
-  blockStops: BlockStop[];
-  orderedAddressIds: string[];
-  blockOrder: number[]; // Indices into blockStops
-  debug: {
-    nInputAddresses: number;
-    nBlockStops: number;
-    nOutputAddresses: number;
-    timings: {
-      buildBlocksMs: number;
-      orderWithinBlocksMs: number;
-    };
-  };
 }
 
 interface RunSegment {
@@ -137,134 +146,195 @@ export function buildBlockStops(
  * then orders one side ascending and the other descending so the route
  * sweeps up one side of the street and back on the other.
  * Tries walkway projection first, falls back to PCA-based ordering.
+ * When reverse=true (snake), the final order is reversed.
  */
 export async function orderAddressesWithinBlock(
   addresses: BlockAddress[],
   options: {
     useWalkwayProjection?: boolean;
+    reverse?: boolean;
   } = {}
 ): Promise<string[]> {
-  const { useWalkwayProjection = true } = options;
+  const { useWalkwayProjection = true, reverse = false } = options;
 
   if (addresses.length <= 1) {
     return addresses.map(a => a.id);
   }
 
-  // Try walkway projection ordering if enabled
+  let ordered: string[];
   if (useWalkwayProjection) {
     try {
       const walkwayOrder = await orderByWalkwayProjection(addresses);
-      if (walkwayOrder) {
-        return walkwayOrder;
-      }
-    } catch (e) {
-      // Fall through to PCA
+      ordered = walkwayOrder ?? orderByPCA(addresses);
+    } catch {
+      ordered = orderByPCA(addresses);
     }
+  } else {
+    ordered = orderByPCA(addresses);
   }
 
-  // Fallback: PCA-based ordering along principal axis
-  return orderByPCA(addresses);
+  if (reverse) {
+    ordered = [...ordered].reverse();
+  }
+  return ordered;
 }
 
 /**
- * Main block optimization pipeline
+ * Group addresses by street name. Returns Map<street_name, addresses>.
+ * Used internally by buildRoute; street_name can be undefined for unknown streets.
  */
-export async function optimizeWithBlocks(
-  addresses: BlockAddress[],
-  options: BlockRouteOptions = {}
-): Promise<BlockOptimizationResult> {
-  const startTime = Date.now();
-  
+export function groupAddressesByStreet(addresses: BlockAddress[]): Map<string | undefined, BlockAddress[]> {
+  return groupByStreet(addresses);
+}
+
+/**
+ * Order blocks by sweep angle from depot (atan2 ascending), then optionally
+ * apply nearest-neighbor post-process: if distance(block_i, block_i+1) > threshold_m,
+ * scan remaining blocks for a closer one and swap.
+ */
+export function orderBlocksBySweep(
+  blocks: BlockStop[],
+  depot: { lat: number; lon: number },
+  sweepNnThresholdM?: number
+): BlockStop[] {
+  if (blocks.length <= 1) return [...blocks];
+
+  const sorted = [...blocks].sort((a, b) => {
+    const angleA = Math.atan2(a.lat - depot.lat, a.lon - depot.lon);
+    const angleB = Math.atan2(b.lat - depot.lat, b.lon - depot.lon);
+    return angleA - angleB;
+  });
+
+  const threshold = sweepNnThresholdM ?? 500;
+  if (!Number.isFinite(threshold) || threshold <= 0) return sorted;
+
+  // NN post-process: for each adjacent pair, if too far, swap with closer block
+  const result = [...sorted];
+  for (let i = 0; i < result.length - 1; i++) {
+    const curr = result[i];
+    const next = result[i + 1];
+    const distToNext = turf.distance(
+      turf.point([curr.lon, curr.lat]),
+      turf.point([next.lon, next.lat]),
+      { units: 'meters' }
+    );
+    if (distToNext <= threshold) continue;
+
+    let bestIdx = i + 1;
+    let bestDist = distToNext;
+    for (let j = i + 2; j < result.length; j++) {
+      const d = turf.distance(
+        turf.point([curr.lon, curr.lat]),
+        turf.point([result[j].lon, result[j].lat]),
+        { units: 'meters' }
+      );
+      if (d < bestDist) {
+        bestDist = d;
+        bestIdx = j;
+      }
+    }
+    if (bestIdx !== i + 1) {
+      [result[i + 1], result[bestIdx]] = [result[bestIdx], result[i + 1]];
+    }
+  }
+  return result;
+}
+
+/**
+ * Single entry point: Street-Block-Sweep-Snake route.
+ * No CVRP, TSP, or Valhalla sequencing. Optional Valhalla only for polyline when include_geometry=true.
+ */
+export async function buildRoute(
+  addresses: BuildRouteAddress[],
+  depot: { lat: number; lon: number },
+  options: BuildRouteOptions = {}
+): Promise<BuildRouteResult> {
   const {
-    enabled = true,
-    targetBlockSize = 50,
-    minAddressesForBlocks = 80,
-    useWalkwayProjection = true
+    include_geometry = false,
+    threshold_meters = 50,
+    sweep_nn_threshold_m = 500
   } = options;
 
-  // Skip block optimization for small campaigns
-  if (!enabled || addresses.length < minAddressesForBlocks) {
-    const orderedIds = addresses.map(a => a.id);
-    return {
-      blockStops: [],
-      orderedAddressIds: orderedIds,
-      blockOrder: [],
-      debug: {
-        nInputAddresses: addresses.length,
-        nBlockStops: 0,
-        nOutputAddresses: orderedIds.length,
-        timings: {
-          buildBlocksMs: 0,
-          orderWithinBlocksMs: 0
-        }
-      }
-    };
+  const blockAddresses: BlockAddress[] = addresses.map(a => ({
+    id: a.id,
+    lon: a.lon,
+    lat: a.lat,
+    house_number: a.house_number,
+    street_name: a.street_name,
+    formatted: a.formatted
+  }));
+
+  const addressById = new Map(blockAddresses.map(a => [a.id, a]));
+
+  if (blockAddresses.length === 0) {
+    return { stops: [] };
+  }
+  if (blockAddresses.length === 1) {
+    const a = blockAddresses[0];
+    const stops: OrderedAddress[] = [{ ...a, sequence_index: 0 }];
+    return { stops };
   }
 
-  // Phase 1: Build block stops
-  const buildStart = Date.now();
-  const blockStops = buildBlockStops(addresses, {
-    targetBlockSize,
-    maxRunGapM: 50,
-    maxAddressesPerBlock: 30
-  });
-  const buildBlocksMs = Date.now() - buildStart;
+  // 1. Group by street
+  const streetGroups = groupByStreet(blockAddresses);
 
-  // Phase 2: Order addresses within each block
-  const orderStart = Date.now();
-  const blockAddressOrders = await Promise.all(
-    blockStops.map(async (block) => {
-      const blockAddresses = addresses.filter(a => block.addressIds.includes(a.id));
-      const orderedIds = await orderAddressesWithinBlock(blockAddresses, { useWalkwayProjection });
-      return { blockId: block.id, orderedIds };
-    })
+  // 2. For each street: splitIntoRuns → collect all runs as blocks
+  const runs: RunSegment[] = [];
+  for (const [, streetAddresses] of streetGroups) {
+    const streetRuns = splitIntoRuns(streetAddresses, threshold_meters);
+    for (const run of streetRuns) {
+      runs.push({ ...run, streetName: streetAddresses[0]?.street_name });
+    }
+  }
+
+  const blocks: BlockStop[] = runs.map((run, idx) =>
+    createBlockFromAddresses(run.addresses, run.streetName ? `${run.streetName}-${idx}` : `block-${idx}`)
   );
-  const orderWithinBlocksMs = Date.now() - orderStart;
 
-  // Create a map for quick lookup
-  const blockOrderMap = new Map(blockAddressOrders.map(bo => [bo.blockId, bo.orderedIds]));
+  // 3. Order blocks by sweep from depot (with optional NN post-process)
+  const orderedBlocks = orderBlocksBySweep(blocks, depot, sweep_nn_threshold_m);
 
-  // Return with empty blockOrder (will be filled after CVRP)
-  return {
-    blockStops,
-    orderedAddressIds: [], // Will be populated after CVRP
-    blockOrder: [],
-    debug: {
-      nInputAddresses: addresses.length,
-      nBlockStops: blockStops.length,
-      nOutputAddresses: 0,
-      timings: {
-        buildBlocksMs,
-        orderWithinBlocksMs
-      }
-    }
-  };
-}
-
-/**
- * Expand block stops into full ordered address list after CVRP
- */
-export function expandBlocksToAddresses(
-  blockStops: BlockStop[],
-  blockOrder: number[], // CVRP output: indices into blockStops
-  addressOrdersWithinBlocks: Map<string, string[]>
-): string[] {
+  // 4. Snake: order addresses within each block (alternate direction per block)
   const orderedIds: string[] = [];
-  
-  for (const blockIdx of blockOrder) {
-    const block = blockStops[blockIdx];
-    if (!block) continue;
-    
-    const blockOrderedIds = addressOrdersWithinBlocks.get(block.id);
-    if (blockOrderedIds) {
-      orderedIds.push(...blockOrderedIds);
-    } else {
-      // Fallback to original order
-      orderedIds.push(...block.addressIds);
+  for (let i = 0; i < orderedBlocks.length; i++) {
+    const block = orderedBlocks[i];
+    const blockAddrs = blockAddresses.filter(a => block.addressIds.includes(a.id));
+    const ids = await orderAddressesWithinBlock(blockAddrs, {
+      useWalkwayProjection: true,
+      reverse: i % 2 === 1
+    });
+    orderedIds.push(...ids);
+  }
+
+  // 5. Build stops with sequence_index (validation: every input appears exactly once)
+  const idSet = new Set(orderedIds);
+  for (const a of blockAddresses) {
+    if (!idSet.has(a.id)) throw new Error(`buildRoute: address ${a.id} missing from output`);
+  }
+  if (orderedIds.length !== blockAddresses.length) {
+    throw new Error(`buildRoute: output length ${orderedIds.length} != input ${blockAddresses.length}`);
+  }
+
+  const stops: OrderedAddress[] = orderedIds.map((id, seq) => {
+    const a = addressById.get(id);
+    if (!a) throw new Error(`buildRoute: unknown id ${id}`);
+    return { ...a, sequence_index: seq };
+  });
+
+  let geometry: BuildRouteResult['geometry'];
+  if (include_geometry && stops.length >= 2) {
+    try {
+      const orderedCoords = stops
+        .sort((x, y) => x.sequence_index - y.sequence_index)
+        .map(s => ({ lat: s.lat, lon: s.lon }));
+      const geom = await RoutingService.getRouteGeometry(orderedCoords);
+      geometry = { polyline: geom.polyline, distance_m: geom.distance_m, time_sec: geom.time_sec };
+    } catch (e) {
+      console.warn('[BlockRoutingService] getRouteGeometry failed:', e);
     }
   }
-  
-  return orderedIds;
+
+  return { stops, geometry };
 }
 
 // ==================== Internal Helper Functions ====================
@@ -471,11 +541,13 @@ async function orderByWalkwayProjection(addresses: BlockAddress[]): Promise<stri
     if (error || !segment) {
       return null;
     }
-    
+    const seg = Array.isArray(segment) ? segment[0] : segment;
+    if (!seg) return null;
+
     const projections = addresses.map(addr => {
       const projected = projectPointOntoSegment(
         { lon: addr.lon, lat: addr.lat },
-        segment
+        seg
       );
       return {
         id: addr.id,

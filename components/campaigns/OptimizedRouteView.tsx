@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { useTheme } from '@/lib/theme-provider';
+import { getMapboxToken } from '@/lib/mapbox';
 import { MapInfoButton } from '@/components/map/MapInfoButton';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -134,7 +135,7 @@ export function OptimizedRouteView({ campaignId, addresses, onAddressesUpdate }:
   useEffect(() => {
     if (!mapContainer.current || map.current) return;
 
-    const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || 'pk.eyJ1IjoiZmx5cnBybyIsImEiOiJjbWd6dzZsbm0wYWE3ZWpvbjIwNGVteDV6In0.lvbLszJ7ADa_Cck3A8hZEQ';
+    const token = getMapboxToken();
     mapboxgl.accessToken = token;
 
     map.current = new mapboxgl.Map({

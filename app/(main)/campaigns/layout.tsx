@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { CampaignListSidebar } from '@/components/campaigns/CampaignListSidebar';
-import { CreateHubView } from '@/components/CreateHubView';
 
 const CAMPAIGN_SIDEBAR_COLLAPSED_KEY = 'flyr-campaign-sidebar-collapsed';
 const SIDEBAR_WIDTH = 280;
@@ -13,7 +13,7 @@ export default function CampaignsLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const [showCreateHub, setShowCreateHub] = useState(false);
+  const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
   const [hoverExpanded, setHoverExpanded] = useState(false);
 
@@ -36,7 +36,7 @@ export default function CampaignsLayout({
   return (
     <div className="flex flex-1 h-full min-h-0 w-full overflow-hidden">
       <CampaignListSidebar
-        onNewCampaign={() => setShowCreateHub(true)}
+        onNewCampaign={() => router.push('/campaigns/create')}
         collapsed={collapsed}
         hoverExpanded={hoverExpanded}
         onToggleCollapse={() => setCollapsedPersisted(!collapsed)}
@@ -48,7 +48,6 @@ export default function CampaignsLayout({
       <div className="flex-1 min-w-0 overflow-auto bg-background">
         {children}
       </div>
-      <CreateHubView open={showCreateHub} onClose={() => setShowCreateHub(false)} />
     </div>
   );
 }

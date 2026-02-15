@@ -134,7 +134,11 @@ export async function POST(request: NextRequest) {
     if (!fubResponse.ok) {
       const errorData = await fubResponse.text();
       console.error('FUB API error:', errorData);
-      
+
+      const isExpired =
+        fubResponse.status === 401 &&
+        /expired|renew|refresh/i.test(errorData);
+
       // Update connection with error
       await supabase
         .from('crm_connections')
@@ -144,6 +148,16 @@ export async function POST(request: NextRequest) {
         })
         .eq('user_id', user.id)
         .eq('provider', 'followupboss');
+
+      if (isExpired) {
+        return NextResponse.json(
+          {
+            error: 'Follow Up Boss API key has expired. Reconnect in Settings → Integrations.',
+            code: 'FUB_TOKEN_EXPIRED',
+          },
+          { status: 401 }
+        );
+      }
 
       return NextResponse.json(
         { error: `Failed to push lead to Follow Up Boss: ${fubResponse.status}` },

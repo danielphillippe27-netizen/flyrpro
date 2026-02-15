@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import type { CampaignType } from '@/types/database';
 import { createClient } from '@/lib/supabase/client';
 import { useTheme } from '@/lib/theme-provider';
+import { getMapboxToken } from '@/lib/mapbox';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import MapboxDraw from '@mapbox/mapbox-gl-draw';
@@ -54,7 +55,7 @@ export default function CreateCampaignPage() {
   useEffect(() => {
     if (!mapContainer.current || map.current) return;
 
-    const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || 'pk.eyJ1IjoiZmx5cnBybyIsImEiOiJjbWd6dzZsbm0wYWE3ZWpvbjIwNGVteDV6In0.lvbLszJ7ADa_Cck3A8hZEQ';
+    const token = getMapboxToken();
     mapboxgl.accessToken = token;
 
     // Initialize map (style follows app theme)

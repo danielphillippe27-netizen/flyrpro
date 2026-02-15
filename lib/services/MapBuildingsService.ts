@@ -245,7 +245,7 @@ export class MapBuildingsService {
           const { error: updateError } = await this.client
             .from('map_buildings')
             .update({ address_id: address.id })
-            .eq('gers_id', address.gers_id)
+            .eq('source_id', address.source_id)
             .eq('campaign_id', campaignId);
 
           if (updateError) {

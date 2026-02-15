@@ -139,7 +139,7 @@ types/
 ### Environment Variables
 Add to `.env.local`:
 ```
-NEXT_PUBLIC_MAPBOX_TOKEN=pk.eyJ1IjoiZmx5cnBybyIsImEiOiJjbWd6dzZsbm0wYWE3ZWpvbjIwNGVteDV6In0.lvbLszJ7ADa_Cck3A8hZEQ
+NEXT_PUBLIC_MAPBOX_TOKEN=<your-mapbox-public-token>
 ```
 
 ### Database Schema

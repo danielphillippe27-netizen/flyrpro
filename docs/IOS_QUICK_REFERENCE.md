@@ -2,30 +2,31 @@
 
 ## 🎯 Quick Start
 
-When user taps a building on the map, you get a **GERS ID** (UUID). Here's how to fetch all related data:
+When the user taps a building on the map, you get a **GERS ID string** (from `feature.properties.gers_id` or feature id). **Use it as a string** — do not convert to UUID. Production stores this string in `building_address_links.building_id`.
 
 ## 📊 Complete Data Flow
 
 ```
 User Taps Building
       ↓
-  GERS ID (UUID)
+  GERS ID (String from map)
       ↓
 Query Strategy:
-1. Try campaign_addresses WHERE gers_id = ? 
-2. If not found, try building_address_links
-3. Fetch contacts WHERE address_id = ?
-4. Fetch building_stats WHERE gers_id = ?
+1. If you have addressId (e.g. address tap): fetch campaign_addresses by address_id.
+2. Else: campaign_addresses WHERE gers_id = ? OR building_gers_id = ? (use string).
+3. Else: building_address_links WHERE building_id = gersIdString (no map_buildings lookup).
+4. Fetch contacts WHERE address_id = ?
+5. Fetch building_stats WHERE gers_id = ? (string)
       ↓
 Display LocationCard
 ```
 
 ## 🔑 Key Database Queries
 
-### Query 1: Get Address from GERS ID
+### Query 1: Get Address from GERS ID (string)
 
 ```swift
-// Direct lookup (fastest path)
+// gersId: String (from map feature)
 let address = try await supabase
     .from("campaign_addresses")
     .select("""
@@ -42,23 +43,17 @@ let address = try await supabase
         qr_code_base64
     """)
     .eq("campaign_id", value: campaignId.uuidString)
-    .or("gers_id.eq.\(gersId.uuidString),building_gers_id.eq.\(gersId.uuidString)")
+    .or("gers_id.eq.\(gersId),building_gers_id.eq.\(gersId)")
     .maybeSingle()
     .execute()
 ```
 
-### Query 2: Fallback via Building Link (if Query 1 returns nil)
+### Query 2: Link table by GERS ID string (no map_buildings lookup)
+
+In production, `building_address_links.building_id` is the **Overture GERS ID string**, not `map_buildings.id`. Query the link table directly with the GERS ID from the map:
 
 ```swift
-// Step 2a: Find building ID
-let building = try await supabase
-    .from("map_buildings")
-    .select("id, gers_id")
-    .eq("gers_id", value: gersId.uuidString)
-    .maybeSingle()
-    .execute()
-
-// Step 2b: Find linked address
+// gersId: String (same as from map feature — do NOT use map_buildings.id)
 let link = try await supabase
     .from("building_address_links")
     .select("""
@@ -78,10 +73,10 @@ let link = try await supabase
         )
     """)
     .eq("campaign_id", value: campaignId.uuidString)
-    .eq("building_id", value: building.id.uuidString)
-    .eq("is_primary", value: true)
+    .eq("building_id", value: gersId)
     .maybeSingle()
     .execute()
+// If table has is_primary: .eq("is_primary", value: true)
 ```
 
 ### Query 3: Get Residents/Contacts
@@ -99,10 +94,11 @@ let contacts = try await supabase
 ### Query 4: Get Building Stats (Optional - for additional metadata)
 
 ```swift
+// gersId: String
 let stats = try await supabase
     .from("building_stats")
     .select("status, scans_total, scans_today, last_scan_at")
-    .eq("gers_id", value: gersId.uuidString)
+    .eq("gers_id", value: gersId)
     .eq("campaign_id", value: campaignId.uuidString)
     .maybeSingle()
     .execute()

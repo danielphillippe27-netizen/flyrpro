@@ -148,18 +148,17 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // If still no addressId, we can't track the scan properly
-    // But we still redirect to welcome so user doesn't see an error
+    // If still no addressId, redirect to campaign URL or app URL (no welcome page)
     if (!addressId) {
-      console.warn('No address ID resolved, redirecting to welcome without tracking');
-      const welcomeUrl = new URL('/welcome', request.url);
-      if (campaignId) welcomeUrl.searchParams.set('campaignId', campaignId);
-      if (addressLine) welcomeUrl.searchParams.set('address', addressLine);
-      if (city) welcomeUrl.searchParams.set('city', city);
-      if (province) welcomeUrl.searchParams.set('province', province);
-      if (postalCode) welcomeUrl.searchParams.set('postalCode', postalCode);
-      console.log('Redirecting to welcome with params:', { campaignId, addressLine, city, province, postalCode, finalUrl: welcomeUrl.toString() });
-      return NextResponse.redirect(welcomeUrl, { status: 302 });
+      console.warn('No address ID resolved, redirecting to campaign or app URL without tracking');
+      const fallbackUrl = process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin;
+      if (campaignId) {
+        const { data: camp } = await supabase.from('campaigns').select('video_url').eq('id', campaignId).single();
+        if (camp?.video_url?.trim()) {
+          return NextResponse.redirect(camp.video_url.trim(), { status: 302 });
+        }
+      }
+      return NextResponse.redirect(fallbackUrl, { status: 302 });
     }
 
     // Fetch full address record to get campaign_id and other details
@@ -171,10 +170,8 @@ export async function GET(request: NextRequest) {
 
     if (addressError || !address) {
       console.error('Error fetching address:', addressError);
-      // Still redirect to welcome, but include the ID we tried
-      const welcomeUrl = new URL('/welcome', request.url);
-      welcomeUrl.searchParams.set('id', addressId);
-      return NextResponse.redirect(welcomeUrl, { status: 302 });
+      const fallbackUrl = process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin;
+      return NextResponse.redirect(fallbackUrl, { status: 302 });
     }
 
     console.log('Processing scan for address:', { addressId: address.id, campaignId: address.campaign_id });
@@ -286,25 +283,19 @@ export async function GET(request: NextRequest) {
       console.error('Error fetching campaign:', campaignError);
     }
 
-    // Redirect based on campaign configuration
+    // Redirect to campaign URL (video_url) or app URL — no welcome page
     if (campaign?.video_url && campaign.video_url.trim() !== '') {
-      console.log('Redirecting to video URL:', campaign.video_url);
-      return NextResponse.redirect(campaign.video_url, { status: 302 });
+      console.log('Redirecting to campaign URL:', campaign.video_url);
+      return NextResponse.redirect(campaign.video_url.trim(), { status: 302 });
     }
 
-    // Fallback: Redirect to welcome page with address ID
-    const welcomeUrl = new URL('/welcome', request.url);
-    welcomeUrl.searchParams.set('id', addressId);
-    console.log('Redirecting to welcome page:', welcomeUrl.toString());
-    return NextResponse.redirect(welcomeUrl, { status: 302 });
+    const fallbackUrl = process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin;
+    console.log('Redirecting to app URL (no campaign URL set):', fallbackUrl);
+    return NextResponse.redirect(fallbackUrl, { status: 302 });
     
   } catch (error) {
     console.error('Error in scan handler:', error);
-    // Fallback to welcome page on any error, preserving params for debugging
-    const welcomeUrl = new URL('/welcome', request.url);
-    if (rawId) welcomeUrl.searchParams.set('id', rawId);
-    if (campaignId) welcomeUrl.searchParams.set('campaignId', campaignId);
-    if (addressLine) welcomeUrl.searchParams.set('address', addressLine);
-    return NextResponse.redirect(welcomeUrl, { status: 302 });
+    const fallbackUrl = process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin;
+    return NextResponse.redirect(fallbackUrl, { status: 302 });
   }
 }

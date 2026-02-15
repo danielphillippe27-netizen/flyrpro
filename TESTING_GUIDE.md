@@ -18,7 +18,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 
 # Mapbox (Required - token is already provided)
-NEXT_PUBLIC_MAPBOX_TOKEN=pk.eyJ1IjoiZmx5cnBybyIsImEiOiJjbWd6dzZsbm0wYWE3ZWpvbjIwNGVteDV6In0.lvbLszJ7ADa_Cck3A8hZEQ
+NEXT_PUBLIC_MAPBOX_TOKEN=<your-mapbox-public-token>
 
 # Stripe (Optional - for payments)
 STRIPE_SECRET_KEY=sk_test_...

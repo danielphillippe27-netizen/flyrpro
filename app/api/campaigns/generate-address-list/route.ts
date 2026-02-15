@@ -255,8 +255,15 @@ export async function POST(request: NextRequest) {
         throw new Error('No addresses with gers_id found. All addresses must have a gers_id from Overture.');
       }
 
+      // Deduplicate by logical address (same formatted + postal_code = one row)
+      // Source can return the same address with different gers_ids (e.g. tile overlap)
       const uniqueInsertData = Array.from(
-        new Map(itemsWithGersId.map((item) => [`${item.campaign_id}-${item.gers_id}`, item])).values()
+        new Map(
+          itemsWithGersId.map((item) => {
+            const key = `${item.campaign_id}-${(item.formatted ?? '').toLowerCase().trim()}-${(item.postal_code ?? '').toLowerCase().trim()}`;
+            return [key, item] as const;
+          })
+        ).values()
       );
 
       const { data: insertedData, error: insertError } = await supabaseAdmin

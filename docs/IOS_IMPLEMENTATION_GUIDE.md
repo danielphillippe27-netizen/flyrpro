@@ -82,19 +82,20 @@ CREATE TABLE campaign_addresses (
 ```
 
 #### 3. `building_address_links`
-The "stable linker" that connects buildings to addresses.
+The "stable linker" that connects buildings to addresses. **Critical for iOS:** `building_id` is the **Overture GERS ID as TEXT** (the same ID from the map feature), not a UUID to `map_buildings`. Use this table to resolve building tap → address by querying with `campaign_id` and `building_id` = GERS ID string.
 
 ```sql
 CREATE TABLE building_address_links (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  building_id UUID NOT NULL REFERENCES map_buildings(id),
-  address_id UUID NOT NULL REFERENCES campaign_addresses(id),
-  campaign_id UUID NOT NULL REFERENCES campaigns(id),
-  match_method TEXT,                 -- 'COVERS', 'NEAREST', etc.
-  is_primary BOOLEAN DEFAULT false,  -- Primary link for this building
-  confidence_score NUMERIC,          -- Match confidence (0-1)
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  UNIQUE(building_id, address_id, campaign_id)
+  campaign_id UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  building_id TEXT NOT NULL,          -- Overture GERS ID (string from map)
+  address_id UUID NOT NULL REFERENCES campaign_addresses(id) ON DELETE CASCADE,
+  match_type TEXT,                    -- 'containment_verified', 'proximity_verified', etc.
+  confidence FLOAT,
+  distance_meters FLOAT,
+  street_match_score FLOAT,
+  matched_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(campaign_id, address_id)     -- One link per address
 );
 ```
 
@@ -226,76 +227,76 @@ class BuildingDataService: ObservableObject {
         }
         
         do {
-            // Step 1: Try direct address lookup by GERS ID
-            let addressQuery = supabase
-                .from("campaign_addresses")
-                .select("""
-                    id,
-                    house_number,
-                    street_name,
-                    formatted,
-                    locality,
-                    region,
-                    postal_code,
-                    gers_id,
-                    scans,
-                    last_scanned_at,
-                    qr_code_base64
-                """)
+            // Step 1 (same as web): Resolve building → address via building_address_links.
+            // building_id in this table is the Overture GERS ID string (from the map), NOT map_buildings.id.
+            let gersIdString = gersId.uuidString
+            let linkQuery = supabase
+                .from("building_address_links")
+                .select("address_id")
                 .eq("campaign_id", value: campaignId.uuidString)
-                .or("gers_id.eq.\(gersId.uuidString),building_gers_id.eq.\(gersId.uuidString)")
-            
-            let addressResponse: [CampaignAddress]? = try await addressQuery.execute().value
-            var resolvedAddress = addressResponse?.first
-            
-            // Step 2: If no direct match, try via building_address_links
+                .eq("building_id", value: gersIdString)
+
+            let linkResponse: [[String: String]]? = try await linkQuery.execute().value
+            let addressIds = (linkResponse ?? []).compactMap { $0["address_id"] }
+
+            var resolvedAddress: CampaignAddress?
+            if !addressIds.isEmpty {
+                // Fetch addresses for these IDs (same as web useBuildingData)
+                let addressQuery = supabase
+                    .from("campaign_addresses")
+                    .select("""
+                        id,
+                        house_number,
+                        street_name,
+                        formatted,
+                        locality,
+                        region,
+                        postal_code,
+                        gers_id,
+                        scans,
+                        last_scanned_at,
+                        qr_code_base64
+                    """)
+                    .eq("campaign_id", value: campaignId.uuidString)
+                    .in("id", values: addressIds)
+
+                let addressResponse: [CampaignAddress]? = try await addressQuery.execute().value
+                resolvedAddress = addressResponse?.first
+                await MainActor.run {
+                    var current = buildingData
+                    current.buildingExists = true
+                    buildingData = current
+                }
+            }
+
+            // Step 2 (fallback): If no link row, try direct campaign_addresses.gers_id match
             if resolvedAddress == nil {
-                // First find the building
-                let buildingQuery = supabase
-                    .from("map_buildings")
-                    .select("id, gers_id")
-                    .eq("gers_id", value: gersId.uuidString)
-                
-                let buildingResponse: [MapBuilding]? = try await buildingQuery.execute().value
-                
-                if let building = buildingResponse?.first {
+                let addressQuery = supabase
+                    .from("campaign_addresses")
+                    .select("""
+                        id,
+                        house_number,
+                        street_name,
+                        formatted,
+                        locality,
+                        region,
+                        postal_code,
+                        gers_id,
+                        scans,
+                        last_scanned_at,
+                        qr_code_base64
+                    """)
+                    .eq("campaign_id", value: campaignId.uuidString)
+                    .or("gers_id.eq.\(gersIdString),building_gers_id.eq.\(gersIdString))")
+
+                let addressResponse: [CampaignAddress]? = try await addressQuery.execute().value
+                resolvedAddress = addressResponse?.first
+                if resolvedAddress != nil {
                     await MainActor.run {
                         var current = buildingData
                         current.buildingExists = true
                         buildingData = current
                     }
-                    
-                    // Find linked address via building_address_links
-                    let linkQuery = supabase
-                        .from("building_address_links")
-                        .select("""
-                            address_id,
-                            campaign_addresses!inner (
-                                id,
-                                house_number,
-                                street_name,
-                                formatted,
-                                locality,
-                                region,
-                                postal_code,
-                                gers_id,
-                                scans,
-                                last_scanned_at,
-                                qr_code_base64
-                            )
-                        """)
-                        .eq("campaign_id", value: campaignId.uuidString)
-                        .eq("building_id", value: building.id.uuidString)
-                        .eq("is_primary", value: true)
-                    
-                    let linkResponse: [BuildingAddressLink]? = try await linkQuery.execute().value
-                    resolvedAddress = linkResponse?.first?.campaignAddress
-                }
-            } else {
-                await MainActor.run {
-                    var current = buildingData
-                    current.buildingExists = true
-                    buildingData = current
                 }
             }
             

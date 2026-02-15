@@ -1827,7 +1827,7 @@ SUPABASE_URL=https://kfnsnwqylsdsbgnwgxva.supabase.co
 SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 
 # Mapbox
-MAPBOX_ACCESS_TOKEN=pk.eyJ1IjoiZmx5cnBybyIsImEiOi...
+MAPBOX_ACCESS_TOKEN=<your-mapbox-public-token>
 
 # Stripe (if implementing payments)
 STRIPE_PUBLISHABLE_KEY=pk_live_...
@@ -1949,7 +1949,7 @@ mapView.mapboxMap.setFeatureState(
 
 ### 12.6 API Calls to Web Backend
 
-For operations not available via Supabase directly, call the web API:
+For operations not available via Supabase directly, call the web API. For Follow Up Boss integration and connecting from the iOS app, see [docs/FOLLOW_UP_BOSS_AND_IOS_GUIDE.md](docs/FOLLOW_UP_BOSS_AND_IOS_GUIDE.md).
 
 ```swift
 // Example: Generate QR codes
@@ -1968,7 +1968,46 @@ func generateQRCodes(campaignId: String) async throws {
 }
 ```
 
-### 12.7 Key Differences from Web
+### 12.7 Building–address linking (how the web does it → iOS)
+
+Addresses link easily because they live in `campaign_addresses` and are fetched by campaign. **Buildings** are linked to addresses only through the **`building_address_links`** table. The web uses this flow; iOS must do the same.
+
+**Important:** In production, `building_address_links.building_id` is **TEXT** — the **Overture GERS ID string** from the map (e.g. from `feature.properties.gers_id`). It is **not** a UUID referencing `map_buildings.id`. The web never looks up `map_buildings` to resolve building → address; it queries the link table by GERS ID.
+
+**Web flow (e.g. `useBuildingData`):**
+
+1. User clicks a building on the map → the app has the building’s **GERS ID string** (from the map feature, e.g. `properties.gers_id`).
+2. Query **`building_address_links`** with:
+   - `campaign_id` = current campaign
+   - `building_id` = **that GERS ID string** (same as from the map).
+3. From the result, read `address_id` (and possibly multiple rows for multi-unit buildings).
+4. Fetch **`campaign_addresses`** for those `address_id` values.
+5. Use those addresses for the detail panel (contacts, QR status, etc.).
+
+**Correct schema for `building_address_links` (production):**
+
+- `building_id` **TEXT** NOT NULL — Overture GERS ID (string from the map).
+- `address_id` UUID REFERENCES `campaign_addresses(id)`.
+- `campaign_id` UUID REFERENCES `campaigns(id)`.
+- UNIQUE(`campaign_id`, `address_id`) — one link per address.
+- (Also: `match_type`, `confidence`, `distance_meters`, etc.)
+
+**iOS translation:** See also [docs/IOS_GERS_ID_FIX_CHECKLIST.md](docs/IOS_GERS_ID_FIX_CHECKLIST.md) for a step-by-step fix checklist.
+
+1. When the user taps a building, get the **GERS ID string** from the map feature (e.g. `feature.properties.gers_id`). Use that string as-is (do not use `map_buildings.id`).
+2. **First** query `building_address_links`:
+   - `campaign_id` = current campaign UUID string
+   - `building_id` = GERS ID **string** (the one from the map).
+3. If you get one or more rows, take their `address_id` values and fetch `campaign_addresses` for those IDs. That gives you the linked address(es).
+4. **Optional fallback:** If you get no links, you can try `campaign_addresses` where `gers_id` (or `gers_id_uuid`) equals the same GERS ID; the web’s primary path is the link table, so this is only a fallback.
+
+Do **not** on iOS:
+
+- Query `map_buildings` by `gers_id` and then use `map_buildings.id` as `building_id` in `building_address_links`. The link table is keyed by GERS ID string, not by `map_buildings.id`.
+
+Links are created during **provisioning** by the **Stable Linker** (Gold Standard spatial join): addresses are inserted first, then buildings are downloaded from S3 and matched to addresses in memory; the result is written into `building_address_links` with `building_id` = building’s GERS ID string. So after provision, every matched address has a row in `building_address_links` with the correct `building_id` (GERS ID string).
+
+### 12.8 Key Differences from Web
 
 | Feature | Web (Next.js) | iOS (Swift) |
 |---------|---------------|-------------|

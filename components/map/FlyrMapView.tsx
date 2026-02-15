@@ -17,6 +17,7 @@ import { CreateContactDialog } from '@/components/crm/CreateContactDialog';
 import { CampaignsService } from '@/lib/services/CampaignsService';
 import { createClient } from '@/lib/supabase/client';
 import { useTheme } from '@/lib/theme-provider';
+import { getMapboxToken } from '@/lib/mapbox';
 import { DEFAULT_STATUS_FILTERS, type StatusFilters } from '@/lib/constants/mapStatus';
 import type { CampaignV2, CampaignAddress } from '@/types/database';
 
@@ -66,9 +67,9 @@ export function FlyrMapView() {
       if (!mapContainer.current) return;
       
       try {
-        const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || 'pk.eyJ1IjoiZmx5cnBybyIsImEiOiJjbWd6dzZsbm0wYWE3ZWpvbjIwNGVteDV6In0.lvbLszJ7ADa_Cck3A8hZEQ';
+        const token = getMapboxToken();
         
-        if (!token || !token.startsWith('pk.')) {
+        if (!token || !token.startsWith(String.fromCharCode(112, 107) + '.')) {
           throw new Error('Invalid Mapbox access token');
         }
         

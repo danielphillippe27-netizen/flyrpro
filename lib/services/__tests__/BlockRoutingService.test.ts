@@ -1,19 +1,36 @@
 /**
  * BlockRoutingService Unit Tests
- * 
+ *
  * Run with: npx tsx lib/services/__tests__/BlockRoutingService.test.ts
  */
 
-import { buildBlockStops, orderAddressesWithinBlock } from '../BlockRoutingService';
-import type { BlockAddress } from '../BlockRoutingService';
+import {
+  buildBlockStops,
+  orderAddressesWithinBlock,
+  buildRoute,
+  orderBlocksBySweep,
+  groupAddressesByStreet,
+} from '../BlockRoutingService';
+import type { BlockAddress, BlockStop } from '../BlockRoutingService';
 
-// Simple test runner
 let testsPassed = 0;
 let testsFailed = 0;
 
 function test(name: string, fn: () => void) {
   try {
     fn();
+    console.log(`✓ ${name}`);
+    testsPassed++;
+  } catch (e: any) {
+    console.error(`✗ ${name}`);
+    console.error(`  ${e.message}`);
+    testsFailed++;
+  }
+}
+
+async function testAsync(name: string, fn: () => Promise<void>) {
+  try {
+    await fn();
     console.log(`✓ ${name}`);
     testsPassed++;
   } catch (e: any) {
@@ -181,7 +198,6 @@ test('orderAddressesWithinBlock: handles single address', async () => {
 
 // Test 12: Target block size splitting
 test('buildBlockStops: respects target block size', () => {
-  // Create many addresses on same street
   const manyAddresses: BlockAddress[] = [];
   for (let i = 0; i < 100; i++) {
     manyAddresses.push({
@@ -192,21 +208,79 @@ test('buildBlockStops: respects target block size', () => {
       street_name: 'Main St'
     });
   }
-  
   const blocks = buildBlockStops(manyAddresses, { targetBlockSize: 10 });
-  
-  // Should have roughly target block size (allowing for merge tolerance)
   assertTrue(blocks.length <= 15, `Should have at most 15 blocks, got ${blocks.length}`);
   assertTrue(blocks.length >= 3, `Should have at least 3 blocks, got ${blocks.length}`);
 });
 
-// ==================== Summary ====================
+// Test 13: groupAddressesByStreet
+test('groupAddressesByStreet: groups by street name', () => {
+  const groups = groupAddressesByStreet(twoStreets);
+  assertTrue(groups.has('Main St'), 'Should have Main St');
+  assertTrue(groups.has('Oak Ave'), 'Should have Oak Ave');
+  assertEqual(groups.get('Main St')!.length, 2, 'Main St should have 2');
+  assertEqual(groups.get('Oak Ave')!.length, 2, 'Oak Ave should have 2');
+});
 
-console.log(`\n${'='.repeat(50)}`);
-console.log(`Tests passed: ${testsPassed}`);
-console.log(`Tests failed: ${testsFailed}`);
-console.log(`${'='.repeat(50)}`);
+// Test 14: orderBlocksBySweep sorts by angle from depot
+test('orderBlocksBySweep: sorts blocks by angle from depot', () => {
+  const blocks: BlockStop[] = [
+    { id: 'b1', lon: 1, lat: 0, addressIds: ['1'], metadata: { street_name: 'A', count: 1, bbox: [0, 0, 1, 1] } },
+    { id: 'b2', lon: 0, lat: 1, addressIds: ['2'], metadata: { street_name: 'B', count: 1, bbox: [0, 0, 1, 1] } },
+    { id: 'b3', lon: -1, lat: 0, addressIds: ['3'], metadata: { street_name: 'C', count: 1, bbox: [0, 0, 1, 1] } },
+  ];
+  const depot = { lat: 0, lon: 0 };
+  const ordered = orderBlocksBySweep(blocks, depot);
+  assertEqual(ordered.length, 3, 'Should have 3 blocks');
+  // atan2(0,1)=0, atan2(1,0)=π/2, atan2(0,-1)=π -> order by angle ascending: b1 (0), b2 (π/2), b3 (π)
+  assertEqual(ordered[0].id, 'b1', 'First by angle should be b1');
+  assertEqual(ordered[1].id, 'b2', 'Second should be b2');
+  assertEqual(ordered[2].id, 'b3', 'Third should be b3');
+});
 
-if (testsFailed > 0) {
-  process.exit(1);
+// Test 16: buildRoute end-to-end (no geometry) - run in async block below
+// Test 17: buildRoute two streets - run in async block below
+// Test 18: buildRoute empty input - run in async block below
+
+// ==================== Summary (async tests run first) ====================
+
+async function run() {
+  await testAsync('orderAddressesWithinBlock: reverse reverses order', async () => {
+    const forward = await orderAddressesWithinBlock(linearStreet, { useWalkwayProjection: false, reverse: false });
+    const reversed = await orderAddressesWithinBlock(linearStreet, { useWalkwayProjection: false, reverse: true });
+    assertEqual(forward.length, 5, 'Forward should have 5');
+    assertEqual(reversed.length, 5, 'Reversed should have 5');
+    assertEqual([...reversed].reverse(), forward, 'Reversed should be reverse of forward');
+  });
+  await testAsync('buildRoute: returns all addresses once with contiguous sequence_index', async () => {
+    const addresses = linearStreet.map(a => ({ ...a }));
+    const depot = { lat: 40.7128, lon: -74.0060 };
+    const result = await buildRoute(addresses, depot, { include_geometry: false });
+    assertEqual(result.stops.length, 5, 'Should have 5 stops');
+    const ids = new Set(result.stops.map(s => s.id));
+    assertEqual(ids.size, 5, 'All IDs unique');
+    const seqs = result.stops.map(s => s.sequence_index).sort((a, b) => a - b);
+    assertEqual(seqs, [0, 1, 2, 3, 4], 'sequence_index should be 0..4');
+  });
+  await testAsync('buildRoute: two streets produce two blocks in sweep order', async () => {
+    const addresses = twoStreets.map(a => ({ ...a }));
+    const depot = { lat: 40.7128, lon: -74.0065 };
+    const result = await buildRoute(addresses, depot, { include_geometry: false });
+    assertEqual(result.stops.length, 4, 'Should have 4 stops');
+    const idSet = new Set(addresses.map(a => a.id));
+    result.stops.forEach(s => assertTrue(idSet.has(s.id), `Stop ${s.sequence_index} should be in input`));
+    assertEqual(new Set(result.stops.map(s => s.id)).size, 4, 'No duplicates');
+  });
+  await testAsync('buildRoute: empty input returns empty stops', async () => {
+    const result = await buildRoute([], { lat: 0, lon: 0 }, {});
+    assertEqual(result.stops.length, 0, 'Should return no stops');
+  });
+
+  console.log(`\n${'='.repeat(50)}`);
+  console.log(`Tests passed: ${testsPassed}`);
+  console.log(`Tests failed: ${testsFailed}`);
+  console.log(`${'='.repeat(50)}`);
+  if (testsFailed > 0) process.exit(1);
 }
+
+run();

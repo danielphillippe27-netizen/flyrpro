@@ -11,6 +11,7 @@ import { LocationCard } from '@/components/map/LocationCard';
 import { CreateContactDialog } from '@/components/crm/CreateContactDialog';
 import { createClient } from '@/lib/supabase/client';
 import { useTheme } from '@/lib/theme-provider';
+import { getMapboxToken } from '@/lib/mapbox';
 import { DEFAULT_STATUS_FILTERS, MAP_STATUS_CONFIG, type StatusFilters } from '@/lib/constants/mapStatus';
 
 const MAP_STYLES = {
@@ -107,7 +108,7 @@ export function CampaignDetailMapView({
       }
 
       initAttemptedRef.current = true;
-      const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || 'pk.eyJ1IjoiZmx5cnBybyIsImEiOiJjbWd6dzZsbm0wYWE3ZWpvbjIwNGVteDV6In0.lvbLszJ7ADa_Cck3A8hZEQ';
+      const token = getMapboxToken();
       mapboxgl.accessToken = token;
 
       // Helper to get initial center from addresses (GeoJSON-first approach)
@@ -367,15 +368,18 @@ export function CampaignDetailMapView({
         const circle = turf.circle(center, radiusMeters / 1000, { units: 'kilometers', steps });
         const poly = circle.geometry;
         if (poly.type !== 'Polygon') continue;
+        const scansTotal = addr.scans ?? 0;
+        const qrScanned = scansTotal > 0 || !!addr.last_scanned_at;
+        const status = addr.visited ? 'visited' : 'not_visited';
         features.push({
           type: 'Feature',
           geometry: poly,
           properties: {
             feature_id: addr.id,
             address_id: addr.id,
-            status: 'not_visited',
-            scans_total: 0,
-            qr_scanned: false,
+            status,
+            scans_total: scansTotal,
+            qr_scanned: qrScanned,
           },
         });
       }

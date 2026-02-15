@@ -2,14 +2,12 @@
 
 import { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { CreateHubView } from '@/components/CreateHubView';
 import { HomeDashboardView } from '@/components/home/HomeDashboardView';
 import { getClientAsync } from '@/lib/supabase/client';
 
 function HomePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [showCreateHub, setShowCreateHub] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
 
@@ -93,8 +91,7 @@ function HomePageContent() {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-background">
-      <HomeDashboardView onCreateCampaign={() => setShowCreateHub(true)} />
-      <CreateHubView open={showCreateHub} onClose={() => setShowCreateHub(false)} />
+      <HomeDashboardView onCreateCampaign={() => router.push('/campaigns/create')} />
     </div>
   );
 }

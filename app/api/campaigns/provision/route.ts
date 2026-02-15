@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { TileLambdaService } from '@/lib/services/TileLambdaService';
 import { RoutingService } from '@/lib/services/RoutingService';
+import { buildRoute } from '@/lib/services/BlockRoutingService';
 import { StableLinkerService, DataIntegrityError } from '@/lib/services/StableLinkerService';
 import { TownhouseSplitterService } from '@/lib/services/TownhouseSplitterService';
 
@@ -134,10 +135,24 @@ export async function POST(request: NextRequest) {
 
       // Step 3: Convert to lean campaign_addresses format
       console.log('[Provision] Step 3: Converting to lean format...');
-      const addressesToInsert = TileLambdaService.convertToCampaignAddresses(
+      const converted = TileLambdaService.convertToCampaignAddresses(
         addressData.features,
         campaign_id!
       );
+
+      // Deduplicate by logical address (same formatted + postal_code = one row)
+      // Source data can return the same address with different gers_ids (e.g. tile boundaries)
+      const addressesToInsert = Array.from(
+        new Map(
+          converted.map((addr) => {
+            const key = `${(addr.formatted ?? '').toLowerCase().trim()}|${(addr.postal_code ?? '').toLowerCase().trim()}`;
+            return [key, addr] as const;
+          })
+        ).values()
+      );
+      if (addressesToInsert.length < converted.length) {
+        console.log(`[Provision] Deduplicated addresses: ${converted.length} -> ${addressesToInsert.length}`);
+      }
 
       // Step 4: Clear existing addresses for this campaign (clean slate)
       console.log('[Provision] Step 4: Clearing existing addresses...');
@@ -218,7 +233,7 @@ export async function POST(request: NextRequest) {
       }
 
       // =============================================================================
-      // STAGE 1: PEDESTRIAN ROUTING - "The Daily Loop"
+      // STAGE 1: PEDESTRIAN ROUTING - Street-Block-Sweep-Snake + optional geometry
       // =============================================================================
       let optimizedPathGeometry: GeoJSON.LineString | null = null;
       let optimizedPathInfo: {
@@ -227,36 +242,51 @@ export async function POST(request: NextRequest) {
         waypointCount: number;
       } | null = null;
 
-      // Only calculate route if we have addresses and Stadia API is configured
-      if (insertedCount >= 2 && process.env.STADIA_API_KEY) {
-        console.log('[Provision] Stage 1: Calculating optimized walking loop...');
-        
+      if (insertedCount >= 2) {
+        console.log('[Provision] Stage 1: Building route (Street-Block-Sweep-Snake)...');
         try {
-          // Grab the first 20 addresses for the optimized route
-          // (More than 20 gets expensive/slow for the TSP solver)
-          const addressesForRoute = addressesToInsert.slice(0, 20);
-          
-          // Convert to format needed by RoutingService {lat, lon}
-          const routeCoords = addressesForRoute.map((addr) => ({
-            lat: addr.geom.coordinates[1], // GeoJSON is [lon, lat]
+          const { data: firstAddresses } = await supabase
+            .from('campaign_addresses')
+            .select('id, geom, house_number, street_name, formatted')
+            .eq('campaign_id', campaign_id)
+            .limit(20);
+          const addressesForRoute = firstAddresses ?? [];
+          if (addressesForRoute.length < 2) {
+            console.log('[Provision] Skipping route: fewer than 2 addresses in DB');
+          } else {
+          const buildRouteAddresses = addressesForRoute.map((addr) => ({
+            id: addr.id,
+            lat: addr.geom.coordinates[1],
             lon: addr.geom.coordinates[0],
+            house_number: addr.house_number ?? undefined,
+            street_name: addr.street_name ?? undefined,
+            formatted: addr.formatted ?? undefined,
           }));
 
-          // Calculate optimized loop using Valhalla TSP solver
-          const loopResult = await RoutingService.getOptimizedWalkingLoop(routeCoords);
-          
-          // Convert to GeoJSON LineString
-          optimizedPathGeometry = RoutingService.toGeoJSONLineString(loopResult.polyline);
-          
+          const sumLat = buildRouteAddresses.reduce((s, a) => s + a.lat, 0);
+          const sumLon = buildRouteAddresses.reduce((s, a) => s + a.lon, 0);
+          const depot = { lat: sumLat / buildRouteAddresses.length, lon: sumLon / buildRouteAddresses.length };
+
+          const routeResult = await buildRoute(buildRouteAddresses, depot, {
+            include_geometry: !!process.env.STADIA_API_KEY,
+            threshold_meters: 50,
+            sweep_nn_threshold_m: 500,
+          });
+
           optimizedPathInfo = {
-            totalDistanceKm: loopResult.summary.length,
-            totalTimeMinutes: Math.round(loopResult.summary.time / 60),
-            waypointCount: addressesForRoute.length,
+            totalDistanceKm: 0,
+            totalTimeMinutes: 0,
+            waypointCount: routeResult.stops.length,
           };
 
-          console.log(`[Provision] Optimized loop: ${optimizedPathInfo.totalDistanceKm.toFixed(2)}km, ${optimizedPathInfo.totalTimeMinutes}min, ${optimizedPathInfo.waypointCount} stops`);
+          if (routeResult.geometry) {
+            optimizedPathGeometry = RoutingService.toGeoJSONLineString(routeResult.geometry.polyline);
+            optimizedPathInfo.totalDistanceKm = routeResult.geometry.distance_m / 1000;
+            optimizedPathInfo.totalTimeMinutes = Math.round(routeResult.geometry.time_sec / 60);
+          }
 
-          // Store the optimized path in campaign_snapshots
+          console.log(`[Provision] Route: ${optimizedPathInfo.waypointCount} stops${routeResult.geometry ? `, ${optimizedPathInfo.totalDistanceKm.toFixed(2)}km, ${optimizedPathInfo.totalTimeMinutes}min` : ' (no geometry)'}`);
+
           const { error: pathError } = await supabase
             .from('campaign_snapshots')
             .update({
@@ -269,13 +299,12 @@ export async function POST(request: NextRequest) {
           if (pathError) {
             console.warn('[Provision] Error storing optimized path:', pathError.message);
           }
-
+          }
         } catch (routingError) {
-          // Don't fail provisioning if routing fails
           console.warn('[Provision] Routing calculation failed:', routingError);
         }
       } else {
-        console.log('[Provision] Skipping routing: insufficient addresses or no STADIA_API_KEY');
+        console.log('[Provision] Skipping routing: insufficient addresses');
       }
       // =============================================================================
       // END PEDESTRIAN ROUTING

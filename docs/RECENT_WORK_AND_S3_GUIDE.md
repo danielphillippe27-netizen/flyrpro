@@ -17,7 +17,7 @@ This document summarizes the last four days of work on FLYR-PRO and provides a d
 ### 1.2 Campaigns and routing
 
 - Campaigns under main app: [app/(main)/campaigns/](../app/(main)/campaigns/) (list + detail), [CampaignListSidebar](../components/campaigns/CampaignListSidebar.tsx)
-- CVRP route optimization: [OptimizedRouteView](../components/campaigns/OptimizedRouteView.tsx), [app/api/campaigns/[campaignId]/routes/optimize/](../app/api/campaigns/[campaignId]/routes/optimize/route.ts), RoutingService, BlockRoutingService, CVRPRoutingService
+- Route optimization (Street-Block-Sweep-Snake only): [OptimizedRouteView](../components/campaigns/OptimizedRouteView.tsx), [app/api/campaigns/[campaignId]/routes/optimize/](../app/api/campaigns/[campaignId]/routes/optimize/route.ts), BlockRoutingService.buildRoute, RoutingService.getRouteGeometry (optional polyline when STADIA_API_KEY set)
 - Walk network snapping: RPCs `snap_point_to_walkway`, `snap_points_to_walkways`, `find_nearest_walkway_segment`; column `overture_transportation.subclass` (sidewalk, crosswalk)
 - Route persistence: view `campaign_addresses_geojson` exposes `cluster_id`, `sequence`, `walk_time_sec`, `distance_m` so optimized routes survive reload
 - Map: RouteLayer, CampaignMarkersLayer, MapInfoButton, MapInfoSheet
@@ -25,7 +25,8 @@ This document summarizes the last four days of work on FLYR-PRO and provides a d
 ### 1.3 CRM and integrations
 
 - Table `crm_connections`: provider, encrypted API key, status, last tested/push/error (RLS per user)
-- FollowUpBoss: [app/api/integrations/followupboss/](../app/api/integrations/followupboss/) (connect, disconnect, status, test, test-push, push-lead)
+- FollowUpBoss: [app/api/integrations/followupboss/](../app/api/integrations/followupboss/) (connect, disconnect, status, test, test-push, push-lead). For how we're linked to Follow Up Boss and how to connect from the iOS app, see [docs/FOLLOW_UP_BOSS_AND_IOS_GUIDE.md](../docs/FOLLOW_UP_BOSS_AND_IOS_GUIDE.md).
+- BoldTrail: [app/api/integrations/boldtrail/](../app/api/integrations/boldtrail/) (connect, disconnect, status, test, test-push, push-lead).
 - Leads page: [app/(main)/leads/](../app/(main)/leads/) using ContactsHubView
 - [app/api/leads/sync-crm/](../app/api/leads/sync-crm/route.ts) for CRM sync
 
