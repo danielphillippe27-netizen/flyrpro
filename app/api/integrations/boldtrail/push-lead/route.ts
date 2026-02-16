@@ -128,6 +128,20 @@ export async function POST(request: NextRequest) {
       .eq('user_id', user.id)
       .eq('provider', 'boldtrail');
 
+    // Save lead to contacts so it shows on the web Leads page (iOS and other push-lead callers)
+    const fullName = nameParts.length ? nameParts.join(' ').trim() : (leadData.email || leadData.phone || 'Lead');
+    const addressStr = [leadData.address, leadData.city, leadData.state, leadData.zip].filter(Boolean).join(', ');
+    await supabase.from('contacts').insert({
+      user_id: user.id,
+      full_name: fullName,
+      phone: leadData.phone || null,
+      email: leadData.email || null,
+      address: addressStr || '',
+      campaign_id: leadData.campaignId || null,
+      status: 'new',
+      notes: leadData.message || null,
+    });
+
     return NextResponse.json({
       success: true,
       message: 'Lead successfully pushed to BoldTrail',

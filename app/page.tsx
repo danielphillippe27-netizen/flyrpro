@@ -6,7 +6,6 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { getClientAsync } from '@/lib/supabase/client';
 import { ArrowRight, Check } from 'lucide-react';
-
 interface PriceOption {
   priceId: string;
   name: string;
@@ -238,23 +237,34 @@ const heroShots = [
 ];
 
 const desktopShots = [
-  { src: '/landing/desktop-map-overview.png', alt: 'Desktop map overview' },
-  { src: '/landing/desktop-buildings-grid.png', alt: 'Buildings progress map' },
-  { src: '/landing/desktop-addresses-grid.png', alt: 'Addresses map grid' },
-  { src: '/landing/desktop-draw-mode-1.png', alt: 'Campaign draw mode' },
-  { src: '/landing/desktop-draw-mode-2.png', alt: 'Campaign draw mode wide' },
-  { src: '/landing/desktop-draw-mode-3.png', alt: 'Campaign draw mode detail' },
+  { src: '/landing/WEIRFF_1.png', alt: 'Desktop command center 1', title: '' },
+  { src: '/landing/WEIRFF_2.png', alt: 'Desktop command center 2', title: 'Unique QR codes for smart tracking' },
+  { src: '/landing/WEIRFF_3.png', alt: 'Desktop command center 3', title: '' },
+  { src: '/landing/WEIRFF_4.png', alt: 'Desktop command center 4', title: '' },
+  { src: '/landing/WEIRFF_5.png', alt: 'Desktop command center 5', title: '' },
+  { src: '/landing/WEIRFF_6.png', alt: 'Desktop command center 6', title: '' },
 ];
 
 const mobileShots = [
-  { src: '/landing/mobile-session-red.png', alt: 'Mobile start session red markers' },
-  { src: '/landing/mobile-progress-view.png', alt: 'Mobile progress with colored markers' },
-  { src: '/landing/mobile-mixed-markers.png', alt: 'Mobile mixed marker states' },
-  { src: '/landing/mobile-column-markers.png', alt: 'Mobile street markers' },
-  { src: '/landing/mobile-leaderboard.png', alt: 'Mobile leaderboard screen' },
+  { src: '/landing/green-houses-dashboard.png', alt: 'Campaign progress with visited buildings' },
+  { src: '/landing/IMG_1708.png', alt: 'Mobile leaderboard' },
+  { src: '/landing/mobile-column-markers.png', alt: 'Mobile address form and map' },
+  { src: '/landing/mobile-leaderboard.png', alt: 'Share activity' },
+  { src: '/landing/mobile-session-red.png', alt: 'Mobile start session' },
+  { src: '/landing/mobile-lead-detail.png', alt: 'Lead detail view' },
 ];
 
-function ScreenshotCard({ src, alt, className = '' }: { src: string; alt: string; className?: string }) {
+function ScreenshotCard({
+  src,
+  alt,
+  className = '',
+  objectFit = 'contain',
+}: {
+  src: string;
+  alt: string;
+  className?: string;
+  objectFit?: 'contain' | 'cover';
+}) {
   const [missing, setMissing] = useState(false);
 
   return (
@@ -268,7 +278,7 @@ function ScreenshotCard({ src, alt, className = '' }: { src: string; alt: string
           src={src}
           alt={alt}
           fill
-          className="object-cover"
+          className={objectFit === 'cover' ? 'object-cover' : 'object-contain'}
           sizes="(max-width: 768px) 100vw, 50vw"
           onError={() => setMissing(true)}
         />
@@ -281,6 +291,7 @@ export default function LandingPage() {
   const router = useRouter();
   const [checking, setChecking] = useState(true);
   const [trackingWordIndex, setTrackingWordIndex] = useState(0);
+  const [desktopShotIndex, setDesktopShotIndex] = useState(0);
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -384,10 +395,18 @@ export default function LandingPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-3">
-              <ScreenshotCard src={heroShots[0].src} alt={heroShots[0].alt} className="col-span-2 h-[300px]" />
-              <ScreenshotCard src={heroShots[1].src} alt={heroShots[1].alt} className="h-[300px]" />
-              <ScreenshotCard src={heroShots[2].src} alt={heroShots[2].alt} className="col-span-3 h-24" />
+            <div className="space-y-4">
+              <div className="relative aspect-video w-full overflow-hidden rounded-2xl border border-white/20 shadow-2xl">
+                <ScreenshotCard
+                  src="/landing/WEIRFF_2.png"
+                  alt="Unique QR codes for smart tracking"
+                  className="h-full min-h-[280px]"
+                  objectFit="contain"
+                />
+              </div>
+              <p className="text-center text-xl font-semibold text-white md:text-2xl">
+                Unique QR codes for smart tracking
+              </p>
             </div>
           </div>
         </section>
@@ -427,10 +446,42 @@ export default function LandingPage() {
               <p className="mt-4 text-lg text-zinc-300">
                 Real campaign view, draw mode, and live scanned-home overlays.
               </p>
-              <div className="mt-8 grid gap-4 md:grid-cols-2">
-                {desktopShots.map((shot) => (
-                  <ScreenshotCard key={shot.src} src={shot.src} alt={shot.alt} className="h-[240px]" />
-                ))}
+              <div className="mt-8 flex items-center gap-4">
+                <button
+                  type="button"
+                  onClick={() => setDesktopShotIndex((i) => (i - 1 + desktopShots.length) % desktopShots.length)}
+                  className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-zinc-500 bg-zinc-800 text-white transition hover:bg-zinc-700"
+                  aria-label="Previous"
+                >
+                  <ArrowRight className="h-5 w-5 rotate-180" />
+                </button>
+                <div className="min-w-0 flex-1">
+                  <div className="relative aspect-video w-full overflow-hidden rounded-2xl border border-zinc-700 bg-zinc-900">
+                    <ScreenshotCard
+                      key={desktopShots[desktopShotIndex].src}
+                      src={desktopShots[desktopShotIndex].src}
+                      alt={desktopShots[desktopShotIndex].alt}
+                      className="h-full min-h-[280px]"
+                    />
+                  </div>
+                  {desktopShots[desktopShotIndex].title ? (
+                    <p className="mt-4 text-center text-lg font-medium text-white">
+                      {desktopShots[desktopShotIndex].title}
+                    </p>
+                  ) : (
+                    <p className="mt-4 text-center text-sm text-zinc-500">
+                      Add a title in desktopShots for this slide when ready.
+                    </p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setDesktopShotIndex((i) => (i + 1) % desktopShots.length)}
+                  className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-zinc-500 bg-zinc-800 text-white transition hover:bg-zinc-700"
+                  aria-label="Next"
+                >
+                  <ArrowRight className="h-5 w-5" />
+                </button>
               </div>
             </article>
           </div>
@@ -442,9 +493,15 @@ export default function LandingPage() {
             <p className="mt-3 text-lg text-zinc-300">
               Session controls, progress colors, and leaderboard views from iOS.
             </p>
-            <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+<div className="mt-8 grid grid-cols-6 gap-3">
               {mobileShots.map((shot) => (
-                <ScreenshotCard key={shot.src} src={shot.src} alt={shot.alt} className="h-[520px]" />
+                <ScreenshotCard
+                  key={shot.src}
+                  src={shot.src}
+                  alt={shot.alt}
+                  className="aspect-[9/19] w-full min-w-0"
+                  objectFit="contain"
+                />
               ))}
             </div>
           </div>

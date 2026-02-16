@@ -40,9 +40,14 @@ export default function CreateCampaignPage() {
   const [mapLoaded, setMapLoaded] = useState(false);
   const [isSatellite, setIsSatellite] = useState(false);
   const [mapSearchQuery, setMapSearchQuery] = useState('');
+  const [snappingBoundary, setSnappingBoundary] = useState(false);
+  const [boundaryRaw, setBoundaryRaw] = useState<{ type: 'Polygon'; coordinates: number[][][] } | null>(null);
+  const [boundarySnapped, setBoundarySnapped] = useState<{ type: 'Polygon'; coordinates: number[][][] } | null>(null);
+  const [showRawBoundary, setShowRawBoundary] = useState(false); // trust toggle: true = emphasize raw
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const drawRef = useRef<MapboxDraw | null>(null);
+  const boundaryLayerIdsRef = useRef<string[]>([]);
 
   useEffect(() => {
     const supabase = createClient();
@@ -269,6 +274,110 @@ export default function CreateCampaignPage() {
     });
   };
 
+  /** Add raw + snapped boundary layers and animate snapped line opacity 0 -> 1 over 600ms */
+  const addBoundaryLayersAndCrossFade = (
+    raw: { type: 'Polygon'; coordinates: number[][][] },
+    snapped: { type: 'Polygon'; coordinates: number[][][] }
+  ) => {
+    const m = map.current;
+    if (!m || !m.getStyle()) return;
+
+    const rawSourceId = 'campaign-boundary-raw';
+    const snappedSourceId = 'campaign-boundary-snapped';
+    const rawFillId = 'campaign-boundary-raw-fill';
+    const rawLineId = 'campaign-boundary-raw-line';
+    const snappedFillId = 'campaign-boundary-snapped-fill';
+    const snappedLineId = 'campaign-boundary-snapped-line';
+
+    const removeExisting = () => {
+      boundaryLayerIdsRef.current.forEach((id) => {
+        if (m.getLayer(id)) m.removeLayer(id);
+      });
+      if (m.getSource(rawSourceId)) m.removeSource(rawSourceId);
+      if (m.getSource(snappedSourceId)) m.removeSource(snappedSourceId);
+      boundaryLayerIdsRef.current = [];
+    };
+    removeExisting();
+
+    const rawFeature: GeoJSON.Feature<GeoJSON.Polygon> = { type: 'Feature', geometry: raw, properties: {} };
+    const snappedFeature: GeoJSON.Feature<GeoJSON.Polygon> = { type: 'Feature', geometry: snapped, properties: {} };
+
+    m.addSource(rawSourceId, { type: 'geojson', data: rawFeature });
+    m.addSource(snappedSourceId, { type: 'geojson', data: snappedFeature });
+
+    m.addLayer({
+      id: rawFillId,
+      type: 'fill',
+      source: rawSourceId,
+      paint: { 'fill-color': '#ef4444', 'fill-opacity': 0.08 },
+    });
+    m.addLayer({
+      id: rawLineId,
+      type: 'line',
+      source: rawSourceId,
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#ef4444',
+        'line-width': 2,
+        'line-opacity': 0.3,
+        'line-dasharray': [1, 1.5],
+      },
+    });
+    m.addLayer({
+      id: snappedFillId,
+      type: 'fill',
+      source: snappedSourceId,
+      paint: { 'fill-color': '#ef4444', 'fill-opacity': 0.15 },
+    });
+    m.addLayer({
+      id: snappedLineId,
+      type: 'line',
+      source: snappedSourceId,
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#ef4444',
+        'line-width': 3,
+        'line-opacity': 0,
+      },
+    });
+
+    boundaryLayerIdsRef.current = [rawFillId, rawLineId, snappedFillId, snappedLineId];
+
+    const duration = 600;
+    const start = performance.now();
+    const tick = (now: number) => {
+      const elapsed = now - start;
+      const opacity = Math.min(1, elapsed / duration);
+      if (m.getLayer(snappedLineId)) {
+        m.setPaintProperty(snappedLineId, 'line-opacity', opacity);
+        m.setPaintProperty(snappedFillId, 'fill-opacity', 0.08 + 0.07 * opacity);
+      }
+      if (opacity < 1) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  };
+
+  /** Update boundary layer visibility for Raw vs Snapped toggle */
+  const updateBoundaryToggle = () => {
+    const m = map.current;
+    if (!m || !boundaryRaw || !boundarySnapped) return;
+    const rawLineId = 'campaign-boundary-raw-line';
+    const snappedLineId = 'campaign-boundary-snapped-line';
+    if (!m.getLayer(rawLineId) || !m.getLayer(snappedLineId)) return;
+    if (showRawBoundary) {
+      m.setPaintProperty(rawLineId, 'line-opacity', 1);
+      m.setPaintProperty(snappedLineId, 'line-opacity', 0.25);
+    } else {
+      m.setPaintProperty(rawLineId, 'line-opacity', 0.3);
+      m.setPaintProperty(snappedLineId, 'line-opacity', 1);
+    }
+  };
+
+  useEffect(() => {
+    if (!boundaryRaw || !boundarySnapped) return;
+    updateBoundaryToggle();
+  }, [showRawBoundary, boundaryRaw, boundarySnapped]);
+
   const handleSubmit = async (e?: React.FormEvent | React.MouseEvent) => {
     e?.preventDefault();
     if (!userId) return;
@@ -330,20 +439,44 @@ if (!features || features.features.length === 0) {
       const campaign = await createRes.json();
       console.log('Campaign created:', campaign?.id, campaign?.name);
 
-      // ADDRESS-FIRST LOGIC: Map Territory - Save addresses first, then provision
+      // Snap to roads: align boundary to road centerlines before address generation
       if (polygon) {
+        setSnappingBoundary(true);
+        let polygonForAddresses = polygon;
+        try {
+          const snapRes = await fetch(`/api/campaigns/${campaign.id}/snap`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+          });
+          if (snapRes.ok) {
+            const snapData = await snapRes.json();
+            polygonForAddresses = snapData.polygon ?? polygon;
+            if (snapData.wasSnapped && snapData.polygon) {
+              setBoundaryRaw(polygon);
+              setBoundarySnapped(snapData.polygon);
+              addBoundaryLayersAndCrossFade(polygon, snapData.polygon);
+              await new Promise((r) => setTimeout(r, 700));
+            }
+          }
+        } catch (snapErr) {
+          console.error('Snap to roads failed, using drawn polygon:', snapErr);
+        } finally {
+          setSnappingBoundary(false);
+        }
+
         setGeneratingAddresses(true);
         try {
           console.log('Saving addresses from polygon...');
           
-          // Step 1: Fetch and save addresses from polygon
+          // Step 1: Fetch and save addresses from polygon (snapped if available)
           const addressResponse = await fetch('/api/campaigns/generate-address-list', {
             method: 'POST',
             credentials: 'include',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               campaign_id: campaign.id,
-              polygon: polygon, // Pass polygon to generate addresses
+              polygon: polygonForAddresses,
             }),
           });
 
@@ -480,16 +613,16 @@ if (!features || features.features.length === 0) {
 
           {/* Action Buttons */}
           <div className="flex items-center gap-2 ml-auto">
-            <Button type="button" variant="outline" size="sm" onClick={() => router.back()} disabled={loading || provisioning}>
+            <Button type="button" variant="outline" size="sm" onClick={() => router.back()} disabled={loading || snappingBoundary || provisioning || generatingAddresses}>
               Cancel
             </Button>
             <Button 
               type="button" 
               size="sm" 
-              disabled={loading || provisioning || generatingAddresses || !name}
+              disabled={loading || snappingBoundary || provisioning || generatingAddresses || !name}
               onClick={handleSubmit}
             >
-              {loading ? 'Creating...' : generatingAddresses ? 'Finding...' : provisioning ? 'Provisioning...' : 'Create Campaign'}
+              {loading ? 'Creating...' : snappingBoundary ? 'Snapping...' : generatingAddresses ? 'Finding...' : provisioning ? 'Provisioning...' : 'Create Campaign'}
             </Button>
           </div>
         </div>
@@ -551,6 +684,17 @@ if (!features || features.features.length === 0) {
               <Trash2 className="w-5 h-5" />
               <span>Clear</span>
             </button>
+
+            {/* Trust toggle: Raw vs Snapped (when both boundaries exist after snap) */}
+            {boundaryRaw && boundarySnapped && (
+              <button
+                type="button"
+                onClick={() => setShowRawBoundary((v) => !v)}
+                className="flex items-center gap-2 px-4 py-2.5 bg-card rounded-lg shadow-lg hover:shadow-xl hover:bg-muted/50 transition-all duration-200 text-sm font-medium text-foreground border border-border"
+              >
+                <span>{showRawBoundary ? 'Snapped' : 'Raw'}</span>
+              </button>
+            )}
           </div>
         )}
 
@@ -565,23 +709,33 @@ if (!features || features.features.length === 0) {
       </div>
 
       {/* Loading Modal */}
-      {(provisioning || generatingAddresses) && (
+      {(snappingBoundary || provisioning || generatingAddresses) && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-card text-card-foreground rounded-lg p-6 max-w-md w-full mx-4 border border-border">
             <h3 className="text-lg font-semibold text-foreground mb-4">
-              {generatingAddresses ? 'Finding Nearest Addresses' : 'Provisioning Mission Territory'}
+              {snappingBoundary
+                ? 'Snapping boundary to roads'
+                : generatingAddresses
+                  ? 'Finding Nearest Addresses'
+                  : 'Provisioning Mission Territory'}
             </h3>
             <div className="space-y-2">
               <div className="flex items-center gap-3">
                 <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary"></div>
                 <p className="text-sm text-foreground">
-                  {generatingAddresses ? 'Querying Overture for nearest addresses...' : (provisionProgress || 'Processing...')}
+                  {snappingBoundary
+                    ? 'Snapping boundary to roads...'
+                    : generatingAddresses
+                      ? 'Querying Overture for nearest addresses...'
+                      : (provisionProgress || 'Processing...')}
                 </p>
               </div>
               <p className="text-xs text-muted-foreground mt-4">
-                {generatingAddresses 
-                  ? 'Geocoding your starting address and finding nearby residential addresses from Overture data...'
-                  : 'Extracting buildings from Overture GERS and calculating road-facing orientation...'}
+                {snappingBoundary
+                  ? 'Aligning your boundary to street centerlines so addresses stay on the correct block.'
+                  : generatingAddresses
+                    ? 'Geocoding your starting address and finding nearby residential addresses from Overture data...'
+                    : 'Extracting buildings from Overture GERS and calculating road-facing orientation...'}
               </p>
             </div>
           </div>

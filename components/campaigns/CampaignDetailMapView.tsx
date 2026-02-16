@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import * as turf from '@turf/turf';
-import type { CampaignAddress } from '@/types/database';
+import type { CampaignAddress, CampaignV2 } from '@/types/database';
 import { MapBuildingsLayer } from '@/components/map/MapBuildingsLayer';
 import { MapInfoButton } from '@/components/map/MapInfoButton';
 import { LocationCard } from '@/components/map/LocationCard';
@@ -12,19 +12,34 @@ import { CreateContactDialog } from '@/components/crm/CreateContactDialog';
 import { createClient } from '@/lib/supabase/client';
 import { useTheme } from '@/lib/theme-provider';
 import { getMapboxToken } from '@/lib/mapbox';
-import { DEFAULT_STATUS_FILTERS, MAP_STATUS_CONFIG, type StatusFilters } from '@/lib/constants/mapStatus';
+import {
+  DEFAULT_STATUS_FILTERS,
+  MAP_STATUS_CONFIG,
+  type StatusFilters,
+} from '@/lib/constants/mapStatus';
 
 const MAP_STYLES = {
   light: 'mapbox://styles/fliper27/cml6z0dhg002301qo9xxc08k4',
   dark: 'mapbox://styles/fliper27/cml6zc5pq002801qo4lh13o19',
 } as const;
 
+const BOUNDARY_SOURCE_RAW = 'campaign-boundary-raw';
+const BOUNDARY_SOURCE_SNAPPED = 'campaign-boundary-snapped';
+const BOUNDARY_LAYER_RAW_FILL = 'campaign-boundary-raw-fill';
+const BOUNDARY_LAYER_RAW_LINE = 'campaign-boundary-raw-line';
+const BOUNDARY_LAYER_SNAPPED_FILL = 'campaign-boundary-snapped-fill';
+const BOUNDARY_LAYER_SNAPPED_LINE = 'campaign-boundary-snapped-line';
+
 export function CampaignDetailMapView({
   campaignId,
   addresses,
+  campaign,
+  onSnapComplete,
 }: {
   campaignId: string;
   addresses: CampaignAddress[];
+  campaign?: CampaignV2 | null;
+  onSnapComplete?: () => void;
 }) {
   const { theme } = useTheme();
   const mapContainer = useRef<HTMLDivElement>(null);
@@ -47,6 +62,9 @@ export function CampaignDetailMapView({
 
   // Map view: 3D buildings vs 3D address points (circular fill-extrusions)
   const [mapViewMode, setMapViewMode] = useState<'buildings' | 'addresses'>('buildings');
+  // Boundary: Snap to Roads and Raw vs Snapped toggle
+  const [snapping, setSnapping] = useState(false);
+  const [showRawBoundary, setShowRawBoundary] = useState(false);
 
   // Get user ID on mount
   useEffect(() => {
@@ -370,14 +388,16 @@ export function CampaignDetailMapView({
         if (poly.type !== 'Polygon') continue;
         const scansTotal = addr.scans ?? 0;
         const qrScanned = scansTotal > 0 || !!addr.last_scanned_at;
-        const status = addr.visited ? 'visited' : 'not_visited';
+        // Address map: address_statuses.status — green = delivered, blue = talked | appointment
+        const addressStatus =
+          addr.address_status ?? (addr.visited ? 'delivered' : 'none');
         features.push({
           type: 'Feature',
           geometry: poly,
           properties: {
             feature_id: addr.id,
             address_id: addr.id,
-            status,
+            address_status: addressStatus,
             scans_total: scansTotal,
             qr_scanned: qrScanned,
           },
@@ -387,35 +407,42 @@ export function CampaignDetailMapView({
       return { type: 'FeatureCollection', features };
     };
 
+    // Address map colors: address_statuses — green = delivered, blue = talked | appointment, purple = QR scanned
     const getColorExpression = (): any => {
-      const getStatusValue = () => ['coalesce', ['feature-state', 'status'], ['get', 'status'], 'not_visited'];
-      const getScansTotal = () => ['coalesce', ['feature-state', 'scans_total'], ['get', 'scans_total'], 0];
+      const getAddressStatus = () => ['coalesce', ['feature-state', 'address_status'], ['get', 'address_status'], 'none'];
       const getQrScanned = () => ['coalesce', ['feature-state', 'qr_scanned'], ['get', 'qr_scanned'], false];
+      const getScansTotal = () => ['coalesce', ['feature-state', 'scans_total'], ['get', 'scans_total'], 0];
       return [
         'case',
         ['any', ['==', getQrScanned(), true], ['>', getScansTotal(), 0]],
         MAP_STATUS_CONFIG.QR_SCANNED.color,
-        ['==', getStatusValue(), 'hot'],
+        ['in', getAddressStatus(), ['literal', ['talked', 'appointment']]],
         MAP_STATUS_CONFIG.CONVERSATIONS.color,
-        ['==', getStatusValue(), 'visited'],
+        ['==', getAddressStatus(), 'delivered'],
         MAP_STATUS_CONFIG.TOUCHED.color,
         MAP_STATUS_CONFIG.UNTOUCHED.color,
       ] as any;
     };
 
     const getFilterExpression = (): any[] | undefined => {
-      const getStatusValue = () => ['coalesce', ['feature-state', 'status'], ['get', 'status'], 'not_visited'];
-      const getScansTotal = () => ['coalesce', ['feature-state', 'scans_total'], ['get', 'scans_total'], 0];
+      const getAddressStatus = () => ['coalesce', ['feature-state', 'address_status'], ['get', 'address_status'], 'none'];
       const getQrScanned = () => ['coalesce', ['feature-state', 'qr_scanned'], ['get', 'qr_scanned'], false];
+      const getScansTotal = () => ['coalesce', ['feature-state', 'scans_total'], ['get', 'scans_total'], 0];
       const isQrScanned = ['any', ['==', getQrScanned(), true], ['>', getScansTotal(), 0]];
-      const isConversation = ['all', ['==', getStatusValue(), 'hot'], ['!', isQrScanned]];
-      const isTouched = ['all', ['==', getStatusValue(), 'visited'], ['!', isQrScanned]];
-      const isUntouched = ['==', getStatusValue(), 'not_visited'];
+      const isConversation = ['in', getAddressStatus(), ['literal', ['talked', 'appointment']]];
+      const isTouched = ['==', getAddressStatus(), 'delivered'];
+      const isUntouched = ['!=', getAddressStatus(), 'delivered']; // and not talked/appointment, not qr — simplified: show all that don't match above
+      const isUntouchedStrict = [
+        'all',
+        ['!=', getAddressStatus(), 'delivered'],
+        ['!', ['in', getAddressStatus(), ['literal', ['talked', 'appointment']]]],
+        ['!', isQrScanned],
+      ];
       const statusConditions: any[] = [];
       if (statusFilters.QR_SCANNED) statusConditions.push(isQrScanned);
       if (statusFilters.CONVERSATIONS) statusConditions.push(isConversation);
       if (statusFilters.TOUCHED) statusConditions.push(isTouched);
-      if (statusFilters.UNTOUCHED) statusConditions.push(isUntouched);
+      if (statusFilters.UNTOUCHED) statusConditions.push(isUntouchedStrict);
       if (statusConditions.length === 0) return ['==', 1, 0];
       const allEnabled = statusFilters.QR_SCANNED && statusFilters.CONVERSATIONS && statusFilters.TOUCHED && statusFilters.UNTOUCHED;
       if (allEnabled) return undefined;
@@ -549,6 +576,113 @@ export function CampaignDetailMapView({
     });
   }, [mapLoaded]);
 
+  // Boundary layer: show territory_boundary (and optional raw/snapped) when campaign has map source
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !mapLoaded || !campaign?.territory_boundary) return;
+    if (campaign.address_source !== 'map') return;
+
+    const boundary = campaign.territory_boundary as GeoJSON.Polygon;
+    const raw = campaign.campaign_polygon_raw as GeoJSON.Polygon | undefined;
+    const snapped = campaign.campaign_polygon_snapped as GeoJSON.Polygon | undefined;
+    const hasBoth = !!(raw && snapped);
+
+    const removeBoundaryLayers = () => {
+      [BOUNDARY_LAYER_RAW_FILL, BOUNDARY_LAYER_RAW_LINE, BOUNDARY_LAYER_SNAPPED_FILL, BOUNDARY_LAYER_SNAPPED_LINE].forEach((id) => {
+        if (m.getLayer(id)) m.removeLayer(id);
+      });
+      if (m.getSource(BOUNDARY_SOURCE_RAW)) m.removeSource(BOUNDARY_SOURCE_RAW);
+      if (m.getSource(BOUNDARY_SOURCE_SNAPPED)) m.removeSource(BOUNDARY_SOURCE_SNAPPED);
+    };
+
+    if (!m.isStyleLoaded()) {
+      m.once('style.load', () => {
+        removeBoundaryLayers();
+        addBoundaryLayers();
+      });
+      return () => {};
+    }
+
+    const addBoundaryLayers = () => {
+      const polyToFeature = (p: GeoJSON.Polygon): GeoJSON.Feature<GeoJSON.Polygon> => ({
+        type: 'Feature',
+        geometry: p,
+        properties: {},
+      });
+
+      if (hasBoth) {
+        m.addSource(BOUNDARY_SOURCE_RAW, { type: 'geojson', data: polyToFeature(raw!) });
+        m.addSource(BOUNDARY_SOURCE_SNAPPED, { type: 'geojson', data: polyToFeature(snapped!) });
+        m.addLayer({ id: BOUNDARY_LAYER_RAW_FILL, type: 'fill', source: BOUNDARY_SOURCE_RAW, paint: { 'fill-color': '#ef4444', 'fill-opacity': 0.08 } });
+        m.addLayer({
+          id: BOUNDARY_LAYER_RAW_LINE,
+          type: 'line',
+          source: BOUNDARY_SOURCE_RAW,
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
+          paint: {
+            'line-color': '#ef4444',
+            'line-width': 2,
+            'line-opacity': 0.3,
+            'line-dasharray': [1, 1.5],
+          },
+        });
+        m.addLayer({ id: BOUNDARY_LAYER_SNAPPED_FILL, type: 'fill', source: BOUNDARY_SOURCE_SNAPPED, paint: { 'fill-color': '#ef4444', 'fill-opacity': 0.15 } });
+        m.addLayer({
+          id: BOUNDARY_LAYER_SNAPPED_LINE,
+          type: 'line',
+          source: BOUNDARY_SOURCE_SNAPPED,
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
+          paint: { 'line-color': '#ef4444', 'line-width': 3, 'line-opacity': 1 },
+        });
+      } else {
+        m.addSource(BOUNDARY_SOURCE_SNAPPED, { type: 'geojson', data: polyToFeature(boundary) });
+        m.addLayer({ id: BOUNDARY_LAYER_SNAPPED_FILL, type: 'fill', source: BOUNDARY_SOURCE_SNAPPED, paint: { 'fill-color': '#ef4444', 'fill-opacity': 0.15 } });
+        m.addLayer({
+          id: BOUNDARY_LAYER_SNAPPED_LINE,
+          type: 'line',
+          source: BOUNDARY_SOURCE_SNAPPED,
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
+          paint: { 'line-color': '#ef4444', 'line-width': 3, 'line-opacity': 1 },
+        });
+      }
+    };
+
+    removeBoundaryLayers();
+    addBoundaryLayers();
+
+    return () => {
+      removeBoundaryLayers();
+    };
+  }, [mapLoaded, campaign?.id, campaign?.territory_boundary, campaign?.campaign_polygon_raw, campaign?.campaign_polygon_snapped, campaign?.address_source]);
+
+  const hasMapBoundary = campaign?.address_source === 'map' && campaign?.territory_boundary;
+  const hasRawAndSnapped = !!(campaign?.campaign_polygon_raw && campaign?.campaign_polygon_snapped);
+
+  // Raw vs Snapped toggle: update line opacity when showRawBoundary changes
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !mapLoaded || !hasRawAndSnapped) return;
+    if (!m.getLayer(BOUNDARY_LAYER_RAW_LINE) || !m.getLayer(BOUNDARY_LAYER_SNAPPED_LINE)) return;
+    m.setPaintProperty(BOUNDARY_LAYER_RAW_LINE, 'line-opacity', showRawBoundary ? 1 : 0.3);
+    m.setPaintProperty(BOUNDARY_LAYER_SNAPPED_LINE, 'line-opacity', showRawBoundary ? 0.25 : 1);
+  }, [mapLoaded, showRawBoundary, hasRawAndSnapped]);
+
+  const handleSnapToRoads = async () => {
+    setSnapping(true);
+    try {
+      const res = await fetch(`/api/campaigns/${campaignId}/snap`, { method: 'POST', credentials: 'include' });
+      if (res.ok) onSnapComplete?.();
+      else {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error || 'Snap to roads failed');
+      }
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Snap to roads failed');
+    } finally {
+      setSnapping(false);
+    }
+  };
+
   return (
     <div className="h-full w-full relative">
       <div ref={mapContainer} className="h-full w-full" />
@@ -560,21 +694,44 @@ export function CampaignDetailMapView({
             <span className="font-medium">Tip:</span> Hold <kbd className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-[10px] font-mono mx-0.5">Ctrl</kbd> + drag to tilt the map
           </div>
           {/* View switcher: Buildings | Addresses */}
-          <div className="absolute top-4 right-4 z-10 flex rounded-lg border border-gray-200 dark:border-gray-700 bg-white/90 dark:bg-black/80 backdrop-blur-sm shadow-sm overflow-hidden">
-            <button
-              type="button"
-              onClick={() => setMapViewMode('buildings')}
-              className={`px-3 py-2 text-sm font-medium transition-colors ${mapViewMode === 'buildings' ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
-            >
-              Buildings
-            </button>
-            <button
-              type="button"
-              onClick={() => setMapViewMode('addresses')}
-              className={`px-3 py-2 text-sm font-medium transition-colors ${mapViewMode === 'addresses' ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
-            >
-              Addresses
-            </button>
+          <div className="absolute top-4 right-4 z-10 flex flex-col gap-2">
+            <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 bg-white/90 dark:bg-black/80 backdrop-blur-sm shadow-sm overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setMapViewMode('buildings')}
+                className={`px-3 py-2 text-sm font-medium transition-colors ${mapViewMode === 'buildings' ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
+              >
+                Buildings
+              </button>
+              <button
+                type="button"
+                onClick={() => setMapViewMode('addresses')}
+                className={`px-3 py-2 text-sm font-medium transition-colors ${mapViewMode === 'addresses' ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
+              >
+                Addresses
+              </button>
+            </div>
+            {hasMapBoundary && (
+              <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 bg-white/90 dark:bg-black/80 backdrop-blur-sm shadow-sm overflow-hidden">
+                <button
+                  type="button"
+                  onClick={handleSnapToRoads}
+                  disabled={snapping}
+                  className="px-3 py-2 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
+                >
+                  {snapping ? 'Snapping…' : 'Snap to Roads'}
+                </button>
+                {hasRawAndSnapped && (
+                  <button
+                    type="button"
+                    onClick={() => setShowRawBoundary((v) => !v)}
+                    className="px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 border-l border-gray-200 dark:border-gray-700"
+                  >
+                    {showRawBoundary ? 'Snapped' : 'Raw'}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
           {mapViewMode === 'buildings' && (
             <MapBuildingsLayer 

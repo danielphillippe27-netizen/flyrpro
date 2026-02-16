@@ -81,6 +81,9 @@ export interface CampaignV2 {
     type: 'Polygon';
     coordinates: number[][][];
   };
+  campaign_polygon_raw?: { type: 'Polygon'; coordinates: number[][][] };
+  campaign_polygon_snapped?: { type: 'Polygon'; coordinates: number[][][] };
+  is_snapped?: boolean;
   bbox?: number[]; // Bounding box: [min_lon, min_lat, max_lon, max_lat]
   // Computed
   progress?: number;
@@ -126,6 +129,8 @@ export interface CampaignAddress {
   sequence?: number | null; // Stop sequence within cluster route
   walk_time_sec?: number | null; // Walking time from depot to this stop
   distance_m?: number | null; // Walking distance from depot to this stop
+  // Address map status (from address_statuses): none | no_answer | delivered | talked | appointment | do_not_knock | future_seller | hot_lead
+  address_status?: string;
 }
 
 export interface Coordinate {

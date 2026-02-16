@@ -368,6 +368,7 @@ Tip: Keep qr-images and canva_bulk_data.csv in the same place so paths match (or
           <TabsList>
             <TabsTrigger value="map">Map</TabsTrigger>
             <TabsTrigger value="addresses">Addresses</TabsTrigger>
+            <TabsTrigger value="doorknocks">Door knocks</TabsTrigger>
             <TabsTrigger value="qr">QR Codes</TabsTrigger>
             <TabsTrigger value="route">Optimized route</TabsTrigger>
             <TabsTrigger value="notes">Notes</TabsTrigger>
@@ -375,7 +376,7 @@ Tip: Keep qr-images and canva_bulk_data.csv in the same place so paths match (or
 
           <TabsContent value="map" className="mt-4 space-y-4">
             <div className="bg-card rounded-xl border border-border overflow-hidden" style={{ height: '560px' }}>
-              <CampaignDetailMapView campaignId={campaignId} addresses={addresses} />
+              <CampaignDetailMapView campaignId={campaignId} addresses={addresses} campaign={campaign} onSnapComplete={loadData} />
             </div>
             <Button className="w-full h-12 text-base font-semibold rounded-xl bg-primary hover:bg-primary/90" size="lg">
               Start Session
@@ -386,6 +387,29 @@ Tip: Keep qr-images and canva_bulk_data.csv in the same place so paths match (or
             <div className="bg-card p-4 rounded-xl border border-border">
               <h2 className="text-sm font-semibold text-foreground mb-3">Addresses</h2>
               <RecipientsTable recipients={formattedRecipients} campaignId={campaignId} />
+            </div>
+          </TabsContent>
+
+          <TabsContent value="doorknocks" className="mt-4 space-y-4">
+            <div className="bg-card p-4 rounded-xl border border-border">
+              <h2 className="text-sm font-semibold text-foreground mb-2">Visited (door knocked)</h2>
+              <p className="text-xs text-muted-foreground mb-3">
+                Addresses you’ve marked as visited. Use the Map tab to see all statuses (red = untouched, green = touched, blue = conversations).
+              </p>
+              {formattedRecipients.filter((r) => r.status === 'scanned').length === 0 ? (
+                <p className="text-sm text-muted-foreground py-4">No door knocks recorded yet. Mark addresses as visited on the Addresses tab or during a session in the app.</p>
+              ) : (
+                <RecipientsTable
+                  recipients={formattedRecipients.filter((r) => r.status === 'scanned')}
+                  campaignId={campaignId}
+                />
+              )}
+            </div>
+            <div className="bg-card p-4 rounded-xl border border-border">
+              <h3 className="text-sm font-semibold text-foreground mb-2">Conversations</h3>
+              <p className="text-xs text-muted-foreground">
+                Buildings where you had a conversation appear on the <strong>Map</strong> as blue pins. Open the Map tab and click a blue building to see details in the location card.
+              </p>
             </div>
           </TabsContent>
 

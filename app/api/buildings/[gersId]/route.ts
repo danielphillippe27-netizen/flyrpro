@@ -1,20 +1,64 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
+import { cookies } from 'next/headers';
 import { createAdminClient } from '@/lib/supabase/server';
 import { validateGersId } from '@/lib/utils/uuid';
+import { getEntitlementForUser, canUsePro } from '@/app/lib/billing/entitlements';
 
 export const runtime = 'nodejs';
 
+const DEFAULT_SUPABASE_URL =
+  process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+
+function getSupabaseUrl(): string {
+  return (DEFAULT_SUPABASE_URL || '').trim().replace(/\/$/, '') || DEFAULT_SUPABASE_URL;
+}
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+/**
+ * Resolve current user ID from Bearer token (iOS) or cookies (web). Returns null if unauthenticated.
+ */
+async function getUserIdFromRequest(request: NextRequest): Promise<string | null> {
+  const authHeader = request.headers.get('authorization');
+  if (authHeader?.startsWith('Bearer ')) {
+    const token = authHeader.slice(7);
+    if (!SUPABASE_ANON_KEY) return null;
+    const supabase = createClient(getSupabaseUrl(), SUPABASE_ANON_KEY!, {
+      global: { headers: { Authorization: `Bearer ${token}` } },
+    });
+    const { data: { user }, error } = await supabase.auth.getUser();
+    if (error || !user) return null;
+    return user.id;
+  }
+  const cookieStore = await cookies();
+  const { createServerClient } = await import('@supabase/ssr');
+  if (!SUPABASE_ANON_KEY) return null;
+  const supabase = createServerClient(getSupabaseUrl(), SUPABASE_ANON_KEY!, {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
+      },
+      setAll(cookiesToSet: { name: string; value: string; options?: object }[]) {
+        cookiesToSet.forEach(({ name, value, options }) =>
+          cookieStore.set(name, value, options)
+        );
+      },
+    },
+  });
+  const { data: { user } } = await supabase.auth.getUser();
+  return user?.id ?? null;
+}
+
 /**
  * GET endpoint for fetching building details by GERS ID
- * 
- * This endpoint replaces coordinate-based searches with direct GERS ID lookups.
- * It queries campaign_addresses by gers_id to find the associated address
- * and campaign information.
- * 
+ *
+ * QR scan data (scans, last_scanned_at) is only returned for Pro/Team subscribers.
+ * Free or unauthenticated callers receive scans: 0, last_scanned_at: null.
+ *
  * @param gersId - The Overture GERS ID (gers_id in campaign_addresses) - UUID v4 format
  * @param campaignId - Optional query parameter to filter by specific campaign
- * 
- * @returns Building details including address, campaign info, and status
+ *
+ * @returns Building details; scan fields gated by entitlement
  */
 export async function GET(
   request: NextRequest,
@@ -44,6 +88,11 @@ export async function GET(
     // Optional campaign filter from query params
     const searchParams = request.nextUrl.searchParams;
     const campaignId = searchParams.get('campaign_id');
+
+    const userId = await getUserIdFromRequest(request);
+    const canShowScans =
+      userId != null &&
+      canUsePro(await getEntitlementForUser(userId));
 
     const supabase = createAdminClient();
 
@@ -106,7 +155,7 @@ export async function GET(
     const address = addresses[0];
     const campaign = address.campaigns as any;
 
-    // Build response
+    // Build response; only include real scan data for Pro/Team users
     const response = {
       gers_id: gersId,
       address_id: address.id,
@@ -118,8 +167,8 @@ export async function GET(
       source: address.source || null,
       status: address.visited ? 'visited' : 'not_visited',
       visited: address.visited || false,
-      scans: address.scans || 0,
-      last_scanned_at: address.last_scanned_at || null,
+      scans: canShowScans ? (address.scans || 0) : 0,
+      last_scanned_at: canShowScans ? (address.last_scanned_at || null) : null,
       created_at: address.created_at,
       // Include all addresses if multiple found (for debugging)
       ...(addresses.length > 1 && !campaignId ? { 
