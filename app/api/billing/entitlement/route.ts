@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 import { getEntitlementForUser } from '@/app/lib/billing/entitlements';
 import type { EntitlementSnapshot } from '@/types/database';
-import { STRIPE_PRICE_PRO_MONTHLY } from '@/app/lib/billing/stripe-products';
+import { getDefaultUpgradePriceId } from '@/app/lib/billing/stripe-products';
 
 const DEFAULT_SUPABASE_URL =
   process.env.SUPABASE_URL ||
@@ -84,8 +84,9 @@ export async function GET(request: NextRequest) {
       source: entitlement.source,
       current_period_end: entitlement.current_period_end,
     };
-    if (STRIPE_PRICE_PRO_MONTHLY) {
-      snapshot.upgrade_price_id = STRIPE_PRICE_PRO_MONTHLY;
+    const defaultPriceId = getDefaultUpgradePriceId();
+    if (defaultPriceId) {
+      snapshot.upgrade_price_id = defaultPriceId;
     }
 
     return NextResponse.json(snapshot);

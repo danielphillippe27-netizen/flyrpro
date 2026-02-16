@@ -11,9 +11,9 @@ export const STRIPE_PRICE_CAD_MONTHLY =
 export const STRIPE_PRICE_USD_MONTHLY =
   process.env.STRIPE_PRICE_USD_MONTHLY ?? '';
 export const STRIPE_PRICE_USD_YEARLY =
-  process.env.STRIPE_PRICE_USD_YEARLY ?? '';
+  process.env.STRIPE_PRICE_USD_YEARLY ?? 'price_1T1ZH4GVNtKfhDB1yAjHL2sk';
 export const STRIPE_PRICE_CAD_YEARLY =
-  process.env.STRIPE_PRICE_CAD_YEARLY ?? '';
+  process.env.STRIPE_PRICE_CAD_YEARLY ?? 'price_1T1ZIGGVNtKfhDB1vc9SPmWw';
 
 export const STRIPE_PRICE_TEAM_MONTHLY =
   process.env.STRIPE_PRICE_TEAM_MONTHLY ?? '';
@@ -41,6 +41,19 @@ const PRO_PRICE_IDS = new Set([
   STRIPE_PRICE_USD_YEARLY,
   STRIPE_PRICE_CAD_YEARLY,
 ].filter(Boolean));
+
+/** First available Pro price ID for "Upgrade to Pro" (Billing/Settings). */
+export function getDefaultUpgradePriceId(): string {
+  return (
+    STRIPE_PRICE_PRO_MONTHLY ||
+    STRIPE_PRICE_USD_MONTHLY ||
+    STRIPE_PRICE_CAD_MONTHLY ||
+    STRIPE_PRICE_PRO_YEARLY ||
+    STRIPE_PRICE_USD_YEARLY ||
+    STRIPE_PRICE_CAD_YEARLY ||
+    ''
+  );
+}
 
 /** Map Stripe price ID to plan for webhook. */
 export function planFromStripePriceId(priceId: string): 'pro' | 'team' | 'free' {

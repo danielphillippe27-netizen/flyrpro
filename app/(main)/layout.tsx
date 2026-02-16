@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { getClientAsync } from '@/lib/supabase/client';
-import { Home, Map, Trophy, Users, Settings, Target, Hexagon, Gauge, Plug, CircleDollarSign } from 'lucide-react';
+import { Home, Map, Trophy, Users, Settings, Target, Hexagon, Gauge, Plug, CircleDollarSign, CreditCard } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import Image from 'next/image';
 
@@ -20,6 +20,7 @@ const tabs = [
   { href: '/leaderboard', icon: Trophy, label: 'Leaderboard' },
   { href: '/stats', icon: Gauge, label: 'Performance' },
   { href: '/pricing', icon: CircleDollarSign, label: 'Pricing' },
+  { href: '/billing', icon: CreditCard, label: 'Billing' },
   { href: '/settings/integrations', icon: Plug, label: 'Integrations' },
   { href: '/settings', icon: Settings, label: 'Settings' },
 ];
@@ -67,14 +68,6 @@ export default function MainLayout({
               height={32}
               className="h-8 w-8 hidden dark:block shrink-0"
             />
-            <span
-              className={cn(
-                'font-semibold text-foreground text-sm whitespace-nowrap overflow-hidden transition-opacity duration-200',
-                sidebarExpanded ? 'opacity-100' : 'opacity-0 w-0 sr-only'
-              )}
-            >
-              FLYR
-            </span>
           </Link>
         </div>
         <div className="flex flex-col items-stretch justify-start flex-1 gap-2 overflow-hidden min-h-0 w-full px-1.5">
@@ -84,12 +77,15 @@ export default function MainLayout({
             const isIntegrations = tab.href === '/settings/integrations';
             const isSettings = tab.href === '/settings';
             const onIntegrations = pathname?.startsWith('/settings/integrations');
-            
+            const isBilling = tab.href === '/billing';
+
             let isActive;
             if (isIntegrations) {
               isActive = pathname === '/settings/integrations';
             } else if (isSettings) {
               isActive = pathname === '/settings' || (pathname?.startsWith('/settings/') && !onIntegrations);
+            } else if (isBilling) {
+              isActive = pathname === '/billing' || pathname?.startsWith('/billing/');
             } else {
               isActive = pathname === tab.href || pathname?.startsWith(tab.href + '/');
             }

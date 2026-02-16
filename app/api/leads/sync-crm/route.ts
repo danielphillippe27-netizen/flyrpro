@@ -5,8 +5,6 @@ import crypto from 'crypto';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const BOLDTRAIL_API_BASE = 'https://api.kvcore.com';
-
 function decryptApiKey(encryptedData: string): string {
   const keyString = process.env.ENCRYPTION_KEY || 'flyr-default-encryption-key-32chars!';
   const key = Buffer.from(keyString.slice(0, 32));
@@ -42,7 +40,7 @@ type ContactRow = {
 
 /**
  * POST /api/leads/sync-crm
- * Syncs the current user's leads/contacts to all connected CRMs (Follow Up Boss, BoldTrail).
+ * Syncs the current user's leads/contacts to connected CRMs (Follow Up Boss).
  */
 export async function POST() {
   try {
@@ -61,7 +59,7 @@ export async function POST() {
 
     if (!connections || connections.length === 0) {
       return NextResponse.json(
-        { error: 'No CRM connected. Connect Follow Up Boss or BoldTrail in Settings → Integrations first.' },
+        { error: 'No CRM connected. Connect Follow Up Boss in Settings → Integrations first.' },
         { status: 400 }
       );
     }
@@ -90,11 +88,11 @@ export async function POST() {
     }
 
     const details: Record<string, { synced: number; failed: number }> = {};
-    const providerNames: Record<string, string> = { followupboss: 'Follow Up Boss', boldtrail: 'BoldTrail' };
+    const providerNames: Record<string, string> = { followupboss: 'Follow Up Boss' };
 
     for (const conn of connections) {
       const provider = conn.provider as string;
-      if (provider !== 'followupboss' && provider !== 'boldtrail') continue;
+      if (provider !== 'followupboss') continue;
 
       let synced = 0;
       let failed = 0;
@@ -106,66 +104,37 @@ export async function POST() {
           continue;
         }
 
-        if (provider === 'followupboss') {
-          const { firstName, lastName } = splitFullName(c.full_name);
-          const person: Record<string, unknown> = {};
-          if (firstName || lastName) {
-            person.firstName = firstName;
-            person.lastName = lastName;
-          }
-          if (c.email) person.emails = [{ value: c.email }];
-          if (c.phone) person.phones = [{ value: c.phone }];
-          if (c.address) person.addresses = [{ street: c.address, city: '', state: '', code: '' }];
-          const eventPayload = {
-            source: 'FLYR',
-            system: 'FLYR',
-            type: 'General Inquiry',
-            message: c.notes
-              ? `FLYR lead${c.campaign_id ? ` (campaign ${c.campaign_id})` : ''}: ${c.notes}`
-              : `Lead from FLYR${c.campaign_id ? ` campaign ${c.campaign_id}` : ''}`,
-            person,
-          };
-          const fubRes = await fetch('https://api.followupboss.com/v1/events', {
-            method: 'POST',
-            headers: {
-              Authorization: `Basic ${Buffer.from(apiKey + ':').toString('base64')}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(eventPayload),
-          });
-          if (!fubRes.ok) {
-            console.error('FUB push failed for contact', c.id, fubRes.status);
-            failed++;
-          } else {
-            synced++;
-          }
+        const { firstName, lastName } = splitFullName(c.full_name);
+        const person: Record<string, unknown> = {};
+        if (firstName || lastName) {
+          person.firstName = firstName;
+          person.lastName = lastName;
+        }
+        if (c.email) person.emails = [{ value: c.email }];
+        if (c.phone) person.phones = [{ value: c.phone }];
+        if (c.address) person.addresses = [{ street: c.address, city: '', state: '', code: '' }];
+        const eventPayload = {
+          source: 'FLYR',
+          system: 'FLYR',
+          type: 'General Inquiry',
+          message: c.notes
+            ? `FLYR lead${c.campaign_id ? ` (campaign ${c.campaign_id})` : ''}: ${c.notes}`
+            : `Lead from FLYR${c.campaign_id ? ` campaign ${c.campaign_id}` : ''}`,
+          person,
+        };
+        const fubRes = await fetch('https://api.followupboss.com/v1/events', {
+          method: 'POST',
+          headers: {
+            Authorization: `Basic ${Buffer.from(apiKey + ':').toString('base64')}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(eventPayload),
+        });
+        if (!fubRes.ok) {
+          console.error('FUB push failed for contact', c.id, fubRes.status);
+          failed++;
         } else {
-          // boldtrail
-          const nameParts = splitFullName(c.full_name);
-          const name = nameParts.firstName || nameParts.lastName
-            ? [nameParts.firstName, nameParts.lastName].filter(Boolean).join(' ')
-            : (c.email || c.phone || 'Lead');
-          const contactPayload: Record<string, unknown> = {
-            name,
-            email: c.email || undefined,
-            source: 'FLYR',
-          };
-          if (c.phone) contactPayload.phone = c.phone;
-          if (c.address) contactPayload.address = c.address;
-          const btRes = await fetch(`${BOLDTRAIL_API_BASE}/v2/public/contacts`, {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${apiKey}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(contactPayload),
-          });
-          if (!btRes.ok) {
-            console.error('BoldTrail push failed for contact', c.id, btRes.status);
-            failed++;
-          } else {
-            synced++;
-          }
+          synced++;
         }
       }
 

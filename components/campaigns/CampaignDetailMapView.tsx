@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import * as turf from '@turf/turf';
-import type { CampaignAddress, CampaignV2 } from '@/types/database';
+import type { CampaignAddress, CampaignV2, CampaignParcel } from '@/types/database';
 import { MapBuildingsLayer } from '@/components/map/MapBuildingsLayer';
 import { MapInfoButton } from '@/components/map/MapInfoButton';
 import { LocationCard } from '@/components/map/LocationCard';
@@ -17,6 +17,10 @@ import {
   MAP_STATUS_CONFIG,
   type StatusFilters,
 } from '@/lib/constants/mapStatus';
+
+const PARCEL_SOURCE_ID = 'campaign-parcels';
+const PARCEL_FILL_LAYER = 'campaign-parcels-fill';
+const PARCEL_LINE_LAYER = 'campaign-parcels-line';
 
 const MAP_STYLES = {
   light: 'mapbox://styles/fliper27/cml6z0dhg002301qo9xxc08k4',
@@ -35,6 +39,16 @@ function safeGetLayer(m: mapboxgl.Map, layerId: string): boolean {
   try {
     if (!m.isStyleLoaded()) return false;
     return !!m.getLayer(layerId);
+  } catch {
+    return false;
+  }
+}
+
+/** Safe getSource: avoid "getOwnSource of undefined" during style transition or cleanup after map removal. */
+function safeGetSource(m: mapboxgl.Map, sourceId: string): boolean {
+  try {
+    if (!m.isStyleLoaded()) return false;
+    return !!m.getSource(sourceId);
   } catch {
     return false;
   }
@@ -75,6 +89,10 @@ export function CampaignDetailMapView({
   // Boundary: Snap to Roads and Raw vs Snapped toggle
   const [snapping, setSnapping] = useState(false);
   const [showRawBoundary, setShowRawBoundary] = useState(false);
+  // Parcels layer toggle
+  const [parcels, setParcels] = useState<CampaignParcel[]>([]);
+  const [showParcels, setShowParcels] = useState(false);
+  const [parcelsLoading, setParcelsLoading] = useState(false);
 
   // Get user ID on mount
   useEffect(() => {
@@ -83,6 +101,27 @@ export function CampaignDetailMapView({
       setUserId(user?.id || null);
     });
   }, []);
+
+  // Fetch parcels for this campaign
+  useEffect(() => {
+    if (!campaignId) return;
+    
+    const fetchParcels = async () => {
+      setParcelsLoading(true);
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from('campaign_parcels')
+        .select('*')
+        .eq('campaign_id', campaignId);
+      
+      if (!error && data) {
+        setParcels(data);
+      }
+      setParcelsLoading(false);
+    };
+    
+    fetchParcels();
+  }, [campaignId]);
 
   // Handle building click - opens LocationCard
   // For unit slices, addressId is passed to show specific unit
@@ -503,7 +542,7 @@ export function CampaignDetailMapView({
     const removeAddressPointsLayer = () => {
       try {
         if (safeGetLayer(mapInstance, addressPointsLayerId)) mapInstance.removeLayer(addressPointsLayerId);
-        if (mapInstance.getSource(addressPointsSourceId)) mapInstance.removeSource(addressPointsSourceId);
+        if (safeGetSource(mapInstance, addressPointsSourceId)) mapInstance.removeSource(addressPointsSourceId);
       } catch (_) {}
     };
 
@@ -604,8 +643,8 @@ export function CampaignDetailMapView({
       [BOUNDARY_LAYER_RAW_FILL, BOUNDARY_LAYER_RAW_LINE, BOUNDARY_LAYER_SNAPPED_FILL, BOUNDARY_LAYER_SNAPPED_LINE].forEach((id) => {
         if (safeGetLayer(m, id)) m.removeLayer(id);
       });
-      if (m.getSource(BOUNDARY_SOURCE_RAW)) m.removeSource(BOUNDARY_SOURCE_RAW);
-      if (m.getSource(BOUNDARY_SOURCE_SNAPPED)) m.removeSource(BOUNDARY_SOURCE_SNAPPED);
+      if (safeGetSource(m, BOUNDARY_SOURCE_RAW)) m.removeSource(BOUNDARY_SOURCE_RAW);
+      if (safeGetSource(m, BOUNDARY_SOURCE_SNAPPED)) m.removeSource(BOUNDARY_SOURCE_SNAPPED);
     };
 
     if (!m.isStyleLoaded()) {
@@ -680,6 +719,94 @@ export function CampaignDetailMapView({
     m.setPaintProperty(BOUNDARY_LAYER_SNAPPED_LINE, 'line-opacity', showRawBoundary ? 0.25 : 1);
   }, [mapLoaded, showRawBoundary, hasRawAndSnapped]);
 
+  // Parcels layer: show/hide when toggle changes
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !mapLoaded) return;
+    if (parcels.length === 0) return;
+
+    const removeParcelsLayer = () => {
+      if (safeGetLayer(m, PARCEL_FILL_LAYER)) m.removeLayer(PARCEL_FILL_LAYER);
+      if (safeGetLayer(m, PARCEL_LINE_LAYER)) m.removeLayer(PARCEL_LINE_LAYER);
+      if (safeGetSource(m, PARCEL_SOURCE_ID)) m.removeSource(PARCEL_SOURCE_ID);
+    };
+
+    const addParcelsLayer = () => {
+      if (!m.isStyleLoaded()) return;
+      
+      // Convert parcels to GeoJSON
+      const features: GeoJSON.Feature<GeoJSON.Polygon>[] = parcels.map((parcel) => {
+        const geom = typeof parcel.geom === 'string' 
+          ? JSON.parse(parcel.geom) 
+          : parcel.geom;
+        return {
+          type: 'Feature',
+          geometry: geom,
+          properties: {
+            external_id: parcel.external_id,
+            feature_type: parcel.properties?.FEATURE_TYPE || 'COMMON',
+          },
+        };
+      });
+
+      const geojson: GeoJSON.FeatureCollection = {
+        type: 'FeatureCollection',
+        features,
+      };
+
+      try {
+        m.addSource(PARCEL_SOURCE_ID, {
+          type: 'geojson',
+          data: geojson,
+        });
+
+        // Fill layer - subtle yellow/cream fill
+        m.addLayer({
+          id: PARCEL_FILL_LAYER,
+          type: 'fill',
+          source: PARCEL_SOURCE_ID,
+          paint: {
+            'fill-color': '#fbbf24',
+            'fill-opacity': 0.1,
+          },
+        });
+
+        // Line layer - amber outline
+        m.addLayer({
+          id: PARCEL_LINE_LAYER,
+          type: 'line',
+          source: PARCEL_SOURCE_ID,
+          layout: {
+            'line-cap': 'round',
+            'line-join': 'round',
+          },
+          paint: {
+            'line-color': '#f59e0b',
+            'line-width': 1.5,
+            'line-opacity': 0.7,
+          },
+        });
+      } catch (err) {
+        console.error('Error adding parcels layer:', err);
+      }
+    };
+
+    if (!showParcels) {
+      removeParcelsLayer();
+      return;
+    }
+
+    if (m.isStyleLoaded()) {
+      addParcelsLayer();
+    } else {
+      m.once('style.load', addParcelsLayer);
+    }
+
+    return () => {
+      removeParcelsLayer();
+    };
+  }, [mapLoaded, showParcels, parcels]);
+
   const handleSnapToRoads = async () => {
     setSnapping(true);
     try {
@@ -743,6 +870,27 @@ export function CampaignDetailMapView({
                     {showRawBoundary ? 'Snapped' : 'Raw'}
                   </button>
                 )}
+              </div>
+            )}
+            {/* Parcels toggle - only show if parcels exist for this campaign */}
+            {parcels.length > 0 && (
+              <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 bg-white/90 dark:bg-black/80 backdrop-blur-sm shadow-sm overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setShowParcels((v) => !v)}
+                  className={`px-3 py-2 text-sm font-medium transition-colors flex items-center gap-2 ${
+                    showParcels 
+                      ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300' 
+                      : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                  }`}
+                  title={`${parcels.length} parcel${parcels.length !== 1 ? 's' : ''} available`}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M5 3a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2V5a2 2 0 00-2-2H5zm0 2h10v10H5V5z" clipRule="evenodd" />
+                  </svg>
+                  {showParcels ? 'Hide Parcels' : 'Show Parcels'}
+                  <span className="text-xs opacity-60">({parcels.length})</span>
+                </button>
               </div>
             )}
           </div>

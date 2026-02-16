@@ -53,6 +53,10 @@ ts-debug.log*
 *.sqlite
 /*.glb
 master_addresses_parquet/
+/data/*.geojson
+/data/*.json
+/data/*.zip
+/data/parcels/
 
 # Debug scripts
 debug-*.js

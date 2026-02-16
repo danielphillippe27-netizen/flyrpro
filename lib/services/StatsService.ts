@@ -1,6 +1,8 @@
 import { createClient } from '@/lib/supabase/client';
 import type { UserStats } from '@/types/database';
 
+export type StatsPeriod = 'daily' | 'weekly' | 'monthly' | 'lifetime';
+
 function mapRow(row: Record<string, unknown>): UserStats {
   return {
     id: String(row.id ?? ''),
@@ -29,7 +31,18 @@ function mapRow(row: Record<string, unknown>): UserStats {
 export class StatsService {
   private static client = createClient();
 
-  static async fetchUserStats(userId: string): Promise<UserStats | null> {
+  static async fetchUserStats(userId: string, period?: StatsPeriod): Promise<UserStats | null> {
+    if (period) {
+      const { data, error } = await this.client.rpc('get_user_stats_for_period', {
+        p_user_id: userId,
+        p_period: period,
+      });
+      if (error) throw error;
+      const row = Array.isArray(data) ? data[0] : data;
+      if (!row) return null;
+      return mapRow(row as Record<string, unknown>);
+    }
+
     const { data, error } = await this.client
       .from('user_stats')
       .select('*')

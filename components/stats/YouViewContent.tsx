@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { StatsService } from '@/lib/services/StatsService';
+import { StatsService, type StatsPeriod } from '@/lib/services/StatsService';
 import type { UserStats } from '@/types/database';
 import { cn } from '@/lib/utils';
 import {
@@ -11,8 +11,6 @@ import {
 } from '@/lib/stats/formatters';
 import { StatCard } from './StatCard';
 import { SuccessMetricBar } from './SuccessMetricBar';
-
-export type StatsPeriod = 'daily' | 'weekly' | 'monthly' | 'lifetime';
 
 const PERIOD_LABELS: Record<StatsPeriod, string> = {
   daily: 'Daily',
@@ -32,7 +30,7 @@ export function YouViewContent({ userId }: { userId: string | null }) {
     setLoading(true);
     setError(null);
     try {
-      const data = await StatsService.fetchUserStats(userId);
+      const data = await StatsService.fetchUserStats(userId, period);
       setStats(data);
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Failed to load stats';
@@ -41,7 +39,7 @@ export function YouViewContent({ userId }: { userId: string | null }) {
     } finally {
       setLoading(false);
     }
-  }, [userId]);
+  }, [userId, period]);
 
   useEffect(() => {
     loadStats();

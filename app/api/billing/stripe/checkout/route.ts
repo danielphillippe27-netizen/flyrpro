@@ -51,6 +51,8 @@ export async function POST(request: NextRequest) {
     }
 
     const appUrl = getAppUrl();
+    const price = await stripe.prices.retrieve(priceId);
+    const isUsd = price.currency?.toLowerCase() === 'usd';
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
       line_items: [{ price: priceId, quantity: 1 }],
@@ -58,6 +60,13 @@ export async function POST(request: NextRequest) {
       success_url: `${appUrl}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${appUrl}/billing`,
       metadata: { user_id: user.id },
+      ...(isUsd && {
+        custom_text: {
+          submit: {
+            message: 'Amount charged in **USD**.',
+          },
+        },
+      }),
     });
 
     return NextResponse.json({ url: session.url });

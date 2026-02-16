@@ -36,8 +36,8 @@ export async function GET() {
     prices.push({
       priceId: STRIPE_PRICE_USD_YEARLY,
       name: 'Pro Yearly',
-      amount: '25',
-      period: '/month',
+      amount: '300',
+      period: '/year',
       currency: 'USD',
       interval: 'year',
     });
@@ -56,8 +56,8 @@ export async function GET() {
     prices.push({
       priceId: STRIPE_PRICE_CAD_YEARLY,
       name: 'Pro Yearly',
-      amount: '33.99',
-      period: '/month',
+      amount: '400',
+      period: '/year',
       currency: 'CAD',
       interval: 'year',
     });

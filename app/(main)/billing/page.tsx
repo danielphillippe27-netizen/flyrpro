@@ -171,6 +171,11 @@ export default function BillingPage() {
                 {checkoutLoading ? 'Redirecting…' : 'Upgrade to Pro'}
               </Button>
             )}
+            {(!entitlement?.is_active || entitlement.plan === 'free') && !entitlement?.upgrade_price_id && (
+              <Button asChild>
+                <Link href="/pricing">Choose a plan</Link>
+              </Button>
+            )}
             {entitlement?.source === 'stripe' && (
               <Button variant="outline" onClick={handleManageBilling} disabled={portalLoading}>
                 {portalLoading ? 'Opening…' : 'Manage billing'}
