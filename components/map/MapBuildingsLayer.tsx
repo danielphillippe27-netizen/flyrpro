@@ -159,7 +159,7 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
       'case',
       // QR_SCANNED (highest priority): qr_scanned === true OR scans_total > 0
       ['any', ['==', getQrScanned(), true], ['>', getScansTotal(), 0]],
-      MAP_STATUS_CONFIG.QR_SCANNED.color, // Yellow
+      MAP_STATUS_CONFIG.QR_SCANNED.color, // Purple
       
       // CONVERSATIONS: status === 'hot'
       ['==', getStatusValue(), 'hot'],

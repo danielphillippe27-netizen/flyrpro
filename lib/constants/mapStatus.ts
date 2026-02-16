@@ -17,7 +17,7 @@ export const MAP_STATUS_CONFIG: Record<MapStatusKey, MapStatusConfig> = {
   QR_SCANNED: {
     key: 'QR_SCANNED',
     label: 'QR Code Scanned',
-    color: '#facc15', // Yellow
+    color: '#a855f7', // Purple
   },
   CONVERSATIONS: {
     key: 'CONVERSATIONS',

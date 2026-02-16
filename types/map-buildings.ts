@@ -56,7 +56,7 @@ export interface BuildingProperties {
   status: 'not_visited' | 'visited' | 'hot';
   scans_today: number;
   scans_total: number;
-  qr_scanned?: boolean; // True when scans_total > 0, used for yellow color
+  qr_scanned?: boolean; // True when scans_total > 0, used for purple color
   last_scan_seconds_ago: number | null;
   unit_points?: GeoJSON.MultiPoint | null; // Parsed GeoJSON geometry
   divider_lines?: GeoJSON.MultiLineString | null; // Parsed GeoJSON geometry

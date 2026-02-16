@@ -301,7 +301,7 @@ export class ThreeHouseLayer {
       const addressId = feature.properties.address_id;
       const isScanned = addressId && this.scannedPropertyIds.has(addressId);
       const colorHex = isScanned 
-        ? '#32CD32' // LimeGreen for scanned houses
+        ? '#a855f7' // Purple for QR-scanned houses (matches MAP_STATUS_CONFIG.QR_SCANNED)
         : (() => {
             const status = feature.properties.latest_status as BuildingStatus | undefined;
             return status 

@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { getClientAsync } from '@/lib/supabase/client';
-import { Home, Map, Trophy, Users, Settings, Target, Hexagon, Gauge, Plug } from 'lucide-react';
+import { Home, Map, Trophy, Users, Settings, Target, Hexagon, Gauge, Plug, CircleDollarSign } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import Image from 'next/image';
 
@@ -19,6 +19,7 @@ const tabs = [
   { href: '/leads', icon: Users, label: 'Leads' },
   { href: '/leaderboard', icon: Trophy, label: 'Leaderboard' },
   { href: '/stats', icon: Gauge, label: 'Performance' },
+  { href: '/pricing', icon: CircleDollarSign, label: 'Pricing' },
   { href: '/settings/integrations', icon: Plug, label: 'Integrations' },
   { href: '/settings', icon: Settings, label: 'Settings' },
 ];

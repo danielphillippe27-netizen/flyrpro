@@ -112,7 +112,7 @@ Contacts, QR Codes, Scan Events
 - [ ] Subscribe to `building_stats` table changes
 - [ ] Implement `onUpdate` callback
 - [ ] Update building annotation colors in real-time
-- [ ] Test by scanning QR code (building should turn yellow)
+- [ ] Test by scanning QR code (building should turn purple)
 
 ### Phase 6: Testing (2 hours)
 

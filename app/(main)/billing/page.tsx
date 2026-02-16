@@ -25,6 +25,7 @@ export default function BillingPage() {
   const [loading, setLoading] = useState(true);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [portalLoading, setPortalLoading] = useState(false);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchEntitlement = async () => {
@@ -48,9 +49,10 @@ export default function BillingPage() {
   const handleUpgrade = async () => {
     const priceId = entitlement?.upgrade_price_id;
     if (!priceId) {
-      alert('Upgrade is not configured. Please try again later.');
+      setCheckoutError('Upgrade is not configured. Please try again later.');
       return;
     }
+    setCheckoutError(null);
     setCheckoutLoading(true);
     try {
       const res = await fetch('/api/billing/stripe/checkout', {
@@ -59,15 +61,18 @@ export default function BillingPage() {
         credentials: 'include',
         body: JSON.stringify({ priceId }),
       });
-      const data = await res.json();
-      if (data.url) {
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.url) {
         window.location.href = data.url;
-      } else {
-        alert(data.error || 'Failed to start checkout');
+        return;
       }
+      const message =
+        data?.error ||
+        (res.status === 401 ? 'Please sign in again.' : res.status === 400 ? 'Invalid plan configuration.' : 'Failed to start checkout.');
+      setCheckoutError(message);
     } catch (e) {
       console.error(e);
-      alert('Failed to start checkout');
+      setCheckoutError('Network error. Please try again.');
     } finally {
       setCheckoutLoading(false);
     }
@@ -113,6 +118,12 @@ export default function BillingPage() {
           <ArrowLeft className="w-4 h-4" />
           Back to Settings
         </Link>
+        <Link
+          href="/pricing"
+          className="text-sm text-muted-foreground hover:text-foreground"
+        >
+          View all plans
+        </Link>
       </div>
 
       <Card>
@@ -149,6 +160,11 @@ export default function BillingPage() {
             </div>
           </div>
 
+          {checkoutError && (
+            <p className="text-sm text-red-500" role="alert">
+              {checkoutError}
+            </p>
+          )}
           <div className="flex flex-wrap gap-2 pt-2">
             {(!entitlement?.is_active || entitlement.plan === 'free') && entitlement?.upgrade_price_id && (
               <Button onClick={handleUpgrade} disabled={checkoutLoading}>

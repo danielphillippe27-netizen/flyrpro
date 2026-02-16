@@ -11,7 +11,8 @@
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
     "deploy:lambda": "cd kimi-cli && npm install && node bin/kimi.js",
-    "deploy:lambda:dry": "cd kimi-cli && node bin/kimi.js --dry-run"
+    "deploy:lambda:dry": "cd kimi-cli && node bin/kimi.js --dry-run",
+    "stripe:listen": "stripe listen --forward-to localhost:3000/api/billing/stripe/webhook"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.986.0",

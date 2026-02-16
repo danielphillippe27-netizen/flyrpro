@@ -929,7 +929,7 @@ supabase.rpc('rpc_get_buildings_in_bbox', {
 
 ### Real-time Update Tests
 
-- [ ] Scan QR code, verify building color changes to yellow
+- [ ] Scan QR code, verify building color changes to purple
 - [ ] Add contact, verify resident list updates
 - [ ] Update building status, verify color changes
 - [ ] Test with multiple buildings updating simultaneously

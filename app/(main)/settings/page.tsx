@@ -62,6 +62,8 @@ function SettingsPageContent() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [entitlement, setEntitlement] = useState<EntitlementSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
+  const [upgradeLoading, setUpgradeLoading] = useState(false);
+  const [portalLoading, setPortalLoading] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [goals, setGoals] = useState<{ weekly_door_goal: number; weekly_sessions_goal: number | null; weekly_minutes_goal: number | null } | null>(null);
   const [goalsSaving, setGoalsSaving] = useState(false);
@@ -170,6 +172,7 @@ function SettingsPageContent() {
       router.push('/billing');
       return;
     }
+    setUpgradeLoading(true);
     try {
       const response = await fetch('/api/billing/stripe/checkout', {
         method: 'POST',
@@ -186,6 +189,30 @@ function SettingsPageContent() {
     } catch (error) {
       console.error('Error creating checkout:', error);
       router.push('/billing');
+    } finally {
+      setUpgradeLoading(false);
+    }
+  };
+
+  const handleManageBilling = async () => {
+    setPortalLoading(true);
+    try {
+      const res = await fetch('/api/billing/stripe/portal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+      });
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        router.push('/billing');
+      }
+    } catch (error) {
+      console.error('Error opening portal:', error);
+      router.push('/billing');
+    } finally {
+      setPortalLoading(false);
     }
   };
 
@@ -273,12 +300,17 @@ function SettingsPageContent() {
                 </div>
                 <div className="flex gap-2">
                   {!entitlement?.is_active && (
-                    <Button onClick={handleUpgrade} size="sm">
-                      Upgrade to Pro
+                    <Button onClick={handleUpgrade} size="sm" disabled={upgradeLoading}>
+                      {upgradeLoading ? 'Redirecting…' : 'Upgrade to Pro'}
                     </Button>
                   )}
-                  <Button variant="outline" size="sm" asChild>
-                    <a href="/billing">Manage billing</a>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleManageBilling}
+                    disabled={portalLoading}
+                  >
+                    {portalLoading ? 'Opening…' : 'Manage billing'}
                   </Button>
                 </div>
               </div>

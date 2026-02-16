@@ -41,7 +41,7 @@ When a user taps on a building on the map:
    • Residents/contacts
    • QR scan status
    • Action buttons (Navigate, Log Visit, Add Contact)
-4. When QR code is scanned, building turns yellow in real-time
+4. When QR code is scanned, building turns purple in real-time
 ```
 
 ### Technical Flow
@@ -249,7 +249,7 @@ Time: ~30 min
    - Yellow (QR scanned) always wins
    
 3. **Real-time updates work**
-   - Building turns yellow when QR scanned
+   - Building turns purple when QR scanned
 
 4. **Handle unlinked buildings gracefully**
    - Show clear UI when no address found
@@ -282,7 +282,7 @@ Your implementation is complete when:
 **Solution**: Verify `contacts.address_id` matches the resolved `campaign_addresses.id`
 
 ### Problem: Colors wrong
-**Solution**: Check status priority logic - QR scanned (yellow) should always win
+**Solution**: Check status priority logic - QR scanned (purple) should always win
 
 ### Problem: Real-time updates not working
 **Solution**: Verify Supabase real-time is enabled on `building_stats` table

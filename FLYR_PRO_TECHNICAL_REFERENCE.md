@@ -707,7 +707,7 @@ CREATE TABLE flyers (
 │                     ▼                                           │
 │  10. Update Map Building Color                                  │
 │      - Find feature by gers_id                                 │
-│      - Update fill color to YELLOW (#facc15)                   │
+│      - Update fill color to PURPLE (#a855f7)                   │
 │      - Instant visual feedback                                 │
 │                     │                                           │
 │                     ▼                                           │
@@ -725,12 +725,12 @@ Buildings are colored based on their status. The priority order is:
 
 | Priority | Status | Color | Hex | Condition |
 |----------|--------|-------|-----|-----------|
-| 1 (Highest) | QR_SCANNED | Yellow | `#facc15` | `scans_total > 0` OR `qr_scanned = true` |
+| 1 (Highest) | QR_SCANNED | Purple | `#a855f7` | `scans_total > 0` OR `qr_scanned = true` |
 | 2 | CONVERSATIONS | Blue | `#3b82f6` | `status = 'hot'` AND not scanned |
 | 3 | TOUCHED | Green | `#22c55e` | `status = 'visited'` AND not scanned |
 | 4 (Lowest) | UNTOUCHED | Red | `#ef4444` | Default / `status = 'not_visited'` |
 
-**Note**: QR scans always take priority. A building that was manually marked "hot" will turn yellow when scanned.
+**Note**: QR scans always take priority. A building that was manually marked "hot" will turn purple when scanned.
 
 ---
 
@@ -1190,9 +1190,9 @@ layer.fillExtrusionOpacity = .constant(0.9)
 // Color based on status
 layer.fillExtrusionColor = .expression(
   Exp(.switchCase) {
-    // Priority 1: QR Scanned (yellow)
+    // Priority 1: QR Scanned (purple)
     Exp(.gt) { Exp(.get) { "scans_total" }; 0 }
-    UIColor(hex: "#facc15")
+    UIColor(hex: "#a855f7")
     
     // Priority 2: Hot/Conversations (blue)
     Exp(.eq) { Exp(.get) { "status" }; "hot" }
