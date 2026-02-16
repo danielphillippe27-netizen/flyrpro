@@ -30,6 +30,16 @@ const BOUNDARY_LAYER_RAW_LINE = 'campaign-boundary-raw-line';
 const BOUNDARY_LAYER_SNAPPED_FILL = 'campaign-boundary-snapped-fill';
 const BOUNDARY_LAYER_SNAPPED_LINE = 'campaign-boundary-snapped-line';
 
+/** Safe getLayer: avoid "getOwnLayer of undefined" during style transition or when map is hidden (e.g. tab switch). */
+function safeGetLayer(m: mapboxgl.Map, layerId: string): boolean {
+  try {
+    if (!m.isStyleLoaded()) return false;
+    return !!m.getLayer(layerId);
+  } catch {
+    return false;
+  }
+}
+
 export function CampaignDetailMapView({
   campaignId,
   addresses,
@@ -464,7 +474,7 @@ export function CampaignDetailMapView({
             promoteId: 'feature_id',
           });
         }
-        if (!mapInstance.getLayer(addressPointsLayerId)) {
+        if (!safeGetLayer(mapInstance, addressPointsLayerId)) {
           const filterExpr = getFilterExpression();
           mapInstance.addLayer({
             id: addressPointsLayerId,
@@ -492,7 +502,7 @@ export function CampaignDetailMapView({
 
     const removeAddressPointsLayer = () => {
       try {
-        if (mapInstance.getLayer(addressPointsLayerId)) mapInstance.removeLayer(addressPointsLayerId);
+        if (safeGetLayer(mapInstance, addressPointsLayerId)) mapInstance.removeLayer(addressPointsLayerId);
         if (mapInstance.getSource(addressPointsSourceId)) mapInstance.removeSource(addressPointsSourceId);
       } catch (_) {}
     };
@@ -544,16 +554,19 @@ export function CampaignDetailMapView({
     const cleanupLayers = () => {
       if (!map.current) return;
       try {
+        if (!map.current.isStyleLoaded()) return;
         const style = map.current.getStyle();
         if (style?.layers) {
           style.layers.forEach((layer) => {
-            if (layer.id.toLowerCase().includes('building')) {
-              map.current?.setLayoutProperty(layer.id, 'visibility', 'none');
-            }
-            if (layer.id && (layer.id.includes('road-label') || layer.id.includes('road_label'))) {
-              try {
-                map.current?.removeLayer(layer.id);
-              } catch {}
+            try {
+              if (layer.id?.toLowerCase().includes('building')) {
+                map.current?.setLayoutProperty(layer.id, 'visibility', 'none');
+              }
+              if (layer.id && (layer.id.includes('road-label') || layer.id.includes('road_label'))) {
+                if (safeGetLayer(map.current!, layer.id)) map.current?.removeLayer(layer.id);
+              }
+            } catch {
+              // Ignore per-layer errors during style cleanup (e.g. getOwnLayer of undefined)
             }
           });
         }
@@ -589,7 +602,7 @@ export function CampaignDetailMapView({
 
     const removeBoundaryLayers = () => {
       [BOUNDARY_LAYER_RAW_FILL, BOUNDARY_LAYER_RAW_LINE, BOUNDARY_LAYER_SNAPPED_FILL, BOUNDARY_LAYER_SNAPPED_LINE].forEach((id) => {
-        if (m.getLayer(id)) m.removeLayer(id);
+        if (safeGetLayer(m, id)) m.removeLayer(id);
       });
       if (m.getSource(BOUNDARY_SOURCE_RAW)) m.removeSource(BOUNDARY_SOURCE_RAW);
       if (m.getSource(BOUNDARY_SOURCE_SNAPPED)) m.removeSource(BOUNDARY_SOURCE_SNAPPED);
@@ -662,7 +675,7 @@ export function CampaignDetailMapView({
   useEffect(() => {
     const m = map.current;
     if (!m || !mapLoaded || !hasRawAndSnapped) return;
-    if (!m.getLayer(BOUNDARY_LAYER_RAW_LINE) || !m.getLayer(BOUNDARY_LAYER_SNAPPED_LINE)) return;
+    if (!safeGetLayer(m, BOUNDARY_LAYER_RAW_LINE) || !safeGetLayer(m, BOUNDARY_LAYER_SNAPPED_LINE)) return;
     m.setPaintProperty(BOUNDARY_LAYER_RAW_LINE, 'line-opacity', showRawBoundary ? 1 : 0.3);
     m.setPaintProperty(BOUNDARY_LAYER_SNAPPED_LINE, 'line-opacity', showRawBoundary ? 0.25 : 1);
   }, [mapLoaded, showRawBoundary, hasRawAndSnapped]);

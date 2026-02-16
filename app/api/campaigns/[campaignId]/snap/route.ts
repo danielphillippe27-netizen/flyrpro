@@ -30,6 +30,7 @@ export async function POST(
   context: { params: Promise<{ campaignId: string }> }
 ) {
   const { campaignId } = await context.params;
+  console.log('[snap] Starting snap request for campaign:', campaignId);
 
   try {
     const supabaseSession = await getSupabaseServerClient();
@@ -39,8 +40,11 @@ export async function POST(
     } = await supabaseSession.auth.getUser();
 
     if (authError || !user) {
+      console.error('[snap] Auth error:', authError);
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+
+    console.log('[snap] User authenticated:', user.id);
 
     const supabase = createAdminClient();
     const { data: campaign, error: campaignError } = await supabase
@@ -50,6 +54,7 @@ export async function POST(
       .single();
 
     if (campaignError || !campaign) {
+      console.error('[snap] Campaign fetch error:', campaignError);
       return NextResponse.json(
         { error: 'Campaign not found or access denied' },
         { status: 404 }
@@ -57,6 +62,7 @@ export async function POST(
     }
 
     if (campaign.owner_id !== user.id) {
+      console.error('[snap] Ownership mismatch:', campaign.owner_id, '!=', user.id);
       return NextResponse.json(
         { error: 'Campaign not found or access denied' },
         { status: 404 }
@@ -66,48 +72,68 @@ export async function POST(
     // Extract geometry: re-snap from raw when already snapped; otherwise use current boundary
     let inputPolygon: { type: 'Polygon'; coordinates: number[][][] } | null = null;
     if (campaign.is_snapped && campaign.campaign_polygon_raw) {
+      console.log('[snap] Using raw polygon (re-snap mode)');
       inputPolygon = toGeoJSONPolygon(campaign.campaign_polygon_raw);
     }
     if (!inputPolygon && campaign.territory_boundary) {
+      console.log('[snap] Using territory_boundary polygon');
       inputPolygon = toGeoJSONPolygon(campaign.territory_boundary);
     }
 
     if (!inputPolygon) {
+      console.error('[snap] No valid polygon found');
       return NextResponse.json(
         { error: 'No territory boundary to snap. Draw a polygon first.' },
         { status: 400 }
       );
     }
 
-    const { polygon, wasSnapped } = await snapPolygonToRoads(inputPolygon, supabase);
+    console.log('[snap] Input polygon vertices:', inputPolygon.coordinates[0]?.length);
+
+    let snapResult;
+    try {
+      snapResult = await snapPolygonToRoads(inputPolygon, supabase);
+    } catch (snapError) {
+      console.error('[snap] snapPolygonToRoads threw error:', snapError);
+      return NextResponse.json(
+        { error: snapError instanceof Error ? snapError.message : 'Snapping service failed' },
+        { status: 500 }
+      );
+    }
+
+    console.log('[snap] Snap result:', { wasSnapped: snapResult.wasSnapped, vertices: snapResult.polygon.coordinates[0]?.length });
 
     const rawToSave =
       campaign.is_snapped && campaign.campaign_polygon_raw
         ? campaign.campaign_polygon_raw
         : inputPolygon;
 
+    console.log('[snap] Calling update_campaign_boundary RPC');
+    
     const { data: updateResult, error: updateError } = await supabase.rpc(
       'update_campaign_boundary',
       {
         p_campaign_id: campaignId,
-        p_boundary_geojson: polygon,
+        p_boundary_geojson: snapResult.polygon,
         p_raw_geojson: rawToSave,
-        p_is_snapped: wasSnapped,
+        p_is_snapped: snapResult.wasSnapped,
       }
     );
 
     if (updateError) {
       console.error('[snap] update_campaign_boundary error:', updateError);
       return NextResponse.json(
-        { error: 'Failed to save boundary' },
+        { error: `Failed to save boundary: ${updateError.message}` },
         { status: 500 }
       );
     }
 
+    console.log('[snap] Successfully updated campaign boundary:', updateResult);
+
     return NextResponse.json({
       ok: true,
-      polygon,
-      wasSnapped,
+      polygon: snapResult.polygon,
+      wasSnapped: snapResult.wasSnapped,
     });
   } catch (err) {
     console.error('[snap] Unhandled error:', err);

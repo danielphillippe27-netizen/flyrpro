@@ -18,8 +18,9 @@ import { CampaignsService } from '@/lib/services/CampaignsService';
 import { createClient } from '@/lib/supabase/client';
 import { useTheme } from '@/lib/theme-provider';
 import { getMapboxToken } from '@/lib/mapbox';
-import { DEFAULT_STATUS_FILTERS, type StatusFilters } from '@/lib/constants/mapStatus';
+import { DEFAULT_STATUS_FILTERS, MAP_STATUS_CONFIG, type StatusFilters } from '@/lib/constants/mapStatus';
 import type { CampaignV2, CampaignAddress } from '@/types/database';
+import * as turf from '@turf/turf';
 
 const MAP_STYLES = {
   light: 'mapbox://styles/fliper27/cml6z0dhg002301qo9xxc08k4',
@@ -50,6 +51,7 @@ export function FlyrMapView() {
   const boundsFittedRef = useRef(false);
   const [campaignBbox, setCampaignBbox] = useState<{ minLon: number; minLat: number; maxLon: number; maxLat: number } | null>(null);
   const [showUserLocation, setShowUserLocation] = useState(false);
+  const [mapViewMode, setMapViewMode] = useState<'buildings' | 'addresses'>('buildings');
 
   // Get user ID on mount
   useEffect(() => {
@@ -453,6 +455,182 @@ export function FlyrMapView() {
     }
   }, [selectedCampaignId, campaignAddresses, mapLoaded]);
 
+  // Address points layer (Map tab): when mapViewMode === 'addresses', show circular fill-extrusions per address
+  const addressPointsSourceId = 'flyr-map-address-points';
+  const addressPointsLayerId = 'flyr-map-address-points-extrusion';
+  useEffect(() => {
+    const mapInstance = map.current;
+    if (!mapInstance || !mapLoaded) return;
+    if (mapViewMode !== 'addresses' || !selectedCampaignId || campaignAddresses.length === 0) {
+      try {
+        if (mapInstance.getLayer(addressPointsLayerId)) mapInstance.removeLayer(addressPointsLayerId);
+        if (mapInstance.getSource(addressPointsSourceId)) mapInstance.removeSource(addressPointsSourceId);
+      } catch (_) {}
+      return;
+    }
+
+    const getCoord = (address: CampaignAddress): { lon: number; lat: number } | null => {
+      if (address.coordinate) return address.coordinate;
+      const a = address as CampaignAddress & { geometry?: unknown; geom_json?: { type: string; coordinates?: number[] } };
+      if (a.geom_json?.type === 'Point' && Array.isArray(a.geom_json?.coordinates) && a.geom_json.coordinates.length >= 2) {
+        const [lon, lat] = a.geom_json.coordinates;
+        if (typeof lon === 'number' && typeof lat === 'number' && !isNaN(lon) && !isNaN(lat)) return { lon, lat };
+      }
+      let geometry = a.geometry;
+      if (typeof geometry === 'string') {
+        try {
+          geometry = JSON.parse(geometry as string) as { type?: string; coordinates?: number[] };
+        } catch {
+          geometry = null;
+        }
+      }
+      const g = geometry as { type?: string; coordinates?: number[] } | null;
+      if (g?.type === 'Point' && Array.isArray(g?.coordinates) && g.coordinates.length >= 2) {
+        const [lon, lat] = g.coordinates;
+        if (typeof lon === 'number' && typeof lat === 'number' && !isNaN(lon) && !isNaN(lat)) return { lon, lat };
+      }
+      return getCoordinate(address);
+    };
+
+    const buildAddressPointsGeoJSON = (): GeoJSON.FeatureCollection | null => {
+      const radiusMeters = 4;
+      const steps = 24;
+      const features: GeoJSON.Feature<GeoJSON.Polygon>[] = [];
+      for (const addr of campaignAddresses) {
+        const coord = getCoord(addr);
+        if (!coord) continue;
+        const center = [coord.lon, coord.lat] as [number, number];
+        const circle = turf.circle(center, radiusMeters / 1000, { units: 'kilometers', steps });
+        const poly = circle.geometry;
+        if (poly.type !== 'Polygon') continue;
+        const scansTotal = addr.scans ?? 0;
+        const qrScanned = scansTotal > 0 || !!addr.last_scanned_at;
+        const addressStatus = addr.address_status ?? (addr.visited ? 'delivered' : 'none');
+        features.push({
+          type: 'Feature',
+          geometry: poly,
+          properties: {
+            feature_id: addr.id,
+            address_id: addr.id,
+            address_status: addressStatus,
+            scans_total: scansTotal,
+            qr_scanned: qrScanned,
+          },
+        });
+      }
+      if (features.length === 0) return null;
+      return { type: 'FeatureCollection', features };
+    };
+
+    const getColorExpression = (): unknown[] => {
+      const getAddressStatus = () => ['coalesce', ['feature-state', 'address_status'], ['get', 'address_status'], 'none'];
+      const getQrScanned = () => ['coalesce', ['feature-state', 'qr_scanned'], ['get', 'qr_scanned'], false];
+      const getScansTotal = () => ['coalesce', ['feature-state', 'scans_total'], ['get', 'scans_total'], 0];
+      return [
+        'case',
+        ['any', ['==', getQrScanned(), true], ['>', getScansTotal(), 0]],
+        MAP_STATUS_CONFIG.QR_SCANNED.color,
+        ['in', getAddressStatus(), ['literal', ['talked', 'appointment']]],
+        MAP_STATUS_CONFIG.CONVERSATIONS.color,
+        ['==', getAddressStatus(), 'delivered'],
+        MAP_STATUS_CONFIG.TOUCHED.color,
+        MAP_STATUS_CONFIG.UNTOUCHED.color,
+      ] as unknown[];
+    };
+
+    const getFilterExpression = (): unknown[] | undefined => {
+      const getAddressStatus = () => ['coalesce', ['feature-state', 'address_status'], ['get', 'address_status'], 'none'];
+      const getQrScanned = () => ['coalesce', ['feature-state', 'qr_scanned'], ['get', 'qr_scanned'], false];
+      const getScansTotal = () => ['coalesce', ['feature-state', 'scans_total'], ['get', 'scans_total'], 0];
+      const isQrScanned = ['any', ['==', getQrScanned(), true], ['>', getScansTotal(), 0]];
+      const isConversation = ['in', getAddressStatus(), ['literal', ['talked', 'appointment']]];
+      const isTouched = ['==', getAddressStatus(), 'delivered'];
+      const isUntouchedStrict = [
+        'all',
+        ['!=', getAddressStatus(), 'delivered'],
+        ['!', ['in', getAddressStatus(), ['literal', ['talked', 'appointment']]]],
+        ['!', isQrScanned],
+      ];
+      const statusConditions: unknown[] = [];
+      if (statusFilters.QR_SCANNED) statusConditions.push(isQrScanned);
+      if (statusFilters.CONVERSATIONS) statusConditions.push(isConversation);
+      if (statusFilters.TOUCHED) statusConditions.push(isTouched);
+      if (statusFilters.UNTOUCHED) statusConditions.push(isUntouchedStrict);
+      if (statusConditions.length === 0) return ['==', 1, 0];
+      if (statusFilters.QR_SCANNED && statusFilters.CONVERSATIONS && statusFilters.TOUCHED && statusFilters.UNTOUCHED) return undefined;
+      return ['any', ...statusConditions] as unknown[];
+    };
+
+    const addAddressPointsLayer = () => {
+      if (!mapInstance.isStyleLoaded()) return;
+      const geo = buildAddressPointsGeoJSON();
+      if (!geo || geo.features.length === 0) return;
+      try {
+        const existingSource = mapInstance.getSource(addressPointsSourceId);
+        if (existingSource && 'setData' in existingSource) {
+          (existingSource as mapboxgl.GeoJSONSource).setData(geo);
+        } else if (!existingSource) {
+          mapInstance.addSource(addressPointsSourceId, {
+            type: 'geojson',
+            data: geo,
+            promoteId: 'feature_id',
+          });
+        }
+        if (!mapInstance.getLayer(addressPointsLayerId)) {
+          const filterExpr = getFilterExpression();
+          mapInstance.addLayer({
+            id: addressPointsLayerId,
+            type: 'fill-extrusion',
+            source: addressPointsSourceId,
+            minzoom: 12,
+            paint: {
+              'fill-extrusion-color': getColorExpression() as string[],
+              'fill-extrusion-height': 10,
+              'fill-extrusion-base': 0,
+              'fill-extrusion-opacity': 1,
+              'fill-extrusion-vertical-gradient': true,
+            },
+            ...(filterExpr ? { filter: filterExpr as mapboxgl.Expression } : {}),
+          });
+        } else {
+          mapInstance.setPaintProperty(addressPointsLayerId, 'fill-extrusion-color', getColorExpression() as string[]);
+          const filterExpr = getFilterExpression();
+          mapInstance.setFilter(addressPointsLayerId, (filterExpr ?? ['all']) as mapboxgl.Expression);
+        }
+      } catch (err) {
+        console.error('[FlyrMapView] Error adding address points layer:', err);
+      }
+    };
+
+    const removeAddressPointsLayer = () => {
+      try {
+        if (mapInstance.getLayer(addressPointsLayerId)) mapInstance.removeLayer(addressPointsLayerId);
+        if (mapInstance.getSource(addressPointsSourceId)) mapInstance.removeSource(addressPointsSourceId);
+      } catch (_) {}
+    };
+
+    const onAddressPointClick = (e: mapboxgl.MapLayerMouseEvent) => {
+      const f = e.features?.[0];
+      if (!f?.properties) return;
+      const addressId = f.properties.address_id as string | undefined;
+      const gersId = (f.properties.gers_id as string | undefined) ?? addressId;
+      if (addressId) handleBuildingClick(gersId ?? addressId, addressId);
+    };
+
+    if (mapInstance.isStyleLoaded()) {
+      addAddressPointsLayer();
+    } else {
+      mapInstance.once('style.load', addAddressPointsLayer);
+    }
+
+    mapInstance.off('click', addressPointsLayerId, onAddressPointClick);
+    mapInstance.on('click', addressPointsLayerId, onAddressPointClick);
+
+    return () => {
+      mapInstance.off('click', addressPointsLayerId, onAddressPointClick);
+      removeAddressPointsLayer();
+    };
+  }, [mapViewMode, mapLoaded, campaignAddresses, statusFilters, theme, selectedCampaignId]);
 
   return (
     <div className="relative h-full w-full">
@@ -476,13 +654,15 @@ export function FlyrMapView() {
       <MapInfoButton show={mapLoaded && !error} />
       {mapLoaded && map.current && !error && useFillExtrusion && (
         <>
-          <MapBuildingsLayer 
-            map={map.current} 
-            campaignId={selectedCampaignId}
-            statusFilters={statusFilters}
-            onBuildingClick={handleBuildingClick}
-            onAddToCRM={handleAddToCRM}
-          />
+          {mapViewMode === 'buildings' && (
+            <MapBuildingsLayer 
+              map={map.current} 
+              campaignId={selectedCampaignId}
+              statusFilters={statusFilters}
+              onBuildingClick={handleBuildingClick}
+              onAddToCRM={handleAddToCRM}
+            />
+          )}
           <RouteLayer 
             map={map.current}
             campaignId={selectedCampaignId}
@@ -506,6 +686,26 @@ export function FlyrMapView() {
             }}
           />
         </>
+      )}
+      {mapLoaded && !error && selectedCampaignId && (
+        <div className="absolute top-4 right-4 z-10 flex flex-col gap-2">
+          <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 bg-white/90 dark:bg-black/80 backdrop-blur-sm shadow-sm overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setMapViewMode('buildings')}
+              className={`px-3 py-2 text-sm font-medium transition-colors ${mapViewMode === 'buildings' ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
+            >
+              Buildings
+            </button>
+            <button
+              type="button"
+              onClick={() => setMapViewMode('addresses')}
+              className={`px-3 py-2 text-sm font-medium transition-colors ${mapViewMode === 'addresses' ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
+            >
+              Addresses
+            </button>
+          </div>
+        </div>
       )}
       {mapLoaded && !error && (
         <div className="absolute top-14 left-3 z-10">

@@ -26,6 +26,8 @@ async function fetchRoadsInBbox(
   maxLon: number,
   maxLat: number
 ): Promise<Feature<LineString>[]> {
+  console.log('[SnappingService] Fetching roads in bbox:', { minLon, minLat, maxLon, maxLat });
+  
   const { data, error } = await supabase.rpc('get_roads_in_bbox', {
     min_lon: minLon,
     min_lat: minLat,
@@ -35,22 +37,33 @@ async function fetchRoadsInBbox(
 
   if (error) {
     console.error('[SnappingService] get_roads_in_bbox error:', error);
-    return [];
+    throw new Error(`Failed to fetch roads: ${error.message}`);
   }
 
+  console.log('[SnappingService] Raw RPC response:', { dataType: typeof data, isArray: Array.isArray(data), dataLength: Array.isArray(data) ? data.length : null });
+
   const segments: Feature<LineString>[] = [];
-  if (!Array.isArray(data)) return segments;
+  if (!Array.isArray(data)) {
+    console.warn('[SnappingService] RPC returned non-array data:', data);
+    return segments;
+  }
 
   for (const row of data) {
     const geojson = row?.geojson;
-    if (!geojson || !geojson.coordinates) continue;
+    if (!geojson || !geojson.coordinates) {
+      console.warn('[SnappingService] Skipping malformed row:', row);
+      continue;
+    }
     try {
       const line = turf.lineString(geojson.coordinates as [number, number][]);
       segments.push(line);
-    } catch {
+    } catch (e) {
+      console.warn('[SnappingService] Failed to parse line:', e, row);
       // skip malformed row
     }
   }
+  
+  console.log('[SnappingService] Parsed', segments.length, 'road segments');
   return segments;
 }
 
@@ -116,26 +129,48 @@ export async function snapPolygonToRoads(
   rawPolygon: GeoJSON.Polygon,
   supabase: SupabaseClient
 ): Promise<SnapResult> {
+  console.log('[SnappingService] Starting snapPolygonToRoads');
+  
   const ring = rawPolygon.coordinates[0];
   if (!ring || ring.length < 3) {
+    console.warn('[SnappingService] Invalid polygon: less than 3 vertices');
     return { polygon: rawPolygon, wasSnapped: false };
   }
 
   try {
     const bbox = turf.bbox(rawPolygon);
+    console.log('[SnappingService] Calculated bbox:', bbox);
+    
     const [minLon, minLat, maxLon, maxLat] = bbox;
+    
+    // Validate bbox values
+    if (!isFinite(minLon) || !isFinite(minLat) || !isFinite(maxLon) || !isFinite(maxLat)) {
+      throw new Error(`Invalid bbox values: ${JSON.stringify(bbox)}`);
+    }
+    
     const segments = await fetchRoadsInBbox(supabase, minLon, minLat, maxLon, maxLat);
+    
     if (segments.length === 0) {
+      console.log('[SnappingService] No road segments found, returning original polygon');
       return { polygon: rawPolygon, wasSnapped: false };
     }
 
     // Snap each vertex (exterior ring only)
+    console.log('[SnappingService] Snapping', ring.length, 'vertices');
     const snappedRing: number[][] = [];
+    let snapCount = 0;
+    
     for (let i = 0; i < ring.length; i++) {
       const vertex = ring[i] as [number, number];
       const snapped = snapVertex(vertex, segments, SNAP_THRESHOLD_M);
+      if (snapped[0] !== vertex[0] || snapped[1] !== vertex[1]) {
+        snapCount++;
+      }
       snappedRing.push(snapped);
     }
+    
+    console.log('[SnappingService] Snapped', snapCount, 'of', ring.length, 'vertices');
+    
     // Close ring if not already
     const first = snappedRing[0];
     const last = snappedRing[snappedRing.length - 1];
@@ -146,18 +181,23 @@ export async function snapPolygonToRoads(
     let poly = turf.polygon([snappedRing]);
 
     // Simplify for clean block edges
+    console.log('[SnappingService] Simplifying polygon');
     poly = turf.simplify(poly, { tolerance: SIMPLIFY_TOLERANCE, highQuality: true });
 
     // Tiny-nub cleanup: drop vertices closer than 2.5m to previous
+    console.log('[SnappingService] Removing tiny nubs');
     const cleanedRing = removeTinyNubs(poly.coordinates[0], TINY_NUB_THRESHOLD_M);
     if (cleanedRing.length < 3) {
+      console.warn('[SnappingService] Cleaned ring has less than 3 vertices, returning original');
       return { polygon: rawPolygon, wasSnapped: false };
     }
     poly = turf.polygon([cleanedRing]);
 
     // Validate
+    console.log('[SnappingService] Validating polygon');
     let valid = turf.booleanValid(poly);
     if (!valid) {
+      console.log('[SnappingService] Polygon invalid, attempting buffer fix');
       try {
         const buffered = turf.buffer(poly, 0, { units: 'meters' });
         if (buffered && turf.booleanValid(buffered)) {
@@ -170,14 +210,16 @@ export async function snapPolygonToRoads(
           if (coords && coords[0] && coords[0].length >= 3) {
             poly = turf.polygon([coords[0]]);
             valid = turf.booleanValid(poly);
+            console.log('[SnappingService] Buffer fix result:', valid);
           }
         }
-      } catch {
-        // ignore buffer failure
+      } catch (e) {
+        console.warn('[SnappingService] Buffer fix failed:', e);
       }
     }
 
     if (!valid) {
+      console.warn('[SnappingService] Polygon still invalid after fixes, returning original');
       return { polygon: rawPolygon, wasSnapped: false };
     }
 
@@ -185,9 +227,11 @@ export async function snapPolygonToRoads(
       type: 'Polygon',
       coordinates: poly.coordinates,
     };
+    
+    console.log('[SnappingService] Successfully snapped polygon');
     return { polygon, wasSnapped: true };
   } catch (err) {
     console.error('[SnappingService] snap error:', err);
-    return { polygon: rawPolygon, wasSnapped: false };
+    throw err; // Re-throw to let caller handle it
   }
 }

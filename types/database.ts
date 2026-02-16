@@ -147,6 +147,20 @@ export interface BuildingPolygon {
   created_at: string;
 }
 
+/** 
+ * Campaign Parcel - Land parcel boundaries for Golden Key linking.
+ * Acts as a "hard container" to link addresses to buildings regardless of distance.
+ * Essential for suburban areas and townhomes.
+ */
+export interface CampaignParcel {
+  id: string;
+  campaign_id: string;
+  external_id?: string; // "PARCELID" from source data (e.g., PCL030544)
+  geom: string; // PostGIS MultiPolygon geometry
+  properties?: Record<string, any>; // OBJECTID, SHAPE_Area, etc.
+  created_at: string;
+}
+
 // QR Code Types
 export interface QRCode {
   id: string;

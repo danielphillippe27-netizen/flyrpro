@@ -544,20 +544,9 @@ export function RouteLayer({ map, campaignId }: RouteLayerProps) {
             <CardContent className="space-y-4">
               {!routeData?.optimized ? (
                 <div className="text-center py-4">
-                  <p className="text-sm text-gray-500 mb-3">
+                  <p className="text-sm text-gray-500">
                     No optimized routes yet.
                   </p>
-                  <div className="flex gap-2 justify-center">
-                    <Button
-                      size="sm"
-                      onClick={() => optimizeRoutes(1)}
-                      disabled={loading}
-                      className="bg-red-500 hover:bg-red-600"
-                    >
-                      <Navigation className="w-3 h-3 mr-1" />
-                      Optimize route
-                    </Button>
-                  </div>
                 </div>
               ) : (
                 <>

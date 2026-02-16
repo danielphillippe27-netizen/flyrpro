@@ -211,6 +211,8 @@ export default function CreateCampaignPage() {
       }
     }
 
+    // Clear boundary layer ref so we never call getLayer with stale IDs after style replace
+    boundaryLayerIdsRef.current = [];
     // Change style
     map.current.setStyle(expectedStyle);
 
@@ -274,13 +276,23 @@ export default function CreateCampaignPage() {
     });
   };
 
+  /** Safe getLayer: avoid "getOwnLayer of undefined" during style transition */
+  const safeGetLayer = (m: mapboxgl.Map, layerId: string): boolean => {
+    try {
+      if (!m.isStyleLoaded()) return false;
+      return !!m.getLayer(layerId);
+    } catch {
+      return false;
+    }
+  };
+
   /** Add raw + snapped boundary layers and animate snapped line opacity 0 -> 1 over 600ms */
   const addBoundaryLayersAndCrossFade = (
     raw: { type: 'Polygon'; coordinates: number[][][] },
     snapped: { type: 'Polygon'; coordinates: number[][][] }
   ) => {
     const m = map.current;
-    if (!m || !m.getStyle()) return;
+    if (!m || !m.getStyle() || !m.isStyleLoaded()) return;
 
     const rawSourceId = 'campaign-boundary-raw';
     const snappedSourceId = 'campaign-boundary-snapped';
@@ -290,11 +302,20 @@ export default function CreateCampaignPage() {
     const snappedLineId = 'campaign-boundary-snapped-line';
 
     const removeExisting = () => {
-      boundaryLayerIdsRef.current.forEach((id) => {
-        if (m.getLayer(id)) m.removeLayer(id);
+      const ids = boundaryLayerIdsRef.current.filter((id): id is string => typeof id === 'string' && id.length > 0);
+      ids.forEach((id) => {
+        try {
+          if (safeGetLayer(m, id)) m.removeLayer(id);
+        } catch {
+          // Map style may have changed; layer registry can be undefined during transition
+        }
       });
-      if (m.getSource(rawSourceId)) m.removeSource(rawSourceId);
-      if (m.getSource(snappedSourceId)) m.removeSource(snappedSourceId);
+      try {
+        if (m.getSource(rawSourceId)) m.removeSource(rawSourceId);
+        if (m.getSource(snappedSourceId)) m.removeSource(snappedSourceId);
+      } catch {
+        // Sources may already be gone after style change
+      }
       boundaryLayerIdsRef.current = [];
     };
     removeExisting();
@@ -348,7 +369,7 @@ export default function CreateCampaignPage() {
     const tick = (now: number) => {
       const elapsed = now - start;
       const opacity = Math.min(1, elapsed / duration);
-      if (m.getLayer(snappedLineId)) {
+      if (safeGetLayer(m, snappedLineId) && safeGetLayer(m, snappedFillId)) {
         m.setPaintProperty(snappedLineId, 'line-opacity', opacity);
         m.setPaintProperty(snappedFillId, 'fill-opacity', 0.08 + 0.07 * opacity);
       }
@@ -360,10 +381,10 @@ export default function CreateCampaignPage() {
   /** Update boundary layer visibility for Raw vs Snapped toggle */
   const updateBoundaryToggle = () => {
     const m = map.current;
-    if (!m || !boundaryRaw || !boundarySnapped) return;
+    if (!m || !boundaryRaw || !boundarySnapped || !m.isStyleLoaded()) return;
     const rawLineId = 'campaign-boundary-raw-line';
     const snappedLineId = 'campaign-boundary-snapped-line';
-    if (!m.getLayer(rawLineId) || !m.getLayer(snappedLineId)) return;
+    if (!safeGetLayer(m, rawLineId) || !safeGetLayer(m, snappedLineId)) return;
     if (showRawBoundary) {
       m.setPaintProperty(rawLineId, 'line-opacity', 1);
       m.setPaintProperty(snappedLineId, 'line-opacity', 0.25);
@@ -575,7 +596,7 @@ if (!features || features.features.length === 0) {
               onChange={(e) => setName(e.target.value)}
               required
               placeholder="Campaign Name"
-              className="w-48 bg-gray-200 dark:bg-gray-700"
+              className="w-48 bg-gray-200 dark:bg-neutral-600"
             />
           </div>
 
@@ -583,7 +604,7 @@ if (!features || features.features.length === 0) {
           <div className="flex items-center gap-2">
             <Label className="text-sm font-medium text-foreground whitespace-nowrap">Type</Label>
             <Select value={type} onValueChange={(v) => setType(v as CampaignType)}>
-              <SelectTrigger className={`w-32 bg-gray-200 dark:bg-gray-700 ${type === 'flyer' ? 'text-red-500' : ''}`}>
+              <SelectTrigger className={`w-32 bg-gray-200 dark:bg-neutral-600 ${type === 'flyer' ? 'text-red-500' : ''}`}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -607,13 +628,13 @@ if (!features || features.features.length === 0) {
               onSelect={handleMapSearchSelect}
               placeholder="Jump to address..."
               className="flex-1"
-              inputClassName="bg-gray-200 dark:bg-gray-700"
+              inputClassName="bg-gray-200 dark:bg-neutral-600"
             />
           </div>
 
           {/* Action Buttons */}
           <div className="flex items-center gap-2 ml-auto">
-            <Button type="button" variant="outline" size="sm" onClick={() => router.back()} disabled={loading || snappingBoundary || provisioning || generatingAddresses}>
+            <Button type="button" variant="outline" size="sm" className="bg-gray-200 dark:bg-neutral-600 dark:border-neutral-500 dark:hover:bg-neutral-500" onClick={() => router.back()} disabled={loading || snappingBoundary || provisioning || generatingAddresses}>
               Cancel
             </Button>
             <Button 
