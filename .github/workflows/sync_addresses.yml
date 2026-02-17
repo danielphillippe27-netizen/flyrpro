@@ -82,10 +82,12 @@ jobs:
           cache: 'npm'
       
       # -----------------------------------------------------------------------
-      # Install dependencies
+      # Install dependencies (clean install to ensure all packages)
       # -----------------------------------------------------------------------
-      - name: Install dependencies
-        run: npm ci
+      - name: Clean install dependencies
+        run: |
+          rm -rf node_modules
+          npm ci
       
       # -----------------------------------------------------------------------
       # Run Ingest Script for this region group (with skip logic for manual trigger)
