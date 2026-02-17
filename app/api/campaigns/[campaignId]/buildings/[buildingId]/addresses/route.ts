@@ -63,6 +63,9 @@ export async function GET(
     const outsideThreshold = parseFloat(process.env.ADDRESS_OUTSIDE_THRESHOLD_METERS || '10');
     
     // Fetch addresses linked to this building
+    // Try building_address_links first (Silver path)
+    let addresses: AddressResult[] = [];
+    
     const { data: links, error: linksError } = await supabase
       .from('building_address_links')
       .select(`
@@ -84,22 +87,48 @@ export async function GET(
       .order('confidence', { ascending: false });
     
     if (linksError) {
-      throw new Error(`Failed to fetch addresses: ${linksError.message}`);
+      console.warn('[API] Error fetching from links table:', linksError.message);
     }
     
-    // Format response with outside footprint flag
-    const addresses: AddressResult[] = (links || []).map((link: any) => ({
-      address_id: link.address_id,
-      formatted: link.campaign_addresses.formatted,
-      house_number: link.campaign_addresses.house_number,
-      street_name: link.campaign_addresses.street_name,
-      unit_number: link.campaign_addresses.unit_number,
-      match_type: link.match_type,
-      confidence: link.confidence,
-      distance_meters: link.distance_meters,
-      is_outside_footprint: link.distance_meters > outsideThreshold,
-      geom: link.campaign_addresses.geom,
-    }));
+    if (links && links.length > 0) {
+      // Silver path: Use building_address_links
+      addresses = links.map((link: any) => ({
+        address_id: link.address_id,
+        formatted: link.campaign_addresses.formatted,
+        house_number: link.campaign_addresses.house_number,
+        street_name: link.campaign_addresses.street_name,
+        unit_number: link.campaign_addresses.unit_number,
+        match_type: link.match_type,
+        confidence: link.confidence,
+        distance_meters: link.distance_meters,
+        is_outside_footprint: link.distance_meters > outsideThreshold,
+        geom: link.campaign_addresses.geom,
+      }));
+    } else {
+      // Gold path: Use campaign_addresses.building_id
+      const { data: goldAddresses, error: goldError } = await supabase
+        .from('campaign_addresses')
+        .select('id, formatted, house_number, street_name, unit_number, geom, match_source, confidence')
+        .eq('campaign_id', campaignId)
+        .eq('building_id', buildingId);
+      
+      if (goldError) {
+        console.warn('[API] Error fetching Gold addresses:', goldError.message);
+      }
+      
+      addresses = (goldAddresses || []).map((addr: any) => ({
+        address_id: addr.id,
+        formatted: addr.formatted,
+        house_number: addr.house_number,
+        street_name: addr.street_name,
+        unit_number: addr.unit_number,
+        match_type: addr.match_source || 'gold_exact',
+        confidence: addr.confidence || 1.0,
+        distance_meters: 0, // Gold links are spatially exact
+        is_outside_footprint: false,
+        geom: addr.geom,
+      }));
+    }
     
     // Calculate summary
     const outsideCount = addresses.filter(a => a.is_outside_footprint).length;

@@ -5,6 +5,9 @@ import { RoutingService } from '@/lib/services/RoutingService';
 import { buildRoute } from '@/lib/services/BlockRoutingService';
 import { StableLinkerService, DataIntegrityError } from '@/lib/services/StableLinkerService';
 import { TownhouseSplitterService } from '@/lib/services/TownhouseSplitterService';
+import { GoldAddressService } from '@/lib/services/GoldAddressService';
+import { BuildingAdapter } from '@/lib/services/BuildingAdapter';
+import { AddressAdapter } from '@/lib/services/AddressAdapter';
 
 // FIX: Ensure Node.js runtime
 export const runtime = 'nodejs';
@@ -111,79 +114,146 @@ export async function POST(request: NextRequest) {
       .eq('id', campaign_id);
 
     // =============================================================================
-    // GOLD STANDARD: Hybrid Provisioning with Lambda + S3
+    // GOLD STANDARD: Hybrid Provisioning - Gold First, Lambda Fallback
     // =============================================================================
     
     const result = await retryWithBackoff(async () => {
-      // Step 1: Call Lambda to generate snapshots from flyr-data-lake
-      console.log('[Provision] Step 1: Calling Tile Lambda...');
-      const snapshot = await TileLambdaService.generateSnapshots(
-        polygon as GeoJSON.Polygon,
-        regionCode,
+      // Step 1: Try Gold Standard addresses first
+      console.log('[Provision] Step 1: Querying Gold Standard addresses...');
+      const goldResult = await GoldAddressService.getAddressesForPolygon(
         campaign_id!,
-        {
-          limitBuildings: 10000,   // Generous limits for full coverage
-          limitAddresses: 10000,
-          limitRoads: 5000,
-          includeRoads: true,
-        }
+        polygon as GeoJSON.Polygon,
+        regionCode
       );
-
-      // Step 2: Download addresses from S3 (the only thing we ingest)
-      console.log('[Provision] Step 2: Downloading addresses from S3...');
-      const addressData = await TileLambdaService.downloadAddresses(snapshot.urls.addresses);
-
-      // Step 3: Convert to lean campaign_addresses format
-      console.log('[Provision] Step 3: Converting to lean format...');
-      const converted = TileLambdaService.convertToCampaignAddresses(
-        addressData.features,
+      
+      console.log(`[Provision] Gold: ${goldResult.counts.gold}, Lambda: ${goldResult.counts.lambda}, Total: ${goldResult.counts.total}`);
+      console.log(`[Provision] Source: ${goldResult.source}`);
+      
+      // Normalize addresses using Adapter Pattern
+      // Handles both Gold format (street_number, city, lat/lon) and 
+      // Lambda format (house_number, locality, geom object)
+      let addressesToInsert = AddressAdapter.normalizeArray(
+        goldResult.addresses,
         campaign_id!
       );
+      
+      let goldBuildings = goldResult.buildings;
+      
+      // If Gold has limited coverage, also get Lambda snapshots for buildings/roads
+      let snapshot = null;
+      if (goldResult.counts.gold < 10) {
+        console.log('[Provision] Gold coverage insufficient, getting Lambda snapshots for buildings...');
+        snapshot = await TileLambdaService.generateSnapshots(
+          polygon as GeoJSON.Polygon,
+          regionCode,
+          campaign_id!,
+          {
+            limitBuildings: 10000,
+            limitAddresses: 10000,
+            limitRoads: 5000,
+            includeRoads: true,
+          }
+        );
+      } else if (!goldBuildings || goldBuildings.length === 0) {
+        // Gold has addresses but no buildings - need Lambda for building footprints
+        console.log('[Provision] Gold has addresses but no buildings, getting Lambda snapshots for building footprints...');
+        snapshot = await TileLambdaService.generateSnapshots(
+          polygon as GeoJSON.Polygon,
+          regionCode,
+          campaign_id!,
+          {
+            limitBuildings: 10000,
+            limitAddresses: 100,  // Minimal - we have Gold addresses
+            limitRoads: 5000,
+            includeRoads: true,
+          }
+        );
+      } else {
+        console.log(`[Provision] Using ${goldBuildings.length} Gold Standard buildings`);
+      }
+      
+      // =============================================================================
+      // ADAPTER PATTERN: Normalize buildings to standard GeoJSON format
+      // This works for both Gold (DB) and Lambda (S3) sources
+      // =============================================================================
+      const { buildings: normalizedBuildingsGeoJSON, overtureRelease } = 
+        await BuildingAdapter.fetchAndNormalize(goldBuildings, snapshot);
+      
+      // Debug: Log first building structure
+      if (normalizedBuildingsGeoJSON.features?.length > 0) {
+        const first = normalizedBuildingsGeoJSON.features[0];
+        console.log('[Provision] Sample building:', {
+          id: first.properties?.gers_id || first.properties?.external_id,
+          geomType: first.geometry?.type,
+          coordCount: first.geometry?.coordinates?.[0]?.length,
+          props: Object.keys(first.properties || {}),
+          source: goldBuildings?.length > 0 ? 'gold' : 'lambda'
+        });
+      }
 
-      // Deduplicate by logical address (same formatted + postal_code = one row)
-      // Source data can return the same address with different gers_ids (e.g. tile boundaries)
-      const addressesToInsert = Array.from(
+      // Step 2: Deduplicate addresses by house number + street + locality
+      console.log('[Provision] Step 2: Deduplicating addresses...');
+      
+      // Debug: Log first few addresses to check format
+      if (addressesToInsert.length > 0) {
+        console.log('[Provision] Sample address format:', {
+          first: addressesToInsert[0],
+          keys: Object.keys(addressesToInsert[0])
+        });
+      }
+      
+      const deduplicated = Array.from(
         new Map(
-          converted.map((addr) => {
-            const key = `${(addr.formatted ?? '').toLowerCase().trim()}|${(addr.postal_code ?? '').toLowerCase().trim()}`;
+          addressesToInsert.map((addr: any) => {
+            const houseNum = (addr.house_number ?? '').toString().toLowerCase().trim();
+            const street = (addr.street_name ?? '').toString().toLowerCase().trim();
+            const locality = (addr.locality ?? '').toString().toLowerCase().trim();
+            const key = `${houseNum}|${street}|${locality}`;
             return [key, addr] as const;
           })
         ).values()
       );
-      if (addressesToInsert.length < converted.length) {
-        console.log(`[Provision] Deduplicated addresses: ${converted.length} -> ${addressesToInsert.length}`);
-      }
-
-      // Step 4: Clear existing addresses for this campaign (clean slate)
-      console.log('[Provision] Step 4: Clearing existing addresses...');
-      const { error: deleteError } = await supabase
-        .from('campaign_addresses')
-        .delete()
-        .eq('campaign_id', campaign_id);
-
-      if (deleteError) {
-        console.warn('[Provision] Error clearing addresses:', deleteError.message);
-      }
-
-      // Step 5: Insert addresses in batches
-      console.log('[Provision] Step 5: Inserting', addressesToInsert.length, 'addresses...');
-      const batchSize = 500;
-      let insertedCount = 0;
       
-      for (let i = 0; i < addressesToInsert.length; i += batchSize) {
-        const batch = addressesToInsert.slice(i, i + batchSize);
-        const { error: insertError } = await supabase
-          .from('campaign_addresses')
-          .insert(batch);
-        
-        if (insertError) {
-          console.error(`[Provision] Error inserting batch ${i / batchSize + 1}:`, insertError.message);
-        } else {
-          insertedCount += batch.length;
-        }
+      if (deduplicated.length < addressesToInsert.length) {
+        console.log(`[Provision] Deduplicated: ${addressesToInsert.length} -> ${deduplicated.length}`);
+      } else {
+        console.log(`[Provision] No deduplication needed: ${addressesToInsert.length} addresses`);
       }
+      addressesToInsert = deduplicated;
 
-      console.log('[Provision] Successfully inserted', insertedCount, 'addresses');
+      // Step 4: Check if addresses already exist (from generate-address-list)
+      const { data: existingAddresses, error: countError } = await supabase
+        .from('campaign_addresses')
+        .select('id')
+        .eq('campaign_id', campaign_id);
+      
+      let insertedCount = existingAddresses?.length || 0;
+      
+      if (countError) {
+        console.warn('[Provision] Error checking existing addresses:', countError.message);
+      }
+      
+      // Step 5: Only insert if addresses don't already exist
+      if (insertedCount === 0 && addressesToInsert.length > 0) {
+        console.log('[Provision] Step 5: Inserting', addressesToInsert.length, 'addresses...');
+        const batchSize = 500;
+        
+        for (let i = 0; i < addressesToInsert.length; i += batchSize) {
+          const batch = addressesToInsert.slice(i, i + batchSize);
+          const { error: insertError } = await supabase
+            .from('campaign_addresses')
+            .insert(batch);
+          
+          if (insertError) {
+            console.error(`[Provision] Error inserting batch ${i / batchSize + 1}:`, insertError.message);
+          } else {
+            insertedCount += batch.length;
+          }
+        }
+        console.log('[Provision] Successfully inserted', insertedCount, 'addresses');
+      } else {
+        console.log(`[Provision] Step 5: Skipping insert - ${insertedCount} addresses already exist`);
+      }
 
       // Step 6: Store S3 snapshot URLs
       // Buildings and Roads stay in S3 - app renders directly from there
@@ -202,34 +272,38 @@ export async function POST(request: NextRequest) {
         console.warn('[Provision] Error updating campaign status:', updateError.message);
       }
 
-      // Store detailed snapshot info in campaign_snapshots table
-      const { error: snapshotError } = await supabase
-        .from('campaign_snapshots')
-        .upsert({
-          campaign_id: campaign_id!,
-          bucket: snapshot.bucket,
-          prefix: snapshot.prefix,
-          buildings_key: snapshot.s3_keys.buildings,
-          addresses_key: snapshot.s3_keys.addresses,
-          roads_key: snapshot.s3_keys.roads || null,
-          metadata_key: snapshot.s3_keys.metadata,
-          buildings_url: snapshot.urls.buildings,
-          addresses_url: snapshot.urls.addresses,
-          roads_url: snapshot.urls.roads || null,
-          metadata_url: snapshot.urls.metadata,
-          buildings_count: snapshot.counts.buildings,
-          addresses_count: snapshot.counts.addresses,
-          roads_count: snapshot.counts.roads,
-          overture_release: snapshot.metadata?.overture_release,
-          tile_metrics: snapshot.metadata?.tile_metrics || null,
-          expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), // 30 days
-        }, {
-          onConflict: 'campaign_id',
-        });
+      // Store detailed snapshot info in campaign_snapshots table (only if using Lambda)
+      if (snapshot) {
+        const { error: snapshotError } = await supabase
+          .from('campaign_snapshots')
+          .upsert({
+            campaign_id: campaign_id!,
+            bucket: snapshot.bucket,
+            prefix: snapshot.prefix,
+            buildings_key: snapshot.s3_keys.buildings,
+            addresses_key: snapshot.s3_keys.addresses,
+            roads_key: snapshot.s3_keys.roads || null,
+            metadata_key: snapshot.s3_keys.metadata,
+            buildings_url: snapshot.urls.buildings,
+            addresses_url: snapshot.urls.addresses,
+            roads_url: snapshot.urls.roads || null,
+            metadata_url: snapshot.urls.metadata,
+            buildings_count: snapshot.counts.buildings,
+            addresses_count: snapshot.counts.addresses,
+            roads_count: snapshot.counts.roads,
+            overture_release: snapshot.metadata?.overture_release,
+            tile_metrics: snapshot.metadata?.tile_metrics || null,
+            expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), // 30 days
+          }, {
+            onConflict: 'campaign_id',
+          });
 
-      if (snapshotError) {
-        console.warn('[Provision] Error storing snapshot metadata:', snapshotError.message);
-        // Don't fail - the addresses are already ingested
+        if (snapshotError) {
+          console.warn('[Provision] Error storing snapshot metadata:', snapshotError.message);
+          // Don't fail - the addresses are already ingested
+        }
+      } else {
+        console.log('[Provision] Using Gold Standard data - no Lambda snapshot to store');
       }
 
       // =============================================================================
@@ -311,9 +385,9 @@ export async function POST(request: NextRequest) {
       // =============================================================================
 
       // =============================================================================
-      // GOLD STANDARD STABLE LINKER: 4-Tier Spatial Matching
+      // GOLD STANDARD SPATIAL LINKER: Fast PostGIS-based matching
       // =============================================================================
-      console.log('[Provision] Gold Standard Stable Linker: Running 4-tier spatial matching...');
+      console.log('[Provision] Gold Standard Spatial Linker: Running PostGIS spatial join...');
       let spatialJoinSummary = {
         matched: 0,
         orphans: 0,
@@ -330,51 +404,56 @@ export async function POST(request: NextRequest) {
       };
       
       try {
-        // Download buildings from S3
-        console.log(`[Provision] Fetching buildings from: ${snapshot.urls.buildings}`);
-        const buildingsResponse = await fetch(snapshot.urls.buildings);
-        if (!buildingsResponse.ok) {
-          throw new Error(`Failed to fetch buildings: ${buildingsResponse.status}`);
-        }
-        
-        const buildingsGeoJSON = await buildingsResponse.json();
-        console.log(`[Provision] Downloaded ${buildingsGeoJSON.features?.length || 0} buildings from S3`);
-        
-        // Debug: Log first building structure
-        if (buildingsGeoJSON.features?.length > 0) {
-          const first = buildingsGeoJSON.features[0];
-          console.log('[Provision] Sample building:', {
-            id: first.properties?.gers_id,
-            geomType: first.geometry?.type,
-            coordCount: first.geometry?.coordinates?.[0]?.length,
-            props: Object.keys(first.properties || {})
-          });
-        }
-        
-        // Run Gold Standard Spatial Join
-        console.log('[Provision] Starting Stable Linker...');
-        const linkerService = new StableLinkerService(supabase);
-        spatialJoinSummary = await linkerService.runSpatialJoin(
-          campaign_id!,
-          buildingsGeoJSON,
-          snapshot.metadata?.overture_release || '2026-01-21.0'
-        );
-
-        console.log('[Provision] Spatial join complete:', spatialJoinSummary);
-        if (spatialJoinSummary?.processing_metadata) {
-          console.log('[Provision] Processing metadata:', spatialJoinSummary.processing_metadata);
+        if (goldBuildings && goldBuildings.length > 0) {
+          // Use fast SQL-based linker for Gold data (O(log n) with spatial index)
+          console.log('[Provision] Using SQL-based Gold linker with polygon filter...');
+          const polygonGeoJSON = JSON.stringify(polygon);
+          const { data: linkResult, error: linkError } = await supabase
+            .rpc('link_campaign_addresses_gold', { 
+              p_campaign_id: campaign_id,
+              p_polygon_geojson: polygonGeoJSON
+            });
+          
+          if (linkError) {
+            console.error('[Provision] Gold linker failed:', linkError.message);
+          } else {
+            const exact = linkResult?.[0]?.exact_matches || 0;
+            const proximity = linkResult?.[0]?.proximity_matches || 0;
+            const total = linkResult?.[0]?.total_linked || 0;
+            
+            console.log(`[Provision] Gold linker complete: ${exact} exact, ${proximity} proximity, ${total} total`);
+            
+            spatialJoinSummary = {
+              matched: Number(total),
+              orphans: insertedCount - Number(total),
+              suspect: 0,
+              avgConfidence: total > 0 ? (exact * 1.0 + proximity * 0.8) / total : 0,
+              coveragePercent: insertedCount > 0 ? (Number(total) / insertedCount) * 100 : 0,
+              matchBreakdown: {
+                containmentVerified: Number(exact),
+                containmentSuspect: 0,
+                pointOnSurface: 0,
+                proximityVerified: Number(proximity),
+                proximityFallback: 0,
+              },
+            };
+          }
+        } else {
+          // Use JavaScript linker for Silver/Lambda data
+          console.log('[Provision] Using JavaScript linker for Silver data...');
+          const linkerService = new StableLinkerService(supabase);
+          spatialJoinSummary = await linkerService.runSpatialJoin(
+            campaign_id!,
+            normalizedBuildingsGeoJSON,
+            overtureRelease
+          );
+          console.log('[Provision] Spatial join complete:', spatialJoinSummary);
         }
       } catch (linkerError) {
-        if (linkerError instanceof DataIntegrityError) {
-          console.warn('[Provision] DataIntegrityError (address sent to orphans):', linkerError.message, 'building_ids:', linkerError.buildingIds);
-        } else {
-          console.error('[Provision] Gold Standard Stable Linker FAILED:', linkerError);
-          console.error('[Provision] Error stack:', (linkerError as Error).stack);
-        }
-        // Don't fail provisioning if linking fails
+        console.error('[Provision] Spatial linker FAILED:', linkerError);
       }
       // =============================================================================
-      // END GOLD STANDARD STABLE LINKER
+      // END GOLD STANDARD SPATIAL LINKER
       // =============================================================================
 
       // =============================================================================
@@ -391,20 +470,12 @@ export async function POST(request: NextRequest) {
       };
       
       try {
-        // Download buildings from S3 for geometric processing
-        const buildingsResponse = await fetch(snapshot.urls.buildings);
-        if (!buildingsResponse.ok) {
-          throw new Error(`Failed to fetch buildings: ${buildingsResponse.status}`);
-        }
-        
-        const buildingsGeoJSON = await buildingsResponse.json();
-        
-        // Run townhouse splitting
+        // Run townhouse splitting using normalized buildings
         const splitterService = new TownhouseSplitterService(supabase);
         townhouseSummary = await splitterService.processCampaignTownhouses(
           campaign_id!,
-          buildingsGeoJSON,
-          snapshot.metadata?.overture_release || '2026-01-21.0'
+          normalizedBuildingsGeoJSON,
+          overtureRelease
         );
         
         console.log('[Provision] Townhouse splitting complete:', townhouseSummary);
@@ -423,32 +494,42 @@ export async function POST(request: NextRequest) {
       
       return {
         success: true,
-        campaign_id: snapshot.campaign_id,
+        campaign_id: campaign_id,
         addresses_saved: insertedCount,
-        buildings_saved: snapshot.counts.buildings,
-        roads_count: snapshot.counts.roads,
+        buildings_saved: goldBuildings?.length || snapshot?.counts?.buildings || 0,
+        roads_count: snapshot?.counts?.roads || 0,
+        source: goldResult.source,
         links_created: spatialJoinSummary.matched,
         units_created: townhouseSummary.units_created,
         spatial_join: spatialJoinSummary,
         townhouse_split: townhouseSummary,
-        map_layers: {
-          buildings: snapshot.urls.buildings,  // iOS renders directly from S3
-          roads: snapshot.urls.roads,          // iOS renders directly from S3
+        map_layers: snapshot ? {
+          buildings: snapshot.urls.buildings,
+          roads: snapshot.urls.roads,
+        } : {
+          buildings: null,
+          roads: null,
         },
-        snapshot_metadata: {
+        snapshot_metadata: snapshot ? {
           bucket: snapshot.bucket,
           prefix: snapshot.prefix,
           overture_release: snapshot.metadata?.overture_release,
           tile_metrics: snapshot.metadata?.tile_metrics,
+        } : {
+          bucket: null,
+          prefix: null,
+          source: 'gold_standard',
         },
-        warning: snapshot.warning,
+        warning: snapshot?.warning || null,
         optimized_path: optimizedPathInfo ? {
           distance_km: optimizedPathInfo.totalDistanceKm,
           time_minutes: optimizedPathInfo.totalTimeMinutes,
           waypoint_count: optimizedPathInfo.waypointCount,
         } : null,
-        message: `Gold Standard provisioning complete: ${insertedCount} leads ready. Buildings (${snapshot.counts.buildings}) and roads (${snapshot.counts.roads}) served from S3.` +
-          (optimizedPathInfo ? ` Optimized walking loop: ${optimizedPathInfo.totalDistanceKm.toFixed(2)}km, ${optimizedPathInfo.totalTimeMinutes}min.` : ''),
+        message: snapshot 
+          ? `Gold Standard provisioning complete: ${insertedCount} leads ready. Buildings (${snapshot.counts.buildings}) and roads (${snapshot.counts.roads}) served from S3.` +
+            (optimizedPathInfo ? ` Optimized walking loop: ${optimizedPathInfo.totalDistanceKm.toFixed(2)}km, ${optimizedPathInfo.totalTimeMinutes}min.` : '')
+          : `Gold Standard provisioning complete: ${insertedCount} leads ready using municipal data.`,
       };
     });
 

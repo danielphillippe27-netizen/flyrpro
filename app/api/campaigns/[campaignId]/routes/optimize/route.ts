@@ -204,11 +204,18 @@ export async function POST(
 
     await supabase.rpc('clear_campaign_routes', { p_campaign_id: campaignId });
 
+    let globalSeq = 0;
     const updatePromises = clusters.flatMap(c =>
       c.addresses.map((addr, idx) =>
         supabase
           .from('campaign_addresses')
-          .update({ cluster_id: c.agent_id, sequence: idx, walk_time_sec: null, distance_m: null })
+          .update({
+            cluster_id: c.agent_id,
+            sequence: idx,
+            seq: globalSeq++,
+            walk_time_sec: null,
+            distance_m: null,
+          })
           .eq('id', addr.id)
       )
     );

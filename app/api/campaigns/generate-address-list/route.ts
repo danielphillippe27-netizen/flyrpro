@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient, getSupabaseServerClient } from '@/lib/supabase/server';
 import { TileLambdaService, type AddressFeature } from '@/lib/services/TileLambdaService';
+import { GoldAddressService } from '@/lib/services/GoldAddressService';
 import { MapService } from '@/lib/services/MapService';
 import { mapOvertureToCanonical } from '@/lib/geo/overtureToCanonical';
 import type { CanonicalCampaignAddress } from '@/lib/geo/types';
@@ -88,13 +89,6 @@ function sortByDistanceAndTake(
 
 export async function POST(request: NextRequest) {
   try {
-    if (!process.env.SLICE_LAMBDA_URL || !process.env.SLICE_SHARED_SECRET) {
-      return NextResponse.json(
-        { error: 'Lambda not configured. Set SLICE_LAMBDA_URL and SLICE_SHARED_SECRET.' },
-        { status: 500 }
-      );
-    }
-
     const body: GenerateAddressListRequest = await request.json();
     const { campaign_id, starting_address, count = 50, coordinates: providedCoordinates, polygon } = body;
 
@@ -111,16 +105,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // 2. Campaign lookup with admin client (sees all rows; same DB as create) then enforce ownership
+    // 2. Campaign lookup with admin client
     let supabaseAdmin;
     try {
       supabaseAdmin = createAdminClient();
     } catch (err: any) {
       console.error('[generate-address-list] Admin client failed:', err?.message);
       return NextResponse.json(
-        {
-          error: 'Server configuration error. Set SUPABASE_SERVICE_ROLE_KEY in .env.local (Supabase Dashboard → Project Settings → API → service_role).',
-        },
+        { error: 'Server configuration error.' },
         { status: 503 }
       );
     }
@@ -132,12 +124,7 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (campaignError || !campaign) {
-      console.error('[generate-address-list] Campaign lookup failed:', {
-        campaign_id,
-        user_id: user.id,
-        code: campaignError?.code,
-        message: campaignError?.message,
-      });
+      console.error('[generate-address-list] Campaign lookup failed:', campaignError);
       return NextResponse.json(
         { error: 'Campaign not found or access denied' },
         { status: 404 }
@@ -154,29 +141,73 @@ export async function POST(request: NextRequest) {
     console.log('[generate-address-list] Campaign found:', campaign_id);
 
     const regionCode = (campaign.region || 'ON').toUpperCase();
-
     let addressFeatures: AddressFeature[] = [];
+    let source = 'lambda';
 
+    // =============================================================================
+    // STEP 1: CHECK GOLD STANDARD FIRST (Polygon Mode)
+    // =============================================================================
     if (polygon) {
-      console.log('[generate-address-list] Polygon mode: fetching addresses via Lambda...');
+      console.log('[generate-address-list] Polygon mode: Checking Gold Standard first...');
+      
       try {
-        const snapshot = await TileLambdaService.generateSnapshots(
-          polygon as GeoJSON.Polygon,
-          regionCode,
-          campaign_id,
-          { limitAddresses: 5000, limitBuildings: 0, includeRoads: false }
-        );
-        const addressData = await TileLambdaService.downloadAddresses(snapshot.urls.addresses);
-        addressFeatures = addressData.features || [];
-        console.log(`[generate-address-list] Found ${addressFeatures.length} addresses from polygon`);
+        const goldAddresses = await GoldAddressService.fetchAddressesInPolygon(polygon as GeoJSON.Polygon);
+        
+        if (goldAddresses && goldAddresses.length > 0) {
+          console.log(`[generate-address-list] Found ${goldAddresses.length} Gold addresses. Skipping Lambda.`);
+          source = 'gold';
+          
+          // Convert Gold addresses to AddressFeature format
+          addressFeatures = goldAddresses.map((addr: any) => ({
+            type: 'Feature' as const,
+            geometry: JSON.parse(addr.geom_geojson),
+            properties: {
+              gers_id: `gold_${addr.id}`, // Generate pseudo-GERS ID
+              house_number: addr.street_number,
+              street_name: addr.street_name,
+              city: addr.city,
+              postal_code: addr.zip,
+              state: addr.province,
+              formatted: `${addr.street_number} ${addr.street_name}, ${addr.city}`,
+              source: 'gold'
+            }
+          }));
+        } else {
+          console.log('[generate-address-list] No Gold addresses found, falling back to Lambda...');
+        }
       } catch (err: any) {
-        console.error('[generate-address-list] Lambda polygon error:', err);
-        return NextResponse.json(
-          { error: `Address data error: ${err.message}` },
-          { status: 500 }
-        );
+        console.warn('[generate-address-list] Gold query failed:', err.message);
+      }
+      
+      // Fallback to Lambda if Gold is empty
+      if (addressFeatures.length === 0) {
+        if (!process.env.SLICE_LAMBDA_URL || !process.env.SLICE_SHARED_SECRET) {
+          return NextResponse.json(
+            { error: 'Lambda not configured.' },
+            { status: 500 }
+          );
+        }
+        
+        try {
+          const snapshot = await TileLambdaService.generateSnapshots(
+            polygon as GeoJSON.Polygon,
+            regionCode,
+            campaign_id,
+            { limitAddresses: 5000, limitBuildings: 0, includeRoads: false }
+          );
+          const addressData = await TileLambdaService.downloadAddresses(snapshot.urls.addresses);
+          addressFeatures = addressData.features || [];
+          console.log(`[generate-address-list] Found ${addressFeatures.length} addresses from Lambda`);
+        } catch (err: any) {
+          console.error('[generate-address-list] Lambda polygon error:', err);
+          return NextResponse.json(
+            { error: `Address data error: ${err.message}` },
+            { status: 500 }
+          );
+        }
       }
     } else if (starting_address) {
+      // Closest-home mode - always use Lambda (Gold doesn't have search by address)
       let coordinates: { lat: number; lon: number };
 
       if (providedCoordinates) {
@@ -230,7 +261,6 @@ export async function POST(request: NextRequest) {
 
     try {
       const canonicalAddresses: CanonicalCampaignAddress[] = addresses.map((address, index) =>
-        // Cast to any because mapOvertureToCanonical expects OvertureAddress but our LambdaAddressShape is compatible
         mapOvertureToCanonical(address as any, campaign_id, index)
       );
 
@@ -249,68 +279,31 @@ export async function POST(request: NextRequest) {
         building_gers_id: addr.building_gers_id || null,
       }));
 
-      const itemsWithGersId = rawInsertData.filter((item) => item.gers_id != null && item.gers_id !== '');
-
-      if (itemsWithGersId.length === 0) {
-        throw new Error('No addresses with gers_id found. All addresses must have a gers_id from Overture.');
-      }
-
-      // Deduplicate by logical address (same formatted + postal_code = one row)
-      // Source can return the same address with different gers_ids (e.g. tile overlap)
-      const uniqueInsertData = Array.from(
-        new Map(
-          itemsWithGersId.map((item) => {
-            const key = `${item.campaign_id}-${(item.formatted ?? '').toLowerCase().trim()}-${(item.postal_code ?? '').toLowerCase().trim()}`;
-            return [key, item] as const;
-          })
-        ).values()
-      );
-
-      const { data: insertedData, error: insertError } = await supabaseAdmin
+      const { data: inserted, error: insertError } = await supabaseAdmin
         .from('campaign_addresses')
-        .upsert(uniqueInsertData, { onConflict: 'campaign_id,gers_id' })
-        .select();
+        .insert(rawInsertData)
+        .select('id, formatted, house_number, street_name, locality, postal_code');
 
       if (insertError) {
-        console.error('[generate-address-list] Upsert failed:', insertError);
-        throw new Error(`Supabase Upsert Error: ${insertError.message}`);
+        console.error('[generate-address-list] Insert error:', insertError);
+        return NextResponse.json({ error: insertError.message }, { status: 500 });
       }
 
-      const insertedCount = insertedData?.length || 0;
+      const insertedCount = inserted?.length ?? 0;
+      console.log(`[generate-address-list] Saved ${insertedCount} addresses (source: ${source})`);
 
-      const { count: totalCount } = await supabaseAdmin
-        .from('campaign_addresses')
-        .select('*', { count: 'exact', head: true })
-        .eq('campaign_id', campaign_id);
-
-      if (totalCount !== null) {
-        await supabaseAdmin.from('campaigns').update({ total_flyers: totalCount }).eq('id', campaign_id);
-      }
-
-      try {
-        await supabaseAdmin.rpc('update_campaign_bbox', { p_campaign_id: campaign_id });
-      } catch {
-        // Non-critical
-      }
-
-      const preview = (insertedData || []).slice(0, 10).map((addr) => ({
-        id: addr.id,
-        formatted: addr.formatted,
-        postal_code: addr.postal_code,
-        source: addr.source,
-        gers_id: addr.gers_id,
-      }));
-
-      return NextResponse.json({ inserted_count: insertedCount, preview });
+      return NextResponse.json({
+        inserted_count: insertedCount,
+        preview: inserted ?? [],
+        source,
+        message: `${insertedCount} addresses generated successfully (${source === 'gold' ? 'Gold Standard' : 'Lambda'})`,
+      });
     } catch (err: any) {
-      console.error('Database Step Error:', err);
-      return NextResponse.json({ error: `Database Error: ${err.message}` }, { status: 500 });
+      console.error('[generate-address-list] Processing error:', err);
+      return NextResponse.json({ error: err.message }, { status: 500 });
     }
-  } catch (error: any) {
-    console.error('Unhandled API Error:', error);
-    return NextResponse.json(
-      { error: error.message || 'Unknown server error' },
-      { status: 500 }
-    );
+  } catch (err: any) {
+    console.error('[generate-address-list] Unexpected error:', err);
+    return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }

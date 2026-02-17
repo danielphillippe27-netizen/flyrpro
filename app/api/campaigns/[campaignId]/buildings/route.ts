@@ -19,7 +19,8 @@ const s3Client = new S3Client({
  * GET /api/campaigns/[campaignId]/buildings
  * 
  * Returns building GeoJSON for a campaign.
- * Fetches fresh data from S3 (handles expired pre-signed URLs).
+ * - Gold: Fetches from ref_buildings_gold via campaign_addresses.building_id
+ * - Silver: Fetches from S3 snapshot
  */
 export async function GET(
   request: NextRequest,
@@ -32,7 +33,37 @@ export async function GET(
   try {
     const supabase = createAdminClient();
     
-    // Get campaign snapshot info
+    // First, check if campaign has Gold-linked buildings
+    const { data: goldBuildings, error: goldError } = await supabase
+      .from('campaign_addresses')
+      .select('building_id')
+      .eq('campaign_id', campaignId)
+      .not('building_id', 'is', null)
+      .limit(1);
+    
+    if (goldError) {
+      console.error('[API] Error checking Gold buildings:', goldError.message);
+    }
+    
+    // GOLD PATH: Return linked Gold buildings
+    if (goldBuildings && goldBuildings.length > 0) {
+      console.log('[API] Using Gold Standard buildings');
+      
+      const { data: buildings, error: buildingsError } = await supabase.rpc(
+        'get_campaign_buildings_geojson',
+        { p_campaign_id: campaignId }
+      );
+      
+      if (buildingsError) {
+        console.error('[API] Gold RPC error:', buildingsError.message);
+        // Fall through to S3 attempt
+      } else if (buildings) {
+        console.log(`[API] Returning ${buildings.features?.length || 0} Gold buildings`);
+        return NextResponse.json(buildings);
+      }
+    }
+    
+    // SILVER PATH: Fetch from S3 snapshot
     const { data: snapshot, error: snapshotError } = await supabase
       .from('campaign_snapshots')
       .select('bucket, buildings_key, buildings_count')
@@ -66,7 +97,7 @@ export async function GET(
     const decompressed = gunzipSync(Buffer.from(bodyBuffer));
     const geojson = JSON.parse(decompressed.toString('utf-8'));
     
-    console.log(`[API] Returning ${geojson.features?.length || 0} buildings`);
+    console.log(`[API] Returning ${geojson.features?.length || 0} buildings from S3`);
     
     return NextResponse.json(geojson);
     

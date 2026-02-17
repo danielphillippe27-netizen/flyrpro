@@ -138,8 +138,8 @@ export class CampaignsService {
         .from('campaign_addresses_geojson')
         .select('*, qr_code_base64')  // Explicitly include qr_code_base64
         .eq('campaign_id', campaignId)
-        .order('street_name', { ascending: true })
-        .order('address', { ascending: true });
+        .order('seq', { ascending: true, nullsFirst: false })
+        .order('id', { ascending: true });
 
       if (error) {
         console.error('Error fetching campaign addresses:', formatError(error));
@@ -150,23 +150,8 @@ export class CampaignsService {
         }
         throw error;
       }
-      
-      // Sort addresses naturally (so "142 Main St" comes before "1420 Main St")
-      const sortedData = (data || []).sort((a: any, b: any) => {
-        // First sort by street name
-        const streetA = (a.street_name || '').toLowerCase();
-        const streetB = (b.street_name || '').toLowerCase();
-        if (streetA !== streetB) {
-          return streetA.localeCompare(streetB);
-        }
-        
-        // Then sort by house number numerically
-        const numA = parseInt((a.address || '').match(/^\d+/)?.[0] || '0', 10);
-        const numB = parseInt((b.address || '').match(/^\d+/)?.[0] || '0', 10);
-        return numA - numB;
-      });
-      
-      return sortedData as unknown as CampaignAddress[];
+
+      return (data || []) as unknown as CampaignAddress[];
     } catch (error) {
       console.error('Error fetching addresses, returning empty array:', formatError(error));
       // Gracefully handle errors - return empty array instead of crashing

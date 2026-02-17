@@ -6,7 +6,6 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import { CampaignMarkersLayer } from './CampaignMarkersLayer';
 import { MapBuildingsLayer } from './MapBuildingsLayer';
 import { MapInfoButton } from './MapInfoButton';
-import { RouteLayer } from './RouteLayer';
 import { UserLocationLayer } from './UserLocationLayer';
 import { LocateFixed } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -493,7 +492,7 @@ export function FlyrMapView() {
     };
 
     const buildAddressPointsGeoJSON = (): GeoJSON.FeatureCollection | null => {
-      const radiusMeters = 4;
+      const radiusMeters = 4 * (2 / 3);
       const steps = 24;
       const features: GeoJSON.Feature<GeoJSON.Polygon>[] = [];
       for (const addr of campaignAddresses) {
@@ -663,10 +662,6 @@ export function FlyrMapView() {
               onAddToCRM={handleAddToCRM}
             />
           )}
-          <RouteLayer 
-            map={map.current}
-            campaignId={selectedCampaignId}
-          />
           <CampaignMarkersLayer
             map={map.current}
             mapLoaded={mapLoaded}

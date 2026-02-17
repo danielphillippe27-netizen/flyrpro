@@ -20,9 +20,9 @@ import type { AddressSuggestion } from '@/lib/services/MapboxAutocompleteService
 import { Satellite, Map, Trash2, Pencil } from 'lucide-react';
 import * as turf from '@turf/turf';
 
-// Mapbox v11/v12 styles with building footprints – used only on create campaign so we see buildings
+// Mapbox v11 styles with 2D building footprints – used only on create campaign so we see buildings
 const MAP_STYLES = {
-  light: 'mapbox://styles/mapbox/streets-v12',
+  light: 'mapbox://styles/mapbox/streets-v11',
   dark: 'mapbox://styles/mapbox/dark-v11',
 } as const;
 
@@ -56,6 +56,68 @@ export default function CreateCampaignPage() {
     });
   }, []);
 
+  /** Add residential-only 2D building footprints from Mapbox vector tiles.
+   *  Hides built-in style buildings and renders residential buildings as near-black at 80% opacity.
+   *  Works with streets-v11 / dark-v11 / satellite-streets-v12 styles. */
+  const add2DBuildingsLayer = (m: mapboxgl.Map) => {
+    const buildingLayerId = '2d-buildings';
+    if (m.getLayer(buildingLayerId)) return; // already added
+
+    const layers = m.getStyle().layers;
+
+    // Hide ALL built-in building layers from the base style (includes 3D extrusions)
+    for (const layer of layers) {
+      const lid = layer.id.toLowerCase();
+      if ((lid.includes('building') || lid.includes('structure')) && layer.id !== buildingLayerId) {
+        try {
+          m.setLayoutProperty(layer.id, 'visibility', 'none');
+        } catch {}
+      }
+    }
+
+    // Find the first symbol layer so buildings render beneath labels
+    let labelLayerId: string | undefined;
+    for (const layer of layers) {
+      if (layer.type === 'symbol' && (layer as any).layout?.['text-field']) {
+        labelLayerId = layer.id;
+        break;
+      }
+    }
+
+    m.addLayer(
+      {
+        id: buildingLayerId,
+        source: 'composite',
+        'source-layer': 'building',
+        type: 'fill',
+        minzoom: 12,
+        // Exclude explicitly non-residential building types
+        filter: [
+          'match', ['get', 'type'],
+          ['commercial', 'industrial', 'retail', 'warehouse', 'office',
+           'church', 'cathedral', 'chapel', 'temple', 'mosque',
+           'hospital', 'civic', 'government', 'public',
+           'university', 'school', 'college', 'kindergarten',
+           'train_station', 'transportation', 'hangar',
+           'parking', 'garage', 'garages',
+           'service', 'manufacture', 'factory',
+           'supermarket', 'hotel', 'motel',
+           'stadium', 'grandstand',
+           'fire_station', 'barn', 'silo', 'greenhouse',
+           'kiosk', 'roof', 'ruins', 'bridge', 'construction'],
+          false,
+          true,
+        ],
+        paint: {
+          'fill-color': '#111111',
+          'fill-opacity': 0.8,
+          'fill-outline-color': '#0a0a0a',
+        },
+      },
+      labelLayerId,
+    );
+  };
+
   // Initialize map with drawing controls
   useEffect(() => {
     if (!mapContainer.current || map.current) return;
@@ -68,11 +130,12 @@ export default function CreateCampaignPage() {
       container: mapContainer.current,
       style: MAP_STYLES[theme] ?? MAP_STYLES.light,
       center: [-79.35, 43.65], // Default to Toronto area
-      zoom: 12,
+      zoom: 15,
     });
 
     map.current.on('load', () => {
       setMapLoaded(true);
+      add2DBuildingsLayer(map.current!);
     });
 
     // Initialize Mapbox Draw with red styling (no visible controls - draw by clicking)
@@ -216,9 +279,12 @@ export default function CreateCampaignPage() {
     // Change style
     map.current.setStyle(expectedStyle);
 
-    // After style loads, create fresh draw instance
+    // After style loads, re-add 2D buildings and create fresh draw instance
     map.current.once('style.load', () => {
       if (!map.current) return;
+
+      // Re-add 2D building footprints after style swap
+      add2DBuildingsLayer(map.current);
 
       // Create fresh draw instance
       const newDraw = new MapboxDraw({
@@ -407,13 +473,22 @@ export default function CreateCampaignPage() {
     let polygon: { type: 'Polygon'; coordinates: number[][][] } | null = null;
     let bbox: number[] | undefined = undefined;
     const features = drawRef.current?.getAll();
-if (!features || features.features.length === 0) {
+    if (!features || features.features.length === 0) {
       alert('Please draw a territory boundary on the map');
       return;
     }
-    polygon = features.features[0].geometry as { type: 'Polygon'; coordinates: number[][][] };
 
-    // Ensure valid polygon for Lambda (LinearRing needs >= 3 points, GeoJSON expects closed ring = 4+ positions)
+    // Find the first completed Polygon feature (skip points, lines, or incomplete geometries)
+    const polygonFeature = features.features.find(
+      (f) => f.geometry?.type === 'Polygon' && f.geometry.coordinates?.[0]?.length >= 3
+    );
+    if (!polygonFeature) {
+      alert('Please draw a territory boundary on the map. Double-click to finish your shape.');
+      return;
+    }
+    polygon = polygonFeature.geometry as { type: 'Polygon'; coordinates: number[][][] };
+
+    // Ensure valid polygon (GeoJSON closed ring = at least 4 positions for 3 unique corners)
     const ring = polygon.coordinates[0];
     if (!ring || ring.length < 3) {
       alert('Please draw a proper territory with at least 3 corners. The shape you drew has too few points.');
@@ -422,7 +497,7 @@ if (!features || features.features.length === 0) {
     // Close the ring if unclosed (first and last must be equal per GeoJSON spec)
     const first = ring[0];
     const last = ring[ring.length - 1];
-    if (ring.length === 3 || (first[0] !== last[0] || first[1] !== last[1])) {
+    if (first[0] !== last[0] || first[1] !== last[1]) {
       polygon = {
         ...polygon,
         coordinates: [[...ring, [first[0], first[1]]]],

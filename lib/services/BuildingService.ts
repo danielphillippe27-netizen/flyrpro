@@ -316,25 +316,95 @@ export class BuildingService {
 
   /**
    * Fetch building by GERS ID
+   * Checks both regular buildings table and Gold Standard ref_buildings_gold
    */
   static async fetchBuildingByGersId(gersId: string): Promise<Building | null> {
-    // During UUID migration: query both gers_id (text) and gers_id_uuid (uuid) columns
-    // After migration: will query only gers_id_uuid
+    // First, try the regular buildings table (Silver/Overture data)
     const { data, error } = await this.client
       .from('buildings')
       .select('*')
       .or(`gers_id.eq.${gersId},gers_id_uuid.eq.${gersId}`)
-      .maybeSingle(); // Use maybeSingle() to handle missing buildings gracefully
+      .maybeSingle();
 
-    if (error) {
-      // Only log non-404 errors (PGRST116 is expected when building doesn't exist)
-      if (error.code !== 'PGRST116') {
-        console.error('Error fetching building by GERS ID:', error);
-      }
-      return null;
+    if (data) {
+      return data as Building;
     }
 
-    return data as Building | null;
+    // If not found and not a "not found" error, log it
+    if (error && error.code !== 'PGRST116') {
+      console.error('Error fetching building by GERS ID:', error);
+    }
+
+    // Fallback: Check Gold Standard buildings
+    const { data: goldData, error: goldError } = await this.client
+      .from('ref_buildings_gold')
+      .select('*')
+      .eq('id', gersId)
+      .maybeSingle();
+
+    if (goldData) {
+      // Transform Gold building to Building format
+      return {
+        id: goldData.id,
+        gers_id: goldData.id, // Use Gold ID as GERS ID
+        gers_id_uuid: goldData.id,
+        geom: goldData.geom,
+        centroid: goldData.centroid,
+        area_sqm: goldData.area_sqm,
+        height: 10, // Default height
+        addr_housenumber: null, // Gold buildings don't have address in this table
+        addr_street: null,
+        addr_unit: null,
+        addr_city: null,
+        addr_postcode: null,
+        latest_status: 'default',
+        is_hidden: false,
+        source: 'gold',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      } as Building;
+    }
+
+    if (goldError && goldError.code !== 'PGRST116') {
+      console.error('Error fetching Gold building:', goldError);
+    }
+
+    return null;
+  }
+
+  /**
+   * Fetch addresses linked to a Gold building for a campaign
+   */
+  static async fetchGoldBuildingAddresses(
+    buildingId: string, 
+    campaignId: string
+  ): Promise<Array<{
+    address_id: string;
+    formatted: string;
+    house_number: string | null;
+    street_name: string | null;
+    match_source: string;
+    confidence: number;
+  }>> {
+    const { data, error } = await this.client
+      .from('campaign_addresses')
+      .select('id, formatted, house_number, street_name, match_source, confidence')
+      .eq('campaign_id', campaignId)
+      .eq('building_id', buildingId);
+
+    if (error) {
+      console.error('Error fetching Gold building addresses:', error);
+      return [];
+    }
+
+    return (data || []).map(addr => ({
+      address_id: addr.id,
+      formatted: addr.formatted || '',
+      house_number: addr.house_number,
+      street_name: addr.street_name,
+      match_source: addr.match_source || 'gold_exact',
+      confidence: addr.confidence || 1.0,
+    }));
   }
 
   /**

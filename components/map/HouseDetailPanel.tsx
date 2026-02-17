@@ -24,6 +24,7 @@ import { Trash2, Eye, EyeOff } from 'lucide-react';
 
 interface HouseDetailPanelProps {
   buildingId: string | null;
+  campaignId: string | null;
   open: boolean;
   onClose: () => void;
   onUpdate: () => void;
@@ -31,12 +32,21 @@ interface HouseDetailPanelProps {
 
 export function HouseDetailPanel({
   buildingId,
+  campaignId,
   open,
   onClose,
   onUpdate,
 }: HouseDetailPanelProps) {
   const [building, setBuilding] = useState<Building | null>(null);
   const [interactions, setInteractions] = useState<BuildingInteraction[]>([]);
+  const [linkedAddresses, setLinkedAddresses] = useState<Array<{
+    address_id: string;
+    formatted: string;
+    house_number: string | null;
+    street_name: string | null;
+    match_source: string;
+    confidence: number;
+  }>>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [newStatus, setNewStatus] = useState<BuildingStatus>('default');
@@ -70,8 +80,23 @@ export function HouseDetailPanel({
       // Once we have the building, use its internal ID for interactions
       const interactionData = await BuildingService.fetchBuildingInteractions(buildingData.id);
 
+      // For Gold buildings, also fetch linked addresses
+      let addressData: Array<{
+        address_id: string;
+        formatted: string;
+        house_number: string | null;
+        street_name: string | null;
+        match_source: string;
+        confidence: number;
+      }> = [];
+      
+      if (buildingData.source === 'gold' && campaignId) {
+        addressData = await BuildingService.fetchGoldBuildingAddresses(buildingData.id, campaignId);
+      }
+
       setBuilding(buildingData);
       setInteractions(interactionData || []);
+      setLinkedAddresses(addressData);
       
       // Set new status to current status
       if (buildingData) {
@@ -204,6 +229,37 @@ export function HouseDetailPanel({
               <Label className="text-sm font-medium">GERS ID</Label>
               <p className="text-sm text-muted-foreground font-mono text-xs">{building.gers_id}</p>
             </div>
+
+            {/* Linked Addresses (for Gold buildings) */}
+            {linkedAddresses.length > 0 && (
+              <div className="space-y-2 pt-2 border-t">
+                <Label className="text-sm font-medium">
+                  Linked Addresses ({linkedAddresses.length})
+                </Label>
+                <div className="space-y-2">
+                  {linkedAddresses.map((addr) => (
+                    <div
+                      key={addr.address_id}
+                      className="border rounded-lg p-3 space-y-1"
+                    >
+                      <p className="text-sm font-medium">
+                        {addr.formatted}
+                      </p>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <span className={`px-2 py-0.5 rounded ${
+                          addr.match_source === 'gold_exact' 
+                            ? 'bg-green-100 text-green-800' 
+                            : 'bg-blue-100 text-blue-800'
+                        }`}>
+                          {addr.match_source === 'gold_exact' ? 'Exact' : 'Proximity'}
+                        </span>
+                        <span>{(addr.confidence * 100).toFixed(0)}% confidence</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Overture Metadata */}
             {(building.height || building.house_name) && (

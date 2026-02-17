@@ -148,7 +148,7 @@ export class StableLinkerService {
       }
 
       // 1. Fetch addresses for this campaign
-      const { data: addresses, error: addrError } = await this.supabase
+      const { data: rawAddresses, error: addrError } = await this.supabase
         .from('campaign_addresses')
         .select('id, gers_id, formatted, house_number, street_name, geom')
         .eq('campaign_id', campaignId);
@@ -156,6 +156,20 @@ export class StableLinkerService {
       if (addrError) {
         throw new Error(`Failed to fetch addresses: ${addrError.message}`);
       }
+      
+      // Parse geom field which may be string or object from Supabase
+      const addresses: CampaignAddress[] = (rawAddresses || []).map((addr: any) => {
+        let geom = addr.geom;
+        if (typeof geom === 'string') {
+          try {
+            geom = JSON.parse(geom);
+          } catch (e) {
+            console.warn(`[StableLinker] Failed to parse geom for address ${addr.id}, using fallback`);
+            geom = { type: 'Point', coordinates: [0, 0] };
+          }
+        }
+        return { ...addr, geom };
+      });
 
       if (!addresses || addresses.length === 0) {
         console.log('[StableLinker] No addresses found for campaign');
