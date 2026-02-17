@@ -62,15 +62,16 @@ const ADDRESS_SOURCES = [
     province: 'ON',
     fieldMap: { streetNumber: 'CIVIC_NUM', streetName: 'FULL_STREE', unit: 'UNIT_NUM', city: 'COMMUNITY' }
   },
-  {
-    id: 'ottawa_addr',
-    name: 'City of Ottawa',
-    url: 'https://maps.ottawa.ca/arcgis/rest/services/Property_Parcels/Address_Points/FeatureServer/0',
-    s3Key: 'gold-standard/canada/ontario/ottawa/addresses.geojson',
-    type: 'address' as const,
-    province: 'ON',
-    fieldMap: { streetNumber: 'ADDR_NUM', streetName: 'ROAD_NAME', unit: 'ADDR_UNIT', city: 'MUNICIPALITY' }
-  },
+  // Ottawa URLs need verification
+  // {
+  //   id: 'ottawa_addr',
+  //   name: 'City of Ottawa',
+  //   url: 'https://maps.ottawa.ca/arcgis/rest/services/Property_Parcels/Address_Points/FeatureServer/0',
+  //   s3Key: 'gold-standard/canada/ontario/ottawa/addresses.geojson',
+  //   type: 'address' as const,
+  //   province: 'ON',
+  //   fieldMap: { streetNumber: 'ADDR_NUM', streetName: 'ROAD_NAME', unit: 'ADDR_UNIT', city: 'MUNICIPALITY' }
+  // },
   {
     id: 'kingston_addr',
     name: 'City of Kingston',
@@ -85,11 +86,11 @@ const ADDRESS_SOURCES = [
   {
     id: 'toronto_addr',
     name: 'City of Toronto',
-    url: 'https://gis.toronto.ca/arcgis/rest/services/primary/COT_ADDRESS_POINT/FeatureServer/0',
+    url: 'https://gis.toronto.ca/arcgis/rest/services/cot_geospatial27/FeatureServer/101',
     s3Key: 'gold-standard/canada/ontario/toronto/addresses.geojson',
     type: 'address' as const,
     province: 'ON',
-    fieldMap: { streetNumber: 'HI_NUM', streetName: 'LF_NAME', unit: 'SUITE', city: 'MUNICIPALITY' }
+    fieldMap: { streetNumber: 'CIVIC_NUM', streetName: 'LINEAR_NAME_FULL', unit: 'UNIT', city: 'MUNICIPALITY' }
   },
   {
     id: 'york_addr',
@@ -360,15 +361,16 @@ const BUILDING_SOURCES = [
     province: 'ON',
     filters: { minArea: 35 }
   },
-  {
-    id: 'toronto_bldg',
-    name: 'City of Toronto',
-    url: 'https://gis.toronto.ca/arcgis/rest/services/primary/COT_BUILDING_FOOTPRINT/MapServer/0',
-    s3Key: 'gold-standard/canada/ontario/toronto/buildings.geojson',
-    type: 'building' as const,
-    province: 'ON',
-    filters: { minArea: 35 }
-  },
+  // Toronto buildings URL needs verification
+  // {
+  //   id: 'toronto_bldg',
+  //   name: 'City of Toronto',
+  //   url: 'https://gis.toronto.ca/arcgis/rest/services/primary/COT_BUILDING_FOOTPRINT/MapServer/0',
+  //   s3Key: 'gold-standard/canada/ontario/toronto/buildings.geojson',
+  //   type: 'building' as const,
+  //   province: 'ON',
+  //   filters: { minArea: 35 }
+  // },
   {
     id: 'york_bldg',
     name: 'Region of York',
@@ -387,15 +389,15 @@ const BUILDING_SOURCES = [
     province: 'ON',
     filters: { minArea: 35 }
   },
-  {
-    id: 'ottawa_bldg',
-    name: 'City of Ottawa',
-    url: 'https://maps.ottawa.ca/arcgis/rest/services/Building_Footprints/MapServer/0',
-    s3Key: 'gold-standard/canada/ontario/ottawa/buildings.geojson',
-    type: 'building' as const,
-    province: 'ON',
-    filters: { minArea: 35 }
-  },
+  // {
+  //   id: 'ottawa_bldg',
+  //   name: 'City of Ottawa',
+  //   url: 'https://maps.ottawa.ca/arcgis/rest/services/Building_Footprints/MapServer/0',
+  //   s3Key: 'gold-standard/canada/ontario/ottawa/buildings.geojson',
+  //   type: 'building' as const,
+  //   province: 'ON',
+  //   filters: { minArea: 35 }
+  // },
   {
     id: 'waterloo_bldg',
     name: 'Region of Waterloo',
@@ -573,8 +575,9 @@ const GROUPS: Record<string, string[]> = {
     'peel_addr', 'peel_bldg'
   ],
   'toronto_ottawa': [
-    'toronto_addr', 'toronto_bldg',
-    'ottawa_addr', 'ottawa_bldg'
+    'toronto_addr'
+    // 'toronto_bldg', - URL needs verification
+    // 'ottawa_addr', 'ottawa_bldg' - URLs need verification
   ],
   'ontario_rest': [
     'peterborough_addr', 'peterborough_bldg',
