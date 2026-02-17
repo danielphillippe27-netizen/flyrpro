@@ -1,0 +1,103 @@
+# ============================================================================
+# GitHub Actions Workflow: Toronto 3D Massing Building Footprints Ingestion
+# ============================================================================
+# 
+# This workflow automates the ingestion of Toronto building footprints
+# from the CKAN Open Data Portal. Unlike other cities, Toronto provides
+# this data as a Shapefile ZIP rather than an ArcGIS API.
+#
+# Schedule: Monthly on the 1st at 04:00 UTC (2 hours after main sync)
+# Manual: Can be triggered via workflow_dispatch
+# ============================================================================
+
+name: Ingest Toronto 3D Massing
+
+on:
+  # Run monthly on the 1st at 04:00 UTC
+  schedule:
+    - cron: '0 4 1 * *'
+  
+  # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (download but do not upload)'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  ingest-toronto-massing:
+    name: Ingest Toronto 3D Massing
+    runs-on: ubuntu-latest
+    
+    steps:
+      # -----------------------------------------------------------------------
+      # Checkout repository
+      # -----------------------------------------------------------------------
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      # -----------------------------------------------------------------------
+      # Setup Node.js
+      # -----------------------------------------------------------------------
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      
+      # -----------------------------------------------------------------------
+      # Install dependencies
+      # -----------------------------------------------------------------------
+      - name: Install dependencies
+        run: |
+          rm -rf node_modules
+          npm ci
+          npm install mapshaper adm-zip
+      
+      # -----------------------------------------------------------------------
+      # Run Toronto Ingest Script
+      # -----------------------------------------------------------------------
+      - name: Ingest Toronto 3D Massing
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
+          AWS_BUCKET_NAME: ${{ secrets.AWS_BUCKET_NAME || 'flyr-pro-addresses-2025' }}
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" == "true" ]; then
+            npx tsx scripts/ingest_toronto_buildings.ts --dry-run
+          else
+            npx tsx scripts/ingest_toronto_buildings.ts
+          fi
+      
+      # -----------------------------------------------------------------------
+      # Upload logs on failure
+      # -----------------------------------------------------------------------
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: toronto-ingest-logs
+          path: |
+            *.log
+            logs/
+          retention-days: 7
+      
+      # -----------------------------------------------------------------------
+      # Notify on completion
+      # -----------------------------------------------------------------------
+      - name: Notify success
+        if: success()
+        run: |
+          echo "✅ Toronto 3D Massing ingestion completed successfully!"
+      
+      - name: Notify failure
+        if: failure()
+        run: |
+          echo "❌ Toronto 3D Massing ingestion failed"
+          exit 1
