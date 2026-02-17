@@ -29,11 +29,11 @@ const ADDRESS_SOURCES = [
   {
     id: 'durham_addr',
     name: 'Region of Durham',
-    url: 'https://services3.arcgis.com/b9j25h2p1wKq8m8p/arcgis/rest/services/Site_Address_Points/FeatureServer/0',
+    url: 'https://maps.durham.ca/arcgis/rest/services/Open_Data/Durham_OpenData/MapServer/0',
     s3Key: 'gold-standard/canada/ontario/durham/addresses.geojson',
     type: 'address' as const,
     province: 'ON',
-    fieldMap: { streetNumber: 'CIVIC_NO', streetName: 'ST_NAME', unit: 'UNIT', city: 'MUNICIPALITY' }
+    fieldMap: { streetNumber: 'CIVIC_NUM', streetName: 'ROAD_NAME', unit: 'UNIT_NUM', city: 'MUNICIPALITY' }
   },
   {
     id: 'peterborough_addr',
@@ -92,24 +92,26 @@ const ADDRESS_SOURCES = [
     province: 'ON',
     fieldMap: { streetNumber: 'CIVIC_NUM', streetName: 'LINEAR_NAME_FULL', unit: 'UNIT', city: 'MUNICIPALITY' }
   },
-  {
-    id: 'york_addr',
-    name: 'Region of York (Markham/Vaughan)',
-    url: 'https://gis.york.ca/arcgis/rest/services/YRC_AddressPoints/FeatureServer/0',
-    s3Key: 'gold-standard/canada/ontario/york/addresses.geojson',
-    type: 'address' as const,
-    province: 'ON',
-    fieldMap: { streetNumber: 'NUM', streetName: 'STREET', unit: 'UNIT', city: 'MUNICIPALITY' }
-  },
-  {
-    id: 'peel_addr',
-    name: 'Region of Peel (Mississauga/Brampton)',
-    url: 'https://services6.arcgis.com/2KCAhidn20a22bHj/arcgis/rest/services/Address_Points/FeatureServer/0',
-    s3Key: 'gold-standard/canada/ontario/peel/addresses.geojson',
-    type: 'address' as const,
-    province: 'ON',
-    fieldMap: { streetNumber: 'ADD_NUM', streetName: 'ST_NAME', unit: 'UNIT', city: 'MUNICIPALITY' }
-  },
+  // York URLs currently unavailable
+  // {
+  //   id: 'york_addr',
+  //   name: 'Region of York (Markham/Vaughan)',
+  //   url: 'https://gis.york.ca/arcgis/rest/services/YRC_AddressPoints/FeatureServer/0',
+  //   s3Key: 'gold-standard/canada/ontario/york/addresses.geojson',
+  //   type: 'address' as const,
+  //   province: 'ON',
+  //   fieldMap: { streetNumber: 'NUM', streetName: 'STREET', unit: 'UNIT', city: 'MUNICIPALITY' }
+  // },
+  // Peel URLs currently unavailable
+  // {
+  //   id: 'peel_addr',
+  //   name: 'Region of Peel (Mississauga/Brampton)',
+  //   url: 'https://services6.arcgis.com/2KCAhidn20a22bHj/arcgis/rest/services/Address_Points/FeatureServer/0',
+  //   s3Key: 'gold-standard/canada/ontario/peel/addresses.geojson',
+  //   type: 'address' as const,
+  //   province: 'ON',
+  //   fieldMap: { streetNumber: 'ADD_NUM', streetName: 'ST_NAME', unit: 'UNIT', city: 'MUNICIPALITY' }
+  // },
   {
     id: 'halton_addr',
     name: 'Region of Halton (Oakville/Burlington)',
@@ -337,7 +339,7 @@ const BUILDING_SOURCES = [
   {
     id: 'durham_bldg',
     name: 'Region of Durham',
-    url: 'https://gismap.durham.ca/arcgis/rest/services/Open_Data/Durham_OpenData/MapServer/25',
+    url: 'https://maps.durham.ca/arcgis/rest/services/Open_Data/Durham_OpenData/MapServer/25',
     s3Key: 'gold-standard/canada/ontario/durham/buildings.geojson',
     type: 'building' as const,
     province: 'ON',
@@ -371,24 +373,24 @@ const BUILDING_SOURCES = [
   //   province: 'ON',
   //   filters: { minArea: 35 }
   // },
-  {
-    id: 'york_bldg',
-    name: 'Region of York',
-    url: 'https://gis.york.ca/arcgis/rest/services/YRC_BuildingFootprints/FeatureServer/0',
-    s3Key: 'gold-standard/canada/ontario/york/buildings.geojson',
-    type: 'building' as const,
-    province: 'ON',
-    filters: { minArea: 35 }
-  },
-  {
-    id: 'peel_bldg',
-    name: 'Region of Peel',
-    url: 'https://services6.arcgis.com/2KCAhidn20a22bHj/arcgis/rest/services/Building_Footprints_2024/FeatureServer/0',
-    s3Key: 'gold-standard/canada/ontario/peel/buildings.geojson',
-    type: 'building' as const,
-    province: 'ON',
-    filters: { minArea: 35 }
-  },
+  // {
+  //   id: 'york_bldg',
+  //   name: 'Region of York',
+  //   url: 'https://gis.york.ca/arcgis/rest/services/YRC_BuildingFootprints/FeatureServer/0',
+  //   s3Key: 'gold-standard/canada/ontario/york/buildings.geojson',
+  //   type: 'building' as const,
+  //   province: 'ON',
+  //   filters: { minArea: 35 }
+  // },
+  // {
+  //   id: 'peel_bldg',
+  //   name: 'Region of Peel',
+  //   url: 'https://services6.arcgis.com/2KCAhidn20a22bHj/arcgis/rest/services/Building_Footprints_2024/FeatureServer/0',
+  //   s3Key: 'gold-standard/canada/ontario/peel/buildings.geojson',
+  //   type: 'building' as const,
+  //   province: 'ON',
+  //   filters: { minArea: 35 }
+  // },
   // {
   //   id: 'ottawa_bldg',
   //   name: 'City of Ottawa',
@@ -570,9 +572,9 @@ const BUILDING_SOURCES = [
 
 const GROUPS: Record<string, string[]> = {
   'durham_york_peel': [
-    'durham_addr', 'durham_bldg',
-    'york_addr', 'york_bldg',
-    'peel_addr', 'peel_bldg'
+    'durham_addr', 'durham_bldg'
+    // 'york_addr', 'york_bldg' - URLs currently unavailable
+    // 'peel_addr', 'peel_bldg' - URLs currently unavailable
   ],
   'toronto_ottawa': [
     'toronto_addr'
