@@ -19,10 +19,10 @@ jobs:
           node-version: '18'
 
       - name: Install Dependencies
-        run: npm install @supabase/supabase-js @aws-sdk/client-s3 dotenv typescript ts-node
+        run: npm install @supabase/supabase-js @aws-sdk/client-s3 dotenv typescript tsx
 
       - name: Run Quarterback Script
-        run: npx ts-node scripts/quarterback-loader.ts
+        run: npx tsx scripts/quarterback-loader.ts
         env:
           # We map these to GitHub Secrets (See Step 3 below)
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
