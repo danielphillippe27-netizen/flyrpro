@@ -1,0 +1,208 @@
+# ============================================================================
+# GitHub Actions Workflow: Gold Tier Municipal Data Pipeline (Parallel Matrix)
+# ============================================================================
+# 
+# This workflow automates the Gold Tier data pipeline using parallel execution:
+#   1. Ingest: Fetch from ArcGIS → Clean → Upload to S3 (Parallel by region)
+#   2. Sync: Download from S3 → Load into Supabase PostGIS
+#
+# Strategy: Split work into 5 parallel jobs to avoid 6-hour timeout
+#   - durham_york_peel: The "Big 3" Ontario neighbors
+#   - toronto_ottawa: The huge cities (Toronto, Ottawa)
+#   - ontario_rest: Smaller Ontario cities
+#   - western_canada: BC, Alberta, Prairies
+#   - atlantic_canada: Nova Scotia, Newfoundland
+#
+# Schedule: Monthly on the 1st at 02:00 UTC
+# Manual: Can be triggered via workflow_dispatch
+# ============================================================================
+
+name: Sync Municipal Data (Gold Tier)
+
+on:
+  # Run monthly on the 1st at 02:00 UTC
+  schedule:
+    - cron: '0 2 1 * *'
+  
+  # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      region:
+        description: 'Region group to sync (leave empty for all)'
+        required: false
+        default: ''
+        type: choice
+        options:
+          - ''
+          - 'durham_york_peel'
+          - 'toronto_ottawa'
+          - 'ontario_rest'
+          - 'western_canada'
+          - 'atlantic_canada'
+      dry_run:
+        description: 'Dry run (fetch but do not upload/load)'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  # ==========================================================================
+  # Job 1: Ingest from ArcGIS to S3 (The Claw) - Parallel Matrix
+  # ==========================================================================
+  ingest-to-s3:
+    name: Ingest ${{ matrix.region }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false  # Continue other jobs if one fails
+      matrix:
+        region: 
+          - durham_york_peel
+          - toronto_ottawa
+          - ontario_rest
+          - western_canada
+          - atlantic_canada
+        # Allow manual override to run specific region
+        include:
+          - region: ${{ github.event.inputs.region || matrix.region }}
+    
+    # Skip matrix jobs if a specific region is selected manually
+    if: github.event.inputs.region == '' || github.event.inputs.region == matrix.region
+    
+    steps:
+      # -----------------------------------------------------------------------
+      # Checkout repository
+      # -----------------------------------------------------------------------
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      # -----------------------------------------------------------------------
+      # Setup Node.js
+      # -----------------------------------------------------------------------
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      
+      # -----------------------------------------------------------------------
+      # Install dependencies
+      # -----------------------------------------------------------------------
+      - name: Install dependencies
+        run: npm ci
+      
+      # -----------------------------------------------------------------------
+      # Run Ingest Script for this region group
+      # -----------------------------------------------------------------------
+      - name: Ingest municipal data to S3 (${{ matrix.region }})
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
+          AWS_BUCKET_NAME: ${{ secrets.AWS_BUCKET_NAME || 'flyr-pro-addresses-2025' }}
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" == "true" ]; then
+            npx tsx scripts/ingest_municipal_data.ts --group=${{ matrix.region }} --dry-run
+          else
+            npx tsx scripts/ingest_municipal_data.ts --group=${{ matrix.region }}
+          fi
+      
+      # -----------------------------------------------------------------------
+      # Upload logs on failure
+      # -----------------------------------------------------------------------
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ingest-logs-${{ matrix.region }}
+          path: |
+            *.log
+            logs/
+          retention-days: 7
+
+  # ==========================================================================
+  # Job 2: Sync from S3 to Supabase (The Loader)
+  # ==========================================================================
+  sync-to-database:
+    name: Sync to Supabase
+    needs: ingest-to-s3  # Wait for all S3 uploads to complete
+    runs-on: ubuntu-latest
+    if: github.event.inputs.dry_run != 'true'  # Skip on dry run
+    
+    steps:
+      # -----------------------------------------------------------------------
+      # Checkout repository
+      # -----------------------------------------------------------------------
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      # -----------------------------------------------------------------------
+      # Setup Node.js
+      # -----------------------------------------------------------------------
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      
+      # -----------------------------------------------------------------------
+      # Install dependencies
+      # -----------------------------------------------------------------------
+      - name: Install dependencies
+        run: npm ci
+      
+      # -----------------------------------------------------------------------
+      # Run Sync Script
+      # -----------------------------------------------------------------------
+      - name: Sync Gold data to Supabase
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
+          AWS_BUCKET_NAME: ${{ secrets.AWS_BUCKET_NAME || 'flyr-pro-addresses-2025' }}
+        run: |
+          if [ -n "${{ github.event.inputs.region }}" ]; then
+            # Specific region - sync only those sources
+            npx tsx scripts/sync-gold-addresses-from-s3.ts --group=${{ github.event.inputs.region }}
+          else
+            # All sources
+            npx tsx scripts/sync-gold-addresses-from-s3.ts --all
+          fi
+      
+      # -----------------------------------------------------------------------
+      # Verify sync
+      # -----------------------------------------------------------------------
+      - name: Verify data loaded
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          echo "Checking Gold data stats..."
+          # You could add a verification script here
+          # npx tsx scripts/verify-gold-data.ts
+
+  # ==========================================================================
+  # Job 3: Notify on completion
+  # ==========================================================================
+  notify:
+    name: Notify
+    needs: [ingest-to-s3, sync-to-database]
+    runs-on: ubuntu-latest
+    if: always() && github.event.inputs.dry_run != 'true'
+    
+    steps:
+      - name: Check status
+        run: |
+          echo "Ingest status: ${{ needs.ingest-to-s3.result }}"
+          echo "Sync status: ${{ needs.sync-to-database.result }}"
+          
+          if [ "${{ needs.ingest-to-s3.result }}" == "success" ] && [ "${{ needs.sync-to-database.result }}" == "success" ]; then
+            echo "✅ Gold tier data sync completed successfully!"
+          else
+            echo "❌ Gold tier data sync failed"
+            exit 1
+          fi
