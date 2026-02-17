@@ -309,21 +309,22 @@ const ADDRESS_SOURCES = [
   {
     id: 'halifax_addr',
     name: 'Halifax (HRM)',
-    url: 'https://services2.arcgis.com/1123456789/arcgis/rest/services/HRM_Address_Points/FeatureServer/0',
+    url: 'https://services2.arcgis.com/11XBiaBYA9Ep0yNJ/arcgis/rest/services/CivicAddresses/FeatureServer/0',
     s3Key: 'gold-standard/canada/nova-scotia/halifax/addresses.geojson',
     type: 'address' as const,
     province: 'NS',
     fieldMap: { streetNumber: 'CIVIC_NUM', streetName: 'STREET', unit: 'UNIT', city: 'COMMUNITY' }
   },
-  {
-    id: 'stjohns_addr',
-    name: 'City of St. Johns',
-    url: 'https://map.stjohns.ca/arcgis/rest/services/OpenData/Address_Points/MapServer/0',
-    s3Key: 'gold-standard/canada/newfoundland/st-johns/addresses.geojson',
-    type: 'address' as const,
-    province: 'NL',
-    fieldMap: { streetNumber: 'STREET_NUM', streetName: 'STREET', unit: 'UNIT', city: 'COMMUNITY' }
-  }
+  // St. John's URL needs verification - placeholder for now
+  // {
+  //   id: 'stjohns_addr',
+  //   name: 'City of St. Johns',
+  //   url: 'https://map.stjohns.ca/arcgis/rest/services/OpenData/Address_Points/MapServer/0',
+  //   s3Key: 'gold-standard/canada/newfoundland/st-johns/addresses.geojson',
+  //   type: 'address' as const,
+  //   province: 'NL',
+  //   fieldMap: { streetNumber: 'STREET_NUM', streetName: 'STREET', unit: 'UNIT', city: 'COMMUNITY' }
+  // }
 ];
 
 // ============================================================================
@@ -601,7 +602,8 @@ const GROUPS: Record<string, string[]> = {
     'winnipeg_addr', 'winnipeg_bldg'
   ],
   'atlantic_canada': [
-    'halifax_addr', 'stjohns_addr'
+    'halifax_addr'
+    // 'stjohns_addr' - URL needs verification
   ]
 };
 
