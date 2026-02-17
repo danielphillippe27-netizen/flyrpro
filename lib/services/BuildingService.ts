@@ -386,15 +386,22 @@ export class BuildingService {
     match_source: string;
     confidence: number;
   }>> {
+    console.log('[BuildingService] Fetching Gold addresses for building:', buildingId, 'campaign:', campaignId);
+    
     const { data, error } = await this.client
       .from('campaign_addresses')
-      .select('id, formatted, house_number, street_name, match_source, confidence')
+      .select('id, formatted, house_number, street_name, match_source, confidence, building_id')
       .eq('campaign_id', campaignId)
       .eq('building_id', buildingId);
 
     if (error) {
-      console.error('Error fetching Gold building addresses:', error);
+      console.error('[BuildingService] Error fetching Gold building addresses:', error);
       return [];
+    }
+
+    console.log('[BuildingService] Found', data?.length || 0, 'linked addresses');
+    if (data && data.length > 0) {
+      console.log('[BuildingService] First address:', data[0]);
     }
 
     return (data || []).map(addr => ({

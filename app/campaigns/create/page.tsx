@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,6 +19,7 @@ import { MapInfoButton } from '@/components/map/MapInfoButton';
 import type { AddressSuggestion } from '@/lib/services/MapboxAutocompleteService';
 import { Satellite, Map, Trash2, Pencil } from 'lucide-react';
 import * as turf from '@turf/turf';
+import Lottie from 'lottie-react';
 
 // Mapbox v11 styles with 2D building footprints – used only on create campaign so we see buildings
 const MAP_STYLES = {
@@ -35,6 +36,7 @@ export default function CreateCampaignPage() {
   const [provisioning, setProvisioning] = useState(false);
   const [provisionProgress, setProvisionProgress] = useState<string>('');
   const [generatingAddresses, setGeneratingAddresses] = useState(false);
+  const [loadingAnimationData, setLoadingAnimationData] = useState<object | null>(null);
   const [addressCount, setAddressCount] = useState<number | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
@@ -48,6 +50,11 @@ export default function CreateCampaignPage() {
   const map = useRef<mapboxgl.Map | null>(null);
   const drawRef = useRef<MapboxDraw | null>(null);
   const boundaryLayerIdsRef = useRef<string[]>([]);
+  const isDark = theme === 'dark';
+  const lottieSrc = useMemo(
+    () => (isDark ? '/loading/white.json' : '/loading/black.json'),
+    [isDark]
+  );
 
   useEffect(() => {
     const supabase = createClient();
@@ -55,6 +62,31 @@ export default function CreateCampaignPage() {
       setUserId(user?.id || null);
     });
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(lottieSrc)
+      .then((r) => r.json())
+      .then((data) => {
+        if (!cancelled) setLoadingAnimationData(data);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [lottieSrc]);
+
+  const currentStepText = snappingBoundary
+    ? 'Step 1/4: Snapping boundary to roads'
+    : generatingAddresses
+      ? 'Step 2/4: Fetching addresses'
+      : provisionProgress.includes('Scanning')
+        ? 'Step 3/4: Fetching buildings'
+        : provisionProgress.includes('Matching') || provisionProgress.includes('Linking')
+          ? 'Step 3/4: Linking addresses to buildings'
+          : provisionProgress.includes('Finalizing')
+            ? 'Step 4/4: Preparing optimized route'
+            : 'Step 4/4: Finishing setup';
 
   /** Add residential-only 2D building footprints from Mapbox vector tiles.
    *  Hides built-in style buildings and renders residential buildings as near-black at 80% opacity.
@@ -238,8 +270,14 @@ export default function CreateCampaignPage() {
 
     return () => {
       if (map.current) {
+        // Temporarily suppress AbortError from Mapbox's in-flight tile requests
+        const suppressAbort = (e: PromiseRejectionEvent) => {
+          if (e.reason?.name === 'AbortError') e.preventDefault();
+        };
+        window.addEventListener('unhandledrejection', suppressAbort);
         map.current.remove();
         map.current = null;
+        setTimeout(() => window.removeEventListener('unhandledrejection', suppressAbort), 0);
       }
     };
   }, []);
@@ -806,33 +844,28 @@ export default function CreateCampaignPage() {
 
       {/* Loading Modal */}
       {(snappingBoundary || provisioning || generatingAddresses) && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-card text-card-foreground rounded-lg p-6 max-w-md w-full mx-4 border border-border">
-            <h3 className="text-lg font-semibold text-foreground mb-4">
-              {snappingBoundary
-                ? 'Snapping boundary to roads'
-                : generatingAddresses
-                  ? 'Finding Nearest Addresses'
-                  : 'Provisioning Mission Territory'}
-            </h3>
-            <div className="space-y-2">
-              <div className="flex items-center gap-3">
-                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary"></div>
-                <p className="text-sm text-foreground">
-                  {snappingBoundary
-                    ? 'Snapping boundary to roads...'
-                    : generatingAddresses
-                      ? 'Querying Overture for nearest addresses...'
-                      : (provisionProgress || 'Processing...')}
-                </p>
+        <div className="fixed inset-0 bg-black/35 backdrop-blur-[1px] flex items-center justify-center z-50">
+          <div className="max-w-lg w-full mx-4 text-center">
+            <div className="h-80 w-full flex items-center justify-center">
+              {loadingAnimationData ? (
+                <Lottie
+                  animationData={loadingAnimationData}
+                  loop
+                  className="h-full w-full"
+                  rendererSettings={{ preserveAspectRatio: 'xMidYMid meet' }}
+                />
+              ) : (
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+              )}
+            </div>
+            <div className="pt-3">
+              <h3 className="text-lg font-semibold text-white mb-3">
+                Generating Campaign
+              </h3>
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-white/95">{currentStepText}</p>
+                <p className="text-sm text-white/90">Syncing property data...</p>
               </div>
-              <p className="text-xs text-muted-foreground mt-4">
-                {snappingBoundary
-                  ? 'Aligning your boundary to street centerlines so addresses stay on the correct block.'
-                  : generatingAddresses
-                    ? 'Geocoding your starting address and finding nearby residential addresses from Overture data...'
-                    : 'Extracting buildings from Overture GERS and calculating road-facing orientation...'}
-              </p>
             </div>
           </div>
         </div>

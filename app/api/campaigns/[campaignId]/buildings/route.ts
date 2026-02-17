@@ -19,8 +19,8 @@ const s3Client = new S3Client({
  * GET /api/campaigns/[campaignId]/buildings
  * 
  * Returns building GeoJSON for a campaign.
- * - Gold: Fetches from ref_buildings_gold via campaign_addresses.building_id
- * - Silver: Fetches from S3 snapshot
+ * - Gold: Direct spatial query of ref_buildings_gold (no linking required)
+ * - Silver: Fetch from S3 snapshot
  */
 export async function GET(
   request: NextRequest,
@@ -33,37 +33,31 @@ export async function GET(
   try {
     const supabase = createAdminClient();
     
-    // First, check if campaign has Gold-linked buildings
-    const { data: goldBuildings, error: goldError } = await supabase
-      .from('campaign_addresses')
-      .select('building_id')
-      .eq('campaign_id', campaignId)
-      .not('building_id', 'is', null)
-      .limit(1);
+    // UNIFIED PATH: Use consolidated RPC that handles both Gold and Silver buildings
+    // Gold: campaign_addresses.building_id → ref_buildings_gold (polygon features)
+    // Silver: building_address_links → buildings table (polygon features)
+    // Fallback: address points (when no building polygons are linked)
+    console.log('[API] Fetching campaign features via rpc_get_campaign_full_features');
     
-    if (goldError) {
-      console.error('[API] Error checking Gold buildings:', goldError.message);
+    const { data: campaignFeatures, error: featuresError } = await supabase.rpc(
+      'rpc_get_campaign_full_features',
+      { p_campaign_id: campaignId }
+    );
+    
+    if (!featuresError && campaignFeatures && campaignFeatures.features?.length > 0) {
+      console.log(`[API] Returning ${campaignFeatures.features.length} building features (source: ${campaignFeatures.features[0]?.properties?.source || 'unknown'})`);
+      return NextResponse.json(campaignFeatures);
     }
     
-    // GOLD PATH: Return linked Gold buildings
-    if (goldBuildings && goldBuildings.length > 0) {
-      console.log('[API] Using Gold Standard buildings');
-      
-      const { data: buildings, error: buildingsError } = await supabase.rpc(
-        'get_campaign_buildings_geojson',
-        { p_campaign_id: campaignId }
-      );
-      
-      if (buildingsError) {
-        console.error('[API] Gold RPC error:', buildingsError.message);
-        // Fall through to S3 attempt
-      } else if (buildings) {
-        console.log(`[API] Returning ${buildings.features?.length || 0} Gold buildings`);
-        return NextResponse.json(buildings);
-      }
+    if (featuresError) {
+      console.error('[API] Feature RPC error:', featuresError.message);
+    } else {
+      console.log('[API] No linked buildings found via RPC');
     }
     
     // SILVER PATH: Fetch from S3 snapshot
+    console.log('[API] Trying Silver buildings (S3 snapshot)');
+    
     const { data: snapshot, error: snapshotError } = await supabase
       .from('campaign_snapshots')
       .select('bucket, buildings_key, buildings_count')
@@ -97,7 +91,7 @@ export async function GET(
     const decompressed = gunzipSync(Buffer.from(bodyBuffer));
     const geojson = JSON.parse(decompressed.toString('utf-8'));
     
-    console.log(`[API] Returning ${geojson.features?.length || 0} buildings from S3`);
+    console.log(`[API] Returning ${geojson.features?.length || 0} Silver buildings from S3`);
     
     return NextResponse.json(geojson);
     

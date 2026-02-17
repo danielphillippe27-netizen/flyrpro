@@ -80,6 +80,7 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
   const sourceId = 'map-buildings-source';
   const layerId = 'map-buildings-extrusion';
   const shadowLayerId = 'map-buildings-shadow';
+  const circleLayerId = 'map-buildings-extrusion-points';
   const supabase = createClient();
   
   // Debounce fetching to prevent spamming Supabase during rapid panning
@@ -127,13 +128,11 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
     // Combine with orphan filter if in campaign mode
     if (isCampaignMode && !showAll) {
       // Campaign mode with showOrphans=false: only show matched buildings AND matching status
+      // NOTE: For Gold buildings, feature_status might not be set, so default to showing them
       if (allEnabled) {
-        return ['==', ['get', 'feature_status'], 'matched'];
+        return undefined; // Show all - no filter needed
       }
-      return ['all', 
-        ['==', ['get', 'feature_status'], 'matched'],
-        ['any', ...statusConditions]
-      ];
+      return ['any', ...statusConditions];
     }
     
     // If all statuses enabled and not filtering orphans, no filter needed
@@ -182,172 +181,99 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
 
   // CAMPAIGN MODE: Fetch ALL campaign features once (no viewport filtering)
   // This enables "fetch once, render forever" for buttery smooth pan/zoom
-  // Load BOTH: split units (Supabase) + parent buildings (S3). Merge: use units when available, else parent building (detached).
   const fetchCampaignData = useCallback(async () => {
     if (!isMountedRef.current || !campaignId) return;
 
     console.log('[MapBuildingsLayer] Campaign Mode: Fetching full campaign data', { campaignId });
 
     try {
-      // Fetch units from Supabase and buildings from our API (avoids expired S3 URLs)
-      const { data: units, error: unitsError } = await supabase
-        .from('building_units')
-        .select('*, campaign_addresses(house_number, street_name, formatted)')
-        .eq('campaign_id', campaignId);
-
-      // Check if we have a snapshot by trying the API
+      // Use API endpoint directly - handles both Gold and Silver buildings
+      console.log('[MapBuildingsLayer] Fetching from API endpoint');
       const buildingsResponse = await fetch(`/api/campaigns/${campaignId}/buildings`);
-      const parentBuildings = buildingsResponse.ok ? await buildingsResponse.json() : null;
-      const hasBuildings = parentBuildings?.features?.length > 0;
-
-      console.log('[MapBuildingsLayer] Data loaded:', {
-        unitsCount: units?.length || 0,
-        unitsError: unitsError?.message,
-        hasBuildings,
-        buildingCount: parentBuildings?.features?.length || 0,
-      });
-
-      // If we have buildings from S3, merge: units for multi-unit buildings, parent building for detached.
-      // Publish every fetched building (no dropping); visibility is controlled via layer filter / feature stats.
-      if (hasBuildings) {
-        const parentFeatures = parentBuildings?.features ?? [];
-
-        const mergedFeatures: BuildingFeature[] = [];
-
-        console.log('[MapBuildingsLayer] Merging units with parent buildings:', {
-          parentBuildings: parentFeatures.length,
-          units: units?.length || 0,
+      if (!buildingsResponse.ok) {
+        console.error('[MapBuildingsLayer] API error:', buildingsResponse.status, buildingsResponse.statusText);
+      }
+      if (buildingsResponse.ok) {
+        const buildings = await buildingsResponse.json();
+        console.log('[MapBuildingsLayer] API response:', {
+          status: buildingsResponse.status,
+          hasFeatures: !!buildings?.features,
+          featuresCount: buildings?.features?.length,
+          firstFeature: buildings?.features?.[0],
         });
-
-        for (const b of parentFeatures) {
-          // S3 buildings have gers_id in properties, not id at feature level
-          const gersId = b.properties?.gers_id;                  // GERS ID (for matching units)
-          const buildingUnits = !unitsError && units?.length
-            ? units.filter((u: { parent_building_id: string }) => u.parent_building_id === gersId)
-            : [];
-          
-          if (buildingUnits.length > 0 || parentFeatures.length <= 3) {
-            console.log('[MapBuildingsLayer] Building merge:', {
-              gersId: gersId?.slice(0, 20),
-              unitCount: buildingUnits.length,
-            });
-          }
-
-          if (buildingUnits.length > 0) {
-            // Multi-unit: emit one feature per slice (use unit geometry and address)
-            // Add slight height offset so units are visually distinct
-            buildingUnits.forEach((u, index) => {
-              const heightOffset = index * 0.5; // Each unit 0.5m higher
-              mergedFeatures.push({
-                type: 'Feature',
-                id: u.id,
-                geometry: u.unit_geometry as GeoJSON.Polygon,
-                properties: {
-                  ...(b.properties || {}),
-                  height: (b.properties?.height || 10) + heightOffset, // Stagger heights
-                  gers_id: gersId,  // Parent building GERS ID
-                  feature_id: u.id,
-                  unit_id: u.id,
-                  unit_number: u.unit_number,
-                  address_id: u.address_id,
-                  status: u.status,
-                  parent_type: u.parent_type,
-                  house_number: u.campaign_addresses?.house_number,
-                  street_name: u.campaign_addresses?.street_name,
-                  address_text: u.campaign_addresses?.formatted ?? (b.properties?.address_text),
-                  layer: 'units',
-                } as Partial<BuildingProperties> as BuildingProperties,
-              } as BuildingFeature);
-            });
-          } else {
-            // Single-family detached: emit parent building as-is with unique feature_id for Mapbox
-            const fid = gersId ?? b.id ?? crypto.randomUUID();
-            mergedFeatures.push({
-              type: 'Feature',
-              id: fid,
-              geometry: b.geometry,
-              properties: {
-                ...(b.properties || {}),
-                gers_id: gersId,
-                feature_id: fid,
-                layer: 'buildings',
-              } as Partial<BuildingProperties> as BuildingProperties,
-            } as BuildingFeature);
-          }
-        }
-
-        if (isMountedRef.current) {
-          const collection: BuildingFeatureCollection = {
-            type: 'FeatureCollection',
-            features: mergedFeatures,
-          };
-          console.log('[MapBuildingsLayer] Merged units + detached:', {
-            featuresCount: mergedFeatures.length,
-            unitFeatures: mergedFeatures.filter((f: BuildingFeature) => f.properties?.unit_id).length,
-            detachedFeatures: mergedFeatures.filter((f: BuildingFeature) => !f.properties?.unit_id).length,
-            campaignId,
-            mode: 'merged-snapshot',
-          });
+        if (buildings?.features?.length > 0) {
+          console.log('[MapBuildingsLayer] Using buildings from API:', buildings.features.length);
           campaignDataLoadedRef.current = campaignId;
-          setFeatures(collection);
+          setFeatures(buildings as BuildingFeatureCollection);
           return;
         }
       }
 
-      // No S3 snapshot: if we have units only, show just units (legacy)
-      if (!unitsError && units && units.length > 0) {
-        const unitsGeoJSON: BuildingFeatureCollection = {
-          type: 'FeatureCollection',
-          features: units.map((u: { id: string; unit_geometry: GeoJSON.Polygon; parent_building_id: string; unit_number: number; address_id: string | null; status: string; parent_type: string; campaign_addresses?: { house_number: string | null; street_name: string | null; formatted: string | null } }) => ({
-            type: 'Feature' as const,
-            id: u.id,
-            geometry: u.unit_geometry as GeoJSON.Polygon,
-            properties: {
-              gers_id: u.parent_building_id,
-              feature_id: u.id,
-              unit_id: u.id,
-              unit_number: u.unit_number,
-              address_id: u.address_id,
-              status: u.status,
-              parent_type: u.parent_type,
-              house_number: u.campaign_addresses?.house_number,
-              street_name: u.campaign_addresses?.street_name,
-              address_text: u.campaign_addresses?.formatted,
-              layer: 'units',
-            } as Partial<BuildingProperties> as BuildingProperties,
-          })) as BuildingFeature[],
-        };
-        if (isMountedRef.current) {
-          campaignDataLoadedRef.current = campaignId;
-          setFeatures(unitsGeoJSON);
-          return;
-        }
-      }
-
-      // FALLBACK: Legacy mode
-      console.log('[MapBuildingsLayer] Falling back to Supabase RPC');
+      // LAST RESORT: Fetch campaign addresses and create point features
+      console.log('[MapBuildingsLayer] No buildings found, creating from addresses');
       
-      const { data, error } = await supabase.rpc('rpc_get_campaign_full_features', {
-        p_campaign_id: campaignId
-      });
-
-      if (error) {
-        console.error('[MapBuildingsLayer] Error fetching campaign data:', error);
-        return;
+      const { data: addresses, error: addrError } = await supabase
+        .from('campaign_addresses')
+        .select('id, formatted, geom, visited, coordinate, scans, last_scanned_at')
+        .eq('campaign_id', campaignId)
+        .not('geom', 'is', null)
+        .limit(5000);
+      
+      if (!addrError && addresses && addresses.length > 0) {
+        // Create simple point features from addresses
+        const addressFeatures: BuildingFeature[] = addresses.map((addr: any) => {
+          // Parse geom to get coordinates
+          let coords: [number, number] = [0, 0];
+          try {
+            if (addr.coordinate) {
+              coords = [addr.coordinate.lon, addr.coordinate.lat];
+            } else if (addr.geom) {
+              // Try to parse PostGIS point
+              const match = addr.geom.match(/POINT\s*\(\s*([-\d.]+)\s+([-\d.]+)\s*\)/i);
+              if (match) {
+                coords = [parseFloat(match[1]), parseFloat(match[2])];
+              }
+            }
+          } catch (e) {
+            console.warn('Failed to parse coordinate for address:', addr.id);
+          }
+          
+          return {
+            type: 'Feature',
+            id: addr.id,
+            geometry: {
+              type: 'Point',
+              coordinates: coords,
+            } as GeoJSON.Point,
+            properties: {
+              id: addr.id,
+              feature_id: addr.id,
+              address_id: addr.id,
+              address_text: addr.formatted,
+              status: addr.visited ? 'visited' : 'not_visited',
+              scans_total: addr.scans || 0,
+              qr_scanned: (addr.scans || 0) > 0 || !!addr.last_scanned_at,
+              height: 10,
+              height_m: 10,
+              feature_type: 'address_point',
+            } as BuildingProperties,
+          };
+        }).filter((f: BuildingFeature) => 
+          f.geometry.coordinates[0] !== 0 && f.geometry.coordinates[1] !== 0
+        );
+        
+        if (addressFeatures.length > 0) {
+          console.log('[MapBuildingsLayer] Created features from addresses:', addressFeatures.length);
+          campaignDataLoadedRef.current = campaignId;
+          setFeatures({
+            type: 'FeatureCollection',
+            features: addressFeatures,
+          } as BuildingFeatureCollection);
+          return;
+        }
       }
 
-      if (data && isMountedRef.current) {
-        const parsedData = typeof data === 'string' ? JSON.parse(data) : data;
-        
-        console.log('[MapBuildingsLayer] Campaign data loaded:', {
-          featuresCount: parsedData?.features?.length,
-          campaignId,
-          mode: 'campaign-persistence',
-        });
-        
-        campaignDataLoadedRef.current = campaignId;
-        setFeatures(parsedData as BuildingFeatureCollection);
-      }
+      console.log('[MapBuildingsLayer] No buildings or addresses found from any source');
     } catch (err) {
       console.error('[MapBuildingsLayer] Error in fetchCampaignData:', err);
     }
@@ -407,6 +333,13 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
           // Layer might not exist
         }
       }
+      if (map.getLayer(circleLayerId)) {
+        try {
+          map.removeLayer(circleLayerId);
+        } catch (err) {
+          // Layer might not exist
+        }
+      }
       if (map.getLayer(shadowLayerId)) {
         try {
           map.removeLayer(shadowLayerId);
@@ -415,7 +348,7 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
         }
       }
     }
-  }, [map]);
+  }, [map, circleLayerId]);
 
   // EXPLORATION MODE ONLY: Handle viewport changes (pan/zoom)
   // Campaign mode doesn't use this - data is already fully loaded
@@ -431,6 +364,13 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
       if (map.getLayer(layerId)) {
         try {
           map.removeLayer(layerId);
+        } catch (err) {
+          // Layer might not exist
+        }
+      }
+      if (map.getLayer(circleLayerId)) {
+        try {
+          map.removeLayer(circleLayerId);
         } catch (err) {
           // Layer might not exist
         }
@@ -564,10 +504,17 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
   // Update Mapbox source and layer when features change
   useEffect(() => {
     // Log every time this effect runs to debug reactivity
+    const geometryTypes = features?.features?.reduce((acc: Record<string, number>, f) => {
+      const type = f.geometry?.type || 'unknown';
+      acc[type] = (acc[type] || 0) + 1;
+      return acc;
+    }, {});
+    
     console.log('[MapBuildingsLayer] Layer update effect triggered:', {
       hasMap: !!map,
       hasFeatures: !!features,
       featuresCount: features?.features?.length,
+      geometryTypes,
       zoomLevel,
     });
 
@@ -627,10 +574,41 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
       }
 
       // Check if we should proceed with layer creation/updates
-      if (!normalizedFeatures || normalizedFeatures.features.length === 0 || zoomLevel < 12) {
-        console.log('[MapBuildingsLayer] Skipping layer creation:', { hasFeatures: !!features, featuresCount: features?.features?.length, zoomLevel });
+      console.log('[MapBuildingsLayer] Checking layer creation conditions:', {
+        hasNormalizedFeatures: !!normalizedFeatures,
+        normalizedFeaturesCount: normalizedFeatures?.features?.length,
+        zoomLevel,
+        zoomCheck: zoomLevel >= 12,
+        firstFeatureGeometry: normalizedFeatures?.features?.[0]?.geometry?.type,
+        firstFeatureId: normalizedFeatures?.features?.[0]?.properties?.feature_id,
+      });
+      
+      if (!normalizedFeatures || normalizedFeatures.features.length === 0) {
+        console.log('[MapBuildingsLayer] Skipping: no normalized features');
         return;
       }
+      
+      if (zoomLevel < 12) {
+        console.log('[MapBuildingsLayer] Skipping: zoom too low (< 12)');
+        return;
+      }
+
+      // Remove any existing route layers/sources that might conflict with buildings
+      // This prevents z-fighting and rendering issues
+      const routeLayers = ['route-lines', 'route-lines-inter', 'route-lines-glow', 'route-points', 'route-labels', 'route-start', 'block-stops', 'block-stop-labels'];
+      const routeSources = ['route-source', 'route-source-inter', 'route-points-source', 'block-stops-source'];
+      
+      routeLayers.forEach(id => {
+        if (map.getLayer(id)) {
+          try { map.removeLayer(id); } catch (e) {}
+        }
+      });
+      
+      routeSources.forEach(id => {
+        if (map.getSource(id)) {
+          try { map.removeSource(id); } catch (e) {}
+        }
+      });
 
       // Create source if it doesn't exist yet (source update already handled above)
       if (!source) {
@@ -653,13 +631,16 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
         }
       }
 
-      // Add or update fill-extrusion layer
+      // Add or update fill-extrusion layer (for Polygon/MultiPolygon geometries)
     if (!map.getLayer(layerId)) {
       try {
         // NOTE: Shadow layer removed to fix "dark square" visual artifact
         // The 3D fill-extrusion with proper lighting provides sufficient visual depth
         const filterExpr = getFilterExpression(showOrphans, !!campaignId, statusFilters);
 
+        // Filter for polygon features only
+        const polygonFilter: any[] = ['any', ['==', ['geometry-type'], 'Polygon'], ['==', ['geometry-type'], 'MultiPolygon']];
+        
         // Add the main building layer
         // Add without beforeId to place at end (on top of everything, including labels)
         const layerConfig: any = {
@@ -667,6 +648,7 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
           type: 'fill-extrusion' as const,
           source: sourceId,
           minzoom: 12,
+          filter: filterExpr ? ['all', polygonFilter, filterExpr] : polygonFilter,
           paint: {
             'fill-extrusion-color': getColorExpression(),
             'fill-extrusion-vertical-gradient': true,
@@ -676,13 +658,35 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
           },
         };
         
-        // Only add filter if defined (undefined means show all)
-        if (filterExpr) {
-          layerConfig.filter = filterExpr;
-        }
-        
         // Add without beforeId - this places it at the end (on top of everything)
+        console.log('[MapBuildingsLayer] Adding fill-extrusion layer with config:', {
+          id: layerConfig.id,
+          filter: layerConfig.filter,
+          featureCount: normalizedFeatures.features.length,
+        });
         map.addLayer(layerConfig);
+        console.log('[MapBuildingsLayer] Fill-extrusion layer added');
+        
+        // Add circle layer for Point geometries (addresses without building polygons)
+        if (!map.getLayer(circleLayerId)) {
+          const circleLayerConfig: any = {
+            id: circleLayerId,
+            type: 'circle' as const,
+            source: sourceId,
+            minzoom: 12,
+            filter: filterExpr 
+              ? ['all', ['==', ['geometry-type'], 'Point'], filterExpr]
+              : ['==', ['geometry-type'], 'Point'],
+            paint: {
+              'circle-radius': 6,
+              'circle-color': getColorExpression(),
+              'circle-opacity': 0.9,
+              'circle-stroke-width': 1.5,
+              'circle-stroke-color': '#ffffff',
+            },
+          };
+          map.addLayer(circleLayerConfig);
+        }
 
         // Outline layer removed to eliminate dark shadow effect underneath buildings
 
@@ -765,7 +769,9 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
           const feature = e.features[0];
           const props = feature.properties as BuildingProperties;
           
-          const gersId = props.gers_id;
+          console.log('[MapBuildingsLayer] Building clicked, raw props:', props);
+          
+          const gersId = props.gers_id || props.id;
           
           // UNIT MODE: If this is a unit slice, pass address_id to show specific unit
           if (props.unit_id && props.address_id && onBuildingClick) {
@@ -783,7 +789,7 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
           
           // If no gers_id, fall back to onBuildingClick with id
           if (!gersId) {
-            console.log('[MapBuildingsLayer] No gers_id, using fallback');
+            console.log('[MapBuildingsLayer] No gers_id or id, using fallback');
             if (props.id && onBuildingClick) {
               onBuildingClick(props.id);
             }
@@ -897,9 +903,10 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
             }
 
             // Always trigger onBuildingClick if available - this opens the LocationCard
-            // The LocationCard provides a richer UI than the popup
+            // The LocationCard provides a richer UI than the popup.
+            // Pass address_id when present (Gold/Silver linked features) so the card can show the address.
             if (onBuildingClick) {
-              onBuildingClick(gersId);
+              onBuildingClick(gersId, props.address_id);
               // Skip showing the basic popup since LocationCard will handle the UI
               return;
             }
@@ -927,11 +934,11 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
             }
           } catch (err) {
             console.error('[MapBuildingsLayer] Error in click handler:', err);
-            // Fallback to onBuildingClick - prefer gers_id (what HouseDetailPanel expects)
+            // Fallback to onBuildingClick - always pass address_id when available
             if (gersId && onBuildingClick) {
-              onBuildingClick(gersId);
+              onBuildingClick(gersId, props.address_id);
             } else if (props.id && onBuildingClick) {
-              onBuildingClick(props.id);
+              onBuildingClick(props.id, props.address_id);
             }
           }
         };
@@ -950,6 +957,17 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
             map.getCanvas().style.cursor = '';
           }
         });
+
+        // Also register click + cursor handlers on the circle layer (Point features)
+        if (map.getLayer(circleLayerId)) {
+          map.on('click', circleLayerId, clickHandler);
+          map.on('mouseenter', circleLayerId, () => {
+            if (map.getCanvas()) map.getCanvas().style.cursor = 'pointer';
+          });
+          map.on('mouseleave', circleLayerId, () => {
+            if (map.getCanvas()) map.getCanvas().style.cursor = '';
+          });
+        }
       } catch (err) {
         console.error('Error adding fill-extrusion layer:', err);
       }
@@ -1331,6 +1349,9 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
         try {
           if (map.getLayer(layerId)) {
             map.removeLayer(layerId);
+          }
+          if (map.getLayer(circleLayerId)) {
+            map.removeLayer(circleLayerId);
           }
           if (map.getLayer(shadowLayerId)) {
             map.removeLayer(shadowLayerId);

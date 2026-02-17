@@ -752,6 +752,7 @@ export function FlyrMapView() {
 
       <HouseDetailPanel
         buildingId={selectedBuildingId}
+        campaignId={selectedCampaignId}
         open={housePanelOpen}
         onClose={() => {
           setHousePanelOpen(false);

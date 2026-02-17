@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { Info } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { MapInfoSheet } from './MapInfoSheet';
 
@@ -24,12 +23,11 @@ export function MapInfoButton({ show = true }: MapInfoButtonProps) {
       <div className="absolute top-3 left-3 z-10">
         <Button
           variant="secondary"
-          size="icon"
-          className="h-9 w-9 rounded-full bg-red-600 hover:bg-red-700 shadow-md border-0 text-white"
+          className="h-9 rounded-full bg-red-600 hover:bg-red-700 shadow-md border-0 text-white px-4 text-xs font-semibold"
           onClick={() => setOpen(true)}
           aria-label="Map info and controls"
         >
-          <Info className="h-5 w-5 text-white" strokeWidth={2.5} />
+          Read me
         </Button>
       </div>
       <MapInfoSheet open={open} onOpenChange={setOpen} />

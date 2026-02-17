@@ -84,13 +84,18 @@ const ADDRESS_SOURCES = [
 
   // --- 2. ONTARIO: GTA CORE (Density) ---
   {
-    id: 'toronto_addr',
-    name: 'City of Toronto',
-    url: 'https://gis.toronto.ca/arcgis/rest/services/cot_geospatial27/FeatureServer/101',
+    id: 'toronto_addresses',
+    name: 'City of Toronto Addresses',
+    url: 'https://gis.toronto.ca/arcgis/rest/services/primary/COT_ADDRESS_POINT/MapServer/0',
     s3Key: 'gold-standard/canada/ontario/toronto/addresses.geojson',
     type: 'address' as const,
     province: 'ON',
-    fieldMap: { streetNumber: 'CIVIC_NUM', streetName: 'LINEAR_NAME_FULL', unit: 'UNIT', city: 'MUNICIPALITY' }
+    fieldMap: { 
+      streetNumber: 'HI_NUM',
+      streetName: 'LF_NAME',
+      unit: 'SUITE',
+      city: 'MUNICIPALITY'
+    }
   },
   // York URLs currently unavailable
   // {
@@ -577,7 +582,7 @@ const GROUPS: Record<string, string[]> = {
     // 'peel_addr', 'peel_bldg' - URLs currently unavailable
   ],
   'toronto_ottawa': [
-    'toronto_addr'
+    'toronto_addresses'
     // 'toronto_bldg', - URL needs verification
     // 'ottawa_addr', 'ottawa_bldg' - URLs need verification
   ],

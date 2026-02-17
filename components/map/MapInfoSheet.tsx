@@ -1,11 +1,11 @@
 'use client';
 
 import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet';
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { MAP_STATUS_CONFIG, MAP_STATUS_PRIORITY } from '@/lib/constants/mapStatus';
 import {
   Move,
@@ -13,6 +13,7 @@ import {
   RotateCw,
   Mountain,
   MousePointer2,
+  Crosshair,
 } from 'lucide-react';
 
 const WEB_MAP_GESTURES = [
@@ -44,18 +45,31 @@ interface MapInfoSheetProps {
 }
 
 /**
- * Info sheet shown from the map (i) button: legend + web map gestures.
- * Matches iOS app: Map Gestures + Homes legend.
+ * Info dialog shown from the "Read me" button: drawing tip, legend + web map gestures.
+ * Centered square card in the middle of the screen.
  */
 export function MapInfoSheet({ open, onOpenChange }: MapInfoSheetProps) {
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="bottom" className="rounded-t-2xl max-h-[min(320px,50vh)] overflow-y-auto p-4">
-        <SheetHeader className="text-left pb-1.5 border-b border-border/60">
-          <SheetTitle className="text-sm font-semibold">Map info</SheetTitle>
-        </SheetHeader>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[420px] w-[420px] rounded-2xl p-5">
+        <DialogHeader className="text-left pb-1.5 border-b border-border/60">
+          <DialogTitle className="text-sm font-semibold">Map info</DialogTitle>
+        </DialogHeader>
 
-        <div className="grid grid-cols-2 gap-x-6 gap-y-3 pt-3">
+        {/* Drawing Tip */}
+        <div className="mt-1 rounded-lg border border-red-500/30 bg-red-500/5 px-3 py-2.5">
+          <div className="flex items-start gap-2">
+            <Crosshair className="h-4 w-4 shrink-0 text-red-500 mt-0.5" />
+            <div>
+              <p className="text-xs font-semibold text-foreground">Drawing tip</p>
+              <p className="text-[11px] text-muted-foreground leading-snug mt-0.5">
+                When creating a campaign, be precise to the road lines and intersections so you have clean campaigns and optimized routes.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-x-6 gap-y-3 pt-2">
           {/* Map Gestures - web controls */}
           <section>
             <h3 className="text-xs font-semibold text-foreground mb-1.5 flex items-center gap-1.5">
@@ -97,7 +111,7 @@ export function MapInfoSheet({ open, onOpenChange }: MapInfoSheetProps) {
             </ul>
           </section>
         </div>
-      </SheetContent>
-    </Sheet>
+      </DialogContent>
+    </Dialog>
   );
 }

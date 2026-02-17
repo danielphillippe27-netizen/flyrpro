@@ -2,8 +2,12 @@
 /**
  * Silver Tier Data Ingestion Script for Canada
  * 
- * Downloads OpenAddresses datasets (StatCan ODA + Municipal data) for Canadian provinces
+ * Downloads StatCan Open Database of Addresses (ODA) for Canadian provinces
  * and uploads them directly to S3 without saving to local disk.
+ * 
+ * The ODA is a collection of open address point data made available under the 
+ * Open Government License - Canada. It contains ~10 million records from 
+ * 99 datasets originating from various government sources.
  * 
  * Usage:
  *   export AWS_ACCESS_KEY_ID=xxx
@@ -15,10 +19,10 @@
  *   npx tsx scripts/ingest_silver_canada.ts on bc
  * 
  * Data Sources:
- *   - OpenAddresses.io (aggregates StatCan ODA + municipal data)
- *   - Ontario: ~5M addresses
- *   - British Columbia: ~2M addresses
- *   - Easily extensible for Alberta, Quebec, etc.
+ *   - Statistics Canada Open Database of Addresses (ODA)
+ *   - https://www.statcan.gc.ca/en/lode/databases/oda
+ *   - ~10 million address records across Canada
+ *   - Updated periodically (current version: v1.0, April 2021)
  */
 
 import axios, { AxiosResponse } from 'axios';
@@ -31,32 +35,90 @@ import { Readable } from 'stream';
 // CONFIGURATION
 // ============================================================================
 
-const BUCKET_NAME = process.env.AWS_BUCKET_NAME || 'flyr-pro-addresses-2025';
+const BUCKET_NAME = process.env.AWS_BUCKET_NAME || 'silver-standard-addresses-canada';
 const AWS_REGION = process.env.AWS_REGION || 'us-east-1';
 
 interface SilverSource {
   region: string;        // Province code: 'on', 'bc', 'ab', 'qc', etc.
   regionName: string;    // Human-readable name
-  url: string;           // OpenAddresses batch download URL
+  url: string;           // StatCan ODA download URL
   s3Prefix: string;      // S3 path prefix
+  expectedSize: string;  // Human-readable expected file size
 }
 
+// StatCan ODA v1.0 (April 2021) - Province-level ZIP files
+// Source: https://www.statcan.gc.ca/en/lode/databases/oda
 const SILVER_SOURCES: SilverSource[] = [
   {
     region: 'on',
     regionName: 'Ontario',
-    url: 'https://data.openaddresses.io/runs/844760/ca/on/statewide.zip',
+    url: 'https://www150.statcan.gc.ca/n1/en/pub/46-26-0001/2021001/ODA_ON_v1.zip',
     s3Prefix: 'silver/ca/on',
+    expectedSize: '~154 MB',
   },
   {
     region: 'bc',
     regionName: 'British Columbia',
-    url: 'https://data.openaddresses.io/runs/844784/ca/bc/statewide.zip',
+    url: 'https://www150.statcan.gc.ca/n1/en/pub/46-26-0001/2021001/ODA_BC_v1.zip',
     s3Prefix: 'silver/ca/bc',
+    expectedSize: '~89 MB',
   },
-  // Easy to add more provinces:
-  // { region: 'ab', regionName: 'Alberta', url: 'https://batch.openaddresses.io/data/ca/ab/statewide.zip', s3Prefix: 'silver/ca/ab' },
-  // { region: 'qc', regionName: 'Quebec', url: 'https://batch.openaddresses.io/data/ca/qc/statewide.zip', s3Prefix: 'silver/ca/qc' },
+  {
+    region: 'ab',
+    regionName: 'Alberta',
+    url: 'https://www150.statcan.gc.ca/n1/en/pub/46-26-0001/2021001/ODA_AB_v1.zip',
+    s3Prefix: 'silver/ca/ab',
+    expectedSize: '~47 MB',
+  },
+  {
+    region: 'qc',
+    regionName: 'Quebec',
+    url: 'https://www150.statcan.gc.ca/n1/en/pub/46-26-0001/2021001/ODA_QC_v1.zip',
+    s3Prefix: 'silver/ca/qc',
+    expectedSize: '~77 MB',
+  },
+  {
+    region: 'mb',
+    regionName: 'Manitoba',
+    url: 'https://www150.statcan.gc.ca/n1/en/pub/46-26-0001/2021001/ODA_MB_v1.zip',
+    s3Prefix: 'silver/ca/mb',
+    expectedSize: '~19 MB',
+  },
+  {
+    region: 'sk',
+    regionName: 'Saskatchewan',
+    url: 'https://www150.statcan.gc.ca/n1/en/pub/46-26-0001/2021001/ODA_SK_v1.zip',
+    s3Prefix: 'silver/ca/sk',
+    expectedSize: '~14 MB',
+  },
+  {
+    region: 'ns',
+    regionName: 'Nova Scotia',
+    url: 'https://www150.statcan.gc.ca/n1/en/pub/46-26-0001/2021001/ODA_NS_v1.zip',
+    s3Prefix: 'silver/ca/ns',
+    expectedSize: '~12 MB',
+  },
+  {
+    region: 'nb',
+    regionName: 'New Brunswick',
+    url: 'https://www150.statcan.gc.ca/n1/en/pub/46-26-0001/2021001/ODA_NB_v1.zip',
+    s3Prefix: 'silver/ca/nb',
+    expectedSize: '~11 MB',
+  },
+  {
+    region: 'pe',
+    regionName: 'Prince Edward Island',
+    url: 'https://www150.statcan.gc.ca/n1/en/pub/46-26-0001/2021001/ODA_PE_v1.zip',
+    s3Prefix: 'silver/ca/pe',
+    expectedSize: '~3 MB',
+  },
+  {
+    region: 'nt',
+    regionName: 'Northwest Territories',
+    url: 'https://www150.statcan.gc.ca/n1/en/pub/46-26-0001/2021001/ODA_NT_v1.zip',
+    s3Prefix: 'silver/ca/nt',
+    expectedSize: '~2 MB',
+  },
 ];
 
 // ============================================================================
@@ -100,6 +162,7 @@ async function downloadAndProcessSource(source: SilverSource): Promise<void> {
   console.log(`Processing: ${source.regionName} (${source.region.toUpperCase()})`);
   console.log(`${'='.repeat(60)}`);
   console.log(`Source URL: ${source.url}`);
+  console.log(`Expected size: ${source.expectedSize}`);
   console.log(`S3 Destination: s3://${BUCKET_NAME}/${source.s3Prefix}/addresses.csv`);
   console.log('');
 
@@ -108,13 +171,15 @@ async function downloadAndProcessSource(source: SilverSource): Promise<void> {
 
   try {
     // Step 1: Download the ZIP file with progress tracking
-    console.log(`📥 Downloading ${source.regionName} dataset...`);
+    console.log(`📥 Downloading ${source.regionName} dataset from StatCan ODA...`);
     
     const response: AxiosResponse<ArrayBuffer> = await axios({
       method: 'GET',
       url: source.url,
       responseType: 'arraybuffer',
-      timeout: 300000, // 5 minutes timeout for large files
+      timeout: 600000, // 10 minutes timeout for large files
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
       onDownloadProgress: (progressEvent) => {
         if (progressEvent.total) {
           const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
@@ -141,26 +206,17 @@ async function downloadAndProcessSource(source: SilverSource): Promise<void> {
     const zipDuration = Date.now() - zipStartTime;
     console.log(`  ✓ ZIP loaded in ${formatDuration(zipDuration)}`);
 
-    // Find the main address file (usually addresses.csv or addresses.geojson)
+    // Find the CSV file
     const files = Object.keys(zip.files);
     console.log(`  Files in archive: ${files.length}`);
     
-    // Look for addresses.csv first, then .geojson, then any .csv
-    let targetFile = files.find(f => f.toLowerCase().endsWith('addresses.csv'));
+    // Look for the main CSV file (usually ODA_XX_v1.csv)
+    let targetFile = files.find(f => f.toLowerCase().endsWith('.csv') && !f.startsWith('__MACOSX'));
+    
     if (!targetFile) {
-      targetFile = files.find(f => f.toLowerCase().endsWith('addresses.geojson'));
-    }
-    if (!targetFile) {
-      targetFile = files.find(f => f.toLowerCase().endsWith('.csv') && !f.startsWith('__MACOSX'));
-    }
-    if (!targetFile) {
-      targetFile = files.find(f => f.toLowerCase().endsWith('.geojson') && !f.startsWith('__MACOSX'));
-    }
-
-    if (!targetFile) {
-      console.error('  ✗ No suitable address file found in archive');
+      console.error('  ✗ No CSV file found in archive');
       console.error(`  Available files: ${files.join(', ')}`);
-      throw new Error('No address file found in ZIP archive');
+      throw new Error('No CSV file found in ZIP archive');
     }
 
     console.log(`  Target file: ${targetFile}`);
@@ -168,12 +224,13 @@ async function downloadAndProcessSource(source: SilverSource): Promise<void> {
     // Step 3: Extract file content as buffer
     console.log(`\n📄 Reading ${targetFile}...`);
     const fileData = await zip.files[targetFile].async('nodebuffer');
-    console.log(`  ✓ File size: ${formatBytes(fileData.length)}`);
+    console.log(`  ✓ CSV size: ${formatBytes(fileData.length)}`);
 
-    // Determine content type
-    const isGeoJSON = targetFile.toLowerCase().endsWith('.geojson');
-    const contentType = isGeoJSON ? 'application/geo+json' : 'text/csv';
-    const s3Key = `${source.s3Prefix}/addresses.${isGeoJSON ? 'geojson' : 'csv'}`;
+    // Estimate records from file size (rough estimate: ~150 bytes per line for CSV)
+    const estimatedRecords = Math.floor(fileData.length / 150);
+    console.log(`  ✓ Estimated records: ~${estimatedRecords.toLocaleString()}`);
+
+    const s3Key = `${source.s3Prefix}/addresses.csv`;
 
     // Step 4: Upload to S3 using multipart upload for large files
     console.log(`\n☁️  Uploading to S3...`);
@@ -190,15 +247,17 @@ async function downloadAndProcessSource(source: SilverSource): Promise<void> {
         Bucket: BUCKET_NAME,
         Key: s3Key,
         Body: stream,
-        ContentType: contentType,
+        ContentType: 'text/csv',
         Metadata: {
           'region': source.region,
           'region-name': source.regionName,
           'source-url': source.url,
-          'source-type': 'openaddresses',
+          'source-type': 'statcan-oda',
+          'source-version': '1.0',
           'original-filename': targetFile,
           'upload-date': new Date().toISOString(),
           'file-size-bytes': String(fileData.length),
+          'estimated-records': String(estimatedRecords),
         },
       },
       partSize: 5 * 1024 * 1024, // 5MB parts for multipart upload
@@ -226,6 +285,7 @@ async function downloadAndProcessSource(source: SilverSource): Promise<void> {
     const totalDuration = Date.now() - startTime;
     console.log(`\n✅ ${source.regionName} - SUCCESS`);
     console.log(`   Total time: ${formatDuration(totalDuration)}`);
+    console.log(`   Records: ~${estimatedRecords.toLocaleString()}`);
     console.log(`   S3 URL: https://${BUCKET_NAME}.s3.amazonaws.com/${s3Key}`);
 
   } catch (error: any) {
@@ -245,9 +305,11 @@ async function downloadAndProcessSource(source: SilverSource): Promise<void> {
 async function main() {
   console.log('========================================');
   console.log('Silver Tier Data Ingestion - Canada');
+  console.log('StatCan Open Database of Addresses (ODA)');
   console.log('========================================');
   console.log(`Bucket: ${BUCKET_NAME}`);
   console.log(`Region: ${AWS_REGION}`);
+  console.log(`Source: https://www.statcan.gc.ca/en/lode/databases/oda`);
   console.log('');
 
   // Validate environment
@@ -273,7 +335,7 @@ async function main() {
   }
 
   console.log(`Processing ${sourcesToProcess.length} region(s):`);
-  sourcesToProcess.forEach(s => console.log(`  - ${s.regionName} (${s.region})`));
+  sourcesToProcess.forEach(s => console.log(`  - ${s.regionName} (${s.region}): ${s.expectedSize}`));
   console.log('');
 
   const results: { source: SilverSource; success: boolean; error?: string }[] = [];

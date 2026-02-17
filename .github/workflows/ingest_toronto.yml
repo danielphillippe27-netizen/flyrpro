@@ -1,16 +1,19 @@
 # ============================================================================
-# GitHub Actions Workflow: Toronto 3D Massing Building Footprints Ingestion
+# GitHub Actions Workflow: Toronto 3D Massing + Address Points Ingestion
 # ============================================================================
 # 
-# This workflow automates the ingestion of Toronto building footprints
-# from the CKAN Open Data Portal. Unlike other cities, Toronto provides
-# this data as a Shapefile ZIP rather than an ArcGIS API.
+# This workflow automates the ingestion of:
+# 1. Toronto building footprints (3D Massing) from CKAN Open Data Portal
+# 2. Toronto Address Points (One Address Repository) from CKAN Open Data Portal
+#
+# Unlike other cities, Toronto provides building data as Shapefile ZIP and
+# address data as GeoJSON (ArcGIS REST API is unstable/publicly restricted).
 #
 # Schedule: Monthly on the 1st at 04:00 UTC (2 hours after main sync)
 # Manual: Can be triggered via workflow_dispatch
 # ============================================================================
 
-name: Ingest Toronto 3D Massing
+name: Ingest Toronto Buildings & Addresses
 
 on:
   # Run monthly on the 1st at 04:00 UTC
@@ -25,13 +28,23 @@ on:
         required: false
         default: false
         type: boolean
+      buildings_only:
+        description: 'Only ingest buildings (skip addresses)'
+        required: false
+        default: false
+        type: boolean
+      addresses_only:
+        description: 'Only ingest addresses (skip buildings)'
+        required: false
+        default: false
+        type: boolean
 
 env:
   NODE_VERSION: '20'
 
 jobs:
-  ingest-toronto-massing:
-    name: Ingest Toronto 3D Massing
+  ingest-toronto-data:
+    name: Ingest Toronto Buildings & Addresses
     runs-on: ubuntu-latest
     
     steps:
@@ -57,23 +70,29 @@ jobs:
         run: |
           rm -rf node_modules
           npm ci
-          npm install mapshaper adm-zip
+          npm install mapshaper adm-zip JSONStream @types/jsonstream
       
       # -----------------------------------------------------------------------
       # Run Toronto Ingest Script
       # -----------------------------------------------------------------------
-      - name: Ingest Toronto 3D Massing
+      - name: Ingest Toronto Data
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
           AWS_BUCKET_NAME: ${{ secrets.AWS_BUCKET_NAME || 'flyr-pro-addresses-2025' }}
         run: |
+          ARGS=""
           if [ "${{ github.event.inputs.dry_run }}" == "true" ]; then
-            npx tsx scripts/ingest_toronto_buildings.ts --dry-run
-          else
-            npx tsx scripts/ingest_toronto_buildings.ts
+            ARGS="$ARGS --dry-run"
           fi
+          if [ "${{ github.event.inputs.buildings_only }}" == "true" ]; then
+            ARGS="$ARGS --buildings-only"
+          fi
+          if [ "${{ github.event.inputs.addresses_only }}" == "true" ]; then
+            ARGS="$ARGS --addresses-only"
+          fi
+          npx tsx scripts/ingest_toronto_buildings.ts $ARGS
       
       # -----------------------------------------------------------------------
       # Upload logs on failure
@@ -94,10 +113,10 @@ jobs:
       - name: Notify success
         if: success()
         run: |
-          echo "✅ Toronto 3D Massing ingestion completed successfully!"
+          echo "✅ Toronto Buildings & Addresses ingestion completed successfully!"
       
       - name: Notify failure
         if: failure()
         run: |
-          echo "❌ Toronto 3D Massing ingestion failed"
+          echo "❌ Toronto Buildings & Addresses ingestion failed"
           exit 1

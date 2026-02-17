@@ -68,9 +68,13 @@ export function HouseDetailPanel({
     if (!buildingId) return;
 
     setLoading(true);
+    console.log('[HouseDetailPanel] Loading building:', buildingId, 'campaign:', campaignId);
+    
     try {
       // buildingId is actually a gers_id from the map click
       const buildingData = await BuildingService.fetchBuildingByGersId(buildingId);
+      
+      console.log('[HouseDetailPanel] Building data:', buildingData);
       
       if (!buildingData) {
         console.error('Building not found for GERS ID:', buildingId);
@@ -90,8 +94,12 @@ export function HouseDetailPanel({
         confidence: number;
       }> = [];
       
+      console.log('[HouseDetailPanel] Building source:', buildingData.source, 'campaignId:', campaignId);
+      
       if (buildingData.source === 'gold' && campaignId) {
+        console.log('[HouseDetailPanel] Fetching Gold addresses for building:', buildingData.id);
         addressData = await BuildingService.fetchGoldBuildingAddresses(buildingData.id, campaignId);
+        console.log('[HouseDetailPanel] Gold addresses result:', addressData);
       }
 
       setBuilding(buildingData);

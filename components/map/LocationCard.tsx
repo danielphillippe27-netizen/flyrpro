@@ -221,7 +221,7 @@ export function LocationCard({
                 <div className="flex items-start justify-between pr-8">
                   <div className="min-w-0 flex-1">
                     <h2 className="text-lg font-semibold text-gray-900 truncate">
-                      {address.street}
+                      {address.formatted || address.street}
                     </h2>
                     <p className="text-sm text-gray-500 truncate">
                       {isMultiAddress

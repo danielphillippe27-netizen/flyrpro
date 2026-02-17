@@ -345,7 +345,7 @@ Tip: Keep qr-images and canva_bulk_data.csv in the same place so paths match (or
   }));
 
   return (
-    <div className="min-h-full bg-muted/30 dark:bg-background">
+    <div className="min-h-full bg-muted/30 dark:bg-background relative">
       <header className="bg-card border-b border-border sticky top-0 z-10">
         <div className="px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between gap-6">
@@ -370,7 +370,7 @@ Tip: Keep qr-images and canva_bulk_data.csv in the same place so paths match (or
             <TabsTrigger value="addresses">Addresses</TabsTrigger>
             <TabsTrigger value="doorknocks">Door knocks</TabsTrigger>
             <TabsTrigger value="qr">QR Codes</TabsTrigger>
-            <TabsTrigger value="route">Optimized route</TabsTrigger>
+            <TabsTrigger value="route">Walking route</TabsTrigger>
             <TabsTrigger value="notes">Notes</TabsTrigger>
           </TabsList>
 
@@ -494,10 +494,6 @@ Tip: Keep qr-images and canva_bulk_data.csv in the same place so paths match (or
             <OptimizedRouteView 
               campaignId={campaignId} 
               addresses={addresses} 
-              onAddressesUpdate={(freshAddresses) => {
-                // Cast to CampaignAddress[] since the types are compatible
-                setAddresses(freshAddresses as CampaignAddress[]);
-              }}
             />
           </TabsContent>
 

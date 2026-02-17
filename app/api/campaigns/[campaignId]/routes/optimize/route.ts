@@ -149,7 +149,7 @@ export async function POST(
 
     const { data: addresses, error: addrError } = await supabase
       .from('campaign_addresses')
-      .select('id, formatted, house_number, street_name, geom')
+      .select('id, formatted, house_number, street_number, street_name, geom')
       .eq('campaign_id', campaignId);
 
     if (addrError || !addresses || addresses.length < 2) {
@@ -161,6 +161,7 @@ export async function POST(
       lat: a.geom.coordinates[1],
       lon: a.geom.coordinates[0],
       house_number: a.house_number ?? undefined,
+      street_number: (a as { street_number?: string | number }).street_number ?? undefined,
       street_name: a.street_name ?? undefined,
       formatted: a.formatted ?? undefined
     }));
@@ -173,11 +174,21 @@ export async function POST(
     }
 
     const startTime = Date.now();
-    const result = await buildRoute(buildRouteAddresses, depot, {
-      include_geometry: false,
-      threshold_meters: options.threshold_meters ?? 50,
-      sweep_nn_threshold_m: options.sweep_nn_threshold_m ?? 500
-    });
+    let result;
+    try {
+      result = await buildRoute(buildRouteAddresses, depot, {
+        include_geometry: false,
+        threshold_meters: options.threshold_meters ?? 50,
+        sweep_nn_threshold_m: options.sweep_nn_threshold_m ?? 500,
+        use_house_numbers: options.use_house_numbers ?? true
+      });
+    } catch (routeError) {
+      console.error('[API] buildRoute error:', routeError);
+      return NextResponse.json(
+        { error: routeError instanceof Error ? `Route build failed: ${routeError.message}` : 'Route build failed' },
+        { status: 500 }
+      );
+    }
     const totalTime = Date.now() - startTime;
 
     const stops = result.stops;

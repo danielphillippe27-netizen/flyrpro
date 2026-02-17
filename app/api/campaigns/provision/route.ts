@@ -317,14 +317,13 @@ export async function POST(request: NextRequest) {
       } | null = null;
 
       if (insertedCount >= 2) {
-        console.log('[Provision] Stage 1: Building route (Street-Block-Sweep-Snake)...');
+        console.log('[Provision] Stage 1: Building route for ALL addresses (Street-Block-Sweep-Snake)...');
         try {
-          const { data: firstAddresses } = await supabase
+          const { data: allAddresses } = await supabase
             .from('campaign_addresses')
             .select('id, geom, house_number, street_name, formatted')
-            .eq('campaign_id', campaign_id)
-            .limit(20);
-          const addressesForRoute = firstAddresses ?? [];
+            .eq('campaign_id', campaign_id);
+          const addressesForRoute = allAddresses ?? [];
           if (addressesForRoute.length < 2) {
             console.log('[Provision] Skipping route: fewer than 2 addresses in DB');
           } else {
@@ -361,6 +360,7 @@ export async function POST(request: NextRequest) {
 
           console.log(`[Provision] Route: ${optimizedPathInfo.waypointCount} stops${routeResult.geometry ? `, ${optimizedPathInfo.totalDistanceKm.toFixed(2)}km, ${optimizedPathInfo.totalTimeMinutes}min` : ' (no geometry)'}`);
 
+          // Store polyline geometry in campaign_snapshots
           const { error: pathError } = await supabase
             .from('campaign_snapshots')
             .update({
@@ -373,6 +373,25 @@ export async function POST(request: NextRequest) {
           if (pathError) {
             console.warn('[Provision] Error storing optimized path:', pathError.message);
           }
+
+          // Persist per-address walking sequence (seq, sequence, cluster_id)
+          // Single agent cluster — all addresses in one walking route
+          console.log(`[Provision] Persisting walking sequence for ${routeResult.stops.length} addresses...`);
+
+          const orderedStops = routeResult.stops;
+          const updatePromises = orderedStops.map((stop, idx) =>
+            supabase
+              .from('campaign_addresses')
+              .update({
+                cluster_id: 1,
+                sequence: idx,
+                seq: idx,
+              })
+              .eq('id', stop.id)
+          );
+          await Promise.all(updatePromises);
+
+          console.log(`[Provision] Walking sequence saved: ${orderedStops.length} addresses ordered`);
           }
         } catch (routingError) {
           console.warn('[Provision] Routing calculation failed:', routingError);
@@ -407,11 +426,12 @@ export async function POST(request: NextRequest) {
         if (goldBuildings && goldBuildings.length > 0) {
           // Use fast SQL-based linker for Gold data (O(log n) with spatial index)
           console.log('[Provision] Using SQL-based Gold linker with polygon filter...');
-          const polygonGeoJSON = JSON.stringify(polygon);
+          // Pass polygon as raw object — the JSONB parameter needs a JSON object,
+          // not a JSON.stringify'd string (which PostgREST would double-serialize)
           const { data: linkResult, error: linkError } = await supabase
             .rpc('link_campaign_addresses_gold', { 
               p_campaign_id: campaign_id,
-              p_polygon_geojson: polygonGeoJSON
+              p_polygon_geojson: polygon
             });
           
           if (linkError) {

@@ -1,7 +1,10 @@
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import path from 'path';
 import pg from 'pg';
 import dotenv from 'dotenv';
 
+// Load .env.local first (where AWS creds / DATABASE_URL typically live), then .env
+dotenv.config({ path: path.resolve(__dirname, '..', '.env.local') });
 dotenv.config();
 
 // --- CONFIGURATION ---
@@ -11,7 +14,7 @@ const S3_BUCKET = process.env.AWS_BUCKET_NAME || 'flyr-pro-addresses-2025';
 
 // Initialize Clients
 const s3 = new S3Client({ 
-  region: process.env.AWS_REGION || 'us-east-1',
+  region: process.env.AWS_REGION || 'us-east-2',
   credentials: {
     accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!
@@ -27,9 +30,9 @@ const pool = new pg.Pool({
 async function loadGoldParallel(type: 'address' | 'building') {
   const table = type === 'address' ? 'ref_addresses_gold' : 'ref_buildings_gold';
   const s3Key = type === 'address' 
-    ? 'gold-standard/canada/ontario/durham/addresses.geojson'
-    : 'gold-standard/canada/ontario/durham/buildings.geojson';
-  const sourceId = type === 'address' ? 'durham_addresses' : 'durham_buildings';
+    ? 'gold-standard/canada/ontario/toronto/addresses.geojson'
+    : 'gold-standard/canada/ontario/toronto/buildings.geojson';
+  const sourceId = type === 'address' ? 'toronto_addresses' : 'toronto_buildings';
 
   console.log(`\n🔵 STARTING PARALLEL LOAD: ${type.toUpperCase()}`);
 
@@ -72,20 +75,20 @@ async function loadGoldParallel(type: 'address' | 'building') {
           
           if (type === 'address') {
             // Skip records with missing required fields
-            const streetName = p.ST_NAME || p.ROAD_NAME;
-            const streetNumber = p.CIVIC_NUM || p.street_number;
-            const city = p.MUNICIPALITY || p.city || p.TOWN;
+            const streetName = p.street_name || p.ST_NAME || p.LF_NAME || p.ROAD_NAME;
+            const streetNumber = p.street_num || p.CIVIC_NUM || p.HI_NUM || p.HI_NUM_NO || p.street_number;
+            const city = p.city || p.MUNICIPALITY || p.TOWN || 'Toronto';
             
             if (!streetName || !streetNumber || !city) {
               continue; // Skip this record
             }
             
             valuePlaceholders.push(`($${paramIdx}, $${paramIdx+1}, $${paramIdx+2}, $${paramIdx+3}, $${paramIdx+4}, ST_SetSRID(ST_GeomFromGeoJSON($${paramIdx+5}), 4326))`);
-            values.push(sourceId, streetNumber, streetName, p.UNIT || null, city, g);
+            values.push(sourceId, streetNumber, streetName, p.unit || p.UNIT || p.SUITE || null, city, g);
             paramIdx += 6;
           } else {
             valuePlaceholders.push(`($${paramIdx}, $${paramIdx+1}, $${paramIdx+2}, ST_SetSRID(ST_Multi(ST_GeomFromGeoJSON($${paramIdx+3})), 4326))`);
-            values.push(sourceId, p.GlobalID || p.OBJECTID, p.ShapeSTArea || 0, g);
+            values.push(sourceId, p.GlobalID || p.OBJECTID || p.id, p.ShapeSTArea || p.area || 0, g);
             paramIdx += 4;
           }
         }

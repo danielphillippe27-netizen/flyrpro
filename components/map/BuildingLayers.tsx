@@ -96,11 +96,11 @@ export function BuildingLayers({
         return new Set<string>();
       }
 
-      // Extract unique GERS IDs (gers_id values)
+      // Extract unique GERS IDs (source_id values)
       const gersIds = new Set<string>();
       addresses?.forEach(addr => {
-        if (addr.gers_id) {
-          gersIds.add(String(addr.gers_id));
+        if (addr.source_id) {
+          gersIds.add(String(addr.source_id));
         }
       });
 
