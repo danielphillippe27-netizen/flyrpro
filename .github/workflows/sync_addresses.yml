@@ -64,12 +64,6 @@ jobs:
           - ontario_rest
           - western_canada
           - atlantic_canada
-        # Allow manual override to run specific region
-        include:
-          - region: ${{ github.event.inputs.region || matrix.region }}
-    
-    # Skip matrix jobs if a specific region is selected manually
-    if: github.event.inputs.region == '' || github.event.inputs.region == matrix.region
     
     steps:
       # -----------------------------------------------------------------------
@@ -94,7 +88,7 @@ jobs:
         run: npm ci
       
       # -----------------------------------------------------------------------
-      # Run Ingest Script for this region group
+      # Run Ingest Script for this region group (with skip logic for manual trigger)
       # -----------------------------------------------------------------------
       - name: Ingest municipal data to S3 (${{ matrix.region }})
         env:
@@ -103,6 +97,13 @@ jobs:
           AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
           AWS_BUCKET_NAME: ${{ secrets.AWS_BUCKET_NAME || 'flyr-pro-addresses-2025' }}
         run: |
+          # Check if specific region requested and skip if not matching
+          if [ -n "${{ github.event.inputs.region }}" ] && [ "${{ github.event.inputs.region }}" != "${{ matrix.region }}" ]; then
+            echo "Skipping ${{ matrix.region }} (requested: ${{ github.event.inputs.region }})"
+            exit 0
+          fi
+          
+          # Run the ingest
           if [ "${{ github.event.inputs.dry_run }}" == "true" ]; then
             npx tsx scripts/ingest_municipal_data.ts --group=${{ matrix.region }} --dry-run
           else
