@@ -28,13 +28,17 @@ dotenv.config({ path: '.env.local' });
 // ============================================================================
 
 const S3_BUCKET = process.env.AWS_BUCKET_NAME || 'flyr-pro-addresses-2025';
-const S3_REGION = process.env.AWS_REGION || 'us-east-1';
+// Bucket is in us-east-2 (Ohio); override with AWS_S3_BUCKET_REGION or AWS_REGION if needed
+const S3_REGION = process.env.AWS_S3_BUCKET_REGION || process.env.AWS_REGION || 'us-east-2';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
-const BATCH_SIZE = 2000;
-const BATCH_DELAY_MS = 100;
+const BATCH_SIZE = 1000; // Smaller batches to avoid Supabase statement timeout on large syncs
+const BATCH_DELAY_MS = 150;
+const BATCH_RETRIES = 3;
+const BATCH_RETRY_DELAY_MS = 2000;
+const DELETE_BATCH_SIZE = 500; // Delete in chunks (small enough for .in() request limit)
 
 // Source configuration mapping
 interface SourceConfig {
@@ -57,7 +61,22 @@ const SOURCE_CONFIGS: SourceConfig[] = [
     s3Key: 'gold-standard/canada/ontario/durham/buildings.geojson',
     table: 'ref_buildings_gold',
   },
+  {
+    id: 'toronto_addresses',
+    type: 'address',
+    s3Key: 'gold-standard/canada/ontario/toronto/addresses.geojson',
+    table: 'ref_addresses_gold',
+  },
 ];
+
+// Group names for GitHub Actions (match ingest script groups)
+const SYNC_GROUPS: Record<string, string[]> = {
+  durham_york_peel: ['durham_addresses', 'durham_buildings'],
+  toronto_ottawa: ['toronto_addresses'],
+  ontario_rest: [],
+  western_canada: [],
+  atlantic_canada: [],
+};
 
 // ============================================================================
 // CLIENTS
@@ -150,30 +169,90 @@ async function downloadFromS3(s3Key: string): Promise<GeoJSONCollection> {
 async function deleteExisting(sourceId: string, table: string): Promise<number> {
   console.log(`\nDeleting existing data from ${table}...`);
   console.log(`  source_id: ${sourceId}`);
-  
-  const { error, count } = await supabase
-    .from(table)
-    .delete({ count: 'exact' })
-    .eq('source_id', sourceId);
-  
-  if (error) {
-    throw new Error(`Delete failed: ${error.message}`);
+  let totalDeleted = 0;
+  while (true) {
+    const { data: ids, error: selectError } = await supabase
+      .from(table)
+      .select('id')
+      .eq('source_id', sourceId)
+      .limit(DELETE_BATCH_SIZE);
+    if (selectError) throw new Error(`Delete (select) failed: ${selectError.message}`);
+    if (!ids?.length) break;
+    const idList = ids.map((r: { id: string }) => r.id);
+    let deleteError: any = null;
+    for (let attempt = 1; attempt <= BATCH_RETRIES; attempt++) {
+      const res = await supabase.from(table).delete().in('id', idList);
+      deleteError = res.error;
+      if (!deleteError) break;
+      const retryable = /fetch failed|ECONNRESET|ETIMEDOUT|network/i.test(deleteError.message || '');
+      if (attempt < BATCH_RETRIES && retryable) {
+        const delay = BATCH_RETRY_DELAY_MS * attempt;
+        console.warn(`    ⚠ Delete batch failed (${deleteError.message}). Retry ${attempt}/${BATCH_RETRIES} in ${delay / 1000}s...`);
+        await new Promise((r) => setTimeout(r, delay));
+      } else {
+        throw new Error(`Delete failed: ${deleteError.message}`);
+      }
+    }
+    totalDeleted += idList.length;
+    if (totalDeleted % 5000 < DELETE_BATCH_SIZE) console.log(`  Deleted ${totalDeleted.toLocaleString()} rows...`);
+    if (idList.length < DELETE_BATCH_SIZE) break;
+    await new Promise((r) => setTimeout(r, 200));
   }
-  
-  console.log(`  ✓ Deleted ${count || 0} rows`);
-  return count || 0;
+  console.log(`  ✓ Deleted ${totalDeleted} rows`);
+  return totalDeleted;
 }
 
-function mapAddressFeature(feature: GeoJSONFeature, sourceId: string, sourceFile: string, sourceUrl: string): any {
+function getLonLat(feature: GeoJSONFeature): { lon: number; lat: number } | null {
+  const g = feature.geometry as Record<string, unknown> | null | undefined;
+  const p = feature.properties;
+  if (!g) return null;
+
+  // Standard GeoJSON Point: coordinates = [lon, lat]
+  const coords = g.coordinates;
+  if (coords != null && Array.isArray(coords)) {
+    const a = coords.length >= 2 ? coords : coords[0];
+    const arr = Array.isArray(a) ? a : coords;
+    if (arr && arr.length >= 2) {
+      const lon = Number(arr[0]);
+      const lat = Number(arr[1]);
+      if (Number.isFinite(lon) && Number.isFinite(lat)) return { lon, lat };
+    }
+  }
+
+  // Esri-style: x, y (or X, Y)
+  const x = (g as any).x ?? (g as any).X;
+  const y = (g as any).y ?? (g as any).Y;
+  if (x != null && y != null) {
+    const lon = Number(x);
+    const lat = Number(y);
+    if (Number.isFinite(lon) && Number.isFinite(lat)) return { lon, lat };
+  }
+
+  // Attributes (Toronto layer has LONGITUDE, LATITUDE)
+  const lon = Number(p?.LONGITUDE ?? p?.longitude ?? p?.X ?? (p as any)?.x);
+  const lat = Number(p?.LATITUDE ?? p?.latitude ?? p?.Y ?? (p as any)?.y);
+  if (Number.isFinite(lon) && Number.isFinite(lat)) return { lon, lat };
+  return null;
+}
+
+function mapAddressFeature(
+  feature: GeoJSONFeature,
+  sourceId: string,
+  sourceFile: string,
+  sourceUrl: string
+): any | null {
   const props = feature.properties;
-  const coords = feature.geometry.coordinates;
-  
+  const lonLat = getLonLat(feature);
+  if (!lonLat) return null;
+  const { lon, lat } = lonLat;
+  if (lon < -180 || lon > 180 || lat < -90 || lat > 90) return null;
+
   return {
     source_id: sourceId,
     source_file: sourceFile,
     source_url: sourceUrl,
     source_date: props._fetched_at ? props._fetched_at.split('T')[0] : new Date().toISOString().split('T')[0],
-    
+
     street_number: props.street_number || '',
     street_name: props.street_name || '',
     unit: props.unit || null,
@@ -181,10 +260,9 @@ function mapAddressFeature(feature: GeoJSONFeature, sourceId: string, sourceFile
     zip: props.zip || null,
     province: props.province || 'ON',
     country: props.country || 'CA',
-    
-    // Create PostGIS geometry
-    geom: `SRID=4326;POINT(${coords[0]} ${coords[1]})`,
-    
+
+    geom: `POINT(${lon} ${lat})`,
+
     address_type: props.address_type || null,
     precision: props.precision || 'rooftop',
   };
@@ -231,34 +309,65 @@ function mapBuildingFeature(feature: GeoJSONFeature, sourceId: string, sourceFil
 
 async function insertAddresses(features: GeoJSONFeature[], config: SourceConfig, metadata: any): Promise<number> {
   console.log(`\nInserting ${features.length.toLocaleString()} addresses...`);
-  
-  const records = features.map(f => 
-    mapAddressFeature(f, config.id, config.s3Key, metadata?.source_url || '')
-  );
-  
+
+  const records = features
+    .map(f => mapAddressFeature(f, config.id, config.s3Key, metadata?.source_url || ''))
+    .filter((r): r is NonNullable<typeof r> => r != null);
+  if (records.length < features.length) {
+    console.log(`  Skipped ${(features.length - records.length).toLocaleString()} features with invalid geometry.`);
+    if (records.length === 0 && features.length > 0) {
+      const f0 = features[0];
+      const g = f0.geometry;
+      console.log('  [debug] First feature geometry keys:', g ? Object.keys(g) : 'null');
+      console.log('  [debug] First feature geometry sample:', JSON.stringify(g)?.slice(0, 400));
+      console.log('  [debug] First feature props (coord-related):', [
+        (f0.properties as any)?.LONGITUDE,
+        (f0.properties as any)?.LATITUDE,
+        (f0.properties as any)?.longitude,
+        (f0.properties as any)?.latitude,
+        (f0.properties as any)?.X,
+        (f0.properties as any)?.Y,
+      ]);
+    }
+  }
+
   let inserted = 0;
-  
+
   for (let i = 0; i < records.length; i += BATCH_SIZE) {
     const batch = records.slice(i, i + BATCH_SIZE);
     const batchNum = Math.floor(i / BATCH_SIZE) + 1;
     const totalBatches = Math.ceil(records.length / BATCH_SIZE);
-    
+
     console.log(`  Batch ${batchNum}/${totalBatches}: ${batch.length} records...`);
-    
-    const { error } = await supabase
-      .from(config.table)
-      .insert(batch);
-    
-    if (error) {
-      console.error(`    ✗ Batch ${batchNum} failed:`, error.message);
-      throw error;
+
+    let lastError: any = null;
+    for (let attempt = 1; attempt <= BATCH_RETRIES; attempt++) {
+      const { error } = await supabase.from(config.table).insert(batch);
+      if (!error) {
+        lastError = null;
+        break;
+      }
+      lastError = error;
+      const isRetryable =
+        error.message?.includes('fetch failed') ||
+        error.message?.includes('ECONNRESET') ||
+        error.message?.includes('ETIMEDOUT') ||
+        error.message?.includes('network');
+      if (attempt < BATCH_RETRIES && isRetryable) {
+        const delay = BATCH_RETRY_DELAY_MS * attempt;
+        console.warn(`    ⚠ Batch ${batchNum} attempt ${attempt}/${BATCH_RETRIES} failed (${error.message}). Retrying in ${delay / 1000}s...`);
+        await new Promise((r) => setTimeout(r, delay));
+      } else {
+        console.error(`    ✗ Batch ${batchNum} failed:`, error.message);
+        throw error;
+      }
     }
-    
+    if (lastError) throw lastError;
+
     inserted += batch.length;
-    
-    // Small delay between batches to prevent overwhelming the DB
+
     if (i + BATCH_SIZE < records.length) {
-      await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS));
+      await new Promise((resolve) => setTimeout(resolve, BATCH_DELAY_MS));
     }
   }
   
@@ -463,6 +572,7 @@ async function main() {
     args: process.argv.slice(2),
     options: {
       source: { type: 'string' },
+      group: { type: 'string' },
       all: { type: 'boolean' },
       'dry-run': { type: 'boolean' },
       'list-sources': { type: 'boolean' },
@@ -480,7 +590,8 @@ Usage:
   npx tsx scripts/sync-gold-addresses-from-s3.ts [options]
 
 Options:
-  --source=<id>       Sync specific source (e.g., durham_addresses)
+  --source=<id>       Sync specific source (e.g., toronto_addresses)
+  --group=<name>      Sync sources in group (e.g., toronto_ottawa)
   --all               Sync all configured sources
   --dry-run           Preview changes without modifying database
   --list-sources      List available sources
@@ -502,6 +613,7 @@ Examples:
 Environment Variables:
   NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_BUCKET_NAME
+  AWS_REGION or AWS_S3_BUCKET_REGION (default: us-east-2 for Ohio bucket)
     `);
     process.exit(0);
   }
@@ -534,6 +646,14 @@ Environment Variables:
   
   if (values.all) {
     configs = SOURCE_CONFIGS;
+  } else if (values.group) {
+    const ids = SYNC_GROUPS[values.group];
+    if (!ids?.length) {
+      console.error(`Unknown or empty group: ${values.group}`);
+      console.log('Available:', Object.keys(SYNC_GROUPS).join(', '));
+      process.exit(1);
+    }
+    configs = SOURCE_CONFIGS.filter(s => ids.includes(s.id));
   } else if (values.source) {
     const config = SOURCE_CONFIGS.find(s => s.id === values.source);
     if (!config) {
@@ -543,7 +663,7 @@ Environment Variables:
     }
     configs = [config];
   } else {
-    console.error('Error: Must specify --source=<id> or --all');
+    console.error('Error: Must specify --source=<id>, --group=<name>, or --all');
     process.exit(1);
   }
   
@@ -552,6 +672,7 @@ Environment Variables:
   console.log('========================================');
   console.log('Gold Tier Sync (The "Loader")');
   console.log('========================================');
+  console.log(`S3: ${S3_BUCKET} (region: ${S3_REGION})`);
   console.log(`Sources: ${configs.length}`);
   console.log(`Mode: ${dryRun ? 'DRY RUN' : 'LIVE'}`);
   console.log('');

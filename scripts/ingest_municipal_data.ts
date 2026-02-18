@@ -17,6 +17,9 @@ import axios from 'axios';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { parseArgs } from 'util';
 import * as dotenv from 'dotenv';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 
 dotenv.config({ path: '.env.local' });
 
@@ -83,18 +86,24 @@ const ADDRESS_SOURCES = [
   },
 
   // --- 2. ONTARIO: GTA CORE (Density) ---
+  // City of Toronto: Address Points from cot_geospatial27 (Layer 101). Root path, not primary/.
+  // If 404, check https://gis.toronto.ca/arcgis/rest/services/?f=json for current version (e.g. cot_geospatial28).
+  // Maps to ref_addresses_gold: street_number, street_name, city, etc.
   {
     id: 'toronto_addresses',
     name: 'City of Toronto Addresses',
-    url: 'https://gis.toronto.ca/arcgis/rest/services/primary/COT_ADDRESS_POINT/MapServer/0',
+    url: 'https://gis.toronto.ca/arcgis/rest/services/cot_geospatial27/FeatureServer/101',
     s3Key: 'gold-standard/canada/ontario/toronto/addresses.geojson',
     type: 'address' as const,
     province: 'ON',
-    fieldMap: { 
-      streetNumber: 'HI_NUM',
-      streetName: 'LF_NAME',
-      unit: 'SUITE',
-      city: 'MUNICIPALITY'
+    city: 'Toronto',
+    fieldMap: {
+      streetNumber: 'ADDRESS_NUMBER',
+      streetNumberSuffix: 'LO_NUM_SUF',
+      streetName: 'LINEAR_NAME',
+      streetType: 'LINEAR_NAME_TYPE',
+      streetDir: 'LINEAR_NAME_DIR',
+      city: 'MUNICIPALITY_NAME',
     }
   },
   // York URLs currently unavailable
@@ -661,7 +670,7 @@ export const MUNICIPAL_SOURCES: MunicipalSource[] = [
 // ============================================================================
 
 const S3_BUCKET = process.env.AWS_BUCKET_NAME || 'flyr-pro-addresses-2025';
-const S3_REGION = process.env.AWS_REGION || 'us-east-1';
+const S3_REGION = process.env.AWS_REGION || 'us-east-2';  // Bucket in Ohio
 const PAGE_SIZE = 2000;  // ArcGIS max is typically 2000
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1000;
@@ -791,17 +800,22 @@ function transformAddress(feature: ArcGISFeature, source: MunicipalSource): ArcG
   const props = feature.properties;
   const map = source.fieldMap || {};
   
+  // Treat "None" string (e.g. from Toronto/ArcGIS) as empty
+  const blank = (v: any) => v == null || v === '' || String(v).trim().toLowerCase() === 'none';
+
   // Build street number with suffix (e.g., "123A")
-  let streetNumber = props[map.streetNumber || 'CIVIC_NUM'] || '';
+  let streetNumber = props[map.streetNumber || 'CIVIC_NUM'];
+  if (blank(streetNumber)) streetNumber = '';
+  else streetNumber = String(streetNumber).trim();
   const suffix = props[map.streetNumberSuffix || 'CIVIC_SFX'];
-  if (suffix) streetNumber += suffix;
-  
+  if (!blank(suffix)) streetNumber += String(suffix).trim();
+
   // Build full street name from components (e.g., "Main Street West")
   const streetParts = [
     props[map.streetName || 'ROAD_NAME'],
     props[map.streetType || 'ROAD_TYPE'],
     props[map.streetDir || 'ROAD_DIR']
-  ].filter(Boolean);
+  ].filter(v => !blank(v)).map(v => String(v).trim());
   const streetName = streetParts.join(' ');
   
   // Build unit string (e.g., "Apt 5" or just "5")
@@ -1008,39 +1022,49 @@ async function uploadToS3(
   features: ArcGISFeature[],
   dryRun: boolean
 ): Promise<boolean> {
-  const geojson = {
-    type: 'FeatureCollection',
-    features,
-    metadata: {
-      source_id: source.id,
-      source_name: source.name,
-      source_url: source.url,
-      source_type: source.type,
-      province: source.province,
-      fetched_at: new Date().toISOString(),
-      feature_count: features.length,
-      filters_applied: source.filters || null,
-    },
+  const metadata = {
+    source_id: source.id,
+    source_name: source.name,
+    source_url: source.url,
+    source_type: source.type,
+    province: source.province,
+    fetched_at: new Date().toISOString(),
+    feature_count: features.length,
+    filters_applied: source.filters || null,
   };
-  
-  const jsonString = JSON.stringify(geojson);
-  const sizeMB = (jsonString.length / 1024 / 1024).toFixed(2);
-  
+
   console.log(`\nUploading to S3:`);
   console.log(`  Bucket: ${S3_BUCKET}`);
   console.log(`  Key: ${source.s3Key}`);
-  console.log(`  Size: ${sizeMB} MB`);
-  
+  console.log(`  Features: ${features.length.toLocaleString()}`);
+
   if (dryRun) {
     console.log('  [DRY RUN] Skipping upload');
     return true;
   }
-  
+
+  const tmpPath = path.join(os.tmpdir(), `claw-${source.id}-${Date.now()}.geojson`);
+
   try {
+    const out = fs.createWriteStream(tmpPath, { encoding: 'utf8' });
+    out.write('{"type":"FeatureCollection","features":[');
+    for (let i = 0; i < features.length; i++) {
+      out.write((i === 0 ? '' : ',') + JSON.stringify(features[i]));
+    }
+    out.write('],"metadata":' + JSON.stringify(metadata) + '}');
+    await new Promise<void>((resolve, reject) => {
+      out.on('finish', resolve);
+      out.on('error', reject);
+      out.end();
+    });
+
+    const sizeMB = (fs.statSync(tmpPath).size / 1024 / 1024).toFixed(2);
+    console.log(`  Size: ${sizeMB} MB (streamed)`);
+
     const command = new PutObjectCommand({
       Bucket: S3_BUCKET,
       Key: source.s3Key,
-      Body: jsonString,
+      Body: fs.createReadStream(tmpPath),
       ContentType: 'application/geo+json',
       Metadata: {
         'source-id': source.id,
@@ -1049,14 +1073,17 @@ async function uploadToS3(
         'feature-count': String(features.length),
       },
     });
-    
+
     await s3Client.send(command);
     console.log('  ✓ Upload successful');
     return true;
-    
   } catch (error: any) {
     console.error('  ✗ Upload failed:', error.message);
     return false;
+  } finally {
+    try {
+      if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+    } catch (_) {}
   }
 }
 

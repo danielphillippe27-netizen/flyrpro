@@ -39,6 +39,11 @@ on:
           - 'ontario_rest'
           - 'western_canada'
           - 'atlantic_canada'
+      sync_only:
+        description: 'Only sync S3 → Supabase (skip ArcGIS ingest). Use when data is already in S3.'
+        required: false
+        default: false
+        type: boolean
       dry_run:
         description: 'Dry run (fetch but do not upload/load)'
         required: false
@@ -55,6 +60,7 @@ jobs:
   ingest-to-s3:
     name: Ingest ${{ matrix.region }}
     runs-on: ubuntu-latest
+    if: github.event.inputs.sync_only != 'true'
     strategy:
       fail-fast: false  # Continue other jobs if one fails
       matrix:
@@ -96,7 +102,7 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
+          AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-2' }}
           AWS_BUCKET_NAME: ${{ secrets.AWS_BUCKET_NAME || 'flyr-pro-addresses-2025' }}
         run: |
           # Check if specific region requested and skip if not matching
@@ -130,9 +136,10 @@ jobs:
   # ==========================================================================
   sync-to-database:
     name: Sync to Supabase
-    needs: ingest-to-s3  # Wait for all S3 uploads to complete
+    needs: ingest-to-s3
     runs-on: ubuntu-latest
-    if: github.event.inputs.dry_run != 'true'  # Skip on dry run
+    if: github.event.inputs.dry_run != 'true' && github.event.inputs.sync_only != 'true'
+    timeout-minutes: 90
     
     steps:
       # -----------------------------------------------------------------------
@@ -165,14 +172,12 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
+          AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-2' }}
           AWS_BUCKET_NAME: ${{ secrets.AWS_BUCKET_NAME || 'flyr-pro-addresses-2025' }}
         run: |
           if [ -n "${{ github.event.inputs.region }}" ]; then
-            # Specific region - sync only those sources
             npx tsx scripts/sync-gold-addresses-from-s3.ts --group=${{ github.event.inputs.region }}
           else
-            # All sources
             npx tsx scripts/sync-gold-addresses-from-s3.ts --all
           fi
       
@@ -189,23 +194,61 @@ jobs:
           # npx tsx scripts/verify-gold-data.ts
 
   # ==========================================================================
+  # Job 2b: Sync only (S3 → Supabase, no ingest) - when "Sync only" is checked
+  # ==========================================================================
+  sync-only:
+    name: Sync only (S3 → Supabase)
+    runs-on: ubuntu-latest
+    if: github.event.inputs.sync_only == 'true'
+    timeout-minutes: 90
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Sync Gold data to Supabase (no ingest)
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-2' }}
+          AWS_BUCKET_NAME: ${{ secrets.AWS_BUCKET_NAME || 'flyr-pro-addresses-2025' }}
+        run: |
+          if [ -n "${{ github.event.inputs.region }}" ]; then
+            npx tsx scripts/sync-gold-addresses-from-s3.ts --group=${{ github.event.inputs.region }}
+          else
+            npx tsx scripts/sync-gold-addresses-from-s3.ts --all
+          fi
+
+  # ==========================================================================
   # Job 3: Notify on completion
   # ==========================================================================
   notify:
     name: Notify
-    needs: [ingest-to-s3, sync-to-database]
+    needs: [ingest-to-s3, sync-to-database, sync-only]
     runs-on: ubuntu-latest
     if: always() && github.event.inputs.dry_run != 'true'
     
     steps:
       - name: Check status
         run: |
-          echo "Ingest status: ${{ needs.ingest-to-s3.result }}"
-          echo "Sync status: ${{ needs.sync-to-database.result }}"
-          
-          if [ "${{ needs.ingest-to-s3.result }}" == "success" ] && [ "${{ needs.sync-to-database.result }}" == "success" ]; then
-            echo "✅ Gold tier data sync completed successfully!"
+          echo "Ingest: ${{ needs.ingest-to-s3.result }}"
+          echo "Sync (after ingest): ${{ needs.sync-to-database.result }}"
+          echo "Sync only: ${{ needs.sync-only.result }}"
+          SYNC_OK="${{ needs.sync-to-database.result == 'success' || needs.sync-only.result == 'success' }}"
+          if [ "$SYNC_OK" == "true" ]; then
+            echo "✅ Gold tier sync completed successfully!"
           else
-            echo "❌ Gold tier data sync failed"
+            echo "❌ Gold tier sync failed"
             exit 1
           fi
