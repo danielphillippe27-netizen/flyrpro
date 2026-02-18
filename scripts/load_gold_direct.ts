@@ -13,6 +13,13 @@ const CONCURRENCY = 10; // Number of parallel connections
 const BATCH_SIZE = 1000; // Rows per insert
 const S3_BUCKET = process.env.AWS_BUCKET_NAME || 'flyr-pro-addresses-2025';
 
+/** Strip CKAN/ArcGIS "None" suffix so we never store e.g. "24None" as street number */
+function stripNone(v: string | number | null | undefined): string {
+  if (v == null) return '';
+  const s = String(v).trim();
+  return s.replace(/\s*none\s*$/gi, '').replace(/^none\s*/gi, '').trim() || '';
+}
+
 // Initialize Clients
 const s3 = new S3Client({ 
   region: process.env.AWS_REGION || 'us-east-2',
@@ -75,20 +82,23 @@ async function loadGoldParallel(type: 'address' | 'building') {
           const g = JSON.stringify(f.geometry);
           
           if (type === 'address') {
-            // Skip records with missing required fields
-            const streetName = p.street_name || p.LINEAR_NAME_FULL || p.ST_NAME || p.LF_NAME || p.ROAD_NAME;
-            const streetNumber = p.street_number || p.street_num || p.ADDRESS_NUMBER || p.CIVIC_NUM || p.HI_NUM || p.HI_NUM_NO;
+            // Skip records with missing required fields; strip "None" so we never store "24None"
+            const rawNumber = p.street_number || p.street_num || p.ADDRESS_NUMBER || p.CIVIC_NUM || p.HI_NUM || p.HI_NUM_NO;
+            const streetNumber = stripNone(rawNumber);
+            const rawName = p.street_name || p.LINEAR_NAME_FULL || p.ST_NAME || p.LF_NAME || p.ROAD_NAME;
+            const streetName = stripNone(rawName);
             const city = p.city || p.MUNICIPALITY || p.TOWN || 'Toronto';
             const province = p.province || p.PROVINCE || 'ON';
             const country = p.country || p.COUNTRY || 'CA';
+            const postalCode = p.zip || p.postal_code || p.POSTAL_CODE || p.POSTALCODE || null;
             
             if (!streetName || !streetNumber || !city) {
               continue; // Skip this record
             }
             
-            valuePlaceholders.push(`($${paramIdx}, $${paramIdx+1}, $${paramIdx+2}, $${paramIdx+3}, $${paramIdx+4}, $${paramIdx+5}, $${paramIdx+6}, ST_SetSRID(ST_GeomFromGeoJSON($${paramIdx+7}), 4326))`);
-            values.push(sourceId, streetNumber, streetName, p.unit || p.UNIT || p.SUITE || null, city, province, country, g);
-            paramIdx += 8;
+            valuePlaceholders.push(`($${paramIdx}, $${paramIdx+1}, $${paramIdx+2}, $${paramIdx+3}, $${paramIdx+4}, $${paramIdx+5}, $${paramIdx+6}, $${paramIdx+7}, ST_SetSRID(ST_GeomFromGeoJSON($${paramIdx+8}), 4326))`);
+            values.push(sourceId, streetNumber, streetName, stripNone(p.unit || p.UNIT || p.SUITE) || null, city, province, country, postalCode, g);
+            paramIdx += 9;
           } else {
             valuePlaceholders.push(`($${paramIdx}, $${paramIdx+1}, $${paramIdx+2}, ST_SetSRID(ST_Multi(ST_GeomFromGeoJSON($${paramIdx+3})), 4326))`);
             values.push(sourceId, p.GlobalID || p.OBJECTID || p.id, p.ShapeSTArea || p.area || 0, g);
@@ -103,7 +113,7 @@ async function loadGoldParallel(type: 'address' | 'building') {
         }
         
         const cols = type === 'address' 
-          ? '(source_id, street_number, street_name, unit, city, province, country, geom)'
+          ? '(source_id, street_number, street_name, unit, city, province, country, postal_code, geom)'
           : '(source_id, external_id, area_sqm, geom)';
         
         const query = `INSERT INTO ${table} ${cols} VALUES ${valuePlaceholders.join(',')}`;
