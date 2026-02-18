@@ -26,7 +26,6 @@ This document summarizes the last four days of work on FLYR-PRO and provides a d
 
 - Table `crm_connections`: provider, encrypted API key, status, last tested/push/error (RLS per user)
 - FollowUpBoss: [app/api/integrations/followupboss/](../app/api/integrations/followupboss/) (connect, disconnect, status, test, test-push, push-lead). For how we're linked to Follow Up Boss and how to connect from the iOS app, see [docs/FOLLOW_UP_BOSS_AND_IOS_GUIDE.md](../docs/FOLLOW_UP_BOSS_AND_IOS_GUIDE.md).
-- BoldTrail: [app/api/integrations/boldtrail/](../app/api/integrations/boldtrail/) (connect, disconnect, status, test, test-push, push-lead).
 - Leads page: [app/(main)/leads/](../app/(main)/leads/) using ContactsHubView
 - [app/api/leads/sync-crm/](../app/api/leads/sync-crm/route.ts) for CRM sync
 
@@ -64,7 +63,10 @@ This section is the operational guide: which buckets are used, how data is obtai
 
 **Extract / data-lake bucket** (e.g. `flyr-pro-addresses-2025`, env `EXTRACT_BUCKET` / `ADDRESSES_BUCKET` in Lambda):
 
-- **Addresses**: Parquet at `master_addresses_parquet/state={state}/data_*.parquet`. See [kimi-cli/templates/lambda/index.js](../kimi-cli/templates/lambda/index.js): `addressesGlobForState`, `ADDRESSES_BUCKET`.
+- **Addresses**:
+  - **US states**: Parquet at `master_addresses_parquet/state={state}/data_*.parquet`
+  - **Canadian provinces**: CSV at `silver/ca/{province}/addresses.csv` (StatCan ODA data)
+  - See [kimi-cli/templates/lambda/index.js](../kimi-cli/templates/lambda/index.js): `addressesPathForState`, `ADDRESSES_BUCKET`.
 - **Buildings/roads**: Thematic tiles under `overture_extracts` (or `EXTRACT_PREFIX`): e.g. `.../theme=buildings/...`, `.../theme=transportation/...` keyed by `OVERTURE_RELEASE` and region/tile.
 
 **Snapshot bucket** (e.g. `flyr-snapshots`, env `SNAPSHOT_BUCKET` in Lambda):
@@ -77,7 +79,10 @@ This section is the operational guide: which buckets are used, how data is obtai
 - **Flow**: Provision (or generate-address-list) sends polygon + region to the **Tile Lambda** (Lambda function URL, auth header `x-slice-secret`).
 - **Lambda** ([kimi-cli/templates/lambda/index.js](../kimi-cli/templates/lambda/index.js)):
   - **Buildings**: Reads from the extract bucket (tiled parquet by theme `buildings`). `queryTheme("buildings", polygon, limit, regionCode)` uses DuckDB `read_parquet` + `ST_Intersects` on the polygon.
-  - **Addresses**: Reads from the addresses bucket parquet. `queryAddresses({ state, polygon, limit })` uses DuckDB `read_parquet(addrGlob)` with bbox + `ST_Intersects`.
+  - **Addresses**: Reads from the addresses bucket. `queryAddresses({ state, polygon, limit })` uses:
+    - **US states**: DuckDB `read_parquet()` on `master_addresses_parquet/state={state}/*`
+    - **Canadian provinces**: DuckDB `read_csv_auto()` on `silver/ca/{province}/addresses.csv` (StatCan ODA)
+    - Both use bbox + `ST_Intersects` for spatial filtering.
   - **Roads** (optional): Same pattern, theme `roads`.
 - **Output**: Lambda writes GeoJSON (gzipped) to the **snapshot bucket** via `putGzJson` (AWS `PutObjectCommand`). Key pattern: `campaigns/{campaignId}/buildings.geojson.gz`, etc. It returns a JSON body with `bucket`, `prefix`, `counts`, `s3_keys` (buildings, addresses, roads, metadata), and presigned `urls` (default 1h TTL).
 
@@ -156,6 +161,19 @@ flowchart LR
   BuildingsAPI -->|gunzip parse| GeoJSON
   BuildingsAPI -->|FeatureCollection| Map
 ```
+
+### 2.7 Gold tier: Toronto (and municipal) address claw into S3
+
+- **Script**: [scripts/ingest_municipal_data.ts](../scripts/ingest_municipal_data.ts) (“the claw”) fetches from ArcGIS REST or Toronto CKAN Open Data, normalizes, and uploads GeoJSON to the **extract bucket** (e.g. `flyr-pro-addresses-2025`) under `gold-standard/...`.
+- **Toronto (two sources, same S3 key)**:
+  - **`toronto_addresses_ckan`** (recommended): Toronto Open Data CKAN API. Package [address-points-municipal-toronto-one-address-repository](https://ckan0.cf.opendata.inter.prod-toronto.ca/dataset/address-points-municipal-toronto-one-address-repository), datastore_search with limit/offset; same schema (ADDRESS_NUMBER, LINEAR_NAME_FULL, geometry). No ArcGIS version drift.
+  - **`toronto_addresses`**: ArcGIS Layer 101 at `https://gis.toronto.ca/arcgis/rest/services/cot_geospatial27/FeatureServer/101` (if 404, check [services index](https://gis.toronto.ca/arcgis/rest/services/?f=json) for e.g. `cot_geospatial28`).
+- Output for both: `gold-standard/canada/ontario/toronto/addresses.geojson`.
+- **Tables**: Before running the claw (and before loading that GeoJSON into the DB), ensure **Supabase migrations are applied** so `ref_addresses_gold` exists. Use `--check-db` to verify (requires `DATABASE_URL` in `.env.local`).
+- **Run**:
+  1. `supabase db push` (or apply migrations).
+  2. `npx tsx scripts/ingest_municipal_data.ts --source=toronto_addresses_ckan --check-db` (CKAN) or `--source=toronto_addresses --check-db` (ArcGIS).
+  3. Optionally load from S3 into `ref_addresses_gold` via [scripts/load_gold_direct.ts](../scripts/load_gold_direct.ts) (expects `street_number`, `street_name`, `city` in GeoJSON properties).
 
 ---
 

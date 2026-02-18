@@ -20,8 +20,10 @@ import * as dotenv from 'dotenv';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import pg from 'pg';
 
-dotenv.config({ path: '.env.local' });
+dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
+dotenv.config();
 
 // ============================================================================
 // ADDRESS SOURCES - Top 50 Canadian Municipal Address Datasets
@@ -86,12 +88,11 @@ const ADDRESS_SOURCES = [
   },
 
   // --- 2. ONTARIO: GTA CORE (Density) ---
-  // City of Toronto: Address Points from cot_geospatial27 (Layer 101). Root path, not primary/.
+  // City of Toronto (ArcGIS): Address Points from cot_geospatial27 Layer 101.
   // If 404, check https://gis.toronto.ca/arcgis/rest/services/?f=json for current version (e.g. cot_geospatial28).
-  // Maps to ref_addresses_gold: street_number, street_name, city, etc.
   {
     id: 'toronto_addresses',
-    name: 'City of Toronto Addresses',
+    name: 'City of Toronto Addresses (ArcGIS)',
     url: 'https://gis.toronto.ca/arcgis/rest/services/cot_geospatial27/FeatureServer/101',
     s3Key: 'gold-standard/canada/ontario/toronto/addresses.geojson',
     type: 'address' as const,
@@ -101,6 +102,30 @@ const ADDRESS_SOURCES = [
       streetNumber: 'ADDRESS_NUMBER',
       streetNumberSuffix: 'LO_NUM_SUF',
       streetName: 'LINEAR_NAME',
+      streetNameFull: 'LINEAR_NAME_FULL',
+      streetType: 'LINEAR_NAME_TYPE',
+      streetDir: 'LINEAR_NAME_DIR',
+      city: 'MUNICIPALITY_NAME',
+    }
+  },
+  // City of Toronto (CKAN): Same dataset via Toronto Open Data API. Package: address-points-municipal-toronto-one-address-repository
+  // https://ckan0.cf.opendata.inter.prod-toronto.ca – same schema (ADDRESS_NUMBER, LINEAR_NAME_FULL, geometry in datastore).
+  {
+    id: 'toronto_addresses_ckan',
+    name: 'City of Toronto Addresses (CKAN)',
+    url: 'https://ckan0.cf.opendata.inter.prod-toronto.ca',
+    s3Key: 'gold-standard/canada/ontario/toronto/addresses.geojson',
+    type: 'address' as const,
+    province: 'ON',
+    city: 'Toronto',
+    api: 'ckan' as const,
+    ckanBaseUrl: 'https://ckan0.cf.opendata.inter.prod-toronto.ca',
+    ckanResourceId: '0b3756af-9caf-4f0f-ac28-9c6617adede4',
+    fieldMap: {
+      streetNumber: 'ADDRESS_NUMBER',
+      streetNumberSuffix: 'LO_NUM_SUF',
+      streetName: 'LINEAR_NAME',
+      streetNameFull: 'LINEAR_NAME_FULL',
       streetType: 'LINEAR_NAME_TYPE',
       streetDir: 'LINEAR_NAME_DIR',
       city: 'MUNICIPALITY_NAME',
@@ -591,6 +616,7 @@ const GROUPS: Record<string, string[]> = {
     // 'peel_addr', 'peel_bldg' - URLs currently unavailable
   ],
   'toronto_ottawa': [
+    'toronto_addresses_ckan',  // Toronto via CKAN Open Data (same S3 key as toronto_addresses)
     'toronto_addresses'
     // 'toronto_bldg', - URL needs verification
     // 'ottawa_addr', 'ottawa_bldg' - URLs need verification
@@ -633,11 +659,17 @@ const GROUPS: Record<string, string[]> = {
 export interface MunicipalSource {
   id: string;              // Unique identifier
   name: string;            // Human-readable name
-  url: string;             // ArcGIS FeatureServer URL
+  url: string;             // ArcGIS FeatureServer URL (or CKAN base URL for display)
   s3Key: string;           // Destination in S3
   type: 'address' | 'building';
   province: string;        // e.g., 'ON', 'BC'
   city?: string;           // Primary city if applicable
+  /** 'ckan' = Toronto CKAN Open Data API; default = ArcGIS */
+  api?: 'arcgis' | 'ckan';
+  /** CKAN datastore resource id (required when api === 'ckan') */
+  ckanResourceId?: string;
+  /** CKAN base URL (default Toronto Open Data) */
+  ckanBaseUrl?: string;
   // Building-specific filters
   filters?: {
     minArea?: number;      // Minimum area in sqm (filter out sheds)
@@ -649,6 +681,7 @@ export interface MunicipalSource {
     streetNumber?: string;
     streetNumberSuffix?: string;
     streetName?: string;
+    streetNameFull?: string;  // Single field for full street name (e.g. Toronto LINEAR_NAME_FULL)
     streetType?: string;
     streetDir?: string;
     unit?: string;
@@ -803,20 +836,36 @@ function transformAddress(feature: ArcGISFeature, source: MunicipalSource): ArcG
   // Treat "None" string (e.g. from Toronto/ArcGIS) as empty
   const blank = (v: any) => v == null || v === '' || String(v).trim().toLowerCase() === 'none';
 
-  // Build street number with suffix (e.g., "123A")
-  let streetNumber = props[map.streetNumber || 'CIVIC_NUM'];
-  if (blank(streetNumber)) streetNumber = '';
-  else streetNumber = String(streetNumber).trim();
+  // Street number: prefer mapped field; for Toronto (ArcGIS or CKAN) use ADDRESS_NUMBER only, or LO_NUM as fallback
+  let rawNum = props[map.streetNumber || 'CIVIC_NUM'];
+  if (typeof rawNum === 'number') rawNum = String(rawNum);  // CKAN sometimes returns number
+  let streetNumber: string = rawNum ?? '';
+  if (blank(streetNumber)) {
+    if ((source.id === 'toronto_addresses' || source.id === 'toronto_addresses_ckan') && props.LO_NUM != null) {
+      streetNumber = String(props.LO_NUM);
+    } else {
+      streetNumber = '';
+    }
+  } else {
+    streetNumber = String(streetNumber).trim();
+  }
   const suffix = props[map.streetNumberSuffix || 'CIVIC_SFX'];
   if (!blank(suffix)) streetNumber += String(suffix).trim();
+  streetNumber = streetNumber.replace(/\s*none\s*/gi, '').trim() || '';
 
-  // Build full street name from components (e.g., "Main Street West")
-  const streetParts = [
-    props[map.streetName || 'ROAD_NAME'],
-    props[map.streetType || 'ROAD_TYPE'],
-    props[map.streetDir || 'ROAD_DIR']
-  ].filter(v => !blank(v)).map(v => String(v).trim());
-  const streetName = streetParts.join(' ');
+  // Street name: prefer full-name field when present (e.g. Toronto LINEAR_NAME_FULL = "Westhead Rd")
+  let streetName: string;
+  const fullName = map.streetNameFull && props[map.streetNameFull];
+  if (!blank(fullName)) {
+    streetName = String(fullName).trim().replace(/\s*none\s*/gi, '');
+  } else {
+    const streetParts = [
+      props[map.streetName || 'ROAD_NAME'],
+      props[map.streetType || 'ROAD_TYPE'],
+      props[map.streetDir || 'ROAD_DIR']
+    ].filter(v => !blank(v)).map(v => String(v).trim());
+    streetName = streetParts.join(' ').replace(/\s*none\s*/gi, '').trim() || '';
+  }
   
   // Build unit string (e.g., "Apt 5" or just "5")
   const unitType = props[map.unitType || 'UNIT_TYPE'];
@@ -830,27 +879,28 @@ function transformAddress(feature: ArcGISFeature, source: MunicipalSource): ArcG
   fullAddrParts.push(props[map.zip || 'POSTAL_CODE']);
   const fullAddr = fullAddrParts.filter(Boolean).join(', ');
   
+  const city = props[map.city || 'TOWN'] || props[map.municipality || 'MUNICIPALITY'] || source.city || 'Unknown';
+  const zip = props[map.zip || 'POSTAL_CODE'] || props.POSTALCODE || props.ZIP || null;
+
+  // Omit raw ArcGIS fields that can confuse (e.g. LO_NUM, HI_NUM) so only clean standardized fields show
+  const { LO_NUM, HI_NUM, LO_NUM_SUF, HI_NUM_SUF, ...restProps } = props as Record<string, unknown> & { LO_NUM?: number; HI_NUM?: number; LO_NUM_SUF?: string; HI_NUM_SUF?: string };
+
   return {
     type: 'Feature',
     geometry: feature.geometry,
     properties: {
-      // Standardized fields
-      street_number: streetNumber,
-      street_name: streetName,
-      unit: unit,
-      city: props[map.city || 'TOWN'] || props[map.municipality || 'MUNICIPALITY'] || source.city || 'Unknown',
-      zip: props[map.zip || 'POSTAL_CODE'] || props.POSTALCODE || props.ZIP || null,
-      province: source.province,
-      country: 'CA',
-      
-      // Raw fields for reference
       _full_address: fullAddr,
       _source_id: source.id,
       _source_url: source.url,
       _fetched_at: new Date().toISOString(),
-      
-      // Include original properties for debugging
-      ...props,
+      ...restProps,
+      street_number: streetNumber,
+      street_name: streetName,
+      unit: unit,
+      city,
+      zip,
+      province: source.province,
+      country: 'CA',
     },
   };
 }
@@ -901,14 +951,16 @@ function transformBuilding(feature: ArcGISFeature, source: MunicipalSource): Arc
 // ARCGIS FETCH (The Claw)
 // ============================================================================
 
-async function fetchFromArcGIS(source: MunicipalSource): Promise<ArcGISFeature[]> {
+async function fetchFromArcGIS(source: MunicipalSource, maxRecords?: number): Promise<ArcGISFeature[]> {
   console.log(`\nFetching from ArcGIS: ${source.name}`);
   console.log(`  URL: ${source.url}`);
   console.log(`  Type: ${source.type}`);
+  if (maxRecords != null) console.log(`  Sample limit: ${maxRecords} records`);
   
   const allFeatures: ArcGISFeature[] = [];
   let offset = 0;
   let pageCount = 0;
+  const pageSize = maxRecords != null ? Math.min(PAGE_SIZE, maxRecords) : PAGE_SIZE;
   let hasMore = true;
   
   while (hasMore) {
@@ -920,7 +972,7 @@ async function fetchFromArcGIS(source: MunicipalSource): Promise<ArcGISFeature[]
       f: 'geojson',
       outSR: '4326',  // WGS84
       resultOffset: offset,
-      resultRecordCount: PAGE_SIZE,
+      resultRecordCount: pageSize,
     };
     
     // Buildings may need geometry precision
@@ -950,16 +1002,18 @@ async function fetchFromArcGIS(source: MunicipalSource): Promise<ArcGISFeature[]
       
       allFeatures.push(...transformed);
       
-      // Check if we've reached the end
-      // ArcGIS indicates more data by returning a full page or setting exceededTransferLimit
+      // Check if we've reached the end (or sample limit)
       const receivedCount = pageFeatures.length;
-      hasMore = receivedCount === PAGE_SIZE || data.exceededTransferLimit === true;
+      if (maxRecords != null) {
+        hasMore = false;  // One page only for sample
+      } else {
+        hasMore = receivedCount === PAGE_SIZE || data.exceededTransferLimit === true;
+      }
       
       console.log(`    Received ${receivedCount} features (total: ${allFeatures.length})`);
       
-      if (hasMore) {
+      if (hasMore && maxRecords == null) {
         offset += receivedCount;
-        // Small delay to be nice to the server
         await sleep(100);
       }
       
@@ -975,6 +1029,89 @@ async function fetchFromArcGIS(source: MunicipalSource): Promise<ArcGISFeature[]
   console.log(`  Total pages: ${pageCount}`);
   console.log(`  Total features fetched: ${allFeatures.length}`);
   
+  return allFeatures;
+}
+
+// ============================================================================
+// CKAN FETCH (Toronto Open Data – datastore_search)
+// ============================================================================
+
+const CKAN_PAGE_SIZE = 2000;
+
+async function fetchFromCKAN(source: MunicipalSource, maxRecords?: number): Promise<ArcGISFeature[]> {
+  const base = source.ckanBaseUrl || 'https://ckan0.cf.opendata.inter.prod-toronto.ca';
+  const resourceId = source.ckanResourceId;
+  if (!resourceId) throw new Error(`CKAN source ${source.id} missing ckanResourceId`);
+
+  console.log(`\nFetching from CKAN: ${source.name}`);
+  console.log(`  Base: ${base}`);
+  console.log(`  Resource: ${resourceId}`);
+  console.log(`  Type: ${source.type}`);
+  if (maxRecords != null) console.log(`  Sample limit: ${maxRecords} records`);
+
+  const allFeatures: ArcGISFeature[] = [];
+  let offset = 0;
+  let pageCount = 0;
+  const searchUrl = `${base}/api/3/action/datastore_search`;
+  const limit = maxRecords != null ? Math.min(CKAN_PAGE_SIZE, maxRecords) : CKAN_PAGE_SIZE;
+
+  while (true) {
+    pageCount++;
+    console.log(`  Page ${pageCount}: offset=${offset}...`);
+
+    const data = await fetchWithRetry<{
+      success: boolean;
+      result?: {
+        records?: Record<string, unknown>[];
+        total?: number;
+        _links?: { next?: string };
+      };
+    }>(searchUrl, {
+      id: resourceId,
+      limit,
+      offset,
+    });
+
+    if (!data.success || !data.result?.records?.length) {
+      console.log(`    No more records.`);
+      break;
+    }
+
+    const records = data.result.records;
+    for (const rec of records) {
+      const geomRaw = rec['geometry'];
+      let geometry: { type: string; coordinates: number[] } = { type: 'Point', coordinates: [0, 0] };
+      if (typeof geomRaw === 'string') {
+        try {
+          geometry = JSON.parse(geomRaw) as { type: string; coordinates: number[] };
+        } catch {
+          continue;
+        }
+      } else if (geomRaw && typeof geomRaw === 'object' && Array.isArray((geomRaw as any).coordinates)) {
+        geometry = geomRaw as { type: string; coordinates: number[] };
+      } else {
+        continue;
+      }
+
+      const { geometry: _g, _id: _i, ...props } = rec as Record<string, unknown> & { geometry?: string; _id?: number };
+      const feature: ArcGISFeature = {
+        type: 'Feature',
+        geometry,
+        properties: { ...props } as Record<string, any>,
+      };
+      const transformed =
+        source.type === 'address' ? transformAddress(feature, source) : feature;
+      allFeatures.push(transformed);
+    }
+
+    console.log(`    Received ${records.length} features (total: ${allFeatures.length})`);
+    if (maxRecords != null || records.length < CKAN_PAGE_SIZE) break;
+    offset += records.length;
+    await sleep(150);
+  }
+
+  console.log(`  Total pages: ${pageCount}`);
+  console.log(`  Total features fetched: ${allFeatures.length}`);
   return allFeatures;
 }
 
@@ -1109,8 +1246,11 @@ async function ingestSource(source: MunicipalSource, dryRun: boolean): Promise<I
   };
   
   try {
-    // 1. Fetch from ArcGIS
-    const features = await fetchFromArcGIS(source);
+    // 1. Fetch (ArcGIS or CKAN)
+    const features =
+      source.api === 'ckan'
+        ? await fetchFromCKAN(source)
+        : await fetchFromArcGIS(source);
     result.fetched = features.length;
     
     // 2. Clean and filter
@@ -1135,6 +1275,38 @@ async function ingestSource(source: MunicipalSource, dryRun: boolean): Promise<I
 }
 
 // ============================================================================
+// DB TABLE CHECK (optional, before claw)
+// ============================================================================
+
+/** Verify ref_addresses_gold / ref_buildings_gold exist before ingesting. Requires DATABASE_URL. */
+async function checkGoldTablesExist(sources: MunicipalSource[]): Promise<{ ok: boolean; missing: string[] }> {
+  const required = new Set<string>();
+  if (sources.some(s => s.type === 'address')) required.add('ref_addresses_gold');
+  if (sources.some(s => s.type === 'building')) required.add('ref_buildings_gold');
+  if (required.size === 0) return { ok: true, missing: [] };
+
+  const conn = process.env.DATABASE_URL;
+  if (!conn) {
+    console.error('--check-db requires DATABASE_URL (e.g. from .env.local).');
+    process.exit(1);
+  }
+
+  const client = new pg.Client({ connectionString: conn, ssl: { rejectUnauthorized: false } });
+  try {
+    await client.connect();
+    const res = await client.query(
+      `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = ANY($1)`,
+      [Array.from(required)]
+    );
+    const present = new Set((res.rows as { table_name: string }[]).map(r => r.table_name));
+    const missing = Array.from(required).filter(t => !present.has(t));
+    return { ok: missing.length === 0, missing };
+  } finally {
+    await client.end();
+  }
+}
+
+// ============================================================================
 // MAIN ENTRY POINT
 // ============================================================================
 
@@ -1146,6 +1318,8 @@ async function main() {
       group: { type: 'string' },
       all: { type: 'boolean' },
       'dry-run': { type: 'boolean' },
+      'check-db': { type: 'boolean' },
+      sample: { type: 'string' },
       'list-sources': { type: 'boolean' },
       'list-groups': { type: 'boolean' },
       help: { type: 'boolean' },
@@ -1162,13 +1336,17 @@ Usage:
   npx tsx scripts/ingest_municipal_data.ts [options]
 
 Options:
-  --source=<id>       Ingest specific source (e.g., durham_addr)
+  --source=<id>       Ingest specific source (e.g., toronto_addresses)
   --group=<name>      Ingest a group of sources (for parallel execution)
   --all               Ingest all configured sources
   --dry-run           Fetch data but don't upload to S3
+  --check-db          Verify ref_addresses_gold (and ref_buildings_gold) exist before running (requires DATABASE_URL)
+  --sample=N          Fetch N records only and print their transformed properties (requires --source). No AWS needed.
   --list-sources      List available sources
   --list-groups       List available groups for parallel execution
   --help              Show this help
+
+Before ingesting: run Supabase migrations so ref_addresses_gold exists (needed when loading from S3 into DB). Use --check-db to verify.
 
 Groups (for --group):
   durham_york_peel    The "Big 3" Ontario neighbors
@@ -1178,6 +1356,9 @@ Groups (for --group):
   atlantic_canada     Nova Scotia, Newfoundland
 
 Examples:
+  # Toronto addresses (ArcGIS Layer 101, ~525k points) – ensure migrations applied first
+  npx tsx scripts/ingest_municipal_data.ts --source=toronto_addresses --check-db
+
   # Ingest Durham addresses
   npx tsx scripts/ingest_municipal_data.ts --source=durham_addr
 
@@ -1185,7 +1366,10 @@ Examples:
   npx tsx scripts/ingest_municipal_data.ts --source=durham_bldg
 
   # Test without uploading
-  npx tsx scripts/ingest_municipal_data.ts --source=durham_addr --dry-run
+  npx tsx scripts/ingest_municipal_data.ts --source=toronto_addresses --dry-run
+
+  # Verify fields locally (no AWS): fetch 5 records and print properties
+  npx tsx scripts/ingest_municipal_data.ts --source=toronto_addresses_ckan --sample=5
 
   # Ingest all of Western Canada (parallel execution)
   npx tsx scripts/ingest_municipal_data.ts --group=western_canada
@@ -1228,6 +1412,36 @@ Environment Variables:
     });
     process.exit(0);
   }
+
+  // --sample=N: fetch a few records and print transformed properties (no AWS, no upload)
+  if (values.sample != null) {
+    const n = Math.min(100, Math.max(1, parseInt(values.sample, 10) || 3));
+    if (!values.source) {
+      console.error('Error: --sample requires --source=<id>');
+      console.log('Example: npx tsx scripts/ingest_municipal_data.ts --source=toronto_addresses_ckan --sample=5');
+      process.exit(1);
+    }
+    const source = MUNICIPAL_SOURCES.find(s => s.id === values.source);
+    if (!source) {
+      console.error(`Unknown source: ${values.source}`);
+      process.exit(1);
+    }
+    console.log(`\nSample mode: fetching up to ${n} records from ${source.name} (${source.id})\n`);
+    const features =
+      source.api === 'ckan'
+        ? await fetchFromCKAN(source, n)
+        : await fetchFromArcGIS(source, n);
+    const { cleaned } = cleanFeatures(features, source);
+    const sample = cleaned.slice(0, n);
+    const out = sample.map(f => ({
+      properties: f.properties,
+      geometry: { type: f.geometry.type, coordinates: f.geometry.coordinates },
+    }));
+    console.log('\n--- Transformed features (properties + geometry) ---\n');
+    console.log(JSON.stringify(out, null, 2));
+    console.log('\n--- Required for load_gold_direct: street_number, street_name, city (and geom) ---');
+    process.exit(0);
+  }
   
   // Validate AWS credentials
   if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) {
@@ -1268,6 +1482,15 @@ Environment Variables:
     console.log('Use --list-sources to see available sources');
     console.log('Use --list-groups to see available groups');
     process.exit(1);
+  }
+
+  if (values['check-db']) {
+    const check = await checkGoldTablesExist(sources);
+    if (!check.ok) {
+      console.error(`Missing table(s): ${check.missing.join(', ')}. Run Supabase migrations first (e.g. supabase db push).`);
+      process.exit(1);
+    }
+    console.log('✓ DB check passed:', [...(sources.some(s => s.type === 'address') ? ['ref_addresses_gold'] : []), ...(sources.some(s => s.type === 'building') ? ['ref_buildings_gold'] : [])].join(', '));
   }
   
   const dryRun = values['dry-run'] || false;

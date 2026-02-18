@@ -75,17 +75,19 @@ async function loadGoldParallel(type: 'address' | 'building') {
           
           if (type === 'address') {
             // Skip records with missing required fields
-            const streetName = p.street_name || p.ST_NAME || p.LF_NAME || p.ROAD_NAME;
-            const streetNumber = p.street_num || p.CIVIC_NUM || p.HI_NUM || p.HI_NUM_NO || p.street_number;
+            const streetName = p.street_name || p.LINEAR_NAME_FULL || p.ST_NAME || p.LF_NAME || p.ROAD_NAME;
+            const streetNumber = p.street_number || p.street_num || p.ADDRESS_NUMBER || p.CIVIC_NUM || p.HI_NUM || p.HI_NUM_NO;
             const city = p.city || p.MUNICIPALITY || p.TOWN || 'Toronto';
+            const province = p.province || p.PROVINCE || 'ON';
+            const country = p.country || p.COUNTRY || 'CA';
             
             if (!streetName || !streetNumber || !city) {
               continue; // Skip this record
             }
             
-            valuePlaceholders.push(`($${paramIdx}, $${paramIdx+1}, $${paramIdx+2}, $${paramIdx+3}, $${paramIdx+4}, ST_SetSRID(ST_GeomFromGeoJSON($${paramIdx+5}), 4326))`);
-            values.push(sourceId, streetNumber, streetName, p.unit || p.UNIT || p.SUITE || null, city, g);
-            paramIdx += 6;
+            valuePlaceholders.push(`($${paramIdx}, $${paramIdx+1}, $${paramIdx+2}, $${paramIdx+3}, $${paramIdx+4}, $${paramIdx+5}, $${paramIdx+6}, ST_SetSRID(ST_GeomFromGeoJSON($${paramIdx+7}), 4326))`);
+            values.push(sourceId, streetNumber, streetName, p.unit || p.UNIT || p.SUITE || null, city, province, country, g);
+            paramIdx += 8;
           } else {
             valuePlaceholders.push(`($${paramIdx}, $${paramIdx+1}, $${paramIdx+2}, ST_SetSRID(ST_Multi(ST_GeomFromGeoJSON($${paramIdx+3})), 4326))`);
             values.push(sourceId, p.GlobalID || p.OBJECTID || p.id, p.ShapeSTArea || p.area || 0, g);
@@ -100,7 +102,7 @@ async function loadGoldParallel(type: 'address' | 'building') {
         }
         
         const cols = type === 'address' 
-          ? '(source_id, street_number, street_name, unit, city, geom)'
+          ? '(source_id, street_number, street_name, unit, city, province, country, geom)'
           : '(source_id, external_id, area_sqm, geom)';
         
         const query = `INSERT INTO ${table} ${cols} VALUES ${valuePlaceholders.join(',')}`;
