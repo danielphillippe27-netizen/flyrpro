@@ -7,6 +7,7 @@ export async function GET(request: NextRequest) {
   // Extract all possible params first for logging/debugging
   const rawId = searchParams.get('id');
   const campaignId = searchParams.get('campaignId');
+  const isBasicQr = searchParams.get('basic') === 'true';
   const addressLine = searchParams.get('address') || searchParams.get('AddressLine');
   const city = searchParams.get('city') || searchParams.get('City');
   const province = searchParams.get('province') || searchParams.get('Province');
@@ -145,6 +146,36 @@ export async function GET(request: NextRequest) {
       
       if (!addressId) {
         console.error('Failed to resolve address for Canva-style QR:', { campaignId, addressLine, streetPart, postalCode });
+      }
+    }
+
+    // Basic QR: campaign-level scan (no address) — track and redirect
+    if (!addressId && campaignId && isBasicQr) {
+      const { data: campaign, error: campaignErr } = await supabase
+        .from('campaigns')
+        .select('id, video_url, scans')
+        .eq('id', campaignId)
+        .single();
+
+      if (!campaignErr && campaign) {
+        try {
+          await supabase.from('scan_events').insert({
+            campaign_id: campaignId,
+            address_id: null,
+            building_id: null,
+            scanned_at: new Date().toISOString(),
+          });
+        } catch (e) {
+          console.error('Error inserting basic QR scan event:', e);
+        }
+        try {
+          const currentScans = (campaign.scans ?? 0) + 1;
+          await supabase.from('campaigns').update({ scans: currentScans }).eq('id', campaignId);
+        } catch (e) {
+          console.error('Error incrementing campaign scans:', e);
+        }
+        const redirectUrl = campaign.video_url?.trim() || process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin;
+        return NextResponse.redirect(redirectUrl, { status: 302 });
       }
     }
 

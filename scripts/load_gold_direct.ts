@@ -1,6 +1,7 @@
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import path from 'path';
 import pg from 'pg';
+import { parseArgs } from 'util';
 import dotenv from 'dotenv';
 
 // Load .env.local first (where AWS creds / DATABASE_URL typically live), then .env
@@ -138,7 +139,20 @@ async function loadGoldParallel(type: 'address' | 'building') {
 }
 
 (async () => {
-  await loadGoldParallel('building');
-  await loadGoldParallel('address');
+  const { values } = parseArgs({
+    args: process.argv.slice(2),
+    options: {
+      'address-only': { type: 'boolean' },
+      'building-only': { type: 'boolean' },
+    },
+  });
+  if (values['address-only']) {
+    await loadGoldParallel('address');
+  } else if (values['building-only']) {
+    await loadGoldParallel('building');
+  } else {
+    await loadGoldParallel('building');
+    await loadGoldParallel('address');
+  }
   await pool.end();
 })();

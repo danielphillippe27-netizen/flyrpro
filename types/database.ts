@@ -77,6 +77,9 @@ export interface CampaignV2 {
   status: CampaignStatus;
   seed_query?: string;
   video_url?: string; // Optional video URL to redirect to when QR code is scanned
+  notes?: string;
+  scripts?: string;
+  flyer_url?: string; // URL of uploaded flyer image/PDF
   territory_boundary?: {
     type: 'Polygon';
     coordinates: number[][][];
@@ -131,6 +134,20 @@ export interface CampaignAddress {
   distance_m?: number | null; // Walking distance from depot to this stop
   // Address map status (from address_statuses): none | no_answer | delivered | talked | appointment | do_not_knock | future_seller | hot_lead
   address_status?: string;
+}
+
+export interface CampaignContact {
+  id: string;
+  campaign_id: string;
+  address_id?: string | null;
+  name?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  last_contacted_at?: string | null;
+  interest_level?: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface Coordinate {
@@ -369,11 +386,14 @@ export interface UserStats {
 }
 
 export type LeaderboardSortBy = 'flyers' | 'conversations' | 'leads' | 'distance' | 'time';
+export type LeaderboardTimeframe = 'day' | 'week' | 'month' | 'year' | 'all_time';
 
 export interface LeaderboardEntry {
   id: string;
   user_id: string;
   user_email: string;
+  name: string;
+  avatar_url: string | null;
   flyers: number;
   conversations: number;
   leads: number;

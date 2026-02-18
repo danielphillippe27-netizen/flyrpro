@@ -425,7 +425,7 @@ export function CampaignDetailMapView({
     };
 
     const buildAddressPointsGeoJSON = (): GeoJSON.FeatureCollection | null => {
-      const radiusMeters = 4;
+      const radiusMeters = 2.5;
       const steps = 24;
       const features: GeoJSON.Feature<GeoJSON.Polygon>[] = [];
       for (const addr of addresses) {
@@ -522,7 +522,7 @@ export function CampaignDetailMapView({
             minzoom: 12,
             paint: {
               'fill-extrusion-color': getColorExpression(),
-              'fill-extrusion-height': 10,
+              'fill-extrusion-height': 7.5,
               'fill-extrusion-base': 0,
               'fill-extrusion-opacity': 1,
               'fill-extrusion-vertical-gradient': true,
@@ -851,25 +851,15 @@ export function CampaignDetailMapView({
                 Addresses
               </button>
             </div>
-            {hasMapBoundary && (
+            {hasMapBoundary && hasRawAndSnapped && (
               <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 bg-white/90 dark:bg-black/80 backdrop-blur-sm shadow-sm overflow-hidden">
                 <button
                   type="button"
-                  onClick={handleSnapToRoads}
-                  disabled={snapping}
-                  className="px-3 py-2 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
+                  onClick={() => setShowRawBoundary((v) => !v)}
+                  className="px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
                 >
-                  {snapping ? 'Snapping…' : 'Snap to Roads'}
+                  {showRawBoundary ? 'Snapped' : 'Raw'}
                 </button>
-                {hasRawAndSnapped && (
-                  <button
-                    type="button"
-                    onClick={() => setShowRawBoundary((v) => !v)}
-                    className="px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 border-l border-gray-200 dark:border-gray-700"
-                  >
-                    {showRawBoundary ? 'Snapped' : 'Raw'}
-                  </button>
-                )}
               </div>
             )}
             {/* Parcels toggle - only show if parcels exist for this campaign */}

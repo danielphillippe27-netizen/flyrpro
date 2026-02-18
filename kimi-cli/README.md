@@ -24,13 +24,24 @@ npm link
 
 ## Deploy
 
+**First-time** (creates ECR repo, IAM role, Lambda, Function URL):
+
 ```bash
 kimi-deploy
 # or
 npx kimi-deploy
 ```
 
-Follow the prompts. For non-interactive deploy (e.g. with admin profile), set env vars and run:
+Follow the prompts.
+
+**Redeploy** (update Lambda code only, e.g. after changing `templates/lambda/index.js` for Silver provinces):
+
+```bash
+cd kimi-cli
+./redeploy.sh
+```
+
+Requires AWS CLI and Docker. Override with `KIMI_FUNCTION_NAME`, `AWS_REGION` if needed. For non-interactive deploy (e.g. with admin profile), set env vars and run:
 
 ```bash
 KIMI_FUNCTION_NAME=flyr-slice-lambda \

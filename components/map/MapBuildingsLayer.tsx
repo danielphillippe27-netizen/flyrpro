@@ -24,7 +24,7 @@ const defaultStatusFilters: StatusFilters = {
 };
 
 /** Scale factor for building footprints (1 = unchanged, <1 = skinnier). */
-const FOOTPRINT_SCALE = 0.65;
+const FOOTPRINT_SCALE = 1;
 
 /**
  * Scale a polygon ring toward a centroid by a factor (in place).
@@ -253,8 +253,8 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
               status: addr.visited ? 'visited' : 'not_visited',
               scans_total: addr.scans || 0,
               qr_scanned: (addr.scans || 0) > 0 || !!addr.last_scanned_at,
-              height: 10,
-              height_m: 10,
+              height: 14,
+              height_m: 14,
               feature_type: 'address_point',
             } as BuildingProperties,
           };
@@ -652,7 +652,7 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
           paint: {
             'fill-extrusion-color': getColorExpression(),
             'fill-extrusion-vertical-gradient': true,
-            'fill-extrusion-height': ['coalesce', ['get', 'height'], ['get', 'height_m'], 10] as any,
+            'fill-extrusion-height': ['coalesce', ['get', 'height'], ['get', 'height_m'], 14] as any,
             'fill-extrusion-base': 0,
             'fill-extrusion-opacity': 1.0,
           },
@@ -678,7 +678,7 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
               ? ['all', ['==', ['geometry-type'], 'Point'], filterExpr]
               : ['==', ['geometry-type'], 'Point'],
             paint: {
-              'circle-radius': 6,
+              'circle-radius': 5,
               'circle-color': getColorExpression(),
               'circle-opacity': 0.9,
               'circle-stroke-width': 1.5,
@@ -1010,7 +1010,7 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
               paint: {
                 'fill-extrusion-color': getColorExpression(),
                 'fill-extrusion-vertical-gradient': true,
-                'fill-extrusion-height': currentPaint.height || ['coalesce', ['get', 'height'], ['get', 'height_m'], 10],
+                'fill-extrusion-height': currentPaint.height || ['coalesce', ['get', 'height'], ['get', 'height_m'], 14],
                 'fill-extrusion-base': currentPaint.base || 0,
                 'fill-extrusion-opacity': currentPaint.opacity || 1.0,
               },

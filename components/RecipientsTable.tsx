@@ -90,7 +90,6 @@ export function RecipientsTable({ recipients }: RecipientsTableProps) {
         <TableHeader>
           <TableRow>
             <TableHead>Address</TableHead>
-            <TableHead>Postal Code</TableHead>
             <TableHead>QR Code</TableHead>
             <TableHead>Status</TableHead>
             <TableHead>Actions</TableHead>
@@ -104,7 +103,6 @@ export function RecipientsTable({ recipients }: RecipientsTableProps) {
                   ? `${recipient.house_number} ${recipient.street_name}`
                   : recipient.address_line || 'N/A'}
               </TableCell>
-              <TableCell>{recipient.postal_code || '-'}</TableCell>
               <TableCell className="px-6 py-4 whitespace-nowrap">
                 {recipient.qr_code_base64 ? (
                   <div className="flex items-center">

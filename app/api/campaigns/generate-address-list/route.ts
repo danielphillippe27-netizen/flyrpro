@@ -198,10 +198,34 @@ export async function POST(request: NextRequest) {
           const addressData = await TileLambdaService.downloadAddresses(snapshot.urls.addresses);
           addressFeatures = addressData.features || [];
           console.log(`[generate-address-list] Found ${addressFeatures.length} addresses from Lambda`);
+          // Store snapshot so provision can reuse (avoid duplicate Lambda call)
+          await supabaseAdmin.from('campaign_snapshots').upsert({
+            campaign_id,
+            bucket: snapshot.bucket,
+            prefix: snapshot.prefix,
+            buildings_key: snapshot.s3_keys.buildings,
+            addresses_key: snapshot.s3_keys.addresses,
+            roads_key: snapshot.s3_keys.roads ?? null,
+            metadata_key: snapshot.s3_keys.metadata,
+            buildings_url: snapshot.urls.buildings,
+            addresses_url: snapshot.urls.addresses,
+            roads_url: snapshot.urls.roads ?? null,
+            metadata_url: snapshot.urls.metadata,
+            buildings_count: snapshot.counts.buildings,
+            addresses_count: snapshot.counts.addresses,
+            roads_count: snapshot.counts.roads ?? 0,
+            overture_release: snapshot.metadata?.overture_release ?? null,
+            expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+          }, { onConflict: 'campaign_id' });
         } catch (err: any) {
           console.error('[generate-address-list] Lambda polygon error:', err);
+          const msg = err.message || String(err);
+          const is502 = msg.includes('502');
+          const userMessage = is502
+            ? 'Address service temporarily failed (502). If this persists, the Lambda may be timing out or the Silver address file may be missing—check CloudWatch Logs for flyr-slice-lambda.'
+            : `Address data error: ${msg}`;
           return NextResponse.json(
-            { error: `Address data error: ${err.message}` },
+            { error: userMessage },
             { status: 500 }
           );
         }
@@ -240,6 +264,25 @@ export async function POST(request: NextRequest) {
         const allFeatures = addressData.features || [];
         addressFeatures = sortByDistanceAndTake(allFeatures, coordinates.lat, coordinates.lon, count);
         console.log(`[generate-address-list] Found ${addressFeatures.length} nearest addresses`);
+        // Store snapshot so provision can reuse (avoid duplicate Lambda call)
+        await supabaseAdmin.from('campaign_snapshots').upsert({
+          campaign_id,
+          bucket: snapshot.bucket,
+          prefix: snapshot.prefix,
+          buildings_key: snapshot.s3_keys.buildings,
+          addresses_key: snapshot.s3_keys.addresses,
+          roads_key: snapshot.s3_keys.roads ?? null,
+          metadata_key: snapshot.s3_keys.metadata,
+          buildings_url: snapshot.urls.buildings,
+          addresses_url: snapshot.urls.addresses,
+          roads_url: snapshot.urls.roads ?? null,
+          metadata_url: snapshot.urls.metadata,
+          buildings_count: snapshot.counts.buildings,
+          addresses_count: snapshot.counts.addresses,
+          roads_count: snapshot.counts.roads ?? 0,
+          overture_release: snapshot.metadata?.overture_release ?? null,
+          expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        }, { onConflict: 'campaign_id' });
       } catch (err: any) {
         console.error('[generate-address-list] Lambda closest-home error:', err);
         return NextResponse.json(

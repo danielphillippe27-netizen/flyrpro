@@ -492,7 +492,7 @@ export function FlyrMapView() {
     };
 
     const buildAddressPointsGeoJSON = (): GeoJSON.FeatureCollection | null => {
-      const radiusMeters = 4 * (2 / 3);
+      const radiusMeters = 2.5 * (2 / 3);
       const steps = 24;
       const features: GeoJSON.Feature<GeoJSON.Polygon>[] = [];
       for (const addr of campaignAddresses) {
@@ -584,7 +584,7 @@ export function FlyrMapView() {
             minzoom: 12,
             paint: {
               'fill-extrusion-color': getColorExpression() as string[],
-              'fill-extrusion-height': 10,
+              'fill-extrusion-height': 7.5,
               'fill-extrusion-base': 0,
               'fill-extrusion-opacity': 1,
               'fill-extrusion-vertical-gradient': true,

@@ -8,12 +8,12 @@
 /**
  * Control whether building unit polygons are persisted to the database.
  * When false: Analysis runs but no units are saved (address linking only).
- * When true: Full townhouse splitting with unit persistence (legacy behavior).
- * 
- * Default: false (disabled in production until v2 splitting is ready)
+ * When true: Full townhouse splitting with unit persistence.
+ *
+ * Default: true (enabled). Set ENABLE_UNIT_PERSISTENCE=false to disable.
  */
 export function isUnitPersistenceEnabled(): boolean {
-  return process.env.ENABLE_UNIT_PERSISTENCE === 'true';
+  return process.env.ENABLE_UNIT_PERSISTENCE !== 'false';
 }
 
 /**

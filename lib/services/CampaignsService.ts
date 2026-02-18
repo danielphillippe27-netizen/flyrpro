@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/client';
-import type { CampaignV2, CampaignAddress, QRCode } from '@/types/database';
+import type { CampaignV2, CampaignAddress, CampaignContact, QRCode } from '@/types/database';
 import type { CreateCampaignPayload } from '@/types/campaigns';
 import { QRCodeService } from '@/lib/services/QRCodeService';
 import type { QRCodeWithScanStatus } from '@/lib/services/QRCodeService';
@@ -159,6 +159,61 @@ export class CampaignsService {
     }
   }
 
+  static async fetchCampaignContacts(campaignId: string): Promise<CampaignContact[]> {
+    const { data, error } = await this.client
+      .from('campaign_contacts')
+      .select('*')
+      .eq('campaign_id', campaignId)
+      .order('updated_at', { ascending: false });
+
+    if (error) {
+      console.warn('fetchCampaignContacts:', formatError(error));
+      return [];
+    }
+    return (data || []) as CampaignContact[];
+  }
+
+  static async createCampaignContact(
+    campaignId: string,
+    contact: Omit<CampaignContact, 'id' | 'campaign_id' | 'created_at' | 'updated_at'>
+  ): Promise<CampaignContact> {
+    const { data, error } = await this.client
+      .from('campaign_contacts')
+      .insert({
+        campaign_id: campaignId,
+        name: contact.name ?? null,
+        phone: contact.phone ?? null,
+        email: contact.email ?? null,
+        address: contact.address ?? null,
+        address_id: contact.address_id ?? null,
+        last_contacted_at: contact.last_contacted_at ?? null,
+        interest_level: contact.interest_level ?? null,
+        updated_at: new Date().toISOString(),
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data as CampaignContact;
+  }
+
+  static async updateCampaignContact(
+    id: string,
+    updates: Partial<Pick<CampaignContact, 'name' | 'phone' | 'email' | 'address' | 'last_contacted_at' | 'interest_level' | 'address_id'>>
+  ): Promise<void> {
+    const { error } = await this.client
+      .from('campaign_contacts')
+      .update({ ...updates, updated_at: new Date().toISOString() })
+      .eq('id', id);
+
+    if (error) throw error;
+  }
+
+  static async deleteCampaignContact(id: string): Promise<void> {
+    const { error } = await this.client.from('campaign_contacts').delete().eq('id', id);
+    if (error) throw error;
+  }
+
   /**
    * @deprecated This method is deprecated. Use fetchAddresses() instead.
    * CSV uploads now go directly to campaign_addresses table.
@@ -295,25 +350,11 @@ export class CampaignsService {
           .from('campaign_addresses')
           .select('*', { count: 'exact', head: true })
           .eq('campaign_id', campaignId);
-        
-        // Check legacy buildings table
-        const { count: legacyBuildingCount } = await this.client
-          .from('buildings')
-          .select('*', { count: 'exact', head: true })
-          .eq('campaign_id', campaignId);
-        
-        // Check new snapshot-based architecture (S3 stored buildings)
-        const { data: snapshot } = await this.client
-          .from('campaign_snapshots')
-          .select('buildings_count')
-          .eq('campaign_id', campaignId)
-          .maybeSingle();
-        
-        const buildingCount = legacyBuildingCount || snapshot?.buildings_count || 0;
 
         return {
           addresses: addressCount || 0,
-          buildings: buildingCount,
+          contacts: 0,
+          contacted: 0,
           visited: 0,
           scanned: 0,
           scan_rate: 0,
@@ -323,7 +364,8 @@ export class CampaignsService {
         console.error('Fallback stats query failed:', formatError(fallbackError));
         return {
           addresses: 0,
-          buildings: 0,
+          contacts: 0,
+          contacted: 0,
           visited: 0,
           scanned: 0,
           scan_rate: 0,
@@ -334,42 +376,39 @@ export class CampaignsService {
 
     // Handle case where data might be a string (JSONB serialization)
     const stats = typeof data === 'string' ? JSON.parse(data) : data;
-    
-    // If RPC returns 0 buildings, check snapshot (Gold Standard architecture)
-    let buildingCount = stats?.buildings || 0;
-    if (buildingCount === 0) {
-      try {
-        const { data: snapshot } = await this.client
-          .from('campaign_snapshots')
-          .select('buildings_count')
-          .eq('campaign_id', campaignId)
-          .maybeSingle();
-        buildingCount = snapshot?.buildings_count || 0;
-      } catch {
-        // Ignore snapshot lookup errors
-      }
-    }
-    
+
+    const totalAddresses = stats?.addresses || 0;
+    const visitedCount = stats?.visited || 0;
+    const scannedCount = stats?.scanned || 0;
+    const contactedCount = stats?.contacted || stats?.buildings || 0;
+    const progressPct = totalAddresses > 0
+      ? Math.round((visitedCount / totalAddresses) * 100)
+      : 0;
+    const scanRate = totalAddresses > 0
+      ? Math.round((scannedCount / totalAddresses) * 100)
+      : 0;
+
     return {
-      addresses: stats?.addresses || 0,
-      buildings: buildingCount,
-      visited: stats?.visited || 0,
-      scanned: stats?.scanned || 0,
-      scan_rate: stats?.scan_rate || 0,
-      progress_pct: stats?.progress_pct || 0,
+      addresses: totalAddresses,
+      contacted: contactedCount,
+      visited: visitedCount,
+      scanned: scannedCount,
+      scan_rate: stats?.scan_rate || scanRate,
+      progress_pct: progressPct,
     };
   }
 }
 
 /**
- * Surgical campaign statistics from rpc_get_campaign_stats
+ * Campaign statistics (lead-centric)
  */
 export interface CampaignStats {
-  addresses: number;    // Total human leads (campaign_addresses count)
-  buildings: number;    // Total physical targets (buildings count)
-  visited: number;      // Doors knocked (buildings with status != available/default)
-  scanned: number;      // Addresses with at least one scan
-  scan_rate: number;    // Percentage of addresses scanned
-  progress_pct: number; // Percentage of buildings visited
+  addresses: number;    // Addresses in campaign (territory)
+  contacts: number;     // Total leads = count of campaign_contacts (0 until user adds)
+  contacted: number;    // Leads with a status set (talked, appointment, hot_lead, etc.)
+  visited: number;      // Leads marked as visited
+  scanned: number;      // Leads with at least one scan
+  scan_rate: number;    // Percentage of leads scanned
+  progress_pct: number; // Percentage of leads visited
 }
 

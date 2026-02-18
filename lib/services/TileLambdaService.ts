@@ -142,7 +142,17 @@ export class TileLambdaService {
     if (!response.ok) {
       const errorText = await response.text();
       console.error('[TileLambda] Lambda error:', response.status, errorText);
-      throw new Error(`Lambda failed (${response.status}): ${errorText}`);
+      let message = errorText;
+      try {
+        const errJson = JSON.parse(errorText) as { error?: string; message?: string };
+        message = errJson.error ?? errJson.message ?? errorText;
+      } catch {
+        // keep errorText
+      }
+      if (response.status === 502) {
+        console.error('[TileLambda] 502 usually means Lambda crashed or timed out. Check CloudWatch Logs for the function.');
+      }
+      throw new Error(`Lambda failed (${response.status}): ${message}`);
     }
 
     const result: LambdaSnapshotResponse = await response.json();

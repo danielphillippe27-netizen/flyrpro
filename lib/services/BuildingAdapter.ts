@@ -84,11 +84,13 @@ export class BuildingAdapter {
 
   /**
    * Fetch and normalize from either source
-   * This is the main entry point for the adapter pattern
+   * This is the main entry point for the adapter pattern.
+   * When preFetchedBuildingsGeo is provided (e.g. from parallel S3 fetch), skips building download.
    */
   static async fetchAndNormalize(
     goldBuildings: GoldBuildingRow[] | null | undefined,
-    snapshot: { urls: { buildings: string }; metadata?: { overture_release?: string } } | null
+    snapshot: { urls: { buildings: string }; metadata?: { overture_release?: string } } | null,
+    preFetchedBuildingsGeo?: unknown
   ): Promise<{ buildings: StandardBuildingCollection; overtureRelease: string; source: 'gold' | 'lambda' }> {
     // Gold path: Database rows
     if (goldBuildings && goldBuildings.length > 0) {
@@ -100,16 +102,21 @@ export class BuildingAdapter {
       };
     }
 
-    // Silver path: Download from S3
+    // Silver path: use pre-fetched GeoJSON or download from S3
     if (snapshot) {
-      console.log(`[BuildingAdapter] Fetching from Lambda: ${snapshot.urls.buildings}`);
-      const response = await fetch(snapshot.urls.buildings);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch buildings: ${response.status}`);
+      let geojson: any;
+      if (preFetchedBuildingsGeo != null) {
+        geojson = preFetchedBuildingsGeo;
+        console.log(`[BuildingAdapter] Using ${geojson?.features?.length ?? 0} pre-fetched Lambda buildings`);
+      } else {
+        console.log(`[BuildingAdapter] Fetching from Lambda: ${snapshot.urls.buildings}`);
+        const response = await fetch(snapshot.urls.buildings);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch buildings: ${response.status}`);
+        }
+        geojson = await response.json();
+        console.log(`[BuildingAdapter] Downloaded ${geojson.features?.length || 0} Lambda buildings`);
       }
-      const geojson = await response.json();
-      console.log(`[BuildingAdapter] Downloaded ${geojson.features?.length || 0} Lambda buildings`);
-      
       return {
         buildings: this.fromLambdaGeoJSON(geojson),
         overtureRelease: snapshot.metadata?.overture_release || '2026-01-21.0',

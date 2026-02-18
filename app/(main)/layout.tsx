@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { getClientAsync } from '@/lib/supabase/client';
-import { Home, Map, Trophy, Users, Settings, Target, Hexagon, Gauge, Plug, CircleDollarSign, CreditCard } from 'lucide-react';
+import { Home, Map, Trophy, Users, Settings, Target, Gauge, Plug, CircleDollarSign, CreditCard } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import Image from 'next/image';
 
@@ -14,7 +14,6 @@ const SIDEBAR_EXPANDED_W = 160;   // 10rem – icons + labels
 const tabs = [
   { href: '/home', icon: Home, label: 'Home' },
   { href: '/campaigns', icon: Target, label: 'Campaigns' },
-  { href: '/farms', icon: Hexagon, label: 'Territories' },
   { href: '/map', icon: Map, label: 'Map' },
   { href: '/leads', icon: Users, label: 'Leads' },
   { href: '/leaderboard', icon: Trophy, label: 'Leaderboard' },
@@ -46,34 +45,32 @@ export default function MainLayout({
     <div className="flex flex-row h-screen">
       {/* Left Sidebar – FLYR logo at top, spaced nav below */}
       <nav
-        className="fixed left-0 top-0 bottom-0 bg-white dark:bg-sidebar z-50 flex flex-col py-4 pl-0 pr-0 transition-[width] duration-200 ease-out"
+        className="fixed left-0 top-0 bottom-0 bg-white dark:bg-sidebar border-r border-border/50 z-50 flex flex-col py-3 pl-0 pr-0 transition-[width] duration-200 ease-out"
         style={{ width: sidebarExpanded ? SIDEBAR_EXPANDED_W : SIDEBAR_COLLAPSED_W }}
         onMouseEnter={() => setSidebarExpanded(true)}
         onMouseLeave={() => setSidebarExpanded(false)}
       >
-        {/* FLYR logo at top of sidebar – no right padding so content meets main area */}
-        <div className={cn('flex items-center shrink-0 mb-6 w-full', sidebarExpanded ? 'px-3 justify-start' : 'justify-center px-0')}>
-          <Link href="/home" className="flex items-center gap-2 min-h-[40px] rounded-lg w-full px-2 hover:opacity-90 transition-opacity">
+        <div className={cn('flex items-center shrink-0 mb-1 w-full', sidebarExpanded ? 'px-3 justify-start' : 'justify-center px-0')}>
+          <Link href="/home" className="flex items-center gap-2 min-h-[36px] rounded-lg w-full px-2 hover:opacity-90 transition-opacity">
             <Image
               src="/flyr-logo-black.svg"
               alt="FLYR"
-              width={32}
-              height={32}
-              className="h-8 w-8 dark:hidden shrink-0"
+              width={28}
+              height={28}
+              className="h-7 w-7 dark:hidden shrink-0"
             />
             <Image
               src="/flyr-logo-white.svg"
               alt="FLYR"
-              width={32}
-              height={32}
-              className="h-8 w-8 hidden dark:block shrink-0"
+              width={28}
+              height={28}
+              className="h-7 w-7 hidden dark:block shrink-0"
             />
           </Link>
         </div>
-        <div className="flex flex-col items-stretch justify-start flex-1 gap-2 overflow-hidden min-h-0 w-full px-1.5">
+        <div className="flex flex-col items-stretch justify-start flex-1 gap-0.5 overflow-hidden min-h-0 w-full px-1.5">
           {tabs.map((tab) => {
             const Icon = tab.icon;
-            // Special handling for settings - don't highlight when on integrations
             const isIntegrations = tab.href === '/settings/integrations';
             const isSettings = tab.href === '/settings';
             const onIntegrations = pathname?.startsWith('/settings/integrations');
@@ -94,8 +91,8 @@ export default function MainLayout({
                 key={tab.href}
                 href={tab.href}
                 className={cn(
-                  'flex items-center gap-2.5 py-3 rounded-lg w-full transition-colors min-h-[44px]',
-                  sidebarExpanded ? 'px-3 justify-start' : 'justify-center px-0',
+                  'flex items-center gap-2 py-2 rounded-md w-full transition-colors min-h-[36px]',
+                  sidebarExpanded ? 'px-2.5 justify-start' : 'justify-center px-0',
                   isActive
                     ? 'text-primary bg-primary/10'
                     : 'text-gray-500 hover:text-gray-700 dark:text-sidebar-foreground/80 dark:hover:text-sidebar-foreground hover:bg-muted/50'
@@ -103,10 +100,10 @@ export default function MainLayout({
                 title={tab.label}
                 aria-label={tab.label}
               >
-                <Icon className="w-5 h-5 shrink-0" />
+                <Icon className="w-[18px] h-[18px] shrink-0" />
                 <span
                   className={cn(
-                    'text-sm font-medium whitespace-nowrap overflow-hidden',
+                    'text-[13px] font-medium whitespace-nowrap overflow-hidden',
                     sidebarExpanded ? 'opacity-100' : 'opacity-0 w-0 sr-only'
                   )}
                 >
@@ -128,7 +125,7 @@ export default function MainLayout({
           <div
             className={cn(
               'flex flex-col min-h-0',
-              pathname?.startsWith('/campaigns') || pathname?.startsWith('/farms')
+              pathname?.startsWith('/campaigns')
                 ? 'flex-1 flex flex-col overflow-hidden min-h-0 [&>*]:flex-1 [&>*]:min-h-0'
                 : 'min-h-full'
             )}

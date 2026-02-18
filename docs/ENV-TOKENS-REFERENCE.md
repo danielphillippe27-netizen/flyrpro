@@ -57,7 +57,7 @@ These are now **required** or explicitly checked by the app:
 |----------|-----------------|
 | `ENCRYPTION_KEY` | 32-character key for encrypting CRM API keys in DB (e.g. `openssl rand -base64 32 \| cut -c1-32`) |
 
-BoldTrail API tokens are stored encrypted in `crm_connections` (provider `boldtrail`). Follow Up Boss API keys use the same table (provider `followupboss`).
+Follow Up Boss API keys are stored encrypted in `crm_connections` (provider `followupboss`).
 
 ### Optional / other
 | Variable | Where to get it |

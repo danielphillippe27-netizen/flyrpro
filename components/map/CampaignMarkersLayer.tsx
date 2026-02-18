@@ -7,6 +7,8 @@ import { CampaignsService } from '@/lib/services/CampaignsService';
 
 const SOURCE_ID = 'campaign-markers-source';
 const LAYER_ID = 'campaign-markers-layer';
+const GLOW_LAYER_ID = 'campaign-markers-glow';
+const LABEL_LAYER_ID = 'campaign-markers-labels';
 const MAX_CAMPAIGNS = 50;
 
 export interface CampaignPoint {
@@ -123,41 +125,61 @@ export function CampaignMarkersLayer({
         });
       }
 
+      const isSelected = ['==', ['get', 'campaignId'], selectedCampaignId ?? ''];
+
+      if (!map.getLayer(GLOW_LAYER_ID)) {
+        map.addLayer({
+          id: GLOW_LAYER_ID,
+          type: 'circle',
+          source: SOURCE_ID,
+          paint: {
+            'circle-radius': ['case', isSelected, 6, 5],
+            'circle-color': '#ef4444',
+            'circle-opacity': 0.35,
+            'circle-blur': 0.8,
+          },
+        });
+      } else {
+        map.setPaintProperty(GLOW_LAYER_ID, 'circle-radius', ['case', isSelected, 6, 5]);
+      }
+
       if (!map.getLayer(LAYER_ID)) {
         map.addLayer({
           id: LAYER_ID,
           type: 'circle',
           source: SOURCE_ID,
           paint: {
-            'circle-radius': [
-              'case',
-              ['==', ['get', 'campaignId'], selectedCampaignId ?? ''],
-              12,
-              8,
-            ],
-            'circle-color': [
-              'case',
-              ['==', ['get', 'campaignId'], selectedCampaignId ?? ''],
-              '#dc2626',
-              '#ef4444',
-            ],
-            'circle-stroke-width': 2,
-            'circle-stroke-color': '#ffffff',
+            'circle-radius': ['case', isSelected, 7, 5],
+            'circle-color': ['case', isSelected, '#dc2626', '#ef4444'],
+            'circle-stroke-width': 1.5,
+            'circle-stroke-color': '#000000',
           },
         });
       } else {
-        map.setPaintProperty(LAYER_ID, 'circle-radius', [
-          'case',
-          ['==', ['get', 'campaignId'], selectedCampaignId ?? ''],
-          12,
-          8,
-        ]);
-        map.setPaintProperty(LAYER_ID, 'circle-color', [
-          'case',
-          ['==', ['get', 'campaignId'], selectedCampaignId ?? ''],
-          '#dc2626',
-          '#ef4444',
-        ]);
+        map.setPaintProperty(LAYER_ID, 'circle-radius', ['case', isSelected, 7, 5]);
+        map.setPaintProperty(LAYER_ID, 'circle-color', ['case', isSelected, '#dc2626', '#ef4444']);
+      }
+
+      if (!map.getLayer(LABEL_LAYER_ID)) {
+        map.addLayer({
+          id: LABEL_LAYER_ID,
+          type: 'symbol',
+          source: SOURCE_ID,
+          minzoom: 13,
+          layout: {
+            'text-field': ['get', 'name'],
+            'text-size': 11,
+            'text-offset': [0, -1.2],
+            'text-anchor': 'bottom',
+            'text-max-width': 10,
+            'text-allow-overlap': false,
+          },
+          paint: {
+            'text-color': '#ffffff',
+            'text-halo-color': '#000000',
+            'text-halo-width': 1,
+          },
+        });
       }
 
       const handler = (e: mapboxgl.MapLayerMouseEvent) => {
@@ -189,7 +211,9 @@ export function CampaignMarkersLayer({
         clickHandlerRef.current = null;
       }
       try {
+        if (map.getLayer(LABEL_LAYER_ID)) map.removeLayer(LABEL_LAYER_ID);
         if (map.getLayer(LAYER_ID)) map.removeLayer(LAYER_ID);
+        if (map.getLayer(GLOW_LAYER_ID)) map.removeLayer(GLOW_LAYER_ID);
         if (map.getSource(SOURCE_ID)) map.removeSource(SOURCE_ID);
       } catch {
         // Style may have been reset

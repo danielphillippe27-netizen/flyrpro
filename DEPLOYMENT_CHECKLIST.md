@@ -33,7 +33,21 @@ Run these in Supabase SQL Editor:
 ```sql
 -- File: 20260210100000_address_orphans_gold_standard.sql
 -- Function: insert_address_orphans_batch
+-- Also: 20260218000000_ensure_insert_address_orphans_batch.sql (idempotent ensure)
 ```
+
+### 4. Lambda Redeploy (Canadian Silver CSV)
+After changing `kimi-cli/templates/lambda/index.js` (e.g. Canadian provinces → `silver/ca/{province}/addresses.csv`), redeploy so the live function uses the new code:
+
+```bash
+cd kimi-cli
+# Build and deploy (exact command depends on your setup: SAM, Serverless, or manual zip)
+sam build && sam deploy
+# or: npm run deploy
+# or: upload index.js + node_modules to Lambda console
+```
+
+Until redeployed, the Lambda may still use old parquet paths and return addresses with `gers_id` (Overture) instead of StatCan Silver CSV (no gers_id).
 
 ## Test Results
 

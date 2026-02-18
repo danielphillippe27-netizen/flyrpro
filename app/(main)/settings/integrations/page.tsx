@@ -44,16 +44,6 @@ export default function IntegrationsPage() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [showApiKey, setShowApiKey] = useState(false);
 
-  // BoldTrail state
-  const [boldtrailConnectionStatus, setBoldtrailConnectionStatus] = useState<ConnectionStatus | null>(null);
-  const [boldtrailApiToken, setBoldtrailApiToken] = useState('');
-  const [isBoldtrailConnecting, setIsBoldtrailConnecting] = useState(false);
-  const [isBoldtrailTesting, setIsBoldtrailTesting] = useState(false);
-  const [isBoldtrailTestPushing, setIsBoldtrailTestPushing] = useState(false);
-  const [isBoldtrailDisconnecting, setIsBoldtrailDisconnecting] = useState(false);
-  const [boldtrailMessage, setBoldtrailMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [showBoldtrailToken, setShowBoldtrailToken] = useState(false);
-
   useEffect(() => {
     const loadData = async () => {
       const supabase = createClient();
@@ -63,7 +53,6 @@ export default function IntegrationsPage() {
       if (authUser) {
         setUser(authUser);
         await loadConnectionStatus();
-        await loadBoldtrailStatus();
       } else {
         router.push('/login');
       }
@@ -83,18 +72,6 @@ export default function IntegrationsPage() {
       }
     } catch (error) {
       console.error('Error loading connection status:', error);
-    }
-  };
-
-  const loadBoldtrailStatus = async () => {
-    try {
-      const response = await fetch('/api/integrations/boldtrail/status');
-      if (response.ok) {
-        const data = await response.json();
-        setBoldtrailConnectionStatus(data);
-      }
-    } catch (error) {
-      console.error('Error loading BoldTrail status:', error);
     }
   };
 
@@ -212,104 +189,6 @@ export default function IntegrationsPage() {
     }
   };
 
-  const handleBoldtrailConnect = async () => {
-    if (!boldtrailApiToken.trim()) {
-      setBoldtrailMessage({ type: 'error', text: 'Please enter an API token' });
-      return;
-    }
-    setIsBoldtrailConnecting(true);
-    setBoldtrailMessage(null);
-    try {
-      const response = await fetch('/api/integrations/boldtrail/connect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiToken: boldtrailApiToken.trim() }),
-      });
-      const data = await response.json();
-      if (response.ok) {
-        setBoldtrailMessage({ type: 'success', text: data.message });
-        setBoldtrailApiToken('');
-        await loadBoldtrailStatus();
-      } else {
-        setBoldtrailMessage({ type: 'error', text: data.error || 'Failed to connect' });
-      }
-    } catch {
-      setBoldtrailMessage({ type: 'error', text: 'Network error. Please try again.' });
-    } finally {
-      setIsBoldtrailConnecting(false);
-    }
-  };
-
-  const handleBoldtrailTest = async () => {
-    setIsBoldtrailTesting(true);
-    setBoldtrailMessage(null);
-    try {
-      const response = await fetch('/api/integrations/boldtrail/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      const data = await response.json();
-      if (response.ok) {
-        setBoldtrailMessage({ type: 'success', text: data.message });
-        await loadBoldtrailStatus();
-      } else {
-        setBoldtrailMessage({ type: 'error', text: data.error || 'Connection test failed' });
-      }
-    } catch {
-      setBoldtrailMessage({ type: 'error', text: 'Network error. Please try again.' });
-    } finally {
-      setIsBoldtrailTesting(false);
-    }
-  };
-
-  const handleBoldtrailTestPush = async () => {
-    setIsBoldtrailTestPushing(true);
-    setBoldtrailMessage(null);
-    try {
-      const response = await fetch('/api/integrations/boldtrail/test-push', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      const data = await response.json();
-      if (response.ok) {
-        setBoldtrailMessage({
-          type: 'success',
-          text: data.testLead ? `${data.message} Test lead: ${data.testLead.name} (${data.testLead.email})` : data.message,
-        });
-        await loadBoldtrailStatus();
-      } else {
-        setBoldtrailMessage({ type: 'error', text: data.error || 'Test push failed' });
-      }
-    } catch {
-      setBoldtrailMessage({ type: 'error', text: 'Network error. Please try again.' });
-    } finally {
-      setIsBoldtrailTestPushing(false);
-    }
-  };
-
-  const handleBoldtrailDisconnect = async () => {
-    if (!confirm('Are you sure you want to disconnect from BoldTrail?')) return;
-    setIsBoldtrailDisconnecting(true);
-    setBoldtrailMessage(null);
-    try {
-      const response = await fetch('/api/integrations/boldtrail/disconnect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      const data = await response.json();
-      if (response.ok) {
-        setBoldtrailMessage({ type: 'success', text: data.message });
-        setBoldtrailConnectionStatus({ connected: false, status: 'disconnected' });
-      } else {
-        setBoldtrailMessage({ type: 'error', text: data.error || 'Failed to disconnect' });
-      }
-    } catch {
-      setBoldtrailMessage({ type: 'error', text: 'Network error. Please try again.' });
-    } finally {
-      setIsBoldtrailDisconnecting(false);
-    }
-  };
-
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-background flex items-center justify-center">
@@ -323,7 +202,7 @@ export default function IntegrationsPage() {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-background">
       <header className="bg-white dark:bg-card border-b border-border sticky top-0 z-10">
-        <div className="max-w-4xl px-4 sm:px-6 lg:px-8 py-4">
+        <div className="max-w-4xl pl-0 pr-4 sm:pr-6 lg:pr-8 py-4">
           <div className="flex items-center gap-4">
             <Button
               variant="ghost"
@@ -339,7 +218,7 @@ export default function IntegrationsPage() {
         </div>
       </header>
       
-      <main className="max-w-4xl px-4 sm:px-6 lg:px-8 py-6">
+      <main className="max-w-4xl pl-0 pr-4 sm:pr-6 lg:pr-8 py-6">
         <div className="space-y-6">
           {/* Follow Up Boss Integration */}
           <Card>
@@ -526,185 +405,6 @@ export default function IntegrationsPage() {
                   >
                     <Plug className="w-4 h-4" />
                     {isConnecting ? 'Connecting...' : 'Connect Follow Up Boss'}
-                  </Button>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* BoldTrail Integration */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-emerald-100 dark:bg-emerald-900 rounded-lg flex items-center justify-center">
-                    <Plug className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-                  </div>
-                  <div>
-                    <CardTitle>BoldTrail</CardTitle>
-                    <CardDescription>
-                      Sync leads to BoldTrail (Inside Real Estate). Use a Contacts or All API token from Lead Engine → Lead Dropbox → My API Tokens.
-                    </CardDescription>
-                  </div>
-                </div>
-                {boldtrailConnectionStatus?.connected ? (
-                  <Badge className="bg-green-500 hover:bg-green-600 gap-1">
-                    <CheckCircle2 className="w-3 h-3" />
-                    Connected
-                  </Badge>
-                ) : (
-                  <Badge variant="outline">Not Connected</Badge>
-                )}
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {boldtrailMessage && (
-                <div className={`p-4 rounded-lg flex items-start gap-3 ${
-                  boldtrailMessage.type === 'success'
-                    ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800'
-                    : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800'
-                }`}>
-                  {boldtrailMessage.type === 'success' ? (
-                    <CheckCircle2 className="w-5 h-5 shrink-0 mt-0.5" />
-                  ) : (
-                    <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
-                  )}
-                  <p className="text-sm">{boldtrailMessage.text}</p>
-                </div>
-              )}
-
-              {boldtrailConnectionStatus?.connected ? (
-                <div className="space-y-6">
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between py-3 border-b border-gray-200 dark:border-gray-700">
-                      <div>
-                        <p className="text-sm font-medium dark:text-white">Connection Status</p>
-                        <p className="text-xs text-gray-500 dark:text-gray-400">
-                          Last tested: {boldtrailConnectionStatus.lastTestedAt
-                            ? new Date(boldtrailConnectionStatus.lastTestedAt).toLocaleString()
-                            : 'Never'}
-                        </p>
-                      </div>
-                      <Badge variant={boldtrailConnectionStatus.status === 'connected' ? 'default' : 'destructive'}>
-                        {boldtrailConnectionStatus.status}
-                      </Badge>
-                    </div>
-                    {boldtrailConnectionStatus.lastPushAt && (
-                      <div className="flex items-center justify-between py-3 border-b border-gray-200 dark:border-gray-700">
-                        <div>
-                          <p className="text-sm font-medium dark:text-white">Last Lead Push</p>
-                          <p className="text-xs text-gray-500 dark:text-gray-400">
-                            {new Date(boldtrailConnectionStatus.lastPushAt).toLocaleString()}
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                    {boldtrailConnectionStatus.lastError && (
-                      <div className="flex items-center justify-between py-3 border-b border-gray-200 dark:border-gray-700">
-                        <div>
-                          <p className="text-sm font-medium text-red-600 dark:text-red-400">Last Error</p>
-                          <p className="text-xs text-red-500 dark:text-red-400">
-                            {boldtrailConnectionStatus.lastError}
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap gap-3">
-                    <Button
-                      variant="outline"
-                      onClick={handleBoldtrailTest}
-                      disabled={isBoldtrailTesting}
-                      className="gap-2"
-                    >
-                      <RefreshCw className={`w-4 h-4 ${isBoldtrailTesting ? 'animate-spin' : ''}`} />
-                      {isBoldtrailTesting ? 'Testing...' : 'Test Connection'}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={handleBoldtrailTestPush}
-                      disabled={isBoldtrailTestPushing}
-                      className="gap-2"
-                    >
-                      <Send className={`w-4 h-4 ${isBoldtrailTestPushing ? 'animate-pulse' : ''}`} />
-                      {isBoldtrailTestPushing ? 'Sending...' : 'Send Test Lead'}
-                    </Button>
-                    <Button
-                      variant="destructive"
-                      onClick={handleBoldtrailDisconnect}
-                      disabled={isBoldtrailDisconnecting}
-                      className="gap-2"
-                    >
-                      <XCircle className="w-4 h-4" />
-                      {isBoldtrailDisconnecting ? 'Disconnecting...' : 'Disconnect'}
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-                    <div className="flex items-start gap-3">
-                      <Shield className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
-                      <div className="text-sm text-blue-700 dark:text-blue-300">
-                        <p className="font-medium mb-1">Secure Connection</p>
-                        <p>
-                          Your API token is encrypted and stored securely. We only use it to send
-                          leads to your BoldTrail account.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="boldtrail-token">BoldTrail API Token</Label>
-                    <div className="flex gap-2">
-                      <Input
-                        id="boldtrail-token"
-                        type={showBoldtrailToken ? 'text' : 'password'}
-                        placeholder="Enter your API token..."
-                        value={boldtrailApiToken}
-                        onChange={(e) => setBoldtrailApiToken(e.target.value)}
-                        className="flex-1"
-                      />
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => setShowBoldtrailToken(!showBoldtrailToken)}
-                      >
-                        {showBoldtrailToken ? 'Hide' : 'Show'}
-                      </Button>
-                    </div>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                      Create a token in BoldTrail: Lead Engine → Lead Dropbox → My API Tokens (Contacts or All scope).
-                    </p>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-2">
-                      <Switch
-                        id="show-boldtrail-token"
-                        checked={showBoldtrailToken}
-                        onCheckedChange={setShowBoldtrailToken}
-                      />
-                      <Label htmlFor="show-boldtrail-token" className="text-sm cursor-pointer">
-                        Show API token
-                      </Label>
-                    </div>
-                    <a
-                      href="https://developer.insiderealestate.com"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-sm text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
-                    >
-                      Get API token
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
-                  </div>
-                  <Button
-                    onClick={handleBoldtrailConnect}
-                    disabled={isBoldtrailConnecting || !boldtrailApiToken.trim()}
-                    className="w-full gap-2"
-                  >
-                    <Plug className="w-4 h-4" />
-                    {isBoldtrailConnecting ? 'Connecting...' : 'Connect BoldTrail'}
                   </Button>
                 </div>
               )}

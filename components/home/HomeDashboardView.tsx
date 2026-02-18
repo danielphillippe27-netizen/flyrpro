@@ -69,7 +69,7 @@ export function HomeDashboardView({ onCreateCampaign }: HomeDashboardViewProps) 
 
   if (loading && !data) {
     return (
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <div className="max-w-7xl mx-auto pl-0 pr-4 sm:pr-6 lg:pr-8 py-6">
         <DashboardSkeleton />
       </div>
     );
@@ -77,7 +77,7 @@ export function HomeDashboardView({ onCreateCampaign }: HomeDashboardViewProps) 
 
   if (error && !data) {
     return (
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <div className="max-w-7xl mx-auto pl-0 pr-4 sm:pr-6 lg:pr-8 py-6">
         <Card className="rounded-xl border border-border">
           <CardContent className="py-8 text-center">
             <p className="text-muted-foreground mb-4">{error}</p>
@@ -111,7 +111,7 @@ export function HomeDashboardView({ onCreateCampaign }: HomeDashboardViewProps) 
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+    <div className="max-w-7xl mx-auto pl-0 pr-4 sm:pr-6 lg:pr-8 py-6 space-y-6">
       <HomeHeaderRow
         firstName={user.firstName}
         doorsThisWeek={stats.doorsThisWeek}

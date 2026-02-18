@@ -114,70 +114,117 @@ export async function POST(request: NextRequest) {
       .eq('id', campaign_id);
 
     // =============================================================================
-    // GOLD STANDARD: Hybrid Provisioning - Gold First, Lambda Fallback
+    // GOLD STANDARD: Hybrid Provisioning - Reuse snapshot when possible (avoid triple Lambda)
     // =============================================================================
-    
+
     const result = await retryWithBackoff(async () => {
-      // Step 1: Try Gold Standard addresses first
-      console.log('[Provision] Step 1: Querying Gold Standard addresses...');
-      const goldResult = await GoldAddressService.getAddressesForPolygon(
-        campaign_id!,
-        polygon as GeoJSON.Polygon,
-        regionCode
-      );
-      
-      console.log(`[Provision] Gold: ${goldResult.counts.gold}, Lambda: ${goldResult.counts.lambda}, Total: ${goldResult.counts.total}`);
-      console.log(`[Provision] Source: ${goldResult.source}`);
-      
-      // Normalize addresses using Adapter Pattern
-      // Handles both Gold format (street_number, city, lat/lon) and 
-      // Lambda format (house_number, locality, geom object)
-      let addressesToInsert = AddressAdapter.normalizeArray(
-        goldResult.addresses,
-        campaign_id!
-      );
-      
-      let goldBuildings = goldResult.buildings;
-      
-      // If Gold has limited coverage, also get Lambda snapshots for buildings/roads
-      let snapshot = null;
-      if (goldResult.counts.gold < 10) {
-        console.log('[Provision] Gold coverage insufficient, getting Lambda snapshots for buildings...');
-        snapshot = await TileLambdaService.generateSnapshots(
-          polygon as GeoJSON.Polygon,
-          regionCode,
-          campaign_id!,
-          {
-            limitBuildings: 10000,
-            limitAddresses: 10000,
-            limitRoads: 5000,
-            includeRoads: true,
-          }
+      let addressesToInsert: any[] = [];
+      let goldBuildings: any[] | null = null;
+      let snapshot: Awaited<ReturnType<typeof TileLambdaService.generateSnapshots>> | null = null;
+      let addressSource: 'gold' | 'silver' | 'lambda' = 'lambda';
+      let preFetchedBuildingsGeo: unknown = undefined;
+
+      // Try to reuse existing snapshot from DB (from generate-address-list or previous provision)
+      const { data: existingSnapshotRow } = await supabase
+        .from('campaign_snapshots')
+        .select('buildings_url, addresses_url, metadata_url, roads_url, overture_release, expires_at')
+        .eq('campaign_id', campaign_id!)
+        .single();
+
+      const snapshotValid =
+        existingSnapshotRow?.buildings_url &&
+        existingSnapshotRow?.addresses_url &&
+        existingSnapshotRow?.expires_at &&
+        new Date(existingSnapshotRow.expires_at) > new Date();
+
+      if (snapshotValid) {
+        console.log('[Provision] Reusing snapshot from campaign_snapshots (skip Lambda)');
+        addressSource = 'lambda';
+        snapshot = {
+          urls: {
+            buildings: existingSnapshotRow!.buildings_url,
+            addresses: existingSnapshotRow!.addresses_url,
+            metadata: existingSnapshotRow!.metadata_url,
+            roads: existingSnapshotRow!.roads_url ?? undefined,
+          },
+          metadata: { overture_release: existingSnapshotRow!.overture_release ?? undefined },
+        } as Awaited<ReturnType<typeof TileLambdaService.generateSnapshots>>;
+        // Parallel fetch: addresses + buildings from S3 (saves ~3–8s vs sequential)
+        const [addressData, buildingsGeo] = await Promise.all([
+          TileLambdaService.downloadAddresses(existingSnapshotRow!.addresses_url),
+          fetch(existingSnapshotRow!.buildings_url).then((r) => {
+            if (!r.ok) throw new Error(`Failed to fetch buildings: ${r.status}`);
+            return r.json();
+          }),
+        ]);
+        const lambdaAddresses = TileLambdaService.convertToCampaignAddresses(
+          addressData.features,
+          campaign_id!
         );
-      } else if (!goldBuildings || goldBuildings.length === 0) {
-        // Gold has addresses but no buildings - need Lambda for building footprints
-        console.log('[Provision] Gold has addresses but no buildings, getting Lambda snapshots for building footprints...');
-        snapshot = await TileLambdaService.generateSnapshots(
-          polygon as GeoJSON.Polygon,
-          regionCode,
-          campaign_id!,
-          {
-            limitBuildings: 10000,
-            limitAddresses: 100,  // Minimal - we have Gold addresses
-            limitRoads: 5000,
-            includeRoads: true,
-          }
-        );
+        addressesToInsert = AddressAdapter.normalizeArray(lambdaAddresses, campaign_id!);
+        goldBuildings = [];
+        // Pass pre-fetched buildings so BuildingAdapter skips a second download
+        preFetchedBuildingsGeo = buildingsGeo;
       } else {
-        console.log(`[Provision] Using ${goldBuildings.length} Gold Standard buildings`);
+        // Step 1: Gold Standard first, Lambda fallback (returns snapshot when Lambda used)
+        console.log('[Provision] Step 1: Querying Gold Standard addresses...');
+        const goldResult = await GoldAddressService.getAddressesForPolygon(
+          campaign_id!,
+          polygon as GeoJSON.Polygon,
+          regionCode
+        );
+
+        console.log(`[Provision] Gold: ${goldResult.counts.gold}, Lambda: ${goldResult.counts.lambda}, Total: ${goldResult.counts.total}`);
+        console.log(`[Provision] Source: ${goldResult.source}`);
+        addressSource = goldResult.source;
+
+        addressesToInsert = AddressAdapter.normalizeArray(
+          goldResult.addresses,
+          campaign_id!
+        );
+        goldBuildings = goldResult.buildings;
+
+        // Reuse Lambda snapshot from GoldAddressService when present (avoids duplicate Lambda call)
+        if (goldResult.snapshot) {
+          snapshot = goldResult.snapshot;
+          console.log('[Provision] Using snapshot from address step for buildings (no extra Lambda call)');
+        } else if (goldResult.counts.gold < 10) {
+          console.log('[Provision] Gold coverage insufficient, getting Lambda snapshots for buildings...');
+          snapshot = await TileLambdaService.generateSnapshots(
+            polygon as GeoJSON.Polygon,
+            regionCode,
+            campaign_id!,
+            {
+              limitBuildings: 10000,
+              limitAddresses: 10000,
+              limitRoads: 5000,
+              includeRoads: true,
+            }
+          );
+        } else if (!goldBuildings || goldBuildings.length === 0) {
+          console.log('[Provision] Gold has addresses but no buildings, getting Lambda snapshots for building footprints...');
+          snapshot = await TileLambdaService.generateSnapshots(
+            polygon as GeoJSON.Polygon,
+            regionCode,
+            campaign_id!,
+            {
+              limitBuildings: 10000,
+              limitAddresses: 100,
+              limitRoads: 5000,
+              includeRoads: true,
+            }
+          );
+        } else {
+          console.log(`[Provision] Using ${goldBuildings.length} Gold Standard buildings`);
+        }
       }
-      
+
       // =============================================================================
       // ADAPTER PATTERN: Normalize buildings to standard GeoJSON format
       // This works for both Gold (DB) and Lambda (S3) sources
       // =============================================================================
-      const { buildings: normalizedBuildingsGeoJSON, overtureRelease } = 
-        await BuildingAdapter.fetchAndNormalize(goldBuildings, snapshot);
+      const { buildings: normalizedBuildingsGeoJSON, overtureRelease } =
+        await BuildingAdapter.fetchAndNormalize(goldBuildings ?? null, snapshot, preFetchedBuildingsGeo);
       
       // Debug: Log first building structure
       if (normalizedBuildingsGeoJSON.features?.length > 0) {
@@ -272,8 +319,8 @@ export async function POST(request: NextRequest) {
         console.warn('[Provision] Error updating campaign status:', updateError.message);
       }
 
-      // Store detailed snapshot info in campaign_snapshots table (only if using Lambda)
-      if (snapshot) {
+      // Store detailed snapshot info in campaign_snapshots table (only when we have a full Lambda response)
+      if (snapshot && 'bucket' in snapshot && snapshot.bucket) {
         const { error: snapshotError } = await supabase
           .from('campaign_snapshots')
           .upsert({
@@ -518,7 +565,7 @@ export async function POST(request: NextRequest) {
         addresses_saved: insertedCount,
         buildings_saved: goldBuildings?.length || snapshot?.counts?.buildings || 0,
         roads_count: snapshot?.counts?.roads || 0,
-        source: goldResult.source,
+        source: addressSource,
         links_created: spatialJoinSummary.matched,
         units_created: townhouseSummary.units_created,
         spatial_join: spatialJoinSummary,
@@ -546,9 +593,10 @@ export async function POST(request: NextRequest) {
           time_minutes: optimizedPathInfo.totalTimeMinutes,
           waypoint_count: optimizedPathInfo.waypointCount,
         } : null,
-        message: snapshot 
-          ? `Gold Standard provisioning complete: ${insertedCount} leads ready. Buildings (${snapshot.counts.buildings}) and roads (${snapshot.counts.roads}) served from S3.` +
-            (optimizedPathInfo ? ` Optimized walking loop: ${optimizedPathInfo.totalDistanceKm.toFixed(2)}km, ${optimizedPathInfo.totalTimeMinutes}min.` : '')
+        message: snapshot
+          ? `Gold Standard provisioning complete: ${insertedCount} leads ready.` +
+            (snapshot?.counts ? ` Buildings (${snapshot.counts.buildings}) and roads (${snapshot.counts.roads ?? 0}) served from S3.` : ' S3 snapshot.')
+            + (optimizedPathInfo ? ` Optimized walking loop: ${optimizedPathInfo.totalDistanceKm.toFixed(2)}km, ${optimizedPathInfo.totalTimeMinutes}min.` : '')
           : `Gold Standard provisioning complete: ${insertedCount} leads ready using municipal data.`,
       };
     });

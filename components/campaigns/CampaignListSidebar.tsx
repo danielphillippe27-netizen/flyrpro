@@ -3,7 +3,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Plus, Search, PanelLeftClose, PanelLeft } from 'lucide-react';
+import { Plus, Search, ChevronsLeft } from 'lucide-react';
 import { CampaignsService } from '@/lib/services/CampaignsService';
 import type { CampaignV2 } from '@/types/database';
 import { Button } from '@/components/ui/button';
@@ -19,23 +19,15 @@ const ACTIVE_STATUSES: CampaignV2['status'][] = ['draft', 'active', 'paused'];
 interface CampaignListSidebarProps {
   onNewCampaign?: () => void;
   collapsed?: boolean;
-  hoverExpanded?: boolean;
   onToggleCollapse?: () => void;
-  onMouseEnter?: () => void;
-  onMouseLeave?: () => void;
   width?: number;
-  stripWidth?: number;
 }
 
 export function CampaignListSidebar({
   onNewCampaign,
   collapsed = false,
-  hoverExpanded = false,
   onToggleCollapse,
-  onMouseEnter,
-  onMouseLeave,
   width = 280,
-  stripWidth = 52,
 }: CampaignListSidebarProps) {
   const pathname = usePathname();
   const [campaigns, setCampaigns] = useState<CampaignV2[]>([]);
@@ -87,78 +79,51 @@ export function CampaignListSidebar({
     ? pathname.split('/')[2]
     : null;
 
-  const isStripOnly = collapsed && !hoverExpanded;
-  const showFullContent = !isStripOnly;
-
   return (
     <aside
       className={cn(
-        'shrink-0 flex flex-col border-r border-border bg-muted/30 dark:bg-sidebar/50 transition-[width] duration-200 ease-out overflow-hidden',
+        'shrink-0 flex flex-col border-r border-border bg-white dark:bg-sidebar transition-[width] duration-200 ease-out overflow-hidden',
+        collapsed && 'border-r-0'
       )}
-      style={{ width }}
-      onMouseEnter={onMouseEnter}
-      onMouseLeave={onMouseLeave}
+      style={{ width: collapsed ? 0 : width }}
     >
-      {isStripOnly ? (
-        <div className="flex flex-col items-center justify-center py-4 h-full gap-3">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onToggleCollapse}
-            aria-label="Show campaign list"
-            title="Show campaign list"
-          >
-            <PanelLeft className="w-5 h-5" />
-          </Button>
-          <span
-            className="text-[10px] font-medium text-muted-foreground select-none"
-            style={{ writingMode: 'vertical-rl', textOrientation: 'mixed' }}
-          >
-            Campaigns
-          </span>
-        </div>
-      ) : (
+      {!collapsed && (
         <>
-          {/* Title + collapse button */}
-          <div className="p-4 pb-4 border-b border-border">
-            <div className="flex items-center justify-between gap-2 mb-3">
-              <h2 className="text-lg font-bold text-foreground truncate min-w-0">Campaigns</h2>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+          <div className="p-3 pb-3 border-b border-border">
+            <div className="flex items-center justify-end gap-2 mb-2">
+              <button
                 onClick={onToggleCollapse}
+                className="flex items-center justify-center w-[18px] h-[18px] rounded-sm bg-transparent hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0 ml-auto"
                 aria-label="Hide campaign list"
                 title="Hide campaign list"
               >
-                <PanelLeftClose className="w-4 h-4" />
-              </Button>
+                <ChevronsLeft className="w-3.5 h-3.5" />
+              </button>
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-1.5">
               <div className="relative flex-1 min-w-0">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
                 <Input
                   placeholder="Search campaigns..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  className="pl-8 h-9 text-sm bg-background border-border"
+                  className="pl-8 h-8 text-xs bg-background border-border"
                 />
               </div>
               <Button
                 size="icon"
-                className="h-9 w-9 shrink-0 bg-red-600 text-white hover:bg-red-700 rounded-md"
+                className="h-8 w-8 shrink-0 bg-red-600 text-white hover:bg-red-700 rounded-md"
                 onClick={onNewCampaign}
                 aria-label="Add campaign"
               >
-                <Plus className="w-4 h-4" />
+                <Plus className="w-3.5 h-3.5" />
               </Button>
             </div>
           </div>
 
-          {/* Active / Completed tabs – no gap before list */}
-          <div className="flex-1 flex flex-col min-h-0 px-3 pt-3">
+          <div className="flex-1 flex flex-col min-h-0 px-2 pt-2">
             <Tabs value={statusTab} onValueChange={(v) => setStatusTab(v as StatusTab)} className="flex flex-col flex-1 min-h-0 w-full">
-              <TabsList className="w-full grid grid-cols-2 h-9 bg-muted/50 dark:bg-muted/30 p-0.5 rounded-lg">
+              <TabsList className="w-full grid grid-cols-2 h-8 bg-muted/50 dark:bg-muted/30 p-0.5 rounded-lg">
                 <TabsTrigger value="active" className="text-xs font-medium rounded-md">
                   Active ({byStatus.active.length})
                 </TabsTrigger>

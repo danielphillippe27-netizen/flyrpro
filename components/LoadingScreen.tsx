@@ -45,7 +45,7 @@ export function LoadingScreen({
   }, [lottieSrc, variant, useVideo]);
 
   const showVideo = (variant === 'fullScreen' || variant === 'overlay') && useVideo;
-  const size = variant === 'inline' ? { width: 56, height: 56 } : { width: 160, height: 160 };
+  const size = variant === 'inline' ? { width: 560, height: 560 } : { width: 160, height: 160 };
 
   const media = showVideo ? (
     <video
@@ -55,7 +55,7 @@ export function LoadingScreen({
       muted
       playsInline
       className="object-contain"
-      style={variant === 'inline' ? { width: 56, height: 56 } : { maxWidth: 280, maxHeight: 280 }}
+      style={variant === 'inline' ? { width: 560, height: 560 } : { maxWidth: 280, maxHeight: 280 }}
       aria-hidden
     />
   ) : animationData ? (

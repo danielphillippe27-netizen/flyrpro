@@ -13,14 +13,297 @@ import { LoadingScreen } from '@/components/LoadingScreen';
 import { RecipientsTable } from '@/components/RecipientsTable';
 import { StatsHeader } from '@/components/StatsHeader';
 import { PaywallGuard } from '@/components/PaywallGuard';
-import { Label } from '@/components/ui/label';
 import { MissingQRModal } from '@/components/modals/MissingQRModal';
-import { NonTrackableExportModal } from '@/components/modals/NonTrackableExportModal';
-import { DeleteQRCodesButton } from '@/components/qr/DeleteQRCodesButton';
-import type { CampaignV2, CampaignAddress } from '@/types/database';
-import JSZip from 'jszip';
-import { saveAs } from 'file-saver';
+import type { CampaignV2, CampaignAddress, CampaignContact } from '@/types/database';
+import { Users, MapPin, Search, Plus, Pencil, Trash2 } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 import { createClient } from '@/lib/supabase/client';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+
+function getStatusBadge(addr: CampaignAddress) {
+  if (addr.address_status === 'hot_lead') return { label: 'Hot Lead', color: 'bg-red-500/20 text-red-400' };
+  if (addr.address_status === 'appointment') return { label: 'Appointment', color: 'bg-blue-500/20 text-blue-400' };
+  if (addr.address_status === 'talked') return { label: 'Talked', color: 'bg-emerald-500/20 text-emerald-400' };
+  if (addr.address_status === 'delivered') return { label: 'Delivered', color: 'bg-purple-500/20 text-purple-400' };
+  if (addr.address_status === 'no_answer') return { label: 'No Answer', color: 'bg-yellow-500/20 text-yellow-400' };
+  if (addr.address_status === 'do_not_knock') return { label: 'Do Not Knock', color: 'bg-zinc-500/20 text-zinc-400' };
+  if (addr.address_status === 'future_seller') return { label: 'Future Seller', color: 'bg-orange-500/20 text-orange-400' };
+  if (addr.visited) return { label: 'Visited', color: 'bg-green-500/20 text-green-400' };
+  if (addr.scans && addr.scans > 0) return { label: 'Scanned', color: 'bg-violet-500/20 text-violet-400' };
+  return { label: 'New', color: 'bg-zinc-700/50 text-zinc-400' };
+}
+
+function CampaignContactsList({
+  contacts,
+  campaignId,
+  onRefresh,
+}: {
+  contacts: CampaignContact[];
+  campaignId: string;
+  onRefresh: () => void;
+}) {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingContact, setEditingContact] = useState<CampaignContact | null>(null);
+  const [formName, setFormName] = useState('');
+  const [formPhone, setFormPhone] = useState('');
+  const [formEmail, setFormEmail] = useState('');
+  const [formAddress, setFormAddress] = useState('');
+  const [formLastContacted, setFormLastContacted] = useState('');
+  const [formInterestLevel, setFormInterestLevel] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const filtered = contacts.filter((c) => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase();
+    const name = (c.name || '').toLowerCase();
+    const phone = (c.phone || '').toLowerCase();
+    const email = (c.email || '').toLowerCase();
+    const address = (c.address || '').toLowerCase();
+    return name.includes(q) || phone.includes(q) || email.includes(q) || address.includes(q);
+  });
+
+  const openAdd = () => {
+    setEditingContact(null);
+    setFormName('');
+    setFormPhone('');
+    setFormEmail('');
+    setFormAddress('');
+    setFormLastContacted('');
+    setFormInterestLevel('');
+    setModalOpen(true);
+  };
+
+  const openEdit = (c: CampaignContact) => {
+    setEditingContact(c);
+    setFormName(c.name ?? '');
+    setFormPhone(c.phone ?? '');
+    setFormEmail(c.email ?? '');
+    setFormAddress(c.address ?? '');
+    setFormLastContacted(c.last_contacted_at ? c.last_contacted_at.slice(0, 10) : '');
+    setFormInterestLevel(c.interest_level ?? '');
+    setModalOpen(true);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      if (editingContact) {
+        await CampaignsService.updateCampaignContact(editingContact.id, {
+          name: formName || null,
+          phone: formPhone || null,
+          email: formEmail || null,
+          address: formAddress || null,
+          last_contacted_at: formLastContacted ? `${formLastContacted}T00:00:00Z` : null,
+          interest_level: formInterestLevel || null,
+        });
+      } else {
+        await CampaignsService.createCampaignContact(campaignId, {
+          name: formName || null,
+          phone: formPhone || null,
+          email: formEmail || null,
+          address: formAddress || null,
+          last_contacted_at: formLastContacted ? `${formLastContacted}T00:00:00Z` : null,
+          interest_level: formInterestLevel || null,
+        });
+      }
+      setModalOpen(false);
+      onRefresh();
+    } catch (e) {
+      console.error('Save contact:', e);
+      alert(e instanceof Error ? e.message : 'Failed to save contact');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('Delete this contact?')) return;
+    try {
+      await CampaignsService.deleteCampaignContact(id);
+      onRefresh();
+    } catch (e) {
+      console.error('Delete contact:', e);
+      alert(e instanceof Error ? e.message : 'Failed to delete contact');
+    }
+  };
+
+  const formatDate = (s: string | null | undefined) => {
+    if (!s) return '—';
+    const d = new Date(s);
+    return isNaN(d.getTime()) ? '—' : d.toLocaleDateString();
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-card p-4 rounded-xl border border-border">
+        <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
+          <div className="flex items-center gap-2">
+            <Users className="w-4 h-4 text-muted-foreground" />
+            <h2 className="text-sm font-semibold text-foreground">Campaign Leads</h2>
+            <Badge variant="secondary" className="text-xs">{contacts.length}</Badge>
+          </div>
+          <Button size="sm" onClick={openAdd}>
+            <Plus className="w-4 h-4 mr-1" />
+            Add contact
+          </Button>
+        </div>
+
+        <div className="relative mb-4">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <input
+            type="text"
+            placeholder="Search by name, phone, email, or address..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-9 pr-3 py-2 rounded-lg border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+        </div>
+
+        {filtered.length === 0 ? (
+          <div className="text-center py-8">
+            <MapPin className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
+            <p className="text-sm text-muted-foreground">
+              {searchQuery ? 'No contacts match your search.' : 'No contacts yet. Add a contact to get started.'}
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-left text-muted-foreground">
+                  <th className="pb-2 pr-3 font-medium">Name</th>
+                  <th className="pb-2 pr-3 font-medium">Phone</th>
+                  <th className="pb-2 pr-3 font-medium">Email</th>
+                  <th className="pb-2 pr-3 font-medium">Address</th>
+                  <th className="pb-2 pr-3 font-medium">Last contacted</th>
+                  <th className="pb-2 pr-3 font-medium">Interest level</th>
+                  <th className="pb-2 w-20 font-medium">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((c) => (
+                  <tr key={c.id} className="border-b border-border/50">
+                    <td className="py-2 pr-3 text-foreground">{c.name || '—'}</td>
+                    <td className="py-2 pr-3 text-foreground">{c.phone || '—'}</td>
+                    <td className="py-2 pr-3 text-foreground">{c.email || '—'}</td>
+                    <td className="py-2 pr-3 text-foreground max-w-[180px] truncate" title={c.address || undefined}>{c.address || '—'}</td>
+                    <td className="py-2 pr-3 text-foreground">{formatDate(c.last_contacted_at)}</td>
+                    <td className="py-2 pr-3 text-foreground">{c.interest_level || '—'}</td>
+                    <td className="py-2">
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => openEdit(c)}
+                          className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted"
+                          aria-label="Edit"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(c.id)}
+                          className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-muted"
+                          aria-label="Delete"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <Dialog open={modalOpen} onOpenChange={setModalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{editingContact ? 'Edit contact' : 'Add contact'}</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-3 py-2">
+            <div>
+              <Label htmlFor="contact-name">Name</Label>
+              <Input
+                id="contact-name"
+                value={formName}
+                onChange={(e) => setFormName(e.target.value)}
+                placeholder="Full name"
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label htmlFor="contact-phone">Phone</Label>
+              <Input
+                id="contact-phone"
+                type="tel"
+                value={formPhone}
+                onChange={(e) => setFormPhone(e.target.value)}
+                placeholder="Phone number"
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label htmlFor="contact-email">Email</Label>
+              <Input
+                id="contact-email"
+                type="email"
+                value={formEmail}
+                onChange={(e) => setFormEmail(e.target.value)}
+                placeholder="Email"
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label htmlFor="contact-address">Address</Label>
+              <Input
+                id="contact-address"
+                value={formAddress}
+                onChange={(e) => setFormAddress(e.target.value)}
+                placeholder="Street, city, etc."
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label htmlFor="contact-last">Last contacted</Label>
+              <Input
+                id="contact-last"
+                type="date"
+                value={formLastContacted}
+                onChange={(e) => setFormLastContacted(e.target.value)}
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label htmlFor="contact-interest">Interest level</Label>
+              <Input
+                id="contact-interest"
+                value={formInterestLevel}
+                onChange={(e) => setFormInterestLevel(e.target.value)}
+                placeholder="e.g. High, Medium, Low"
+                className="mt-1"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setModalOpen(false)}>Cancel</Button>
+            <Button onClick={handleSave} disabled={saving}>{saving ? 'Saving...' : 'Save'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
 
 export default function CampaignDetailPage() {
   const params = useParams();
@@ -30,35 +313,60 @@ export default function CampaignDetailPage() {
   const [addresses, setAddresses] = useState<CampaignAddress[]>([]);
   const [campaignStats, setCampaignStats] = useState<CampaignStats>({
     addresses: 0,
-    buildings: 0,
+    contacts: 0,
+    contacted: 0,
     visited: 0,
     scanned: 0,
     scan_rate: 0,
     progress_pct: 0,
   });
+  const [contacts, setContacts] = useState<CampaignContact[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [showPaywall, setShowPaywall] = useState(false);
   const [showMissingQRModal, setShowMissingQRModal] = useState(false);
   const [missingQRFlyerId, setMissingQRFlyerId] = useState<string | null>(null);
-  const [exportWithoutTracking, setExportWithoutTracking] = useState(false);
-  const [showNonTrackableModal, setShowNonTrackableModal] = useState(false);
   const [destinationUrl, setDestinationUrl] = useState('');
   const [isSavingUrl, setIsSavingUrl] = useState(false);
   const [notes, setNotes] = useState('');
   const [isSavingNotes, setIsSavingNotes] = useState(false);
   const [notesDirty, setNotesDirty] = useState(false);
   const [generatingCanva, setGeneratingCanva] = useState(false);
+  const [basicQrBase64, setBasicQrBase64] = useState<string | null>(null);
+  const [generatingBasicQr, setGeneratingBasicQr] = useState(false);
+  const [scripts, setScripts] = useState('');
+  const [scriptsDirty, setScriptsDirty] = useState(false);
+  const [isSavingScripts, setIsSavingScripts] = useState(false);
+  const [uploadingFlyer, setUploadingFlyer] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
-      const campaignData = await CampaignsService.fetchCampaign(campaignId);
+      const [campaignData, addressesData, statsData, contactsData] = await Promise.all([
+        CampaignsService.fetchCampaign(campaignId),
+        CampaignsService.fetchAddresses(campaignId),
+        CampaignsService.fetchCampaignStats(campaignId),
+        CampaignsService.fetchCampaignContacts(campaignId),
+      ]);
       if (!campaignData) return;
-      const addressesData = await CampaignsService.fetchAddresses(campaignId);
-      const statsData = await CampaignsService.fetchCampaignStats(campaignId);
+
+      const contactedCount = addressesData.filter(
+        (a) => a.address_status && a.address_status !== 'new' || a.visited
+      ).length;
+      const visitedCount = addressesData.filter((a) => a.visited).length;
+      const totalAddresses = addressesData.length;
+      const progressPct = totalAddresses > 0 ? Math.round((visitedCount / totalAddresses) * 100) : 0;
+
       setCampaign(campaignData);
       setAddresses(addressesData);
-      setCampaignStats(statsData);
+      setContacts(contactsData);
+      setCampaignStats({
+        ...statsData,
+        addresses: totalAddresses,
+        contacts: contactsData.length,
+        contacted: contactedCount,
+        visited: visitedCount || statsData.visited,
+        progress_pct: progressPct,
+      });
     } catch (error) {
       console.error('Error loading campaign:', error);
     } finally {
@@ -77,6 +385,56 @@ export default function CampaignDetailPage() {
   useEffect(() => {
     if (campaign?.notes !== undefined) setNotes(campaign.notes ?? '');
   }, [campaign?.notes]);
+
+  useEffect(() => {
+    if (campaign?.scripts !== undefined) setScripts(campaign.scripts ?? '');
+  }, [campaign?.scripts]);
+
+  const handleSaveScripts = async () => {
+    if (!campaignId) return;
+    setIsSavingScripts(true);
+    try {
+      const supabase = createClient();
+      const { error } = await supabase
+        .from('campaigns')
+        .update({ scripts: scripts || null })
+        .eq('id', campaignId);
+      if (error) throw error;
+      setScriptsDirty(false);
+      await loadData();
+    } catch (e) {
+      console.error('Error saving scripts:', e);
+      alert(e instanceof Error ? e.message : 'Failed to save scripts');
+    } finally {
+      setIsSavingScripts(false);
+    }
+  };
+
+  const handleFlyerUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !campaignId) return;
+    setUploadingFlyer(true);
+    try {
+      const formData = new FormData();
+      // Use a safe ASCII-only filename to avoid "Failed to parse body as FormData" (e.g. non-ASCII names)
+      const ext = (file.name.split('.').pop() || '').replace(/[^a-zA-Z0-9]/g, '') || 'png';
+      const safeName = `flyer.${ext}`;
+      formData.append('file', file, safeName);
+      const res = await fetch(`/api/campaigns/${campaignId}/flyer-upload`, {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Upload failed');
+      await loadData();
+    } catch (err) {
+      console.error('Flyer upload:', err);
+      alert(err instanceof Error ? err.message : 'Failed to upload flyer');
+    } finally {
+      setUploadingFlyer(false);
+      e.target.value = '';
+    }
+  };
 
   const handleGenerateQRs = async (trackable: boolean = true) => {
     setGenerating(true);
@@ -104,9 +462,7 @@ export default function CampaignDetailPage() {
         throw new Error(data.error || data.message || 'Generation failed');
       }
       await loadData();
-      if (trackable) alert(`Generated ${data.count} QR codes!`);
-      else alert('Non-trackable export created successfully.');
-      setExportWithoutTracking(false);
+      alert(`Generated ${data.count} QR codes!`);
     } catch (error) {
       console.error('Error generating QRs:', error);
       alert(error instanceof Error ? error.message : 'Failed to generate QR codes');
@@ -115,12 +471,6 @@ export default function CampaignDetailPage() {
     }
   };
 
-  const handleConfirmNonTrackableExport = async () => {
-    setShowNonTrackableModal(false);
-    await handleGenerateQRs(false);
-  };
-
-  // Generate Canva-ready QRs with S3 upload and CSV download
   const handleGenerateCanvaQRs = async () => {
     if (!addresses?.length) {
       alert('No addresses to generate QRs for');
@@ -129,7 +479,6 @@ export default function CampaignDetailPage() {
 
     setGeneratingCanva(true);
     try {
-      // Transform addresses to Canva format
       const rows = addresses.map((addr) => {
         const parts = (addr.formatted || addr.address || '').split(', ');
         return {
@@ -155,17 +504,14 @@ export default function CampaignDetailPage() {
         throw new Error(errorData.error || `HTTP ${response.status}`);
       }
 
-      // Get filename from header
       const contentDisposition = response.headers.get('Content-Disposition') || '';
       const filenameMatch = contentDisposition.match(/filename="(.+)"/);
       const filename = filenameMatch ? filenameMatch[1] : 'canva_bulk.csv';
 
-      // Get metrics from headers
       const uploaded = response.headers.get('X-Canva-Uploaded') || '0';
       const existing = response.headers.get('X-Canva-Existing') || '0';
       const failed = response.headers.get('X-Canva-Failed') || '0';
 
-      // Download the CSV
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -206,49 +552,6 @@ export default function CampaignDetailPage() {
     }
   };
 
-  const handleDownloadForCanva = async () => {
-    if (!addresses?.length) {
-      alert('No addresses to download');
-      return;
-    }
-    const zip = new JSZip();
-    const imgFolder = zip.folder('qr-images');
-    let csvContent = 'Address,City,State,Zip,ImageFilename\n';
-    addresses.forEach((addr) => {
-      if (addr.qr_code_base64) {
-        const cleanAddress = (addr.formatted || addr.address || 'address')
-          .replace(/[^a-zA-Z0-9 ]/g, '')
-          .trim()
-          .replace(/\s+/g, '-')
-          .substring(0, 50);
-        const filename = `${cleanAddress}.png`;
-        const base64Data = addr.qr_code_base64.split(',')[1];
-        imgFolder?.file(filename, base64Data, { base64: true });
-        const addressParts = (addr.formatted || addr.address || '').split(',');
-        const city = addressParts.length > 1 ? addressParts[1].trim() : '';
-        const state = addressParts.length > 2 ? addressParts[2].trim() : '';
-        csvContent += `"${addr.formatted || addr.address || ''}","${city}","${state}","${addr.postal_code || ''}","${filename}"\n`;
-      }
-    });
-    zip.file('canva_bulk_data.csv', csvContent);
-    const howToCanva = `How to insert into Canva (Bulk Create)
-
-1. In Canva, go to Apps and open "Bulk Create" (or search for it).
-2. Upload the CSV: Use "canva_bulk_data.csv" from this ZIP.
-   - Canva will use the columns: Address, City, State, Zip, ImageFilename.
-3. Add the QR images:
-   - The folder "qr-images" contains one PNG per address.
-   - In Bulk Create, map the "ImageFilename" column to your design's image placeholder so each row gets the matching QR image.
-4. Design your layout with one image placeholder for the QR code; Bulk Create will fill it from the CSV + qr-images.
-5. Generate and download your merged designs.
-
-Tip: Keep qr-images and canva_bulk_data.csv in the same place so paths match (or upload the folder to Canva and use the filenames from the CSV).
-`;
-    zip.file('HOW_TO_INSERT_INTO_CANVA.txt', howToCanva);
-    const content = await zip.generateAsync({ type: 'blob' });
-    saveAs(content, 'campaign-qrs-canva.zip');
-  };
-
   const handleSaveNotes = async () => {
     if (!campaignId) return;
     setIsSavingNotes(true);
@@ -266,6 +569,66 @@ Tip: Keep qr-images and canva_bulk_data.csv in the same place so paths match (or
       alert(e instanceof Error ? e.message : 'Failed to save notes');
     } finally {
       setIsSavingNotes(false);
+    }
+  };
+
+  const handleGenerateBasicQr = async () => {
+    setGeneratingBasicQr(true);
+    try {
+      const baseUrl = typeof window !== 'undefined' ? window.location.origin : undefined;
+      const res = await fetch(`/api/campaigns/${campaignId}/generate-basic-qr`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ baseUrl }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      const { qrBase64 } = await res.json();
+      setBasicQrBase64(qrBase64 || null);
+    } catch (e) {
+      console.error('Generate basic QR:', e);
+      alert(e instanceof Error ? e.message : 'Failed to generate basic QR');
+    } finally {
+      setGeneratingBasicQr(false);
+    }
+  };
+
+  const handleDownloadBasicQr = () => {
+    if (!basicQrBase64) return;
+    const link = document.createElement('a');
+    link.href = basicQrBase64;
+    link.download = `campaign-${campaignId}-basic-qr.png`;
+    link.click();
+  };
+
+  const handleBasicQrForCanva = async () => {
+    setGeneratingBasicQr(true);
+    try {
+      const baseUrl = typeof window !== 'undefined' ? window.location.origin : undefined;
+      const res = await fetch(`/api/campaigns/${campaignId}/generate-basic-qr`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ baseUrl }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      const { qrBase64 } = await res.json();
+      if (qrBase64) {
+        setBasicQrBase64(qrBase64);
+        const link = document.createElement('a');
+        link.href = qrBase64;
+        link.download = `campaign-${campaignId}-basic-qr-canva.png`;
+        link.click();
+      }
+    } catch (e) {
+      console.error('Generate basic QR for Canva:', e);
+      alert(e instanceof Error ? e.message : 'Failed to generate');
+    } finally {
+      setGeneratingBasicQr(false);
     }
   };
 
@@ -288,8 +651,6 @@ Tip: Keep qr-images and canva_bulk_data.csv in the same place so paths match (or
       alert(error instanceof Error ? error.message : 'Failed to add QR element');
     }
   };
-
-
 
   if (loading) {
     return (
@@ -347,10 +708,10 @@ Tip: Keep qr-images and canva_bulk_data.csv in the same place so paths match (or
   return (
     <div className="min-h-full bg-muted/30 dark:bg-background relative">
       <header className="bg-card border-b border-border sticky top-0 z-10">
-        <div className="px-4 sm:px-6 lg:px-8 py-4">
+        <div className="pl-0 pr-4 sm:pr-6 lg:pr-8 py-4">
           <div className="flex items-center justify-between gap-6">
             <h1 className="text-xl font-bold text-foreground">{campaign.name || 'Unnamed Campaign'}</h1>
-            {campaignStats.buildings > 0 && (
+            {campaignStats.addresses > 0 && campaignStats.progress_pct > 0 && (
               <div className="flex-1 min-w-0 max-w-md sm:max-w-lg flex items-center gap-3">
                 <span className="text-sm font-medium text-muted-foreground whitespace-nowrap">Progress</span>
                 <Progress value={campaignStats.progress_pct} className="h-2 flex-1" />
@@ -361,14 +722,14 @@ Tip: Keep qr-images and canva_bulk_data.csv in the same place so paths match (or
         </div>
       </header>
 
-      <main className="max-w-7xl px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+      <main className="max-w-7xl pl-0 pr-4 sm:pr-6 lg:pr-8 py-6 space-y-6">
         <StatsHeader stats={campaignStats} />
 
         <Tabs defaultValue="map" className="w-full">
           <TabsList>
             <TabsTrigger value="map">Map</TabsTrigger>
             <TabsTrigger value="addresses">Addresses</TabsTrigger>
-            <TabsTrigger value="doorknocks">Door knocks</TabsTrigger>
+            <TabsTrigger value="contacts">Contacts</TabsTrigger>
             <TabsTrigger value="qr">QR Codes</TabsTrigger>
             <TabsTrigger value="route">Walking route</TabsTrigger>
             <TabsTrigger value="notes">Notes</TabsTrigger>
@@ -378,9 +739,6 @@ Tip: Keep qr-images and canva_bulk_data.csv in the same place so paths match (or
             <div className="bg-card rounded-xl border border-border overflow-hidden" style={{ height: '560px' }}>
               <CampaignDetailMapView campaignId={campaignId} addresses={addresses} campaign={campaign} onSnapComplete={loadData} />
             </div>
-            <Button className="w-full h-12 text-base font-semibold rounded-xl bg-primary hover:bg-primary/90" size="lg">
-              Start Session
-            </Button>
           </TabsContent>
 
           <TabsContent value="addresses" className="mt-4">
@@ -390,27 +748,8 @@ Tip: Keep qr-images and canva_bulk_data.csv in the same place so paths match (or
             </div>
           </TabsContent>
 
-          <TabsContent value="doorknocks" className="mt-4 space-y-4">
-            <div className="bg-card p-4 rounded-xl border border-border">
-              <h2 className="text-sm font-semibold text-foreground mb-2">Visited (door knocked)</h2>
-              <p className="text-xs text-muted-foreground mb-3">
-                Addresses you’ve marked as visited. Use the Map tab to see all statuses (red = untouched, green = touched, blue = conversations).
-              </p>
-              {formattedRecipients.filter((r) => r.status === 'scanned').length === 0 ? (
-                <p className="text-sm text-muted-foreground py-4">No door knocks recorded yet. Mark addresses as visited on the Addresses tab or during a session in the app.</p>
-              ) : (
-                <RecipientsTable
-                  recipients={formattedRecipients.filter((r) => r.status === 'scanned')}
-                  campaignId={campaignId}
-                />
-              )}
-            </div>
-            <div className="bg-card p-4 rounded-xl border border-border">
-              <h3 className="text-sm font-semibold text-foreground mb-2">Conversations</h3>
-              <p className="text-xs text-muted-foreground">
-                Buildings where you had a conversation appear on the <strong>Map</strong> as blue pins. Open the Map tab and click a blue building to see details in the location card.
-              </p>
-            </div>
+          <TabsContent value="contacts" className="mt-4">
+            <CampaignContactsList contacts={contacts} campaignId={campaignId} onRefresh={loadData} />
           </TabsContent>
 
           <TabsContent value="qr" className="mt-4 space-y-4">
@@ -435,57 +774,66 @@ Tip: Keep qr-images and canva_bulk_data.csv in the same place so paths match (or
             </div>
 
             <div className="bg-card p-4 rounded-xl border border-border">
-              <h2 className="text-sm font-semibold text-foreground mb-3">Campaign Controls</h2>
-              <div className="flex flex-wrap gap-3 mb-4">
+              <div className="flex flex-wrap gap-6 items-start justify-between">
+                <div className="flex flex-col gap-3">
+                  <h3 className="text-sm font-semibold text-foreground">Basic QR Code</h3>
+                  <p className="text-xs text-muted-foreground max-w-md">
+                    One QR code for the whole campaign. Scans are counted in campaign analytics but not tied to any address.
+                  </p>
+                  <div className="flex flex-wrap gap-3">
+                    <Button
+                      onClick={handleGenerateBasicQr}
+                      disabled={generatingBasicQr}
+                    >
+                      {generatingBasicQr ? 'Generating...' : 'Generate QR'}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={handleBasicQrForCanva}
+                      disabled={generatingBasicQr}
+                    >
+                      {generatingBasicQr ? 'Generating...' : 'Generate for Canva'}
+                    </Button>
+                  </div>
+                </div>
+                {basicQrBase64 && (
+                  <div className="flex flex-col gap-2 items-center shrink-0">
+                    <img
+                      src={basicQrBase64}
+                      alt="Campaign basic QR code"
+                      className="w-48 h-48 rounded-lg border border-border bg-white object-contain"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleDownloadBasicQr}
+                      className="text-sm font-medium text-red-600 hover:text-red-500 underline underline-offset-2"
+                    >
+                      Download PNG
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-card p-4 rounded-xl border border-border">
+              <h2 className="text-sm font-semibold text-foreground mb-3">Advanced QR Code</h2>
+              <p className="text-xs text-muted-foreground mb-3">
+                Unique QR codes for every home in the campaign. Scans are tied to addresses and will show on the map.
+              </p>
+              <div className="flex flex-wrap gap-3">
                 <Button
-                  onClick={() =>
-                    exportWithoutTracking ? setShowNonTrackableModal(true) : handleGenerateQRs(true)
-                  }
+                  onClick={() => handleGenerateQRs(true)}
                   disabled={generating || formattedRecipients.length === 0}
                 >
-                  {generating ? 'Generating...' : 'Generate QR Codes (In-App)'}
+                  {generating ? 'Generating...' : 'Generate QR (In-App)'}
                 </Button>
                 <Button
+                  variant="secondary"
                   onClick={handleGenerateCanvaQRs}
                   disabled={generatingCanva || !addresses?.length}
-                  variant="secondary"
                 >
-                  {generatingCanva ? 'Generating...' : 'Generate for Canva (S3 + CSV)'}
+                  {generatingCanva ? 'Generating...' : 'Generate for Canva'}
                 </Button>
-                <Button
-                  onClick={handleDownloadForCanva}
-                  disabled={
-                    !addresses?.length ||
-                    addresses.filter((a) => a.qr_code_base64).length === 0
-                  }
-                  variant="outline"
-                  size="sm"
-                >
-                  Download (ZIP)
-                </Button>
-                <DeleteQRCodesButton
-                  campaignId={campaignId}
-                  onDeleted={loadData}
-                  variant="outline"
-                  size="sm"
-                />
-              </div>
-              <div className="flex items-start gap-3 pt-3 border-t border-border">
-                <input
-                  type="checkbox"
-                  id="export-without-tracking"
-                  checked={exportWithoutTracking}
-                  onChange={(e) => setExportWithoutTracking(e.target.checked)}
-                  className="mt-1 h-4 w-4 rounded border-input text-primary focus:ring-primary"
-                />
-                <div>
-                  <Label htmlFor="export-without-tracking" className="text-sm font-medium cursor-pointer">
-                    Export without tracking (no QR)
-                  </Label>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    No scan analytics or address-level attribution for this batch.
-                  </p>
-                </div>
               </div>
             </div>
           </TabsContent>
@@ -497,7 +845,7 @@ Tip: Keep qr-images and canva_bulk_data.csv in the same place so paths match (or
             />
           </TabsContent>
 
-          <TabsContent value="notes" className="mt-4">
+          <TabsContent value="notes" className="mt-4 space-y-4">
             <div className="bg-card p-4 rounded-xl border border-border">
               <h2 className="text-sm font-semibold text-foreground mb-3">Campaign notes</h2>
               <p className="text-xs text-muted-foreground mb-2">
@@ -522,6 +870,62 @@ Tip: Keep qr-images and canva_bulk_data.csv in the same place so paths match (or
                 </Button>
               </div>
             </div>
+
+            <div className="bg-card p-4 rounded-xl border border-border">
+              <h2 className="text-sm font-semibold text-foreground mb-3">Scripts</h2>
+              <p className="text-xs text-muted-foreground mb-2">
+                Script or dialogue to use when door-knocking or talking to leads.
+              </p>
+              <textarea
+                className="w-full min-h-[160px] rounded-md border border-input bg-background px-3 py-2 text-sm font-mono resize-y"
+                placeholder="Add scripts..."
+                value={scripts}
+                onChange={(e) => {
+                  setScripts(e.target.value);
+                  setScriptsDirty(true);
+                }}
+              />
+              <div className="mt-3 flex justify-end">
+                <Button
+                  size="sm"
+                  onClick={handleSaveScripts}
+                  disabled={!scriptsDirty || isSavingScripts}
+                >
+                  {isSavingScripts ? 'Saving...' : 'Save scripts'}
+                </Button>
+              </div>
+            </div>
+
+            <div className="bg-card p-4 rounded-xl border border-border">
+              <h2 className="text-sm font-semibold text-foreground mb-3">Flyer used</h2>
+              <p className="text-xs text-muted-foreground mb-3">
+                Upload a photo or PDF of the flyer you used for this campaign.
+              </p>
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="cursor-pointer inline-block">
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/gif,application/pdf"
+                    className="sr-only"
+                    onChange={handleFlyerUpload}
+                    disabled={uploadingFlyer}
+                  />
+                  <span className="inline-flex items-center justify-center rounded-md text-sm font-medium border border-input bg-background px-3 py-2 hover:bg-accent hover:text-accent-foreground h-9">
+                    {uploadingFlyer ? 'Uploading...' : 'Choose photo or PDF'}
+                  </span>
+                </label>
+                {campaign?.flyer_url && (
+                  <a
+                    href={campaign.flyer_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm text-primary hover:underline"
+                  >
+                    View current flyer
+                  </a>
+                )}
+              </div>
+            </div>
           </TabsContent>
         </Tabs>
       </main>
@@ -534,11 +938,6 @@ Tip: Keep qr-images and canva_bulk_data.csv in the same place so paths match (or
           setMissingQRFlyerId(null);
         }}
         onAddQR={handleAddQR}
-      />
-      <NonTrackableExportModal
-        open={showNonTrackableModal}
-        onClose={() => setShowNonTrackableModal(false)}
-        onConfirm={handleConfirmNonTrackableExport}
       />
     </div>
   );

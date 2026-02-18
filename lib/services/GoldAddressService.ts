@@ -6,7 +6,7 @@
  */
 
 import { createAdminClient } from '@/lib/supabase/server';
-import { TileLambdaService } from './TileLambdaService';
+import { TileLambdaService, type LambdaSnapshotResponse } from './TileLambdaService';
 
 export interface GoldAddressResult {
   source: 'gold' | 'silver' | 'lambda';
@@ -17,6 +17,8 @@ export interface GoldAddressResult {
     lambda: number;
     total: number;
   };
+  /** When source is lambda/silver, the Lambda snapshot so callers can reuse for buildings (avoid duplicate Lambda call). */
+  snapshot?: LambdaSnapshotResponse | null;
 }
 
 export class GoldAddressService {
@@ -176,12 +178,13 @@ export class GoldAddressService {
     return {
       source: goldCount > 0 ? 'silver' : 'lambda',
       addresses: finalAddresses,
-      buildings: [], // Buildings come from separate call
+      buildings: [], // Buildings come from Lambda snapshot (use result.snapshot for BuildingAdapter)
       counts: {
         gold: goldCount,
         lambda: lambdaAddresses.length,
         total: finalAddresses.length
-      }
+      },
+      snapshot, // Reuse in provision so we don't call Lambda again for buildings
     };
   }
   
