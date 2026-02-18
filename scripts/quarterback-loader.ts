@@ -6,7 +6,7 @@ import * as dotenv from 'dotenv';
 dotenv.config();
 
 // --- CONFIGURATION ---
-const BATCH_SIZE = 1000; // Efficient size for GitHub Actions runners
+const BATCH_SIZE = 1000;
 
 const SOURCE_CONFIG = {
   address: {
@@ -70,7 +70,20 @@ async function loadGoldHttp(type: 'address' | 'building') {
     const features = geojson.features || [];
     console.log(`📦 Parsed ${features.length.toLocaleString()} features.`);
 
-    // 2. Batch Process
+    // 2. Delete old data for this source_id (FIX: Clear before insert)
+    console.log(`🧹 Deleting old records for source_id='${config.sourceId}'...`);
+    const { error: delError } = await supabase
+      .from(config.table)
+      .delete()
+      .eq('source_id', config.sourceId);
+
+    if (delError) {
+      console.error('❌ Delete error:', delError);
+      throw delError;
+    }
+    console.log(`✅ Cleared old data`);
+
+    // 3. Batch Process
     console.log(`🚀 Processing batches of ${BATCH_SIZE}...`);
     let successCount = 0;
     let errorCount = 0;
@@ -111,25 +124,17 @@ async function loadGoldHttp(type: 'address' | 'building') {
 
       if (rows.length === 0) continue;
 
-      // 3. Insert / Upsert
-      let error;
-      
-      if (type === 'building') {
-        // Buildings have unique external_id, so use Upsert for reliability
-        const res = await supabase.from(config.table).upsert(rows, { onConflict: 'external_id' });
-        error = res.error;
-      } else {
-        // Addresses don't have a clear unique ID in this logic, so standard Insert
-        const res = await supabase.from(config.table).insert(rows);
-        error = res.error;
-      }
+      // 3. Insert (FIX: Use insert instead of upsert)
+      const { error } = await supabase.from(config.table).insert(rows);
       
       if (error) {
         console.error(`❌ Batch ${batchNum} Failed:`, error.message);
         errorCount += rows.length;
       } else {
         successCount += rows.length;
-        if (batchNum % 10 === 0) console.log(`✅ Batch ${batchNum}/${totalBatches} saved.`);
+        if (batchNum % 10 === 0 || batchNum === totalBatches) {
+          console.log(`✅ Batch ${batchNum}/${totalBatches} saved.`);
+        }
       }
     }
 
@@ -139,7 +144,7 @@ async function loadGoldHttp(type: 'address' | 'building') {
 
   } catch (err) {
     console.error(`\n❌ CRITICAL FAILURE in ${type}:`, err);
-    throw err; // Throw to fail the GitHub Action
+    throw err;
   }
 }
 
