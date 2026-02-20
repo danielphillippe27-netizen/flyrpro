@@ -3,7 +3,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Plus, Search, ChevronsLeft } from 'lucide-react';
+import { Plus, Search, ChevronsLeft, ChevronsRight } from 'lucide-react';
 import { CampaignsService } from '@/lib/services/CampaignsService';
 import type { CampaignV2 } from '@/types/database';
 import { Button } from '@/components/ui/button';
@@ -81,80 +81,88 @@ export function CampaignListSidebar({
     ? pathname.split('/')[2]
     : null;
 
+  if (collapsed) {
+    return (
+      <aside className="shrink-0 flex flex-col bg-white dark:bg-[#0f0f10] w-9 h-12 items-center justify-center border-b border-border -mt-px">
+        <button
+          onClick={onToggleCollapse}
+          className="flex items-center justify-center w-[18px] h-[18px] rounded-sm bg-transparent hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+          aria-label="Show campaign list"
+          title="Show campaign list"
+        >
+          <ChevronsRight className="w-3.5 h-3.5" />
+        </button>
+      </aside>
+    );
+  }
+
   return (
     <aside
-      className={cn(
-        'shrink-0 flex flex-col border-r border-border bg-white dark:bg-sidebar transition-[width] duration-200 ease-out overflow-hidden',
-        collapsed && 'border-r-0'
-      )}
-      style={{ width: collapsed ? 0 : width }}
+      className="shrink-0 flex flex-col border-r border-border bg-white dark:bg-sidebar transition-[width] duration-200 ease-out overflow-hidden"
+      style={{ width }}
     >
-      {!collapsed && (
-        <>
-          <div className="p-3 pb-3 border-b border-border">
-            <div className="flex items-center justify-end gap-2 mb-2">
-              <button
-                onClick={onToggleCollapse}
-                className="flex items-center justify-center w-[18px] h-[18px] rounded-sm bg-transparent hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0 ml-auto"
-                aria-label="Hide campaign list"
-                title="Hide campaign list"
-              >
-                <ChevronsLeft className="w-3.5 h-3.5" />
-              </button>
-            </div>
-            <div className="flex gap-1.5">
-              <div className="relative flex-1 min-w-0">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
-                <Input
-                  placeholder="Search campaigns..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="pl-8 h-8 text-xs bg-background border-border"
-                />
-              </div>
-              <Button
-                size="icon"
-                className="h-8 w-8 shrink-0 bg-red-600 text-white hover:bg-red-700 rounded-md"
-                onClick={onNewCampaign}
-                aria-label="Add campaign"
-              >
-                <Plus className="w-3.5 h-3.5" />
-              </Button>
-            </div>
+      <div className="p-3 pb-3 border-b border-border">
+        <div className="flex items-center justify-end gap-2 mb-2">
+          <button
+            onClick={onToggleCollapse}
+            className="flex items-center justify-center w-[18px] h-[18px] rounded-sm bg-transparent hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0 ml-auto"
+            aria-label="Hide campaign list"
+            title="Hide campaign list"
+          >
+            <ChevronsLeft className="w-3.5 h-3.5" />
+          </button>
+        </div>
+        <div className="flex gap-1.5">
+          <div className="relative flex-1 min-w-0">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+            <Input
+              placeholder="Search campaigns..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-8 h-8 text-xs bg-background border-border"
+            />
           </div>
+          <Button
+            size="icon"
+            className="h-8 w-8 shrink-0 bg-red-600 text-white hover:bg-red-700 rounded-md"
+            onClick={onNewCampaign}
+            aria-label="Add campaign"
+          >
+            <Plus className="w-3.5 h-3.5" />
+          </Button>
+        </div>
+      </div>
 
-          <div className="flex-1 flex flex-col min-h-0 px-2 pt-2">
-            <Tabs value={statusTab} onValueChange={(v) => setStatusTab(v as StatusTab)} className="flex flex-col flex-1 min-h-0 w-full">
-              <TabsList className="w-full grid grid-cols-2 h-8 bg-muted/50 dark:bg-muted/30 p-0.5 rounded-lg">
-                <TabsTrigger value="active" className="text-xs font-medium rounded-md">
-                  Active ({byStatus.active.length})
-                </TabsTrigger>
-                <TabsTrigger value="completed" className="text-xs font-medium rounded-md">
-                  Completed ({byStatus.completed.length})
-                </TabsTrigger>
-              </TabsList>
-              <TabsContent value="active" className="mt-0 flex-1 min-h-0 focus-visible:outline-none data-[state=inactive]:hidden">
-                <CampaignList
-                  campaigns={filtered}
-                  activeId={activeId}
-                  loading={loading}
-                  userId={userId}
-                  emptyMessage={byStatus.active.length === 0 ? 'No active campaigns' : 'No matches'}
-                />
-              </TabsContent>
-              <TabsContent value="completed" className="mt-0 flex-1 min-h-0 focus-visible:outline-none data-[state=inactive]:hidden">
-                <CampaignList
-                  campaigns={filtered}
-                  activeId={activeId}
-                  loading={loading}
-                  userId={userId}
-                  emptyMessage={byStatus.completed.length === 0 ? 'No completed campaigns' : 'No matches'}
-                />
-              </TabsContent>
-            </Tabs>
-          </div>
-        </>
-      )}
+      <div className="flex-1 flex flex-col min-h-0 px-2 pt-2">
+        <Tabs value={statusTab} onValueChange={(v) => setStatusTab(v as StatusTab)} className="flex flex-col flex-1 min-h-0 w-full">
+          <TabsList className="w-full grid grid-cols-2 h-8 bg-muted/50 dark:bg-muted/30 p-0.5 rounded-lg">
+            <TabsTrigger value="active" className="text-xs font-medium rounded-md">
+              Active ({byStatus.active.length})
+            </TabsTrigger>
+            <TabsTrigger value="completed" className="text-xs font-medium rounded-md">
+              Completed ({byStatus.completed.length})
+            </TabsTrigger>
+          </TabsList>
+          <TabsContent value="active" className="mt-0 flex-1 min-h-0 focus-visible:outline-none data-[state=inactive]:hidden">
+            <CampaignList
+              campaigns={filtered}
+              activeId={activeId}
+              loading={loading}
+              userId={userId}
+              emptyMessage={byStatus.active.length === 0 ? 'No active campaigns' : 'No matches'}
+            />
+          </TabsContent>
+          <TabsContent value="completed" className="mt-0 flex-1 min-h-0 focus-visible:outline-none data-[state=inactive]:hidden">
+            <CampaignList
+              campaigns={filtered}
+              activeId={activeId}
+              loading={loading}
+              userId={userId}
+              emptyMessage={byStatus.completed.length === 0 ? 'No completed campaigns' : 'No matches'}
+            />
+          </TabsContent>
+        </Tabs>
+      </div>
     </aside>
   );
 }

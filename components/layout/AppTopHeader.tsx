@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import Image from 'next/image';
 import { MessageCircleQuestion, Moon, Sun } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -16,6 +16,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useTheme } from '@/lib/theme-provider';
 import { useWorkspace } from '@/lib/workspace-context';
 import { getClientAsync } from '@/lib/supabase/client';
+import { ProfileEditDialog } from '@/components/profile/ProfileEditDialog';
 
 type UserProfileLite = {
   email: string | null;
@@ -33,7 +34,7 @@ function initialsFromName(nameOrEmail: string | null): string {
 
 export default function AppTopHeader() {
   const { theme, toggleTheme } = useTheme();
-  const { currentWorkspace, membershipsByWorkspaceId } = useWorkspace();
+  const { currentWorkspace, membershipsByWorkspaceId, refreshWorkspaces } = useWorkspace();
   const [profile, setProfile] = useState<UserProfileLite>({
     email: null,
     fullName: null,
@@ -44,6 +45,65 @@ export default function AppTopHeader() {
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
   const [feedbackSuccess, setFeedbackSuccess] = useState<string | null>(null);
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+  const [isFounder, setIsFounder] = useState<boolean>(false);
+  const [profileEditOpen, setProfileEditOpen] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    fetch('/api/access/state', { credentials: 'include' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (mounted && data && typeof data.isFounder === 'boolean') {
+          setIsFounder(data.isFounder);
+        }
+      })
+      .catch(() => {});
+    return () => { mounted = false; };
+  }, []);
+
+  const refreshProfile = useCallback(() => {
+    getClientAsync()
+      .then((supabase) => supabase.auth.getUser())
+      .then(({ data: { user } }) => {
+        if (!user) return;
+        fetch('/api/profile', { credentials: 'include' })
+          .then((res) => (res.ok ? res.json() : null))
+          .then((data) => {
+            if (data) {
+              const fullName =
+                (data.first_name || data.last_name)
+                  ? [data.first_name, data.last_name].filter(Boolean).join(' ')
+                  : null;
+              setProfile({
+                email: data.email ?? user.email ?? null,
+                fullName: fullName ?? (typeof user.user_metadata?.full_name === 'string' && user.user_metadata.full_name) ||
+                  (typeof user.user_metadata?.name === 'string' && user.user_metadata.name) ||
+                  null,
+                avatarUrl: data.avatar_url ??
+                  (typeof user.user_metadata?.avatar_url === 'string' && user.user_metadata.avatar_url) ||
+                  (typeof user.user_metadata?.picture === 'string' && user.user_metadata.picture) ||
+                  null,
+              });
+              return;
+            }
+            const fullName =
+              (typeof user.user_metadata?.full_name === 'string' && user.user_metadata.full_name) ||
+              (typeof user.user_metadata?.name === 'string' && user.user_metadata.name) ||
+              null;
+            const avatarUrl =
+              (typeof user.user_metadata?.avatar_url === 'string' && user.user_metadata.avatar_url) ||
+              (typeof user.user_metadata?.picture === 'string' && user.user_metadata.picture) ||
+              null;
+            setProfile({
+              email: user.email ?? null,
+              fullName,
+              avatarUrl,
+            });
+          })
+          .catch(() => {});
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -51,23 +111,59 @@ export default function AppTopHeader() {
       .then((supabase) => supabase.auth.getUser())
       .then(({ data: { user } }) => {
         if (!mounted || !user) return;
-        const fullName =
-          (typeof user.user_metadata?.full_name === 'string' && user.user_metadata.full_name) ||
-          (typeof user.user_metadata?.name === 'string' && user.user_metadata.name) ||
-          null;
-        const avatarUrl =
-          (typeof user.user_metadata?.avatar_url === 'string' && user.user_metadata.avatar_url) ||
-          (typeof user.user_metadata?.picture === 'string' && user.user_metadata.picture) ||
-          null;
-        setProfile({
-          email: user.email ?? null,
-          fullName,
-          avatarUrl,
-        });
+        fetch('/api/profile', { credentials: 'include' })
+          .then((res) => (res.ok ? res.json() : null))
+          .then((data) => {
+            if (!mounted) return;
+            if (data) {
+              const fullName =
+                (data.first_name || data.last_name)
+                  ? [data.first_name, data.last_name].filter(Boolean).join(' ')
+                  : null;
+              setProfile({
+                email: data.email ?? user.email ?? null,
+                fullName: fullName ?? (typeof user.user_metadata?.full_name === 'string' && user.user_metadata.full_name) ||
+                  (typeof user.user_metadata?.name === 'string' && user.user_metadata.name) ||
+                  null,
+                avatarUrl: data.avatar_url ??
+                  (typeof user.user_metadata?.avatar_url === 'string' && user.user_metadata.avatar_url) ||
+                  (typeof user.user_metadata?.picture === 'string' && user.user_metadata.picture) ||
+                  null,
+              });
+              return;
+            }
+            const fullName =
+              (typeof user.user_metadata?.full_name === 'string' && user.user_metadata.full_name) ||
+              (typeof user.user_metadata?.name === 'string' && user.user_metadata.name) ||
+              null;
+            const avatarUrl =
+              (typeof user.user_metadata?.avatar_url === 'string' && user.user_metadata.avatar_url) ||
+              (typeof user.user_metadata?.picture === 'string' && user.user_metadata.picture) ||
+              null;
+            setProfile({
+              email: user.email ?? null,
+              fullName,
+              avatarUrl,
+            });
+          })
+          .catch(() => {
+            if (!mounted) return;
+            const fullName =
+              (typeof user.user_metadata?.full_name === 'string' && user.user_metadata.full_name) ||
+              (typeof user.user_metadata?.name === 'string' && user.user_metadata.name) ||
+              null;
+            const avatarUrl =
+              (typeof user.user_metadata?.avatar_url === 'string' && user.user_metadata.avatar_url) ||
+              (typeof user.user_metadata?.picture === 'string' && user.user_metadata.picture) ||
+              null;
+            setProfile({
+              email: user.email ?? null,
+              fullName,
+              avatarUrl,
+            });
+          });
       })
-      .catch(() => {
-        // no-op
-      });
+      .catch(() => {});
 
     return () => {
       mounted = false;
@@ -139,7 +235,7 @@ export default function AppTopHeader() {
               <span className="mr-2 text-muted-foreground">/</span>
               <span className="truncate align-middle">{currentWorkspace?.name ?? 'Workspace'}</span>
               <span className="mx-2 text-muted-foreground">/</span>
-              <span className="capitalize text-muted-foreground">{currentRole ?? 'member'}</span>
+              <span className="capitalize text-muted-foreground">{isFounder ? 'Founder' : (currentRole ?? 'member')}</span>
             </div>
           </div>
 
@@ -164,10 +260,12 @@ export default function AppTopHeader() {
               {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </Button>
 
-            <div
-              className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full border border-border bg-muted text-xs font-semibold text-foreground"
-              title={profile.fullName ?? profile.email ?? 'Profile'}
-              aria-label="Profile"
+            <button
+              type="button"
+              onClick={() => setProfileEditOpen(true)}
+              className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-muted text-xs font-semibold text-foreground transition hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+              title={profile.fullName ?? profile.email ?? 'Edit profile'}
+              aria-label="Edit profile"
             >
               {profile.avatarUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -180,11 +278,20 @@ export default function AppTopHeader() {
               ) : (
                 <span>{initialsFromName(profile.fullName ?? profile.email)}</span>
               )}
-            </div>
+            </button>
           </div>
         </div>
         <div className="h-px w-full bg-border/90" />
       </header>
+
+      <ProfileEditDialog
+        open={profileEditOpen}
+        onOpenChange={setProfileEditOpen}
+        onSaved={() => {
+          refreshProfile();
+          refreshWorkspaces();
+        }}
+      />
 
       <Dialog
         open={feedbackOpen}

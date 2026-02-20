@@ -32,7 +32,10 @@ export function TeamOwnerDashboardView() {
   const [selectedMember, setSelectedMember] = useState<{ user_id: string; display_name: string; color: string } | null>(null);
 
   const fetchMembers = useCallback(async () => {
-    if (!currentWorkspaceId) return;
+    if (!currentWorkspaceId) {
+      setMembers([]);
+      return;
+    }
     try {
       const res = await fetch(
         `/api/team/map?workspaceId=${encodeURIComponent(currentWorkspaceId)}&limit=50`

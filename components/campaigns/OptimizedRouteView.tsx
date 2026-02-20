@@ -4,25 +4,36 @@ import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { useTheme } from '@/lib/theme-provider';
+import { useWorkspace } from '@/lib/workspace-context';
+import { createClient } from '@/lib/supabase/client';
 import { getMapboxToken } from '@/lib/mapbox';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { 
   MapPin,
   ChevronDown,
   ChevronUp,
   Home,
-  ArrowRight
+  ArrowRight,
+  Save,
+  Loader2
 } from 'lucide-react';
 
 interface OptimizedRouteViewProps {
   campaignId: string;
+  campaignName?: string;
   addresses: Array<{
     id: string;
     formatted?: string;
     house_number?: string;
     street_number?: string | number;
     street_name?: string;
+    gers_id?: string;
+    building_id?: string;
     geom?: { coordinates: [number, number] } | string;
     geom_json?: { coordinates?: [number, number] };
     coordinate?: { lat: number; lon: number };
@@ -44,6 +55,8 @@ interface RouteAddress {
   street_name: string;
   lat: number;
   lon: number;
+  gers_id?: string;
+  building_id?: string;
 }
 
 interface StreetSegment {
@@ -54,6 +67,13 @@ interface StreetSegment {
   house_range: string;
   color: string;
 }
+
+type RouteMember = {
+  userId: string;
+  role: 'owner' | 'admin' | 'member';
+  fullName: string | null;
+  email: string | null;
+};
 
 const COLORS = [
   '#ef4444', // red-500
@@ -103,6 +123,33 @@ function streetStem(name: string | undefined): string {
   return parts.join(' ') || s;
 }
 
+function parseSegmentLabel(name: string): { streetName: string; side: 'odds' | 'evens' | 'both' } {
+  const [streetNameRaw, sideRaw] = name.split(' — ');
+  const side = sideRaw?.toLowerCase() ?? '';
+  if (side.includes('odd')) return { streetName: streetNameRaw || name, side: 'odds' };
+  if (side.includes('even')) return { streetName: streetNameRaw || name, side: 'evens' };
+  return { streetName: streetNameRaw || name, side: 'both' };
+}
+
+function parseHouseRange(range: string): { fromHouse: number | null; toHouse: number | null } {
+  const match = range.match(/(\d+)\D+(\d+)/);
+  if (match) {
+    return { fromHouse: Number(match[1]), toHouse: Number(match[2]) };
+  }
+  const single = range.match(/^\s*(\d+)\s*$/);
+  if (single) {
+    const value = Number(single[1]);
+    return { fromHouse: value, toHouse: value };
+  }
+  return { fromHouse: null, toHouse: null };
+}
+
+function displayMemberName(member: RouteMember): string {
+  if (member.fullName && member.fullName.trim().length > 0) return member.fullName;
+  if (member.email && member.email.trim().length > 0) return member.email;
+  return member.userId.slice(0, 8);
+}
+
 const MAP_STYLES = {
   light: 'mapbox://styles/fliper27/cml6z0dhg002301qo9xxc08k4',
   dark: 'mapbox://styles/fliper27/cml6zc5pq002801qo4lh13o19',
@@ -137,7 +184,12 @@ function getAddressCoords(addr: {
   // geom_json from ST_AsGeoJSON is the most reliable source
   if (addr.geom_json?.coordinates) return fromCoords(addr.geom_json.coordinates);
   const g = addr.geom;
-  if (g && typeof g === 'object' && Array.isArray((g as any).coordinates)) return fromCoords((g as any).coordinates);
+  if (g && typeof g === 'object') {
+    const withCoords = g as { coordinates?: [number, number] };
+    if (Array.isArray(withCoords.coordinates)) {
+      return fromCoords(withCoords.coordinates);
+    }
+  }
   if (typeof g === 'string') {
     try {
       const parsed = JSON.parse(g) as { coordinates?: [number, number] };
@@ -153,11 +205,29 @@ function getAddressCoords(addr: {
   return null;
 }
 
-export function OptimizedRouteView({ campaignId, addresses }: OptimizedRouteViewProps) {
+export function OptimizedRouteView({ campaignId, campaignName, addresses }: OptimizedRouteViewProps) {
   const { theme } = useTheme();
+  const { currentWorkspace, membershipsByWorkspaceId } = useWorkspace();
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const [expandedStreet, setExpandedStreet] = useState<string | null>(null);
+  const [members, setMembers] = useState<RouteMember[]>([]);
+  const [routePlanName, setRoutePlanName] = useState('');
+  const [assignToUserId, setAssignToUserId] = useState<string>('none');
+  const [isSavingPlan, setIsSavingPlan] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
+
+  const currentWorkspaceId = currentWorkspace?.id ?? null;
+  const currentRole = currentWorkspaceId ? membershipsByWorkspaceId[currentWorkspaceId] : null;
+  const canManageRoutePlans = currentRole === 'owner' || currentRole === 'admin';
+
+  useEffect(() => {
+    if (routePlanName.trim().length > 0) return;
+    const base = campaignName?.trim() || 'Walking Route';
+    const label = `${base} — ${new Date().toLocaleDateString()}`;
+    setRoutePlanName(label);
+  }, [campaignName, routePlanName]);
 
   // Build ordered address list
   const orderedAddresses = useMemo((): RouteAddress[] => {
@@ -177,6 +247,8 @@ export function OptimizedRouteView({ campaignId, addresses }: OptimizedRouteView
         street_name: addr.street_name || '',
         lat: coords.lat,
         lon: coords.lon,
+        gers_id: addr.gers_id,
+        building_id: addr.building_id,
       });
     }
     list.sort((a, b) => a.sequence - b.sequence);
@@ -270,6 +342,210 @@ export function OptimizedRouteView({ campaignId, addresses }: OptimizedRouteView
     });
     return map;
   }, [streetSegments, addressUnknownSet]);
+
+  const estimatedMinutes = useMemo(() => {
+    const totalSeconds = addresses.reduce((sum, addr) => sum + (addr.walk_time_sec ?? 0), 0);
+    if (totalSeconds > 0) {
+      return Math.max(1, Math.round(totalSeconds / 60));
+    }
+    return Math.max(1, Math.round(orderedAddresses.length * 1.5));
+  }, [addresses, orderedAddresses.length]);
+
+  const estimatedDistanceMeters = useMemo(() => {
+    const totalMeters = addresses.reduce((sum, addr) => sum + (addr.distance_m ?? 0), 0);
+    return totalMeters > 0 ? Math.round(totalMeters) : null;
+  }, [addresses]);
+
+  useEffect(() => {
+    if (!canManageRoutePlans || !currentWorkspaceId) {
+      setMembers([]);
+      return;
+    }
+
+    let mounted = true;
+    const supabase = createClient();
+
+    (async () => {
+      const { data: memberRows, error: memberError } = await supabase
+        .from('workspace_members')
+        .select('user_id, role')
+        .eq('workspace_id', currentWorkspaceId);
+
+      if (memberError || !mounted) return;
+      const rows = (memberRows ?? []) as Array<{ user_id: string; role: 'owner' | 'admin' | 'member' }>;
+      const userIds = Array.from(new Set(rows.map((row) => row.user_id)));
+
+      let profileMap = new Map<string, { full_name: string | null; email: string | null }>();
+      if (userIds.length > 0) {
+        const { data: profileRows } = await supabase
+          .from('profiles')
+          .select('id, full_name, email')
+          .in('id', userIds);
+
+        if (mounted && profileRows) {
+          profileMap = new Map(
+            profileRows.map((profile) => [
+              profile.id as string,
+              {
+                full_name: (profile as { full_name?: string | null }).full_name ?? null,
+                email: (profile as { email?: string | null }).email ?? null,
+              },
+            ])
+          );
+        }
+      }
+
+      if (!mounted) return;
+      const ordered = rows
+        .map((row) => {
+          const profile = profileMap.get(row.user_id);
+          return {
+            userId: row.user_id,
+            role: row.role,
+            fullName: profile?.full_name ?? null,
+            email: profile?.email ?? null,
+          } satisfies RouteMember;
+        })
+        .sort((a, b) => {
+          const rank = (role: RouteMember['role']) => (role === 'owner' ? 0 : role === 'admin' ? 1 : 2);
+          const roleDelta = rank(a.role) - rank(b.role);
+          if (roleDelta !== 0) return roleDelta;
+          return displayMemberName(a).localeCompare(displayMemberName(b));
+        });
+      setMembers(ordered);
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [canManageRoutePlans, currentWorkspaceId]);
+
+  const handleSaveRoutePlan = useCallback(async () => {
+    if (!canManageRoutePlans) {
+      setSaveError('Only owners/admins can create route plans.');
+      return;
+    }
+    if (!currentWorkspaceId) {
+      setSaveError('No workspace selected.');
+      return;
+    }
+    if (!routePlanName.trim()) {
+      setSaveError('Route plan name is required.');
+      return;
+    }
+    if (streetSegments.length === 0 || orderedAddresses.length === 0) {
+      setSaveError('No route data available to save.');
+      return;
+    }
+
+    setSaveError(null);
+    setSaveSuccess(null);
+    setIsSavingPlan(true);
+
+    try {
+      const segmentsPayload = streetSegments.map((segment) => {
+        const parsed = parseSegmentLabel(segment.street_name);
+        const houseRange = parseHouseRange(segment.house_range);
+        const lineGeoJson =
+          segment.addresses.length >= 2
+            ? {
+                type: 'LineString',
+                coordinates: segment.addresses.map((addr) => [addr.lon, addr.lat]),
+              }
+            : null;
+
+        return {
+          street_name: parsed.streetName,
+          side: parsed.side,
+          from_house: houseRange.fromHouse,
+          to_house: houseRange.toHouse,
+          stop_count: segment.addresses.length,
+          color: segment.color,
+          line_geojson: lineGeoJson,
+        };
+      });
+
+      const stopsPayload = orderedAddresses.map((addr, index) => ({
+        stop_order: index + 1,
+        address_id: addr.id,
+        gers_id: addr.gers_id ?? null,
+        lat: addr.lat,
+        lng: addr.lon,
+        display_address:
+          addr.formatted && addr.formatted.trim().length > 0
+            ? addr.formatted
+            : `${addr.house_number || ''} ${addr.street_name || ''}`.trim() || 'Unknown address',
+        building_id: addr.building_id ?? null,
+      }));
+
+      const createResponse = await fetch('/api/routes/create_from_segments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          workspaceId: currentWorkspaceId,
+          campaignId,
+          name: routePlanName.trim(),
+          status: 'active',
+          estMinutes: estimatedMinutes,
+          distanceMeters: estimatedDistanceMeters,
+          segments: segmentsPayload,
+          stops: stopsPayload,
+        }),
+      });
+
+      const createPayload = (await createResponse.json().catch(() => null)) as
+        | { routePlan?: { id: string }; error?: string }
+        | null;
+
+      if (!createResponse.ok || !createPayload?.routePlan?.id) {
+        setSaveError(createPayload?.error ?? 'Failed to save route plan.');
+        return;
+      }
+
+      const routePlanId = createPayload.routePlan.id;
+      if (assignToUserId && assignToUserId !== 'none') {
+        const assignResponse = await fetch('/api/routes/assign', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            routePlanId,
+            assignedToUserId: assignToUserId,
+          }),
+        });
+        const assignPayload = (await assignResponse.json().catch(() => null)) as
+          | { error?: string }
+          | null;
+        if (!assignResponse.ok) {
+          setSaveError(assignPayload?.error ?? 'Route saved, but assignment failed.');
+          return;
+        }
+
+        const member = members.find((entry) => entry.userId === assignToUserId);
+        setSaveSuccess(
+          `Route plan saved and assigned to ${member ? displayMemberName(member) : 'team member'}.`
+        );
+      } else {
+        setSaveSuccess('Route plan saved.');
+      }
+    } catch {
+      setSaveError('Failed to save route plan.');
+    } finally {
+      setIsSavingPlan(false);
+    }
+  }, [
+    canManageRoutePlans,
+    currentWorkspaceId,
+    routePlanName,
+    streetSegments,
+    orderedAddresses,
+    campaignId,
+    estimatedMinutes,
+    estimatedDistanceMeters,
+    assignToUserId,
+    members,
+  ]);
 
   // Draw route layers on the current map — called after every style.load (dots only, no lines; labels = street sequence)
   const drawRoute = useCallback((m: mapboxgl.Map) => {
@@ -385,7 +661,7 @@ export function OptimizedRouteView({ campaignId, addresses }: OptimizedRouteView
     if (!map.current || orderedAddresses.length === 0) return;
     if (!map.current.isStyleLoaded()) return;
     drawRoute(map.current);
-  }, [drawRoute]);
+  }, [drawRoute, orderedAddresses.length]);
 
   if (orderedAddresses.length === 0) {
     return (
@@ -408,6 +684,67 @@ export function OptimizedRouteView({ campaignId, addresses }: OptimizedRouteView
         <span>{streetSegments.length} street segments</span>
         <span>{orderedAddresses.length} homes in walking order</span>
       </div>
+
+      {canManageRoutePlans ? (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm">Save as Route Plan</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="md:col-span-2">
+                <Label htmlFor="route-plan-name">Route plan name</Label>
+                <Input
+                  id="route-plan-name"
+                  value={routePlanName}
+                  onChange={(event) => setRoutePlanName(event.target.value)}
+                  placeholder="Open House - Section A"
+                  className="mt-1"
+                  disabled={isSavingPlan}
+                />
+              </div>
+              <div>
+                <Label htmlFor="route-assignee">Assign to (optional)</Label>
+                <Select
+                  value={assignToUserId}
+                  onValueChange={setAssignToUserId}
+                  disabled={isSavingPlan}
+                >
+                  <SelectTrigger id="route-assignee" className="mt-1">
+                    <SelectValue placeholder="Unassigned" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Unassigned</SelectItem>
+                    {members.map((member) => (
+                      <SelectItem key={member.userId} value={member.userId}>
+                        {displayMemberName(member)} ({member.role})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="text-xs text-muted-foreground">
+                {orderedAddresses.length} stops • ~{estimatedMinutes} min
+                {estimatedDistanceMeters ? ` • ${(estimatedDistanceMeters / 1000).toFixed(1)} km` : ''}
+              </div>
+              <Button onClick={() => void handleSaveRoutePlan()} disabled={isSavingPlan}>
+                {isSavingPlan ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="mr-2 h-4 w-4" />
+                )}
+                Save Route Plan
+              </Button>
+            </div>
+
+            {saveError ? <p className="text-sm text-destructive">{saveError}</p> : null}
+            {saveSuccess ? <p className="text-sm text-emerald-600 dark:text-emerald-400">{saveSuccess}</p> : null}
+          </CardContent>
+        </Card>
+      ) : null}
 
       {/* Walking Route Map */}
       <div className="relative h-[560px] w-full rounded-lg border bg-card shadow-sm overflow-hidden">

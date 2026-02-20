@@ -3,15 +3,15 @@
 import { useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { HomeDashboardView } from '@/components/home/HomeDashboardView';
+import { MemberDashboardView } from '@/components/home/MemberDashboardView';
 import { TeamOwnerDashboardView } from '@/components/home/TeamOwnerDashboardView';
-import type { TeamDashboardMode } from '@/app/api/_utils/workspace';
+import type { DashboardAccessLevel } from '@/app/api/_utils/workspace';
 
 type HomePageClientProps = {
-  mode: TeamDashboardMode;
-  workspaceId: string | null;
+  accessLevel: DashboardAccessLevel;
 };
 
-export function HomePageClient({ mode, workspaceId }: HomePageClientProps) {
+export function HomePageClient({ accessLevel }: HomePageClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -24,8 +24,10 @@ export function HomePageClient({ mode, workspaceId }: HomePageClientProps) {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-background">
-      {mode === 'team_owner' ? (
+      {accessLevel === 'team_leader' ? (
         <TeamOwnerDashboardView />
+      ) : accessLevel === 'member' ? (
+        <MemberDashboardView />
       ) : (
         <HomeDashboardView onCreateCampaign={() => router.push('/campaigns/create')} />
       )}

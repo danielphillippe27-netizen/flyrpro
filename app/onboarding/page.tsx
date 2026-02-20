@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -37,6 +37,7 @@ const MAX_SEATS = 100;
 
 export default function OnboardingPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -55,6 +56,15 @@ export default function OnboardingPage() {
   const brokerageListRef = useRef<HTMLDivElement>(null);
   const [referralCode, setReferralCode] = useState('');
   const [seats, setSeats] = useState(TEAM_MIN_SEATS);
+
+  // When arriving from app handoff (Continue on web), skip name step and start at team/workspace.
+  useEffect(() => {
+    if (searchParams.get('from_handoff') === '1') {
+      setStep(2);
+      setUseCase('team');
+      setSeats(TEAM_MIN_SEATS);
+    }
+  }, [searchParams]);
 
   const canStep1 = firstName.trim().length > 0 && lastName.trim().length > 0;
   const canStep3 =
@@ -134,7 +144,7 @@ export default function OnboardingPage() {
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.redirect) {
-        router.push(data.redirect);
+        window.location.href = data.redirect;
         return;
       }
       setError(data?.error ?? 'Something went wrong. Please try again.');
@@ -387,7 +397,7 @@ export default function OnboardingPage() {
             </div>
             {useCase === 'team' && (
               <div className="space-y-2">
-                <Label className="text-base text-white">Seats</Label>
+                <Label className="text-base text-white">Members</Label>
                 <div className="flex items-center justify-between rounded-md border border-zinc-600 bg-[#2a2a2a] px-4 py-3">
                   <span className="text-2xl md:text-2xl text-white tabular-nums">
                     {seats}

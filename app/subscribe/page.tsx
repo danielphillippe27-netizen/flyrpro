@@ -72,6 +72,7 @@ function SubscribeContent() {
 
   useEffect(() => {
     let mounted = true;
+    let redirectTimer: ReturnType<typeof setTimeout> | null = null;
     const run = async () => {
       try {
         const res = await fetch('/api/access/state', { credentials: 'include' });
@@ -83,7 +84,10 @@ function SubscribeContent() {
           const data = await res.json();
           setState(data);
           if (data.hasAccess) {
-            router.replace('/home');
+            // Brief delay so post-onboarding workspace update is visible to the gate when /home loads
+            redirectTimer = setTimeout(() => {
+              if (mounted) router.replace('/home');
+            }, 600);
             return;
           }
         }
@@ -94,6 +98,7 @@ function SubscribeContent() {
     run();
     return () => {
       mounted = false;
+      if (redirectTimer) clearTimeout(redirectTimer);
     };
   }, [router]);
 

@@ -1,4 +1,6 @@
-import { getSupabaseServerClient } from '@/lib/supabase/server';
+import { createAdminClient, getSupabaseServerClient } from '@/lib/supabase/server';
+import { resolveDashboardAccessLevel } from '@/app/api/_utils/workspace';
+import type { MinimalSupabaseClient } from '@/app/api/_utils/workspace';
 
 export type PostAuthRedirect =
   | { redirect: 'login'; path: '/login' }
@@ -6,7 +8,7 @@ export type PostAuthRedirect =
   | { redirect: 'onboarding'; path: '/onboarding' }
   | { redirect: 'subscribe'; path: '/subscribe' }
   | { redirect: 'contact-owner'; path: '/subscribe?reason=member-inactive' }
-  | { redirect: 'dashboard'; path: '/home' };
+  | { redirect: 'dashboard'; path: string };
 
 export type GateOptions = {
   /** If set, user came from invite link; after auth they should accept then go to dashboard */
@@ -21,11 +23,11 @@ export type GateOptions = {
  */
 export async function getPostAuthRedirect(options: GateOptions = {}): Promise<PostAuthRedirect> {
   const { inviteToken, next } = options;
-  const supabase = await getSupabaseServerClient();
+  const authClient = await getSupabaseServerClient();
   const {
     data: { user },
     error: userError,
-  } = await supabase.auth.getUser();
+  } = await authClient.auth.getUser();
 
   if (userError || !user) {
     return { redirect: 'login', path: '/login' };
@@ -38,30 +40,30 @@ export async function getPostAuthRedirect(options: GateOptions = {}): Promise<Po
     return { redirect: 'join', path: `/join?token=${encodeURIComponent(inviteToken.trim())}` };
   }
 
-  // Primary workspace + role
-  const { data: memberships, error: memError } = await supabase
-    .from('workspace_members')
-    .select('workspace_id, role')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: true });
-
-  if (memError || !memberships?.length) {
-    // No workspace yet (shouldn't happen with trigger, but handle)
+  const admin = createAdminClient();
+  const access = await resolveDashboardAccessLevel(
+    admin as unknown as MinimalSupabaseClient,
+    userId
+  );
+  const founderPath = next && next !== '/home' ? next : '/admin';
+  if (!access.workspaceId) {
+    if (access.isFounder) {
+      return { redirect: 'dashboard', path: founderPath };
+    }
     return { redirect: 'onboarding', path: '/onboarding' };
   }
 
-  const primary = memberships[0];
-  const workspaceId = primary.workspace_id;
-  const role = primary.role as 'owner' | 'admin' | 'member';
-
   // Workspace row (name, subscription_status, onboarding_completed_at)
-  const { data: workspace, error: wsError } = await supabase
+  const { data: workspace, error: wsError } = await admin
     .from('workspaces')
     .select('id, subscription_status, trial_ends_at, onboarding_completed_at')
-    .eq('id', workspaceId)
+    .eq('id', access.workspaceId)
     .single();
 
   if (wsError || !workspace) {
+    if (access.isFounder) {
+      return { redirect: 'dashboard', path: founderPath };
+    }
     return { redirect: 'dashboard', path: next || '/home' };
   }
 
@@ -70,24 +72,20 @@ export async function getPostAuthRedirect(options: GateOptions = {}): Promise<Po
   const hasDashboardAccess =
     subscriptionStatus === 'active' ||
     (subscriptionStatus === 'trialing' && (!trialEndsAt || trialEndsAt > new Date()));
+  const effectiveAccess = hasDashboardAccess || access.isFounder;
 
-  const onboardingCompleted = !!workspace.onboarding_completed_at;
-
-  // Owner: must complete onboarding first
-  if (role === 'owner' && !onboardingCompleted) {
-    return { redirect: 'onboarding', path: '/onboarding' };
+  if (access.level === 'founder') {
+    return { redirect: 'dashboard', path: founderPath };
   }
 
-  // Member/Admin: workspace must be active; otherwise show contact-owner
-  if (role === 'member' || role === 'admin') {
-    if (!hasDashboardAccess) {
+  if (access.level === 'member') {
+    if (!effectiveAccess) {
       return { redirect: 'contact-owner', path: '/subscribe?reason=member-inactive' };
     }
     return { redirect: 'dashboard', path: next || '/home' };
   }
 
-  // Owner: check paywall
-  if (role === 'owner' && !hasDashboardAccess) {
+  if ((access.level === 'solo_owner' || access.level === 'team_leader') && !effectiveAccess) {
     return { redirect: 'subscribe', path: '/subscribe' };
   }
 

@@ -15,7 +15,8 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { useWorkspace } from '@/lib/workspace-context';
 
 interface HomeDashboardViewProps {
-  onCreateCampaign: () => void;
+  onCreateCampaign?: () => void;
+  canCreateCampaign?: boolean;
 }
 
 function DashboardSkeleton() {
@@ -46,7 +47,10 @@ function DashboardSkeleton() {
   );
 }
 
-export function HomeDashboardView({ onCreateCampaign }: HomeDashboardViewProps) {
+export function HomeDashboardView({
+  onCreateCampaign,
+  canCreateCampaign = true,
+}: HomeDashboardViewProps) {
   const { currentWorkspaceId } = useWorkspace();
   const [data, setData] = useState<HomeDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -141,6 +145,7 @@ export function HomeDashboardView({ onCreateCampaign }: HomeDashboardViewProps) 
       <QuickActionsRow
         activeRouteCampaignId={null}
         onCreateCampaign={onCreateCampaign}
+        canCreateCampaign={canCreateCampaign}
       />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

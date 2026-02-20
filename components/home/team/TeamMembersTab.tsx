@@ -48,7 +48,12 @@ export function TeamMembersTab(props: TeamMembersTabProps) {
   const [error, setError] = useState<string | null>(null);
 
   const fetchMembers = useCallback(async () => {
-    if (!currentWorkspaceId) return;
+    if (!currentWorkspaceId) {
+      setMembers([]);
+      setError('No workspace selected');
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -58,7 +63,10 @@ export function TeamMembersTab(props: TeamMembersTabProps) {
         end: range.end,
       });
       const res = await fetch('/api/team/members?' + params.toString());
-      if (!res.ok) throw new Error('Failed to load members');
+      if (!res.ok) {
+        const payload = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error ?? 'Failed to load members');
+      }
       const data = await res.json();
       setMembers(data.members ?? []);
     } catch (e) {

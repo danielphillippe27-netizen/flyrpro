@@ -17,6 +17,7 @@ import MapboxDraw from '@mapbox/mapbox-gl-draw';
 import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css';
 import { AddressAutocomplete } from '@/components/address/AddressAutocomplete';
 import { MapInfoButton } from '@/components/map/MapInfoButton';
+import { UserLocationLayer } from '@/components/map/UserLocationLayer';
 import type { AddressSuggestion } from '@/lib/services/MapboxAutocompleteService';
 import { Satellite, Map, Trash2, Pencil } from 'lucide-react';
 import * as turf from '@turf/turf';
@@ -817,6 +818,19 @@ export default function CreateCampaignPage() {
       <div className="flex-1 relative">
         <div ref={mapContainer} className="absolute inset-0 w-full h-full" />
         <MapInfoButton show={mapLoaded} />
+        {mapLoaded && map.current && (
+          <UserLocationLayer
+            map={map.current}
+            mapLoaded={mapLoaded}
+            showUserLocation={true}
+            onLocationFound={(lng, lat) => {
+              map.current?.flyTo({ center: [lng, lat], zoom: 15, duration: 800 });
+            }}
+            onLocationError={() => {
+              // Keep default Toronto center if geolocation denied or fails
+            }}
+          />
+        )}
 
         {/* Map Controls - Google Maps style floating buttons */}
         {mapLoaded && (

@@ -78,7 +78,7 @@ export default function LoginPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gatePath, hasChecked, router]);
 
-  const handleEmailSignIn = async (e: React.FormEvent) => {
+  const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setMessage(null);
@@ -86,22 +86,62 @@ export default function LoginPage() {
     try {
       const supabase = await getClientAsync();
       const normalizedEmail = sanitizeEmail(email);
-      const { error } = await supabase.auth.signInWithPassword({
+
+      // Try sign-in first (existing user)
+      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
         email: normalizedEmail,
         password,
       });
 
-      if (error) {
-        console.error('❌ Supabase Auth Error:', error);
-        throw error;
+      if (!signInError && signInData?.session) {
+        router.replace(gatePath);
+        return;
       }
 
-      router.replace(gatePath);
-    } catch (error: any) {
-      console.error('❌ Sign in error:', error);
+      // If "Invalid login credentials", user may not exist — try sign-up
+      const isInvalidCredentials =
+        signInError?.message?.toLowerCase().includes('invalid login credentials') ||
+        signInError?.message?.toLowerCase().includes('invalid_credentials');
+
+      if (!isInvalidCredentials) {
+        setMessage({
+          type: 'error',
+          text: signInError?.message || 'Invalid email or password.',
+        });
+        return;
+      }
+
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+        email: normalizedEmail,
+        password,
+        options: { emailRedirectTo: `${typeof window !== 'undefined' ? window.location.origin : ''}/auth/callback?next=${encodeURIComponent(normalizedNext)}` },
+      });
+
+      if (signUpError) {
+        // "User already registered" means wrong password
+        if (signUpError.message?.toLowerCase().includes('already registered') || signUpError.message?.toLowerCase().includes('already exists')) {
+          setMessage({ type: 'error', text: 'Invalid login credentials.' });
+        } else {
+          setMessage({ type: 'error', text: signUpError.message });
+        }
+        return;
+      }
+
+      if (signUpData?.session) {
+        router.replace(gatePath);
+        return;
+      }
+
+      // Sign-up succeeded but email confirmation required
+      setMessage({
+        type: 'success',
+        text: 'Check your email to confirm your account, then sign in with your password.',
+      });
+    } catch (error: unknown) {
+      console.error('❌ Auth error:', error);
       setMessage({
         type: 'error',
-        text: error.message || 'Invalid email or password.',
+        text: error instanceof Error ? error.message : 'Something went wrong. Please try again.',
       });
     } finally {
       setLoading(false);
@@ -162,11 +202,11 @@ export default function LoginPage() {
             />
           </div>
           <p className="text-[#AAAAAA] text-lg">
-            Continue to access access your dashboard or onboarding
+            Sign in or create an account to access your dashboard or onboarding
           </p>
         </div>
 
-        <form onSubmit={handleEmailSignIn} className="mt-6 space-y-4">
+        <form onSubmit={handleEmailSubmit} className="mt-6 space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="email" className="text-white text-base">Email</Label>
             <Input
@@ -206,7 +246,7 @@ export default function LoginPage() {
 
         <div className="relative mt-6 flex items-center gap-4">
           <span className="flex-1 border-t border-zinc-600" />
-          <span className="text-sm uppercase leading-normal text-[#AAAAAA] shrink-0">Or continue with sign in</span>
+          <span className="text-sm uppercase leading-normal text-[#AAAAAA] shrink-0">Or continue with</span>
           <span className="flex-1 border-t border-zinc-600" />
         </div>
 
@@ -271,7 +311,7 @@ export default function LoginPage() {
         )}
 
         <p className="mt-5 text-sm text-center text-[#AAAAAA]">
-          By signing in, you agree to our Terms of Service and Privacy Policy
+          By continuing, you agree to our Terms of Service and Privacy Policy
         </p>
       </div>
     </div>

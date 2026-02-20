@@ -2,17 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createHmac, randomBytes } from 'crypto';
 import { createServerClient } from '@supabase/ssr';
 import { createAdminClient } from '@/lib/supabase/server';
-
-const DEFAULT_SUPABASE_URL =
-  process.env.SUPABASE_URL ||
-  process.env.NEXT_PUBLIC_SUPABASE_URL ||
-  'https://kfnsnwqylsdsbgnwgxva.supabase.co';
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const SUPABASE_JWT_SECRET = process.env.SUPABASE_JWT_SECRET;
-
-function getCleanSupabaseUrl(): string {
-  return (DEFAULT_SUPABASE_URL || '').trim().replace(/\/$/, '') || DEFAULT_SUPABASE_URL;
-}
+import {
+  getSupabaseAnonKey,
+  getSupabaseJwtSecret,
+  getSupabaseUrl,
+} from '@/lib/supabase/env';
 
 function base64UrlEncode(input: string | Buffer): string {
   return Buffer.from(input)
@@ -23,16 +17,15 @@ function base64UrlEncode(input: string | Buffer): string {
 }
 
 function createShortLivedAccessToken(userId: string): string {
-  if (!SUPABASE_JWT_SECRET) {
-    throw new Error('SUPABASE_JWT_SECRET is required for handoff redemption');
-  }
+  const supabaseUrl = getSupabaseUrl();
+  const supabaseJwtSecret = getSupabaseJwtSecret();
 
   const now = Math.floor(Date.now() / 1000);
   const payload = {
     aud: 'authenticated',
     exp: now + 15 * 60,
     iat: now,
-    iss: `${getCleanSupabaseUrl()}/auth/v1`,
+    iss: `${supabaseUrl}/auth/v1`,
     role: 'authenticated',
     sub: userId,
   };
@@ -41,20 +34,19 @@ function createShortLivedAccessToken(userId: string): string {
   const encodedHeader = base64UrlEncode(JSON.stringify(header));
   const encodedPayload = base64UrlEncode(JSON.stringify(payload));
   const signingInput = `${encodedHeader}.${encodedPayload}`;
-  const signature = createHmac('sha256', SUPABASE_JWT_SECRET).update(signingInput).digest();
+  const signature = createHmac('sha256', supabaseJwtSecret).update(signingInput).digest();
   const encodedSignature = base64UrlEncode(signature);
   return `${signingInput}.${encodedSignature}`;
 }
 
 export async function POST(request: NextRequest) {
   try {
+    const supabaseUrl = getSupabaseUrl();
+    const supabaseAnonKey = getSupabaseAnonKey();
     const body = await request.json().catch(() => ({}));
     const code = typeof body?.code === 'string' ? body.code.trim() : '';
     if (!code) {
       return NextResponse.json({ error: 'Code is required' }, { status: 400 });
-    }
-    if (!SUPABASE_ANON_KEY) {
-      return NextResponse.json({ error: 'Server misconfiguration' }, { status: 500 });
     }
 
     const admin = createAdminClient();
@@ -77,7 +69,7 @@ export async function POST(request: NextRequest) {
     }
 
     const response = NextResponse.json({ ok: true });
-    const supabase = createServerClient(getCleanSupabaseUrl(), SUPABASE_ANON_KEY, {
+    const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
       cookies: {
         getAll() {
           return request.cookies.getAll();

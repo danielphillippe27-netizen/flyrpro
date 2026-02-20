@@ -16,29 +16,32 @@ function isSubscribe(path: string): boolean {
 
 export function MainRouteGuard({ children }: { children: ReactNode }) {
   const router = useRouter();
+  const [mounted, setMounted] = useState(false);
   const [allowed, setAllowed] = useState(false);
   const [showPaywallOverlay, setShowPaywallOverlay] = useState(false);
   const [checking, setChecking] = useState(true);
 
-  if (typeof window === 'undefined') {
-    return <>{children}</>;
-  }
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
-    let mounted = true;
+    if (!mounted) return;
+    let cancelled = false;
     fetch('/api/access/redirect', { credentials: 'include' })
       .then((res) => {
-        if (!mounted) return;
-        if (res.status === 401) {
-          setAllowed(false);
-          router.replace('/login');
-          setChecking(false);
-          return;
+        if (!cancelled) {
+          if (res.status === 401) {
+            setAllowed(false);
+            router.replace('/login');
+            setChecking(false);
+            return;
+          }
+          return res.json();
         }
-        return res.json();
       })
       .then((data) => {
-        if (!mounted || !data) return;
+        if (cancelled || !data) return;
         const path = (data.path as string) ?? '/home';
         if (shouldRedirect(path)) {
           router.replace(path);
@@ -51,19 +54,17 @@ export function MainRouteGuard({ children }: { children: ReactNode }) {
         }
       })
       .catch(() => {
-        if (mounted) {
-          setAllowed(true);
-        }
+        if (!cancelled) setAllowed(true);
       })
       .finally(() => {
-        if (mounted) setChecking(false);
+        if (!cancelled) setChecking(false);
       });
     return () => {
-      mounted = false;
+      cancelled = true;
     };
-  }, [router]);
+  }, [mounted, router]);
 
-  if (checking) {
+  if (!mounted || checking) {
     return (
       <div className="flex h-screen flex-col items-center justify-center bg-gray-50 dark:bg-background">
         <p className="text-muted-foreground">Loading…</p>

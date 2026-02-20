@@ -63,7 +63,16 @@ export function TeamActivityTab({ range, memberIds }: TeamActivityTabProps) {
 
   const fetchActivity = useCallback(
     async (off: number, append: boolean) => {
-      if (!currentWorkspaceId) return;
+      if (!currentWorkspaceId) {
+        if (!append) {
+          setEvents([]);
+          setTotal(0);
+          setOffset(0);
+        }
+        setError('No workspace selected');
+        setLoading(false);
+        return;
+      }
       setLoading(true);
       setError(null);
       try {

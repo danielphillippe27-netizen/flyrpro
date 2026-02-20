@@ -11,6 +11,5 @@ export async function GET(request: NextRequest) {
   const next = searchParams.get('next') ?? null;
 
   const result = await getPostAuthRedirect({ inviteToken, next });
-  const path = result.redirect === 'subscribe' ? '/home' : result.path;
-  return NextResponse.redirect(new URL(path, request.url));
+  return NextResponse.redirect(new URL(result.path, request.url));
 }

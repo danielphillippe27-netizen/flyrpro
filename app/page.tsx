@@ -22,21 +22,18 @@ function LandingPricing() {
   const loginRedirect = `/login?redirect=${encodeURIComponent('/pricing')}`;
 
   const proFeatures = [
-    { text: 'Desktop dashboard' },
-    { text: 'iOS field app' },
-    { text: 'Smart maps' },
-    { text: 'Territory drawing' },
-    { text: 'Unlimited campaigns + contacts' },
-    { text: 'Lead list' },
-    { text: 'Smart route optimization (walkable flow)' },
-    { text: 'Address-level QR tracking + bulk generator' },
-    { text: 'Performance analytics (doors, scans, follow-ups)' },
-    { text: 'Conversion metrics' },
+    { text: 'iOS + Desktop dashboard' },
+    { text: 'Unlimited campaigns' },
+    { text: 'Unlimited contacts / leads' },
+    { text: 'Advanced optimized routing (smart street order + walkable flow)' },
+    { text: 'Address-level QR tracking (exact house that scanned)' },
+    { text: 'Unlimited QR codes (bulk generator)' },
+    { text: 'Track performance' },
+    { text: 'Doors knocked, convos, follow-ups, scans' },
     { text: 'Follow-up system (tasks, reminders, call list)' },
-    { text: 'Personal goals' },
     { text: 'Exports (CSV / CRM-ready)' },
-    { text: 'CRM integrations (Follow Up Boss / webhook)' },
-    { text: 'Priority support' },
+    { text: 'Leaderboards + activity feed' },
+    { text: 'CRM integrations (Follow Up Boss / webhook / Zapier-style)' },
   ];
 
   const teamFeatures = [
@@ -112,12 +109,6 @@ const TRACKING_WORDS = [
   'Flyers',
 ];
 
-const heroShots = [
-  { src: '/landing/cover-3d-route.png', alt: '3D route map view' },
-  { src: '/landing/cover-neighborhood.png', alt: 'Neighborhood route map' },
-  { src: '/landing/cover-mobile-session.png', alt: 'Mobile session start' },
-];
-
 const desktopShots = [
   { src: '/landing/WEIRFF_1.png', alt: 'Desktop dashboard 1', title: '' },
   { src: '/landing/WEIRFF_2.png', alt: 'Desktop dashboard 2', title: '' },
@@ -152,9 +143,7 @@ function ScreenshotCard({
   return (
     <div className={`relative overflow-hidden rounded-3xl border border-zinc-700 bg-zinc-900 ${className}`}>
       {missing ? (
-        <div className="flex h-full min-h-[180px] items-center justify-center bg-zinc-800 p-4 text-center text-xs text-zinc-300">
-          Add image file: {src}
-        </div>
+        <div className="h-full min-h-[180px] bg-zinc-800" />
       ) : (
         <Image
           src={src}
@@ -194,7 +183,9 @@ export default function LandingPage() {
         }
         setChecking(false);
       })
-      .catch(() => setChecking(false));
+      .catch(() => {
+        if (!cancelled) setChecking(false);
+      });
 
     return () => {
       cancelled = true;
@@ -286,7 +277,7 @@ export default function LandingPage() {
                 We help businesses track what actually works when marketing to homeowners.
               </h2>
               <p className="mt-5 text-lg text-zinc-600">
-                Everything from which home scanned your QR code, to how many conversations you had, to how many turned into appointments — so you know what's working and can repeat it.
+                Everything from which home scanned your QR code, to how many conversations you had, to how many turned into appointments — so you know what&apos;s working and can repeat it.
               </p>
               <Link
                 href="/login"

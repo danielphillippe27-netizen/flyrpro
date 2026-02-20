@@ -85,7 +85,14 @@ export function TeamMapTab({ range, memberIds, mapMode }: TeamMapTabProps) {
   const [error, setError] = useState<string | null>(null);
 
   const fetchMapData = useCallback(async () => {
-    if (!currentWorkspaceId) return;
+    if (!currentWorkspaceId) {
+      setMembers([]);
+      setSessions([]);
+      setKnockEvents([]);
+      setError('No workspace selected');
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -129,7 +136,7 @@ export function TeamMapTab({ range, memberIds, mapMode }: TeamMapTabProps) {
     mapboxgl.accessToken = token;
     const map = new mapboxgl.Map({
       container: mapContainerRef.current,
-      style: MAP_STYLES[theme === 'dark' ? 'dark' : 'light'] ?? MAP_STYLES.light,
+      style: MAP_STYLES.light,
       center: [-79.3832, 43.6532],
       zoom: 11,
     });

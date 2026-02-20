@@ -67,8 +67,9 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const workspaceId = await (async () => {
-      const { data: memberships } = await supabase
+    // Use admin client so we always find an existing owner workspace (avoids RLS/race creating duplicates)
+    let workspaceId = await (async () => {
+      const { data: memberships } = await admin
         .from('workspace_members')
         .select('workspace_id')
         .eq('user_id', user.id)
@@ -79,16 +80,57 @@ export async function POST(request: NextRequest) {
       return memberships?.[0]?.workspace_id ?? null;
     })();
 
+    // If user has no owner workspace (e.g. account created before workspace trigger or backfill missed them),
+    // create one so onboarding can complete.
     if (!workspaceId) {
-      return NextResponse.json(
-        { error: 'No workspace found' },
-        { status: 400 }
-      );
+      const initialName =
+        typeof workspaceName === 'string' && workspaceName.trim()
+          ? workspaceName.trim()
+          : 'My Workspace';
+      const { data: newWorkspace, error: createErr } = await admin
+        .from('workspaces')
+        .insert({
+          name: initialName,
+          owner_id: user.id,
+        })
+        .select('id')
+        .single();
+
+      if (createErr || !newWorkspace?.id) {
+        console.error('Onboarding: failed to create workspace', createErr);
+        return NextResponse.json(
+          { error: 'Failed to create workspace. Please try again.' },
+          { status: 500 }
+        );
+      }
+
+      const { error: memberErr } = await admin
+        .from('workspace_members')
+        .insert({
+          workspace_id: newWorkspace.id,
+          user_id: user.id,
+          role: 'owner',
+        });
+
+      if (memberErr) {
+        console.error('Onboarding: failed to add owner membership', memberErr);
+        return NextResponse.json(
+          { error: 'Failed to set up workspace. Please try again.' },
+          { status: 500 }
+        );
+      }
+
+      workspaceId = newWorkspace.id;
     }
+
+    const trialEndsAt = new Date();
+    trialEndsAt.setFullYear(trialEndsAt.getFullYear() + 1);
 
     const updates: Record<string, unknown> = {
       updated_at: new Date().toISOString(),
       onboarding_completed_at: new Date().toISOString(),
+      subscription_status: 'trialing',
+      trial_ends_at: trialEndsAt.toISOString(),
     };
 
     if (typeof workspaceName === 'string' && workspaceName.trim()) {

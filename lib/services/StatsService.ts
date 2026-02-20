@@ -31,24 +31,12 @@ function mapRow(row: Record<string, unknown>): UserStats {
 export class StatsService {
   private static client = createClient();
 
-  static async fetchUserStats(userId: string, period?: StatsPeriod): Promise<UserStats | null> {
-    if (period) {
-      const { data, error } = await this.client.rpc('get_user_stats_for_period', {
-        p_user_id: userId,
-        p_period: period,
-      });
-      if (error) {
-        // Gracefully degrade if the period RPC isn't available in the current DB.
-        if (error.code === 'PGRST202') {
-          return this.fetchUserStats(userId);
-        }
-        throw new Error(error.message || `Failed to load ${period} stats`);
-      }
-      const row = Array.isArray(data) ? data[0] : data;
-      if (!row) return null;
-      return mapRow(row as Record<string, unknown>);
-    }
-
+  /**
+   * Fetches the current user's stats from public.user_stats.
+   * Same table iOS updates via increment_user_stats RPC and the sessions trigger.
+   * Read path: direct table read (no RPC).
+   */
+  static async fetchUserStats(userId: string, _period?: StatsPeriod): Promise<UserStats | null> {
     const { data, error } = await this.client
       .from('user_stats')
       .select('*')

@@ -1,22 +1,17 @@
 import { createClient } from '@supabase/supabase-js';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
-
-const DEFAULT_SUPABASE_URL = 'https://kfnsnwqylsdsbgnwgxva.supabase.co';
+import {
+  getSupabaseAnonKey,
+  getSupabaseServiceRoleKey,
+  getSupabaseUrl,
+} from '@/lib/supabase/env';
 
 export function createAdminClient() {
-  // Support both SUPABASE_URL (server-only) and NEXT_PUBLIC_SUPABASE_URL
-  const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || DEFAULT_SUPABASE_URL;
-  const cleanUrl = supabaseUrl ? supabaseUrl.trim().replace(/\/$/, '') : DEFAULT_SUPABASE_URL;
+  const supabaseUrl = getSupabaseUrl();
+  const supabaseServiceKey = getSupabaseServiceRoleKey();
 
-  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!supabaseServiceKey) {
-    throw new Error(
-      'SUPABASE_SERVICE_ROLE_KEY is required for this project. Set it in .env.local (Supabase Dashboard → Project Settings → API → service_role secret).'
-    );
-  }
-
-  return createClient(cleanUrl, supabaseServiceKey, {
+  return createClient(supabaseUrl, supabaseServiceKey, {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
@@ -30,18 +25,11 @@ export function createAdminClient() {
  */
 export async function getSupabaseServerClient() {
   const cookieStore = await cookies();
-  const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://kfnsnwqylsdsbgnwgxva.supabase.co';
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!supabaseAnonKey) {
-    throw new Error(
-      'NEXT_PUBLIC_SUPABASE_ANON_KEY is required. Set it in .env.local (Supabase Dashboard → Project Settings → API → anon public).'
-    );
-  }
-  
-  const cleanUrl = supabaseUrl ? supabaseUrl.trim().replace(/\/$/, '') : 'https://kfnsnwqylsdsbgnwgxva.supabase.co';
+  const supabaseUrl = getSupabaseUrl();
+  const supabaseAnonKey = getSupabaseAnonKey();
 
   return createServerClient(
-    cleanUrl,
+    supabaseUrl,
     supabaseAnonKey,
     {
       cookies: {
@@ -57,4 +45,3 @@ export async function getSupabaseServerClient() {
     }
   );
 }
-

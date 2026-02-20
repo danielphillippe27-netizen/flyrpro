@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServerClient, createAdminClient } from '@/lib/supabase/server';
 import { resolveTeamDashboardMode } from '@/app/api/_utils/workspace';
+import type { MinimalSupabaseClient } from '@/app/api/_utils/workspace';
 
 function parseRange(start?: string | null, end?: string | null): { start: string; end: string } {
   const now = new Date();
@@ -38,7 +39,11 @@ export async function GET(request: NextRequest) {
     const supabase = createAdminClient();
     const { searchParams } = new URL(request.url);
     const workspaceId = searchParams.get('workspaceId') ?? undefined;
-    const resolution = await resolveTeamDashboardMode(supabase as any, user.id, workspaceId);
+    const resolution = await resolveTeamDashboardMode(
+      supabase as unknown as MinimalSupabaseClient,
+      user.id,
+      workspaceId
+    );
     if (resolution.error || !resolution.workspaceId || resolution.mode !== 'team_owner') {
       return NextResponse.json(
         { error: resolution.error ?? 'Forbidden' },
@@ -55,8 +60,90 @@ export async function GET(request: NextRequest) {
     });
 
     if (error) {
-      console.error('[team/members] RPC error:', error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      console.error('[team/members] RPC error (falling back):', error);
+
+      const { data: memberRows, error: membersError } = await supabase
+        .from('workspace_members')
+        .select('user_id, role, color')
+        .eq('workspace_id', resolution.workspaceId)
+        .order('created_at', { ascending: true });
+
+      if (membersError) {
+        return NextResponse.json({ error: error.message }, { status: 500 });
+      }
+
+      const rows = (memberRows ?? []) as Array<{ user_id: string; role?: string | null; color?: string | null }>;
+      const userIds = rows.map((row) => row.user_id).filter(Boolean);
+
+      const { data: profiles } = userIds.length
+        ? await supabase
+            .from('user_profiles')
+            .select('user_id, first_name, last_name')
+            .in('user_id', userIds)
+        : { data: [] as Array<{ user_id: string; first_name: string | null; last_name: string | null }> };
+
+      const profileByUserId = new Map(
+        ((profiles ?? []) as Array<{ user_id: string; first_name: string | null; last_name: string | null }>).map(
+          (profile) => [profile.user_id, profile]
+        )
+      );
+
+      let sessionsByUserId = new Map<string, { sessionsCount: number; lastActiveAt: string | null }>();
+      try {
+        const { data: sessionRows } = userIds.length
+          ? await supabase
+              .from('sessions')
+              .select('user_id, start_time, end_time')
+              .eq('workspace_id', resolution.workspaceId)
+              .in('user_id', userIds)
+              .gte('start_time', start)
+              .lte('start_time', end)
+              .order('start_time', { ascending: false })
+          : { data: [] as Array<{ user_id: string; start_time: string | null; end_time: string | null }> };
+
+        const map = new Map<string, { sessionsCount: number; lastActiveAt: string | null }>();
+        for (const session of (sessionRows ?? []) as Array<{ user_id: string; start_time: string | null; end_time: string | null }>) {
+          const existing = map.get(session.user_id) ?? { sessionsCount: 0, lastActiveAt: null };
+          const eventTime = session.end_time ?? session.start_time ?? null;
+          map.set(session.user_id, {
+            sessionsCount: existing.sessionsCount + 1,
+            lastActiveAt: existing.lastActiveAt ?? eventTime,
+          });
+        }
+        sessionsByUserId = map;
+      } catch {
+        // Ignore session-derived stats in fallback when sessions schema differs.
+      }
+
+      const members = rows.map((row) => {
+        const profile = profileByUserId.get(row.user_id);
+        const fullName = [profile?.first_name, profile?.last_name]
+          .filter((part): part is string => typeof part === 'string' && part.trim().length > 0)
+          .join(' ')
+          .trim();
+        const sessionInfo = sessionsByUserId.get(row.user_id);
+        const last = sessionInfo?.lastActiveAt ?? null;
+        return {
+          user_id: row.user_id,
+          display_name: fullName || 'Member',
+          role: row.role ?? null,
+          color: row.color ?? '#3B82F6',
+          last_active_at: last,
+          inactive_days: daysSince(last),
+          doors_knocked: 0,
+          conversations: 0,
+          flyers_delivered: 0,
+          followups: 0,
+          appointments: 0,
+          sessions_count: sessionInfo?.sessionsCount ?? 0,
+          active_days: 0,
+        };
+      });
+
+      return NextResponse.json({
+        members,
+        degraded: true,
+      });
     }
 
     const raw = data as { error?: string } | unknown[];

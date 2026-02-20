@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation';
 import { Suspense } from 'react';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/server';
-import { resolveTeamDashboardMode } from '@/app/api/_utils/workspace';
+import { resolveDashboardAccessLevel } from '@/app/api/_utils/workspace';
 import { HomePageClient } from './HomePageClient';
 
 export default async function HomePage() {
@@ -12,7 +12,10 @@ export default async function HomePage() {
     redirect('/login');
   }
   const admin = createAdminClient();
-  const { mode, workspaceId } = await resolveTeamDashboardMode(admin, user.id);
+  const access = await resolveDashboardAccessLevel(admin, user.id);
+  if (access.level === 'founder') {
+    redirect('/admin');
+  }
   return (
     <Suspense
       fallback={
@@ -21,7 +24,7 @@ export default async function HomePage() {
         </div>
       }
     >
-      <HomePageClient mode={mode} workspaceId={workspaceId} />
+      <HomePageClient accessLevel={access.level} />
     </Suspense>
   );
 }

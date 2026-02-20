@@ -841,6 +841,7 @@ export default function CampaignDetailPage() {
           <TabsContent value="route" className="mt-4">
             <OptimizedRouteView 
               campaignId={campaignId} 
+              campaignName={campaign?.name ?? undefined}
               addresses={addresses} 
             />
           </TabsContent>

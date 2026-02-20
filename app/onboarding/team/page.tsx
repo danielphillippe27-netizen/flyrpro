@@ -1,11 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 
-function TeamOnboardingHandoffContent() {
+export default function TeamOnboardingHandoffPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const code = useMemo(() => searchParams.get('code')?.trim() ?? '', [searchParams]);
@@ -78,22 +77,5 @@ function TeamOnboardingHandoffContent() {
         )}
       </div>
     </div>
-  );
-}
-
-export default function TeamOnboardingHandoffPage() {
-  return (
-    <Suspense
-      fallback={
-        <div className="min-h-screen flex items-center justify-center bg-black text-white p-6">
-          <div className="max-w-md w-full rounded-xl border border-zinc-700 bg-zinc-900 p-6 text-center space-y-3">
-            <h1 className="text-xl font-semibold">Signing you in...</h1>
-            <p className="text-sm text-zinc-400">Please wait while we securely continue setup.</p>
-          </div>
-        </div>
-      }
-    >
-      <TeamOnboardingHandoffContent />
-    </Suspense>
   );
 }

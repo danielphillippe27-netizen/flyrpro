@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
-import { getSupabaseServerClient } from '@/lib/supabase/server';
+import { createAdminClient, getSupabaseServerClient } from '@/lib/supabase/server';
+import { resolveDashboardAccessLevel } from '@/app/api/_utils/workspace';
+import type { MinimalSupabaseClient } from '@/app/api/_utils/workspace';
 
 /**
  * GET /api/access/state
@@ -7,44 +9,54 @@ import { getSupabaseServerClient } from '@/lib/supabase/server';
  */
 export async function GET() {
   try {
-    const supabase = await getSupabaseServerClient();
+    const authClient = await getSupabaseServerClient();
     const {
       data: { user },
       error: userError,
-    } = await supabase.auth.getUser();
+    } = await authClient.auth.getUser();
 
     if (userError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { data: memberships } = await supabase
-      .from('workspace_members')
-      .select('workspace_id, role')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: true });
-
-    if (!memberships?.length) {
+    const admin = createAdminClient();
+    const access = await resolveDashboardAccessLevel(
+      admin as unknown as MinimalSupabaseClient,
+      user.id
+    );
+    if (!access.workspaceId) {
       return NextResponse.json({
-        role: null,
+        userId: user.id,
+        role: access.role,
+        workspaceId: null,
+        workspace_id: null,
         workspaceName: null,
-        hasAccess: false,
+        hasAccess: access.isFounder,
         reason: 'no_workspace',
+        isFounder: access.isFounder,
+        accessLevel: access.level,
+        memberCount: access.memberCount,
       });
     }
 
-    const primary = memberships[0];
-    const { data: workspace } = await supabase
+    const { data: workspace } = await admin
       .from('workspaces')
       .select('id, name, subscription_status, trial_ends_at, max_seats')
-      .eq('id', primary.workspace_id)
+      .eq('id', access.workspaceId)
       .single();
 
     if (!workspace) {
       return NextResponse.json({
-        role: primary.role,
+        userId: user.id,
+        role: access.role,
+        workspaceId: access.workspaceId,
+        workspace_id: access.workspaceId,
         workspaceName: null,
-        hasAccess: false,
+        hasAccess: access.isFounder,
         reason: 'no_workspace',
+        isFounder: access.isFounder,
+        accessLevel: access.level,
+        memberCount: access.memberCount,
       });
     }
 
@@ -52,17 +64,24 @@ export async function GET() {
     const trialEnd = workspace.trial_ends_at
       ? new Date(workspace.trial_ends_at)
       : null;
-    const hasAccess =
+    const subscriptionAccess =
       status === 'active' ||
       (status === 'trialing' && (!trialEnd || trialEnd > new Date()));
+    const hasAccess = subscriptionAccess || access.isFounder;
 
     return NextResponse.json({
-      role: primary.role,
+      userId: user.id,
+      role: access.role,
+      workspaceId: workspace.id,
+      workspace_id: workspace.id,
       workspaceName: workspace.name,
       maxSeats: workspace.max_seats ?? 1,
       hasAccess,
+      isFounder: access.isFounder,
+      accessLevel: access.level,
+      memberCount: access.memberCount,
       reason:
-        (primary.role === 'member' || primary.role === 'admin') && !hasAccess
+        access.level === 'member' && !hasAccess
           ? 'member-inactive'
           : undefined,
     });

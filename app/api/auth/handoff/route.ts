@@ -2,16 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { randomBytes } from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 import { createAdminClient } from '@/lib/supabase/server';
-
-const DEFAULT_SUPABASE_URL =
-  process.env.SUPABASE_URL ||
-  process.env.NEXT_PUBLIC_SUPABASE_URL ||
-  'https://kfnsnwqylsdsbgnwgxva.supabase.co';
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-function getCleanSupabaseUrl(): string {
-  return (DEFAULT_SUPABASE_URL || '').trim().replace(/\/$/, '') || DEFAULT_SUPABASE_URL;
-}
+import { getSupabaseAnonKey, getSupabaseUrl } from '@/lib/supabase/env';
 
 function buildClientIp(request: NextRequest): string | null {
   const xForwardedFor = request.headers.get('x-forwarded-for');
@@ -25,8 +16,10 @@ function buildClientIp(request: NextRequest): string | null {
 
 export async function POST(request: NextRequest) {
   try {
+    const supabaseUrl = getSupabaseUrl();
+    const supabaseAnonKey = getSupabaseAnonKey();
     const authHeader = request.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ') || !SUPABASE_ANON_KEY) {
+    if (!authHeader?.startsWith('Bearer ')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -35,7 +28,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const supabase = createClient(getCleanSupabaseUrl(), SUPABASE_ANON_KEY, {
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       global: { headers: { Authorization: `Bearer ${token}` } },
       auth: { persistSession: false, autoRefreshToken: false },
     });

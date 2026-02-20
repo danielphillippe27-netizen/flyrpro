@@ -51,7 +51,7 @@ export function FlyrMapView() {
   const [userId, setUserId] = useState<string | null>(null);
   const boundsFittedRef = useRef(false);
   const [campaignBbox, setCampaignBbox] = useState<{ minLon: number; minLat: number; maxLon: number; maxLat: number } | null>(null);
-  const [showUserLocation, setShowUserLocation] = useState(false);
+  const [showUserLocation, setShowUserLocation] = useState(true);
   const [mapViewMode, setMapViewMode] = useState<'buildings' | 'addresses'>('buildings');
 
   const clearCampaignSelection = () => {
@@ -238,14 +238,17 @@ export function FlyrMapView() {
   }, []);
 
   // Keep Mapbox canvas in sync with container size (sidebar collapse/expand, viewport changes).
+  // Debounce resize so we don't flash during the sidebar's width transition (~200ms).
+  const RESIZE_DEBOUNCE_MS = 250;
   useEffect(() => {
     if (!mapLoaded || !map.current || !mapContainer.current) return;
 
     const mapInstance = map.current;
     const container = mapContainer.current;
     let frameId: number | null = null;
+    let debounceId: ReturnType<typeof setTimeout> | null = null;
 
-    const resizeMap = () => {
+    const performResize = () => {
       if (frameId !== null) cancelAnimationFrame(frameId);
       frameId = requestAnimationFrame(() => {
         try {
@@ -253,22 +256,30 @@ export function FlyrMapView() {
         } catch {
           // Ignore transient resize errors during style swaps/unmount.
         }
+        frameId = null;
       });
     };
 
-    const observer = new ResizeObserver(() => {
-      resizeMap();
-    });
+    const resizeMap = () => {
+      if (debounceId !== null) clearTimeout(debounceId);
+      debounceId = setTimeout(() => {
+        debounceId = null;
+        performResize();
+      }, RESIZE_DEBOUNCE_MS);
+    };
+
+    const observer = new ResizeObserver(resizeMap);
     observer.observe(container);
 
     window.addEventListener('resize', resizeMap);
     window.addEventListener('orientationchange', resizeMap);
-    resizeMap();
+    performResize(); // initial sync, no debounce
 
     return () => {
       observer.disconnect();
       window.removeEventListener('resize', resizeMap);
       window.removeEventListener('orientationchange', resizeMap);
+      if (debounceId !== null) clearTimeout(debounceId);
       if (frameId !== null) cancelAnimationFrame(frameId);
     };
   }, [mapLoaded]);

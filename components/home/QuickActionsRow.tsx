@@ -1,21 +1,40 @@
 'use client';
 
 import Link from 'next/link';
-import { Route, Target, MapPin, Plus } from 'lucide-react';
+import { Route, Target, MapPin, Plus, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
+
+type QuickActionTile =
+  | {
+      label: string;
+      href: string;
+      icon: LucideIcon;
+      ariaLabel: string;
+    }
+  | {
+      label: string;
+      onClick: () => void;
+      icon: LucideIcon;
+      ariaLabel: string;
+    };
 
 interface QuickActionsRowProps {
   /** If set, show "Continue Route" linking to this campaign's route tab; else "Start a Route" to /campaigns */
   activeRouteCampaignId: string | null;
-  onCreateCampaign: () => void;
+  onCreateCampaign?: () => void;
+  canCreateCampaign?: boolean;
 }
 
-export function QuickActionsRow({ activeRouteCampaignId, onCreateCampaign }: QuickActionsRowProps) {
+export function QuickActionsRow({
+  activeRouteCampaignId,
+  onCreateCampaign,
+  canCreateCampaign = true,
+}: QuickActionsRowProps) {
   const routeHref = activeRouteCampaignId
     ? `/campaigns/${activeRouteCampaignId}?tab=route`
     : '/campaigns';
 
-  const tiles = [
+  const tiles: QuickActionTile[] = [
     {
       label: activeRouteCampaignId ? 'Continue Route' : 'Start a Route',
       href: routeHref,
@@ -34,13 +53,16 @@ export function QuickActionsRow({ activeRouteCampaignId, onCreateCampaign }: Qui
       icon: MapPin,
       ariaLabel: 'View routes',
     },
-    {
+  ];
+
+  if (canCreateCampaign && onCreateCampaign) {
+    tiles.push({
       label: 'Create Campaign',
       onClick: onCreateCampaign,
       icon: Plus,
       ariaLabel: 'Create new campaign',
-    },
-  ];
+    });
+  }
 
   return (
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

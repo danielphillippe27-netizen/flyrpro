@@ -60,7 +60,13 @@ export function TeamDashboardTab({ range, memberIds, onMemberClick, onOpenMap }:
   const [error, setError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
-    if (!currentWorkspaceId) return;
+    if (!currentWorkspaceId) {
+      setSummary(null);
+      setMembers([]);
+      setError('No workspace selected');
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -74,8 +80,14 @@ export function TeamDashboardTab({ range, memberIds, onMemberClick, onOpenMap }:
         fetch('/api/team/summary?' + qs),
         fetch('/api/team/members?' + qs),
       ]);
-      if (!summaryRes.ok) throw new Error('Failed to load summary');
-      if (!membersRes.ok) throw new Error('Failed to load members');
+      if (!summaryRes.ok) {
+        const payload = (await summaryRes.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error ?? 'Failed to load summary');
+      }
+      if (!membersRes.ok) {
+        const payload = (await membersRes.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error ?? 'Failed to load members');
+      }
       const summaryData = await summaryRes.json();
       const membersData = await membersRes.json();
       setSummary(summaryData);
