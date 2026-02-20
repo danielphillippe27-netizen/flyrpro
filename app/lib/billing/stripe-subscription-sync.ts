@@ -97,4 +97,46 @@ export async function applyStripeSubscriptionUpdate(
       },
       { onConflict: 'user_id' }
     );
+
+  if (isActive) {
+    await syncWorkspaceSubscriptionFromStripe(supabase, userId, subscription);
+  }
+}
+
+/**
+ * Set the user's primary workspace subscription_status to active/trialing so hard paywall gate allows access.
+ */
+export async function syncWorkspaceSubscriptionFromStripe(
+  supabase: SupabaseAdmin,
+  userId: string,
+  subscription: Stripe.Subscription
+): Promise<void> {
+  const { data: member } = await supabase
+    .from('workspace_members')
+    .select('workspace_id')
+    .eq('user_id', userId)
+    .eq('role', 'owner')
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (!member?.workspace_id) return;
+
+  const status =
+    subscription.status === 'trialing' ? 'trialing' : 'active';
+  const trialEnd =
+    subscription.trial_end != null
+      ? new Date(subscription.trial_end * 1000).toISOString()
+      : null;
+  const seatQuantity = Math.max(1, subscription.items?.data?.[0]?.quantity ?? 1);
+
+  await supabase
+    .from('workspaces')
+    .update({
+      subscription_status: status,
+      trial_ends_at: trialEnd,
+      max_seats: seatQuantity,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', member.workspace_id);
 }

@@ -14,6 +14,7 @@ This documentation package contains everything you need to implement the "linked
 | **IOS_LOGIC_TRANSLATION.md** | TypeScript → Swift translations | 30 min |
 | **IOS_IMPLEMENTATION_GUIDE.md** | Complete technical reference | 60 min |
 | **FOLLOW_UP_BOSS_AND_IOS_GUIDE.md** | Follow Up Boss & iOS: how we're linked, API contract, connect from the app | 15 min |
+| **IOS_WORKSPACE_AND_ONBOARDING_GUIDE.md** | Workspace setup, onboarding flow, invites, and post-auth routing for iOS | 25 min |
 
 ## 🚀 Quick Start (5 Steps)
 
@@ -26,6 +27,10 @@ This documentation package contains everything you need to implement the "linked
 ## 🔗 Follow Up Boss & iOS
 
 For how FLYR is linked to Follow Up Boss and how users can connect from the iOS app (API contract, auth, WebView vs native), see **[FOLLOW_UP_BOSS_AND_IOS_GUIDE.md](FOLLOW_UP_BOSS_AND_IOS_GUIDE.md)**.
+
+## 🔗 Workspace & Onboarding (iOS)
+
+For implementing workspace multitenancy, the onboarding wizard, team invites, and post-auth routing (onboarding → subscribe → dashboard) so the iOS app matches the web app, see **[IOS_WORKSPACE_AND_ONBOARDING_GUIDE.md](IOS_WORKSPACE_AND_ONBOARDING_GUIDE.md)**.
 
 ## 🎯 What This Feature Does
 
@@ -129,9 +134,10 @@ Display LocationCard UI
 
 ### If you're a **Mobile Developer**:
 1. Start: `IOS_IMPLEMENTATION_SUMMARY.md`
-2. Reference: `IOS_QUICK_REFERENCE.md` (bookmark this!)
-3. Deep dive: `IOS_IMPLEMENTATION_GUIDE.md`
-4. Code examples: `IOS_LOGIC_TRANSLATION.md`
+2. Workspace/onboarding: `IOS_WORKSPACE_AND_ONBOARDING_GUIDE.md` (auth, invites, paywall)
+3. Reference: `IOS_QUICK_REFERENCE.md` (bookmark this!)
+4. Deep dive: `IOS_IMPLEMENTATION_GUIDE.md`
+5. Code examples: `IOS_LOGIC_TRANSLATION.md`
 
 ### If you're a **Backend Developer**:
 1. Start: `IOS_DATA_FLOW_DIAGRAM.md`

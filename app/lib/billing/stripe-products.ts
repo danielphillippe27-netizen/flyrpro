@@ -11,9 +11,9 @@ export const STRIPE_PRICE_CAD_MONTHLY =
 export const STRIPE_PRICE_USD_MONTHLY =
   process.env.STRIPE_PRICE_USD_MONTHLY ?? '';
 export const STRIPE_PRICE_USD_YEARLY =
-  process.env.STRIPE_PRICE_USD_YEARLY ?? 'price_1T1ZH4GVNtKfhDB1yAjHL2sk';
+  process.env.STRIPE_PRICE_USD_YEARLY ?? 'price_1T2GC4GVNtKfhDB1ksgVMtnY';
 export const STRIPE_PRICE_CAD_YEARLY =
-  process.env.STRIPE_PRICE_CAD_YEARLY ?? 'price_1T1ZIGGVNtKfhDB1vc9SPmWw';
+  process.env.STRIPE_PRICE_CAD_YEARLY ?? 'price_1T2GAvGVNtKfhDB1UfIuhUg9';
 
 export const STRIPE_PRICE_TEAM_MONTHLY =
   process.env.STRIPE_PRICE_TEAM_MONTHLY ?? '';
@@ -53,6 +53,18 @@ export function getDefaultUpgradePriceId(): string {
     STRIPE_PRICE_CAD_YEARLY ||
     ''
   );
+}
+
+/** Resolve Pro price ID by plan and currency (for subscribe/paywall checkout). Never returns monthly for annual. */
+export function getProPriceId(plan: 'annual' | 'monthly', currency: 'USD' | 'CAD'): string {
+  if (plan === 'annual') {
+    return currency === 'CAD'
+      ? STRIPE_PRICE_CAD_YEARLY || ''
+      : STRIPE_PRICE_USD_YEARLY || STRIPE_PRICE_PRO_YEARLY || '';
+  }
+  return currency === 'CAD'
+    ? STRIPE_PRICE_CAD_MONTHLY || ''
+    : STRIPE_PRICE_USD_MONTHLY || STRIPE_PRICE_PRO_MONTHLY || '';
 }
 
 /** Map Stripe price ID to plan for webhook. */

@@ -19,3 +19,14 @@ debug-*.js
 
 # Parquet files
 *.parquet
+
+# Next.js build/cache artifacts
+.next/
+
+# Local dependencies and generated binaries
+node_modules/
+kimi-cli/.kimi-build/
+kimi-cli/templates/lambda/node_modules/
+
+# Local large datasets not required by runtime
+data/

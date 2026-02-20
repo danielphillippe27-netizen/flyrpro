@@ -12,6 +12,7 @@ import { RecentSnapshot } from './RecentSnapshot';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { useWorkspace } from '@/lib/workspace-context';
 
 interface HomeDashboardViewProps {
   onCreateCampaign: () => void;
@@ -46,6 +47,7 @@ function DashboardSkeleton() {
 }
 
 export function HomeDashboardView({ onCreateCampaign }: HomeDashboardViewProps) {
+  const { currentWorkspaceId } = useWorkspace();
   const [data, setData] = useState<HomeDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -54,14 +56,14 @@ export function HomeDashboardView({ onCreateCampaign }: HomeDashboardViewProps) 
     setLoading(true);
     setError(null);
     try {
-      const res = await fetchHomeDashboard();
+      const res = await fetchHomeDashboard(currentWorkspaceId);
       setData(res);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [currentWorkspaceId]);
 
   useEffect(() => {
     load();

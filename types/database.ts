@@ -385,7 +385,7 @@ export interface UserStats {
   created_at: string | null;
 }
 
-export type LeaderboardSortBy = 'flyers' | 'conversations' | 'leads' | 'distance' | 'time';
+export type LeaderboardSortBy = 'flyers' | 'conversations' | 'leads' | 'distance' | 'time' | 'day_streak' | 'best_streak';
 export type LeaderboardTimeframe = 'day' | 'week' | 'month' | 'year' | 'all_time';
 
 export interface LeaderboardEntry {
@@ -401,6 +401,24 @@ export interface LeaderboardEntry {
   time_minutes: number;
   day_streak: number;
   best_streak: number;
+  rank: number;
+  updated_at: string;
+}
+
+/** Brokerage leaderboard: only all_time and month MVs supported */
+export type BrokerageLeaderboardTimeframe = 'all_time' | 'month';
+
+export interface BrokerageLeaderboardEntry {
+  brokerage_key: string;
+  display_name: string;
+  flyers: number;
+  conversations: number;
+  leads: number;
+  distance: number;
+  time_minutes: number;
+  day_streak: number;
+  best_streak: number;
+  agent_count: number;
   rank: number;
   updated_at: string;
 }

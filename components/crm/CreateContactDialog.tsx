@@ -21,9 +21,11 @@ interface CreateContactDialogProps {
   onClose: () => void;
   onSuccess: () => void;
   userId: string;
+  workspaceId?: string;
   initialAddress?: string;
   initialAddressId?: string;
   initialCampaignId?: string;
+  initialNotes?: string;
 }
 
 export function CreateContactDialog({
@@ -31,9 +33,11 @@ export function CreateContactDialog({
   onClose,
   onSuccess,
   userId,
+  workspaceId,
   initialAddress,
   initialAddressId,
   initialCampaignId,
+  initialNotes,
 }: CreateContactDialogProps) {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -43,7 +47,7 @@ export function CreateContactDialog({
     email: '',
     address: initialAddress || '',
     status: 'new' as ContactStatus,
-    notes: '',
+    notes: initialNotes || '',
     tags: '',
   });
 
@@ -53,6 +57,10 @@ export function CreateContactDialog({
       setFormData(prev => ({ ...prev, address: initialAddress }));
     }
   }, [initialAddress]);
+
+  useEffect(() => {
+    setFormData(prev => ({ ...prev, notes: initialNotes || '' }));
+  }, [initialNotes]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -76,7 +84,7 @@ export function CreateContactDialog({
           notes: formData.notes.trim() || undefined,
           address_id: initialAddressId,
           tags: formData.tags.trim() || undefined,
-        });
+        }, workspaceId);
       } else {
         await ContactsService.createContact(userId, {
           first_name: formData.first_name.trim(),
@@ -88,7 +96,7 @@ export function CreateContactDialog({
           status: formData.status,
           notes: formData.notes.trim() || undefined,
           tags: formData.tags.trim() || undefined,
-        });
+        }, workspaceId);
       }
 
       // Reset form

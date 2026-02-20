@@ -5,74 +5,52 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { getClientAsync } from '@/lib/supabase/client';
-import { ArrowRight, Check } from 'lucide-react';
-interface PriceOption {
-  priceId: string;
-  name: string;
-  amount: string;
-  period: string;
-  currency: 'USD' | 'CAD';
-  interval: 'month' | 'year';
-}
+import { ArrowRight } from 'lucide-react';
+import { PricingCard } from '@/components/pricing/PricingCard';
+import { TeamSeatSelector } from '@/components/pricing/TeamSeatSelector';
 
 function LandingPricing() {
-  const [prices, setPrices] = useState<PriceOption[]>([]);
   const [loading, setLoading] = useState(true);
-  const [preferredCurrency, setPreferredCurrency] = useState<'USD' | 'CAD'>('USD');
 
   useEffect(() => {
     fetch('/api/billing/prices')
-      .then((res) => res.json())
-      .then((data) => setPrices(data.prices || []))
-      .catch(() => setPrices([]))
+      .then(() => {})
+      .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => {
-    const getCurrencyFromCountry = (countryCode: string | null | undefined): 'USD' | 'CAD' => {
-      if (!countryCode) return 'USD';
-      return countryCode.toUpperCase() === 'CA' ? 'CAD' : 'USD';
-    };
-
-    const detectPreferredCurrency = async () => {
-      // Manual override for testing: ?country=CA or ?country=US
-      const params = new URLSearchParams(window.location.search);
-      const countryOverride = params.get('country');
-      if (countryOverride) {
-        setPreferredCurrency(getCurrencyFromCountry(countryOverride));
-        return;
-      }
-
-      try {
-        const res = await fetch('https://ipapi.co/json/', { cache: 'no-store' });
-        if (res.ok) {
-          const data = await res.json();
-          setPreferredCurrency(getCurrencyFromCountry(data?.country_code));
-          return;
-        }
-      } catch {
-        // Ignore and fall back to locale-based detection.
-      }
-
-      const locale = (navigator.language || Intl.DateTimeFormat().resolvedOptions().locale || '').toLowerCase();
-      setPreferredCurrency(locale.includes('-ca') ? 'CAD' : 'USD');
-    };
-
-    detectPreferredCurrency();
-  }, []);
-
-  const symbol = (c: string) => (c === 'USD' ? '$' : 'CA$');
-  const usdPlans = prices.filter((p) => p.currency === 'USD');
-  const cadPlans = prices.filter((p) => p.currency === 'CAD');
-  const preferredPlans = preferredCurrency === 'CAD' ? cadPlans : usdPlans;
-  const activePlans = preferredPlans.length > 0 ? preferredPlans : (usdPlans.length > 0 ? usdPlans : cadPlans);
-  const parseAmount = (amount: string) => Number.parseFloat(amount.replace(/,/g, ''));
-  const yearlyPlans = activePlans.filter((p) => p.interval === 'year');
-  const displayProPlan = (yearlyPlans.length > 0 ? yearlyPlans : activePlans).reduce<PriceOption | null>((best, plan) => {
-    if (!best) return plan;
-    return parseAmount(plan.amount) < parseAmount(best.amount) ? plan : best;
-  }, null);
   const loginRedirect = `/login?redirect=${encodeURIComponent('/pricing')}`;
+
+  const proFeatures = [
+    { text: 'Desktop dashboard' },
+    { text: 'iOS field app' },
+    { text: 'Smart maps' },
+    { text: 'Territory drawing' },
+    { text: 'Unlimited campaigns + contacts' },
+    { text: 'Lead list' },
+    { text: 'Smart route optimization (walkable flow)' },
+    { text: 'Address-level QR tracking + bulk generator' },
+    { text: 'Performance analytics (doors, scans, follow-ups)' },
+    { text: 'Conversion metrics' },
+    { text: 'Follow-up system (tasks, reminders, call list)' },
+    { text: 'Personal goals' },
+    { text: 'Exports (CSV / CRM-ready)' },
+    { text: 'CRM integrations (Follow Up Boss / webhook)' },
+    { text: 'Priority support' },
+  ];
+
+  const teamFeatures = [
+    { text: 'Everything in Pro', bold: true },
+    { text: '2 seats included in base price' },
+    { text: 'Invite / remove team members' },
+    { text: 'Roles & permissions (Admin, Member)' },
+    { text: 'Assign territories & campaigns to teammates' },
+    { text: 'Shared progress + activity feed' },
+    { text: 'Team leaderboards' },
+    { text: 'Team analytics (by member, by campaign)' },
+    { text: 'Centralized billing' },
+    { text: 'Priority support' },
+  ];
 
   if (loading) {
     return <div className="mt-8 text-center text-sm text-zinc-600">Loading plans...</div>;
@@ -80,139 +58,43 @@ function LandingPricing() {
 
   return (
     <div className="mt-8 grid gap-6 md:grid-cols-2">
-      <article className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
-        <h3 className="text-xl font-semibold text-zinc-900">Starter</h3>
-        <p className="mt-2 text-sm text-zinc-600">iOS plan for businesses testing software.</p>
-        <p className="mt-5 text-4xl font-bold text-zinc-900">$0</p>
-        <p className="text-sm text-zinc-500">per month</p>
-        <ul className="mt-6 space-y-2 text-sm text-zinc-700">
-          {[
-            'iOS only',
-            'Campaign planning',
-            'Territory map view',
-            'Optimized route (basic) street-by-street order',
-            'Door tracking (No answer / Talked / Follow-up)',
-            'Performance tracking (basic): doors knocked + scans',
-            'Leaderboard (weekly)',
-            'Up to 50 contacts / leads',
-            '1 active campaign at a time',
-            'Email support',
-          ].map((item) => (
-            <li key={item} className="flex items-center gap-2">
-              <Check className="h-4 w-4 text-red-600" />
-              {item}
-            </li>
-          ))}
-        </ul>
-      </article>
-
-      <article className="rounded-3xl border-2 border-red-600 bg-red-50 p-6 shadow-sm">
-        <h3 className="text-xl font-semibold text-zinc-900">Pro</h3>
-        <p className="mt-2 text-sm text-zinc-600">iOS + Desktop dashboard for teams running serious flyer volume.</p>
-        {displayProPlan && (
-          <div className="mt-5">
-            <p className="text-4xl font-bold text-zinc-900">
-              {symbol(displayProPlan.currency)}{displayProPlan.amount}
+      <PricingCard
+        title="Pro"
+        subtitle="For serious flyer volume."
+        features={proFeatures}
+        cta={
+          <>
+            <p className="text-center text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+              CA$39.99 / month
             </p>
-            <p className="text-sm text-zinc-500">{displayProPlan.period}</p>
-            {displayProPlan.interval === 'year' && (
-              <p className="mt-1 text-xs font-medium text-zinc-500">billed yearly</p>
-            )}
-          </div>
-        )}
-        <ul className="mt-6 space-y-2 text-sm text-zinc-700">
-          {[
-            'iOS + Desktop dashboard',
-            'Unlimited campaigns',
-            'Unlimited contacts / leads',
-            'Tags + custom statuses',
-            'Advanced optimized routing (smart street order + walkable flow)',
-            'Address-level QR tracking (exact house that scanned)',
-            'Unlimited QR codes (bulk generator)',
-            'Advanced performance analytics',
-            'Doors knocked, convos, follow-ups, scans',
-            'Follow-up system (tasks, reminders, call list)',
-            'Exports (CSV / CRM-ready)',
-            'Team mode (assign areas, shared progress)',
-            'Team leaderboards + activity feed',
-            'CRM integrations (Follow Up Boss / webhook / Zapier-style)',
-            'Priority support',
-          ].map((item) => (
-            <li key={item} className="flex items-center gap-2">
-              <Check className="h-4 w-4 text-red-600" />
-              {item}
-            </li>
-          ))}
-        </ul>
-
-        <div className="mt-6 space-y-2">
-          {prices.length === 0 && (
             <Link
               href={loginRedirect}
-              className="inline-flex h-11 w-full items-center justify-center rounded-2xl bg-zinc-900 text-sm font-semibold text-white transition hover:bg-zinc-700"
+              className="inline-flex h-11 w-full items-center justify-center rounded-2xl bg-zinc-900 text-sm font-semibold text-white transition hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
             >
-              See Pro pricing
+              Get started
             </Link>
-          )}
-
-          {preferredPlans.length > 0 && (
-            <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                {preferredCurrency}
-              </p>
-              {preferredPlans.map((plan) => (
-                <Link
-                  key={plan.priceId}
-                  href={loginRedirect}
-                  className="inline-flex h-11 w-full items-center justify-center rounded-2xl bg-zinc-900 px-4 text-sm font-semibold text-white transition hover:bg-zinc-700"
-                >
-                  {symbol(plan.currency)}{plan.amount}{plan.period}
-                  {plan.interval === 'year' ? ' billed yearly' : ''}
-                </Link>
-              ))}
-            </div>
-          )}
-
-          {preferredPlans.length === 0 && usdPlans.length > 0 && (
-            <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">USD</p>
-              {usdPlans.map((plan) => (
-                <Link
-                  key={plan.priceId}
-                  href={loginRedirect}
-                  className="inline-flex h-11 w-full items-center justify-center rounded-2xl bg-zinc-900 px-4 text-sm font-semibold text-white transition hover:bg-zinc-700"
-                >
-                  {symbol(plan.currency)}{plan.amount}{plan.period}
-                  {plan.interval === 'year' ? ' billed yearly' : ''}
-                </Link>
-              ))}
-            </div>
-          )}
-
-          {preferredPlans.length === 0 && cadPlans.length > 0 && (
-            <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">CAD</p>
-              {cadPlans.map((plan) => (
-                <Link
-                  key={plan.priceId}
-                  href={loginRedirect}
-                  className="inline-flex h-11 w-full items-center justify-center rounded-2xl bg-zinc-900 px-4 text-sm font-semibold text-white transition hover:bg-zinc-700"
-                >
-                  {symbol(plan.currency)}{plan.amount}{plan.period}
-                  {plan.interval === 'year' ? ' billed yearly' : ''}
-                </Link>
-              ))}
-            </div>
-          )}
-
-          <Link
-            href="/login"
-            className="inline-flex h-11 w-full items-center justify-center rounded-2xl border border-zinc-900 text-sm font-semibold text-zinc-900 transition hover:bg-zinc-900 hover:text-white"
-          >
-            Get started
-          </Link>
-        </div>
-      </article>
+          </>
+        }
+      />
+      <PricingCard
+        title="Team"
+        subtitle="Collaboration + accountability for small teams."
+        features={teamFeatures}
+        cta={
+          <>
+            <TeamSeatSelector />
+            <p className="text-center text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+              CA$79.99 / month + CA$30 per seat
+            </p>
+            <Link
+              href={loginRedirect}
+              className="inline-flex h-11 w-full items-center justify-center rounded-2xl bg-zinc-900 text-sm font-semibold text-white transition hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+            >
+              Start team
+            </Link>
+          </>
+        }
+      />
     </div>
   );
 }
@@ -237,12 +119,12 @@ const heroShots = [
 ];
 
 const desktopShots = [
-  { src: '/landing/WEIRFF_1.png', alt: 'Desktop command center 1', title: '' },
-  { src: '/landing/WEIRFF_2.png', alt: 'Desktop command center 2', title: 'Unique QR codes for smart tracking' },
-  { src: '/landing/WEIRFF_3.png', alt: 'Desktop command center 3', title: '' },
-  { src: '/landing/WEIRFF_4.png', alt: 'Desktop command center 4', title: '' },
-  { src: '/landing/WEIRFF_5.png', alt: 'Desktop command center 5', title: '' },
-  { src: '/landing/WEIRFF_6.png', alt: 'Desktop command center 6', title: '' },
+  { src: '/landing/WEIRFF_1.png', alt: 'Desktop dashboard 1', title: '' },
+  { src: '/landing/WEIRFF_2.png', alt: 'Desktop dashboard 2', title: '' },
+  { src: '/landing/WEIRFF_3.png', alt: 'Desktop dashboard 3', title: '' },
+  { src: '/landing/WEIRFF_4.png', alt: 'Desktop dashboard 4', title: '' },
+  { src: '/landing/WEIRFF_5.png', alt: 'Desktop dashboard 5', title: '' },
+  { src: '/landing/WEIRFF_6.png', alt: 'Desktop dashboard 6', title: '' },
 ];
 
 const mobileShots = [
@@ -307,7 +189,7 @@ export default function LandingPage() {
       .then(({ data: { session } }) => {
         if (cancelled) return;
         if (session?.user) {
-          router.replace('/home');
+          router.replace('/gate');
           return;
         }
         setChecking(false);
@@ -363,12 +245,12 @@ export default function LandingPage() {
 
       <main>
         <section className="relative overflow-hidden border-b border-zinc-200 bg-red-500 px-5 py-16 md:px-8 md:py-24">
-          <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
-            <div>
-              <h1 className="max-w-xl text-3xl font-black leading-tight text-white md:text-4xl">
+          <div className="mx-auto flex max-w-7xl flex-col items-center text-center">
+            <div className="w-full max-w-4xl">
+              <h1 className="text-5xl font-black leading-tight text-white md:text-6xl">
                 Stop Guessing
               </h1>
-              <p className="mt-5 flex max-w-xl flex-wrap items-baseline gap-x-2 text-3xl font-black leading-tight text-zinc-950 md:text-4xl">
+              <p className="mt-5 flex flex-wrap items-baseline justify-center gap-x-2 text-5xl font-black leading-tight text-zinc-950 md:text-6xl">
                 <span>Start Tracking</span>
                 <span
                   key={trackingWordIndex}
@@ -378,7 +260,7 @@ export default function LandingPage() {
                   {TRACKING_WORDS[trackingWordIndex]}
                 </span>
               </p>
-              <div className="mt-8 flex flex-wrap gap-4">
+              <div className="mt-8 flex flex-wrap justify-center gap-4">
                 <Link
                   href="/login"
                   className="inline-flex h-12 items-center rounded-2xl bg-zinc-900 px-6 text-base font-semibold text-white transition hover:bg-zinc-700"
@@ -393,20 +275,6 @@ export default function LandingPage() {
                   View pricing
                 </a>
               </div>
-            </div>
-
-            <div className="space-y-4">
-              <div className="relative aspect-video w-full overflow-hidden rounded-2xl border border-white/20 shadow-2xl">
-                <ScreenshotCard
-                  src="/landing/WEIRFF_2.png"
-                  alt="Unique QR codes for smart tracking"
-                  className="h-full min-h-[280px]"
-                  objectFit="contain"
-                />
-              </div>
-              <p className="text-center text-xl font-semibold text-white md:text-2xl">
-                Unique QR codes for smart tracking
-              </p>
             </div>
           </div>
         </section>
@@ -442,8 +310,8 @@ export default function LandingPage() {
         <section className="px-5 py-16 md:px-8">
           <div className="mx-auto max-w-7xl">
             <article className="rounded-3xl border border-zinc-700 bg-zinc-950 p-6 text-white">
-              <h2 className="text-3xl font-black leading-tight md:text-4xl">Desktop command center.</h2>
-              <p className="mt-4 text-lg text-zinc-300">
+              <h2 className="text-center text-3xl font-black leading-tight md:text-4xl">Desktop dashboard.</h2>
+              <p className="mt-4 text-center text-lg text-zinc-300">
                 Real campaign view, draw mode, and live scanned-home overlays.
               </p>
               <div className="mt-8 flex items-center gap-4">
@@ -468,11 +336,7 @@ export default function LandingPage() {
                     <p className="mt-4 text-center text-lg font-medium text-white">
                       {desktopShots[desktopShotIndex].title}
                     </p>
-                  ) : (
-                    <p className="mt-4 text-center text-sm text-zinc-500">
-                      Add a title in desktopShots for this slide when ready.
-                    </p>
-                  )}
+                  ) : null}
                 </div>
                 <button
                   type="button"
@@ -489,8 +353,8 @@ export default function LandingPage() {
 
         <section className="px-5 pb-16 md:px-8">
           <div className="mx-auto max-w-7xl rounded-3xl border border-zinc-700 bg-zinc-950 p-6 text-white">
-            <h3 className="text-3xl font-black">Mobile field mode.</h3>
-            <p className="mt-3 text-lg text-zinc-300">
+            <h3 className="text-center text-3xl font-black">Mobile field mode.</h3>
+            <p className="mt-3 text-center text-lg text-zinc-300">
               Session controls, progress colors, and leaderboard views from iOS.
             </p>
 <div className="mt-8 grid grid-cols-6 gap-3">
@@ -512,23 +376,13 @@ export default function LandingPage() {
             <div className="text-center">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-red-600">Pricing</p>
               <h2 className="mt-3 text-4xl font-black">Pick your plan</h2>
-              <p className="mt-3 text-lg text-zinc-600">Simple pricing in one place. Start free, upgrade when you are ready.</p>
+              <p className="mt-3 text-lg text-zinc-600">Simple pricing. Scale when you&apos;re ready.</p>
             </div>
             <LandingPricing />
           </div>
         </section>
       </main>
 
-      <footer className="px-5 py-10 md:px-8">
-        <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-3 text-sm text-zinc-600 md:flex-row">
-          <span>© {new Date().getFullYear()} FLYR Pro</span>
-          <div className="flex items-center gap-6">
-            <Link href="/login" className="hover:text-zinc-900">Sign in</Link>
-            <Link href="/#pricing" className="hover:text-zinc-900">Pricing</Link>
-            <Link href="/privacy" className="hover:text-zinc-900">Privacy</Link>
-          </div>
-        </div>
-      </footer>
     </div>
   );
 }

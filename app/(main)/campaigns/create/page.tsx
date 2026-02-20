@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import type { CampaignType } from '@/types/database';
 import { createClient } from '@/lib/supabase/client';
 import { useTheme } from '@/lib/theme-provider';
+import { useWorkspace } from '@/lib/workspace-context';
 import { getMapboxToken } from '@/lib/mapbox';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
@@ -30,6 +31,7 @@ const MAP_STYLES = {
 export default function CreateCampaignPage() {
   const router = useRouter();
   const { theme } = useTheme();
+  const { currentWorkspaceId } = useWorkspace();
   const [name, setName] = useState('');
   const [type, setType] = useState<CampaignType>('flyer');
   const [loading, setLoading] = useState(false);
@@ -94,6 +96,8 @@ export default function CreateCampaignPage() {
   const add2DBuildingsLayer = (m: mapboxgl.Map) => {
     const buildingLayerId = '2d-buildings';
     if (m.getLayer(buildingLayerId)) return; // already added
+    const buildingFill = isDark ? '#111111' : '#c8c1b2';
+    const buildingOutline = isDark ? '#0a0a0a' : '#b5ad9d';
 
     const layers = m.getStyle().layers;
 
@@ -141,9 +145,9 @@ export default function CreateCampaignPage() {
           true,
         ],
         paint: {
-          'fill-color': '#111111',
+          'fill-color': buildingFill,
           'fill-opacity': 0.8,
-          'fill-outline-color': '#0a0a0a',
+          'fill-outline-color': buildingOutline,
         },
       },
       labelLayerId,
@@ -352,6 +356,42 @@ export default function CreateCampaignPage() {
       }
     });
   }, [isSatellite, theme, mapLoaded]);
+
+  // Keep map fully sized when surrounding layout (e.g. campaign sidebar) collapses/expands.
+  useEffect(() => {
+    if (!mapLoaded || !map.current || !mapContainer.current) return;
+
+    const mapInstance = map.current;
+    const container = mapContainer.current;
+    let frameId: number | null = null;
+
+    const resizeMap = () => {
+      if (frameId !== null) cancelAnimationFrame(frameId);
+      frameId = requestAnimationFrame(() => {
+        try {
+          mapInstance.resize();
+        } catch {
+          // Ignore transient resize errors during style transitions/unmount.
+        }
+      });
+    };
+
+    const observer = new ResizeObserver(() => {
+      resizeMap();
+    });
+    observer.observe(container);
+
+    window.addEventListener('resize', resizeMap);
+    window.addEventListener('orientationchange', resizeMap);
+    resizeMap();
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', resizeMap);
+      window.removeEventListener('orientationchange', resizeMap);
+      if (frameId !== null) cancelAnimationFrame(frameId);
+    };
+  }, [mapLoaded]);
 
   const toggleSatelliteView = () => {
     setIsSatellite(!isSatellite);
@@ -562,6 +602,7 @@ export default function CreateCampaignPage() {
           name,
           type,
           address_source: 'map',
+          workspace_id: currentWorkspaceId ?? undefined,
           bbox,
           territory_boundary: polygon || undefined,
         }),

@@ -1,12 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Check, Zap, MapPin, QrCode, BarChart3, ArrowRight } from 'lucide-react';
+import { Zap, MapPin, QrCode, BarChart3 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { PricingCard } from '@/components/pricing/PricingCard';
+import { TeamSeatSelector } from '@/components/pricing/TeamSeatSelector';
 
 interface PriceOption {
   priceId: string;
@@ -18,10 +18,8 @@ interface PriceOption {
 }
 
 export default function PricingPage() {
-  const router = useRouter();
   const [prices, setPrices] = useState<PriceOption[]>([]);
   const [loading, setLoading] = useState(true);
-  const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/billing/prices')
@@ -30,36 +28,6 @@ export default function PricingPage() {
       .catch(() => setPrices([]))
       .finally(() => setLoading(false));
   }, []);
-
-  const handleSelectPlan = async (priceId: string) => {
-    setCheckoutLoading(priceId);
-    try {
-      const res = await fetch('/api/billing/stripe/checkout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ priceId }),
-      });
-      const data = await res.json();
-      if (res.status === 401) {
-        router.push(`/login?redirect=${encodeURIComponent('/pricing')}`);
-        return;
-      }
-      if (data.url) {
-        window.location.href = data.url;
-      } else {
-        router.push('/billing');
-      }
-    } catch {
-      router.push('/billing');
-    } finally {
-      setCheckoutLoading(null);
-    }
-  };
-
-  const symbol = (c: string) => (c === 'USD' ? '$' : 'CA$');
-  const usdPlans = prices.filter((p) => p.currency === 'USD');
-  const cadPlans = prices.filter((p) => p.currency === 'CAD');
 
   return (
     <div className="min-h-full bg-gradient-to-b from-background to-muted/20">
@@ -100,7 +68,7 @@ export default function PricingPage() {
       <section className="px-6 pb-20 pt-4" id="pricing">
         <h2 className="text-center text-2xl font-semibold dark:text-white">Choose your plan</h2>
         <p className="mt-2 text-center text-muted-foreground">
-          Start free. Upgrade to Pro when you need more.
+          Simple pricing. Scale when you&apos;re ready.
         </p>
 
         {loading ? (
@@ -109,106 +77,64 @@ export default function PricingPage() {
           </div>
         ) : (
           <div className="mx-auto mt-12 grid max-w-4xl gap-8 sm:grid-cols-2">
-            {/* Free */}
-            <Card className="flex flex-col">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  Free
-                </CardTitle>
-                <CardDescription>
-                  Get started with core features
-                </CardDescription>
-                <div className="mt-4">
-                  <span className="text-3xl font-bold">$0</span>
-                  <span className="text-muted-foreground">/month</span>
-                </div>
-              </CardHeader>
-              <CardContent className="flex flex-1 flex-col gap-4">
-                <ul className="space-y-2 text-sm">
-                  {['Campaigns & territories', 'QR codes (limits apply)', 'Map view', 'Basic stats'].map((f) => (
-                    <li key={f} className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-green-500" />
-                      {f}
-                    </li>
-                  ))}
-                </ul>
-                <Button variant="outline" className="mt-auto" asChild>
-                  <Link href="/home">Get started</Link>
-                </Button>
-              </CardContent>
-            </Card>
-
-            {/* Pro */}
-            <Card className="flex flex-col border-primary shadow-md">
-              <CardHeader>
-                <Badge className="w-fit">Pro</Badge>
-                <CardTitle className="flex items-center gap-2">
-                  Pro
-                </CardTitle>
-                <CardDescription>
-                  Unlimited QR codes and advanced features
-                </CardDescription>
-                <div className="mt-4 text-muted-foreground">
-                  Choose plan below
-                </div>
-              </CardHeader>
-              <CardContent className="flex flex-1 flex-col gap-4">
-                <ul className="space-y-2 text-sm">
-                  {['Everything in Free', 'Unlimited QR codes', 'ZIP export for print', 'Priority support'].map((f) => (
-                    <li key={f} className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-green-500" />
-                      {f}
-                    </li>
-                  ))}
-                </ul>
-                {prices.length === 0 ? (
-                  <Button className="mt-auto" asChild>
-                    <Link href="/billing">
-                      Upgrade to Pro
-                      <ArrowRight className="ml-2 h-4 w-4" />
-                    </Link>
+            <PricingCard
+              title="Pro"
+              subtitle="For serious flyer volume."
+              features={[
+                { text: 'Desktop dashboard' },
+                { text: 'iOS field app' },
+                { text: 'Smart maps' },
+                { text: 'Territory drawing' },
+                { text: 'Unlimited campaigns + contacts' },
+                { text: 'Lead list' },
+                { text: 'Smart route optimization (walkable flow)' },
+                { text: 'Address-level QR tracking + bulk generator' },
+                { text: 'Performance analytics (doors, scans, follow-ups)' },
+                { text: 'Conversion metrics' },
+                { text: 'Follow-up system (tasks, reminders, call list)' },
+                { text: 'Personal goals' },
+                { text: 'Exports (CSV / CRM-ready)' },
+                { text: 'CRM integrations (Follow Up Boss / webhook)' },
+                { text: 'Priority support' },
+              ]}
+              cta={
+                <>
+                  <p className="text-center text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+                    CA$39.99 / month
+                  </p>
+                  <Button className="w-full" asChild>
+                    <Link href="/billing">Get started</Link>
                   </Button>
-                ) : (
-                  <div className="mt-auto space-y-2">
-                    {usdPlans.length > 0 && (
-                      <div className="space-y-2">
-                        <p className="text-xs font-medium text-muted-foreground">USD</p>
-                        {usdPlans.map((p) => (
-                          <Button
-                            key={p.priceId}
-                            className="w-full"
-                            onClick={() => handleSelectPlan(p.priceId)}
-                            disabled={checkoutLoading !== null}
-                          >
-                            {checkoutLoading === p.priceId
-                              ? 'Redirecting…'
-                              : `${symbol(p.currency)}${p.amount}${p.period}${p.interval === 'year' ? ' (billed yearly)' : ''}`}
-                          </Button>
-                        ))}
-                      </div>
-                    )}
-                    {cadPlans.length > 0 && (
-                      <div className="space-y-2">
-                        <p className="text-xs font-medium text-muted-foreground">CAD</p>
-                        {cadPlans.map((p) => (
-                          <Button
-                            key={p.priceId}
-                            variant="outline"
-                            className="w-full"
-                            onClick={() => handleSelectPlan(p.priceId)}
-                            disabled={checkoutLoading !== null}
-                          >
-                            {checkoutLoading === p.priceId
-                              ? 'Redirecting…'
-                              : `${symbol(p.currency)}${p.amount}${p.period}${p.interval === 'year' ? ' (billed yearly)' : ''}`}
-                          </Button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+                </>
+              }
+            />
+            <PricingCard
+              title="Team"
+              subtitle="Collaboration + accountability for small teams."
+              features={[
+                { text: 'Everything in Pro', bold: true },
+                { text: '2 seats included in base price' },
+                { text: 'Invite / remove team members' },
+                { text: 'Roles & permissions (Admin, Member)' },
+                { text: 'Assign territories & campaigns to teammates' },
+                { text: 'Shared progress + activity feed' },
+                { text: 'Team leaderboards' },
+                { text: 'Team analytics (by member, by campaign)' },
+                { text: 'Centralized billing' },
+                { text: 'Priority support' },
+              ]}
+              cta={
+                <>
+                  <TeamSeatSelector />
+                  <p className="text-center text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+                    CA$79.99 / month + CA$30 per seat
+                  </p>
+                  <Button className="w-full" asChild>
+                    <Link href="/billing">Start team</Link>
+                  </Button>
+                </>
+              }
+            />
           </div>
         )}
       </section>

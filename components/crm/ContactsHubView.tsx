@@ -10,8 +10,10 @@ import { ContactsService } from '@/lib/services/ContactsService';
 import { StatsService } from '@/lib/services/StatsService';
 import type { Contact, UserStats } from '@/types/database';
 import { createClient } from '@/lib/supabase/client';
+import { useWorkspace } from '@/lib/workspace-context';
 
 export function ContactsHubView() {
+  const { currentWorkspaceId } = useWorkspace();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [userStats, setUserStats] = useState<UserStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -25,7 +27,7 @@ export function ContactsHubView() {
       try {
         setLoading(true);
         const [contactsData, statsData] = await Promise.all([
-          ContactsService.fetchContacts(currentUserId),
+          ContactsService.fetchContacts(currentUserId, currentWorkspaceId),
           StatsService.fetchUserStats(currentUserId),
         ]);
         setContacts(contactsData);
@@ -46,14 +48,14 @@ export function ContactsHubView() {
         setLoading(false);
       }
     });
-  }, []);
+  }, [currentWorkspaceId]);
 
   const loadContacts = async () => {
     if (!userId) return;
     try {
       setLoading(true);
       const [contactsData, statsData] = await Promise.all([
-        ContactsService.fetchContacts(userId),
+        ContactsService.fetchContacts(userId, currentWorkspaceId),
         StatsService.fetchUserStats(userId),
       ]);
       setContacts(contactsData);
@@ -76,7 +78,11 @@ export function ContactsHubView() {
   const handleSyncToCrm = async () => {
     setSyncing(true);
     try {
-      const res = await fetch('/api/leads/sync-crm', { method: 'POST' });
+      const res = await fetch('/api/leads/sync-crm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspaceId: currentWorkspaceId }),
+      });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         alert(data?.error ?? 'Sync to CRM failed.');
@@ -130,6 +136,7 @@ export function ContactsHubView() {
           onClose={() => setCreateDialogOpen(false)}
           onSuccess={handleContactCreated}
           userId={userId}
+          workspaceId={currentWorkspaceId ?? undefined}
         />
       )}
     </div>

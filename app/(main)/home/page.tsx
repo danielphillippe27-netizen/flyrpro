@@ -1,111 +1,27 @@
-'use client';
+import { redirect } from 'next/navigation';
+import { Suspense } from 'react';
+import { getSupabaseServerClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/server';
+import { resolveTeamDashboardMode } from '@/app/api/_utils/workspace';
+import { HomePageClient } from './HomePageClient';
 
-import { useEffect, useState, Suspense } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { HomeDashboardView } from '@/components/home/HomeDashboardView';
-import { getClientAsync } from '@/lib/supabase/client';
-
-function HomePageContent() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const [userId, setUserId] = useState<string | null>(null);
-  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
-
-  useEffect(() => {
-    let hasRedirected = false;
-    let authSubscription: { unsubscribe: () => void } | null = null;
-
-    const code = searchParams.get('code');
-    if (code) {
-      router.replace(`/auth/callback?code=${code}&next=/home`);
-      return;
-    }
-
-    const run = async () => {
-      try {
-        const supabase = await getClientAsync();
-        if (!supabase?.auth) {
-          router.push('/login');
-          return;
-        }
-
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-        if (session?.user) {
-          setUserId(session.user.id);
-          setIsCheckingAuth(false);
-          authSubscription = supabase.auth.onAuthStateChange((event, s) => {
-            if (s?.user) setUserId(s.user.id);
-            else if (event === 'SIGNED_OUT' && !hasRedirected) {
-              hasRedirected = true;
-              router.push('/login');
-            }
-          }).data.subscription;
-          return;
-        }
-
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          setUserId(user.id);
-          setIsCheckingAuth(false);
-          authSubscription = supabase.auth.onAuthStateChange((event, s) => {
-            if (s?.user) setUserId(s.user.id);
-            else if (event === 'SIGNED_OUT' && !hasRedirected) {
-              hasRedirected = true;
-              router.push('/login');
-            }
-          }).data.subscription;
-          return;
-        }
-
-        if (!hasRedirected) {
-          hasRedirected = true;
-          setIsCheckingAuth(false);
-          router.push('/login');
-        }
-      } catch (error) {
-        console.error("Auth check error:", error);
-        setIsCheckingAuth(false);
-        if (!hasRedirected) {
-          hasRedirected = true;
-          router.push('/login');
-        }
-      }
-    };
-
-    run();
-
-    return () => {
-      authSubscription?.unsubscribe();
-    };
-  }, [router, searchParams]);
-
-  if (isCheckingAuth) {
-    return (
-      <div className="min-h-screen bg-gray-50 dark:bg-background flex items-center justify-center">
-        <div className="text-center">
-          <div className="text-gray-600 dark:text-foreground/80">Loading...</div>
-        </div>
-      </div>
-    );
+export default async function HomePage() {
+  const supabase = await getSupabaseServerClient();
+  const { data: { user }, error: userError } = await supabase.auth.getUser();
+  if (userError || !user) {
+    redirect('/login');
   }
-
+  const admin = createAdminClient();
+  const { mode, workspaceId } = await resolveTeamDashboardMode(admin, user.id);
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-background">
-      <HomeDashboardView onCreateCampaign={() => router.push('/campaigns/create')} />
-    </div>
-  );
-}
-
-export default function HomePage() {
-  return (
-    <Suspense fallback={
-      <div className="min-h-screen bg-gray-50 dark:bg-background flex items-center justify-center">
-        <div className="text-center">
-          <div className="text-gray-600 dark:text-foreground/80">Loading...</div>
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-gray-50 dark:bg-background flex items-center justify-center">
+          <p className="text-muted-foreground">Loading…</p>
         </div>
-      </div>
-    }>
-      <HomePageContent />
+      }
+    >
+      <HomePageClient mode={mode} workspaceId={workspaceId} />
     </Suspense>
   );
 }

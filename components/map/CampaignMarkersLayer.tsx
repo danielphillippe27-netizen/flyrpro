@@ -22,6 +22,8 @@ interface CampaignMarkersLayerProps {
   map: Map | null;
   mapLoaded: boolean;
   userId: string | null;
+  workspaceId?: string | null;
+  hidden?: boolean;
   selectedCampaignId: string | null;
   onCampaignSelect: (id: string | null) => void;
 }
@@ -48,6 +50,8 @@ export function CampaignMarkersLayer({
   map,
   mapLoaded,
   userId,
+  workspaceId,
+  hidden = false,
   selectedCampaignId,
   onCampaignSelect,
 }: CampaignMarkersLayerProps) {
@@ -67,7 +71,7 @@ export function CampaignMarkersLayer({
 
     (async () => {
       try {
-        const campaigns = await CampaignsService.fetchCampaignsV2(userId);
+        const campaigns = await CampaignsService.fetchCampaignsV2(userId, workspaceId);
         const limited = campaigns.slice(0, MAX_CAMPAIGNS);
 
         const bboxes = await Promise.all(
@@ -102,7 +106,7 @@ export function CampaignMarkersLayer({
     return () => {
       cancelled = true;
     };
-  }, [userId, mapLoaded]);
+  }, [userId, workspaceId, mapLoaded]);
 
   const addLayers = useCallback(() => {
     if (!map || !map.getStyle() || campaignPoints.length === 0) return;
@@ -220,7 +224,7 @@ export function CampaignMarkersLayer({
       }
     };
 
-    if (campaignPoints.length === 0) {
+    if (hidden || campaignPoints.length === 0) {
       cleanup();
       return;
     }
@@ -229,7 +233,7 @@ export function CampaignMarkersLayer({
     map.on('style.load', addLayers);
 
     return cleanup;
-  }, [map, mapLoaded, campaignPoints, addLayers]);
+  }, [map, mapLoaded, campaignPoints, addLayers, hidden]);
 
   return null;
 }

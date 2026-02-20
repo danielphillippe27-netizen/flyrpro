@@ -33,7 +33,9 @@ export async function GET(request: Request) {
     const { error } = await supabase.auth.exchangeCodeForSession(code);
 
     if (!error) {
-      return NextResponse.redirect(`${origin}${next}`);
+      const gateUrl = new URL('/gate', origin);
+      if (next && next !== '/home') gateUrl.searchParams.set('next', next);
+      return NextResponse.redirect(gateUrl.toString());
     }
 
     console.error('Auth callback error:', error);

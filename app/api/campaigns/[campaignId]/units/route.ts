@@ -103,10 +103,10 @@ export async function POST(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
     
-    // Verify campaign ownership
+    // Verify campaign ownership and get workspace for team activity
     const { data: campaign, error: campaignError } = await supabase
       .from('campaigns')
-      .select('owner_id')
+      .select('owner_id, workspace_id')
       .eq('id', campaignId)
       .single();
     
@@ -151,6 +151,19 @@ export async function POST(
     
     if (updateError) {
       throw new Error(`Failed to update unit: ${updateError.message}`);
+    }
+
+    // Team activity: record knock when marking as visited
+    const workspaceId = campaign.workspace_id;
+    if (status === 'visited' && workspaceId) {
+      const admin = (await import('@/lib/supabase/server')).createAdminClient();
+      await admin.from('session_events').insert({
+        workspace_id: workspaceId,
+        user_id: user.id,
+        event_type: 'knock',
+        event_time: new Date().toISOString(),
+        payload: { unit_id: unitId, campaign_id: campaignId },
+      });
     }
     
     return NextResponse.json({

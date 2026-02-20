@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseServerClient, createAdminClient } from '@/lib/supabase/server';
+import { resolveWorkspaceIdForUser } from '@/app/api/_utils/workspace';
 
 /**
  * Week start: Monday 00:00 UTC.
@@ -19,7 +20,7 @@ function getStartOfWeekUTC(): string {
  * Doors hit = count of scan_events for campaigns owned by the user (QR scans).
  * Fallback: if we add "addresses marked visited/attempted" elsewhere, document there and keep UI consistent.
  */
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const authClient = await getSupabaseServerClient();
     const { data: { user }, error: userError } = await authClient.auth.getUser();
@@ -28,12 +29,22 @@ export async function GET() {
     }
 
     const userId = user.id;
+    const url = new URL(request.url);
+    const requestedWorkspaceId = url.searchParams.get('workspaceId');
     const firstName =
       (user.user_metadata?.name as string)?.split(/\s+/)[0] ||
       (user.email?.split('@')[0] as string) ||
       'User';
 
     const supabase = createAdminClient();
+    const workspaceResolution = await resolveWorkspaceIdForUser(supabase as any, userId, requestedWorkspaceId);
+    if (!workspaceResolution.workspaceId) {
+      return NextResponse.json(
+        { error: workspaceResolution.error ?? 'Workspace not found' },
+        { status: workspaceResolution.status ?? 400 }
+      );
+    }
+    const targetWorkspaceId = workspaceResolution.workspaceId;
     const startOfWeek = getStartOfWeekUTC();
 
     // Run independent fetches in parallel
@@ -51,7 +62,7 @@ export async function GET() {
       supabase
         .from('campaigns')
         .select('id, title, name')
-        .eq('owner_id', userId)
+        .eq('workspace_id', targetWorkspaceId)
         .order('created_at', { ascending: false }),
     ]);
 

@@ -1,5 +1,11 @@
 import { createClient } from '@/lib/supabase/client';
-import type { LeaderboardEntry, LeaderboardSortBy, LeaderboardTimeframe } from '@/types/database';
+import type {
+  LeaderboardEntry,
+  LeaderboardSortBy,
+  LeaderboardTimeframe,
+  BrokerageLeaderboardEntry,
+  BrokerageLeaderboardTimeframe,
+} from '@/types/database';
 
 export class LeaderboardService {
   private static client = createClient();
@@ -77,6 +83,41 @@ export class LeaderboardService {
       best_streak: Number(stat.best_streak) || 0,
       rank: offset + index + 1,
       updated_at: String(stat.updated_at ?? ''),
+    }));
+  }
+
+  /** Brokerage leaderboard from materialized views (all_time or month only). */
+  static async fetchBrokerageLeaderboard(
+    sortBy: LeaderboardSortBy = 'flyers',
+    limit: number = 100,
+    offset: number = 0,
+    timeframe: BrokerageLeaderboardTimeframe = 'all_time'
+  ): Promise<BrokerageLeaderboardEntry[]> {
+    const { data, error } = await this.client.rpc('get_brokerage_leaderboard', {
+      sort_by: sortBy,
+      limit_count: limit,
+      offset_count: offset,
+      timeframe,
+    });
+
+    if (error) {
+      console.warn('get_brokerage_leaderboard RPC failed:', error.message);
+      return [];
+    }
+
+    return (Array.isArray(data) ? data : []).map((row: Record<string, unknown>) => ({
+      brokerage_key: String(row.brokerage_key ?? ''),
+      display_name: String(row.display_name ?? ''),
+      flyers: Number(row.flyers) || 0,
+      conversations: Number(row.conversations) || 0,
+      leads: Number(row.leads) || 0,
+      distance: Number(row.distance) || 0,
+      time_minutes: Number(row.time_minutes) || 0,
+      day_streak: Number(row.day_streak) || 0,
+      best_streak: Number(row.best_streak) || 0,
+      agent_count: Number(row.agent_count) || 0,
+      rank: Number(row.rank) || 0,
+      updated_at: String(row.updated_at ?? ''),
     }));
   }
 

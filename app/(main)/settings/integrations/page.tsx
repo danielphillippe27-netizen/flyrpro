@@ -20,6 +20,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
+import { useWorkspace } from '@/lib/workspace-context';
 
 interface ConnectionStatus {
   connected: boolean;
@@ -33,6 +34,7 @@ interface ConnectionStatus {
 
 export default function IntegrationsPage() {
   const router = useRouter();
+  const { currentWorkspaceId } = useWorkspace();
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [apiKey, setApiKey] = useState('');
@@ -52,7 +54,7 @@ export default function IntegrationsPage() {
       const { data: { user: authUser } } = await supabase.auth.getUser();
       if (authUser) {
         setUser(authUser);
-        await loadConnectionStatus();
+        await loadConnectionStatus(currentWorkspaceId ?? undefined);
       } else {
         router.push('/login');
       }
@@ -61,11 +63,12 @@ export default function IntegrationsPage() {
     };
 
     loadData();
-  }, [router]);
+  }, [router, currentWorkspaceId]);
 
-  const loadConnectionStatus = async () => {
+  const loadConnectionStatus = async (workspaceId?: string) => {
     try {
-      const response = await fetch('/api/integrations/followupboss/status');
+      const qs = workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : '';
+      const response = await fetch(`/api/integrations/followupboss/status${qs}`);
       if (response.ok) {
         const data = await response.json();
         setConnectionStatus(data);
@@ -88,7 +91,7 @@ export default function IntegrationsPage() {
       const response = await fetch('/api/integrations/followupboss/connect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiKey: apiKey.trim() }),
+        body: JSON.stringify({ apiKey: apiKey.trim(), workspaceId: currentWorkspaceId }),
       });
 
       const data = await response.json();
@@ -96,7 +99,7 @@ export default function IntegrationsPage() {
       if (response.ok) {
         setMessage({ type: 'success', text: data.message });
         setApiKey('');
-        await loadConnectionStatus();
+        await loadConnectionStatus(currentWorkspaceId ?? undefined);
       } else {
         setMessage({ type: 'error', text: data.error || 'Failed to connect' });
       }
@@ -115,13 +118,14 @@ export default function IntegrationsPage() {
       const response = await fetch('/api/integrations/followupboss/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspaceId: currentWorkspaceId }),
       });
 
       const data = await response.json();
 
       if (response.ok) {
         setMessage({ type: 'success', text: data.message });
-        await loadConnectionStatus();
+        await loadConnectionStatus(currentWorkspaceId ?? undefined);
       } else {
         setMessage({ type: 'error', text: data.error || 'Connection test failed' });
       }
@@ -140,6 +144,7 @@ export default function IntegrationsPage() {
       const response = await fetch('/api/integrations/followupboss/test-push', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspaceId: currentWorkspaceId }),
       });
 
       const data = await response.json();
@@ -149,7 +154,7 @@ export default function IntegrationsPage() {
           type: 'success', 
           text: `${data.message} Test lead: ${data.testLead.name} (${data.testLead.email})` 
         });
-        await loadConnectionStatus();
+        await loadConnectionStatus(currentWorkspaceId ?? undefined);
       } else {
         setMessage({ type: 'error', text: data.error || 'Test push failed' });
       }
@@ -172,6 +177,7 @@ export default function IntegrationsPage() {
       const response = await fetch('/api/integrations/followupboss/disconnect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspaceId: currentWorkspaceId }),
       });
 
       const data = await response.json();
@@ -202,7 +208,7 @@ export default function IntegrationsPage() {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-background">
       <header className="bg-white dark:bg-card border-b border-border sticky top-0 z-10">
-        <div className="max-w-4xl pl-0 pr-4 sm:pr-6 lg:pr-8 py-4">
+        <div className="mx-auto w-full max-w-4xl px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center gap-4">
             <Button
               variant="ghost"
@@ -218,7 +224,7 @@ export default function IntegrationsPage() {
         </div>
       </header>
       
-      <main className="max-w-4xl pl-0 pr-4 sm:pr-6 lg:pr-8 py-6">
+      <main className="mx-auto w-full max-w-4xl px-4 sm:px-6 lg:px-8 py-6">
         <div className="space-y-6">
           {/* Follow Up Boss Integration */}
           <Card>

@@ -47,17 +47,17 @@ export default function CampaignsLayout({
       {collapsed && (
         <button
           onClick={() => setCollapsedPersisted(false)}
-          className="absolute left-0 z-20 flex items-center justify-center w-10 h-10 rounded-r-md bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground border border-l-0 border-border shadow-md transition-colors cursor-pointer"
-          style={{ top: '4.75rem' }}
+          className="absolute left-0 z-20 flex items-center justify-center w-8 h-8 rounded-r-md bg-muted/45 hover:bg-muted/60 text-muted-foreground hover:text-foreground border border-l-0 border-border/70 shadow-sm transition-colors cursor-pointer"
+          style={{ top: '0' }}
           aria-label="Show campaign list"
           title="Show campaign list"
         >
-          <ChevronsRight className="w-5 h-5" />
+          <ChevronsRight className="w-4 h-4" />
         </button>
       )}
       <div
-        className="flex-1 min-w-0 overflow-auto bg-background transition-[margin-left] duration-200 ease-out"
-        style={{ marginLeft: collapsed ? 0 : SIDEBAR_WIDTH }}
+        className="flex-1 min-w-0 overflow-auto bg-background"
+        style={{ marginLeft: 0 }}
       >
         {children}
       </div>

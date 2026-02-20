@@ -37,7 +37,13 @@ export class StatsService {
         p_user_id: userId,
         p_period: period,
       });
-      if (error) throw error;
+      if (error) {
+        // Gracefully degrade if the period RPC isn't available in the current DB.
+        if (error.code === 'PGRST202') {
+          return this.fetchUserStats(userId);
+        }
+        throw new Error(error.message || `Failed to load ${period} stats`);
+      }
       const row = Array.isArray(data) ? data[0] : data;
       if (!row) return null;
       return mapRow(row as Record<string, unknown>);
@@ -50,7 +56,7 @@ export class StatsService {
       .limit(1)
       .maybeSingle();
 
-    if (error) throw error;
+    if (error) throw new Error(error.message || 'Failed to load stats');
     if (!data) return null;
     return mapRow(data as Record<string, unknown>);
   }

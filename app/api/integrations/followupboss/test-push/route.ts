@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
+import { resolveWorkspaceIdForUser } from '@/app/api/_utils/workspace';
 import crypto from 'crypto';
 
 // Decrypt function to match the encrypt function
@@ -41,11 +42,28 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    let requestedWorkspaceId: string | null = null;
+    try {
+      const body = await request.json();
+      requestedWorkspaceId = body?.workspaceId ?? null;
+    } catch {
+      requestedWorkspaceId = null;
+    }
+
+    const workspaceResolution = await resolveWorkspaceIdForUser(supabase as any, user.id, requestedWorkspaceId);
+    if (!workspaceResolution.workspaceId) {
+      return NextResponse.json(
+        { error: workspaceResolution.error ?? 'Workspace not found' },
+        { status: workspaceResolution.status ?? 400 }
+      );
+    }
+    const targetWorkspaceId = workspaceResolution.workspaceId;
+
     // Get the stored connection
     const { data: connection } = await supabase
       .from('crm_connections')
       .select('api_key_encrypted')
-      .eq('user_id', user.id)
+      .eq('workspace_id', targetWorkspaceId)
       .eq('provider', 'followupboss')
       .maybeSingle();
 
@@ -99,7 +117,7 @@ export async function POST(request: NextRequest) {
           status: 'error',
           last_error: `Test push failed: ${fubResponse.status}`,
         })
-        .eq('user_id', user.id)
+        .eq('workspace_id', targetWorkspaceId)
         .eq('provider', 'followupboss');
 
       return NextResponse.json(
@@ -118,7 +136,7 @@ export async function POST(request: NextRequest) {
         status: 'connected',
         last_error: null,
       })
-      .eq('user_id', user.id)
+      .eq('workspace_id', targetWorkspaceId)
       .eq('provider', 'followupboss');
 
     return NextResponse.json({

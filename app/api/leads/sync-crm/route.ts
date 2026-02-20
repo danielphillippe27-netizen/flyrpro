@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
+import { resolveWorkspaceIdForUser } from '@/app/api/_utils/workspace';
 import crypto from 'crypto';
 
 export const runtime = 'nodejs';
@@ -42,7 +43,7 @@ type ContactRow = {
  * POST /api/leads/sync-crm
  * Syncs the current user's leads/contacts to connected CRMs (Follow Up Boss).
  */
-export async function POST() {
+export async function POST(request: Request) {
   try {
     const supabase = await getSupabaseServerClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -51,10 +52,27 @@ export async function POST() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    let workspaceId: string | null = null;
+    try {
+      const body = await request.json();
+      workspaceId = body?.workspaceId ?? null;
+    } catch {
+      // no-op: body may be empty
+    }
+
+    const workspaceResolution = await resolveWorkspaceIdForUser(supabase as any, user.id, workspaceId);
+    if (!workspaceResolution.workspaceId) {
+      return NextResponse.json(
+        { error: workspaceResolution.error ?? 'Workspace not found' },
+        { status: workspaceResolution.status ?? 400 }
+      );
+    }
+    const targetWorkspaceId = workspaceResolution.workspaceId;
+
     const { data: connections } = await supabase
       .from('crm_connections')
       .select('provider, api_key_encrypted')
-      .eq('user_id', user.id)
+      .eq('workspace_id', targetWorkspaceId)
       .eq('status', 'connected');
 
     if (!connections || connections.length === 0) {
@@ -67,7 +85,7 @@ export async function POST() {
     const { data: contacts, error } = await supabase
       .from('contacts')
       .select('id, full_name, phone, email, address, campaign_id, notes')
-      .eq('user_id', user.id);
+      .eq('workspace_id', targetWorkspaceId);
 
     if (error) {
       console.error('Sync CRM: fetch contacts error', error);
@@ -148,7 +166,7 @@ export async function POST() {
             status: 'connected',
             last_error: null,
           })
-          .eq('user_id', user.id)
+          .eq('workspace_id', targetWorkspaceId)
           .eq('provider', provider);
       }
     }

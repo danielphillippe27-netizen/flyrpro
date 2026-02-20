@@ -102,14 +102,14 @@ export default function BillingPage() {
 
   if (loading) {
     return (
-      <div className="p-6">
+      <div className="p-6 max-w-2xl mx-auto">
         <p className="text-muted-foreground">Loading…</p>
       </div>
     );
   }
 
   return (
-    <div className="p-6 max-w-2xl">
+    <div className="p-6 max-w-2xl mx-auto">
       <div className="flex items-center gap-4 mb-6">
         <Link
           href="/settings"

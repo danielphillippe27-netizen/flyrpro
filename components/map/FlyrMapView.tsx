@@ -7,7 +7,7 @@ import { CampaignMarkersLayer } from './CampaignMarkersLayer';
 import { MapBuildingsLayer } from './MapBuildingsLayer';
 import { MapInfoButton } from './MapInfoButton';
 import { UserLocationLayer } from './UserLocationLayer';
-import { LocateFixed } from 'lucide-react';
+import { House, LocateFixed } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { AddressOrientationPanel } from './AddressOrientationPanel';
 import { HouseDetailPanel } from './HouseDetailPanel';
@@ -16,6 +16,7 @@ import { CreateContactDialog } from '@/components/crm/CreateContactDialog';
 import { CampaignsService } from '@/lib/services/CampaignsService';
 import { createClient } from '@/lib/supabase/client';
 import { useTheme } from '@/lib/theme-provider';
+import { useWorkspace } from '@/lib/workspace-context';
 import { getMapboxToken } from '@/lib/mapbox';
 import { DEFAULT_STATUS_FILTERS, MAP_STATUS_CONFIG, type StatusFilters } from '@/lib/constants/mapStatus';
 import type { CampaignV2, CampaignAddress } from '@/types/database';
@@ -28,6 +29,7 @@ const MAP_STYLES = {
 
 export function FlyrMapView() {
   const { theme } = useTheme();
+  const { currentWorkspaceId } = useWorkspace();
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const [statusFilters, setStatusFilters] = useState<StatusFilters>(DEFAULT_STATUS_FILTERS);
@@ -45,12 +47,27 @@ export function FlyrMapView() {
   const [housePanelOpen, setHousePanelOpen] = useState(false);
   const [locationCardOpen, setLocationCardOpen] = useState(false);
   const [createContactDialogOpen, setCreateContactDialogOpen] = useState(false);
-  const [contactDialogData, setContactDialogData] = useState<{ address: string; addressId?: string; gersId?: string; campaignId?: string } | null>(null);
+  const [contactDialogData, setContactDialogData] = useState<{ address: string; addressId?: string; gersId?: string; campaignId?: string; notes?: string } | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const boundsFittedRef = useRef(false);
   const [campaignBbox, setCampaignBbox] = useState<{ minLon: number; minLat: number; maxLon: number; maxLat: number } | null>(null);
   const [showUserLocation, setShowUserLocation] = useState(false);
   const [mapViewMode, setMapViewMode] = useState<'buildings' | 'addresses'>('buildings');
+
+  const clearCampaignSelection = () => {
+    setSelectedCampaignId(null);
+    setSelectedCampaign(null);
+    setCampaignAddresses([]);
+    setCampaignBbox(null);
+    setMapViewMode('buildings');
+    setLocationCardOpen(false);
+    setSelectedBuildingId(null);
+    setSelectedAddressId(null);
+    setHousePanelOpen(false);
+    setSelectedAddress(null);
+    setOrientationPanelOpen(false);
+    boundsFittedRef.current = false;
+  };
 
   // Get user ID on mount
   useEffect(() => {
@@ -220,6 +237,42 @@ export function FlyrMapView() {
     };
   }, []);
 
+  // Keep Mapbox canvas in sync with container size (sidebar collapse/expand, viewport changes).
+  useEffect(() => {
+    if (!mapLoaded || !map.current || !mapContainer.current) return;
+
+    const mapInstance = map.current;
+    const container = mapContainer.current;
+    let frameId: number | null = null;
+
+    const resizeMap = () => {
+      if (frameId !== null) cancelAnimationFrame(frameId);
+      frameId = requestAnimationFrame(() => {
+        try {
+          mapInstance.resize();
+        } catch {
+          // Ignore transient resize errors during style swaps/unmount.
+        }
+      });
+    };
+
+    const observer = new ResizeObserver(() => {
+      resizeMap();
+    });
+    observer.observe(container);
+
+    window.addEventListener('resize', resizeMap);
+    window.addEventListener('orientationchange', resizeMap);
+    resizeMap();
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', resizeMap);
+      window.removeEventListener('orientationchange', resizeMap);
+      if (frameId !== null) cancelAnimationFrame(frameId);
+    };
+  }, [mapLoaded]);
+
   // Sync map style with app theme (light/dark)
   useEffect(() => {
     if (!map.current || !mapLoaded) return;
@@ -359,12 +412,13 @@ export function FlyrMapView() {
   };
 
   // Handle adding contact from LocationCard
-  const handleAddContactFromCard = () => {
+  const handleAddContactFromCard = (_addressId?: string, addressText?: string, notes?: string) => {
     if (selectedBuildingId && selectedCampaignId) {
       setContactDialogData({
-        address: '',
+        address: addressText ?? '',
         gersId: selectedBuildingId,
         campaignId: selectedCampaignId,
+        notes,
       });
       setCreateContactDialogOpen(true);
     }
@@ -666,6 +720,8 @@ export function FlyrMapView() {
             map={map.current}
             mapLoaded={mapLoaded}
             userId={userId}
+            workspaceId={currentWorkspaceId}
+            hidden={!!selectedCampaignId}
             selectedCampaignId={selectedCampaignId}
             onCampaignSelect={setSelectedCampaignId}
           />
@@ -681,6 +737,28 @@ export function FlyrMapView() {
             }}
           />
         </>
+      )}
+      {mapLoaded && !error && selectedCampaignId && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20">
+          <div className="flex items-center gap-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-black/85 px-3 py-2 shadow-md backdrop-blur-sm">
+            <p className="max-w-[40vw] truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
+              {selectedCampaign?.name || 'Campaign'}
+            </p>
+            <div className="flex items-center gap-1.5 rounded-md bg-gray-100 dark:bg-gray-800 px-2 py-1 text-xs font-medium text-gray-700 dark:text-gray-200">
+              <House className="h-3.5 w-3.5" />
+              <span>{campaignAddresses.length} homes</span>
+            </div>
+            <button
+              type="button"
+              onClick={clearCampaignSelection}
+              className="inline-flex h-6 w-6 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white"
+              aria-label="Exit campaign focus"
+              title="Back to regular map"
+            >
+              ×
+            </button>
+          </div>
+        </div>
       )}
       {mapLoaded && !error && selectedCampaignId && (
         <div className="absolute top-4 right-4 z-10 flex flex-col gap-2">
@@ -773,9 +851,11 @@ export function FlyrMapView() {
             // Optionally refresh map data or show success message
           }}
           userId={userId}
+          workspaceId={currentWorkspaceId ?? undefined}
           initialAddress={contactDialogData?.address}
           initialAddressId={contactDialogData?.addressId}
           initialCampaignId={contactDialogData?.campaignId}
+          initialNotes={contactDialogData?.notes}
         />
       )}
     </div>

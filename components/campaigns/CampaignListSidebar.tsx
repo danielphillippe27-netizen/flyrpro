@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import { getClientAsync } from '@/lib/supabase/client';
+import { useWorkspace } from '@/lib/workspace-context';
 
 type StatusTab = 'active' | 'completed';
 
@@ -30,6 +31,7 @@ export function CampaignListSidebar({
   width = 280,
 }: CampaignListSidebarProps) {
   const pathname = usePathname();
+  const { currentWorkspaceId } = useWorkspace();
   const [campaigns, setCampaigns] = useState<CampaignV2[]>([]);
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
@@ -47,7 +49,7 @@ export function CampaignListSidebar({
           setLoading(false);
           return;
         }
-        const data = await CampaignsService.fetchCampaignsV2(id);
+        const data = await CampaignsService.fetchCampaignsV2(id, currentWorkspaceId);
         setCampaigns(data);
       } catch (e) {
         console.error('CampaignListSidebar load:', e);
@@ -56,7 +58,7 @@ export function CampaignListSidebar({
       }
     };
     run();
-  }, []);
+  }, [currentWorkspaceId]);
 
   const byStatus = useMemo(() => {
     const active = campaigns.filter((c) => ACTIVE_STATUSES.includes(c.status));

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
+import { resolveWorkspaceIdForUser } from '@/app/api/_utils/workspace';
 
 export async function GET(request: NextRequest) {
   try {
@@ -14,11 +15,21 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    const requestedWorkspaceId = request.nextUrl.searchParams.get('workspaceId');
+    const workspaceResolution = await resolveWorkspaceIdForUser(supabase as any, user.id, requestedWorkspaceId);
+    if (!workspaceResolution.workspaceId) {
+      return NextResponse.json(
+        { error: workspaceResolution.error ?? 'Workspace not found' },
+        { status: workspaceResolution.status ?? 400 }
+      );
+    }
+    const targetWorkspaceId = workspaceResolution.workspaceId;
+
     // Get connection status (.maybeSingle() so 0 rows returns null instead of throwing)
     const { data: connection } = await supabase
       .from('crm_connections')
       .select('status, created_at, updated_at, last_tested_at, last_push_at, last_error')
-      .eq('user_id', user.id)
+      .eq('workspace_id', targetWorkspaceId)
       .eq('provider', 'followupboss')
       .maybeSingle();
 

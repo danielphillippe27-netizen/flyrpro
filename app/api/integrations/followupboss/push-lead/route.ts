@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
+import { resolveWorkspaceIdForUser } from '@/app/api/_utils/workspace';
 import crypto from 'crypto';
 
 // Decrypt function to match the encrypt function
@@ -67,11 +68,31 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    let targetWorkspaceId: string | null = null;
+    if (leadData.campaignId) {
+      const { data: campaignRow } = await supabase
+        .from('campaigns')
+        .select('workspace_id')
+        .eq('id', leadData.campaignId)
+        .maybeSingle();
+      targetWorkspaceId = campaignRow?.workspace_id ?? null;
+    }
+    if (!targetWorkspaceId) {
+      const workspaceResolution = await resolveWorkspaceIdForUser(supabase as any, user.id, null);
+      if (!workspaceResolution.workspaceId) {
+        return NextResponse.json(
+          { error: workspaceResolution.error ?? 'Workspace not found' },
+          { status: workspaceResolution.status ?? 400 }
+        );
+      }
+      targetWorkspaceId = workspaceResolution.workspaceId;
+    }
+
     // Get the stored connection
     const { data: connection } = await supabase
       .from('crm_connections')
       .select('api_key_encrypted')
-      .eq('user_id', user.id)
+      .eq('workspace_id', targetWorkspaceId)
       .eq('provider', 'followupboss')
       .maybeSingle();
 
@@ -146,7 +167,7 @@ export async function POST(request: NextRequest) {
           status: 'error',
           last_error: `Push failed: ${fubResponse.status}`,
         })
-        .eq('user_id', user.id)
+        .eq('workspace_id', targetWorkspaceId)
         .eq('provider', 'followupboss');
 
       if (isExpired) {
@@ -175,7 +196,7 @@ export async function POST(request: NextRequest) {
         status: 'connected',
         last_error: null,
       })
-      .eq('user_id', user.id)
+      .eq('workspace_id', targetWorkspaceId)
       .eq('provider', 'followupboss');
 
     // Save lead to contacts so it shows on the web Leads page (iOS and other push-lead callers)
@@ -183,6 +204,7 @@ export async function POST(request: NextRequest) {
     const addressStr = [leadData.address, leadData.city, leadData.state, leadData.zip].filter(Boolean).join(', ');
     await supabase.from('contacts').insert({
       user_id: user.id,
+      workspace_id: targetWorkspaceId,
       full_name: fullName,
       phone: leadData.phone || null,
       email: leadData.email || null,

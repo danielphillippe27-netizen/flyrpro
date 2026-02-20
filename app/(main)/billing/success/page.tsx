@@ -1,13 +1,14 @@
 'use client';
 
 import { Suspense, useEffect, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { CheckCircle, ArrowLeft, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
 function BillingSuccessContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const sessionId = searchParams.get('session_id');
   const [status, setStatus] = useState<'idle' | 'confirming' | 'done' | 'error'>(
@@ -93,7 +94,10 @@ function BillingSuccessContent() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Button asChild>
+          <Button onClick={() => router.push('/home')}>
+            Go to Dashboard
+          </Button>
+          <Button variant="outline" asChild>
             <Link href="/billing">
               <ArrowLeft className="w-4 h-4 mr-2" />
               Back to Billing

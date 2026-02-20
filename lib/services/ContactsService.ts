@@ -5,15 +5,20 @@ import type { CreateContactPayload } from '@/types/contacts';
 export class ContactsService {
   private static client = createClient();
 
-  static async fetchContacts(userId: string, filters?: {
+  static async fetchContacts(userId: string, workspaceId?: string | null, filters?: {
     status?: string;
     campaignId?: string;
     farmId?: string;
   }): Promise<Contact[]> {
     let query = this.client
       .from('contacts')
-      .select('*')
-      .eq('user_id', userId);
+      .select('*');
+
+    if (workspaceId) {
+      query = query.eq('workspace_id', workspaceId);
+    } else {
+      query = query.eq('user_id', userId);
+    }
 
     if (filters?.status) {
       query = query.eq('status', filters.status);
@@ -42,7 +47,11 @@ export class ContactsService {
     return data || null;
   }
 
-  static async createContact(userId: string, payload: CreateContactPayload): Promise<Contact> {
+  static async createContact(
+    userId: string,
+    payload: CreateContactPayload,
+    workspaceId?: string | null
+  ): Promise<Contact> {
     // Concatenate first_name and last_name into full_name
     const full_name = payload.last_name
       ? `${payload.first_name.trim()} ${payload.last_name.trim()}`.trim()
@@ -52,6 +61,7 @@ export class ContactsService {
       .from('contacts')
       .insert({
         user_id: userId,
+        workspace_id: workspaceId ?? undefined,
         full_name: full_name,
         phone: payload.phone,
         email: payload.email,
@@ -178,10 +188,11 @@ export class ContactsService {
    */
   static async createContactWithAddress(
     userId: string,
-    payload: CreateContactPayload & { address_id?: string }
+    payload: CreateContactPayload & { address_id?: string },
+    workspaceId?: string | null
   ): Promise<Contact> {
     // Create contact first
-    const contact = await this.createContact(userId, payload);
+    const contact = await this.createContact(userId, payload, workspaceId);
 
     // If address_id is provided, link it
     if (payload.address_id) {

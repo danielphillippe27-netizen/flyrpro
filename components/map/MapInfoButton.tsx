@@ -23,7 +23,7 @@ export function MapInfoButton({ show = true }: MapInfoButtonProps) {
       <div className="absolute top-3 left-3 z-10">
         <Button
           variant="secondary"
-          className="h-9 rounded-full bg-red-600 hover:bg-red-700 shadow-md border-0 text-white px-4 text-xs font-semibold"
+          className="h-9 rounded-full bg-red-500/80 hover:bg-red-500/90 shadow-sm border border-red-300/30 text-white px-4 text-xs font-semibold"
           onClick={() => setOpen(true)}
           aria-label="Map info and controls"
         >

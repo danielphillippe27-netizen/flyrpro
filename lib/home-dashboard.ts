@@ -18,8 +18,9 @@ export interface HomeDashboardData {
   lastSessionAt: string | null;
 }
 
-export async function fetchHomeDashboard(): Promise<HomeDashboardData> {
-  const res = await fetch('/api/home/dashboard', { credentials: 'include' });
+export async function fetchHomeDashboard(workspaceId?: string | null): Promise<HomeDashboardData> {
+  const qs = workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : '';
+  const res = await fetch(`/api/home/dashboard${qs}`, { credentials: 'include' });
   if (!res.ok) {
     if (res.status === 401) throw new Error('Unauthorized');
     throw new Error(res.status === 500 ? 'Failed to load dashboard' : 'Request failed');

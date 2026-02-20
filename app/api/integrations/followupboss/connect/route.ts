@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
+import { resolveWorkspaceIdForUser } from '@/app/api/_utils/workspace';
 import crypto from 'crypto';
 
 // Encrypt API key using AES-256-GCM
@@ -30,7 +31,7 @@ function encryptApiKey(apiKey: string): string {
 
 export async function POST(request: NextRequest) {
   try {
-    const { apiKey } = await request.json();
+    const { apiKey, workspaceId } = await request.json();
 
     if (!apiKey || typeof apiKey !== 'string') {
       return NextResponse.json(
@@ -49,6 +50,15 @@ export async function POST(request: NextRequest) {
         { status: 401 }
       );
     }
+
+    const workspaceResolution = await resolveWorkspaceIdForUser(supabase as any, user.id, workspaceId ?? null);
+    if (!workspaceResolution.workspaceId) {
+      return NextResponse.json(
+        { error: workspaceResolution.error ?? 'Workspace not found' },
+        { status: workspaceResolution.status ?? 400 }
+      );
+    }
+    const targetWorkspaceId = workspaceResolution.workspaceId;
 
     // Test the API key by calling FUB's users endpoint
     const testResponse = await fetch('https://api.followupboss.com/v1/users', {
@@ -76,7 +86,7 @@ export async function POST(request: NextRequest) {
     const { data: existingConnection } = await supabase
       .from('crm_connections')
       .select('id')
-      .eq('user_id', user.id)
+      .eq('workspace_id', targetWorkspaceId)
       .eq('provider', 'followupboss')
       .maybeSingle();
 
@@ -102,6 +112,7 @@ export async function POST(request: NextRequest) {
         .from('crm_connections')
         .insert({
           user_id: user.id,
+          workspace_id: targetWorkspaceId,
           provider: 'followupboss',
           api_key_encrypted: encryptedKey,
           status: 'connected',

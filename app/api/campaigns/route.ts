@@ -8,6 +8,7 @@ interface CreateCampaignBody {
   name: string;
   type: string;
   address_source: string;
+  workspace_id?: string;
   seed_query?: string;
   bbox?: number[];
   territory_boundary?: { type: 'Polygon'; coordinates: number[][][] };
@@ -27,7 +28,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body: CreateCampaignBody = await request.json();
-    const { name, type, address_source, seed_query, bbox, territory_boundary } = body;
+    const { name, type, address_source, workspace_id, seed_query, bbox, territory_boundary } = body;
 
     if (!name || !type || !address_source) {
       return NextResponse.json(
@@ -36,10 +37,45 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    let targetWorkspaceId: string | null = workspace_id ?? null;
+    if (targetWorkspaceId) {
+      const { data: membership, error: membershipError } = await supabase
+        .from('workspace_members')
+        .select('workspace_id')
+        .eq('user_id', user.id)
+        .eq('workspace_id', targetWorkspaceId)
+        .maybeSingle();
+
+      if (membershipError || !membership) {
+        return NextResponse.json(
+          { error: 'You are not a member of the selected workspace' },
+          { status: 403 }
+        );
+      }
+    } else {
+      const { data: fallbackMembership, error: fallbackError } = await supabase
+        .from('workspace_members')
+        .select('workspace_id')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (fallbackError || !fallbackMembership?.workspace_id) {
+        return NextResponse.json(
+          { error: 'No workspace membership found for this user' },
+          { status: 400 }
+        );
+      }
+
+      targetWorkspaceId = fallbackMembership.workspace_id;
+    }
+
     const { data: campaign, error: insertError } = await supabase
       .from('campaigns')
       .insert({
         owner_id: user.id,
+        workspace_id: targetWorkspaceId,
         name,
         title: name,
         description: '',

@@ -11,6 +11,7 @@ import { LocationCard } from '@/components/map/LocationCard';
 import { CreateContactDialog } from '@/components/crm/CreateContactDialog';
 import { createClient } from '@/lib/supabase/client';
 import { useTheme } from '@/lib/theme-provider';
+import { useWorkspace } from '@/lib/workspace-context';
 import { getMapboxToken } from '@/lib/mapbox';
 import {
   DEFAULT_STATUS_FILTERS,
@@ -66,6 +67,7 @@ export function CampaignDetailMapView({
   onSnapComplete?: () => void;
 }) {
   const { theme } = useTheme();
+  const { currentWorkspaceId } = useWorkspace();
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const [statusFilters, setStatusFilters] = useState<StatusFilters>(DEFAULT_STATUS_FILTERS);
@@ -83,6 +85,7 @@ export function CampaignDetailMapView({
   const [userId, setUserId] = useState<string | null>(null);
   const [selectedAddressId, setSelectedAddressId] = useState<string | undefined>(undefined);
   const [selectedAddressText, setSelectedAddressText] = useState<string | undefined>(undefined);
+  const [selectedContactNotes, setSelectedContactNotes] = useState<string | undefined>(undefined);
 
   // Map view: 3D buildings vs 3D address points (circular fill-extrusions)
   const [mapViewMode, setMapViewMode] = useState<'buildings' | 'addresses'>('buildings');
@@ -140,9 +143,10 @@ export function CampaignDetailMapView({
   };
 
   // Handle adding a contact from LocationCard
-  const handleAddContact = (addressId?: string, addressText?: string) => {
+  const handleAddContact = (addressId?: string, addressText?: string, notes?: string) => {
     setSelectedAddressId(addressId);
     setSelectedAddressText(addressText);
+    setSelectedContactNotes(notes);
     setCreateContactOpen(true);
   };
 
@@ -151,6 +155,7 @@ export function CampaignDetailMapView({
     setCreateContactOpen(false);
     setSelectedAddressId(undefined);
     setSelectedAddressText(undefined);
+    setSelectedContactNotes(undefined);
     // Refresh the location card data
     if (selectedBuildingId) {
       // Force re-render by toggling
@@ -324,6 +329,42 @@ export function CampaignDetailMapView({
       }
     };
   }, [addresses]);
+
+  // Keep Mapbox canvas in sync with container size (sidebar collapse/expand, viewport changes).
+  useEffect(() => {
+    if (!mapLoaded || !map.current || !mapContainer.current) return;
+
+    const mapInstance = map.current;
+    const container = mapContainer.current;
+    let frameId: number | null = null;
+
+    const resizeMap = () => {
+      if (frameId !== null) cancelAnimationFrame(frameId);
+      frameId = requestAnimationFrame(() => {
+        try {
+          mapInstance.resize();
+        } catch {
+          // Ignore transient resize errors during style swaps/unmount.
+        }
+      });
+    };
+
+    const observer = new ResizeObserver(() => {
+      resizeMap();
+    });
+    observer.observe(container);
+
+    window.addEventListener('resize', resizeMap);
+    window.addEventListener('orientationchange', resizeMap);
+    resizeMap();
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', resizeMap);
+      window.removeEventListener('orientationchange', resizeMap);
+      if (frameId !== null) cancelAnimationFrame(frameId);
+    };
+  }, [mapLoaded]);
 
   useEffect(() => {
     if (!map.current || !mapLoaded) return;
@@ -829,10 +870,6 @@ export function CampaignDetailMapView({
       {map.current && mapLoaded && (
         <>
           <MapInfoButton show />
-          {/* Pitch control tip */}
-          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 bg-white/90 dark:bg-black/80 backdrop-blur-sm px-3 py-1.5 rounded-full shadow-sm text-xs text-gray-600 dark:text-gray-300">
-            <span className="font-medium">Tip:</span> Hold <kbd className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-[10px] font-mono mx-0.5">Ctrl</kbd> + drag to tilt the map
-          </div>
           {/* View switcher: Buildings | Addresses */}
           <div className="absolute top-4 right-4 z-10 flex flex-col gap-2">
             <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 bg-white/90 dark:bg-black/80 backdrop-blur-sm shadow-sm overflow-hidden">
@@ -917,12 +954,15 @@ export function CampaignDetailMapView({
             setCreateContactOpen(false);
             setSelectedAddressId(undefined);
             setSelectedAddressText(undefined);
+            setSelectedContactNotes(undefined);
           }}
           onSuccess={handleContactCreated}
           userId={userId}
+          workspaceId={currentWorkspaceId ?? undefined}
           initialAddress={selectedAddressText}
           initialAddressId={selectedAddressId}
           initialCampaignId={campaignId}
+          initialNotes={selectedContactNotes}
         />
       )}
     </div>

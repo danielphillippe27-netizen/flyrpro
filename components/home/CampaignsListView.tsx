@@ -7,6 +7,7 @@ import type { CampaignV2 } from '@/types/database';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
+import { useWorkspace } from '@/lib/workspace-context';
 
 interface CampaignsListViewProps {
   userId: string | null;
@@ -14,6 +15,7 @@ interface CampaignsListViewProps {
 }
 
 export function CampaignsListView({ userId, onCampaignSelect }: CampaignsListViewProps) {
+  const { currentWorkspaceId } = useWorkspace();
   const [campaigns, setCampaigns] = useState<CampaignV2[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -25,7 +27,7 @@ export function CampaignsListView({ userId, onCampaignSelect }: CampaignsListVie
 
     const loadCampaigns = async () => {
       try {
-        const data = await CampaignsService.fetchCampaignsV2(userId);
+        const data = await CampaignsService.fetchCampaignsV2(userId, currentWorkspaceId);
         setCampaigns(data);
       } catch (error) {
         console.error('Error loading campaigns:', error);
@@ -35,7 +37,7 @@ export function CampaignsListView({ userId, onCampaignSelect }: CampaignsListVie
     };
 
     loadCampaigns();
-  }, [userId]);
+  }, [userId, currentWorkspaceId]);
 
   if (loading) {
     return <div className="text-center py-8 text-gray-600 dark:text-gray-400">Loading campaigns...</div>;

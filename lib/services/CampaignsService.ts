@@ -28,12 +28,21 @@ function formatError(error: unknown): string {
 export class CampaignsService {
   private static client = createClient();
 
-  static async fetchCampaignsV2(userId: string): Promise<CampaignV2[]> {
-    const { data, error } = await this.client
+  static async fetchCampaignsV2(userId: string, workspaceId?: string | null): Promise<CampaignV2[]> {
+    let query = this.client
       .from('campaigns')
       .select('*')
-      .eq('owner_id', userId)
       .order('created_at', { ascending: false });
+
+    // Workspace scope is the new source of truth.
+    // Keep owner fallback when workspace context is not available yet.
+    if (workspaceId) {
+      query = query.eq('workspace_id', workspaceId);
+    } else {
+      query = query.eq('owner_id', userId);
+    }
+
+    const { data, error } = await query;
 
     if (error) throw error;
 
@@ -97,11 +106,12 @@ export class CampaignsService {
     } as CampaignV2;
   }
 
-  static async createV2(userId: string, payload: CreateCampaignPayload): Promise<CampaignV2> {
+  static async createV2(userId: string, payload: CreateCampaignPayload, workspaceId?: string | null): Promise<CampaignV2> {
     const { data, error } = await this.client
       .from('campaigns')
       .insert({
         owner_id: userId,
+        workspace_id: workspaceId ?? undefined,
         name: payload.name,
         title: payload.name, // Set title to match name for database constraint
         description: '', // Set empty description to satisfy NOT NULL constraint

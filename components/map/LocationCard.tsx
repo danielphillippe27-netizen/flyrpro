@@ -1,9 +1,12 @@
 'use client';
 
+import { useState } from 'react';
 import { useBuildingData } from '@/lib/hooks/useBuildingData';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import {
   X,
   Navigation,
@@ -27,7 +30,7 @@ interface LocationCardProps {
   onNavigate?: () => void;
   onLogVisit?: () => void;
   onEditContact?: (contactId: string) => void;
-  onAddContact?: (addressId?: string, addressText?: string) => void;
+  onAddContact?: (addressId?: string, addressText?: string, notes?: string) => void;
   className?: string;
 }
 
@@ -56,6 +59,8 @@ export function LocationCard({
     qrStatus,
     addressLinked,
   } = useBuildingData(gersId, campaignId, preferredAddressId);
+  const [manualAddress, setManualAddress] = useState('');
+  const [newContactNotes, setNewContactNotes] = useState('');
 
   const isMultiAddress = addresses.length > 1;
   const isListMode =
@@ -85,8 +90,9 @@ export function LocationCard({
   return (
     <div
       className={`
-        w-[320px] bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl
-        border border-gray-100 overflow-hidden
+        w-[320px] rounded-2xl border overflow-hidden shadow-2xl backdrop-blur-xl
+        bg-white/95 border-gray-100
+        dark:bg-black/85 dark:border-white/10
         transform transition-all duration-200 ease-out
         ${className}
       `}
@@ -94,10 +100,10 @@ export function LocationCard({
       {/* Close button */}
       <button
         onClick={onClose}
-        className="absolute top-3 right-3 p-1.5 rounded-full bg-gray-100/80 hover:bg-gray-200/80 transition-colors z-10"
+        className="absolute top-3 right-3 z-10 rounded-full p-1.5 transition-colors bg-gray-100/80 hover:bg-gray-200/80 dark:bg-white/10 dark:hover:bg-white/20"
         aria-label="Close"
       >
-        <X className="w-4 h-4 text-gray-600" />
+        <X className="w-4 h-4 text-gray-600 dark:text-gray-300" />
       </button>
 
       {/* Loading State */}
@@ -143,29 +149,36 @@ export function LocationCard({
       {/* No Address Linked State */}
       {!isLoading && !error && !addressLinked && (
         <div className="p-5">
-          <div className="flex items-center gap-3 text-gray-500">
-            <MapPin className="w-5 h-5" />
+          <div className="flex items-center gap-3 text-gray-600 dark:text-gray-400">
+            <MapPin className="w-5 h-5 text-gray-500 dark:text-gray-400" />
             <div>
-              <p className="font-medium text-gray-700">Unlinked Building</p>
-              <p className="text-sm">No address data found for this building</p>
+              <p className="font-medium text-gray-900 dark:text-white">Unlinked Building</p>
+              <p className="text-sm text-gray-600 dark:text-gray-400">No address data found for this building</p>
             </div>
           </div>
-          <p className="mt-3 text-xs text-gray-400 font-mono truncate">
-            GERS: {gersId}
-          </p>
+          <div className="mt-4">
+            <Input
+              value={manualAddress}
+              onChange={(e) => setManualAddress(e.target.value)}
+              placeholder="Add address (required to link)"
+              className="h-10 bg-white dark:bg-white/5 dark:text-white dark:placeholder:text-gray-500 dark:border-white/20"
+              aria-label="Address to link building"
+            />
+          </div>
           <div className="flex gap-2 mt-4">
             <Button
               variant="outline"
               size="sm"
               onClick={onClose}
-              className="flex-1"
+              className="flex-1 dark:bg-white/10 dark:border-white/25 dark:text-white dark:hover:bg-white/20"
             >
               Close
             </Button>
             {onAddContact && (
               <Button
                 size="sm"
-                onClick={onAddContact}
+                onClick={() => onAddContact(undefined, manualAddress.trim())}
+                disabled={!manualAddress.trim()}
                 className="flex-1"
               >
                 <UserPlus className="w-4 h-4 mr-1" />
@@ -220,10 +233,10 @@ export function LocationCard({
                 )}
                 <div className="flex items-start justify-between pr-8">
                   <div className="min-w-0 flex-1">
-                    <h2 className="text-lg font-semibold text-gray-900 truncate">
+                    <h2 className="text-lg font-semibold text-gray-900 dark:text-white truncate">
                       {address.formatted || address.street}
                     </h2>
-                    <p className="text-sm text-gray-500 truncate">
+                    <p className="text-sm text-gray-500 dark:text-gray-400 truncate">
                       {isMultiAddress
                         ? `${addresses.length} addresses at this building`
                         : [address.locality, address.region, address.postalCode]
@@ -245,10 +258,10 @@ export function LocationCard({
                     if (residents.length > 0 && onEditContact) {
                       onEditContact(residents[0].id);
                     } else if (onAddContact) {
-                      onAddContact(address.id, address.formatted);
+                      onAddContact(address.id, address.formatted, newContactNotes.trim() || undefined);
                     }
                   }}
-                  className="w-full flex items-center gap-3 p-3 rounded-xl bg-gray-50 hover:bg-gray-100 transition-colors text-left"
+                  className="w-full flex items-center gap-3 p-3 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800/80 dark:hover:bg-zinc-700 transition-colors text-left"
                 >
                   <div className="w-9 h-9 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center shrink-0">
                     <Users className="w-4 h-4 text-red-600 dark:text-red-400" />
@@ -266,6 +279,19 @@ export function LocationCard({
                   )}
                 </button>
 
+                {residents.length === 0 && (
+                  <div className="p-3 rounded-xl bg-zinc-100 dark:bg-zinc-800/80">
+                    <p className="text-xs font-medium text-gray-700 dark:text-gray-200 mb-2">Notes</p>
+                    <Textarea
+                      value={newContactNotes}
+                      onChange={(e) => setNewContactNotes(e.target.value)}
+                      placeholder="Add notes for this contact..."
+                      rows={2}
+                      className="resize-none bg-white/90 dark:bg-zinc-900/80 border-gray-300 dark:border-zinc-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400"
+                    />
+                  </div>
+                )}
+
                 {/* Resident Notes */}
                 {residents.length > 0 && residents.some((r) => r.notes) && (
                   <div className="p-3 rounded-xl bg-amber-50 border border-amber-100">
@@ -280,7 +306,8 @@ export function LocationCard({
                 )}
 
                 {/* QR Status Row */}
-                <div className="flex items-center gap-3 p-3 rounded-xl bg-gray-50">
+                {(qrStatus.hasFlyer || qrStatus.totalScans > 0) && (
+                <div className="flex items-center gap-3 p-3 rounded-xl bg-zinc-100 dark:bg-zinc-800/80">
                   <div
                     className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${
                       qrStatus.hasFlyer
@@ -306,14 +333,14 @@ export function LocationCard({
                         ? qrStatus.totalScans > 0
                           ? `Scanned ${qrStatus.totalScans}x`
                           : 'Flyer delivered'
-                        : 'No QR code'}
+                        : ''}
                     </p>
                     <p className="text-xs text-gray-500">
                       {qrStatus.lastScannedAt
                         ? `Last: ${qrStatus.lastScannedAt.toLocaleDateString()}`
                         : qrStatus.hasFlyer
                           ? 'Not scanned yet'
-                          : 'Generate in campaign'}
+                          : ''}
                     </p>
                   </div>
                   {qrStatus.totalScans > 0 && (
@@ -322,6 +349,7 @@ export function LocationCard({
                     </div>
                   )}
                 </div>
+                )}
               </div>
 
               {/* Action Footer */}
@@ -352,7 +380,7 @@ export function LocationCard({
                   {onAddContact && (
                     <Button
                       size="sm"
-                      onClick={() => onAddContact(address?.id, address?.formatted)}
+                      onClick={() => onAddContact(address?.id, address?.formatted, newContactNotes.trim() || undefined)}
                       className="flex-1 gap-1.5"
                     >
                       <UserPlus className="w-4 h-4" />

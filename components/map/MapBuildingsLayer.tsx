@@ -74,6 +74,18 @@ function scaleFootprint(geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon, scale:
   }
 }
 
+/**
+ * Deterministically place ~25% of features in the purple group.
+ * Keeps coloring stable across re-renders/refreshes.
+ */
+function isPurpleCampaignFeature(featureId: string): boolean {
+  let hash = 0;
+  for (let i = 0; i < featureId.length; i++) {
+    hash = ((hash << 5) - hash + featureId.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash) % 4 === 0;
+}
+
 export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStatusFilters, showOrphans = true, onBuildingClick, onAddToCRM }: MapBuildingsLayerProps) {
   const [features, setFeatures] = useState<BuildingFeatureCollection | null>(null);
   const [zoomLevel, setZoomLevel] = useState(15);
@@ -149,6 +161,16 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
   // Uses ['feature-state', ...] for real-time updates via setFeatureState(),
   // with fallback to ['get', ...] for initial data from properties
   const getColorExpression = (): any => {
+    // Campaign focus mode: ~25% purple, remaining green.
+    if (campaignId) {
+      return [
+        'case',
+        ['==', ['get', 'campaign_color_group'], 'purple'],
+        '#8b5cf6',
+        '#22c55e',
+      ] as any;
+    }
+
     // Helper expressions - check feature-state first (real-time), then source properties (initial load)
     const getStatusValue = () => ['coalesce', ['feature-state', 'status'], ['get', 'status'], 'not_visited'];
     const getScansTotal = () => ['coalesce', ['feature-state', 'scans_total'], ['get', 'scans_total'], 0];
@@ -290,12 +312,19 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
         min_lat: bounds.sw[1],
         max_lon: bounds.ne[0],
         max_lat: bounds.ne[1],
+        // Keep RPC signature stable across PostgREST schema cache versions.
+        p_campaign_id: null,
       };
 
       const { data, error } = await supabase.rpc('rpc_get_buildings_in_bbox', rpcParams as GetBuildingsInBboxParams);
 
       if (error) {
-        console.error('[MapBuildingsLayer] Error fetching buildings:', error);
+        console.error('[MapBuildingsLayer] Error fetching buildings:', {
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code,
+        });
         return;
       }
 
@@ -549,6 +578,9 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
             features: features.features.map((f) => {
               const props = f.properties ?? {};
               const fid = props.feature_id ?? props.gers_id ?? f.id ?? (props as any).id;
+              const fidString = String(fid ?? '');
+              const campaignColorGroup =
+                campaignId && fidString && isPurpleCampaignFeature(fidString) ? 'purple' : 'green';
               const geom = f.geometry;
               const scaledGeom =
                 geom?.type === 'Polygon' || geom?.type === 'MultiPolygon'
@@ -560,7 +592,11 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
               return {
                 ...f,
                 geometry: (scaledGeom ?? geom) as GeoJSON.Polygon,
-                properties: { ...props, feature_id: fid ?? (f as any).id },
+                properties: {
+                  ...props,
+                  feature_id: fid ?? (f as any).id,
+                  campaign_color_group: campaignColorGroup,
+                },
               };
             }),
           } as BuildingFeatureCollection
