@@ -1,8 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { getClientAsync } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,12 +9,28 @@ import { Label } from '@/components/ui/label';
 import Image from 'next/image';
 
 export default function LoginPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const router = useRouter();
   const [hasChecked, setHasChecked] = useState(false);
+  const sanitizeEmail = (value: string) => value.trim().replace(/^['"]+|['"]+$/g, '');
+
+  const nextFromQuery = searchParams.get('next');
+  const inviteToken = searchParams.get('token');
+  const workspaceIntent = searchParams.get('workspace') ?? searchParams.get('workspaceId');
+
+  const resolveNextPath = () => {
+    if (nextFromQuery && nextFromQuery.startsWith('/')) return nextFromQuery;
+    if (inviteToken) return `/join?token=${encodeURIComponent(inviteToken)}`;
+    if (workspaceIntent) return `/onboarding/team/setup?workspace=${encodeURIComponent(workspaceIntent)}`;
+    return '/home';
+  };
+
+  const normalizedNext = resolveNextPath();
+  const gatePath = `/gate?next=${encodeURIComponent(normalizedNext)}`;
 
   // Show error from URL (e.g. after Apple OAuth or callback failure)
   useEffect(() => {
@@ -47,12 +62,12 @@ export default function LoginPage() {
         const { data: { session }, error: sessionError } = await supabase.auth.getSession();
 
         if (session?.user) {
-          router.replace('/home');
+          router.replace(gatePath);
           return;
         }
         if (!session && !sessionError) {
           const { data: { user } } = await supabase.auth.getUser();
-          if (user) router.replace('/home');
+          if (user) router.replace(gatePath);
         }
       } catch (error) {
         console.error('❌ Auth check error:', error);
@@ -61,7 +76,7 @@ export default function LoginPage() {
 
     checkAuth();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasChecked]);
+  }, [gatePath, hasChecked, router]);
 
   const handleEmailSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -70,8 +85,9 @@ export default function LoginPage() {
 
     try {
       const supabase = await getClientAsync();
+      const normalizedEmail = sanitizeEmail(email);
       const { error } = await supabase.auth.signInWithPassword({
-        email,
+        email: normalizedEmail,
         password,
       });
 
@@ -80,7 +96,7 @@ export default function LoginPage() {
         throw error;
       }
 
-      router.replace('/gate?next=/home');
+      router.replace(gatePath);
     } catch (error: any) {
       console.error('❌ Sign in error:', error);
       setMessage({
@@ -96,7 +112,7 @@ export default function LoginPage() {
     setLoading(true);
     setMessage(null);
     try {
-      const redirectTo = `${window.location.origin}/auth/callback?next=/home`;
+      const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(normalizedNext)}`;
       const supabase = await getClientAsync();
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
@@ -115,7 +131,7 @@ export default function LoginPage() {
     setLoading(true);
     setMessage(null);
     try {
-      const redirectTo = `${window.location.origin}/auth/callback?next=/home`;
+      const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(normalizedNext)}`;
       const supabase = await getClientAsync();
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'apple',
@@ -146,7 +162,7 @@ export default function LoginPage() {
             />
           </div>
           <p className="text-[#AAAAAA] text-lg">
-            Sign in to access your campaigns and analytics
+            Continue to access access your dashboard or onboarding
           </p>
         </div>
 
@@ -158,7 +174,7 @@ export default function LoginPage() {
               type="email"
               placeholder="you@example.com"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => setEmail(sanitizeEmail(e.target.value))}
               required
               disabled={loading}
               className="h-12 text-base text-white bg-[#2a2a2a] border-zinc-600 placeholder:text-gray-500 focus-visible:border-white focus-visible:ring-2 focus-visible:ring-white/40"
@@ -181,10 +197,10 @@ export default function LoginPage() {
           <Button
             type="submit"
             size="lg"
-            className="w-full h-12 text-base bg-[#ef4444] text-white hover:bg-[#dc2626] border-0"
+            className="w-full h-12 text-base bg-[#dc2626] text-white hover:bg-[#b91c1c] border border-red-900/40"
             disabled={loading}
           >
-            {loading ? 'Signing in...' : 'Sign in'}
+            {loading ? 'Continuing...' : 'Continue with Email'}
           </Button>
         </form>
 
@@ -193,7 +209,7 @@ export default function LoginPage() {
             <span className="w-full border-t border-zinc-600" />
           </div>
           <div className="relative flex justify-center text-sm uppercase">
-            <span className="bg-[#242424] px-2 text-[#AAAAAA]">Or continue with</span>
+            <span className="bg-[#242424] px-2 text-[#AAAAAA]">Or continue with sign in</span>
           </div>
         </div>
 
@@ -202,7 +218,7 @@ export default function LoginPage() {
             type="button"
             variant="outline"
             size="lg"
-            className="w-full h-12 text-base border-zinc-600 bg-[#2a2a2a] hover:bg-zinc-700 text-white"
+            className="w-full h-12 text-base border-red-900/50 bg-[#991b1b] hover:bg-[#7f1d1d] text-white"
             onClick={handleGoogleSignIn}
             disabled={loading}
           >
@@ -224,13 +240,13 @@ export default function LoginPage() {
                 d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
               />
             </svg>
-            Sign in with Google
+            Continue with Google
           </Button>
           <Button
             type="button"
             variant="outline"
             size="lg"
-            className="w-full h-12 text-base border-zinc-600 bg-[#2a2a2a] hover:bg-zinc-700 text-white"
+            className="w-full h-12 text-base border-red-900/50 bg-[#991b1b] hover:bg-[#7f1d1d] text-white"
             onClick={handleAppleSignIn}
             disabled={loading}
           >
@@ -241,7 +257,7 @@ export default function LoginPage() {
             >
               <path d="M17.05 20.28c-.98.95-2.05.88-3.08.4-1.09-.5-2.08-.48-3.24 0-1.44.62-2.2.44-3.06-.4C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.54 4.09l.01-.01zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z" />
             </svg>
-            Sign in with Apple
+            Continue with Apple
           </Button>
         </div>
 
@@ -259,11 +275,6 @@ export default function LoginPage() {
 
         <p className="mt-5 text-sm text-center text-[#AAAAAA]">
           By signing in, you agree to our Terms of Service and Privacy Policy
-        </p>
-        <p className="mt-2 text-sm text-center">
-          <Link href="/signup" className="text-red-400 hover:text-red-300 underline underline-offset-2">
-            Sign up
-          </Link>
         </p>
       </div>
     </div>
