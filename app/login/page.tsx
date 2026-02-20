@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { getClientAsync } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,7 +10,6 @@ import Image from 'next/image';
 
 export default function LoginPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -18,9 +17,10 @@ export default function LoginPage() {
   const [hasChecked, setHasChecked] = useState(false);
   const sanitizeEmail = (value: string) => value.trim().replace(/^['"]+|['"]+$/g, '');
 
-  const nextFromQuery = searchParams.get('next');
-  const inviteToken = searchParams.get('token');
-  const workspaceIntent = searchParams.get('workspace') ?? searchParams.get('workspaceId');
+  const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+  const nextFromQuery = searchParams?.get('next') ?? null;
+  const inviteToken = searchParams?.get('token') ?? null;
+  const workspaceIntent = searchParams?.get('workspace') ?? searchParams?.get('workspaceId') ?? null;
 
   const resolveNextPath = () => {
     if (nextFromQuery && nextFromQuery.startsWith('/')) return nextFromQuery;
