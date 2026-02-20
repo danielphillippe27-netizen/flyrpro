@@ -149,7 +149,7 @@ export default function LoginPage() {
   return (
     <div className="dark min-h-screen bg-gradient-to-br from-black to-[#262626] flex flex-col items-center justify-center p-4 relative overflow-hidden">
       <div className="absolute inset-0 bg-gradient-to-b from-red-950/40 via-transparent to-black/80 pointer-events-none" />
-      <div className="relative w-full max-w-xl rounded-2xl border border-zinc-700/50 bg-[#242424] px-10 py-7 shadow-2xl">
+      <div className="relative w-full max-w-xl rounded-2xl border border-white/15 bg-white/[0.06] px-10 py-7 backdrop-blur-2xl shadow-[0_24px_70px_rgba(0,0,0,0.6),0_10px_30px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.2)]">
         <div className="text-center space-y-2">
           <div className="flex justify-center">
             <Image
@@ -157,7 +157,7 @@ export default function LoginPage() {
               alt="FLYR"
               width={480}
               height={128}
-              className="h-24 w-auto"
+              className="h-32 w-auto"
               priority
             />
           </div>
@@ -177,7 +177,7 @@ export default function LoginPage() {
               onChange={(e) => setEmail(sanitizeEmail(e.target.value))}
               required
               disabled={loading}
-              className="h-12 text-base text-white bg-[#2a2a2a] border-zinc-600 placeholder:text-gray-500 focus-visible:border-white focus-visible:ring-2 focus-visible:ring-white/40"
+              className="h-12 text-base text-white bg-white/[0.08] border border-white/15 placeholder:text-gray-500 focus-visible:border-white/40 focus-visible:ring-2 focus-visible:ring-white/40 backdrop-blur-sm"
             />
           </div>
           <div className="space-y-1.5">
@@ -191,7 +191,7 @@ export default function LoginPage() {
               required
               minLength={6}
               disabled={loading}
-              className="h-12 text-base text-white bg-[#2a2a2a] border-zinc-600 placeholder:text-gray-500 focus-visible:border-white focus-visible:ring-2 focus-visible:ring-white/40"
+              className="h-12 text-base text-white bg-white/[0.08] border border-white/15 placeholder:text-gray-500 focus-visible:border-white/40 focus-visible:ring-2 focus-visible:ring-white/40 backdrop-blur-sm"
             />
           </div>
           <Button
@@ -204,13 +204,10 @@ export default function LoginPage() {
           </Button>
         </form>
 
-        <div className="relative mt-6">
-          <div className="absolute inset-0 flex items-center">
-            <span className="w-full border-t border-zinc-600" />
-          </div>
-          <div className="relative flex justify-center text-sm uppercase">
-            <span className="bg-[#242424] px-2 text-[#AAAAAA]">Or continue with sign in</span>
-          </div>
+        <div className="relative mt-6 flex items-center gap-4">
+          <span className="flex-1 border-t border-zinc-600" />
+          <span className="text-sm uppercase leading-normal text-[#AAAAAA] shrink-0">Or continue with sign in</span>
+          <span className="flex-1 border-t border-zinc-600" />
         </div>
 
         <div className="mt-6 grid gap-3">
