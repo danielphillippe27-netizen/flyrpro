@@ -1,0 +1,882 @@
+'use client';
+
+import { useEffect, useRef, useState } from 'react';
+import mapboxgl from 'mapbox-gl';
+import 'mapbox-gl/dist/mapbox-gl.css';
+import { CampaignMarkersLayer } from './CampaignMarkersLayer';
+import { MapBuildingsLayer } from './MapBuildingsLayer';
+import { MapInfoButton } from './MapInfoButton';
+import { UserLocationLayer } from './UserLocationLayer';
+import { House, LocateFixed } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { AddressOrientationPanel } from './AddressOrientationPanel';
+import { HouseDetailPanel } from './HouseDetailPanel';
+import { LocationCard } from './LocationCard';
+import { CreateContactDialog } from '@/components/crm/CreateContactDialog';
+import { CampaignsService } from '@/lib/services/CampaignsService';
+import { createClient } from '@/lib/supabase/client';
+import { useTheme } from '@/lib/theme-provider';
+import { useWorkspace } from '@/lib/workspace-context';
+import { getMapboxToken } from '@/lib/mapbox';
+import { DEFAULT_STATUS_FILTERS, MAP_STATUS_CONFIG, type StatusFilters } from '@/lib/constants/mapStatus';
+import type { CampaignV2, CampaignAddress } from '@/types/database';
+import * as turf from '@turf/turf';
+
+const MAP_STYLES = {
+  light: 'mapbox://styles/fliper27/cml6z0dhg002301qo9xxc08k4',
+  dark: 'mapbox://styles/fliper27/cml6zc5pq002801qo4lh13o19',
+} as const;
+
+export function FlyrMapView() {
+  const { theme } = useTheme();
+  const { currentWorkspaceId } = useWorkspace();
+  const mapContainer = useRef<HTMLDivElement>(null);
+  const map = useRef<mapboxgl.Map | null>(null);
+  const [statusFilters, setStatusFilters] = useState<StatusFilters>(DEFAULT_STATUS_FILTERS);
+  const [mapLoaded, setMapLoaded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
+  const [selectedCampaign, setSelectedCampaign] = useState<CampaignV2 | null>(null);
+  const [campaignAddresses, setCampaignAddresses] = useState<CampaignAddress[]>([]);
+  const [show3DBuildings, setShow3DBuildings] = useState(false);
+  const [useFillExtrusion, setUseFillExtrusion] = useState(true);
+  const [selectedAddress, setSelectedAddress] = useState<CampaignAddress | null>(null);
+  const [orientationPanelOpen, setOrientationPanelOpen] = useState(false);
+  const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(null);
+  const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
+  const [housePanelOpen, setHousePanelOpen] = useState(false);
+  const [locationCardOpen, setLocationCardOpen] = useState(false);
+  const [createContactDialogOpen, setCreateContactDialogOpen] = useState(false);
+  const [contactDialogData, setContactDialogData] = useState<{ address: string; addressId?: string; gersId?: string; campaignId?: string; notes?: string } | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const boundsFittedRef = useRef(false);
+  const [campaignBbox, setCampaignBbox] = useState<{ minLon: number; minLat: number; maxLon: number; maxLat: number } | null>(null);
+  const [showUserLocation, setShowUserLocation] = useState(true);
+  const [mapViewMode, setMapViewMode] = useState<'buildings' | 'addresses'>('buildings');
+
+  const clearCampaignSelection = () => {
+    setSelectedCampaignId(null);
+    setSelectedCampaign(null);
+    setCampaignAddresses([]);
+    setCampaignBbox(null);
+    setMapViewMode('buildings');
+    setLocationCardOpen(false);
+    setSelectedBuildingId(null);
+    setSelectedAddressId(null);
+    setHousePanelOpen(false);
+    setSelectedAddress(null);
+    setOrientationPanelOpen(false);
+    boundsFittedRef.current = false;
+  };
+
+  // Get user ID on mount
+  useEffect(() => {
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setUserId(user?.id || null);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!mapContainer.current || map.current) return;
+
+    // Initialize map immediately
+    const initMap = () => {
+      if (!mapContainer.current) return;
+      
+      try {
+        const token = getMapboxToken();
+        
+        if (!token || !token.startsWith(String.fromCharCode(112, 107) + '.')) {
+          throw new Error('Invalid Mapbox access token');
+        }
+        
+        mapboxgl.accessToken = token;
+        
+        // Set worker URL to fix potential worker loading issues
+        if (typeof window !== 'undefined') {
+          mapboxgl.workerCount = 2;
+        }
+
+        map.current = new mapboxgl.Map({
+          container: mapContainer.current,
+          style: MAP_STYLES[theme] ?? MAP_STYLES.light,
+          center: [-79.3832, 43.6532], // Toronto default
+          zoom: 12,
+          pitch: 0,
+          bearing: 0,
+        });
+
+        map.current.on('load', () => {
+          setMapLoaded(true);
+          
+          // Clean up problematic layers and hide building layers
+          const cleanupLayers = () => {
+            if (!map.current) return;
+            
+            try {
+              const style = map.current.getStyle();
+              if (style && style.layers) {
+                style.layers.forEach((layer) => {
+                  // Hide layers that contain "building" in their id
+                  if (layer.id.toLowerCase().includes('building')) {
+                    map.current?.setLayoutProperty(layer.id, 'visibility', 'none');
+                  }
+                  
+                  // Remove layers that reference non-existent source layers
+                  if (layer.id && (
+                    layer.id.includes('road-label') || 
+                    layer.id.includes('road_label')
+                  )) {
+                    try {
+                      map.current.removeLayer(layer.id);
+                    } catch (err) {
+                      // Layer might not exist or already removed
+                    }
+                  }
+                });
+              }
+            } catch (err) {
+              // Ignore cleanup errors
+            }
+          };
+          
+          cleanupLayers();
+          
+          // Resize after load to ensure proper rendering
+          setTimeout(() => {
+            map.current?.resize();
+          }, 50);
+        });
+
+        map.current.on('error', (e) => {
+          // Log full error details for debugging
+          const errorDetails = {
+            error: e.error,
+            message: e.error?.message || String(e.error),
+            type: e.type,
+            target: e.target,
+          };
+          
+          // Check if this is a non-critical source layer error
+          const errorMessage = e.error?.message || String(e.error);
+          const isSourceLayerError = errorMessage.includes('does not exist on source') || 
+                                     errorMessage.includes('Source layer');
+          
+          if (isSourceLayerError) {
+            // This is a style validation error - log but don't show to user
+            // The map will still function, just without that specific layer
+            console.warn('Mapbox style layer warning (non-critical):', errorDetails);
+            
+            // Try to remove the problematic layer after style loads
+            if (map.current) {
+              map.current.once('style.load', () => {
+                try {
+                  const style = map.current?.getStyle();
+                  if (style && style.layers) {
+                    // Find and remove layers that reference non-existent source layers
+                    style.layers.forEach((layer) => {
+                      if (layer.id && (
+                        layer.id.includes('road-label') || 
+                        layer.id.includes('road_label')
+                      )) {
+                        try {
+                          map.current?.removeLayer(layer.id);
+                          console.log(`Removed problematic layer: ${layer.id}`);
+                        } catch (removeErr) {
+                          // Layer might already be removed or not exist
+                        }
+                      }
+                    });
+                  }
+                } catch (cleanupErr) {
+                  // Ignore cleanup errors
+                }
+              });
+            }
+            return; // Don't set error state for non-critical issues
+          }
+          
+          console.error('Mapbox error:', errorDetails);
+          
+          // Only show critical errors to the user
+          setError(`Map error: ${errorMessage}`);
+        });
+
+        // Also listen for style loading errors
+        map.current.on('style.loading', () => {
+          console.log('Mapbox style loading...');
+        });
+
+        map.current.on('style.error', (e) => {
+          console.error('Mapbox style error:', e);
+          setError(`Style loading error: ${e.error?.message || 'Failed to load map style'}`);
+        });
+
+        // Handle data loading errors
+        map.current.on('data', (e) => {
+          if (e.dataType === 'error') {
+            console.error('Mapbox data error:', e);
+            setError(`Data loading error: ${e.error?.message || 'Failed to load map data'}`);
+          }
+        });
+      } catch (err) {
+        console.error('Map initialization error:', err);
+        setError('Failed to initialize map');
+      }
+    };
+
+    // Use requestAnimationFrame to ensure DOM is ready
+    const rafId = requestAnimationFrame(() => {
+      initMap();
+    });
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      map.current?.remove();
+    };
+  }, []);
+
+  // Keep Mapbox canvas in sync with container size (sidebar collapse/expand, viewport changes).
+  // Debounce resize so we don't flash during the sidebar's width transition (~200ms).
+  const RESIZE_DEBOUNCE_MS = 250;
+  useEffect(() => {
+    if (!mapLoaded || !map.current || !mapContainer.current) return;
+
+    const mapInstance = map.current;
+    const container = mapContainer.current;
+    let frameId: number | null = null;
+    let debounceId: ReturnType<typeof setTimeout> | null = null;
+
+    const performResize = () => {
+      if (frameId !== null) cancelAnimationFrame(frameId);
+      frameId = requestAnimationFrame(() => {
+        try {
+          mapInstance.resize();
+        } catch {
+          // Ignore transient resize errors during style swaps/unmount.
+        }
+        frameId = null;
+      });
+    };
+
+    const resizeMap = () => {
+      if (debounceId !== null) clearTimeout(debounceId);
+      debounceId = setTimeout(() => {
+        debounceId = null;
+        performResize();
+      }, RESIZE_DEBOUNCE_MS);
+    };
+
+    const observer = new ResizeObserver(resizeMap);
+    observer.observe(container);
+
+    window.addEventListener('resize', resizeMap);
+    window.addEventListener('orientationchange', resizeMap);
+    performResize(); // initial sync, no debounce
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', resizeMap);
+      window.removeEventListener('orientationchange', resizeMap);
+      if (debounceId !== null) clearTimeout(debounceId);
+      if (frameId !== null) cancelAnimationFrame(frameId);
+    };
+  }, [mapLoaded]);
+
+  // Sync map style with app theme (light/dark)
+  useEffect(() => {
+    if (!map.current || !mapLoaded) return;
+
+    const styleUrl = MAP_STYLES[theme] ?? MAP_STYLES.light;
+    try {
+      map.current.setStyle(styleUrl);
+    } catch (err) {
+      console.error('Error setting map style:', err);
+      setError(`Failed to load map style: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    const cleanupLayers = () => {
+      if (!map.current) return;
+      try {
+        const style = map.current.getStyle();
+        if (style?.layers) {
+          style.layers.forEach((layer) => {
+            if (layer.id.toLowerCase().includes('building')) {
+              map.current?.setLayoutProperty(layer.id, 'visibility', 'none');
+            }
+            if (layer.id && (layer.id.includes('road-label') || layer.id.includes('road_label'))) {
+              try {
+                map.current.removeLayer(layer.id);
+              } catch {}
+            }
+          });
+        }
+      } catch {}
+    };
+
+    map.current.once('style.load', () => {
+      cleanupLayers();
+    });
+  }, [theme, mapLoaded]);
+
+  // Handle 3D view pitch and bearing
+  useEffect(() => {
+    if (!map.current || !mapLoaded) return;
+
+    if (show3DBuildings) {
+      map.current.setPitch(60);
+      map.current.setBearing(-17.6);
+    } else {
+      map.current.setPitch(0);
+      map.current.setBearing(0);
+    }
+  }, [show3DBuildings, mapLoaded]);
+
+  // Fetch campaign data and addresses when selectedCampaignId changes
+  const fetchCampaignData = async () => {
+    if (!selectedCampaignId) {
+      setSelectedCampaign(null);
+      setCampaignAddresses([]);
+      setCampaignBbox(null);
+      boundsFittedRef.current = false;
+      return;
+    }
+
+    try {
+      const campaign = await CampaignsService.fetchCampaign(selectedCampaignId);
+      if (!campaign) {
+        setSelectedCampaign(null);
+        setCampaignAddresses([]);
+        setCampaignBbox(null);
+        boundsFittedRef.current = false;
+        return;
+      }
+
+      const [addresses, bbox] = await Promise.all([
+        CampaignsService.fetchAddresses(selectedCampaignId),
+        CampaignsService.fetchCampaignBoundingBox(selectedCampaignId),
+      ]);
+
+      setSelectedCampaign(campaign);
+      setCampaignAddresses(addresses || []);
+      setCampaignBbox(bbox);
+      boundsFittedRef.current = false; // Reset bounds fitting for new campaign
+    } catch (error) {
+      console.error('Error fetching campaign data:', error);
+      setSelectedCampaign(null);
+      setCampaignAddresses([]);
+      setCampaignBbox(null);
+    }
+  };
+
+  useEffect(() => {
+    fetchCampaignData();
+  }, [selectedCampaignId]);
+
+  // Fit camera to campaign bounding box when campaign is selected and map is loaded
+  useEffect(() => {
+    if (!map.current || !mapLoaded || !selectedCampaignId || !campaignBbox || boundsFittedRef.current) return;
+
+    setTimeout(() => {
+      if (!map.current || boundsFittedRef.current) return;
+      
+      const bounds = new mapboxgl.LngLatBounds(
+        [campaignBbox.minLon, campaignBbox.minLat],
+        [campaignBbox.maxLon, campaignBbox.maxLat]
+      );
+      
+      boundsFittedRef.current = true;
+      map.current.fitBounds(bounds, {
+        padding: 100,
+        maxZoom: 18,
+        duration: 1000, // Smooth animation
+      });
+    }, 100);
+  }, [selectedCampaignId, campaignBbox, mapLoaded]);
+
+
+  // Handle marker click (legacy address-based)
+  const handleMarkerClick = (addressId: string) => {
+    const address = campaignAddresses.find((addr) => addr.id === addressId);
+    if (address) {
+      setSelectedAddress(address);
+      setOrientationPanelOpen(true);
+    }
+  };
+
+  // Handle building click (Gold Standard: building UUID)
+  const handleAddToCRM = (data: { address: string; addressId?: string; gersId?: string; campaignId?: string }) => {
+    setContactDialogData(data);
+    setCreateContactDialogOpen(true);
+  };
+
+  const handleBuildingClick = (buildingId: string, addressId?: string) => {
+    setSelectedBuildingId(buildingId);
+    setSelectedAddressId(addressId ?? null);
+    setLocationCardOpen(true);
+  };
+
+  // Open detailed panel (from LocationCard "Log Visit" action)
+  const handleOpenDetailPanel = () => {
+    setLocationCardOpen(false);
+    setHousePanelOpen(true);
+  };
+
+  // Handle navigate action from LocationCard
+  const handleNavigateToBuilding = () => {
+    // Could open Google Maps or Apple Maps with the address
+    // For now, just log - can be expanded later
+    console.log('Navigate to building:', selectedBuildingId);
+  };
+
+  // Handle adding contact from LocationCard
+  const handleAddContactFromCard = (_addressId?: string, addressText?: string, notes?: string) => {
+    if (selectedBuildingId && selectedCampaignId) {
+      setContactDialogData({
+        address: addressText ?? '',
+        gersId: selectedBuildingId,
+        campaignId: selectedCampaignId,
+        notes,
+      });
+      setCreateContactDialogOpen(true);
+    }
+  };
+
+  // Handle orientation panel update
+  const handleOrientationUpdate = () => {
+    if (selectedCampaignId) {
+      fetchCampaignData();
+    }
+  };
+
+  // Helper function to extract coordinates from CampaignAddress
+  const getCoordinate = (address: CampaignAddress): { lon: number; lat: number } | null => {
+    // First try direct coordinate
+    if (address.coordinate) {
+      return address.coordinate;
+    }
+    
+    // Try parsing from geom (PostGIS geometry)
+    if (address.geom) {
+      try {
+        // Check if it's already an object
+        const geom = typeof address.geom === 'string' ? address.geom : JSON.stringify(address.geom);
+        
+        // Try to parse as JSON first
+        try {
+          const parsed = JSON.parse(geom);
+          if (parsed && parsed.coordinates) {
+            // PostGIS Point: [lon, lat]
+            if (Array.isArray(parsed.coordinates) && parsed.coordinates.length >= 2) {
+              return { lon: parsed.coordinates[0], lat: parsed.coordinates[1] };
+            }
+          }
+        } catch (jsonError) {
+          // Not valid JSON - might be WKT or PostGIS binary format
+          // Try to extract coordinates from WKT format like "POINT(lon lat)"
+          const wktMatch = geom.match(/POINT\s*\(\s*([-\d.]+)\s+([-\d.]+)\s*\)/i);
+          if (wktMatch) {
+            return { lon: parseFloat(wktMatch[1]), lat: parseFloat(wktMatch[2]) };
+          }
+          // If it's already an object with coordinates
+          if (typeof address.geom === 'object' && address.geom.coordinates) {
+            const coords = address.geom.coordinates;
+            if (Array.isArray(coords) && coords.length >= 2) {
+              return { lon: coords[0], lat: coords[1] };
+            }
+          }
+        }
+      } catch (e) {
+        // Silently skip invalid geometries - don't spam console
+        // console.warn('Failed to parse geometry for address:', address.id, e);
+      }
+    }
+    
+    return null;
+  };
+
+  // Fit map bounds to campaign addresses when campaign is selected
+  useEffect(() => {
+    if (!map.current || !mapLoaded || !selectedCampaignId || campaignAddresses.length === 0 || boundsFittedRef.current) return;
+
+    const addressesWithCoords = campaignAddresses
+      .map(addr => getCoordinate(addr))
+      .filter((coord): coord is { lon: number; lat: number } => coord !== null);
+
+    if (addressesWithCoords.length > 0) {
+      // Use setTimeout to ensure map is fully ready
+      setTimeout(() => {
+        if (!map.current || boundsFittedRef.current) return;
+        
+        const bounds = new mapboxgl.LngLatBounds();
+        addressesWithCoords.forEach((coord) => {
+          bounds.extend([coord.lon, coord.lat]);
+        });
+        
+        // Only fit bounds if we have valid bounds
+        if (!bounds.isEmpty()) {
+          boundsFittedRef.current = true;
+          map.current.fitBounds(bounds, { 
+            padding: 100, 
+            maxZoom: 18,
+            duration: 1000 // Smooth animation
+          });
+        }
+      }, 200); // Small delay to ensure map is ready
+    }
+  }, [selectedCampaignId, campaignAddresses, mapLoaded]);
+
+  // Address points layer (Map tab): when mapViewMode === 'addresses', show circular fill-extrusions per address
+  const addressPointsSourceId = 'flyr-map-address-points';
+  const addressPointsLayerId = 'flyr-map-address-points-extrusion';
+  useEffect(() => {
+    const mapInstance = map.current;
+    if (!mapInstance || !mapLoaded) return;
+    if (mapViewMode !== 'addresses' || !selectedCampaignId || campaignAddresses.length === 0) {
+      try {
+        if (mapInstance.getLayer(addressPointsLayerId)) mapInstance.removeLayer(addressPointsLayerId);
+        if (mapInstance.getSource(addressPointsSourceId)) mapInstance.removeSource(addressPointsSourceId);
+      } catch (_) {}
+      return;
+    }
+
+    const getCoord = (address: CampaignAddress): { lon: number; lat: number } | null => {
+      if (address.coordinate) return address.coordinate;
+      const a = address as CampaignAddress & { geometry?: unknown; geom_json?: { type: string; coordinates?: number[] } };
+      if (a.geom_json?.type === 'Point' && Array.isArray(a.geom_json?.coordinates) && a.geom_json.coordinates.length >= 2) {
+        const [lon, lat] = a.geom_json.coordinates;
+        if (typeof lon === 'number' && typeof lat === 'number' && !isNaN(lon) && !isNaN(lat)) return { lon, lat };
+      }
+      let geometry = a.geometry;
+      if (typeof geometry === 'string') {
+        try {
+          geometry = JSON.parse(geometry as string) as { type?: string; coordinates?: number[] };
+        } catch {
+          geometry = null;
+        }
+      }
+      const g = geometry as { type?: string; coordinates?: number[] } | null;
+      if (g?.type === 'Point' && Array.isArray(g?.coordinates) && g.coordinates.length >= 2) {
+        const [lon, lat] = g.coordinates;
+        if (typeof lon === 'number' && typeof lat === 'number' && !isNaN(lon) && !isNaN(lat)) return { lon, lat };
+      }
+      return getCoordinate(address);
+    };
+
+    const buildAddressPointsGeoJSON = (): GeoJSON.FeatureCollection | null => {
+      const radiusMeters = 2.5 * (2 / 3);
+      const steps = 24;
+      const features: GeoJSON.Feature<GeoJSON.Polygon>[] = [];
+      for (const addr of campaignAddresses) {
+        const coord = getCoord(addr);
+        if (!coord) continue;
+        const center = [coord.lon, coord.lat] as [number, number];
+        const circle = turf.circle(center, radiusMeters / 1000, { units: 'kilometers', steps });
+        const poly = circle.geometry;
+        if (poly.type !== 'Polygon') continue;
+        const scansTotal = addr.scans ?? 0;
+        const qrScanned = scansTotal > 0 || !!addr.last_scanned_at;
+        const addressStatus = addr.address_status ?? (addr.visited ? 'delivered' : 'none');
+        features.push({
+          type: 'Feature',
+          geometry: poly,
+          properties: {
+            feature_id: addr.id,
+            address_id: addr.id,
+            address_status: addressStatus,
+            scans_total: scansTotal,
+            qr_scanned: qrScanned,
+          },
+        });
+      }
+      if (features.length === 0) return null;
+      return { type: 'FeatureCollection', features };
+    };
+
+    const getColorExpression = (): unknown[] => {
+      const getAddressStatus = () => ['coalesce', ['feature-state', 'address_status'], ['get', 'address_status'], 'none'];
+      const getQrScanned = () => ['coalesce', ['feature-state', 'qr_scanned'], ['get', 'qr_scanned'], false];
+      const getScansTotal = () => ['coalesce', ['feature-state', 'scans_total'], ['get', 'scans_total'], 0];
+      return [
+        'case',
+        ['any', ['==', getQrScanned(), true], ['>', getScansTotal(), 0]],
+        MAP_STATUS_CONFIG.QR_SCANNED.color,
+        ['in', getAddressStatus(), ['literal', ['talked', 'appointment']]],
+        MAP_STATUS_CONFIG.CONVERSATIONS.color,
+        ['==', getAddressStatus(), 'delivered'],
+        MAP_STATUS_CONFIG.TOUCHED.color,
+        MAP_STATUS_CONFIG.UNTOUCHED.color,
+      ] as unknown[];
+    };
+
+    const getFilterExpression = (): unknown[] | undefined => {
+      const getAddressStatus = () => ['coalesce', ['feature-state', 'address_status'], ['get', 'address_status'], 'none'];
+      const getQrScanned = () => ['coalesce', ['feature-state', 'qr_scanned'], ['get', 'qr_scanned'], false];
+      const getScansTotal = () => ['coalesce', ['feature-state', 'scans_total'], ['get', 'scans_total'], 0];
+      const isQrScanned = ['any', ['==', getQrScanned(), true], ['>', getScansTotal(), 0]];
+      const isConversation = ['in', getAddressStatus(), ['literal', ['talked', 'appointment']]];
+      const isTouched = ['==', getAddressStatus(), 'delivered'];
+      const isUntouchedStrict = [
+        'all',
+        ['!=', getAddressStatus(), 'delivered'],
+        ['!', ['in', getAddressStatus(), ['literal', ['talked', 'appointment']]]],
+        ['!', isQrScanned],
+      ];
+      const statusConditions: unknown[] = [];
+      if (statusFilters.QR_SCANNED) statusConditions.push(isQrScanned);
+      if (statusFilters.CONVERSATIONS) statusConditions.push(isConversation);
+      if (statusFilters.TOUCHED) statusConditions.push(isTouched);
+      if (statusFilters.UNTOUCHED) statusConditions.push(isUntouchedStrict);
+      if (statusConditions.length === 0) return ['==', 1, 0];
+      if (statusFilters.QR_SCANNED && statusFilters.CONVERSATIONS && statusFilters.TOUCHED && statusFilters.UNTOUCHED) return undefined;
+      return ['any', ...statusConditions] as unknown[];
+    };
+
+    const addAddressPointsLayer = () => {
+      if (!mapInstance.isStyleLoaded()) return;
+      const geo = buildAddressPointsGeoJSON();
+      if (!geo || geo.features.length === 0) return;
+      try {
+        const existingSource = mapInstance.getSource(addressPointsSourceId);
+        if (existingSource && 'setData' in existingSource) {
+          (existingSource as mapboxgl.GeoJSONSource).setData(geo);
+        } else if (!existingSource) {
+          mapInstance.addSource(addressPointsSourceId, {
+            type: 'geojson',
+            data: geo,
+            promoteId: 'feature_id',
+          });
+        }
+        if (!mapInstance.getLayer(addressPointsLayerId)) {
+          const filterExpr = getFilterExpression();
+          mapInstance.addLayer({
+            id: addressPointsLayerId,
+            type: 'fill-extrusion',
+            source: addressPointsSourceId,
+            minzoom: 12,
+            paint: {
+              'fill-extrusion-color': getColorExpression() as string[],
+              'fill-extrusion-height': 7.5,
+              'fill-extrusion-base': 0,
+              'fill-extrusion-opacity': 1,
+              'fill-extrusion-vertical-gradient': true,
+            },
+            ...(filterExpr ? { filter: filterExpr as mapboxgl.Expression } : {}),
+          });
+        } else {
+          mapInstance.setPaintProperty(addressPointsLayerId, 'fill-extrusion-color', getColorExpression() as string[]);
+          const filterExpr = getFilterExpression();
+          mapInstance.setFilter(addressPointsLayerId, (filterExpr ?? ['all']) as mapboxgl.Expression);
+        }
+      } catch (err) {
+        console.error('[FlyrMapView] Error adding address points layer:', err);
+      }
+    };
+
+    const removeAddressPointsLayer = () => {
+      try {
+        if (mapInstance.getLayer(addressPointsLayerId)) mapInstance.removeLayer(addressPointsLayerId);
+        if (mapInstance.getSource(addressPointsSourceId)) mapInstance.removeSource(addressPointsSourceId);
+      } catch (_) {}
+    };
+
+    const onAddressPointClick = (e: mapboxgl.MapLayerMouseEvent) => {
+      const f = e.features?.[0];
+      if (!f?.properties) return;
+      const addressId = f.properties.address_id as string | undefined;
+      const gersId = (f.properties.gers_id as string | undefined) ?? addressId;
+      if (addressId) handleBuildingClick(gersId ?? addressId, addressId);
+    };
+
+    if (mapInstance.isStyleLoaded()) {
+      addAddressPointsLayer();
+    } else {
+      mapInstance.once('style.load', addAddressPointsLayer);
+    }
+
+    mapInstance.off('click', addressPointsLayerId, onAddressPointClick);
+    mapInstance.on('click', addressPointsLayerId, onAddressPointClick);
+
+    return () => {
+      mapInstance.off('click', addressPointsLayerId, onAddressPointClick);
+      removeAddressPointsLayer();
+    };
+  }, [mapViewMode, mapLoaded, campaignAddresses, statusFilters, theme, selectedCampaignId]);
+
+  return (
+    <div className="relative h-full w-full">
+      {error && (
+        <div className="absolute inset-0 flex items-center justify-center bg-red-50 z-10">
+          <div className="text-center">
+            <p className="text-red-600 font-semibold">Map Error</p>
+            <p className="text-red-500 text-sm mt-1">{error}</p>
+          </div>
+        </div>
+      )}
+      {!mapLoaded && !error && (
+        <div className="absolute inset-0 flex items-center justify-center bg-gray-50 dark:bg-gray-900 z-10">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-red-600 dark:border-red-500 mx-auto mb-2"></div>
+            <p className="text-gray-600 dark:text-gray-400 text-sm">Loading map...</p>
+          </div>
+        </div>
+      )}
+      <div ref={mapContainer} className="h-full w-full min-h-[400px]" />
+      <MapInfoButton show={mapLoaded && !error} />
+      {mapLoaded && map.current && !error && useFillExtrusion && (
+        <>
+          {mapViewMode === 'buildings' && (
+            <MapBuildingsLayer 
+              map={map.current} 
+              campaignId={selectedCampaignId}
+              statusFilters={statusFilters}
+              onBuildingClick={handleBuildingClick}
+              onAddToCRM={handleAddToCRM}
+            />
+          )}
+          <CampaignMarkersLayer
+            map={map.current}
+            mapLoaded={mapLoaded}
+            userId={userId}
+            workspaceId={currentWorkspaceId}
+            hidden={!!selectedCampaignId}
+            selectedCampaignId={selectedCampaignId}
+            onCampaignSelect={setSelectedCampaignId}
+          />
+          <UserLocationLayer
+            map={map.current}
+            mapLoaded={mapLoaded}
+            showUserLocation={showUserLocation}
+            onLocationFound={(lng, lat) => {
+              map.current?.flyTo({ center: [lng, lat], zoom: 15, duration: 800 });
+            }}
+            onLocationError={(err) => {
+              console.warn('Geolocation error:', err.message);
+            }}
+          />
+        </>
+      )}
+      {mapLoaded && !error && selectedCampaignId && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20">
+          <div className="flex items-center gap-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-black/85 px-3 py-2 shadow-md backdrop-blur-sm">
+            <p className="max-w-[40vw] truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
+              {selectedCampaign?.name || 'Campaign'}
+            </p>
+            <div className="flex items-center gap-1.5 rounded-md bg-gray-100 dark:bg-gray-800 px-2 py-1 text-xs font-medium text-gray-700 dark:text-gray-200">
+              <House className="h-3.5 w-3.5" />
+              <span>{campaignAddresses.length} homes</span>
+            </div>
+            <button
+              type="button"
+              onClick={clearCampaignSelection}
+              className="inline-flex h-6 w-6 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white"
+              aria-label="Exit campaign focus"
+              title="Back to regular map"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      )}
+      {mapLoaded && !error && selectedCampaignId && (
+        <div className="absolute top-4 right-4 z-10 flex flex-col gap-2">
+          <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 bg-white/90 dark:bg-black/80 backdrop-blur-sm shadow-sm overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setMapViewMode('buildings')}
+              className={`px-3 py-2 text-sm font-medium transition-colors ${mapViewMode === 'buildings' ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
+            >
+              Buildings
+            </button>
+            <button
+              type="button"
+              onClick={() => setMapViewMode('addresses')}
+              className={`px-3 py-2 text-sm font-medium transition-colors ${mapViewMode === 'addresses' ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
+            >
+              Addresses
+            </button>
+          </div>
+        </div>
+      )}
+      {mapLoaded && !error && (
+        <div className="absolute top-14 left-3 z-10">
+          <Button
+            variant="secondary"
+            size="icon"
+            className={`h-9 w-9 rounded-full shadow-md border ${
+              showUserLocation
+                ? 'bg-blue-100 dark:bg-blue-900/40 border-blue-300 dark:border-blue-700'
+                : 'bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 border-gray-200 dark:border-gray-700'
+            }`}
+            onClick={() => setShowUserLocation((v) => !v)}
+            aria-label="Show my location"
+            title="My location"
+          >
+            <LocateFixed className={`h-5 w-5 ${showUserLocation ? 'text-blue-600 dark:text-blue-400' : 'text-gray-600 dark:text-gray-400'}`} strokeWidth={2.5} />
+          </Button>
+        </div>
+      )}
+      <AddressOrientationPanel
+        address={selectedAddress}
+        open={orientationPanelOpen}
+        onClose={() => {
+          setOrientationPanelOpen(false);
+          setSelectedAddress(null);
+        }}
+        onUpdate={handleOrientationUpdate}
+      />
+      
+      {/* Location Card - floating card on map when building is clicked */}
+      {locationCardOpen && selectedBuildingId && selectedCampaignId && (
+        <div className="absolute bottom-6 left-4 z-20">
+          <LocationCard
+            gersId={selectedBuildingId}
+            campaignId={selectedCampaignId}
+            preferredAddressId={selectedAddressId}
+            onSelectAddress={(id) => setSelectedAddressId(id ?? null)}
+            onClose={() => {
+              setLocationCardOpen(false);
+              setSelectedBuildingId(null);
+              setSelectedAddressId(null);
+            }}
+            onNavigate={handleNavigateToBuilding}
+            onLogVisit={handleOpenDetailPanel}
+            onAddContact={handleAddContactFromCard}
+          />
+        </div>
+      )}
+
+      <HouseDetailPanel
+        buildingId={selectedBuildingId}
+        campaignId={selectedCampaignId}
+        open={housePanelOpen}
+        onClose={() => {
+          setHousePanelOpen(false);
+          setSelectedBuildingId(null);
+        }}
+        onUpdate={handleOrientationUpdate}
+      />
+      {userId && (
+        <CreateContactDialog
+          open={createContactDialogOpen}
+          onClose={() => {
+            setCreateContactDialogOpen(false);
+            setContactDialogData(null);
+          }}
+          onSuccess={() => {
+            setCreateContactDialogOpen(false);
+            setContactDialogData(null);
+            // Optionally refresh map data or show success message
+          }}
+          userId={userId}
+          workspaceId={currentWorkspaceId ?? undefined}
+          initialAddress={contactDialogData?.address}
+          initialAddressId={contactDialogData?.addressId}
+          initialCampaignId={contactDialogData?.campaignId}
+          initialNotes={contactDialogData?.notes}
+        />
+      )}
+    </div>
+  );
+}

@@ -118,11 +118,11 @@ def main():
     parser.add_argument("--source", required=True, help="Source ID or 'all'")
     args = parser.parse_args()
     
-    bucket = os.environ.get('S3_BUCKET_NAME')
+    bucket = os.environ.get('S3_BUCKET_NAME') or os.environ.get('AWS_BUCKET_NAME')
     prefix = "municipal_data/clean"
     
     if not bucket:
-        logger.error("S3_BUCKET_NAME not set")
+        logger.error("S3_BUCKET_NAME or AWS_BUCKET_NAME not set")
         return 1
     
     # Get files from S3
