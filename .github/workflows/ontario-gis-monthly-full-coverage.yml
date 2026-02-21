@@ -14,15 +14,6 @@ on:
         description: 'Max parallel jobs (1-20)'
         required: false
         default: '15'
-    inputs:
-      regions:
-        description: 'Regions to process (comma-separated, or "all")'
-        required: false
-        default: 'all'
-      concurrency:
-        description: 'Max parallel jobs (1-20)'
-        required: false
-        default: '15'
 
 env:
   SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -97,17 +88,17 @@ jobs:
           # Halton Region Towns
           - region: burlington
             municipality: burlington
-            buildings_url: "https://services.arcgis.com/N0l9vJ857K32BwD3/arcgis/rest/services/Building_Footprints/FeatureServer/0"
+            buildings_url: "https://services.arcgis.com/N0l9vJ857K32BwD3/arcgis/rest/services/Building_Footprints/FeatureServer/0",
             addresses_url: "https://services.arcgis.com/N0l9vJ857K32BwD3/arcgis/rest/services/Address_Points/FeatureServer/0"
             
           - region: milton
             municipality: milton
-            buildings_url: "https://services1.arcgis.com/1g263c323f434234/arcgis/rest/services/Building_Footprints/FeatureServer/0"
+            buildings_url: "https://services1.arcgis.com/1g263c323f434234/arcgis/rest/services/Building_Footprints/FeatureServer/0",
             addresses_url: "https://services1.arcgis.com/1g263c323f434234/arcgis/rest/services/Address_Points/FeatureServer/0"
             
           - region: oakville
             municipality: oakville
-            buildings_url: "https://agsportal.oakville.ca/oakgis/rest/services/OpenData/Building_Footprints/MapServer/0"
+            buildings_url: "https://agsportal.oakville.ca/oakgis/rest/services/OpenData/Building_Footprints/MapServer/0",
             addresses_url: "https://agsportal.oakville.ca/oakgis/rest/services/OpenData/Address_Points/MapServer/0"
     
     steps:
@@ -188,7 +179,7 @@ def query_arcgis_data(url, output_file, data_type):
                 "region": region,
                 "data_type": data_type,
                 "source_url": url,
-                "download_date": "2026-02-20",
+                "download_date": "2026-02-21",
                 "record_count": record_count
             }
         }
@@ -219,9 +210,9 @@ print(f"  📍 Addresses: {'✅ Success' if addresses_success else '⚠️ Skipp
 
 # Set output for GitHub Actions
 if buildings_success:
-    print(f"::set-output name=buildings_status::success")
+    echo "buildings_status=success" >> $GITHUB_OUTPUT
 if addresses_success:
-    print(f"::set-output name=addresses_status::success")
+    echo "addresses_status=success" >> $GITHUB_OUTPUT
 EOF
         
         python download_${{ matrix.region }}.py
