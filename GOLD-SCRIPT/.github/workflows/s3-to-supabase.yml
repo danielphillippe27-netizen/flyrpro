@@ -51,12 +51,24 @@ jobs:
 
         run: |
           python << 'PY'
-          import os, json, tempfile, logging, re
+          import os, json, tempfile, logging, re, socket
           import boto3, psycopg2
           from psycopg2.extras import execute_values
 
           logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
           log = logging.getLogger("loader")
+
+          # Force IPv4 for Postgres (GitHub runners often cannot reach IPv6)
+          _host = os.environ.get("POSTGRES_HOST", "")
+          if _host:
+            try:
+              for info in socket.getaddrinfo(_host, None):
+                if info[0] == socket.AF_INET:
+                  os.environ["POSTGRES_HOST"] = info[4][0]
+                  log.info("Resolved POSTGRES_HOST to IPv4: %s", info[4][0])
+                  break
+            except Exception as e:
+              log.warning("Could not resolve to IPv4, using hostname: %s", e)
 
           BUCKET = os.environ["AWS_BUCKET_NAME"]
           FILTER = os.environ.get("SOURCE_FILTER", "all")
