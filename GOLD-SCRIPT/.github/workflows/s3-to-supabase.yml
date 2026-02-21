@@ -1,0 +1,317 @@
+name: Load S3 to Supabase
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: "Source to load (york_buildings, york_addresses, or all)"
+        required: true
+        default: "all"
+      dry_run:
+        description: "Dry run (count only, no inserts)"
+        type: boolean
+        default: false
+      vacuum:
+        description: "Run VACUUM ANALYZE after load (heavier)"
+        type: boolean
+        default: false
+
+  schedule:
+    - cron: "0 2 * * *" # daily 2am UTC
+
+jobs:
+  load:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install psycopg2-binary boto3
+
+      - name: Load from S3 to Supabase
+        env:
+          POSTGRES_HOST: ${{ secrets.POSTGRES_HOST }}
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_PORT: ${{ secrets.POSTGRES_PORT }}
+
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          AWS_BUCKET_NAME: ${{ secrets.AWS_BUCKET_NAME }}
+
+          SOURCE_FILTER: ${{ github.event.inputs.source || 'all' }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+          DO_VACUUM: ${{ github.event.inputs.vacuum }}
+
+        run: |
+          python << 'PY'
+          import os, json, tempfile, logging, re
+          import boto3, psycopg2
+          from psycopg2.extras import execute_values
+
+          logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+          log = logging.getLogger("loader")
+
+          BUCKET = os.environ["AWS_BUCKET_NAME"]
+          FILTER = os.environ.get("SOURCE_FILTER", "all")
+          DRY_RUN = str(os.environ.get("DRY_RUN", "false")).lower() == "true"
+          DO_VACUUM = str(os.environ.get("DO_VACUUM", "false")).lower() == "true"
+          BATCH = 10000
+
+          s3 = boto3.client("s3")
+
+          def pg_conn():
+            return psycopg2.connect(
+              host=os.environ["POSTGRES_HOST"],
+              database=os.environ["POSTGRES_DB"],
+              user=os.environ["POSTGRES_USER"],
+              password=os.environ["POSTGRES_PASSWORD"],
+              port=os.environ["POSTGRES_PORT"],
+            )
+
+          def stream_records(key):
+            with tempfile.NamedTemporaryFile(delete=False) as tmp:
+              s3.download_file(BUCKET, key, tmp.name)
+              tmp_path = tmp.name
+            try:
+              with open(tmp_path, "r") as f:
+                for line in f:
+                  if line.strip():
+                    yield json.loads(line)
+            finally:
+              os.unlink(tmp_path)
+
+          def list_all_files(prefix="municipal_data/clean/"):
+            files = []
+            paginator = s3.get_paginator("list_objects_v2")
+            for page in paginator.paginate(Bucket=BUCKET, Prefix=prefix):
+              for obj in page.get("Contents", []):
+                k = obj["Key"]
+                if k.endswith("_gold.ndjson"):
+                  parts = k.split("/")
+                  # municipal_data/clean/<source_id>/<yyyymmdd>/<source_id>_gold.ndjson
+                  if len(parts) >= 5:
+                    source_id = parts[-3]
+                    date_folder = parts[-2]
+                    files.append((source_id, date_folder, k, obj["Size"]))
+            return files
+
+          def pick_latest_per_source(files):
+            latest = {}
+            for source_id, date_folder, key, size in files:
+              if source_id not in latest or date_folder > latest[source_id][0]:
+                latest[source_id] = (date_folder, key, size)
+            return [(sid, v[0], v[1], v[2]) for sid, v in latest.items()]
+
+          def filter_sources(files):
+            if FILTER == "all":
+              return files
+            return [f for f in files if FILTER in f[0] or FILTER in f[2]]
+
+          def load_buildings(source_id, key):
+            if DRY_RUN:
+              c = 0
+              for r in stream_records(key):
+                if r.get("external_id") is not None:
+                  c += 1
+              log.info(f"[DRY RUN] buildings {source_id}: {c:,} (non-null external_id)")
+              return c
+
+            conn = pg_conn()
+            with conn.cursor() as cur:
+              cur.execute("""
+                CREATE TEMP TABLE _stg_buildings (
+                  source_id text,
+                  source_file text,
+                  source_url text,
+                  source_date date,
+                  external_id text,
+                  parcel_id text,
+                  geom text,
+                  centroid text,
+                  area_sqm double precision,
+                  height_m double precision,
+                  floors integer,
+                  year_built integer,
+                  building_type text,
+                  subtype text,
+                  primary_address text,
+                  primary_street_number text,
+                  primary_street_name text
+                ) ON COMMIT DROP;
+              """)
+
+            batch, total = [], 0
+            for r in stream_records(key):
+              if r.get("external_id") is None:
+                continue
+
+              batch.append((
+                r.get("source_id"), r.get("source_file"), r.get("source_url"), r.get("source_date"),
+                r.get("external_id"), r.get("parcel_id"),
+                r.get("geom"), r.get("centroid"),
+                r.get("area_sqm"), r.get("height_m"), r.get("floors"), r.get("year_built"),
+                r.get("building_type"), r.get("subtype"),
+                r.get("primary_address"), r.get("primary_street_number"), r.get("primary_street_name")
+              ))
+
+              if len(batch) >= BATCH:
+                with conn.cursor() as cur:
+                  execute_values(cur, "INSERT INTO _stg_buildings VALUES %s", batch)
+                total += len(batch)
+                log.info(f"  staged buildings: {total:,}")
+                batch = []
+
+            if batch:
+              with conn.cursor() as cur:
+                execute_values(cur, "INSERT INTO _stg_buildings VALUES %s", batch)
+              total += len(batch)
+
+            with conn.cursor() as cur:
+              cur.execute("""
+                INSERT INTO public.ref_buildings_gold (
+                  source_id, source_file, source_url, source_date,
+                  external_id, parcel_id, geom, centroid, area_sqm,
+                  height_m, floors, year_built, building_type, subtype,
+                  primary_address, primary_street_number, primary_street_name
+                )
+                SELECT
+                  source_id, source_file, source_url, source_date,
+                  external_id, parcel_id,
+                  ST_GeomFromEWKT(geom),
+                  CASE WHEN centroid IS NULL THEN NULL ELSE ST_GeomFromEWKT(centroid) END,
+                  area_sqm, height_m, floors, year_built, building_type, subtype,
+                  primary_address, primary_street_number, primary_street_name
+                FROM _stg_buildings
+                ON CONFLICT ON CONSTRAINT uniq_ref_buildings_source_external
+                DO UPDATE SET
+                  geom = EXCLUDED.geom,
+                  centroid = EXCLUDED.centroid,
+                  area_sqm = EXCLUDED.area_sqm,
+                  height_m = EXCLUDED.height_m,
+                  floors = EXCLUDED.floors,
+                  year_built = EXCLUDED.year_built,
+                  building_type = EXCLUDED.building_type,
+                  subtype = EXCLUDED.subtype,
+                  updated_at = now();
+              """)
+
+            conn.commit()
+            conn.close()
+            log.info(f"✅ loaded buildings {source_id}: {total:,}")
+            return total
+
+          def load_addresses(source_id, key):
+            if DRY_RUN:
+              c = sum(1 for _ in stream_records(key))
+              log.info(f"[DRY RUN] addresses {source_id}: {c:,}")
+              return c
+
+            conn = pg_conn()
+            with conn.cursor() as cur:
+              cur.execute("""
+                CREATE TEMP TABLE _stg_addresses (
+                  source_id text,
+                  source_file text,
+                  source_url text,
+                  source_date date,
+                  street_number text,
+                  street_name text,
+                  unit text,
+                  city text,
+                  zip text,
+                  province text,
+                  country text,
+                  geom text,
+                  address_type text,
+                  precision text
+                ) ON COMMIT DROP;
+              """)
+
+            batch, total = [], 0
+            for r in stream_records(key):
+              batch.append((
+                r.get("source_id"), r.get("source_file"), r.get("source_url"), r.get("source_date"),
+                r.get("street_number"), r.get("street_name"), r.get("unit"),
+                r.get("city"), r.get("zip"), r.get("province", "ON"), r.get("country", "CA"),
+                r.get("geom"), r.get("address_type"), r.get("precision", "rooftop")
+              ))
+
+              if len(batch) >= BATCH:
+                with conn.cursor() as cur:
+                  execute_values(cur, "INSERT INTO _stg_addresses VALUES %s", batch)
+                total += len(batch)
+                log.info(f"  staged addresses: {total:,}")
+                batch = []
+
+            if batch:
+              with conn.cursor() as cur:
+                execute_values(cur, "INSERT INTO _stg_addresses VALUES %s", batch)
+              total += len(batch)
+
+            with conn.cursor() as cur:
+              cur.execute("""
+                INSERT INTO public.ref_addresses_gold (
+                  source_id, source_file, source_url, source_date,
+                  street_number, street_name, unit, city, zip, province, country,
+                  geom, address_type, precision
+                )
+                SELECT
+                  source_id, source_file, source_url, source_date,
+                  street_number, street_name, unit, city, zip, province, country,
+                  ST_GeomFromEWKT(geom), address_type, precision
+                FROM _stg_addresses
+                ON CONFLICT ON CONSTRAINT uniq_ref_addr_source_norm_city_unit
+                DO UPDATE SET
+                  zip = EXCLUDED.zip,
+                  geom = EXCLUDED.geom,
+                  address_type = EXCLUDED.address_type,
+                  precision = EXCLUDED.precision,
+                  updated_at = now();
+              """)
+
+            conn.commit()
+            conn.close()
+            log.info(f"✅ loaded addresses {source_id}: {total:,}")
+            return total
+
+          # MAIN
+          all_files = list_all_files()
+          all_files = filter_sources(all_files)
+
+          latest = pick_latest_per_source(all_files)
+          log.info(f"Found {len(latest)} latest file(s) to process")
+
+          # Load addresses first, then buildings (helps if you later choose linking)
+          for source_id, date_folder, key, size in sorted(latest, key=lambda x: x[2]):
+            if "address" in key.lower():
+              load_addresses(source_id, key)
+
+          for source_id, date_folder, key, size in sorted(latest, key=lambda x: x[2]):
+            if "building" in key.lower():
+              load_buildings(source_id, key)
+
+          # ANALYZE always; VACUUM optional
+          if not DRY_RUN:
+            conn = pg_conn()
+            conn.autocommit = True
+            with conn.cursor() as cur:
+              log.info("ANALYZE ref_buildings_gold...")
+              cur.execute("ANALYZE public.ref_buildings_gold")
+              log.info("ANALYZE ref_addresses_gold...")
+              cur.execute("ANALYZE public.ref_addresses_gold")
+              if DO_VACUUM:
+                log.info("VACUUM ANALYZE ref_buildings_gold...")
+                cur.execute("VACUUM ANALYZE public.ref_buildings_gold")
+                log.info("VACUUM ANALYZE ref_addresses_gold...")
+                cur.execute("VACUUM ANALYZE public.ref_addresses_gold")
+            conn.close()
+
+          log.info("✅ done")
+          PY
