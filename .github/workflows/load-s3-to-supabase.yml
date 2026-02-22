@@ -35,5 +35,9 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_REGION: ${{ secrets.AWS_REGION }}
           S3_BUCKET_NAME: ${{ secrets.AWS_BUCKET_NAME }}
+          CHUNK_SIZE: "10000"
+          MAX_RETRIES: "3"
+          RETRY_BASE_SECONDS: "2"
+          DB_STATEMENT_TIMEOUT_MS: "0"
         run: |
           python s3_to_supabase_loader.py --source "${{ github.event.inputs.source || 'all' }}"
