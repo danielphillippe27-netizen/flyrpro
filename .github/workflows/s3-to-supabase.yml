@@ -70,19 +70,23 @@ jobs:
           logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
           log = logging.getLogger("loader")
 
-          # Force IPv4 for Postgres (GitHub runners often cannot reach IPv6)
+          # Force IPv4 for direct DB hosts only.
+          # Keep Supabase pooler hostnames intact (SNI/routing can break on raw IP).
           _host = os.environ.get("POSTGRES_HOST", "").strip()
           if _host:
-            try:
-              infos = socket.getaddrinfo(_host, None, socket.AF_INET)
-              if infos:
-                ipv4 = infos[0][4][0]
-                os.environ["POSTGRES_HOST"] = ipv4
-                log.info("Resolved POSTGRES_HOST to IPv4: %s", ipv4)
-              else:
-                log.warning("No IPv4 for %r; connection may fail (use Supabase pooler host if so)", _host)
-            except Exception as e:
-              log.warning("Could not resolve to IPv4: %s", e)
+            if _host.endswith("pooler.supabase.com"):
+              log.info("Using pooler hostname without IPv4 rewrite: %s", _host)
+            else:
+              try:
+                infos = socket.getaddrinfo(_host, None, socket.AF_INET)
+                if infos:
+                  ipv4 = infos[0][4][0]
+                  os.environ["POSTGRES_HOST"] = ipv4
+                  log.info("Resolved POSTGRES_HOST to IPv4: %s", ipv4)
+                else:
+                  log.warning("No IPv4 for %r; connection may fail (use Supabase pooler host if so)", _host)
+              except Exception as e:
+                log.warning("Could not resolve to IPv4: %s", e)
 
           BUCKET = os.environ["AWS_BUCKET_NAME"]
           FILTER = os.environ.get("SOURCE_FILTER", "all")
