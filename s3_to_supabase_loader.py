@@ -34,6 +34,10 @@ DB_STATEMENT_TIMEOUT_MS = int(os.environ.get("DB_STATEMENT_TIMEOUT_MS", "0"))
 DB_CONNECT_RETRIES = int(os.environ.get("DB_CONNECT_RETRIES", "12"))
 DB_CONNECT_RETRY_SECONDS = int(os.environ.get("DB_CONNECT_RETRY_SECONDS", "5"))
 POSTGRES_SSLMODE = os.environ.get("POSTGRES_SSLMODE", "require")
+ALLOW_SESSION_POOLER_FALLBACK = (
+    str(os.environ.get("ALLOW_SESSION_POOLER_FALLBACK", "false")).strip().lower()
+    in {"1", "true", "yes", "y", "on"}
+)
 IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
@@ -121,11 +125,15 @@ def pg_conn():
                 and host.endswith("pooler.supabase.com")
                 and port == "6543"
             ):
+                if ALLOW_SESSION_POOLER_FALLBACK:
+                    logger.warning(
+                        "Pooler handshake error on 6543; falling back to 5432 (session pooler)."
+                    )
+                    port = "5432"
+                    continue
                 logger.warning(
-                    "Pooler handshake error on 6543; falling back to 5432 (session pooler)."
+                    "Pooler handshake error on 6543; staying on 6543 and retrying."
                 )
-                port = "5432"
-                continue
             retryable = any(
                 token in msg
                 for token in [
@@ -135,6 +143,7 @@ def pg_conn():
                     "timeout",
                     "timed out",
                     "connection",
+                    "client encoding",
                 ]
             )
             if not retryable or attempt >= DB_CONNECT_RETRIES:
