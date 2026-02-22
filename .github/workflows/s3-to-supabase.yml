@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       source:
-        description: "Source to load (york_buildings, york_addresses, or all)"
+        description: "Source to load (source_id, all, or auto for next pending)"
         required: true
-        default: "all"
+        default: "auto"
       dry_run:
         description: "Dry run (count only, no inserts)"
         type: boolean
@@ -59,4 +59,4 @@ jobs:
           DB_CONNECT_RETRIES: "12"
           DB_CONNECT_RETRY_SECONDS: "5"
         run: |
-          python s3_to_supabase_loader.py --source "${{ github.event.inputs.source || 'all' }}"
+          python s3_to_supabase_one_by_one.py --source "${{ github.event.inputs.source || 'auto' }}"

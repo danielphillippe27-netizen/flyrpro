@@ -250,6 +250,29 @@ def get_s3_files(bucket: str, prefix: str) -> List[Dict]:
     return files
 
 
+def pick_latest_per_source(files: List[Dict]) -> List[Dict]:
+    """Keep only the latest dated key per source_id."""
+    latest: Dict[str, Dict] = {}
+    for f in files:
+        key = f.get("key", "")
+        source_id = f.get("source_id", "")
+        parts = key.split("/")
+        # Expected .../<source_id>/<yyyymmdd>/<filename>
+        date_folder = parts[-2] if len(parts) >= 2 else ""
+        prev = latest.get(source_id)
+        if prev is None or date_folder > prev.get("_date_folder", ""):
+            item = dict(f)
+            item["_date_folder"] = date_folder
+            latest[source_id] = item
+
+    result = []
+    for item in latest.values():
+        item.pop("_date_folder", None)
+        result.append(item)
+    result.sort(key=lambda x: x.get("source_id", ""))
+    return result
+
+
 def download_from_s3(bucket: str, key: str, local_path: Path):
     """Download file from S3 to local."""
     s3 = boto3.client("s3")
@@ -400,10 +423,16 @@ def main():
         ensure_loaded_files_table()
 
     files = get_s3_files(bucket, prefix)
-    logger.info("Found %s files in S3", len(files))
+    files = pick_latest_per_source(files)
+    logger.info("Found %s latest file(s) in S3", len(files))
 
     if args.source != "all":
-        files = [f for f in files if args.source in f["source_id"]]
+        requested = args.source.strip()
+        exact = [f for f in files if f["source_id"] == requested]
+        if exact:
+            files = exact
+        else:
+            files = [f for f in files if requested in f["source_id"] or requested in f["key"]]
 
     logger.info("Processing %s files", len(files))
 
