@@ -70,9 +70,10 @@ def validate_db_env() -> None:
     if not host or not port or not user or not db:
         raise RuntimeError("Missing one or more DB env vars: POSTGRES_HOST/POSTGRES_PORT/POSTGRES_USER/POSTGRES_DB")
 
-    if host.endswith("pooler.supabase.com") and port != "6543":
+    if host.endswith("pooler.supabase.com") and port not in {"5432", "6543"}:
         raise RuntimeError(
-            f"Pooler host detected ({host}) but POSTGRES_PORT={port}. Use 6543 for Supabase transaction pooler."
+            f"Pooler host detected ({host}) but POSTGRES_PORT={port}. "
+            "Use 5432 (session pooler) or 6543 (transaction pooler)."
         )
 
 
