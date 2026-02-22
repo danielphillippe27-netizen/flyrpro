@@ -158,6 +158,23 @@ def get_s3_files(bucket: str, prefix: str) -> List[Dict]:
     s3 = boto3.client("s3")
     files: List[Dict] = []
 
+    def source_id_from_key(key: str) -> str:
+        # Expected shape:
+        # gold-standard/canada/ontario/<source_id>/<yyyymmdd>/<source_id>_gold.ndjson
+        parts = key.split("/")
+        filename = parts[-1] if parts else ""
+
+        # Prefer filename-derived source ID if present.
+        if filename.endswith("_gold.ndjson"):
+            return filename[: -len("_gold.ndjson")]
+
+        # Fallback for legacy/path-only structures.
+        if len(parts) >= 3:
+            return parts[-3]
+        if len(parts) >= 2:
+            return parts[-2]
+        return "unknown"
+
     paginator = s3.get_paginator("list_objects_v2")
     for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
         for obj in page.get("Contents", []):
@@ -167,7 +184,7 @@ def get_s3_files(bucket: str, prefix: str) -> List[Dict]:
                     {
                         "key": key,
                         "size": obj["Size"],
-                        "source_id": key.split("/")[-2] if "/" in key else "unknown",
+                        "source_id": source_id_from_key(key),
                     }
                 )
 
