@@ -1,0 +1,5 @@
+# Municipal gold pipeline: shapefile -> NDJSON -> S3
+pyshp>=2.3
+shapely>=2.0
+pyproj>=3.6
+boto3>=1.28

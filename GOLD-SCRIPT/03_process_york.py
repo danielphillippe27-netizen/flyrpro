@@ -220,8 +220,39 @@ def process_addresses(shp_path: Path, source_id: str):
 
 
 if __name__ == "__main__":
-    buildings = Path(STORAGE_PATH) / "raw/York_buildings/Building_Footprint/Building_Footprint.shp"
-    addresses = Path(STORAGE_PATH) / "raw/York_addresses/Address_Point/Address_Point.shp"
+    import argparse
+    ap = argparse.ArgumentParser(description="Shapefile -> gold NDJSON (EWKT) -> S3")
+    ap.add_argument("--storage", type=Path, default=None, help="Base path for raw/ and clean/ (default: STORAGE_PATH)")
+    ap.add_argument(
+        "--buildings-shp",
+        type=Path,
+        default=None,
+        help="Path to buildings .shp (default: <storage>/raw/York_buildings/.../Building_Footprint.shp)",
+    )
+    ap.add_argument(
+        "--addresses-shp",
+        type=Path,
+        default=None,
+        help="Path to addresses .shp (default: <storage>/raw/York_addresses/.../Address_Point.shp)",
+    )
+    ap.add_argument("--buildings-only", action="store_true", help="Process only buildings")
+    ap.add_argument("--addresses-only", action="store_true", help="Process only addresses")
+    args = ap.parse_args()
 
-    process_buildings(buildings, "york_buildings")
-    process_addresses(addresses, "york_addresses")
+    storage = Path(args.storage) if args.storage else Path(STORAGE_PATH)
+    if args.storage:
+        globals()["STORAGE_PATH"] = str(storage)
+
+    buildings = args.buildings_shp or (storage / "raw/York_buildings/Building_Footprint/Building_Footprint.shp")
+    addresses = args.addresses_shp or (storage / "raw/York_addresses/Address_Point/Address_Point.shp")
+
+    if not args.addresses_only:
+        if buildings.exists():
+            process_buildings(buildings, "york_buildings")
+        else:
+            log.warning("Buildings .shp not found: %s (use --buildings-shp)", buildings)
+    if not args.buildings_only:
+        if addresses.exists():
+            process_addresses(addresses, "york_addresses")
+        else:
+            log.warning("Addresses .shp not found: %s (use --addresses-shp)", addresses)
