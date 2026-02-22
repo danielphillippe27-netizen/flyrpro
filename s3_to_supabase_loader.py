@@ -33,6 +33,7 @@ RETRY_BASE_SECONDS = int(os.environ.get("RETRY_BASE_SECONDS", "2"))
 DB_STATEMENT_TIMEOUT_MS = int(os.environ.get("DB_STATEMENT_TIMEOUT_MS", "0"))
 DB_CONNECT_RETRIES = int(os.environ.get("DB_CONNECT_RETRIES", "12"))
 DB_CONNECT_RETRY_SECONDS = int(os.environ.get("DB_CONNECT_RETRY_SECONDS", "5"))
+POSTGRES_SSLMODE = os.environ.get("POSTGRES_SSLMODE", "require")
 IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
@@ -60,6 +61,21 @@ def maybe_force_ipv4_for_non_pooler_host() -> None:
         logger.warning("Could not resolve POSTGRES_HOST to IPv4: %s", e)
 
 
+def validate_db_env() -> None:
+    host = (os.environ.get("POSTGRES_HOST") or "").strip()
+    port = (os.environ.get("POSTGRES_PORT") or "").strip()
+    user = (os.environ.get("POSTGRES_USER") or "").strip()
+    db = (os.environ.get("POSTGRES_DB") or "").strip()
+
+    if not host or not port or not user or not db:
+        raise RuntimeError("Missing one or more DB env vars: POSTGRES_HOST/POSTGRES_PORT/POSTGRES_USER/POSTGRES_DB")
+
+    if host.endswith("pooler.supabase.com") and port != "6543":
+        raise RuntimeError(
+            f"Pooler host detected ({host}) but POSTGRES_PORT={port}. Use 6543 for Supabase transaction pooler."
+        )
+
+
 def quote_ident(ident: str) -> str:
     if not IDENT_RE.match(ident):
         raise ValueError(f"Invalid SQL identifier: {ident!r}")
@@ -67,15 +83,22 @@ def quote_ident(ident: str) -> str:
 
 
 def pg_conn():
+    host = (os.environ.get("POSTGRES_HOST") or "").strip()
+    db = (os.environ.get("POSTGRES_DB") or "").strip()
+    user = (os.environ.get("POSTGRES_USER") or "").strip()
+    password = (os.environ.get("POSTGRES_PASSWORD") or "").strip()
+    port = (os.environ.get("POSTGRES_PORT") or "").strip()
+
     last_error = None
     for attempt in range(1, DB_CONNECT_RETRIES + 1):
         try:
             conn = psycopg2.connect(
-                host=os.environ.get("POSTGRES_HOST"),
-                database=os.environ.get("POSTGRES_DB"),
-                user=os.environ.get("POSTGRES_USER"),
-                password=os.environ.get("POSTGRES_PASSWORD"),
-                port=os.environ.get("POSTGRES_PORT"),
+                host=host,
+                database=db,
+                user=user,
+                password=password,
+                port=port,
+                sslmode=POSTGRES_SSLMODE,
                 connect_timeout=30,
                 keepalives=1,
                 keepalives_idle=30,
@@ -418,6 +441,7 @@ def main():
         return 1
 
     maybe_force_ipv4_for_non_pooler_host()
+    validate_db_env()
 
     if not dry_run:
         ensure_loaded_files_table()

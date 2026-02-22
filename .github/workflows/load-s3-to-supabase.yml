@@ -38,5 +38,6 @@ jobs:
           DB_STATEMENT_TIMEOUT_MS: "0"
           DB_CONNECT_RETRIES: "12"
           DB_CONNECT_RETRY_SECONDS: "5"
+          POSTGRES_SSLMODE: "require"
         run: |
           python s3_to_supabase_loader.py --source "${{ github.event.inputs.source || 'all' }}"
