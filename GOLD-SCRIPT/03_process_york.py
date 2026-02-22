@@ -46,7 +46,7 @@ def upload_to_s3(local_path: Path, key: str):
     log.info(f"Uploaded to s3://{S3_BUCKET}/{key}")
 
 
-def geodesic_area_m2(geod: Geod, geom) -> float | None:
+def geodesic_area_m2(geod: Geod, geom):
     """Robust geodesic area for Polygon/MultiPolygon in WGS84."""
     if geom.is_empty:
         return None
@@ -144,7 +144,7 @@ def process_buildings(shp_path: Path, source_id: str):
                 continue
 
     log.info(f"Wrote buildings: {count:,} (skipped {skipped:,}) -> {output}")
-    key = f"municipal_data/clean/{source_id}/{datetime.now():%Y%m%d}/{source_id}_gold.ndjson"
+    key = f"gold-standard/canada/ontario/{source_id}/{datetime.now():%Y%m%d}/{source_id}_gold.ndjson"
     upload_to_s3(output, key)
 
 
@@ -215,7 +215,7 @@ def process_addresses(shp_path: Path, source_id: str):
                 continue
 
     log.info(f"Wrote addresses: {count:,} (skipped {skipped:,}) -> {output}")
-    key = f"municipal_data/clean/{source_id}/{datetime.now():%Y%m%d}/{source_id}_gold.ndjson"
+    key = f"gold-standard/canada/ontario/{source_id}/{datetime.now():%Y%m%d}/{source_id}_gold.ndjson"
     upload_to_s3(output, key)
 
 

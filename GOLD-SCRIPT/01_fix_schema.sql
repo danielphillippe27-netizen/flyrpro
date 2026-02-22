@@ -4,6 +4,9 @@
 -- Run in Supabase SQL Editor BEFORE loading data
 -- ============================================================================
 
+-- Allow long-running statements (e.g. address dedupe on large tables)
+set statement_timeout = '600s';
+
 -- 1) Extensions
 create extension if not exists postgis;
 create extension if not exists pg_trgm;
@@ -47,6 +50,10 @@ alter table public.ref_buildings_gold
 -- 5) Addresses uniqueness (for UPSERT)
 -- Use a NAMED constraint so GitHub loader can use: ON CONFLICT ON CONSTRAINT ...
 -- Includes unit so condos/townhouses don't overwrite each other.
+--
+-- If you get "Key (...) is duplicated": run 01b_dedupe_addresses.sql first via a
+-- DIRECT DB connection (psql, etc.). Supabase SQL Editor times out on large dedupes.
+
 alter table public.ref_addresses_gold
   drop constraint if exists uniq_ref_addr_source_norm_city_unit;
 

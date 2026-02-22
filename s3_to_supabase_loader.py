@@ -119,7 +119,7 @@ def main():
     args = parser.parse_args()
     
     bucket = os.environ.get('S3_BUCKET_NAME') or os.environ.get('AWS_BUCKET_NAME')
-    prefix = "municipal_data/clean"
+    prefix = "gold-standard/canada/ontario"
     
     if not bucket:
         logger.error("S3_BUCKET_NAME or AWS_BUCKET_NAME not set")

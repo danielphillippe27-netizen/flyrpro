@@ -101,7 +101,7 @@ jobs:
             finally:
               os.unlink(tmp_path)
 
-          def list_all_files(prefix="municipal_data/clean/"):
+          def list_all_files(prefix="gold-standard/canada/ontario/"):
             files = []
             paginator = s3.get_paginator("list_objects_v2")
             for page in paginator.paginate(Bucket=BUCKET, Prefix=prefix):
@@ -109,7 +109,7 @@ jobs:
                 k = obj["Key"]
                 if k.endswith("_gold.ndjson"):
                   parts = k.split("/")
-                  # municipal_data/clean/<source_id>/<yyyymmdd>/<source_id>_gold.ndjson
+                  # gold-standard/canada/ontario/<source_id>/<yyyymmdd>/<source_id>_gold.ndjson
                   if len(parts) >= 5:
                     source_id = parts[-3]
                     date_folder = parts[-2]
@@ -280,7 +280,14 @@ jobs:
                   source_id, source_file, source_url, source_date,
                   street_number, street_name, unit, city, zip, province, country,
                   ST_GeomFromEWKT(geom), address_type, precision
-                FROM _stg_addresses
+                FROM (
+                  SELECT DISTINCT ON (source_id, lower(trim(street_number)), lower(trim(street_name)), city, unit)
+                    source_id, source_file, source_url, source_date,
+                    street_number, street_name, unit, city, zip, province, country,
+                    geom, address_type, precision
+                  FROM _stg_addresses
+                  ORDER BY source_id, lower(trim(street_number)), lower(trim(street_name)), city, unit, source_date DESC NULLS LAST
+                ) sub
                 ON CONFLICT ON CONSTRAINT uniq_ref_addr_source_norm_city_unit
                 DO UPDATE SET
                   zip = EXCLUDED.zip,
