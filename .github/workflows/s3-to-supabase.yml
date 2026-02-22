@@ -51,7 +51,7 @@ jobs:
 
           DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
           DO_VACUUM: ${{ github.event.inputs.vacuum || 'false' }}
-          CHUNK_SIZE: "5000"
+          CHUNK_SIZE: "2000"
           MAX_RETRIES: "3"
           RETRY_BASE_SECONDS: "2"
           DB_STATEMENT_TIMEOUT_MS: "600000"
