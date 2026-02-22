@@ -281,6 +281,12 @@ jobs:
                   province text, country text, geom text, address_type text, precision text
                 ) ON COMMIT DROP;
               """)
+            with conn.cursor() as cur:
+              cur.execute("""
+                CREATE TEMP TABLE _chunk_norm (
+                  LIKE public.ref_addresses_gold INCLUDING DEFAULTS INCLUDING GENERATED
+                ) ON COMMIT DROP;
+              """)
 
             inserted_total = 0
             while True:
@@ -298,7 +304,7 @@ jobs:
                 break
               with conn.cursor() as cur:
                 cur.execute("""
-                  INSERT INTO public.ref_addresses_gold (
+                  INSERT INTO _chunk_norm (
                     source_id, source_file, source_url, source_date,
                     street_number, street_name, unit, city, zip, province, country,
                     geom, address_type, precision
@@ -307,18 +313,34 @@ jobs:
                     source_id, source_file, source_url, source_date,
                     street_number, street_name, unit, city, zip, province, country,
                     ST_GeomFromEWKT(geom), address_type, precision
+                  FROM _chunk;
+                """)
+              with conn.cursor() as cur:
+                cur.execute("""
+                  INSERT INTO public.ref_addresses_gold (
+                    source_id, source_file, source_url, source_date,
+                    street_number, street_name, unit, city, zip, province, country,
+                    geom, address_type, precision
+                  )
+                  SELECT
+                    source_id, source_file, source_url, source_date,
+                    street_number, street_name, unit, city, zip, province, country,
+                    geom, address_type, precision
                   FROM (
-                    SELECT DISTINCT ON (source_id, nnum, nname, coalesce(city,''), coalesce(unit,''))
+                    SELECT DISTINCT ON (
+                      source_id, street_number_normalized, street_name_normalized, city, unit
+                    )
                       source_id, source_file, source_url, source_date,
                       street_number, street_name, unit, city, zip, province, country,
                       geom, address_type, precision
-                    FROM (
-                      SELECT *,
-                        trim(regexp_replace(lower(coalesce(street_number,'')), '\\s+', ' ', 'g')) AS nnum,
-                        trim(regexp_replace(lower(coalesce(street_name,'')), '\\s+', ' ', 'g')) AS nname
-                      FROM _chunk
-                    ) t
-                    ORDER BY source_id, nnum, nname, coalesce(city,''), coalesce(unit,''), source_date DESC NULLS LAST
+                    FROM _chunk_norm
+                    ORDER BY
+                      source_id,
+                      street_number_normalized,
+                      street_name_normalized,
+                      city,
+                      unit,
+                      source_date DESC NULLS LAST
                   ) sub
                   ON CONFLICT ON CONSTRAINT uniq_ref_addr_source_norm_city_unit
                   DO UPDATE SET
@@ -332,6 +354,8 @@ jobs:
                 inserted_total += n_inserted
               with conn.cursor() as cur:
                 cur.execute("TRUNCATE _chunk")
+              with conn.cursor() as cur:
+                cur.execute("TRUNCATE _chunk_norm")
               log.info(f"  address chunk: {moved:,} staged -> {n_inserted:,} inserted (running total: {inserted_total:,})")
             log.info(f"  address chunks done: {inserted_total:,} rows into ref_addresses_gold")
 
