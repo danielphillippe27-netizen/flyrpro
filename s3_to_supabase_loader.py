@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import re
+import socket
 import sys
 import tempfile
 import time
@@ -33,6 +34,30 @@ DB_STATEMENT_TIMEOUT_MS = int(os.environ.get("DB_STATEMENT_TIMEOUT_MS", "0"))
 DB_CONNECT_RETRIES = int(os.environ.get("DB_CONNECT_RETRIES", "12"))
 DB_CONNECT_RETRY_SECONDS = int(os.environ.get("DB_CONNECT_RETRY_SECONDS", "5"))
 IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def env_flag(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return str(raw).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def maybe_force_ipv4_for_non_pooler_host() -> None:
+    host = (os.environ.get("POSTGRES_HOST") or "").strip()
+    if not host:
+        return
+    if host.endswith("pooler.supabase.com"):
+        logger.info("Using pooler hostname without IPv4 rewrite: %s", host)
+        return
+    try:
+        infos = socket.getaddrinfo(host, None, socket.AF_INET)
+        if infos:
+            ipv4 = infos[0][4][0]
+            os.environ["POSTGRES_HOST"] = ipv4
+            logger.info("Resolved POSTGRES_HOST to IPv4: %s", ipv4)
+    except Exception as e:
+        logger.warning("Could not resolve POSTGRES_HOST to IPv4: %s", e)
 
 
 def quote_ident(ident: str) -> str:
@@ -356,16 +381,23 @@ def run_with_retries(clean_file: Path, table: str, s3_key: str, source_id: str) 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", required=True, help="Source ID or 'all'")
+    parser.add_argument("--dry-run", action="store_true", help="Count/validate only, no inserts")
+    parser.add_argument("--vacuum", action="store_true", help="Run VACUUM ANALYZE after load")
     args = parser.parse_args()
 
     bucket = os.environ.get("S3_BUCKET_NAME") or os.environ.get("AWS_BUCKET_NAME")
     prefix = "gold-standard/canada/ontario"
+    dry_run = args.dry_run or env_flag("DRY_RUN", False)
+    do_vacuum = args.vacuum or env_flag("DO_VACUUM", False)
 
     if not bucket:
         logger.error("S3_BUCKET_NAME or AWS_BUCKET_NAME not set")
         return 1
 
-    ensure_loaded_files_table()
+    maybe_force_ipv4_for_non_pooler_host()
+
+    if not dry_run:
+        ensure_loaded_files_table()
 
     files = get_s3_files(bucket, prefix)
     logger.info("Found %s files in S3", len(files))
@@ -390,7 +422,27 @@ def main():
         with tempfile.TemporaryDirectory() as tmpdir:
             local_file = Path(tmpdir) / f"{source_id}.ndjson"
             download_from_s3(bucket, key, local_file)
-            run_with_retries(local_file, table, key, source_id)
+            if dry_run:
+                count = 0
+                with open(local_file, "r") as f:
+                    for line in f:
+                        if line.strip():
+                            count += 1
+                logger.info("[DRY RUN] %s -> %s: %s rows", source_id, table, f"{count:,}")
+            else:
+                run_with_retries(local_file, table, key, source_id)
+
+    if do_vacuum and not dry_run:
+        logger.info("Running VACUUM ANALYZE on gold tables...")
+        conn = pg_conn()
+        try:
+            conn.autocommit = True
+            with conn.cursor() as cur:
+                cur.execute("VACUUM ANALYZE public.ref_buildings_gold")
+                cur.execute("VACUUM ANALYZE public.ref_addresses_gold")
+        finally:
+            conn.close()
+        logger.info("VACUUM ANALYZE complete")
 
     return 0
 
