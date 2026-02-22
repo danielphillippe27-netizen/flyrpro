@@ -199,7 +199,7 @@ jobs:
                 SELECT
                   source_id, source_file, source_url, source_date,
                   external_id, parcel_id,
-                  ST_GeomFromEWKT(geom),
+                  ST_Multi(ST_GeomFromEWKT(geom)),
                   CASE WHEN centroid IS NULL THEN NULL ELSE ST_GeomFromEWKT(centroid) END,
                   area_sqm, height_m, floors, year_built, building_type, subtype,
                   primary_address, primary_street_number, primary_street_name
