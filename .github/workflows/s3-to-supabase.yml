@@ -17,7 +17,6 @@ on:
         default: false
 
   schedule:
-    - cron: "0 2 * * *" # daily 2am UTC
     - cron: "15 * * * *" # hourly catch-up for overnight backfill
 
 jobs:
@@ -52,12 +51,12 @@ jobs:
 
           DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
           DO_VACUUM: ${{ github.event.inputs.vacuum || 'false' }}
-          CHUNK_SIZE: "10000"
+          CHUNK_SIZE: "5000"
           MAX_RETRIES: "3"
           RETRY_BASE_SECONDS: "2"
-          DB_STATEMENT_TIMEOUT_MS: "0"
-          DB_CONNECT_RETRIES: "12"
-          DB_CONNECT_RETRY_SECONDS: "5"
+          DB_STATEMENT_TIMEOUT_MS: "600000"
+          DB_CONNECT_RETRIES: "60"
+          DB_CONNECT_RETRY_SECONDS: "10"
           POSTGRES_SSLMODE: "require"
         run: |
           python s3_to_supabase_one_by_one.py --source "${{ github.event.inputs.source || 'auto' }}"

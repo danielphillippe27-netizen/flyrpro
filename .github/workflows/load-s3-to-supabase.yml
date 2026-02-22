@@ -32,12 +32,12 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_REGION: ${{ secrets.AWS_REGION }}
           S3_BUCKET_NAME: ${{ secrets.AWS_BUCKET_NAME }}
-          CHUNK_SIZE: "10000"
+          CHUNK_SIZE: "5000"
           MAX_RETRIES: "3"
           RETRY_BASE_SECONDS: "2"
-          DB_STATEMENT_TIMEOUT_MS: "0"
-          DB_CONNECT_RETRIES: "12"
-          DB_CONNECT_RETRY_SECONDS: "5"
+          DB_STATEMENT_TIMEOUT_MS: "600000"
+          DB_CONNECT_RETRIES: "60"
+          DB_CONNECT_RETRY_SECONDS: "10"
           POSTGRES_SSLMODE: "require"
         run: |
           python s3_to_supabase_loader.py --source "${{ github.event.inputs.source || 'all' }}"
