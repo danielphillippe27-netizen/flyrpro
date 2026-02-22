@@ -223,7 +223,8 @@ jobs:
             return total
 
           def norm_addr(s):
-            return (s or "").strip().lower()
+            # Match DB normalization: collapse whitespace so "123  Main" and "123 Main" dedupe to one
+            return " ".join((s or "").lower().split())
 
           def load_addresses(source_id, key):
             if DRY_RUN:
@@ -307,21 +308,17 @@ jobs:
                     street_number, street_name, unit, city, zip, province, country,
                     ST_GeomFromEWKT(geom), address_type, precision
                   FROM (
-                    SELECT source_id, source_file, source_url, source_date,
+                    SELECT DISTINCT ON (source_id, nnum, nname, coalesce(city,''), coalesce(unit,''))
+                      source_id, source_file, source_url, source_date,
                       street_number, street_name, unit, city, zip, province, country,
                       geom, address_type, precision
                     FROM (
-                      SELECT *, row_number() OVER (
-                        PARTITION BY source_id,
-                          lower(trim(coalesce(street_number, ''))),
-                          lower(trim(coalesce(street_name, ''))),
-                          coalesce(city, ''),
-                          coalesce(unit, '')
-                        ORDER BY source_date DESC NULLS LAST
-                      ) AS rn
+                      SELECT *,
+                        trim(regexp_replace(lower(coalesce(street_number,'')), '\\s+', ' ', 'g')) AS nnum,
+                        trim(regexp_replace(lower(coalesce(street_name,'')), '\\s+', ' ', 'g')) AS nname
                       FROM _chunk
                     ) t
-                    WHERE rn = 1
+                    ORDER BY source_id, nnum, nname, coalesce(city,''), coalesce(unit,''), source_date DESC NULLS LAST
                   ) sub
                   ON CONFLICT ON CONSTRAINT uniq_ref_addr_source_norm_city_unit
                   DO UPDATE SET
