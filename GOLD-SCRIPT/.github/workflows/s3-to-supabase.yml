@@ -222,6 +222,9 @@ jobs:
             log.info(f"✅ loaded buildings {source_id}: {total:,}")
             return total
 
+          def norm_addr(s):
+            return (s or "").strip().lower()
+
           def load_addresses(source_id, key):
             if DRY_RUN:
               c = sum(1 for _ in stream_records(key))
@@ -251,26 +254,23 @@ jobs:
                 ) ON COMMIT DROP;
               """)
 
-            batch, total = [], 0
+            # Dedupe in Python so one row per (source_id, norm street_number, norm street_name, city, unit); keep latest source_date
+            seen = {}
             for r in stream_records(key):
-              batch.append((
-                r.get("source_id"), r.get("source_file"), r.get("source_url"), r.get("source_date"),
-                r.get("street_number"), r.get("street_name"), r.get("unit"),
-                r.get("city"), r.get("zip"), r.get("province", "ON"), r.get("country", "CA"),
-                r.get("geom"), r.get("address_type"), r.get("precision", "rooftop")
-              ))
+              k = (r.get("source_id"), norm_addr(r.get("street_number")), norm_addr(r.get("street_name")), (r.get("city") or ""), (r.get("unit") or ""))
+              rec = (r.get("source_id"), r.get("source_file"), r.get("source_url"), r.get("source_date"), r.get("street_number"), r.get("street_name"), r.get("unit"), r.get("city"), r.get("zip"), r.get("province", "ON"), r.get("country", "CA"), r.get("geom"), r.get("address_type"), r.get("precision", "rooftop"))
+              sd = r.get("source_date") or ""
+              if k not in seen or (sd and str(sd) > str(seen[k][0])):
+                seen[k] = (sd, rec)
+            rows = [v[1] for v in seen.values()]
+            total = len(rows)
+            log.info(f"  addresses deduped: {total:,} unique")
 
-              if len(batch) >= BATCH:
-                with conn.cursor() as cur:
-                  execute_values(cur, "INSERT INTO _stg_addresses VALUES %s", batch)
-                total += len(batch)
-                log.info(f"  staged addresses: {total:,}")
-                batch = []
-
-            if batch:
+            for i in range(0, total, BATCH):
+              batch = rows[i:i + BATCH]
               with conn.cursor() as cur:
                 execute_values(cur, "INSERT INTO _stg_addresses VALUES %s", batch)
-              total += len(batch)
+              log.info(f"  staged addresses: {min(i + BATCH, total):,}")
 
             with conn.cursor() as cur:
               cur.execute("""
