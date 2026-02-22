@@ -312,7 +312,14 @@ jobs:
                   SELECT
                     source_id, source_file, source_url, source_date,
                     street_number, street_name, unit, city, zip, province, country,
-                    ST_GeomFromEWKT(geom), address_type, precision
+                    CASE
+                      WHEN geom IS NULL OR btrim(geom) = '' THEN NULL
+                      ELSE ST_SetSRID(
+                        ST_PointOnSurface(ST_GeomFromEWKT(geom)),
+                        4326
+                      )::geometry(Point,4326)
+                    END,
+                    address_type, precision
                   FROM _chunk;
                 """)
               with conn.cursor() as cur:
