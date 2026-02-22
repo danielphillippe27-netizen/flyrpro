@@ -77,6 +77,7 @@ jobs:
           DRY_RUN = str(os.environ.get("DRY_RUN", "false")).lower() == "true"
           DO_VACUUM = str(os.environ.get("DO_VACUUM", "false")).lower() == "true"
           BATCH = 10000
+          CHUNK_SIZE = 50000
 
           s3 = boto3.client("s3")
 
@@ -229,6 +230,8 @@ jobs:
 
             conn = pg_conn()
             with conn.cursor() as cur:
+              cur.execute("SET statement_timeout = '1800s'")
+            with conn.cursor() as cur:
               cur.execute("""
                 CREATE TEMP TABLE _stg_addresses (
                   source_id text,
@@ -271,31 +274,60 @@ jobs:
 
             with conn.cursor() as cur:
               cur.execute("""
-                INSERT INTO public.ref_addresses_gold (
-                  source_id, source_file, source_url, source_date,
-                  street_number, street_name, unit, city, zip, province, country,
-                  geom, address_type, precision
-                )
-                SELECT
-                  source_id, source_file, source_url, source_date,
-                  street_number, street_name, unit, city, zip, province, country,
-                  ST_GeomFromEWKT(geom), address_type, precision
-                FROM (
-                  SELECT DISTINCT ON (source_id, lower(trim(street_number)), lower(trim(street_name)), city, unit)
+                CREATE TEMP TABLE _chunk (
+                  source_id text, source_file text, source_url text, source_date date,
+                  street_number text, street_name text, unit text, city text, zip text,
+                  province text, country text, geom text, address_type text, precision text
+                ) ON COMMIT DROP;
+              """)
+
+            inserted_total = 0
+            while True:
+              with conn.cursor() as cur:
+                cur.execute("""
+                  WITH d AS (
+                    DELETE FROM _stg_addresses
+                    WHERE ctid IN (SELECT ctid FROM _stg_addresses LIMIT %s)
+                    RETURNING *
+                  )
+                  INSERT INTO _chunk SELECT * FROM d
+                """, (CHUNK_SIZE,))
+                moved = cur.rowcount
+              if moved == 0:
+                break
+              with conn.cursor() as cur:
+                cur.execute("""
+                  INSERT INTO public.ref_addresses_gold (
                     source_id, source_file, source_url, source_date,
                     street_number, street_name, unit, city, zip, province, country,
                     geom, address_type, precision
-                  FROM _stg_addresses
-                  ORDER BY source_id, lower(trim(street_number)), lower(trim(street_name)), city, unit, source_date DESC NULLS LAST
-                ) sub
-                ON CONFLICT ON CONSTRAINT uniq_ref_addr_source_norm_city_unit
-                DO UPDATE SET
-                  zip = EXCLUDED.zip,
-                  geom = EXCLUDED.geom,
-                  address_type = EXCLUDED.address_type,
-                  precision = EXCLUDED.precision,
-                  updated_at = now();
-              """)
+                  )
+                  SELECT
+                    source_id, source_file, source_url, source_date,
+                    street_number, street_name, unit, city, zip, province, country,
+                    ST_GeomFromEWKT(geom), address_type, precision
+                  FROM (
+                    SELECT DISTINCT ON (source_id, lower(trim(street_number)), lower(trim(street_name)), city, unit)
+                      source_id, source_file, source_url, source_date,
+                      street_number, street_name, unit, city, zip, province, country,
+                      geom, address_type, precision
+                    FROM _chunk
+                    ORDER BY source_id, lower(trim(street_number)), lower(trim(street_name)), city, unit, source_date DESC NULLS LAST
+                  ) sub
+                  ON CONFLICT ON CONSTRAINT uniq_ref_addr_source_norm_city_unit
+                  DO UPDATE SET
+                    zip = EXCLUDED.zip,
+                    geom = EXCLUDED.geom,
+                    address_type = EXCLUDED.address_type,
+                    precision = EXCLUDED.precision,
+                    updated_at = now();
+                """)
+                n_inserted = cur.rowcount
+                inserted_total += n_inserted
+              with conn.cursor() as cur:
+                cur.execute("TRUNCATE _chunk")
+              log.info(f"  address chunk: {moved:,} staged -> {n_inserted:,} inserted (running total: {inserted_total:,})")
+            log.info(f"  address chunks done: {inserted_total:,} rows into ref_addresses_gold")
 
             conn.commit()
             conn.close()
