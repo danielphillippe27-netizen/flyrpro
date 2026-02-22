@@ -1,0 +1,349 @@
+#!/usr/bin/env python3
+"""
+Load municipal data from S3 to Supabase.
+Designed to run in GitHub Actions.
+
+Usage:
+    python s3_to_supabase_loader.py --source york_buildings
+    python s3_to_supabase_loader.py --source all
+"""
+
+import argparse
+import json
+import logging
+import os
+import re
+import sys
+import tempfile
+import time
+from pathlib import Path
+from typing import Dict, List, Tuple
+
+import boto3
+import psycopg2
+from psycopg2.extras import execute_values
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
+logger = logging.getLogger(__name__)
+
+CHUNK_SIZE = int(os.environ.get("CHUNK_SIZE", "10000"))
+MAX_RETRIES = int(os.environ.get("MAX_RETRIES", "3"))
+RETRY_BASE_SECONDS = int(os.environ.get("RETRY_BASE_SECONDS", "2"))
+DB_STATEMENT_TIMEOUT_MS = int(os.environ.get("DB_STATEMENT_TIMEOUT_MS", "0"))
+IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def quote_ident(ident: str) -> str:
+    if not IDENT_RE.match(ident):
+        raise ValueError(f"Invalid SQL identifier: {ident!r}")
+    return f'"{ident}"'
+
+
+def pg_conn():
+    conn = psycopg2.connect(
+        host=os.environ.get("POSTGRES_HOST"),
+        database=os.environ.get("POSTGRES_DB"),
+        user=os.environ.get("POSTGRES_USER"),
+        password=os.environ.get("POSTGRES_PASSWORD"),
+        port=os.environ.get("POSTGRES_PORT"),
+        connect_timeout=30,
+        keepalives=1,
+        keepalives_idle=30,
+        keepalives_interval=10,
+        keepalives_count=5,
+    )
+    with conn.cursor() as cur:
+        cur.execute("SET statement_timeout = %s", (DB_STATEMENT_TIMEOUT_MS,))
+    return conn
+
+
+def is_retryable_error(err: Exception) -> bool:
+    msg = str(err).lower()
+    if isinstance(err, (psycopg2.OperationalError, psycopg2.InterfaceError)):
+        return True
+    retry_tokens = [
+        "timeout",
+        "timed out",
+        "connection",
+        "server closed",
+        "connection reset",
+        "broken pipe",
+        "could not connect",
+        "ssl",
+    ]
+    return any(token in msg for token in retry_tokens)
+
+
+def ensure_loaded_files_table():
+    conn = pg_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS public.loader_loaded_files (
+                  s3_key text PRIMARY KEY,
+                  source_id text NOT NULL,
+                  status text NOT NULL DEFAULT 'in_progress',
+                  rows_loaded bigint NOT NULL DEFAULT 0,
+                  attempts integer NOT NULL DEFAULT 0,
+                  last_error text,
+                  updated_at timestamptz NOT NULL DEFAULT now(),
+                  loaded_at timestamptz
+                );
+                """
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def is_file_completed(s3_key: str) -> bool:
+    conn = pg_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM public.loader_loaded_files WHERE s3_key = %s AND status = 'completed'",
+                (s3_key,),
+            )
+            return cur.fetchone() is not None
+    finally:
+        conn.close()
+
+
+def mark_file_status(
+    s3_key: str,
+    source_id: str,
+    status: str,
+    rows_loaded: int = 0,
+    last_error: str = None,
+):
+    conn = pg_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO public.loader_loaded_files (
+                  s3_key, source_id, status, rows_loaded, attempts, last_error, updated_at, loaded_at
+                ) VALUES (
+                  %s,
+                  %s,
+                  %s,
+                  %s,
+                  CASE WHEN %s = 'in_progress' THEN 1 ELSE 0 END,
+                  %s,
+                  now(),
+                  CASE WHEN %s = 'completed' THEN now() ELSE NULL END
+                )
+                ON CONFLICT (s3_key) DO UPDATE SET
+                  source_id = EXCLUDED.source_id,
+                  status = EXCLUDED.status,
+                  rows_loaded = EXCLUDED.rows_loaded,
+                  attempts = CASE
+                    WHEN EXCLUDED.status = 'in_progress' THEN public.loader_loaded_files.attempts + 1
+                    ELSE public.loader_loaded_files.attempts
+                  END,
+                  last_error = EXCLUDED.last_error,
+                  updated_at = now(),
+                  loaded_at = CASE WHEN EXCLUDED.status = 'completed' THEN now() ELSE public.loader_loaded_files.loaded_at END;
+                """,
+                (s3_key, source_id, status, rows_loaded, status, last_error, status),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_s3_files(bucket: str, prefix: str) -> List[Dict]:
+    """List all clean data files in S3."""
+    s3 = boto3.client("s3")
+    files: List[Dict] = []
+
+    paginator = s3.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            if key.endswith("_gold.ndjson"):
+                files.append(
+                    {
+                        "key": key,
+                        "size": obj["Size"],
+                        "source_id": key.split("/")[-2] if "/" in key else "unknown",
+                    }
+                )
+
+    files.sort(key=lambda f: f["key"])
+    return files
+
+
+def download_from_s3(bucket: str, key: str, local_path: Path):
+    """Download file from S3 to local."""
+    s3 = boto3.client("s3")
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    s3.download_file(bucket, key, str(local_path))
+    logger.info("Downloaded s3://%s/%s to %s", bucket, key, local_path)
+    return local_path
+
+
+def execute_batch_with_retry(
+    conn,
+    table: str,
+    columns: List[str],
+    batch: List[Dict],
+) -> Tuple[object, int]:
+    table_ident = quote_ident(table)
+    col_idents = ",".join(quote_ident(c) for c in columns)
+    sql = (
+        f"INSERT INTO {table_ident} ({col_idents}) VALUES %s "
+        "ON CONFLICT DO NOTHING"
+    )
+    values = [tuple(r.get(c) for c in columns) for r in batch]
+
+    attempts = 0
+    while True:
+        attempts += 1
+        try:
+            with conn.cursor() as cur:
+                execute_values(cur, sql, values, page_size=min(CHUNK_SIZE, 1000))
+            conn.commit()
+            return conn, len(batch)
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            retryable = is_retryable_error(e)
+            if not retryable or attempts >= MAX_RETRIES:
+                raise
+            sleep_s = RETRY_BASE_SECONDS * (2 ** (attempts - 1))
+            logger.warning(
+                "Batch insert failed (attempt %s/%s): %s; retrying in %ss",
+                attempts,
+                MAX_RETRIES,
+                str(e),
+                sleep_s,
+            )
+            try:
+                conn.close()
+            except Exception:
+                pass
+            time.sleep(sleep_s)
+            conn = pg_conn()
+
+
+def load_to_supabase(clean_file: Path, table: str, s3_key: str, source_id: str) -> int:
+    """Load clean NDJSON to Supabase with retries and file-level resume."""
+    logger.info("Loading %s to %s...", clean_file.name, table)
+
+    if is_file_completed(s3_key):
+        logger.info("Skipping already completed file: %s", s3_key)
+        return 0
+
+    mark_file_status(s3_key, source_id, "in_progress")
+
+    with open(clean_file, "r") as f:
+        total = sum(1 for _ in f)
+    logger.info("Loading %s records (chunk size: %s)...", f"{total:,}", CHUNK_SIZE)
+
+    conn = pg_conn()
+    inserted = 0
+    batch: List[Dict] = []
+    columns: List[str] = []
+
+    try:
+        with open(clean_file, "r") as f:
+            for line in f:
+                record = json.loads(line)
+                if not columns:
+                    columns = list(record.keys())
+                batch.append(record)
+
+                if len(batch) >= CHUNK_SIZE:
+                    conn, added = execute_batch_with_retry(conn, table, columns, batch)
+                    inserted += added
+                    logger.info("Inserted %s/%s", f"{inserted:,}", f"{total:,}")
+                    batch = []
+
+            if batch:
+                conn, added = execute_batch_with_retry(conn, table, columns, batch)
+                inserted += added
+
+        mark_file_status(s3_key, source_id, "completed", rows_loaded=inserted)
+        logger.info("Complete! Loaded %s records to %s", f"{inserted:,}", table)
+        return inserted
+    except Exception as e:
+        mark_file_status(s3_key, source_id, "failed", last_error=str(e)[:2000])
+        raise
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def run_with_retries(clean_file: Path, table: str, s3_key: str, source_id: str) -> int:
+    attempts = 0
+    while attempts < MAX_RETRIES:
+        attempts += 1
+        try:
+            return load_to_supabase(clean_file, table, s3_key, source_id)
+        except Exception as e:
+            retryable = is_retryable_error(e)
+            if not retryable or attempts >= MAX_RETRIES:
+                raise
+            sleep_s = RETRY_BASE_SECONDS * (2 ** (attempts - 1))
+            logger.warning(
+                "Retrying file %s (%s/%s) after error: %s (sleep %ss)",
+                s3_key,
+                attempts,
+                MAX_RETRIES,
+                str(e),
+                sleep_s,
+            )
+            time.sleep(sleep_s)
+    return 0
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--source", required=True, help="Source ID or 'all'")
+    args = parser.parse_args()
+
+    bucket = os.environ.get("S3_BUCKET_NAME") or os.environ.get("AWS_BUCKET_NAME")
+    prefix = "gold-standard/canada/ontario"
+
+    if not bucket:
+        logger.error("S3_BUCKET_NAME or AWS_BUCKET_NAME not set")
+        return 1
+
+    ensure_loaded_files_table()
+
+    files = get_s3_files(bucket, prefix)
+    logger.info("Found %s files in S3", len(files))
+
+    if args.source != "all":
+        files = [f for f in files if args.source in f["source_id"]]
+
+    logger.info("Processing %s files", len(files))
+
+    for file_info in files:
+        source_id = file_info["source_id"]
+        key = file_info["key"]
+
+        if "building" in source_id.lower():
+            table = "ref_buildings_gold"
+        elif "address" in source_id.lower():
+            table = "ref_addresses_gold"
+        else:
+            logger.warning("Unknown type for %s, skipping", source_id)
+            continue
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            local_file = Path(tmpdir) / f"{source_id}.ndjson"
+            download_from_s3(bucket, key, local_file)
+            run_with_retries(local_file, table, key, source_id)
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
