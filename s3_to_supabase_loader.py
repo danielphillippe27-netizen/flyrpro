@@ -88,7 +88,8 @@ def pg_conn():
     db = (os.environ.get("POSTGRES_DB") or "").strip()
     user = (os.environ.get("POSTGRES_USER") or "").strip()
     password = (os.environ.get("POSTGRES_PASSWORD") or "").strip()
-    port = (os.environ.get("POSTGRES_PORT") or "").strip()
+    configured_port = (os.environ.get("POSTGRES_PORT") or "").strip()
+    port = configured_port
 
     last_error = None
     for attempt in range(1, DB_CONNECT_RETRIES + 1):
@@ -112,6 +113,19 @@ def pg_conn():
         except psycopg2.OperationalError as e:
             last_error = e
             msg = str(e).lower()
+            # Supabase shared transaction pooler can occasionally return a protocol error
+            # ("server didn't return client encoding") depending on endpoint/mode.
+            # If that happens on 6543, fall back to shared session pooler 5432.
+            if (
+                "server didn't return client encoding" in msg
+                and host.endswith("pooler.supabase.com")
+                and port == "6543"
+            ):
+                logger.warning(
+                    "Pooler handshake error on 6543; falling back to 5432 (session pooler)."
+                )
+                port = "5432"
+                continue
             retryable = any(
                 token in msg
                 for token in [
