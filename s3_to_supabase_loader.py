@@ -30,6 +30,8 @@ CHUNK_SIZE = int(os.environ.get("CHUNK_SIZE", "10000"))
 MAX_RETRIES = int(os.environ.get("MAX_RETRIES", "3"))
 RETRY_BASE_SECONDS = int(os.environ.get("RETRY_BASE_SECONDS", "2"))
 DB_STATEMENT_TIMEOUT_MS = int(os.environ.get("DB_STATEMENT_TIMEOUT_MS", "0"))
+DB_CONNECT_RETRIES = int(os.environ.get("DB_CONNECT_RETRIES", "12"))
+DB_CONNECT_RETRY_SECONDS = int(os.environ.get("DB_CONNECT_RETRY_SECONDS", "5"))
 IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
@@ -40,21 +42,52 @@ def quote_ident(ident: str) -> str:
 
 
 def pg_conn():
-    conn = psycopg2.connect(
-        host=os.environ.get("POSTGRES_HOST"),
-        database=os.environ.get("POSTGRES_DB"),
-        user=os.environ.get("POSTGRES_USER"),
-        password=os.environ.get("POSTGRES_PASSWORD"),
-        port=os.environ.get("POSTGRES_PORT"),
-        connect_timeout=30,
-        keepalives=1,
-        keepalives_idle=30,
-        keepalives_interval=10,
-        keepalives_count=5,
-    )
-    with conn.cursor() as cur:
-        cur.execute("SET statement_timeout = %s", (DB_STATEMENT_TIMEOUT_MS,))
-    return conn
+    last_error = None
+    for attempt in range(1, DB_CONNECT_RETRIES + 1):
+        try:
+            conn = psycopg2.connect(
+                host=os.environ.get("POSTGRES_HOST"),
+                database=os.environ.get("POSTGRES_DB"),
+                user=os.environ.get("POSTGRES_USER"),
+                password=os.environ.get("POSTGRES_PASSWORD"),
+                port=os.environ.get("POSTGRES_PORT"),
+                connect_timeout=30,
+                keepalives=1,
+                keepalives_idle=30,
+                keepalives_interval=10,
+                keepalives_count=5,
+            )
+            with conn.cursor() as cur:
+                cur.execute("SET statement_timeout = %s", (DB_STATEMENT_TIMEOUT_MS,))
+            return conn
+        except psycopg2.OperationalError as e:
+            last_error = e
+            msg = str(e).lower()
+            retryable = any(
+                token in msg
+                for token in [
+                    "maxclientsinsessionmode",
+                    "max clients",
+                    "too many connections",
+                    "timeout",
+                    "timed out",
+                    "connection",
+                ]
+            )
+            if not retryable or attempt >= DB_CONNECT_RETRIES:
+                raise
+            sleep_s = DB_CONNECT_RETRY_SECONDS * attempt
+            logger.warning(
+                "DB connect attempt %s/%s failed (%s). Retrying in %ss...",
+                attempt,
+                DB_CONNECT_RETRIES,
+                str(e),
+                sleep_s,
+            )
+            time.sleep(sleep_s)
+    if last_error:
+        raise last_error
+    raise psycopg2.OperationalError("Failed to establish DB connection")
 
 
 def is_retryable_error(err: Exception) -> bool:
