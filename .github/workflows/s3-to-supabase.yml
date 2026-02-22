@@ -1,4 +1,4 @@
-name: Load S3 to Supabase
+name: Load S3 to Supabase (Resumable)
 
 on:
   workflow_dispatch:
@@ -18,10 +18,15 @@ on:
 
   schedule:
     - cron: "0 2 * * *" # daily 2am UTC
+    - cron: "15 * * * *" # hourly catch-up for overnight backfill
 
 jobs:
   load:
     runs-on: ubuntu-latest
+    timeout-minutes: 180
+    concurrency:
+      group: s3-to-supabase-resumable
+      cancel-in-progress: false
 
     steps:
       - uses: actions/checkout@v4

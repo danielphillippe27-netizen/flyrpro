@@ -1,4 +1,4 @@
-name: Load S3 to Supabase
+name: Load S3 to Supabase (Legacy Manual)
 
 on:
   workflow_dispatch:
@@ -7,9 +7,6 @@ on:
         description: 'Source to load (e.g., york_buildings, york_addresses, or "all")'
         required: true
         default: 'all'
-  
-  schedule:
-    - cron: '0 2 * * *'  # Daily at 2 AM UTC
 
 jobs:
   load:
