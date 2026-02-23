@@ -42,9 +42,9 @@ export async function GET() {
           null;
     const avatarUrl =
       profile?.avatar_url ??
-      (typeof user.user_metadata?.avatar_url === 'string' && user.user_metadata.avatar_url) ||
+      ((typeof user.user_metadata?.avatar_url === 'string' && user.user_metadata.avatar_url) ||
       (typeof user.user_metadata?.picture === 'string' && user.user_metadata.picture) ||
-      null;
+      null);
 
     return NextResponse.json({
       email: user.email ?? null,

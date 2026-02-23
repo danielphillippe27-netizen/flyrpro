@@ -76,13 +76,13 @@ export default function AppTopHeader() {
                   : null;
               setProfile({
                 email: data.email ?? user.email ?? null,
-                fullName: fullName ?? (typeof user.user_metadata?.full_name === 'string' && user.user_metadata.full_name) ||
+                fullName: fullName ?? ((typeof user.user_metadata?.full_name === 'string' && user.user_metadata.full_name) ||
                   (typeof user.user_metadata?.name === 'string' && user.user_metadata.name) ||
-                  null,
+                  null),
                 avatarUrl: data.avatar_url ??
-                  (typeof user.user_metadata?.avatar_url === 'string' && user.user_metadata.avatar_url) ||
+                  ((typeof user.user_metadata?.avatar_url === 'string' && user.user_metadata.avatar_url) ||
                   (typeof user.user_metadata?.picture === 'string' && user.user_metadata.picture) ||
-                  null,
+                  null),
               });
               return;
             }
@@ -122,13 +122,13 @@ export default function AppTopHeader() {
                   : null;
               setProfile({
                 email: data.email ?? user.email ?? null,
-                fullName: fullName ?? (typeof user.user_metadata?.full_name === 'string' && user.user_metadata.full_name) ||
+                fullName: fullName ?? ((typeof user.user_metadata?.full_name === 'string' && user.user_metadata.full_name) ||
                   (typeof user.user_metadata?.name === 'string' && user.user_metadata.name) ||
-                  null,
+                  null),
                 avatarUrl: data.avatar_url ??
-                  (typeof user.user_metadata?.avatar_url === 'string' && user.user_metadata.avatar_url) ||
+                  ((typeof user.user_metadata?.avatar_url === 'string' && user.user_metadata.avatar_url) ||
                   (typeof user.user_metadata?.picture === 'string' && user.user_metadata.picture) ||
-                  null,
+                  null),
               });
               return;
             }
