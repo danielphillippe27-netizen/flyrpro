@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { Suspense, useState, useCallback, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -35,7 +35,7 @@ const SOLO_SEATS = 1;
 const TEAM_MIN_SEATS = 2;
 const MAX_SEATS = 100;
 
-export default function OnboardingPage() {
+function OnboardingContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [step, setStep] = useState(1);
@@ -524,5 +524,19 @@ export default function OnboardingPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function OnboardingPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
+          <p className="text-muted-foreground">Loading…</p>
+        </div>
+      }
+    >
+      <OnboardingContent />
+    </Suspense>
   );
 }
