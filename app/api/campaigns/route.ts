@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseServerClient } from '@/lib/supabase/server';
+import { createAdminClient, getSupabaseServerClient } from '@/lib/supabase/server';
+import { resolveWorkspaceIdForUser } from '@/app/api/_utils/workspace';
+import { resolveCampaignRegion } from '@/lib/geo/regionResolver';
+import type { MinimalSupabaseClient } from '@/app/api/_utils/workspace';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -8,6 +11,7 @@ interface CreateCampaignBody {
   name: string;
   type: string;
   address_source: string;
+  region?: string;
   workspace_id?: string;
   seed_query?: string;
   bbox?: number[];
@@ -15,20 +19,21 @@ interface CreateCampaignBody {
 }
 
 /**
- * POST /api/campaigns - Create a campaign server-side (session client).
- * Ensure SUPABASE_SERVICE_ROLE_KEY is set for your project so generate-address-list can find the campaign.
+ * POST /api/campaigns - Create a campaign server-side after validating workspace access.
+ * Requires SUPABASE_SERVICE_ROLE_KEY for admin resolution/insert.
  */
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await getSupabaseServerClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const authClient = await getSupabaseServerClient();
+    const { data: { user }, error: authError } = await authClient.auth.getUser();
 
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const admin = createAdminClient();
     const body: CreateCampaignBody = await request.json();
-    const { name, type, address_source, workspace_id, seed_query, bbox, territory_boundary } = body;
+    const { name, type, address_source, region, workspace_id, seed_query, bbox, territory_boundary } = body;
 
     if (!name || !type || !address_source) {
       return NextResponse.json(
@@ -37,41 +42,75 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    let targetWorkspaceId: string | null = workspace_id ?? null;
-    if (targetWorkspaceId) {
-      const { data: membership, error: membershipError } = await supabase
-        .from('workspace_members')
-        .select('workspace_id')
-        .eq('user_id', user.id)
-        .eq('workspace_id', targetWorkspaceId)
-        .maybeSingle();
+    const requestedWorkspaceId =
+      typeof workspace_id === 'string' && workspace_id.trim()
+        ? workspace_id.trim()
+        : null;
 
-      if (membershipError || !membership) {
-        return NextResponse.json(
-          { error: 'You are not a member of the selected workspace' },
-          { status: 403 }
+    let targetWorkspaceId: string | null = requestedWorkspaceId;
+    if (targetWorkspaceId) {
+      const resolution = await resolveWorkspaceIdForUser(
+        admin as unknown as MinimalSupabaseClient,
+        user.id,
+        targetWorkspaceId
+      );
+
+      if (!resolution.workspaceId) {
+        const fallbackResolution = await resolveWorkspaceIdForUser(
+          admin as unknown as MinimalSupabaseClient,
+          user.id,
+          null
         );
+        if (!fallbackResolution.workspaceId) {
+          return NextResponse.json(
+            {
+              error:
+                fallbackResolution.error ??
+                resolution.error ??
+                'No workspace membership found for this user',
+            },
+            { status: fallbackResolution.status ?? resolution.status ?? 400 }
+          );
+        }
+        console.warn('[POST /api/campaigns] Provided workspace_id is not accessible; falling back to primary workspace', {
+          user_id: user.id,
+          requested_workspace_id: targetWorkspaceId,
+          fallback_workspace_id: fallbackResolution.workspaceId,
+        });
+        targetWorkspaceId = fallbackResolution.workspaceId;
+      } else {
+        targetWorkspaceId = resolution.workspaceId;
       }
     } else {
-      const { data: fallbackMembership, error: fallbackError } = await supabase
-        .from('workspace_members')
-        .select('workspace_id')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: true })
-        .limit(1)
-        .maybeSingle();
-
-      if (fallbackError || !fallbackMembership?.workspace_id) {
+      const fallbackResolution = await resolveWorkspaceIdForUser(
+        admin as unknown as MinimalSupabaseClient,
+        user.id,
+        null
+      );
+      if (!fallbackResolution.workspaceId) {
         return NextResponse.json(
-          { error: 'No workspace membership found for this user' },
-          { status: 400 }
+          { error: fallbackResolution.error ?? 'No workspace membership found for this user' },
+          { status: fallbackResolution.status ?? 400 }
         );
       }
-
-      targetWorkspaceId = fallbackMembership.workspace_id;
+      targetWorkspaceId = fallbackResolution.workspaceId;
     }
 
-    const { data: campaign, error: insertError } = await supabase
+    const regionResolution = await resolveCampaignRegion({
+      currentRegion: region,
+      polygon: territory_boundary ?? null,
+      bbox: bbox ?? null,
+    });
+
+    if (regionResolution.source !== 'campaign') {
+      console.log('[POST /api/campaigns] Resolved campaign region:', {
+        region: regionResolution.regionCode,
+        source: regionResolution.source,
+        reason: regionResolution.reason,
+      });
+    }
+
+    const { data: campaign, error: insertError } = await admin
       .from('campaigns')
       .insert({
         owner_id: user.id,
@@ -81,6 +120,7 @@ export async function POST(request: NextRequest) {
         description: '',
         type,
         address_source,
+        region: regionResolution.regionCode,
         seed_query: seed_query ?? null,
         bbox: bbox ?? null,
         territory_boundary: territory_boundary ?? null,

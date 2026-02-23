@@ -6,7 +6,7 @@ import { useState, useEffect } from 'react';
 import { WorkspaceProvider } from '@/lib/workspace-context';
 import AppTopHeader from '@/components/layout/AppTopHeader';
 import { MainRouteGuard } from '@/components/guard/MainRouteGuard';
-import { Home, Map, Trophy, Users, Settings, Target, Gauge, Plug, CreditCard, MessageCircle, Shield } from 'lucide-react';
+import { Home, Map, Trophy, Users, Settings, Target, Gauge, Plug, CreditCard, MessageCircle, Shield, Activity, CalendarCheck, MessageSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { DashboardAccessLevel } from '@/app/api/_utils/workspace';
 
@@ -17,7 +17,10 @@ const baseTabs = [
   { href: '/home', icon: Home, label: 'Home' },
   { href: '/campaigns', icon: Target, label: 'Campaigns' },
   { href: '/map', icon: Map, label: 'Map' },
+  { href: '/activity', icon: Activity, label: 'Activity' },
   { href: '/leads', icon: Users, label: 'Leads' },
+  { href: '/appointments', icon: CalendarCheck, label: 'Appointments' },
+  { href: '/follow-up', icon: MessageSquare, label: 'Follow Up' },
   { href: '/leaderboard', icon: Trophy, label: 'Leaderboard' },
   { href: '/stats', icon: Gauge, label: 'Performance' },
   { href: '/billing', icon: CreditCard, label: 'Billing' },
@@ -28,7 +31,19 @@ const baseTabs = [
 const supportTab = { href: '/support', icon: MessageCircle, label: 'Support' };
 const adminTab = { href: '/admin', icon: Shield, label: 'Founder' };
 const memberTabs = baseTabs.filter((tab) =>
-  ['/home', '/campaigns', '/map', '/leads', '/leaderboard', '/stats'].includes(tab.href)
+  [
+    '/home',
+    '/campaigns',
+    '/map',
+    '/leads',
+    '/activity',
+    '/appointments',
+    '/follow-up',
+    '/leaderboard',
+    '/stats',
+    '/settings',
+    '/settings/integrations',
+  ].includes(tab.href)
 );
 
 export default function MainLayoutClient({
@@ -81,6 +96,7 @@ export default function MainLayoutClient({
                 const onIntegrations = pathname?.startsWith('/settings/integrations');
                 const isBilling = tab.href === '/billing';
                 const isAdmin = tab.href === '/admin';
+                const pinMemberSettingsToBottom = accessLevel === 'member' && isSettings;
 
                 let isActive;
                 if (isIntegrations) {
@@ -100,6 +116,7 @@ export default function MainLayoutClient({
                     href={tab.href}
                     className={cn(
                       'flex items-center gap-2 py-2.5 rounded-md w-full transition-colors min-h-[42px]',
+                      pinMemberSettingsToBottom && 'mt-auto',
                       sidebarExpanded ? 'px-2.5 justify-start' : 'justify-center px-0',
                       isActive
                         ? 'text-primary bg-primary/10'

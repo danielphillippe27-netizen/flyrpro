@@ -53,6 +53,7 @@ export default function CreateCampaignPage() {
   const map = useRef<mapboxgl.Map | null>(null);
   const drawRef = useRef<MapboxDraw | null>(null);
   const boundaryLayerIdsRef = useRef<string[]>([]);
+  const hasCenteredOnUserLocationRef = useRef(false);
   const isDark = theme === 'dark';
   const lottieSrc = useMemo(
     () => (isDark ? '/loading/white.json' : '/loading/black.json'),
@@ -824,7 +825,11 @@ export default function CreateCampaignPage() {
             mapLoaded={mapLoaded}
             showUserLocation={true}
             onLocationFound={(lng, lat) => {
-              map.current?.flyTo({ center: [lng, lat], zoom: 15, duration: 800 });
+              // Only center on user location once when first opening create campaign
+              if (!hasCenteredOnUserLocationRef.current) {
+                hasCenteredOnUserLocationRef.current = true;
+                map.current?.flyTo({ center: [lng, lat], zoom: 15, duration: 800 });
+              }
             }}
             onLocationError={() => {
               // Keep default Toronto center if geolocation denied or fails

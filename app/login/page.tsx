@@ -16,6 +16,34 @@ export default function LoginPage() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [hasChecked, setHasChecked] = useState(false);
   const sanitizeEmail = (value: string) => value.trim().replace(/^['"]+|['"]+$/g, '');
+  const formatAuthError = (
+    error: unknown,
+    fallback = 'Sign-in is temporarily unavailable. Please try again in a minute.'
+  ) => {
+    const asRecord =
+      error && typeof error === 'object' ? (error as Record<string, unknown>) : null;
+    const rawMessage =
+      error instanceof Error
+        ? error.message
+        : typeof asRecord?.message === 'string'
+          ? asRecord.message
+          : '';
+    const message = rawMessage.trim();
+    const status = typeof asRecord?.status === 'number' ? asRecord.status : null;
+
+    const isUpstreamFailure =
+      message === '{}' ||
+      /upstream connect error|remote connection failure|service unavailable|fetch failed|timeout|timed out/i.test(
+        message
+      ) ||
+      (status !== null && status >= 500);
+
+    if (isUpstreamFailure) {
+      return fallback;
+    }
+
+    return message || fallback;
+  };
 
   const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
   const nextFromQuery = searchParams?.get('next') ?? null;
@@ -106,7 +134,7 @@ export default function LoginPage() {
       if (!isInvalidCredentials) {
         setMessage({
           type: 'error',
-          text: signInError?.message || 'Invalid email or password.',
+          text: formatAuthError(signInError),
         });
         return;
       }
@@ -122,7 +150,7 @@ export default function LoginPage() {
         if (signUpError.message?.toLowerCase().includes('already registered') || signUpError.message?.toLowerCase().includes('already exists')) {
           setMessage({ type: 'error', text: 'Invalid login credentials.' });
         } else {
-          setMessage({ type: 'error', text: signUpError.message });
+          setMessage({ type: 'error', text: formatAuthError(signUpError) });
         }
         return;
       }
@@ -141,7 +169,7 @@ export default function LoginPage() {
       console.error('❌ Auth error:', error);
       setMessage({
         type: 'error',
-        text: error instanceof Error ? error.message : 'Something went wrong. Please try again.',
+        text: formatAuthError(error, 'Something went wrong. Please try again.'),
       });
     } finally {
       setLoading(false);
@@ -161,7 +189,7 @@ export default function LoginPage() {
       if (error) throw error;
       if (data?.url) window.location.href = data.url;
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to start Google sign-in.';
+      const message = formatAuthError(err, 'Failed to start Google sign-in.');
       setMessage({ type: 'error', text: message });
       setLoading(false);
     }
@@ -180,7 +208,7 @@ export default function LoginPage() {
       if (error) throw error;
       if (data?.url) window.location.href = data.url;
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to start Sign in with Apple.';
+      const msg = formatAuthError(err, 'Failed to start Sign in with Apple.');
       setMessage({ type: 'error', text: msg });
       setLoading(false);
     }

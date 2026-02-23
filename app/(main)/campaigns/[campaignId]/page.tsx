@@ -707,20 +707,16 @@ export default function CampaignDetailPage() {
 
   return (
     <div className="min-h-full bg-muted/30 dark:bg-background relative">
-      <header className="bg-card border-b border-border sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2.5">
-          <div className="space-y-2">
-            <h1 className="text-lg font-semibold text-foreground text-center">{campaign.name || 'Unnamed Campaign'}</h1>
-            {campaignStats.addresses > 0 && campaignStats.progress_pct > 0 && (
-              <div className="mx-auto min-w-0 max-w-md sm:max-w-lg flex items-center gap-3">
-                <span className="text-sm font-medium text-muted-foreground whitespace-nowrap">Progress</span>
-                <Progress value={campaignStats.progress_pct} className="h-2 flex-1" />
-                <span className="text-sm font-semibold text-foreground whitespace-nowrap">{campaignStats.progress_pct}%</span>
-              </div>
-            )}
+      {/* Progress bar only – campaign name is in layout header */}
+      {campaignStats.addresses > 0 && campaignStats.progress_pct > 0 && (
+        <div className="bg-card border-b border-border px-4 sm:px-6 lg:px-8 py-2">
+          <div className="max-w-7xl mx-auto min-w-0 max-w-md sm:max-w-lg flex items-center gap-3">
+            <span className="text-sm font-medium text-muted-foreground whitespace-nowrap">Progress</span>
+            <Progress value={campaignStats.progress_pct} className="h-2 flex-1" />
+            <span className="text-sm font-semibold text-foreground whitespace-nowrap">{campaignStats.progress_pct}%</span>
           </div>
         </div>
-      </header>
+      )}
 
       <main className="w-full px-4 sm:px-6 lg:px-8 py-6 space-y-6">
         <StatsHeader stats={campaignStats} />

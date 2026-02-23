@@ -512,10 +512,43 @@ async function queryTheme(theme, polygon, limit, regionCode) {
 // Addresses Query
 // ============================================
 
+function isMissingAddressSourceError(error) {
+  const message = String(error?.message || error || "");
+  return (
+    message.includes("404 (Not Found)") ||
+    message.includes("No files found") ||
+    message.includes("HTTP GET error")
+  );
+}
+
+async function buildParquetAddressQuery({ path, wkt, bufferedMinX, bufferedMaxX, bufferedMinY, bufferedMaxY, limit }) {
+  // Schema detection for parquet files
+  const descSql = `DESCRIBE SELECT * FROM read_parquet('${path}') LIMIT 1;`;
+  const cols = await queryWithIam(descSql, REGION);
+  const names = new Set(cols.map(c => c.column_name));
+  
+  let latCol = "latitude", lonCol = "longitude";
+  if (names.has("lat") && names.has("lon")) {
+    latCol = "lat"; lonCol = "lon";
+  }
+  
+  return `
+    SELECT gers_id, formatted, house_number, street_name, unit, city, postal_code, state,
+           ${lonCol} as longitude, ${latCol} as latitude
+    FROM read_parquet('${path}')
+    WHERE (${lonCol} BETWEEN ${bufferedMinX} AND ${bufferedMaxX}) 
+      AND (${latCol} BETWEEN ${bufferedMinY} AND ${bufferedMaxY})
+      AND ST_Intersects(ST_GeomFromText('${wkt}'), ST_Point(${lonCol}, ${latCol}))
+    LIMIT ${limit}
+  `;
+}
+
 async function queryAddresses({ state, polygon, limit }) {
   const addrSource = addressesPathForState(state);
   const { minX, minY, maxX, maxY } = bboxFromPolygon(polygon);
   const wkt = polygonToWKT(polygon);
+  const stateCode = (state || 'ON').toString().toUpperCase().slice(0, 2);
+  const bronzePath = `s3://${ADDRESSES_BUCKET}/master_addresses_parquet/state=${stateCode}/data_*.parquet`;
   
   // Expand bbox slightly to catch edge cases (buffer by ~0.001 degrees = ~100m)
   const buffer = 0.001;
@@ -524,13 +557,14 @@ async function queryAddresses({ state, polygon, limit }) {
   const bufferedMinY = minY - buffer;
   const bufferedMaxY = maxY + buffer;
   
-  let sql;
+  let primarySql;
+  let primaryLabel;
   
   if (addrSource.isCanadian) {
     // Canadian Silver tier data (CSV format from StatCan ODA)
     // Read as all VARCHAR to avoid auto-detect turning unit (e.g. "8A") into BIGINT; cast lon/lat for geometry.
-    const stateCode = (state || 'ON').toString().toUpperCase().slice(0, 2);
-    sql = `
+    primaryLabel = 'Canadian Silver';
+    primarySql = `
       WITH raw AS (
         SELECT * FROM read_csv_auto('${addrSource.path}', all_varchar=true, quote='"', ignore_errors=true)
       )
@@ -551,32 +585,67 @@ async function queryAddresses({ state, polygon, limit }) {
       LIMIT ${limit}
     `;
   } else {
-    // US data (Parquet format)
-    // Schema detection for parquet files
-    const descSql = `DESCRIBE SELECT * FROM read_parquet('${addrSource.path}') LIMIT 1;`;
-    const cols = await queryWithIam(descSql, REGION);
-    const names = new Set(cols.map(c => c.column_name));
-    
-    let latCol = "latitude", lonCol = "longitude";
-    if (names.has("lat") && names.has("lon")) {
-      latCol = "lat"; lonCol = "lon";
-    }
-    
-    sql = `
-      SELECT gers_id, formatted, house_number, street_name, unit, city, postal_code, state,
-             ${lonCol} as longitude, ${latCol} as latitude
-      FROM read_parquet('${addrSource.path}')
-      WHERE (${lonCol} BETWEEN ${bufferedMinX} AND ${bufferedMaxX}) 
-        AND (${latCol} BETWEEN ${bufferedMinY} AND ${bufferedMaxY})
-        AND ST_Intersects(ST_GeomFromText('${wkt}'), ST_Point(${lonCol}, ${latCol}))
-      LIMIT ${limit}
-    `;
+    // US/master data (Parquet format)
+    primaryLabel = 'US master';
+    primarySql = await buildParquetAddressQuery({
+      path: addrSource.path,
+      wkt,
+      bufferedMinX,
+      bufferedMaxX,
+      bufferedMinY,
+      bufferedMaxY,
+      limit
+    });
   }
   
-  console.log(`[addresses] Querying ${addrSource.isCanadian ? 'Canadian Silver' : 'US'} data with buffered bbox: [${bufferedMinX.toFixed(4)}, ${bufferedMinY.toFixed(4)}, ${bufferedMaxX.toFixed(4)}, ${bufferedMaxY.toFixed(4)}]`);
+  console.log(`[addresses] Querying ${primaryLabel} data with buffered bbox: [${bufferedMinX.toFixed(4)}, ${bufferedMinY.toFixed(4)}, ${bufferedMaxX.toFixed(4)}, ${bufferedMaxY.toFixed(4)}]`);
   
   const queryStart = Date.now();
-  const rows = await queryWithIam(sql, REGION);
+  let rows = [];
+  let warning;
+  let primaryMissing = false;
+  try {
+    rows = await queryWithIam(primarySql, REGION);
+  } catch (e) {
+    if (!isMissingAddressSourceError(e)) {
+      throw e;
+    }
+    primaryMissing = true;
+    console.warn(`[addresses] Primary address source missing for state=${stateCode}: ${addrSource.path}`);
+  }
+
+  // Bronze fallback for all regions: if primary source is missing OR returns zero rows.
+  const shouldTryBronzeFallback = (primaryMissing || rows.length === 0) && addrSource.path !== bronzePath;
+  if (shouldTryBronzeFallback) {
+    try {
+      console.log(`[addresses] Trying Bronze fallback: ${bronzePath}`);
+      const bronzeSql = await buildParquetAddressQuery({
+        path: bronzePath,
+        wkt,
+        bufferedMinX,
+        bufferedMaxX,
+        bufferedMinY,
+        bufferedMaxY,
+        limit
+      });
+      const bronzeRows = await queryWithIam(bronzeSql, REGION);
+      if (bronzeRows.length > 0) {
+        rows = bronzeRows;
+        warning = `Using Bronze fallback for region ${stateCode}`;
+        console.log(`[addresses] Bronze fallback returned ${bronzeRows.length} addresses`);
+      } else if (primaryMissing) {
+        warning = `No Silver/Bronze address file for region ${stateCode}`;
+      }
+    } catch (fallbackErr) {
+      if (!isMissingAddressSourceError(fallbackErr)) {
+        throw fallbackErr;
+      }
+      if (primaryMissing) {
+        warning = `No Silver/Bronze address file for region ${stateCode}`;
+      }
+      console.warn(`[addresses] Bronze fallback source missing for state=${stateCode}: ${bronzePath}`);
+    }
+  }
   const queryTime = Date.now() - queryStart;
   
   console.log(`[addresses] Found ${rows.length} addresses in ${queryTime}ms`);
@@ -600,6 +669,8 @@ async function queryAddresses({ state, polygon, limit }) {
         state: r.state
       }
     }))
+    ,
+    ...(warning ? { warning } : {})
   };
 }
 
@@ -664,6 +735,11 @@ exports.handler = async (event) => {
     const addresses = await queryAddresses({ state, polygon, limit: limitAddresses });
     
     console.log(`Results: buildings=${buildings.features.length}, addresses=${addresses.features.length}, roads=${roads?.features.length || 0}, divisions=${divisions?.features.length || 0}`);
+    const warnings = [];
+    if (addresses.warning) warnings.push(addresses.warning);
+    if (warnings.length > 0) {
+      console.warn(`[warning] ${warnings.join("; ")}`);
+    }
     
     // Write snapshots
     const baseKey = `${SNAPSHOT_PREFIX}/${campaignId}`;
@@ -721,6 +797,7 @@ exports.handler = async (event) => {
         bucket: SNAPSHOT_BUCKET,
         prefix: baseKey,
         counts: metadata.counts,
+        ...(warnings.length > 0 ? { warning: warnings.join("; ") } : {}),
         s3_keys: {
           buildings: writes.buildings.key,
           addresses: writes.addresses.key,

@@ -23,11 +23,48 @@ export interface GoldAddressResult {
 
 export class GoldAddressService {
   /**
+   * Handles mixed DB states where either 1-arg or 2-arg RPC signatures may exist.
+   */
+  private static async queryGoldAddresses(
+    supabase: ReturnType<typeof createAdminClient>,
+    polygonGeoJSON: string,
+    province?: string
+  ) {
+    const normalizedProvince = province?.toUpperCase();
+
+    if (normalizedProvince) {
+      const twoArgResult = await supabase.rpc(
+        'get_gold_addresses_in_polygon_geojson',
+        { p_polygon_geojson: polygonGeoJSON, p_province: normalizedProvince }
+      );
+
+      if (!twoArgResult.error) {
+        return twoArgResult;
+      }
+
+      const errorMessage = twoArgResult.error.message || '';
+      const twoArgMissing =
+        errorMessage.includes('Could not find the function public.get_gold_addresses_in_polygon_geojson') &&
+        errorMessage.includes('p_province');
+
+      if (!twoArgMissing) {
+        return twoArgResult;
+      }
+    }
+
+    return supabase.rpc(
+      'get_gold_addresses_in_polygon_geojson',
+      { p_polygon_geojson: polygonGeoJSON }
+    );
+  }
+
+  /**
    * Fetch addresses from Gold Standard database
    * Returns addresses with geom as GeoJSON string for easy insertion
    */
   static async fetchAddressesInPolygon(
-    polygon: GeoJSON.Polygon
+    polygon: GeoJSON.Polygon,
+    province?: string
   ): Promise<any[]> {
     const supabase = createAdminClient();
     const polygonGeoJSON = JSON.stringify(polygon);
@@ -35,9 +72,10 @@ export class GoldAddressService {
     console.log('[GoldAddressService] Querying Gold Standard addresses...');
     
     // Query addresses with geom as GeoJSON string
-    const { data: goldAddresses, error } = await supabase.rpc(
-      'get_gold_addresses_in_polygon_geojson',
-      { p_polygon_geojson: polygonGeoJSON }
+    const { data: goldAddresses, error } = await this.queryGoldAddresses(
+      supabase,
+      polygonGeoJSON,
+      province
     );
     
     if (error) {
@@ -70,9 +108,10 @@ export class GoldAddressService {
     // =============================================================================
     console.log('[GoldAddressService] Querying Gold Standard table...');
     
-    const { data: goldAddresses, error: goldError } = await supabase.rpc(
-      'get_gold_addresses_in_polygon_geojson',
-      { p_polygon_geojson: polygonGeoJSON }
+    const { data: goldAddresses, error: goldError } = await this.queryGoldAddresses(
+      supabase,
+      polygonGeoJSON,
+      regionCode
     );
     
     if (goldError) {

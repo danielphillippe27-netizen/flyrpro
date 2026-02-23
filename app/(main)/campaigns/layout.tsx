@@ -1,11 +1,48 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { CampaignListSidebar } from '@/components/campaigns/CampaignListSidebar';
+import { CampaignsPageHeader } from '@/components/campaigns/CampaignsPageHeader';
+import { CampaignsService } from '@/lib/services/CampaignsService';
 
 const CAMPAIGN_SIDEBAR_COLLAPSED_KEY = 'flyr-campaign-sidebar-collapsed';
 const SIDEBAR_WIDTH = 280;
+
+function useCampaignHeaderTitle() {
+  const pathname = usePathname();
+  const [campaignName, setCampaignName] = useState<string | null>(null);
+
+  const campaignId = (() => {
+    if (!pathname?.startsWith('/campaigns/')) return null;
+    const rest = pathname.slice('/campaigns/'.length);
+    const segment = rest.split('/')[0];
+    return segment && segment !== 'create' ? segment : null;
+  })();
+
+  useEffect(() => {
+    if (!campaignId) {
+      setCampaignName(null);
+      return;
+    }
+    let cancelled = false;
+    CampaignsService.fetchCampaign(campaignId)
+      .then((c) => {
+        if (!cancelled && c) setCampaignName(c.name || 'Unnamed Campaign');
+      })
+      .catch(() => {
+        if (!cancelled) setCampaignName(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [campaignId]);
+
+  if (pathname === '/campaigns/create') return 'New Campaign';
+  if (campaignId && campaignName) return campaignName;
+  if (campaignId) return 'Campaign';
+  return 'Campaigns';
+}
 
 export default function CampaignsLayout({
   children,
@@ -14,6 +51,7 @@ export default function CampaignsLayout({
 }) {
   const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
+  const headerTitle = useCampaignHeaderTitle();
 
   useEffect(() => {
     try {
@@ -37,8 +75,11 @@ export default function CampaignsLayout({
         onToggleCollapse={() => setCollapsedPersisted(!collapsed)}
         width={SIDEBAR_WIDTH}
       />
-      <div className="flex-1 min-w-0 overflow-auto bg-background">
-        {children}
+      <div className="flex-1 min-w-0 flex flex-col overflow-hidden bg-background">
+        <CampaignsPageHeader title={headerTitle} />
+        <div className="flex-1 min-h-0 overflow-auto">
+          {children}
+        </div>
       </div>
     </div>
   );

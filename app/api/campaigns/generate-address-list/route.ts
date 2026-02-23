@@ -5,6 +5,7 @@ import { GoldAddressService } from '@/lib/services/GoldAddressService';
 import { MapService } from '@/lib/services/MapService';
 import { mapOvertureToCanonical } from '@/lib/geo/overtureToCanonical';
 import type { CanonicalCampaignAddress } from '@/lib/geo/types';
+import { resolveCampaignRegion } from '@/lib/geo/regionResolver';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -119,7 +120,7 @@ export async function POST(request: NextRequest) {
 
     const { data: campaign, error: campaignError } = await supabaseAdmin
       .from('campaigns')
-      .select('owner_id, region')
+      .select('owner_id, region, territory_boundary, bbox')
       .eq('id', campaign_id)
       .single();
 
@@ -140,7 +141,30 @@ export async function POST(request: NextRequest) {
 
     console.log('[generate-address-list] Campaign found:', campaign_id);
 
-    const regionCode = (campaign.region || 'ON').toUpperCase();
+    const regionResolution = await resolveCampaignRegion({
+      currentRegion: campaign.region,
+      polygon: polygon ?? campaign.territory_boundary,
+      bbox: campaign.bbox,
+    });
+    const regionCode = regionResolution.regionCode;
+
+    if (regionResolution.shouldPersist) {
+      const { error: regionUpdateError } = await supabaseAdmin
+        .from('campaigns')
+        .update({ region: regionCode })
+        .eq('id', campaign_id);
+
+      if (regionUpdateError) {
+        console.warn('[generate-address-list] Failed to persist inferred campaign region:', regionUpdateError.message);
+      } else {
+        console.log('[generate-address-list] Updated campaign region:', {
+          region: regionCode,
+          source: regionResolution.source,
+          reason: regionResolution.reason,
+        });
+      }
+    }
+
     let addressFeatures: AddressFeature[] = [];
     let source = 'lambda';
 
@@ -151,7 +175,10 @@ export async function POST(request: NextRequest) {
       console.log('[generate-address-list] Polygon mode: Checking Gold Standard first...');
       
       try {
-        const goldAddresses = await GoldAddressService.fetchAddressesInPolygon(polygon as GeoJSON.Polygon);
+        const goldAddresses = await GoldAddressService.fetchAddressesInPolygon(
+          polygon as GeoJSON.Polygon,
+          regionCode
+        );
         
         if (goldAddresses && goldAddresses.length > 0) {
           console.log(`[generate-address-list] Found ${goldAddresses.length} Gold addresses. Skipping Lambda.`);

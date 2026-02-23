@@ -8,6 +8,7 @@ import { TownhouseSplitterService } from '@/lib/services/TownhouseSplitterServic
 import { GoldAddressService } from '@/lib/services/GoldAddressService';
 import { BuildingAdapter } from '@/lib/services/BuildingAdapter';
 import { AddressAdapter } from '@/lib/services/AddressAdapter';
+import { resolveCampaignRegion } from '@/lib/geo/regionResolver';
 
 // FIX: Ensure Node.js runtime
 export const runtime = 'nodejs';
@@ -81,7 +82,7 @@ export async function POST(request: NextRequest) {
     // Get campaign with territory boundary
     const { data: campaign, error: campaignError } = await supabase
       .from('campaigns')
-      .select('owner_id, territory_boundary, region')
+      .select('owner_id, territory_boundary, region, bbox')
       .eq('id', campaign_id)
       .single();
 
@@ -101,8 +102,28 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Determine region code (ON for Ontario, etc.)
-    const regionCode = (campaign.region || 'ON').toUpperCase();
+    const regionResolution = await resolveCampaignRegion({
+      currentRegion: campaign.region,
+      polygon,
+      bbox: campaign.bbox,
+    });
+    const regionCode = regionResolution.regionCode;
+
+    if (regionResolution.shouldPersist) {
+      const { error: regionUpdateError } = await supabase
+        .from('campaigns')
+        .update({ region: regionCode })
+        .eq('id', campaign_id);
+      if (regionUpdateError) {
+        console.warn('[Provision] Failed to persist inferred region:', regionUpdateError.message);
+      } else {
+        console.log('[Provision] Updated campaign region:', {
+          region: regionCode,
+          source: regionResolution.source,
+          reason: regionResolution.reason,
+        });
+      }
+    }
     
     console.log('[Provision] Campaign:', campaign_id);
     console.log('[Provision] Region:', regionCode);
@@ -471,40 +492,164 @@ export async function POST(request: NextRequest) {
       
       try {
         if (goldBuildings && goldBuildings.length > 0) {
-          // Use fast SQL-based linker for Gold data (O(log n) with spatial index)
-          console.log('[Provision] Using SQL-based Gold linker with polygon filter...');
-          // Pass polygon as raw object — the JSONB parameter needs a JSON object,
-          // not a JSON.stringify'd string (which PostgREST would double-serialize)
-          const { data: linkResult, error: linkError } = await supabase
-            .rpc('link_campaign_addresses_gold', { 
-              p_campaign_id: campaign_id,
-              p_polygon_geojson: polygon
-            });
-          
-          if (linkError) {
-            console.error('[Provision] Gold linker failed:', linkError.message);
-          } else {
-            const exact = linkResult?.[0]?.exact_matches || 0;
-            const proximity = linkResult?.[0]?.proximity_matches || 0;
-            const total = linkResult?.[0]?.total_linked || 0;
-            
-            console.log(`[Provision] Gold linker complete: ${exact} exact, ${proximity} proximity, ${total} total`);
-            
-            spatialJoinSummary = {
-              matched: Number(total),
-              orphans: insertedCount - Number(total),
-              suspect: 0,
-              avgConfidence: total > 0 ? (exact * 1.0 + proximity * 0.8) / total : 0,
-              coveragePercent: insertedCount > 0 ? (Number(total) / insertedCount) * 100 : 0,
-              matchBreakdown: {
-                containmentVerified: Number(exact),
-                containmentSuspect: 0,
-                pointOnSurface: 0,
-                proximityVerified: Number(proximity),
-                proximityFallback: 0,
-              },
+          // Use SQL-based linker for Gold data, but tolerate mixed DB states
+          // (two-arg linker, legacy one-arg linker, or consolidated linker).
+          console.log('[Provision] Using SQL-based Gold linker with compatibility fallbacks...');
+
+          const toNumber = (value: unknown): number => {
+            const num = Number(value);
+            return Number.isFinite(num) ? num : 0;
+          };
+
+          const parseLinkCounts = (data: unknown) => {
+            const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | null | undefined;
+            if (!row || typeof row !== 'object') return null;
+
+            const exact = toNumber(row.exact_matches ?? row.gold_exact);
+            const proximity = toNumber(row.proximity_matches ?? row.gold_prox);
+            const silverExact = toNumber(row.silver_exact);
+            const silverProximity = toNumber(row.silver_prox);
+            const total = toNumber(
+              row.total_linked ?? (exact + proximity + silverExact + silverProximity)
+            );
+
+            return { exact, proximity, silverExact, silverProximity, total };
+          };
+
+          const getPersistedLinkTotals = async () => {
+            const [{ count: goldLinked, error: goldCountError }, { count: silverLinked, error: silverCountError }] =
+              await Promise.all([
+                supabase
+                  .from('campaign_addresses')
+                  .select('*', { count: 'exact', head: true })
+                  .eq('campaign_id', campaign_id)
+                  .not('building_id', 'is', null),
+                supabase
+                  .from('building_address_links')
+                  .select('*', { count: 'exact', head: true })
+                  .eq('campaign_id', campaign_id),
+              ]);
+
+            if (goldCountError) {
+              console.warn('[Provision] Failed to count Gold links:', goldCountError.message);
+            }
+            if (silverCountError) {
+              console.warn('[Provision] Failed to count Silver links:', silverCountError.message);
+            }
+
+            return {
+              goldLinked: toNumber(goldLinked),
+              silverLinked: toNumber(silverLinked),
+              total: toNumber(goldLinked) + toNumber(silverLinked),
             };
+          };
+
+          let exact = 0;
+          let proximity = 0;
+          let silverExact = 0;
+          let silverProximity = 0;
+          let total = 0;
+          let linkerMethod: 'gold_two_arg' | 'gold_one_arg' | 'all' | 'none' = 'none';
+
+          // 1) Preferred: two-arg Gold linker (campaign_id + polygon)
+          const { data: linkResultTwoArg, error: linkErrorTwoArg } = await supabase.rpc(
+            'link_campaign_addresses_gold',
+            {
+              p_campaign_id: campaign_id,
+              p_polygon_geojson: polygon,
+            }
+          );
+
+          if (!linkErrorTwoArg) {
+            const parsed = parseLinkCounts(linkResultTwoArg);
+            if (parsed) {
+              exact = parsed.exact;
+              proximity = parsed.proximity;
+              silverExact = parsed.silverExact;
+              silverProximity = parsed.silverProximity;
+              total = parsed.total;
+            }
+            linkerMethod = 'gold_two_arg';
+          } else {
+            console.warn('[Provision] Two-arg Gold linker unavailable/failed:', linkErrorTwoArg.message);
           }
+
+          // 2) Compatibility fallback: legacy one-arg Gold linker
+          if (linkErrorTwoArg) {
+            const { data: linkResultOneArg, error: linkErrorOneArg } = await supabase.rpc(
+              'link_campaign_addresses_gold',
+              { p_campaign_id: campaign_id }
+            );
+
+            if (!linkErrorOneArg) {
+              const parsed = parseLinkCounts(linkResultOneArg);
+              if (parsed) {
+                exact = parsed.exact;
+                proximity = parsed.proximity;
+                silverExact = parsed.silverExact;
+                silverProximity = parsed.silverProximity;
+                total = parsed.total;
+              }
+              linkerMethod = 'gold_one_arg';
+            } else {
+              console.warn('[Provision] One-arg Gold linker unavailable/failed:', linkErrorOneArg.message);
+            }
+          }
+
+          // 3) If still no links, use consolidated linker (Gold + Silver fallback)
+          if (total === 0) {
+            const { data: linkResultAll, error: linkErrorAll } = await supabase.rpc(
+              'link_campaign_addresses_all',
+              { p_campaign_id: campaign_id }
+            );
+
+            if (!linkErrorAll) {
+              const parsed = parseLinkCounts(linkResultAll);
+              if (parsed) {
+                exact = parsed.exact;
+                proximity = parsed.proximity;
+                silverExact = parsed.silverExact;
+                silverProximity = parsed.silverProximity;
+                total = parsed.total;
+              }
+              linkerMethod = 'all';
+            } else {
+              console.warn('[Provision] Consolidated linker unavailable/failed:', linkErrorAll.message);
+            }
+          }
+
+          // Some linker variants return void; trust persisted link counts when RPC rows are empty.
+          if (total === 0) {
+            const persisted = await getPersistedLinkTotals();
+            total = persisted.total;
+            if (exact + proximity + silverExact + silverProximity === 0) {
+              exact = persisted.goldLinked;
+              silverExact = persisted.silverLinked;
+            }
+          }
+
+          console.log(
+            `[Provision] SQL linker complete [${linkerMethod}]: ` +
+              `${exact} gold exact, ${proximity} gold proximity, ` +
+              `${silverExact} silver exact, ${silverProximity} silver proximity, ${total} total`
+          );
+
+          spatialJoinSummary = {
+            matched: Number(total),
+            orphans: Math.max(insertedCount - Number(total), 0),
+            suspect: 0,
+            avgConfidence: total > 0
+              ? (exact * 1.0 + proximity * 0.8 + silverExact * 1.0 + silverProximity * 0.8) / total
+              : 0,
+            coveragePercent: insertedCount > 0 ? (Number(total) / insertedCount) * 100 : 0,
+            matchBreakdown: {
+              containmentVerified: Number(exact + silverExact),
+              containmentSuspect: 0,
+              pointOnSurface: 0,
+              proximityVerified: Number(proximity + silverProximity),
+              proximityFallback: 0,
+            },
+          };
         } else {
           // Use JavaScript linker for Silver/Lambda data
           console.log('[Provision] Using JavaScript linker for Silver data...');
