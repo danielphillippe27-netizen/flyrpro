@@ -91,7 +91,6 @@ export function CampaignDetailMapView({
   const [mapViewMode, setMapViewMode] = useState<'buildings' | 'addresses'>('buildings');
   // Boundary: Snap to Roads and Raw vs Snapped toggle
   const [snapping, setSnapping] = useState(false);
-  const [showRawBoundary, setShowRawBoundary] = useState(false);
   // Parcels layer toggle
   const [parcels, setParcels] = useState<CampaignParcel[]>([]);
   const [showParcels, setShowParcels] = useState(false);
@@ -751,14 +750,14 @@ export function CampaignDetailMapView({
   const hasMapBoundary = campaign?.address_source === 'map' && campaign?.territory_boundary;
   const hasRawAndSnapped = !!(campaign?.campaign_polygon_raw && campaign?.campaign_polygon_snapped);
 
-  // Raw vs Snapped toggle: update line opacity when showRawBoundary changes
+  // Boundary line opacity: snapped emphasized (raw dimmed)
   useEffect(() => {
     const m = map.current;
     if (!m || !mapLoaded || !hasRawAndSnapped) return;
     if (!safeGetLayer(m, BOUNDARY_LAYER_RAW_LINE) || !safeGetLayer(m, BOUNDARY_LAYER_SNAPPED_LINE)) return;
-    m.setPaintProperty(BOUNDARY_LAYER_RAW_LINE, 'line-opacity', showRawBoundary ? 1 : 0.3);
-    m.setPaintProperty(BOUNDARY_LAYER_SNAPPED_LINE, 'line-opacity', showRawBoundary ? 0.25 : 1);
-  }, [mapLoaded, showRawBoundary, hasRawAndSnapped]);
+    m.setPaintProperty(BOUNDARY_LAYER_RAW_LINE, 'line-opacity', 0.3);
+    m.setPaintProperty(BOUNDARY_LAYER_SNAPPED_LINE, 'line-opacity', 1);
+  }, [mapLoaded, hasRawAndSnapped]);
 
   // Parcels layer: show/hide when toggle changes
   useEffect(() => {
@@ -888,17 +887,6 @@ export function CampaignDetailMapView({
                 Addresses
               </button>
             </div>
-            {hasMapBoundary && hasRawAndSnapped && (
-              <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 bg-white/90 dark:bg-black/80 backdrop-blur-sm shadow-sm overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => setShowRawBoundary((v) => !v)}
-                  className="px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
-                >
-                  {showRawBoundary ? 'Snapped' : 'Raw'}
-                </button>
-              </div>
-            )}
             {/* Parcels toggle - only show if parcels exist for this campaign */}
             {parcels.length > 0 && (
               <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 bg-white/90 dark:bg-black/80 backdrop-blur-sm shadow-sm overflow-hidden">

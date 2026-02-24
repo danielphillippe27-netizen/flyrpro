@@ -5,6 +5,7 @@ import Stripe from 'stripe';
 import {
   resolveUserIdFromSession,
   applyStripeSubscriptionUpdate,
+  updateWorkspaceSubscriptionForUser,
 } from '@/app/lib/billing/stripe-subscription-sync';
 
 const secret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -31,6 +32,11 @@ async function setStripeInactive(
       updated_at: new Date().toISOString(),
     })
     .eq('user_id', row.user_id);
+
+  await updateWorkspaceSubscriptionForUser(supabase, row.user_id, {
+    status: 'inactive',
+    trialEndsAt: null,
+  });
 }
 
 export async function POST(request: NextRequest) {

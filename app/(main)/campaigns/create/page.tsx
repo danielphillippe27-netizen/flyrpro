@@ -5,8 +5,6 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import type { CampaignType } from '@/types/database';
 import { createClient } from '@/lib/supabase/client';
 import { useTheme } from '@/lib/theme-provider';
 import { useWorkspace } from '@/lib/workspace-context';
@@ -34,7 +32,6 @@ export default function CreateCampaignPage() {
   const { theme } = useTheme();
   const { currentWorkspaceId } = useWorkspace();
   const [name, setName] = useState('');
-  const [type, setType] = useState<CampaignType>('flyer');
   const [loading, setLoading] = useState(false);
   const [provisioning, setProvisioning] = useState(false);
   const [provisionProgress, setProvisionProgress] = useState<string>('');
@@ -48,7 +45,6 @@ export default function CreateCampaignPage() {
   const [snappingBoundary, setSnappingBoundary] = useState(false);
   const [boundaryRaw, setBoundaryRaw] = useState<{ type: 'Polygon'; coordinates: number[][][] } | null>(null);
   const [boundarySnapped, setBoundarySnapped] = useState<{ type: 'Polygon'; coordinates: number[][][] } | null>(null);
-  const [showRawBoundary, setShowRawBoundary] = useState(false); // trust toggle: true = emphasize raw
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const drawRef = useRef<MapboxDraw | null>(null);
@@ -524,26 +520,16 @@ export default function CreateCampaignPage() {
     requestAnimationFrame(tick);
   };
 
-  /** Update boundary layer visibility for Raw vs Snapped toggle */
-  const updateBoundaryToggle = () => {
+  /** Set boundary layer opacity (snapped emphasized by default) */
+  useEffect(() => {
     const m = map.current;
     if (!m || !boundaryRaw || !boundarySnapped || !m.isStyleLoaded()) return;
     const rawLineId = 'campaign-boundary-raw-line';
     const snappedLineId = 'campaign-boundary-snapped-line';
     if (!safeGetLayer(m, rawLineId) || !safeGetLayer(m, snappedLineId)) return;
-    if (showRawBoundary) {
-      m.setPaintProperty(rawLineId, 'line-opacity', 1);
-      m.setPaintProperty(snappedLineId, 'line-opacity', 0.25);
-    } else {
-      m.setPaintProperty(rawLineId, 'line-opacity', 0.3);
-      m.setPaintProperty(snappedLineId, 'line-opacity', 1);
-    }
-  };
-
-  useEffect(() => {
-    if (!boundaryRaw || !boundarySnapped) return;
-    updateBoundaryToggle();
-  }, [showRawBoundary, boundaryRaw, boundarySnapped]);
+    m.setPaintProperty(rawLineId, 'line-opacity', 0.3);
+    m.setPaintProperty(snappedLineId, 'line-opacity', 1);
+  }, [boundaryRaw, boundarySnapped]);
 
   const handleSubmit = async (e?: React.FormEvent | React.MouseEvent) => {
     e?.preventDefault();
@@ -602,7 +588,7 @@ export default function CreateCampaignPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name,
-          type,
+          type: 'flyer',
           address_source: 'map',
           workspace_id: currentWorkspaceId ?? undefined,
           bbox,
@@ -744,7 +730,7 @@ export default function CreateCampaignPage() {
       <div className="flex-shrink-0 bg-white dark:bg-card border-b border-border px-4 py-3">
         <div className="flex items-center gap-4 flex-wrap">
           {/* Campaign Name */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-1 min-w-48">
             <Label htmlFor="name" className="text-sm font-medium text-foreground whitespace-nowrap">Name</Label>
             <Input
               id="name"
@@ -752,27 +738,8 @@ export default function CreateCampaignPage() {
               onChange={(e) => setName(e.target.value)}
               required
               placeholder="Campaign Name"
-              className="w-48 bg-gray-200 dark:bg-neutral-600"
+              className="flex-1 min-w-0 bg-gray-200 dark:bg-neutral-600"
             />
-          </div>
-
-          {/* Campaign Type */}
-          <div className="flex items-center gap-2">
-            <Label className="text-sm font-medium text-foreground whitespace-nowrap">Type</Label>
-            <Select value={type} onValueChange={(v) => setType(v as CampaignType)}>
-              <SelectTrigger className={`w-32 bg-gray-200 dark:bg-neutral-600 ${type === 'flyer' ? 'text-red-500' : ''}`}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="flyer" className="text-red-500">Flyer</SelectItem>
-                <SelectItem value="door_knock">Door Knock</SelectItem>
-                <SelectItem value="event">Event</SelectItem>
-                <SelectItem value="survey">Survey</SelectItem>
-                <SelectItem value="gift">Gift</SelectItem>
-                <SelectItem value="pop_by">Pop By</SelectItem>
-                <SelectItem value="open_house">Open House</SelectItem>
-              </SelectContent>
-            </Select>
           </div>
 
           {/* Address Search */}
@@ -879,16 +846,6 @@ export default function CreateCampaignPage() {
               <span>Clear</span>
             </button>
 
-            {/* Trust toggle: Raw vs Snapped (when both boundaries exist after snap) */}
-            {boundaryRaw && boundarySnapped && (
-              <button
-                type="button"
-                onClick={() => setShowRawBoundary((v) => !v)}
-                className="flex items-center gap-2 px-4 py-2.5 bg-card rounded-lg shadow-lg hover:shadow-xl hover:bg-muted/50 transition-all duration-200 text-sm font-medium text-foreground border border-border"
-              >
-                <span>{showRawBoundary ? 'Snapped' : 'Raw'}</span>
-              </button>
-            )}
           </div>
         )}
 

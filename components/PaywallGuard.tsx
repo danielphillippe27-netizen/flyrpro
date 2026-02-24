@@ -22,16 +22,19 @@ export function PaywallGuard({ open, onClose }: PaywallGuardProps) {
   const handleUpgrade = async () => {
     setLoading(true);
     try {
-      const response = await fetch('/api/stripe/checkout', {
+      const response = await fetch('/api/billing/stripe/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ priceId: 'price_pro_monthly' }),
+        credentials: 'include',
+        body: JSON.stringify({ plan: 'monthly', currency: 'USD' }),
       });
 
-      const { url } = await response.json();
-      if (url) {
-        window.location.href = url;
+      const data = await response.json().catch(() => ({}));
+      if (response.ok && data.url) {
+        window.location.href = data.url;
+        return;
       }
+      throw new Error(data?.error || 'Failed to create checkout session');
     } catch (error) {
       console.error('Error creating checkout:', error);
       alert('Failed to create checkout session');
@@ -81,4 +84,3 @@ export function PaywallGuard({ open, onClose }: PaywallGuardProps) {
     </Dialog>
   );
 }
-

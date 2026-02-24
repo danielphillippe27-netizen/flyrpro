@@ -2,8 +2,68 @@ import { createClient } from '@/lib/supabase/client';
 import type { Contact, ContactActivity } from '@/types/database';
 import type { CreateContactPayload } from '@/types/contacts';
 
+type LegacyFieldLead = {
+  id: string;
+  user_id: string | null;
+  workspace_id?: string | null;
+  full_name?: string | null;
+  name?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  campaign_id?: string | null;
+  status?: string | null;
+  notes?: string | null;
+  tags?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
 export class ContactsService {
   private static client = createClient();
+
+  private static normalizeLegacyStatus(status?: string | null): Contact['status'] {
+    const normalized = (status ?? '').trim().toLowerCase();
+    if (!normalized) return 'new';
+    if (normalized === 'new' || normalized === 'hot' || normalized === 'warm' || normalized === 'cold') {
+      return normalized;
+    }
+    if (['interested', 'appointment', 'talked', 'converted'].includes(normalized)) return 'hot';
+    if (['delivered', 'contacted', 'follow_up', 'follow-up'].includes(normalized)) return 'warm';
+    if (['not_interested', 'uninterested', 'dnc', 'do_not_knock', 'do-not-knock'].includes(normalized)) {
+      return 'cold';
+    }
+    return 'new';
+  }
+
+  private static mapLegacyFieldLead(row: LegacyFieldLead): Contact {
+    const nowIso = new Date().toISOString();
+    const fullName = (row.full_name ?? row.name ?? '').trim() || 'Lead';
+    return {
+      id: row.id,
+      user_id: row.user_id ?? '',
+      full_name: fullName,
+      phone: row.phone ?? undefined,
+      email: row.email ?? undefined,
+      address: (row.address ?? '').trim(),
+      campaign_id: row.campaign_id ?? undefined,
+      status: this.normalizeLegacyStatus(row.status),
+      notes: row.notes ?? undefined,
+      tags: row.tags ?? undefined,
+      created_at: row.created_at ?? nowIso,
+      updated_at: row.updated_at ?? row.created_at ?? nowIso,
+    };
+  }
+
+  private static contactSignature(contact: Contact): string {
+    return [
+      contact.full_name.trim().toLowerCase(),
+      (contact.phone ?? '').trim(),
+      (contact.email ?? '').trim().toLowerCase(),
+      (contact.address ?? '').trim().toLowerCase(),
+      (contact.campaign_id ?? '').trim(),
+    ].join('|');
+  }
 
   static async fetchContacts(userId: string, workspaceId?: string | null, filters?: {
     status?: string;
@@ -33,7 +93,53 @@ export class ContactsService {
     const { data, error } = await query.order('created_at', { ascending: false });
 
     if (error) throw error;
-    return data || [];
+    const contacts = data || [];
+
+    // iOS compatibility: if legacy field_leads still receives writes, merge it so Leads remains populated.
+    try {
+      let legacyQuery = this.client.from('field_leads').select('*');
+
+      if (workspaceId) {
+        legacyQuery = legacyQuery.eq('workspace_id', workspaceId);
+      } else {
+        legacyQuery = legacyQuery.eq('user_id', userId);
+      }
+
+      if (filters?.campaignId) {
+        legacyQuery = legacyQuery.eq('campaign_id', filters.campaignId);
+      }
+
+      const { data: legacyData, error: legacyError } = await legacyQuery.order('created_at', {
+        ascending: false,
+      });
+
+      if (legacyError || !legacyData || legacyData.length === 0) {
+        return contacts;
+      }
+
+      const mappedLegacy = (legacyData as LegacyFieldLead[])
+        .map((row) => this.mapLegacyFieldLead(row))
+        .filter((row) => (filters?.status ? row.status === filters.status : true));
+
+      if (mappedLegacy.length === 0) {
+        return contacts;
+      }
+
+      const merged: Contact[] = [...contacts];
+      const seenSignatures = new Set(contacts.map((row) => this.contactSignature(row)));
+
+      for (const legacy of mappedLegacy) {
+        const signature = this.contactSignature(legacy);
+        if (seenSignatures.has(signature)) continue;
+        seenSignatures.add(signature);
+        merged.push(legacy);
+      }
+
+      return merged;
+    } catch {
+      // Ignore legacy fallback errors (table may not exist in all environments).
+      return contacts;
+    }
   }
 
   static async fetchContact(id: string): Promise<Contact | null> {
@@ -202,4 +308,3 @@ export class ContactsService {
     return contact;
   }
 }
-

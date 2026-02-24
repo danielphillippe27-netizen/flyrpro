@@ -5,24 +5,24 @@ interface StatsHeaderProps {
 }
 
 export function StatsHeader({ stats }: StatsHeaderProps) {
-  const { addresses, contacts, contacted, visited, scan_rate } = stats;
+  const { addresses, contacts, visited, scan_rate } = stats;
 
   const visitPct = addresses > 0 ? Math.round((visited / addresses) * 100) : 0;
 
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-      {/* Card 1: Total Leads (contact count; 0 until user adds contacts) */}
+      {/* Card 1: Total homes */}
       <div className="bg-card text-card-foreground p-6 rounded-2xl border border-border">
-        <div className="text-sm text-muted-foreground mb-1">Total Leads</div>
-        <div className="text-3xl font-bold">{contacts ?? 0}</div>
-        <div className="text-xs text-muted-foreground mt-1">contacts in campaign</div>
+        <div className="text-sm text-muted-foreground mb-1">Total homes</div>
+        <div className="text-3xl font-bold">{addresses ?? 0}</div>
+        <div className="text-xs text-muted-foreground mt-1">addresses in campaign</div>
       </div>
 
-      {/* Card 2: Contacted */}
+      {/* Card 2: Leads */}
       <div className="bg-card text-card-foreground p-6 rounded-2xl border border-border">
-        <div className="text-sm text-muted-foreground mb-1">Contacted</div>
-        <div className="text-3xl font-bold">{contacted}</div>
-        <div className="text-xs text-muted-foreground mt-1">leads reached</div>
+        <div className="text-sm text-muted-foreground mb-1">Leads</div>
+        <div className="text-3xl font-bold">{contacts ?? 0}</div>
+        <div className="text-xs text-muted-foreground mt-1">contacts in campaign</div>
       </div>
 
       {/* Card 3: Visited */}

@@ -6,6 +6,7 @@ import { getAppleTransactionStatus } from '@/app/lib/billing/apple-server';
 import {
   isAllowedAppleProductId,
 } from '@/app/lib/billing/apple-products';
+import { updateWorkspaceSubscriptionForUser } from '@/app/lib/billing/stripe-subscription-sync';
 
 const SUPABASE_URL =
   process.env.SUPABASE_URL ||
@@ -100,32 +101,27 @@ export async function POST(request: NextRequest) {
       current_period_end: result.expiresAt,
     });
 
-    if (Object.keys(update).length === 0) {
-      return NextResponse.json({
-        ok: true,
-        entitlement: {
-          plan: existing.plan,
-          is_active: existing.is_active,
-          source: existing.source,
-          current_period_end: existing.current_period_end,
-        },
-      });
+    const admin = createAdminClient();
+    if (Object.keys(update).length > 0) {
+      await admin
+        .from('entitlements')
+        .upsert(
+          {
+            user_id: user.id,
+            plan: update.plan ?? existing.plan,
+            is_active: update.is_active ?? existing.is_active,
+            source: update.source ?? existing.source,
+            current_period_end: update.current_period_end ?? existing.current_period_end,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'user_id' }
+        );
     }
 
-    const admin = createAdminClient();
-    await admin
-      .from('entitlements')
-      .upsert(
-        {
-          user_id: user.id,
-          plan: update.plan ?? existing.plan,
-          is_active: update.is_active ?? existing.is_active,
-          source: update.source ?? existing.source,
-          current_period_end: update.current_period_end ?? existing.current_period_end,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'user_id' }
-      );
+    await updateWorkspaceSubscriptionForUser(admin, user.id, {
+      status: result.isActive ? 'active' : 'inactive',
+      trialEndsAt: null,
+    });
 
     const final = await getEntitlementForUser(user.id);
     return NextResponse.json({

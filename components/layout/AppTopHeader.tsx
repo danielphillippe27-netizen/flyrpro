@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import Image from 'next/image';
-import { MessageCircleQuestion, Moon, Sun } from 'lucide-react';
+import { MessageCircleQuestion, Moon, Sun, Maximize2, Minimize2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { useTheme } from '@/lib/theme-provider';
+import { useFullscreen } from '@/lib/hooks/useFullscreen';
 import { useWorkspace } from '@/lib/workspace-context';
 import { getClientAsync } from '@/lib/supabase/client';
 import { ProfileEditDialog } from '@/components/profile/ProfileEditDialog';
@@ -34,6 +35,7 @@ function initialsFromName(nameOrEmail: string | null): string {
 
 export default function AppTopHeader() {
   const { theme, toggleTheme } = useTheme();
+  const { isFullscreen, toggle: toggleFullscreen } = useFullscreen();
   const { currentWorkspace, membershipsByWorkspaceId, refreshWorkspaces } = useWorkspace();
   const [profile, setProfile] = useState<UserProfileLite>({
     email: null,
@@ -248,6 +250,20 @@ export default function AppTopHeader() {
             >
               <MessageCircleQuestion className="h-4 w-4" />
               Feedback ?
+            </Button>
+
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={toggleFullscreen}
+              aria-label={isFullscreen ? 'Exit full screen' : 'Full screen'}
+              title={isFullscreen ? 'Exit full screen' : 'Full screen'}
+            >
+              {isFullscreen ? (
+                <Minimize2 className="h-4 w-4" />
+              ) : (
+                <Maximize2 className="h-4 w-4" />
+              )}
             </Button>
 
             <Button

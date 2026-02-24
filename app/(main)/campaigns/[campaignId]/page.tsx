@@ -724,6 +724,7 @@ export default function CampaignDetailPage() {
         <Tabs defaultValue="map" className="w-full">
           <TabsList>
             <TabsTrigger value="map">Map</TabsTrigger>
+            <TabsTrigger value="activity">Activity</TabsTrigger>
             <TabsTrigger value="addresses">Addresses</TabsTrigger>
             <TabsTrigger value="contacts">Contacts</TabsTrigger>
             <TabsTrigger value="qr">QR Codes</TabsTrigger>
@@ -734,6 +735,23 @@ export default function CampaignDetailPage() {
           <TabsContent value="map" className="mt-4 space-y-4">
             <div className="bg-card rounded-xl border border-border overflow-hidden" style={{ height: '560px' }}>
               <CampaignDetailMapView campaignId={campaignId} addresses={addresses} campaign={campaign} onSnapComplete={loadData} />
+            </div>
+          </TabsContent>
+
+          <TabsContent value="activity" className="mt-4">
+            <div className="bg-card p-4 rounded-xl border border-border">
+              <h2 className="text-sm font-semibold text-foreground mb-3">Campaign activity</h2>
+              <p className="text-sm text-muted-foreground">
+                Sessions, knocks, follow-ups, and scans for this campaign. View full workspace activity on the Activity page.
+              </p>
+              <div className="mt-4">
+                <Link
+                  href="/activity"
+                  className="inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline"
+                >
+                  Open Activity
+                </Link>
+              </div>
             </div>
           </TabsContent>
 
