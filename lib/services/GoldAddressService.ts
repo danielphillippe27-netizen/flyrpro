@@ -22,6 +22,91 @@ export interface GoldAddressResult {
 }
 
 export class GoldAddressService {
+  private static parseGoldAddressRows(raw: unknown): any[] {
+    if (!raw) return [];
+
+    if (Array.isArray(raw)) return raw;
+
+    if (typeof raw === 'string') {
+      try {
+        return this.parseGoldAddressRows(JSON.parse(raw));
+      } catch {
+        return [];
+      }
+    }
+
+    if (typeof raw === 'object') {
+      const obj = raw as Record<string, unknown>;
+      if ('get_gold_addresses_in_polygon_geojson' in obj) {
+        return this.parseGoldAddressRows(obj.get_gold_addresses_in_polygon_geojson);
+      }
+      if ('street_name' in obj || 'street_number' in obj || 'id' in obj) {
+        return [obj];
+      }
+    }
+
+    return [];
+  }
+
+  private static parseGoldBuildingRows(raw: unknown): any[] {
+    if (!raw) return [];
+
+    if (Array.isArray(raw)) {
+      // Row shape from RETURNS TABLE rpc
+      if (raw.length === 0) return [];
+      const first = raw[0] as Record<string, unknown>;
+      if ('geom_geojson' in first) return raw;
+      if (first?.type === 'Feature') {
+        return raw.map((feature) => this.featureToGoldBuildingRow(feature as Record<string, unknown>)).filter(Boolean);
+      }
+      return raw;
+    }
+
+    if (typeof raw === 'string') {
+      try {
+        return this.parseGoldBuildingRows(JSON.parse(raw));
+      } catch {
+        return [];
+      }
+    }
+
+    if (typeof raw === 'object') {
+      const obj = raw as Record<string, unknown>;
+
+      if ('get_gold_buildings_in_polygon_geojson' in obj) {
+        return this.parseGoldBuildingRows(obj.get_gold_buildings_in_polygon_geojson);
+      }
+
+      if (obj.type === 'FeatureCollection' && Array.isArray(obj.features)) {
+        return obj.features
+          .map((feature) => this.featureToGoldBuildingRow(feature as Record<string, unknown>))
+          .filter(Boolean);
+      }
+
+      if (obj.type === 'Feature') {
+        const one = this.featureToGoldBuildingRow(obj);
+        return one ? [one] : [];
+      }
+    }
+
+    return [];
+  }
+
+  private static featureToGoldBuildingRow(feature: Record<string, unknown>): any | null {
+    const geometry = feature.geometry as Record<string, unknown> | undefined;
+    if (!geometry) return null;
+    const props = (feature.properties as Record<string, unknown> | undefined) ?? {};
+    return {
+      id: props.id ?? feature.id ?? null,
+      source_id: props.source_id ?? null,
+      external_id: props.external_id ?? null,
+      area_sqm: props.area_sqm ?? null,
+      geom_geojson: JSON.stringify(geometry),
+      centroid_geojson: props.centroid_geojson ?? null,
+      building_type: props.building_type ?? null,
+    };
+  }
+
   /**
    * Handles mixed DB states where either 1-arg or 2-arg RPC signatures may exist.
    */
@@ -30,7 +115,7 @@ export class GoldAddressService {
     polygonGeoJSON: string,
     province?: string
   ) {
-    const normalizedProvince = province?.toUpperCase();
+    const normalizedProvince = province?.trim().toUpperCase();
 
     if (normalizedProvince) {
       const twoArgResult = await supabase.rpc(
@@ -72,7 +157,7 @@ export class GoldAddressService {
     console.log('[GoldAddressService] Querying Gold Standard addresses...');
     
     // Query addresses with geom as GeoJSON string
-    const { data: goldAddresses, error } = await this.queryGoldAddresses(
+    const { data: goldAddressesRaw, error } = await this.queryGoldAddresses(
       supabase,
       polygonGeoJSON,
       province
@@ -83,8 +168,9 @@ export class GoldAddressService {
       return [];
     }
     
-    console.log(`[GoldAddressService] Found ${goldAddresses?.length || 0} Gold addresses`);
-    return goldAddresses || [];
+    const goldAddresses = this.parseGoldAddressRows(goldAddressesRaw);
+    console.log(`[GoldAddressService] Found ${goldAddresses.length} Gold addresses`);
+    return goldAddresses;
   }
 
   /**
@@ -108,17 +194,34 @@ export class GoldAddressService {
     // =============================================================================
     console.log('[GoldAddressService] Querying Gold Standard table...');
     
-    const { data: goldAddresses, error: goldError } = await this.queryGoldAddresses(
+    const normalizedRegion = regionCode?.trim().toUpperCase();
+    const { data: goldAddressesRaw, error: goldError } = await this.queryGoldAddresses(
       supabase,
       polygonGeoJSON,
-      regionCode
+      normalizedRegion
     );
     
     if (goldError) {
       console.warn('[GoldAddressService] Gold query error:', goldError.message);
     }
     
-    const goldCount = goldAddresses?.length || 0;
+    let goldAddresses = this.parseGoldAddressRows(goldAddressesRaw);
+
+    // Province filter can be stale/wrong; retry once without it when it yields zero.
+    if (goldAddresses.length === 0 && normalizedRegion) {
+      const fallback = await this.queryGoldAddresses(supabase, polygonGeoJSON);
+      if (!fallback.error) {
+        const unfiltered = this.parseGoldAddressRows(fallback.data);
+        if (unfiltered.length > 0) {
+          console.warn(
+            `[GoldAddressService] Province-filtered query returned 0 for ${normalizedRegion}; unfiltered returned ${unfiltered.length}`
+          );
+          goldAddresses = unfiltered;
+        }
+      }
+    }
+
+    const goldCount = goldAddresses.length;
     console.log(`[GoldAddressService] Found ${goldCount} Gold Standard addresses`);
     
     // =============================================================================
@@ -128,7 +231,7 @@ export class GoldAddressService {
       console.log('[GoldAddressService] Using Gold Standard exclusively');
       
       // Also get buildings from Gold if available (with GeoJSON)
-      const { data: goldBuildings, error: buildingsError } = await supabase.rpc(
+      const { data: goldBuildingsRaw, error: buildingsError } = await supabase.rpc(
         'get_gold_buildings_in_polygon_geojson',
         { p_polygon_geojson: polygonGeoJSON }
       );
@@ -137,6 +240,8 @@ export class GoldAddressService {
         console.warn('[GoldAddressService] Gold buildings query error:', buildingsError.message);
       }
       
+      const goldBuildings = this.parseGoldBuildingRows(goldBuildingsRaw);
+
       return {
         source: 'gold',
         addresses: goldAddresses || [],

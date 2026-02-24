@@ -6,7 +6,7 @@ import { useState, useEffect } from 'react';
 import { WorkspaceProvider } from '@/lib/workspace-context';
 import AppTopHeader from '@/components/layout/AppTopHeader';
 import { MainRouteGuard } from '@/components/guard/MainRouteGuard';
-import { Home, Map, Trophy, Users, Settings, Target, Gauge, Plug, CreditCard, MessageCircle, Shield, Activity, CalendarCheck, MessageSquare } from 'lucide-react';
+import { Home, Map, Trophy, Users, Settings, Target, Gauge, Plug, CreditCard, MessageCircle, Shield, Activity, CalendarCheck, CornerDownRight, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { DashboardAccessLevel } from '@/app/api/_utils/workspace';
 
@@ -19,8 +19,8 @@ const baseTabs = [
   { href: '/map', icon: Map, label: 'Map' },
   { href: '/activity', icon: Activity, label: 'Activity' },
   { href: '/leads', icon: Users, label: 'Leads' },
+  { href: '/follow-up', icon: CornerDownRight, label: 'Follow Up' },
   { href: '/appointments', icon: CalendarCheck, label: 'Appointments' },
-  { href: '/follow-up', icon: MessageSquare, label: 'Follow Up' },
   { href: '/leaderboard', icon: Trophy, label: 'Leaderboard' },
   { href: '/stats', icon: Gauge, label: 'Performance' },
   { href: '/billing', icon: CreditCard, label: 'Billing' },
@@ -89,6 +89,28 @@ export default function MainLayoutClient({
             onMouseLeave={() => setSidebarExpanded(false)}
           >
             <div className="flex flex-col items-stretch justify-start flex-1 gap-3 overflow-hidden min-h-0 w-full px-1.5">
+              {/* Red Create button – same row layout as nav items, icon + label when expanded */}
+              <Link
+                href="/campaigns/create"
+                className={cn(
+                  'flex items-center gap-2 py-2.5 rounded-md w-full transition-opacity hover:opacity-90 min-h-[42px]',
+                  sidebarExpanded ? 'px-2.5 justify-start' : 'justify-center px-0'
+                )}
+                title="Create campaign"
+                aria-label="Create campaign"
+              >
+                <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-red-500 text-white shrink-0">
+                  <Plus className="w-5 h-5" strokeWidth={2.5} />
+                </span>
+                <span
+                  className={cn(
+                    'text-[13px] font-medium text-red-500 whitespace-nowrap overflow-hidden',
+                    sidebarExpanded ? 'opacity-100' : 'opacity-0 w-0 sr-only'
+                  )}
+                >
+                  Create
+                </span>
+              </Link>
               {tabs.map((tab) => {
                 const Icon = tab.icon;
                 const isIntegrations = tab.href === '/settings/integrations';

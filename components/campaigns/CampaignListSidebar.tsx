@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { Plus, Search, ChevronsLeft, ChevronsRight } from 'lucide-react';
+import { usePathname, useRouter } from 'next/navigation';
+import { Plus, Search, ChevronsLeft, ChevronsRight, Trash2 } from 'lucide-react';
 import { CampaignsService } from '@/lib/services/CampaignsService';
 import type { CampaignV2 } from '@/types/database';
 import { Button } from '@/components/ui/button';
@@ -12,6 +12,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import { getClientAsync } from '@/lib/supabase/client';
 import { useWorkspace } from '@/lib/workspace-context';
+import { handleWheelScrollContainer } from '@/lib/scrollContainer';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
 type StatusTab = 'active' | 'completed';
 
@@ -31,12 +40,28 @@ export function CampaignListSidebar({
   width = 280,
 }: CampaignListSidebarProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const { currentWorkspaceId } = useWorkspace();
   const [campaigns, setCampaigns] = useState<CampaignV2[]>([]);
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [statusTab, setStatusTab] = useState<StatusTab>('active');
+
+  const handleDeleteCampaign = useCallback(
+    async (id: string) => {
+      try {
+        await CampaignsService.deleteCampaign(id);
+        setCampaigns((prev) => prev.filter((c) => c.id !== id));
+        if (pathname?.startsWith(`/campaigns/${id}`)) {
+          router.push('/campaigns');
+        }
+      } catch (e) {
+        console.error('Delete campaign failed:', e);
+      }
+    },
+    [pathname, router]
+  );
 
   useEffect(() => {
     const run = async () => {
@@ -150,6 +175,7 @@ export function CampaignListSidebar({
               loading={loading}
               userId={userId}
               emptyMessage={byStatus.active.length === 0 ? 'No active campaigns' : 'No matches'}
+              onDeleteCampaign={handleDeleteCampaign}
             />
           </TabsContent>
           <TabsContent value="completed" className="mt-0 flex-1 min-h-0 focus-visible:outline-none data-[state=inactive]:hidden">
@@ -159,6 +185,7 @@ export function CampaignListSidebar({
               loading={loading}
               userId={userId}
               emptyMessage={byStatus.completed.length === 0 ? 'No completed campaigns' : 'No matches'}
+              onDeleteCampaign={handleDeleteCampaign}
             />
           </TabsContent>
         </Tabs>
@@ -173,15 +200,43 @@ function CampaignList({
   loading,
   userId,
   emptyMessage,
+  onDeleteCampaign,
 }: {
   campaigns: CampaignV2[];
   activeId: string | null;
   loading: boolean;
   userId: string | null;
   emptyMessage: string;
+  onDeleteCampaign: (id: string) => Promise<void>;
 }) {
+  const [deleteTarget, setDeleteTarget] = useState<CampaignV2 | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => handleWheelScrollContainer(e, el);
+    el.addEventListener('wheel', handler, { passive: false });
+    return () => el.removeEventListener('wheel', handler);
+  }, []);
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await onDeleteCampaign(deleteTarget.id);
+      setDeleteTarget(null);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
-    <div className="overflow-auto min-h-0 pt-0 -mx-3 px-3">
+    <div
+      ref={scrollContainerRef}
+      className="overflow-y-auto min-h-0 flex-1 pt-0 -mx-3 px-3 overscroll-contain"
+    >
       {loading ? (
         <div className="px-3 py-4 text-sm text-muted-foreground">Loading...</div>
       ) : !userId ? (
@@ -191,20 +246,34 @@ function CampaignList({
           {campaigns.map((campaign) => {
             const isActive = activeId === campaign.id;
             return (
-              <li key={campaign.id}>
-                <Link
-                  href={`/campaigns/${campaign.id}`}
+              <li key={campaign.id} className="group">
+                <div
                   className={cn(
-                    'flex items-center px-3 py-2 text-sm border-l-2 -ml-px transition-colors truncate',
+                    'flex items-center gap-1 px-3 py-2 text-sm border-l-2 -ml-px transition-colors',
                     isActive
                       ? 'border-primary bg-primary/10 dark:bg-primary/15 text-foreground font-medium'
                       : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50 dark:hover:bg-muted/30'
                   )}
                 >
-                  <span className="truncate min-w-0">
+                  <Link
+                    href={`/campaigns/${campaign.id}`}
+                    className="truncate min-w-0 flex-1"
+                  >
                     {campaign.name || 'Unnamed Campaign'}
-                  </span>
-                </Link>
+                  </Link>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 shrink-0 opacity-60 group-hover:opacity-100 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setDeleteTarget(campaign);
+                    }}
+                    aria-label={`Delete ${campaign.name || 'campaign'}`}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </Button>
+                </div>
               </li>
             );
           })}
@@ -213,6 +282,33 @@ function CampaignList({
       {!loading && userId && campaigns.length === 0 && (
         <div className="px-3 py-4 text-sm text-muted-foreground">{emptyMessage}</div>
       )}
+
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete campaign</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete &quot;{deleteTarget?.name || 'Unnamed Campaign'}&quot;? This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => setDeleteTarget(null)}
+              disabled={deleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleConfirmDelete}
+              disabled={deleting}
+            >
+              {deleting ? 'Deleting...' : 'Delete'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient, getSupabaseServerClient } from '@/lib/supabase/server';
+import { createClient, type User } from '@supabase/supabase-js';
 import { TileLambdaService, type AddressFeature } from '@/lib/services/TileLambdaService';
 import { GoldAddressService } from '@/lib/services/GoldAddressService';
 import { MapService } from '@/lib/services/MapService';
@@ -9,6 +10,9 @@ import { resolveCampaignRegion } from '@/lib/geo/regionResolver';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 interface GenerateAddressListRequest {
   campaign_id: string;
@@ -88,6 +92,30 @@ function sortByDistanceAndTake(
   return withDistance.slice(0, limit).map((x) => x.f);
 }
 
+async function getRequestUser(request: NextRequest): Promise<User | null> {
+  const authHeader = request.headers.get('authorization');
+  if (authHeader?.startsWith('Bearer ') && SUPABASE_URL && SUPABASE_ANON_KEY) {
+    const token = authHeader.slice(7);
+    const bearerClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      global: { headers: { Authorization: `Bearer ${token}` } },
+    });
+    const {
+      data: { user },
+      error,
+    } = await bearerClient.auth.getUser();
+    if (!error && user) return user;
+    console.warn('[generate-address-list] Bearer auth failed, trying cookie session:', error?.message);
+  }
+
+  const supabaseSession = await getSupabaseServerClient();
+  const {
+    data: { user },
+    error,
+  } = await supabaseSession.auth.getUser();
+  if (error || !user) return null;
+  return user;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body: GenerateAddressListRequest = await request.json();
@@ -98,11 +126,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Either starting_address or polygon is required' }, { status: 400 });
     }
 
-    // 1. Require authenticated user (session) – identifies who is making the request
-    const supabaseSession = await getSupabaseServerClient();
-    const { data: { user }, error: authError } = await supabaseSession.auth.getUser();
-    if (authError || !user) {
-      console.error('[generate-address-list] No session:', authError?.message);
+    // 1. Require authenticated user (Bearer token for iOS or cookie session for web)
+    const user = await getRequestUser(request);
+    if (!user) {
+      console.error('[generate-address-list] Unauthorized: no valid bearer token or session');
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 

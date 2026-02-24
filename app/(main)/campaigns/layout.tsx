@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { CampaignListSidebar } from '@/components/campaigns/CampaignListSidebar';
 import { CampaignsPageHeader } from '@/components/campaigns/CampaignsPageHeader';
 import { CampaignsService } from '@/lib/services/CampaignsService';
+import { handleWheelScrollContainer } from '@/lib/scrollContainer';
 
 const CAMPAIGN_SIDEBAR_COLLAPSED_KEY = 'flyr-campaign-sidebar-collapsed';
 const SIDEBAR_WIDTH = 280;
@@ -50,8 +51,10 @@ export default function CampaignsLayout({
   children: React.ReactNode;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const headerTitle = useCampaignHeaderTitle();
+  const isCreatePage = pathname === '/campaigns/create';
 
   useEffect(() => {
     try {
@@ -67,6 +70,15 @@ export default function CampaignsLayout({
     } catch {}
   }, []);
 
+  const mainContentRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = mainContentRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => handleWheelScrollContainer(e, el);
+    el.addEventListener('wheel', handler, { passive: false });
+    return () => el.removeEventListener('wheel', handler);
+  }, []);
+
   return (
     <div className="flex flex-1 h-full min-h-0 w-full overflow-hidden">
       <CampaignListSidebar
@@ -76,8 +88,11 @@ export default function CampaignsLayout({
         width={SIDEBAR_WIDTH}
       />
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden bg-background">
-        <CampaignsPageHeader title={headerTitle} />
-        <div className="flex-1 min-h-0 overflow-auto">
+        {!isCreatePage && <CampaignsPageHeader title={headerTitle} />}
+        <div
+          ref={mainContentRef}
+          className="flex-1 min-h-0 overflow-y-auto overscroll-contain h-full"
+        >
           {children}
         </div>
       </div>

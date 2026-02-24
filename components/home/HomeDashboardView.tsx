@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import Link from 'next/link';
 import { fetchHomeDashboard, type HomeDashboardData } from '@/lib/home-dashboard';
 import { HomeHeaderRow } from './HomeHeaderRow';
 import { WeeklyGoalsCard } from './WeeklyGoalsCard';
@@ -11,7 +10,7 @@ import { QuoteCard } from './QuoteCard';
 import { RecentSnapshot } from './RecentSnapshot';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { useWorkspace } from '@/lib/workspace-context';
 
 interface HomeDashboardViewProps {
@@ -126,21 +125,7 @@ export function HomeDashboardView({
         lastSessionAt={lastSessionAt}
       />
 
-      {!hasAnyActivity && (
-        <Card className="rounded-xl border border-border bg-card">
-          <CardHeader>
-            <h2 className="text-lg font-semibold text-foreground">Get started</h2>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground mb-4">
-              Start your first session to see your progress here.
-            </p>
-            <Button asChild className="bg-primary text-primary-foreground hover:bg-primary/90">
-              <Link href="/campaigns">Start your first session</Link>
-            </Button>
-          </CardContent>
-        </Card>
-      )}
+      <QuoteCard noCard className="min-h-[160px]" />
 
       <QuickActionsRow
         activeRouteCampaignId={null}
@@ -165,9 +150,6 @@ export function HomeDashboardView({
             doorsAllTime={stats.doorsAllTime}
             totalMinutesAllTime={stats.totalMinutesAllTime}
           />
-        </div>
-        <div className="w-full min-h-0 md:col-span-2">
-          <QuoteCard />
         </div>
       </div>
 
