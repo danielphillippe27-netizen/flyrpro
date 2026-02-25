@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { stripe } from '@/lib/stripe';
-import { getSupabaseServerClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { getEntitlementForUser } from '@/app/lib/billing/entitlements';
 import {
@@ -8,9 +7,18 @@ import {
   getProPriceId,
   STRIPE_ALLOWED_PRICE_IDS,
 } from '@/app/lib/billing/stripe-products';
+import { isStripeSecretKeyConfigured } from '@/app/lib/billing/stripe-env';
+import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 
 export async function POST(request: NextRequest) {
   try {
+    if (!isStripeSecretKeyConfigured()) {
+      return NextResponse.json(
+        { error: 'Stripe secret key is not configured for the current mode.' },
+        { status: 500 }
+      );
+    }
+
     const body = await request.json();
     let priceId = body?.priceId as string | undefined;
     const plan = body?.plan as 'annual' | 'monthly' | undefined;
@@ -29,18 +37,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const supabase = await getSupabaseServerClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) {
+    const requestUser = await resolveUserFromRequest(request);
+    if (!requestUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { data: ownerMembership } = await supabase
+    const userId = requestUser.id;
+    const admin = createAdminClient();
+    const { data: ownerMembership } = await admin
       .from('workspace_members')
       .select('workspace_id')
-      .eq('user_id', user.id)
+      .eq('user_id', userId)
       .eq('role', 'owner')
       .order('created_at', { ascending: true })
       .limit(1)
@@ -48,7 +55,7 @@ export async function POST(request: NextRequest) {
 
     let workspaceSeats = 1;
     if (ownerMembership?.workspace_id) {
-      const { data: workspace } = await supabase
+      const { data: workspace } = await admin
         .from('workspaces')
         .select('max_seats')
         .eq('id', ownerMembership.workspace_id)
@@ -64,21 +71,20 @@ export async function POST(request: NextRequest) {
       ? Math.min(100, parsedRequestedSeats)
       : Math.min(100, workspaceSeats);
 
-    let entitlement = await getEntitlementForUser(user.id);
+    const entitlement = await getEntitlementForUser(userId);
     let customerId = entitlement.stripe_customer_id;
 
     if (!customerId) {
       const customer = await stripe.customers.create({
-        email: user.email ?? undefined,
-        metadata: { user_id: user.id },
+        email: requestUser.email ?? undefined,
+        metadata: { user_id: userId },
       });
       customerId = customer.id;
-      const admin = createAdminClient();
       await admin
         .from('entitlements')
         .upsert(
           {
-            user_id: user.id,
+            user_id: userId,
             stripe_customer_id: customerId,
             updated_at: new Date().toISOString(),
           },
@@ -86,7 +92,7 @@ export async function POST(request: NextRequest) {
         );
     }
 
-    const appUrl = getAppUrl();
+    const appUrl = getAppUrl(request);
     const price = await stripe.prices.retrieve(priceId);
     const isUsd = price.currency?.toLowerCase() === 'usd';
     const session = await stripe.checkout.sessions.create({
@@ -95,7 +101,7 @@ export async function POST(request: NextRequest) {
       mode: 'subscription',
       success_url: `${appUrl}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${appUrl}/subscribe`,
-      metadata: { user_id: user.id, seats: String(quantity) },
+      metadata: { user_id: userId, seats: String(quantity) },
       ...(isUsd && {
         custom_text: {
           submit: {
