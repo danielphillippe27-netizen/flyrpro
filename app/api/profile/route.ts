@@ -157,6 +157,34 @@ export async function PATCH(request: NextRequest) {
           { status: 500 }
         );
       }
+
+      // Mirror name fields into public.profiles so list/admin views stay consistent.
+      if (first_name !== undefined || last_name !== undefined) {
+        const normalizedFirstName =
+          typeof first_name === 'string' ? first_name.trim() || null : null;
+        const normalizedLastName =
+          typeof last_name === 'string' ? last_name.trim() || null : null;
+        const fullName =
+          [normalizedFirstName, normalizedLastName]
+            .filter((part): part is string => typeof part === 'string' && part.length > 0)
+            .join(' ')
+            .trim() || null;
+
+        const admin = createAdminClient();
+        const { error: mirrorProfileError } = await admin
+          .from('profiles')
+          .update({
+            ...(first_name !== undefined ? { first_name: normalizedFirstName } : {}),
+            ...(last_name !== undefined ? { last_name: normalizedLastName } : {}),
+            full_name: fullName,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', user.id);
+
+        if (mirrorProfileError) {
+          console.warn('Profile PATCH: failed to mirror names into profiles', mirrorProfileError);
+        }
+      }
     }
 
     if (wantsWorkspaceRename) {

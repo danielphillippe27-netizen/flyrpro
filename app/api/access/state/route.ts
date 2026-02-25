@@ -1,32 +1,28 @@
-import { NextResponse } from 'next/server';
-import { createAdminClient, getSupabaseServerClient } from '@/lib/supabase/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { createAdminClient } from '@/lib/supabase/server';
 import { resolveDashboardAccessLevel } from '@/app/api/_utils/workspace';
 import type { MinimalSupabaseClient } from '@/app/api/_utils/workspace';
+import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 
 /**
  * GET /api/access/state
  * Returns workspace role, name, and whether user has dashboard access (for subscribe page and guards).
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const authClient = await getSupabaseServerClient();
-    const {
-      data: { user },
-      error: userError,
-    } = await authClient.auth.getUser();
-
-    if (userError || !user) {
+    const requestUser = await resolveUserFromRequest(request);
+    if (!requestUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const admin = createAdminClient();
     const access = await resolveDashboardAccessLevel(
       admin as unknown as MinimalSupabaseClient,
-      user.id
+      requestUser.id
     );
     if (!access.workspaceId) {
       return NextResponse.json({
-        userId: user.id,
+        userId: requestUser.id,
         role: access.role,
         workspaceId: null,
         workspace_id: null,
@@ -47,7 +43,7 @@ export async function GET() {
 
     if (!workspace) {
       return NextResponse.json({
-        userId: user.id,
+        userId: requestUser.id,
         role: access.role,
         workspaceId: access.workspaceId,
         workspace_id: access.workspaceId,
@@ -70,7 +66,7 @@ export async function GET() {
     const hasAccess = subscriptionAccess || access.isFounder;
 
     return NextResponse.json({
-      userId: user.id,
+      userId: requestUser.id,
       role: access.role,
       workspaceId: workspace.id,
       workspace_id: workspace.id,

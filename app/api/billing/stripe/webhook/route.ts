@@ -7,10 +7,11 @@ import {
   applyStripeSubscriptionUpdate,
   updateWorkspaceSubscriptionForUser,
 } from '@/app/lib/billing/stripe-subscription-sync';
+import { getStripeWebhookSecret } from '@/app/lib/billing/stripe-env';
 
-const secret = process.env.STRIPE_WEBHOOK_SECRET;
+const secret = getStripeWebhookSecret();
 if (!secret) {
-  console.warn('STRIPE_WEBHOOK_SECRET is not set; webhook will reject');
+  console.warn('Stripe webhook secret is not set for current mode; webhook will reject');
 }
 
 async function setStripeInactive(

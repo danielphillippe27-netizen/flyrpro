@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseServerClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/server';
+import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 
 const INDUSTRIES = [
   'Real Estate',
@@ -15,15 +15,11 @@ const INDUSTRIES = [
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await getSupabaseServerClient();
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
-
-    if (userError || !user) {
+    const requestUser = await resolveUserFromRequest(request);
+    if (!requestUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    const userId = requestUser.id;
 
     const body = await request.json();
     const {
@@ -51,19 +47,65 @@ export async function POST(request: NextRequest) {
     const admin = createAdminClient();
 
     if (firstName !== undefined || lastName !== undefined) {
-      const { error: profileError } = await supabase
+      const normalizedFirstName =
+        typeof firstName === 'string' ? firstName.trim() || null : undefined;
+      const normalizedLastName =
+        typeof lastName === 'string' ? lastName.trim() || null : undefined;
+      const profileUpdates: Record<string, string | null> = {};
+      if (normalizedFirstName !== undefined) {
+        profileUpdates.first_name = normalizedFirstName;
+      }
+      if (normalizedLastName !== undefined) {
+        profileUpdates.last_name = normalizedLastName;
+      }
+
+      const { data: updatedProfiles, error: profileError } = await admin
         .from('user_profiles')
-        .update({
-          first_name: typeof firstName === 'string' ? firstName.trim() || null : undefined,
-          last_name: typeof lastName === 'string' ? lastName.trim() || null : undefined,
-        })
-        .eq('user_id', user.id);
+        .update(profileUpdates)
+        .eq('user_id', userId)
+        .select('user_id');
 
       if (profileError) {
         return NextResponse.json(
           { error: 'Failed to update profile' },
           { status: 500 }
         );
+      }
+
+      // Safety: create row if trigger/backfill didn't create it yet.
+      if (!updatedProfiles || updatedProfiles.length === 0) {
+        const { error: insertProfileError } = await admin
+          .from('user_profiles')
+          .insert({
+            user_id: userId,
+            ...profileUpdates,
+          });
+        if (insertProfileError) {
+          return NextResponse.json(
+            { error: 'Failed to create profile' },
+            { status: 500 }
+          );
+        }
+      }
+
+      // Keep legacy public.profiles name fields in sync for admin/reporting queries.
+      const fullName =
+        [normalizedFirstName, normalizedLastName]
+          .filter((part): part is string => typeof part === 'string' && part.length > 0)
+          .join(' ')
+          .trim() || null;
+      const { error: mirrorProfileError } = await admin
+        .from('profiles')
+        .update({
+          ...(normalizedFirstName !== undefined ? { first_name: normalizedFirstName } : {}),
+          ...(normalizedLastName !== undefined ? { last_name: normalizedLastName } : {}),
+          full_name: fullName,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', userId);
+
+      if (mirrorProfileError) {
+        console.warn('Onboarding: failed to mirror names into profiles', mirrorProfileError);
       }
     }
 
@@ -72,7 +114,7 @@ export async function POST(request: NextRequest) {
       const { data: memberships } = await admin
         .from('workspace_members')
         .select('workspace_id')
-        .eq('user_id', user.id)
+        .eq('user_id', userId)
         .eq('role', 'owner')
         .order('created_at', { ascending: true })
         .limit(1);
@@ -91,7 +133,7 @@ export async function POST(request: NextRequest) {
         .from('workspaces')
         .insert({
           name: initialName,
-          owner_id: user.id,
+          owner_id: userId,
         })
         .select('id')
         .single();
@@ -108,7 +150,7 @@ export async function POST(request: NextRequest) {
         .from('workspace_members')
         .insert({
           workspace_id: newWorkspace.id,
-          user_id: user.id,
+          user_id: userId,
           role: 'owner',
         });
 
@@ -123,14 +165,9 @@ export async function POST(request: NextRequest) {
       workspaceId = newWorkspace.id;
     }
 
-    const trialEndsAt = new Date();
-    trialEndsAt.setFullYear(trialEndsAt.getFullYear() + 1);
-
     const updates: Record<string, unknown> = {
       updated_at: new Date().toISOString(),
       onboarding_completed_at: new Date().toISOString(),
-      subscription_status: 'trialing',
-      trial_ends_at: trialEndsAt.toISOString(),
     };
 
     if (typeof workspaceName === 'string' && workspaceName.trim()) {

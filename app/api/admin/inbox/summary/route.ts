@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { requireFounderApi } from '@/app/api/admin/_utils/founder';
 import { stripe } from '@/lib/stripe';
+import { getStripeSecretKey } from '@/app/lib/billing/stripe-env';
 
 type ProfileLite = {
   id: string;
@@ -112,7 +113,7 @@ async function estimateStripeMonthlyRevenueFromEntitlements(
   stripeSubscriptionCount: number;
   stripeError: string | null;
 }> {
-  const stripeKey = process.env.STRIPE_SECRET_KEY ?? '';
+  const stripeKey = getStripeSecretKey();
   if (!stripeKey || stripeKey.startsWith('sk_test_placeholder')) {
     return {
       monthlyAmountCents: null,

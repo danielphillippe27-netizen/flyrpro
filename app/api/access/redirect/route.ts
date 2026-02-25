@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getPostAuthRedirect } from '@/app/lib/post-auth-gate';
+import {
+  getPostAuthRedirect,
+  getPostAuthRedirectForUserId,
+} from '@/app/lib/post-auth-gate';
+import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 
 /**
  * GET /api/access/redirect
@@ -7,7 +11,10 @@ import { getPostAuthRedirect } from '@/app/lib/post-auth-gate';
  */
 export async function GET(request: NextRequest) {
   try {
-    const result = await getPostAuthRedirect({});
+    const requestUser = await resolveUserFromRequest(request);
+    const result = requestUser
+      ? await getPostAuthRedirectForUserId(requestUser.id, {})
+      : await getPostAuthRedirect({});
     return NextResponse.json({ redirect: result.redirect, path: result.path });
   } catch (e) {
     console.error('Access redirect error:', e);

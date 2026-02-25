@@ -1,24 +1,26 @@
 /**
  * Stripe price IDs from env. Use these for Checkout; never expose secret key to client.
  */
+import { getStripePriceEnv } from '@/app/lib/billing/stripe-env';
+
 export const STRIPE_PRICE_PRO_MONTHLY =
-  process.env.STRIPE_PRICE_PRO_MONTHLY ?? '';
+  getStripePriceEnv('STRIPE_PRICE_PRO_MONTHLY');
 export const STRIPE_PRICE_PRO_YEARLY =
-  process.env.STRIPE_PRICE_PRO_YEARLY ?? '';
+  getStripePriceEnv('STRIPE_PRICE_PRO_YEARLY');
 
 export const STRIPE_PRICE_CAD_MONTHLY =
-  process.env.STRIPE_PRICE_CAD_MONTHLY ?? '';
+  getStripePriceEnv('STRIPE_PRICE_CAD_MONTHLY');
 export const STRIPE_PRICE_USD_MONTHLY =
-  process.env.STRIPE_PRICE_USD_MONTHLY ?? '';
+  getStripePriceEnv('STRIPE_PRICE_USD_MONTHLY');
 export const STRIPE_PRICE_USD_YEARLY =
-  process.env.STRIPE_PRICE_USD_YEARLY ?? 'price_1T2GC4GVNtKfhDB1ksgVMtnY';
+  getStripePriceEnv('STRIPE_PRICE_USD_YEARLY');
 export const STRIPE_PRICE_CAD_YEARLY =
-  process.env.STRIPE_PRICE_CAD_YEARLY ?? 'price_1T2GAvGVNtKfhDB1UfIuhUg9';
+  getStripePriceEnv('STRIPE_PRICE_CAD_YEARLY');
 
 export const STRIPE_PRICE_TEAM_MONTHLY =
-  process.env.STRIPE_PRICE_TEAM_MONTHLY ?? '';
+  getStripePriceEnv('STRIPE_PRICE_TEAM_MONTHLY');
 export const STRIPE_PRICE_TEAM_YEARLY =
-  process.env.STRIPE_PRICE_TEAM_YEARLY ?? '';
+  getStripePriceEnv('STRIPE_PRICE_TEAM_YEARLY');
 
 /** Allowed price IDs for checkout (allowlist). */
 export const STRIPE_ALLOWED_PRICE_IDS = [
@@ -79,7 +81,21 @@ export function planFromStripePriceId(priceId: string): 'pro' | 'team' | 'free' 
   return 'free';
 }
 
-export function getAppUrl(): string {
+export function getAppUrl(request?: string | URL | { url: string }): string {
+  if (request) {
+    try {
+      const url =
+        typeof request === 'string'
+          ? new URL(request)
+          : request instanceof URL
+            ? request
+            : new URL(request.url);
+      return url.origin.replace(/\/$/, '');
+    } catch {
+      // Fall through to env-based fallback below.
+    }
+  }
+
   return (
     process.env.NEXT_PUBLIC_APP_URL ||
     process.env.APP_BASE_URL ||

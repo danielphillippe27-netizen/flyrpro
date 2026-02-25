@@ -175,7 +175,7 @@ function OnboardingContent() {
             )}
             {step === 5 && (
               <>
-                You're one step away from tracking every door
+                You&apos;re one step away from tracking every door
                 <br />
                 and never losing a lead.
               </>
@@ -518,7 +518,7 @@ function OnboardingContent() {
               disabled={loading}
               className="w-full h-14 text-lg font-semibold bg-[#ef4444] text-white hover:bg-[#dc2626] border-0"
             >
-              {loading ? 'Saving…' : 'Start trial'}
+              {loading ? 'Saving…' : 'Continue to billing'}
             </Button>
           )}
         </div>

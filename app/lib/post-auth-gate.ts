@@ -17,25 +17,12 @@ export type GateOptions = {
   next?: string | null;
 };
 
-/**
- * Server-side gate: determines where to send the user after auth.
- * Use in Route Handler (GET /gate) or server component.
- */
-export async function getPostAuthRedirect(options: GateOptions = {}): Promise<PostAuthRedirect> {
+export async function getPostAuthRedirectForUserId(
+  userId: string,
+  options: GateOptions = {}
+): Promise<PostAuthRedirect> {
   const { inviteToken, next } = options;
-  const authClient = await getSupabaseServerClient();
-  const {
-    data: { user },
-    error: userError,
-  } = await authClient.auth.getUser();
 
-  if (userError || !user) {
-    return { redirect: 'login', path: '/login' };
-  }
-
-  const userId = user.id;
-
-  // Invite flow: send to join page to accept invite (token preserved in URL)
   if (inviteToken && inviteToken.trim()) {
     return { redirect: 'join', path: `/join?token=${encodeURIComponent(inviteToken.trim())}` };
   }
@@ -53,7 +40,6 @@ export async function getPostAuthRedirect(options: GateOptions = {}): Promise<Po
     return { redirect: 'onboarding', path: '/onboarding' };
   }
 
-  // Workspace row (name, subscription_status, onboarding_completed_at)
   const { data: workspace, error: wsError } = await admin
     .from('workspaces')
     .select('id, subscription_status, trial_ends_at, onboarding_completed_at')
@@ -69,6 +55,7 @@ export async function getPostAuthRedirect(options: GateOptions = {}): Promise<Po
 
   const subscriptionStatus = workspace.subscription_status ?? 'inactive';
   const trialEndsAt = workspace.trial_ends_at ? new Date(workspace.trial_ends_at) : null;
+  const onboardingComplete = !!workspace.onboarding_completed_at;
   const hasDashboardAccess =
     subscriptionStatus === 'active' ||
     (subscriptionStatus === 'trialing' && (!trialEndsAt || trialEndsAt > new Date()));
@@ -76,6 +63,10 @@ export async function getPostAuthRedirect(options: GateOptions = {}): Promise<Po
 
   if (access.level === 'founder') {
     return { redirect: 'dashboard', path: founderPath };
+  }
+
+  if (access.role === 'owner' && !onboardingComplete) {
+    return { redirect: 'onboarding', path: '/onboarding' };
   }
 
   if (access.level === 'member') {
@@ -90,4 +81,22 @@ export async function getPostAuthRedirect(options: GateOptions = {}): Promise<Po
   }
 
   return { redirect: 'dashboard', path: next || '/home' };
+}
+
+/**
+ * Server-side gate: determines where to send the user after auth.
+ * Use in Route Handler (GET /gate) or server component.
+ */
+export async function getPostAuthRedirect(options: GateOptions = {}): Promise<PostAuthRedirect> {
+  const authClient = await getSupabaseServerClient();
+  const {
+    data: { user },
+    error: userError,
+  } = await authClient.auth.getUser();
+
+  if (userError || !user) {
+    return { redirect: 'login', path: '/login' };
+  }
+
+  return getPostAuthRedirectForUserId(user.id, options);
 }

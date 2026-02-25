@@ -3,7 +3,7 @@
 import { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { AlertCircle, LogOut, Monitor, Flag, QrCode, Link, Calendar, RefreshCw, Map, MoreHorizontal } from 'lucide-react';
+import { AlertCircle, LogOut, Monitor, Flag, QrCode, Link, Calendar, RefreshCw, Map, Gauge, MoreHorizontal } from 'lucide-react';
 import { getClientAsync } from '@/lib/supabase/client';
 
 type AccessState = {
@@ -22,6 +22,7 @@ const FEATURES = [
   { icon: Calendar, label: 'Set Appointments' },
   { icon: RefreshCw, label: "Create Follow Up's" },
   { icon: Map, label: 'Optimized routes' },
+  { icon: Gauge, label: 'Performance reports' },
   { icon: MoreHorizontal, label: '& much more' },
 ] as const;
 
@@ -44,7 +45,8 @@ function SubscribeContent() {
   const annualTotal = annualBase * seats;
   const monthlyPrice = currency === 'CAD' ? 39.99 : 29.99;
   const monthlyTotal = monthlyPrice * seats;
-  const cadMonthlyList = 50 * seats;
+  const planButtonBaseClass =
+    'group relative w-full overflow-hidden rounded-2xl border px-5 py-4 text-left backdrop-blur-xl transition-all duration-200';
 
   useEffect(() => {
     let mounted = true;
@@ -131,8 +133,8 @@ function SubscribeContent() {
 
   if (loading || !state) {
     return (
-      <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
-        <p className="text-muted-foreground">Loading…</p>
+      <div className="dark min-h-screen bg-gradient-to-br from-black via-zinc-950 to-[#262626] flex items-center justify-center">
+        <p className="text-[#AAAAAA]">Loading…</p>
       </div>
     );
   }
@@ -148,22 +150,34 @@ function SubscribeContent() {
 
   if (isMemberInactive) {
     return (
-      <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center p-6">
-        <div className="max-w-md w-full text-center space-y-4 rounded-2xl border border-border bg-card/95 dark:bg-zinc-900/95 p-8 shadow-2xl">
+      <div className="dark min-h-screen bg-gradient-to-br from-black via-zinc-950 to-[#262626] flex flex-col items-center justify-center p-6 relative overflow-hidden">
+        <div className="pointer-events-none absolute inset-0">
+          <div
+            className="absolute inset-0 scale-110 bg-cover bg-center opacity-35"
+            style={{ backgroundImage: "url('/WEIRFF_1-06d620b4-4558-472d-90f5-da6be22c2dd1.png')" }}
+          />
+        </div>
+        <div className="absolute inset-0 bg-gradient-to-b from-red-950/35 via-transparent to-black/80 pointer-events-none" />
+        <div className="relative max-w-md w-full text-center space-y-4 rounded-2xl border border-white/12 bg-black/72 p-8 backdrop-blur-2xl shadow-[0_28px_80px_rgba(0,0,0,0.72),0_12px_34px_rgba(0,0,0,0.58),inset_0_1px_0_rgba(255,255,255,0.14)]">
           <div className="flex justify-center">
             <AlertCircle className="h-12 w-12 text-amber-500" />
           </div>
-          <h1 className="text-xl font-semibold text-foreground">
+          <h1 className="text-xl font-semibold text-white">
             Workspace subscription inactive
           </h1>
-          <p className="text-muted-foreground text-sm">
+          <p className="text-[#AAAAAA] text-sm">
             {state.workspaceName
               ? `${state.workspaceName} does not have an active subscription.`
               : 'This workspace does not have an active subscription.'}{' '}
             Contact your workspace owner to renew so you can access the dashboard.
           </p>
           <div className="flex justify-center pt-2">
-            <Button variant="outline" onClick={handleSignOut} disabled={signingOut} className="gap-2">
+            <Button
+              variant="outline"
+              onClick={handleSignOut}
+              disabled={signingOut}
+              className="gap-2 border-white/15 bg-white/[0.03] text-white hover:bg-white/[0.08] hover:text-white"
+            >
               <LogOut className="h-4 w-4" />
               {signingOut ? 'Signing out…' : 'Sign out'}
             </Button>
@@ -174,10 +188,23 @@ function SubscribeContent() {
   }
 
   return (
-    <div className="dark min-h-screen bg-gradient-to-br from-black to-[#262626] flex flex-col items-center justify-center p-6 relative overflow-hidden">
-      <div className="absolute inset-0 bg-gradient-to-b from-red-950/40 via-transparent to-black/80 pointer-events-none" />
-      <div className="relative w-full max-w-xl rounded-2xl border border-zinc-700/50 bg-[#242424] p-8 shadow-2xl space-y-0">
-        <div className="text-center space-y-3">
+    <div className="dark min-h-screen bg-gradient-to-br from-black via-zinc-950 to-[#262626] flex flex-col items-center justify-center p-4 sm:p-6 relative overflow-hidden">
+      <div className="pointer-events-none absolute inset-0">
+        <div
+          className="absolute inset-0 scale-110 bg-cover bg-center opacity-35"
+          style={{ backgroundImage: "url('/WEIRFF_1-06d620b4-4558-472d-90f5-da6be22c2dd1.png')" }}
+        />
+      </div>
+      <div className="absolute inset-0 bg-gradient-to-b from-red-950/35 via-transparent to-black/80 pointer-events-none" />
+      <div className="pointer-events-none absolute -top-24 left-1/2 h-72 w-72 -translate-x-1/2 rounded-full bg-red-500/20 blur-3xl" />
+      <div className="pointer-events-none absolute bottom-0 right-[-6rem] h-64 w-64 rounded-full bg-white/10 blur-3xl" />
+
+      <div className="relative w-full max-w-xl overflow-hidden rounded-2xl border border-white/12 bg-black/72 p-8 backdrop-blur-2xl shadow-[0_28px_80px_rgba(0,0,0,0.72),0_12px_34px_rgba(0,0,0,0.58),inset_0_1px_0_rgba(255,255,255,0.14)] space-y-0">
+        <div className="pointer-events-none absolute -top-28 left-1/2 h-56 w-[140%] -translate-x-1/2 rounded-full bg-white/8 blur-3xl" />
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/35" />
+        <div className="pointer-events-none absolute -right-14 bottom-16 h-36 w-36 rounded-full bg-red-400/20 blur-3xl" />
+
+        <div className="relative z-10 text-center space-y-3">
           <h1 className="text-5xl font-bold text-white">
             Track your outreach.
           </h1>
@@ -186,88 +213,86 @@ function SubscribeContent() {
           </p>
         </div>
 
-        <p className="mt-6 text-center">
+        <p className="relative z-10 mt-6 text-center">
           <button
             type="button"
             onClick={() => setCurrency((c) => (c === 'USD' ? 'CAD' : 'USD'))}
-            className="text-sm text-[#AAAAAA] hover:text-white underline underline-offset-2"
+            className="text-sm text-[#B2B2B2] hover:text-white underline underline-offset-2 transition-colors"
           >
             {currency === 'USD' ? 'Show prices in CAD' : 'Show prices in USD'}
           </button>
         </p>
 
-        <div className="mt-6 space-y-2">
+        <div className="relative z-10 mt-6 space-y-2.5">
           <button
             type="button"
             onClick={() => setPlan('annual')}
-            className={`w-full flex items-center justify-between rounded-xl border-2 px-4 py-3 text-left transition-colors ${
+            className={`${planButtonBaseClass} ${
               plan === 'annual'
-                ? 'border-red-500 bg-red-500/10'
-                : 'border-zinc-600 bg-[#2a2a2a] hover:border-zinc-500'
+                ? 'border-red-400/80 bg-[linear-gradient(135deg,rgba(239,68,68,0.24),rgba(0,0,0,0.55))] shadow-[0_12px_30px_rgba(239,68,68,0.18),inset_0_1px_0_rgba(255,255,255,0.24)]'
+                : 'border-white/20 bg-black/40 hover:border-white/30 hover:bg-black/55 shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]'
             }`}
           >
-            <div>
+            <span className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/40 opacity-90" />
+            <div className="relative z-10">
               <p className="font-semibold text-white">Annual</p>
-              <p className="text-xs text-[#AAAAAA]">
+              <p className="text-xs text-[#B2B2B2]">
                 Billed at ${annualTotal.toFixed(2)}/year for {seats} seat{seats === 1 ? '' : 's'}
-                <span className="ml-1 text-[10px] uppercase text-[#888]">{currency}</span>
               </p>
             </div>
-            <p className="font-semibold text-white text-right">
-              ~${(annualMonthlyEquivalent * seats).toFixed(2)}/month
-              <span className="ml-1 text-[10px] font-normal uppercase text-[#888]">{currency}</span>
+            <p className="relative z-10 font-semibold text-white text-right">
+              ${(annualMonthlyEquivalent * seats).toFixed(2)}/month
             </p>
           </button>
           <button
             type="button"
             onClick={() => setPlan('monthly')}
-            className={`w-full flex items-center justify-between rounded-xl border-2 px-4 py-3 text-left transition-colors ${
+            className={`${planButtonBaseClass} ${
               plan === 'monthly'
-                ? 'border-red-500 bg-red-500/10'
-                : 'border-zinc-600 bg-[#2a2a2a] hover:border-zinc-500'
+                ? 'border-red-400/80 bg-[linear-gradient(135deg,rgba(239,68,68,0.24),rgba(0,0,0,0.55))] shadow-[0_12px_30px_rgba(239,68,68,0.18),inset_0_1px_0_rgba(255,255,255,0.24)]'
+                : 'border-white/20 bg-black/40 hover:border-white/30 hover:bg-black/55 shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]'
             }`}
           >
-            <div>
+            <span className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/40 opacity-90" />
+            <div className="relative z-10">
               <p className="font-semibold text-white">Monthly</p>
-              <p className="text-xs text-[#AAAAAA]">
-                {seats} seat{seats === 1 ? '' : 's'}
+              <p className="text-xs text-[#B2B2B2]">
+                Billed at ${monthlyTotal.toFixed(2)}/month for {seats} seat{seats === 1 ? '' : 's'}
               </p>
-              {currency === 'CAD' && (
-                <p className="text-xs text-[#AAAAAA]">Limited-time offer</p>
-              )}
             </div>
-            <p className="font-semibold text-white text-right">
-              {currency === 'CAD' ? (
-                <span className="flex flex-col items-end">
-                  <span className="line-through text-[#888] text-sm font-normal">
-                    ${cadMonthlyList.toFixed(2)}/month <span className="text-[10px] uppercase">CAD</span>
-                  </span>
-                  <span>
-                    ${monthlyTotal.toFixed(2)}/month{' '}
-                    <span className="text-[10px] font-normal uppercase text-[#888]">CAD</span>
-                  </span>
-                </span>
-              ) : (
-                <span>
-                  ${monthlyTotal.toFixed(2)}/month{' '}
-                  <span className="ml-1 text-[10px] font-normal uppercase text-[#888]">USD</span>
-                </span>
-              )}
+            <p className="relative z-10 font-semibold text-white text-right">
+              ${monthlyTotal.toFixed(2)}/month
             </p>
           </button>
         </div>
 
-        <p className="mt-5 font-semibold text-white text-lg text-center">Unlock your full potential</p>
-        <ul className="mt-6 grid grid-cols-2 gap-x-6 gap-y-6 pl-12">
-          {FEATURES.map(({ icon: Icon, label }) => (
-            <li key={label} className="flex items-center gap-2 text-white text-sm">
-              <Icon className="h-5 w-5 text-red-500 shrink-0" />
-              <span>{label}</span>
-            </li>
-          ))}
+        <p className="relative z-10 mt-5 font-semibold text-white text-lg text-center">Unlock your full potential</p>
+        <ul className="relative z-10 mt-6 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-5 sm:pl-10">
+          {FEATURES.map(({ icon: Icon, label }) => {
+            const isDesktopDashboard = label === 'Desktop Dashboard';
+            return (
+              <li
+                key={label}
+                className={`flex items-center gap-2.5 text-white text-sm ${
+                  isDesktopDashboard
+                    ? 'sm:col-span-2 rounded-xl border border-red-400/60 bg-red-500/12 px-3.5 py-2.5 shadow-[0_10px_28px_rgba(239,68,68,0.2),inset_0_1px_0_rgba(255,255,255,0.2)]'
+                    : ''
+                }`}
+              >
+                <Icon
+                  className={`text-red-500 shrink-0 ${
+                    isDesktopDashboard ? 'h-6 w-6' : 'h-5 w-5'
+                  }`}
+                />
+                <span className={isDesktopDashboard ? 'text-base font-semibold' : ''}>
+                  {label}
+                </span>
+              </li>
+            );
+          })}
         </ul>
 
-        <div className="mt-10 flex flex-col items-center gap-3">
+        <div className="relative z-10 mt-10 flex flex-col items-center gap-3">
           {checkoutError && (
             <p className="text-sm text-red-400 text-center">{checkoutError}</p>
           )}
@@ -277,15 +302,21 @@ function SubscribeContent() {
             disabled={checkoutLoading}
             className="w-full bg-[#ef4444] text-white hover:bg-[#dc2626] border-0"
           >
-            {checkoutLoading ? 'Redirecting…' : 'Start trial'}
+            {checkoutLoading ? 'Redirecting…' : 'Continue to checkout'}
           </Button>
           <p className="text-xs text-[#AAAAAA] text-center">
             Recurring billing. Cancel anytime.
           </p>
         </div>
 
-        <div className="mt-6 flex justify-center">
-          <Button variant="outline" size="sm" onClick={handleSignOut} disabled={signingOut} className="gap-2 border-zinc-600 text-white hover:bg-zinc-800 hover:text-white">
+        <div className="relative z-10 mt-6 flex justify-center">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleSignOut}
+            disabled={signingOut}
+            className="gap-2 border-white/15 bg-white/[0.03] text-white hover:bg-white/[0.08] hover:text-white"
+          >
             <LogOut className="h-4 w-4" />
             {signingOut ? 'Signing out…' : 'Sign out'}
           </Button>
