@@ -29,11 +29,14 @@ export function getStripeSecretKey(): string {
     return key;
   }
 
-  return firstNonEmpty(
+  const key = firstNonEmpty(
     process.env.STRIPE_SECRET_KEY_LIVE,
     process.env.STRIPE_SECRET_KEY,
     'sk_test_placeholder'
   );
+  // Guard against accidental test keys in live mode.
+  if (key.startsWith('sk_test')) return 'sk_test_placeholder';
+  return key;
 }
 
 export function isStripeSecretKeyConfigured(): boolean {

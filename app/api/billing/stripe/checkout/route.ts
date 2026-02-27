@@ -8,6 +8,11 @@ import {
   STRIPE_ALLOWED_PRICE_IDS,
 } from '@/app/lib/billing/stripe-products';
 import { isStripeSecretKeyConfigured } from '@/app/lib/billing/stripe-env';
+import {
+  getStripeCrossModeMessage,
+  isStripeCrossModeError,
+  isStripeNoSuchCustomerError,
+} from '@/app/lib/billing/stripe-errors';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 
 export async function POST(request: NextRequest) {
@@ -95,21 +100,43 @@ export async function POST(request: NextRequest) {
     const appUrl = getAppUrl(request);
     const price = await stripe.prices.retrieve(priceId);
     const isUsd = price.currency?.toLowerCase() === 'usd';
-    const session = await stripe.checkout.sessions.create({
-      customer: customerId,
-      line_items: [{ price: priceId, quantity }],
-      mode: 'subscription',
-      success_url: `${appUrl}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${appUrl}/subscribe`,
-      metadata: { user_id: userId, seats: String(quantity) },
-      ...(isUsd && {
-        custom_text: {
-          submit: {
-            message: 'Amount charged in **USD**.',
+    let session;
+    try {
+      session = await stripe.checkout.sessions.create({
+        customer: customerId,
+        line_items: [{ price: priceId, quantity }],
+        mode: 'subscription',
+        success_url: `${appUrl}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${appUrl}/subscribe`,
+        metadata: { user_id: userId, seats: String(quantity) },
+        ...(isUsd && {
+          custom_text: {
+            submit: {
+              message: 'Amount charged in **USD**.',
+            },
           },
-        },
-      }),
-    });
+        }),
+      });
+    } catch (error) {
+      if (isStripeCrossModeError(error)) {
+        return NextResponse.json(
+          { error: getStripeCrossModeMessage() },
+          { status: 409 }
+        );
+      }
+
+      if (isStripeNoSuchCustomerError(error)) {
+        return NextResponse.json(
+          {
+            error:
+              'Stored Stripe customer ID is missing for the active Stripe mode. Verify STRIPE_MODE/keys or create a new subscription in this mode.',
+          },
+          { status: 409 }
+        );
+      }
+
+      throw error;
+    }
 
     return NextResponse.json({ url: session.url });
   } catch (error) {

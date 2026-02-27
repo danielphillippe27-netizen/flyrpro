@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useWorkspace } from '@/lib/workspace-context';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -69,10 +69,22 @@ function eventLabel(type: string): string {
   return t?.label ?? type;
 }
 
-export function ActivityPageView() {
+type ActivityPageViewProps = {
+  forcedTypeFilter?: string;
+  hideTypeFilters?: boolean;
+  defaultRangePreset?: RangePreset;
+  emptyMessage?: string;
+};
+
+export function ActivityPageView({
+  forcedTypeFilter,
+  hideTypeFilters = false,
+  defaultRangePreset = 'month',
+  emptyMessage = 'No activity in this period.',
+}: ActivityPageViewProps = {}) {
   const { currentWorkspaceId } = useWorkspace();
-  const [rangePreset, setRangePreset] = useState<RangePreset>('month');
-  const [typeFilter, setTypeFilter] = useState<string>('');
+  const [rangePreset, setRangePreset] = useState<RangePreset>(defaultRangePreset);
+  const [typeFilter, setTypeFilter] = useState<string>(forcedTypeFilter ?? '');
   const [includeMembers, setIncludeMembers] = useState(false);
   const [canIncludeMembers, setCanIncludeMembers] = useState(false);
   const [events, setEvents] = useState<ActivityEvent[]>([]);
@@ -81,7 +93,8 @@ export function ActivityPageView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const { start, end } = getRangeForPreset(rangePreset);
+  const { start, end } = useMemo(() => getRangeForPreset(rangePreset), [rangePreset]);
+  const activeTypeFilter = forcedTypeFilter ?? typeFilter;
 
   const fetchActivity = useCallback(
     async (off: number, append: boolean) => {
@@ -105,7 +118,7 @@ export function ActivityPageView() {
           limit: String(PAGE_SIZE),
           offset: String(off),
         });
-        if (typeFilter) params.set('type', typeFilter);
+        if (activeTypeFilter) params.set('type', activeTypeFilter);
         if (includeMembers) params.set('includeMembers', 'true');
         const res = await fetch(`/api/activity?${params}`);
         if (!res.ok) throw new Error(await res.text());
@@ -124,8 +137,16 @@ export function ActivityPageView() {
         setLoading(false);
       }
     },
-    [currentWorkspaceId, start, end, typeFilter, includeMembers]
+    [currentWorkspaceId, start, end, activeTypeFilter, includeMembers]
   );
+
+  useEffect(() => {
+    setRangePreset(defaultRangePreset);
+  }, [defaultRangePreset]);
+
+  useEffect(() => {
+    setTypeFilter(forcedTypeFilter ?? '');
+  }, [forcedTypeFilter]);
 
   useEffect(() => {
     fetchActivity(0, false);
@@ -137,7 +158,10 @@ export function ActivityPageView() {
     acc[key].push(ev);
     return acc;
   }, {});
-  const sortedDates = Object.keys(groupedByDate).sort().reverse();
+  const sortAscending = activeTypeFilter === 'followup';
+  const sortedDates = Object.keys(groupedByDate).sort((a, b) =>
+    sortAscending ? a.localeCompare(b) : b.localeCompare(a)
+  );
   const hasMore = offset + events.length < total;
   const loadMore = () => fetchActivity(offset + PAGE_SIZE, true);
 
@@ -168,20 +192,22 @@ export function ActivityPageView() {
           </>
         )}
       </div>
-      <div className="flex flex-wrap items-center gap-3">
-        <span className="text-sm text-muted-foreground">Type:</span>
-        {TYPE_FILTERS.map(({ value, label, icon: Icon }) => (
-          <Button
-            key={value || 'all'}
-            variant={typeFilter === value ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setTypeFilter(value)}
-          >
-            <Icon className="w-3.5 h-3.5 mr-1" />
-            {label}
-          </Button>
-        ))}
-      </div>
+      {!hideTypeFilters && !forcedTypeFilter && (
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-sm text-muted-foreground">Type:</span>
+          {TYPE_FILTERS.map(({ value, label, icon: Icon }) => (
+            <Button
+              key={value || 'all'}
+              variant={typeFilter === value ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setTypeFilter(value)}
+            >
+              <Icon className="w-3.5 h-3.5 mr-1" />
+              {label}
+            </Button>
+          ))}
+        </div>
+      )}
 
       {error && (
         <Card className="border-destructive/50">
@@ -193,7 +219,7 @@ export function ActivityPageView() {
         {loading && events.length === 0 ? (
           <div className="p-8 text-center text-muted-foreground">Loading activity…</div>
         ) : sortedDates.length === 0 ? (
-          <div className="p-8 text-center text-muted-foreground">No activity in this period.</div>
+          <div className="p-8 text-center text-muted-foreground">{emptyMessage}</div>
         ) : (
           sortedDates.map((dateKey) => (
             <div key={dateKey}>

@@ -2,7 +2,11 @@ import { cookies } from 'next/headers';
 import { type NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
-import { getSupabaseAnonKey, getSupabaseUrl } from '@/lib/supabase/env';
+import {
+  getSupabaseAnonKey,
+  getSupabaseServiceRoleKey,
+  getSupabaseUrl,
+} from '@/lib/supabase/env';
 
 export type RequestUser = {
   id: string;
@@ -30,9 +34,29 @@ export async function resolveUserFromRequest(
       const {
         data: { user },
         error,
-      } = await bearerClient.auth.getUser();
+      } = await bearerClient.auth.getUser(token);
       if (!error && user) {
         return { id: user.id, email: user.email ?? null };
+      }
+
+      // Fallback: verify bearer using service role.
+      // This protects iOS API auth if anon key/config drift causes auth.getUser(token) to fail.
+      const serviceRoleClient = createClient(
+        supabaseUrl,
+        getSupabaseServiceRoleKey(),
+        {
+          auth: {
+            autoRefreshToken: false,
+            persistSession: false,
+          },
+        }
+      );
+      const {
+        data: { user: serviceUser },
+        error: serviceError,
+      } = await serviceRoleClient.auth.getUser(token);
+      if (!serviceError && serviceUser) {
+        return { id: serviceUser.id, email: serviceUser.email ?? null };
       }
     }
   }
@@ -59,4 +83,3 @@ export async function resolveUserFromRequest(
   if (error || !user) return null;
   return { id: user.id, email: user.email ?? null };
 }
-

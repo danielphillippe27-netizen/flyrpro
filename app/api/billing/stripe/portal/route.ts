@@ -3,6 +3,11 @@ import { stripe } from '@/lib/stripe';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
 import { getEntitlementForUser } from '@/app/lib/billing/entitlements';
 import { getAppUrl } from '@/app/lib/billing/stripe-products';
+import {
+  getStripeCrossModeMessage,
+  isStripeCrossModeError,
+  isStripeNoSuchCustomerError,
+} from '@/app/lib/billing/stripe-errors';
 
 export async function POST(request: NextRequest) {
   try {
@@ -25,10 +30,32 @@ export async function POST(request: NextRequest) {
     }
 
     const appUrl = getAppUrl(request);
-    const session = await stripe.billingPortal.sessions.create({
-      customer: customerId,
-      return_url: `${appUrl}/billing`,
-    });
+    let session;
+    try {
+      session = await stripe.billingPortal.sessions.create({
+        customer: customerId,
+        return_url: `${appUrl}/billing`,
+      });
+    } catch (error) {
+      if (isStripeCrossModeError(error)) {
+        return NextResponse.json(
+          { error: getStripeCrossModeMessage() },
+          { status: 409 }
+        );
+      }
+
+      if (isStripeNoSuchCustomerError(error)) {
+        return NextResponse.json(
+          {
+            error:
+              'Stored Stripe customer ID is missing for the active Stripe mode. Verify STRIPE_MODE/keys or sign in to the mode that owns this subscription.',
+          },
+          { status: 409 }
+        );
+      }
+
+      throw error;
+    }
 
     return NextResponse.json({ url: session.url });
   } catch (error) {

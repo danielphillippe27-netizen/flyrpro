@@ -6,7 +6,7 @@ import { useState, useEffect } from 'react';
 import { WorkspaceProvider } from '@/lib/workspace-context';
 import AppTopHeader from '@/components/layout/AppTopHeader';
 import { MainRouteGuard } from '@/components/guard/MainRouteGuard';
-import { Home, Map, Trophy, Users, Settings, Target, Gauge, Plug, CreditCard, MessageCircle, Shield, Activity, CalendarCheck, CornerDownRight, Plus } from 'lucide-react';
+import { Home, Map, Trophy, Users, Settings, Target, Gauge, Plug, MessageCircle, Shield, Activity, CalendarCheck, CornerDownRight, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { DashboardAccessLevel } from '@/app/api/_utils/workspace';
 
@@ -23,9 +23,8 @@ const baseTabs = [
   { href: '/appointments', icon: CalendarCheck, label: 'Appointments' },
   { href: '/leaderboard', icon: Trophy, label: 'Leaderboard' },
   { href: '/stats', icon: Gauge, label: 'Performance' },
-  { href: '/billing', icon: CreditCard, label: 'Billing' },
-  { href: '/settings', icon: Settings, label: 'Settings' },
   { href: '/settings/integrations', icon: Plug, label: 'Integrations' },
+  { href: '/settings', icon: Settings, label: 'Settings' },
 ];
 
 const supportTab = { href: '/support', icon: MessageCircle, label: 'Support' };
@@ -116,7 +115,6 @@ export default function MainLayoutClient({
                 const isIntegrations = tab.href === '/settings/integrations';
                 const isSettings = tab.href === '/settings';
                 const onIntegrations = pathname?.startsWith('/settings/integrations');
-                const isBilling = tab.href === '/billing';
                 const isAdmin = tab.href === '/admin';
                 const pinMemberSettingsToBottom = accessLevel === 'member' && isSettings;
 
@@ -125,8 +123,6 @@ export default function MainLayoutClient({
                   isActive = pathname === '/settings/integrations';
                 } else if (isSettings) {
                   isActive = pathname === '/settings' || (pathname?.startsWith('/settings/') && !onIntegrations);
-                } else if (isBilling) {
-                  isActive = pathname === '/billing' || pathname?.startsWith('/billing/');
                 } else if (isAdmin) {
                   isActive = pathname === '/admin' || pathname?.startsWith('/admin/');
                 } else {
