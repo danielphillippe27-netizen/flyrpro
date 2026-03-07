@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import type Stripe from 'stripe';
 import { stripe } from '@/lib/stripe';
 import { createAdminClient } from '@/lib/supabase/server';
 import { getEntitlementForUser } from '@/app/lib/billing/entitlements';
@@ -14,6 +15,37 @@ import {
   isStripeNoSuchCustomerError,
 } from '@/app/lib/billing/stripe-errors';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
+
+async function resolveCheckoutDiscount(
+  referralCode: string | null
+): Promise<Stripe.Checkout.SessionCreateParams.Discount[] | undefined> {
+  if (!referralCode) return undefined;
+
+  try {
+    const promoResults = await stripe.promotionCodes.list({
+      code: referralCode,
+      active: true,
+      limit: 1,
+    });
+    const promotionCodeId = promoResults.data[0]?.id;
+    if (promotionCodeId) {
+      return [{ promotion_code: promotionCodeId }];
+    }
+  } catch (error) {
+    console.warn('[Stripe] Failed to resolve promotion code from referral:', error);
+  }
+
+  try {
+    const coupon = await stripe.coupons.retrieve(referralCode);
+    if (!('deleted' in coupon) && coupon.valid) {
+      return [{ coupon: coupon.id }];
+    }
+  } catch {
+    // Ignore invalid coupon IDs: referral codes may map to promotion codes only.
+  }
+
+  return undefined;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -59,13 +91,19 @@ export async function POST(request: NextRequest) {
       .maybeSingle();
 
     let workspaceSeats = 1;
+    let workspaceReferralCode: string | null = null;
     if (ownerMembership?.workspace_id) {
       const { data: workspace } = await admin
         .from('workspaces')
-        .select('max_seats')
+        .select('max_seats, referral_code_used')
         .eq('id', ownerMembership.workspace_id)
         .maybeSingle();
       workspaceSeats = Math.max(1, workspace?.max_seats ?? 1);
+      workspaceReferralCode =
+        typeof workspace?.referral_code_used === 'string' &&
+        workspace.referral_code_used.trim().length > 0
+          ? workspace.referral_code_used.trim()
+          : null;
     }
 
     const parsedRequestedSeats =
@@ -100,15 +138,20 @@ export async function POST(request: NextRequest) {
     const appUrl = getAppUrl(request);
     const price = await stripe.prices.retrieve(priceId);
     const isUsd = price.currency?.toLowerCase() === 'usd';
+    const discounts = await resolveCheckoutDiscount(workspaceReferralCode);
     let session;
     try {
-      session = await stripe.checkout.sessions.create({
+      const sessionParams: Stripe.Checkout.SessionCreateParams = {
         customer: customerId,
         line_items: [{ price: priceId, quantity }],
         mode: 'subscription',
         success_url: `${appUrl}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${appUrl}/subscribe`,
-        metadata: { user_id: userId, seats: String(quantity) },
+        metadata: {
+          user_id: userId,
+          seats: String(quantity),
+          ...(workspaceReferralCode ? { referral_code: workspaceReferralCode } : {}),
+        },
         ...(isUsd && {
           custom_text: {
             submit: {
@@ -116,7 +159,15 @@ export async function POST(request: NextRequest) {
             },
           },
         }),
-      });
+      };
+
+      if (discounts?.length) {
+        sessionParams.discounts = discounts;
+      } else {
+        sessionParams.allow_promotion_codes = true;
+      }
+
+      session = await stripe.checkout.sessions.create(sessionParams);
     } catch (error) {
       if (isStripeCrossModeError(error)) {
         return NextResponse.json(
