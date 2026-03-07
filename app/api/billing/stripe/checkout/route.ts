@@ -3,6 +3,7 @@ import type Stripe from 'stripe';
 import { stripe } from '@/lib/stripe';
 import { createAdminClient } from '@/lib/supabase/server';
 import { getEntitlementForUser } from '@/app/lib/billing/entitlements';
+import { resolveReferralDiscount } from '@/app/lib/billing/stripe-referral';
 import {
   getAppUrl,
   getProPriceId,
@@ -15,37 +16,6 @@ import {
   isStripeNoSuchCustomerError,
 } from '@/app/lib/billing/stripe-errors';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
-
-async function resolveCheckoutDiscount(
-  referralCode: string | null
-): Promise<Stripe.Checkout.SessionCreateParams.Discount[] | undefined> {
-  if (!referralCode) return undefined;
-
-  try {
-    const promoResults = await stripe.promotionCodes.list({
-      code: referralCode,
-      active: true,
-      limit: 1,
-    });
-    const promotionCodeId = promoResults.data[0]?.id;
-    if (promotionCodeId) {
-      return [{ promotion_code: promotionCodeId }];
-    }
-  } catch (error) {
-    console.warn('[Stripe] Failed to resolve promotion code from referral:', error);
-  }
-
-  try {
-    const coupon = await stripe.coupons.retrieve(referralCode);
-    if (!('deleted' in coupon) && coupon.valid) {
-      return [{ coupon: coupon.id }];
-    }
-  } catch {
-    // Ignore invalid coupon IDs: referral codes may map to promotion codes only.
-  }
-
-  return undefined;
-}
 
 export async function POST(request: NextRequest) {
   try {
@@ -138,7 +108,8 @@ export async function POST(request: NextRequest) {
     const appUrl = getAppUrl(request);
     const price = await stripe.prices.retrieve(priceId);
     const isUsd = price.currency?.toLowerCase() === 'usd';
-    const discounts = await resolveCheckoutDiscount(workspaceReferralCode);
+    const resolvedReferral = await resolveReferralDiscount(workspaceReferralCode);
+    const discounts = resolvedReferral?.discounts;
     let session;
     try {
       const sessionParams: Stripe.Checkout.SessionCreateParams = {

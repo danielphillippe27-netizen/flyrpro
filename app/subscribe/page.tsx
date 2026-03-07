@@ -14,6 +14,18 @@ type AccessState = {
   reason?: string;
 };
 
+type ReferralPreview = {
+  referralCode: string | null;
+  hasDiscount: boolean;
+  discount?: {
+    source: 'promotion_code' | 'coupon';
+    percentOff: number | null;
+    amountOff: number | null;
+    amountOffCurrency: string | null;
+    duration: 'forever' | 'once' | 'repeating' | null;
+  } | null;
+};
+
 const FEATURES = [
   { icon: Monitor, label: 'Desktop Dashboard' },
   { icon: Flag, label: 'Unlimited Campaigns' },
@@ -38,13 +50,22 @@ function SubscribeContent() {
   const [signingOut, setSigningOut] = useState(false);
   const [plan, setPlan] = useState<'annual' | 'monthly'>('annual');
   const [currency, setCurrency] = useState<'USD' | 'CAD'>('CAD');
+  const [referralPreview, setReferralPreview] = useState<ReferralPreview | null>(null);
   const seats = Math.max(1, state?.maxSeats ?? 1);
 
   const annualBase = currency === 'CAD' ? 399 : 299;
-  const annualMonthlyEquivalent = annualBase / 12;
-  const annualTotal = annualBase * seats;
+  const annualMonthlyEquivalentBase = annualBase / 12;
+  const annualTotalBase = annualBase * seats;
   const monthlyPrice = currency === 'CAD' ? 39.99 : 29.99;
-  const monthlyTotal = monthlyPrice * seats;
+  const monthlyTotalBase = monthlyPrice * seats;
+  const percentOff =
+    referralPreview?.hasDiscount && typeof referralPreview.discount?.percentOff === 'number'
+      ? Math.max(0, Math.min(100, referralPreview.discount.percentOff))
+      : 0;
+  const discountMultiplier = 1 - percentOff / 100;
+  const annualTotal = annualTotalBase * discountMultiplier;
+  const annualMonthlyEquivalent = annualMonthlyEquivalentBase * seats * discountMultiplier;
+  const monthlyTotal = monthlyTotalBase * discountMultiplier;
   const planButtonBaseClass =
     'group relative w-full overflow-hidden rounded-2xl border px-5 py-4 text-left backdrop-blur-xl transition-all duration-200';
 
@@ -85,6 +106,19 @@ function SubscribeContent() {
         if (res.ok && mounted) {
           const data = await res.json();
           setState(data);
+
+          try {
+            const promoRes = await fetch('/api/billing/stripe/referral', {
+              credentials: 'include',
+            });
+            if (promoRes.ok && mounted) {
+              const promoData = (await promoRes.json()) as ReferralPreview;
+              setReferralPreview(promoData);
+            }
+          } catch {
+            // Non-blocking; checkout route still applies referral server-side.
+          }
+
           if (data.hasAccess) {
             // Brief delay so post-onboarding workspace update is visible to the gate when /home loads
             redirectTimer = setTimeout(() => {
@@ -124,7 +158,7 @@ function SubscribeContent() {
       } else {
         setCheckoutError(data?.error ?? 'Failed to start checkout.');
       }
-    } catch (e) {
+    } catch {
       setCheckoutError('Network error. Please try again.');
     } finally {
       setCheckoutLoading(false);
@@ -222,6 +256,12 @@ function SubscribeContent() {
             {currency === 'USD' ? 'Show prices in CAD' : 'Show prices in USD'}
           </button>
         </p>
+        {referralPreview?.hasDiscount && referralPreview.referralCode && (
+          <p className="relative z-10 mt-2 text-center text-sm text-emerald-300">
+            Referral {referralPreview.referralCode} applied
+            {percentOff > 0 ? `: ${percentOff}% off` : ''}.
+          </p>
+        )}
 
         <div className="relative z-10 mt-6 space-y-2.5">
           <button
@@ -241,7 +281,12 @@ function SubscribeContent() {
               </p>
             </div>
             <p className="relative z-10 font-semibold text-white text-right">
-              ${(annualMonthlyEquivalent * seats).toFixed(2)}/month
+              {percentOff > 0 && (
+                <span className="mr-2 text-[#A0A0A0] line-through">
+                  ${(annualMonthlyEquivalentBase * seats).toFixed(2)}
+                </span>
+              )}
+              ${annualMonthlyEquivalent.toFixed(2)}/month
             </p>
           </button>
           <button
@@ -261,6 +306,11 @@ function SubscribeContent() {
               </p>
             </div>
             <p className="relative z-10 font-semibold text-white text-right">
+              {percentOff > 0 && (
+                <span className="mr-2 text-[#A0A0A0] line-through">
+                  ${monthlyTotalBase.toFixed(2)}
+                </span>
+              )}
               ${monthlyTotal.toFixed(2)}/month
             </p>
           </button>
