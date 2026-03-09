@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
     // First, try to fetch all addresses for this campaign
     const { data: addresses, error } = await supabase
       .from('campaign_addresses')
-      .select('id, qr_code_base64')
+      .select('id, qr_code_base64, purl')
       .eq('campaign_id', campaignId);
 
     if (error) {
@@ -64,9 +64,11 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Filter addresses that don't have QR codes yet (qr_code_base64 is null)
+    // Regenerate when missing OR when legacy localhost tracking URLs were saved.
     const addressesNeedingQR = addresses.filter(addr => 
-      !addr.qr_code_base64
+      !addr.qr_code_base64 ||
+      !addr.purl ||
+      isLocalhostUrl(addr.purl)
     );
 
     console.log(`${addressesNeedingQR.length} addresses need QR codes`);
