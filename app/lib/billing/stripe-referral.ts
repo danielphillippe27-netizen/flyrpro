@@ -13,6 +13,51 @@ export type ResolvedReferralDiscount = {
   duration: Stripe.Coupon.Duration | null;
 };
 
+function buildCouponDiscount(
+  referralCode: string,
+  coupon: Stripe.Coupon
+): ResolvedReferralDiscount {
+  return {
+    referralCode,
+    source: 'coupon',
+    stripeCouponId: coupon.id,
+    discounts: [{ coupon: coupon.id }],
+    percentOff: coupon.percent_off ?? null,
+    amountOff: coupon.amount_off ?? null,
+    amountOffCurrency: coupon.currency?.toUpperCase() ?? null,
+    duration: coupon.duration ?? null,
+  };
+}
+
+async function findCouponByName(input: string): Promise<Stripe.Coupon | null> {
+  const normalizedInput = input.trim().toLowerCase();
+  if (!normalizedInput) return null;
+
+  let startingAfter: string | undefined;
+  // Scan a bounded number of pages to support coupon-name referral codes.
+  for (let page = 0; page < 5; page += 1) {
+    const results = await stripe.coupons.list({
+      limit: 100,
+      ...(startingAfter ? { starting_after: startingAfter } : {}),
+    });
+
+    const match = results.data.find((coupon) => {
+      const couponName = coupon.name?.trim().toLowerCase();
+      return (
+        coupon.valid &&
+        (couponName === normalizedInput || coupon.id.trim().toLowerCase() === normalizedInput)
+      );
+    });
+    if (match) return match;
+
+    if (!results.has_more || results.data.length === 0) break;
+    startingAfter = results.data[results.data.length - 1]?.id;
+    if (!startingAfter) break;
+  }
+
+  return null;
+}
+
 export async function resolveReferralDiscount(
   referralCode: string | null
 ): Promise<ResolvedReferralDiscount | null> {
@@ -61,19 +106,19 @@ export async function resolveReferralDiscount(
   try {
     const coupon = await stripe.coupons.retrieve(trimmed);
     if (!('deleted' in coupon) && coupon.valid) {
-      return {
-        referralCode: trimmed,
-        source: 'coupon',
-        stripeCouponId: coupon.id,
-        discounts: [{ coupon: coupon.id }],
-        percentOff: coupon.percent_off ?? null,
-        amountOff: coupon.amount_off ?? null,
-        amountOffCurrency: coupon.currency?.toUpperCase() ?? null,
-        duration: coupon.duration ?? null,
-      };
+      return buildCouponDiscount(trimmed, coupon);
     }
   } catch {
     // Ignore invalid coupon IDs.
+  }
+
+  try {
+    const coupon = await findCouponByName(trimmed);
+    if (coupon) {
+      return buildCouponDiscount(trimmed, coupon);
+    }
+  } catch (error) {
+    console.warn('[Stripe] Failed to resolve coupon from referral name:', error);
   }
 
   return null;
