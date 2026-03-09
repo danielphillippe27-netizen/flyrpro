@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
+import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { gunzipSync } from 'zlib';
 
@@ -44,7 +45,36 @@ export async function GET(
   console.log(`[API] GET /campaigns/${campaignId}/buildings`);
   
   try {
+    const requestUser = await resolveUserFromRequest(request);
+    if (!requestUser) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const supabase = createAdminClient();
+
+    const { data: campaignAccess, error: campaignAccessError } = await supabase
+      .from('campaigns')
+      .select('owner_id, workspace_id, territory_boundary')
+      .eq('id', campaignId)
+      .maybeSingle();
+
+    if (campaignAccessError || !campaignAccess) {
+      return NextResponse.json({ error: 'Campaign not found' }, { status: 404 });
+    }
+
+    let allowed = campaignAccess.owner_id === requestUser.id;
+    if (!allowed && campaignAccess.workspace_id) {
+      const { data: member } = await supabase
+        .from('workspace_members')
+        .select('user_id')
+        .eq('workspace_id', campaignAccess.workspace_id)
+        .eq('user_id', requestUser.id)
+        .maybeSingle();
+      allowed = !!member?.user_id;
+    }
+    if (!allowed) {
+      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+    }
     
     // UNIFIED PATH: Use consolidated RPC that handles both Gold and Silver buildings
     // Gold: campaign_addresses.building_id → ref_buildings_gold (polygon features)
@@ -77,11 +107,7 @@ export async function GET(
     // Self-heal: relink on demand for campaigns that have addresses but no polygon links yet.
     // This handles mixed DB states where the provision step may have skipped linker RPCs.
     let repairAttempted = false;
-    const { data: campaignRow } = await supabase
-      .from('campaigns')
-      .select('territory_boundary')
-      .eq('id', campaignId)
-      .maybeSingle();
+    const campaignRow = campaignAccess;
 
     if (campaignRow?.territory_boundary) {
       const { error: goldRepairError } = await supabase.rpc('link_campaign_addresses_gold', {

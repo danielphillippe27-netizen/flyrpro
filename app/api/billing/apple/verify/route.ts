@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 import { createAdminClient } from '@/lib/supabase/server';
 import { getEntitlementForUser, mergeEntitlementUpdate } from '@/app/lib/billing/entitlements';
 import { getAppleTransactionStatus } from '@/app/lib/billing/apple-server';
@@ -7,16 +6,7 @@ import {
   isAllowedAppleProductId,
 } from '@/app/lib/billing/apple-products';
 import { updateWorkspaceSubscriptionForUser } from '@/app/lib/billing/stripe-subscription-sync';
-
-const SUPABASE_URL =
-  process.env.SUPABASE_URL ||
-  process.env.NEXT_PUBLIC_SUPABASE_URL ||
-  'https://kfnsnwqylsdsbgnwgxva.supabase.co';
-const SUPABASE_ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-function cleanUrl(): string {
-  return (SUPABASE_URL || '').trim().replace(/\/$/, '') || SUPABASE_URL;
-}
+import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 
 /**
  * POST /api/billing/apple/verify
@@ -26,21 +16,11 @@ function cleanUrl(): string {
  */
 export async function POST(request: NextRequest) {
   try {
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ') || !SUPABASE_ANON) {
+    const requestUser = await resolveUserFromRequest(request);
+    if (!requestUser) {
       return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
     }
-    const token = authHeader.slice(7);
-    const supabase = createClient(cleanUrl(), SUPABASE_ANON, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-    });
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
-    if (userError || !user) {
-      return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
-    }
+    const userId = requestUser.id;
 
     const body = await request.json();
     const transactionId = body?.transactionId as string | undefined;
@@ -80,10 +60,10 @@ export async function POST(request: NextRequest) {
 
     let existing;
     try {
-      existing = await getEntitlementForUser(user.id);
+      existing = await getEntitlementForUser(userId);
     } catch {
       existing = {
-        user_id: user.id,
+        user_id: userId,
         plan: 'free',
         is_active: false,
         source: 'none',
@@ -103,11 +83,11 @@ export async function POST(request: NextRequest) {
 
     const admin = createAdminClient();
     if (Object.keys(update).length > 0) {
-      await admin
+      const { error: upsertError } = await admin
         .from('entitlements')
         .upsert(
           {
-            user_id: user.id,
+            user_id: userId,
             plan: update.plan ?? existing.plan,
             is_active: update.is_active ?? existing.is_active,
             source: update.source ?? existing.source,
@@ -116,14 +96,44 @@ export async function POST(request: NextRequest) {
           },
           { onConflict: 'user_id' }
         );
+      if (upsertError) {
+        console.error('[billing/apple/verify] entitlement upsert failed:', upsertError);
+        return NextResponse.json(
+          { ok: false, error: 'Failed to update entitlement' },
+          { status: 500 }
+        );
+      }
     }
 
-    await updateWorkspaceSubscriptionForUser(admin, user.id, {
+    await updateWorkspaceSubscriptionForUser(admin, userId, {
       status: result.isActive ? 'active' : 'inactive',
       trialEndsAt: null,
     });
 
-    const final = await getEntitlementForUser(user.id);
+    // Defensive fallback: if owner workspace exists, force it to reflect Apple status.
+    // This protects iOS/web parity if primary-workspace resolution misses in edge cases.
+    const { data: ownerWorkspaces, error: ownerWsError } = await admin
+      .from('workspaces')
+      .select('id')
+      .eq('owner_id', userId);
+    if (ownerWsError) {
+      console.error('[billing/apple/verify] owner workspace lookup failed:', ownerWsError);
+    } else if ((ownerWorkspaces ?? []).length > 0) {
+      const ids = (ownerWorkspaces ?? []).map((row) => row.id);
+      const { error: wsUpdateError } = await admin
+        .from('workspaces')
+        .update({
+          subscription_status: result.isActive ? 'active' : 'inactive',
+          trial_ends_at: null,
+          updated_at: new Date().toISOString(),
+        })
+        .in('id', ids);
+      if (wsUpdateError) {
+        console.error('[billing/apple/verify] workspace status update failed:', wsUpdateError);
+      }
+    }
+
+    const final = await getEntitlementForUser(userId);
     return NextResponse.json({
       ok: true,
       entitlement: {

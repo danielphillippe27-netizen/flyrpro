@@ -338,14 +338,20 @@ export default function CampaignDetailPage() {
   const [scriptsDirty, setScriptsDirty] = useState(false);
   const [isSavingScripts, setIsSavingScripts] = useState(false);
   const [uploadingFlyer, setUploadingFlyer] = useState(false);
+  const [qrScanEventsCount, setQrScanEventsCount] = useState<number | null>(null);
 
   const loadData = useCallback(async () => {
     try {
-      const [campaignData, addressesData, statsData, contactsData] = await Promise.all([
+      const supabase = createClient();
+      const [campaignData, addressesData, statsData, contactsData, scanEventsRes] = await Promise.all([
         CampaignsService.fetchCampaign(campaignId),
         CampaignsService.fetchAddresses(campaignId),
         CampaignsService.fetchCampaignStats(campaignId),
         CampaignsService.fetchCampaignContacts(campaignId),
+        supabase
+          .from('scan_events')
+          .select('id', { count: 'exact', head: true })
+          .eq('campaign_id', campaignId),
       ]);
       if (!campaignData) return;
 
@@ -367,6 +373,12 @@ export default function CampaignDetailPage() {
         visited: visitedCount || statsData.visited,
         progress_pct: progressPct,
       });
+      if (scanEventsRes.error) {
+        console.warn('Unable to fetch scan_events count:', scanEventsRes.error.message);
+        setQrScanEventsCount(null);
+      } else {
+        setQrScanEventsCount(scanEventsRes.count ?? 0);
+      }
     } catch (error) {
       console.error('Error loading campaign:', error);
     } finally {
@@ -687,6 +699,13 @@ export default function CampaignDetailPage() {
     }
   }
   const dedupedAddresses = Array.from(seen.values());
+  const totalHomesInCampaign = campaignStats.addresses || dedupedAddresses.length;
+  const homesWithQrScans = campaignStats.scanned || dedupedAddresses.filter((addr) => (addr.scans || 0) > 0).length;
+  const fallbackTotalQrScans = Math.max(
+    dedupedAddresses.reduce((total, addr) => total + (addr.scans || 0), 0),
+    campaign.scans || 0
+  );
+  const totalQrScans = qrScanEventsCount ?? fallbackTotalQrScans;
 
   const formattedRecipients = dedupedAddresses.map((addr) => ({
     id: addr.id,
@@ -792,7 +811,7 @@ export default function CampaignDetailPage() {
                 <div className="flex flex-col gap-3">
                   <h3 className="text-sm font-semibold text-foreground">Basic QR Code</h3>
                   <p className="text-xs text-muted-foreground max-w-md">
-                    One QR code for the whole campaign. Scans are counted in campaign analytics but not tied to any address.
+                    One QR code for the whole campaign. Each scan is tracked in campaign analytics, but not tied to any specific address.
                   </p>
                   <div className="flex flex-wrap gap-3">
                     <Button
@@ -849,6 +868,42 @@ export default function CampaignDetailPage() {
                   {generatingCanva ? 'Generating...' : 'Generate for Canva'}
                 </Button>
               </div>
+            </div>
+
+            <div className="bg-card p-4 rounded-xl border border-border">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-sm font-semibold text-foreground">QR Analytics</h2>
+                  <p className="text-xs text-muted-foreground">
+                    Simple scan totals for this campaign.
+                  </p>
+                </div>
+                <Button size="sm" variant="outline" onClick={loadData}>
+                  Refresh
+                </Button>
+              </div>
+              <p className="text-[11px] text-muted-foreground mb-3">
+                Basic QR scans count toward total scans, not homes scanned.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="rounded-lg border border-border bg-background p-3">
+                  <p className="text-xs text-muted-foreground">Homes in campaign</p>
+                  <p className="text-2xl font-semibold text-foreground">{totalHomesInCampaign.toLocaleString()}</p>
+                </div>
+                <div className="rounded-lg border border-border bg-background p-3">
+                  <p className="text-xs text-muted-foreground">Homes scanned (Advanced QR)</p>
+                  <p className="text-2xl font-semibold text-foreground">{homesWithQrScans.toLocaleString()}</p>
+                </div>
+                <div className="rounded-lg border border-border bg-background p-3">
+                  <p className="text-xs text-muted-foreground">Total QR scans</p>
+                  <p className="text-2xl font-semibold text-foreground">{totalQrScans.toLocaleString()}</p>
+                </div>
+              </div>
+              {qrScanEventsCount === null && (
+                <p className="text-[11px] text-muted-foreground mt-2">
+                  Total scans shown with fallback estimate when event logs are unavailable.
+                </p>
+              )}
             </div>
           </TabsContent>
 

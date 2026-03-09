@@ -3,18 +3,22 @@ import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { db } from '@/lib/editor-db/drizzle';
 import { editorProjects } from '@/lib/editor-db/schema';
-import { eq, and, desc, asc } from 'drizzle-orm';
+import { eq, desc } from 'drizzle-orm';
+import { getSupabaseAnonKey, getSupabaseUrl } from '@/lib/supabase/env';
+
+function isDatabaseConfigError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('DATABASE_URL') || message.includes('must be set');
+}
 
 // Get all projects
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
     const cookieStore = await cookies();
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://kfnsnwqylsdsbgnwgxva.supabase.co';
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
     
     const supabase = createServerClient(
-      supabaseUrl,
-      supabaseAnonKey,
+      getSupabaseUrl(),
+      getSupabaseAnonKey(),
       {
         cookies: {
           getAll() {
@@ -43,9 +47,9 @@ export async function GET(request: NextRequest) {
         .orderBy(desc(editorProjects.updatedAt));
 
       return NextResponse.json({ data: projects });
-    } catch (dbError: any) {
+    } catch (dbError) {
       // If database is not configured, return empty array
-      if (dbError.message?.includes('DATABASE_URL') || dbError.message?.includes('must be set')) {
+      if (isDatabaseConfigError(dbError)) {
         console.warn('Database not configured, returning empty projects list');
         return NextResponse.json({ data: [] });
       }
@@ -61,12 +65,10 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const cookieStore = await cookies();
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://kfnsnwqylsdsbgnwgxva.supabase.co';
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
     
     const supabase = createServerClient(
-      supabaseUrl,
-      supabaseAnonKey,
+      getSupabaseUrl(),
+      getSupabaseAnonKey(),
       {
         cookies: {
           getAll() {
@@ -107,9 +109,9 @@ export async function POST(request: NextRequest) {
         .returning();
 
       return NextResponse.json({ data: project });
-    } catch (dbError: any) {
+    } catch (dbError) {
       // If database is not configured, return error
-      if (dbError.message?.includes('DATABASE_URL') || dbError.message?.includes('must be set')) {
+      if (isDatabaseConfigError(dbError)) {
         return NextResponse.json({ 
           error: 'Database not configured. Please set DATABASE_URL in environment variables.' 
         }, { status: 503 });
@@ -121,4 +123,3 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
-

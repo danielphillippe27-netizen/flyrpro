@@ -105,11 +105,6 @@ export function HomeDashboardView({
     lastSessionAt,
   } = data;
 
-  const hasAnyActivity =
-    stats.doorsAllTime > 0 ||
-    stats.doorsThisWeek > 0 ||
-    stats.totalMinutesAllTime > 0;
-
   const handleEditGoals = () => {
     // TODO: Open existing settings/goals modal or route; if none exists, placeholder.
     window.location.href = '/settings#goals';
@@ -128,7 +123,6 @@ export function HomeDashboardView({
       <QuoteCard noCard className="min-h-[160px]" />
 
       <QuickActionsRow
-        activeRouteCampaignId={null}
         onCreateCampaign={onCreateCampaign}
         canCreateCampaign={canCreateCampaign}
       />

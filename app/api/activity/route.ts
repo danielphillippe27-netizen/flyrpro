@@ -331,16 +331,21 @@ export async function GET(request: NextRequest) {
 
     const runEventsQuery = async (
       withWorkspaceFilter: boolean,
-      timestampColumn: TimestampColumn
+      timestampColumn: TimestampColumn,
+      includePayload: boolean
     ) => {
-      const selectColumns =
-        timestampColumn === 'event_time'
-          ? 'id, user_id, event_type, event_time, payload, created_at'
-          : 'id, user_id, event_type, created_at, payload';
+      const baseColumns = ['id', 'user_id', 'event_type'];
+      if (timestampColumn === 'event_time') {
+        baseColumns.push('event_time');
+      }
+      if (includePayload) {
+        baseColumns.push('payload');
+      }
+      baseColumns.push('created_at');
 
       let query = admin
         .from('session_events')
-        .select(selectColumns, { count: 'exact' })
+        .select(baseColumns.join(', '), { count: 'exact' })
         .gte(timestampColumn, start)
         .lte(timestampColumn, end)
         .order(timestampColumn, { ascending: false })
@@ -363,19 +368,32 @@ export async function GET(request: NextRequest) {
       return query;
     };
 
-    const runEventsQueryWithTimestampFallback = async (withWorkspaceFilter: boolean) => {
-      const primary = await runEventsQuery(withWorkspaceFilter, 'event_time');
-      if (!primary.error || !isMissingSessionEventsColumn(primary.error, 'event_time')) {
-        return primary;
+    const runEventsQueryWithFallbacks = async (withWorkspaceFilter: boolean) => {
+      let timestampColumn: TimestampColumn = 'event_time';
+      let includePayload = true;
+
+      while (true) {
+        const result = await runEventsQuery(withWorkspaceFilter, timestampColumn, includePayload);
+        if (!result.error) {
+          return result;
+        }
+        if (timestampColumn === 'event_time' && isMissingSessionEventsColumn(result.error, 'event_time')) {
+          timestampColumn = 'created_at';
+          continue;
+        }
+        if (includePayload && isMissingSessionEventsColumn(result.error, 'payload')) {
+          includePayload = false;
+          continue;
+        }
+        return result;
       }
-      return runEventsQuery(withWorkspaceFilter, 'created_at');
     };
 
-    let { data: rows, error: rowsError, count } = await runEventsQueryWithTimestampFallback(true);
+    let { data: rows, error: rowsError, count } = await runEventsQueryWithFallbacks(true);
 
     if (rowsError) {
       // Fallback for older DBs where session_events may not have workspace_id yet
-      const fallbackResult = await runEventsQueryWithTimestampFallback(false);
+      const fallbackResult = await runEventsQueryWithFallbacks(false);
       rows = fallbackResult.data;
       rowsError = fallbackResult.error;
       count = fallbackResult.count;

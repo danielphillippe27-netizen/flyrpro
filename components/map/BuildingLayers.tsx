@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { Map } from 'mapbox-gl';
 import mapboxgl from 'mapbox-gl';
-// @ts-ignore - pmtiles types may not be available yet
+// @ts-expect-error - pmtiles types may not be available yet
 import { installProtocol } from 'pmtiles';
 import { createClient } from '@/lib/supabase/client';
 
@@ -18,7 +18,10 @@ function getPmtilesUrl(): string {
   }
 
   // Construct from Supabase URL
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://kfnsnwqylsdsbgnwgxva.supabase.co';
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!supabaseUrl) {
+    return '';
+  }
   const cleanUrl = supabaseUrl.trim().replace(/\/$/, '');
   return `${cleanUrl}/storage/v1/object/public/map-tiles/buildings.pmtiles`;
 }
@@ -114,7 +117,7 @@ export function BuildingLayers({
 
   // Note: Feature state is no longer used - we use match expression in paint properties instead
   // This function is kept for backward compatibility but does nothing
-  const updateFeatureState = useCallback((map: Map, activeIds: Set<string>) => {
+  const updateFeatureState = useCallback(() => {
     // GERS-First Architecture: Color matching is now done via match expression in paint properties
     // No need to update feature state
   }, []);
@@ -152,6 +155,10 @@ export function BuildingLayers({
         const sourceId = 'flyr-campaign-buildings-source';
         const layerId = 'flyr-campaign-buildings-extrusion';
         const pmtilesUrl = getPmtilesUrl();
+        if (!pmtilesUrl) {
+          console.warn('[BuildingLayers] Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_PMTILES_URL');
+          return;
+        }
 
         // Convert Set to Array for match expression
         const activeGersIdsArray = Array.from(activeIds);
@@ -241,7 +248,7 @@ export function BuildingLayers({
             // Fallback: show popup with basic info
             const fullAddress = props.full_address || 'Address not available';
             const renderHeight = props.height || props.render_height || 10;
-            const popup = new mapboxgl.Popup({ closeOnClick: true })
+            new mapboxgl.Popup({ closeOnClick: true })
               .setLngLat(e.lngLat)
               .setHTML(`
                 <div style="padding: 8px;">
@@ -269,7 +276,7 @@ export function BuildingLayers({
             const buildingData = await response.json();
 
             // Create popup with building details
-            const popup = new mapboxgl.Popup({ closeOnClick: true })
+            new mapboxgl.Popup({ closeOnClick: true })
               .setLngLat(e.lngLat)
               .setHTML(`
                 <div style="padding: 8px;">
@@ -304,7 +311,7 @@ export function BuildingLayers({
             // Fallback popup on error
             const fullAddress = props.full_address || 'Address not available';
             const renderHeight = props.height || props.render_height || 10;
-            const popup = new mapboxgl.Popup({ closeOnClick: true })
+            new mapboxgl.Popup({ closeOnClick: true })
               .setLngLat(e.lngLat)
               .setHTML(`
                 <div style="padding: 8px;">
@@ -322,7 +329,7 @@ export function BuildingLayers({
         };
 
         // Remove existing handlers and add new one
-        map.off('click', layerId, clickHandler as any);
+        map.off('click', layerId, clickHandler);
         map.on('click', layerId, clickHandler);
 
         // Change cursor on hover

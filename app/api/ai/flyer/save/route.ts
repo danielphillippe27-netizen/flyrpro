@@ -4,6 +4,7 @@ import { createServerClient } from "@supabase/ssr";
 import { FlyerEditorService } from "@/lib/services/FlyerEditorService";
 import { convertAITemplateToFlyerData } from "@/lib/flyers/aiTemplateConverter";
 import type { FlyerTemplate, FlyerListingData } from "@/types/flyer";
+import { getSupabaseAnonKey, getSupabaseUrl } from "@/lib/supabase/env";
 
 export async function POST(req: NextRequest) {
   try {
@@ -18,13 +19,10 @@ export async function POST(req: NextRequest) {
 
     // Get authenticated user
     const cookieStore = await cookies();
-    const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://kfnsnwqylsdsbgnwgxva.supabase.co';
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtmbnNud3F5bHNkc2JnbndneHZhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA5MjY3MzEsImV4cCI6MjA3NjUwMjczMX0.k2TZKPi3VxAVpEGggLiROYvfVu2nV_oSqBt2GM4jX-Y';
-    const cleanUrl = supabaseUrl ? supabaseUrl.trim().replace(/\/$/, '') : 'https://kfnsnwqylsdsbgnwgxva.supabase.co';
     
     const supabase = createServerClient(
-      cleanUrl,
-      supabaseAnonKey,
+      getSupabaseUrl(),
+      getSupabaseAnonKey(),
       {
         cookies: {
           getAll() {
@@ -108,14 +106,6 @@ export async function POST(req: NextRequest) {
       listing as FlyerListingData
     );
 
-    // Map size format
-    const sizeMap: Record<string, string> = {
-      "4x6": "4x6",
-      "5x7": "5x7",
-      "8.5x5.5": "8.5x5.5",
-    };
-    const dbSize = sizeMap[template.size] || "LETTER_8_5x11";
-
     // Create flyer
     const flyer = await FlyerEditorService.createDefaultFlyer(
       finalCampaignId,
@@ -130,12 +120,14 @@ export async function POST(req: NextRequest) {
       flyerId: flyer.id,
       campaignId: finalCampaignId,
     });
-  } catch (err: any) {
-    console.error("Save AI flyer error", err);
+  } catch (error) {
+    console.error("Save AI flyer error", error);
     return NextResponse.json(
-      { error: "Server error", detail: err?.message },
+      {
+        error: "Server error",
+        detail: error instanceof Error ? error.message : "Unknown error",
+      },
       { status: 500 }
     );
   }
 }
-

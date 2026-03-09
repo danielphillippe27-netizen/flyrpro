@@ -1,19 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-import { cookies } from 'next/headers';
 import { getEntitlementForUser } from '@/app/lib/billing/entitlements';
 import type { EntitlementSnapshot } from '@/types/database';
 import { getDefaultUpgradePriceId } from '@/app/lib/billing/stripe-products';
-
-const DEFAULT_SUPABASE_URL =
-  process.env.SUPABASE_URL ||
-  process.env.NEXT_PUBLIC_SUPABASE_URL ||
-  'https://kfnsnwqylsdsbgnwgxva.supabase.co';
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-function getCleanUrl(): string {
-  return (DEFAULT_SUPABASE_URL || '').trim().replace(/\/$/, '') || DEFAULT_SUPABASE_URL;
-}
+import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 
 /**
  * GET /api/billing/entitlement
@@ -22,61 +11,12 @@ function getCleanUrl(): string {
  */
 export async function GET(request: NextRequest) {
   try {
-    let userId: string | null = null;
-
-    const authHeader = request.headers.get('authorization');
-    if (authHeader?.startsWith('Bearer ')) {
-      const token = authHeader.slice(7);
-      if (!SUPABASE_ANON_KEY) {
-        return NextResponse.json(
-          { error: 'Server misconfiguration' },
-          { status: 500 }
-        );
-      }
-      const supabase = createClient(getCleanUrl(), SUPABASE_ANON_KEY, {
-        global: { headers: { Authorization: `Bearer ${token}` } },
-      });
-      const {
-        data: { user },
-        error,
-      } = await supabase.auth.getUser();
-      if (error || !user) {
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-      }
-      userId = user.id;
-    } else {
-      const cookieStore = await cookies();
-      const { createServerClient } = await import('@supabase/ssr');
-      if (!SUPABASE_ANON_KEY) {
-        return NextResponse.json(
-          { error: 'Server misconfiguration' },
-          { status: 500 }
-        );
-      }
-      const supabase = createServerClient(
-        getCleanUrl(),
-        SUPABASE_ANON_KEY,
-        {
-          cookies: {
-            getAll() {
-              return cookieStore.getAll();
-            },
-            setAll(cookiesToSet: { name: string; value: string; options?: object }[]) {
-              cookiesToSet.forEach(({ name, value, options }) =>
-                cookieStore.set(name, value, options)
-              );
-            },
-          },
-        }
-      );
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-      }
-      userId = user.id;
+    const requestUser = await resolveUserFromRequest(request);
+    if (!requestUser) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const entitlement = await getEntitlementForUser(userId!);
+    const entitlement = await getEntitlementForUser(requestUser.id);
 
     const snapshot: EntitlementSnapshot & { upgrade_price_id?: string } = {
       plan: entitlement.plan,

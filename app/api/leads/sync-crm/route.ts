@@ -1,6 +1,7 @@
-import { NextResponse } from 'next/server';
-import { getSupabaseServerClient } from '@/lib/supabase/server';
-import { resolveWorkspaceIdForUser } from '@/app/api/_utils/workspace';
+import { NextRequest, NextResponse } from 'next/server';
+import { createAdminClient } from '@/lib/supabase/server';
+import { resolveWorkspaceIdForUser, type MinimalSupabaseClient } from '@/app/api/_utils/workspace';
+import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import crypto from 'crypto';
 
 export const runtime = 'nodejs';
@@ -43,14 +44,14 @@ type ContactRow = {
  * POST /api/leads/sync-crm
  * Syncs the current user's leads/contacts to connected CRMs (Follow Up Boss).
  */
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
-    const supabase = await getSupabaseServerClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-
-    if (authError || !user) {
+    const requestUser = await resolveUserFromRequest(request);
+    if (!requestUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    const userId = requestUser.id;
+    const supabase = createAdminClient();
 
     let workspaceId: string | null = null;
     try {
@@ -60,7 +61,11 @@ export async function POST(request: Request) {
       // no-op: body may be empty
     }
 
-    const workspaceResolution = await resolveWorkspaceIdForUser(supabase as any, user.id, workspaceId);
+    const workspaceResolution = await resolveWorkspaceIdForUser(
+      supabase as unknown as MinimalSupabaseClient,
+      userId,
+      workspaceId
+    );
     if (!workspaceResolution.workspaceId) {
       return NextResponse.json(
         { error: workspaceResolution.error ?? 'Workspace not found' },

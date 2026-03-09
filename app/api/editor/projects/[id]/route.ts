@@ -4,6 +4,12 @@ import { createServerClient } from '@supabase/ssr';
 import { db } from '@/lib/editor-db/drizzle';
 import { editorProjects } from '@/lib/editor-db/schema';
 import { eq, and } from 'drizzle-orm';
+import { getSupabaseAnonKey, getSupabaseUrl } from '@/lib/supabase/env';
+
+function isDatabaseConfigError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('DATABASE_URL') || message.includes('must be set');
+}
 
 // Get single project
 export async function GET(
@@ -13,12 +19,10 @@ export async function GET(
   try {
     const { id } = await params;
     const cookieStore = await cookies();
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://kfnsnwqylsdsbgnwgxva.supabase.co';
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
     
     const supabase = createServerClient(
-      supabaseUrl,
-      supabaseAnonKey,
+      getSupabaseUrl(),
+      getSupabaseAnonKey(),
       {
         cookies: {
           getAll() {
@@ -54,9 +58,9 @@ export async function GET(
       }
 
       return NextResponse.json({ data: project });
-    } catch (dbError: any) {
+    } catch (dbError) {
       // If database is not configured, return 503
-      if (dbError.message?.includes('DATABASE_URL') || dbError.message?.includes('must be set')) {
+      if (isDatabaseConfigError(dbError)) {
         return NextResponse.json({ 
           error: 'Database not configured. Please set DATABASE_URL in environment variables.' 
         }, { status: 503 });
@@ -77,12 +81,10 @@ export async function PATCH(
   try {
     const { id } = await params;
     const cookieStore = await cookies();
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://kfnsnwqylsdsbgnwgxva.supabase.co';
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
     
     const supabase = createServerClient(
-      supabaseUrl,
-      supabaseAnonKey,
+      getSupabaseUrl(),
+      getSupabaseAnonKey(),
       {
         cookies: {
           getAll() {
@@ -123,9 +125,9 @@ export async function PATCH(
       }
 
       return NextResponse.json({ data: project });
-    } catch (dbError: any) {
+    } catch (dbError) {
       // If database is not configured, return 503
-      if (dbError.message?.includes('DATABASE_URL') || dbError.message?.includes('must be set')) {
+      if (isDatabaseConfigError(dbError)) {
         return NextResponse.json({ 
           error: 'Database not configured. Please set DATABASE_URL in environment variables.' 
         }, { status: 503 });
@@ -146,12 +148,10 @@ export async function DELETE(
   try {
     const { id } = await params;
     const cookieStore = await cookies();
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://kfnsnwqylsdsbgnwgxva.supabase.co';
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
     
     const supabase = createServerClient(
-      supabaseUrl,
-      supabaseAnonKey,
+      getSupabaseUrl(),
+      getSupabaseAnonKey(),
       {
         cookies: {
           getAll() {
@@ -181,9 +181,9 @@ export async function DELETE(
         ));
 
       return NextResponse.json({ data: { id } });
-    } catch (dbError: any) {
+    } catch (dbError) {
       // If database is not configured, return 503
-      if (dbError.message?.includes('DATABASE_URL') || dbError.message?.includes('must be set')) {
+      if (isDatabaseConfigError(dbError)) {
         return NextResponse.json({ 
           error: 'Database not configured. Please set DATABASE_URL in environment variables.' 
         }, { status: 503 });
@@ -195,4 +195,3 @@ export async function DELETE(
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
-

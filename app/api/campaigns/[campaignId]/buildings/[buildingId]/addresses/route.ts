@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseServerClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/server';
+import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -20,6 +21,77 @@ interface AddressResult {
   };
 }
 
+type BuildingLinkRow = {
+  address_id: string;
+  match_type: string;
+  confidence: number;
+  distance_meters: number;
+  campaign_addresses: {
+    formatted: string;
+    house_number: string | null;
+    street_name: string | null;
+    unit_number: string | null;
+    geom: AddressResult['geom'];
+  };
+};
+
+type GoldAddressRow = {
+  id: string;
+  formatted: string;
+  house_number: string | null;
+  street_name: string | null;
+  unit_number: string | null;
+  geom: AddressResult['geom'];
+  match_source: string | null;
+  confidence: number | null;
+};
+
+type AuthorizedContext = {
+  supabase: ReturnType<typeof createAdminClient>;
+};
+
+async function resolveAuthorizedContext(
+  request: NextRequest,
+  campaignId: string
+): Promise<{ context?: AuthorizedContext; error?: NextResponse }> {
+  const requestUser = await resolveUserFromRequest(request);
+  if (!requestUser) {
+    return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) };
+  }
+
+  const supabase = createAdminClient();
+  const { data: campaign, error: campaignError } = await supabase
+    .from('campaigns')
+    .select('owner_id, workspace_id')
+    .eq('id', campaignId)
+    .maybeSingle();
+
+  if (campaignError || !campaign) {
+    return { error: NextResponse.json({ error: 'Campaign not found' }, { status: 404 }) };
+  }
+
+  let allowed = campaign.owner_id === requestUser.id;
+  if (!allowed && campaign.workspace_id) {
+    const { data: member } = await supabase
+      .from('workspace_members')
+      .select('user_id')
+      .eq('workspace_id', campaign.workspace_id)
+      .eq('user_id', requestUser.id)
+      .maybeSingle();
+    allowed = !!member?.user_id;
+  }
+
+  if (!allowed) {
+    return { error: NextResponse.json({ error: 'Access denied' }, { status: 403 }) };
+  }
+
+  return {
+    context: {
+      supabase,
+    },
+  };
+}
+
 /**
  * GET /api/campaigns/[campaignId]/buildings/[buildingId]/addresses
  * 
@@ -35,29 +107,9 @@ export async function GET(
   console.log(`[API] GET /campaigns/${campaignId}/buildings/${buildingId}/addresses`);
   
   try {
-    const supabase = await getSupabaseServerClient();
-    
-    // Check authentication
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
-    
-    if (userError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-    
-    // Verify campaign ownership
-    const { data: campaign, error: campaignError } = await supabase
-      .from('campaigns')
-      .select('owner_id')
-      .eq('id', campaignId)
-      .single();
-    
-    if (campaignError || !campaign) {
-      return NextResponse.json({ error: 'Campaign not found' }, { status: 404 });
-    }
-    
-    if (campaign.owner_id !== user.id) {
-      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
-    }
+    const auth = await resolveAuthorizedContext(request, campaignId);
+    if (auth.error) return auth.error;
+    const { supabase } = auth.context!;
     
     // Get threshold for "outside footprint" warning
     const outsideThreshold = parseFloat(process.env.ADDRESS_OUTSIDE_THRESHOLD_METERS || '10');
@@ -92,7 +144,7 @@ export async function GET(
     
     if (links && links.length > 0) {
       // Silver path: Use building_address_links
-      addresses = links.map((link: any) => ({
+      addresses = (links as BuildingLinkRow[]).map((link) => ({
         address_id: link.address_id,
         formatted: link.campaign_addresses.formatted,
         house_number: link.campaign_addresses.house_number,
@@ -116,7 +168,7 @@ export async function GET(
         console.warn('[API] Error fetching Gold addresses:', goldError.message);
       }
       
-      addresses = (goldAddresses || []).map((addr: any) => ({
+      addresses = ((goldAddresses || []) as GoldAddressRow[]).map((addr) => ({
         address_id: addr.id,
         formatted: addr.formatted,
         house_number: addr.house_number,
@@ -169,29 +221,9 @@ export async function POST(
   console.log(`[API] POST /campaigns/${campaignId}/buildings/${buildingId}/addresses`);
   
   try {
-    const supabase = await getSupabaseServerClient();
-    
-    // Check authentication
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
-    
-    if (userError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-    
-    // Verify campaign ownership
-    const { data: campaign, error: campaignError } = await supabase
-      .from('campaigns')
-      .select('owner_id')
-      .eq('id', campaignId)
-      .single();
-    
-    if (campaignError || !campaign) {
-      return NextResponse.json({ error: 'Campaign not found' }, { status: 404 });
-    }
-    
-    if (campaign.owner_id !== user.id) {
-      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
-    }
+    const auth = await resolveAuthorizedContext(request, campaignId);
+    if (auth.error) return auth.error;
+    const { supabase } = auth.context!;
     
     const body = await request.json();
     const { address_id, unit_label } = body;
@@ -274,29 +306,9 @@ export async function DELETE(
   console.log(`[API] DELETE /campaigns/${campaignId}/buildings/${buildingId}/addresses`);
   
   try {
-    const supabase = await getSupabaseServerClient();
-    
-    // Check authentication
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
-    
-    if (userError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-    
-    // Verify campaign ownership
-    const { data: campaign, error: campaignError } = await supabase
-      .from('campaigns')
-      .select('owner_id')
-      .eq('id', campaignId)
-      .single();
-    
-    if (campaignError || !campaign) {
-      return NextResponse.json({ error: 'Campaign not found' }, { status: 404 });
-    }
-    
-    if (campaign.owner_id !== user.id) {
-      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
-    }
+    const auth = await resolveAuthorizedContext(request, campaignId);
+    if (auth.error) return auth.error;
+    const { supabase } = auth.context!;
     
     // Get address_id from query params
     const { searchParams } = new URL(request.url);

@@ -1,19 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseServerClient } from '@/lib/supabase/server';
-import { resolveWorkspaceIdForUser } from '@/app/api/_utils/workspace';
+import { createAdminClient } from '@/lib/supabase/server';
+import { resolveWorkspaceIdForUser, type MinimalSupabaseClient } from '@/app/api/_utils/workspace';
+import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 
 export async function POST(request: NextRequest) {
   try {
-    // Get current user
-    const supabase = await getSupabaseServerClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    
-    if (!user) {
+    const requestUser = await resolveUserFromRequest(request);
+    if (!requestUser) {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
       );
     }
+    const userId = requestUser.id;
+    const supabase = createAdminClient();
 
     let requestedWorkspaceId: string | null = null;
     try {
@@ -23,7 +23,11 @@ export async function POST(request: NextRequest) {
       requestedWorkspaceId = null;
     }
 
-    const workspaceResolution = await resolveWorkspaceIdForUser(supabase as any, user.id, requestedWorkspaceId);
+    const workspaceResolution = await resolveWorkspaceIdForUser(
+      supabase as unknown as MinimalSupabaseClient,
+      userId,
+      requestedWorkspaceId
+    );
     if (!workspaceResolution.workspaceId) {
       return NextResponse.json(
         { error: workspaceResolution.error ?? 'Workspace not found' },

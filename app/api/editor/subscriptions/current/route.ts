@@ -1,55 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { createServerClient } from '@supabase/ssr';
+import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
+import { getEntitlementForUser } from '@/app/lib/billing/entitlements';
 
-// Stub API route for subscription status
-// TODO: Implement with actual subscription check from Stripe/Supabase
 export async function GET(request: NextRequest) {
   try {
-    const cookieStore = await cookies();
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://kfnsnwqylsdsbgnwgxva.supabase.co';
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-    
-    const supabase = createServerClient(
-      supabaseUrl,
-      supabaseAnonKey,
-      {
-        cookies: {
-          getAll() {
-            return cookieStore.getAll();
-          },
-          setAll(cookiesToSet) {
-            cookiesToSet.forEach(({ name, value, options }) =>
-              cookieStore.set(name, value, options)
-            );
-          },
-        },
-      }
-    );
-
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
+    const requestUser = await resolveUserFromRequest(request);
+    if (!requestUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // For now, return no active subscription
-    // TODO: Check actual subscription status from database
+    const entitlement = await getEntitlementForUser(requestUser.id);
     return NextResponse.json({
       data: {
-        active: false,
-        subscriptionId: null,
-        customerId: null,
-        priceId: null,
-        status: 'inactive',
+        active: entitlement.is_active,
+        plan: entitlement.plan,
+        source: entitlement.source,
+        currentPeriodEnd: entitlement.current_period_end,
+        customerId: entitlement.stripe_customer_id ?? null,
+        status: entitlement.is_active ? 'active' : 'inactive',
       },
     });
   } catch (error) {
-    console.error('Error fetching subscription:', error);
+    console.error('Error fetching editor subscription:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
-
-
-
-

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseServerClient } from '@/lib/supabase/server';
-import { resolveWorkspaceIdForUser } from '@/app/api/_utils/workspace';
+import { createAdminClient } from '@/lib/supabase/server';
+import { resolveWorkspaceIdForUser, type MinimalSupabaseClient } from '@/app/api/_utils/workspace';
+import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import crypto from 'crypto';
 
 // Encrypt API key using AES-256-GCM
@@ -40,18 +41,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get current user
-    const supabase = await getSupabaseServerClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    
-    if (!user) {
+    const requestUser = await resolveUserFromRequest(request);
+    if (!requestUser) {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
       );
     }
+    const userId = requestUser.id;
+    const supabase = createAdminClient();
 
-    const workspaceResolution = await resolveWorkspaceIdForUser(supabase as any, user.id, workspaceId ?? null);
+    const workspaceResolution = await resolveWorkspaceIdForUser(
+      supabase as unknown as MinimalSupabaseClient,
+      userId,
+      workspaceId ?? null
+    );
     if (!workspaceResolution.workspaceId) {
       return NextResponse.json(
         { error: workspaceResolution.error ?? 'Workspace not found' },
@@ -111,7 +115,7 @@ export async function POST(request: NextRequest) {
       const { error: insertError } = await supabase
         .from('crm_connections')
         .insert({
-          user_id: user.id,
+          user_id: userId,
           workspace_id: targetWorkspaceId,
           provider: 'followupboss',
           api_key_encrypted: encryptedKey,
@@ -130,7 +134,7 @@ export async function POST(request: NextRequest) {
       .from('user_integrations')
       .upsert(
         {
-          user_id: user.id,
+          user_id: userId,
           provider: 'fub',
           api_key: apiKey, // full key, 40+ chars; column must be TEXT
           updated_at: new Date().toISOString(),

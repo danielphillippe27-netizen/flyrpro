@@ -4,6 +4,12 @@ import { createServerClient } from '@supabase/ssr';
 import { db } from '@/lib/editor-db/drizzle';
 import { editorProjects } from '@/lib/editor-db/schema';
 import { eq, and } from 'drizzle-orm';
+import { getSupabaseAnonKey, getSupabaseUrl } from '@/lib/supabase/env';
+
+function isDatabaseConfigError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('DATABASE_URL') || message.includes('must be set');
+}
 
 /**
  * Get linked resources for an editor project
@@ -16,12 +22,10 @@ export async function GET(
   try {
     const { id } = await params;
     const cookieStore = await cookies();
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://kfnsnwqylsdsbgnwgxva.supabase.co';
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
     
     const supabase = createServerClient(
-      supabaseUrl,
-      supabaseAnonKey,
+      getSupabaseUrl(),
+      getSupabaseAnonKey(),
       {
         cookies: {
           getAll() {
@@ -145,9 +149,9 @@ export async function GET(
       }
 
       return NextResponse.json({ data: resources });
-    } catch (dbError: any) {
+    } catch (dbError) {
       // If database is not configured, return empty resources
-      if (dbError.message?.includes('DATABASE_URL') || dbError.message?.includes('must be set')) {
+      if (isDatabaseConfigError(dbError)) {
         return NextResponse.json({ 
           data: {
             campaign: null,
@@ -163,4 +167,3 @@ export async function GET(
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
-

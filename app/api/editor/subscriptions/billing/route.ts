@@ -1,51 +1,50 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { createServerClient } from '@supabase/ssr';
+import { getDefaultUpgradePriceId } from '@/app/lib/billing/stripe-products';
 
-// Stub API route for billing
-// TODO: Implement with Stripe Checkout
 export async function POST(request: NextRequest) {
   try {
-    const cookieStore = await cookies();
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://kfnsnwqylsdsbgnwgxva.supabase.co';
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-    
-    const supabase = createServerClient(
-      supabaseUrl,
-      supabaseAnonKey,
-      {
-        cookies: {
-          getAll() {
-            return cookieStore.getAll();
-          },
-          setAll(cookiesToSet) {
-            cookiesToSet.forEach(({ name, value, options }) =>
-              cookieStore.set(name, value, options)
-            );
-          },
-        },
-      }
-    );
-
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const priceId = getDefaultUpgradePriceId();
+    if (!priceId) {
+      return NextResponse.json(
+        { error: 'No default Stripe price configured.' },
+        { status: 500 }
+      );
     }
 
-    // For now, redirect to settings page
-    // TODO: Create Stripe Checkout session
-    const redirectUrl = `${process.env.APP_BASE_URL || 'http://localhost:3000'}/settings`;
-    
-    return NextResponse.json({
-      data: redirectUrl,
+    const checkoutUrl = new URL('/api/billing/stripe/checkout', request.url);
+    const upstream = await fetch(checkoutUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(request.headers.get('cookie')
+          ? { cookie: request.headers.get('cookie') as string }
+          : {}),
+        ...(request.headers.get('authorization')
+          ? { authorization: request.headers.get('authorization') as string }
+          : {}),
+      },
+      body: JSON.stringify({ priceId }),
+      cache: 'no-store',
     });
+
+    const payload = await upstream.json().catch(() => ({}));
+    if (!upstream.ok) {
+      return NextResponse.json(
+        { error: payload?.error ?? 'Failed to create checkout session' },
+        { status: upstream.status || 500 }
+      );
+    }
+
+    if (typeof payload?.url !== 'string' || !payload.url) {
+      return NextResponse.json(
+        { error: 'Checkout session URL was not returned.' },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ data: payload.url });
   } catch (error) {
-    console.error('Error creating billing session:', error);
+    console.error('Error creating editor billing session:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
-
-
-
-

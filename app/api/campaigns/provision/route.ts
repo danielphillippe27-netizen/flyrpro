@@ -3,12 +3,13 @@ import { createAdminClient } from '@/lib/supabase/server';
 import { TileLambdaService } from '@/lib/services/TileLambdaService';
 import { RoutingService } from '@/lib/services/RoutingService';
 import { buildRoute } from '@/lib/services/BlockRoutingService';
-import { StableLinkerService, DataIntegrityError } from '@/lib/services/StableLinkerService';
+import { StableLinkerService } from '@/lib/services/StableLinkerService';
 import { TownhouseSplitterService } from '@/lib/services/TownhouseSplitterService';
 import { GoldAddressService } from '@/lib/services/GoldAddressService';
 import { BuildingAdapter } from '@/lib/services/BuildingAdapter';
 import { AddressAdapter } from '@/lib/services/AddressAdapter';
 import { resolveCampaignRegion } from '@/lib/geo/regionResolver';
+import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 
 // FIX: Ensure Node.js runtime
 export const runtime = 'nodejs';
@@ -59,6 +60,11 @@ export async function POST(request: NextRequest) {
   let campaign_id: string | null = null;
   
   try {
+    const requestUser = await resolveUserFromRequest(request);
+    if (!requestUser) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const body: ProvisionRequest = await request.json();
     campaign_id = body.campaign_id;
     
@@ -82,7 +88,7 @@ export async function POST(request: NextRequest) {
     // Get campaign with territory boundary
     const { data: campaign, error: campaignError } = await supabase
       .from('campaigns')
-      .select('owner_id, territory_boundary, region, bbox')
+      .select('owner_id, workspace_id, territory_boundary, region, bbox')
       .eq('id', campaign_id)
       .single();
 
@@ -90,6 +96,26 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: 'Campaign not found' },
         { status: 404 }
+      );
+    }
+
+    const isOwner = campaign.owner_id === requestUser.id;
+    let canProvision = isOwner;
+    if (!canProvision && campaign.workspace_id) {
+      const { data: membership } = await supabase
+        .from('workspace_members')
+        .select('role')
+        .eq('workspace_id', campaign.workspace_id)
+        .eq('user_id', requestUser.id)
+        .maybeSingle();
+      const role = membership?.role ?? null;
+      canProvision = role === 'owner' || role === 'admin';
+    }
+
+    if (!canProvision) {
+      return NextResponse.json(
+        { error: 'Access denied' },
+        { status: 403 }
       );
     }
 
@@ -139,8 +165,8 @@ export async function POST(request: NextRequest) {
     // =============================================================================
 
     const result = await retryWithBackoff(async () => {
-      let addressesToInsert: any[] = [];
-      let goldBuildings: any[] | null = null;
+      let addressesToInsert: Array<Record<string, unknown>> = [];
+      let goldBuildings: Array<Record<string, unknown>> | null = null;
       let snapshot: Awaited<ReturnType<typeof TileLambdaService.generateSnapshots>> | null = null;
       let addressSource: 'gold' | 'silver' | 'lambda' = 'lambda';
       let preFetchedBuildingsGeo: unknown = undefined;
@@ -272,12 +298,13 @@ export async function POST(request: NextRequest) {
       
       const deduplicated = Array.from(
         new Map(
-          addressesToInsert.map((addr: any) => {
-            const houseNum = (addr.house_number ?? '').toString().toLowerCase().trim();
-            const street = (addr.street_name ?? '').toString().toLowerCase().trim();
-            const locality = (addr.locality ?? '').toString().toLowerCase().trim();
+          addressesToInsert.map((addr) => {
+            const record = addr as Record<string, unknown>;
+            const houseNum = (record.house_number ?? '').toString().toLowerCase().trim();
+            const street = (record.street_name ?? '').toString().toLowerCase().trim();
+            const locality = (record.locality ?? '').toString().toLowerCase().trim();
             const key = `${houseNum}|${street}|${locality}`;
-            return [key, addr] as const;
+            return [key, record] as const;
           })
         ).values()
       );

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseServerClient } from '@/lib/supabase/server';
-import { resolveWorkspaceIdForUser } from '@/app/api/_utils/workspace';
+import { createAdminClient } from '@/lib/supabase/server';
+import { resolveWorkspaceIdForUser, type MinimalSupabaseClient } from '@/app/api/_utils/workspace';
+import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import crypto from 'crypto';
 
 // Decrypt function to match the encrypt function
@@ -42,7 +43,7 @@ interface LeadData {
   source?: string;
   sourceUrl?: string;
   campaignId?: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export async function POST(request: NextRequest) {
@@ -57,16 +58,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get current user
-    const supabase = await getSupabaseServerClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    
-    if (!user) {
+    const requestUser = await resolveUserFromRequest(request);
+    if (!requestUser) {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
       );
     }
+    const userId = requestUser.id;
+    const supabase = createAdminClient();
 
     let targetWorkspaceId: string | null = null;
     if (leadData.campaignId) {
@@ -77,16 +77,18 @@ export async function POST(request: NextRequest) {
         .maybeSingle();
       targetWorkspaceId = campaignRow?.workspace_id ?? null;
     }
-    if (!targetWorkspaceId) {
-      const workspaceResolution = await resolveWorkspaceIdForUser(supabase as any, user.id, null);
-      if (!workspaceResolution.workspaceId) {
-        return NextResponse.json(
-          { error: workspaceResolution.error ?? 'Workspace not found' },
-          { status: workspaceResolution.status ?? 400 }
-        );
-      }
-      targetWorkspaceId = workspaceResolution.workspaceId;
+    const workspaceResolution = await resolveWorkspaceIdForUser(
+      supabase as unknown as MinimalSupabaseClient,
+      userId,
+      targetWorkspaceId
+    );
+    if (!workspaceResolution.workspaceId) {
+      return NextResponse.json(
+        { error: workspaceResolution.error ?? 'Workspace not found' },
+        { status: workspaceResolution.status ?? 403 }
+      );
     }
+    targetWorkspaceId = workspaceResolution.workspaceId;
 
     // Get the stored connection
     const { data: connection } = await supabase
@@ -107,7 +109,13 @@ export async function POST(request: NextRequest) {
     const apiKey = decryptApiKey(connection.api_key_encrypted);
 
     // Prepare the person data
-    const person: any = {};
+    const person: {
+      firstName?: string;
+      lastName?: string;
+      emails?: Array<{ value: string }>;
+      phones?: Array<{ value: string }>;
+      addresses?: Array<{ street: string; city: string; state: string; code: string }>;
+    } = {};
     if (leadData.firstName || leadData.lastName) {
       person.firstName = leadData.firstName || '';
       person.lastName = leadData.lastName || '';
@@ -124,7 +132,15 @@ export async function POST(request: NextRequest) {
     }
 
     // Build the event payload according to FUB's recommended format
-    const eventPayload: any = {
+    const eventPayload: {
+      source: string;
+      system: string;
+      type: string;
+      message: string;
+      person: typeof person;
+      sourceUrl?: string;
+      metadata?: Record<string, unknown>;
+    } = {
       source: leadData.source || 'FLYR',
       system: 'FLYR',
       type: 'General Inquiry',
@@ -203,7 +219,7 @@ export async function POST(request: NextRequest) {
     const fullName = [leadData.firstName, leadData.lastName].filter(Boolean).join(' ').trim() || (leadData.email || leadData.phone || 'Lead');
     const addressStr = [leadData.address, leadData.city, leadData.state, leadData.zip].filter(Boolean).join(', ');
     await supabase.from('contacts').insert({
-      user_id: user.id,
+      user_id: userId,
       workspace_id: targetWorkspaceId,
       full_name: fullName,
       phone: leadData.phone || null,

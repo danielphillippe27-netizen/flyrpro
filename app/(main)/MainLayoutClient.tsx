@@ -98,8 +98,8 @@ export default function MainLayoutClient({
                 title="Create campaign"
                 aria-label="Create campaign"
               >
-                <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-red-500 text-white shrink-0">
-                  <Plus className="w-5 h-5" strokeWidth={2.5} />
+                <span className="flex items-center justify-center w-8 h-8 rounded-md bg-red-500 text-white shrink-0">
+                  <Plus className="w-4 h-4" strokeWidth={2.5} />
                 </span>
                 <span
                   className={cn(

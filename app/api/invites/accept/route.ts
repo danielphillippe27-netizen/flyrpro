@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseServerClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/server';
+import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 
 /**
  * POST /api/invites/accept
@@ -10,15 +10,11 @@ import { createAdminClient } from '@/lib/supabase/server';
  */
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await getSupabaseServerClient();
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
-
-    if (userError || !user) {
+    const requestUser = await resolveUserFromRequest(request);
+    if (!requestUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    const userEmail = (requestUser.email ?? '').toLowerCase().trim();
 
     const body = await request.json().catch(() => ({}));
     const token = typeof body?.token === 'string' ? body.token.trim() : null;
@@ -58,7 +54,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const userEmail = (user.email ?? '').toLowerCase().trim();
     const inviteEmail = (invite.email ?? '').toLowerCase().trim();
     if (userEmail !== inviteEmail) {
       return NextResponse.json(
@@ -67,7 +62,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { error: updateError } = await supabase
+    const { error: updateError } = await admin
       .from('workspace_invites')
       .update({
         status: 'accepted',
