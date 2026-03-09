@@ -705,7 +705,7 @@ export default function CampaignDetailPage() {
     dedupedAddresses.reduce((total, addr) => total + (addr.scans || 0), 0),
     campaign.scans || 0
   );
-  const totalQrScans = qrScanEventsCount ?? fallbackTotalQrScans;
+  const totalQrScans = Math.max(qrScanEventsCount ?? 0, fallbackTotalQrScans);
 
   const formattedRecipients = dedupedAddresses.map((addr) => ({
     id: addr.id,

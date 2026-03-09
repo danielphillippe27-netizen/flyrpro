@@ -2,6 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import QRCode from 'qrcode';
 import { createAdminClient } from '@/lib/supabase/server';
 
+function isLocalhostUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return ['localhost', '127.0.0.1', '0.0.0.0', '::1'].includes(parsed.hostname);
+  } catch {
+    return /localhost|127\.0\.0\.1|0\.0\.0\.0|::1/i.test(url);
+  }
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ campaignId: string }> }
@@ -9,7 +18,12 @@ export async function POST(
   try {
     const { campaignId } = await params;
     const body = await request.json().catch(() => ({}));
-    const baseUrl = body.baseUrl || process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin;
+    const requestedBaseUrl = typeof body.baseUrl === 'string' ? body.baseUrl.trim() : '';
+    const envBaseUrl = (process.env.NEXT_PUBLIC_APP_URL || '').trim();
+    const fallbackBaseUrl = request.nextUrl.origin;
+    const safeBaseUrl = requestedBaseUrl && !isLocalhostUrl(requestedBaseUrl)
+      ? requestedBaseUrl
+      : (envBaseUrl || fallbackBaseUrl);
 
     if (!campaignId) {
       return NextResponse.json({ error: 'Missing campaignId' }, { status: 400 });
@@ -26,7 +40,7 @@ export async function POST(
       return NextResponse.json({ error: 'Campaign not found' }, { status: 404 });
     }
 
-    const trackingUrl = `${baseUrl.replace(/\/$/, '')}/api/scan?campaignId=${campaignId}&basic=true`;
+    const trackingUrl = `${safeBaseUrl.replace(/\/$/, '')}/api/scan?campaignId=${campaignId}&basic=true`;
 
     const qrBase64 = await QRCode.toDataURL(trackingUrl, {
       type: 'image/png',

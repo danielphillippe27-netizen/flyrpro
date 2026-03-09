@@ -2,6 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import QRCode from 'qrcode';
 import { createAdminClient } from '@/lib/supabase/server';
 
+function isLocalhostUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return ['localhost', '127.0.0.1', '0.0.0.0', '::1'].includes(parsed.hostname);
+  } catch {
+    return /localhost|127\.0\.0\.1|0\.0\.0\.0|::1/i.test(url);
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     // ---------------------------------------------------------
@@ -77,7 +86,12 @@ export async function POST(request: NextRequest) {
     
     // Default base URL - MUST use production URL for QR codes to work from phones
     // Priority: 1) Explicitly passed baseUrl, 2) NEXT_PUBLIC_APP_URL env var, 3) Production default
-    const domain = baseUrl || process.env.NEXT_PUBLIC_APP_URL || 'https://flyrpro.vercel.app';
+    const requestedBaseUrl = typeof baseUrl === 'string' ? baseUrl.trim() : '';
+    const envBaseUrl = (process.env.NEXT_PUBLIC_APP_URL || '').trim();
+    const fallbackBaseUrl = request.nextUrl.origin;
+    const domain = requestedBaseUrl && !isLocalhostUrl(requestedBaseUrl)
+      ? requestedBaseUrl
+      : (envBaseUrl || fallbackBaseUrl || 'https://flyrpro.vercel.app');
     
     console.log(`Using domain for QR codes: ${domain}`);
 

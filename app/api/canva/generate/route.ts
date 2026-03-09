@@ -41,6 +41,37 @@ const CONFIG = {
   maxConcurrency: 5, // Process 5 rows at a time to avoid timeouts
 };
 
+function isLocalhostUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return ['localhost', '127.0.0.1', '0.0.0.0', '::1'].includes(parsed.hostname);
+  } catch {
+    return /localhost|127\.0\.0\.1|0\.0\.0\.0|::1/i.test(url);
+  }
+}
+
+function resolveScanBaseUrl(rawBaseUrl: string | undefined, request: NextRequest): string {
+  const requested = (rawBaseUrl || '').trim();
+  const envBase = (process.env.NEXT_PUBLIC_APP_URL || '').trim();
+  const requestOrigin = request.nextUrl.origin;
+
+  if (requested && !isLocalhostUrl(requested)) {
+    try {
+      const parsed = new URL(requested);
+      if (!parsed.pathname || parsed.pathname === '/') {
+        parsed.pathname = '/api/scan';
+      }
+      return parsed.toString();
+    } catch {
+      // If it's not a full URL, fall through to env/request origin.
+    }
+  }
+  if (envBase) {
+    return `${envBase.replace(/\/$/, '')}/api/scan`;
+  }
+  return `${requestOrigin.replace(/\/$/, '')}/api/scan`;
+}
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -641,17 +672,11 @@ export async function POST(request: NextRequest) {
     // ---------------------------------------------------------------------
     const body = await request.json();
     const { campaignId, baseUrl, rows } = body;
+    const scanBaseUrl = resolveScanBaseUrl(baseUrl, request);
 
     if (!campaignId) {
       return NextResponse.json(
         { error: 'campaignId is required' },
-        { status: 400 }
-      );
-    }
-
-    if (!baseUrl) {
-      return NextResponse.json(
-        { error: 'baseUrl is required' },
         { status: 400 }
       );
     }
@@ -670,14 +695,14 @@ export async function POST(request: NextRequest) {
       console.warn(`[CanvaQR] Truncated ${rows.length} rows to ${MAX_ROWS}`);
     }
 
-    console.log(`[CanvaQR] Starting generation for ${limitedRows.length} rows, campaign: ${campaignId}, user: ${userId}`);
+    console.log(`[CanvaQR] Starting generation for ${limitedRows.length} rows, campaign: ${campaignId}, user: ${userId}, baseUrl: ${scanBaseUrl}`);
 
     // ---------------------------------------------------------------------
     // 3. PROCESS ROWS WITH CONCURRENCY LIMIT
     // ---------------------------------------------------------------------
     const results = await processRowsWithConcurrency(
       limitedRows,
-      (row, index) => processRow(row, index, userId, campaignId, baseUrl, true),
+      (row, index) => processRow(row, index, userId, campaignId, scanBaseUrl, true),
       CONFIG.maxConcurrency
     );
 
