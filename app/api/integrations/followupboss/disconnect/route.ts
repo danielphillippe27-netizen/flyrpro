@@ -47,6 +47,16 @@ export async function POST(request: NextRequest) {
       throw error;
     }
 
+    const { error: integrationError } = await supabase
+      .from('user_integrations')
+      .delete()
+      .eq('user_id', userId)
+      .eq('provider', 'fub');
+
+    if (integrationError) {
+      console.warn('Error clearing user_integrations FUB row:', integrationError);
+    }
+
     return NextResponse.json({
       success: true,
       message: 'Successfully disconnected from Follow Up Boss',

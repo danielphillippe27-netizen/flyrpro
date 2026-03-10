@@ -9,17 +9,13 @@ import {
   CheckCircle2, 
   XCircle, 
   RefreshCw,
-  ExternalLink,
   Shield,
   AlertCircle,
   Send
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { Switch } from '@/components/ui/switch';
 import { useWorkspace } from '@/lib/workspace-context';
 
 interface ConnectionStatus {
@@ -37,14 +33,12 @@ export default function IntegrationsPage() {
   const { currentWorkspaceId } = useWorkspace();
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [apiKey, setApiKey] = useState('');
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus | null>(null);
-  const [isConnecting, setIsConnecting] = useState(false);
+  const [isStartingOAuth, setIsStartingOAuth] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [isTestPushing, setIsTestPushing] = useState(false);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [showApiKey, setShowApiKey] = useState(false);
 
   useEffect(() => {
     const loadData = async () => {
@@ -65,6 +59,20 @@ export default function IntegrationsPage() {
     loadData();
   }, [router, currentWorkspaceId]);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const fub = params.get('fub');
+    const callbackMessage = params.get('message');
+    if (fub === 'connected') {
+      setMessage({ type: 'success', text: callbackMessage || 'Follow Up Boss connected successfully.' });
+      window.history.replaceState({}, '', '/settings/integrations');
+      loadConnectionStatus(currentWorkspaceId ?? undefined);
+    } else if (fub === 'error') {
+      setMessage({ type: 'error', text: callbackMessage || 'Follow Up Boss OAuth connection failed.' });
+      window.history.replaceState({}, '', '/settings/integrations');
+    }
+  }, [currentWorkspaceId]);
+
   const loadConnectionStatus = async (workspaceId?: string) => {
     try {
       const qs = workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : '';
@@ -78,35 +86,30 @@ export default function IntegrationsPage() {
     }
   };
 
-  const handleConnect = async () => {
-    if (!apiKey.trim()) {
-      setMessage({ type: 'error', text: 'Please enter an API key' });
-      return;
-    }
-
-    setIsConnecting(true);
+  const handleStartOAuth = async () => {
+    setIsStartingOAuth(true);
     setMessage(null);
 
     try {
-      const response = await fetch('/api/integrations/followupboss/connect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiKey: apiKey.trim(), workspaceId: currentWorkspaceId }),
+      const params = new URLSearchParams({ platform: 'web' });
+      if (currentWorkspaceId) {
+        params.set('workspaceId', currentWorkspaceId);
+      }
+      const response = await fetch(`/api/integrations/fub/oauth/start?${params.toString()}`, {
+        method: 'GET',
       });
 
       const data = await response.json();
 
-      if (response.ok) {
-        setMessage({ type: 'success', text: data.message });
-        setApiKey('');
-        await loadConnectionStatus(currentWorkspaceId ?? undefined);
+      if (response.ok && data.authorizeUrl) {
+        window.location.assign(String(data.authorizeUrl));
       } else {
-        setMessage({ type: 'error', text: data.error || 'Failed to connect' });
+        setMessage({ type: 'error', text: data.error || 'Failed to start OAuth flow' });
       }
     } catch (error) {
       setMessage({ type: 'error', text: 'Network error. Please try again.' });
     } finally {
-      setIsConnecting(false);
+      setIsStartingOAuth(false);
     }
   };
 
@@ -350,67 +353,27 @@ export default function IntegrationsPage() {
                       <div className="text-sm text-blue-700 dark:text-blue-300">
                         <p className="font-medium mb-1">Secure Connection</p>
                         <p>
-                          Your API key is encrypted and stored securely. We only use it to send 
-                          leads to your Follow Up Boss account.
+                          Connect with OAuth. You will sign in to Follow Up Boss and approve access.
+                          FLYR stores tokens securely on the backend.
                         </p>
                       </div>
                     </div>
                   </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="api-key">Follow Up Boss API Key</Label>
-                    <div className="flex gap-2">
-                      <Input
-                        id="api-key"
-                        type={showApiKey ? 'text' : 'password'}
-                        placeholder="Enter your API key..."
-                        value={apiKey}
-                        onChange={(e) => setApiKey(e.target.value)}
-                        className="flex-1"
-                      />
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => setShowApiKey(!showApiKey)}
-                      >
-                        {showApiKey ? 'Hide' : 'Show'}
-                      </Button>
-                    </div>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                      You can find your API key in Follow Up Boss under Admin → API
-                    </p>
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-2">
-                      <Switch
-                        id="show-key"
-                        checked={showApiKey}
-                        onCheckedChange={setShowApiKey}
-                      />
-                      <Label htmlFor="show-key" className="text-sm cursor-pointer">
-                        Show API key
-                      </Label>
-                    </div>
-                    
-                    <a
-                      href="https://developer.followupboss.com/"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-sm text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
-                    >
-                      Get API key
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
+                  <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4 text-sm text-gray-600 dark:text-gray-300 space-y-1">
+                    <p>1. Click Connect Follow Up Boss</p>
+                    <p>2. Sign in to Follow Up Boss</p>
+                    <p>3. Approve FLYR access</p>
+                    <p>4. Return to FLYR automatically</p>
                   </div>
 
                   <Button
-                    onClick={handleConnect}
-                    disabled={isConnecting || !apiKey.trim()}
+                    onClick={handleStartOAuth}
+                    disabled={isStartingOAuth}
                     className="w-full gap-2"
                   >
                     <Plug className="w-4 h-4" />
-                    {isConnecting ? 'Connecting...' : 'Connect Follow Up Boss'}
+                    {isStartingOAuth ? 'Redirecting...' : 'Connect Follow Up Boss'}
                   </Button>
                 </div>
               )}

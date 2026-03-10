@@ -2,25 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveWorkspaceIdForUser, type MinimalSupabaseClient } from '@/app/api/_utils/workspace';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
-import crypto from 'crypto';
+import { getFubAuthForUserWorkspace } from '@/app/api/integrations/followupboss/_lib/auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-function decryptApiKey(encryptedData: string): string {
-  const keyString = process.env.ENCRYPTION_KEY || 'flyr-default-encryption-key-32chars!';
-  const key = Buffer.from(keyString.slice(0, 32));
-  const parts = encryptedData.split(':');
-  if (parts.length !== 3) throw new Error('Invalid encrypted data format');
-  const iv = Buffer.from(parts[0], 'base64');
-  const authTag = Buffer.from(parts[1], 'base64');
-  const encrypted = parts[2];
-  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
-  decipher.setAuthTag(authTag);
-  let decrypted = decipher.update(encrypted, 'base64', 'utf8');
-  decrypted += decipher.final('utf8');
-  return decrypted;
-}
 
 /** Split "First Last" into { firstName, lastName } */
 function splitFullName(fullName: string | null | undefined): { firstName: string; lastName: string } {
@@ -76,7 +61,7 @@ export async function POST(request: NextRequest) {
 
     const { data: connections } = await supabase
       .from('crm_connections')
-      .select('provider, api_key_encrypted')
+      .select('provider')
       .eq('workspace_id', targetWorkspaceId)
       .eq('status', 'connected');
 
@@ -119,7 +104,11 @@ export async function POST(request: NextRequest) {
 
       let synced = 0;
       let failed = 0;
-      const apiKey = decryptApiKey(conn.api_key_encrypted);
+      const fubAuth = await getFubAuthForUserWorkspace(supabase, userId, targetWorkspaceId);
+      if (!fubAuth) {
+        details[provider] = { synced: 0, failed: list.length };
+        continue;
+      }
 
       for (const c of list) {
         if (!c.email && !c.phone) {
@@ -148,8 +137,8 @@ export async function POST(request: NextRequest) {
         const fubRes = await fetch('https://api.followupboss.com/v1/events', {
           method: 'POST',
           headers: {
-            Authorization: `Basic ${Buffer.from(apiKey + ':').toString('base64')}`,
             'Content-Type': 'application/json',
+            ...fubAuth.headers,
           },
           body: JSON.stringify(eventPayload),
         });

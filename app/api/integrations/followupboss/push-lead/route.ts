@@ -2,33 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveWorkspaceIdForUser, type MinimalSupabaseClient } from '@/app/api/_utils/workspace';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
-import crypto from 'crypto';
-
-// Decrypt function to match the encrypt function
-function decryptApiKey(encryptedData: string): string {
-  const keyString = process.env.ENCRYPTION_KEY || 'flyr-default-encryption-key-32chars!';
-  const key = Buffer.from(keyString.slice(0, 32));
-  
-  // Parse the encrypted data format: iv:authTag:encrypted
-  const parts = encryptedData.split(':');
-  if (parts.length !== 3) {
-    throw new Error('Invalid encrypted data format');
-  }
-  
-  const iv = Buffer.from(parts[0], 'base64');
-  const authTag = Buffer.from(parts[1], 'base64');
-  const encrypted = parts[2];
-  
-  // Create decipher
-  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
-  decipher.setAuthTag(authTag);
-  
-  // Decrypt
-  let decrypted = decipher.update(encrypted, 'base64', 'utf8');
-  decrypted += decipher.final('utf8');
-  
-  return decrypted;
-}
+import { getFubAuthForUserWorkspace } from '../_lib/auth';
 
 interface LeadData {
   firstName?: string;
@@ -90,23 +64,13 @@ export async function POST(request: NextRequest) {
     }
     targetWorkspaceId = workspaceResolution.workspaceId;
 
-    // Get the stored connection
-    const { data: connection } = await supabase
-      .from('crm_connections')
-      .select('api_key_encrypted')
-      .eq('workspace_id', targetWorkspaceId)
-      .eq('provider', 'followupboss')
-      .maybeSingle();
-
-    if (!connection) {
+    const fubAuth = await getFubAuthForUserWorkspace(supabase, userId, targetWorkspaceId);
+    if (!fubAuth) {
       return NextResponse.json(
         { error: 'Follow Up Boss not connected. Please connect your account first.' },
         { status: 400 }
       );
     }
-
-    // Decrypt the API key
-    const apiKey = decryptApiKey(connection.api_key_encrypted);
 
     // Prepare the person data
     const person: {
@@ -162,8 +126,8 @@ export async function POST(request: NextRequest) {
     const fubResponse = await fetch('https://api.followupboss.com/v1/events', {
       method: 'POST',
       headers: {
-        'Authorization': `Basic ${Buffer.from(apiKey + ':').toString('base64')}`,
         'Content-Type': 'application/json',
+        ...fubAuth.headers,
       },
       body: JSON.stringify(eventPayload),
     });

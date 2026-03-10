@@ -4,6 +4,9 @@ import { resolveWorkspaceIdForUser, type MinimalSupabaseClient } from '@/app/api
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import crypto from 'crypto';
 
+const FUB_SYSTEM_NAME = process.env.FUB_SYSTEM_NAME || 'FLYR';
+const FUB_SYSTEM_KEY = process.env.FUB_SYSTEM_KEY;
+
 // Encrypt API key using AES-256-GCM
 function encryptApiKey(apiKey: string): string {
   // Get encryption key from env (must be 32 bytes for AES-256)
@@ -32,7 +35,14 @@ function encryptApiKey(apiKey: string): string {
 
 export async function POST(request: NextRequest) {
   try {
-    const { apiKey, workspaceId } = await request.json();
+    const body = await request.json();
+    const apiKey =
+      typeof body?.apiKey === 'string'
+        ? body.apiKey
+        : typeof body?.api_key === 'string'
+          ? body.api_key
+          : '';
+    const workspaceId = body?.workspaceId ?? null;
 
     if (!apiKey || typeof apiKey !== 'string') {
       return NextResponse.json(
@@ -70,6 +80,8 @@ export async function POST(request: NextRequest) {
       headers: {
         'Authorization': `Basic ${Buffer.from(apiKey + ':').toString('base64')}`,
         'Content-Type': 'application/json',
+        'X-System': FUB_SYSTEM_NAME,
+        ...(FUB_SYSTEM_KEY ? { 'X-System-Key': FUB_SYSTEM_KEY } : {}),
       },
     });
 
@@ -128,23 +140,15 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // After writing to crm_connections, also write to user_integrations so the iOS Edge Function (crm_sync) can find the token.
-    // Store the full API key (no truncation). user_integrations.api_key must be TEXT, not VARCHAR(n).
-    const { error: integrationError } = await supabase
+    // API-key mode should override OAuth mode for this user.
+    const { error: integrationDeleteError } = await supabase
       .from('user_integrations')
-      .upsert(
-        {
-          user_id: userId,
-          provider: 'fub',
-          api_key: apiKey, // full key, 40+ chars; column must be TEXT
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'user_id,provider' }
-      );
+      .delete()
+      .eq('user_id', userId)
+      .eq('provider', 'fub');
 
-    if (integrationError) {
-      console.error('Failed to write to user_integrations:', integrationError);
-      // Don't fail the whole request, just log it
+    if (integrationDeleteError) {
+      console.warn('Failed to clear user_integrations OAuth row:', integrationDeleteError);
     }
 
     return NextResponse.json({
