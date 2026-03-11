@@ -31,6 +31,7 @@ export async function GET(request: NextRequest) {
   const url = request.nextUrl;
   const origin = url.origin;
   const errorParam = url.searchParams.get('error');
+  const responseParam = url.searchParams.get('response');
   const code = url.searchParams.get('code');
   const rawState = url.searchParams.get('state') || '';
 
@@ -44,13 +45,16 @@ export async function GET(request: NextRequest) {
     const desc = url.searchParams.get('error_description') || errorParam;
     return redirectForError(origin, platform, desc);
   }
+  if (responseParam === 'denied') {
+    return redirectForError(origin, platform, 'Follow Up Boss authorization was denied.');
+  }
   if (!code) {
     return redirectForError(origin, platform, 'Missing authorization code.');
   }
 
   try {
     const redirectUri = getFubOAuthRedirectUri(origin);
-    const tokenData = await exchangeOAuthCode(code, redirectUri);
+    const tokenData = await exchangeOAuthCode(code, redirectUri, rawState);
     const supabase = createAdminClient();
 
     // OAuth credentials for FUB are user-scoped.

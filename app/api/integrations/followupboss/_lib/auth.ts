@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { refreshOAuthToken } from './oauth';
+import { getCrmEncryptionKey } from './env';
 
 const FUB_SYSTEM_NAME = process.env.FUB_SYSTEM_NAME || 'FLYR';
 const FUB_SYSTEM_KEY = process.env.FUB_SYSTEM_KEY;
@@ -14,7 +15,7 @@ function getSystemHeaders(): Record<string, string> {
 }
 
 export function decryptApiKey(encryptedData: string): string {
-  const keyString = process.env.ENCRYPTION_KEY || 'flyr-default-encryption-key-32chars!';
+  const keyString = getCrmEncryptionKey();
   const key = Buffer.from(keyString.slice(0, 32));
   const parts = encryptedData.split(':');
   if (parts.length !== 3) {

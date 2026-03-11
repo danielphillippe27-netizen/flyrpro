@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/server';
 import { resolveWorkspaceIdForUser, type MinimalSupabaseClient } from '@/app/api/_utils/workspace';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import crypto from 'crypto';
+import { getCrmEncryptionKey } from '../_lib/env';
 
 const FUB_SYSTEM_NAME = process.env.FUB_SYSTEM_NAME || 'FLYR';
 const FUB_SYSTEM_KEY = process.env.FUB_SYSTEM_KEY;
@@ -10,7 +11,7 @@ const FUB_SYSTEM_KEY = process.env.FUB_SYSTEM_KEY;
 // Encrypt API key using AES-256-GCM
 function encryptApiKey(apiKey: string): string {
   // Get encryption key from env (must be 32 bytes for AES-256)
-  const keyString = process.env.ENCRYPTION_KEY || 'flyr-default-encryption-key-32chars!';
+  const keyString = getCrmEncryptionKey();
   const key = Buffer.from(keyString.slice(0, 32));
   
   // Generate random IV (12 bytes for GCM)

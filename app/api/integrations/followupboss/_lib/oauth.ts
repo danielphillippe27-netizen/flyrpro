@@ -14,11 +14,12 @@ const FUB_OAUTH_CLIENT_ID = process.env.FUB_OAUTH_CLIENT_ID ?? '';
 const FUB_OAUTH_CLIENT_SECRET = process.env.FUB_OAUTH_CLIENT_SECRET ?? '';
 const FUB_OAUTH_SCOPE = process.env.FUB_OAUTH_SCOPE ?? '';
 const FUB_OAUTH_AUTHORIZE_URL =
-  process.env.FUB_OAUTH_AUTHORIZE_URL ?? 'https://api.followupboss.com/v1/oauth2/authorize';
+  process.env.FUB_OAUTH_AUTHORIZE_URL ?? 'https://app.followupboss.com/oauth/authorize';
 const FUB_OAUTH_TOKEN_URL =
-  process.env.FUB_OAUTH_TOKEN_URL ?? 'https://api.followupboss.com/v1/oauth2/token';
+  process.env.FUB_OAUTH_TOKEN_URL ?? 'https://app.followupboss.com/oauth/token';
 const OAUTH_STATE_SECRET = process.env.OAUTH_STATE_SECRET || process.env.ENCRYPTION_KEY || '';
 const OAUTH_STATE_TTL_SECONDS = 10 * 60;
+const DEFAULT_APP_ORIGIN = 'https://www.flyrpro.app';
 
 function base64UrlEncode(input: string | Buffer): string {
   return Buffer.from(input)
@@ -39,22 +40,35 @@ function sign(payloadEncoded: string): string {
   return base64UrlEncode(createHmac('sha256', OAUTH_STATE_SECRET).update(payloadEncoded).digest());
 }
 
+function resolveAppOrigin(origin?: string): string {
+  const raw = origin || process.env.NEXT_PUBLIC_APP_URL || DEFAULT_APP_ORIGIN;
+  try {
+    const parsed = new URL(raw);
+    if (parsed.hostname.toLowerCase() === 'flyrpro.app') {
+      parsed.hostname = 'www.flyrpro.app';
+    }
+    return parsed.origin;
+  } catch {
+    return DEFAULT_APP_ORIGIN;
+  }
+}
+
 export function getFubOAuthRedirectUri(origin?: string): string {
   if (process.env.FUB_OAUTH_REDIRECT_URI) return process.env.FUB_OAUTH_REDIRECT_URI;
-  const appOrigin = origin || process.env.NEXT_PUBLIC_APP_URL || 'https://www.flyrpro.app';
-  return `${appOrigin.replace(/\/$/, '')}/api/integrations/fub/oauth/callback`;
+  const appOrigin = resolveAppOrigin(origin);
+  return `${appOrigin}/api/integrations/fub/oauth/callback`;
 }
 
 export function getWebSuccessUrl(origin?: string): string {
   if (process.env.FUB_OAUTH_WEB_SUCCESS_URL) return process.env.FUB_OAUTH_WEB_SUCCESS_URL;
-  const appOrigin = origin || process.env.NEXT_PUBLIC_APP_URL || 'https://www.flyrpro.app';
-  return `${appOrigin.replace(/\/$/, '')}/settings/integrations?fub=connected`;
+  const appOrigin = resolveAppOrigin(origin);
+  return `${appOrigin}/settings/integrations?fub=connected`;
 }
 
 export function getWebErrorUrl(origin?: string): string {
   if (process.env.FUB_OAUTH_WEB_ERROR_URL) return process.env.FUB_OAUTH_WEB_ERROR_URL;
-  const appOrigin = origin || process.env.NEXT_PUBLIC_APP_URL || 'https://www.flyrpro.app';
-  return `${appOrigin.replace(/\/$/, '')}/settings/integrations?fub=error`;
+  const appOrigin = resolveAppOrigin(origin);
+  return `${appOrigin}/settings/integrations?fub=error`;
 }
 
 export function buildIosResultUrl(result: 'success' | 'error', message?: string): string {
@@ -110,10 +124,11 @@ export function verifyOAuthState(rawState: string): OAuthStatePayload | null {
 export function buildAuthorizeUrl(state: string, redirectUri: string): string {
   ensureOAuthConfig();
   const params = new URLSearchParams({
-    response_type: 'code',
+    response_type: 'auth_code',
     client_id: FUB_OAUTH_CLIENT_ID,
     redirect_uri: redirectUri,
     state,
+    prompt: 'login',
   });
   if (FUB_OAUTH_SCOPE.trim()) {
     params.set('scope', FUB_OAUTH_SCOPE.trim());
@@ -123,7 +138,8 @@ export function buildAuthorizeUrl(state: string, redirectUri: string): string {
 
 export async function exchangeOAuthCode(
   code: string,
-  redirectUri: string
+  redirectUri: string,
+  state?: string
 ): Promise<{ accessToken: string; refreshToken?: string; expiresAt?: number }> {
   ensureOAuthConfig();
 
@@ -134,6 +150,9 @@ export async function exchangeOAuthCode(
     client_id: FUB_OAUTH_CLIENT_ID,
     client_secret: FUB_OAUTH_CLIENT_SECRET,
   });
+  if (state?.trim()) {
+    params.set('state', state);
+  }
 
   const basic = Buffer.from(`${FUB_OAUTH_CLIENT_ID}:${FUB_OAUTH_CLIENT_SECRET}`).toString('base64');
   const res = await fetch(FUB_OAUTH_TOKEN_URL, {

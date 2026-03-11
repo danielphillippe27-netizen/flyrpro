@@ -2,7 +2,7 @@
 
 This guide is the single reference for how FLYR-PRO is linked to Follow Up Boss and how users can connect from the iOS app. It is written for product, support, and iOS developers.
 
-**Recommended: Web-only connection.** Users should connect Follow Up Boss via the web app at **https://flyrpro.app/settings/integrations** (or `{APP_URL}/settings/integrations` for staging). The iOS app then uses that same connection for sync and push-lead—no native FUB token flow required.
+**Recommended: Web-only connection.** Users should connect Follow Up Boss via the web app at **https://www.flyrpro.app/settings/integrations** (or `{APP_URL}/settings/integrations` for staging). The iOS app then uses that same connection for sync and push-lead—no native FUB token flow required.
 
 ---
 
@@ -101,7 +101,7 @@ Users get their API key from Follow Up Boss:
 
 1. Log in to Follow Up Boss.
 2. Go to **Admin → API**.
-3. Copy the API key and paste it into FLYR at **https://flyrpro.app/settings/integrations** (web Settings → Integrations). To avoid two token stores, prefer directing users to the web integrations page rather than a native Connect screen.
+3. Copy the API key and paste it into FLYR at **https://www.flyrpro.app/settings/integrations** (web Settings → Integrations). To avoid two token stores, prefer directing users to the web integrations page rather than a native Connect screen.
 
 Reference: [Follow Up Boss Developer API](https://developer.followupboss.com/).
 
@@ -117,24 +117,33 @@ The iOS app uses the **same** FLYR API and the **same** `crm_connections` table.
 
 ### Auth requirement
 
-The server currently resolves the user from the **Supabase session in cookies** ([lib/supabase/server.ts](../lib/supabase/server.ts)). There is **no** `Authorization: Bearer` handling in the API routes today.
+The server resolves the user from either:
+
+- Supabase session cookies (web/WebView), or
+- `Authorization: Bearer <supabase_access_token>` (native clients).
 
 ### Recommended: WebView / in-app browser (primary option)
 
 **Open the web app’s Integrations page in a WebView or `SFSafariViewController`** so the user stays in the app and can sign in and enter their API key there. Use:
 
-- **Production:** https://flyrpro.app/settings/integrations  
+- **Production:** https://www.flyrpro.app/settings/integrations  
 - **Staging:** `{APP_URL}/settings/integrations`
 
 The session lives in the web view; after connecting, the user returns to the app and sync/push-lead use the same `crm_connections` row. **No backend change required.** Prefer this so there is a single source of truth and no duplicate token handling on iOS.
 
+If the user sees an iOS username/password sheet for `api.followupboss.com`, the app opened the wrong host. User-facing OAuth consent should come from `app.followupboss.com`, not the API host.
+
 ### Optional: Native “Connect Follow Up Boss” screen (deprecated)
 
-A native screen that collects the API key and calls `POST /api/integrations/followupboss/connect` is **deprecated**. To avoid two token stores and keep one source of truth, prefer directing users to the web integrations page (https://flyrpro.app/settings/integrations). If you keep a native flow, the backend would need to accept the user’s session from the app (e.g. `Authorization: Bearer <supabase_access_token>` when cookies are missing).
+A native screen that collects the API key and calls `POST /api/integrations/followupboss/connect` is **deprecated**. To avoid two token stores and keep one source of truth, prefer directing users to the web integrations page (https://www.flyrpro.app/settings/integrations). If you keep a native flow, the backend would need to accept the user’s session from the app (e.g. `Authorization: Bearer <supabase_access_token>` when cookies are missing).
 
 ### Base URL
 
-The iOS app must call the same origin as the web app (e.g. your production URL). No extra client-side env vars are needed for Follow Up Boss; only the server uses `ENCRYPTION_KEY`, and only the server calls the Follow Up Boss API.
+The iOS app must call the same origin as the web app. In production, use the canonical host:
+
+- `FLYR_PRO_API_URL=https://www.flyrpro.app`
+
+Avoid calling `https://flyrpro.app` from native clients because cross-host redirects (apex -> `www`) can strip the `Authorization` header in `URLSession`.
 
 ---
 
@@ -165,10 +174,12 @@ You can expose a “Sync to CRM” action in the iOS app that calls this endpoin
 | Issue | Cause | What to do |
 | ----- | ------ | ---------- |
 | 401 on connect: “Invalid API key…” | Follow Up Boss rejected the key | User should check the key in Follow Up Boss (**Admin → API**), ensure no extra spaces, and try again. |
-| 400: “Follow Up Boss not connected” | No row in `crm_connections` for this user/provider | User must connect at **https://flyrpro.app/settings/integrations** (recommended) or via in-app browser; see [Connecting from the iOS app](#5-connecting-from-the-ios-app). |
+| 400: “Follow Up Boss not connected” | No row in `crm_connections` for this user/provider | User must connect at **https://www.flyrpro.app/settings/integrations** (recommended) or via in-app browser; see [Connecting from the iOS app](#5-connecting-from-the-ios-app). |
 | 401 Unauthorized on any endpoint | No valid session sent | Ensure the request includes the user’s session (cookies if using WebView, or Bearer token once the backend supports it). |
 | API test fails / push fails | Key revoked or invalid | User should reconnect with a valid key from Follow Up Boss **Admin → API**. |
-| App shows “no integrations” or sync fails | No FUB connection for this user | Direct the user to connect at **https://flyrpro.app/settings/integrations** (web). After connecting there, sync from the app will use the same connection. |
+| App shows “no integrations” or sync fails | No FUB connection for this user | Direct the user to connect at **https://www.flyrpro.app/settings/integrations** (web). After connecting there, sync from the app will use the same connection. |
+
+For `GET /api/integrations/fub/oauth/start`, the backend accepts `Authorization: Bearer <token>` and also supports a query token fallback (`?token=` or `?access_token=`) for native redirect edge cases.
 
 For more on the Follow Up Boss API: [https://developer.followupboss.com/](https://developer.followupboss.com/).
 

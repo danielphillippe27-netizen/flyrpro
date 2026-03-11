@@ -11,7 +11,10 @@ import {
 
 export async function GET(request: NextRequest) {
   try {
-    const requestUser = await resolveUserFromRequest(request);
+    const requestUser = await resolveUserFromRequest(request, {
+      allowQueryToken: true,
+      queryTokenParamNames: ['token', 'access_token'],
+    });
     if (!requestUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
