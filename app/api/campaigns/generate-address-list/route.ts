@@ -13,6 +13,7 @@ export const dynamic = 'force-dynamic';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const GOLD_POLYGON_ADDRESS_LIMIT = 2500;
 
 interface GenerateAddressListRequest {
   campaign_id: string;
@@ -204,7 +205,8 @@ export async function POST(request: NextRequest) {
       try {
         const goldAddresses = await GoldAddressService.fetchAddressesInPolygon(
           polygon as GeoJSON.Polygon,
-          regionCode
+          regionCode,
+          GOLD_POLYGON_ADDRESS_LIMIT
         );
         
         if (goldAddresses && goldAddresses.length > 0) {

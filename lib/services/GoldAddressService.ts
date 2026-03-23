@@ -8,6 +8,8 @@
 import { createAdminClient } from '@/lib/supabase/server';
 import { TileLambdaService, type LambdaSnapshotResponse } from './TileLambdaService';
 
+const DEFAULT_GOLD_ADDRESS_LIMIT = 2500;
+
 export interface GoldAddressResult {
   source: 'gold' | 'silver' | 'lambda';
   addresses: any[];
@@ -149,7 +151,8 @@ export class GoldAddressService {
    */
   static async fetchAddressesInPolygon(
     polygon: GeoJSON.Polygon,
-    province?: string
+    province?: string,
+    limit: number = DEFAULT_GOLD_ADDRESS_LIMIT
   ): Promise<any[]> {
     const supabase = createAdminClient();
     const polygonGeoJSON = JSON.stringify(polygon);
@@ -169,8 +172,17 @@ export class GoldAddressService {
     }
     
     const goldAddresses = this.parseGoldAddressRows(goldAddressesRaw);
-    console.log(`[GoldAddressService] Found ${goldAddresses.length} Gold addresses`);
-    return goldAddresses;
+    const limitedGoldAddresses = goldAddresses.slice(0, limit);
+
+    if (limitedGoldAddresses.length < goldAddresses.length) {
+      console.log(
+        `[GoldAddressService] Found ${goldAddresses.length} Gold addresses, capped to ${limitedGoldAddresses.length}`
+      );
+    } else {
+      console.log(`[GoldAddressService] Found ${goldAddresses.length} Gold addresses`);
+    }
+
+    return limitedGoldAddresses;
   }
 
   /**

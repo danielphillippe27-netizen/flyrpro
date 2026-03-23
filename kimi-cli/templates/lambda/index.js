@@ -34,6 +34,7 @@ const TILE_CONFIG = {
 
 const MAX_TILES_PER_REQUEST = parseInt(process.env.MAX_TILES_PER_REQUEST || "400", 10);
 const TILE_CACHE_TTL_MS = 10 * 60 * 1000;
+const DEFAULT_ADDRESS_LIMIT = 2500;
 const tileExistenceCache = new Map();
 
 // Addresses bucket
@@ -562,6 +563,7 @@ async function queryAddresses({ state, polygon, limit }) {
   
   if (addrSource.isCanadian) {
     // Canadian Silver tier data (CSV format from StatCan ODA)
+    // Keep the same caller-provided limit for both Silver and Bronze fallback paths.
     // Read as all VARCHAR to avoid auto-detect turning unit (e.g. "8A") into BIGINT; cast lon/lat for geometry.
     primaryLabel = 'Canadian Silver';
     primarySql = `
@@ -701,7 +703,7 @@ exports.handler = async (event) => {
     const limitBuildings = body.limitBuildings ?? 500;
     const limitRoads = body.limitRoads ?? 300;
     const limitDivisions = body.limitDivisions ?? 100;
-    const limitAddresses = body.limitAddresses ?? 2000;
+    const limitAddresses = body.limitAddresses ?? DEFAULT_ADDRESS_LIMIT;
     
     const includeRoads = body.includeRoads ?? false;
     const includeDivisions = body.includeDivisions ?? false;
