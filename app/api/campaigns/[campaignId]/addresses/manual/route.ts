@@ -161,7 +161,10 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       }
     );
 
-    if (insertError || !insertedAddress) {
+    // RPC returns an array, extract the first row
+    const addressRow = Array.isArray(insertedAddress) ? insertedAddress[0] : insertedAddress;
+    
+    if (insertError || !addressRow) {
       console.error("[manual-address] insert error:", JSON.stringify(insertError));
       return NextResponse.json(
         { error: "Failed to create manual address", details: insertError?.message, code: insertError?.code, hint: insertError?.hint },
@@ -176,7 +179,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
           {
             campaign_id: campaignId,
             building_id: resolvedBuilding.rowId,
-            address_id: (insertedAddress as { id: string }).id,
+            address_id: addressRow.id,
             match_type: "manual",
             confidence: 1,
             is_multi_unit: false,
@@ -195,7 +198,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     }
 
     return NextResponse.json({
-      address: insertedAddress,
+      address: addressRow,
       linked_building_id: resolvedBuilding?.publicId ?? null,
     });
   } catch (error) {
