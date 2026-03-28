@@ -164,9 +164,9 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       .single();
 
     if (insertError || !insertedAddress) {
-      console.error("[manual-address] insert error:", insertError);
+      console.error("[manual-address] insert error:", JSON.stringify(insertError));
       return NextResponse.json(
-        { error: "Failed to create manual address", details: insertError?.message },
+        { error: "Failed to create manual address", details: insertError?.message, code: insertError?.code, hint: insertError?.hint },
         { status: 500 }
       );
     }
