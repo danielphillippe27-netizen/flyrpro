@@ -139,29 +139,27 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     }
 
     // Build address insert matching FLYR-PRO schema
-    const addressInsert = {
-      campaign_id: campaignId,
-      address: formatted, // REQUIRED field - use formatted as the address
-      formatted: formatted,
-      house_number: String((body as { house_number?: unknown }).house_number ?? "").trim() || null,
-      street_name: String((body as { street_name?: unknown }).street_name ?? "").trim() || null,
-      locality: String((body as { locality?: unknown }).locality ?? "").trim() || null,
-      region: String((body as { region?: unknown }).region ?? "").trim() || null,
-      postal_code: String((body as { postal_code?: unknown }).postal_code ?? "").trim() || null,
-      source: "manual",
-      building_gers_id: resolvedBuilding?.publicId ?? null,
-      geom: JSON.stringify(pointGeoJSON(longitude, latitude)),
-      coordinate: { lat: latitude, lon: longitude },
-      visited: false,
-    };
-
-    const { data: insertedAddress, error: insertError } = await supabase
-      .from("campaign_addresses")
-      .insert(addressInsert)
-      .select(
-        "id, address, formatted, house_number, street_name, locality, region, postal_code, building_gers_id, source"
-      )
-      .single();
+    // Use raw SQL to properly insert PostGIS geometry using ST_GeomFromGeoJSON
+    const geoJsonPoint = pointGeoJSON(longitude, latitude);
+    
+    const { data: insertedAddress, error: insertError } = await supabase.rpc(
+      'insert_manual_address',
+      {
+        p_campaign_id: campaignId,
+        p_address: formatted,
+        p_formatted: formatted,
+        p_house_number: String((body as { house_number?: unknown }).house_number ?? "").trim() || null,
+        p_street_name: String((body as { street_name?: unknown }).street_name ?? "").trim() || null,
+        p_locality: String((body as { locality?: unknown }).locality ?? "").trim() || null,
+        p_region: String((body as { region?: unknown }).region ?? "").trim() || null,
+        p_postal_code: String((body as { postal_code?: unknown }).postal_code ?? "").trim() || null,
+        p_source: "manual",
+        p_building_gers_id: resolvedBuilding?.publicId ?? null,
+        p_geom_json: JSON.stringify(geoJsonPoint),
+        p_coordinate: { lat: latitude, lon: longitude },
+        p_visited: false,
+      }
+    );
 
     if (insertError || !insertedAddress) {
       console.error("[manual-address] insert error:", JSON.stringify(insertError));
