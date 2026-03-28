@@ -18,6 +18,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useTheme } from '@/lib/theme-provider';
 import { useWorkspace } from '@/lib/workspace-context';
 import { getMapboxToken } from '@/lib/mapbox';
+import { getCampaignAddressMapStatus } from '@/lib/campaignStats';
 import { DEFAULT_STATUS_FILTERS, MAP_STATUS_CONFIG, type StatusFilters } from '@/lib/constants/mapStatus';
 import type { CampaignV2, CampaignAddress } from '@/types/database';
 import * as turf from '@turf/turf';
@@ -569,7 +570,7 @@ export function FlyrMapView() {
         if (poly.type !== 'Polygon') continue;
         const scansTotal = addr.scans ?? 0;
         const qrScanned = scansTotal > 0 || !!addr.last_scanned_at;
-        const addressStatus = addr.address_status ?? (addr.visited ? 'delivered' : 'none');
+        const addressStatus = getCampaignAddressMapStatus(addr);
         features.push({
           type: 'Feature',
           geometry: poly,
@@ -722,6 +723,7 @@ export function FlyrMapView() {
             <MapBuildingsLayer 
               map={map.current} 
               campaignId={selectedCampaignId}
+              addressStateOverrides={campaignAddresses}
               statusFilters={statusFilters}
               onBuildingClick={handleBuildingClick}
               onAddToCRM={handleAddToCRM}
@@ -872,4 +874,3 @@ export function FlyrMapView() {
     </div>
   );
 }
-

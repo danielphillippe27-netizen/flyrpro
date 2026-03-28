@@ -26,14 +26,15 @@ This doc records how the app uses (or doesn’t use) contact and activity tables
 
 | Table / concept | Used by app? | Where |
 |-----------------|--------------|--------|
-| **`public.sessions`** | **Yes** | **iOS:** SessionsAPI (fetch user sessions, campaign sessions, active session), SessionManager (insert/update sessions), NewCampaignDetailView (campaign sessions for analytics), LeaderboardView / LeaderboardDebugView. **Web:** team dashboard RPCs (e.g. get_team_leaderboard, get_agent_report) read from `sessions`. |
-| **`public.session_events`** | **Yes** | **iOS:** SessionEventsAPI; RPC `rpc_complete_building_in_session` writes to `session_events` (see migration `20250208000000_session_recording.sql`). **Web:** `get_team_activity_feed` and related RPCs read from `session_events` (with fallback to `sessions`). |
+| **`public.sessions`** | **Yes** | **iOS:** SessionsAPI (fetch user sessions, campaign sessions, active session), SessionManager (insert/update sessions), NewCampaignDetailView (campaign sessions for analytics), LeaderboardView / LeaderboardDebugView. **Web:** team dashboard RPCs (e.g. get_team_leaderboard, get_agent_report) read from `sessions`; **personal Activity feed** (`GET /api/activity`) and **team activity** (`GET /api/team/activity`) both merge in rows from `sessions` as synthetic `session_completed` events so iOS-created sessions show on web. |
+| **`public.session_events`** | **Yes** | **iOS:** SessionEventsAPI; RPC `rpc_complete_building_in_session` writes to `session_events` (see migration `20250208000000_session_recording.sql`). **Web:** `get_team_activity_feed`, `GET /api/activity`, and `GET /api/team/activity` read from `session_events` (with fallback/merge from `sessions`). |
 | **`public.field_sessions`** | **No** | Not referenced in app code. Legacy; team dashboard reads from `sessions`. |
 | **`public.activity_events`** | **No** | Not referenced in app code. Legacy; team feed reads from `session_events`. |
 
 **Summary**
 
-- **sessions** and **session_events** = used (iOS reads/writes; web reads via RPCs). Already the single source of truth for team activity.
+- **sessions** and **session_events** = used (iOS reads/writes; web reads via RPCs and REST). Single source of truth for team and personal activity.
+- **Web Activity feed** (personal and team) pulls from the **same area as iOS**: both `session_events` and `sessions`. Session activity created on iOS (SessionsAPI → `sessions` table) is merged into the web Activity feed so it appears in the app.
 - **field_sessions** and **activity_events** = not used; no app unification needed for them.
 
 ---

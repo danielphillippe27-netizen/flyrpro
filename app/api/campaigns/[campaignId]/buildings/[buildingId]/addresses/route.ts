@@ -11,6 +11,8 @@ interface AddressResult {
   house_number: string | null;
   street_name: string | null;
   unit_number: string | null;
+  visited?: boolean | null;
+  address_status?: string | null;
   match_type: string;
   confidence: number;
   distance_meters: number;
@@ -179,6 +181,29 @@ export async function GET(
         distance_meters: 0, // Gold links are spatially exact
         is_outside_footprint: false,
         geom: addr.geom,
+      }));
+    }
+
+    if (addresses.length > 0) {
+      const { data: canonicalStates } = await supabase
+        .from('campaign_addresses_geojson')
+        .select('id, visited, address_status')
+        .in('id', addresses.map((address) => address.address_id));
+
+      const stateById = new Map(
+        (canonicalStates || []).map((row) => [
+          row.id as string,
+          {
+            visited: (row as { visited?: boolean | null }).visited ?? null,
+            address_status: (row as { address_status?: string | null }).address_status ?? null,
+          },
+        ])
+      );
+
+      addresses = addresses.map((address) => ({
+        ...address,
+        visited: stateById.get(address.address_id)?.visited ?? null,
+        address_status: stateById.get(address.address_id)?.address_status ?? null,
       }));
     }
     

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServerClient, createAdminClient } from '@/lib/supabase/server';
+import { fetchAllInPages } from '@/lib/supabase/fetchAllInPages';
 import { buildRoute } from '@/lib/services/BlockRoutingService';
 
 export const runtime = 'nodejs';
@@ -39,15 +40,19 @@ export async function GET(
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
-    const { data: addresses, error: addrError } = await supabase
-      .from('campaign_addresses')
-      .select('id, formatted, house_number, street_name, geom, cluster_id, sequence, walk_time_sec, distance_m')
-      .eq('campaign_id', campaignId)
-      .not('cluster_id', 'is', null)
-      .order('cluster_id', { ascending: true })
-      .order('sequence', { ascending: true });
-
-    if (addrError) {
+    let addresses;
+    try {
+      addresses = await fetchAllInPages((from, to) =>
+        supabase
+          .from('campaign_addresses')
+          .select('id, formatted, house_number, street_name, geom, cluster_id, sequence, walk_time_sec, distance_m')
+          .eq('campaign_id', campaignId)
+          .not('cluster_id', 'is', null)
+          .order('cluster_id', { ascending: true })
+          .order('sequence', { ascending: true })
+          .range(from, to)
+      );
+    } catch (addrError) {
       console.error('[API] Error fetching addresses:', addrError);
       return NextResponse.json({ error: 'Failed to fetch routes' }, { status: 500 });
     }
@@ -147,12 +152,21 @@ export async function POST(
     const depotFromBody = body.depot as { lat: number; lon: number } | undefined;
     const options = body.options || {};
 
-    const { data: addresses, error: addrError } = await supabase
-      .from('campaign_addresses')
-      .select('id, formatted, house_number, street_number, street_name, geom')
-      .eq('campaign_id', campaignId);
+    let addresses;
+    try {
+      addresses = await fetchAllInPages((from, to) =>
+        supabase
+          .from('campaign_addresses')
+          .select('id, formatted, house_number, street_number, street_name, geom')
+          .eq('campaign_id', campaignId)
+          .order('id', { ascending: true })
+          .range(from, to)
+      );
+    } catch {
+      return NextResponse.json({ error: 'Need at least 2 addresses' }, { status: 400 });
+    }
 
-    if (addrError || !addresses || addresses.length < 2) {
+    if (!addresses || addresses.length < 2) {
       return NextResponse.json({ error: 'Need at least 2 addresses' }, { status: 400 });
     }
 

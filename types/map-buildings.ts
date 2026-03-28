@@ -68,6 +68,8 @@ export interface BuildingProperties {
   match_method?: string | null;
   /** Formatted address from linked campaign_addresses. From rpc_get_campaign_map_features. */
   address_text?: string | null;
+  /** Canonical address-level status when available. */
+  address_status?: string | null;
   /** Unique id for Mapbox promoteId (unit id for slices, gers_id for detached). Used for setFeatureState. */
   feature_id?: string;
 }

@@ -2,22 +2,63 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { CampaignsService, type CampaignStats } from '@/lib/services/CampaignsService';
+import {
+  deriveCampaignStats,
+  getAddressRecipientsStatus,
+  getCampaignAddressMapStatus,
+  isVisitedCampaignAddress,
+} from '@/lib/campaignStats';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { CampaignDetailMapView } from '@/components/campaigns/CampaignDetailMapView';
-import { OptimizedRouteView } from '@/components/campaigns/OptimizedRouteView';
 import { LoadingScreen } from '@/components/LoadingScreen';
 import { RecipientsTable } from '@/components/RecipientsTable';
 import { StatsHeader } from '@/components/StatsHeader';
 import { PaywallGuard } from '@/components/PaywallGuard';
 import { MissingQRModal } from '@/components/modals/MissingQRModal';
 import type { CampaignV2, CampaignAddress, CampaignContact } from '@/types/database';
+import type { CampaignRoadMetadata } from '@/types/campaign-roads';
 import { Users, MapPin, Search, Plus, Pencil, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { createClient } from '@/lib/supabase/client';
+import { ActivityPageView } from '@/components/activity/ActivityPageView';
+
+const FLYER_ALLOWED_TYPES = [
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+  'application/pdf',
+] as const;
+const FLYER_MAX_SIZE_MB = 10;
+
+const MapPanelSkeleton = () => (
+  <div className="flex h-full min-h-[400px] items-center justify-center bg-muted/30 text-sm text-muted-foreground">
+    Loading map…
+  </div>
+);
+
+const CampaignDetailMapView = dynamic(
+  () =>
+    import('@/components/campaigns/CampaignDetailMapView').then((m) => m.CampaignDetailMapView),
+  { ssr: false, loading: () => <MapPanelSkeleton /> }
+);
+
+const OptimizedRouteView = dynamic(
+  () =>
+    import('@/components/campaigns/OptimizedRouteView').then((m) => m.OptimizedRouteView),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="rounded-xl border border-border bg-card p-8 text-center text-sm text-muted-foreground">
+        Loading route…
+      </div>
+    ),
+  }
+);
 import {
   Dialog,
   DialogContent,
@@ -27,19 +68,6 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-
-function getStatusBadge(addr: CampaignAddress) {
-  if (addr.address_status === 'hot_lead') return { label: 'Hot Lead', color: 'bg-red-500/20 text-red-400' };
-  if (addr.address_status === 'appointment') return { label: 'Appointment', color: 'bg-blue-500/20 text-blue-400' };
-  if (addr.address_status === 'talked') return { label: 'Talked', color: 'bg-emerald-500/20 text-emerald-400' };
-  if (addr.address_status === 'delivered') return { label: 'Delivered', color: 'bg-purple-500/20 text-purple-400' };
-  if (addr.address_status === 'no_answer') return { label: 'No Answer', color: 'bg-yellow-500/20 text-yellow-400' };
-  if (addr.address_status === 'do_not_knock') return { label: 'Do Not Knock', color: 'bg-zinc-500/20 text-zinc-400' };
-  if (addr.address_status === 'future_seller') return { label: 'Future Seller', color: 'bg-orange-500/20 text-orange-400' };
-  if (addr.visited) return { label: 'Visited', color: 'bg-green-500/20 text-green-400' };
-  if (addr.scans && addr.scans > 0) return { label: 'Scanned', color: 'bg-violet-500/20 text-violet-400' };
-  return { label: 'New', color: 'bg-zinc-700/50 text-zinc-400' };
-}
 
 function CampaignContactsList({
   contacts,
@@ -339,40 +367,33 @@ export default function CampaignDetailPage() {
   const [isSavingScripts, setIsSavingScripts] = useState(false);
   const [uploadingFlyer, setUploadingFlyer] = useState(false);
   const [qrScanEventsCount, setQrScanEventsCount] = useState<number | null>(null);
+  const [roadMetadata, setRoadMetadata] = useState<CampaignRoadMetadata | null>(null);
 
   const loadData = useCallback(async () => {
     try {
       const supabase = createClient();
-      const [campaignData, addressesData, statsData, contactsData, scanEventsRes] = await Promise.all([
+      const [campaignData, addressesData, contactsData, scanEventsRes, roadMetaRes] = await Promise.all([
         CampaignsService.fetchCampaign(campaignId),
         CampaignsService.fetchAddresses(campaignId),
-        CampaignsService.fetchCampaignStats(campaignId),
         CampaignsService.fetchCampaignContacts(campaignId),
         supabase
           .from('scan_events')
           .select('id', { count: 'exact', head: true })
           .eq('campaign_id', campaignId),
+        supabase.rpc('rpc_get_campaign_road_metadata', { p_campaign_id: campaignId }),
       ]);
       if (!campaignData) return;
 
-      const contactedCount = addressesData.filter(
-        (a) => a.address_status && a.address_status !== 'new' || a.visited
-      ).length;
-      const visitedCount = addressesData.filter((a) => a.visited).length;
-      const totalAddresses = addressesData.length;
-      const progressPct = totalAddresses > 0 ? Math.round((visitedCount / totalAddresses) * 100) : 0;
+      if (!roadMetaRes.error && roadMetaRes.data) {
+        setRoadMetadata(roadMetaRes.data as CampaignRoadMetadata);
+      } else {
+        setRoadMetadata(null);
+      }
 
       setCampaign(campaignData);
       setAddresses(addressesData);
       setContacts(contactsData);
-      setCampaignStats({
-        ...statsData,
-        addresses: totalAddresses,
-        contacts: contactsData.length,
-        contacted: contactedCount,
-        visited: visitedCount || statsData.visited,
-        progress_pct: progressPct,
-      });
+      setCampaignStats(deriveCampaignStats(addressesData, contactsData));
       if (scanEventsRes.error) {
         console.warn('Unable to fetch scan_events count:', scanEventsRes.error.message);
         setQrScanEventsCount(null);
@@ -389,6 +410,17 @@ export default function CampaignDetailPage() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // Poll road metadata when status is fetching
+  useEffect(() => {
+    if (roadMetadata?.roads_status !== 'fetching' || !campaignId) return;
+    const supabase = createClient();
+    const interval = setInterval(async () => {
+      const { data } = await supabase.rpc('rpc_get_campaign_road_metadata', { p_campaign_id: campaignId });
+      if (data) setRoadMetadata(data as CampaignRoadMetadata);
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [campaignId, roadMetadata?.roads_status]);
 
   useEffect(() => {
     if (campaign?.video_url) setDestinationUrl(campaign.video_url);
@@ -427,17 +459,44 @@ export default function CampaignDetailPage() {
     if (!file || !campaignId) return;
     setUploadingFlyer(true);
     try {
-      const formData = new FormData();
-      // Use a safe ASCII-only filename to avoid "Failed to parse body as FormData" (e.g. non-ASCII names)
-      const ext = (file.name.split('.').pop() || '').replace(/[^a-zA-Z0-9]/g, '') || 'png';
-      const safeName = `flyer.${ext}`;
-      formData.append('file', file, safeName);
-      const res = await fetch(`/api/campaigns/${campaignId}/flyer-upload`, {
-        method: 'POST',
-        body: formData,
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'Upload failed');
+      if (!FLYER_ALLOWED_TYPES.includes(file.type as (typeof FLYER_ALLOWED_TYPES)[number])) {
+        alert('Invalid file type. Use image (JPEG, PNG, WebP, GIF) or PDF.');
+        return;
+      }
+      if (file.size > FLYER_MAX_SIZE_MB * 1024 * 1024) {
+        alert(`File too large. Maximum size is ${FLYER_MAX_SIZE_MB}MB.`);
+        return;
+      }
+
+      // Upload from the browser so the file goes straight to Supabase Storage. Server-side
+      // upload from the API route can fail with undici/socket errors against the storage CDN.
+      const supabase = createClient();
+      const rawExt =
+        file.type === 'application/pdf'
+          ? 'pdf'
+          : (file.name.split('.').pop() || '').replace(/[^a-zA-Z0-9]/g, '') || 'jpg';
+      const safeExt = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'pdf'].includes(rawExt.toLowerCase())
+        ? rawExt.toLowerCase()
+        : 'jpg';
+      const path = `campaign-flyers/${campaignId}/${crypto.randomUUID()}.${safeExt}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('flyers')
+        .upload(path, file, {
+          contentType: file.type,
+          upsert: false,
+        });
+      if (uploadError) throw new Error(uploadError.message || 'Upload failed');
+
+      const { data: urlData } = supabase.storage.from('flyers').getPublicUrl(path);
+      const flyerUrl = urlData.publicUrl;
+
+      const { error: updateError } = await supabase
+        .from('campaigns')
+        .update({ flyer_url: flyerUrl })
+        .eq('id', campaignId);
+      if (updateError) throw updateError;
+
       await loadData();
     } catch (err) {
       console.error('Flyer upload:', err);
@@ -690,11 +749,17 @@ export default function CampaignDetailPage() {
   for (const addr of addresses) {
     const key = addressKey(addr);
     const existing = seen.get(key);
+    const addrVisited = isVisitedCampaignAddress(addr);
     if (!existing) {
       seen.set(key, addr);
-    } else if (addr.visited && !existing.visited) {
+    } else if (addrVisited && !isVisitedCampaignAddress(existing)) {
       seen.set(key, addr);
-    } else if (addr.visited === existing.visited && (addr.id < existing.id)) {
+    } else if (
+      getCampaignAddressMapStatus(addr) !== 'none' &&
+      getCampaignAddressMapStatus(existing) === 'none'
+    ) {
+      seen.set(key, addr);
+    } else if (addrVisited === isVisitedCampaignAddress(existing) && (addr.id < existing.id)) {
       seen.set(key, addr);
     }
   }
@@ -707,22 +772,28 @@ export default function CampaignDetailPage() {
   );
   const totalQrScans = Math.max(qrScanEventsCount ?? 0, fallbackTotalQrScans);
 
-  const formattedRecipients = dedupedAddresses.map((addr) => ({
-    id: addr.id,
-    address_line: addr.formatted || addr.address || '',
-    city: addr.locality || '',
-    region: addr.region || '',
-    postal_code: addr.postal_code || '',
-    status: addr.visited ? 'scanned' : 'pending',
-    qr_png_url: null,
-    qr_code_base64: addr.qr_code_base64 || null,
-    sent_at: null,
-    scanned_at: addr.visited ? new Date().toISOString() : null,
-    street_name: addr.street_name,
-    house_number: addr.house_number,
-    locality: addr.locality,
-    seq: addr.seq,
-  }));
+  const formattedRecipients = dedupedAddresses.map((addr) => {
+    const { statusKey, label } = getAddressRecipientsStatus(addr);
+    return {
+      id: addr.id,
+      address_line: addr.formatted || addr.address || '',
+      city: addr.locality || '',
+      region: addr.region || '',
+      postal_code: addr.postal_code || '',
+      status: statusKey,
+      statusLabel: label,
+      canMarkVisited: !isVisitedCampaignAddress(addr),
+      qr_png_url: null,
+      qr_code_base64: addr.qr_code_base64 || null,
+      sent_at: null,
+      scanned_at:
+        isVisitedCampaignAddress(addr) || (addr.scans ?? 0) > 0 ? addr.last_scanned_at ?? null : null,
+      street_name: addr.street_name,
+      house_number: addr.house_number,
+      locality: addr.locality,
+      seq: addr.seq,
+    };
+  });
 
   return (
     <div className="min-h-full bg-muted/30 dark:bg-background relative">
@@ -753,31 +824,38 @@ export default function CampaignDetailPage() {
 
           <TabsContent value="map" className="mt-4 space-y-4">
             <div className="bg-card rounded-xl border border-border overflow-hidden" style={{ height: '560px' }}>
-              <CampaignDetailMapView campaignId={campaignId} addresses={addresses} campaign={campaign} onSnapComplete={loadData} />
+              <CampaignDetailMapView campaignId={campaignId} addresses={addresses} campaign={campaign} onSnapComplete={loadData} roadCacheVersion={roadMetadata?.cache_version} />
             </div>
           </TabsContent>
 
           <TabsContent value="activity" className="mt-4">
-            <div className="bg-card p-4 rounded-xl border border-border">
-              <h2 className="text-sm font-semibold text-foreground mb-3">Campaign activity</h2>
-              <p className="text-sm text-muted-foreground">
-                Sessions, knocks, follow-ups, and scans for this campaign. View full workspace activity on the Activity page.
-              </p>
-              <div className="mt-4">
+            <div className="bg-card p-4 rounded-xl border border-border space-y-4">
+              <div>
+                <h2 className="text-sm font-semibold text-foreground mb-1">Campaign activity</h2>
+                <p className="text-sm text-muted-foreground">
+                  Canvassing sessions for this campaign.
+                </p>
                 <Link
                   href="/activity"
-                  className="inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline"
+                  className="inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline mt-2"
                 >
-                  Open Activity
+                  View all workspace activity
                 </Link>
               </div>
+              <ActivityPageView
+                campaignId={campaignId}
+                forcedTypeFilter="session_completed"
+                hideFilterControls
+                defaultRangePreset="all"
+                emptyMessage="No sessions for this campaign yet."
+              />
             </div>
           </TabsContent>
 
           <TabsContent value="addresses" className="mt-4">
             <div className="bg-card p-4 rounded-xl border border-border">
               <h2 className="text-sm font-semibold text-foreground mb-3">Addresses</h2>
-              <RecipientsTable recipients={formattedRecipients} campaignId={campaignId} />
+              <RecipientsTable recipients={formattedRecipients} campaignId={campaignId} onRefresh={loadData} />
             </div>
           </TabsContent>
 

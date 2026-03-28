@@ -6,9 +6,11 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import * as turf from '@turf/turf';
 import type { CampaignAddress, CampaignV2, CampaignParcel } from '@/types/database';
 import { MapBuildingsLayer } from '@/components/map/MapBuildingsLayer';
+import { CampaignRoadsLayer } from '@/components/campaigns/CampaignRoadsLayer';
 import { MapInfoButton } from '@/components/map/MapInfoButton';
 import { LocationCard } from '@/components/map/LocationCard';
 import { CreateContactDialog } from '@/components/crm/CreateContactDialog';
+import { getCampaignAddressMapStatus } from '@/lib/campaignStats';
 import { createClient } from '@/lib/supabase/client';
 import { useTheme } from '@/lib/theme-provider';
 import { useWorkspace } from '@/lib/workspace-context';
@@ -60,11 +62,14 @@ export function CampaignDetailMapView({
   addresses,
   campaign,
   onSnapComplete,
+  roadCacheVersion,
 }: {
   campaignId: string;
   addresses: CampaignAddress[];
   campaign?: CampaignV2 | null;
   onSnapComplete?: () => void;
+  /** When this changes (e.g. after refresh), the map refetches and redraws campaign roads. */
+  roadCacheVersion?: number | null;
 }) {
   const { theme } = useTheme();
   const { currentWorkspaceId } = useWorkspace();
@@ -415,10 +420,11 @@ export function CampaignDetailMapView({
           // Only fit bounds if we have valid bounds
           if (!bounds.isEmpty()) {
             boundsFittedRef.current = true;
-            map.current.fitBounds(bounds, { 
-              padding: 100, 
+            map.current.fitBounds(bounds, {
+              padding: 100,
+              minZoom: 12, // MapBuildingsLayer fill-extrusion uses minzoom 12 — stay zoomed in enough to see footprints
               maxZoom: 18,
-              duration: 1000 // Smooth animation
+              duration: 1000,
             });
           }
         }, 200);
@@ -477,9 +483,7 @@ export function CampaignDetailMapView({
         if (poly.type !== 'Polygon') continue;
         const scansTotal = addr.scans ?? 0;
         const qrScanned = scansTotal > 0 || !!addr.last_scanned_at;
-        // Address map: address_statuses.status — green = delivered, blue = talked | appointment
-        const addressStatus =
-          addr.address_status ?? (addr.visited ? 'delivered' : 'none');
+        const addressStatus = getCampaignAddressMapStatus(addr);
         features.push({
           type: 'Feature',
           geometry: poly,
@@ -913,11 +917,18 @@ export function CampaignDetailMapView({
             <MapBuildingsLayer 
               map={map.current} 
               campaignId={campaignId}
+              addressStateOverrides={addresses}
               statusFilters={statusFilters}
               onBuildingClick={handleBuildingClick}
             />
           )}
-          
+          <CampaignRoadsLayer
+            campaignId={campaignId}
+            map={map.current}
+            isMapReady={mapLoaded}
+            roadCacheVersion={roadCacheVersion}
+          />
+
           {/* Location Card - floating card when building is clicked */}
           {locationCardOpen && selectedBuildingId && (
             <div className="absolute bottom-6 left-4 z-20">
@@ -956,4 +967,3 @@ export function CampaignDetailMapView({
     </div>
   );
 }
-

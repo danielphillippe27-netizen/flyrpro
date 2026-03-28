@@ -1,0 +1,393 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            90.442,
+            -925.851
+          ],
+          [
+            82.259,
+            -916.409
+          ],
+          [
+            24.26,
+            -734.224
+          ],
+          [
+            -177.236,
+            -132.706
+          ],
+          [
+            -168.643,
+            -129.698
+          ],
+          [
+            -167.354,
+            -126.691
+          ],
+          [
+            -221.917,
+            35.71
+          ],
+          [
+            -220.628,
+            54.613
+          ],
+          [
+            -60.365,
+            106.594
+          ]
+        ]
+      },
+      "properties": {
+        "road_id": "road_0",
+        "road_name": "",
+        "road_class": "path"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            286.338,
+            -237.999
+          ],
+          [
+            303.947,
+            -225.078
+          ],
+          [
+            308.282,
+            -229.77
+          ],
+          [
+            315.57,
+            -238.444
+          ],
+          [
+            349.058,
+            -275.346
+          ],
+          [
+            371.829,
+            -317.882
+          ],
+          [
+            450.92,
+            -556.795
+          ]
+        ]
+      },
+      "properties": {
+        "road_id": "road_1",
+        "road_name": "",
+        "road_class": "path"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            319.414,
+            -242.224
+          ],
+          [
+            355.073,
+            -217.774
+          ],
+          [
+            400.184,
+            -202.307
+          ],
+          [
+            667.842,
+            -118.528
+          ],
+          [
+            670.842,
+            -128.805
+          ]
+        ]
+      },
+      "properties": {
+        "road_id": "road_2",
+        "road_name": "",
+        "road_class": "path"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            294.907,
+            -231.549
+          ],
+          [
+            234.348,
+            -162.351
+          ],
+          [
+            182.383,
+            -90.999
+          ]
+        ]
+      },
+      "properties": {
+        "road_id": "road_3",
+        "road_name": "",
+        "road_class": "path"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -12.232,
+            -38.182
+          ],
+          [
+            -62.527,
+            113.044
+          ]
+        ]
+      },
+      "properties": {
+        "road_id": "road_4",
+        "road_name": "Arthur Trewin St",
+        "road_class": "street"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            145.382,
+            13.413
+          ],
+          [
+            64.645,
+            -11.12
+          ],
+          [
+            -164.776,
+            -91.461
+          ],
+          [
+            -176.376,
+            -79.431
+          ],
+          [
+            -191.843,
+            -17.135
+          ],
+          [
+            -181.962,
+            -10.261
+          ],
+          [
+            -36.338,
+            36.097
+          ]
+        ]
+      },
+      "properties": {
+        "road_id": "road_5",
+        "road_name": "Elmer Adams Dr",
+        "road_class": "street"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            678.13,
+            -101.785
+          ],
+          [
+            346.051,
+            -206.174
+          ],
+          [
+            293.626,
+            -246.116
+          ]
+        ]
+      },
+      "properties": {
+        "road_id": "road_6",
+        "road_name": "George Reynolds Dr",
+        "road_class": "street"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            13.957,
+            137.951
+          ],
+          [
+            64.653,
+            -11.161
+          ]
+        ]
+      },
+      "properties": {
+        "road_id": "road_7",
+        "road_name": "Gordon Cowling St",
+        "road_class": "street"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            302.676,
+            -239.222
+          ],
+          [
+            346.91,
+            -290.384
+          ],
+          [
+            364.954,
+            -333.349
+          ],
+          [
+            440.569,
+            -565.793
+          ],
+          [
+            520.516,
+            -799.088
+          ]
+        ]
+      },
+      "properties": {
+        "road_id": "road_8",
+        "road_name": "Harry Gay Dr",
+        "road_class": "street"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -243.367,
+            56.334
+          ],
+          [
+            83.978,
+            160.729
+          ],
+          [
+            95.578,
+            159.87
+          ],
+          [
+            182.383,
+            -90.999
+          ],
+          [
+            173.77,
+            -98.765
+          ],
+          [
+            120.926,
+            -118.528
+          ],
+          [
+            111.904,
+            -118.098
+          ],
+          [
+            103.311,
+            -112.513
+          ],
+          [
+            64.653,
+            -11.161
+          ]
+        ]
+      },
+      "properties": {
+        "road_id": "road_9",
+        "road_name": "Holyrod Dr",
+        "road_class": "street"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -80.547,
+            -61.866
+          ],
+          [
+            -68.133,
+            -101.785
+          ]
+        ]
+      },
+      "properties": {
+        "road_id": "road_10",
+        "road_name": "",
+        "road_class": "street"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            187.909,
+            -1273.446
+          ],
+          [
+            50.037,
+            -828.324
+          ],
+          [
+            -247.265,
+            68.361
+          ],
+          [
+            -441.025,
+            596.297
+          ]
+        ]
+      },
+      "properties": {
+        "road_id": "road_11",
+        "road_name": "Courtice Rd",
+        "road_class": "secondary"
+      }
+    }
+  ]
+}

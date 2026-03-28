@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/client';
 import type { BuildingPolygon, Coordinate, CampaignAddress, Building } from '@/types/database';
+import { getCampaignBuildingStatus } from '@/lib/campaignStats';
 import * as turf from '@turf/turf';
 import * as THREE from 'three';
 import { BuildingService } from './BuildingService';
@@ -32,7 +33,7 @@ export interface BuildingModelPoint {
     address_id?: string; // Legacy: for backward compatibility
     building_id?: string; // Gold Standard: UUID of building (preferred)
     gers_id?: string; // Overture: GERS ID for building lookup
-    latest_status?: string; // Gold Standard: cached status from buildings table
+    status?: string; // Canonical/persisted status for color mapping when available
     height_m?: number;
     min_height_m?: number;
     // Dynamic spacing properties
@@ -45,7 +46,7 @@ export interface BuildingModelPoint {
     street_name?: string; // Street name for neighbor grouping (legacy)
     road_bearing?: number; // Road bearing for townhouse alignment
     collision_scale_reduction?: number; // Scale reduction factor from collision detection (default: 1.0)
-    color?: string; // Legacy color property (deprecated in favor of latest_status)
+    color?: string; // Optional local color override
   };
 }
 
@@ -450,6 +451,7 @@ export class MapService {
         return true;
       })
       .map((building) => {
+        const address = building.address_id ? addresses?.get(building.address_id) : undefined;
         // Convert PostGIS geometry to GeoJSON
         // Supabase PostGIS returns geometry as GeoJSON object or string
         let geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon;
@@ -500,6 +502,7 @@ export class MapService {
             'front_bearing': frontBearing, // Keep for backward compatibility
             'house_bearing': frontBearing, // Use same value, will be overridden by address data if available
             address_id: building.address_id,
+            status: address ? getCampaignBuildingStatus(address) : undefined,
             height_m: building.height_m,
             min_height_m: building.min_height_m,
           },
@@ -1006,7 +1009,7 @@ export class MapService {
             'house_bearing': houseBearing,
             'building_id': building.id,
             'gers_id': building.gers_id, // Add GERS ID for Overture lookup
-            'latest_status': building.latest_status,
+            'status': (building as Building & { status?: string }).status,
             'scale_factor': spatialScale.scaleFactor,
             'width_meters': spatialScale.widthMeters,
             'is_townhouse': false,
@@ -1021,4 +1024,3 @@ export class MapService {
     return modelPoints;
   }
 }
-

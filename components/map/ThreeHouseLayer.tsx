@@ -54,6 +54,24 @@ export class ThreeHouseLayer {
   private directionalLight: THREE.DirectionalLight | null = null;
   private scannedPropertyIds: Set<string> = new Set();
 
+  private resolveFeatureColor(feature: BuildingModelPoint): string {
+    const addressId = feature.properties.address_id;
+    const isScanned = addressId && this.scannedPropertyIds.has(addressId);
+    if (isScanned) {
+      return '#a855f7';
+    }
+
+    if (feature.properties.color) {
+      return feature.properties.color;
+    }
+
+    if (feature.properties.status) {
+      return this.getStatusColor(feature.properties.status);
+    }
+
+    return this.getStatusColor('default');
+  }
+
   /**
    * Get color hex code based on building status
    */
@@ -296,18 +314,8 @@ export class ThreeHouseLayer {
       // Clone model
       const modelClone = this.baseModel!.clone(true);
 
-      // Apply color based on scanned status (highest priority) or latest_status
-      // Priority: scanned > latest_status > color property > default grey
-      const addressId = feature.properties.address_id;
-      const isScanned = addressId && this.scannedPropertyIds.has(addressId);
-      const colorHex = isScanned 
-        ? '#a855f7' // Purple for QR-scanned houses (matches MAP_STATUS_CONFIG.QR_SCANNED)
-        : (() => {
-            const status = feature.properties.latest_status as BuildingStatus | undefined;
-            return status 
-              ? this.getStatusColor(status)
-              : (feature.properties.color || this.getStatusColor('default'));
-          })();
+      // Apply color based on persisted/scanned status, with optional local color override.
+      const colorHex = this.resolveFeatureColor(feature);
       
       modelClone.traverse((node) => {
         if (node instanceof THREE.Mesh && node.material) {
@@ -957,7 +965,6 @@ export class ThreeHouseLayer {
 
     // Update feature property
     record.feature.properties.color = hex;
-    record.feature.properties.latest_status = hex; // Update status for color mapping
   }
 
   // Collision fail-safe: Replace model with townhouse if width < 4m
@@ -993,11 +1000,8 @@ export class ThreeHouseLayer {
       // Clone model
       const modelClone = this.baseModel.clone(true);
 
-      // Apply color based on status
-      const status = feature.properties.latest_status as BuildingStatus | undefined;
-      const colorHex = status 
-        ? this.getStatusColor(status)
-        : this.getStatusColor('default');
+      // Apply color based on persisted/scanned status, with optional local color override.
+      const colorHex = this.resolveFeatureColor(feature);
       
       modelClone.traverse((node) => {
         if (node instanceof THREE.Mesh && node.material) {
@@ -1119,4 +1123,3 @@ export class ThreeHouseLayer {
     }
   }
 }
-

@@ -1,0 +1,40 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              -270.074,
+              93.3
+            ],
+            [
+              158.567,
+              240.183
+            ],
+            [
+              268.732,
+              -96.984
+            ],
+            [
+              -159.241,
+              -237.865
+            ],
+            [
+              -270.074,
+              93.3
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "campaign_id": "e375825f-672c-4ebc-9f09-05eb566730fb",
+        "origin_lng": -78.7808532724299,
+        "origin_lat": 43.9246813744982
+      }
+    }
+  ]
+}

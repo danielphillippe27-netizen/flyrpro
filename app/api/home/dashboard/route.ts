@@ -1,6 +1,15 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseServerClient, createAdminClient } from '@/lib/supabase/server';
-import { resolveWorkspaceIdForUser } from '@/app/api/_utils/workspace';
+import { resolveWorkspaceIdForUser, type MinimalSupabaseClient } from '@/app/api/_utils/workspace';
+
+function isMissingRelation(error: unknown, relation: string): boolean {
+  if (!error || typeof error !== 'object' || !('message' in error) || typeof error.message !== 'string') {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return message.includes(`relation "${relation}" does not exist`);
+}
 
 /**
  * Week start: Monday 00:00 UTC.
@@ -14,6 +23,45 @@ function getStartOfWeekUTC(): string {
   monday.setUTCDate(now.getUTCDate() + diff);
   monday.setUTCHours(0, 0, 0, 0);
   return monday.toISOString();
+}
+
+async function getLifetimeDoorsFromSessions(
+  supabase: ReturnType<typeof createAdminClient>,
+  userId: string
+): Promise<number | null> {
+  const pageSize = 1000;
+  let from = 0;
+  let totalDoors = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from('sessions')
+      .select('doors_hit')
+      .eq('user_id', userId)
+      .order('start_time', { ascending: false })
+      .range(from, from + pageSize - 1);
+
+    if (error) {
+      if (isMissingRelation(error, 'sessions')) {
+        return null;
+      }
+      throw new Error(error.message || 'Failed to load session totals');
+    }
+
+    const rows = (data ?? []) as Array<{ doors_hit?: number | null }>;
+
+    for (const row of rows) {
+      totalDoors += Number(row.doors_hit ?? 0) || 0;
+    }
+
+    if (rows.length < pageSize) {
+      break;
+    }
+
+    from += pageSize;
+  }
+
+  return totalDoors;
 }
 
 /**
@@ -37,7 +85,11 @@ export async function GET(request: Request) {
       'User';
 
     const supabase = createAdminClient();
-    const workspaceResolution = await resolveWorkspaceIdForUser(supabase as any, userId, requestedWorkspaceId);
+    const workspaceResolution = await resolveWorkspaceIdForUser(
+      supabase as MinimalSupabaseClient,
+      userId,
+      requestedWorkspaceId
+    );
     if (!workspaceResolution.workspaceId) {
       return NextResponse.json(
         { error: workspaceResolution.error ?? 'Workspace not found' },
@@ -70,9 +122,16 @@ export async function GET(request: Request) {
     const profile = profileRes.data;
     const campaignsData = campaignsRes.data ?? [];
 
-    const doorsAllTime = userStats?.doors_knocked ?? 0;
+    let doorsAllTime = userStats?.doors_knocked ?? 0;
     const totalMinutesAllTime = userStats?.time_tracked ?? 0;
     const dayStreak = userStats?.day_streak ?? 0;
+
+    if (doorsAllTime <= 0) {
+      const sessionDoors = await getLifetimeDoorsFromSessions(supabase, userId);
+      if (sessionDoors !== null) {
+        doorsAllTime = sessionDoors;
+      }
+    }
 
     const weeklyDoorGoal = profile?.weekly_door_goal ?? 100;
     const weeklySessionsGoal = profile?.weekly_sessions_goal ?? undefined;

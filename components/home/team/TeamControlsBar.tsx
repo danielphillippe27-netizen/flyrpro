@@ -8,7 +8,6 @@ import {
   DropdownMenuCheckboxItem,
 } from '@/components/ui/dropdown-menu';
 import { ChevronDown } from 'lucide-react';
-import { cn } from '@/lib/utils';
 
 export type RangePreset = 'today' | '7d' | '30d' | 'month' | 'custom';
 
@@ -24,9 +23,6 @@ export type TeamControlsBarProps = {
   memberIds: string[];
   onMemberFilterChange: (ids: string[]) => void;
   members: { user_id: string; display_name: string; color?: string }[];
-  showMapMode?: boolean;
-  mapMode?: 'routes' | 'knocked_homes';
-  onMapModeChange?: (mode: 'routes' | 'knocked_homes') => void;
 };
 
 function getRangeForPreset(preset: RangePreset): { start: string; end: string } {
@@ -55,9 +51,6 @@ export function TeamControlsBar({
   memberIds,
   onMemberFilterChange,
   members,
-  showMapMode,
-  mapMode,
-  onMapModeChange,
 }: TeamControlsBarProps) {
   const setPreset = (preset: RangePreset) => {
     const { start, end } = getRangeForPreset(preset);
@@ -124,25 +117,6 @@ export function TeamControlsBar({
           ))}
         </DropdownMenuContent>
       </DropdownMenu>
-      {showMapMode && onMapModeChange && (
-        <>
-          <span className="text-sm text-muted-foreground ml-2">Map:</span>
-          <Button
-            variant={mapMode === 'routes' ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => onMapModeChange('routes')}
-          >
-            Routes
-          </Button>
-          <Button
-            variant={mapMode === 'knocked_homes' ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => onMapModeChange('knocked_homes')}
-          >
-            Knocked homes
-          </Button>
-        </>
-      )}
     </div>
   );
 }

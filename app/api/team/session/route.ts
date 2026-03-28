@@ -1,11 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServerClient, createAdminClient } from '@/lib/supabase/server';
 import { resolveWorkspaceIdForUser } from '@/app/api/_utils/workspace';
+import type { MinimalSupabaseClient } from '@/app/api/_utils/workspace';
+
+function isMissingColumn(error: unknown, table: string, column: string): boolean {
+  if (!error || typeof error !== 'object' || !('message' in error) || typeof error.message !== 'string') {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return message.includes(`column ${table}.${column}`) && message.includes('does not exist');
+}
 
 /**
  * POST /api/team/session
  * Record a completed session (and activity event). Caller must be workspace member.
- * Body: { workspaceId?, started_at, ended_at?, campaign_id?, stats?: { doors_knocked, conversations, followups, appointments } }
+ * Body: { workspaceId?, started_at, ended_at?, campaign_id?, stats?: { doors_knocked, conversations, leads_created, followups, appointments } }
  */
 export async function POST(request: NextRequest) {
   try {
@@ -35,7 +45,11 @@ export async function POST(request: NextRequest) {
     }
 
     const supabase = createAdminClient();
-    const resolution = await resolveWorkspaceIdForUser(supabase as any, user.id, workspaceId ?? undefined);
+    const resolution = await resolveWorkspaceIdForUser(
+      supabase as unknown as MinimalSupabaseClient,
+      user.id,
+      workspaceId ?? undefined
+    );
     if (!resolution.workspaceId) {
       return NextResponse.json(
         { error: resolution.error ?? 'Workspace not found' },
@@ -46,6 +60,7 @@ export async function POST(request: NextRequest) {
     const parsedStats = (stats ?? {}) as Record<string, unknown>;
     const doorsHit = Number(parsedStats.doors_hit ?? parsedStats.doors_knocked ?? 0) || 0;
     const conversations = Number(parsedStats.conversations ?? 0) || 0;
+    const leadsCreated = Number(parsedStats.leads_created ?? parsedStats.leads ?? 0) || 0;
     const flyersDelivered = Number(parsedStats.flyers_delivered ?? parsedStats.followups ?? 0) || 0;
     const activeSeconds =
       Number(parsedStats.active_seconds ?? parsedStats.duration_seconds ?? 0) ||
@@ -61,23 +76,38 @@ export async function POST(request: NextRequest) {
           ? parsedStats.route_geojson
           : null;
 
-    const { data: insertedSession, error: sessionError } = await supabase
+    const sessionInsert = {
+      workspace_id: resolution.workspaceId,
+      user_id: user.id,
+      campaign_id: campaign_id ?? null,
+      start_time: started_at,
+      end_time: ended_at ?? null,
+      active_seconds: activeSeconds,
+      distance_meters: distanceMeters,
+      doors_hit: doorsHit,
+      conversations,
+      leads_created: leadsCreated,
+      flyers_delivered: flyersDelivered,
+      path_geojson: pathGeoJson,
+    };
+
+    let { data: insertedSession, error: sessionError } = await supabase
       .from('sessions')
-      .insert({
-        workspace_id: resolution.workspaceId,
-        user_id: user.id,
-        campaign_id: campaign_id ?? null,
-        start_time: started_at,
-        end_time: ended_at ?? null,
-        active_seconds: activeSeconds,
-        distance_meters: distanceMeters,
-        doors_hit: doorsHit,
-        conversations,
-        flyers_delivered: flyersDelivered,
-        path_geojson: pathGeoJson,
-      })
+      .insert(sessionInsert)
       .select('id')
       .single();
+
+    if (sessionError && isMissingColumn(sessionError, 'sessions', 'leads_created')) {
+      const fallbackInsert: Partial<typeof sessionInsert> = { ...sessionInsert };
+      delete fallbackInsert.leads_created;
+      const fallbackResult = await supabase
+        .from('sessions')
+        .insert(fallbackInsert)
+        .select('id')
+        .single();
+      insertedSession = fallbackResult.data;
+      sessionError = fallbackResult.error;
+    }
     if (sessionError) {
       console.error('[team/session] insert session:', sessionError);
       return NextResponse.json({ error: sessionError.message }, { status: 500 });
@@ -94,6 +124,7 @@ export async function POST(request: NextRequest) {
         ended_at: ended_at ?? null,
         doors_hit: doorsHit,
         conversations,
+        leads_created: leadsCreated,
         flyers_delivered: flyersDelivered,
         active_seconds: activeSeconds,
         distance_meters: distanceMeters,
@@ -102,7 +133,8 @@ export async function POST(request: NextRequest) {
     let { error: eventError } = await supabase.from('session_events').insert(eventPayload);
     if (eventError) {
       // Some deployments may not include session_id on session_events yet.
-      const { session_id: _unused, ...fallbackEventPayload } = eventPayload;
+      const fallbackEventPayload: Partial<typeof eventPayload> = { ...eventPayload };
+      delete fallbackEventPayload.session_id;
       const retry = await supabase.from('session_events').insert(fallbackEventPayload);
       eventError = retry.error;
     }

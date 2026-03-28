@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const GOLD_POLYGON_ADDRESS_LIMIT = 2500;
+const CAMPAIGN_POLYGON_ADDRESS_LIMIT = 2500;
 
 interface GenerateAddressListRequest {
   campaign_id: string;
@@ -206,7 +206,7 @@ export async function POST(request: NextRequest) {
         const goldAddresses = await GoldAddressService.fetchAddressesInPolygon(
           polygon as GeoJSON.Polygon,
           regionCode,
-          GOLD_POLYGON_ADDRESS_LIMIT
+          CAMPAIGN_POLYGON_ADDRESS_LIMIT
         );
         
         if (goldAddresses && goldAddresses.length > 0) {
@@ -249,7 +249,7 @@ export async function POST(request: NextRequest) {
             polygon as GeoJSON.Polygon,
             regionCode,
             campaign_id,
-            { limitAddresses: 5000, limitBuildings: 0, includeRoads: false }
+            { limitAddresses: CAMPAIGN_POLYGON_ADDRESS_LIMIT, limitBuildings: 0, includeRoads: false }
           );
           const addressData = await TileLambdaService.downloadAddresses(snapshot.urls.addresses);
           addressFeatures = addressData.features || [];
@@ -389,12 +389,17 @@ export async function POST(request: NextRequest) {
       }
 
       const insertedCount = inserted?.length ?? 0;
+      const coverageLimitWarning =
+        polygon && insertedCount >= CAMPAIGN_POLYGON_ADDRESS_LIMIT
+          ? `You hit the maximum coverage of ${CAMPAIGN_POLYGON_ADDRESS_LIMIT} homes. Try a smaller area.`
+          : null;
       console.log(`[generate-address-list] Saved ${insertedCount} addresses (source: ${source})`);
 
       return NextResponse.json({
         inserted_count: insertedCount,
         preview: inserted ?? [],
         source,
+        warning: coverageLimitWarning,
         message: `${insertedCount} addresses generated successfully (${source === 'gold' ? 'Gold Standard' : 'Lambda'})`,
       });
     } catch (err: any) {

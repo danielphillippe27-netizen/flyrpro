@@ -19,8 +19,10 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { BuildingService } from '@/lib/services/BuildingService';
+import { getCampaignAddressMapStatus } from '@/lib/campaignStats';
+import { createClient } from '@/lib/supabase/client';
 import type { Building, BuildingInteraction, BuildingStatus } from '@/types/database';
-import { Trash2, Eye, EyeOff } from 'lucide-react';
+import { Trash2, EyeOff } from 'lucide-react';
 
 interface HouseDetailPanelProps {
   buildingId: string | null;
@@ -44,6 +46,8 @@ export function HouseDetailPanel({
     formatted: string;
     house_number: string | null;
     street_name: string | null;
+    visited?: boolean | null;
+    address_status?: string | null;
     match_source: string;
     confidence: number;
   }>>([]);
@@ -51,6 +55,57 @@ export function HouseDetailPanel({
   const [saving, setSaving] = useState(false);
   const [newStatus, setNewStatus] = useState<BuildingStatus>('default');
   const [newNotes, setNewNotes] = useState('');
+
+  const mapBuildingStatusToOutcome = (status: BuildingStatus): 'none' | 'no_answer' | 'talked' | 'do_not_knock' => {
+    switch (status) {
+      case 'not_home':
+        return 'no_answer';
+      case 'interested':
+        return 'talked';
+      case 'dnc':
+        return 'do_not_knock';
+      case 'available':
+      case 'default':
+      default:
+        return 'none';
+    }
+  };
+
+  const mapOutcomeToBuildingStatus = (
+    address: { address_status?: string | null; visited?: boolean | null }
+  ): BuildingStatus => {
+    const status = getCampaignAddressMapStatus(address);
+    switch (status) {
+      case 'do_not_knock':
+        return 'dnc';
+      case 'talked':
+      case 'appointment':
+      case 'future_seller':
+      case 'hot_lead':
+        return 'interested';
+      case 'no_answer':
+        return 'not_home';
+      case 'delivered':
+      case 'none':
+      default:
+        return 'default';
+    }
+  };
+
+  const deriveCurrentBuildingStatus = (
+    addresses: Array<{ address_status?: string | null; visited?: boolean | null }>
+  ): BuildingStatus => {
+    if (addresses.some((address) => mapOutcomeToBuildingStatus(address) === 'dnc')) {
+      return 'dnc';
+    }
+    if (addresses.some((address) => mapOutcomeToBuildingStatus(address) === 'interested')) {
+      return 'interested';
+    }
+    if (addresses.some((address) => mapOutcomeToBuildingStatus(address) === 'not_home')) {
+      return 'not_home';
+    }
+    return 'default';
+  };
 
   // Load building and interactions when panel opens
   useEffect(() => {
@@ -84,32 +139,53 @@ export function HouseDetailPanel({
       // Once we have the building, use its internal ID for interactions
       const interactionData = await BuildingService.fetchBuildingInteractions(buildingData.id);
 
-      // For Gold buildings, also fetch linked addresses
+      // Load linked campaign addresses for this building so house outcomes can be saved canonically.
       let addressData: Array<{
         address_id: string;
         formatted: string;
         house_number: string | null;
         street_name: string | null;
+        visited?: boolean | null;
+        address_status?: string | null;
         match_source: string;
         confidence: number;
       }> = [];
-      
+
       console.log('[HouseDetailPanel] Building source:', buildingData.source, 'campaignId:', campaignId);
-      
-      if (buildingData.source === 'gold' && campaignId) {
-        console.log('[HouseDetailPanel] Fetching Gold addresses for building:', buildingData.id);
-        addressData = await BuildingService.fetchGoldBuildingAddresses(buildingData.id, campaignId);
-        console.log('[HouseDetailPanel] Gold addresses result:', addressData);
+
+      if (campaignId) {
+        const response = await fetch(`/api/campaigns/${campaignId}/buildings/${buildingId}/addresses`, {
+          credentials: 'include',
+        });
+        if (response.ok) {
+          const result = await response.json();
+          addressData = (result.addresses || []).map((address: {
+            address_id: string;
+            formatted: string;
+            house_number: string | null;
+            street_name: string | null;
+            match_type?: string | null;
+            confidence?: number | null;
+          }) => ({
+            address_id: address.address_id,
+            formatted: address.formatted,
+            house_number: address.house_number,
+            street_name: address.street_name,
+            visited: address.visited ?? null,
+            address_status: address.address_status ?? null,
+            match_source: address.match_type || 'linked',
+            confidence: address.confidence || 1,
+          }));
+        } else if (buildingData.source === 'gold') {
+          addressData = await BuildingService.fetchGoldBuildingAddresses(buildingData.id, campaignId);
+        }
       }
 
       setBuilding(buildingData);
       setInteractions(interactionData || []);
       setLinkedAddresses(addressData);
       
-      // Set new status to current status
-      if (buildingData) {
-        setNewStatus(buildingData.latest_status);
-      }
+      setNewStatus(deriveCurrentBuildingStatus(addressData));
     } catch (error) {
       console.error('Error loading building data:', error);
     } finally {
@@ -118,24 +194,46 @@ export function HouseDetailPanel({
   };
 
   const handleCreateInteraction = async () => {
-    if (!buildingId || !building || saving) return;
+    if (!buildingId || !building || !campaignId || saving) return;
+
+    if (linkedAddresses.length === 0) {
+      alert('No linked campaign addresses were found for this building.');
+      return;
+    }
 
     setSaving(true);
     try {
-      // Use the building's internal ID for interactions
-      await BuildingService.createInteraction(building.id, newStatus, newNotes || undefined);
-      
-      // Reload data to get updated status (trigger will update latest_status)
-      await loadBuildingData();
-      
-      // Clear form
+      const supabase = createClient();
+      const outcomeStatus = mapBuildingStatusToOutcome(newStatus);
+      const occurredAt = new Date().toISOString();
+      const addressIds = linkedAddresses.map((address) => address.address_id);
+
+      if (addressIds.length === 1) {
+        const { error } = await supabase.rpc('record_campaign_address_outcome', {
+          p_campaign_id: campaignId,
+          p_campaign_address_id: addressIds[0],
+          p_status: outcomeStatus,
+          p_notes: newNotes || '',
+          p_occurred_at: occurredAt,
+        });
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.rpc('record_campaign_target_outcome', {
+          p_campaign_id: campaignId,
+          p_campaign_address_ids: addressIds,
+          p_status: outcomeStatus,
+          p_notes: newNotes || '',
+          p_occurred_at: occurredAt,
+        });
+        if (error) throw error;
+      }
+
       setNewNotes('');
-      
-      // Trigger parent update
       onUpdate();
+      onClose();
     } catch (error) {
-      console.error('Error creating interaction:', error);
-      alert('Failed to save interaction. Please try again.');
+      console.error('Error saving campaign outcome:', error);
+      alert('Failed to save visit. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -201,6 +299,8 @@ export function HouseDetailPanel({
   if (!building && !loading) {
     return null;
   }
+
+  const currentBuildingStatus = deriveCurrentBuildingStatus(linkedAddresses);
 
   return (
     <Sheet open={open} onOpenChange={onClose}>
@@ -286,8 +386,8 @@ export function HouseDetailPanel({
 
             <div className="space-y-2">
               <Label className="text-sm font-medium">Current Status</Label>
-              <div className={`inline-flex items-center px-3 py-1 rounded-md border text-sm font-medium ${getStatusColor(building.latest_status)}`}>
-                {getStatusLabel(building.latest_status)}
+              <div className={`inline-flex items-center px-3 py-1 rounded-md border text-sm font-medium ${getStatusColor(currentBuildingStatus)}`}>
+                {getStatusLabel(currentBuildingStatus)}
               </div>
             </div>
 
@@ -392,4 +492,3 @@ export function HouseDetailPanel({
     </Sheet>
   );
 }
-

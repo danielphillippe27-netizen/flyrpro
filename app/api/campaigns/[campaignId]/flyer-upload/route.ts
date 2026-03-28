@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
-import { getSupabaseServerClient } from '@/lib/supabase/server';
+import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
+
+export const runtime = 'nodejs';
 
 const ALLOWED_TYPES = [
   'image/jpeg',
@@ -10,6 +12,8 @@ const ALLOWED_TYPES = [
   'application/pdf',
 ];
 const MAX_SIZE_MB = 10;
+
+const STORAGE_UPLOAD_ATTEMPTS = 3;
 
 export async function POST(
   request: NextRequest,
@@ -21,21 +25,34 @@ export async function POST(
       return NextResponse.json({ error: 'Missing campaignId' }, { status: 400 });
     }
 
-    const serverClient = await getSupabaseServerClient();
-    const { data: { session } } = await serverClient.auth.getSession();
-    if (!session?.user?.id) {
+    const requestUser = await resolveUserFromRequest(request);
+    if (!requestUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const supabase = createAdminClient();
     const { data: campaign, error: campaignError } = await supabase
       .from('campaigns')
-      .select('id, owner_id')
+      .select('id, owner_id, workspace_id')
       .eq('id', campaignId)
-      .single();
+      .maybeSingle();
 
-    if (campaignError || !campaign || campaign.owner_id !== session.user.id) {
-      return NextResponse.json({ error: 'Campaign not found or access denied' }, { status: 404 });
+    if (campaignError || !campaign) {
+      return NextResponse.json({ error: 'Campaign not found' }, { status: 404 });
+    }
+
+    let allowed = campaign.owner_id === requestUser.id;
+    if (!allowed && campaign.workspace_id) {
+      const { data: member } = await supabase
+        .from('workspace_members')
+        .select('user_id')
+        .eq('workspace_id', campaign.workspace_id)
+        .eq('user_id', requestUser.id)
+        .maybeSingle();
+      allowed = !!member?.user_id;
+    }
+    if (!allowed) {
+      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
     const contentType = request.headers.get('content-type') || '';
@@ -81,12 +98,24 @@ export async function POST(
     const path = `campaign-flyers/${campaignId}/${crypto.randomUUID()}.${safeExt}`;
 
     const arrayBuffer = await file.arrayBuffer();
-    const { error: uploadError } = await supabase.storage
-      .from('flyers')
-      .upload(path, arrayBuffer, {
-        contentType: file.type,
-        upsert: false,
-      });
+
+    let uploadError: { message: string } | null = null;
+    for (let attempt = 1; attempt <= STORAGE_UPLOAD_ATTEMPTS; attempt++) {
+      const { error } = await supabase.storage
+        .from('flyers')
+        .upload(path, arrayBuffer, {
+          contentType: file.type,
+          upsert: false,
+        });
+      if (!error) {
+        uploadError = null;
+        break;
+      }
+      uploadError = error;
+      if (attempt < STORAGE_UPLOAD_ATTEMPTS) {
+        await new Promise((r) => setTimeout(r, 400 * attempt));
+      }
+    }
 
     if (uploadError) {
       console.error('Flyer upload error:', uploadError);

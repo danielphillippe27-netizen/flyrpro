@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 
 interface Recipient {
   id: string;
@@ -20,7 +21,12 @@ interface Recipient {
   city: string;
   region: string;
   postal_code: string;
+  /** Canonical outcome key (e.g. none, talked, delivered). */
   status: string;
+  /** User-facing label; falls back to title-casing `status` when omitted. */
+  statusLabel?: string;
+  /** When true, show “Mark visited” for addresses without a knock outcome yet. */
+  canMarkVisited?: boolean;
   qr_png_url: string | null;
   qr_code_base64?: string | null;  // NEW: Add QR code base64
   sent_at: string | null;
@@ -34,9 +40,10 @@ interface Recipient {
 interface RecipientsTableProps {
   recipients: Recipient[];
   campaignId: string;
+  onRefresh?: () => Promise<void> | void;
 }
 
-export function RecipientsTable({ recipients }: RecipientsTableProps) {
+export function RecipientsTable({ recipients, campaignId, onRefresh }: RecipientsTableProps) {
   const [loading, setLoading] = useState<string | null>(null);
   const router = useRouter();
   const supabase = createClient();
@@ -44,35 +51,64 @@ export function RecipientsTable({ recipients }: RecipientsTableProps) {
   const handleMarkSent = async (recipientId: string) => {
     setLoading(recipientId);
     try {
-      const { error } = await supabase
-        .from('campaign_addresses')
-        .update({
-          visited: true,
-        })
-        .eq('id', recipientId);
+      const { error } = await supabase.rpc('record_campaign_address_outcome', {
+        p_campaign_id: campaignId,
+        p_campaign_address_id: recipientId,
+        p_status: 'delivered',
+        p_notes: '',
+        p_occurred_at: new Date().toISOString(),
+      });
 
       if (error) {
         throw error;
       }
-      router.refresh();
+      if (onRefresh) {
+        await onRefresh();
+      } else {
+        router.refresh();
+      }
     } catch (error) {
-      console.error('Error marking as visited:', error);
+      console.error('Error saving house outcome:', error);
       alert('Failed to update status');
     } finally {
       setLoading(null);
     }
   };
 
-  const getStatusColor = (status: string) => {
+  const displayLabel = (recipient: Recipient) =>
+    recipient.statusLabel?.trim() ||
+    recipient.status
+      .split(/[_\s]+/)
+      .filter(Boolean)
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join(' ');
+
+  const getStatusBadgeClass = (status: string) => {
     switch (status) {
+      case 'none':
       case 'pending':
-        return 'bg-gray-200 text-gray-800';
+        return 'bg-muted text-muted-foreground border border-border';
+      case 'qr_scanned':
+        return 'bg-sky-500/15 text-sky-700 dark:text-sky-300 border border-sky-500/30';
+      case 'no_answer':
+        return 'bg-amber-500/15 text-amber-800 dark:text-amber-200 border border-amber-500/25';
+      case 'delivered':
+        return 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-200 border border-emerald-500/25';
+      case 'talked':
+        return 'bg-violet-500/15 text-violet-800 dark:text-violet-200 border border-violet-500/25';
+      case 'appointment':
+        return 'bg-primary/15 text-primary border border-primary/25';
+      case 'do_not_knock':
+        return 'bg-destructive/15 text-destructive border border-destructive/25';
+      case 'future_seller':
+      case 'hot_lead':
+        return 'bg-orange-500/15 text-orange-800 dark:text-orange-200 border border-orange-500/25';
       case 'sent':
         return 'bg-red-200 dark:bg-red-900/30 text-red-800 dark:text-red-300';
       case 'scanned':
-        return 'bg-green-200 text-green-800';
+        return 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-200 border border-emerald-500/25';
       default:
-        return 'bg-gray-200 text-gray-800';
+        return 'bg-muted text-foreground border border-border';
     }
   };
 
@@ -124,12 +160,12 @@ export function RecipientsTable({ recipients }: RecipientsTableProps) {
                 )}
               </TableCell>
               <TableCell>
-                <Badge className={getStatusColor(recipient.status)} variant="secondary">
-                  {recipient.status}
+                <Badge className={cn('font-normal', getStatusBadgeClass(recipient.status))} variant="secondary">
+                  {displayLabel(recipient)}
                 </Badge>
               </TableCell>
               <TableCell className="space-x-2">
-                {recipient.status === 'pending' && (
+                {recipient.canMarkVisited && (
                   <Button
                     size="sm"
                     variant="outline"
@@ -158,4 +194,3 @@ export function RecipientsTable({ recipients }: RecipientsTableProps) {
     </div>
   );
 }
-

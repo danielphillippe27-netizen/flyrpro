@@ -77,16 +77,16 @@ export default function CreateCampaignPage() {
   }, [lottieSrc]);
 
   const currentStepText = snappingBoundary
-    ? 'Step 1/4: Snapping boundary to roads'
+    ? 'Step 1/5: Snapping boundary to roads'
     : generatingAddresses
-      ? 'Step 2/4: Fetching addresses'
-      : provisionProgress.includes('Scanning')
-        ? 'Step 3/4: Fetching buildings'
-        : provisionProgress.includes('Matching') || provisionProgress.includes('Linking')
-          ? 'Step 3/4: Linking addresses to buildings'
-          : provisionProgress.includes('Finalizing')
-            ? 'Step 4/4: Preparing optimized route'
-            : 'Step 4/4: Finishing setup';
+        ? 'Step 3/5: Fetching addresses'
+        : provisionProgress.includes('Scanning')
+          ? 'Step 4/5: Fetching buildings'
+          : provisionProgress.includes('Matching') || provisionProgress.includes('Linking')
+            ? 'Step 4/5: Linking addresses to buildings'
+            : provisionProgress.includes('Finalizing')
+              ? 'Step 5/5: Preparing optimized route'
+              : 'Step 5/5: Finishing setup';
 
   /** Add residential-only 2D building footprints from Mapbox vector tiles.
    *  Hides built-in style buildings and renders residential buildings as near-black at 80% opacity.
@@ -169,7 +169,9 @@ export default function CreateCampaignPage() {
 
     map.current.on('load', () => {
       setMapLoaded(true);
-      add2DBuildingsLayer(map.current!);
+      if (!isSatellite) {
+        add2DBuildingsLayer(map.current!);
+      }
     });
 
     // Initialize Mapbox Draw with red styling (no visible controls - draw by clicking)
@@ -323,8 +325,10 @@ export default function CreateCampaignPage() {
     map.current.once('style.load', () => {
       if (!map.current) return;
 
-      // Re-add 2D building footprints after style swap
-      add2DBuildingsLayer(map.current);
+      // Keep custom residential building overlays off satellite mode.
+      if (!isSatellite) {
+        add2DBuildingsLayer(map.current);
+      }
 
       // Create fresh draw instance
       const newDraw = new MapboxDraw({
@@ -628,6 +632,9 @@ export default function CreateCampaignPage() {
           setSnappingBoundary(false);
         }
 
+        // Fire and forget — roads are additive, never block campaign creation
+        fetch(`/api/campaigns/${campaign.id}/roads/prepare`, { method: 'POST' }).catch(() => {});
+
         setGeneratingAddresses(true);
         try {
           console.log('Saving addresses from polygon...');
@@ -651,6 +658,9 @@ export default function CreateCampaignPage() {
             const addressResult = await addressResponse.json();
             setAddressCount(addressResult.inserted_count || 0);
             console.log(`Saved ${addressResult.inserted_count} addresses from polygon`);
+            if (addressResult.warning) {
+              alert(addressResult.warning);
+            }
             
             if (addressResult.inserted_count > 0) {
               // Step 2: Provision buildings (no boundary needed - uses addresses)
@@ -890,4 +900,3 @@ export default function CreateCampaignPage() {
     </div>
   );
 }
-

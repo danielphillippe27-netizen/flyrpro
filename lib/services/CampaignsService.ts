@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/client';
+import { fetchAllInPages } from '@/lib/supabase/fetchAllInPages';
 import type { CampaignV2, CampaignAddress, CampaignContact, QRCode } from '@/types/database';
 import type { CreateCampaignPayload } from '@/types/campaigns';
 import { QRCodeService } from '@/lib/services/QRCodeService';
@@ -144,23 +145,15 @@ export class CampaignsService {
 
   static async fetchAddresses(campaignId: string): Promise<CampaignAddress[]> {
     try {
-      const { data, error } = await this.client
-        .from('campaign_addresses_geojson')
-        .select('*, qr_code_base64')  // Explicitly include qr_code_base64
-        .eq('campaign_id', campaignId)
-        .order('seq', { ascending: true, nullsFirst: false })
-        .order('id', { ascending: true });
-
-      if (error) {
-        console.error('Error fetching campaign addresses:', formatError(error));
-        // Return empty array instead of throwing for graceful degradation
-        if (error.code === 'PGRST205' || error.message?.includes('schema cache')) {
-          console.warn('campaign_addresses_geojson view not found, returning empty array');
-          return [];
-        }
-        throw error;
-      }
-
+      const data = await fetchAllInPages((from, to) =>
+        this.client
+          .from('campaign_addresses_geojson')
+          .select('*, qr_code_base64') // Explicitly include qr_code_base64
+          .eq('campaign_id', campaignId)
+          .order('seq', { ascending: true, nullsFirst: false })
+          .order('id', { ascending: true })
+          .range(from, to)
+      );
       return (data || []) as unknown as CampaignAddress[];
     } catch (error) {
       console.error('Error fetching addresses, returning empty array:', formatError(error));

@@ -8,6 +8,7 @@ const MERGE_FETCH_LIMIT = 1000;
 type TimestampColumn = 'event_time' | 'created_at';
 type EventTable = 'session_events' | 'activity_events';
 type ContactActivityType = 'appointment' | 'followup';
+type AddressStatusForeignKeyColumn = 'campaign_address_id' | 'address_id';
 
 type ActivityEvent = {
   id: string;
@@ -29,6 +30,7 @@ type ContactEventRow = {
   payload: Record<string, unknown>;
   created_at: string;
 };
+type DerivedActivityEvent = ActivityEvent & { campaign_name?: string };
 
 type SessionEventRow = {
   id: string;
@@ -78,6 +80,47 @@ function isMissingRelation(error: unknown, table: string): boolean {
   );
 }
 
+async function fetchAppointmentAddressStatusRows(
+  admin: ReturnType<typeof createAdminClient>,
+  start: string,
+  end: string,
+  limit: number
+): Promise<{
+  rows: Array<Record<string, unknown>>;
+  addressIdColumn: AddressStatusForeignKeyColumn;
+}> {
+  const addressIdColumns: AddressStatusForeignKeyColumn[] = ['campaign_address_id', 'address_id'];
+
+  for (const addressIdColumn of addressIdColumns) {
+    const result = await admin
+      .from('address_statuses')
+      .select(`${addressIdColumn}, status, created_at, updated_at`)
+      .eq('status', 'appointment')
+      .gte('updated_at', start)
+      .lte('updated_at', end)
+      .limit(limit);
+
+    if (!result.error) {
+      return {
+        rows: (result.data ?? []) as Array<Record<string, unknown>>,
+        addressIdColumn,
+      };
+    }
+
+    if (isMissingRelation(result.error, 'address_statuses')) {
+      return { rows: [], addressIdColumn };
+    }
+
+    if (isMissingColumn(result.error, 'address_statuses', addressIdColumn)) {
+      continue;
+    }
+
+    throw new Error(result.error.message);
+  }
+
+  throw new Error('address_statuses is missing a supported address foreign key column');
+}
+
 function firstNonEmptyString(...values: unknown[]): string | null {
   for (const value of values) {
     if (typeof value === 'string' && value.trim().length > 0) {
@@ -116,6 +159,100 @@ function needsFollowUp(status: string, reminderDateIso: string | null): boolean 
     normalized === 'no_answer' ||
     normalized === 'warm'
   );
+}
+
+function isLegacyAppointmentStatus(rawStatus: string): boolean {
+  return rawStatus.trim().toLowerCase() === 'appointment';
+}
+
+function buildContactRowSignature(row: Record<string, unknown>): string {
+  const userId = firstNonEmptyString(row.user_id) ?? '';
+  const contactName = firstNonEmptyString(row.full_name, row.name)?.toLowerCase() ?? '';
+  const phone = firstNonEmptyString(row.phone) ?? '';
+  const email = firstNonEmptyString(row.email)?.toLowerCase() ?? '';
+  const address = firstNonEmptyString(row.address)?.toLowerCase() ?? '';
+  const campaignId = firstNonEmptyString(row.campaign_id) ?? '';
+  const status = firstNonEmptyString(row.status)?.toLowerCase() ?? '';
+  const reminderDateIso = toIsoOrNull(row.reminder_date) ?? '';
+  const updatedAtIso = toIsoOrNull(row.updated_at) ?? '';
+  const createdAtIso = toIsoOrNull(row.created_at) ?? '';
+
+  return [
+    userId,
+    contactName,
+    phone,
+    email,
+    address,
+    campaignId,
+    status,
+    reminderDateIso,
+    updatedAtIso || createdAtIso,
+  ].join('|');
+}
+
+function mergeContactRows(
+  ...groups: Array<Array<Record<string, unknown>>>
+): Array<Record<string, unknown>> {
+  const merged: Array<Record<string, unknown>> = [];
+  const seen = new Set<string>();
+
+  for (const group of groups) {
+    for (const row of group) {
+      const signature = buildContactRowSignature(row);
+      if (seen.has(signature)) continue;
+      seen.add(signature);
+      merged.push(row);
+    }
+  }
+
+  return merged;
+}
+
+function normalizeLegacyAppointmentEvents(
+  rawRows: Array<Record<string, unknown>>,
+  start: string,
+  end: string
+): DerivedActivityEvent[] {
+  const events: DerivedActivityEvent[] = [];
+
+  for (const row of rawRows) {
+    const id = firstNonEmptyString(row.id);
+    const userId = firstNonEmptyString(row.user_id);
+    const status = firstNonEmptyString(row.status) ?? '';
+    if (!id || !userId || !isLegacyAppointmentStatus(status)) continue;
+
+    const eventTime = toIsoOrNull(row.updated_at) ?? toIsoOrNull(row.created_at) ?? new Date().toISOString();
+    if (!isWithinRange(eventTime, start, end)) continue;
+
+    const contactName = firstNonEmptyString(row.full_name, row.name);
+    const address = firstNonEmptyString(row.address) ?? '';
+    const campaignName = firstNonEmptyString(row.campaign_name, row.campaign_title);
+    const summary = contactName
+      ? address
+        ? `${contactName} • ${address}`
+        : contactName
+      : address || 'Appointment';
+
+    events.push({
+      id: `legacy-appointment-${id}`,
+      user_id: userId,
+      event_type: 'appointment',
+      event_time: eventTime,
+      ref_id: null,
+      created_at: toIsoOrNull(row.created_at) ?? eventTime,
+      payload: {
+        summary,
+        contact_name: contactName,
+        address,
+        status: status.trim().toLowerCase(),
+        source: 'field_leads',
+      },
+      campaign_name: campaignName ?? undefined,
+    });
+  }
+
+  events.sort((a, b) => new Date(b.event_time).getTime() - new Date(a.event_time).getTime());
+  return events;
 }
 
 function normalizeContactEvents(
@@ -256,21 +393,177 @@ async function fetchContactEvents(
   if (!typeFilter || typeFilter === 'followup') requestedTypes.push('followup');
   if (requestedTypes.length === 0) return [];
 
-  const contactTables: Array<'contacts' | 'field_leads'> = ['contacts', 'field_leads'];
-  let rows: Array<Record<string, unknown>> = [];
-  for (const table of contactTables) {
-    rows = await fetchContactRows(admin, table, workspaceId, workspaceUserIds, memberId);
-    if (rows.length > 0) break;
+  const events: ActivityEvent[] = [];
+
+  if (!typeFilter || typeFilter === 'appointment') {
+    const addressStatusEvents = await fetchAddressStatusAppointmentEvents(
+      admin,
+      workspaceId,
+      workspaceUserIds,
+      memberId,
+      start,
+      end
+    );
+    const legacyRows = await fetchContactRows(admin, 'field_leads', workspaceId, workspaceUserIds, memberId);
+    const allowedUsers = new Set(workspaceUserIds);
+    const filteredLegacyRows = legacyRows.filter((row) => {
+      const rowUserId = firstNonEmptyString(row.user_id);
+      if (!rowUserId || !allowedUsers.has(rowUserId)) return false;
+      return memberId ? rowUserId === memberId : true;
+    });
+    events.push(...addressStatusEvents, ...normalizeLegacyAppointmentEvents(filteredLegacyRows, start, end));
   }
 
-  const allowedUsers = new Set(workspaceUserIds);
-  const filteredRows = rows.filter((row) => {
-    const rowUserId = firstNonEmptyString(row.user_id);
-    if (!rowUserId || !allowedUsers.has(rowUserId)) return false;
-    return memberId ? rowUserId === memberId : true;
-  });
+  if (!typeFilter || typeFilter === 'followup') {
+    const contactTables: Array<'contacts' | 'field_leads'> = ['contacts', 'field_leads'];
+    const rowGroups: Array<Array<Record<string, unknown>>> = [];
+    for (const table of contactTables) {
+      rowGroups.push(await fetchContactRows(admin, table, workspaceId, workspaceUserIds, memberId));
+    }
+    const rows = mergeContactRows(...rowGroups);
+    const allowedUsers = new Set(workspaceUserIds);
+    const filteredRows = rows.filter((row) => {
+      const rowUserId = firstNonEmptyString(row.user_id);
+      if (!rowUserId || !allowedUsers.has(rowUserId)) return false;
+      return memberId ? rowUserId === memberId : true;
+    });
+    events.push(...normalizeContactEvents(filteredRows, 'followup', start, end));
+  }
 
-  return requestedTypes.flatMap((type) => normalizeContactEvents(filteredRows, type, start, end));
+  return events.sort((a, b) => {
+    if (a.event_type === 'followup' && b.event_type === 'followup') {
+      return new Date(a.event_time).getTime() - new Date(b.event_time).getTime();
+    }
+    if (a.event_type === 'followup') return 1;
+    if (b.event_type === 'followup') return -1;
+    return new Date(b.event_time).getTime() - new Date(a.event_time).getTime();
+  });
+}
+
+async function fetchAddressStatusAppointmentEvents(
+  admin: ReturnType<typeof createAdminClient>,
+  workspaceId: string,
+  workspaceUserIds: string[],
+  memberId: string | undefined,
+  start: string,
+  end: string
+): Promise<DerivedActivityEvent[]> {
+  const { rows: statusRows, addressIdColumn } = await fetchAppointmentAddressStatusRows(
+    admin,
+    start,
+    end,
+    MERGE_FETCH_LIMIT
+  );
+
+  const rows = statusRows.filter((row) => {
+    const eventTime = toIsoOrNull(row.updated_at) ?? toIsoOrNull(row.created_at);
+    return !!eventTime && isWithinRange(eventTime, start, end);
+  });
+  const addressIds = Array.from(
+    new Set(rows.map((row) => firstNonEmptyString(row[addressIdColumn])).filter((value): value is string => !!value))
+  );
+  if (addressIds.length === 0) return [];
+
+  const { data: addressRows, error: addressError } = await admin
+    .from('campaign_addresses')
+    .select('id, campaign_id, formatted, house_number, street_name')
+    .in('id', addressIds);
+
+  if (addressError) {
+    if (isMissingRelation(addressError, 'campaign_addresses')) return [];
+    throw new Error(addressError.message);
+  }
+
+  const addressMap = new Map(
+    ((addressRows ?? []) as Array<Record<string, unknown>>)
+      .map((row) => {
+        const id = firstNonEmptyString(row.id);
+        return id ? [id, row] : null;
+      })
+      .filter((entry): entry is [string, Record<string, unknown>] => !!entry)
+  );
+
+  const campaignIds = Array.from(
+    new Set(
+      Array.from(addressMap.values())
+        .map((row) => firstNonEmptyString(row.campaign_id))
+        .filter((value): value is string => !!value)
+    )
+  );
+  if (campaignIds.length === 0) return [];
+
+  const { data: campaignRows, error: campaignError } = await admin
+    .from('campaigns')
+    .select('*')
+    .in('id', campaignIds);
+
+  if (campaignError) {
+    if (isMissingRelation(campaignError, 'campaigns')) return [];
+    throw new Error(campaignError.message);
+  }
+
+  const campaignMap = new Map(
+    ((campaignRows ?? []) as Array<Record<string, unknown>>)
+      .map((row) => {
+        const id = firstNonEmptyString(row.id);
+        return id ? [id, row] : null;
+      })
+      .filter((entry): entry is [string, Record<string, unknown>] => !!entry)
+  );
+
+  const allowedUsers = new Set(workspaceUserIds);
+  const events: DerivedActivityEvent[] = [];
+
+  for (const row of rows) {
+    const addressId = firstNonEmptyString(row[addressIdColumn]);
+    if (!addressId) continue;
+
+    const address = addressMap.get(addressId);
+    const campaignId = address ? firstNonEmptyString(address.campaign_id) : null;
+    const campaign = campaignId ? campaignMap.get(campaignId) : null;
+    if (!address || !campaign) continue;
+
+    const actorUserId = firstNonEmptyString(campaign.owner_id, campaign.user_id);
+    const campaignWorkspaceId = firstNonEmptyString(campaign.workspace_id);
+    const workspaceMatch = campaignWorkspaceId
+      ? campaignWorkspaceId === workspaceId
+      : !!actorUserId && allowedUsers.has(actorUserId);
+
+    if (!workspaceMatch) continue;
+    if (memberId && actorUserId && actorUserId !== memberId) continue;
+    if (memberId && !actorUserId) continue;
+
+    const eventTime = toIsoOrNull(row.updated_at) ?? toIsoOrNull(row.created_at);
+    if (!eventTime) continue;
+
+    const formattedAddress =
+      firstNonEmptyString(address.formatted) ??
+      [firstNonEmptyString(address.house_number), firstNonEmptyString(address.street_name)]
+        .filter((part): part is string => !!part)
+        .join(' ')
+        .trim();
+    const campaignName = firstNonEmptyString(campaign.name, campaign.title);
+
+    events.push({
+      id: `address-status-appointment-${addressId}`,
+      user_id: actorUserId ?? workspaceUserIds[0] ?? '',
+      event_type: 'appointment',
+      event_time: eventTime,
+      ref_id: null,
+      created_at: toIsoOrNull(row.created_at) ?? eventTime,
+      payload: {
+        summary: formattedAddress || 'Appointment',
+        address: formattedAddress || '',
+        status: 'appointment',
+        campaign_address_id: addressId,
+        source: 'address_statuses',
+      },
+      campaign_name: campaignName ?? undefined,
+    });
+  }
+
+  events.sort((a, b) => new Date(b.event_time).getTime() - new Date(a.event_time).getTime());
+  return events;
 }
 
 async function fetchEventTableRows(
@@ -406,28 +699,57 @@ async function fetchSyntheticSessionEvents(
   start: string,
   end: string
 ): Promise<ActivityEvent[]> {
-  let query = admin
-    .from('sessions')
-    .select('id, user_id, start_time, end_time, active_seconds, distance_meters, doors_hit, conversations, flyers_delivered, created_at')
-    .eq('workspace_id', workspaceId)
-    .gte('start_time', start)
-    .lte('start_time', end)
-    .order('start_time', { ascending: false })
-    .limit(MERGE_FETCH_LIMIT);
+  let includeLeadsCreated = true;
+  let rows: Array<Record<string, unknown>> = [];
 
-  if (memberId) {
-    query = query.eq('user_id', memberId);
-  }
+  while (true) {
+    const selectColumns = [
+      'id',
+      'user_id',
+      'start_time',
+      'end_time',
+      'active_seconds',
+      'distance_meters',
+      'doors_hit',
+      'conversations',
+      'flyers_delivered',
+      'created_at',
+    ];
 
-  const { data, error } = await query;
-  if (error) {
+    if (includeLeadsCreated) {
+      selectColumns.push('leads_created');
+    }
+
+    let query = admin
+      .from('sessions')
+      .select(selectColumns.join(', '))
+      .eq('workspace_id', workspaceId)
+      .gte('start_time', start)
+      .lte('start_time', end)
+      .order('start_time', { ascending: false })
+      .limit(MERGE_FETCH_LIMIT);
+
+    if (memberId) {
+      query = query.eq('user_id', memberId);
+    }
+
+    const { data, error } = await query;
+    if (!error) {
+      rows = (data ?? []) as Array<Record<string, unknown>>;
+      break;
+    }
+
     if (isMissingRelation(error, 'sessions')) {
       return [];
+    }
+    if (includeLeadsCreated && isMissingColumn(error, 'sessions', 'leads_created')) {
+      includeLeadsCreated = false;
+      continue;
     }
     throw new Error(error.message);
   }
 
-  return ((data ?? []) as Array<Record<string, unknown>>).map((row) => ({
+  return rows.map((row) => ({
     id: String(row.id),
     user_id: String(row.user_id),
     event_type: 'session_completed',
@@ -437,6 +759,7 @@ async function fetchSyntheticSessionEvents(
     payload: {
       doors_hit: Number(row.doors_hit ?? 0) || 0,
       conversations: Number(row.conversations ?? 0) || 0,
+      leads_created: Number(row.leads_created ?? 0) || 0,
       flyers_delivered: Number(row.flyers_delivered ?? 0) || 0,
       active_seconds: Number(row.active_seconds ?? 0) || 0,
       distance_meters: Number(row.distance_meters ?? 0) || 0,

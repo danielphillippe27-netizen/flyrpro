@@ -10,6 +10,7 @@ import { BuildingAdapter } from '@/lib/services/BuildingAdapter';
 import { AddressAdapter } from '@/lib/services/AddressAdapter';
 import { resolveCampaignRegion } from '@/lib/geo/regionResolver';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
+import { fetchAllInPages } from '@/lib/supabase/fetchAllInPages';
 
 // FIX: Ensure Node.js runtime
 export const runtime = 'nodejs';
@@ -316,16 +317,16 @@ export async function POST(request: NextRequest) {
       }
       addressesToInsert = deduplicated;
 
-      // Step 4: Check if addresses already exist (from generate-address-list)
-      const { data: existingAddresses, error: countError } = await supabase
+      // Step 4: Exact count (PostgREST caps unbounded selects at 1000 rows)
+      const { count: existingAddressCount, error: countError } = await supabase
         .from('campaign_addresses')
-        .select('id')
+        .select('id', { count: 'exact', head: true })
         .eq('campaign_id', campaign_id);
-      
-      let insertedCount = existingAddresses?.length || 0;
-      
+
+      let insertedCount = existingAddressCount ?? 0;
+
       if (countError) {
-        console.warn('[Provision] Error checking existing addresses:', countError.message);
+        console.warn('[Provision] Error counting existing addresses:', countError.message);
       }
       
       // Step 5: Only insert if addresses don't already exist
@@ -414,11 +415,14 @@ export async function POST(request: NextRequest) {
       if (insertedCount >= 2) {
         console.log('[Provision] Stage 1: Building route for ALL addresses (Street-Block-Sweep-Snake)...');
         try {
-          const { data: allAddresses } = await supabase
-            .from('campaign_addresses')
-            .select('id, geom, house_number, street_name, formatted')
-            .eq('campaign_id', campaign_id);
-          const addressesForRoute = allAddresses ?? [];
+          const addressesForRoute = await fetchAllInPages((from, to) =>
+            supabase
+              .from('campaign_addresses')
+              .select('id, geom, house_number, street_name, formatted')
+              .eq('campaign_id', campaign_id)
+              .order('id', { ascending: true })
+              .range(from, to)
+          );
           if (addressesForRoute.length < 2) {
             console.log('[Provision] Skipping route: fewer than 2 addresses in DB');
           } else {

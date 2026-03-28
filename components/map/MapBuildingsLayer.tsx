@@ -5,13 +5,18 @@ import type { Map } from 'mapbox-gl';
 import mapboxgl from 'mapbox-gl';
 import { createClient } from '@/lib/supabase/client';
 import type { BuildingFeatureCollection, BuildingFeature, BuildingProperties, GetBuildingsInBboxParams } from '@/types/map-buildings';
+import type { CampaignAddress } from '@/types/database';
+import { getCampaignAddressMapStatus, getCampaignBuildingStatus } from '@/lib/campaignStats';
 import { MAP_STATUS_CONFIG, type StatusFilters } from '@/lib/constants/mapStatus';
 
 interface MapBuildingsLayerProps {
   map: Map;
   campaignId?: string | null;
+  addressStateOverrides?: CampaignAddress[];
   statusFilters?: StatusFilters;
   showOrphans?: boolean; // Toggle to show/hide orphan buildings (buildings without address links)
+  /** When false, footprints use a neutral gray (not status colors); roads unchanged. Default true. */
+  footprintStatusColors?: boolean;
   onBuildingClick?: (buildingId: string, addressId?: string) => void;
   onAddToCRM?: (data: { address: string; addressId?: string; gersId?: string; campaignId?: string }) => void;
 }
@@ -74,7 +79,16 @@ function scaleFootprint(geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon, scale:
   }
 }
 
-export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStatusFilters, showOrphans = true, onBuildingClick, onAddToCRM }: MapBuildingsLayerProps) {
+export function MapBuildingsLayer({
+  map,
+  campaignId,
+  addressStateOverrides,
+  statusFilters = defaultStatusFilters,
+  showOrphans = true,
+  footprintStatusColors = true,
+  onBuildingClick,
+  onAddToCRM,
+}: MapBuildingsLayerProps) {
   const [features, setFeatures] = useState<BuildingFeatureCollection | null>(null);
   const [zoomLevel, setZoomLevel] = useState(15);
   const sourceId = 'map-buildings-source';
@@ -82,10 +96,97 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
   const shadowLayerId = 'map-buildings-shadow';
   const circleLayerId = 'map-buildings-extrusion-points';
   const supabase = createClient();
+  const useCanonicalAddressState = Boolean(addressStateOverrides?.length);
   
   // Debounce fetching to prevent spamming Supabase during rapid panning
   const fetchTimeout = useRef<NodeJS.Timeout | undefined>(undefined);
   const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    if (!map || !campaignId || !features?.features?.length || !addressStateOverrides?.length) return;
+
+    let cancelled = false;
+
+    const addressStateById = new Map(
+      addressStateOverrides.map((address) => [
+        address.id,
+        {
+          status: getCampaignBuildingStatus(address),
+          scans_total: Number(address.scans ?? 0),
+          qr_scanned: Number(address.scans ?? 0) > 0 || Boolean(address.last_scanned_at),
+        },
+      ])
+    );
+
+    const buildingStateById = new Map<
+      string,
+      { status: 'not_visited' | 'visited' | 'hot'; scans_total: number; qr_scanned: boolean }
+    >();
+
+    const statusRank = { not_visited: 0, visited: 1, hot: 2 } as const;
+
+    for (const address of addressStateOverrides) {
+      const buildingId = (address as CampaignAddress & { building_id?: string | null }).building_id;
+      if (!buildingId) continue;
+
+      const nextState = {
+        status: getCampaignBuildingStatus(address),
+        scans_total: Number(address.scans ?? 0),
+        qr_scanned: Number(address.scans ?? 0) > 0 || Boolean(address.last_scanned_at),
+      };
+      const currentState = buildingStateById.get(buildingId);
+
+      if (!currentState) {
+        buildingStateById.set(buildingId, nextState);
+        continue;
+      }
+
+      buildingStateById.set(buildingId, {
+        status:
+          statusRank[nextState.status] > statusRank[currentState.status]
+            ? nextState.status
+            : currentState.status,
+        scans_total: currentState.scans_total + nextState.scans_total,
+        qr_scanned: currentState.qr_scanned || nextState.qr_scanned,
+      });
+    }
+
+    const applyOverrides = (attempt = 0) => {
+      if (cancelled) return;
+
+      if (!map.getSource(sourceId)) {
+        if (attempt < 5) {
+          requestAnimationFrame(() => applyOverrides(attempt + 1));
+        }
+        return;
+      }
+
+      for (const feature of features.features) {
+        const props = feature.properties ?? {};
+        const featureId = props.feature_id ?? props.gers_id ?? feature.id ?? props.id;
+        if (!featureId) continue;
+
+        const featureState =
+          (props.address_id ? addressStateById.get(props.address_id) : undefined) ??
+          (props.building_id ? buildingStateById.get(props.building_id) : undefined) ??
+          (props.gers_id ? buildingStateById.get(props.gers_id) : undefined);
+
+        if (!featureState) continue;
+
+        try {
+          map.setFeatureState({ source: sourceId, id: featureId }, featureState);
+        } catch (error) {
+          console.warn('[MapBuildingsLayer] Failed to apply canonical address state override:', error);
+        }
+      }
+    };
+
+    applyOverrides();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [map, campaignId, features, addressStateOverrides]);
 
   // Generate filter expression based on showOrphans toggle and statusFilters
   // When showOrphans=false in campaign mode, only show buildings with feature_status='matched'
@@ -173,6 +274,18 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
     ] as any;
   };
 
+  /** Neutral footprint when not using status colors (visible on map, not loud red/salmon). */
+  const NEUTRAL_FOOTPRINT_COLOR = '#6b7280';
+  const NEUTRAL_EXTRUSION_OPACITY = 0.55;
+  const NEUTRAL_CIRCLE_OPACITY = 0.88;
+
+  const getFootprintFillColor = (): any =>
+    footprintStatusColors ? getColorExpression() : NEUTRAL_FOOTPRINT_COLOR;
+  const getFootprintFillOpacity = (): number =>
+    footprintStatusColors ? 1 : NEUTRAL_EXTRUSION_OPACITY;
+  const getCircleOpacity = (): number =>
+    footprintStatusColors ? 0.9 : NEUTRAL_CIRCLE_OPACITY;
+
   // Track if campaign data has been loaded (for "fetch once, render forever" pattern)
   const campaignDataLoadedRef = useRef<string | null>(null);
 
@@ -213,8 +326,8 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
       console.log('[MapBuildingsLayer] No buildings found, creating from addresses');
       
       const { data: addresses, error: addrError } = await supabase
-        .from('campaign_addresses')
-        .select('id, formatted, geom, visited, coordinate, scans, last_scanned_at')
+        .from('campaign_addresses_geojson')
+        .select('id, formatted, geom, geom_json, visited, coordinate, scans, last_scanned_at, address_status')
         .eq('campaign_id', campaignId)
         .not('geom', 'is', null)
         .limit(5000);
@@ -227,6 +340,8 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
           try {
             if (addr.coordinate) {
               coords = [addr.coordinate.lon, addr.coordinate.lat];
+            } else if (addr.geom_json?.type === 'Point' && Array.isArray(addr.geom_json.coordinates)) {
+              coords = [addr.geom_json.coordinates[0], addr.geom_json.coordinates[1]];
             } else if (addr.geom) {
               // Try to parse PostGIS point
               const match = addr.geom.match(/POINT\s*\(\s*([-\d.]+)\s+([-\d.]+)\s*\)/i);
@@ -250,7 +365,8 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
               feature_id: addr.id,
               address_id: addr.id,
               address_text: addr.formatted,
-              status: addr.visited ? 'visited' : 'not_visited',
+              address_status: getCampaignAddressMapStatus(addr as CampaignAddress),
+              status: getCampaignBuildingStatus(addr as CampaignAddress),
               scans_total: addr.scans || 0,
               qr_scanned: (addr.scans || 0) > 0 || !!addr.last_scanned_at,
               height: 14,
@@ -660,11 +776,11 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
           minzoom: 12,
           filter: filterExpr ? ['all', polygonFilter, filterExpr] : polygonFilter,
           paint: {
-            'fill-extrusion-color': getColorExpression(),
+            'fill-extrusion-color': getFootprintFillColor(),
             'fill-extrusion-vertical-gradient': true,
             'fill-extrusion-height': ['coalesce', ['get', 'height'], ['get', 'height_m'], 14] as any,
             'fill-extrusion-base': 0,
-            'fill-extrusion-opacity': 1.0,
+            'fill-extrusion-opacity': getFootprintFillOpacity(),
           },
         };
         
@@ -689,8 +805,8 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
               : ['==', ['geometry-type'], 'Point'],
             paint: {
               'circle-radius': 5,
-              'circle-color': getColorExpression(),
-              'circle-opacity': 0.9,
+              'circle-color': getFootprintFillColor(),
+              'circle-opacity': getCircleOpacity(),
               'circle-stroke-width': 1.5,
               'circle-stroke-color': '#ffffff',
             },
@@ -743,7 +859,7 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
           opacity: paintOpacity,
           currentZoom,
           statusFilters,
-          colorExpression: getColorExpression(),
+          colorExpression: getFootprintFillColor(),
           sampleFeatureStatus: normalizedFeatures.features[0]?.properties?.status,
         });
         
@@ -984,13 +1100,13 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
     } else {
         // Update paint properties for existing layer to ensure opacity is correct
         try {
-        const colorExpr = getColorExpression();
+        const colorExpr = getFootprintFillColor();
         console.log('[MapBuildingsLayer] Updating existing layer colors', {
           statusFilters,
           colorExpression: colorExpr,
           layerId,
         });
-        map.setPaintProperty(layerId, 'fill-extrusion-opacity', 1.0);
+        map.setPaintProperty(layerId, 'fill-extrusion-opacity', getFootprintFillOpacity());
         map.setPaintProperty(layerId, 'fill-extrusion-color', colorExpr);
         map.setPaintProperty(layerId, 'fill-extrusion-vertical-gradient', true);
         
@@ -1018,11 +1134,11 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
               source: sourceId,
               minzoom: (layerConfig as any).minzoom || 12,
               paint: {
-                'fill-extrusion-color': getColorExpression(),
+                'fill-extrusion-color': getFootprintFillColor(),
                 'fill-extrusion-vertical-gradient': true,
                 'fill-extrusion-height': currentPaint.height || ['coalesce', ['get', 'height'], ['get', 'height_m'], 14],
                 'fill-extrusion-base': currentPaint.base || 0,
-                'fill-extrusion-opacity': currentPaint.opacity || 1.0,
+                'fill-extrusion-opacity': getFootprintFillOpacity(),
               },
             };
             // Only add filter if the original layer had one
@@ -1082,22 +1198,27 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
       map.off('idle', onIdle);
       map.off('style.load', onStyleLoad);
     };
-  }, [map, features, zoomLevel, onBuildingClick, statusFilters, campaignId, supabase, onAddToCRM, showOrphans]);
+  }, [map, features, zoomLevel, onBuildingClick, statusFilters, campaignId, supabase, onAddToCRM, showOrphans, footprintStatusColors]);
 
   // Update color and filter when statusFilters or campaignId changes
   useEffect(() => {
     if (!map || !map.getLayer(layerId)) return;
     
     try {
-      const colorExpr = getColorExpression();
+      const colorExpr = getFootprintFillColor();
       const filterExpr = getFilterExpression(showOrphans, !!campaignId, statusFilters);
       console.log('[MapBuildingsLayer] Updating color/filter for statusFilters change', { statusFilters, campaignId, colorExpr, filterExpr });
       map.setPaintProperty(layerId, 'fill-extrusion-color', colorExpr);
+      map.setPaintProperty(layerId, 'fill-extrusion-opacity', getFootprintFillOpacity());
       map.setFilter(layerId, filterExpr);
+      if (map.getLayer(circleLayerId)) {
+        map.setPaintProperty(circleLayerId, 'circle-color', colorExpr);
+        map.setPaintProperty(circleLayerId, 'circle-opacity', getCircleOpacity());
+      }
     } catch (err) {
       console.error('[MapBuildingsLayer] Error updating color/filter:', err);
     }
-  }, [map, statusFilters, campaignId, layerId, showOrphans]);
+  }, [map, statusFilters, campaignId, layerId, showOrphans, footprintStatusColors, circleLayerId]);
 
   // Update filter when showOrphans changes (toggle visibility of orphan buildings)
   useEffect(() => {
@@ -1144,9 +1265,13 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
 
         // Refresh colors after style change (ensures they're applied correctly)
         if (map.getLayer(layerId)) {
-          map.setPaintProperty(layerId, 'fill-extrusion-color', getColorExpression());
-          map.setPaintProperty(layerId, 'fill-extrusion-opacity', 1.0);
+          map.setPaintProperty(layerId, 'fill-extrusion-color', getFootprintFillColor());
+          map.setPaintProperty(layerId, 'fill-extrusion-opacity', getFootprintFillOpacity());
           map.setPaintProperty(layerId, 'fill-extrusion-vertical-gradient', true);
+        }
+        if (map.getLayer(circleLayerId)) {
+          map.setPaintProperty(circleLayerId, 'circle-color', getFootprintFillColor());
+          map.setPaintProperty(circleLayerId, 'circle-opacity', getCircleOpacity());
         }
       } catch (err) {
         console.warn('[MapBuildingsLayer] Error applying lighting/colors:', err);
@@ -1164,14 +1289,14 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
     return () => {
       map.off('style.load', applyLightingAndColors);
     };
-  }, [map, layerId]);
+  }, [map, layerId, circleLayerId, footprintStatusColors]);
 
   // Real-time subscription for building_stats updates
   // When a QR code is scanned, building_stats is updated via trigger
   // This subscription catches that change and updates the map colors instantly
   // Uses setFeatureState() for efficient real-time updates (no full re-render)
   useEffect(() => {
-    if (!map || !campaignId) return;
+    if (!map || !campaignId || useCanonicalAddressState) return;
 
     console.log('[MapBuildingsLayer] Setting up real-time subscription for building_stats, campaignId:', campaignId);
 
@@ -1245,12 +1370,12 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [map, campaignId, supabase]);
+  }, [map, campaignId, supabase, useCanonicalAddressState]);
 
   // Real-time subscription for scan_events (direct scan tracking)
   // This is a fallback in case building_stats trigger fails or realtime isn't enabled
   useEffect(() => {
-    if (!map || !campaignId) return;
+    if (!map || !campaignId || useCanonicalAddressState) return;
 
     console.log('[MapBuildingsLayer] Setting up real-time subscription for scan_events, campaignId:', campaignId);
 
@@ -1315,7 +1440,7 @@ export function MapBuildingsLayer({ map, campaignId, statusFilters = defaultStat
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [map, campaignId, supabase]);
+  }, [map, campaignId, supabase, useCanonicalAddressState]);
 
   // Real-time subscription for building_address_links (stable linker: map snaps grey → red as links are added)
   useEffect(() => {

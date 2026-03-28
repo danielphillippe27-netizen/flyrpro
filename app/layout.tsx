@@ -11,6 +11,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://www.flyrpro.app"),
   title: "FLYR PRO - Direct Mail Campaign Management",
   description: "Create and track QR code campaigns for direct mail",
 };

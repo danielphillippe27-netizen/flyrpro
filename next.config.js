@@ -16,6 +16,25 @@ const nextConfig = {
     'duckdb',           // Required for MotherDuck connections to work
     '@duckdb/node-api',
   ],
+  async redirects() {
+    return [
+      {
+        source: "/terms-of-service",
+        destination: "/terms",
+        permanent: true,
+      },
+      {
+        source: "/terms-and-conditions",
+        destination: "/terms",
+        permanent: true,
+      },
+      {
+        source: "/tos",
+        destination: "/terms",
+        permanent: true,
+      },
+    ];
+  },
   async rewrites() {
     // QR code redirects: Primary handler is /api/q/[slug] (local Next.js API route)
     // This rewrite to Supabase Edge Function is kept as a fallback for:
@@ -54,4 +73,3 @@ const nextConfig = {
 };
 
 module.exports = nextConfig;
-

@@ -13,6 +13,7 @@
  */
 
 import { SupabaseClient } from '@supabase/supabase-js';
+import { fetchAllInPages } from '@/lib/supabase/fetchAllInPages';
 
 /** Raised when an address cannot be uniquely assigned to a building due to identical confidence and spatial metrics after tie-breakers. */
 export class DataIntegrityError extends Error {
@@ -147,15 +148,15 @@ export class StableLinkerService {
         throw new Error('Invalid buildings GeoJSON: missing features array');
       }
 
-      // 1. Fetch addresses for this campaign
-      const { data: rawAddresses, error: addrError } = await this.supabase
-        .from('campaign_addresses')
-        .select('id, gers_id, formatted, house_number, street_name, geom')
-        .eq('campaign_id', campaignId);
-
-      if (addrError) {
-        throw new Error(`Failed to fetch addresses: ${addrError.message}`);
-      }
+      // 1. Fetch addresses for this campaign (PostgREST caps unbounded selects at 1000 rows)
+      const rawAddresses = await fetchAllInPages((from, to) =>
+        this.supabase
+          .from('campaign_addresses')
+          .select('id, gers_id, formatted, house_number, street_name, geom')
+          .eq('campaign_id', campaignId)
+          .order('id', { ascending: true })
+          .range(from, to)
+      );
       
       // Parse geom field which may be string or object from Supabase
       const addresses: CampaignAddress[] = (rawAddresses || []).map((addr: any) => {

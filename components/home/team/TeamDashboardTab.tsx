@@ -3,9 +3,8 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useWorkspace } from '@/lib/workspace-context';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { DoorOpen, MessageSquare, CalendarCheck, Users, Trophy, Map, Target, Clock, UserCircle } from 'lucide-react';
+import { DoorOpen, MessageSquare, CalendarCheck, Users, Trophy, Target, Clock, UserCircle } from 'lucide-react';
 import type { TeamControlsRange } from '@/components/home/team/TeamControlsBar';
 
 type Summary = {
@@ -49,10 +48,9 @@ type TeamDashboardTabProps = {
   range: TeamControlsRange;
   memberIds: string[];
   onMemberClick?: (member: { user_id: string; display_name: string; color: string }) => void;
-  onOpenMap?: () => void;
 };
 
-export function TeamDashboardTab({ range, memberIds, onMemberClick, onOpenMap }: TeamDashboardTabProps) {
+export function TeamDashboardTab({ range, memberIds, onMemberClick }: TeamDashboardTabProps) {
   const { currentWorkspaceId } = useWorkspace();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [members, setMembers] = useState<MemberRow[]>([]);
@@ -309,25 +307,7 @@ export function TeamDashboardTab({ range, memberIds, onMemberClick, onOpenMap }:
         </Card>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card className="border-dashed">
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2 text-muted-foreground">
-              <Map className="w-4 h-4" />
-              Coverage
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <p className="text-sm text-muted-foreground">
-              No coverage insights yet. View Map → Knocked homes mode to start.
-            </p>
-            {onOpenMap && (
-              <Button variant="outline" size="sm" onClick={onOpenMap}>
-                Open Map
-              </Button>
-            )}
-          </CardContent>
-        </Card>
+      <div>
         <Card className="border-dashed">
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2 text-muted-foreground">

@@ -3,6 +3,16 @@ import type { UserStats } from '@/types/database';
 
 export type StatsPeriod = 'daily' | 'weekly' | 'monthly' | 'lifetime';
 
+type AppointmentCandidateRow = {
+  full_name?: string | null;
+  name?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  campaign_id?: string | null;
+  status?: string | null;
+};
+
 function mapRow(row: Record<string, unknown>): UserStats {
   return {
     id: String(row.id ?? ''),
@@ -28,6 +38,21 @@ function mapRow(row: Record<string, unknown>): UserStats {
   };
 }
 
+function isAppointmentStatus(status: unknown): boolean {
+  const normalized = String(status ?? '').trim().toLowerCase();
+  return normalized === 'interested' || normalized === 'hot' || normalized === 'appointment';
+}
+
+function appointmentSignature(row: AppointmentCandidateRow): string {
+  return [
+    (row.full_name ?? row.name ?? '').trim().toLowerCase(),
+    (row.phone ?? '').trim(),
+    (row.email ?? '').trim().toLowerCase(),
+    (row.address ?? '').trim().toLowerCase(),
+    (row.campaign_id ?? '').trim(),
+  ].join('|');
+}
+
 export class StatsService {
   private static client = createClient();
 
@@ -36,7 +61,7 @@ export class StatsService {
    * Same table iOS updates via increment_user_stats RPC and the sessions trigger.
    * Read path: direct table read (no RPC).
    */
-  static async fetchUserStats(userId: string, _period?: StatsPeriod): Promise<UserStats | null> {
+  static async fetchUserStats(userId: string): Promise<UserStats | null> {
     const { data, error } = await this.client
       .from('user_stats')
       .select('*')
@@ -47,6 +72,41 @@ export class StatsService {
     if (error) throw new Error(error.message || 'Failed to load stats');
     if (!data) return null;
     return mapRow(data as Record<string, unknown>);
+  }
+
+  static async fetchAppointmentCount(userId: string): Promise<number> {
+    const [{ data: contacts, error: contactsError }, legacyResult] = await Promise.all([
+      this.client
+        .from('contacts')
+        .select('full_name, phone, email, address, campaign_id, status')
+        .eq('user_id', userId),
+      this.client
+        .from('field_leads')
+        .select('full_name, name, phone, email, address, campaign_id, status')
+        .eq('user_id', userId),
+    ]);
+
+    if (contactsError) {
+      throw new Error(contactsError.message || 'Failed to load appointments');
+    }
+
+    const rows: AppointmentCandidateRow[] = [
+      ...((contacts ?? []) as AppointmentCandidateRow[]),
+      ...(legacyResult.error ? [] : ((legacyResult.data ?? []) as AppointmentCandidateRow[])),
+    ];
+
+    const signatures = new Set<string>();
+    let count = 0;
+
+    for (const row of rows) {
+      if (!isAppointmentStatus(row.status)) continue;
+      const signature = appointmentSignature(row);
+      if (signatures.has(signature)) continue;
+      signatures.add(signature);
+      count += 1;
+    }
+
+    return count;
   }
 
   static async createOrUpdateUserStats(userId: string, updates: Partial<UserStats>): Promise<UserStats> {
@@ -96,4 +156,3 @@ export class StatsService {
     }
   }
 }
-

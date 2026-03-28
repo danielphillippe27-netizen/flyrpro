@@ -1,0 +1,30 @@
+{
+  "export_version": 1,
+  "campaign_id": "e375825f-672c-4ebc-9f09-05eb566730fb",
+  "created_at": "2026-03-20T17:16:06.912Z",
+  "origin": {
+    "lng": -78.7808532724299,
+    "lat": 43.9246813744982
+  },
+  "coordinate_system": "local_meters_from_origin",
+  "padding_meters": 50,
+  "simplification_tolerance": 0.000005,
+  "counts": {
+    "target_buildings": 170,
+    "context_buildings": 36,
+    "roads": 12,
+    "addresses": 172
+  },
+  "source": "ref_buildings_gold",
+  "storage": {
+    "bucket": "blender-exports",
+    "prefix": "e375825f-672c-4ebc-9f09-05eb566730fb/v1",
+    "files": {
+      "boundary": "e375825f-672c-4ebc-9f09-05eb566730fb/v1/boundary.geojson",
+      "buildings": "e375825f-672c-4ebc-9f09-05eb566730fb/v1/buildings.geojson",
+      "roads": "e375825f-672c-4ebc-9f09-05eb566730fb/v1/roads.geojson",
+      "addresses": "e375825f-672c-4ebc-9f09-05eb566730fb/v1/addresses.geojson",
+      "manifest": "e375825f-672c-4ebc-9f09-05eb566730fb/v1/manifest.json"
+    }
+  }
+}

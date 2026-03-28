@@ -36,23 +36,35 @@ const EMPTY_STATS: UserStats = {
 
 export function YouViewContent({ userId, authChecked = false }: { userId: string | null; authChecked?: boolean }) {
   const [stats, setStats] = useState<UserStats | null>(null);
+  const [appointmentCount, setAppointmentCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const loadStats = useCallback(async () => {
     if (!userId) {
+      setAppointmentCount(0);
       setLoading(false);
       return;
     }
     setLoading(true);
     setError(null);
     try {
-      const data = await StatsService.fetchUserStats(userId);
-      setStats(data);
+      const [statsResult, appointmentResult] = await Promise.allSettled([
+        StatsService.fetchUserStats(userId),
+        StatsService.fetchAppointmentCount(userId),
+      ]);
+
+      if (statsResult.status === 'rejected') {
+        throw statsResult.reason;
+      }
+
+      setStats(statsResult.value);
+      setAppointmentCount(appointmentResult.status === 'fulfilled' ? appointmentResult.value : 0);
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Failed to load stats';
       setError(message);
       setStats(null);
+      setAppointmentCount(0);
     } finally {
       setLoading(false);
     }
@@ -96,6 +108,8 @@ export function YouViewContent({ userId, authChecked = false }: { userId: string
   }
 
   const displayStats = stats ?? EMPTY_STATS;
+  const appointmentPerConversation =
+    displayStats.conversations > 0 ? (appointmentCount / displayStats.conversations) * 100 : 0;
 
   return (
     <div className="space-y-6">
@@ -118,14 +132,11 @@ export function YouViewContent({ userId, authChecked = false }: { userId: string
       {/* Stats grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <StatCard label="Doors Knocked" value={displayStats.doors_knocked} />
-        <StatCard label="Flyers" value={displayStats.flyers} />
         <StatCard label="Conversations" value={displayStats.conversations} />
         <StatCard label="Leads Created" value={displayStats.leads_created} />
         <StatCard label="QR Codes Scanned" value={displayStats.qr_codes_scanned} />
         <StatCard label="Distance Walked" value={`${formatDistanceWalked(displayStats.distance_walked)} km`} />
         <StatCard label="Time Tracked" value={formatTimeTracked(displayStats.time_tracked)} />
-        <StatCard label="Experience Points" value={displayStats.xp} />
-        <StatCard label="Routes Walked" value={displayStats.routes_walked ?? 0} />
       </div>
 
       {/* Success metrics */}
@@ -136,25 +147,25 @@ export function YouViewContent({ userId, authChecked = false }: { userId: string
         </h3>
         <div className="flex flex-col gap-5">
           <SuccessMetricBar
-            title="Conversations per Door"
+            title="Conversation / Door"
             value={ratePercent(displayStats.conversation_per_door)}
             icon="💬"
             color="#a855f7"
             description="Conversations per door knocked"
           />
           <SuccessMetricBar
-            title="Conversation–Lead Rate"
+            title="Lead / Conversation"
             value={ratePercent(displayStats.conversation_lead_rate)}
             icon="⭐"
             color="#eab308"
             description="Leads per conversation"
           />
           <SuccessMetricBar
-            title="FLYR™ QR Code Scan"
-            value={ratePercent(displayStats.qr_code_scan_rate)}
-            icon="📱"
+            title="Appointment / Conversation"
+            value={appointmentPerConversation}
+            icon="📆"
             color="#ef4444"
-            description="QR code scans per flyer"
+            description="Appointments per conversation"
           />
         </div>
       </section>

@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseServerClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/server';
 
 export async function GET(
@@ -127,11 +126,17 @@ export async function GET(
         if (scanError) {
           console.error('Error recording QR scan:', scanError);
         } else if (address && isFirstScan) {
-          // Update address visited status (mark as scanned)
-          await supabase
-            .from('campaign_addresses')
-            .update({ visited: true })
-            .eq('id', qrCode.address_id);
+          const { error: outcomeError } = await supabase.rpc('record_public_qr_scan_outcome', {
+            p_campaign_address_id: qrCode.address_id,
+            p_status: 'delivered',
+            p_notes: 'public qr scan',
+            p_occurred_at: new Date().toISOString(),
+          });
+
+          if (outcomeError) {
+            console.error('Error recording canonical QR scan outcome:', outcomeError);
+            return NextResponse.redirect(redirectUrl, { status: 302 });
+          }
 
           // Increment campaign scan count (only for first scan to track unique homes)
           if (campaignId) {
@@ -167,7 +172,6 @@ export async function GET(
     );
   }
 }
-
 
 
 
