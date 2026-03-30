@@ -207,9 +207,10 @@ export async function POST(request: NextRequest) {
         ]);
         const lambdaAddresses = TileLambdaService.convertToCampaignAddresses(
           addressData.features,
-          campaign_id!
+          campaign_id!,
+          regionCode
         );
-        addressesToInsert = AddressAdapter.normalizeArray(lambdaAddresses, campaign_id!);
+        addressesToInsert = AddressAdapter.normalizeArray(lambdaAddresses, campaign_id!, regionCode);
         goldBuildings = [];
         // Pass pre-fetched buildings so BuildingAdapter skips a second download
         preFetchedBuildingsGeo = buildingsGeo;
@@ -228,7 +229,8 @@ export async function POST(request: NextRequest) {
 
         addressesToInsert = AddressAdapter.normalizeArray(
           goldResult.addresses,
-          campaign_id!
+          campaign_id!,
+          regionCode
         );
         goldBuildings = goldResult.buildings;
 

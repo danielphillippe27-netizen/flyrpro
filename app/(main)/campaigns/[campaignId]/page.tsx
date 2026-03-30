@@ -824,7 +824,7 @@ export default function CampaignDetailPage() {
 
           <TabsContent value="map" className="mt-4 space-y-4">
             <div className="bg-card rounded-xl border border-border overflow-hidden" style={{ height: '560px' }}>
-              <CampaignDetailMapView campaignId={campaignId} addresses={addresses} campaign={campaign} onSnapComplete={loadData} roadCacheVersion={roadMetadata?.cache_version} />
+              <CampaignDetailMapView campaignId={campaignId} addresses={addresses} campaign={campaign} onSnapComplete={loadData} />
             </div>
           </TabsContent>
 

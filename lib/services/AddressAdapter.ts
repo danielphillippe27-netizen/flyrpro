@@ -55,10 +55,24 @@ export interface StandardCampaignAddress {
 }
 
 export class AddressAdapter {
+  private static normalizeRegion(value: unknown, fallbackRegion?: string | null): string | null {
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim().toUpperCase();
+    }
+    if (typeof fallbackRegion === 'string' && fallbackRegion.trim()) {
+      return fallbackRegion.trim().toUpperCase();
+    }
+    return null;
+  }
+
   /**
    * Convert Gold database row to standard campaign address
    */
-  static fromGoldRow(row: GoldAddressRow, campaignId: string): StandardCampaignAddress {
+  static fromGoldRow(
+    row: GoldAddressRow,
+    campaignId: string,
+    fallbackRegion?: string | null
+  ): StandardCampaignAddress {
     const lon = row.lon ?? 0;
     const lat = row.lat ?? 0;
     
@@ -68,7 +82,7 @@ export class AddressAdapter {
       house_number: row.street_number,
       street_name: row.street_name,
       locality: row.city,
-      region: row.province || 'ON',
+      region: this.normalizeRegion(row.province, fallbackRegion),
       postal_code: row.zip,
       coordinate: { lat, lon },
       geom: `{"type":"Point","coordinates":[${lon},${lat}]}`,
@@ -80,7 +94,11 @@ export class AddressAdapter {
   /**
    * Convert Lambda GeoJSON feature to standard campaign address
    */
-  static fromLambdaFeature(feature: LambdaAddressFeature, campaignId: string): StandardCampaignAddress {
+  static fromLambdaFeature(
+    feature: LambdaAddressFeature,
+    campaignId: string,
+    fallbackRegion?: string | null
+  ): StandardCampaignAddress {
     const [lon, lat] = feature.geometry.coordinates;
     
     return {
@@ -89,7 +107,7 @@ export class AddressAdapter {
       house_number: feature.properties.house_number,
       street_name: feature.properties.street_name,
       locality: feature.properties.city,
-      region: feature.properties.state || 'ON',
+      region: this.normalizeRegion(feature.properties.state, fallbackRegion),
       postal_code: feature.properties.postal_code,
       coordinate: { lat, lon },
       geom: JSON.stringify(feature.geometry),
@@ -102,7 +120,11 @@ export class AddressAdapter {
    * Convert already-normalized address (from GoldAddressService) to standard format
    * Handles the case where geom might be object or string
    */
-  static fromNormalized(addr: any, campaignId: string): StandardCampaignAddress {
+  static fromNormalized(
+    addr: any,
+    campaignId: string,
+    fallbackRegion?: string | null
+  ): StandardCampaignAddress {
     // Handle geom as string or object
     const geomString = typeof addr.geom === 'string' 
       ? addr.geom 
@@ -113,8 +135,8 @@ export class AddressAdapter {
       formatted: addr.formatted || '',
       house_number: addr.house_number,
       street_name: addr.street_name,
-      locality: addr.locality,
-      region: addr.region || 'ON',
+      locality: addr.locality ?? addr.city ?? null,
+      region: this.normalizeRegion(addr.region ?? addr.province ?? addr.state, fallbackRegion),
       postal_code: addr.postal_code,
       coordinate: addr.coordinate,
       geom: geomString,
@@ -127,7 +149,11 @@ export class AddressAdapter {
    * Normalize array of addresses from mixed sources
    * Auto-detects Gold vs Lambda format
    */
-  static normalizeArray(addresses: any[], campaignId: string): StandardCampaignAddress[] {
+  static normalizeArray(
+    addresses: any[],
+    campaignId: string,
+    fallbackRegion?: string | null
+  ): StandardCampaignAddress[] {
     if (!addresses || addresses.length === 0) return [];
 
     // Detect format based on first address
@@ -136,10 +162,10 @@ export class AddressAdapter {
 
     if (isGoldFormat) {
       console.log(`[AddressAdapter] Normalizing ${addresses.length} Gold addresses`);
-      return addresses.map((addr) => this.fromGoldRow(addr, campaignId));
+      return addresses.map((addr) => this.fromGoldRow(addr, campaignId, fallbackRegion));
     } else {
       console.log(`[AddressAdapter] Normalizing ${addresses.length} Lambda/normalized addresses`);
-      return addresses.map((addr) => this.fromNormalized(addr, campaignId));
+      return addresses.map((addr) => this.fromNormalized(addr, campaignId, fallbackRegion));
     }
   }
 }

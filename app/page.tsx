@@ -201,57 +201,46 @@ export default function LandingPage() {
   }
 
   return (
-    <div className="min-h-screen bg-red-500 text-zinc-900">
-      <header className="sticky top-0 z-50 bg-transparent">
-        <div className="flex w-full items-center justify-between px-2 py-2 md:px-4">
+    <div className="min-h-screen bg-zinc-50 text-zinc-900">
+      <header className="sticky top-0 z-50 border-b border-zinc-200/80 bg-zinc-50/90 backdrop-blur-sm">
+        <div className="flex w-full items-center justify-between px-4 py-3 md:px-6">
           <Link href="/" className="flex items-end">
-            <span className="text-6xl font-black leading-none tracking-tight text-black md:text-7xl">FLYR</span>
+            <span className="text-4xl font-black leading-none tracking-tight text-red-600 md:text-5xl">FLYR</span>
           </Link>
 
-          <div className="hidden items-center gap-3 md:flex">
+          <div className="flex items-center gap-5 md:gap-6">
             <a
               href="#pricing"
-              className="inline-flex h-12 items-center rounded-2xl bg-white px-6 text-base font-semibold text-zinc-900 transition hover:bg-zinc-100"
+              className="text-sm font-medium text-zinc-600 transition hover:text-zinc-900"
             >
               Pricing
             </a>
             <Link
               href="/login"
-              className="inline-flex h-12 items-center rounded-2xl bg-zinc-900 px-6 text-base font-semibold text-white transition hover:bg-zinc-700"
+              className="inline-flex h-9 items-center rounded-lg border border-zinc-300 bg-white px-4 text-sm font-semibold text-zinc-900 transition hover:bg-zinc-100"
             >
               Sign in
             </Link>
           </div>
         </div>
-
-        <div className="px-5 pb-3 md:hidden">
-          <a
-            href="#pricing"
-            className="block rounded-2xl border border-zinc-300 bg-white px-4 py-3 text-center text-sm font-semibold text-zinc-800"
-          >
-            Pricing
-          </a>
-        </div>
       </header>
 
       <main>
-        <section className="relative overflow-hidden border-b border-zinc-200 bg-red-500 px-5 py-16 md:px-8 md:py-24">
+        <section className="relative overflow-hidden px-5 py-24 md:px-8 md:py-32">
           <div className="mx-auto flex max-w-7xl flex-col items-center text-center">
             <div className="w-full max-w-4xl">
-              <h1 className="text-5xl font-black leading-tight text-white md:text-6xl">
-                Stop Guessing
+              <h1 className="text-5xl font-black leading-tight text-zinc-900 md:text-6xl">
+                Stop Guessing. Start Tracking.
               </h1>
-              <p className="mt-5 flex flex-wrap items-baseline justify-center gap-x-2 text-5xl font-black leading-tight text-zinc-950 md:text-6xl">
-                <span>Start Tracking</span>
-                <span
-                  key={trackingWordIndex}
-                  className="min-w-[4ch] animate-hero-word-in text-white"
-                  aria-hidden
-                >
+              <p
+                className="mt-6 text-2xl font-semibold text-red-600"
+                aria-live="polite"
+              >
+                <span key={trackingWordIndex} className="inline-block min-w-[6ch] animate-hero-word-in">
                   {TRACKING_WORDS[trackingWordIndex]}
                 </span>
               </p>
-              <div className="mt-8 flex flex-wrap justify-center gap-4">
+              <div className="mt-10 flex flex-wrap justify-center gap-4">
                 <Link
                   href="/login"
                   className="inline-flex h-12 items-center rounded-2xl bg-zinc-900 px-6 text-base font-semibold text-white transition hover:bg-zinc-700"
@@ -261,7 +250,7 @@ export default function LandingPage() {
                 </Link>
                 <a
                   href="#pricing"
-                  className="inline-flex h-12 items-center rounded-2xl border border-zinc-900 bg-white px-6 text-base font-semibold text-zinc-900 transition hover:bg-zinc-100"
+                  className="inline-flex h-12 items-center rounded-2xl bg-zinc-100 px-6 text-base font-semibold text-zinc-900 transition hover:bg-zinc-200"
                 >
                   View pricing
                 </a>
@@ -270,13 +259,13 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section className="border-t border-zinc-200 bg-white px-5 py-16 md:px-8">
-          <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[1fr_1fr] lg:items-center">
+        <section className="px-5 py-24 md:px-8">
+          <div className="mx-auto grid max-w-7xl gap-12 lg:grid-cols-[1fr_1fr] lg:items-center">
             <div>
               <h2 className="text-3xl font-black leading-tight text-zinc-900 md:text-4xl">
                 We help businesses track what actually works when marketing to homeowners.
               </h2>
-              <p className="mt-5 text-lg text-zinc-600">
+              <p className="mt-5 text-lg text-zinc-500">
                 Everything from which home scanned your QR code, to how many conversations you had, to how many turned into appointments — so you know what&apos;s working and can repeat it.
               </p>
               <Link
@@ -298,12 +287,12 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section className="px-5 py-16 md:px-8">
+        <section className="px-5 py-24 md:px-8">
           <div className="mx-auto max-w-7xl">
-            <article className="rounded-3xl border border-zinc-700 bg-zinc-950 p-6 text-white">
-              <h2 className="text-center text-3xl font-black leading-tight md:text-4xl">Desktop dashboard.</h2>
-              <p className="mt-4 text-center text-lg text-zinc-300">
-                Real campaign view, draw mode, and live scanned-home overlays.
+            <article className="rounded-3xl border border-zinc-700 bg-zinc-950 p-6 text-white md:p-8">
+              <h2 className="text-center text-3xl font-black leading-tight md:text-4xl">Desktop dashboard</h2>
+              <p className="mt-4 text-center text-lg text-zinc-400">
+                Campaigns, draw mode, and live scan overlays.
               </p>
               <div className="mt-8 flex items-center gap-4">
                 <button
@@ -342,13 +331,13 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section className="px-5 pb-16 md:px-8">
-          <div className="mx-auto max-w-7xl rounded-3xl border border-zinc-700 bg-zinc-950 p-6 text-white">
-            <h3 className="text-center text-3xl font-black">Mobile field mode.</h3>
-            <p className="mt-3 text-center text-lg text-zinc-300">
-              Session controls, progress colors, and leaderboard views from iOS.
+        <section className="px-5 pb-24 pt-0 md:px-8">
+          <div className="mx-auto max-w-7xl rounded-3xl border border-zinc-700 bg-zinc-950 p-6 text-white md:p-8">
+            <h3 className="text-center text-3xl font-black">Mobile field mode</h3>
+            <p className="mt-3 text-center text-lg text-zinc-400">
+              Sessions, progress, and leaderboards on iOS.
             </p>
-<div className="mt-8 grid grid-cols-6 gap-3">
+            <div className="mt-8 grid grid-cols-3 gap-3 md:gap-4">
               {mobileShots.map((shot) => (
                 <ScreenshotCard
                   key={shot.src}
@@ -362,12 +351,12 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section id="pricing" className="border-y border-zinc-200 bg-white px-5 py-16 md:px-8">
+        <section id="pricing" className="bg-white px-5 py-24 md:px-8">
           <div className="mx-auto max-w-5xl">
             <div className="text-center">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-red-600">Pricing</p>
               <h2 className="mt-3 text-4xl font-black">Pick your plan</h2>
-              <p className="mt-3 text-lg text-zinc-600">Simple pricing. Scale when you&apos;re ready.</p>
+              <p className="mt-3 text-lg text-zinc-500">Simple pricing. Scale when you&apos;re ready.</p>
             </div>
             <LandingPricing />
           </div>

@@ -9,6 +9,7 @@ import { createAdminClient } from '@/lib/supabase/server';
 import { TileLambdaService, type LambdaSnapshotResponse } from './TileLambdaService';
 
 const DEFAULT_GOLD_ADDRESS_LIMIT = 2500;
+const GOLD_ADDRESS_RPC_FILTERED = 'get_gold_addresses_in_polygon_geojson_filtered';
 
 export interface GoldAddressResult {
   source: 'gold' | 'silver' | 'lambda';
@@ -39,6 +40,9 @@ export class GoldAddressService {
 
     if (typeof raw === 'object') {
       const obj = raw as Record<string, unknown>;
+      if (GOLD_ADDRESS_RPC_FILTERED in obj) {
+        return this.parseGoldAddressRows(obj[GOLD_ADDRESS_RPC_FILTERED]);
+      }
       if ('get_gold_addresses_in_polygon_geojson' in obj) {
         return this.parseGoldAddressRows(obj.get_gold_addresses_in_polygon_geojson);
       }
@@ -109,40 +113,75 @@ export class GoldAddressService {
     };
   }
 
-  /**
-   * Handles mixed DB states where either 1-arg or 2-arg RPC signatures may exist.
-   */
-  private static async queryGoldAddresses(
+  private static normalizeProvince(value?: string | null): string | null {
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim().toUpperCase();
+    return trimmed || null;
+  }
+
+  private static isMissingFunctionError(message: string, functionName: string): boolean {
+    return (
+      message.includes(`Could not find the function public.${functionName}`) ||
+      message.includes(`Could not find the function ${functionName}`)
+    );
+  }
+
+  private static async queryLegacyGoldAddresses(
     supabase: ReturnType<typeof createAdminClient>,
     polygonGeoJSON: string,
     province?: string
   ) {
-    const normalizedProvince = province?.trim().toUpperCase();
+    const normalizedProvince = this.normalizeProvince(province);
 
-    if (normalizedProvince) {
-      const twoArgResult = await supabase.rpc(
-        'get_gold_addresses_in_polygon_geojson',
-        { p_polygon_geojson: polygonGeoJSON, p_province: normalizedProvince }
-      );
+    const twoArgResult = await supabase.rpc(
+      'get_gold_addresses_in_polygon_geojson',
+      { p_polygon_geojson: polygonGeoJSON, p_province: normalizedProvince }
+    );
 
-      if (!twoArgResult.error) {
-        return twoArgResult;
-      }
+    if (!twoArgResult.error) {
+      return twoArgResult;
+    }
 
-      const errorMessage = twoArgResult.error.message || '';
-      const twoArgMissing =
-        errorMessage.includes('Could not find the function public.get_gold_addresses_in_polygon_geojson') &&
-        errorMessage.includes('p_province');
+    const errorMessage = twoArgResult.error.message || '';
+    const twoArgMissing =
+      this.isMissingFunctionError(errorMessage, 'get_gold_addresses_in_polygon_geojson') &&
+      errorMessage.includes('p_province');
 
-      if (!twoArgMissing) {
-        return twoArgResult;
-      }
+    if (!twoArgMissing) {
+      return twoArgResult;
     }
 
     return supabase.rpc(
       'get_gold_addresses_in_polygon_geojson',
       { p_polygon_geojson: polygonGeoJSON }
     );
+  }
+
+  /**
+   * Handles mixed DB states where either the new single-signature RPC exists
+   * or older overloaded RPC signatures are still deployed.
+   */
+  private static async queryGoldAddresses(
+    supabase: ReturnType<typeof createAdminClient>,
+    polygonGeoJSON: string,
+    province?: string
+  ) {
+    const normalizedProvince = this.normalizeProvince(province);
+    const filteredResult = await supabase.rpc(
+      GOLD_ADDRESS_RPC_FILTERED,
+      { p_polygon_geojson: polygonGeoJSON, p_province: normalizedProvince }
+    );
+
+    if (!filteredResult.error) {
+      return filteredResult;
+    }
+
+    const errorMessage = filteredResult.error.message || '';
+    if (!this.isMissingFunctionError(errorMessage, GOLD_ADDRESS_RPC_FILTERED)) {
+      return filteredResult;
+    }
+
+    return this.queryLegacyGoldAddresses(supabase, polygonGeoJSON, normalizedProvince ?? undefined);
   }
 
   /**
@@ -206,7 +245,7 @@ export class GoldAddressService {
     // =============================================================================
     console.log('[GoldAddressService] Querying Gold Standard table...');
     
-    const normalizedRegion = regionCode?.trim().toUpperCase();
+    const normalizedRegion = this.normalizeProvince(regionCode);
     const { data: goldAddressesRaw, error: goldError } = await this.queryGoldAddresses(
       supabase,
       polygonGeoJSON,
@@ -286,7 +325,8 @@ export class GoldAddressService {
     const addressData = await TileLambdaService.downloadAddresses(snapshot.urls.addresses);
     const lambdaAddresses = TileLambdaService.convertToCampaignAddresses(
       addressData.features,
-      campaignId
+      campaignId,
+      normalizedRegion
     );
     
     console.log(`[GoldAddressService] Tile Lambda returned ${lambdaAddresses.length} addresses`);
@@ -304,7 +344,7 @@ export class GoldAddressService {
         house_number: addr.street_number,
         street_name: addr.street_name,
         locality: addr.city,
-        region: addr.province || 'ON',
+        region: this.normalizeProvince(addr.province) ?? normalizedRegion,
         postal_code: addr.zip,
         coordinate: { lat: addr.lat, lon: addr.lon },
         geom: addr.geom_geojson, // GeoJSON string from RPC

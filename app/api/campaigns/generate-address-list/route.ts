@@ -359,9 +359,13 @@ export async function POST(request: NextRequest) {
     const addresses: LambdaAddressShape[] = addressFeatures.map(lambdaFeatureToAddressShape);
 
     try {
-      const canonicalAddresses: CanonicalCampaignAddress[] = addresses.map((address, index) =>
-        mapOvertureToCanonical(address as any, campaign_id, index)
-      );
+      const canonicalAddresses: CanonicalCampaignAddress[] = addresses.map((address, index) => {
+        const canonical = mapOvertureToCanonical(address as any, campaign_id, index);
+        return {
+          ...canonical,
+          region: canonical.region || regionCode,
+        };
+      });
 
       const rawInsertData = canonicalAddresses.map((addr) => ({
         campaign_id: addr.campaign_id,

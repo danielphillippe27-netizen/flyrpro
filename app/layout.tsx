@@ -12,8 +12,26 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://www.flyrpro.app"),
-  title: "FLYR PRO - Direct Mail Campaign Management",
-  description: "Create and track QR code campaigns for direct mail",
+  title: {
+    default: "FLYR",
+    template: "%s | FLYR",
+  },
+  description: "Direct Mail Campaign Management",
+  icons: {
+    icon: "/favicon.ico",
+    apple: "/apple-icon.png",
+  },
+  openGraph: {
+    title: "FLYR",
+    description: "Direct Mail Campaign Management",
+    images: ["/og-image.png"],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "FLYR",
+    description: "Direct Mail Campaign Management",
+    images: ["/og-image.png"],
+  },
 };
 
 export default function RootLayout({

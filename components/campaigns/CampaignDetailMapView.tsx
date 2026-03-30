@@ -6,7 +6,6 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import * as turf from '@turf/turf';
 import type { CampaignAddress, CampaignV2, CampaignParcel } from '@/types/database';
 import { MapBuildingsLayer } from '@/components/map/MapBuildingsLayer';
-import { CampaignRoadsLayer } from '@/components/campaigns/CampaignRoadsLayer';
 import { MapInfoButton } from '@/components/map/MapInfoButton';
 import { LocationCard } from '@/components/map/LocationCard';
 import { CreateContactDialog } from '@/components/crm/CreateContactDialog';
@@ -36,6 +35,7 @@ const BOUNDARY_LAYER_RAW_FILL = 'campaign-boundary-raw-fill';
 const BOUNDARY_LAYER_RAW_LINE = 'campaign-boundary-raw-line';
 const BOUNDARY_LAYER_SNAPPED_FILL = 'campaign-boundary-snapped-fill';
 const BOUNDARY_LAYER_SNAPPED_LINE = 'campaign-boundary-snapped-line';
+const CUSTOM_BUILDING_LAYER_PREFIXES = ['map-buildings-', 'campaign-parcels'];
 
 /** Safe getLayer: avoid "getOwnLayer of undefined" during style transition or when map is hidden (e.g. tab switch). */
 function safeGetLayer(m: mapboxgl.Map, layerId: string): boolean {
@@ -57,19 +57,20 @@ function safeGetSource(m: mapboxgl.Map, sourceId: string): boolean {
   }
 }
 
+function isCustomBuildingLayer(layerId: string): boolean {
+  return CUSTOM_BUILDING_LAYER_PREFIXES.some((prefix) => layerId.startsWith(prefix));
+}
+
 export function CampaignDetailMapView({
   campaignId,
   addresses,
   campaign,
   onSnapComplete,
-  roadCacheVersion,
 }: {
   campaignId: string;
   addresses: CampaignAddress[];
   campaign?: CampaignV2 | null;
   onSnapComplete?: () => void;
-  /** When this changes (e.g. after refresh), the map refetches and redraws campaign roads. */
-  roadCacheVersion?: number | null;
 }) {
   const { theme } = useTheme();
   const { currentWorkspaceId } = useWorkspace();
@@ -252,7 +253,9 @@ export function CampaignDetailMapView({
               style.layers.forEach((layer) => {
                 // Hide layers that contain "building" in their id
                 if (layer.id.toLowerCase().includes('building')) {
-                  map.current?.setLayoutProperty(layer.id, 'visibility', 'none');
+                  if (!isCustomBuildingLayer(layer.id)) {
+                    map.current?.setLayoutProperty(layer.id, 'visibility', 'none');
+                  }
                 }
                 
                 // Remove layers that reference non-existent source layers
@@ -643,7 +646,9 @@ export function CampaignDetailMapView({
           style.layers.forEach((layer) => {
             try {
               if (layer.id?.toLowerCase().includes('building')) {
-                map.current?.setLayoutProperty(layer.id, 'visibility', 'none');
+                if (!isCustomBuildingLayer(layer.id)) {
+                  map.current?.setLayoutProperty(layer.id, 'visibility', 'none');
+                }
               }
               if (layer.id && (layer.id.includes('road-label') || layer.id.includes('road_label'))) {
                 if (safeGetLayer(map.current!, layer.id)) map.current?.removeLayer(layer.id);
@@ -922,13 +927,6 @@ export function CampaignDetailMapView({
               onBuildingClick={handleBuildingClick}
             />
           )}
-          <CampaignRoadsLayer
-            campaignId={campaignId}
-            map={map.current}
-            isMapReady={mapLoaded}
-            roadCacheVersion={roadCacheVersion}
-          />
-
           {/* Location Card - floating card when building is clicked */}
           {locationCardOpen && selectedBuildingId && (
             <div className="absolute bottom-6 left-4 z-20">

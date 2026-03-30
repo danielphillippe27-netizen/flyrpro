@@ -212,7 +212,8 @@ export class TileLambdaService {
    */
   static convertToCampaignAddresses(
     features: AddressFeature[],
-    campaignId: string
+    campaignId: string,
+    fallbackRegion?: string | null
   ): Array<{
     campaign_id: string;
     gers_id: string;
@@ -220,10 +221,16 @@ export class TileLambdaService {
     street_name?: string;
     postal_code?: string;
     locality?: string;
+    region?: string | null;
     formatted?: string;
     geom: { type: 'Point'; coordinates: [number, number] };
     status?: string;
   }> {
+    const normalizedFallbackRegion =
+      typeof fallbackRegion === 'string' && fallbackRegion.trim()
+        ? fallbackRegion.trim().toUpperCase()
+        : null;
+
     return features.map((f) => ({
       campaign_id: campaignId,
       gers_id: f.properties.gers_id,
@@ -231,6 +238,10 @@ export class TileLambdaService {
       street_name: f.properties.street_name,
       postal_code: f.properties.postal_code,
       locality: f.properties.city,
+      region:
+        (typeof f.properties.state === 'string' && f.properties.state.trim()
+          ? f.properties.state.trim().toUpperCase()
+          : null) ?? normalizedFallbackRegion,
       formatted: f.properties.formatted || f.properties.label,
       geom: f.geometry,
       status: 'new', // Initial status for lead tracking

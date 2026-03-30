@@ -173,19 +173,36 @@ function centroidFromPolygon(polygon: GeoJSON.Polygon): Point | null {
 }
 
 function inferRegionFromBounds(point: Point): string | null {
-  for (const [region, [minLng, minLat, maxLng, maxLat]] of Object.entries(CANADA_REGION_BOUNDS)) {
-    if (point.lng >= minLng && point.lng <= maxLng && point.lat >= minLat && point.lat <= maxLat) {
-      return region;
-    }
-  }
+  const matches: Array<{ region: string; area: number; depth: number }> = [];
 
-  for (const [region, [minLng, minLat, maxLng, maxLat]] of Object.entries(US_REGION_BOUNDS)) {
-    if (point.lng >= minLng && point.lng <= maxLng && point.lat >= minLat && point.lat <= maxLat) {
-      return region;
+  const collectMatches = (boundsMap: Record<string, Bounds>) => {
+    for (const [region, [minLng, minLat, maxLng, maxLat]] of Object.entries(boundsMap)) {
+      if (point.lng >= minLng && point.lng <= maxLng && point.lat >= minLat && point.lat <= maxLat) {
+        matches.push({
+          region,
+          area: Math.abs((maxLng - minLng) * (maxLat - minLat)),
+          // Prefer the region where the point sits farther from the nearest bbox edge.
+          depth: Math.min(
+            point.lng - minLng,
+            maxLng - point.lng,
+            point.lat - minLat,
+            maxLat - point.lat
+          ),
+        });
+      }
     }
-  }
+  };
 
-  return null;
+  collectMatches(CANADA_REGION_BOUNDS);
+  collectMatches(US_REGION_BOUNDS);
+
+  if (matches.length === 0) return null;
+
+  matches.sort((a, b) => {
+    if (b.depth !== a.depth) return b.depth - a.depth;
+    return a.area - b.area;
+  });
+  return matches[0].region;
 }
 
 async function inferRegionFromMapbox(point: Point): Promise<string | null> {
