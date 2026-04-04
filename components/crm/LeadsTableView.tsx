@@ -11,7 +11,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { ratePercent } from '@/lib/stats/formatters';
 
 function startOfWeek(d: Date): Date {
   const date = new Date(d);
@@ -69,11 +68,11 @@ export function LeadsTableView({
 
   const avgLeadsPerConversation =
     userStats && userStats.conversations > 0
-      ? `${(ratePercent(userStats.conversation_lead_rate) / 100).toFixed(2)}`
+      ? (totalLeads / userStats.conversations).toFixed(2)
       : '—';
   const leadsPerKnock =
     userStats && userStats.doors_knocked > 0
-      ? (userStats.leads_created / userStats.doors_knocked).toFixed(2)
+      ? (totalLeads / userStats.doors_knocked).toFixed(2)
       : '—';
 
   return (

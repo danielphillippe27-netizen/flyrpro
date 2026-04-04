@@ -168,7 +168,10 @@ export function CampaignListSidebar({
               Completed ({byStatus.completed.length})
             </TabsTrigger>
           </TabsList>
-          <TabsContent value="active" className="mt-0 flex-1 min-h-0 focus-visible:outline-none data-[state=inactive]:hidden">
+          <TabsContent
+            value="active"
+            className="mt-0 flex flex-1 min-h-0 flex-col overflow-hidden focus-visible:outline-none data-[state=inactive]:hidden"
+          >
             <CampaignList
               campaigns={filtered}
               activeId={activeId}
@@ -178,7 +181,10 @@ export function CampaignListSidebar({
               onDeleteCampaign={handleDeleteCampaign}
             />
           </TabsContent>
-          <TabsContent value="completed" className="mt-0 flex-1 min-h-0 focus-visible:outline-none data-[state=inactive]:hidden">
+          <TabsContent
+            value="completed"
+            className="mt-0 flex flex-1 min-h-0 flex-col overflow-hidden focus-visible:outline-none data-[state=inactive]:hidden"
+          >
             <CampaignList
               campaigns={filtered}
               activeId={activeId}

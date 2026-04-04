@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { refreshOAuthToken } from './oauth';
 import { getCrmEncryptionKey } from './env';
+import { FUB_CONNECTION_PROVIDERS } from './provider';
 
 const FUB_SYSTEM_NAME = process.env.FUB_SYSTEM_NAME || 'FLYR';
 const FUB_SYSTEM_KEY = process.env.FUB_SYSTEM_KEY;
@@ -109,7 +110,7 @@ export async function getFubAuthForUserWorkspace(
     .from('crm_connections')
     .select('api_key_encrypted')
     .eq('workspace_id', workspaceId)
-    .eq('provider', 'followupboss')
+    .in('provider', [...FUB_CONNECTION_PROVIDERS])
     .maybeSingle();
 
   if (!connection?.api_key_encrypted) {

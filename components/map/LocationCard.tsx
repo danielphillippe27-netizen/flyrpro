@@ -9,8 +9,6 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import {
   X,
-  Navigation,
-  ClipboardList,
   UserPlus,
   Users,
   QrCode,
@@ -27,8 +25,6 @@ interface LocationCardProps {
   preferredAddressId?: string | null; // For unit slices - show specific address
   onSelectAddress?: (addressId: string | null) => void; // Pick address from dropdown or Back to list (null)
   onClose: () => void;
-  onNavigate?: () => void;
-  onLogVisit?: () => void;
   onEditContact?: (contactId: string) => void;
   onAddContact?: (addressId?: string, addressText?: string, notes?: string) => void;
   className?: string;
@@ -44,8 +40,6 @@ export function LocationCard({
   preferredAddressId,
   onSelectAddress,
   onClose,
-  onNavigate,
-  onLogVisit,
   onEditContact,
   onAddContact,
   className = '',
@@ -195,19 +189,19 @@ export function LocationCard({
           {/* Multi-address list mode: count + clickable list of all addresses */}
           {isListMode && (
             <div className="px-5 pt-5 pb-5">
-              <h2 className="text-lg font-semibold text-gray-900 pr-8">
+              <h2 className="text-lg font-semibold text-white pr-8">
                 {addresses.length} addresses
               </h2>
-              <p className="text-xs text-gray-500 mt-1 mb-2">Tap an address for details</p>
+              <p className="text-xs text-white/70 mt-1 mb-2">Tap an address for details</p>
               <ul className="space-y-1 max-h-64 overflow-y-auto">
                 {addresses.map((a) => (
                   <li key={a.id}>
                     <button
                       type="button"
                       onClick={() => onSelectAddress?.(a.id)}
-                      className="w-full flex items-center gap-2 p-2.5 rounded-lg text-left text-sm text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors border border-transparent hover:border-gray-200"
+                      className="w-full flex items-center gap-2 p-2.5 rounded-lg text-left text-sm text-white/90 hover:bg-white/10 hover:text-white transition-colors border border-transparent hover:border-white/10"
                     >
-                      <MapPin className="w-4 h-4 text-gray-400 shrink-0" />
+                      <MapPin className="w-4 h-4 text-white/60 shrink-0" />
                       <span className="truncate flex-1">{a.formatted || a.street}</span>
                     </button>
                   </li>
@@ -236,13 +230,16 @@ export function LocationCard({
                     <h2 className="text-lg font-semibold text-gray-900 dark:text-white truncate">
                       {address.formatted || address.street}
                     </h2>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 truncate">
-                      {isMultiAddress
-                        ? `${addresses.length} addresses at this building`
-                        : [address.locality, address.region, address.postalCode]
-                            .filter(Boolean)
-                            .join(', ') || 'Location details unavailable'}
-                    </p>
+                    {(isMultiAddress ||
+                      [address.locality, address.region, address.postalCode].filter(Boolean).length > 0) && (
+                      <p className="text-sm text-gray-500 dark:text-gray-400 truncate">
+                        {isMultiAddress
+                          ? `${addresses.length} addresses at this building`
+                          : [address.locality, address.region, address.postalCode]
+                              .filter(Boolean)
+                              .join(', ')}
+                      </p>
+                    )}
                   </div>
                   <Badge variant={statusBadge.variant} className="ml-2 shrink-0">
                     {statusBadge.text}
@@ -263,16 +260,24 @@ export function LocationCard({
                   }}
                   className="w-full flex items-center gap-3 p-3 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800/80 dark:hover:bg-zinc-700 transition-colors text-left"
                 >
-                  <div className="w-9 h-9 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center shrink-0">
-                    <Users className="w-4 h-4 text-red-600 dark:text-red-400" />
+                  <div className="w-9 h-9 rounded-full bg-zinc-200 dark:bg-zinc-700 flex items-center justify-center shrink-0">
+                    <Users className="w-4 h-4 text-gray-500 dark:text-gray-300" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-gray-900 truncate">
-                      {getResidentsText(residents)}
+                    <p
+                      className={`text-sm font-medium truncate ${
+                        residents.length === 0
+                          ? 'text-gray-500 dark:text-zinc-300'
+                          : 'text-gray-900 dark:text-white'
+                      }`}
+                    >
+                      {residents.length === 0 ? 'Add resident' : getResidentsText(residents)}
                     </p>
-                    <p className="text-xs text-gray-500">
-                      {residents.length === 0 ? 'Add a resident' : `${residents.length} resident${residents.length !== 1 ? 's' : ''}`}
-                    </p>
+                    {residents.length > 0 && (
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        {`${residents.length} resident${residents.length !== 1 ? 's' : ''}`}
+                      </p>
+                    )}
                   </div>
                   {residents.length === 0 && (
                     <UserPlus className="w-4 h-4 text-gray-400 shrink-0" />
@@ -353,30 +358,8 @@ export function LocationCard({
               </div>
 
               {/* Action Footer */}
-              <div className="px-5 pb-5 pt-2 border-t border-gray-100">
+              <div className="px-5 pb-5 pt-2 border-t border-gray-100 dark:border-white/10">
                 <div className="flex gap-2">
-                  {onNavigate && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={onNavigate}
-                      className="flex-1 gap-1.5"
-                    >
-                      <Navigation className="w-4 h-4" />
-                      Navigate
-                    </Button>
-                  )}
-                  {onLogVisit && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={onLogVisit}
-                      className="flex-1 gap-1.5"
-                    >
-                      <ClipboardList className="w-4 h-4" />
-                      Log Visit
-                    </Button>
-                  )}
                   {onAddContact && (
                     <Button
                       size="sm"

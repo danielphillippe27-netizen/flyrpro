@@ -31,6 +31,13 @@ export type DashboardAccessResolution = {
   status?: number;
 };
 
+export type WorkspaceMembershipResolution = {
+  workspaceId: string | null;
+  role: WorkspaceRole | null;
+  error?: string;
+  status?: number;
+};
+
 function roleRank(role: string | null | undefined): number {
   if (role === 'owner') return 0;
   if (role === 'admin') return 1;
@@ -113,20 +120,27 @@ export async function resolveDashboardAccessLevel(
   };
 }
 
-/** Resolve workspace, role, and dashboard mode. mode === 'team_owner' only when (owner|admin) and memberCount > 1. */
+/** Resolve workspace, role, and dashboard mode. mode === 'team_owner' for owner/admin workspaces. */
 export async function resolveTeamDashboardMode(
   supabase: MinimalSupabaseClient,
   userId: string,
   requestedWorkspaceId?: string | null
 ): Promise<{ workspaceId: string | null; role: WorkspaceRole | null; mode: TeamDashboardMode; error?: string; status?: number }> {
-  const access = await resolveDashboardAccessLevel(supabase, userId, requestedWorkspaceId);
-  const mode: TeamDashboardMode = access.level === 'team_leader' ? 'team_owner' : 'default';
+  const membership = await resolveWorkspaceMembershipForUser(
+    supabase,
+    userId,
+    requestedWorkspaceId
+  );
+  const mode: TeamDashboardMode =
+    membership.role === 'owner' || membership.role === 'admin'
+      ? 'team_owner'
+      : 'default';
   return {
-    workspaceId: access.workspaceId,
-    role: access.role,
+    workspaceId: membership.workspaceId,
+    role: membership.role,
     mode,
-    error: access.error,
-    status: access.status,
+    error: membership.error,
+    status: membership.status,
   };
 }
 
@@ -136,24 +150,59 @@ export async function resolveWorkspaceAndRoleForTeam(
   userId: string,
   requestedWorkspaceId?: string | null
 ): Promise<ResolveTeamResult> {
-  const access = await resolveDashboardAccessLevel(supabase, userId, requestedWorkspaceId);
-  if (!access.workspaceId) {
+  const membership = await resolveWorkspaceMembershipForUser(
+    supabase,
+    userId,
+    requestedWorkspaceId
+  );
+  if (!membership.workspaceId) {
     return {
       workspaceId: null,
       role: null,
-      error: access.error ?? 'Workspace not found',
-      status: access.status ?? 400,
+      error: membership.error ?? 'Workspace not found',
+      status: membership.status ?? 400,
     };
   }
-  if (access.level !== 'team_leader') {
+  if (membership.role !== 'owner' && membership.role !== 'admin') {
     return {
-      workspaceId: access.workspaceId,
-      role: access.role,
+      workspaceId: membership.workspaceId,
+      role: membership.role,
       error: 'Team dashboard is only available to workspace owners and admins',
       status: 403,
     };
   }
-  return { workspaceId: access.workspaceId, role: access.role, status: 200 };
+  return { workspaceId: membership.workspaceId, role: membership.role, status: 200 };
+}
+
+export async function resolveWorkspaceMembershipForUser(
+  supabase: MinimalSupabaseClient,
+  userId: string,
+  requestedWorkspaceId?: string | null
+): Promise<WorkspaceMembershipResolution> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const supabaseAny = supabase as any;
+  const workspace = await resolveWorkspaceIdForUser(supabase, userId, requestedWorkspaceId);
+  if (!workspace.workspaceId) {
+    return {
+      workspaceId: null,
+      role: null,
+      error: workspace.error,
+      status: workspace.status,
+    };
+  }
+
+  const { data: membership } = await supabaseAny
+    .from('workspace_members')
+    .select('role')
+    .eq('user_id', userId)
+    .eq('workspace_id', workspace.workspaceId)
+    .maybeSingle();
+
+  return {
+    workspaceId: workspace.workspaceId,
+    role: (membership?.role as WorkspaceRole) ?? null,
+    status: 200,
+  };
 }
 
 /** Resolve workspace for the current user (primary or requested). */
@@ -162,6 +211,9 @@ export async function resolveWorkspaceIdForUser(
   userId: string,
   requestedWorkspaceId?: string | null
 ): Promise<{ workspaceId: string | null; error?: string; status?: number }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const supabaseAny = supabase as any;
+
   if (requestedWorkspaceId) {
     const { data: membership, error } = await supabase
       .from('workspace_members')
@@ -175,6 +227,29 @@ export async function resolveWorkspaceIdForUser(
     }
 
     return { workspaceId: membership.workspace_id };
+  }
+
+  const { data: preferredProfile } = await supabaseAny
+    .from('user_profiles')
+    .select('current_workspace_id')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  const preferredWorkspaceId =
+    typeof preferredProfile?.current_workspace_id === 'string'
+      ? preferredProfile.current_workspace_id
+      : null;
+  if (preferredWorkspaceId) {
+    const { data: preferredMembership } = await supabaseAny
+      .from('workspace_members')
+      .select('workspace_id')
+      .eq('user_id', userId)
+      .eq('workspace_id', preferredWorkspaceId)
+      .maybeSingle();
+
+    if (preferredMembership?.workspace_id) {
+      return { workspaceId: preferredMembership.workspace_id };
+    }
   }
 
   const { data: fallbackMembership, error: fallbackError } = await supabase

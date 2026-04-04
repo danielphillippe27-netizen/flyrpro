@@ -6,9 +6,7 @@ import type { LeaderboardSortBy, LeaderboardTimeframe } from '@/types/database';
 const METRICS: { value: LeaderboardSortBy; label: string }[] = [
   { value: 'flyers', label: 'Flyers' },
   { value: 'conversations', label: 'Conversations' },
-  { value: 'leads', label: 'Leads' },
   { value: 'distance', label: 'Distance' },
-  { value: 'time', label: 'Time' },
 ];
 
 const TIMEFRAMES: { value: LeaderboardTimeframe; label: string }[] = [

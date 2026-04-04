@@ -4,6 +4,7 @@ import { resolveWorkspaceIdForUser, type MinimalSupabaseClient } from '@/app/api
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import crypto from 'crypto';
 import { getCrmEncryptionKey } from '../_lib/env';
+import { FUB_CONNECTION_PROVIDER, FUB_CONNECTION_PROVIDERS } from '../_lib/provider';
 
 const FUB_SYSTEM_NAME = process.env.FUB_SYSTEM_NAME || 'FLYR';
 const FUB_SYSTEM_KEY = process.env.FUB_SYSTEM_KEY;
@@ -104,7 +105,7 @@ export async function POST(request: NextRequest) {
       .from('crm_connections')
       .select('id')
       .eq('workspace_id', targetWorkspaceId)
-      .eq('provider', 'followupboss')
+      .in('provider', [...FUB_CONNECTION_PROVIDERS])
       .maybeSingle();
 
     if (existingConnection) {
@@ -130,7 +131,7 @@ export async function POST(request: NextRequest) {
         .insert({
           user_id: userId,
           workspace_id: targetWorkspaceId,
-          provider: 'followupboss',
+          provider: FUB_CONNECTION_PROVIDER,
           api_key_encrypted: encryptedKey,
           status: 'connected',
           last_tested_at: new Date().toISOString(),

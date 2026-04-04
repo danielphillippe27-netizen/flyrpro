@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
+import {
+  buildLegacyCampaignText,
+  isMissingCampaignColumnErrorMessage,
+  parseLegacyCampaignText,
+} from '@/lib/campaignLegacyFields';
 
 export const runtime = 'nodejs';
 
@@ -33,7 +38,7 @@ export async function POST(
     const supabase = createAdminClient();
     const { data: campaign, error: campaignError } = await supabase
       .from('campaigns')
-      .select('id, owner_id, workspace_id')
+      .select('id, owner_id, workspace_id, description')
       .eq('id', campaignId)
       .maybeSingle();
 
@@ -134,8 +139,33 @@ export async function POST(
       .eq('id', campaignId);
 
     if (updateError) {
+      const errorMessage = updateError.message || 'Failed to save flyer URL';
+      if (isMissingCampaignColumnErrorMessage(errorMessage, 'flyer_url')) {
+        const legacy = parseLegacyCampaignText(campaign.description);
+        const { error: legacyUpdateError } = await supabase
+          .from('campaigns')
+          .update({
+            description: buildLegacyCampaignText({
+              notes: legacy.notes,
+              scripts: legacy.scripts,
+              flyerUrl,
+            }),
+          })
+          .eq('id', campaignId);
+
+        if (!legacyUpdateError) {
+          return NextResponse.json({ flyer_url: flyerUrl });
+        }
+
+        console.error('Error saving legacy flyer_url:', legacyUpdateError);
+        return NextResponse.json(
+          { error: legacyUpdateError.message || 'Failed to save flyer URL' },
+          { status: 500 }
+        );
+      }
+
       console.error('Error saving flyer_url:', updateError);
-      return NextResponse.json({ error: 'Failed to save flyer URL' }, { status: 500 });
+      return NextResponse.json({ error: errorMessage }, { status: 500 });
     }
 
     return NextResponse.json({ flyer_url: flyerUrl });

@@ -8,6 +8,14 @@ const nextConfig = {
     // Ignore TypeScript errors during builds
     ignoreBuildErrors: true,
   },
+  images: {
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'lh3.googleusercontent.com',
+      },
+    ],
+  },
   // Exclude problematic native modules from server-side bundling
   // CRITICAL: DuckDB uses native C++ bindings that break if Webpack tries to bundle them
   // This tells Next.js: "Don't touch DuckDB, run it as native node code"

@@ -1,11 +1,8 @@
 'use client';
 
-import type { ReactNode } from 'react';
-
 interface SuccessMetricBarProps {
   title: string;
   value: number;
-  icon: ReactNode;
   color: string;
   description?: string;
 }
@@ -13,7 +10,6 @@ interface SuccessMetricBarProps {
 export function SuccessMetricBar({
   title,
   value,
-  icon,
   color,
   description,
 }: SuccessMetricBarProps) {
@@ -21,7 +17,6 @@ export function SuccessMetricBar({
   return (
     <div className="flex flex-col gap-2 py-1">
       <div className="flex items-center gap-2">
-        <span className="text-base" style={{ color }}>{icon}</span>
         <span className="text-sm font-medium text-gray-900 dark:text-gray-100 flex-1">
           {title}
         </span>

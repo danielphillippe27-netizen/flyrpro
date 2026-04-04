@@ -91,6 +91,7 @@ export async function PATCH(request: NextRequest) {
       avatar_url,
       workspace_name,
       workspace_id,
+      current_workspace_id,
     } = body as {
       first_name?: string | null;
       last_name?: string | null;
@@ -100,6 +101,7 @@ export async function PATCH(request: NextRequest) {
       avatar_url?: string | null;
       workspace_name?: string | null;
       workspace_id?: string | null;
+      current_workspace_id?: string | null;
     };
 
     const normalizedWorkspaceName =
@@ -110,6 +112,12 @@ export async function PATCH(request: NextRequest) {
       typeof workspace_id === 'string' && workspace_id.trim()
         ? workspace_id.trim()
         : null;
+    const requestedCurrentWorkspaceId =
+      typeof current_workspace_id === 'string' && current_workspace_id.trim()
+        ? current_workspace_id.trim()
+        : current_workspace_id === null
+          ? null
+          : undefined;
 
     const updates: Record<string, string | null> = {};
     if (first_name !== undefined) {
@@ -261,6 +269,41 @@ export async function PATCH(request: NextRequest) {
         console.error('Workspace rename error:', workspaceError);
         return NextResponse.json(
           { error: 'Failed to update workspace name' },
+          { status: 500 }
+        );
+      }
+    }
+
+    if (requestedCurrentWorkspaceId !== undefined) {
+      const admin = createAdminClient();
+
+      if (requestedCurrentWorkspaceId !== null) {
+        const { data: membership } = await admin
+          .from('workspace_members')
+          .select('workspace_id')
+          .eq('user_id', user.id)
+          .eq('workspace_id', requestedCurrentWorkspaceId)
+          .maybeSingle();
+
+        if (!membership?.workspace_id) {
+          return NextResponse.json(
+            { error: 'You are not a member of the selected workspace.' },
+            { status: 403 }
+          );
+        }
+      }
+
+      const { error: workspacePreferenceError } = await admin
+        .from('user_profiles')
+        .update({
+          current_workspace_id: requestedCurrentWorkspaceId,
+        })
+        .eq('user_id', user.id);
+
+      if (workspacePreferenceError) {
+        console.error('Profile PATCH current workspace error:', workspacePreferenceError);
+        return NextResponse.json(
+          { error: 'Failed to update current workspace' },
           { status: 500 }
         );
       }

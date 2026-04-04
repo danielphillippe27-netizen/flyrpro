@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveWorkspaceIdForUser, type MinimalSupabaseClient } from '@/app/api/_utils/workspace';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
+import { FUB_CONNECTION_PROVIDERS } from '../_lib/provider';
 
 export async function POST(request: NextRequest) {
   try {
@@ -41,7 +42,7 @@ export async function POST(request: NextRequest) {
       .from('crm_connections')
       .delete()
       .eq('workspace_id', targetWorkspaceId)
-      .eq('provider', 'followupboss');
+      .in('provider', [...FUB_CONNECTION_PROVIDERS]);
 
     if (error) {
       throw error;

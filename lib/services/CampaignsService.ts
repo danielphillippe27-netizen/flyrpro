@@ -154,7 +154,47 @@ export class CampaignsService {
           .order('id', { ascending: true })
           .range(from, to)
       );
-      return (data || []) as unknown as CampaignAddress[];
+      const baseState = await fetchAllInPages((from, to) =>
+        this.client
+          .from('campaign_addresses')
+          .select('id, building_id, visited, scans, last_scanned_at, address_statuses(status)')
+          .eq('campaign_id', campaignId)
+          .order('id', { ascending: true })
+          .range(from, to)
+      );
+
+      const stateById = new Map(
+        (baseState || []).map((row) => {
+          const rel = (row as {
+            id: string;
+            building_id?: string | null;
+            visited?: boolean | null;
+            scans?: number | null;
+            last_scanned_at?: string | null;
+            address_statuses?: { status?: string | null }[] | { status?: string | null } | null;
+          }).address_statuses;
+
+          const addressStatus = Array.isArray(rel)
+            ? (rel[0]?.status ?? null)
+            : (rel?.status ?? null);
+
+          return [
+            (row as { id: string }).id,
+            {
+              building_id: (row as { building_id?: string | null }).building_id ?? null,
+              visited: Boolean((row as { visited?: boolean | null }).visited),
+              scans: Number((row as { scans?: number | null }).scans ?? 0),
+              last_scanned_at: (row as { last_scanned_at?: string | null }).last_scanned_at ?? null,
+              address_status: addressStatus ?? undefined,
+            },
+          ];
+        })
+      );
+
+      return ((data || []) as Array<CampaignAddress & { building_id?: string | null }>).map((row) => ({
+        ...row,
+        ...(stateById.get(row.id) ?? {}),
+      }));
     } catch (error) {
       console.error('Error fetching addresses, returning empty array:', formatError(error));
       // Gracefully handle errors - return empty array instead of crashing
@@ -222,7 +262,7 @@ export class CampaignsService {
    * CSV uploads now go directly to campaign_addresses table.
    * This method is kept for backward compatibility but always returns an empty array.
    */
-  static async fetchRecipients(campaignId: string): Promise<any[]> {
+  static async fetchRecipients(): Promise<unknown[]> {
     console.warn('fetchRecipients() is deprecated. Use fetchAddresses() instead.');
     return [];
   }
@@ -414,4 +454,3 @@ export interface CampaignStats {
   scan_rate: number;    // Percentage of leads scanned
   progress_pct: number; // Percentage of leads visited
 }
-

@@ -76,6 +76,10 @@ type AccessStateRow = {
   memberCount?: number | null;
 };
 
+type WorkspacePreferenceRow = {
+  current_workspace_id?: string | null;
+};
+
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [memberships, setMemberships] = useState<WorkspaceMembership[]>([]);
@@ -84,13 +88,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  const setCurrentWorkspaceId = useCallback((workspaceId: string) => {
-    setCurrentWorkspaceIdState(workspaceId);
-    if (typeof window !== 'undefined' && currentUserId) {
-      window.localStorage.setItem(workspaceStorageKeyForUser(currentUserId), workspaceId);
-    }
-  }, [currentUserId]);
 
   const refreshWorkspaces = useCallback(async () => {
     setIsLoading(true);
@@ -187,9 +184,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       }
 
       let safeWorkspaceRows: WorkspaceRow[] = [];
+      let preferredWorkspaceId: string | null = null;
       const countMap: Record<string, number> = {};
       if (workspaceIds.length > 0) {
-        const [workspaceResult, membersResult] = await Promise.all([
+        const [workspaceResult, membersResult, preferenceResult] = await Promise.all([
           supabase
             .from('workspaces')
             .select('id, name, owner_id, created_at, updated_at, brokerage_id, brokerage_name')
@@ -199,15 +197,26 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             .from('workspace_members')
             .select('workspace_id')
             .in('workspace_id', workspaceIds),
+          supabase
+            .from('user_profiles')
+            .select('current_workspace_id')
+            .eq('user_id', user.id)
+            .maybeSingle(),
         ]);
 
         if (workspaceResult.error) throw workspaceResult.error;
         safeWorkspaceRows = (workspaceResult.data ?? []) as WorkspaceRow[];
+        const currentWorkspacePreference = (preferenceResult.data ?? null) as WorkspacePreferenceRow | null;
 
         const memberRows = (membersResult.data ?? []) as { workspace_id: string }[];
         for (const row of memberRows) {
           countMap[row.workspace_id] = (countMap[row.workspace_id] ?? 0) + 1;
         }
+        preferredWorkspaceId =
+          typeof currentWorkspacePreference?.current_workspace_id === 'string' &&
+          currentWorkspacePreference.current_workspace_id
+            ? currentWorkspacePreference.current_workspace_id
+            : null;
       }
 
       setMemberCountByWorkspaceId(countMap);
@@ -249,9 +258,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           ? window.localStorage.getItem(namespacedKey) ||
             window.localStorage.getItem(CURRENT_WORKSPACE_STORAGE_KEY)
           : null;
-      const nextWorkspaceId = storedWorkspaceId && validIds.has(storedWorkspaceId)
-        ? storedWorkspaceId
-        : sortedWorkspaceRows[0]?.id ?? null;
+      const nextWorkspaceId =
+        (storedWorkspaceId && validIds.has(storedWorkspaceId) ? storedWorkspaceId : null) ||
+        (preferredWorkspaceId && validIds.has(preferredWorkspaceId) ? preferredWorkspaceId : null) ||
+        (sortedWorkspaceRows[0]?.id ?? null);
 
       setCurrentWorkspaceIdState(nextWorkspaceId);
       if (typeof window !== 'undefined') {
@@ -316,6 +326,29 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setIsLoading(false);
     }
   }, []);
+
+  const setCurrentWorkspaceId = useCallback((workspaceId: string) => {
+    setCurrentWorkspaceIdState(workspaceId);
+    if (typeof window !== 'undefined' && currentUserId) {
+      window.localStorage.setItem(workspaceStorageKeyForUser(currentUserId), workspaceId);
+    }
+
+    void fetch('/api/profile', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ current_workspace_id: workspaceId }),
+    }).then(async (response) => {
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error ?? 'Failed to save workspace selection');
+      }
+      setError(null);
+    }).catch((err) => {
+      setError(err instanceof Error ? err.message : 'Failed to save workspace selection');
+      void refreshWorkspaces();
+    });
+  }, [currentUserId, refreshWorkspaces]);
 
   useEffect(() => {
     refreshWorkspaces();

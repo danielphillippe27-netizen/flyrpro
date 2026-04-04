@@ -43,6 +43,7 @@ function SubscribeContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const reason = searchParams.get('reason');
+  const requestedSeatsFromQuery = Number.parseInt(searchParams.get('seats') ?? '', 10);
   const [state, setState] = useState<AccessState | null>(null);
   const [loading, setLoading] = useState(true);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
@@ -51,7 +52,10 @@ function SubscribeContent() {
   const [plan, setPlan] = useState<'annual' | 'monthly'>('annual');
   const [currency, setCurrency] = useState<'USD' | 'CAD'>('CAD');
   const [referralPreview, setReferralPreview] = useState<ReferralPreview | null>(null);
-  const seats = Math.max(1, state?.maxSeats ?? 1);
+  const [additionalSeats, setAdditionalSeats] = useState(0);
+  const [seatSelectionInitialized, setSeatSelectionInitialized] = useState(false);
+  const paidSeats = Math.max(1, state?.maxSeats ?? 1);
+  const seats = paidSeats + additionalSeats;
 
   const annualBase = currency === 'CAD' ? 399 : 299;
   const annualMonthlyEquivalentBase = annualBase / 12;
@@ -81,6 +85,15 @@ function SubscribeContent() {
       .catch(() => {});
     return () => { mounted = false; };
   }, [searchParams]);
+
+  useEffect(() => {
+    if (!state || seatSelectionInitialized) return;
+    const requestedSeats = Number.isFinite(requestedSeatsFromQuery) && requestedSeatsFromQuery > 0
+      ? requestedSeatsFromQuery
+      : paidSeats;
+    setAdditionalSeats(Math.max(0, requestedSeats - paidSeats));
+    setSeatSelectionInitialized(true);
+  }, [paidSeats, requestedSeatsFromQuery, seatSelectionInitialized, state]);
 
   const handleSignOut = async () => {
     setSigningOut(true);
@@ -264,6 +277,51 @@ function SubscribeContent() {
         )}
 
         <div className="relative z-10 mt-6 space-y-2.5">
+          <div className="rounded-2xl border border-white/12 bg-white/[0.04] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold text-white">Seat summary</p>
+                <p className="mt-1 text-xs text-[#B2B2B2]">
+                  You are paying for {paidSeats} seat{paidSeats === 1 ? '' : 's'} now.
+                  Admins are free and do not count toward paid seats.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setAdditionalSeats((value) => Math.max(0, value - 1))}
+                  className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-white/[0.04] text-white transition hover:bg-white/[0.08]"
+                  aria-label="Remove paid seat"
+                >
+                  -
+                </button>
+                <div className="min-w-24 text-center">
+                  <p className="text-xs uppercase tracking-[0.2em] text-[#8F8F8F]">Add</p>
+                  <p className="text-xl font-semibold text-white">{additionalSeats}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAdditionalSeats((value) => value + 1)}
+                  className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-white/[0.04] text-white transition hover:bg-white/[0.08]"
+                  aria-label="Add paid seat"
+                >
+                  +
+                </button>
+              </div>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2 text-xs text-[#C7C7C7]">
+              <span className="rounded-full border border-white/12 px-3 py-1">
+                {paidSeats} current paid
+              </span>
+              <span className="rounded-full border border-white/12 px-3 py-1">
+                +{additionalSeats} adding
+              </span>
+              <span className="rounded-full border border-red-400/35 bg-red-500/10 px-3 py-1 text-white">
+                {seats} billed seats total
+              </span>
+            </div>
+          </div>
+
           <button
             type="button"
             onClick={() => setPlan('annual')}

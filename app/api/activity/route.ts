@@ -51,6 +51,10 @@ type ContactEventRow = {
   created_at: string;
 };
 type DerivedActivityEventRow = ContactEventRow & { campaign_name?: string; campaign_id?: string };
+type ActivityMemberOption = {
+  user_id: string;
+  display_name: string;
+};
 
 function getErrorMessage(error: unknown): string {
   if (!error || typeof error !== 'object') return '';
@@ -128,14 +132,13 @@ const CONTACT_ROWS_FETCH_LIMIT = 1000;
 async function fetchSyntheticSessionEventsFromSessions(
   admin: ReturnType<typeof createAdminClient>,
   workspaceId: string,
-  includeMembers: boolean,
-  userId: string,
-  workspaceUserIds: Set<string>,
+  scopedUserIds: string[],
   start: string,
   end: string
 ): Promise<SessionEventRow[]> {
   let includeLeadsCreated = true;
   let data: Array<Record<string, unknown>> | null = null;
+  const allowedUserIds = new Set(scopedUserIds);
 
   while (true) {
     const selectColumns = [
@@ -165,8 +168,10 @@ async function fetchSyntheticSessionEventsFromSessions(
       .order('start_time', { ascending: false })
       .limit(SESSIONS_FETCH_LIMIT);
 
-    if (!includeMembers) {
-      query = query.eq('user_id', userId);
+    if (scopedUserIds.length === 1) {
+      query = query.eq('user_id', scopedUserIds[0]);
+    } else if (scopedUserIds.length > 1) {
+      query = query.in('user_id', scopedUserIds);
     }
 
     const result = await query;
@@ -185,7 +190,7 @@ async function fetchSyntheticSessionEventsFromSessions(
   }
 
   return ((data ?? []) as Array<Record<string, unknown>>)
-    .filter((row) => workspaceUserIds.has(String(row.user_id)))
+    .filter((row) => allowedUserIds.has(String(row.user_id)))
     .map((row) => ({
       id: String(row.id),
       user_id: String(row.user_id),
@@ -234,8 +239,20 @@ function isAppointmentStatus(rawStatus: string): boolean {
   return normalized === 'interested' || normalized === 'hot' || normalized === 'appointment';
 }
 
-function needsFollowUp(status: string, reminderDateIso: string | null): boolean {
-  if (reminderDateIso) return true;
+function getFollowUpDateIso(row: Record<string, unknown>): string | null {
+  return toIsoOrNull(row.follow_up_at) ?? toIsoOrNull(row.reminder_date);
+}
+
+function getAppointmentDateIso(row: Record<string, unknown>): string | null {
+  return toIsoOrNull(row.appointment_at);
+}
+
+function hasAppointment(status: string, appointmentDateIso: string | null): boolean {
+  return Boolean(appointmentDateIso) || isAppointmentStatus(status);
+}
+
+function needsFollowUp(status: string, followUpDateIso: string | null): boolean {
+  if (followUpDateIso) return true;
   const normalized = status.trim().toLowerCase();
   return (
     normalized === 'follow_up' ||
@@ -258,7 +275,8 @@ function buildContactRowSignature(row: Record<string, unknown>): string {
   const address = firstNonEmptyString(row.address)?.toLowerCase() ?? '';
   const campaignId = firstNonEmptyString(row.campaign_id) ?? '';
   const status = firstNonEmptyString(row.status)?.toLowerCase() ?? '';
-  const reminderDateIso = toIsoOrNull(row.reminder_date) ?? '';
+  const followUpDateIso = getFollowUpDateIso(row) ?? '';
+  const appointmentDateIso = getAppointmentDateIso(row) ?? '';
   const updatedAtIso = toIsoOrNull(row.updated_at) ?? '';
   const createdAtIso = toIsoOrNull(row.created_at) ?? '';
 
@@ -270,7 +288,8 @@ function buildContactRowSignature(row: Record<string, unknown>): string {
     address,
     campaignId,
     status,
-    reminderDateIso,
+    followUpDateIso,
+    appointmentDateIso,
     updatedAtIso || createdAtIso,
   ].join('|');
 }
@@ -347,9 +366,7 @@ async function fetchContactRows(
   admin: ReturnType<typeof createAdminClient>,
   table: 'contacts' | 'field_leads',
   workspaceId: string,
-  includeMembers: boolean,
-  userId: string,
-  workspaceUserIds: string[]
+  scopedUserIds: string[]
 ): Promise<Array<Record<string, unknown>>> {
   const runQuery = async (withWorkspaceFilter: boolean) => {
     let query = admin
@@ -361,10 +378,10 @@ async function fetchContactRows(
       query = query.eq('workspace_id', workspaceId);
     }
 
-    if (!includeMembers) {
-      query = query.eq('user_id', userId);
-    } else if (!withWorkspaceFilter) {
-      query = query.in('user_id', workspaceUserIds);
+    if (scopedUserIds.length === 1) {
+      query = query.eq('user_id', scopedUserIds[0]);
+    } else if (scopedUserIds.length > 1) {
+      query = query.in('user_id', scopedUserIds);
     }
 
     return query;
@@ -394,7 +411,7 @@ async function fetchContactRows(
 async function fetchAddressStatusAppointmentEvents(
   admin: ReturnType<typeof createAdminClient>,
   workspaceId: string,
-  workspaceUserIds: string[],
+  scopedUserIds: string[],
   fallbackUserId: string,
   start: string,
   end: string
@@ -457,7 +474,7 @@ async function fetchAddressStatusAppointmentEvents(
       .filter((entry): entry is [string, Record<string, unknown>] => !!entry)
   );
 
-  const allowedUsers = new Set(workspaceUserIds);
+  const allowedUsers = new Set(scopedUserIds);
   const events: DerivedActivityEventRow[] = [];
 
   for (const row of rows) {
@@ -476,6 +493,7 @@ async function fetchAddressStatusAppointmentEvents(
       : allowedUsers.has(actorUserId);
 
     if (!workspaceMatch) continue;
+    if (!allowedUsers.has(actorUserId)) continue;
 
     const eventTime = toIsoOrNull(row.updated_at) ?? toIsoOrNull(row.created_at) ?? new Date().toISOString();
     const createdAt = toIsoOrNull(row.created_at) ?? eventTime;
@@ -526,18 +544,19 @@ function normalizeContactEvents(
     const status = firstNonEmptyString(row.status)?.toLowerCase() ?? '';
     const contactName = firstNonEmptyString(row.full_name, row.name);
     const address = firstNonEmptyString(row.address) ?? '';
-    const reminderDateIso = toIsoOrNull(row.reminder_date);
+    const followUpDateIso = getFollowUpDateIso(row);
+    const appointmentDateIso = getAppointmentDateIso(row);
     const updatedAtIso = toIsoOrNull(row.updated_at);
     const createdAtIso = toIsoOrNull(row.created_at) ?? updatedAtIso ?? new Date().toISOString();
 
     if (!id || !userId) continue;
 
-    if (type === 'appointment' && !isAppointmentStatus(status)) continue;
-    if (type === 'followup' && !needsFollowUp(status, reminderDateIso)) continue;
+    if (type === 'appointment' && !hasAppointment(status, appointmentDateIso)) continue;
+    if (type === 'followup' && !needsFollowUp(status, followUpDateIso)) continue;
 
     const eventTime = type === 'followup'
-      ? reminderDateIso ?? updatedAtIso ?? createdAtIso
-      : updatedAtIso ?? createdAtIso;
+      ? followUpDateIso ?? updatedAtIso ?? createdAtIso
+      : appointmentDateIso ?? updatedAtIso ?? createdAtIso;
 
     if (!isWithinRange(eventTime, start, end)) continue;
 
@@ -559,7 +578,8 @@ function normalizeContactEvents(
         contact_name: contactName,
         address,
         status,
-        reminder_date: reminderDateIso,
+        follow_up_at: followUpDateIso,
+        appointment_at: appointmentDateIso,
       },
     });
   }
@@ -593,6 +613,35 @@ async function loadProfileMap(
       return [profile.user_id, fullName || 'Member'];
     })
   );
+}
+
+async function loadWorkspaceMemberOptions(
+  admin: ReturnType<typeof createAdminClient>,
+  workspaceId: string
+): Promise<ActivityMemberOption[]> {
+  const { data: memberships, error } = await admin
+    .from('workspace_members')
+    .select('user_id, created_at')
+    .eq('workspace_id', workspaceId)
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    if (isMissingRelation(error, 'workspace_members')) return [];
+    throw new Error(error.message);
+  }
+
+  const userIds = ((memberships ?? []) as Array<{ user_id: string }>)
+    .map((row) => row.user_id)
+    .filter((value): value is string => typeof value === 'string' && value.length > 0);
+
+  const profileMap = await loadProfileMap(admin, userIds);
+
+  return userIds
+    .map((userId) => ({
+      user_id: userId,
+      display_name: profileMap.get(userId) ?? 'Member',
+    }))
+    .sort((left, right) => left.display_name.localeCompare(right.display_name));
 }
 
 async function loadSessionCampaignMap(
@@ -671,6 +720,7 @@ export async function GET(request: NextRequest) {
     const requestedWorkspaceId = searchParams.get('workspaceId') ?? undefined;
     const typeFilter = (searchParams.get('type') || '').trim() || null;
     const includeMembersRequested = toBool(searchParams.get('includeMembers'));
+    const requestedMemberId = firstNonEmptyString(searchParams.get('memberId'));
     const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') ?? '30', 10) || 30));
     const offset = Math.max(0, parseInt(searchParams.get('offset') ?? '0', 10) || 0);
     const { start, end } = parseRange(searchParams.get('start'), searchParams.get('end'));
@@ -704,18 +754,45 @@ export async function GET(request: NextRequest) {
     }
 
     const canIncludeMembers = access.role === 'owner' || access.role === 'admin';
-    const includeMembers = canIncludeMembers && includeMembersRequested;
-
     const { data: workspaceMembers } = await admin
       .from('workspace_members')
       .select('user_id')
       .eq('workspace_id', access.workspaceId);
 
     const workspaceUserIds = new Set<string>((workspaceMembers ?? []).map((m: { user_id: string }) => m.user_id));
+    if (requestedMemberId) {
+      if (!canIncludeMembers) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      }
+      if (!workspaceUserIds.has(requestedMemberId)) {
+        return NextResponse.json({ error: 'Team member not found' }, { status: 404 });
+      }
+    }
 
-    const workspaceIds = Array.from(workspaceUserIds);
-    if (includeMembers && workspaceIds.length === 0) {
-      return NextResponse.json({ events: [], total: 0, nextOffset: null, canIncludeMembers, includeMembers });
+    const scopedUserIds = canIncludeMembers
+      ? requestedMemberId
+        ? [requestedMemberId]
+        : includeMembersRequested
+          ? Array.from(workspaceUserIds)
+          : [user.id]
+      : [user.id];
+    const scopedUserIdSet = new Set(scopedUserIds);
+    const includeMembers = canIncludeMembers && (includeMembersRequested || Boolean(requestedMemberId));
+    const memberOptions = canIncludeMembers
+      ? await loadWorkspaceMemberOptions(admin, access.workspaceId)
+      : [];
+
+    if (scopedUserIds.length === 0) {
+      return NextResponse.json({
+        events: [],
+        total: 0,
+        nextOffset: null,
+        canIncludeMembers,
+        includeMembers,
+        members: memberOptions,
+        selectedMemberId: requestedMemberId,
+        workspaceId: access.workspaceId,
+      });
     }
 
     if (typeFilter === 'appointment' || typeFilter === 'followup') {
@@ -724,13 +801,20 @@ export async function GET(request: NextRequest) {
       try {
         if (typeFilter === 'appointment') {
           const [addressStatusEvents, legacyAppointmentRows] = await Promise.all([
-            fetchAddressStatusAppointmentEvents(admin, access.workspaceId, workspaceIds, user.id, start, end),
-            fetchContactRows(admin, 'field_leads', access.workspaceId, includeMembers, user.id, workspaceIds),
+            fetchAddressStatusAppointmentEvents(
+              admin,
+              access.workspaceId,
+              scopedUserIds,
+              requestedMemberId ?? user.id,
+              start,
+              end
+            ),
+            fetchContactRows(admin, 'field_leads', access.workspaceId, scopedUserIds),
           ]);
 
           const filteredLegacyRows = legacyAppointmentRows.filter((row) => {
             const rowUserId = firstNonEmptyString(row.user_id);
-            return !!rowUserId && workspaceUserIds.has(rowUserId);
+            return !!rowUserId && scopedUserIdSet.has(rowUserId);
           });
 
           events = [
@@ -742,14 +826,14 @@ export async function GET(request: NextRequest) {
           }
         } else {
           const [contactRows, legacyRows] = await Promise.all([
-            fetchContactRows(admin, 'contacts', access.workspaceId, includeMembers, user.id, workspaceIds),
-            fetchContactRows(admin, 'field_leads', access.workspaceId, includeMembers, user.id, workspaceIds),
+            fetchContactRows(admin, 'contacts', access.workspaceId, scopedUserIds),
+            fetchContactRows(admin, 'field_leads', access.workspaceId, scopedUserIds),
           ]);
           const rows = mergeContactRows(contactRows, legacyRows);
           let filteredRows = rows.filter((row) => {
             const rowUserId = firstNonEmptyString(row.user_id);
             if (!rowUserId) return false;
-            return workspaceUserIds.has(rowUserId);
+            return scopedUserIdSet.has(rowUserId);
           });
           if (scopedCampaignId) {
             filteredRows = filteredRows.filter((row) => firstNonEmptyString(row.campaign_id) === scopedCampaignId);
@@ -779,6 +863,8 @@ export async function GET(request: NextRequest) {
         nextOffset: offset + normalizedEvents.length < total ? offset + normalizedEvents.length : null,
         canIncludeMembers,
         includeMembers,
+        members: memberOptions,
+        selectedMemberId: requestedMemberId,
         workspaceId: access.workspaceId,
       });
     }
@@ -832,10 +918,10 @@ export async function GET(request: NextRequest) {
         query = query.eq('workspace_id', access.workspaceId);
       }
 
-      if (!includeMembers) {
-        query = query.eq('user_id', user.id);
-      } else if (!withWorkspaceFilter) {
-        query = query.in('user_id', workspaceIds);
+      if (scopedUserIds.length === 1) {
+        query = query.eq('user_id', scopedUserIds[0]);
+      } else if (scopedUserIds.length > 1) {
+        query = query.in('user_id', scopedUserIds);
       }
 
       if (typeFilter) {
@@ -904,11 +990,11 @@ export async function GET(request: NextRequest) {
       if (fullResult.error) {
         const fallbackResult = await runEventsQueryWithFallbacks(false, false);
         rows = ((fallbackResult.data ?? []) as SessionEventRow[]).filter((row) =>
-          workspaceUserIds.has(row.user_id)
+          scopedUserIdSet.has(row.user_id)
         );
       } else {
         rows = ((fullResult.data ?? []) as SessionEventRow[]).filter((row) =>
-          workspaceUserIds.has(row.user_id)
+          scopedUserIdSet.has(row.user_id)
         );
       }
 
@@ -917,9 +1003,7 @@ export async function GET(request: NextRequest) {
         synthetic = await fetchSyntheticSessionEventsFromSessions(
           admin,
           access.workspaceId,
-          includeMembers,
-          user.id,
-          workspaceUserIds,
+          scopedUserIds,
           start,
           end
         );
@@ -976,6 +1060,7 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ error: result.error.message }, { status: 500 });
       }
       rows = ((result.data ?? []) as SessionEventRow[]).filter((row) => workspaceUserIds.has(row.user_id));
+      rows = rows.filter((row) => scopedUserIdSet.has(row.user_id));
       if (scopedCampaignId) {
         const sessionIdsKnock = Array.from(
           new Set(
@@ -1034,6 +1119,8 @@ export async function GET(request: NextRequest) {
       nextOffset: offset + normalizedEvents.length < total ? offset + normalizedEvents.length : null,
       canIncludeMembers,
       includeMembers,
+      members: memberOptions,
+      selectedMemberId: requestedMemberId,
       workspaceId: access.workspaceId,
     });
   } catch (error) {

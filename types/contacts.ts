@@ -15,10 +15,11 @@ export interface CreateContactPayload {
   status: ContactStatus;
   notes?: string;
   address_id?: string; // Optional: link to campaign_addresses.id
+  follow_up_at?: string;
+  appointment_at?: string;
   tags?: string; // Optional comma-separated tags
 }
 
 export interface ContactWithActivities extends Contact {
   activities: ContactActivity[];
 }
-

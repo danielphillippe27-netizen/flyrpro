@@ -24,7 +24,7 @@ export function HomePageClient({ accessLevel }: HomePageClientProps) {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-background">
-      {accessLevel === 'team_leader' ? (
+      {accessLevel === 'team_leader' || accessLevel === 'solo_owner' ? (
         <TeamOwnerDashboardView />
       ) : accessLevel === 'member' ? (
         <MemberDashboardView />

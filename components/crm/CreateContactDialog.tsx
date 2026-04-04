@@ -48,8 +48,15 @@ export function CreateContactDialog({
     address: initialAddress || '',
     status: 'new' as ContactStatus,
     notes: initialNotes || '',
-    tags: '',
+    follow_up_at: '',
+    appointment_at: '',
   });
+
+  const toIsoString = (value: string): string | undefined => {
+    if (!value.trim()) return undefined;
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+  };
 
   // Update form data when initial values change
   useEffect(() => {
@@ -83,7 +90,8 @@ export function CreateContactDialog({
           status: formData.status,
           notes: formData.notes.trim() || undefined,
           address_id: initialAddressId,
-          tags: formData.tags.trim() || undefined,
+          follow_up_at: toIsoString(formData.follow_up_at),
+          appointment_at: toIsoString(formData.appointment_at),
         }, workspaceId);
       } else {
         await ContactsService.createContact(userId, {
@@ -95,7 +103,8 @@ export function CreateContactDialog({
           campaign_id: initialCampaignId,
           status: formData.status,
           notes: formData.notes.trim() || undefined,
-          tags: formData.tags.trim() || undefined,
+          follow_up_at: toIsoString(formData.follow_up_at),
+          appointment_at: toIsoString(formData.appointment_at),
         }, workspaceId);
       }
 
@@ -108,7 +117,8 @@ export function CreateContactDialog({
         address: '',
         status: 'new',
         notes: '',
-        tags: '',
+        follow_up_at: '',
+        appointment_at: '',
       });
 
       onSuccess();
@@ -132,7 +142,8 @@ export function CreateContactDialog({
         address: '',
         status: 'new',
         notes: '',
-        tags: '',
+        follow_up_at: '',
+        appointment_at: '',
       });
       onClose();
     }
@@ -244,15 +255,27 @@ export function CreateContactDialog({
             />
           </div>
 
-          <div>
-            <Label htmlFor="tags">Tags</Label>
-            <Input
-              id="tags"
-              value={formData.tags}
-              onChange={(e) => setFormData({ ...formData, tags: e.target.value })}
-              placeholder="Tag1, Tag2, Tag3"
-              disabled={loading}
-            />
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="follow_up_at">Follow Up</Label>
+              <Input
+                id="follow_up_at"
+                type="datetime-local"
+                value={formData.follow_up_at}
+                onChange={(e) => setFormData({ ...formData, follow_up_at: e.target.value })}
+                disabled={loading}
+              />
+            </div>
+            <div>
+              <Label htmlFor="appointment_at">Appointment</Label>
+              <Input
+                id="appointment_at"
+                type="datetime-local"
+                value={formData.appointment_at}
+                onChange={(e) => setFormData({ ...formData, appointment_at: e.target.value })}
+                disabled={loading}
+              />
+            </div>
           </div>
 
           <div className="flex gap-4 justify-end pt-4">
@@ -273,4 +296,3 @@ export function CreateContactDialog({
     </Dialog>
   );
 }
-

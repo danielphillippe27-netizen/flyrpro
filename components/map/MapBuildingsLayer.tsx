@@ -30,6 +30,7 @@ const defaultStatusFilters: StatusFilters = {
 
 /** Scale factor for building footprints (1 = unchanged, <1 = skinnier). */
 const FOOTPRINT_SCALE = 1;
+const ADDRESS_LABEL_MIN_ZOOM = 18;
 
 /**
  * Scale a polygon ring toward a centroid by a factor (in place).
@@ -79,6 +80,85 @@ function scaleFootprint(geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon, scale:
   }
 }
 
+function getAddressCoordinate(address: CampaignAddress): [number, number] | null {
+  if (address.coordinate) {
+    const { lon, lat } = address.coordinate;
+    if (!Number.isNaN(lon) && !Number.isNaN(lat)) {
+      return [lon, lat];
+    }
+  }
+
+  const addressWithGeo = address as CampaignAddress & { geometry?: unknown; geom_json?: unknown };
+
+  if (
+    addressWithGeo.geom_json &&
+    typeof addressWithGeo.geom_json === 'object' &&
+    (addressWithGeo.geom_json as GeoJSON.Point).type === 'Point'
+  ) {
+    const coords = (addressWithGeo.geom_json as GeoJSON.Point).coordinates;
+    if (Array.isArray(coords) && coords.length >= 2) {
+      const [lon, lat] = coords;
+      if (typeof lon === 'number' && typeof lat === 'number' && !Number.isNaN(lon) && !Number.isNaN(lat)) {
+        return [lon, lat];
+      }
+    }
+  }
+
+  let geometry = addressWithGeo.geometry;
+  if (typeof geometry === 'string') {
+    try {
+      geometry = JSON.parse(geometry);
+    } catch {
+      geometry = null;
+    }
+  }
+
+  if (
+    geometry &&
+    typeof geometry === 'object' &&
+    (geometry as GeoJSON.Point).type === 'Point' &&
+    Array.isArray((geometry as GeoJSON.Point).coordinates)
+  ) {
+    const [lon, lat] = (geometry as GeoJSON.Point).coordinates;
+    if (typeof lon === 'number' && typeof lat === 'number' && !Number.isNaN(lon) && !Number.isNaN(lat)) {
+      return [lon, lat];
+    }
+  }
+
+  return null;
+}
+
+function buildAddressLabelFeatureCollection(
+  addresses?: CampaignAddress[]
+): GeoJSON.FeatureCollection<GeoJSON.Point> {
+  return {
+    type: 'FeatureCollection',
+    features: (addresses ?? []).flatMap((address) => {
+      const houseNumber = address.house_number?.trim();
+      const coordinates = getAddressCoordinate(address);
+
+      if (!houseNumber || !coordinates) {
+        return [];
+      }
+
+      return [{
+        type: 'Feature',
+        id: address.id,
+        geometry: {
+          type: 'Point',
+          coordinates,
+        },
+        properties: {
+          id: address.id,
+          address_id: address.id,
+          feature_id: address.id,
+          house_number: houseNumber,
+        },
+      }];
+    }),
+  };
+}
+
 export function MapBuildingsLayer({
   map,
   campaignId,
@@ -95,6 +175,8 @@ export function MapBuildingsLayer({
   const layerId = 'map-buildings-extrusion';
   const shadowLayerId = 'map-buildings-shadow';
   const circleLayerId = 'map-buildings-extrusion-points';
+  const addressLabelSourceId = 'map-address-centroid-label-source';
+  const addressLabelLayerId = 'map-address-centroid-labels';
   const supabase = createClient();
   const useCanonicalAddressState = Boolean(addressStateOverrides?.length);
   
@@ -327,7 +409,7 @@ export function MapBuildingsLayer({
       
       const { data: addresses, error: addrError } = await supabase
         .from('campaign_addresses_geojson')
-        .select('id, formatted, geom, geom_json, visited, coordinate, scans, last_scanned_at, address_status')
+        .select('id, formatted, house_number, geom, geom_json, visited, coordinate, scans, last_scanned_at, address_status')
         .eq('campaign_id', campaignId)
         .not('geom', 'is', null)
         .limit(5000);
@@ -365,6 +447,7 @@ export function MapBuildingsLayer({
               feature_id: addr.id,
               address_id: addr.id,
               address_text: addr.formatted,
+              house_number: addr.house_number || null,
               address_status: getCampaignAddressMapStatus(addr as CampaignAddress),
               status: getCampaignBuildingStatus(addr as CampaignAddress),
               scans_total: addr.scans || 0,
@@ -663,6 +746,8 @@ export function MapBuildingsLayer({
       }
 
       const source = map.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined;
+      const labelSource = map.getSource(addressLabelSourceId) as mapboxgl.GeoJSONSource | undefined;
+      const addressLabelFeatures = buildAddressLabelFeatureCollection(addressStateOverrides);
 
       // Ensure every feature has feature_id for promoteId (required for setFeatureState)
       // Scale footprints toward centroid so markers appear skinnier on the map
@@ -697,6 +782,10 @@ export function MapBuildingsLayer({
       if (source && normalizedFeatures) {
         console.log('[MapBuildingsLayer] Updating existing source with', normalizedFeatures.features.length, 'features');
         source.setData(normalizedFeatures);
+      }
+
+      if (labelSource) {
+        labelSource.setData(addressLabelFeatures);
       }
 
       // Check if we should proceed with layer creation/updates
@@ -757,6 +846,18 @@ export function MapBuildingsLayer({
         }
       }
 
+      if (!labelSource) {
+        try {
+          map.addSource(addressLabelSourceId, {
+            type: 'geojson',
+            data: addressLabelFeatures,
+            promoteId: 'feature_id',
+          });
+        } catch (err) {
+          console.error('Error adding address label source:', err);
+        }
+      }
+
       // Add or update fill-extrusion layer (for Polygon/MultiPolygon geometries)
     if (!map.getLayer(layerId)) {
       try {
@@ -812,6 +913,38 @@ export function MapBuildingsLayer({
             },
           };
           map.addLayer(circleLayerConfig);
+        }
+
+        if (!map.getLayer(addressLabelLayerId)) {
+          map.addLayer({
+            id: addressLabelLayerId,
+            type: 'symbol',
+            source: addressLabelSourceId,
+            minzoom: ADDRESS_LABEL_MIN_ZOOM,
+            filter: ['has', 'house_number'],
+            layout: {
+              'text-field': ['get', 'house_number'],
+              'text-size': [
+                'interpolate',
+                ['linear'],
+                ['zoom'],
+                ADDRESS_LABEL_MIN_ZOOM,
+                10,
+                22,
+                13,
+              ],
+              'text-font': ['DIN Offc Pro Medium', 'Arial Unicode MS Regular'],
+              'text-anchor': 'center',
+              'text-allow-overlap': false,
+              'text-ignore-placement': false,
+            },
+            paint: {
+              'text-color': '#f9fafb',
+              'text-opacity': 0.95,
+              'text-halo-color': '#111827',
+              'text-halo-width': 1.5,
+            },
+          });
         }
 
         // Outline layer removed to eliminate dark shadow effect underneath buildings
@@ -1094,6 +1227,10 @@ export function MapBuildingsLayer({
             if (map.getCanvas()) map.getCanvas().style.cursor = '';
           });
         }
+
+        if (map.getLayer(addressLabelLayerId)) {
+          map.moveLayer(addressLabelLayerId);
+        }
       } catch (err) {
         console.error('Error adding fill-extrusion layer:', err);
       }
@@ -1146,9 +1283,44 @@ export function MapBuildingsLayer({
               readdConfig.filter = (layerConfig as any).filter;
             }
             map.addLayer(readdConfig); // No beforeId - adds at end (on top)
+            if (map.getLayer(addressLabelLayerId)) {
+              map.moveLayer(addressLabelLayerId);
+            }
           }
         } catch (moveErr) {
           console.log('Layer move to end error:', moveErr);
+        }
+
+        if (!map.getLayer(addressLabelLayerId) && map.getSource(addressLabelSourceId)) {
+          map.addLayer({
+            id: addressLabelLayerId,
+            type: 'symbol',
+            source: addressLabelSourceId,
+            minzoom: ADDRESS_LABEL_MIN_ZOOM,
+            filter: ['has', 'house_number'],
+            layout: {
+              'text-field': ['get', 'house_number'],
+              'text-size': [
+                'interpolate',
+                ['linear'],
+                ['zoom'],
+                ADDRESS_LABEL_MIN_ZOOM,
+                10,
+                22,
+                13,
+              ],
+              'text-font': ['DIN Offc Pro Medium', 'Arial Unicode MS Regular'],
+              'text-anchor': 'center',
+              'text-allow-overlap': false,
+              'text-ignore-placement': false,
+            },
+            paint: {
+              'text-color': '#f9fafb',
+              'text-opacity': 0.95,
+              'text-halo-color': '#111827',
+              'text-halo-width': 1.5,
+            },
+          });
         }
       } catch (err) {
         console.error('Error updating layer paint properties:', err);
@@ -1198,7 +1370,7 @@ export function MapBuildingsLayer({
       map.off('idle', onIdle);
       map.off('style.load', onStyleLoad);
     };
-  }, [map, features, zoomLevel, onBuildingClick, statusFilters, campaignId, supabase, onAddToCRM, showOrphans, footprintStatusColors]);
+  }, [map, features, zoomLevel, onBuildingClick, statusFilters, campaignId, supabase, onAddToCRM, showOrphans, footprintStatusColors, addressStateOverrides]);
 
   // Update color and filter when statusFilters or campaignId changes
   useEffect(() => {

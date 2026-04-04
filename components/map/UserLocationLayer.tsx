@@ -29,6 +29,16 @@ export function UserLocationLayer({
   const markerRef = useRef<mapboxgl.Marker | null>(null);
   const rootRef = useRef<ReturnType<typeof createRoot> | null>(null);
   const elRef = useRef<HTMLDivElement | null>(null);
+  const onLocationFoundRef = useRef(onLocationFound);
+  const onLocationErrorRef = useRef(onLocationError);
+
+  useEffect(() => {
+    onLocationFoundRef.current = onLocationFound;
+  }, [onLocationFound]);
+
+  useEffect(() => {
+    onLocationErrorRef.current = onLocationError;
+  }, [onLocationError]);
 
   const clearMarker = useCallback(() => {
     if (markerRef.current) {
@@ -49,7 +59,14 @@ export function UserLocationLayer({
     }
 
     if (!navigator.geolocation) {
-      onLocationError?.(Object.assign(new Error('Geolocation not supported') as any, { code: 2, message: 'Geolocation not supported' }));
+      const unsupportedError = Object.assign(new Error('Geolocation not supported'), {
+        code: 2,
+        message: 'Geolocation not supported',
+        PERMISSION_DENIED: 1,
+        POSITION_UNAVAILABLE: 2,
+        TIMEOUT: 3,
+      }) as GeolocationPositionError;
+      onLocationErrorRef.current?.(unsupportedError);
       return;
     }
 
@@ -74,10 +91,10 @@ export function UserLocationLayer({
           .addTo(map);
 
         markerRef.current = marker;
-        onLocationFound?.(longitude, latitude);
+        onLocationFoundRef.current?.(longitude, latitude);
       },
       (err) => {
-        onLocationError?.(err);
+        onLocationErrorRef.current?.(err);
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
     );
@@ -85,7 +102,7 @@ export function UserLocationLayer({
     return () => {
       clearMarker();
     };
-  }, [showUserLocation, map, mapLoaded, onLocationFound, onLocationError, clearMarker]);
+  }, [showUserLocation, map, mapLoaded, clearMarker]);
 
   return null;
 }

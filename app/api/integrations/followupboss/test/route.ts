@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/server';
 import { resolveWorkspaceIdForUser, type MinimalSupabaseClient } from '@/app/api/_utils/workspace';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { getFubAuthForUserWorkspace } from '../_lib/auth';
+import { FUB_CONNECTION_PROVIDERS } from '../_lib/provider';
 
 export async function POST(request: NextRequest) {
   try {
@@ -63,7 +64,7 @@ export async function POST(request: NextRequest) {
           last_error: `API test failed: ${testResponse.status}`,
         })
         .eq('workspace_id', targetWorkspaceId)
-        .eq('provider', 'followupboss');
+        .in('provider', [...FUB_CONNECTION_PROVIDERS]);
 
       return NextResponse.json(
         { error: 'API test failed. Please reconnect your account.' },
@@ -80,7 +81,7 @@ export async function POST(request: NextRequest) {
         last_error: null,
       })
       .eq('workspace_id', targetWorkspaceId)
-      .eq('provider', 'followupboss');
+      .in('provider', [...FUB_CONNECTION_PROVIDERS]);
 
     return NextResponse.json({
       success: true,

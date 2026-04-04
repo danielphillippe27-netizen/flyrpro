@@ -25,6 +25,11 @@ import { Users, MapPin, Search, Plus, Pencil, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { createClient } from '@/lib/supabase/client';
 import { ActivityPageView } from '@/components/activity/ActivityPageView';
+import {
+  buildLegacyCampaignText,
+  isMissingCampaignColumnErrorMessage,
+  parseLegacyCampaignText,
+} from '@/lib/campaignLegacyFields';
 
 const FLYER_ALLOWED_TYPES = [
   'image/jpeg',
@@ -68,6 +73,36 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+
+type CampaignWithLegacyDescription = CampaignV2 & {
+  description?: string | null;
+};
+
+function formatSupabaseError(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === 'string' && error.trim()) return error;
+
+  const candidate = error as {
+    message?: string;
+    details?: string | null;
+    hint?: string | null;
+    code?: string;
+  } | null;
+
+  const parts = [
+    candidate?.message,
+    candidate?.details,
+    candidate?.hint ? `Hint: ${candidate.hint}` : undefined,
+    candidate?.code ? `Code: ${candidate.code}` : undefined,
+  ].filter((part): part is string => Boolean(part && part.trim()));
+
+  return parts.length > 0 ? parts.join('\n') : fallback;
+}
+
+function isMissingCampaignColumnError(error: unknown, column: 'notes' | 'scripts' | 'flyer_url'): boolean {
+  const message = formatSupabaseError(error, '').toLowerCase();
+  return isMissingCampaignColumnErrorMessage(message, column);
+}
 
 function CampaignContactsList({
   contacts,
@@ -368,6 +403,10 @@ export default function CampaignDetailPage() {
   const [uploadingFlyer, setUploadingFlyer] = useState(false);
   const [qrScanEventsCount, setQrScanEventsCount] = useState<number | null>(null);
   const [roadMetadata, setRoadMetadata] = useState<CampaignRoadMetadata | null>(null);
+  const legacyCampaignText = parseLegacyCampaignText(
+    (campaign as CampaignWithLegacyDescription | null)?.description
+  );
+  const currentFlyerUrl = campaign?.flyer_url ?? legacyCampaignText.flyerUrl ?? null;
 
   const loadData = useCallback(async () => {
     try {
@@ -427,12 +466,38 @@ export default function CampaignDetailPage() {
   }, [campaign]);
 
   useEffect(() => {
-    if (campaign?.notes !== undefined) setNotes(campaign.notes ?? '');
-  }, [campaign?.notes]);
+    if (campaign?.notes !== undefined) {
+      setNotes(campaign.notes ?? '');
+      return;
+    }
+    setNotes(legacyCampaignText.notes ?? '');
+  }, [campaign?.notes, legacyCampaignText.notes]);
 
   useEffect(() => {
-    if (campaign?.scripts !== undefined) setScripts(campaign.scripts ?? '');
-  }, [campaign?.scripts]);
+    if (campaign?.scripts !== undefined) {
+      setScripts(campaign.scripts ?? '');
+      return;
+    }
+    setScripts(legacyCampaignText.scripts ?? '');
+  }, [campaign?.scripts, legacyCampaignText.scripts]);
+
+  const saveLegacyCampaignText = useCallback(
+    async (updates: { notes?: string; scripts?: string; flyerUrl?: string }) => {
+      const supabase = createClient();
+      const { error } = await supabase
+        .from('campaigns')
+        .update({
+          description: buildLegacyCampaignText({
+            notes: updates.notes ?? notes,
+            scripts: updates.scripts ?? scripts,
+            flyerUrl: updates.flyerUrl ?? currentFlyerUrl ?? undefined,
+          }),
+        })
+        .eq('id', campaignId);
+      if (error) throw error;
+    },
+    [campaignId, currentFlyerUrl, notes, scripts]
+  );
 
   const handleSaveScripts = async () => {
     if (!campaignId) return;
@@ -443,12 +508,18 @@ export default function CampaignDetailPage() {
         .from('campaigns')
         .update({ scripts: scripts || null })
         .eq('id', campaignId);
-      if (error) throw error;
+      if (error) {
+        if (isMissingCampaignColumnError(error, 'scripts')) {
+          await saveLegacyCampaignText({ scripts });
+        } else {
+          throw error;
+        }
+      }
       setScriptsDirty(false);
       await loadData();
     } catch (e) {
       console.error('Error saving scripts:', e);
-      alert(e instanceof Error ? e.message : 'Failed to save scripts');
+      alert(formatSupabaseError(e, 'Failed to save scripts'));
     } finally {
       setIsSavingScripts(false);
     }
@@ -495,7 +566,13 @@ export default function CampaignDetailPage() {
         .from('campaigns')
         .update({ flyer_url: flyerUrl })
         .eq('id', campaignId);
-      if (updateError) throw updateError;
+      if (updateError) {
+        if (isMissingCampaignColumnError(updateError, 'flyer_url')) {
+          await saveLegacyCampaignText({ flyerUrl });
+        } else {
+          throw updateError;
+        }
+      }
 
       await loadData();
     } catch (err) {
@@ -632,12 +709,18 @@ export default function CampaignDetailPage() {
         .from('campaigns')
         .update({ notes: notes || null })
         .eq('id', campaignId);
-      if (error) throw error;
+      if (error) {
+        if (isMissingCampaignColumnError(error, 'notes')) {
+          await saveLegacyCampaignText({ notes });
+        } else {
+          throw error;
+        }
+      }
       setNotesDirty(false);
       await loadData();
     } catch (e) {
       console.error('Error saving notes:', e);
-      alert(e instanceof Error ? e.message : 'Failed to save notes');
+      alert(formatSupabaseError(e, 'Failed to save notes'));
     } finally {
       setIsSavingNotes(false);
     }
@@ -1010,6 +1093,7 @@ export default function CampaignDetailPage() {
               />
               <div className="mt-3 flex justify-end">
                 <Button
+                  type="button"
                   size="sm"
                   onClick={handleSaveNotes}
                   disabled={!notesDirty || isSavingNotes}
@@ -1035,6 +1119,7 @@ export default function CampaignDetailPage() {
               />
               <div className="mt-3 flex justify-end">
                 <Button
+                  type="button"
                   size="sm"
                   onClick={handleSaveScripts}
                   disabled={!scriptsDirty || isSavingScripts}
@@ -1062,9 +1147,9 @@ export default function CampaignDetailPage() {
                     {uploadingFlyer ? 'Uploading...' : 'Choose photo or PDF'}
                   </span>
                 </label>
-                {campaign?.flyer_url && (
+                {currentFlyerUrl && (
                   <a
-                    href={campaign.flyer_url}
+                    href={currentFlyerUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-sm text-primary hover:underline"

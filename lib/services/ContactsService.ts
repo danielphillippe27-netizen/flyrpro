@@ -15,12 +15,33 @@ type LegacyFieldLead = {
   status?: string | null;
   notes?: string | null;
   tags?: string | null;
+  reminder_date?: string | null;
+  follow_up_at?: string | null;
+  appointment_at?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 };
 
 export class ContactsService {
   private static client = createClient();
+
+  private static getErrorMessage(error: unknown): string {
+    if (!error || typeof error !== 'object') return '';
+    if ('message' in error && typeof (error as { message?: unknown }).message === 'string') {
+      return (error as { message: string }).message;
+    }
+    return '';
+  }
+
+  private static isMissingContactsColumn(error: unknown, column: string): boolean {
+    const message = this.getErrorMessage(error).toLowerCase();
+    return (
+      message.includes(`column contacts.${column}`) ||
+      message.includes(`column "${column}"`) ||
+      message.includes(`'${column}' column`) ||
+      message.includes(`${column} does not exist`)
+    );
+  }
 
   private static normalizeLegacyStatus(status?: string | null): Contact['status'] {
     const normalized = (status ?? '').trim().toLowerCase();
@@ -49,6 +70,9 @@ export class ContactsService {
       campaign_id: row.campaign_id ?? undefined,
       status: this.normalizeLegacyStatus(row.status),
       notes: row.notes ?? undefined,
+      reminder_date: row.reminder_date ?? row.follow_up_at ?? undefined,
+      follow_up_at: row.follow_up_at ?? row.reminder_date ?? undefined,
+      appointment_at: row.appointment_at ?? undefined,
       tags: row.tags ?? undefined,
       created_at: row.created_at ?? nowIso,
       updated_at: row.updated_at ?? row.created_at ?? nowIso,
@@ -163,23 +187,45 @@ export class ContactsService {
       ? `${payload.first_name.trim()} ${payload.last_name.trim()}`.trim()
       : payload.first_name.trim();
 
-    const { data, error } = await this.client
+    const insertPayload = {
+      user_id: userId,
+      workspace_id: workspaceId ?? undefined,
+      full_name: full_name,
+      phone: payload.phone,
+      email: payload.email,
+      address: payload.address,
+      campaign_id: payload.campaign_id,
+      farm_id: payload.farm_id,
+      status: payload.status,
+      notes: payload.notes,
+      follow_up_at: payload.follow_up_at ?? undefined,
+      appointment_at: payload.appointment_at ?? undefined,
+      tags: payload.tags ?? undefined,
+    };
+
+    let { data, error } = await this.client
       .from('contacts')
-      .insert({
-        user_id: userId,
-        workspace_id: workspaceId ?? undefined,
-        full_name: full_name,
-        phone: payload.phone,
-        email: payload.email,
-        address: payload.address,
-        campaign_id: payload.campaign_id,
-        farm_id: payload.farm_id,
-        status: payload.status,
-        notes: payload.notes,
-        tags: payload.tags ?? undefined,
-      })
+      .insert(insertPayload)
       .select()
       .single();
+
+    const missingFollowUpColumn = this.isMissingContactsColumn(error, 'follow_up_at');
+    const missingAppointmentColumn = this.isMissingContactsColumn(error, 'appointment_at');
+
+    if (error && (missingFollowUpColumn || missingAppointmentColumn)) {
+      const fallbackPayload = { ...insertPayload };
+      delete (fallbackPayload as { follow_up_at?: string }).follow_up_at;
+      delete (fallbackPayload as { appointment_at?: string }).appointment_at;
+
+      const retryResult = await this.client
+        .from('contacts')
+        .insert(fallbackPayload)
+        .select()
+        .single();
+
+      data = retryResult.data;
+      error = retryResult.error;
+    }
 
     if (error) throw error;
     return data;

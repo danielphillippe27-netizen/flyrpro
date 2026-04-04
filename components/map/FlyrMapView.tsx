@@ -10,7 +10,6 @@ import { UserLocationLayer } from './UserLocationLayer';
 import { House, LocateFixed } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { AddressOrientationPanel } from './AddressOrientationPanel';
-import { HouseDetailPanel } from './HouseDetailPanel';
 import { LocationCard } from './LocationCard';
 import { CreateContactDialog } from '@/components/crm/CreateContactDialog';
 import { CampaignsService } from '@/lib/services/CampaignsService';
@@ -45,7 +44,6 @@ export function FlyrMapView() {
   const [orientationPanelOpen, setOrientationPanelOpen] = useState(false);
   const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(null);
   const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
-  const [housePanelOpen, setHousePanelOpen] = useState(false);
   const [locationCardOpen, setLocationCardOpen] = useState(false);
   const [createContactDialogOpen, setCreateContactDialogOpen] = useState(false);
   const [contactDialogData, setContactDialogData] = useState<{ address: string; addressId?: string; gersId?: string; campaignId?: string; notes?: string } | null>(null);
@@ -54,8 +52,25 @@ export function FlyrMapView() {
   const [campaignBbox, setCampaignBbox] = useState<{ minLon: number; minLat: number; maxLon: number; maxLat: number } | null>(null);
   const [showUserLocation, setShowUserLocation] = useState(true);
   const [mapViewMode, setMapViewMode] = useState<'buildings' | 'addresses'>('buildings');
+  const regularMapViewRef = useRef<{
+    center: [number, number];
+    zoom: number;
+    pitch: number;
+    bearing: number;
+  } | null>(null);
 
   const clearCampaignSelection = () => {
+    if (map.current && regularMapViewRef.current) {
+      const { center, zoom, pitch, bearing } = regularMapViewRef.current;
+      map.current.easeTo({
+        center,
+        zoom,
+        pitch,
+        bearing,
+        duration: 700,
+      });
+    }
+
     setSelectedCampaignId(null);
     setSelectedCampaign(null);
     setCampaignAddresses([]);
@@ -64,10 +79,29 @@ export function FlyrMapView() {
     setLocationCardOpen(false);
     setSelectedBuildingId(null);
     setSelectedAddressId(null);
-    setHousePanelOpen(false);
     setSelectedAddress(null);
     setOrientationPanelOpen(false);
+    regularMapViewRef.current = null;
     boundsFittedRef.current = false;
+  };
+
+  const handleCampaignSelect = (campaignId: string | null) => {
+    if (!campaignId) {
+      clearCampaignSelection();
+      return;
+    }
+
+    if (!selectedCampaignId && map.current) {
+      const center = map.current.getCenter();
+      regularMapViewRef.current = {
+        center: [center.lng, center.lat],
+        zoom: map.current.getZoom(),
+        pitch: map.current.getPitch(),
+        bearing: map.current.getBearing(),
+      };
+    }
+
+    setSelectedCampaignId(campaignId);
   };
 
   // Get user ID on mount
@@ -410,19 +444,6 @@ export function FlyrMapView() {
     setLocationCardOpen(true);
   };
 
-  // Open detailed panel (from LocationCard "Log Visit" action)
-  const handleOpenDetailPanel = () => {
-    setLocationCardOpen(false);
-    setHousePanelOpen(true);
-  };
-
-  // Handle navigate action from LocationCard
-  const handleNavigateToBuilding = () => {
-    // Could open Google Maps or Apple Maps with the address
-    // For now, just log - can be expanded later
-    console.log('Navigate to building:', selectedBuildingId);
-  };
-
   // Handle adding contact from LocationCard
   const handleAddContactFromCard = (_addressId?: string, addressText?: string, notes?: string) => {
     if (selectedBuildingId && selectedCampaignId) {
@@ -454,7 +475,7 @@ export function FlyrMapView() {
     if (address.geom) {
       try {
         // Check if it's already an object
-        let geom = typeof address.geom === 'string' ? address.geom : JSON.stringify(address.geom);
+        const geom = typeof address.geom === 'string' ? address.geom : JSON.stringify(address.geom);
         
         // Try to parse as JSON first
         try {
@@ -719,7 +740,7 @@ export function FlyrMapView() {
       <MapInfoButton show={mapLoaded && !error} />
       {mapLoaded && map.current && !error && useFillExtrusion && (
         <>
-          {mapViewMode === 'buildings' && (
+          {selectedCampaignId && mapViewMode === 'buildings' && (
             <MapBuildingsLayer 
               map={map.current} 
               campaignId={selectedCampaignId}
@@ -736,7 +757,7 @@ export function FlyrMapView() {
             workspaceId={currentWorkspaceId}
             hidden={!!selectedCampaignId}
             selectedCampaignId={selectedCampaignId}
-            onCampaignSelect={setSelectedCampaignId}
+            onCampaignSelect={handleCampaignSelect}
           />
           <UserLocationLayer
             map={map.current}
@@ -834,23 +855,10 @@ export function FlyrMapView() {
               setSelectedBuildingId(null);
               setSelectedAddressId(null);
             }}
-            onNavigate={handleNavigateToBuilding}
-            onLogVisit={handleOpenDetailPanel}
             onAddContact={handleAddContactFromCard}
           />
         </div>
       )}
-
-      <HouseDetailPanel
-        buildingId={selectedBuildingId}
-        campaignId={selectedCampaignId}
-        open={housePanelOpen}
-        onClose={() => {
-          setHousePanelOpen(false);
-          setSelectedBuildingId(null);
-        }}
-        onUpdate={handleOrientationUpdate}
-      />
       {userId && (
         <CreateContactDialog
           open={createContactDialogOpen}
@@ -861,7 +869,12 @@ export function FlyrMapView() {
           onSuccess={() => {
             setCreateContactDialogOpen(false);
             setContactDialogData(null);
-            // Optionally refresh map data or show success message
+
+            if (selectedBuildingId) {
+              const currentId = selectedBuildingId;
+              setSelectedBuildingId(null);
+              setTimeout(() => setSelectedBuildingId(currentId), 100);
+            }
           }}
           userId={userId}
           workspaceId={currentWorkspaceId ?? undefined}

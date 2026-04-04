@@ -49,6 +49,8 @@ export interface BuildingProperties {
   /** Address UUID (present when feature has an address link). For slices, this identifies the specific unit. */
   address_id?: string;
   gers_id?: string | null; // Overture GERS ID for linking to contacts
+  house_number?: string | null;
+  street_name?: string | null;
   height_m: number; // Building height in meters from map_buildings table
   min_height: number;
   is_townhome: boolean;

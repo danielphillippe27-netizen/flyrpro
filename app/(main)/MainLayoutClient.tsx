@@ -161,7 +161,14 @@ export default function MainLayoutClient({
           {/* Main content – sits under full-width header */}
           <div className="flex flex-1 flex-col min-w-0 min-h-0 p-0 bg-gray-50 dark:bg-background">
             {/* Only constrain height on campaigns/territory so their two panels scroll independently; other pages scroll in main */}
-            <main className="flex flex-1 flex-col min-h-0 p-0 m-0 overflow-auto">
+            <main
+              className={cn(
+                'flex flex-1 flex-col min-h-0 p-0 m-0',
+                pathname?.startsWith('/campaigns') || pathname?.startsWith('/map')
+                  ? 'overflow-hidden'
+                  : 'overflow-auto'
+              )}
+            >
               <div
                 className={cn(
                   'flex flex-col min-h-0',

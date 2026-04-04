@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { StatsService } from '@/lib/services/StatsService';
 import type { UserStats } from '@/types/database';
+import { useWorkspace } from '@/lib/workspace-context';
 import {
   formatDistanceWalked,
   formatTimeTracked,
@@ -10,6 +11,7 @@ import {
 } from '@/lib/stats/formatters';
 import { StatCard } from './StatCard';
 import { SuccessMetricBar } from './SuccessMetricBar';
+import { Button } from '@/components/ui/button';
 
 const EMPTY_STATS: UserStats = {
   id: '',
@@ -34,14 +36,40 @@ const EMPTY_STATS: UserStats = {
   created_at: null,
 };
 
+type StatsScope = 'self' | 'team';
+
+type TeamRosterResponse = {
+  members?: Array<{
+    user_id: string;
+    display_name: string;
+  }>;
+};
+
+type TeamSummaryResponse = {
+  totals?: {
+    leads?: number;
+    appointments?: number;
+  };
+};
+
 export function YouViewContent({ userId, authChecked = false }: { userId: string | null; authChecked?: boolean }) {
+  const { currentWorkspaceId, membershipsByWorkspaceId, memberCountByWorkspaceId } = useWorkspace();
   const [stats, setStats] = useState<UserStats | null>(null);
+  const [leadCount, setLeadCount] = useState(0);
   const [appointmentCount, setAppointmentCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [scope, setScope] = useState<StatsScope>('self');
+  const currentRole = currentWorkspaceId ? membershipsByWorkspaceId[currentWorkspaceId] : null;
+  const canViewTeamMetrics =
+    Boolean(currentWorkspaceId) &&
+    (currentRole === 'owner' || currentRole === 'admin') &&
+    (memberCountByWorkspaceId[currentWorkspaceId ?? ''] ?? 0) > 1;
 
   const loadStats = useCallback(async () => {
     if (!userId) {
+      setStats(null);
+      setLeadCount(0);
       setAppointmentCount(0);
       setLoading(false);
       return;
@@ -49,30 +77,66 @@ export function YouViewContent({ userId, authChecked = false }: { userId: string
     setLoading(true);
     setError(null);
     try {
-      const [statsResult, appointmentResult] = await Promise.allSettled([
-        StatsService.fetchUserStats(userId),
-        StatsService.fetchAppointmentCount(userId),
-      ]);
+      if (scope === 'team' && canViewTeamMetrics && currentWorkspaceId) {
+        const rosterResponse = await fetch(`/api/team/roster?workspaceId=${encodeURIComponent(currentWorkspaceId)}`);
+        if (!rosterResponse.ok) {
+          const payload = (await rosterResponse.json().catch(() => null)) as { error?: string } | null;
+          throw new Error(payload?.error ?? 'Failed to load team roster');
+        }
 
-      if (statsResult.status === 'rejected') {
-        throw statsResult.reason;
+        const rosterData = (await rosterResponse.json()) as TeamRosterResponse;
+        const memberIds = Array.isArray(rosterData.members)
+          ? rosterData.members.map((member) => member.user_id).filter(Boolean)
+          : [];
+
+        const [statsRows, summaryResponse] = await Promise.all([
+          StatsService.fetchUserStatsForUsers(memberIds),
+          fetch(`/api/team/summary?workspaceId=${encodeURIComponent(currentWorkspaceId)}`),
+        ]);
+
+        if (!summaryResponse.ok) {
+          const payload = (await summaryResponse.json().catch(() => null)) as { error?: string } | null;
+          throw new Error(payload?.error ?? 'Failed to load team summary');
+        }
+
+        const summary = (await summaryResponse.json()) as TeamSummaryResponse;
+        setStats(StatsService.aggregateUserStats(statsRows, 'team'));
+        setLeadCount(summary.totals?.leads ?? 0);
+        setAppointmentCount(summary.totals?.appointments ?? 0);
+      } else {
+        const [statsResult, leadCountResult, appointmentResult] = await Promise.allSettled([
+          StatsService.fetchUserStats(userId),
+          StatsService.fetchLeadCount(userId),
+          StatsService.fetchAppointmentCount(userId),
+        ]);
+
+        if (statsResult.status === 'rejected') {
+          throw statsResult.reason;
+        }
+
+        setStats(statsResult.value);
+        setLeadCount(leadCountResult.status === 'fulfilled' ? leadCountResult.value : 0);
+        setAppointmentCount(appointmentResult.status === 'fulfilled' ? appointmentResult.value : 0);
       }
-
-      setStats(statsResult.value);
-      setAppointmentCount(appointmentResult.status === 'fulfilled' ? appointmentResult.value : 0);
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Failed to load stats';
       setError(message);
       setStats(null);
+      setLeadCount(0);
       setAppointmentCount(0);
     } finally {
       setLoading(false);
     }
-  }, [userId]);
+  }, [canViewTeamMetrics, currentWorkspaceId, scope, userId]);
 
   useEffect(() => {
-    loadStats();
+    void loadStats();
   }, [loadStats]);
+
+  useEffect(() => {
+    if (canViewTeamMetrics) return;
+    setScope('self');
+  }, [canViewTeamMetrics]);
 
   // Still resolving auth or loading stats
   if (!authChecked || (userId && loading && !stats && !error)) {
@@ -108,32 +172,58 @@ export function YouViewContent({ userId, authChecked = false }: { userId: string
   }
 
   const displayStats = stats ?? EMPTY_STATS;
+  const effectiveLeadsCreated = Math.max(displayStats.leads_created, leadCount);
+  const effectiveLeadPerConversation =
+    displayStats.conversations > 0 ? (effectiveLeadsCreated / displayStats.conversations) * 100 : 0;
   const appointmentPerConversation =
     displayStats.conversations > 0 ? (appointmentCount / displayStats.conversations) * 100 : 0;
+  const heading = scope === 'team' ? 'Team stats' : 'Your stats';
+  const description =
+    scope === 'team'
+      ? 'Team metrics aggregate your workspace members, and lead totals are reconciled from CRM contacts.'
+      : 'Session metrics come from the app, and lead totals are reconciled from CRM contacts.';
+  const emptyCopy =
+    scope === 'team'
+      ? 'No team stats recorded yet. Complete a session in the app to see team numbers here.'
+      : 'No stats recorded yet. Complete a session in the app to see your numbers here.';
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3">
-        <p className="text-xl font-bold text-white">Your stats</p>
-        <p className="text-sm text-muted-foreground">
-          Updated from the app via <code className="rounded bg-muted px-1">increment_user_stats</code> and sessions.
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-xl font-bold text-white">{heading}</p>
+          {canViewTeamMetrics && (
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant={scope === 'self' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setScope('self')}
+              >
+                Your metrics
+              </Button>
+              <Button
+                type="button"
+                variant={scope === 'team' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setScope('team')}
+              >
+                Team metrics
+              </Button>
+            </div>
+          )}
+        </div>
+        <p className="text-sm text-muted-foreground">{description}</p>
         {!stats && (
-          <p className="text-sm text-muted-foreground">No stats recorded yet. Complete a session in the app to see your numbers here.</p>
+          <p className="text-sm text-muted-foreground">{emptyCopy}</p>
         )}
-      </div>
-
-      {/* Streaks */}
-      <div className="grid grid-cols-2 gap-4">
-        <StatCard label="Day Streak" value={displayStats.day_streak} />
-        <StatCard label="Best Streak" value={displayStats.best_streak} />
       </div>
 
       {/* Stats grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <StatCard label="Doors Knocked" value={displayStats.doors_knocked} />
         <StatCard label="Conversations" value={displayStats.conversations} />
-        <StatCard label="Leads Created" value={displayStats.leads_created} />
+        <StatCard label="Leads Created" value={effectiveLeadsCreated} />
         <StatCard label="QR Codes Scanned" value={displayStats.qr_codes_scanned} />
         <StatCard label="Distance Walked" value={`${formatDistanceWalked(displayStats.distance_walked)} km`} />
         <StatCard label="Time Tracked" value={formatTimeTracked(displayStats.time_tracked)} />
@@ -141,29 +231,23 @@ export function YouViewContent({ userId, authChecked = false }: { userId: string
 
       {/* Success metrics */}
       <section>
-        <h3 className="flex items-center gap-2 text-lg font-semibold text-foreground mb-4">
-          <span>📈</span>
-          Success Metrics
-        </h3>
+        <h3 className="text-lg font-semibold text-foreground mb-4">Success Metrics</h3>
         <div className="flex flex-col gap-5">
           <SuccessMetricBar
             title="Conversation / Door"
             value={ratePercent(displayStats.conversation_per_door)}
-            icon="💬"
             color="#a855f7"
             description="Conversations per door knocked"
           />
           <SuccessMetricBar
             title="Lead / Conversation"
-            value={ratePercent(displayStats.conversation_lead_rate)}
-            icon="⭐"
+            value={effectiveLeadPerConversation}
             color="#eab308"
             description="Leads per conversation"
           />
           <SuccessMetricBar
             title="Appointment / Conversation"
             value={appointmentPerConversation}
-            icon="📆"
             color="#ef4444"
             description="Appointments per conversation"
           />

@@ -8,13 +8,32 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import Image from 'next/image';
 
+type InviteValidationResponse = {
+  valid?: boolean;
+  workspaceName?: string | null;
+  email?: string | null;
+};
+
+const PENDING_INVITE_PROFILE_KEY = 'flyr.pendingInviteProfile';
+
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [hasChecked, setHasChecked] = useState(false);
+  const [inviteInfo, setInviteInfo] = useState<{
+    status: 'idle' | 'loading' | 'ready' | 'invalid';
+    workspaceName: string | null;
+    email: string | null;
+  }>({
+    status: 'idle',
+    workspaceName: null,
+    email: null,
+  });
   const sanitizeEmail = (value: string) => value.trim().replace(/^['"]+|['"]+$/g, '');
   const formatAuthError = (
     error: unknown,
@@ -48,6 +67,7 @@ export default function LoginPage() {
   const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
   const nextFromQuery = searchParams?.get('next') ?? null;
   const inviteToken = searchParams?.get('token') ?? null;
+  const inviteMode = Boolean(inviteToken?.trim());
   const workspaceIntent = searchParams?.get('workspace') ?? searchParams?.get('workspaceId') ?? null;
 
   const resolveNextPath = () => {
@@ -58,7 +78,68 @@ export default function LoginPage() {
   };
 
   const normalizedNext = resolveNextPath();
-  const gatePath = `/gate?next=${encodeURIComponent(normalizedNext)}`;
+  const buildGatePath = () => {
+    const params = new URLSearchParams();
+    params.set('next', normalizedNext);
+    if (inviteToken?.trim()) {
+      params.set('token', inviteToken.trim());
+    }
+    if (workspaceIntent?.trim()) {
+      params.set('workspace', workspaceIntent.trim());
+    }
+    return `/gate?${params.toString()}`;
+  };
+  const gatePath = buildGatePath();
+  const buildAuthCallbackURL = () => {
+    const callbackURL = new URL('/auth/callback', window.location.origin);
+    callbackURL.searchParams.set('next', normalizedNext);
+    if (inviteToken?.trim()) {
+      callbackURL.searchParams.set('token', inviteToken.trim());
+    }
+    if (workspaceIntent?.trim()) {
+      callbackURL.searchParams.set('workspace', workspaceIntent.trim());
+    }
+    return callbackURL.toString();
+  };
+
+  useEffect(() => {
+    if (!inviteMode || !inviteToken?.trim()) {
+      setInviteInfo({ status: 'idle', workspaceName: null, email: null });
+      return;
+    }
+
+    let mounted = true;
+    setInviteInfo((prev) => ({ ...prev, status: 'loading' }));
+
+    fetch(`/api/invites/validate?token=${encodeURIComponent(inviteToken.trim())}`, {
+      credentials: 'include',
+    })
+      .then((response) => response.json().catch(() => ({} as InviteValidationResponse)))
+      .then((payload: InviteValidationResponse) => {
+        if (!mounted) return;
+        const inviteEmail =
+          typeof payload?.email === 'string' ? sanitizeEmail(payload.email).toLowerCase() : '';
+        if (payload?.valid && inviteEmail) {
+          setInviteInfo({
+            status: 'ready',
+            workspaceName:
+              typeof payload.workspaceName === 'string' ? payload.workspaceName : null,
+            email: inviteEmail,
+          });
+          setEmail(inviteEmail);
+          return;
+        }
+        setInviteInfo({ status: 'invalid', workspaceName: null, email: null });
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setInviteInfo({ status: 'invalid', workspaceName: null, email: null });
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [inviteMode, inviteToken]);
 
   // Show error from URL (e.g. after Apple OAuth or callback failure)
   useEffect(() => {
@@ -103,7 +184,6 @@ export default function LoginPage() {
     };
 
     checkAuth();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gatePath, hasChecked, router]);
 
   const handleEmailSubmit = async (e: React.FormEvent) => {
@@ -113,7 +193,48 @@ export default function LoginPage() {
 
     try {
       const supabase = await getClientAsync();
-      const normalizedEmail = sanitizeEmail(email);
+      const normalizedEmail = sanitizeEmail(
+        inviteMode && inviteInfo.email ? inviteInfo.email : email
+      ).toLowerCase();
+      const normalizedFirstName = firstName.trim();
+      const normalizedLastName = lastName.trim();
+
+      if (inviteMode && inviteInfo.status !== 'ready') {
+        setMessage({
+          type: 'error',
+          text: 'This invite is invalid or expired. Ask your workspace owner for a new link.',
+        });
+        return;
+      }
+
+      if (
+        inviteMode &&
+        inviteInfo.email &&
+        normalizedEmail !== inviteInfo.email.toLowerCase()
+      ) {
+        setMessage({
+          type: 'error',
+          text: `This invite was sent to ${inviteInfo.email}. Sign in with that email to continue.`,
+        });
+        return;
+      }
+
+      if (inviteMode && (!normalizedFirstName || !normalizedLastName)) {
+        setMessage({
+          type: 'error',
+          text: 'Enter your first and last name to continue.',
+        });
+        return;
+      }
+
+      const pendingInviteProfile =
+        inviteMode && inviteToken?.trim() && normalizedFirstName && normalizedLastName
+          ? {
+              token: inviteToken.trim(),
+              firstName: normalizedFirstName,
+              lastName: normalizedLastName,
+            }
+          : null;
 
       // Try sign-in first (existing user)
       const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
@@ -122,6 +243,12 @@ export default function LoginPage() {
       });
 
       if (!signInError && signInData?.session) {
+        if (typeof window !== 'undefined' && pendingInviteProfile) {
+          window.localStorage.setItem(
+            `${PENDING_INVITE_PROFILE_KEY}:${pendingInviteProfile.token}`,
+            JSON.stringify(pendingInviteProfile)
+          );
+        }
         router.replace(gatePath);
         return;
       }
@@ -142,7 +269,16 @@ export default function LoginPage() {
       const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
         email: normalizedEmail,
         password,
-        options: { emailRedirectTo: `${typeof window !== 'undefined' ? window.location.origin : ''}/auth/callback?next=${encodeURIComponent(normalizedNext)}` },
+        options: {
+          emailRedirectTo: buildAuthCallbackURL(),
+          data:
+            normalizedFirstName || normalizedLastName
+              ? {
+                  first_name: normalizedFirstName || undefined,
+                  last_name: normalizedLastName || undefined,
+                }
+              : undefined,
+        },
       });
 
       if (signUpError) {
@@ -156,6 +292,12 @@ export default function LoginPage() {
       }
 
       if (signUpData?.session) {
+        if (typeof window !== 'undefined' && pendingInviteProfile) {
+          window.localStorage.setItem(
+            `${PENDING_INVITE_PROFILE_KEY}:${pendingInviteProfile.token}`,
+            JSON.stringify(pendingInviteProfile)
+          );
+        }
         router.replace(gatePath);
         return;
       }
@@ -163,7 +305,9 @@ export default function LoginPage() {
       // Sign-up succeeded but email confirmation required
       setMessage({
         type: 'success',
-        text: 'Check your email to confirm your account, then sign in with your password.',
+        text: inviteMode
+          ? 'Check your email to confirm your account, then sign in to finish joining this workspace.'
+          : 'Check your email to confirm your account, then sign in with your password.',
       });
     } catch (error: unknown) {
       console.error('❌ Auth error:', error);
@@ -180,7 +324,7 @@ export default function LoginPage() {
     setLoading(true);
     setMessage(null);
     try {
-      const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(normalizedNext)}`;
+      const redirectTo = buildAuthCallbackURL();
       const supabase = await getClientAsync();
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
@@ -199,7 +343,7 @@ export default function LoginPage() {
     setLoading(true);
     setMessage(null);
     try {
-      const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(normalizedNext)}`;
+      const redirectTo = buildAuthCallbackURL();
       const supabase = await getClientAsync();
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'apple',
@@ -230,11 +374,43 @@ export default function LoginPage() {
             />
           </div>
           <p className="text-[#AAAAAA] text-lg">
-            Sign in or create an account to access your dashboard or onboarding
+            {inviteMode
+              ? `Create your account to join ${inviteInfo.workspaceName ?? 'this workspace'}`
+              : 'Sign in or create an account to access your dashboard or onboarding'}
           </p>
         </div>
 
         <form onSubmit={handleEmailSubmit} className="mt-6 space-y-4">
+          {inviteMode ? (
+            <>
+              <div className="space-y-1.5">
+                <Label htmlFor="firstName" className="text-white text-base">First name</Label>
+                <Input
+                  id="firstName"
+                  type="text"
+                  placeholder="First name"
+                  value={firstName}
+                  onChange={(e) => setFirstName(e.target.value)}
+                  required
+                  disabled={loading}
+                  className="h-12 text-base text-white bg-white/[0.08] border border-white/15 placeholder:text-gray-500 focus-visible:border-white/40 focus-visible:ring-2 focus-visible:ring-white/40 backdrop-blur-sm"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="lastName" className="text-white text-base">Last name</Label>
+                <Input
+                  id="lastName"
+                  type="text"
+                  placeholder="Last name"
+                  value={lastName}
+                  onChange={(e) => setLastName(e.target.value)}
+                  required
+                  disabled={loading}
+                  className="h-12 text-base text-white bg-white/[0.08] border border-white/15 placeholder:text-gray-500 focus-visible:border-white/40 focus-visible:ring-2 focus-visible:ring-white/40 backdrop-blur-sm"
+                />
+              </div>
+            </>
+          ) : null}
           <div className="space-y-1.5">
             <Label htmlFor="email" className="text-white text-base">Email</Label>
             <Input
@@ -244,7 +420,8 @@ export default function LoginPage() {
               value={email}
               onChange={(e) => setEmail(sanitizeEmail(e.target.value))}
               required
-              disabled={loading}
+              readOnly={inviteMode && !!inviteInfo.email}
+              disabled={loading || (inviteMode && inviteInfo.status === 'loading')}
               className="h-12 text-base text-white bg-white/[0.08] border border-white/15 placeholder:text-gray-500 focus-visible:border-white/40 focus-visible:ring-2 focus-visible:ring-white/40 backdrop-blur-sm"
             />
           </div>
@@ -266,19 +443,21 @@ export default function LoginPage() {
             type="submit"
             size="lg"
             className="w-full h-12 text-base bg-[#dc2626] text-white hover:bg-[#b91c1c] border border-red-900/40"
-            disabled={loading}
+            disabled={loading || (inviteMode && inviteInfo.status === 'loading')}
           >
-            {loading ? 'Continuing...' : 'Continue with Email'}
+            {loading ? 'Continuing...' : inviteMode ? 'Create account and continue' : 'Continue with Email'}
           </Button>
         </form>
 
-        <div className="relative mt-6 flex items-center gap-4">
-          <span className="flex-1 border-t border-zinc-600" />
-          <span className="text-sm uppercase leading-normal text-[#AAAAAA] shrink-0">Or continue with</span>
-          <span className="flex-1 border-t border-zinc-600" />
-        </div>
+        {!inviteMode ? (
+          <>
+            <div className="relative mt-6 flex items-center gap-4">
+              <span className="flex-1 border-t border-zinc-600" />
+              <span className="text-sm uppercase leading-normal text-[#AAAAAA] shrink-0">Or continue with</span>
+              <span className="flex-1 border-t border-zinc-600" />
+            </div>
 
-        <div className="mt-6 grid gap-3">
+            <div className="mt-6 grid gap-3">
           <Button
             type="button"
             variant="outline"
@@ -324,7 +503,9 @@ export default function LoginPage() {
             </svg>
             Continue with Apple
           </Button>
-        </div>
+            </div>
+          </>
+        ) : null}
 
         {message && (
           <div

@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { Plus, RefreshCw } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Download, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { LeadsTableView } from './LeadsTableView';
 import { ContactDetailSheet } from './ContactDetailSheet';
 import { CreateContactDialog } from './CreateContactDialog';
@@ -12,101 +13,193 @@ import type { Contact, UserStats } from '@/types/database';
 import { createClient } from '@/lib/supabase/client';
 import { useWorkspace } from '@/lib/workspace-context';
 
+type TeamMemberOption = {
+  user_id: string;
+  display_name: string;
+};
+
+type TeamRosterResponse = {
+  members?: TeamMemberOption[];
+};
+
+function escapeCsv(value: string | null | undefined): string {
+  const safe = value ?? '';
+  if (/[",\n]/.test(safe)) {
+    return `"${safe.replace(/"/g, '""')}"`;
+  }
+  return safe;
+}
+
 export function ContactsHubView() {
-  const { currentWorkspaceId } = useWorkspace();
+  const { currentWorkspaceId, membershipsByWorkspaceId } = useWorkspace();
   const [contacts, setContacts] = useState<Contact[]>([]);
-  const [userStats, setUserStats] = useState<UserStats | null>(null);
+  const [statsByUserId, setStatsByUserId] = useState<Record<string, UserStats>>({});
   const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState(false);
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
+  const [teamMembers, setTeamMembers] = useState<TeamMemberOption[]>([]);
+  const [selectedMemberId, setSelectedMemberId] = useState<string>('all');
+  const currentRole = currentWorkspaceId ? membershipsByWorkspaceId[currentWorkspaceId] : null;
+  const canFilterByMembers = currentRole === 'owner' || currentRole === 'admin';
 
-  useEffect(() => {
-    const load = async (currentUserId: string) => {
+  const loadContacts = useCallback(async (currentUserId: string) => {
+    const loadTeamMembers = async (): Promise<TeamMemberOption[]> => {
+      if (!canFilterByMembers || !currentWorkspaceId) return [];
+
       try {
-        setLoading(true);
-        const [contactsData, statsData] = await Promise.all([
-          ContactsService.fetchContacts(currentUserId, currentWorkspaceId),
-          StatsService.fetchUserStats(currentUserId),
-        ]);
-        setContacts(contactsData);
-        setUserStats(statsData ?? null);
+        const response = await fetch(`/api/team/roster?workspaceId=${encodeURIComponent(currentWorkspaceId)}`);
+        if (!response.ok) return [];
+        const data = (await response.json()) as TeamRosterResponse;
+        return Array.isArray(data.members) ? data.members : [];
       } catch (error) {
-        console.error('Error loading contacts or stats:', error);
-      } finally {
-        setLoading(false);
+        console.error('Error loading team roster:', error);
+        return [];
       }
     };
 
+    try {
+      setLoading(true);
+      const [contactsData, members] = await Promise.all([
+        ContactsService.fetchContacts(currentUserId, currentWorkspaceId),
+        loadTeamMembers(),
+      ]);
+
+      const statsUsers = members.length > 0 ? members.map((member) => member.user_id) : [currentUserId];
+      const statsRows =
+        statsUsers.length > 1
+          ? await StatsService.fetchUserStatsForUsers(statsUsers)
+          : [await StatsService.fetchUserStats(statsUsers[0])].filter((value): value is UserStats => Boolean(value));
+
+      setContacts(contactsData);
+      setTeamMembers(members);
+      setStatsByUserId(
+        statsRows.reduce<Record<string, UserStats>>((acc, stat) => {
+          acc[stat.user_id] = stat;
+          return acc;
+        }, {})
+      );
+    } catch (error) {
+      console.error('Error loading contacts or stats:', error);
+      setContacts([]);
+      setTeamMembers([]);
+      setStatsByUserId({});
+    } finally {
+      setLoading(false);
+    }
+  }, [canFilterByMembers, currentWorkspaceId]);
+
+  useEffect(() => {
     const supabase = createClient();
     supabase.auth.getUser().then(({ data: { user } }) => {
       setUserId(user?.id || null);
       if (user?.id) {
-        load(user.id);
+        void loadContacts(user.id);
       } else {
         setLoading(false);
       }
     });
-  }, [currentWorkspaceId]);
-
-  const loadContacts = async () => {
-    if (!userId) return;
-    try {
-      setLoading(true);
-      const [contactsData, statsData] = await Promise.all([
-        ContactsService.fetchContacts(userId, currentWorkspaceId),
-        StatsService.fetchUserStats(userId),
-      ]);
-      setContacts(contactsData);
-      setUserStats(statsData ?? null);
-    } catch (error) {
-      console.error('Error loading contacts or stats:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [loadContacts]);
 
   const handleCreateContact = () => {
     setCreateDialogOpen(true);
   };
 
   const handleContactCreated = () => {
-    loadContacts();
+    if (userId) {
+      void loadContacts(userId);
+    }
   };
 
-  const handleSyncToCrm = async () => {
-    setSyncing(true);
-    try {
-      const res = await fetch('/api/leads/sync-crm', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workspaceId: currentWorkspaceId }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        alert(data?.error ?? 'Sync to CRM failed.');
-        return;
-      }
-      alert(data?.message ?? 'Leads synced to CRM.');
-    } catch (e) {
-      console.error('Sync to CRM error:', e);
-      alert('Sync to CRM failed.');
-    } finally {
-      setSyncing(false);
+  useEffect(() => {
+    if (selectedMemberId === 'all') return;
+    if (teamMembers.some((member) => member.user_id === selectedMemberId)) return;
+    setSelectedMemberId('all');
+  }, [teamMembers, selectedMemberId]);
+
+  const memberNameById = useMemo(
+    () =>
+      teamMembers.reduce<Record<string, string>>((acc, member) => {
+        acc[member.user_id] = member.display_name;
+        return acc;
+      }, {}),
+    [teamMembers]
+  );
+
+  const visibleContacts = useMemo(() => {
+    if (selectedMemberId === 'all') return contacts;
+    return contacts.filter((contact) => contact.user_id === selectedMemberId);
+  }, [contacts, selectedMemberId]);
+
+  const visibleStats = useMemo(() => {
+    if (selectedMemberId === 'all') {
+      return StatsService.aggregateUserStats(Object.values(statsByUserId), 'all');
     }
+    return statsByUserId[selectedMemberId] ?? null;
+  }, [selectedMemberId, statsByUserId]);
+
+  const handleExportContacts = () => {
+    if (visibleContacts.length === 0) return;
+
+    const headers = ['Name', 'Phone', 'Email', 'Address', 'Status', 'Tags', 'Created'];
+    if (canFilterByMembers) headers.splice(4, 0, 'Member');
+
+    const rows = visibleContacts.map((contact) => {
+      const values = [
+        contact.full_name,
+        contact.phone ?? '',
+        contact.email ?? '',
+        contact.address ?? '',
+        contact.status,
+        contact.tags ?? '',
+        contact.created_at,
+      ];
+
+      if (canFilterByMembers) {
+        values.splice(4, 0, memberNameById[contact.user_id] ?? 'Member');
+      }
+
+      return values.map((value) => escapeCsv(String(value ?? ''))).join(',');
+    });
+
+    const csv = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const selectedLabel =
+      selectedMemberId === 'all'
+        ? 'all-members'
+        : (memberNameById[selectedMemberId] ?? 'member').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+
+    link.href = url;
+    link.download = `contacts-${selectedLabel}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   return (
     <div>
-      <div className="flex justify-end gap-2 mb-6">
-        <Button
-          variant="outline"
-          onClick={handleSyncToCrm}
-          disabled={syncing || loading}
-        >
-          <RefreshCw className={`w-4 h-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
-          {syncing ? 'Syncing…' : 'Sync to CRM'}
+      <div className="mb-6 flex flex-wrap justify-end gap-2">
+        {canFilterByMembers && teamMembers.length > 0 && (
+          <Select value={selectedMemberId} onValueChange={setSelectedMemberId}>
+            <SelectTrigger className="w-[220px]">
+              <SelectValue placeholder="All members" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All members</SelectItem>
+              {teamMembers.map((member) => (
+                <SelectItem key={member.user_id} value={member.user_id}>
+                  {member.display_name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+        <Button variant="outline" onClick={handleExportContacts} disabled={loading || visibleContacts.length === 0}>
+          <Download className="mr-2 h-4 w-4" />
+          Export Contacts
         </Button>
         <Button onClick={handleCreateContact} className="bg-primary text-primary-foreground hover:bg-primary/90">
           <Plus className="w-4 h-4 mr-2" />
@@ -115,8 +208,8 @@ export function ContactsHubView() {
       </div>
 
       <LeadsTableView
-        contacts={contacts}
-        userStats={userStats}
+        contacts={visibleContacts}
+        userStats={visibleStats}
         loading={loading}
         onContactSelect={setSelectedContact}
       />
@@ -142,4 +235,3 @@ export function ContactsHubView() {
     </div>
   );
 }
-

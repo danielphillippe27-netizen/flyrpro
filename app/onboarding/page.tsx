@@ -263,7 +263,7 @@ function OnboardingContent() {
               <Users className="h-9 w-9 text-[#AAAAAA]" />
               <span className="text-base font-medium text-white">For my team</span>
               <span className="text-sm text-[#AAAAAA] text-center">
-                Invite others
+                Add teammates later
               </span>
             </button>
           </div>

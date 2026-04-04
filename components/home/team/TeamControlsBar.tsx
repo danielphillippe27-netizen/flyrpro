@@ -9,7 +9,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { ChevronDown } from 'lucide-react';
 
-export type RangePreset = 'today' | '7d' | '30d' | 'month' | 'custom';
+export type RangePreset = 'today' | '7d' | '30d' | 'year' | 'custom';
 
 export type TeamControlsRange = {
   preset: RangePreset;
@@ -36,8 +36,8 @@ function getRangeForPreset(preset: RangePreset): { start: string; end: string } 
   } else if (preset === '30d') {
     start.setDate(start.getDate() - 29);
     start.setUTCHours(0, 0, 0, 0);
-  } else if (preset === 'month') {
-    start.setDate(1);
+  } else if (preset === 'year') {
+    start.setMonth(0, 1);
     start.setUTCHours(0, 0, 0, 0);
   } else {
     return { start: start.toISOString(), end: end.toISOString() };
@@ -56,6 +56,7 @@ export function TeamControlsBar({
     const { start, end } = getRangeForPreset(preset);
     onRangeChange({ preset, start, end });
   };
+  const currentYearLabel = String(new Date().getFullYear());
 
   const isAll = memberIds.length === 0;
   const selectAll = () => onMemberFilterChange([]);
@@ -75,14 +76,14 @@ export function TeamControlsBar({
     <div className="sticky top-0 z-10 bg-gray-50 dark:bg-background pb-3 -mx-1 flex flex-wrap items-center gap-3 border-b border-border/50 mb-4">
       <span className="text-sm text-muted-foreground">Range:</span>
       <div className="flex flex-wrap gap-1">
-        {(['today', '7d', '30d', 'month'] as const).map((p) => (
+        {(['today', '7d', '30d', 'year'] as const).map((p) => (
           <Button
             key={p}
             variant={range.preset === p ? 'default' : 'outline'}
             size="sm"
             onClick={() => setPreset(p)}
           >
-            {p === 'today' ? 'Today' : p === '7d' ? '7D' : p === '30d' ? '30D' : 'This month'}
+            {p === 'today' ? 'Today' : p === '7d' ? '7D' : p === '30d' ? '30D' : currentYearLabel}
           </Button>
         ))}
       </div>

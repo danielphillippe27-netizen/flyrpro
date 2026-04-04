@@ -5,6 +5,7 @@ import { useWorkspace } from '@/lib/workspace-context';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Route, Hand, Activity, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -43,6 +44,14 @@ function getRangeForPreset(preset: RangePreset): { start: string; end: string } 
   return { start: start.toISOString(), end: end.toISOString() };
 }
 
+function getRangePresetLabel(preset: Exclude<RangePreset, 'all'>, now = new Date()): string {
+  if (preset === 'week') return 'Week';
+  if (preset === 'month') {
+    return now.toLocaleDateString(undefined, { month: 'long' });
+  }
+  return String(now.getFullYear());
+}
+
 type ActivityEvent = {
   id: string;
   user_id: string;
@@ -55,6 +64,18 @@ type ActivityEvent = {
   payload: Record<string, unknown>;
   created_at: string;
   display_name: string | null;
+};
+
+type ActivityMemberOption = {
+  user_id: string;
+  display_name: string;
+};
+
+type ActivityResponse = {
+  events?: ActivityEvent[];
+  total?: number;
+  canIncludeMembers?: boolean;
+  members?: ActivityMemberOption[];
 };
 
 function formatDateKey(iso: string): string {
@@ -145,7 +166,7 @@ type ActivityPageViewProps = {
   emptyMessage?: string;
   /** When set, activity is limited to this campaign and the list omits redundant campaign names. */
   campaignId?: string;
-  /** Hides period and “All team members” controls (e.g. campaign activity tab: sessions only, no chrome). */
+  /** Hides period and member controls (e.g. campaign activity tab: sessions only, no chrome). */
   hideFilterControls?: boolean;
 };
 
@@ -160,8 +181,9 @@ export function ActivityPageView({
   const { currentWorkspaceId } = useWorkspace();
   const [rangePreset, setRangePreset] = useState<RangePreset>(defaultRangePreset);
   const [typeFilter, setTypeFilter] = useState<string>(forcedTypeFilter ?? '');
-  const [includeMembers, setIncludeMembers] = useState(() => Boolean(hideFilterControls));
   const [canIncludeMembers, setCanIncludeMembers] = useState(false);
+  const [teamMembers, setTeamMembers] = useState<ActivityMemberOption[]>([]);
+  const [selectedMemberId, setSelectedMemberId] = useState<string>('all');
   const [events, setEvents] = useState<ActivityEvent[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
@@ -170,6 +192,14 @@ export function ActivityPageView({
   const [selectedEvent, setSelectedEvent] = useState<ActivityEvent | null>(null);
 
   const { start, end } = useMemo(() => getRangeForPreset(rangePreset), [rangePreset]);
+  const rangePresetLabels = useMemo(() => {
+    const now = new Date();
+    return {
+      week: getRangePresetLabel('week', now),
+      month: getRangePresetLabel('month', now),
+      year: getRangePresetLabel('year', now),
+    };
+  }, []);
   const activeTypeFilter = forcedTypeFilter ?? typeFilter;
 
   const fetchActivity = useCallback(
@@ -195,17 +225,29 @@ export function ActivityPageView({
           offset: String(off),
         });
         if (activeTypeFilter) params.set('type', activeTypeFilter);
-        if (includeMembers) params.set('includeMembers', 'true');
+        if (hideFilterControls || selectedMemberId === 'all') {
+          params.set('includeMembers', 'true');
+        } else {
+          params.set('memberId', selectedMemberId);
+        }
         if (campaignId) params.set('campaignId', campaignId);
         const res = await fetch(`/api/activity?${params}`);
         if (!res.ok) throw new Error(await res.text());
-        const data = await res.json();
+        const data = (await res.json()) as ActivityResponse;
         const list = (data.events ?? []) as ActivityEvent[];
         setEvents((prev) => (append ? [...prev, ...list] : list));
         setTotal(data.total ?? 0);
         setOffset(off);
         if (data.canIncludeMembers !== undefined) {
-          setCanIncludeMembers(data.canIncludeMembers);
+          const nextCanIncludeMembers = Boolean(data.canIncludeMembers);
+          setCanIncludeMembers(nextCanIncludeMembers);
+          if (!nextCanIncludeMembers) {
+            setTeamMembers([]);
+            setSelectedMemberId('all');
+          }
+        }
+        if (Array.isArray(data.members)) {
+          setTeamMembers(data.members);
         }
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Failed to load activity');
@@ -214,7 +256,7 @@ export function ActivityPageView({
         setLoading(false);
       }
     },
-    [currentWorkspaceId, start, end, activeTypeFilter, includeMembers, campaignId]
+    [currentWorkspaceId, start, end, activeTypeFilter, hideFilterControls, selectedMemberId, campaignId]
   );
 
   useEffect(() => {
@@ -228,6 +270,12 @@ export function ActivityPageView({
   useEffect(() => {
     fetchActivity(0, false);
   }, [fetchActivity]);
+
+  useEffect(() => {
+    if (selectedMemberId === 'all') return;
+    if (teamMembers.some((member) => member.user_id === selectedMemberId)) return;
+    setSelectedMemberId('all');
+  }, [teamMembers, selectedMemberId]);
 
   const groupedByDate = events.reduce<Record<string, ActivityEvent[]>>((acc, ev) => {
     const key = ev.event_time.slice(0, 10);
@@ -254,19 +302,25 @@ export function ActivityPageView({
               size="sm"
               onClick={() => setRangePreset(preset)}
             >
-              {preset === 'week' ? 'Week' : preset === 'month' ? 'Month' : 'Year'}
+              {rangePresetLabels[preset]}
             </Button>
           ))}
           {canIncludeMembers && (
             <>
               <span className="text-sm text-muted-foreground ml-2">|</span>
-              <Button
-                variant={includeMembers ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setIncludeMembers((v) => !v)}
-              >
-                All team members
-              </Button>
+              <Select value={selectedMemberId} onValueChange={setSelectedMemberId}>
+                <SelectTrigger size="sm" className="w-[220px]">
+                  <SelectValue placeholder="All team members" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All team members</SelectItem>
+                  {teamMembers.map((member) => (
+                    <SelectItem key={member.user_id} value={member.user_id}>
+                      {member.display_name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </>
           )}
         </div>

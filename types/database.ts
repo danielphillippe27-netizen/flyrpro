@@ -76,6 +76,7 @@ export interface CampaignV2 {
   created_at: string;
   status: CampaignStatus;
   seed_query?: string;
+  description?: string;
   video_url?: string; // Optional video URL to redirect to when QR code is scanned
   notes?: string;
   scripts?: string;
@@ -345,6 +346,8 @@ export interface Contact {
   last_contacted?: string;
   notes?: string;
   reminder_date?: string;
+  follow_up_at?: string;
+  appointment_at?: string;
   gers_id?: string; // Overture GERS ID linking to map_buildings.gers_id
   address_id?: string; // FK to campaign_addresses.id
   tags?: string; // Comma-separated or single tag

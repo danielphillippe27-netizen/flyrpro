@@ -51,6 +51,29 @@ Required environment variables:
 - `APP_BASE_URL`: Your app URL (http://localhost:3000 for development)
 - `NEXT_PUBLIC_EDITOR_URL`: URL of your deployed Canva clone editor (e.g., `https://flyr-editor-yourname.vercel.app`)
 
+### HubSpot OAuth
+
+If you are using the HubSpot integration, configure these server env vars as well:
+
+- `HUBSPOT_OAUTH_CLIENT_ID`: HubSpot OAuth app client ID
+- `HUBSPOT_OAUTH_CLIENT_SECRET`: HubSpot OAuth app client secret
+- `OAUTH_STATE_SECRET` or `CRM_ENCRYPTION_KEY`: secret used to sign OAuth `state`
+- `HUBSPOT_OAUTH_SCOPE`: optional space-separated scopes override
+
+The default HubSpot scope set includes:
+
+- `oauth`
+- `crm.objects.contacts.read`
+- `crm.objects.contacts.write`
+- `crm.objects.appointments.read`
+- `crm.objects.appointments.write`
+- `crm.schemas.appointments.read`
+- `crm.schemas.appointments.write`
+
+FLYR creates HubSpot appointments with the `appointments` CRM object, then adds the appointment details as a contact timeline note. This avoids relying on older non-searchable meeting scope names in the OAuth install URL.
+
+If HubSpot shows a scope-mismatch error during connect, make sure the scopes enabled in the HubSpot developer app match `HUBSPOT_OAUTH_SCOPE`. If you already set `HUBSPOT_OAUTH_SCOPE` in production, update that env var directly because the code default is only used when the env var is unset.
+
 ### 3. Set Up Supabase
 
 1. Create a new Supabase project

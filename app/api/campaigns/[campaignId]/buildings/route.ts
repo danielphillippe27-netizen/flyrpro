@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
+import { getCampaignBuildingStatus } from '@/lib/campaignStats';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { gunzipSync } from 'zlib';
 
@@ -49,6 +50,7 @@ interface CampaignAddressRow {
   house_number: string | null;
   street_name: string | null;
   building_id: string | null;
+  address_status?: string | null;
   visited: boolean | null;
   scans: number | null;
 }
@@ -129,8 +131,15 @@ function buildGoldFallbackFeatureCollection(
     const linkedAddresses = addressGroups.get(building.id) ?? [];
     const firstAddress = linkedAddresses[0] ?? null;
     const scansTotal = linkedAddresses.reduce((sum, address) => sum + (address.scans ?? 0), 0);
-    const anyVisited = linkedAddresses.some((address) => Boolean(address.visited));
     const isMatched = linkedAddresses.length > 0;
+    const statusRank = { not_visited: 0, visited: 1, hot: 2 } as const;
+    const buildingStatus = linkedAddresses.reduce<'not_visited' | 'visited' | 'hot'>(
+      (current, address) => {
+        const next = getCampaignBuildingStatus(address);
+        return statusRank[next] > statusRank[current] ? next : current;
+      },
+      'not_visited'
+    );
 
     return [{
       type: 'Feature',
@@ -146,6 +155,7 @@ function buildGoldFallbackFeatureCollection(
         address_text: linkedAddresses.length === 1 ? firstAddress?.formatted ?? null : null,
         house_number: linkedAddresses.length === 1 ? firstAddress?.house_number ?? null : null,
         street_name: linkedAddresses.length === 1 ? firstAddress?.street_name ?? null : null,
+        address_status: linkedAddresses.length === 1 ? firstAddress?.address_status ?? null : null,
         height: 10,
         height_m: 10,
         min_height: 0,
@@ -153,7 +163,7 @@ function buildGoldFallbackFeatureCollection(
         building_type: building.building_type ?? null,
         feature_type: isMatched ? 'matched_house' : 'orphan',
         feature_status: isMatched ? 'matched' : 'orphan_building',
-        status: anyVisited ? 'visited' : 'not_visited',
+        status: buildingStatus,
         scans_today: 0,
         scans_total: scansTotal,
       },
@@ -178,7 +188,7 @@ async function fetchGoldFallbackFeatures(
 
   const { data: campaignAddresses, error: addressesError } = await supabase
     .from('campaign_addresses')
-    .select('id, formatted, house_number, street_name, building_id, visited, scans')
+    .select('id, formatted, house_number, street_name, building_id, visited, scans, address_statuses(status)')
     .eq('campaign_id', campaignId);
 
   if (addressesError) {
@@ -191,9 +201,18 @@ async function fetchGoldFallbackFeatures(
     return null;
   }
 
+  const normalizedAddresses = (campaignAddresses as Array<CampaignAddressRow & {
+    address_statuses?: { status?: string | null } | Array<{ status?: string | null }> | null;
+  }>).map((address) => ({
+    ...address,
+    address_status: Array.isArray(address.address_statuses)
+      ? address.address_statuses[0]?.status ?? null
+      : address.address_statuses?.status ?? null,
+  }));
+
   const linkedBuildingIds = Array.from(
     new Set(
-      (campaignAddresses as CampaignAddressRow[])
+      normalizedAddresses
         .map((address) => address.building_id)
         .filter((buildingId): buildingId is string => typeof buildingId === 'string' && buildingId.length > 0)
     )
@@ -212,7 +231,7 @@ async function fetchGoldFallbackFeatures(
       console.log(`[API] Gold fallback loaded ${linkedBuildings.length} buildings directly by linked ids`);
       const fallback = buildGoldFallbackFeatureCollection(
         linkedBuildings as GoldBuildingRow[],
-        campaignAddresses as CampaignAddressRow[]
+        normalizedAddresses
       );
       if (fallback.features.length > 0) {
         return fallback;
@@ -254,7 +273,7 @@ async function fetchGoldFallbackFeatures(
 
   const fallback = buildGoldFallbackFeatureCollection(
     goldBuildings,
-    campaignAddresses as CampaignAddressRow[]
+    normalizedAddresses
   );
 
   if (fallback.features.length === 0) {

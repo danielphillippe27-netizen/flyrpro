@@ -5,7 +5,6 @@ import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { useTheme } from '@/lib/theme-provider';
 import { useWorkspace } from '@/lib/workspace-context';
-import { createClient } from '@/lib/supabase/client';
 import { getMapboxToken } from '@/lib/mapbox';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -73,6 +72,16 @@ type RouteMember = {
   role: 'owner' | 'admin' | 'member';
   fullName: string | null;
   email: string | null;
+};
+
+type TeamRosterMember = {
+  user_id: string;
+  display_name: string;
+  role: 'owner' | 'admin' | 'member';
+};
+
+type TeamRosterResponse = {
+  members?: TeamRosterMember[];
 };
 
 const COLORS = [
@@ -363,56 +372,32 @@ export function OptimizedRouteView({ campaignId, campaignName, addresses }: Opti
     }
 
     let mounted = true;
-    const supabase = createClient();
 
     (async () => {
-      const { data: memberRows, error: memberError } = await supabase
-        .from('workspace_members')
-        .select('user_id, role')
-        .eq('workspace_id', currentWorkspaceId);
-
-      if (memberError || !mounted) return;
-      const rows = (memberRows ?? []) as Array<{ user_id: string; role: 'owner' | 'admin' | 'member' }>;
-      const userIds = Array.from(new Set(rows.map((row) => row.user_id)));
-
-      let profileMap = new Map<string, { full_name: string | null; email: string | null }>();
-      if (userIds.length > 0) {
-        const { data: profileRows } = await supabase
-          .from('profiles')
-          .select('id, full_name, email')
-          .in('id', userIds);
-
-        if (mounted && profileRows) {
-          profileMap = new Map(
-            profileRows.map((profile) => [
-              profile.id as string,
-              {
-                full_name: (profile as { full_name?: string | null }).full_name ?? null,
-                email: (profile as { email?: string | null }).email ?? null,
-              },
-            ])
-          );
+      try {
+        const response = await fetch(
+          `/api/team/roster?workspaceId=${encodeURIComponent(currentWorkspaceId)}`
+        );
+        if (!response.ok || !mounted) {
+          setMembers([]);
+          return;
         }
-      }
 
-      if (!mounted) return;
-      const ordered = rows
-        .map((row) => {
-          const profile = profileMap.get(row.user_id);
-          return {
-            userId: row.user_id,
-            role: row.role,
-            fullName: profile?.full_name ?? null,
-            email: profile?.email ?? null,
-          } satisfies RouteMember;
-        })
-        .sort((a, b) => {
-          const rank = (role: RouteMember['role']) => (role === 'owner' ? 0 : role === 'admin' ? 1 : 2);
-          const roleDelta = rank(a.role) - rank(b.role);
-          if (roleDelta !== 0) return roleDelta;
-          return displayMemberName(a).localeCompare(displayMemberName(b));
-        });
-      setMembers(ordered);
+        const data = (await response.json()) as TeamRosterResponse;
+        const ordered = (Array.isArray(data.members) ? data.members : []).map((member) => ({
+          userId: member.user_id,
+          role: member.role,
+          fullName: member.display_name ?? null,
+          email: null,
+        })) satisfies RouteMember[];
+
+        if (!mounted) return;
+        setMembers(ordered);
+      } catch (error) {
+        console.error('Error loading route assignees:', error);
+        if (!mounted) return;
+        setMembers([]);
+      }
     })();
 
     return () => {

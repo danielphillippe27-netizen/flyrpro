@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, Suspense } from 'react';
+import { useCallback, useEffect, useRef, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -14,6 +14,8 @@ type InviteInfo = {
   role: string;
 };
 
+const PENDING_INVITE_PROFILE_KEY = 'flyr.pendingInviteProfile';
+
 function JoinContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -23,6 +25,7 @@ function JoinContent() {
   const [invite, setInvite] = useState<InviteInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const hasAutoAcceptedRef = useRef(false);
 
   useEffect(() => {
     if (!token?.trim()) {
@@ -58,33 +61,78 @@ function JoinContent() {
 
   useEffect(() => {
     if (!authChecked || user) return;
-    const loginUrl = `/login?next=${encodeURIComponent(`/join?token=${encodeURIComponent(token ?? '')}`)}`;
+    const inviteToken = token?.trim() ?? '';
+    const loginUrl = `/login?token=${encodeURIComponent(inviteToken)}&next=${encodeURIComponent(`/join?token=${encodeURIComponent(inviteToken)}`)}`;
     router.replace(loginUrl);
   }, [authChecked, user, token, router]);
 
-  const handleAccept = async () => {
+  const handleAccept = useCallback(async (mode: 'manual' | 'auto' = 'manual') => {
     if (!token || !invite) return;
     setError(null);
     setLoading(true);
     try {
+      let firstName: string | undefined;
+      let lastName: string | undefined;
+      if (typeof window !== 'undefined') {
+        const stored = window.localStorage.getItem(`${PENDING_INVITE_PROFILE_KEY}:${token}`);
+        if (stored) {
+          try {
+            const parsed = JSON.parse(stored) as {
+              firstName?: unknown;
+              lastName?: unknown;
+            };
+            if (typeof parsed.firstName === 'string' && parsed.firstName.trim()) {
+              firstName = parsed.firstName.trim();
+            }
+            if (typeof parsed.lastName === 'string' && parsed.lastName.trim()) {
+              lastName = parsed.lastName.trim();
+            }
+          } catch {
+            // Ignore malformed local data from earlier app versions.
+          }
+        }
+      }
+
       const res = await fetch('/api/invites/accept', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ token }),
+        body: JSON.stringify({
+          token,
+          ...(firstName ? { firstName } : {}),
+          ...(lastName ? { lastName } : {}),
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.redirect) {
+        if (typeof window !== 'undefined') {
+          window.localStorage.removeItem(`${PENDING_INVITE_PROFILE_KEY}:${token}`);
+        }
         router.push(data.redirect);
         return;
       }
       setError(data?.error ?? 'Failed to join workspace');
-    } catch (e) {
-      setError('Network error. Please try again.');
+    } catch {
+      setError(
+        mode === 'auto'
+          ? 'Could not auto-join yet. Use the button below to try again.'
+          : 'Network error. Please try again.'
+      );
     } finally {
       setLoading(false);
     }
-  };
+  }, [invite, router, token]);
+
+  useEffect(() => {
+    if (!invite || !user || !token || loading || hasAutoAcceptedRef.current) return;
+    const emailMatch =
+      user.email &&
+      invite.email &&
+      user.email.toLowerCase().trim() === invite.email.toLowerCase().trim();
+    if (!emailMatch) return;
+    hasAutoAcceptedRef.current = true;
+    handleAccept('auto');
+  }, [handleAccept, invite, loading, token, user]);
 
   if (!authChecked || (!user && token)) {
     return (
@@ -159,7 +207,7 @@ function JoinContent() {
         </p>
         {error && <p className="text-sm text-destructive">{error}</p>}
         <Button
-          onClick={handleAccept}
+          onClick={() => handleAccept('manual')}
           disabled={!emailMatch || loading}
           className="w-full"
         >

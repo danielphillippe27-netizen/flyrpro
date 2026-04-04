@@ -6,6 +6,8 @@ export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get('code');
   const next = searchParams.get('next') ?? '/home';
+  const inviteToken = searchParams.get('token');
+  const workspaceIntent = searchParams.get('workspace');
   const errorParam = searchParams.get('error');
   const errorDescription = searchParams.get('error_description') ?? '';
 
@@ -35,6 +37,8 @@ export async function GET(request: Request) {
     if (!error) {
       const gateUrl = new URL('/gate', origin);
       if (next && next !== '/home') gateUrl.searchParams.set('next', next);
+      if (inviteToken?.trim()) gateUrl.searchParams.set('token', inviteToken.trim());
+      if (workspaceIntent?.trim()) gateUrl.searchParams.set('workspace', workspaceIntent.trim());
       return NextResponse.redirect(gateUrl.toString());
     }
 
@@ -45,6 +49,9 @@ export async function GET(request: Request) {
     } else {
       loginUrl.searchParams.set('error', 'auth_failed');
     }
+    if (next && next !== '/home') loginUrl.searchParams.set('next', next);
+    if (inviteToken?.trim()) loginUrl.searchParams.set('token', inviteToken.trim());
+    if (workspaceIntent?.trim()) loginUrl.searchParams.set('workspace', workspaceIntent.trim());
     return NextResponse.redirect(loginUrl);
   }
 
@@ -54,6 +61,8 @@ export async function GET(request: Request) {
     loginUrl.searchParams.set('error', errorParam === 'access_denied' ? 'apple_exchange_failed' : 'auth_failed');
     if (errorDescription) loginUrl.searchParams.set('error_description', errorDescription);
   }
+  if (next && next !== '/home') loginUrl.searchParams.set('next', next);
+  if (inviteToken?.trim()) loginUrl.searchParams.set('token', inviteToken.trim());
+  if (workspaceIntent?.trim()) loginUrl.searchParams.set('workspace', workspaceIntent.trim());
   return NextResponse.redirect(loginUrl);
 }
-

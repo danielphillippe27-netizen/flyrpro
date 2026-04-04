@@ -8,6 +8,7 @@ import {
   getWebSuccessUrl,
   verifyOAuthState,
 } from '../../_lib/oauth';
+import { FUB_CONNECTION_PROVIDER, FUB_CONNECTION_PROVIDERS } from '../../_lib/provider';
 
 function withMessage(url: string, message: string): string {
   try {
@@ -82,7 +83,7 @@ export async function GET(request: NextRequest) {
       .from('crm_connections')
       .select('id')
       .eq('workspace_id', state.workspaceId)
-      .eq('provider', 'followupboss')
+      .in('provider', [...FUB_CONNECTION_PROVIDERS])
       .maybeSingle();
 
     if (fetchConnectionError) {
@@ -95,7 +96,7 @@ export async function GET(request: NextRequest) {
         .from('crm_connections')
         .update({
           status: 'connected',
-          api_key_encrypted: null,
+          api_key_encrypted: '',
           last_error: null,
           last_tested_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
@@ -110,9 +111,9 @@ export async function GET(request: NextRequest) {
       const { error: insertError } = await supabase.from('crm_connections').insert({
         user_id: state.userId,
         workspace_id: state.workspaceId,
-        provider: 'followupboss',
+        provider: FUB_CONNECTION_PROVIDER,
         status: 'connected',
-        api_key_encrypted: null,
+        api_key_encrypted: '',
         last_error: null,
         last_tested_at: new Date().toISOString(),
       });

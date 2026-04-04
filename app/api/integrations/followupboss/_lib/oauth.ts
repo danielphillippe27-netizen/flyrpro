@@ -1,4 +1,5 @@
 import { createHmac, randomBytes } from 'crypto';
+import { getOAuthStateSecret } from './env';
 
 export type OAuthPlatform = 'ios' | 'web';
 
@@ -17,7 +18,7 @@ const FUB_OAUTH_AUTHORIZE_URL =
   process.env.FUB_OAUTH_AUTHORIZE_URL ?? 'https://app.followupboss.com/oauth/authorize';
 const FUB_OAUTH_TOKEN_URL =
   process.env.FUB_OAUTH_TOKEN_URL ?? 'https://app.followupboss.com/oauth/token';
-const OAUTH_STATE_SECRET = process.env.OAUTH_STATE_SECRET || process.env.ENCRYPTION_KEY || '';
+const OAUTH_STATE_SECRET = getOAuthStateSecret();
 const OAUTH_STATE_TTL_SECONDS = 10 * 60;
 const DEFAULT_APP_ORIGIN = 'https://www.flyrpro.app';
 

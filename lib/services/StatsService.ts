@@ -11,7 +11,28 @@ type AppointmentCandidateRow = {
   address?: string | null;
   campaign_id?: string | null;
   status?: string | null;
+  appointment_at?: string | null;
 };
+
+type LeadCandidateRow = AppointmentCandidateRow;
+
+function getErrorMessage(error: unknown): string {
+  if (!error || typeof error !== 'object') return '';
+  if ('message' in error && typeof (error as { message?: unknown }).message === 'string') {
+    return (error as { message: string }).message;
+  }
+  return '';
+}
+
+function isMissingContactsColumn(error: unknown, column: string): boolean {
+  const message = getErrorMessage(error).toLowerCase();
+  return (
+    message.includes(`column contacts.${column}`) ||
+    message.includes(`column "${column}"`) ||
+    message.includes(`'${column}' column`) ||
+    message.includes(`${column} does not exist`)
+  );
+}
 
 function mapRow(row: Record<string, unknown>): UserStats {
   return {
@@ -43,6 +64,10 @@ function isAppointmentStatus(status: unknown): boolean {
   return normalized === 'interested' || normalized === 'hot' || normalized === 'appointment';
 }
 
+function hasAppointment(row: AppointmentCandidateRow): boolean {
+  return Boolean(row.appointment_at) || isAppointmentStatus(row.status);
+}
+
 function appointmentSignature(row: AppointmentCandidateRow): string {
   return [
     (row.full_name ?? row.name ?? '').trim().toLowerCase(),
@@ -53,8 +78,72 @@ function appointmentSignature(row: AppointmentCandidateRow): string {
   ].join('|');
 }
 
+async function fetchLeadCandidateRows(
+  client: ReturnType<typeof createClient>,
+  userId: string
+): Promise<LeadCandidateRow[]> {
+  const [{ data: initialContacts, error: initialContactsError }, legacyResult] = await Promise.all([
+    client
+      .from('contacts')
+      .select('full_name, phone, email, address, campaign_id, status, appointment_at')
+      .eq('user_id', userId),
+    client
+      .from('field_leads')
+      .select('full_name, name, phone, email, address, campaign_id, status')
+      .eq('user_id', userId),
+  ]);
+
+  let contacts = initialContacts;
+  let contactsError = initialContactsError;
+
+  if (contactsError && isMissingContactsColumn(contactsError, 'appointment_at')) {
+    const retryResult = await client
+      .from('contacts')
+      .select('full_name, phone, email, address, campaign_id, status')
+      .eq('user_id', userId);
+
+    contacts = retryResult.data;
+    contactsError = retryResult.error;
+  }
+
+  if (contactsError) {
+    throw new Error(contactsError.message || 'Failed to load leads');
+  }
+
+  return [
+    ...((contacts ?? []) as LeadCandidateRow[]),
+    ...(legacyResult.error ? [] : ((legacyResult.data ?? []) as LeadCandidateRow[])),
+  ];
+}
+
 export class StatsService {
   private static client = createClient();
+
+  private static emptyStats(userId = ''): UserStats {
+    const nowIso = new Date().toISOString();
+    return {
+      id: userId,
+      user_id: userId,
+      day_streak: 0,
+      best_streak: 0,
+      doors_knocked: 0,
+      flyers: 0,
+      conversations: 0,
+      leads_created: 0,
+      qr_codes_scanned: 0,
+      distance_walked: 0,
+      time_tracked: 0,
+      conversation_per_door: 0,
+      conversation_lead_rate: 0,
+      qr_code_scan_rate: 0,
+      qr_code_lead_rate: 0,
+      streak_days: null,
+      xp: 0,
+      routes_walked: 0,
+      updated_at: nowIso,
+      created_at: nowIso,
+    };
+  }
 
   /**
    * Fetches the current user's stats from public.user_stats.
@@ -74,32 +163,64 @@ export class StatsService {
     return mapRow(data as Record<string, unknown>);
   }
 
-  static async fetchAppointmentCount(userId: string): Promise<number> {
-    const [{ data: contacts, error: contactsError }, legacyResult] = await Promise.all([
-      this.client
-        .from('contacts')
-        .select('full_name, phone, email, address, campaign_id, status')
-        .eq('user_id', userId),
-      this.client
-        .from('field_leads')
-        .select('full_name, name, phone, email, address, campaign_id, status')
-        .eq('user_id', userId),
-    ]);
+  static async fetchUserStatsForUsers(userIds: string[]): Promise<UserStats[]> {
+    const uniqueUserIds = Array.from(new Set(userIds.filter(Boolean)));
+    if (uniqueUserIds.length === 0) return [];
 
-    if (contactsError) {
-      throw new Error(contactsError.message || 'Failed to load appointments');
+    const { data, error } = await this.client
+      .from('user_stats')
+      .select('*')
+      .in('user_id', uniqueUserIds);
+
+    if (error) throw new Error(error.message || 'Failed to load stats');
+    return ((data ?? []) as Array<Record<string, unknown>>).map((row) => mapRow(row));
+  }
+
+  static aggregateUserStats(stats: UserStats[], userId = 'all'): UserStats | null {
+    if (stats.length === 0) return null;
+
+    const aggregated = this.emptyStats(userId);
+    let latestUpdatedAt = aggregated.updated_at;
+
+    for (const stat of stats) {
+      aggregated.day_streak = Math.max(aggregated.day_streak, stat.day_streak);
+      aggregated.best_streak = Math.max(aggregated.best_streak, stat.best_streak);
+      aggregated.doors_knocked += stat.doors_knocked;
+      aggregated.flyers += stat.flyers;
+      aggregated.conversations += stat.conversations;
+      aggregated.leads_created += stat.leads_created;
+      aggregated.qr_codes_scanned += stat.qr_codes_scanned;
+      aggregated.distance_walked += stat.distance_walked;
+      aggregated.time_tracked += stat.time_tracked;
+      aggregated.xp += stat.xp;
+      aggregated.routes_walked = (aggregated.routes_walked ?? 0) + (stat.routes_walked ?? 0);
+
+      if (stat.updated_at > latestUpdatedAt) {
+        latestUpdatedAt = stat.updated_at;
+      }
     }
 
-    const rows: AppointmentCandidateRow[] = [
-      ...((contacts ?? []) as AppointmentCandidateRow[]),
-      ...(legacyResult.error ? [] : ((legacyResult.data ?? []) as AppointmentCandidateRow[])),
-    ];
+    aggregated.updated_at = latestUpdatedAt;
+    aggregated.conversation_per_door =
+      aggregated.doors_knocked > 0 ? aggregated.conversations / aggregated.doors_knocked : 0;
+    aggregated.conversation_lead_rate =
+      aggregated.conversations > 0 ? aggregated.leads_created / aggregated.conversations : 0;
+    aggregated.qr_code_scan_rate =
+      aggregated.flyers > 0 ? aggregated.qr_codes_scanned / aggregated.flyers : 0;
+    aggregated.qr_code_lead_rate =
+      aggregated.qr_codes_scanned > 0 ? aggregated.leads_created / aggregated.qr_codes_scanned : 0;
+
+    return aggregated;
+  }
+
+  static async fetchAppointmentCount(userId: string): Promise<number> {
+    const rows = await fetchLeadCandidateRows(this.client, userId);
 
     const signatures = new Set<string>();
     let count = 0;
 
     for (const row of rows) {
-      if (!isAppointmentStatus(row.status)) continue;
+      if (!hasAppointment(row)) continue;
       const signature = appointmentSignature(row);
       if (signatures.has(signature)) continue;
       signatures.add(signature);
@@ -107,6 +228,17 @@ export class StatsService {
     }
 
     return count;
+  }
+
+  static async fetchLeadCount(userId: string): Promise<number> {
+    const rows = await fetchLeadCandidateRows(this.client, userId);
+    const signatures = new Set<string>();
+
+    for (const row of rows) {
+      signatures.add(appointmentSignature(row));
+    }
+
+    return signatures.size;
   }
 
   static async createOrUpdateUserStats(userId: string, updates: Partial<UserStats>): Promise<UserStats> {

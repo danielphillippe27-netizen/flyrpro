@@ -149,8 +149,20 @@ function isAppointmentStatus(rawStatus: string): boolean {
   return normalized === 'interested' || normalized === 'hot' || normalized === 'appointment';
 }
 
-function needsFollowUp(status: string, reminderDateIso: string | null): boolean {
-  if (reminderDateIso) return true;
+function getFollowUpDateIso(row: Record<string, unknown>): string | null {
+  return toIsoOrNull(row.follow_up_at) ?? toIsoOrNull(row.reminder_date);
+}
+
+function getAppointmentDateIso(row: Record<string, unknown>): string | null {
+  return toIsoOrNull(row.appointment_at);
+}
+
+function hasAppointment(status: string, appointmentDateIso: string | null): boolean {
+  return Boolean(appointmentDateIso) || isAppointmentStatus(status);
+}
+
+function needsFollowUp(status: string, followUpDateIso: string | null): boolean {
+  if (followUpDateIso) return true;
   const normalized = status.trim().toLowerCase();
   return (
     normalized === 'follow_up' ||
@@ -173,7 +185,8 @@ function buildContactRowSignature(row: Record<string, unknown>): string {
   const address = firstNonEmptyString(row.address)?.toLowerCase() ?? '';
   const campaignId = firstNonEmptyString(row.campaign_id) ?? '';
   const status = firstNonEmptyString(row.status)?.toLowerCase() ?? '';
-  const reminderDateIso = toIsoOrNull(row.reminder_date) ?? '';
+  const followUpDateIso = getFollowUpDateIso(row) ?? '';
+  const appointmentDateIso = getAppointmentDateIso(row) ?? '';
   const updatedAtIso = toIsoOrNull(row.updated_at) ?? '';
   const createdAtIso = toIsoOrNull(row.created_at) ?? '';
 
@@ -185,7 +198,8 @@ function buildContactRowSignature(row: Record<string, unknown>): string {
     address,
     campaignId,
     status,
-    reminderDateIso,
+    followUpDateIso,
+    appointmentDateIso,
     updatedAtIso || createdAtIso,
   ].join('|');
 }
@@ -269,18 +283,19 @@ function normalizeContactEvents(
     const status = firstNonEmptyString(row.status)?.toLowerCase() ?? '';
     const contactName = firstNonEmptyString(row.full_name, row.name);
     const address = firstNonEmptyString(row.address) ?? '';
-    const reminderDateIso = toIsoOrNull(row.reminder_date);
+    const followUpDateIso = getFollowUpDateIso(row);
+    const appointmentDateIso = getAppointmentDateIso(row);
     const updatedAtIso = toIsoOrNull(row.updated_at);
     const createdAtIso = toIsoOrNull(row.created_at) ?? updatedAtIso ?? new Date().toISOString();
 
     if (!id || !userId) continue;
 
-    if (type === 'appointment' && !isAppointmentStatus(status)) continue;
-    if (type === 'followup' && !needsFollowUp(status, reminderDateIso)) continue;
+    if (type === 'appointment' && !hasAppointment(status, appointmentDateIso)) continue;
+    if (type === 'followup' && !needsFollowUp(status, followUpDateIso)) continue;
 
     const eventTime = type === 'followup'
-      ? reminderDateIso ?? updatedAtIso ?? createdAtIso
-      : updatedAtIso ?? createdAtIso;
+      ? followUpDateIso ?? updatedAtIso ?? createdAtIso
+      : appointmentDateIso ?? updatedAtIso ?? createdAtIso;
 
     if (!isWithinRange(eventTime, start, end)) continue;
 
@@ -302,7 +317,8 @@ function normalizeContactEvents(
         contact_name: contactName,
         address,
         status,
-        reminder_date: reminderDateIso,
+        follow_up_at: followUpDateIso,
+        appointment_at: appointmentDateIso,
       },
     });
   }

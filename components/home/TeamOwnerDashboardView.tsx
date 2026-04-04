@@ -5,7 +5,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { TeamControlsBar, type TeamControlsRange } from '@/components/home/team/TeamControlsBar';
 import { TeamActivityTab } from '@/components/home/team/TeamActivityTab';
 import { TeamDashboardTab } from '@/components/home/team/TeamDashboardTab';
-import { TeamMembersTab } from '@/components/home/team/TeamMembersTab';
+import { TeamSettingsTab } from '@/components/home/team/TeamSettingsTab';
 import { MemberDetailDrawer } from '@/components/home/team/MemberDetailDrawer';
 import { useWorkspace } from '@/lib/workspace-context';
 
@@ -68,10 +68,25 @@ export function TeamOwnerDashboardView() {
           members={members}
         />
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="mb-4">
-            <TabsTrigger value="summary">Summary</TabsTrigger>
-            <TabsTrigger value="activity">Activity</TabsTrigger>
-            <TabsTrigger value="members">Members</TabsTrigger>
+          <TabsList className="mb-4 gap-1 bg-transparent p-0">
+            <TabsTrigger
+              value="summary"
+              className="operator-surface border border-transparent bg-transparent px-4 data-[state=active]:border-border data-[state=active]:bg-card data-[state=active]:shadow-none focus-visible:ring-0"
+            >
+              Summary
+            </TabsTrigger>
+            <TabsTrigger
+              value="activity"
+              className="operator-surface border border-transparent bg-transparent px-4 data-[state=active]:border-border data-[state=active]:bg-card data-[state=active]:shadow-none focus-visible:ring-0"
+            >
+              Activity
+            </TabsTrigger>
+            <TabsTrigger
+              value="settings"
+              className="operator-surface border border-transparent bg-transparent px-4 data-[state=active]:border-border data-[state=active]:bg-card data-[state=active]:shadow-none focus-visible:ring-0"
+            >
+              Settings
+            </TabsTrigger>
           </TabsList>
           <TabsContent value="summary">
             <TeamDashboardTab
@@ -83,8 +98,8 @@ export function TeamOwnerDashboardView() {
           <TabsContent value="activity">
             <TeamActivityTab range={range} memberIds={memberIds} />
           </TabsContent>
-          <TabsContent value="members">
-            <TeamMembersTab
+          <TabsContent value="settings">
+            <TeamSettingsTab
               range={range}
               onMemberClick={(m) => setSelectedMember({ ...m, color: m.color ?? '#3B82F6' })}
             />

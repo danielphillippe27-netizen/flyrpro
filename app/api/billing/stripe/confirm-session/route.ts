@@ -37,7 +37,10 @@ export async function POST(request: NextRequest) {
       expand: ['subscription'],
     });
 
-    if (session.payment_status !== 'paid') {
+    if (
+      session.payment_status !== 'paid' &&
+      session.payment_status !== 'no_payment_required'
+    ) {
       return NextResponse.json(
         { error: 'Session not paid' },
         { status: 400 }

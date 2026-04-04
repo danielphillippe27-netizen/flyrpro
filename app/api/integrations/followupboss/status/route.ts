@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveWorkspaceIdForUser, type MinimalSupabaseClient } from '@/app/api/_utils/workspace';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
+import { FUB_CONNECTION_PROVIDERS } from '../_lib/provider';
 
 export async function GET(request: NextRequest) {
   try {
@@ -34,7 +35,7 @@ export async function GET(request: NextRequest) {
       .from('crm_connections')
       .select('status, created_at, updated_at, last_tested_at, last_push_at, last_error')
       .eq('workspace_id', targetWorkspaceId)
-      .eq('provider', 'followupboss')
+      .in('provider', [...FUB_CONNECTION_PROVIDERS])
       .maybeSingle();
 
     if (!connection) {

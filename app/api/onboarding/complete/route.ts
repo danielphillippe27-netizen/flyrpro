@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
+import { WORKSPACE_TRIAL_DAYS } from '@/app/lib/billing/workspace-trial';
 
 const INDUSTRIES = [
   'Real Estate',
@@ -165,6 +166,35 @@ export async function POST(request: NextRequest) {
       workspaceId = newWorkspace.id;
     }
 
+    const { data: currentWorkspace, error: currentWorkspaceError } = await admin
+      .from('workspaces')
+      .select('subscription_status, trial_ends_at, onboarding_completed_at')
+      .eq('id', workspaceId)
+      .maybeSingle();
+
+    if (currentWorkspaceError) {
+      return NextResponse.json(
+        { error: 'Failed to load workspace state' },
+        { status: 500 }
+      );
+    }
+
+    const currentSubscriptionStatus = currentWorkspace?.subscription_status ?? 'inactive';
+    const currentTrialEndsAt =
+      typeof currentWorkspace?.trial_ends_at === 'string'
+        ? currentWorkspace.trial_ends_at
+        : null;
+    const onboardingWasComplete = !!currentWorkspace?.onboarding_completed_at;
+    const shouldStartTrial =
+      !onboardingWasComplete &&
+      currentSubscriptionStatus === 'inactive' &&
+      !currentTrialEndsAt;
+    const startedTrialEndsAt = shouldStartTrial
+      ? new Date(
+          Date.now() + WORKSPACE_TRIAL_DAYS * 24 * 60 * 60 * 1000
+        ).toISOString()
+      : null;
+
     const updates: Record<string, unknown> = {
       updated_at: new Date().toISOString(),
       onboarding_completed_at: new Date().toISOString(),
@@ -194,6 +224,11 @@ export async function POST(request: NextRequest) {
       } else if (useCase === 'solo') {
         updates.max_seats = 1;
       }
+    }
+
+    if (shouldStartTrial && startedTrialEndsAt) {
+      updates.subscription_status = 'trialing';
+      updates.trial_ends_at = startedTrialEndsAt;
     }
 
     // Brokerage: persist brokerage_id when selected, else try template match or store custom brokerage_name
@@ -234,7 +269,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({ success: true, redirect: '/subscribe' });
+    const resultingSubscriptionStatus = shouldStartTrial
+      ? 'trialing'
+      : currentSubscriptionStatus;
+    const resultingTrialEndsAt = shouldStartTrial
+      ? startedTrialEndsAt
+      : currentTrialEndsAt;
+    const hasAccess =
+      resultingSubscriptionStatus === 'active' ||
+      (resultingSubscriptionStatus === 'trialing' &&
+        (!resultingTrialEndsAt || new Date(resultingTrialEndsAt) > new Date()));
+
+    return NextResponse.json({
+      success: true,
+      redirect: hasAccess ? '/home' : '/subscribe',
+    });
   } catch (e) {
     console.error('Onboarding complete error:', e);
     return NextResponse.json(

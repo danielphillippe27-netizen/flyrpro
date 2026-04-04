@@ -176,6 +176,11 @@
   box-shadow: 0 0 20px rgba(239, 68, 68, 0.4), 0 0 40px rgba(239, 68, 68, 0.2);
 }
 
+.operator-surface,
+.operator-surface:hover {
+  box-shadow: none !important;
+}
+
 /* Rotating hero word: fade in */
 @keyframes hero-word-in {
   from {

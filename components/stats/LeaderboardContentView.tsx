@@ -2,179 +2,216 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { LeaderboardService } from '@/lib/services/LeaderboardService';
-import { getClientAsync } from '@/lib/supabase/client';
 import type {
   LeaderboardEntry,
   LeaderboardSortBy,
-  LeaderboardTimeframe,
-  BrokerageLeaderboardEntry,
-  BrokerageLeaderboardTimeframe,
 } from '@/types/database';
 import { LeaderboardView } from './LeaderboardView';
-import { BrokerageLeaderboardView } from './BrokerageLeaderboardView';
-import { MetricPickerView } from './MetricPickerView';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
+import { useWorkspace } from '@/lib/workspace-context';
 
-type LeaderboardMode = 'agents' | 'brokerages';
+type LeaderboardScope = 'global' | 'team';
 
-const BROKERAGE_TIMEFRAMES: { value: BrokerageLeaderboardTimeframe; label: string }[] = [
-  { value: 'all_time', label: 'All Time' },
-  { value: 'month', label: 'This Month' },
+type TeamLeaderboardRow = {
+  user_id: string;
+  display_name: string;
+  doors_knocked: number;
+  conversations: number;
+  total_duration_seconds?: number;
+  distance_meters?: number;
+  last_active_at: string | null;
+};
+
+type TeamLeaderboardDiagnostics = {
+  source?: 'sessions' | 'user_stats_fallback';
+  message?: string | null;
+};
+
+const SCOPES: { value: LeaderboardScope; label: string }[] = [
+  { value: 'global', label: 'Global' },
+  { value: 'team', label: 'Team' },
 ];
 
-export function LeaderboardContentView() {
-  const [mode, setMode] = useState<LeaderboardMode>('agents');
-  const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
-  const [brokerageEntries, setBrokerageEntries] = useState<BrokerageLeaderboardEntry[]>([]);
-  const [sortBy, setSortBy] = useState<LeaderboardSortBy>('flyers');
-  const [timeframe, setTimeframe] = useState<LeaderboardTimeframe>('all_time');
-  const [brokerageTimeframe, setBrokerageTimeframe] = useState<BrokerageLeaderboardTimeframe>('all_time');
-  const [loading, setLoading] = useState(true);
-  const [brokerageLoading, setBrokerageLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [brokerageError, setBrokerageError] = useState<string | null>(null);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+function getMetricValue(
+  entry: Pick<LeaderboardEntry, 'flyers' | 'conversations' | 'distance'>,
+  sortBy: LeaderboardSortBy
+): number {
+  switch (sortBy) {
+    case 'conversations':
+      return entry.conversations;
+    case 'distance':
+      return entry.distance;
+    case 'flyers':
+    default:
+      return entry.flyers;
+  }
+}
 
-  useEffect(() => {
-    getClientAsync()
-      .then((supabase) => supabase.auth.getSession())
-      .then(({ data: { session } }) => {
-        setCurrentUserId(session?.user?.id ?? null);
-      })
-      .catch(() => {});
-  }, []);
+function sortLeaderboardEntries(
+  entries: LeaderboardEntry[],
+  sortBy: LeaderboardSortBy
+): LeaderboardEntry[] {
+  return [...entries]
+    .sort((left, right) => {
+      const delta = getMetricValue(right, sortBy) - getMetricValue(left, sortBy);
+      if (delta !== 0) return delta;
+      if (right.conversations !== left.conversations) {
+        return right.conversations - left.conversations;
+      }
+      return (left.name || left.user_email).localeCompare(right.name || right.user_email);
+    })
+    .map((entry, index) => ({
+      ...entry,
+      rank: index + 1,
+    }));
+}
+
+function mapTeamRows(rows: TeamLeaderboardRow[]): LeaderboardEntry[] {
+  return rows.map((row) => ({
+    id: row.user_id,
+    user_id: row.user_id,
+    user_email: '',
+    name: row.display_name,
+    avatar_url: null,
+    flyers: Number(row.doors_knocked) || 0,
+    conversations: Number(row.conversations) || 0,
+    leads: 0,
+    distance: (Number(row.distance_meters) || 0) / 1000,
+    time_minutes: (Number(row.total_duration_seconds) || 0) / 60,
+    day_streak: 0,
+    best_streak: 0,
+    rank: 0,
+    updated_at: row.last_active_at ?? '',
+  }));
+}
+
+export function LeaderboardContentView() {
+  const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
+  const [sortBy, setSortBy] = useState<LeaderboardSortBy>('flyers');
+  const [scope, setScope] = useState<LeaderboardScope>('global');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [teamNotice, setTeamNotice] = useState<string | null>(null);
+  const {
+    currentWorkspace,
+    currentWorkspaceId,
+    isLoading: workspaceLoading,
+    membershipsByWorkspaceId,
+  } = useWorkspace();
+
+  const currentRole = currentWorkspaceId ? membershipsByWorkspaceId[currentWorkspaceId] : null;
+  const canRequestTeamLeaderboard = Boolean(currentWorkspaceId) && (currentRole === 'owner' || currentRole === 'admin');
+  const effectiveLoading = loading || (scope === 'team' && workspaceLoading);
 
   const loadLeaderboard = useCallback(async () => {
+    if (scope === 'team' && workspaceLoading) {
+      return;
+    }
+
     setLoading(true);
     setError(null);
+    setTeamNotice(null);
     try {
-      const data = await LeaderboardService.fetchLeaderboard(sortBy, 100, 0, timeframe);
-      setEntries(data);
+      if (scope === 'team') {
+        if (!currentWorkspaceId) {
+          setEntries([]);
+          setError('Select a workspace to view the team leaderboard.');
+          return;
+        }
+
+        if (!canRequestTeamLeaderboard) {
+          setEntries([]);
+          setError('Team leaderboard is available to workspace owners and admins.');
+          return;
+        }
+
+        const response = await fetch(
+          `/api/team/leaderboard?workspaceId=${encodeURIComponent(currentWorkspaceId)}`
+        );
+        const payload = (await response.json().catch(() => null)) as
+          | { rows?: TeamLeaderboardRow[]; diagnostics?: TeamLeaderboardDiagnostics; error?: string }
+          | null;
+
+        if (!response.ok) {
+          throw new Error(payload?.error ?? 'Could not load team leaderboard.');
+        }
+
+        const teamEntries = sortLeaderboardEntries(mapTeamRows(payload?.rows ?? []), sortBy);
+        setEntries(teamEntries);
+        setTeamNotice(payload?.diagnostics?.message ?? null);
+        return;
+      }
+
+      const data = await LeaderboardService.fetchLeaderboard(sortBy, 100, 0, 'all_time');
+      setEntries(sortLeaderboardEntries(data, sortBy));
+      setTeamNotice(null);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes('JWT') || msg.includes('401') || msg.includes('auth')) {
+      if (msg.includes('JWT') || msg.includes('401') || msg.includes('auth') || msg.includes('Unauthorized')) {
         setError('Please sign in to view the leaderboard.');
+      } else if (msg.includes('forbidden') || msg.includes('Forbidden')) {
+        setError('You do not have access to this leaderboard yet.');
       } else if (msg.includes('does not exist') || msg.includes('function')) {
         setError('Leaderboard is temporarily unavailable.');
       } else {
         setError('Could not load leaderboard. Check your connection and try again.');
       }
+      setEntries([]);
       console.error('Leaderboard error:', err);
     } finally {
       setLoading(false);
     }
-  }, [sortBy, timeframe]);
-
-  const loadBrokerageLeaderboard = useCallback(async () => {
-    setBrokerageLoading(true);
-    setBrokerageError(null);
-    try {
-      const data = await LeaderboardService.fetchBrokerageLeaderboard(
-        sortBy,
-        100,
-        0,
-        brokerageTimeframe
-      );
-      setBrokerageEntries(data);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setBrokerageError(msg.includes('function') ? 'Brokerage leaderboard is temporarily unavailable.' : 'Could not load brokerage leaderboard.');
-      console.error('Brokerage leaderboard error:', err);
-    } finally {
-      setBrokerageLoading(false);
-    }
-  }, [sortBy, brokerageTimeframe]);
+  }, [canRequestTeamLeaderboard, currentWorkspaceId, scope, sortBy, workspaceLoading]);
 
   useEffect(() => {
-    if (mode === 'agents') loadLeaderboard();
-  }, [mode, loadLeaderboard]);
-
-  useEffect(() => {
-    if (mode === 'brokerages') loadBrokerageLeaderboard();
-  }, [mode, loadBrokerageLeaderboard]);
-
-  useEffect(() => {
-    const unsub = LeaderboardService.subscribeToUpdates((newEntries) => {
-      setEntries(newEntries);
-    });
-    return unsub;
-  }, []);
-
-  const brokerageTimeframeLabel = BROKERAGE_TIMEFRAMES.find((t) => t.value === brokerageTimeframe)?.label ?? '';
+    void loadLeaderboard();
+  }, [loadLeaderboard]);
 
   return (
-    <div className="space-y-4">
-      <Tabs value={mode} onValueChange={(v) => setMode(v as LeaderboardMode)}>
-        <div className="flex flex-wrap items-center gap-4">
-          <TabsList>
-            <TabsTrigger value="agents">Agents</TabsTrigger>
-            <TabsTrigger value="brokerages">Brokerages</TabsTrigger>
-          </TabsList>
-          {mode === 'agents' && (
-            <MetricPickerView
-              sortBy={sortBy}
-              onSortChange={setSortBy}
-              timeframe={timeframe}
-              onTimeframeChange={setTimeframe}
-            />
-          )}
-          {mode === 'brokerages' && (
-            <div className="flex flex-wrap items-center gap-4 bg-card rounded-lg border border-border p-4">
-              <div className="flex items-center gap-2">
-                <label className="text-sm font-medium text-muted-foreground whitespace-nowrap">Period</label>
-                <select
-                  value={brokerageTimeframe}
-                  onChange={(e) => setBrokerageTimeframe(e.target.value as BrokerageLeaderboardTimeframe)}
-                  className="h-9 w-[140px] rounded-md border border-input bg-background px-3 py-1 text-sm"
-                >
-                  {BROKERAGE_TIMEFRAMES.map((t) => (
-                    <option key={t.value} value={t.value}>
-                      {t.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex items-center gap-2">
-                <label className="text-sm font-medium text-muted-foreground whitespace-nowrap">Sort by</label>
-                <select
-                  value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value as LeaderboardSortBy)}
-                  className="h-9 w-[160px] rounded-md border border-input bg-background px-3 py-1 text-sm"
-                >
-                  <option value="flyers">Flyers</option>
-                  <option value="conversations">Conversations</option>
-                  <option value="leads">Leads</option>
-                  <option value="distance">Distance</option>
-                  <option value="time">Time</option>
-                  <option value="day_streak">Day streak</option>
-                  <option value="best_streak">Best streak</option>
-                </select>
-              </div>
-            </div>
-          )}
+    <div className="mx-auto w-full max-w-5xl space-y-5">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="space-y-1">
+          <h1 className="text-3xl font-semibold tracking-tight text-zinc-900 dark:text-white sm:text-4xl">
+            Leaderboard
+          </h1>
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            {scope === 'global'
+              ? 'See how everyone stacks up across the platform.'
+              : `Track performance inside ${currentWorkspace?.name ?? 'your workspace'}.`}
+          </p>
         </div>
-        <TabsContent value="agents" className="mt-4">
-          <LeaderboardView
-            entries={entries}
-            loading={loading}
-            error={error}
-            onRetry={loadLeaderboard}
-            currentUserId={currentUserId}
-            sortBy={sortBy}
-            timeframe={timeframe}
-          />
-        </TabsContent>
-        <TabsContent value="brokerages" className="mt-4">
-          <BrokerageLeaderboardView
-            entries={brokerageEntries}
-            loading={brokerageLoading}
-            error={brokerageError}
-            onRetry={loadBrokerageLeaderboard}
-            sortBy={sortBy}
-            timeframeLabel={brokerageTimeframeLabel}
-          />
-        </TabsContent>
-      </Tabs>
+
+        <div className="inline-flex w-full rounded-full border border-zinc-200 bg-white p-1 dark:border-white/10 dark:bg-white/[0.04] sm:w-auto">
+          {SCOPES.map((option) => (
+            <Button
+              key={option.value}
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setScope(option.value)}
+              className={cn(
+                'flex-1 rounded-full px-4 text-sm text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-white/10 dark:hover:text-white sm:flex-none',
+                scope === option.value && 'bg-zinc-900 text-white hover:bg-zinc-900 hover:text-white dark:bg-white dark:text-black dark:hover:bg-white dark:hover:text-black'
+              )}
+            >
+              {option.label}
+            </Button>
+          ))}
+        </div>
+      </div>
+
+      <LeaderboardView
+        entries={entries}
+        loading={effectiveLoading}
+        error={error}
+        onRetry={loadLeaderboard}
+        sortBy={sortBy}
+        onSortChange={setSortBy}
+      />
+      {scope === 'team' && teamNotice ? (
+        <p className="text-xs text-zinc-400">{teamNotice}</p>
+      ) : null}
     </div>
   );
 }

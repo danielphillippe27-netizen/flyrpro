@@ -17,14 +17,36 @@ export type GateOptions = {
   next?: string | null;
 };
 
+function normalizeNextPath(next: string | null | undefined): string | null {
+  if (!next) return null;
+  return next.startsWith('/') ? next : null;
+}
+
+function extractInviteTokenFromNext(next: string | null | undefined): string | null {
+  const normalizedNext = normalizeNextPath(next);
+  if (!normalizedNext) return null;
+
+  try {
+    const nextURL = new URL(normalizedNext, 'https://flyrpro.app');
+    if (nextURL.pathname !== '/join') {
+      return null;
+    }
+    const token = nextURL.searchParams.get('token');
+    return token?.trim() ? token.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function getPostAuthRedirectForUserId(
   userId: string,
   options: GateOptions = {}
 ): Promise<PostAuthRedirect> {
-  const { inviteToken, next } = options;
+  const next = normalizeNextPath(options.next);
+  const inviteToken = options.inviteToken?.trim() || extractInviteTokenFromNext(next);
 
-  if (inviteToken && inviteToken.trim()) {
-    return { redirect: 'join', path: `/join?token=${encodeURIComponent(inviteToken.trim())}` };
+  if (inviteToken) {
+    return { redirect: 'join', path: `/join?token=${encodeURIComponent(inviteToken)}` };
   }
 
   const admin = createAdminClient();

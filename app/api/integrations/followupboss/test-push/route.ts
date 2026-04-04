@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/server';
 import { resolveWorkspaceIdForUser, type MinimalSupabaseClient } from '@/app/api/_utils/workspace';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { getFubAuthForUserWorkspace } from '../_lib/auth';
+import { FUB_CONNECTION_PROVIDERS } from '../_lib/provider';
 
 export async function POST(request: NextRequest) {
   try {
@@ -54,7 +55,7 @@ export async function POST(request: NextRequest) {
       person: {
         firstName: 'Test',
         lastName: 'Lead',
-        emails: [{ value: `test-${Date.now()}@flyr.test` }],
+        emails: [{ value: `test-${Date.now()}@example.com` }],
         phones: [{ value: '(555) 123-4567' }],
       },
       metadata: {
@@ -86,7 +87,7 @@ export async function POST(request: NextRequest) {
           last_error: `Test push failed: ${fubResponse.status}`,
         })
         .eq('workspace_id', targetWorkspaceId)
-        .eq('provider', 'followupboss');
+        .in('provider', [...FUB_CONNECTION_PROVIDERS]);
 
       return NextResponse.json(
         { error: `Failed to push test lead: ${fubResponse.status}` },
@@ -105,7 +106,7 @@ export async function POST(request: NextRequest) {
         last_error: null,
       })
       .eq('workspace_id', targetWorkspaceId)
-      .eq('provider', 'followupboss');
+      .in('provider', [...FUB_CONNECTION_PROVIDERS]);
 
     return NextResponse.json({
       success: true,

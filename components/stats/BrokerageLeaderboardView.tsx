@@ -2,8 +2,20 @@
 
 import type { BrokerageLeaderboardEntry, LeaderboardSortBy } from '@/types/database';
 import { Card } from '@/components/ui/card';
-import { cn } from '@/lib/utils';
 import { Loader2 } from 'lucide-react';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+
+const METRICS: { value: LeaderboardSortBy; label: string }[] = [
+  { value: 'flyers', label: 'Doors' },
+  { value: 'conversations', label: 'Conversations' },
+  { value: 'distance', label: 'Distance' },
+];
 
 function getDisplayValue(entry: BrokerageLeaderboardEntry, sortBy: LeaderboardSortBy): string {
   switch (sortBy) {
@@ -11,12 +23,8 @@ function getDisplayValue(entry: BrokerageLeaderboardEntry, sortBy: LeaderboardSo
       return String(entry.flyers);
     case 'conversations':
       return String(entry.conversations);
-    case 'leads':
-      return String(entry.leads);
     case 'distance':
       return `${entry.distance.toFixed(1)} km`;
-    case 'time':
-      return `${Math.round(entry.time_minutes)} min`;
     case 'day_streak':
       return String(entry.day_streak);
     case 'best_streak':
@@ -34,31 +42,25 @@ function getSubtitle(entry: BrokerageLeaderboardEntry): string {
   return parts.join(' · ') || '—';
 }
 
-const rankStyles: Record<number, string> = {
-  1: 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800/50',
-  2: 'bg-gray-50 dark:bg-gray-800/30 border-gray-200 dark:border-gray-700/50',
-  3: 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800/50',
-};
-
 export function BrokerageLeaderboardView({
   entries,
   loading,
   error,
   onRetry,
   sortBy,
-  timeframeLabel,
+  onSortChange,
 }: {
   entries: BrokerageLeaderboardEntry[];
   loading: boolean;
   error: string | null;
   onRetry: () => void;
   sortBy: LeaderboardSortBy;
-  timeframeLabel: string;
+  onSortChange: (sortBy: LeaderboardSortBy) => void;
 }) {
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-        <Loader2 className="w-8 h-8 animate-spin text-primary mb-3" />
+      <div className="flex min-h-[420px] flex-col items-center justify-center rounded-xl border border-border bg-card px-6 py-16 text-muted-foreground">
+        <Loader2 className="mb-3 h-8 w-8 animate-spin text-primary" />
         <p className="text-sm">Loading brokerage leaderboard...</p>
       </div>
     );
@@ -81,10 +83,10 @@ export function BrokerageLeaderboardView({
 
   if (entries.length === 0) {
     return (
-      <div className="text-center py-16 bg-card rounded-lg border border-border">
-        <div className="text-4xl mb-3">🏢</div>
-        <p className="text-muted-foreground font-medium">No brokerage rankings {timeframeLabel}</p>
-        <p className="text-muted-foreground/60 text-sm mt-1">
+      <div className="rounded-xl border border-border bg-card px-6 py-16 text-center">
+        <div className="mb-3 text-4xl">🏢</div>
+        <p className="font-medium text-foreground">No brokerage rankings yet</p>
+        <p className="mt-1 text-sm text-muted-foreground">
           Workspaces with a brokerage set will appear here
         </p>
       </div>
@@ -92,58 +94,95 @@ export function BrokerageLeaderboardView({
   }
 
   return (
-    <div className="space-y-2">
-      {entries.map((entry) => {
-        const value = getDisplayValue(entry, sortBy);
-        const subtitle = getSubtitle(entry);
-        const isTopThree = entry.rank <= 3;
-        return (
-          <Card
-            key={entry.brokerage_key}
-            className={cn(
-              'p-3 sm:p-4 transition-colors',
-              isTopThree && rankStyles[entry.rank],
-              !isTopThree && 'border-border'
-            )}
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-8 text-center shrink-0">
-                {entry.rank === 1 ? (
-                  <span className="text-lg" role="img" aria-label="1st place">
-                    👑
+    <div className="overflow-hidden rounded-xl border border-border bg-card">
+      <div className="border-b border-border px-4 py-4 sm:px-5">
+        <div className="grid grid-cols-[28px,minmax(0,1fr),auto] items-center gap-2 text-sm sm:grid-cols-[40px,minmax(0,1fr),auto] sm:gap-3">
+          <span className="text-muted-foreground">#</span>
+          <span className="text-muted-foreground">Brokerage</span>
+          <InlineHeaderSelect
+            value={sortBy}
+            onValueChange={(value) => onSortChange(value as LeaderboardSortBy)}
+            options={METRICS}
+            align="end"
+          />
+        </div>
+      </div>
+
+      <div>
+        {entries.map((entry, index) => {
+          const value = getDisplayValue(entry, sortBy);
+          const subtitle = getSubtitle(entry);
+          return (
+            <Card
+              key={entry.brokerage_key}
+              className={`rounded-none border-0 border-b border-border bg-card p-3 shadow-none transition-colors sm:p-4 ${
+                index === entries.length - 1 ? 'border-b-0' : ''
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-8 shrink-0 text-center">
+                  {entry.rank === 1 ? (
+                    <span className="text-lg text-primary" role="img" aria-label="1st place">👑</span>
+                  ) : entry.rank === 2 ? (
+                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-muted text-xs font-bold text-muted-foreground">
+                      2
+                    </span>
+                  ) : entry.rank === 3 ? (
+                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-muted text-xs font-bold text-muted-foreground">
+                      3
+                    </span>
+                  ) : (
+                    <span className="text-sm font-medium text-muted-foreground">
+                      {entry.rank}
+                    </span>
+                  )}
+                </div>
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                  <span className="text-xs font-medium text-primary">
+                    {entry.display_name.slice(0, 2).toUpperCase()}
                   </span>
-                ) : entry.rank === 2 ? (
-                  <span className="w-6 h-6 rounded-full bg-gray-300 dark:bg-gray-600 inline-flex items-center justify-center text-xs font-bold text-gray-700 dark:text-gray-200">
-                    2
+                </div>
+                <div className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-semibold text-foreground">
+                    {entry.display_name}
                   </span>
-                ) : entry.rank === 3 ? (
-                  <span className="w-6 h-6 rounded-full bg-orange-300 dark:bg-orange-700 inline-flex items-center justify-center text-xs font-bold text-orange-800 dark:text-orange-200">
-                    3
-                  </span>
-                ) : (
-                  <span className="text-sm font-medium text-muted-foreground">
-                    #{entry.rank}
-                  </span>
-                )}
+                  <p className="mt-0.5 truncate text-xs text-muted-foreground">{subtitle}</p>
+                </div>
+                <div className="shrink-0 text-right">
+                  <p className="text-base font-bold text-primary">{value}</p>
+                </div>
               </div>
-              <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center shrink-0">
-                <span className="text-xs font-medium text-muted-foreground">
-                  {entry.display_name.slice(0, 2).toUpperCase()}
-                </span>
-              </div>
-              <div className="flex-1 min-w-0">
-                <span className="font-semibold text-foreground text-sm truncate block">
-                  {entry.display_name}
-                </span>
-                <p className="text-xs text-muted-foreground mt-0.5 truncate">{subtitle}</p>
-              </div>
-              <div className="text-right shrink-0">
-                <p className="text-base font-bold text-primary">{value}</p>
-              </div>
-            </div>
-          </Card>
-        );
-      })}
+            </Card>
+          );
+        })}
+      </div>
     </div>
+  );
+}
+
+function InlineHeaderSelect({
+  value,
+  onValueChange,
+  options,
+  align = 'center',
+}: {
+  value: string;
+  onValueChange: (value: string) => void;
+  options: { value: string; label: string }[];
+  align?: 'center' | 'end';
+}) {
+  return (
+    <Select value={value} onValueChange={onValueChange}>
+      <SelectTrigger className="h-auto min-w-0 border-0 bg-transparent p-0 text-[15px] font-semibold text-primary shadow-none ring-0 hover:bg-transparent focus:ring-0 focus:ring-offset-0 [&_svg]:opacity-100">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent align={align}>
+        {options.map((option) => (
+          <SelectItem key={option.value} value={option.value}>
+            {option.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
