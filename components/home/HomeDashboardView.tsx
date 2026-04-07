@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { fetchHomeDashboard, type HomeDashboardData } from '@/lib/home-dashboard';
 import { HomeHeaderRow } from './HomeHeaderRow';
 import { WeeklyGoalsCard } from './WeeklyGoalsCard';
-import { QuickActionsRow } from './QuickActionsRow';
+import { HomeMetricsRow } from './HomeMetricsRow';
 import { StatsOverviewCard } from './StatsOverviewCard';
 import { QuoteCard } from './QuoteCard';
 import { RecentSnapshot } from './RecentSnapshot';
@@ -12,11 +12,6 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent } from '@/components/ui/card';
 import { useWorkspace } from '@/lib/workspace-context';
-
-interface HomeDashboardViewProps {
-  onCreateCampaign?: () => void;
-  canCreateCampaign?: boolean;
-}
 
 function DashboardSkeleton() {
   return (
@@ -46,10 +41,7 @@ function DashboardSkeleton() {
   );
 }
 
-export function HomeDashboardView({
-  onCreateCampaign,
-  canCreateCampaign = true,
-}: HomeDashboardViewProps) {
+export function HomeDashboardView() {
   const { currentWorkspaceId } = useWorkspace();
   const [data, setData] = useState<HomeDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -103,6 +95,7 @@ export function HomeDashboardView({
     weeklyGoals,
     recentCampaigns,
     lastSessionAt,
+    metrics,
   } = data;
 
   const handleEditGoals = () => {
@@ -113,7 +106,7 @@ export function HomeDashboardView({
   return (
     <div className="max-w-7xl mx-auto pl-0 pr-4 sm:pr-6 lg:pr-8 py-6 space-y-6">
       <HomeHeaderRow
-        firstName={user.firstName}
+        firstName={user.fullName || user.firstName}
         doorsThisWeek={stats.doorsThisWeek}
         weeklyDoorGoal={weeklyGoals.doors}
         dayStreak={stats.dayStreak}
@@ -122,9 +115,11 @@ export function HomeDashboardView({
 
       <QuoteCard noCard className="min-h-[160px]" />
 
-      <QuickActionsRow
-        onCreateCampaign={onCreateCampaign}
-        canCreateCampaign={canCreateCampaign}
+      <HomeMetricsRow
+        doors={metrics.doors}
+        convos={metrics.convos}
+        leads={metrics.leads}
+        appointments={metrics.appointments}
       />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -142,7 +137,7 @@ export function HomeDashboardView({
         <div className="w-full aspect-[4/1] min-h-0">
           <StatsOverviewCard
             doorsAllTime={stats.doorsAllTime}
-            totalMinutesAllTime={stats.totalMinutesAllTime}
+            conversationsAllTime={stats.conversationsAllTime}
           />
         </div>
       </div>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import QRCode from 'qrcode';
 import { createAdminClient } from '@/lib/supabase/server';
+import { createPrintableQrPng, formatAddressLabel } from '@/lib/utils/qr-print';
 
 function isLocalhostUrl(url: string): boolean {
   try {
@@ -17,7 +18,7 @@ export async function POST(request: NextRequest) {
     // 1. READ DATA FROM THE BODY (The Fix)
     // ---------------------------------------------------------
     const body = await request.json();
-    const { campaignId, trackable: trackableParam, baseUrl } = body;
+    const { campaignId, trackable: trackableParam, baseUrl, forceRegenerate } = body;
 
     console.log("Generating QRs for Campaign:", campaignId);
     console.log("Received Body:", body); // <--- CHECK YOUR TERMINAL FOR THIS
@@ -38,7 +39,7 @@ export async function POST(request: NextRequest) {
     // First, try to fetch all addresses for this campaign
     const { data: addresses, error } = await supabase
       .from('campaign_addresses')
-      .select('id, qr_code_base64, purl')
+      .select('id, qr_code_base64, purl, address, formatted, house_number, street_name')
       .eq('campaign_id', campaignId);
 
     if (error) {
@@ -64,12 +65,16 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Regenerate when missing OR when legacy localhost tracking URLs were saved.
-    const addressesNeedingQR = addresses.filter(addr => 
-      !addr.qr_code_base64 ||
-      !addr.purl ||
-      isLocalhostUrl(addr.purl)
-    );
+    // By default, regenerate all addresses so visual QR style updates are applied immediately.
+    // A caller can pass forceRegenerate=false to keep legacy behavior.
+    const shouldRegenerateAll = forceRegenerate !== false;
+    const addressesNeedingQR = shouldRegenerateAll
+      ? addresses
+      : addresses.filter((addr) =>
+          !addr.qr_code_base64 ||
+          !addr.purl ||
+          isLocalhostUrl(addr.purl)
+        );
 
     console.log(`${addressesNeedingQR.length} addresses need QR codes`);
 
@@ -99,15 +104,25 @@ export async function POST(request: NextRequest) {
 
     for (const address of addressesNeedingQR) {
       try {
-        // Create the tracking URL
-        const trackingUrl = `${domain}/api/scan?id=${address.id}`;
+        const addressLabel = formatAddressLabel(address);
+        const addressTag = addressLabel.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 64);
 
-        // Generate Base64 QR Image
-        const qrImageBase64 = await QRCode.toDataURL(trackingUrl, {
+        // Create the tracking URL (keeping address id as primary tracking key).
+        const scanUrl = new URL('/api/scan', domain);
+        scanUrl.searchParams.set('id', address.id);
+        if (addressTag) {
+          scanUrl.searchParams.set('addr', addressTag);
+        }
+        const trackingUrl = scanUrl.toString();
+
+        // Generate a print-ready QR image (QR + address label beneath).
+        const baseQrPng = await QRCode.toBuffer(trackingUrl, {
           type: 'image/png',
           width: 512,
           margin: 2,
         });
+        const printableQrPng = await createPrintableQrPng(baseQrPng, addressLabel);
+        const qrImageBase64 = `data:image/png;base64,${printableQrPng.toString('base64')}`;
 
         // Save to Supabase
         const { error: updateError } = await supabase

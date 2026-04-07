@@ -29,6 +29,7 @@ import { stringify } from 'csv-stringify/sync';
 import { createAdminClient } from '@/lib/supabase/server';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
 import JSZip from 'jszip';
+import { createPrintableQrPng, formatAddressLabel } from '@/lib/utils/qr-print';
 
 // ============================================================================
 // Configuration
@@ -193,8 +194,8 @@ async function checkObjectExists(s3Key: string): Promise<boolean> {
 /**
  * Generate QR code PNG buffer
  */
-async function generateQRBuffer(url: string): Promise<Buffer> {
-  return QRCode.toBuffer(url, {
+async function generateQRBuffer(url: string, addressLabel: string): Promise<Buffer> {
+  const baseQr = await QRCode.toBuffer(url, {
     type: 'png',
     width: 512,
     margin: 2,
@@ -203,6 +204,7 @@ async function generateQRBuffer(url: string): Promise<Buffer> {
       light: '#ffffff',
     },
   });
+  return createPrintableQrPng(baseQr, addressLabel);
 }
 
 /**
@@ -385,7 +387,13 @@ async function processRow(
     const encodedUrlString = encodedUrl.toString();
 
     // Generate QR buffer
-    const qrBuffer = await generateQRBuffer(encodedUrlString);
+    const qrBuffer = await generateQRBuffer(
+      encodedUrlString,
+      formatAddressLabel({
+        address: row.AddressLine,
+        formatted: [row.AddressLine, row.City, row.Province, row.PostalCode].filter(Boolean).join(', '),
+      })
+    );
 
     // Upload to S3
     const { uploaded, url: publicUrl } = await uploadToS3(s3Key, qrBuffer, skipExisting);

@@ -102,6 +102,9 @@ export function LeaderboardContentView() {
 
   const currentRole = currentWorkspaceId ? membershipsByWorkspaceId[currentWorkspaceId] : null;
   const canRequestTeamLeaderboard = Boolean(currentWorkspaceId) && (currentRole === 'owner' || currentRole === 'admin');
+  const visibleScopes = canRequestTeamLeaderboard
+    ? SCOPES
+    : SCOPES.filter((option) => option.value === 'global');
   const effectiveLoading = loading || (scope === 'team' && workspaceLoading);
 
   const loadLeaderboard = useCallback(async () => {
@@ -121,8 +124,7 @@ export function LeaderboardContentView() {
         }
 
         if (!canRequestTeamLeaderboard) {
-          setEntries([]);
-          setError('Team leaderboard is available to workspace owners and admins.');
+          setScope('global');
           return;
         }
 
@@ -168,6 +170,13 @@ export function LeaderboardContentView() {
     void loadLeaderboard();
   }, [loadLeaderboard]);
 
+  useEffect(() => {
+    if (scope !== 'team') return;
+    if (workspaceLoading) return;
+    if (canRequestTeamLeaderboard) return;
+    setScope('global');
+  }, [canRequestTeamLeaderboard, scope, workspaceLoading]);
+
   return (
     <div className="mx-auto w-full max-w-5xl space-y-5">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -183,7 +192,7 @@ export function LeaderboardContentView() {
         </div>
 
         <div className="inline-flex w-full rounded-full border border-zinc-200 bg-white p-1 dark:border-white/10 dark:bg-white/[0.04] sm:w-auto">
-          {SCOPES.map((option) => (
+          {visibleScopes.map((option) => (
             <Button
               key={option.value}
               type="button"

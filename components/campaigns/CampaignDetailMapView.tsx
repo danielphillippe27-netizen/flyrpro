@@ -508,41 +508,27 @@ export function CampaignDetailMapView({
       const getAddressStatus = () => ['coalesce', ['feature-state', 'address_status'], ['get', 'address_status'], 'none'];
       const getQrScanned = () => ['coalesce', ['feature-state', 'qr_scanned'], ['get', 'qr_scanned'], false];
       const getScansTotal = () => ['coalesce', ['feature-state', 'scans_total'], ['get', 'scans_total'], 0];
-      return [
-        'case',
-        ['any', ['==', getQrScanned(), true], ['>', getScansTotal(), 0]],
-        MAP_STATUS_CONFIG.QR_SCANNED.color,
-        ['in', getAddressStatus(), ['literal', ['talked', 'appointment']]],
-        MAP_STATUS_CONFIG.CONVERSATIONS.color,
-        ['==', getAddressStatus(), 'delivered'],
-        MAP_STATUS_CONFIG.TOUCHED.color,
-        MAP_STATUS_CONFIG.UNTOUCHED.color,
-      ] as any;
-    };
-
-    const getFilterExpression = (): any[] | undefined => {
-      const getAddressStatus = () => ['coalesce', ['feature-state', 'address_status'], ['get', 'address_status'], 'none'];
-      const getQrScanned = () => ['coalesce', ['feature-state', 'qr_scanned'], ['get', 'qr_scanned'], false];
-      const getScansTotal = () => ['coalesce', ['feature-state', 'scans_total'], ['get', 'scans_total'], 0];
       const isQrScanned = ['any', ['==', getQrScanned(), true], ['>', getScansTotal(), 0]];
       const isConversation = ['in', getAddressStatus(), ['literal', ['talked', 'appointment']]];
       const isTouched = ['==', getAddressStatus(), 'delivered'];
-      const isUntouched = ['!=', getAddressStatus(), 'delivered']; // and not talked/appointment, not qr — simplified: show all that don't match above
-      const isUntouchedStrict = [
+      const isUntouched = [
         'all',
         ['!=', getAddressStatus(), 'delivered'],
         ['!', ['in', getAddressStatus(), ['literal', ['talked', 'appointment']]]],
         ['!', isQrScanned],
       ];
-      const statusConditions: any[] = [];
-      if (statusFilters.QR_SCANNED) statusConditions.push(isQrScanned);
-      if (statusFilters.CONVERSATIONS) statusConditions.push(isConversation);
-      if (statusFilters.TOUCHED) statusConditions.push(isTouched);
-      if (statusFilters.UNTOUCHED) statusConditions.push(isUntouchedStrict);
-      if (statusConditions.length === 0) return ['==', 1, 0];
-      const allEnabled = statusFilters.QR_SCANNED && statusFilters.CONVERSATIONS && statusFilters.TOUCHED && statusFilters.UNTOUCHED;
-      if (allEnabled) return undefined;
-      return ['any', ...statusConditions];
+      return [
+        'case',
+        ['all', isQrScanned, statusFilters.QR_SCANNED],
+        MAP_STATUS_CONFIG.QR_SCANNED.color,
+        ['all', isConversation, statusFilters.CONVERSATIONS],
+        MAP_STATUS_CONFIG.CONVERSATIONS.color,
+        ['all', isTouched, statusFilters.TOUCHED],
+        MAP_STATUS_CONFIG.TOUCHED.color,
+        ['all', isUntouched, statusFilters.UNTOUCHED],
+        MAP_STATUS_CONFIG.UNTOUCHED.color,
+        '#6b7280',
+      ] as any;
     };
 
     const addAddressPointsLayer = () => {
@@ -561,7 +547,6 @@ export function CampaignDetailMapView({
           });
         }
         if (!safeGetLayer(mapInstance, addressPointsLayerId)) {
-          const filterExpr = getFilterExpression();
           mapInstance.addLayer({
             id: addressPointsLayerId,
             type: 'fill-extrusion',
@@ -574,12 +559,9 @@ export function CampaignDetailMapView({
               'fill-extrusion-opacity': 1,
               'fill-extrusion-vertical-gradient': true,
             },
-            ...(filterExpr ? { filter: filterExpr } : {}),
           });
         } else {
           mapInstance.setPaintProperty(addressPointsLayerId, 'fill-extrusion-color', getColorExpression());
-          const filterExpr = getFilterExpression();
-          mapInstance.setFilter(addressPointsLayerId, filterExpr ?? ['all']);
         }
       } catch (err) {
         console.error('[CampaignDetailMapView] Error adding address points layer:', err);
@@ -877,7 +859,11 @@ export function CampaignDetailMapView({
       <div ref={mapContainer} className="h-full w-full" />
       {map.current && mapLoaded && (
         <>
-          <MapInfoButton show />
+          <MapInfoButton
+            show
+            statusFilters={statusFilters}
+            onStatusFiltersChange={setStatusFilters}
+          />
           {/* View switcher: Buildings | Addresses */}
           <div className="absolute top-4 right-4 z-10 flex flex-col gap-2">
             <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 bg-white/90 dark:bg-black/80 backdrop-blur-sm shadow-sm overflow-hidden">

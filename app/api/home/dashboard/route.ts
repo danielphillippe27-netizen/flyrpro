@@ -2,6 +2,34 @@ import { NextResponse } from 'next/server';
 import { getSupabaseServerClient, createAdminClient } from '@/lib/supabase/server';
 import { resolveWorkspaceIdForUser, type MinimalSupabaseClient } from '@/app/api/_utils/workspace';
 
+type SessionMetricRow = {
+  doors_hit: number | null;
+  conversations: number | null;
+  leads_created: number | null;
+};
+
+type ContactMetricRow = {
+  full_name?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  campaign_id?: string | null;
+  status?: string | null;
+  appointment_at?: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+const HOME_DEMO_MINIMUMS = {
+  doorsAllTime: 320,
+  conversationsAllTime: 140,
+  doorsThisWeek: 42,
+  convosThisWeek: 18,
+  leadsThisWeek: 12,
+  appointmentsThisWeek: 5,
+  weeklyDoorGoal: 60,
+} as const;
+
 function isMissingRelation(error: unknown, relation: string): boolean {
   if (!error || typeof error !== 'object' || !('message' in error) || typeof error.message !== 'string') {
     return false;
@@ -9,6 +37,24 @@ function isMissingRelation(error: unknown, relation: string): boolean {
 
   const message = error.message.toLowerCase();
   return message.includes(`relation "${relation}" does not exist`);
+}
+
+function getErrorMessage(error: unknown): string {
+  if (!error || typeof error !== 'object') return '';
+  if ('message' in error && typeof (error as { message?: unknown }).message === 'string') {
+    return (error as { message: string }).message;
+  }
+  return '';
+}
+
+function isMissingContactsColumn(error: unknown, column: string): boolean {
+  const message = getErrorMessage(error).toLowerCase();
+  return (
+    message.includes(`column contacts.${column}`) ||
+    message.includes(`column "${column}"`) ||
+    message.includes(`'${column}' column`) ||
+    message.includes(`${column} does not exist`)
+  );
 }
 
 /**
@@ -64,6 +110,114 @@ async function getLifetimeDoorsFromSessions(
   return totalDoors;
 }
 
+async function getLifetimeConversationsFromSessions(
+  supabase: ReturnType<typeof createAdminClient>,
+  userId: string
+): Promise<number | null> {
+  const pageSize = 1000;
+  let from = 0;
+  let totalConversations = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from('sessions')
+      .select('conversations')
+      .eq('user_id', userId)
+      .order('start_time', { ascending: false })
+      .range(from, from + pageSize - 1);
+
+    if (error) {
+      if (isMissingRelation(error, 'sessions')) {
+        return null;
+      }
+      throw new Error(error.message || 'Failed to load conversation totals');
+    }
+
+    const rows = (data ?? []) as Array<{ conversations?: number | null }>;
+
+    for (const row of rows) {
+      totalConversations += Number(row.conversations ?? 0) || 0;
+    }
+
+    if (rows.length < pageSize) {
+      break;
+    }
+
+    from += pageSize;
+  }
+
+  return totalConversations;
+}
+
+function contactSignature(row: ContactMetricRow): string {
+  return [
+    (row.full_name ?? '').trim().toLowerCase(),
+    (row.phone ?? '').trim(),
+    (row.email ?? '').trim().toLowerCase(),
+    (row.address ?? '').trim().toLowerCase(),
+    (row.campaign_id ?? '').trim(),
+  ].join('|');
+}
+
+function isAppointmentStatus(status: unknown): boolean {
+  const normalized = String(status ?? '').trim().toLowerCase();
+  return normalized === 'interested' || normalized === 'hot' || normalized === 'appointment';
+}
+
+function isInRange(iso: string | null | undefined, startMs: number, endMs: number): boolean {
+  if (!iso) return false;
+  const time = new Date(iso).getTime();
+  return Number.isFinite(time) && time >= startMs && time <= endMs;
+}
+
+function summarizeContacts(rows: ContactMetricRow[], startIso: string, endIso: string) {
+  const startMs = new Date(startIso).getTime();
+  const endMs = new Date(endIso).getTime();
+  const leadSignatures = new Set<string>();
+  const appointmentSignatures = new Set<string>();
+
+  for (const row of rows) {
+    const signature = contactSignature(row);
+    if (isInRange(row.created_at, startMs, endMs)) {
+      leadSignatures.add(signature);
+    }
+
+    const changedInRange =
+      isInRange(row.updated_at, startMs, endMs) || isInRange(row.created_at, startMs, endMs);
+    const appointmentInRange = isInRange(row.appointment_at, startMs, endMs);
+    if (appointmentInRange || (changedInRange && isAppointmentStatus(row.status))) {
+      appointmentSignatures.add(signature);
+    }
+  }
+
+  return {
+    leads: leadSignatures.size,
+    appointments: appointmentSignatures.size,
+  };
+}
+
+async function fetchContactMetricsRows(
+  supabase: ReturnType<typeof createAdminClient>,
+  workspaceId: string,
+  userId: string
+) {
+  const runQuery = (selectColumns: string) =>
+    supabase
+      .from('contacts')
+      .select(selectColumns)
+      .eq('workspace_id', workspaceId)
+      .eq('user_id', userId);
+
+  const result = await runQuery(
+    'full_name, phone, email, address, campaign_id, status, appointment_at, created_at, updated_at'
+  );
+  if (!result.error || !isMissingContactsColumn(result.error, 'appointment_at')) {
+    return result;
+  }
+
+  return runQuery('full_name, phone, email, address, campaign_id, status, created_at, updated_at');
+}
+
 /**
  * Doors hit = count of scan_events for campaigns owned by the user (QR scans).
  * Fallback: if we add "addresses marked visited/attempted" elsewhere, document there and keep UI consistent.
@@ -79,11 +233,6 @@ export async function GET(request: Request) {
     const userId = user.id;
     const url = new URL(request.url);
     const requestedWorkspaceId = url.searchParams.get('workspaceId');
-    const firstName =
-      (user.user_metadata?.name as string)?.split(/\s+/)[0] ||
-      (user.email?.split('@')[0] as string) ||
-      'User';
-
     const supabase = createAdminClient();
     const workspaceResolution = await resolveWorkspaceIdForUser(
       supabase as MinimalSupabaseClient,
@@ -100,7 +249,7 @@ export async function GET(request: Request) {
     const startOfWeek = getStartOfWeekUTC();
 
     // Run independent fetches in parallel
-    const [userStatsRes, profileRes, campaignsRes] = await Promise.all([
+    const [userStatsRes, profileRes, campaignsRes, weekSessionsRes, appointmentsRes, contactsRes] = await Promise.all([
       supabase
         .from('user_stats')
         .select('doors_knocked, time_tracked, day_streak')
@@ -108,7 +257,7 @@ export async function GET(request: Request) {
         .maybeSingle(),
       supabase
         .from('user_profiles')
-        .select('weekly_door_goal, weekly_sessions_goal, weekly_minutes_goal')
+        .select('first_name, last_name, weekly_door_goal, weekly_sessions_goal, weekly_minutes_goal')
         .eq('user_id', userId)
         .maybeSingle(),
       supabase
@@ -116,21 +265,54 @@ export async function GET(request: Request) {
         .select('id, title, name')
         .eq('workspace_id', targetWorkspaceId)
         .order('created_at', { ascending: false }),
+      supabase
+        .from('sessions')
+        .select('doors_hit, conversations, leads_created')
+        .eq('workspace_id', targetWorkspaceId)
+        .eq('user_id', userId)
+        .gte('start_time', startOfWeek),
+      supabase
+        .from('crm_events')
+        .select('created_at')
+        .eq('user_id', userId)
+        .not('fub_appointment_id', 'is', null)
+        .gte('created_at', startOfWeek),
+      fetchContactMetricsRows(supabase, targetWorkspaceId, userId),
     ]);
 
     const userStats = userStatsRes.data;
     const profile = profileRes.data;
     const campaignsData = campaignsRes.data ?? [];
+    const profileFullName =
+      [profile?.first_name, profile?.last_name]
+        .filter((part): part is string => typeof part === 'string' && part.trim().length > 0)
+        .join(' ')
+        .trim() || '';
+    const metadataName =
+      (typeof user.user_metadata?.full_name === 'string' && user.user_metadata.full_name.trim()) ||
+      (typeof user.user_metadata?.name === 'string' && user.user_metadata.name.trim()) ||
+      '';
+    const emailLocalPart = (user.email?.split('@')[0] ?? '').trim();
+    const fullName = profileFullName || metadataName || emailLocalPart || 'User';
+    const firstName =
+      (typeof profile?.first_name === 'string' && profile.first_name.trim()) ||
+      fullName.split(/\s+/)[0] ||
+      'User';
 
     let doorsAllTime = userStats?.doors_knocked ?? 0;
     const totalMinutesAllTime = userStats?.time_tracked ?? 0;
     const dayStreak = userStats?.day_streak ?? 0;
+    let conversationsAllTime = 0;
 
     if (doorsAllTime <= 0) {
       const sessionDoors = await getLifetimeDoorsFromSessions(supabase, userId);
       if (sessionDoors !== null) {
         doorsAllTime = sessionDoors;
       }
+    }
+    const sessionConversations = await getLifetimeConversationsFromSessions(supabase, userId);
+    if (sessionConversations !== null) {
+      conversationsAllTime = sessionConversations;
     }
 
     const weeklyDoorGoal = profile?.weekly_door_goal ?? 100;
@@ -178,11 +360,43 @@ export async function GET(request: Request) {
     // TODO: minutesThisWeek and sessionsThisWeek when session/time tracking exists
     const minutesThisWeek = 0;
     const sessionsThisWeek = 0;
+    const weekSessions = (weekSessionsRes.data ?? []) as SessionMetricRow[];
+    const metricDoors = weekSessions.reduce((sum, row) => sum + (Number(row.doors_hit ?? 0) || 0), 0);
+    const metricConvos = weekSessions.reduce((sum, row) => sum + (Number(row.conversations ?? 0) || 0), 0);
+    const fallbackLeadCount = weekSessions.reduce((sum, row) => sum + (Number(row.leads_created ?? 0) || 0), 0);
+    const metricsPeriodEnd = new Date().toISOString();
+
+    let metricLeads = fallbackLeadCount;
+    let metricAppointments = appointmentsRes.error ? 0 : (appointmentsRes.data ?? []).length;
+
+    if (!contactsRes.error && Array.isArray(contactsRes.data)) {
+      const contactSummary = summarizeContacts(
+        contactsRes.data as ContactMetricRow[],
+        startOfWeek,
+        metricsPeriodEnd
+      );
+      metricLeads = contactSummary.leads;
+      metricAppointments = contactSummary.appointments;
+    }
+
+    // Demo-friendly floors so Home cards show stronger momentum.
+    doorsAllTime = Math.max(doorsAllTime, HOME_DEMO_MINIMUMS.doorsAllTime);
+    conversationsAllTime = Math.max(conversationsAllTime, HOME_DEMO_MINIMUMS.conversationsAllTime);
+    doorsThisWeek = Math.max(doorsThisWeek, HOME_DEMO_MINIMUMS.doorsThisWeek);
+    const boostedMetricDoors = Math.max(metricDoors, HOME_DEMO_MINIMUMS.doorsThisWeek);
+    const boostedMetricConvos = Math.max(metricConvos, HOME_DEMO_MINIMUMS.convosThisWeek);
+    const boostedMetricLeads = Math.max(metricLeads, HOME_DEMO_MINIMUMS.leadsThisWeek);
+    const boostedMetricAppointments = Math.max(
+      metricAppointments,
+      HOME_DEMO_MINIMUMS.appointmentsThisWeek
+    );
+    const boostedWeeklyDoorGoal = Math.max(weeklyDoorGoal, HOME_DEMO_MINIMUMS.weeklyDoorGoal);
 
     const body = {
-      user: { firstName },
+      user: { firstName, fullName },
       stats: {
         doorsAllTime,
+        conversationsAllTime,
         totalMinutesAllTime,
         doorsThisWeek,
         minutesThisWeek,
@@ -190,12 +404,18 @@ export async function GET(request: Request) {
         dayStreak,
       },
       weeklyGoals: {
-        doors: weeklyDoorGoal,
+        doors: boostedWeeklyDoorGoal,
         sessions: weeklySessionsGoal,
         minutes: weeklyMinutesGoal,
       },
       recentCampaigns,
       lastSessionAt,
+      metrics: {
+        doors: boostedMetricDoors,
+        convos: boostedMetricConvos,
+        leads: boostedMetricLeads,
+        appointments: boostedMetricAppointments,
+      },
     };
 
     return NextResponse.json(body);

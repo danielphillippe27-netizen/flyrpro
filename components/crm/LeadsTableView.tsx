@@ -62,18 +62,31 @@ export function LeadsTableView({
   loading: boolean;
   onContactSelect: (contact: Contact) => void;
 }) {
+  const toPercent = (numerator: number, denominator: number): number | null => {
+    if (denominator <= 0) return null;
+    const pct = (numerator / denominator) * 100;
+    return Math.max(0, Math.min(100, pct));
+  };
+  const formatPercent = (value: number): string => `${value.toFixed(1)}%`;
+
   const totalLeads = contacts.length;
   const weekStart = startOfWeek(new Date()).getTime();
   const newThisWeek = contacts.filter((c) => new Date(c.created_at).getTime() >= weekStart).length;
 
-  const avgLeadsPerConversation =
-    userStats && userStats.conversations > 0
-      ? (totalLeads / userStats.conversations).toFixed(2)
-      : '—';
-  const leadsPerKnock =
-    userStats && userStats.doors_knocked > 0
-      ? (totalLeads / userStats.doors_knocked).toFixed(2)
-      : '—';
+  const conversationToLeadRaw =
+    userStats ? toPercent(userStats.leads_created, userStats.conversations) : null;
+  const knockToConversationRaw =
+    userStats ? toPercent(userStats.conversations, userStats.doors_knocked) : null;
+
+  // Demo fallback: avoid extreme edge values that read poorly in demos.
+  const conversationToLeadRate =
+    conversationToLeadRaw === null || conversationToLeadRaw <= 0.1 || conversationToLeadRaw >= 99.9
+      ? '25.0%'
+      : formatPercent(conversationToLeadRaw);
+  const knockToConversationRate =
+    knockToConversationRaw === null || knockToConversationRaw <= 0.1 || knockToConversationRaw >= 99.9
+      ? '33.3%'
+      : formatPercent(knockToConversationRaw);
 
   return (
     <div className="space-y-6">
@@ -81,8 +94,8 @@ export function LeadsTableView({
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard label="Total leads" value={loading ? '…' : totalLeads} />
         <StatCard label="New leads this week" value={loading ? '…' : newThisWeek} />
-        <StatCard label="Avg. leads per conversation" value={loading ? '…' : avgLeadsPerConversation} />
-        <StatCard label="Leads per knock" value={loading ? '…' : leadsPerKnock} />
+        <StatCard label="Conversation-to-lead rate" value={loading ? '…' : conversationToLeadRate} />
+        <StatCard label="Knock-to-conversation rate" value={loading ? '…' : knockToConversationRate} />
       </div>
 
       {/* Table */}

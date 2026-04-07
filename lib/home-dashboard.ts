@@ -1,8 +1,9 @@
 /** Response shape from GET /api/home/dashboard */
 export interface HomeDashboardData {
-  user: { firstName: string };
+  user: { firstName: string; fullName: string };
   stats: {
     doorsAllTime: number;
+    conversationsAllTime: number;
     totalMinutesAllTime: number;
     doorsThisWeek: number;
     minutesThisWeek: number;
@@ -16,6 +17,12 @@ export interface HomeDashboardData {
   };
   recentCampaigns: { id: string; name: string }[];
   lastSessionAt: string | null;
+  metrics: {
+    doors: number;
+    convos: number;
+    leads: number;
+    appointments: number;
+  };
 }
 
 export async function fetchHomeDashboard(workspaceId?: string | null): Promise<HomeDashboardData> {

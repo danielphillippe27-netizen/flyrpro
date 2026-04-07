@@ -31,6 +31,8 @@ const defaultStatusFilters: StatusFilters = {
 /** Scale factor for building footprints (1 = unchanged, <1 = skinnier). */
 const FOOTPRINT_SCALE = 1;
 const ADDRESS_LABEL_MIN_ZOOM = 18;
+const POLYGON_GEOMETRY_FILTER: any[] = ['any', ['==', ['geometry-type'], 'Polygon'], ['==', ['geometry-type'], 'MultiPolygon']];
+const POINT_GEOMETRY_FILTER: any[] = ['==', ['geometry-type'], 'Point'];
 
 /**
  * Scale a polygon ring toward a centroid by a factor (in place).
@@ -270,61 +272,10 @@ export function MapBuildingsLayer({
     };
   }, [map, campaignId, features, addressStateOverrides]);
 
-  // Generate filter expression based on showOrphans toggle and statusFilters
-  // When showOrphans=false in campaign mode, only show buildings with feature_status='matched'
-  // StatusFilters control which status categories are visible
-  // NOTE: fill-extrusion layers don't need geometry type filter - they only render polygon-like geometries
-  const getFilterExpression = (showAll: boolean, isCampaignMode: boolean, filters: StatusFilters): any[] | undefined => {
-    // Build status visibility conditions based on filters
-    const statusConditions: any[] = [];
-    
-    // Helper to get effective status for a feature
-    // Priority: QR_SCANNED (scans_total > 0) > CONVERSATIONS (hot) > TOUCHED (visited) > UNTOUCHED (not_visited)
-    // Check feature-state first (real-time updates), then source properties (initial load)
-    const getStatusValue = () => ['coalesce', ['feature-state', 'status'], ['get', 'status'], 'not_visited'];
-    const getScansTotal = () => ['coalesce', ['feature-state', 'scans_total'], ['get', 'scans_total'], 0];
-    const getQrScanned = () => ['coalesce', ['feature-state', 'qr_scanned'], ['get', 'qr_scanned'], false];
-    
-    // QR_SCANNED: qr_scanned === true OR scans_total > 0
-    const isQrScanned = ['any', ['==', getQrScanned(), true], ['>', getScansTotal(), 0]];
-    // CONVERSATIONS: status === 'hot' AND not QR scanned
-    const isConversation = ['all', ['==', getStatusValue(), 'hot'], ['!', isQrScanned]];
-    // TOUCHED: status === 'visited' AND not QR scanned
-    const isTouched = ['all', ['==', getStatusValue(), 'visited'], ['!', isQrScanned]];
-    // UNTOUCHED: status === 'not_visited' (default)
-    const isUntouched = ['==', getStatusValue(), 'not_visited'];
-    
-    // Add conditions for enabled statuses
-    if (filters.QR_SCANNED) statusConditions.push(isQrScanned);
-    if (filters.CONVERSATIONS) statusConditions.push(isConversation);
-    if (filters.TOUCHED) statusConditions.push(isTouched);
-    if (filters.UNTOUCHED) statusConditions.push(isUntouched);
-    
-    // If no statuses enabled, hide all features
-    if (statusConditions.length === 0) {
-      return ['==', 1, 0]; // Always false - hide everything
-    }
-    
-    // If all statuses enabled, check orphan filter only
-    const allEnabled = filters.QR_SCANNED && filters.CONVERSATIONS && filters.TOUCHED && filters.UNTOUCHED;
-    
-    // Combine with orphan filter if in campaign mode
-    if (isCampaignMode && !showAll) {
-      // Campaign mode with showOrphans=false: only show matched buildings AND matching status
-      // NOTE: For Gold buildings, feature_status might not be set, so default to showing them
-      if (allEnabled) {
-        return undefined; // Show all - no filter needed
-      }
-      return ['any', ...statusConditions];
-    }
-    
-    // If all statuses enabled and not filtering orphans, no filter needed
-    if (allEnabled) {
-      return undefined;
-    }
-    
-    // Return status filter only
-    return ['any', ...statusConditions];
+  // Status toggles now control color emphasis (not visibility).
+  // Non-selected statuses render as neutral gray baseline.
+  const getFilterExpression = (): any[] | undefined => {
+    return undefined;
   };
 
   // Generate unified color expression based on status priority
@@ -336,23 +287,31 @@ export function MapBuildingsLayer({
     const getStatusValue = () => ['coalesce', ['feature-state', 'status'], ['get', 'status'], 'not_visited'];
     const getScansTotal = () => ['coalesce', ['feature-state', 'scans_total'], ['get', 'scans_total'], 0];
     const getQrScanned = () => ['coalesce', ['feature-state', 'qr_scanned'], ['get', 'qr_scanned'], false];
+    const isQrScanned = ['any', ['==', getQrScanned(), true], ['>', getScansTotal(), 0]];
+    const isConversation = ['all', ['==', getStatusValue(), 'hot'], ['!', isQrScanned]];
+    const isTouched = ['all', ['==', getStatusValue(), 'visited'], ['!', isQrScanned]];
+    const isUntouched = ['==', getStatusValue(), 'not_visited'];
     
     return [
       'case',
-      // QR_SCANNED (highest priority): qr_scanned === true OR scans_total > 0
-      ['any', ['==', getQrScanned(), true], ['>', getScansTotal(), 0]],
+      // QR_SCANNED (highest priority)
+      ['all', isQrScanned, statusFilters.QR_SCANNED],
       MAP_STATUS_CONFIG.QR_SCANNED.color, // Purple
       
-      // CONVERSATIONS: status === 'hot'
-      ['==', getStatusValue(), 'hot'],
+      // CONVERSATIONS
+      ['all', isConversation, statusFilters.CONVERSATIONS],
       MAP_STATUS_CONFIG.CONVERSATIONS.color, // Blue
       
-      // TOUCHED: status === 'visited'
-      ['==', getStatusValue(), 'visited'],
+      // TOUCHED
+      ['all', isTouched, statusFilters.TOUCHED],
       MAP_STATUS_CONFIG.TOUCHED.color, // Green
       
-      // UNTOUCHED (default): status === 'not_visited' or fallback
-      MAP_STATUS_CONFIG.UNTOUCHED.color // Red
+      // UNTOUCHED
+      ['all', isUntouched, statusFilters.UNTOUCHED],
+      MAP_STATUS_CONFIG.UNTOUCHED.color, // Red
+
+      // Baseline when no toggle applies
+      NEUTRAL_FOOTPRINT_COLOR,
     ] as any;
   };
 
@@ -360,7 +319,6 @@ export function MapBuildingsLayer({
   const NEUTRAL_FOOTPRINT_COLOR = '#6b7280';
   const NEUTRAL_EXTRUSION_OPACITY = 0.55;
   const NEUTRAL_CIRCLE_OPACITY = 0.88;
-
   const getFootprintFillColor = (): any =>
     footprintStatusColors ? getColorExpression() : NEUTRAL_FOOTPRINT_COLOR;
   const getFootprintFillOpacity = (): number =>
@@ -1378,14 +1336,15 @@ export function MapBuildingsLayer({
     
     try {
       const colorExpr = getFootprintFillColor();
-      const filterExpr = getFilterExpression(showOrphans, !!campaignId, statusFilters);
+      const filterExpr = getFilterExpression();
       console.log('[MapBuildingsLayer] Updating color/filter for statusFilters change', { statusFilters, campaignId, colorExpr, filterExpr });
       map.setPaintProperty(layerId, 'fill-extrusion-color', colorExpr);
       map.setPaintProperty(layerId, 'fill-extrusion-opacity', getFootprintFillOpacity());
-      map.setFilter(layerId, filterExpr);
+      map.setFilter(layerId, filterExpr ? ['all', POLYGON_GEOMETRY_FILTER, filterExpr] : POLYGON_GEOMETRY_FILTER);
       if (map.getLayer(circleLayerId)) {
         map.setPaintProperty(circleLayerId, 'circle-color', colorExpr);
         map.setPaintProperty(circleLayerId, 'circle-opacity', getCircleOpacity());
+        map.setFilter(circleLayerId, filterExpr ? ['all', POINT_GEOMETRY_FILTER, filterExpr] : POINT_GEOMETRY_FILTER);
       }
     } catch (err) {
       console.error('[MapBuildingsLayer] Error updating color/filter:', err);
@@ -1397,12 +1356,15 @@ export function MapBuildingsLayer({
     if (!map) return;
     
     const updateFilters = () => {
-      const filterExpr = getFilterExpression(showOrphans, !!campaignId, statusFilters);
+      const filterExpr = getFilterExpression();
       console.log('[MapBuildingsLayer] Updating filter for showOrphans change', { showOrphans, campaignId, filterExpr });
       
       try {
         if (map.getLayer(layerId)) {
-          map.setFilter(layerId, filterExpr);
+          map.setFilter(layerId, filterExpr ? ['all', POLYGON_GEOMETRY_FILTER, filterExpr] : POLYGON_GEOMETRY_FILTER);
+        }
+        if (map.getLayer(circleLayerId)) {
+          map.setFilter(circleLayerId, filterExpr ? ['all', POINT_GEOMETRY_FILTER, filterExpr] : POINT_GEOMETRY_FILTER);
         }
       } catch (err) {
         console.error('[MapBuildingsLayer] Error updating filter for showOrphans:', err);
@@ -1419,7 +1381,7 @@ export function MapBuildingsLayer({
     return () => {
       map.off('load', updateFilters);
     };
-  }, [map, showOrphans, campaignId, statusFilters, layerId]);
+  }, [map, showOrphans, campaignId, statusFilters, layerId, circleLayerId]);
 
   // Re-apply lighting and refresh colors when map style loads (important for dark mode)
   useEffect(() => {

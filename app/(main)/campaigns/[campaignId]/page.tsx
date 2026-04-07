@@ -394,7 +394,6 @@ export default function CampaignDetailPage() {
   const [notes, setNotes] = useState('');
   const [isSavingNotes, setIsSavingNotes] = useState(false);
   const [notesDirty, setNotesDirty] = useState(false);
-  const [generatingCanva, setGeneratingCanva] = useState(false);
   const [basicQrBase64, setBasicQrBase64] = useState<string | null>(null);
   const [generatingBasicQr, setGeneratingBasicQr] = useState(false);
   const [scripts, setScripts] = useState('');
@@ -594,6 +593,7 @@ export default function CampaignDetailPage() {
           campaignId,
           trackable,
           baseUrl: typeof window !== 'undefined' ? window.location.origin : undefined,
+          forceRegenerate: true,
         }),
       });
       const data = await response.json();
@@ -609,74 +609,56 @@ export default function CampaignDetailPage() {
         }
         throw new Error(data.error || data.message || 'Generation failed');
       }
+
+      // Consolidated behavior: also export/download the full advanced QR package.
+      if (addresses?.length) {
+        const rows = addresses.map((addr) => {
+          const parts = (addr.formatted || addr.address || '').split(', ');
+          return {
+            AddressLine: addr.address || parts[0] || '',
+            City: addr.locality || parts[1] || '',
+            Province: addr.region || parts[2] || '',
+            PostalCode: addr.postal_code || '',
+          };
+        });
+
+        const canvaResponse = await fetch('/api/canva/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            campaignId,
+            baseUrl: `${typeof window !== 'undefined' ? window.location.origin : 'https://flyrpro.app'}/api/scan`,
+            rows,
+          }),
+        });
+
+        if (!canvaResponse.ok) {
+          const errorData = await canvaResponse.json().catch(() => ({}));
+          throw new Error(errorData.error || `Failed to download advanced QR package (HTTP ${canvaResponse.status})`);
+        }
+
+        const contentDisposition = canvaResponse.headers.get('Content-Disposition') || '';
+        const filenameMatch = contentDisposition.match(/filename="(.+)"/);
+        const filename = filenameMatch ? filenameMatch[1] : `canva_qr_${campaignId}.zip`;
+
+        const blob = await canvaResponse.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+      }
+
       await loadData();
-      alert(`Generated ${data.count} QR codes!`);
+      alert(`Generated ${data.count} QR codes and downloaded the full advanced QR package.`);
     } catch (error) {
       console.error('Error generating QRs:', error);
       alert(error instanceof Error ? error.message : 'Failed to generate QR codes');
     } finally {
       setGenerating(false);
-    }
-  };
-
-  const handleGenerateCanvaQRs = async () => {
-    if (!addresses?.length) {
-      alert('No addresses to generate QRs for');
-      return;
-    }
-
-    setGeneratingCanva(true);
-    try {
-      const rows = addresses.map((addr) => {
-        const parts = (addr.formatted || addr.address || '').split(', ');
-        return {
-          AddressLine: addr.address || parts[0] || '',
-          City: addr.locality || parts[1] || '',
-          Province: addr.region || parts[2] || '',
-          PostalCode: addr.postal_code || '',
-        };
-      });
-
-      const response = await fetch('/api/canva/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          campaignId,
-          baseUrl: `${typeof window !== 'undefined' ? window.location.origin : 'https://flyrpro.app'}/api/scan`,
-          rows,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `HTTP ${response.status}`);
-      }
-
-      const contentDisposition = response.headers.get('Content-Disposition') || '';
-      const filenameMatch = contentDisposition.match(/filename="(.+)"/);
-      const filename = filenameMatch ? filenameMatch[1] : 'canva_bulk.csv';
-
-      const uploaded = response.headers.get('X-Canva-Uploaded') || '0';
-      const existing = response.headers.get('X-Canva-Existing') || '0';
-      const failed = response.headers.get('X-Canva-Failed') || '0';
-
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-
-      alert(`Canva CSV generated!\n${uploaded} uploaded, ${existing} existing, ${failed} failed`);
-      await loadData();
-    } catch (error) {
-      console.error('Error generating Canva QRs:', error);
-      alert(error instanceof Error ? error.message : 'Failed to generate Canva QRs');
-    } finally {
-      setGeneratingCanva(false);
     }
   };
 
@@ -740,7 +722,15 @@ export default function CampaignDetailPage() {
         throw new Error(data.error || `HTTP ${res.status}`);
       }
       const { qrBase64 } = await res.json();
-      setBasicQrBase64(qrBase64 || null);
+      if (qrBase64) {
+        setBasicQrBase64(qrBase64);
+        const link = document.createElement('a');
+        link.href = qrBase64;
+        link.download = `campaign-${campaignId}-basic-qr.png`;
+        link.click();
+      } else {
+        setBasicQrBase64(null);
+      }
     } catch (e) {
       console.error('Generate basic QR:', e);
       alert(e instanceof Error ? e.message : 'Failed to generate basic QR');
@@ -755,35 +745,6 @@ export default function CampaignDetailPage() {
     link.href = basicQrBase64;
     link.download = `campaign-${campaignId}-basic-qr.png`;
     link.click();
-  };
-
-  const handleBasicQrForCanva = async () => {
-    setGeneratingBasicQr(true);
-    try {
-      const baseUrl = typeof window !== 'undefined' ? window.location.origin : undefined;
-      const res = await fetch(`/api/campaigns/${campaignId}/generate-basic-qr`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ baseUrl }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || `HTTP ${res.status}`);
-      }
-      const { qrBase64 } = await res.json();
-      if (qrBase64) {
-        setBasicQrBase64(qrBase64);
-        const link = document.createElement('a');
-        link.href = qrBase64;
-        link.download = `campaign-${campaignId}-basic-qr-canva.png`;
-        link.click();
-      }
-    } catch (e) {
-      console.error('Generate basic QR for Canva:', e);
-      alert(e instanceof Error ? e.message : 'Failed to generate');
-    } finally {
-      setGeneratingBasicQr(false);
-    }
   };
 
   const handleAddQR = async () => {
@@ -854,6 +815,15 @@ export default function CampaignDetailPage() {
     campaign.scans || 0
   );
   const totalQrScans = Math.max(qrScanEventsCount ?? 0, fallbackTotalQrScans);
+  const advancedHomesScanned = dedupedAddresses
+    .filter((addr) => (addr.scans || 0) > 0)
+    .sort((a, b) => {
+      const aTime = a.last_scanned_at ? new Date(a.last_scanned_at).getTime() : 0;
+      const bTime = b.last_scanned_at ? new Date(b.last_scanned_at).getTime() : 0;
+      if (bTime !== aTime) return bTime - aTime;
+      return (b.scans || 0) - (a.scans || 0);
+    })
+    .slice(0, 10);
 
   const formattedRecipients = dedupedAddresses.map((addr) => {
     const { statusKey, label } = getAddressRecipientsStatus(addr);
@@ -885,7 +855,10 @@ export default function CampaignDetailPage() {
         <div className="bg-card border-b border-border px-4 sm:px-6 lg:px-8 py-2">
           <div className="max-w-7xl mx-auto min-w-0 max-w-md sm:max-w-lg flex items-center gap-3">
             <span className="text-sm font-medium text-muted-foreground whitespace-nowrap">Progress</span>
-            <Progress value={campaignStats.progress_pct} className="h-2 flex-1" />
+            <Progress
+              value={campaignStats.progress_pct}
+              className="h-2 flex-1 bg-emerald-500/20 dark:bg-emerald-500/25 [&>[data-slot=progress-indicator]]:bg-emerald-500"
+            />
             <span className="text-sm font-semibold text-foreground whitespace-nowrap">{campaignStats.progress_pct}%</span>
           </div>
         </div>
@@ -981,13 +954,6 @@ export default function CampaignDetailPage() {
                     >
                       {generatingBasicQr ? 'Generating...' : 'Generate QR'}
                     </Button>
-                    <Button
-                      variant="secondary"
-                      onClick={handleBasicQrForCanva}
-                      disabled={generatingBasicQr}
-                    >
-                      {generatingBasicQr ? 'Generating...' : 'Generate for Canva'}
-                    </Button>
                   </div>
                 </div>
                 {basicQrBase64 && (
@@ -1012,21 +978,14 @@ export default function CampaignDetailPage() {
             <div className="bg-card p-4 rounded-xl border border-border">
               <h2 className="text-sm font-semibold text-foreground mb-3">Advanced QR Code</h2>
               <p className="text-xs text-muted-foreground mb-3">
-                Unique QR codes for every home in the campaign. Scans are tied to addresses and will show on the map.
+                Unique QR codes for every home in the campaign. Scans are tied to addresses and each PNG includes the home address for print matching.
               </p>
               <div className="flex flex-wrap gap-3">
                 <Button
                   onClick={() => handleGenerateQRs(true)}
                   disabled={generating || formattedRecipients.length === 0}
                 >
-                  {generating ? 'Generating...' : 'Generate QR (In-App)'}
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={handleGenerateCanvaQRs}
-                  disabled={generatingCanva || !addresses?.length}
-                >
-                  {generatingCanva ? 'Generating...' : 'Generate for Canva'}
+                  {generating ? 'Generating...' : 'Generate QR Codes'}
                 </Button>
               </div>
             </div>
@@ -1064,6 +1023,42 @@ export default function CampaignDetailPage() {
                 <p className="text-[11px] text-muted-foreground mt-2">
                   Total scans shown with fallback estimate when event logs are unavailable.
                 </p>
+              )}
+            </div>
+
+            <div className="bg-card p-4 rounded-xl border border-border">
+              <h3 className="text-sm font-semibold text-foreground">Homes Scanned (Advanced)</h3>
+              <p className="text-xs text-muted-foreground mt-1 mb-3">
+                Most recent homes that scanned an advanced QR code.
+              </p>
+              {advancedHomesScanned.length === 0 ? (
+                <p className="text-xs text-muted-foreground">No advanced QR scans yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {advancedHomesScanned.map((addr) => {
+                    const addressText =
+                      (addr.house_number && addr.street_name)
+                        ? `${addr.house_number} ${addr.street_name}`
+                        : (addr.address || addr.formatted || 'Unknown address');
+                    const lastScanned = addr.last_scanned_at
+                      ? new Date(addr.last_scanned_at).toLocaleString()
+                      : 'Unknown';
+                    return (
+                      <div
+                        key={addr.id}
+                        className="rounded-md border border-border bg-background px-3 py-2 flex items-center justify-between gap-3"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-sm text-foreground truncate">{addressText}</p>
+                          <p className="text-[11px] text-muted-foreground">Last scan: {lastScanned}</p>
+                        </div>
+                        <p className="text-xs font-medium text-foreground whitespace-nowrap">
+                          {(addr.scans || 0).toLocaleString()} scan{(addr.scans || 0) === 1 ? '' : 's'}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </div>
           </TabsContent>

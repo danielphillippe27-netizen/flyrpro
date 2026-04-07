@@ -30,7 +30,7 @@ export function StatsHeader({ stats }: StatsHeaderProps) {
         <div className="text-sm text-muted-foreground mb-1">Visited</div>
         <div className="text-3xl font-bold text-green-600 dark:text-green-500">{visited}</div>
         <div className="text-xs text-muted-foreground mt-1">
-          {addresses > 0 ? `${visitPct}% of leads` : 'no leads yet'}
+          {addresses > 0 ? `${visitPct}% of houses` : 'no houses yet'}
         </div>
       </div>
 
