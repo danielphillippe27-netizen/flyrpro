@@ -105,14 +105,14 @@ export default function LandingPage() {
         </section>
 
         <section className="pb-0 pt-0">
-          <div className="w-full">
+          <div className="mx-auto w-full max-w-7xl px-5 md:px-8">
             <h2 className="text-center text-3xl font-black leading-tight text-zinc-900 md:text-4xl">
               See FLYR in action
             </h2>
             <p className="mt-3 text-center text-lg text-zinc-500">
               Take a quick product walkthrough directly in the page.
             </p>
-            <div className="mt-8 w-full">
+            <div className="mx-auto mt-8 w-full max-w-6xl overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
               <ArcadeEmbed />
             </div>
           </div>
