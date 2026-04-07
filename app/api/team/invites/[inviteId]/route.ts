@@ -4,6 +4,7 @@ import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { getInviteMailerConfigError, sendWorkspaceInviteEmail } from '@/lib/email/resend';
 import {
   buildJoinUrl,
+  getSeatUsage,
   getWorkspaceInviteRecord,
   normalizePendingInviteRole,
   resolveTeamManagementContext,
@@ -11,6 +12,18 @@ import {
 } from '@/app/api/team/_lib/manage';
 
 const INVITE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+function isSeatLimitError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const maybeError = error as { message?: string; details?: string; code?: string };
+  return (
+    maybeError.code === 'P0001' ||
+    (typeof maybeError.message === 'string' &&
+      maybeError.message.toLowerCase().includes('workspace paid seat limit reached')) ||
+    (typeof maybeError.details === 'string' &&
+      maybeError.details.toLowerCase().includes('max_seats'))
+  );
+}
 
 async function getInviteForWorkspace(admin: ReturnType<typeof createAdminClient>, inviteId: string) {
   const { data, error } = await getWorkspaceInviteRecord(admin, inviteId);
@@ -90,7 +103,33 @@ export async function PATCH(
 
       if (updateError || !updatedInvite) {
         console.error('[team/invites/:inviteId] role update error:', updateError);
+        if (isSeatLimitError(updateError)) {
+          return NextResponse.json(
+            {
+              error:
+                'All paid seats are currently allocated. Increase seats before assigning this invite as member.',
+            },
+            { status: 409 }
+          );
+        }
         return NextResponse.json({ error: 'Failed to update invite role' }, { status: 500 });
+      }
+
+      if (nextRole === 'member' && invite.role !== 'member') {
+        const seatUsage = await getSeatUsage(admin, teamContext.workspaceId);
+        if (seatUsage.seatsUsed > seatUsage.maxSeats) {
+          await updateWorkspaceInviteRecord(admin, invite.id, {
+            role: invite.role,
+            updated_at: new Date().toISOString(),
+          });
+          return NextResponse.json(
+            {
+              error:
+                'All paid seats are currently allocated. Increase seats before assigning this invite as member.',
+            },
+            { status: 409 }
+          );
+        }
       }
 
       return NextResponse.json({

@@ -101,8 +101,8 @@ export function LeaderboardContentView() {
   } = useWorkspace();
 
   const currentRole = currentWorkspaceId ? membershipsByWorkspaceId[currentWorkspaceId] : null;
-  const canRequestTeamLeaderboard = Boolean(currentWorkspaceId) && (currentRole === 'owner' || currentRole === 'admin');
-  const visibleScopes = canRequestTeamLeaderboard
+  const canViewTeamLeaderboard = Boolean(currentWorkspaceId && currentRole);
+  const visibleScopes = canViewTeamLeaderboard
     ? SCOPES
     : SCOPES.filter((option) => option.value === 'global');
   const effectiveLoading = loading || (scope === 'team' && workspaceLoading);
@@ -123,7 +123,7 @@ export function LeaderboardContentView() {
           return;
         }
 
-        if (!canRequestTeamLeaderboard) {
+        if (!canViewTeamLeaderboard) {
           setScope('global');
           return;
         }
@@ -164,7 +164,7 @@ export function LeaderboardContentView() {
     } finally {
       setLoading(false);
     }
-  }, [canRequestTeamLeaderboard, currentWorkspaceId, scope, sortBy, workspaceLoading]);
+  }, [canViewTeamLeaderboard, currentWorkspaceId, scope, sortBy, workspaceLoading]);
 
   useEffect(() => {
     void loadLeaderboard();
@@ -173,9 +173,9 @@ export function LeaderboardContentView() {
   useEffect(() => {
     if (scope !== 'team') return;
     if (workspaceLoading) return;
-    if (canRequestTeamLeaderboard) return;
+    if (canViewTeamLeaderboard) return;
     setScope('global');
-  }, [canRequestTeamLeaderboard, scope, workspaceLoading]);
+  }, [canViewTeamLeaderboard, scope, workspaceLoading]);
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-5">

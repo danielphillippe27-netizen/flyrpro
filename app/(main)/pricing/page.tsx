@@ -94,7 +94,7 @@ export default function PricingPage() {
                 { text: 'Follow-up system (tasks, reminders, call list)' },
                 { text: 'Personal goals' },
                 { text: 'Exports (CSV / CRM-ready)' },
-                { text: 'CRM integrations (Follow Up Boss / webhook)' },
+                { text: 'CRM integrations (Follow Up Boss / kvCORE / BoldTrail / HubSpot)' },
                 { text: 'Priority support' },
               ]}
               cta={

@@ -1,168 +1,33 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import Image from 'next/image';
-import { getClientAsync } from '@/lib/supabase/client';
 import { ArrowRight } from 'lucide-react';
-import { PricingCard } from '@/components/pricing/PricingCard';
-import { TeamSeatSelector } from '@/components/pricing/TeamSeatSelector';
-
-function LandingPricing() {
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetch('/api/billing/prices')
-      .then(() => {})
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
-
-  const loginRedirect = `/login?redirect=${encodeURIComponent('/pricing')}`;
-
-  const proFeatures = [
-    { text: 'iOS + Desktop dashboard' },
-    { text: 'Unlimited campaigns' },
-    { text: 'Unlimited contacts / leads' },
-    { text: 'Advanced optimized routing (smart street order + walkable flow)' },
-    { text: 'Address-level QR tracking (exact house that scanned)' },
-    { text: 'Unlimited QR codes (bulk generator)' },
-    { text: 'Track performance' },
-    { text: 'Doors knocked, convos, follow-ups, scans' },
-    { text: 'Follow-up system (tasks, reminders, call list)' },
-    { text: 'Exports (CSV / CRM-ready)' },
-    { text: 'Leaderboards + activity feed' },
-    { text: 'CRM integrations (Follow Up Boss / webhook / Zapier-style)' },
-  ];
-
-  const teamFeatures = [
-    { text: 'Everything in Pro', bold: true },
-    { text: '2 seats included in base price' },
-    { text: 'Invite / remove team members' },
-    { text: 'Roles & permissions (Admin, Member)' },
-    { text: 'Assign territories & campaigns to teammates' },
-    { text: 'Shared progress + activity feed' },
-    { text: 'Team leaderboards' },
-    { text: 'Team analytics (by member, by campaign)' },
-    { text: 'Centralized billing' },
-    { text: 'Priority support' },
-  ];
-
-  if (loading) {
-    return <div className="mt-8 text-center text-sm text-zinc-600">Loading plans...</div>;
-  }
-
-  return (
-    <div className="mt-8 grid gap-6 md:grid-cols-2">
-      <PricingCard
-        title="Pro"
-        subtitle="For serious flyer volume."
-        features={proFeatures}
-        cta={
-          <>
-            <p className="text-center text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-              CA$39.99 / month
-            </p>
-            <Link
-              href={loginRedirect}
-              className="inline-flex h-11 w-full items-center justify-center rounded-2xl bg-zinc-900 text-sm font-semibold text-white transition hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
-            >
-              Get started
-            </Link>
-          </>
-        }
-      />
-      <PricingCard
-        title="Team"
-        subtitle="Collaboration + accountability for small teams."
-        features={teamFeatures}
-        cta={
-          <>
-            <TeamSeatSelector />
-            <p className="text-center text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-              CA$79.99 / month + CA$30 per seat
-            </p>
-            <Link
-              href={loginRedirect}
-              className="inline-flex h-11 w-full items-center justify-center rounded-2xl bg-zinc-900 text-sm font-semibold text-white transition hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
-            >
-              Start team
-            </Link>
-          </>
-        }
-      />
-    </div>
-  );
-}
+import { ArcadeEmbed } from '@/components/landing/ArcadeEmbed';
 
 const TRACKING_WORDS = [
   'Doors',
+  'Knocks',
+  'Reps',
+  'Territories',
   'Conversations',
   'Routes',
+  'Campaigns',
   'QR Scans',
+  'Follow-ups',
+  'Show-up Rate',
+  'Lead Sources',
+  'Team Activity',
+  'Leaderboard',
+  'Performance',
   'Time',
   'Distance',
   'Leads',
-  'Appointments',
-  'Conversion rates',
   'Flyers',
 ];
 
-const desktopShots = [
-  { src: '/landing/WEIRFF_1.png', alt: 'Desktop dashboard 1', title: '' },
-  { src: '/landing/WEIRFF_2.png', alt: 'Desktop dashboard 2', title: '' },
-  { src: '/landing/WEIRFF_3.png', alt: 'Desktop dashboard 3', title: '' },
-  { src: '/landing/WEIRFF_4.png', alt: 'Desktop dashboard 4', title: '' },
-  { src: '/landing/WEIRFF_5.png', alt: 'Desktop dashboard 5', title: '' },
-  { src: '/landing/WEIRFF_6.png', alt: 'Desktop dashboard 6', title: '' },
-];
-
-const mobileShots = [
-  { src: '/landing/green-houses-dashboard.png', alt: 'Campaign progress with visited buildings' },
-  { src: '/landing/IMG_1708.png', alt: 'Mobile leaderboard' },
-  { src: '/landing/mobile-column-markers.png', alt: 'Mobile address form and map' },
-  { src: '/landing/mobile-leaderboard.png', alt: 'Share activity' },
-  { src: '/landing/mobile-session-red.png', alt: 'Mobile start session' },
-  { src: '/landing/mobile-lead-detail.png', alt: 'Lead detail view' },
-];
-
-function ScreenshotCard({
-  src,
-  alt,
-  className = '',
-  objectFit = 'contain',
-}: {
-  src: string;
-  alt: string;
-  className?: string;
-  objectFit?: 'contain' | 'cover';
-}) {
-  const [missing, setMissing] = useState(false);
-
-  return (
-    <div className={`relative overflow-hidden rounded-3xl border border-zinc-700 bg-zinc-900 ${className}`}>
-      {missing ? (
-        <div className="h-full min-h-[180px] bg-zinc-800" />
-      ) : (
-        <Image
-          src={src}
-          alt={alt}
-          fill
-          className={objectFit === 'cover' ? 'object-cover' : 'object-contain'}
-          sizes="(max-width: 768px) 100vw, 50vw"
-          onError={() => setMissing(true)}
-        />
-      )}
-    </div>
-  );
-}
-
 export default function LandingPage() {
-  const router = useRouter();
-  const [checking, setChecking] = useState(true);
   const [trackingWordIndex, setTrackingWordIndex] = useState(0);
-  const [desktopShotIndex, setDesktopShotIndex] = useState(0);
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -170,35 +35,6 @@ export default function LandingPage() {
     }, 2200);
     return () => clearInterval(id);
   }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    getClientAsync()
-      .then((supabase) => supabase.auth.getSession())
-      .then(({ data: { session } }) => {
-        if (cancelled) return;
-        if (session?.user) {
-          router.replace('/gate');
-          return;
-        }
-        setChecking(false);
-      })
-      .catch(() => {
-        if (!cancelled) setChecking(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [router]);
-
-  if (checking) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-zinc-100">
-        <p className="text-zinc-600">Loading...</p>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-zinc-50 text-zinc-900">
@@ -209,12 +45,18 @@ export default function LandingPage() {
           </Link>
 
           <div className="flex items-center gap-5 md:gap-6">
-            <a
-              href="#pricing"
+            <Link
+              href="/plans"
               className="text-sm font-medium text-zinc-600 transition hover:text-zinc-900"
             >
               Pricing
-            </a>
+            </Link>
+            <Link
+              href="/download"
+              className="text-sm font-medium text-zinc-600 transition hover:text-zinc-900"
+            >
+              Download
+            </Link>
             <Link
               href="/login"
               className="inline-flex h-9 items-center rounded-lg border border-zinc-300 bg-white px-4 text-sm font-semibold text-zinc-900 transition hover:bg-zinc-100"
@@ -230,14 +72,17 @@ export default function LandingPage() {
           <div className="mx-auto flex max-w-7xl flex-col items-center text-center">
             <div className="w-full max-w-4xl">
               <h1 className="text-5xl font-black leading-tight text-zinc-900 md:text-6xl">
-                Stop Guessing. Start Tracking.
+                The operating system for field prospecting.
               </h1>
               <p
-                className="mt-6 text-2xl font-semibold text-red-600"
+                className="mt-6 flex items-center justify-center text-2xl font-semibold text-zinc-900"
                 aria-live="polite"
               >
-                <span key={trackingWordIndex} className="inline-block min-w-[6ch] animate-hero-word-in">
-                  {TRACKING_WORDS[trackingWordIndex]}
+                <span className="text-center">Start tracking</span>
+                <span className="ml-1 inline-flex w-[12ch] justify-start">
+                  <span key={trackingWordIndex} className="inline-block animate-hero-word-in text-red-600">
+                    {TRACKING_WORDS[trackingWordIndex]}
+                  </span>
                 </span>
               </p>
               <div className="mt-10 flex flex-wrap justify-center gap-4">
@@ -248,117 +93,40 @@ export default function LandingPage() {
                   Get started
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </Link>
-                <a
-                  href="#pricing"
+                <Link
+                  href="/plans"
                   className="inline-flex h-12 items-center rounded-2xl bg-zinc-100 px-6 text-base font-semibold text-zinc-900 transition hover:bg-zinc-200"
                 >
                   View pricing
-                </a>
+                </Link>
               </div>
             </div>
           </div>
         </section>
 
-        <section className="px-5 py-24 md:px-8">
-          <div className="mx-auto grid max-w-7xl gap-12 lg:grid-cols-[1fr_1fr] lg:items-center">
-            <div>
-              <h2 className="text-3xl font-black leading-tight text-zinc-900 md:text-4xl">
-                We help businesses track what actually works when marketing to homeowners.
-              </h2>
-              <p className="mt-5 text-lg text-zinc-500">
-                Everything from which home scanned your QR code, to how many conversations you had, to how many turned into appointments — so you know what&apos;s working and can repeat it.
-              </p>
-              <Link
-                href="/login"
-                className="mt-8 inline-flex h-12 items-center rounded-2xl bg-zinc-900 px-6 text-base font-semibold text-white transition hover:bg-zinc-700"
-              >
-                Sign up
-              </Link>
-            </div>
-            <div className="relative overflow-hidden rounded-3xl border border-zinc-200 shadow-lg">
-              <Image
-                src="/landing/hero-dashboard-map.png"
-                alt="Campaign dashboard with map, addresses, and scan metrics"
-                width={800}
-                height={500}
-                className="h-auto w-full object-cover"
-              />
-            </div>
-          </div>
-        </section>
-
-        <section className="px-5 py-24 md:px-8">
-          <div className="mx-auto max-w-7xl">
-            <article className="rounded-3xl border border-zinc-700 bg-zinc-950 p-6 text-white md:p-8">
-              <h2 className="text-center text-3xl font-black leading-tight md:text-4xl">Desktop dashboard</h2>
-              <p className="mt-4 text-center text-lg text-zinc-400">
-                Campaigns, draw mode, and live scan overlays.
-              </p>
-              <div className="mt-8 flex items-center gap-4">
-                <button
-                  type="button"
-                  onClick={() => setDesktopShotIndex((i) => (i - 1 + desktopShots.length) % desktopShots.length)}
-                  className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-zinc-500 bg-zinc-800 text-white transition hover:bg-zinc-700"
-                  aria-label="Previous"
-                >
-                  <ArrowRight className="h-5 w-5 rotate-180" />
-                </button>
-                <div className="min-w-0 flex-1">
-                  <div className="relative aspect-video w-full overflow-hidden rounded-2xl border border-zinc-700 bg-zinc-900">
-                    <ScreenshotCard
-                      key={desktopShots[desktopShotIndex].src}
-                      src={desktopShots[desktopShotIndex].src}
-                      alt={desktopShots[desktopShotIndex].alt}
-                      className="h-full min-h-[280px]"
-                    />
-                  </div>
-                  {desktopShots[desktopShotIndex].title ? (
-                    <p className="mt-4 text-center text-lg font-medium text-white">
-                      {desktopShots[desktopShotIndex].title}
-                    </p>
-                  ) : null}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setDesktopShotIndex((i) => (i + 1) % desktopShots.length)}
-                  className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-zinc-500 bg-zinc-800 text-white transition hover:bg-zinc-700"
-                  aria-label="Next"
-                >
-                  <ArrowRight className="h-5 w-5" />
-                </button>
-              </div>
-            </article>
-          </div>
-        </section>
-
-        <section className="px-5 pb-24 pt-0 md:px-8">
-          <div className="mx-auto max-w-7xl rounded-3xl border border-zinc-700 bg-zinc-950 p-6 text-white md:p-8">
-            <h3 className="text-center text-3xl font-black">Mobile field mode</h3>
-            <p className="mt-3 text-center text-lg text-zinc-400">
-              Sessions, progress, and leaderboards on iOS.
+        <section className="pb-0 pt-0">
+          <div className="w-full">
+            <h2 className="text-center text-3xl font-black leading-tight text-zinc-900 md:text-4xl">
+              See FLYR in action
+            </h2>
+            <p className="mt-3 text-center text-lg text-zinc-500">
+              Take a quick product walkthrough directly in the page.
             </p>
-            <div className="mt-8 grid grid-cols-3 gap-3 md:gap-4">
-              {mobileShots.map((shot) => (
-                <ScreenshotCard
-                  key={shot.src}
-                  src={shot.src}
-                  alt={shot.alt}
-                  className="aspect-[9/19] w-full min-w-0"
-                  objectFit="contain"
-                />
-              ))}
+            <div className="mt-8 w-full">
+              <ArcadeEmbed />
             </div>
           </div>
         </section>
 
-        <section id="pricing" className="bg-white px-5 py-24 md:px-8">
-          <div className="mx-auto max-w-5xl">
-            <div className="text-center">
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-red-600">Pricing</p>
-              <h2 className="mt-3 text-4xl font-black">Pick your plan</h2>
-              <p className="mt-3 text-lg text-zinc-500">Simple pricing. Scale when you&apos;re ready.</p>
-            </div>
-            <LandingPricing />
+        <section className="px-5 pb-14 pt-10 md:px-8 md:pb-16">
+          <div className="mx-auto flex max-w-7xl flex-col items-center text-center">
+            <p className="text-lg font-medium text-zinc-700">Ready to turn prospecting into a system?</p>
+            <Link
+              href="/login"
+              className="mt-4 inline-flex h-12 items-center rounded-2xl bg-red-600 px-6 text-base font-semibold text-white transition hover:bg-red-500"
+            >
+              Start your free trial
+            </Link>
           </div>
         </section>
       </main>

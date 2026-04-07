@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import {
+  getSeatUsage,
   normalizePendingInviteRole,
   resolveTeamManagementContext,
 } from '@/app/api/team/_lib/manage';
@@ -10,6 +11,18 @@ type MemberRow = {
   user_id: string;
   role: 'owner' | 'admin' | 'member';
 };
+
+function isSeatLimitError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const maybeError = error as { message?: string; details?: string; code?: string };
+  return (
+    maybeError.code === 'P0001' ||
+    (typeof maybeError.message === 'string' &&
+      maybeError.message.toLowerCase().includes('workspace paid seat limit reached')) ||
+    (typeof maybeError.details === 'string' &&
+      maybeError.details.toLowerCase().includes('max_seats'))
+  );
+}
 
 async function getWorkspaceMember(
   admin: ReturnType<typeof createAdminClient>,
@@ -84,6 +97,23 @@ export async function PATCH(
       );
     }
 
+    if (member.role === nextRole) {
+      return NextResponse.json({ success: true });
+    }
+
+    if (nextRole === 'member' && member.role !== 'member') {
+      const seatUsage = await getSeatUsage(admin, teamContext.workspaceId);
+      if (seatUsage.seatsUsed >= seatUsage.maxSeats) {
+        return NextResponse.json(
+          {
+            error:
+              'All paid seats are currently allocated. Increase seats before changing this user to member.',
+          },
+          { status: 409 }
+        );
+      }
+    }
+
     const { error: updateError } = await admin
       .from('workspace_members')
       .update({
@@ -95,7 +125,38 @@ export async function PATCH(
 
     if (updateError) {
       console.error('[team/members/:userId] role update error:', updateError);
+      if (isSeatLimitError(updateError)) {
+        return NextResponse.json(
+          {
+            error:
+              'All paid seats are currently allocated. Increase seats before changing this user to member.',
+          },
+          { status: 409 }
+        );
+      }
       return NextResponse.json({ error: 'Failed to update member role' }, { status: 500 });
+    }
+
+    if (nextRole === 'member' && member.role !== 'member') {
+      const seatUsage = await getSeatUsage(admin, teamContext.workspaceId);
+      if (seatUsage.seatsUsed > seatUsage.maxSeats) {
+        await admin
+          .from('workspace_members')
+          .update({
+            role: member.role,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('workspace_id', teamContext.workspaceId)
+          .eq('user_id', userId);
+
+        return NextResponse.json(
+          {
+            error:
+              'All paid seats are currently allocated. Increase seats before changing this user to member.',
+          },
+          { status: 409 }
+        );
+      }
     }
 
     return NextResponse.json({ success: true });

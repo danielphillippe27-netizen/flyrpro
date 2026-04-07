@@ -19,8 +19,8 @@ export function TeamSeatSelector() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-4">
-        <span className="text-sm font-medium text-zinc-600 dark:text-zinc-400">Seats</span>
-        <div className="flex items-center gap-1 rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 p-1">
+        <span className="text-sm font-medium text-zinc-700">Seats</span>
+        <div className="flex items-center gap-1 rounded-lg border border-zinc-300 bg-white p-1">
           <Button
             type="button"
             variant="ghost"
@@ -48,16 +48,16 @@ export function TeamSeatSelector() {
           </Button>
         </div>
       </div>
-      <div className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/50 p-3 text-sm">
-        <p className="text-zinc-600 dark:text-zinc-400">
+      <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm">
+        <p className="text-zinc-700">
           {INCLUDED_SEATS} seats included: CA${BASE_PRICE_CAD.toFixed(2)}
         </p>
         {additional > 0 && (
-          <p className="mt-1 text-zinc-600 dark:text-zinc-400">
+          <p className="mt-1 text-zinc-700">
             + {additional} additional seat{additional !== 1 ? 's' : ''}: CA${additionalCost.toFixed(2)} (CA${EXTRA_SEAT_PRICE_CAD} × {additional})
           </p>
         )}
-        <p className="mt-2 font-semibold text-zinc-900 dark:text-white">
+        <p className="mt-2 font-semibold text-zinc-900">
           Total: CA${total.toFixed(2)} / month
         </p>
       </div>

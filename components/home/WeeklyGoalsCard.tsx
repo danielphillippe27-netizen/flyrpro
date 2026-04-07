@@ -52,7 +52,10 @@ export function WeeklyGoalsCard({
               {doorsHit} / {weeklyDoorGoal}
             </span>
           </div>
-          <Progress value={doorsProgress} className="h-2" />
+          <Progress
+            value={doorsProgress}
+            className="h-2 [&_[data-slot=progress-indicator]]:bg-emerald-500 dark:[&_[data-slot=progress-indicator]]:bg-emerald-400"
+          />
         </div>
         {weeklySessionsGoal != null && (
           <div className="text-sm">

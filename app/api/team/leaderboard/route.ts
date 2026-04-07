@@ -17,6 +17,27 @@ type TeamLeaderboardRow = {
   last_active_at?: string | null;
 };
 
+type WorkspaceMemberRow = {
+  user_id: string;
+  color: string | null;
+};
+
+type ProfileRow = {
+  user_id: string;
+  first_name: string | null;
+  last_name: string | null;
+};
+
+type SessionRow = {
+  user_id: string | null;
+  doors_hit: number | null;
+  conversations: number | null;
+  flyers_delivered: number | null;
+  active_seconds: number | null;
+  distance_meters: number | null;
+  start_time: string | null;
+};
+
 type TeamLeaderboardDiagnostics = {
   source: 'sessions' | 'user_stats_fallback';
   message: string | null;
@@ -43,6 +64,123 @@ function parseRange(start?: string | null, end?: string | null): { start: string
 
 function toNumber(value: unknown): number {
   return Number(value) || 0;
+}
+
+function buildDisplayName(profile?: ProfileRow): string {
+  const fullName = [profile?.first_name, profile?.last_name]
+    .filter((part): part is string => typeof part === 'string' && part.trim().length > 0)
+    .join(' ')
+    .trim();
+
+  return fullName || 'Member';
+}
+
+async function buildMemberVisibleLeaderboardRows(
+  supabase: ReturnType<typeof createAdminClient>,
+  workspaceId: string,
+  start: string,
+  end: string
+): Promise<TeamLeaderboardRow[]> {
+  const { data: workspaceMembers, error: workspaceMembersError } = await supabase
+    .from('workspace_members')
+    .select('user_id, color')
+    .eq('workspace_id', workspaceId)
+    .order('created_at', { ascending: true });
+
+  if (workspaceMembersError) {
+    throw workspaceMembersError;
+  }
+
+  const members = (workspaceMembers ?? []) as WorkspaceMemberRow[];
+  const memberIds = members.map((row) => row.user_id).filter(Boolean);
+  if (memberIds.length === 0) {
+    return [];
+  }
+
+  const [profilesRes, sessionsRes] = await Promise.all([
+    supabase
+      .from('user_profiles')
+      .select('user_id, first_name, last_name')
+      .in('user_id', memberIds),
+    supabase
+      .from('sessions')
+      .select('user_id, doors_hit, conversations, flyers_delivered, active_seconds, distance_meters, start_time')
+      .eq('workspace_id', workspaceId)
+      .in('user_id', memberIds)
+      .gte('start_time', start)
+      .lte('start_time', end)
+      .order('start_time', { ascending: false }),
+  ]);
+
+  if (profilesRes.error) {
+    throw profilesRes.error;
+  }
+  if (sessionsRes.error) {
+    throw sessionsRes.error;
+  }
+
+  const profileByUserId = new Map(
+    ((profilesRes.data ?? []) as ProfileRow[]).map((profile) => [profile.user_id, profile])
+  );
+
+  const totalsByUserId = new Map<
+    string,
+    {
+      doors_knocked: number;
+      conversations: number;
+      flyers_delivered: number;
+      sessions_count: number;
+      total_duration_seconds: number;
+      distance_meters: number;
+      last_active_at: string | null;
+    }
+  >();
+
+  for (const session of (sessionsRes.data ?? []) as SessionRow[]) {
+    if (!session.user_id) continue;
+    const existing = totalsByUserId.get(session.user_id) ?? {
+      doors_knocked: 0,
+      conversations: 0,
+      flyers_delivered: 0,
+      sessions_count: 0,
+      total_duration_seconds: 0,
+      distance_meters: 0,
+      last_active_at: null,
+    };
+    totalsByUserId.set(session.user_id, {
+      doors_knocked: existing.doors_knocked + toNumber(session.doors_hit),
+      conversations: existing.conversations + toNumber(session.conversations),
+      flyers_delivered: existing.flyers_delivered + toNumber(session.flyers_delivered),
+      sessions_count: existing.sessions_count + 1,
+      total_duration_seconds: existing.total_duration_seconds + toNumber(session.active_seconds),
+      distance_meters: existing.distance_meters + toNumber(session.distance_meters),
+      last_active_at: existing.last_active_at ?? (session.start_time ?? null),
+    });
+  }
+
+  return members
+    .map((member) => {
+      const totals = totalsByUserId.get(member.user_id);
+      return {
+        user_id: member.user_id,
+        display_name: buildDisplayName(profileByUserId.get(member.user_id)),
+        color: member.color ?? '#3B82F6',
+        doors_knocked: totals?.doors_knocked ?? 0,
+        conversations: totals?.conversations ?? 0,
+        flyers_delivered: totals?.flyers_delivered ?? 0,
+        sessions_count: totals?.sessions_count ?? 0,
+        total_duration_seconds: totals?.total_duration_seconds ?? 0,
+        distance_meters: totals?.distance_meters ?? 0,
+        last_active_at: totals?.last_active_at ?? null,
+      } satisfies TeamLeaderboardRow;
+    })
+    .sort((left, right) => {
+      const doorDelta = toNumber(right.doors_knocked) - toNumber(left.doors_knocked);
+      if (doorDelta !== 0) return doorDelta;
+      const convoDelta = toNumber(right.conversations) - toNumber(left.conversations);
+      if (convoDelta !== 0) return convoDelta;
+      return (right.last_active_at ?? '').localeCompare(left.last_active_at ?? '');
+    });
 }
 
 function summarizeRows(rows: TeamLeaderboardRow[]) {
@@ -165,7 +303,7 @@ export async function GET(request: NextRequest) {
       user.id,
       workspaceId
     );
-    if (resolution.error || !resolution.workspaceId || resolution.mode !== 'team_owner') {
+    if (resolution.error || !resolution.workspaceId || !resolution.role) {
       return NextResponse.json(
         { error: resolution.error ?? 'Forbidden' },
         { status: resolution.status ?? 403 }
@@ -174,24 +312,36 @@ export async function GET(request: NextRequest) {
 
     const { start, end } = parseRange(searchParams.get('start'), searchParams.get('end'));
 
-    const { data, error } = await authClient.rpc('get_team_leaderboard', {
-      p_workspace_id: resolution.workspaceId,
-      p_start_ts: start,
-      p_end_ts: end,
-    });
+    const canUseTeamOwnerRpc = resolution.mode === 'team_owner';
+    let rows: TeamLeaderboardRow[] = [];
 
-    if (error) {
-      console.error('[team/leaderboard] RPC error:', error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    if (canUseTeamOwnerRpc) {
+      const { data, error } = await authClient.rpc('get_team_leaderboard', {
+        p_workspace_id: resolution.workspaceId,
+        p_start_ts: start,
+        p_end_ts: end,
+      });
+
+      if (error) {
+        console.error('[team/leaderboard] RPC error:', error);
+        return NextResponse.json({ error: error.message }, { status: 500 });
+      }
+
+      const result = data as { error?: string } | unknown[];
+      if (result && typeof result === 'object' && 'error' in result && (result as { error: string }).error === 'forbidden') {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      }
+
+      rows = (Array.isArray(result) ? result : []) as TeamLeaderboardRow[];
+    } else {
+      rows = await buildMemberVisibleLeaderboardRows(
+        supabase,
+        resolution.workspaceId,
+        start,
+        end
+      );
     }
 
-    const result = data as { error?: string } | unknown[];
-    if (result && typeof result === 'object' && 'error' in result && (result as { error: string }).error === 'forbidden') {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    }
-
-    const memberRows = (Array.isArray(result) ? result : []) as TeamLeaderboardRow[];
-    let rows = memberRows;
     const inactiveMembers = rows.filter((row) => {
       const item = row as { sessions_count?: number; last_active_at?: string | null };
       return (item.sessions_count ?? 0) === 0 || !item.last_active_at;

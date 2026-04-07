@@ -16,6 +16,45 @@ import {
 
 const INVITE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
+function isSeatLimitError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const maybeError = error as { message?: string; details?: string; code?: string };
+  return (
+    maybeError.code === 'P0001' ||
+    (typeof maybeError.message === 'string' &&
+      maybeError.message.toLowerCase().includes('workspace paid seat limit reached')) ||
+    (typeof maybeError.details === 'string' &&
+      maybeError.details.toLowerCase().includes('max_seats'))
+  );
+}
+
+async function ensureInviteWithinSeatLimit(
+  admin: ReturnType<typeof createAdminClient>,
+  workspaceId: string,
+  role: 'admin' | 'member',
+  inviteId: string
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  if (role === 'admin') {
+    return { ok: true };
+  }
+
+  const seatUsage = await getSeatUsage(admin, workspaceId);
+  if (seatUsage.seatsUsed <= seatUsage.maxSeats) {
+    return { ok: true };
+  }
+
+  await updateWorkspaceInviteRecord(admin, inviteId, {
+    status: 'canceled',
+    updated_at: new Date().toISOString(),
+  });
+
+  return {
+    ok: false,
+    message:
+      'All paid seats are currently allocated. Increase seats before inviting another member.',
+  };
+}
+
 async function getWorkspaceName(
   admin: ReturnType<typeof createAdminClient>,
   workspaceId: string
@@ -101,6 +140,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const { data: memberAlreadyExists, error: memberLookupError } = await admin.rpc(
+      'workspace_has_member_email',
+      {
+        p_workspace_id: context.workspaceId,
+        p_email: email,
+      }
+    );
+
+    if (memberLookupError) {
+      console.error('[team/invites] existing member lookup error:', memberLookupError);
+      return NextResponse.json({ error: 'Failed to create invite' }, { status: 500 });
+    }
+
+    if (memberAlreadyExists === true) {
+      return NextResponse.json(
+        { error: 'That email is already a member of this workspace' },
+        { status: 409 }
+      );
+    }
+
     const seatUsage = await getSeatUsage(admin, context.workspaceId);
     const inviteConsumesPaidSeat = requestedRole !== 'admin';
     if (inviteConsumesPaidSeat && seatUsage.seatsUsed >= seatUsage.maxSeats) {
@@ -159,7 +218,26 @@ export async function POST(request: NextRequest) {
 
       if (refreshError || !refreshedInvite) {
         console.error('[team/invites] refresh stale invite error:', refreshError);
+        if (isSeatLimitError(refreshError)) {
+          return NextResponse.json(
+            {
+              error:
+                'All paid seats are currently allocated. Increase seats before inviting another member.',
+            },
+            { status: 409 }
+          );
+        }
         return NextResponse.json({ error: 'Failed to create invite' }, { status: 500 });
+      }
+
+      const refreshedSeatCheck = await ensureInviteWithinSeatLimit(
+        admin,
+        context.workspaceId,
+        requestedRole,
+        refreshedInvite.id
+      );
+      if (!refreshedSeatCheck.ok) {
+        return NextResponse.json({ error: refreshedSeatCheck.message }, { status: 409 });
       }
 
       const joinUrl = buildJoinUrl(request, refreshedInvite.token);
@@ -216,7 +294,26 @@ export async function POST(request: NextRequest) {
 
     if (error || !invite) {
       console.error('[team/invites] create error:', error);
+      if (isSeatLimitError(error)) {
+        return NextResponse.json(
+          {
+            error:
+              'All paid seats are currently allocated. Increase seats before inviting another member.',
+          },
+          { status: 409 }
+        );
+      }
       return NextResponse.json({ error: 'Failed to create invite' }, { status: 500 });
+    }
+
+    const seatCheck = await ensureInviteWithinSeatLimit(
+      admin,
+      context.workspaceId,
+      requestedRole,
+      invite.id
+    );
+    if (!seatCheck.ok) {
+      return NextResponse.json({ error: seatCheck.message }, { status: 409 });
     }
 
     const joinUrl = buildJoinUrl(request, invite.token);

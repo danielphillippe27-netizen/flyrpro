@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { ThemeProvider } from "@/lib/theme-provider";
+import { PwaRegister } from '@/components/pwa/PwaRegister';
 
 const inter = Inter({
   variable: "--font-inter",
@@ -12,6 +13,7 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://www.flyrpro.app"),
+  manifest: '/manifest.webmanifest',
   title: {
     default: "FLYR",
     template: "%s | FLYR",
@@ -19,7 +21,7 @@ export const metadata: Metadata = {
   description: "Direct Mail Campaign Management",
   icons: {
     icon: "/favicon.ico",
-    apple: "/apple-icon.png",
+    apple: "/apple-touch-icon.png",
   },
   openGraph: {
     title: "FLYR",
@@ -45,6 +47,7 @@ export default function RootLayout({
         className={`${inter.variable} font-sans antialiased`}
       >
         <ThemeProvider>
+          <PwaRegister />
           {children}
         </ThemeProvider>
       </body>
