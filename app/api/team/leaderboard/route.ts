@@ -6,6 +6,7 @@ import type { MinimalSupabaseClient } from '@/app/api/_utils/workspace';
 type TeamLeaderboardRow = {
   user_id: string;
   display_name: string;
+  avatar_url?: string | null;
   color?: string | null;
   doors_knocked?: number;
   conversations?: number;
@@ -26,6 +27,7 @@ type ProfileRow = {
   user_id: string;
   first_name: string | null;
   last_name: string | null;
+  avatar_url?: string | null;
 };
 
 type SessionRow = {
@@ -100,7 +102,7 @@ async function buildMemberVisibleLeaderboardRows(
   const [profilesRes, sessionsRes] = await Promise.all([
     supabase
       .from('user_profiles')
-      .select('user_id, first_name, last_name')
+      .select('user_id, first_name, last_name, avatar_url')
       .in('user_id', memberIds),
     supabase
       .from('sessions')
@@ -164,6 +166,7 @@ async function buildMemberVisibleLeaderboardRows(
       return {
         user_id: member.user_id,
         display_name: buildDisplayName(profileByUserId.get(member.user_id)),
+        avatar_url: profileByUserId.get(member.user_id)?.avatar_url ?? null,
         color: member.color ?? '#3B82F6',
         doors_knocked: totals?.doors_knocked ?? 0,
         conversations: totals?.conversations ?? 0,
@@ -181,6 +184,33 @@ async function buildMemberVisibleLeaderboardRows(
       if (convoDelta !== 0) return convoDelta;
       return (right.last_active_at ?? '').localeCompare(left.last_active_at ?? '');
     });
+}
+
+async function enrichRowsWithAvatarUrls(
+  supabase: ReturnType<typeof createAdminClient>,
+  rows: TeamLeaderboardRow[]
+): Promise<TeamLeaderboardRow[]> {
+  const memberIds = Array.from(new Set(rows.map((row) => row.user_id).filter(Boolean)));
+  if (memberIds.length === 0) return rows;
+
+  const { data: profiles, error } = await supabase
+    .from('user_profiles')
+    .select('user_id, avatar_url')
+    .in('user_id', memberIds);
+  if (error) {
+    console.warn('[team/leaderboard] avatar enrichment failed:', error.message);
+    return rows;
+  }
+
+  const avatarByUserId = new Map<string, string | null>();
+  for (const profile of (profiles ?? []) as Array<{ user_id: string; avatar_url: string | null }>) {
+    avatarByUserId.set(profile.user_id, profile.avatar_url);
+  }
+
+  return rows.map((row) => ({
+    ...row,
+    avatar_url: row.avatar_url ?? avatarByUserId.get(row.user_id) ?? null,
+  }));
 }
 
 function summarizeRows(rows: TeamLeaderboardRow[]) {
@@ -341,6 +371,8 @@ export async function GET(request: NextRequest) {
         end
       );
     }
+
+    rows = await enrichRowsWithAvatarUrls(supabase, rows);
 
     const inactiveMembers = rows.filter((row) => {
       const item = row as { sessions_count?: number; last_active_at?: string | null };

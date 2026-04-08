@@ -48,12 +48,16 @@ function roleRank(role: string | null | undefined): number {
 function classifyDashboardAccessLevel(
   isFounder: boolean,
   role: WorkspaceRole | null,
-  memberCount: number
+  memberCount: number,
+  maxSeats: number | null
 ): DashboardAccessLevel {
   if (isFounder) return 'founder';
   if (role === 'member') return 'member';
   if (role === 'admin') return 'team_leader';
-  if (role === 'owner') return memberCount > 1 ? 'team_leader' : 'solo_owner';
+  if (role === 'owner') {
+    const hasTeamCapacity = typeof maxSeats === 'number' && maxSeats > 1;
+    return memberCount > 1 || hasTeamCapacity ? 'team_leader' : 'solo_owner';
+  }
   return 'unassigned';
 }
 
@@ -109,13 +113,20 @@ export async function resolveDashboardAccessLevel(
     .select('user_id')
     .eq('workspace_id', resolution.workspaceId);
   const memberCount = Array.isArray(memberRows) ? memberRows.length : 0;
+  const { data: workspace } = await supabaseAny
+    .from('workspaces')
+    .select('max_seats')
+    .eq('id', resolution.workspaceId)
+    .maybeSingle();
+  const maxSeats =
+    typeof workspace?.max_seats === 'number' ? workspace.max_seats : null;
 
   return {
     workspaceId: resolution.workspaceId,
     role,
     memberCount,
     isFounder,
-    level: classifyDashboardAccessLevel(isFounder, role, memberCount),
+    level: classifyDashboardAccessLevel(isFounder, role, memberCount, maxSeats),
     status: 200,
   };
 }

@@ -4,10 +4,24 @@ import { useEffect, useState, useCallback } from 'react';
 import { useWorkspace } from '@/lib/workspace-context';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { MailPlus, RefreshCw, UserMinus, Users } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { MailPlus, MoreHorizontal, RefreshCw, UserMinus, Users } from 'lucide-react';
 import type { TeamControlsRange } from '@/components/home/team/TeamControlsBar';
 import { InviteMemberDialog } from '@/components/home/team/InviteMemberDialog';
 
@@ -50,6 +64,11 @@ type InviteMutationResponse = {
   emailError?: string | null;
 };
 
+type InviteListResponse = {
+  invites?: PendingInvite[];
+  error?: string;
+};
+
 type SeatUsage = {
   maxSeats: number;
   activeMembers: number;
@@ -69,6 +88,9 @@ type BillingEntitlement = {
 };
 
 type RosterResponse = {
+  workspace?: {
+    trialActive?: boolean;
+  };
   actorRole: 'owner' | 'admin';
   seatUsage: SeatUsage;
   members: RosterMember[];
@@ -76,8 +98,9 @@ type RosterResponse = {
 };
 
 function formatLastActive(iso: string | null): string {
-  if (!iso) return '—';
+  if (!iso) return 'No session yet';
   const then = new Date(iso);
+  if (Number.isNaN(then.getTime())) return 'No session yet';
   const now = new Date();
   const days = Math.floor((now.getTime() - then.getTime()) / (24 * 60 * 60 * 1000));
   if (days === 0) return 'Today';
@@ -111,16 +134,30 @@ export function TeamMembersTab(props: TeamMembersTabProps) {
   const [analyticsByUserId, setAnalyticsByUserId] = useState<Record<string, AnalyticsRow>>({});
   const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
   const [seatUsage, setSeatUsage] = useState<SeatUsage | null>(null);
+  const [isTrialActive, setIsTrialActive] = useState(false);
   const [actorRole, setActorRole] = useState<'owner' | 'admin'>('owner');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
+  const [removeMembersDialogOpen, setRemoveMembersDialogOpen] = useState(false);
+  const [selectedRemoveMemberIds, setSelectedRemoveMemberIds] = useState<string[]>([]);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [billingError, setBillingError] = useState<string | null>(null);
   const [openingBilling, setOpeningBilling] = useState(false);
-  const [sendingTestInvite, setSendingTestInvite] = useState(false);
   const [actionKey, setActionKey] = useState<string | null>(null);
+  const attentionSummary =
+    seatUsage
+      ? isTrialActive
+        ? `${seatUsage.pendingInvites} invite${seatUsage.pendingInvites === 1 ? '' : 's'} pending • ${seatUsage.activeMembers} member${seatUsage.activeMembers === 1 ? '' : 's'} active • trial active`
+        : `${seatUsage.pendingInvites} invite${seatUsage.pendingInvites === 1 ? '' : 's'} pending • ${seatUsage.activeMembers} member${seatUsage.activeMembers === 1 ? '' : 's'} active • ${seatUsage.seatsRemaining} paid seat${seatUsage.seatsRemaining === 1 ? '' : 's'} remaining`
+      : null;
+  const removableMembers = rosterMembers.filter(
+    (member) =>
+      !member.is_current_user &&
+      member.role !== 'owner' &&
+      (actorRole === 'owner' || member.role === 'member')
+  );
 
   const fetchMembers = useCallback(async () => {
     if (!currentWorkspaceId) {
@@ -154,11 +191,30 @@ export function TeamMembersTab(props: TeamMembersTabProps) {
 
       const rosterData = (await rosterRes.json()) as RosterResponse;
       const analyticsData = (await analyticsRes.json()) as { members?: AnalyticsRow[] };
+      let nextPendingInvites = rosterData.pendingInvites ?? [];
+
+      // Fallback: if seat counters report pending invites but roster list is empty,
+      // fetch invites directly to avoid a confusing mismatch in the UI.
+      if (
+        currentWorkspaceId &&
+        nextPendingInvites.length === 0 &&
+        (rosterData.seatUsage?.pendingInvites ?? 0) > 0
+      ) {
+        const invitesParams = new URLSearchParams({ workspaceId: currentWorkspaceId });
+        const invitesRes = await fetch('/api/team/invites?' + invitesParams.toString(), {
+          credentials: 'include',
+        });
+        if (invitesRes.ok) {
+          const invitesPayload = (await invitesRes.json()) as InviteListResponse;
+          nextPendingInvites = invitesPayload.invites ?? [];
+        }
+      }
 
       setActorRole(rosterData.actorRole);
+      setIsTrialActive(Boolean(rosterData.workspace?.trialActive));
       setSeatUsage(rosterData.seatUsage);
       setRosterMembers(rosterData.members ?? []);
-      setPendingInvites(rosterData.pendingInvites ?? []);
+      setPendingInvites(nextPendingInvites);
       setAnalyticsByUserId(
         Object.fromEntries(((analyticsData.members ?? []) as AnalyticsRow[]).map((row) => [row.user_id, row]))
       );
@@ -167,6 +223,7 @@ export function TeamMembersTab(props: TeamMembersTabProps) {
       setRosterMembers([]);
       setPendingInvites([]);
       setSeatUsage(null);
+      setIsTrialActive(false);
       setAnalyticsByUserId({});
     } finally {
       setLoading(false);
@@ -199,8 +256,8 @@ export function TeamMembersTab(props: TeamMembersTabProps) {
     setNotice(noticeMessage);
   }, []);
 
-  const handleIncreaseSeats = useCallback(async (
-    additionalSeats = 1,
+  const handleAdjustSeats = useCallback(async (
+    seatDelta = 1,
     options?: { showNotice?: boolean }
   ): Promise<'updated' | 'redirected' | 'failed'> => {
     if (actorRole !== 'owner') return 'failed';
@@ -218,8 +275,17 @@ export function TeamMembersTab(props: TeamMembersTabProps) {
         );
       }
 
-      const requestedIncrease = Math.max(1, Math.trunc(additionalSeats));
-      const targetSeats = Math.max(1, (seatUsage?.maxSeats ?? 1) + requestedIncrease);
+      const requestedSeatDelta = Math.trunc(seatDelta);
+      if (!Number.isFinite(requestedSeatDelta) || requestedSeatDelta === 0) {
+        return 'failed';
+      }
+      const currentSeats = Math.max(1, seatUsage?.maxSeats ?? 1);
+      const targetSeats = Math.max(1, currentSeats + requestedSeatDelta);
+      const seatsChangedBy = targetSeats - currentSeats;
+      if (seatsChangedBy === 0) {
+        setBillingError('Paid seats cannot go below 1.');
+        return 'failed';
+      }
       const openStripeRoute = async (
         endpoint: '/api/billing/stripe/checkout' | '/api/billing/stripe/seats',
         body?: Record<string, unknown>
@@ -249,7 +315,10 @@ export function TeamMembersTab(props: TeamMembersTabProps) {
           throw new Error(payload?.error ?? 'Failed to update paid seats');
         }
         if (options?.showNotice !== false) {
-          setNotice(`Paid seats updated to ${payload?.maxSeats ?? targetSeats}. Admins remain free.`);
+          const updatedSeats = payload?.maxSeats ?? targetSeats;
+          setNotice(
+            `Paid seats updated from ${currentSeats} to ${updatedSeats}. Admins remain free.`
+          );
         }
         await fetchMembers();
         return 'updated';
@@ -290,8 +359,8 @@ export function TeamMembersTab(props: TeamMembersTabProps) {
     setInviteError(null);
     setBillingError(null);
     try {
-      if (role === 'member' && additionalSeats > 0) {
-        const seatUpdateResult = await handleIncreaseSeats(additionalSeats, { showNotice: false });
+      if (!isTrialActive && role === 'member' && additionalSeats > 0) {
+        const seatUpdateResult = await handleAdjustSeats(additionalSeats, { showNotice: false });
         if (seatUpdateResult !== 'updated') {
           return;
         }
@@ -384,66 +453,7 @@ export function TeamMembersTab(props: TeamMembersTabProps) {
       setInviteError(message);
       setError(message);
     }
-  }, [copyInviteLink, currentWorkspaceId, fetchMembers, handleIncreaseSeats, runAction]);
-
-  const handleSendTestInvite = useCallback(async (options?: { previewEmail?: string }) => {
-    if (!currentWorkspaceId) return;
-    setInviteError(null);
-    setBillingError(null);
-    setError(null);
-    setNotice(null);
-    setSendingTestInvite(true);
-
-    try {
-      const response = await fetch('/api/team/invites/test-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          workspaceId: currentWorkspaceId,
-          ...(options?.previewEmail ? { previewEmail: options.previewEmail } : {}),
-        }),
-      });
-      const payload = (await response.json().catch(() => null)) as {
-        error?: string;
-        message?: string;
-        email?: string;
-        resendEmailId?: string | null;
-        previewUrl?: string;
-      } | null;
-
-      if (!response.ok) {
-        const message = payload?.error ?? 'Failed to send preview invite';
-        setInviteError(message);
-        throw new Error(message);
-      }
-
-      let clipboardNote = '';
-      if (payload?.previewUrl) {
-        try {
-          await navigator.clipboard.writeText(payload.previewUrl);
-          clipboardNote = ' Preview link copied to clipboard.';
-        } catch {
-          clipboardNote = ` Preview link: ${payload.previewUrl}`;
-        }
-      }
-
-      const resendNote =
-        payload?.resendEmailId?.trim()
-          ? ` Resend message id ${payload.resendEmailId} — at https://resend.com/emails confirm whether Resend shows "Delivered".`
-          : '';
-
-      setNotice(
-        `${payload?.message ?? `Preview invite sent to ${payload?.email ?? 'your email'}.`}${clipboardNote}${resendNote} If the inbox is empty, check Spam and search for subject "Preview:".`
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to send preview invite';
-      setInviteError(message);
-      setError(message);
-    } finally {
-      setSendingTestInvite(false);
-    }
-  }, [currentWorkspaceId]);
+  }, [copyInviteLink, currentWorkspaceId, fetchMembers, handleAdjustSeats, isTrialActive, runAction]);
 
   const handleResendInvite = useCallback(async (inviteId: string) => {
     if (!currentWorkspaceId) return;
@@ -528,12 +538,60 @@ export function TeamMembersTab(props: TeamMembersTabProps) {
       if (!response.ok) {
         throw new Error(payload?.error ?? 'Failed to remove member');
       }
-      setNotice('Member removed.');
+      setNotice('Member removed from workspace. Historical data remains available.');
       await fetchMembers();
     }).catch((err: Error) => {
       setError(err.message);
     });
   }, [currentWorkspaceId, fetchMembers, runAction]);
+
+  const toggleRemoveMemberSelection = useCallback((userId: string) => {
+    setSelectedRemoveMemberIds((current) =>
+      current.includes(userId) ? current.filter((id) => id !== userId) : [...current, userId]
+    );
+  }, []);
+
+  const handleBulkRemoveMembers = useCallback(async () => {
+    if (!currentWorkspaceId || selectedRemoveMemberIds.length === 0) return;
+    await runAction('member:remove:bulk', async () => {
+      const failedRemovals: string[] = [];
+      let removedCount = 0;
+
+      for (const userId of selectedRemoveMemberIds) {
+        const response = await fetch(`/api/team/members/${userId}?workspaceId=${encodeURIComponent(currentWorkspaceId)}`, {
+          method: 'DELETE',
+          credentials: 'include',
+        });
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        if (!response.ok) {
+          failedRemovals.push(payload?.error ?? 'Failed to remove member');
+          continue;
+        }
+        removedCount += 1;
+      }
+
+      await fetchMembers();
+
+      if (removedCount > 0) {
+        setNotice(
+          `${removedCount} member${removedCount === 1 ? '' : 's'} removed from workspace. Historical data remains available.`
+        );
+      }
+
+      if (failedRemovals.length > 0) {
+        throw new Error(
+          failedRemovals.length === 1
+            ? failedRemovals[0]
+            : `${failedRemovals.length} removals failed: ${failedRemovals.join('; ')}`
+        );
+      }
+
+      setRemoveMembersDialogOpen(false);
+      setSelectedRemoveMemberIds([]);
+    }).catch((err: Error) => {
+      setError(err.message);
+    });
+  }, [currentWorkspaceId, fetchMembers, runAction, selectedRemoveMemberIds]);
 
   if (loading && rosterMembers.length === 0 && pendingInvites.length === 0) {
     return (
@@ -557,14 +615,75 @@ export function TeamMembersTab(props: TeamMembersTabProps) {
         }}
         actorRole={actorRole}
         seatsRemaining={seatUsage?.seatsRemaining ?? 0}
+        isTrialActive={isTrialActive}
         isSubmitting={actionKey === 'invite:create'}
         isOpeningBilling={openingBilling}
-        isSendingTestInvite={sendingTestInvite}
         error={inviteError}
         billingError={billingError}
         onSubmit={handleCreateInvite}
-        onSendTestInvite={handleSendTestInvite}
       />
+      <Dialog
+        open={removeMembersDialogOpen}
+        onOpenChange={(open) => {
+          setRemoveMembersDialogOpen(open);
+          if (!open) {
+            setSelectedRemoveMemberIds([]);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove members</DialogTitle>
+            <DialogDescription>
+              Select members to remove from this workspace. Their historical activity data remains available.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            {removableMembers.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No removable members available.</p>
+            ) : (
+              removableMembers.map((member) => {
+                const isSelected = selectedRemoveMemberIds.includes(member.user_id);
+                return (
+                  <Button
+                    key={member.user_id}
+                    type="button"
+                    variant={isSelected ? 'default' : 'outline'}
+                    className="w-full justify-between"
+                    onClick={() => toggleRemoveMemberSelection(member.user_id)}
+                  >
+                    <span>{member.display_name}</span>
+                    <span className="text-xs capitalize opacity-80">{member.role}</span>
+                  </Button>
+                );
+              })
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setRemoveMembersDialogOpen(false);
+                setSelectedRemoveMemberIds([]);
+              }}
+              disabled={actionKey === 'member:remove:bulk'}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                void handleBulkRemoveMembers();
+              }}
+              disabled={selectedRemoveMemberIds.length === 0 || actionKey === 'member:remove:bulk'}
+            >
+              {actionKey === 'member:remove:bulk'
+                ? 'Removing...'
+                : `Remove ${selectedRemoveMemberIds.length} member${selectedRemoveMemberIds.length === 1 ? '' : 's'}`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {error ? (
         <Card className="border-destructive/50">
@@ -574,6 +693,14 @@ export function TeamMembersTab(props: TeamMembersTabProps) {
       {notice ? (
         <Card>
           <CardContent className="py-3 text-sm text-muted-foreground">{notice}</CardContent>
+        </Card>
+      ) : null}
+      {attentionSummary ? (
+        <Card>
+          <CardContent className="py-3 text-sm">
+            <span className="font-medium">Needs attention:</span>{' '}
+            <span className="text-muted-foreground">{attentionSummary}</span>
+          </CardContent>
         </Card>
       ) : null}
 
@@ -603,11 +730,18 @@ export function TeamMembersTab(props: TeamMembersTabProps) {
               <TableBody>
                 {rosterMembers.map((member) => {
                   const analytics = analyticsByUserId[member.user_id];
-                  const isActive =
-                    (analytics?.sessions_count ?? 0) > 0 ||
-                    (analytics?.inactive_days !== null &&
-                      analytics?.inactive_days !== undefined &&
-                      analytics.inactive_days < 7);
+                  const inactiveDays = analytics?.inactive_days;
+                  const hasSessions = (analytics?.sessions_count ?? 0) > 0;
+                  const statusLabel =
+                    !hasSessions && !analytics?.last_active_at
+                      ? 'No activity yet'
+                      : inactiveDays !== null && inactiveDays !== undefined && inactiveDays < 2
+                        ? 'Active'
+                        : inactiveDays !== null && inactiveDays !== undefined && inactiveDays < 7
+                          ? 'Recent'
+                          : 'Needs follow-up';
+                  const statusVariant =
+                    statusLabel === 'Active' || statusLabel === 'Recent' ? 'secondary' : 'outline';
                   const canPromoteDemote =
                     actorRole === 'owner' &&
                     !member.is_current_user &&
@@ -633,12 +767,19 @@ export function TeamMembersTab(props: TeamMembersTabProps) {
                       }
                     >
                       <TableCell>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-3">
                           <span
-                            className="h-2.5 w-2.5 rounded-full"
+                            className="flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-semibold text-white"
                             style={{ backgroundColor: member.color }}
                             aria-hidden
-                          />
+                          >
+                            {(member.display_name || 'M')
+                              .split(/\s+/)
+                              .filter(Boolean)
+                              .slice(0, 2)
+                              .map((part) => part[0]?.toUpperCase())
+                              .join('') || 'M'}
+                          </span>
                           <div className="flex items-center gap-2">
                             <span className="font-medium">{member.display_name}</span>
                             {member.is_current_user ? <Badge variant="outline">You</Badge> : null}
@@ -650,8 +791,8 @@ export function TeamMembersTab(props: TeamMembersTabProps) {
                       <TableCell>{formatLastActive(analytics?.last_active_at ?? null)}</TableCell>
                       <TableCell className="text-right">{analytics?.sessions_count ?? 0}</TableCell>
                       <TableCell>
-                        <Badge variant={isActive ? 'secondary' : 'outline'}>
-                          {isActive ? 'Active' : 'Inactive'}
+                        <Badge variant={statusVariant}>
+                          {statusLabel}
                         </Badge>
                       </TableCell>
                       <TableCell>
@@ -681,7 +822,7 @@ export function TeamMembersTab(props: TeamMembersTabProps) {
                               onClick={() => handleRemoveMember(member.user_id)}
                             >
                               <UserMinus className="mr-2 h-4 w-4" />
-                              Remove
+                              Remove member
                             </Button>
                           ) : null}
                         </div>
@@ -700,42 +841,50 @@ export function TeamMembersTab(props: TeamMembersTabProps) {
           <div>
             <CardTitle className="text-base">Seats</CardTitle>
             <p className="mt-1 text-sm text-muted-foreground">
-              You pay for member seats. Admins are free.
+              Paid seats apply to members only. Admins are free.
             </p>
           </div>
-          <Button
-            type="button"
-            onClick={() => setInviteDialogOpen(true)}
-            disabled={!seatUsage}
-          >
-            <MailPlus className="mr-2 h-4 w-4" />
-            Invite member
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setRemoveMembersDialogOpen(true)}
+              disabled={removableMembers.length === 0}
+            >
+              <UserMinus className="mr-2 h-4 w-4" />
+              Remove members
+            </Button>
+            <Button
+              type="button"
+              onClick={() => setInviteDialogOpen(true)}
+              disabled={!seatUsage}
+            >
+              <MailPlus className="mr-2 h-4 w-4" />
+              Add member
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap gap-2">
             <Badge variant="secondary">
-              {seatUsage?.seatsUsed ?? 0} paid used
-            </Badge>
-            <Badge variant="outline">
-              {seatUsage?.maxSeats ?? 0} paid seats
-            </Badge>
-            <Badge variant="outline">
-              {seatUsage?.seatsRemaining ?? 0} paid remaining
-            </Badge>
-            <Badge variant="outline">
-              {seatUsage?.activeAdmins ?? 0} admins free
-            </Badge>
-            <Badge variant="outline">
-              {seatUsage?.pendingAdminInvites ?? 0} admin invites
-            </Badge>
-            <Badge variant="outline">
-              {seatUsage?.activeMembers ?? 0} active people
+              {seatUsage?.seatsUsed ?? 0} seats used
             </Badge>
             <Badge variant="outline">
               {seatUsage?.pendingInvites ?? 0} pending invites
             </Badge>
+            <Badge variant="outline">
+              {seatUsage?.activeMembers ?? 0} active members
+            </Badge>
+            <Badge variant="outline">
+              {seatUsage?.activeAdmins ?? 0} admin seats
+            </Badge>
           </div>
+          <p className="text-xs text-muted-foreground">
+            {seatUsage?.seatsRemaining ?? 0} paid seat{(seatUsage?.seatsRemaining ?? 0) === 1 ? '' : 's'} remaining
+            {' • '}
+            {seatUsage?.pendingAdminInvites ?? 0} admin invite{(seatUsage?.pendingAdminInvites ?? 0) === 1 ? '' : 's'} pending
+          </p>
+          {billingError ? <p className="text-sm text-destructive">{billingError}</p> : null}
         </CardContent>
       </Card>
 
@@ -771,42 +920,42 @@ export function TeamMembersTab(props: TeamMembersTabProps) {
                       <TableCell>{formatDate(invite.last_sent_at ?? invite.created_at)}</TableCell>
                       <TableCell>{formatDate(invite.expires_at)}</TableCell>
                       <TableCell>
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              void copyInviteLink(invite.join_url).catch((err) => {
-                                setError(err instanceof Error ? err.message : 'Failed to copy invite link');
-                              });
-                            }}
-                          >
-                            Copy link
-                          </Button>
-                          {canManageInvite ? (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              disabled={actionKey === `invite:resend:${invite.id}`}
-                              onClick={() => handleResendInvite(invite.id)}
-                            >
-                              Resend
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button type="button" size="icon" variant="outline" aria-label="Invite actions">
+                              <MoreHorizontal className="h-4 w-4" />
                             </Button>
-                          ) : null}
-                          {canManageInvite ? (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              disabled={actionKey === `invite:cancel:${invite.id}`}
-                              onClick={() => handleCancelInvite(invite.id)}
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem
+                              disabled={!invite.join_url}
+                              onClick={() => {
+                                void copyInviteLink(invite.join_url).catch((err) => {
+                                  setError(err instanceof Error ? err.message : 'Failed to copy invite link');
+                                });
+                              }}
                             >
-                              Cancel
-                            </Button>
-                          ) : null}
-                        </div>
+                              Copy link
+                            </DropdownMenuItem>
+                            {canManageInvite ? (
+                              <DropdownMenuItem
+                                disabled={actionKey === `invite:resend:${invite.id}`}
+                                onClick={() => handleResendInvite(invite.id)}
+                              >
+                                Resend
+                              </DropdownMenuItem>
+                            ) : null}
+                            {canManageInvite ? (
+                              <DropdownMenuItem
+                                variant="destructive"
+                                disabled={actionKey === `invite:cancel:${invite.id}`}
+                                onClick={() => handleCancelInvite(invite.id)}
+                              >
+                                Cancel invite
+                              </DropdownMenuItem>
+                            ) : null}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </TableCell>
                     </TableRow>
                   );

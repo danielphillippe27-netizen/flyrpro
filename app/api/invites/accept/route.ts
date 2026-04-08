@@ -2,6 +2,132 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 
+type InviteRow = {
+  id: string;
+  workspace_id: string;
+  email: string;
+  role: 'admin' | 'member';
+  status: string;
+  expires_at: string | null;
+  accepted_by_user_id?: string | null;
+};
+
+function isLegacyAcceptedTriggerNullUserError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const maybe = error as { code?: string; message?: string };
+  return (
+    maybe.code === '23502' &&
+    typeof maybe.message === 'string' &&
+    maybe.message.includes('null value in column "user_id" of relation "workspace_members"')
+  );
+}
+
+async function getInviteByToken(
+  admin: ReturnType<typeof createAdminClient>,
+  token: string
+): Promise<{ invite: InviteRow | null; error: unknown }> {
+  const withAcceptedBy = await admin
+    .from('workspace_invites')
+    .select('id, workspace_id, email, role, status, expires_at, accepted_by_user_id')
+    .eq('token', token)
+    .maybeSingle();
+
+  if (!withAcceptedBy.error) {
+    return {
+      invite: (withAcceptedBy.data as InviteRow | null) ?? null,
+      error: null,
+    };
+  }
+
+  const maybeError = withAcceptedBy.error as { code?: string; message?: string } | null;
+  const missingAcceptedByColumn =
+    maybeError?.code === '42703' &&
+    typeof maybeError.message === 'string' &&
+    maybeError.message.includes('accepted_by_user_id');
+
+  if (!missingAcceptedByColumn) {
+    return { invite: null, error: withAcceptedBy.error };
+  }
+
+  const fallback = await admin
+    .from('workspace_invites')
+    .select('id, workspace_id, email, role, status, expires_at')
+    .eq('token', token)
+    .maybeSingle();
+
+  return {
+    invite: fallback.data
+      ? ({ ...fallback.data, accepted_by_user_id: null } as InviteRow)
+      : null,
+    error: fallback.error,
+  };
+}
+
+async function markInviteAccepted(
+  admin: ReturnType<typeof createAdminClient>,
+  inviteId: string,
+  userId: string,
+  nowIso: string
+) {
+  const withAcceptedBy = await admin
+    .from('workspace_invites')
+    .update({
+      status: 'accepted',
+      accepted_at: nowIso,
+      accepted_by_user_id: userId,
+      updated_at: nowIso,
+    })
+    .eq('id', inviteId)
+    .eq('status', 'pending')
+    .select('id')
+    .maybeSingle();
+
+  if (!withAcceptedBy.error) {
+    return withAcceptedBy;
+  }
+
+  const maybeError = withAcceptedBy.error as { code?: string; message?: string } | null;
+  const missingAcceptedByColumn =
+    maybeError?.code === 'PGRST204' &&
+    typeof maybeError.message === 'string' &&
+    maybeError.message.includes('accepted_by_user_id');
+
+  if (!missingAcceptedByColumn) {
+    return withAcceptedBy;
+  }
+
+  return admin
+    .from('workspace_invites')
+    .update({
+      status: 'accepted',
+      accepted_at: nowIso,
+      updated_at: nowIso,
+    })
+    .eq('id', inviteId)
+    .eq('status', 'pending')
+    .select('id')
+    .maybeSingle();
+}
+
+async function ensureMembership(
+  admin: ReturnType<typeof createAdminClient>,
+  invite: InviteRow,
+  userId: string,
+  nowIso: string
+) {
+  return admin
+    .from('workspace_members')
+    .upsert(
+      {
+        workspace_id: invite.workspace_id,
+        user_id: userId,
+        role: invite.role,
+        updated_at: nowIso,
+      },
+      { onConflict: 'workspace_id,user_id' }
+    );
+}
+
 /**
  * POST /api/invites/accept
  * Body: { token: string }
@@ -30,11 +156,7 @@ export async function POST(request: NextRequest) {
     }
 
     const admin = createAdminClient();
-    const { data: invite, error: inviteError } = await admin
-      .from('workspace_invites')
-      .select('id, workspace_id, email, role, status, expires_at, accepted_by_user_id')
-      .eq('token', token)
-      .single();
+    const { invite, error: inviteError } = await getInviteByToken(admin, token);
 
     if (inviteError || !invite) {
       return NextResponse.json(
@@ -79,7 +201,7 @@ export async function POST(request: NextRequest) {
     const acceptedByCurrentUser =
       invite.accepted_by_user_id === requestUser.id || membershipAlreadyExists;
 
-    if (invite.status === 'accepted' && acceptedByCurrentUser) {
+    if ((invite.status === 'accepted' || invite.status === 'expired') && acceptedByCurrentUser) {
       console.info('[invite-accept] duplicate accept resolved safely', {
         inviteId: invite.id,
         workspaceId: invite.workspace_id,
@@ -101,18 +223,45 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { data: acceptedInvite, error: updateError } = await admin
-      .from('workspace_invites')
-      .update({
-        status: 'accepted',
-        accepted_at: nowIso,
-        accepted_by_user_id: requestUser.id,
-        updated_at: nowIso,
-      })
-      .eq('id', invite.id)
-      .eq('status', 'pending')
-      .select('id')
-      .maybeSingle();
+    let { data: acceptedInvite, error: updateError } = await markInviteAccepted(
+      admin,
+      invite.id,
+      requestUser.id,
+      nowIso
+    );
+    let membershipEnsuredByLegacyFallback = false;
+
+    if (updateError && isLegacyAcceptedTriggerNullUserError(updateError)) {
+      const { error: legacyMembershipError } = await ensureMembership(
+        admin,
+        invite,
+        requestUser.id,
+        nowIso
+      );
+      if (legacyMembershipError) {
+        console.error('[invite-accept] legacy membership upsert error:', legacyMembershipError);
+        return NextResponse.json(
+          { error: 'Failed to accept invite' },
+          { status: 500 }
+        );
+      }
+
+      const legacyInviteUpdate = await admin
+        .from('workspace_invites')
+        .update({
+          status: 'expired',
+          accepted_at: nowIso,
+          updated_at: nowIso,
+        })
+        .eq('id', invite.id)
+        .eq('status', 'pending')
+        .select('id')
+        .maybeSingle();
+
+      acceptedInvite = legacyInviteUpdate.data;
+      updateError = legacyInviteUpdate.error;
+      membershipEnsuredByLegacyFallback = true;
+    }
 
     if (updateError) {
       console.error('[invite-accept] invite update error:', updateError);
@@ -125,14 +274,14 @@ export async function POST(request: NextRequest) {
     if (!acceptedInvite && !membershipAlreadyExists) {
       const { data: refreshedInvite, error: refreshedInviteError } = await admin
         .from('workspace_invites')
-        .select('id, status, accepted_by_user_id')
+        .select('id, status')
         .eq('id', invite.id)
         .maybeSingle();
 
       if (
         refreshedInviteError ||
         !refreshedInvite?.id ||
-        refreshedInvite.status !== 'accepted'
+        (refreshedInvite.status !== 'accepted' && refreshedInvite.status !== 'expired')
       ) {
         console.error('[invite-accept] invite race recovery failed:', refreshedInviteError);
         return NextResponse.json(
@@ -142,18 +291,13 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (!membershipAlreadyExists) {
-      const { error: membershipUpsertError } = await admin
-        .from('workspace_members')
-        .upsert(
-          {
-            workspace_id: invite.workspace_id,
-            user_id: requestUser.id,
-            role: invite.role,
-            updated_at: nowIso,
-          },
-          { onConflict: 'workspace_id,user_id' }
-        );
+    if (!membershipAlreadyExists && !membershipEnsuredByLegacyFallback) {
+      const { error: membershipUpsertError } = await ensureMembership(
+        admin,
+        invite,
+        requestUser.id,
+        nowIso
+      );
 
       if (membershipUpsertError) {
         console.error('[invite-accept] membership upsert error:', membershipUpsertError);

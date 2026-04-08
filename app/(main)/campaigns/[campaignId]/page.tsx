@@ -24,7 +24,9 @@ import type { CampaignRoadMetadata } from '@/types/campaign-roads';
 import { Users, MapPin, Search, Plus, Pencil, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { createClient } from '@/lib/supabase/client';
+import { useWorkspace } from '@/lib/workspace-context';
 import { ActivityPageView } from '@/components/activity/ActivityPageView';
+import { AssignedRoutesView } from '@/components/routes/AssignedRoutesView';
 import {
   buildLegacyCampaignText,
   isMissingCampaignColumnErrorMessage,
@@ -371,6 +373,7 @@ function CampaignContactsList({
 export default function CampaignDetailPage() {
   const params = useParams();
   const campaignId = params.campaignId as string;
+  const { currentWorkspaceId, membershipsByWorkspaceId } = useWorkspace();
 
   const [campaign, setCampaign] = useState<CampaignV2 | null>(null);
   const [addresses, setAddresses] = useState<CampaignAddress[]>([]);
@@ -402,6 +405,8 @@ export default function CampaignDetailPage() {
   const [uploadingFlyer, setUploadingFlyer] = useState(false);
   const [qrScanEventsCount, setQrScanEventsCount] = useState<number | null>(null);
   const [roadMetadata, setRoadMetadata] = useState<CampaignRoadMetadata | null>(null);
+  const currentRole = currentWorkspaceId ? membershipsByWorkspaceId[currentWorkspaceId] : null;
+  const isMemberOnlyView = currentRole === 'member';
   const legacyCampaignText = parseLegacyCampaignText(
     (campaign as CampaignWithLegacyDescription | null)?.description
   );
@@ -874,7 +879,7 @@ export default function CampaignDetailPage() {
             <TabsTrigger value="addresses">Addresses</TabsTrigger>
             <TabsTrigger value="contacts">Contacts</TabsTrigger>
             <TabsTrigger value="qr">QR Codes</TabsTrigger>
-            <TabsTrigger value="route">Walking route</TabsTrigger>
+            <TabsTrigger value="routes">Routes</TabsTrigger>
             <TabsTrigger value="notes">Notes</TabsTrigger>
           </TabsList>
 
@@ -1063,12 +1068,16 @@ export default function CampaignDetailPage() {
             </div>
           </TabsContent>
 
-          <TabsContent value="route" className="mt-4">
-            <OptimizedRouteView 
-              campaignId={campaignId} 
-              campaignName={campaign?.name ?? undefined}
-              addresses={addresses} 
-            />
+          <TabsContent value="routes" className="mt-4">
+            {isMemberOnlyView ? (
+              <AssignedRoutesView campaignId={campaignId} embedded />
+            ) : (
+              <OptimizedRouteView 
+                campaignId={campaignId} 
+                campaignName={campaign?.name ?? undefined}
+                addresses={addresses} 
+              />
+            )}
           </TabsContent>
 
           <TabsContent value="notes" className="mt-4 space-y-4">

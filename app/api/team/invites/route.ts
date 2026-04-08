@@ -7,6 +7,7 @@ import {
   createWorkspaceInviteRecord,
   findPendingWorkspaceInviteByEmail,
   getSeatUsage,
+  getWorkspaceTrialState,
   listPendingWorkspaceInvites,
   normalizeInviteEmail,
   normalizePendingInviteRole,
@@ -28,13 +29,77 @@ function isSeatLimitError(error: unknown): boolean {
   );
 }
 
+function isMissingWorkspaceMemberEmailFunction(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const maybeError = error as { code?: string; message?: string };
+  return (
+    maybeError.code === 'PGRST202' &&
+    typeof maybeError.message === 'string' &&
+    maybeError.message.includes('workspace_has_member_email')
+  );
+}
+
+async function workspaceAlreadyHasMemberEmail(
+  admin: ReturnType<typeof createAdminClient>,
+  workspaceId: string,
+  email: string
+): Promise<boolean> {
+  const normalizedTargetEmail = email.trim().toLowerCase();
+  const { data: memberAlreadyExists, error: memberLookupError } = await admin.rpc(
+    'workspace_has_member_email',
+    {
+      p_workspace_id: workspaceId,
+      p_email: email,
+    }
+  );
+
+  if (!memberLookupError) {
+    return memberAlreadyExists === true;
+  }
+
+  if (!isMissingWorkspaceMemberEmailFunction(memberLookupError)) {
+    throw memberLookupError;
+  }
+
+  // Legacy fallback when the RPC migration has not been applied.
+  const { data: workspaceMembers, error: membersError } = await admin
+    .from('workspace_members')
+    .select('user_id')
+    .eq('workspace_id', workspaceId);
+
+  if (membersError) {
+    throw membersError;
+  }
+
+  const userIds = Array.from(
+    new Set((workspaceMembers ?? []).map((row) => row.user_id).filter((value): value is string => !!value))
+  );
+  if (userIds.length === 0) {
+    return false;
+  }
+
+  const authUsers = await Promise.all(
+    userIds.map(async (userId) => {
+      const result = await admin.auth.admin.getUserById(userId);
+      return result?.data?.user ?? null;
+    })
+  );
+
+  return authUsers.some(
+    (authUser) =>
+      typeof authUser?.email === 'string' &&
+      authUser.email.trim().toLowerCase() === normalizedTargetEmail
+  );
+}
+
 async function ensureInviteWithinSeatLimit(
   admin: ReturnType<typeof createAdminClient>,
   workspaceId: string,
   role: 'admin' | 'member',
-  inviteId: string
+  inviteId: string,
+  options?: { skipSeatLimit?: boolean }
 ): Promise<{ ok: true } | { ok: false; message: string }> {
-  if (role === 'admin') {
+  if (role === 'admin' || options?.skipSeatLimit) {
     return { ok: true };
   }
 
@@ -100,7 +165,7 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     invites: (data ?? []).map((invite) => ({
       ...invite,
-      join_url: buildJoinUrl(request, invite.token),
+      join_url: invite.token ? buildJoinUrl(request, invite.token) : '',
     })),
   });
 }
@@ -140,15 +205,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { data: memberAlreadyExists, error: memberLookupError } = await admin.rpc(
-      'workspace_has_member_email',
-      {
-        p_workspace_id: context.workspaceId,
-        p_email: email,
-      }
-    );
-
-    if (memberLookupError) {
+    let memberAlreadyExists = false;
+    try {
+      memberAlreadyExists = await workspaceAlreadyHasMemberEmail(
+        admin,
+        context.workspaceId,
+        email
+      );
+    } catch (memberLookupError) {
       console.error('[team/invites] existing member lookup error:', memberLookupError);
       return NextResponse.json({ error: 'Failed to create invite' }, { status: 500 });
     }
@@ -160,9 +224,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const trialState = await getWorkspaceTrialState(admin, context.workspaceId);
     const seatUsage = await getSeatUsage(admin, context.workspaceId);
     const inviteConsumesPaidSeat = requestedRole !== 'admin';
-    if (inviteConsumesPaidSeat && seatUsage.seatsUsed >= seatUsage.maxSeats) {
+    if (
+      inviteConsumesPaidSeat &&
+      !trialState.isTrialActive &&
+      seatUsage.seatsUsed >= seatUsage.maxSeats
+    ) {
       return NextResponse.json(
         { error: 'All paid seats are currently allocated. Increase seats before inviting another member.' },
         { status: 409 }
@@ -197,7 +266,7 @@ export async function POST(request: NextRequest) {
             error: 'A pending invite already exists for that email',
             invite: {
               ...existingInvite,
-              join_url: buildJoinUrl(request, existingInvite.token),
+              join_url: existingInvite.token ? buildJoinUrl(request, existingInvite.token) : '',
             },
           },
           { status: 409 }
@@ -234,13 +303,14 @@ export async function POST(request: NextRequest) {
         admin,
         context.workspaceId,
         requestedRole,
-        refreshedInvite.id
+        refreshedInvite.id,
+        { skipSeatLimit: trialState.isTrialActive }
       );
       if (!refreshedSeatCheck.ok) {
         return NextResponse.json({ error: refreshedSeatCheck.message }, { status: 409 });
       }
 
-      const joinUrl = buildJoinUrl(request, refreshedInvite.token);
+      const joinUrl = refreshedInvite.token ? buildJoinUrl(request, refreshedInvite.token) : '';
       const workspaceName = await getWorkspaceName(admin, context.workspaceId);
       let emailSent = false;
       let emailError: string | null = getInviteMailerConfigError();
@@ -310,13 +380,14 @@ export async function POST(request: NextRequest) {
       admin,
       context.workspaceId,
       requestedRole,
-      invite.id
+      invite.id,
+      { skipSeatLimit: trialState.isTrialActive }
     );
     if (!seatCheck.ok) {
       return NextResponse.json({ error: seatCheck.message }, { status: 409 });
     }
 
-    const joinUrl = buildJoinUrl(request, invite.token);
+    const joinUrl = invite.token ? buildJoinUrl(request, invite.token) : '';
     const workspaceName = await getWorkspaceName(admin, context.workspaceId);
     let emailSent = false;
     let emailError: string | null = getInviteMailerConfigError();

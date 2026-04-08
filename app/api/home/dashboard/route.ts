@@ -8,6 +8,21 @@ type SessionMetricRow = {
   leads_created: number | null;
 };
 
+type WorkspaceMembershipRow = {
+  role: 'owner' | 'admin' | 'member' | null;
+};
+
+type WorkspaceGoalsRow = {
+  weekly_door_goal: number | null;
+  weekly_sessions_goal: number | null;
+};
+
+type ProfileGoalRow = {
+  user_id: string;
+  weekly_door_goal: number | null;
+  weekly_sessions_goal: number | null;
+};
+
 type ContactMetricRow = {
   full_name?: string | null;
   phone?: string | null;
@@ -19,16 +34,6 @@ type ContactMetricRow = {
   created_at: string | null;
   updated_at: string | null;
 };
-
-const HOME_DEMO_MINIMUMS = {
-  doorsAllTime: 320,
-  conversationsAllTime: 140,
-  doorsThisWeek: 42,
-  convosThisWeek: 18,
-  leadsThisWeek: 12,
-  appointmentsThisWeek: 5,
-  weeklyDoorGoal: 60,
-} as const;
 
 function isMissingRelation(error: unknown, relation: string): boolean {
   if (!error || typeof error !== 'object' || !('message' in error) || typeof error.message !== 'string') {
@@ -315,9 +320,68 @@ export async function GET(request: Request) {
       conversationsAllTime = sessionConversations;
     }
 
-    const weeklyDoorGoal = profile?.weekly_door_goal ?? 100;
-    const weeklySessionsGoal = profile?.weekly_sessions_goal ?? undefined;
-    const weeklyMinutesGoal = profile?.weekly_minutes_goal ?? undefined;
+    let weeklyDoorGoal = profile?.weekly_door_goal ?? 100;
+    let weeklySessionsGoal = profile?.weekly_sessions_goal ?? undefined;
+    let weeklyMinutesGoal = profile?.weekly_minutes_goal ?? undefined;
+
+    const { data: membershipData } = await supabase
+      .from('workspace_members')
+      .select('role')
+      .eq('workspace_id', targetWorkspaceId)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    const membership = (membershipData ?? null) as WorkspaceMembershipRow | null;
+
+    if (membership?.role === 'member') {
+      const [{ data: workspaceGoalsData }, { data: workspaceMembersData }] = await Promise.all([
+        supabase
+          .from('workspaces')
+          .select('weekly_door_goal, weekly_sessions_goal')
+          .eq('id', targetWorkspaceId)
+          .maybeSingle(),
+        supabase
+          .from('workspace_members')
+          .select('user_id')
+          .eq('workspace_id', targetWorkspaceId),
+      ]);
+
+      const workspaceGoals = (workspaceGoalsData ?? null) as WorkspaceGoalsRow | null;
+      const workspaceUserIds = (workspaceMembersData ?? [])
+        .map((row) => row.user_id)
+        .filter((value): value is string => typeof value === 'string' && value.length > 0);
+
+      let aggregateDoorGoal = 0;
+      let aggregateSessionsGoal = 0;
+      let hasAggregateSessionsGoal = false;
+
+      if (workspaceUserIds.length > 0) {
+        const { data: profileGoalsData } = await supabase
+          .from('user_profiles')
+          .select('user_id, weekly_door_goal, weekly_sessions_goal')
+          .in('user_id', workspaceUserIds);
+
+        const profileGoalMap = new Map(
+          ((profileGoalsData ?? []) as ProfileGoalRow[]).map((goalRow) => [goalRow.user_id, goalRow])
+        );
+
+        for (const workspaceUserId of workspaceUserIds) {
+          const goalProfile = profileGoalMap.get(workspaceUserId);
+          aggregateDoorGoal += Math.max(0, goalProfile?.weekly_door_goal ?? 100);
+
+          if (goalProfile?.weekly_sessions_goal != null) {
+            aggregateSessionsGoal += Math.max(0, goalProfile.weekly_sessions_goal);
+            hasAggregateSessionsGoal = true;
+          }
+        }
+      }
+
+      weeklyDoorGoal = workspaceGoals?.weekly_door_goal ?? aggregateDoorGoal;
+      weeklySessionsGoal =
+        workspaceGoals?.weekly_sessions_goal ??
+        (hasAggregateSessionsGoal ? aggregateSessionsGoal : undefined);
+      weeklyMinutesGoal = undefined;
+    }
 
     const campaignIds = campaignsData.map((c) => c.id);
     const recentCampaigns = campaignsData.slice(0, 3).map((c) => ({
@@ -379,19 +443,6 @@ export async function GET(request: Request) {
       metricAppointments = contactSummary.appointments;
     }
 
-    // Demo-friendly floors so Home cards show stronger momentum.
-    doorsAllTime = Math.max(doorsAllTime, HOME_DEMO_MINIMUMS.doorsAllTime);
-    conversationsAllTime = Math.max(conversationsAllTime, HOME_DEMO_MINIMUMS.conversationsAllTime);
-    doorsThisWeek = Math.max(doorsThisWeek, HOME_DEMO_MINIMUMS.doorsThisWeek);
-    const boostedMetricDoors = Math.max(metricDoors, HOME_DEMO_MINIMUMS.doorsThisWeek);
-    const boostedMetricConvos = Math.max(metricConvos, HOME_DEMO_MINIMUMS.convosThisWeek);
-    const boostedMetricLeads = Math.max(metricLeads, HOME_DEMO_MINIMUMS.leadsThisWeek);
-    const boostedMetricAppointments = Math.max(
-      metricAppointments,
-      HOME_DEMO_MINIMUMS.appointmentsThisWeek
-    );
-    const boostedWeeklyDoorGoal = Math.max(weeklyDoorGoal, HOME_DEMO_MINIMUMS.weeklyDoorGoal);
-
     const body = {
       user: { firstName, fullName },
       stats: {
@@ -404,17 +455,17 @@ export async function GET(request: Request) {
         dayStreak,
       },
       weeklyGoals: {
-        doors: boostedWeeklyDoorGoal,
+        doors: weeklyDoorGoal,
         sessions: weeklySessionsGoal,
         minutes: weeklyMinutesGoal,
       },
       recentCampaigns,
       lastSessionAt,
       metrics: {
-        doors: boostedMetricDoors,
-        convos: boostedMetricConvos,
-        leads: boostedMetricLeads,
-        appointments: boostedMetricAppointments,
+        doors: metricDoors,
+        convos: metricConvos,
+        leads: metricLeads,
+        appointments: metricAppointments,
       },
     };
 

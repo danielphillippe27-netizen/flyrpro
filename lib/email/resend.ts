@@ -133,7 +133,6 @@ export async function sendWorkspaceInviteEmail(input: WorkspaceInviteEmailInput)
   const expiresLabel = formatExpiry(input.expiresAt);
   const roleLabel = input.role === 'admin' ? 'admin' : 'member';
   const previewText = input.previewText?.trim() || '';
-
   const text = [
     `${input.subjectPrefix?.trim() ? `${input.subjectPrefix.trim()} ` : ''}Join ${workspaceName} on FLYR`,
     '',
@@ -146,32 +145,34 @@ export async function sendWorkspaceInviteEmail(input: WorkspaceInviteEmailInput)
   ].join('\n');
 
   const html = `
-    <div style="margin:0;padding:24px;background:#111827;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#f9fafb;">
-      <div style="max-width:560px;margin:0 auto;background:#1f2937;border:1px solid #374151;border-radius:16px;overflow:hidden;">
-        <div style="padding:28px 28px 20px;border-bottom:1px solid #374151;">
-          <div style="font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#9ca3af;">FLYR</div>
-          <h1 style="margin:12px 0 0;font-size:24px;line-height:1.25;color:#ffffff;">Join ${escapedWorkspaceName}</h1>
+    <div style="margin:0;padding:32px 18px;background:#06090f;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#e5e7eb;">
+      <div style="max-width:580px;margin:0 auto;background:#11151f;border:1px solid #222938;border-radius:18px;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.45);">
+        <div style="padding:30px 30px 22px;border-bottom:1px solid #222938;background:linear-gradient(180deg,#161c29 0%,#11151f 100%);">
+          <div style="font-size:30px;line-height:1;font-weight:800;letter-spacing:.02em;color:#ffffff;">FLYR</div>
+          <h1 style="margin:12px 0 0;font-size:28px;line-height:1.2;color:#f9fafb;font-weight:700;">Join ${escapedWorkspaceName}</h1>
         </div>
-        <div style="padding:28px;">
+        <div style="padding:30px;">
           ${previewText
-            ? `<p style="margin:0 0 16px;font-size:13px;line-height:1.6;color:#fca5a5;background:#3f1d1d;border:1px solid #7f1d1d;border-radius:10px;padding:12px 14px;">${escapeHtml(previewText)}</p>`
+            ? `<p style="margin:0 0 18px;font-size:13px;line-height:1.6;color:#fecaca;background:#341819;border:1px solid #5e2427;border-radius:10px;padding:12px 14px;">${escapeHtml(previewText)}</p>`
             : ''}
-          <p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#d1d5db;">
+          <p style="margin:0 0 16px;font-size:16px;line-height:1.65;color:#c6cfdf;">
             ${inviterLine} to join <strong style="color:#ffffff;">${escapedWorkspaceName}</strong> on FLYR as a ${roleLabel}.
           </p>
-          <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#d1d5db;">
+          <p style="margin:0 0 26px;font-size:15px;line-height:1.65;color:#aab4c6;">
             Use the same email address this invite was sent to when you sign in or create your account.
           </p>
-          <p style="margin:0 0 28px;">
-            <a href="${escapedJoinUrl}" style="display:inline-block;background:#dc2626;color:#ffffff;text-decoration:none;padding:14px 22px;border-radius:10px;font-weight:600;">
+          <p style="margin:0 0 24px;">
+            <a href="${escapedJoinUrl}" style="display:inline-block;background:#e5e7eb;color:#0b0f17;text-decoration:none;padding:13px 22px;border-radius:11px;font-size:15px;font-weight:700;letter-spacing:.01em;">
               Accept invite
             </a>
           </p>
-          <p style="margin:0 0 10px;font-size:13px;line-height:1.6;color:#9ca3af;">
-            This invite expires ${escapeHtml(expiresLabel)}.
-          </p>
-          <p style="margin:0;font-size:12px;line-height:1.6;color:#6b7280;word-break:break-all;">
-            ${escapedJoinUrl}
+          <div style="margin:0 0 16px;padding:12px 14px;border-radius:10px;background:#0c111b;border:1px solid #1d2533;">
+            <p style="margin:0;font-size:13px;line-height:1.6;color:#8f9bb1;">
+              This invite expires ${escapeHtml(expiresLabel)}.
+            </p>
+          </div>
+          <p style="margin:0;font-size:12px;line-height:1.6;word-break:break-all;">
+            <a href="${escapedJoinUrl}" style="color:#7084a8;text-decoration:underline;">${escapedJoinUrl}</a>
           </p>
         </div>
       </div>

@@ -13,7 +13,7 @@ interface WeeklyGoalsCardProps {
   weeklySessionsGoal?: number | null;
   minutesThisWeek: number;
   weeklyMinutesGoal?: number | null;
-  onEditGoals: () => void;
+  onEditGoals?: () => void;
 }
 
 export function WeeklyGoalsCard({
@@ -32,16 +32,18 @@ export function WeeklyGoalsCard({
       <CardHeader className="pb-2 shrink-0">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-foreground">Weekly Goals</h2>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onEditGoals}
-            className="text-muted-foreground"
-            aria-label="Edit goals"
-          >
-            <Settings className="w-4 h-4 mr-1" />
-            Edit goals
-          </Button>
+          {onEditGoals ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onEditGoals}
+              className="text-muted-foreground"
+              aria-label="Edit goals"
+            >
+              <Settings className="w-4 h-4 mr-1" />
+              Edit goals
+            </Button>
+          ) : null}
         </div>
       </CardHeader>
       <CardContent className="flex-1 flex flex-col justify-between min-h-0 space-y-4">

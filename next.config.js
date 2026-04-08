@@ -14,6 +14,10 @@ const nextConfig = {
         protocol: 'https',
         hostname: 'lh3.googleusercontent.com',
       },
+      {
+        protocol: 'https',
+        hostname: 'kfnsnwqylsdsbgnwgxva.supabase.co',
+      },
     ],
   },
   // Exclude problematic native modules from server-side bundling
@@ -26,6 +30,16 @@ const nextConfig = {
   ],
   async redirects() {
     return [
+      {
+        source: "/routes",
+        destination: "/members",
+        permanent: false,
+      },
+      {
+        source: "/routes/:path*",
+        destination: "/members/:path*",
+        permanent: false,
+      },
       {
         source: "/terms-of-service",
         destination: "/terms",

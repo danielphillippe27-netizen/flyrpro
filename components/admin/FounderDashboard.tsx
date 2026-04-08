@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Loader2, MessageCircle, AlertTriangle, Bug, DollarSign } from 'lucide-react';
+import { FounderGlobalChallengesSection } from '@/components/challenges/FounderGlobalChallengesSection';
 
 type SupportThreadPreview = {
   id: string;
@@ -62,6 +63,7 @@ type FeedbackItemPreview = {
   title: string | null;
   body: string;
   createdAt: string;
+  context?: Record<string, unknown> | null;
   appVersion: string | null;
   buildNumber: string | null;
   iosVersion: string | null;
@@ -165,7 +167,9 @@ export function FounderDashboard() {
   }, []);
 
   const loadFeedback = useCallback(async () => {
-    const payload = await readJson<FeedbackInboxPayload>('/api/admin/inbox/feedback');
+    const payload = await readJson<FeedbackInboxPayload>(
+      '/api/admin/inbox/feedback?itemLimit=40&threadLimit=40'
+    );
     setFeedback(payload);
   }, []);
 
@@ -232,6 +236,57 @@ export function FounderDashboard() {
     [summary]
   );
 
+  /** Desktop/header feedback uses feedback_items; native chat uses support_messages — merge for one at-a-glance list. */
+  const latestUserMessages = useMemo(() => {
+    type Merged =
+      | {
+          key: string;
+          sortAt: string;
+          kind: 'support';
+          title: string;
+          preview: string;
+          href: string;
+        }
+      | {
+          key: string;
+          sortAt: string;
+          kind: 'feedback';
+          title: string;
+          preview: string;
+          href: string;
+          sourceLabel: string;
+        };
+
+    const fromSupport: Merged[] = (support?.latestInboundMessages ?? []).map((m) => ({
+      key: `s-${m.id}`,
+      sortAt: m.createdAt,
+      kind: 'support',
+      title: displayUserName(m.userName, m.userEmail, m.userId),
+      preview: m.body,
+      href: `/admin/support?thread=${m.threadId}`,
+    }));
+
+    const fromFeedback: Merged[] = (feedback?.items ?? []).map((item) => {
+      const source =
+        typeof item.context?.source === 'string' ? item.context.source : null;
+      const sourceLabel =
+        source === 'web' ? 'Web' : source === 'ios' || source === 'app' ? 'App' : 'Feedback';
+      return {
+        key: `f-${item.id}`,
+        sortAt: item.createdAt,
+        kind: 'feedback' as const,
+        title: displayUserName(item.userName, item.userEmail, item.userId),
+        preview: item.title?.trim() ? `${item.title} — ${item.body}` : item.body,
+        href: `/admin/feedback?thread=${item.threadId}`,
+        sourceLabel,
+      };
+    });
+
+    return [...fromSupport, ...fromFeedback]
+      .sort((a, b) => new Date(b.sortAt).getTime() - new Date(a.sortAt).getTime())
+      .slice(0, 20);
+  }, [support, feedback]);
+
   if (loading) {
     return (
       <div className="p-6 max-w-7xl mx-auto">
@@ -252,9 +307,14 @@ export function FounderDashboard() {
             Who needs a reply now, and is the product healthy this week.
           </p>
         </div>
-        <Button variant="outline" onClick={() => void loadAll()}>
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <Link href="/admin/offers">
+            <Button variant="outline">Partner Offers</Button>
+          </Link>
+          <Button variant="outline" onClick={() => void loadAll()}>
+            Refresh
+          </Button>
+        </div>
       </header>
 
       {error ? (
@@ -262,6 +322,8 @@ export function FounderDashboard() {
           <CardContent className="pt-6 text-sm text-destructive">{error}</CardContent>
         </Card>
       ) : null}
+
+      <FounderGlobalChallengesSection />
 
       <section className="grid gap-3 md:grid-cols-3 lg:grid-cols-6">
         <Card>
@@ -302,6 +364,44 @@ export function FounderDashboard() {
         </Card>
       </section>
 
+      <section>
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <MessageCircle className="h-4 w-4" />
+              Latest user messages
+            </CardTitle>
+            <CardDescription>
+              App support chat and web/header feedback in one place (newest first).
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {latestUserMessages.length ? (
+              <div className="space-y-2">
+                {latestUserMessages.map((row) => (
+                  <Link
+                    key={row.key}
+                    href={row.href}
+                    className="flex items-start gap-3 rounded-md border p-3 hover:bg-muted/50 transition-colors"
+                  >
+                    <Badge variant={row.kind === 'support' ? 'default' : 'secondary'} className="shrink-0 mt-0.5">
+                      {row.kind === 'support' ? 'Support' : row.sourceLabel}
+                    </Badge>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-medium truncate">{row.title}</div>
+                      <div className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{row.preview}</div>
+                      <div className="text-xs text-muted-foreground mt-1">{formatDateTime(row.sortAt)}</div>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            ) : (
+              <div className="text-sm text-muted-foreground">No messages or feedback yet.</div>
+            )}
+          </CardContent>
+        </Card>
+      </section>
+
       <section className="grid gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader>
@@ -309,7 +409,7 @@ export function FounderDashboard() {
               <MessageCircle className="h-4 w-4" />
               Support Inbox
             </CardTitle>
-            <CardDescription>Latest threads and inbound user messages.</CardDescription>
+            <CardDescription>App support threads and inbound chat messages.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
@@ -370,9 +470,9 @@ export function FounderDashboard() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Bug className="h-4 w-4" />
-              iOS Feedback
+              Feedback
             </CardTitle>
-            <CardDescription>Recent bug reports and feature requests.</CardDescription>
+            <CardDescription>Web (header) and in-app bug reports and requests.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
             {feedback?.items.length ? (

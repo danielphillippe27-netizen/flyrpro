@@ -20,17 +20,16 @@ type InviteMemberDialogProps = {
   onOpenChange: (open: boolean) => void;
   actorRole: 'owner' | 'admin';
   seatsRemaining: number;
+  isTrialActive?: boolean;
   isSubmitting: boolean;
   isOpeningBilling?: boolean;
   error: string | null;
   billingError?: string | null;
-  isSendingTestInvite?: boolean;
   onSubmit: (payload: {
     emails: string[];
     role: InviteRole;
     additionalSeats: number;
   }) => Promise<void> | void;
-  onSendTestInvite?: (options?: { previewEmail?: string }) => Promise<void> | void;
 };
 
 export function InviteMemberDialog({
@@ -38,13 +37,12 @@ export function InviteMemberDialog({
   onOpenChange,
   actorRole,
   seatsRemaining,
+  isTrialActive = false,
   isSubmitting,
   isOpeningBilling = false,
   error,
   billingError = null,
-  isSendingTestInvite = false,
   onSubmit,
-  onSendTestInvite,
 }: InviteMemberDialogProps) {
   const [emails, setEmails] = useState<string[]>(['']);
   const [role, setRole] = useState<InviteRole>('member');
@@ -64,7 +62,7 @@ export function InviteMemberDialog({
   }, [actorRole, open]);
 
   const availableMemberSlots = seatsRemaining + additionalSeats;
-  const inviteConsumesPaidSeat = role !== 'admin';
+  const inviteConsumesPaidSeat = role !== 'admin' && !isTrialActive;
   const emailFieldCount = role === 'admin' ? 1 : Math.max(1, availableMemberSlots);
   const trimmedEmails = emails.map((email) => email.trim());
   const filledEmails = trimmedEmails.filter((email) => email.length > 0);
@@ -85,23 +83,23 @@ export function InviteMemberDialog({
     });
   }, [emailFieldCount]);
 
-  const busy = isSubmitting || isOpeningBilling || isSendingTestInvite;
+  const busy = isSubmitting || isOpeningBilling;
   const submitLabel =
-    role === 'member' && additionalSeats > 0 && actorRole === 'owner'
+    role === 'member' && additionalSeats > 0 && actorRole === 'owner' && !isTrialActive
       ? busy
         ? 'Updating seats…'
-        : `Add ${additionalSeats} seat${additionalSeats === 1 ? '' : 's'} and send invites`
+        : `Add ${additionalSeats} seat${additionalSeats === 1 ? '' : 's'}, then add members`
       : busy
-        ? 'Sending…'
-        : `Send invite${filledEmails.length === 1 ? '' : 's'}`;
+        ? 'Adding…'
+        : `Add member${filledEmails.length === 1 ? '' : 's'}`;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Invite members</DialogTitle>
+          <DialogTitle>Add members</DialogTitle>
           <DialogDescription>
-            We&apos;ll send join links to each email address you enter. If delivery is unavailable, the invite still gets created so you can share the link manually.
+            We&apos;ll send join links to each email address you enter. If delivery is unavailable, the member invite still gets created so you can share the link manually.
           </DialogDescription>
         </DialogHeader>
 
@@ -124,7 +122,9 @@ export function InviteMemberDialog({
             <p className="text-xs text-muted-foreground">
               {role === 'admin'
                 ? 'Admins are free and do not use a paid seat.'
-                : 'Members use one paid seat.'}
+                : isTrialActive
+                  ? 'Trial active: members are free until trial ends.'
+                  : 'Members use one paid seat.'}
             </p>
           </div>
 
@@ -139,7 +139,7 @@ export function InviteMemberDialog({
                     Add seats here and the invite form will open more email slots automatically.
                   </p>
                 </div>
-                {actorRole === 'owner' ? (
+                {actorRole === 'owner' && !isTrialActive ? (
                   <div className="flex flex-wrap items-center gap-2">
                     <Button
                       type="button"
@@ -224,31 +224,12 @@ export function InviteMemberDialog({
               </p>
             ) : null}
 
-            {role === 'member' ? (
-              <p className="text-xs text-muted-foreground">
-                Send test invite emails a <strong className="font-medium text-foreground">sample preview</strong> to the
-                first address above (or your login email if empty). It does not create a real invite or use a seat. Check
-                spam/junk and that inbox—delivery can take a few minutes.
-              </p>
-            ) : null}
           </div>
 
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
         </div>
 
         <DialogFooter>
-          {role === 'member' ? (
-            <Button
-              variant="outline"
-              onClick={() => {
-                const first = filledEmails[0]?.trim();
-                onSendTestInvite?.(first ? { previewEmail: first } : {});
-              }}
-              disabled={busy}
-            >
-              {isSendingTestInvite ? 'Sending preview…' : 'Send test invite'}
-            </Button>
-          ) : null}
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
             Cancel
           </Button>

@@ -54,6 +54,8 @@ interface MondayBoard {
 }
 
 export default function IntegrationsPage() {
+  const integrationLogoContainerClass = 'w-10 h-10 rounded-lg flex items-center justify-center';
+  const integrationLogoIconClass = 'w-5 h-5';
   const router = useRouter();
   const { currentWorkspaceId } = useWorkspace();
   const [loading, setLoading] = useState(true);
@@ -926,13 +928,18 @@ export default function IntegrationsPage() {
             </div>
           )}
 
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
           {/* Follow Up Boss Integration */}
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900 rounded-lg flex items-center justify-center">
-                    <Plug className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                  <div className={`${integrationLogoContainerClass} bg-blue-100 dark:bg-blue-900`}>
+                    <img
+                      src="https://logo.clearbit.com/followupboss.com"
+                      alt="Follow Up Boss logo"
+                      className={`${integrationLogoIconClass} object-contain`}
+                    />
                   </div>
                   <div>
                     <CardTitle>Follow Up Boss</CardTitle>
@@ -1062,12 +1069,16 @@ export default function IntegrationsPage() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="order-5">
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-orange-100 dark:bg-orange-950 rounded-lg flex items-center justify-center">
-                    <Send className="w-5 h-5 text-orange-700 dark:text-orange-300" />
+                  <div className={`${integrationLogoContainerClass} bg-orange-100 dark:bg-orange-950`}>
+                    <img
+                      src="https://logo.clearbit.com/zapier.com"
+                      alt="Zapier logo"
+                      className={`${integrationLogoIconClass} object-contain`}
+                    />
                   </div>
                   <div>
                     <CardTitle>Zapier</CardTitle>
@@ -1176,8 +1187,12 @@ export default function IntegrationsPage() {
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-orange-100 dark:bg-orange-900 rounded-lg flex items-center justify-center">
-                    <Plug className="w-5 h-5 text-orange-700 dark:text-orange-300" />
+                  <div className={`${integrationLogoContainerClass} bg-orange-100 dark:bg-orange-900`}>
+                    <img
+                      src="https://logo.clearbit.com/hubspot.com"
+                      alt="HubSpot logo"
+                      className={`${integrationLogoIconClass} object-contain`}
+                    />
                   </div>
                   <div>
                     <CardTitle>HubSpot</CardTitle>
@@ -1298,8 +1313,12 @@ export default function IntegrationsPage() {
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-emerald-100 dark:bg-emerald-950 rounded-lg flex items-center justify-center">
-                    <KeyRound className="w-5 h-5 text-emerald-700 dark:text-emerald-300" />
+                  <div className={`${integrationLogoContainerClass} bg-emerald-100 dark:bg-emerald-950`}>
+                    <img
+                      src="https://logo.clearbit.com/boldtrail.com"
+                      alt="BoldTrail logo"
+                      className={`${integrationLogoIconClass} object-contain`}
+                    />
                   </div>
                   <div>
                     <CardTitle>BoldTrail / kvCORE</CardTitle>
@@ -1408,8 +1427,12 @@ export default function IntegrationsPage() {
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-yellow-100 dark:bg-yellow-900 rounded-lg flex items-center justify-center">
-                    <LayoutGrid className="w-5 h-5 text-yellow-700 dark:text-yellow-300" />
+                  <div className={`${integrationLogoContainerClass} bg-yellow-100 dark:bg-yellow-900`}>
+                    <img
+                      src="https://logo.clearbit.com/monday.com"
+                      alt="Monday.com logo"
+                      className={`${integrationLogoIconClass} object-contain`}
+                    />
                   </div>
                   <div>
                     <CardTitle>Monday.com</CardTitle>
@@ -1550,12 +1573,12 @@ export default function IntegrationsPage() {
           </Card>
 
           {/* Future integrations placeholder */}
-          <Card className="opacity-60">
+          <Card className="order-6 opacity-60">
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-gray-100 dark:bg-gray-800 rounded-lg flex items-center justify-center">
-                    <Plug className="w-5 h-5 text-gray-400" />
+                  <div className={`${integrationLogoContainerClass} bg-gray-100 dark:bg-gray-800`}>
+                    <Plug className={`${integrationLogoIconClass} text-gray-400`} />
                   </div>
                   <div>
                     <CardTitle className="text-gray-500">More Integrations</CardTitle>
@@ -1568,6 +1591,7 @@ export default function IntegrationsPage() {
               </div>
             </CardHeader>
           </Card>
+          </div>
 
           <Card>
             <CardHeader>

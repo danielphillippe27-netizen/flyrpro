@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import {
   getSeatUsage,
+  getWorkspaceTrialState,
   normalizePendingInviteRole,
   resolveTeamManagementContext,
 } from '@/app/api/team/_lib/manage';
@@ -100,10 +101,11 @@ export async function PATCH(
     if (member.role === nextRole) {
       return NextResponse.json({ success: true });
     }
+    const trialState = await getWorkspaceTrialState(admin, teamContext.workspaceId);
 
     if (nextRole === 'member' && member.role !== 'member') {
       const seatUsage = await getSeatUsage(admin, teamContext.workspaceId);
-      if (seatUsage.seatsUsed >= seatUsage.maxSeats) {
+      if (!trialState.isTrialActive && seatUsage.seatsUsed >= seatUsage.maxSeats) {
         return NextResponse.json(
           {
             error:
@@ -139,7 +141,7 @@ export async function PATCH(
 
     if (nextRole === 'member' && member.role !== 'member') {
       const seatUsage = await getSeatUsage(admin, teamContext.workspaceId);
-      if (seatUsage.seatsUsed > seatUsage.maxSeats) {
+      if (!trialState.isTrialActive && seatUsage.seatsUsed > seatUsage.maxSeats) {
         await admin
           .from('workspace_members')
           .update({

@@ -94,6 +94,13 @@ export async function POST(request: NextRequest) {
     const quantity = Number.isFinite(parsedRequestedSeats) && parsedRequestedSeats > 0
       ? Math.min(100, parsedRequestedSeats)
       : Math.min(100, workspaceSeats);
+    const seatDelta = quantity - workspaceSeats;
+    const seatSummaryMessage =
+      seatDelta > 0
+        ? `You are paying for ${quantity} total seat${quantity === 1 ? '' : 's'} (${workspaceSeats} current + ${seatDelta} added).`
+        : seatDelta < 0
+          ? `You are paying for ${quantity} total seat${quantity === 1 ? '' : 's'} (${workspaceSeats} current - ${Math.abs(seatDelta)} removed).`
+          : `You are paying for ${quantity} total seat${quantity === 1 ? '' : 's'}.`;
 
     const entitlement = await getEntitlementForUser(userId);
     let customerId = entitlement.stripe_customer_id;
@@ -132,7 +139,17 @@ export async function POST(request: NextRequest) {
     try {
       const sessionParams: Stripe.Checkout.SessionCreateParams = {
         customer: customerId,
-        line_items: [{ price: priceId, quantity }],
+        line_items: [
+          {
+            price: priceId,
+            quantity,
+            adjustable_quantity: {
+              enabled: true,
+              minimum: 1,
+              maximum: 100,
+            },
+          },
+        ],
         mode: 'subscription',
         success_url: `${appUrl}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${appUrl}/subscribe`,
@@ -141,13 +158,13 @@ export async function POST(request: NextRequest) {
           seats: String(quantity),
           ...(workspaceReferralCode ? { referral_code: workspaceReferralCode } : {}),
         },
-        ...(isUsd && {
-          custom_text: {
-            submit: {
-              message: 'Amount charged in **USD**.',
-            },
+        custom_text: {
+          submit: {
+            message: isUsd
+              ? `${seatSummaryMessage} Amount charged in **USD**.`
+              : seatSummaryMessage,
           },
-        }),
+        },
       };
 
       if (shouldHonorWorkspaceTrial && workspaceTrialEnd) {

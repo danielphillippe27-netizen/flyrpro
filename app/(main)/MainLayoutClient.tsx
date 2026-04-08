@@ -6,7 +6,7 @@ import { useState, useEffect } from 'react';
 import { WorkspaceProvider } from '@/lib/workspace-context';
 import AppTopHeader from '@/components/layout/AppTopHeader';
 import { MainRouteGuard } from '@/components/guard/MainRouteGuard';
-import { Home, Map, Trophy, Users, Settings, Target, Gauge, Plug, MessageCircle, Shield, Activity, CalendarCheck, CornerDownRight, Plus } from 'lucide-react';
+import { Home, Map, Trophy, Users, Settings, Target, Gauge, Plug, MessageCircle, Activity, CalendarCheck, CornerDownRight, Plus, Link2, UserCircle2, Flag } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { DashboardAccessLevel } from '@/app/api/_utils/workspace';
 
@@ -16,6 +16,8 @@ const SIDEBAR_EXPANDED_W = 160;   // 10rem – icons + labels
 const baseTabs = [
   { href: '/home', icon: Home, label: 'Home' },
   { href: '/campaigns', icon: Target, label: 'Campaigns' },
+  { href: '/members', icon: UserCircle2, label: 'Members' },
+  { href: '/challenges', icon: Flag, label: 'Challenges' },
   { href: '/map', icon: Map, label: 'Map' },
   { href: '/activity', icon: Activity, label: 'Activity' },
   { href: '/leads', icon: Users, label: 'Leads' },
@@ -24,15 +26,17 @@ const baseTabs = [
   { href: '/leaderboard', icon: Trophy, label: 'Leaderboard' },
   { href: '/stats', icon: Gauge, label: 'Performance' },
   { href: '/settings/integrations', icon: Plug, label: 'Integrations' },
-  { href: '/settings', icon: Settings, label: 'Settings' },
 ];
 
 const supportTab = { href: '/support', icon: MessageCircle, label: 'Support' };
-const adminTab = { href: '/admin', icon: Shield, label: 'Founder' };
+const offersTab = { href: '/admin/offers', icon: Link2, label: 'Offers' };
+const settingsTab = { href: '/settings', icon: Settings, label: 'Settings' };
 const memberTabs = baseTabs.filter((tab) =>
   [
     '/home',
     '/campaigns',
+    '/members',
+    '/challenges',
     '/map',
     '/leads',
     '/activity',
@@ -40,7 +44,6 @@ const memberTabs = baseTabs.filter((tab) =>
     '/follow-up',
     '/leaderboard',
     '/stats',
-    '/settings',
     '/settings/integrations',
   ].includes(tab.href)
 );
@@ -68,9 +71,9 @@ export default function MainLayoutClient({
   }, []);
 
   const tabs = (() => {
-    if (accessLevel === 'member') return memberTabs;
-    if (accessLevel === 'founder') return [...baseTabs, supportTab, adminTab];
-    return baseTabs;
+    if (accessLevel === 'member') return [...memberTabs, settingsTab];
+    if (accessLevel === 'founder') return [...baseTabs, supportTab, offersTab, settingsTab];
+    return [...baseTabs, settingsTab];
   })();
 
   return (
@@ -115,7 +118,6 @@ export default function MainLayoutClient({
                 const isIntegrations = tab.href === '/settings/integrations';
                 const isSettings = tab.href === '/settings';
                 const onIntegrations = pathname?.startsWith('/settings/integrations');
-                const isAdmin = tab.href === '/admin';
                 const pinMemberSettingsToBottom = accessLevel === 'member' && isSettings;
 
                 let isActive;
@@ -123,8 +125,6 @@ export default function MainLayoutClient({
                   isActive = pathname === '/settings/integrations';
                 } else if (isSettings) {
                   isActive = pathname === '/settings' || (pathname?.startsWith('/settings/') && !onIntegrations);
-                } else if (isAdmin) {
-                  isActive = pathname === '/admin' || pathname?.startsWith('/admin/');
                 } else {
                   isActive = pathname === tab.href || pathname?.startsWith(tab.href + '/');
                 }
@@ -164,7 +164,9 @@ export default function MainLayoutClient({
             <main
               className={cn(
                 'flex flex-1 flex-col min-h-0 p-0 m-0',
-                pathname?.startsWith('/campaigns') || pathname?.startsWith('/map')
+                pathname?.startsWith('/campaigns') ||
+                pathname?.startsWith('/members') ||
+                pathname?.startsWith('/map')
                   ? 'overflow-hidden'
                   : 'overflow-auto'
               )}
@@ -172,7 +174,9 @@ export default function MainLayoutClient({
               <div
                 className={cn(
                   'flex flex-col min-h-0',
-                  pathname?.startsWith('/campaigns') || pathname?.startsWith('/map')
+                  pathname?.startsWith('/campaigns') ||
+                  pathname?.startsWith('/members') ||
+                  pathname?.startsWith('/map')
                     ? 'flex-1 flex flex-col overflow-hidden min-h-0 [&>*]:flex-1 [&>*]:min-h-0'
                     : 'min-h-full'
                 )}

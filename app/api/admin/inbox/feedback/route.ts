@@ -27,10 +27,30 @@ type FeedbackItemRow = {
   created_at: string;
 };
 
+type LegacyFeedbackSubmissionRow = {
+  id: string;
+  user_id: string;
+  email: string | null;
+  role: string | null;
+  page: string | null;
+  message: string;
+  user_agent: string | null;
+  created_at: string;
+};
+
 function parseLimit(value: string | null, fallback: number, max: number): number {
   const parsed = Number(value ?? fallback);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.max(1, Math.min(max, Math.floor(parsed)));
+}
+
+function isMissingRelationError(message: string | undefined): boolean {
+  if (!message) return false;
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes('could not find the table') ||
+    (normalized.includes('relation') && normalized.includes('does not exist'))
+  );
 }
 
 export async function GET(request: NextRequest) {
@@ -66,15 +86,78 @@ export async function GET(request: NextRequest) {
       threadId ? itemsQuery.eq('thread_id', threadId) : itemsQuery,
     ]);
 
-    if (threadsRes.error) {
+    if (threadsRes.error && !isMissingRelationError(threadsRes.error.message)) {
       return NextResponse.json({ error: threadsRes.error.message }, { status: 500 });
     }
-    if (itemsRes.error) {
+    if (itemsRes.error && !isMissingRelationError(itemsRes.error.message)) {
       return NextResponse.json({ error: itemsRes.error.message }, { status: 500 });
     }
 
-    const threadRows = (threadsRes.data ?? []) as FeedbackThreadRow[];
-    const itemRows = (itemsRes.data ?? []) as FeedbackItemRow[];
+    let threadRows = (threadsRes.data ?? []) as FeedbackThreadRow[];
+    let itemRows = (itemsRes.data ?? []) as FeedbackItemRow[];
+
+    // Backward-compatible fallback: if no new feedback rows are present yet,
+    // read from the legacy feedback_submissions table so founder inbox still receives web feedback.
+    if (itemRows.length === 0) {
+      const legacyBase = auth.admin
+        .from('feedback_submissions')
+        .select('id, user_id, email, role, page, message, user_agent, created_at')
+        .order('created_at', { ascending: false })
+        .limit(itemLimit);
+      const legacyThreadUserId =
+        threadId && threadId.startsWith('legacy-') ? threadId.slice('legacy-'.length) : null;
+      const { data: legacyData, error: legacyError } = legacyThreadUserId
+        ? await legacyBase.eq('user_id', legacyThreadUserId)
+        : await legacyBase;
+
+      if (legacyError && !isMissingRelationError(legacyError.message)) {
+        return NextResponse.json({ error: legacyError.message }, { status: 500 });
+      }
+
+      const legacyRows = (legacyData ?? []) as LegacyFeedbackSubmissionRow[];
+      if (legacyRows.length > 0) {
+        itemRows = legacyRows.map((row) => ({
+          id: row.id,
+          thread_id: `legacy-${row.user_id}`,
+          user_id: row.user_id,
+          type: 'other',
+          title: null,
+          body: row.message,
+          context: {
+            source: 'web',
+            page: row.page,
+            role: row.role,
+            user_agent: row.user_agent,
+            email: row.email,
+            legacy_submission: true,
+          },
+          created_at: row.created_at,
+        }));
+
+        const byUser = new Map<string, { createdAt: string }>();
+        legacyRows.forEach((row) => {
+          const existing = byUser.get(row.user_id);
+          if (!existing || new Date(row.created_at).getTime() > new Date(existing.createdAt).getTime()) {
+            byUser.set(row.user_id, { createdAt: row.created_at });
+          }
+        });
+
+        threadRows = Array.from(byUser.entries())
+          .map(([userId, meta]) => ({
+            id: `legacy-${userId}`,
+            user_id: userId,
+            status: 'open',
+            last_feedback_at: meta.createdAt,
+            unread_for_founder: false,
+            created_at: meta.createdAt,
+          }))
+          .sort(
+            (a, b) =>
+              new Date(b.last_feedback_at).getTime() - new Date(a.last_feedback_at).getTime()
+          )
+          .slice(0, threadLimit);
+      }
+    }
 
     const profileIds = new Set<string>();
     threadRows.forEach((row) => {
@@ -100,7 +183,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       kpis: {
-        newFeedback: unreadRes.count ?? 0,
+        newFeedback: unreadRes.count ?? (itemRows.length > 0 ? itemRows.length : 0),
       },
       threads: threadRows.map((row) => {
         const profile = profilesById.get(row.user_id);

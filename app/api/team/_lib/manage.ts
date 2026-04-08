@@ -56,7 +56,7 @@ export type TeamInviteRecord = {
   email: string;
   role: PendingInviteRole;
   status: string;
-  token: string;
+  token: string | null;
   created_at: string;
   expires_at: string;
   last_sent_at: string | null;
@@ -73,6 +73,11 @@ export type SeatUsage = {
   pendingAdminInvites: number;
   seatsUsed: number;
   seatsRemaining: number;
+};
+
+type WorkspaceBillingRow = {
+  subscription_status: string | null;
+  trial_ends_at: string | null;
 };
 
 function inviteSelectColumns(options?: {
@@ -96,7 +101,7 @@ function normalizeInviteRecord(row: Record<string, unknown> | null): TeamInviteR
     email: String(row.email),
     role: row.role === 'admin' ? 'admin' : 'member',
     status: String(row.status),
-    token: String(row.token),
+    token: typeof row.token === 'string' && row.token.trim().length > 0 ? row.token : null,
     created_at: String(row.created_at),
     expires_at: String(row.expires_at),
     last_sent_at:
@@ -115,10 +120,12 @@ function normalizeInviteRecords(rows: Record<string, unknown>[] | null | undefin
 export function isMissingLastSentAtColumnError(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
   const maybeError = error as { code?: string; message?: string };
+  const message = typeof maybeError.message === 'string' ? maybeError.message.toLowerCase() : '';
+  const referencesLastSentAt = message.includes('last_sent_at');
   return (
-    maybeError.code === 'PGRST204' &&
-    typeof maybeError.message === 'string' &&
-    maybeError.message.includes("'last_sent_at'")
+    (maybeError.code === 'PGRST204' && referencesLastSentAt) ||
+    (maybeError.code === '42703' && referencesLastSentAt) ||
+    (referencesLastSentAt && message.includes('column') && message.includes('does not exist'))
   );
 }
 
@@ -232,6 +239,38 @@ export async function getSeatUsage(
   };
 }
 
+export function isWorkspaceTrialActive(workspace: WorkspaceBillingRow | null): boolean {
+  if (!workspace) return false;
+  if ((workspace.subscription_status ?? '').toLowerCase() !== 'trialing') {
+    return false;
+  }
+  if (!workspace.trial_ends_at) {
+    return true;
+  }
+
+  const trialEnd = new Date(workspace.trial_ends_at);
+  return !Number.isNaN(trialEnd.getTime()) && trialEnd > new Date();
+}
+
+export async function getWorkspaceTrialState(
+  supabase: AdminClient,
+  workspaceId: string
+): Promise<{ isTrialActive: boolean }> {
+  const { data, error } = await supabase
+    .from('workspaces')
+    .select('subscription_status, trial_ends_at')
+    .eq('id', workspaceId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return {
+    isTrialActive: isWorkspaceTrialActive((data ?? null) as WorkspaceBillingRow | null),
+  };
+}
+
 export function buildJoinUrl(request: NextRequest, token: string): string {
   return new URL(`/join?token=${encodeURIComponent(token)}`, request.url).toString();
 }
@@ -250,16 +289,18 @@ export async function listPendingWorkspaceInvites(
     .order('created_at', { ascending: false });
 
   if (!isMissingLastSentAtColumnError(withLastSentAt.error)) {
+    if (!withLastSentAt.error) {
+      return {
+        data: normalizeInviteRecords(withLastSentAt.data as Record<string, unknown>[] | null),
+        error: null,
+      };
+    }
     if (isMissingRelation(withLastSentAt.error, 'workspace_invites')) {
       return {
         data: [],
         error: null,
       };
     }
-    return {
-      data: normalizeInviteRecords(withLastSentAt.data as Record<string, unknown>[] | null),
-      error: withLastSentAt.error,
-    };
   }
 
   const withoutLastSentAt = await supabase
@@ -270,13 +311,44 @@ export async function listPendingWorkspaceInvites(
     .gt('expires_at', nowIso)
     .order('created_at', { ascending: false });
 
+  if (!withoutLastSentAt.error) {
+    return {
+      data: normalizeInviteRecords(withoutLastSentAt.data as Record<string, unknown>[] | null),
+      error: null,
+    };
+  }
+  if (isMissingRelation(withoutLastSentAt.error, 'workspace_invites')) {
+    return {
+      data: [],
+      error: null,
+    };
+  }
+
+  // Legacy fallback: some environments can miss optional invite columns.
+  const minimalInviteQuery = await supabase
+    .from('workspace_invites')
+    .select('id, email, role, status, created_at, expires_at')
+    .eq('workspace_id', workspaceId)
+    .eq('status', 'pending')
+    .gt('expires_at', nowIso)
+    .order('created_at', { ascending: false });
+
+  if (!minimalInviteQuery.error) {
+    return {
+      data: normalizeInviteRecords(minimalInviteQuery.data as Record<string, unknown>[] | null),
+      error: null,
+    };
+  }
+  if (isMissingRelation(minimalInviteQuery.error, 'workspace_invites')) {
+    return {
+      data: [],
+      error: null,
+    };
+  }
+
   return {
-    data: isMissingRelation(withoutLastSentAt.error, 'workspace_invites')
-      ? []
-      : normalizeInviteRecords(withoutLastSentAt.data as Record<string, unknown>[] | null),
-    error: isMissingRelation(withoutLastSentAt.error, 'workspace_invites')
-      ? null
-      : withoutLastSentAt.error,
+    data: [],
+    error: minimalInviteQuery.error,
   };
 }
 

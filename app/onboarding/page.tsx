@@ -1,7 +1,7 @@
 'use client';
 
 import { Suspense, useState, useCallback, useEffect, useRef } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,6 +14,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { User, Users, Building2, Plus, Minus } from 'lucide-react';
+import { ArcadeEmbed } from '@/components/landing/ArcadeEmbed';
+import { getClientAsync } from '@/lib/supabase/client';
 
 type BrokerageSuggestion = { id: string; name: string };
 
@@ -35,15 +37,37 @@ const SOLO_SEATS = 1;
 const TEAM_MIN_SEATS = 2;
 const MAX_SEATS = 100;
 
+function normalizeEmailList(values: string[]): string[] {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const value of values) {
+    const email = value.trim().toLowerCase();
+    if (!email) continue;
+    if (seen.has(email)) continue;
+    seen.add(email);
+    normalized.push(email);
+  }
+  return normalized;
+}
+
 function OnboardingContent() {
-  const router = useRouter();
   const searchParams = useSearchParams();
+  const offerType = searchParams.get('offer');
+  const partnerOfferToken = searchParams.get('partnerOfferToken');
+  const isExclusivePartnerOnboarding =
+    offerType === 'exclusive30' &&
+    typeof partnerOfferToken === 'string' &&
+    partnerOfferToken.trim().length > 0;
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
+  const [workEmail, setWorkEmail] = useState('');
+  const [accountPassword, setAccountPassword] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
   const [useCase, setUseCase] = useState<'solo' | 'team'>('solo');
   const [workspaceName, setWorkspaceName] = useState('');
   const [industry, setIndustry] = useState('');
@@ -56,6 +80,7 @@ function OnboardingContent() {
   const brokerageListRef = useRef<HTMLDivElement>(null);
   const [referralCode, setReferralCode] = useState('');
   const [seats, setSeats] = useState(TEAM_MIN_SEATS);
+  const [teamInviteEmails, setTeamInviteEmails] = useState<string[]>(['']);
 
   // When arriving from app handoff (Continue on web), skip name step and start at team/workspace.
   useEffect(() => {
@@ -66,7 +91,17 @@ function OnboardingContent() {
     }
   }, [searchParams]);
 
-  const canStep1 = firstName.trim().length > 0 && lastName.trim().length > 0;
+  useEffect(() => {
+    if (!isExclusivePartnerOnboarding) return;
+    setUseCase('team');
+    setSeats((previous) => Math.max(TEAM_MIN_SEATS, previous));
+  }, [isExclusivePartnerOnboarding]);
+
+  const canStep1 =
+    firstName.trim().length > 0 &&
+    lastName.trim().length > 0 &&
+    (!isExclusivePartnerOnboarding ||
+      (workEmail.trim().length > 0 && accountPassword.trim().length >= 6));
   const canStep3 =
     workspaceName.trim().length > 0 && industry.length > 0;
 
@@ -126,6 +161,7 @@ function OnboardingContent() {
     setError(null);
     setLoading(true);
     try {
+      const normalizedInviteEmails = normalizeEmailList(teamInviteEmails);
       const res = await fetch('/api/onboarding/complete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -135,11 +171,20 @@ function OnboardingContent() {
           lastName: lastName.trim(),
           workspaceName: workspaceName.trim(),
           industry: industry.trim(),
-          referralCode: referralCode.trim() || null,
+          referralCode: isExclusivePartnerOnboarding
+            ? null
+            : referralCode.trim() || null,
           brokerage: brokerage.trim() || undefined,
           brokerageId: brokerageId ?? undefined,
-          useCase,
-          maxSeats: useCase === 'team' ? Math.max(TEAM_MIN_SEATS, seats) : SOLO_SEATS,
+          useCase: isExclusivePartnerOnboarding ? 'team' : useCase,
+          maxSeats:
+            isExclusivePartnerOnboarding
+              ? Math.max(TEAM_MIN_SEATS, normalizedInviteEmails.length + 1, seats)
+              : useCase === 'team'
+                ? Math.max(TEAM_MIN_SEATS, seats)
+                : SOLO_SEATS,
+          partnerOfferToken: isExclusivePartnerOnboarding ? partnerOfferToken : undefined,
+          teamMemberEmails: isExclusivePartnerOnboarding ? normalizedInviteEmails : undefined,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -148,12 +193,105 @@ function OnboardingContent() {
         return;
       }
       setError(data?.error ?? 'Something went wrong. Please try again.');
-    } catch (e) {
+    } catch {
       setError('Network error. Please try again.');
     } finally {
       setLoading(false);
     }
   };
+
+  const ensureExclusiveAuth = useCallback(async (): Promise<boolean> => {
+    if (!isExclusivePartnerOnboarding) return true;
+    const normalizedEmail = workEmail.trim().toLowerCase();
+    if (!normalizedEmail || accountPassword.trim().length < 6) {
+      setAuthError('Enter a valid work email and a password (6+ characters).');
+      return false;
+    }
+
+    setAuthError(null);
+    setAuthLoading(true);
+    try {
+      const supabase = await getClientAsync();
+      const {
+        data: { user: currentUser },
+      } = await supabase.auth.getUser();
+      if (
+        currentUser?.email &&
+        currentUser.email.toLowerCase() === normalizedEmail
+      ) {
+        return true;
+      }
+
+      if (currentUser) {
+        await supabase.auth.signOut();
+      }
+
+      const signInResult = await supabase.auth.signInWithPassword({
+        email: normalizedEmail,
+        password: accountPassword,
+      });
+      if (!signInResult.error && signInResult.data?.session) {
+        return true;
+      }
+
+      const isInvalidCredentials =
+        signInResult.error?.message
+          ?.toLowerCase()
+          .includes('invalid login credentials') ||
+        signInResult.error?.message
+          ?.toLowerCase()
+          .includes('invalid_credentials');
+
+      if (!isInvalidCredentials) {
+        setAuthError(signInResult.error?.message || 'Failed to sign in with this email.');
+        return false;
+      }
+
+      const onboardingNext = `/onboarding?offer=exclusive30&partnerOfferToken=${encodeURIComponent(
+        partnerOfferToken ?? ''
+      )}`;
+      const callbackUrl = new URL('/auth/callback', window.location.origin);
+      callbackUrl.searchParams.set('next', onboardingNext);
+
+      const signUpResult = await supabase.auth.signUp({
+        email: normalizedEmail,
+        password: accountPassword,
+        options: {
+          emailRedirectTo: callbackUrl.toString(),
+          data: {
+            first_name: firstName.trim() || undefined,
+            last_name: lastName.trim() || undefined,
+          },
+        },
+      });
+
+      if (signUpResult.error) {
+        setAuthError(signUpResult.error.message || 'Failed to create account.');
+        return false;
+      }
+
+      if (signUpResult.data?.session) {
+        return true;
+      }
+
+      setAuthError(
+        'Check your inbox to confirm your email, then return to finish onboarding.'
+      );
+      return false;
+    } catch {
+      setAuthError('Could not verify account. Please try again.');
+      return false;
+    } finally {
+      setAuthLoading(false);
+    }
+  }, [
+    accountPassword,
+    firstName,
+    isExclusivePartnerOnboarding,
+    lastName,
+    partnerOfferToken,
+    workEmail,
+  ]);
 
   return (
     <div className="dark min-h-screen bg-gradient-to-br from-black to-[#262626] flex flex-col items-center justify-center p-6 relative overflow-hidden">
@@ -184,18 +322,40 @@ function OnboardingContent() {
           {(step === 1 || step === 2 || step === 3) && (
             <p className="text-base text-[#AAAAAA]">
               {step === 1 && 'We use this to personalize your experience.'}
-              {step === 2 && 'Choose solo or invite your team.'}
+              {step === 2 &&
+                (isExclusivePartnerOnboarding
+                  ? 'We set this to team mode for your exclusive offer.'
+                  : 'Choose solo or invite your team.')}
               {step === 3 && 'Name your business and tell us your industry.'}
             </p>
           )}
         </div>
 
+        {isExclusivePartnerOnboarding && step === 1 ? (
+          <div className="rounded-xl border border-red-500/40 bg-red-500/10 p-4">
+            <p className="text-center text-xs font-semibold uppercase tracking-wider text-red-300">
+              Exclusive Team Onboarding
+            </p>
+            <p className="mt-1 text-center text-lg font-semibold text-white">
+              30-day exclusive offer unlocked
+            </p>
+            <p className="mt-1 text-center text-sm text-zinc-300">
+              Finish onboarding to activate your 30-day trial and watch demo if you havent already.
+            </p>
+            <div className="mt-4 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900">
+              <ArcadeEmbed />
+            </div>
+          </div>
+        ) : null}
+
         {step === 1 && (
           <form
             className="space-y-5"
-            onSubmit={(e) => {
+            onSubmit={async (e) => {
               e.preventDefault();
-              if (canStep1) setStep((s) => s + 1);
+              if (!canStep1) return;
+              const authReady = await ensureExclusiveAuth();
+              if (authReady) setStep((s) => s + 1);
             }}
           >
             <div className="space-y-2">
@@ -225,48 +385,125 @@ function OnboardingContent() {
                 }}
               />
             </div>
+            {isExclusivePartnerOnboarding ? (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="workEmail" className="text-base text-white">Work email</Label>
+                  <Input
+                    id="workEmail"
+                    type="email"
+                    value={workEmail}
+                    onChange={(e) => setWorkEmail(e.target.value)}
+                    placeholder="you@company.com"
+                    className="h-16 text-2xl md:text-2xl text-white placeholder:text-gray-500 bg-[#2a2a2a] border-zinc-600 focus-visible:border-white focus-visible:ring-2 focus-visible:ring-white/40"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="accountPassword" className="text-base text-white">Password</Label>
+                  <Input
+                    id="accountPassword"
+                    type="password"
+                    value={accountPassword}
+                    onChange={(e) => setAccountPassword(e.target.value)}
+                    placeholder="At least 6 characters"
+                    className="h-16 text-2xl md:text-2xl text-white placeholder:text-gray-500 bg-[#2a2a2a] border-zinc-600 focus-visible:border-white focus-visible:ring-2 focus-visible:ring-white/40"
+                  />
+                </div>
+                <p className="text-xs text-zinc-400">
+                  We will sign in or create this account before continuing so onboarding never runs on the wrong user.
+                </p>
+              </>
+            ) : null}
           </form>
         )}
 
         {step === 2 && (
-          <div className="grid grid-cols-2 gap-4">
-            <button
-              type="button"
-              onClick={() => {
-                setUseCase('solo');
-                setSeats(SOLO_SEATS);
-              }}
-              className={`flex flex-col items-center gap-2 rounded-xl border-2 p-7 transition-colors ${
-                useCase === 'solo'
-                  ? 'border-red-500 bg-red-500/10'
-                  : 'border-zinc-600 hover:border-zinc-500'
-              }`}
-            >
-              <User className="h-9 w-9 text-[#AAAAAA]" />
-              <span className="text-base font-medium text-white">For myself</span>
-              <span className="text-sm text-[#AAAAAA] text-center">
-                Solo use
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setUseCase('team');
-                setSeats((prev) => Math.max(prev, TEAM_MIN_SEATS));
-              }}
-              className={`flex flex-col items-center gap-2 rounded-xl border-2 p-7 transition-colors ${
-                useCase === 'team'
-                  ? 'border-red-500 bg-red-500/10'
-                  : 'border-zinc-600 hover:border-zinc-500'
-              }`}
-            >
-              <Users className="h-9 w-9 text-[#AAAAAA]" />
-              <span className="text-base font-medium text-white">For my team</span>
-              <span className="text-sm text-[#AAAAAA] text-center">
-                Add teammates later
-              </span>
-            </button>
-          </div>
+          isExclusivePartnerOnboarding ? (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-red-500/40 bg-red-500/10 p-4 text-center">
+                <p className="text-sm font-semibold text-white">Team onboarding is pre-selected for this exclusive offer.</p>
+                <p className="mt-1 text-xs text-zinc-300">Add teammate emails now and invites will be sent after onboarding completes.</p>
+              </div>
+              <div className="space-y-3">
+                <Label className="text-base text-white">Team member emails (optional)</Label>
+                <div className="space-y-2">
+                  {teamInviteEmails.map((email, index) => (
+                    <Input
+                      key={index}
+                      type="email"
+                      value={email}
+                      onChange={(event) => {
+                        const nextEmails = [...teamInviteEmails];
+                        nextEmails[index] = event.target.value;
+                        setTeamInviteEmails(nextEmails);
+                      }}
+                      placeholder={`teammate${index + 1}@company.com`}
+                      className="h-12 text-base text-white placeholder:text-gray-500 bg-[#2a2a2a] border-zinc-600 focus-visible:border-white focus-visible:ring-2 focus-visible:ring-white/40"
+                    />
+                  ))}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setTeamInviteEmails((prev) => [...prev, ''])}
+                    className="border-zinc-600 text-white hover:bg-zinc-800 hover:text-white"
+                  >
+                    Add another email
+                  </Button>
+                  {teamInviteEmails.length > 1 ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setTeamInviteEmails((prev) => prev.slice(0, -1))}
+                      className="border-zinc-600 text-white hover:bg-zinc-800 hover:text-white"
+                    >
+                      Remove last
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setUseCase('solo');
+                  setSeats(SOLO_SEATS);
+                }}
+                className={`flex flex-col items-center gap-2 rounded-xl border-2 p-7 transition-colors ${
+                  useCase === 'solo'
+                    ? 'border-red-500 bg-red-500/10'
+                    : 'border-zinc-600 hover:border-zinc-500'
+                }`}
+              >
+                <User className="h-9 w-9 text-[#AAAAAA]" />
+                <span className="text-base font-medium text-white">For myself</span>
+                <span className="text-sm text-[#AAAAAA] text-center">
+                  Solo use
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setUseCase('team');
+                  setSeats((prev) => Math.max(prev, TEAM_MIN_SEATS));
+                }}
+                className={`flex flex-col items-center gap-2 rounded-xl border-2 p-7 transition-colors ${
+                  useCase === 'team'
+                    ? 'border-red-500 bg-red-500/10'
+                    : 'border-zinc-600 hover:border-zinc-500'
+                }`}
+              >
+                <Users className="h-9 w-9 text-[#AAAAAA]" />
+                <span className="text-base font-medium text-white">For my team</span>
+                <span className="text-sm text-[#AAAAAA] text-center">
+                  Add teammates later
+                </span>
+              </button>
+            </div>
+          )
         )}
 
         {step === 3 && (
@@ -379,22 +616,24 @@ function OnboardingContent() {
                 )}
               </div>
             )}
-            <div className="space-y-2">
-              <Label htmlFor="referralCode" className="text-base text-white">Referral code (optional)</Label>
-              <Input
-                id="referralCode"
-                value={referralCode}
-                onChange={(e) => setReferralCode(e.target.value)}
-                placeholder="e.g. Launch2026"
-                className="h-16 text-2xl md:text-2xl text-white placeholder:text-gray-500 bg-[#2a2a2a] border-zinc-600 focus-visible:border-white focus-visible:ring-2 focus-visible:ring-white/40"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && canStep3) {
-                    e.preventDefault();
-                    setStep(4);
-                  }
-                }}
-              />
-            </div>
+            {!isExclusivePartnerOnboarding ? (
+              <div className="space-y-2">
+                <Label htmlFor="referralCode" className="text-base text-white">Referral code (optional)</Label>
+                <Input
+                  id="referralCode"
+                  value={referralCode}
+                  onChange={(e) => setReferralCode(e.target.value)}
+                  placeholder="e.g. Launch2026"
+                  className="h-16 text-2xl md:text-2xl text-white placeholder:text-gray-500 bg-[#2a2a2a] border-zinc-600 focus-visible:border-white focus-visible:ring-2 focus-visible:ring-white/40"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && canStep3) {
+                      e.preventDefault();
+                      setStep(4);
+                    }
+                  }}
+                />
+              </div>
+            ) : null}
             {useCase === 'team' && (
               <div className="space-y-2">
                 <Label className="text-base text-white">Members</Label>
@@ -488,6 +727,9 @@ function OnboardingContent() {
         {error && (
           <p className="text-sm text-red-400 text-center">{error}</p>
         )}
+        {authError && (
+          <p className="text-sm text-red-400 text-center">{authError}</p>
+        )}
 
         <div className="flex flex-col gap-3">
           {step > 1 && (
@@ -503,13 +745,22 @@ function OnboardingContent() {
           {step < 5 ? (
             <Button
               type="button"
-              onClick={() => setStep((s) => s + 1)}
+              onClick={async () => {
+                if (step === 1 && isExclusivePartnerOnboarding) {
+                  if (!canStep1) return;
+                  const authReady = await ensureExclusiveAuth();
+                  if (!authReady) return;
+                }
+                setStep((s) => s + 1);
+              }}
               disabled={
-                (step === 1 && !canStep1) || (step === 3 && !canStep3)
+                authLoading ||
+                (step === 1 && !canStep1) ||
+                (step === 3 && !canStep3)
               }
               className="w-full h-14 text-lg font-semibold bg-[#ef4444] text-white hover:bg-[#dc2626] border-0"
             >
-              Continue
+              {authLoading && step === 1 ? 'Verifying account…' : 'Continue'}
             </Button>
           ) : (
             <Button
@@ -518,7 +769,11 @@ function OnboardingContent() {
               disabled={loading}
               className="w-full h-14 text-lg font-semibold bg-[#ef4444] text-white hover:bg-[#dc2626] border-0"
             >
-              {loading ? 'Saving…' : 'Continue to billing'}
+              {loading
+                ? 'Saving…'
+                : isExclusivePartnerOnboarding
+                  ? 'Activate 30-day exclusive access'
+                  : 'Continue to billing'}
             </Button>
           )}
         </div>

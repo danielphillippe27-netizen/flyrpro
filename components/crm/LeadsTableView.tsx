@@ -78,15 +78,8 @@ export function LeadsTableView({
   const knockToConversationRaw =
     userStats ? toPercent(userStats.conversations, userStats.doors_knocked) : null;
 
-  // Demo fallback: avoid extreme edge values that read poorly in demos.
-  const conversationToLeadRate =
-    conversationToLeadRaw === null || conversationToLeadRaw <= 0.1 || conversationToLeadRaw >= 99.9
-      ? '25.0%'
-      : formatPercent(conversationToLeadRaw);
-  const knockToConversationRate =
-    knockToConversationRaw === null || knockToConversationRaw <= 0.1 || knockToConversationRaw >= 99.9
-      ? '33.3%'
-      : formatPercent(knockToConversationRaw);
+  const conversationToLeadRate = formatPercent(conversationToLeadRaw ?? 0);
+  const knockToConversationRate = formatPercent(knockToConversationRaw ?? 0);
 
   return (
     <div className="space-y-6">

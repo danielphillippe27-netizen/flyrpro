@@ -25,6 +25,11 @@ type UserProfileLite = {
   avatarUrl: string | null;
 };
 
+type AccessStatePayload = {
+  isFounder?: boolean;
+  planBadgeLabel?: string | null;
+};
+
 function initialsFromName(nameOrEmail: string | null): string {
   const value = (nameOrEmail ?? '').trim();
   if (!value) return 'U';
@@ -48,6 +53,7 @@ export default function AppTopHeader() {
   const [feedbackSuccess, setFeedbackSuccess] = useState<string | null>(null);
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
   const [isFounder, setIsFounder] = useState<boolean>(false);
+  const [planBadgeLabel, setPlanBadgeLabel] = useState<string | null>(null);
   const [profileEditOpen, setProfileEditOpen] = useState(false);
 
   useEffect(() => {
@@ -55,8 +61,15 @@ export default function AppTopHeader() {
     fetch('/api/access/state', { credentials: 'include' })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (mounted && data && typeof data.isFounder === 'boolean') {
-          setIsFounder(data.isFounder);
+        if (!mounted || !data) return;
+        const payload = data as AccessStatePayload;
+        if (typeof payload.isFounder === 'boolean') {
+          setIsFounder(payload.isFounder);
+        }
+        if (typeof payload.planBadgeLabel === 'string') {
+          setPlanBadgeLabel(payload.planBadgeLabel);
+        } else {
+          setPlanBadgeLabel(null);
         }
       })
       .catch(() => {});
@@ -176,6 +189,7 @@ export default function AppTopHeader() {
     if (!currentWorkspace) return null;
     return membershipsByWorkspaceId[currentWorkspace.id] ?? null;
   }, [currentWorkspace, membershipsByWorkspaceId]);
+  const isTrialBadge = Boolean(planBadgeLabel && /trial/i.test(planBadgeLabel));
 
   const sendFeedback = async () => {
     const trimmed = feedbackMessage.trim();
@@ -187,6 +201,7 @@ export default function AppTopHeader() {
     try {
       const response = await fetch('/api/feedback', {
         method: 'POST',
+        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
         },
@@ -200,6 +215,10 @@ export default function AppTopHeader() {
 
       if (!response.ok) {
         const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        if (response.status === 401) {
+          setFeedbackError('Your session expired. Please sign in again, then resend your feedback.');
+          return;
+        }
         setFeedbackError(payload?.error ?? 'Failed to send feedback. Please try again.');
         return;
       }
@@ -242,6 +261,15 @@ export default function AppTopHeader() {
           </div>
 
           <div className="flex items-center gap-2">
+            {planBadgeLabel ? (
+              <div
+                className={`rounded-md border border-border bg-muted px-2 py-1 text-[11px] font-semibold ${
+                  isTrialBadge ? 'text-red-600 dark:text-red-400' : 'text-foreground'
+                }`}
+              >
+                {planBadgeLabel}
+              </div>
+            ) : null}
             <Button
               variant="outline"
               size="sm"

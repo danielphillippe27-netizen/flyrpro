@@ -41,7 +41,11 @@ function DashboardSkeleton() {
   );
 }
 
-export function HomeDashboardView() {
+type HomeDashboardViewProps = {
+  disableGoalEditing?: boolean;
+};
+
+export function HomeDashboardView({ disableGoalEditing = false }: HomeDashboardViewProps) {
   const { currentWorkspaceId } = useWorkspace();
   const [data, setData] = useState<HomeDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -131,7 +135,7 @@ export function HomeDashboardView() {
             weeklySessionsGoal={weeklyGoals.sessions}
             minutesThisWeek={stats.minutesThisWeek}
             weeklyMinutesGoal={weeklyGoals.minutes}
-            onEditGoals={handleEditGoals}
+            onEditGoals={disableGoalEditing ? undefined : handleEditGoals}
           />
         </div>
         <div className="w-full aspect-[4/1] min-h-0">

@@ -1,7 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
-import { WORKSPACE_TRIAL_DAYS } from '@/app/lib/billing/workspace-trial';
+import {
+  PARTNER_EXCLUSIVE_TRIAL_DAYS,
+  WORKSPACE_TRIAL_DAYS,
+} from '@/app/lib/billing/workspace-trial';
+import {
+  buildJoinUrl,
+  createWorkspaceInviteRecord,
+  findPendingWorkspaceInviteByEmail,
+  normalizeInviteEmail,
+  updateWorkspaceInviteRecord,
+} from '@/app/api/team/_lib/manage';
+import { sendWorkspaceInviteEmail } from '@/lib/email/resend';
 
 const INDUSTRIES = [
   'Real Estate',
@@ -13,6 +24,22 @@ const INDUSTRIES = [
   'Solar',
   'Other',
 ] as const;
+
+const INVITE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+function normalizeEmailArray(values: unknown): string[] {
+  if (!Array.isArray(values)) return [];
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const normalized = normalizeInviteEmail(value);
+    if (!normalized) continue;
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    result.push(normalized);
+  }
+  return result;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -33,6 +60,7 @@ export async function POST(request: NextRequest) {
       maxSeats,
       brokerage,
       brokerageId,
+      teamMemberEmails,
     } = body as {
       firstName?: string;
       lastName?: string;
@@ -43,6 +71,8 @@ export async function POST(request: NextRequest) {
       maxSeats?: number;
       brokerage?: string;
       brokerageId?: string;
+      partnerOfferToken?: string;
+      teamMemberEmails?: string[];
     };
 
     const admin = createAdminClient();
@@ -185,13 +215,38 @@ export async function POST(request: NextRequest) {
         ? currentWorkspace.trial_ends_at
         : null;
     const onboardingWasComplete = !!currentWorkspace?.onboarding_completed_at;
+    const partnerOfferToken =
+      typeof body?.partnerOfferToken === 'string' && body.partnerOfferToken.trim()
+        ? body.partnerOfferToken.trim()
+        : null;
+
+    let isValidPartnerExclusiveOffer = false;
+    if (partnerOfferToken) {
+      const { data: offer } = await admin
+        .from('partner_offers')
+        .select('id, expires_at, revoked_at, max_views, view_count')
+        .eq('token', partnerOfferToken)
+        .maybeSingle();
+      if (offer) {
+        const notRevoked = !offer.revoked_at;
+        const notExpired = new Date(offer.expires_at).getTime() > Date.now();
+        const underViewLimit =
+          offer.max_views == null || offer.view_count < offer.max_views;
+        isValidPartnerExclusiveOffer = notRevoked && notExpired && underViewLimit;
+      }
+    }
+
+    const trialDays = isValidPartnerExclusiveOffer
+      ? PARTNER_EXCLUSIVE_TRIAL_DAYS
+      : WORKSPACE_TRIAL_DAYS;
+
     const shouldStartTrial =
       !onboardingWasComplete &&
       currentSubscriptionStatus === 'inactive' &&
       !currentTrialEndsAt;
     const startedTrialEndsAt = shouldStartTrial
       ? new Date(
-          Date.now() + WORKSPACE_TRIAL_DAYS * 24 * 60 * 60 * 1000
+          Date.now() + trialDays * 24 * 60 * 60 * 1000
         ).toISOString()
       : null;
 
@@ -280,9 +335,128 @@ export async function POST(request: NextRequest) {
       (resultingSubscriptionStatus === 'trialing' &&
         (!resultingTrialEndsAt || new Date(resultingTrialEndsAt) > new Date()));
 
+    const normalizedTeamInviteEmails = normalizeEmailArray(teamMemberEmails);
+    const inviteResults: Array<{ email: string; sent: boolean; error?: string }> = [];
+    if (normalizedTeamInviteEmails.length > 0) {
+      const workspaceName =
+        (typeof updates.name === 'string' && updates.name.trim()) ||
+        (typeof workspaceName === 'string' && workspaceName.trim()) ||
+        'your workspace';
+
+      for (const email of normalizedTeamInviteEmails) {
+        if (requestUser.email && email === requestUser.email.toLowerCase()) {
+          inviteResults.push({
+            email,
+            sent: false,
+            error: 'Skipped inviter email',
+          });
+          continue;
+        }
+
+        const { data: memberAlreadyExists } = await admin.rpc(
+          'workspace_has_member_email',
+          {
+            p_workspace_id: workspaceId,
+            p_email: email,
+          }
+        );
+
+        if (memberAlreadyExists === true) {
+          inviteResults.push({
+            email,
+            sent: false,
+            error: 'Already a workspace member',
+          });
+          continue;
+        }
+
+        const now = new Date();
+        const expiresAt = new Date(now.getTime() + INVITE_WINDOW_MS).toISOString();
+        const existingInviteLookup = await findPendingWorkspaceInviteByEmail(
+          admin,
+          workspaceId,
+          email
+        );
+        const existingInvite = existingInviteLookup.data;
+
+        let inviteToken: string | null = null;
+
+        if (
+          existingInvite?.id &&
+          existingInvite.expires_at &&
+          new Date(existingInvite.expires_at).getTime() > now.getTime()
+        ) {
+          inviteToken = existingInvite.token;
+        } else if (existingInvite?.id) {
+          const refreshedToken = crypto.randomUUID();
+          const refreshedInvite = await updateWorkspaceInviteRecord(
+            admin,
+            existingInvite.id,
+            {
+              role: 'member',
+              token: refreshedToken,
+              invited_by: requestUser.id,
+              expires_at: expiresAt,
+              last_sent_at: now.toISOString(),
+              updated_at: now.toISOString(),
+            }
+          );
+          inviteToken = refreshedInvite.data?.token ?? null;
+        } else {
+          const token = crypto.randomUUID();
+          const createdInvite = await createWorkspaceInviteRecord(admin, {
+            workspace_id: workspaceId,
+            email,
+            role: 'member',
+            token,
+            status: 'pending',
+            invited_by: requestUser.id,
+            expires_at: expiresAt,
+            last_sent_at: now.toISOString(),
+          });
+          inviteToken = createdInvite.data?.token ?? null;
+        }
+
+        if (!inviteToken) {
+          inviteResults.push({
+            email,
+            sent: false,
+            error: 'Failed to create invite',
+          });
+          continue;
+        }
+
+        try {
+          await sendWorkspaceInviteEmail({
+            to: email,
+            joinUrl: buildJoinUrl(request, inviteToken),
+            workspaceName,
+            role: 'member',
+            inviterEmail: requestUser.email,
+            expiresAt,
+          });
+          inviteResults.push({ email, sent: true });
+        } catch (inviteError) {
+          inviteResults.push({
+            email,
+            sent: false,
+            error:
+              inviteError instanceof Error
+                ? inviteError.message
+                : 'Invite created but email failed',
+          });
+        }
+      }
+    }
+
     return NextResponse.json({
       success: true,
       redirect: hasAccess ? '/home' : '/subscribe',
+      invites: {
+        attempted: normalizedTeamInviteEmails.length,
+        sent: inviteResults.filter((result) => result.sent).length,
+        results: inviteResults,
+      },
     });
   } catch (e) {
     console.error('Onboarding complete error:', e);

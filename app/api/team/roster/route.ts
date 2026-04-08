@@ -4,6 +4,7 @@ import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import {
   buildJoinUrl,
   getSeatUsage,
+  isWorkspaceTrialActive,
   listPendingWorkspaceInvites,
   resolveTeamManagementContext,
 } from '@/app/api/team/_lib/manage';
@@ -170,7 +171,7 @@ export async function GET(request: NextRequest) {
       await Promise.allSettled([
         admin
           .from('workspaces')
-          .select('id, name, max_seats')
+          .select('id, name, max_seats, subscription_status, trial_ends_at')
           .eq('id', context.workspaceId)
           .single(),
         loadWorkspaceMembers(admin, context.workspaceId),
@@ -247,7 +248,7 @@ export async function GET(request: NextRequest) {
       created_at: row.created_at,
       expires_at: row.expires_at,
       last_sent_at: row.last_sent_at,
-      join_url: buildJoinUrl(request, row.token),
+      join_url: row.token ? buildJoinUrl(request, row.token) : '',
     }));
 
     return NextResponse.json({
@@ -255,6 +256,14 @@ export async function GET(request: NextRequest) {
         id: workspace?.id ?? context.workspaceId,
         name: workspace?.name ?? 'Workspace',
         maxSeats: Math.max(1, workspace?.max_seats ?? seatUsage.maxSeats),
+        trialActive: isWorkspaceTrialActive(
+          workspace
+            ? {
+                subscription_status: workspace.subscription_status ?? null,
+                trial_ends_at: workspace.trial_ends_at ?? null,
+              }
+            : null
+        ),
       },
       actorRole: context.role,
       seatUsage,

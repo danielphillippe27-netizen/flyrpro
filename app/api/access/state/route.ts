@@ -64,6 +64,17 @@ export async function GET(request: NextRequest) {
       status === 'active' ||
       (status === 'trialing' && (!trialEnd || trialEnd > new Date()));
     const hasAccess = subscriptionAccess || access.isFounder;
+    const now = Date.now();
+    const trialDaysRemaining =
+      status === 'trialing' && trialEnd && trialEnd.getTime() > now
+        ? Math.max(0, Math.ceil((trialEnd.getTime() - now) / (24 * 60 * 60 * 1000)))
+        : null;
+    const planBadgeLabel =
+      status === 'active'
+        ? 'PRO'
+        : trialDaysRemaining != null
+          ? `${trialDaysRemaining} day trial`
+          : null;
 
     return NextResponse.json({
       userId: requestUser.id,
@@ -73,6 +84,10 @@ export async function GET(request: NextRequest) {
       workspaceName: workspace.name,
       maxSeats: workspace.max_seats ?? 1,
       hasAccess,
+      subscriptionStatus: status,
+      trialEndsAt: workspace.trial_ends_at ?? null,
+      trialDaysRemaining,
+      planBadgeLabel,
       isFounder: access.isFounder,
       accessLevel: access.level,
       memberCount: access.memberCount,

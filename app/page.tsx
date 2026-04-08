@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
 import { ArcadeEmbed } from '@/components/landing/ArcadeEmbed';
+import { useRef } from 'react';
 
 const TRACKING_WORDS = [
   'Doors',
@@ -28,6 +29,7 @@ const TRACKING_WORDS = [
 
 export default function LandingPage() {
   const [trackingWordIndex, setTrackingWordIndex] = useState(0);
+  const demoContainerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -35,6 +37,25 @@ export default function LandingPage() {
     }, 2200);
     return () => clearInterval(id);
   }, []);
+
+  const handleGetStarted = async () => {
+    const demoContainer = demoContainerRef.current;
+    if (!demoContainer) return;
+
+    demoContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    const fullscreenMethod =
+      demoContainer.requestFullscreen ||
+      (demoContainer as HTMLDivElement & { webkitRequestFullscreen?: () => Promise<void> }).webkitRequestFullscreen;
+
+    if (fullscreenMethod) {
+      try {
+        await fullscreenMethod.call(demoContainer);
+      } catch {
+        // Ignore rejection (e.g., browser policy); scroll fallback still runs.
+      }
+    }
+  };
 
   return (
     <div className="min-h-screen bg-zinc-50 text-zinc-900">
@@ -86,13 +107,14 @@ export default function LandingPage() {
                 </span>
               </p>
               <div className="mt-10 flex flex-wrap justify-center gap-4">
-                <Link
-                  href="/login"
+                <button
+                  type="button"
+                  onClick={handleGetStarted}
                   className="inline-flex h-12 items-center rounded-2xl bg-zinc-900 px-6 text-base font-semibold text-white transition hover:bg-zinc-700"
                 >
                   Get started
                   <ArrowRight className="ml-2 h-4 w-4" />
-                </Link>
+                </button>
                 <Link
                   href="/plans"
                   className="inline-flex h-12 items-center rounded-2xl bg-zinc-100 px-6 text-base font-semibold text-zinc-900 transition hover:bg-zinc-200"
@@ -112,7 +134,10 @@ export default function LandingPage() {
             <p className="mt-3 text-center text-lg text-zinc-500">
               Take a quick product walkthrough directly in the page.
             </p>
-            <div className="mx-auto mt-8 w-full max-w-6xl overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
+            <div
+              ref={demoContainerRef}
+              className="mx-auto mt-8 w-full max-w-6xl overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm"
+            >
               <ArcadeEmbed />
             </div>
           </div>

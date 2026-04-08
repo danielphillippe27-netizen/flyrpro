@@ -6,6 +6,7 @@ import {
   buildJoinUrl,
   getSeatUsage,
   getWorkspaceInviteRecord,
+  getWorkspaceTrialState,
   normalizePendingInviteRole,
   resolveTeamManagementContext,
   updateWorkspaceInviteRecord,
@@ -28,6 +29,31 @@ function isSeatLimitError(error: unknown): boolean {
 async function getInviteForWorkspace(admin: ReturnType<typeof createAdminClient>, inviteId: string) {
   const { data, error } = await getWorkspaceInviteRecord(admin, inviteId);
   return { invite: data, error };
+}
+
+async function cancelInviteRecord(
+  admin: ReturnType<typeof createAdminClient>,
+  inviteId: string
+) {
+  const cancellationStatuses = ['canceled', 'cancelled', 'expired'] as const;
+  let lastError: unknown = null;
+
+  for (const status of cancellationStatuses) {
+    const { error } = await admin
+      .from('workspace_invites')
+      .update({
+        status,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', inviteId);
+
+    if (!error) {
+      return { ok: true as const };
+    }
+    lastError = error;
+  }
+
+  return { ok: false as const, error: lastError };
 }
 
 async function getWorkspaceName(
@@ -94,6 +120,7 @@ export async function PATCH(
       if (!nextRole) {
         return NextResponse.json({ error: 'A valid invite role is required' }, { status: 400 });
       }
+      const trialState = await getWorkspaceTrialState(admin, teamContext.workspaceId);
 
       const { data: updatedInvite, error: updateError } =
         await updateWorkspaceInviteRecord(admin, invite.id, {
@@ -117,7 +144,7 @@ export async function PATCH(
 
       if (nextRole === 'member' && invite.role !== 'member') {
         const seatUsage = await getSeatUsage(admin, teamContext.workspaceId);
-        if (seatUsage.seatsUsed > seatUsage.maxSeats) {
+        if (!trialState.isTrialActive && seatUsage.seatsUsed > seatUsage.maxSeats) {
           await updateWorkspaceInviteRecord(admin, invite.id, {
             role: invite.role,
             updated_at: new Date().toISOString(),
@@ -136,7 +163,7 @@ export async function PATCH(
         success: true,
         invite: {
           ...updatedInvite,
-          join_url: buildJoinUrl(request, updatedInvite.token),
+          join_url: updatedInvite.token ? buildJoinUrl(request, updatedInvite.token) : '',
         },
       });
     }
@@ -161,7 +188,7 @@ export async function PATCH(
       return NextResponse.json({ error: 'Failed to resend invite' }, { status: 500 });
     }
 
-    const joinUrl = buildJoinUrl(request, updatedInvite.token);
+    const joinUrl = updatedInvite.token ? buildJoinUrl(request, updatedInvite.token) : '';
     const workspaceName = await getWorkspaceName(admin, teamContext.workspaceId);
     let emailSent = false;
     let emailError: string | null = getInviteMailerConfigError();
@@ -238,16 +265,9 @@ export async function DELETE(
       );
     }
 
-    const { error: cancelError } = await admin
-      .from('workspace_invites')
-      .update({
-        status: 'canceled',
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', invite.id);
-
-    if (cancelError) {
-      console.error('[team/invites/:inviteId] cancel error:', cancelError);
+    const cancelResult = await cancelInviteRecord(admin, invite.id);
+    if (!cancelResult.ok) {
+      console.error('[team/invites/:inviteId] cancel error:', cancelResult.error);
       return NextResponse.json({ error: 'Failed to cancel invite' }, { status: 500 });
     }
 
