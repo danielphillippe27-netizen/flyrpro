@@ -1,11 +1,13 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ChallengeStatusBadge } from '@/components/challenges/ChallengeStatusBadge';
 import { ChallengeLeaderboard } from '@/components/challenges/ChallengeLeaderboard';
+import { ChallengeShareCardModal } from '@/components/challenges/ChallengeShareCardModal';
 import { ChallengeUserStandingCard } from '@/components/challenges/ChallengeUserStandingCard';
 import { formatMetricValue } from '@/lib/challenges/metric-labels';
 import { templateTimeframeLabel } from '@/lib/challenges/timeframe';
@@ -20,6 +22,7 @@ export function ChallengeDetailView({
   viewerUserId,
   template,
   viewerInstance,
+  viewerLatestSessionId,
   leaderboard,
   leaderboardLast30Days,
   overview,
@@ -28,6 +31,7 @@ export function ChallengeDetailView({
   viewerUserId: string;
   template: ChallengeTemplate;
   viewerInstance: ChallengeInstance | null;
+  viewerLatestSessionId: string | null;
   leaderboard: LeaderboardEntry[];
   leaderboardLast30Days: LeaderboardEntry[];
   overview: {
@@ -38,6 +42,7 @@ export function ChallengeDetailView({
   };
   leaderboardLocked: boolean;
 }) {
+  const [shareOpen, setShareOpen] = useState(false);
   const cardStatus = cardStatusForTemplate(template, viewerInstance);
   const timeframe = templateTimeframeLabel(template);
 
@@ -76,6 +81,16 @@ export function ChallengeDetailView({
               </div>
             </div>
             <ChallengeUserStandingCard template={template} instance={viewerInstance} />
+          </div>
+          <div className="flex justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShareOpen(true)}
+              disabled={!viewerLatestSessionId}
+            >
+              Share your progress
+            </Button>
           </div>
         </div>
 
@@ -167,6 +182,13 @@ export function ChallengeDetailView({
           </Card>
         </div>
       </div>
+      <ChallengeShareCardModal
+        open={shareOpen}
+        onOpenChange={setShareOpen}
+        userId={viewerUserId}
+        challengeId={template.id}
+        sessionId={viewerLatestSessionId}
+      />
     </div>
   );
 }

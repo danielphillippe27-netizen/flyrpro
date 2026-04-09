@@ -31,14 +31,14 @@ const nextConfig = {
   async redirects() {
     return [
       {
-        source: "/routes",
-        destination: "/members",
-        permanent: false,
+        source: "/members",
+        destination: "/routes",
+        permanent: true,
       },
       {
-        source: "/routes/:path*",
-        destination: "/members/:path*",
-        permanent: false,
+        source: "/members/:path*",
+        destination: "/routes/:path*",
+        permanent: true,
       },
       {
         source: "/terms-of-service",

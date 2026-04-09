@@ -3,7 +3,7 @@
 import { useParams } from 'next/navigation';
 import { AssignedRoutesView } from '@/components/routes/AssignedRoutesView';
 
-export default function MemberRouteAssignmentPage() {
+export default function RouteAssignmentPage() {
   const params = useParams();
   const assignmentId = typeof params?.assignmentId === 'string' ? params.assignmentId : null;
 

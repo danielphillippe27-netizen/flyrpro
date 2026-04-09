@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { getClientAsync } from '@/lib/supabase/client';
 import { Target } from 'lucide-react';
 
-export default function MembersRoutesPage() {
+export default function RoutesIndexPage() {
   const router = useRouter();
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
 

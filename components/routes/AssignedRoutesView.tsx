@@ -294,7 +294,7 @@ function statusLabel(status: AssignmentStatus): string {
 type AssignedRoutesViewProps = {
   campaignId?: string;
   embedded?: boolean;
-  /** When set (standalone /members/[id] page), scope the view to this assignment and match campaigns-style detail layout. */
+  /** When set (standalone /routes/[id] page), scope the view to this assignment and match campaigns-style detail layout. */
   focusAssignmentId?: string;
 };
 

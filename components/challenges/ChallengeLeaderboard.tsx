@@ -5,6 +5,15 @@ import type { LeaderboardEntry } from '@/types/challenges';
 import { formatMetricValue } from '@/lib/challenges/metric-labels';
 import type { ChallengeMetric } from '@/types/challenges';
 
+const BADGE_META: Record<string, { emoji: string; label: string }> = {
+  streak: { emoji: '🔥', label: 'On a streak' },
+  top_week: { emoji: '👑', label: 'Top this week' },
+  most_active_24h: { emoji: '⚡', label: 'Most active' },
+  milestone_10: { emoji: '🎯', label: '10-home day' },
+  milestone_25: { emoji: '🏠', label: '25 homes' },
+  milestone_50: { emoji: '🚀', label: '50 homes' },
+};
+
 export function ChallengeLeaderboard({
   title = 'Leaderboard',
   subtitle,
@@ -54,10 +63,38 @@ export function ChallengeLeaderboard({
               >
                 <div className="flex items-center gap-3 min-w-0">
                   <span className="tabular-nums text-muted-foreground w-7 shrink-0">#{row.rank}</span>
-                  <span className={cn('font-medium truncate', isYou && 'text-primary')}>
-                    {row.displayName}
-                    {isYou ? <span className="text-muted-foreground font-normal"> (you)</span> : null}
-                  </span>
+                  <div className="min-w-0 flex flex-wrap items-center gap-1.5">
+                    <span className={cn('font-medium truncate', isYou && 'text-primary')}>
+                      {row.displayName}
+                      {isYou ? <span className="text-muted-foreground font-normal"> (you)</span> : null}
+                    </span>
+                    {row.currentStreak && row.currentStreak >= 2 ? (
+                      <span className="inline-flex items-center rounded-full bg-orange-500/10 px-2 py-0.5 text-[11px] font-medium text-orange-600">
+                        🔥 {row.currentStreak}
+                      </span>
+                    ) : null}
+                    {(row.activeBadges ?? []).map((badgeId) => {
+                      const badge = BADGE_META[badgeId];
+                      if (!badge) return null;
+                      return (
+                        <span
+                          key={`${row.userId}-${badgeId}`}
+                          className="inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary"
+                          title={badge.label}
+                        >
+                          {badge.emoji}
+                        </span>
+                      );
+                    })}
+                    {row.accountabilityPosted ? (
+                      <span
+                        className="inline-flex items-center rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-600"
+                        title="Posted accountability story this week"
+                      >
+                        📤 Posted
+                      </span>
+                    ) : null}
+                  </div>
                 </div>
                 <span className="tabular-nums shrink-0 text-muted-foreground">
                   {formatMetricValue(metric, row.score, metricLabelOverride)}

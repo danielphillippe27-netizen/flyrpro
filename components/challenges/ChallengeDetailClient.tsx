@@ -13,6 +13,7 @@ type DetailPayload = {
   viewerUserId: string;
   template: ChallengeTemplate;
   viewerInstance: ChallengeInstance | null;
+  viewerLatestSessionId: string | null;
   leaderboard: LeaderboardEntry[];
   leaderboardLast30Days: LeaderboardEntry[];
   overview: {
@@ -77,6 +78,7 @@ export function ChallengeDetailClient({ challengeId }: { challengeId: string }) 
       viewerUserId={data.viewerUserId}
       template={data.template}
       viewerInstance={data.viewerInstance}
+      viewerLatestSessionId={data.viewerLatestSessionId}
       leaderboard={data.leaderboard}
       leaderboardLast30Days={data.leaderboardLast30Days}
       overview={data.overview}

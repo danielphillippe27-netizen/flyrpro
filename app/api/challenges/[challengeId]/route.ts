@@ -119,6 +119,8 @@ export async function GET(
       viewerUserId: user.id,
       template,
       viewerInstance,
+      viewerLatestSessionId:
+        leaderboardAllTime.find((entry) => entry.userId === user.id)?.latestSessionId ?? null,
       leaderboard: leaderboardAllTime,
       leaderboardLast30Days,
       overview,

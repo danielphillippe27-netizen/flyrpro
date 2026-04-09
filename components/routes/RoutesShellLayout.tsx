@@ -55,10 +55,10 @@ function isAssignmentDetailPath(pathname: string | null, basePath: string): bool
 
 export type RoutesShellLayoutProps = {
   children: React.ReactNode;
-  /** URL prefix for this shell, e.g. `/members` */
+  /** URL prefix for this shell, e.g. `/routes` */
   basePath: string;
   localStorageCollapsedKey: string;
-  /** Centered header title on the index route (e.g. `Members`) */
+  /** Centered header title on the index route (e.g. `Routes`) */
   indexTitle: string;
 };
 

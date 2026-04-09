@@ -68,7 +68,16 @@ export function mapTemplateRow(
   };
 }
 
-type RpcLbRow = { user_id: string; display_name: string; score: number | string; rank: number | string };
+type RpcLbRow = {
+  user_id: string;
+  display_name: string;
+  score: number | string;
+  rank: number | string;
+  active_badges?: string[] | null;
+  current_streak?: number | string | null;
+  accountability_posted?: boolean | null;
+  latest_session_id?: string | null;
+};
 
 export function mapRpcLeaderboard(rows: RpcLbRow[] | null): LeaderboardEntry[] {
   if (!rows?.length) return [];
@@ -78,6 +87,12 @@ export function mapRpcLeaderboard(rows: RpcLbRow[] | null): LeaderboardEntry[] {
       displayName: String(r.display_name ?? 'Member'),
       score: Number(r.score) || 0,
       rank: Number(r.rank) || 0,
+      activeBadges: Array.isArray(r.active_badges)
+        ? r.active_badges.map((badge) => String(badge)) as LeaderboardEntry['activeBadges']
+        : [],
+      currentStreak: Number(r.current_streak) || 0,
+      accountabilityPosted: Boolean(r.accountability_posted),
+      latestSessionId: r.latest_session_id ? String(r.latest_session_id) : null,
     }))
     .sort((a, b) => a.rank - b.rank);
 }

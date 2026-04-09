@@ -143,7 +143,34 @@ export async function POST(request: NextRequest) {
       // Session already inserted; don't fail the request
     }
 
-    return NextResponse.json({ ok: true });
+    const sessionId = insertedSession?.id ?? null;
+
+    try {
+      await supabase.functions.invoke('evaluate-badges', {
+        body: {
+          user_id: user.id,
+          session_id: sessionId,
+        },
+      });
+    } catch (badgeError) {
+      console.warn('[team/session] evaluate-badges failed:', badgeError);
+    }
+
+    if (sessionId) {
+      try {
+        const shareCardUrl = new URL('/api/share-card', request.nextUrl.origin);
+        shareCardUrl.searchParams.set('user_id', user.id);
+        shareCardUrl.searchParams.set('session_id', sessionId);
+        await fetch(shareCardUrl, {
+          method: 'POST',
+          cache: 'no-store',
+        });
+      } catch (shareCardError) {
+        console.warn('[team/session] share-card warm failed:', shareCardError);
+      }
+    }
+
+    return NextResponse.json({ ok: true, session_id: sessionId });
   } catch (err) {
     console.error('[team/session] error:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

@@ -18,6 +18,14 @@ export type ChallengeMetric =
   | 'sessions_completed'
   | 'consistency_days';
 
+export type ChallengeBadgeId =
+  | 'streak'
+  | 'top_week'
+  | 'most_active_24h'
+  | 'milestone_10'
+  | 'milestone_25'
+  | 'milestone_50';
+
 /** Published lifecycle of a template (catalog row). Rolling templates stay `active` while instances are per-user. */
 export type ChallengeTemplateStatus = 'upcoming' | 'active' | 'completed' | 'archived';
 
@@ -76,6 +84,10 @@ export type LeaderboardEntry = {
   score: number;
   rank: number;
   challengeInstanceId?: string | null;
+  activeBadges?: ChallengeBadgeId[];
+  currentStreak?: number;
+  accountabilityPosted?: boolean;
+  latestSessionId?: string | null;
 };
 
 export type ChallengeDetailPack = {

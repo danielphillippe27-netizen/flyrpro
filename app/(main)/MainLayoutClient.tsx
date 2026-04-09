@@ -6,7 +6,7 @@ import { useState, useEffect } from 'react';
 import { WorkspaceProvider } from '@/lib/workspace-context';
 import AppTopHeader from '@/components/layout/AppTopHeader';
 import { MainRouteGuard } from '@/components/guard/MainRouteGuard';
-import { Home, Map, Trophy, Users, Settings, Target, Gauge, Plug, MessageCircle, Activity, CalendarCheck, CornerDownRight, Plus, Link2, UserCircle2, Flag } from 'lucide-react';
+import { Home, Map, Trophy, Users, Settings, Target, Gauge, Plug, MessageCircle, Activity, CalendarCheck, CornerDownRight, Plus, Link2, Route, Flag } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { DashboardAccessLevel } from '@/app/api/_utils/workspace';
 
@@ -16,7 +16,7 @@ const SIDEBAR_EXPANDED_W = 160;   // 10rem – icons + labels
 const baseTabs = [
   { href: '/home', icon: Home, label: 'Home' },
   { href: '/campaigns', icon: Target, label: 'Campaigns' },
-  { href: '/members', icon: UserCircle2, label: 'Members' },
+  { href: '/routes', icon: Route, label: 'Routes' },
   { href: '/challenges', icon: Flag, label: 'Challenges' },
   { href: '/map', icon: Map, label: 'Map' },
   { href: '/activity', icon: Activity, label: 'Activity' },
@@ -35,7 +35,7 @@ const memberTabs = baseTabs.filter((tab) =>
   [
     '/home',
     '/campaigns',
-    '/members',
+    '/routes',
     '/challenges',
     '/map',
     '/leads',
@@ -165,7 +165,7 @@ export default function MainLayoutClient({
               className={cn(
                 'flex flex-1 flex-col min-h-0 p-0 m-0',
                 pathname?.startsWith('/campaigns') ||
-                pathname?.startsWith('/members') ||
+                pathname?.startsWith('/routes') ||
                 pathname?.startsWith('/map')
                   ? 'overflow-hidden'
                   : 'overflow-auto'
@@ -175,7 +175,7 @@ export default function MainLayoutClient({
                 className={cn(
                   'flex flex-col min-h-0',
                   pathname?.startsWith('/campaigns') ||
-                  pathname?.startsWith('/members') ||
+                  pathname?.startsWith('/routes') ||
                   pathname?.startsWith('/map')
                     ? 'flex-1 flex flex-col overflow-hidden min-h-0 [&>*]:flex-1 [&>*]:min-h-0'
                     : 'min-h-full'

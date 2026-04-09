@@ -48,7 +48,7 @@ function routeSidebarDisplayName(fullName: string): string {
 }
 
 interface RouteListSidebarProps {
-  /** App path prefix for links and active state, e.g. `/members` */
+  /** App path prefix for links and active state, e.g. `/routes` */
   basePath: string;
   onNewRoute?: () => void;
   collapsed?: boolean;
