@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import Image from 'next/image';
-import { MessageCircleQuestion, Moon, Sun, Maximize2, Minimize2 } from 'lucide-react';
+import { MessageCircleQuestion, Moon, Sun, Maximize2, Minimize2, Menu } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -18,6 +18,7 @@ import { useFullscreen } from '@/lib/hooks/useFullscreen';
 import { useWorkspace } from '@/lib/workspace-context';
 import { getClientAsync } from '@/lib/supabase/client';
 import { ProfileEditDialog } from '@/components/profile/ProfileEditDialog';
+import { useMainLayoutNav } from '@/components/layout/MainLayoutNavContext';
 
 type UserProfileLite = {
   email: string | null;
@@ -55,6 +56,7 @@ export default function AppTopHeader() {
   const [isFounder, setIsFounder] = useState<boolean>(false);
   const [planBadgeLabel, setPlanBadgeLabel] = useState<string | null>(null);
   const [profileEditOpen, setProfileEditOpen] = useState(false);
+  const mainLayoutNav = useMainLayoutNav();
 
   useEffect(() => {
     let mounted = true;
@@ -235,24 +237,36 @@ export default function AppTopHeader() {
   return (
     <>
       <header className="shrink-0 bg-white dark:bg-[#0f0f10]">
-        <div className="flex h-12 items-center justify-between pl-2 pr-4">
-          <div className="flex min-w-0 items-center gap-3">
+        <div className="flex h-12 items-center justify-between gap-2 pl-2 pr-3 sm:pr-4">
+          <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
+            {mainLayoutNav ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="shrink-0 md:hidden"
+                onClick={mainLayoutNav.openMobileNav}
+                aria-label="Open menu"
+              >
+                <Menu className="h-5 w-5" />
+              </Button>
+            ) : null}
             <Image
               src="/flyr-logo-wide-light.svg"
               alt="FLYR"
               width={72}
               height={28}
-              className="h-6 w-auto dark:hidden"
+              className="h-6 w-auto shrink-0 dark:hidden"
             />
             <Image
               src="/flyr-logo-wide-dark.svg"
               alt="FLYR"
               width={72}
               height={28}
-              className="hidden h-6 w-auto dark:block"
+              className="hidden h-6 w-auto shrink-0 dark:block"
             />
 
-            <div className="min-w-0 text-sm font-medium text-foreground">
+            <div className="hidden min-w-0 text-sm font-medium text-foreground md:flex md:items-center">
               <span className="mr-2 text-muted-foreground">/</span>
               <span className="truncate align-middle">{currentWorkspace?.name ?? 'Workspace'}</span>
               <span className="mx-2 text-muted-foreground">/</span>
@@ -260,10 +274,10 @@ export default function AppTopHeader() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1 sm:gap-2">
             {planBadgeLabel ? (
               <div
-                className={`rounded-md border border-border bg-muted px-2 py-1 text-[11px] font-semibold ${
+                className={`inline-flex max-w-[5.5rem] truncate rounded-md border border-border bg-muted px-1.5 py-0.5 text-[10px] font-semibold sm:max-w-none sm:px-2 sm:py-1 sm:text-[11px] ${
                   isTrialBadge ? 'text-red-600 dark:text-red-400' : 'text-foreground'
                 }`}
               >
@@ -274,10 +288,10 @@ export default function AppTopHeader() {
               variant="outline"
               size="sm"
               onClick={() => setFeedbackOpen(true)}
-              className="gap-2"
+              className="gap-1 px-2 sm:gap-2 sm:px-3"
             >
-              <MessageCircleQuestion className="h-4 w-4" />
-              Feedback ?
+              <MessageCircleQuestion className="h-4 w-4 shrink-0" />
+              <span className="hidden sm:inline">Feedback ?</span>
             </Button>
 
             <Button
@@ -286,6 +300,7 @@ export default function AppTopHeader() {
               onClick={toggleFullscreen}
               aria-label={isFullscreen ? 'Exit full screen' : 'Full screen'}
               title={isFullscreen ? 'Exit full screen' : 'Full screen'}
+              className="hidden sm:inline-flex"
             >
               {isFullscreen ? (
                 <Minimize2 className="h-4 w-4" />
