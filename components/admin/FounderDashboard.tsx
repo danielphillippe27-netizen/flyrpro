@@ -308,7 +308,7 @@ export function FounderDashboard() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Link href="/admin/offers">
+          <Link href="/offers">
             <Button variant="outline">Partner Offers</Button>
           </Link>
           <Button variant="outline" onClick={() => void loadAll()}>

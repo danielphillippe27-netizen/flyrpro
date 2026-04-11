@@ -1,7 +1,15 @@
+import {
+  PARTNER_OFFER_EMAIL_BODY_HOOK,
+  PARTNER_OFFER_EMAIL_SUBJECT_SENTINEL,
+} from '@/lib/email/partnerOfferEmailCopy';
+import { slugifyPartnerOfferPath } from '@/lib/offers/partnerOfferSlug';
+
 export type OfferStatus = 'active' | 'expired' | 'revoked' | 'maxed';
+export type OfferEmailStatus = 'not_requested' | 'sent' | 'failed';
 
 export type PartnerOffer = {
   id: string;
+  isDraft: boolean;
   recipientName: string | null;
   recipientEmail: string | null;
   partnerName: string;
@@ -15,12 +23,18 @@ export type PartnerOffer = {
   lastViewedAt: string | null;
   revokedAt: string | null;
   createdAt: string;
+  emailSent: boolean;
+  emailSentAt: string | null;
+  emailRecipient: string | null;
+  resendMessageId: string | null;
+  emailStatus: OfferEmailStatus;
   status: OfferStatus;
+  vanitySlug: string | null;
   shareUrl: string;
 };
 
 export type OfferTemplate = {
-  id: 'team-partner' | 'free-30-day-challenge' | 'solo-agent' | 'affiliate';
+  id: 'team-partner' | 'free-30-day-challenge' | 'solo-agent' | 'affiliate' | 'just-listed-dm';
   label: string;
   title: string;
   message: string;
@@ -31,10 +45,9 @@ export const OFFER_TEMPLATES: OfferTemplate[] = [
   {
     id: 'team-partner',
     label: 'Team Partner Offer',
-    title: 'Exclusive Team Offer',
-    message:
-      'Private access for your team. This page is invite-only and not publicly listed.',
-    ctaLabel: 'Book team onboarding',
+    title: PARTNER_OFFER_EMAIL_SUBJECT_SENTINEL,
+    message: PARTNER_OFFER_EMAIL_BODY_HOOK,
+    ctaLabel: 'Book your team onboarding',
   },
   {
     id: 'free-30-day-challenge',
@@ -60,7 +73,28 @@ export const OFFER_TEMPLATES: OfferTemplate[] = [
       'Placeholder: affiliate collaboration terms, referral incentives, and campaign support details.',
     ctaLabel: 'Review affiliate terms',
   },
+  {
+    id: 'just-listed-dm',
+    label: 'Just Listed DM Template',
+    title: 'Use this listing to win the neighbourhood.',
+    message:
+      "You've already got the listing.\n\nNow use FLYR to turn it into more exposure, more conversations, and your next client.\n\nUse flyers and doorknocking around your listing to create local buzz, uncover buyers, and meet nearby sellers before this window closes.",
+    ctaLabel: 'See the listing play',
+  },
 ];
+
+export {
+  partnerOfferGreetingFirstName,
+  partnerOfferRecipientFirstName,
+} from '@/lib/email/partnerOfferEmailCopy';
+export { slugifyPartnerOfferPath } from '@/lib/offers/partnerOfferSlug';
+
+export function isJustListedDmOffer(offerTitle: string, offerMessage?: string | null): boolean {
+  const content = `${offerTitle}\n${offerMessage ?? ''}`;
+  return /just listed|new listing|listing play|listing advantage|win the neighbourhood|hot listing|doorknocking around your listing/i.test(
+    content
+  );
+}
 
 export function formatLongDate(value: string): string {
   const date = new Date(value);
@@ -77,6 +111,25 @@ export function toLocalDateTimeInputValue(date: Date): string {
   return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
 }
 
+/** `YYYY-MM-DD` for a `<input type="date" />` in local time. */
+export function toLocalDateInputValue(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+/** End of local calendar day as ISO, for API `expires_at` from a date-only picker. */
+export function expiresAtIsoFromDateInput(yyyyMmDd: string): string {
+  const trimmed = yyyyMmDd.trim();
+  const parts = trimmed.split('-').map((p) => Number(p));
+  if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) {
+    return new Date(trimmed).toISOString();
+  }
+  const [y, m, d] = parts;
+  return new Date(y, m - 1, d, 23, 59, 59, 999).toISOString();
+}
+
 export function statusVariant(status: OfferStatus): 'default' | 'destructive' | 'secondary' | 'outline' {
   if (status === 'active') return 'default';
   if (status === 'revoked') return 'destructive';
@@ -91,32 +144,71 @@ export function statusLabel(status: OfferStatus): string {
   return 'Expired';
 }
 
+export function emailStatusLabel(status: OfferEmailStatus): string {
+  if (status === 'sent') return 'Sent';
+  if (status === 'failed') return 'Failed';
+  return 'Not sent';
+}
+
 export function buildOutreachCopy(offer: PartnerOffer) {
   const recipient = offer.recipientName || offer.recipientEmail || 'there';
   const partner = offer.partnerName || 'your team';
-  const ctaText = offer.ctaLabel || 'review your private offer';
+  const justListedDm = isJustListedDmOffer(offer.offerTitle, offer.offerMessage);
+  const ctaText = justListedDm
+    ? offer.ctaLabel || 'See the listing play'
+    : offer.ctaLabel || 'review your private offer';
   const expires = formatLongDate(offer.expiresAt);
   const includeArcadeEmbed =
     /team/i.test(offer.offerTitle) || /30\s*day\s*challenge/i.test(offer.offerTitle);
 
-  const emailSubject = `${partner} x FLYR: Exclusive Offer`;
-  const emailBody = [
-    `Hi ${recipient},`,
-    '',
-    `I created a private FLYR offer page for ${partner}.`,
-    `This link is invite-only and not public: ${offer.shareUrl}`,
-    '',
-    `${offer.offerMessage || 'You can review the details and next steps on that page.'}`,
-    `Offer expires: ${expires}`,
-    '',
-    `When ready, click "${ctaText}" on the page.`,
-    '',
-    '— Daniel',
-  ].join('\n');
+  const emailSubject = justListedDm
+    ? `Just listed: a FLYR listing play for ${partner}`
+    : `Exclusive FLYR Partner Offer for ${partner}`;
+  const emailBody = justListedDm
+    ? [
+        `Hi ${recipient},`,
+        '',
+        `Just listed: I made a FLYR listing play for ${partner}.`,
+        `Open it here: ${offer.shareUrl}`,
+        '',
+        `${offer.offerMessage || 'Use this listing to create more local exposure, more conversations, and more seller opportunities while the listing is fresh.'}`,
+        `Offer expires: ${expires}`,
+        '',
+        `When ready, tap "${ctaText}" on the page.`,
+        '',
+        '— Daniel Phillippe',
+      ].join('\n')
+    : [
+        `Hi ${recipient},`,
+        '',
+        `I created a private FLYR offer page for ${partner}.`,
+        `This link is invite-only and not public: ${offer.shareUrl}`,
+        '',
+        `${offer.offerMessage || 'You can review the details and next steps on that page.'}`,
+        `Offer expires: ${expires}`,
+        '',
+        `When ready, click "${ctaText}" on the page.`,
+        '',
+        '— Daniel Phillippe',
+      ].join('\n');
 
-  const smsText = `Hey ${recipient} — here is your private FLYR offer link for ${partner}: ${offer.shareUrl} (expires ${expires}).`;
+  const smsText = justListedDm
+    ? `Hey ${recipient} — just listed. Here is the FLYR listing play for ${partner}: ${offer.shareUrl} (expires ${expires}).`
+    : `Hey ${recipient} — here is your private FLYR offer link for ${partner}: ${offer.shareUrl} (expires ${expires}).`;
 
-  const igDmText = `Hey ${recipient}! I made an invite-only FLYR offer page for ${partner}: ${offer.shareUrl} (expires ${expires}).`;
+  const igDmIntroText = justListedDm
+    ? `Hey ${recipient}! Congrats on the listing.`
+    : `Hey ${recipient}! I made an invite-only FLYR offer page for ${partner}. Want me to send the link?`;
+
+  const igDmReplyText = justListedDm ? 'Thank you!' : '';
+
+  const igDmLinkText = justListedDm
+    ? `Use FLYR to flyer the area, knock the surrounding homes, and turn listing attention into your next seller and buyer opportunities.\n\nI've attached a free trial and demo on how it works: ${offer.shareUrl}`
+    : `Perfect. Here is your private FLYR offer link for ${partner}: ${offer.shareUrl}\n\nIt expires ${expires}.`;
+
+  const igDmText = justListedDm
+    ? `${igDmIntroText}\n\n${igDmReplyText}\n\n${igDmLinkText}`
+    : `${igDmIntroText}\n\n${igDmLinkText}`;
 
   const teamOfferEmailHtml = includeArcadeEmbed
     ? [
@@ -138,9 +230,18 @@ export function buildOutreachCopy(offer: PartnerOffer) {
         `</div>`,
         `</div>`,
         `<p>When ready, click "${ctaText}" on the page.</p>`,
-        `<p>— Daniel</p>`,
+        `<p>— Daniel Phillippe</p>`,
       ].join('\n')
     : null;
 
-  return { emailSubject, emailBody, smsText, igDmText, teamOfferEmailHtml };
+  return {
+    emailSubject,
+    emailBody,
+    smsText,
+    igDmIntroText,
+    igDmReplyText,
+    igDmLinkText,
+    igDmText,
+    teamOfferEmailHtml,
+  };
 }

@@ -1,7 +1,7 @@
-import { PartnerOffersManager } from '@/components/admin/PartnerOffersManager';
+import { redirect } from 'next/navigation';
 import { requireFounder } from '@/lib/auth/requireFounder';
 
-export default async function AdminOffersPage() {
+export default async function AdminOffersRedirectPage() {
   await requireFounder();
-  return <PartnerOffersManager />;
+  redirect('/offers');
 }

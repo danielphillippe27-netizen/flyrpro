@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServerClient, createAdminClient } from '@/lib/supabase/server';
 import { fetchAllInPages } from '@/lib/supabase/fetchAllInPages';
-import { buildRoute } from '@/lib/services/BlockRoutingService';
+import {
+  buildBalancedBlockClusters,
+  buildNaturalZoneClusters,
+  buildRoute,
+  type RouteSplitMode,
+} from '@/lib/services/BlockRoutingService';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -151,6 +156,12 @@ export async function POST(
     const nAgents = Math.max(1, Number(body.n_agents) || 1);
     const depotFromBody = body.depot as { lat: number; lon: number } | undefined;
     const options = body.options || {};
+    const splitMode: RouteSplitMode =
+      body.split_mode === 'natural' || body.split_mode === 'balanced'
+        ? body.split_mode
+        : options.split_mode === 'natural' || options.split_mode === 'balanced'
+          ? options.split_mode
+          : 'balanced';
 
     let addresses;
     try {
@@ -210,22 +221,12 @@ export async function POST(
       return NextResponse.json({ error: 'No stops produced' }, { status: 400 });
     }
 
-    // Multi-agent: split into n_agents contiguous segments by sequence_index
-    const n = stops.length;
-    const segmentSize = Math.ceil(n / nAgents);
-    const clusters: Array<{ agent_id: number; addresses: typeof stops }> = [];
-    for (let g = 0; g < nAgents; g++) {
-      const start = g * segmentSize;
-      const end = Math.min(start + segmentSize, n);
-      if (start >= n) break;
-      const segment = stops.filter(s => s.sequence_index >= start && s.sequence_index < end);
-      if (segment.length > 0) {
-        clusters.push({
-          agent_id: g + 1,
-          addresses: segment
-        });
-      }
-    }
+    const clusters =
+      nAgents <= 1
+        ? [{ agent_id: 1, addresses: stops, segments: [] }]
+        : splitMode === 'natural'
+          ? buildNaturalZoneClusters(buildRouteAddresses, nAgents, depot)
+          : buildBalancedBlockClusters(buildRouteAddresses, nAgents, depot);
 
     await supabase.rpc('clear_campaign_routes', { p_campaign_id: campaignId });
 
@@ -251,6 +252,19 @@ export async function POST(
       n_addresses: cluster.addresses.length,
       total_time_min: 0,
       total_distance_km: '0.00',
+      block_stops: 'segments' in cluster
+        ? cluster.segments.map((segment, idx) => ({
+            id: segment.id,
+            lon: segment.centroid.lon,
+            lat: segment.centroid.lat,
+            address_count: segment.weight,
+            street_name:
+              segment.blockStart === null
+                ? segment.streetName
+                : `${segment.streetName} ${segment.side} ${segment.blockStart}-block`,
+            sequence_in_cluster: idx,
+          }))
+        : [],
       addresses: cluster.addresses.map((addr, idx) => ({
         id: addr.id,
         sequence: idx,
@@ -268,7 +282,18 @@ export async function POST(
       debug: {
         total_time_ms: totalTime,
         n_input_addresses: addresses.length,
-        n_output_addresses: stops.length
+        n_output_addresses: stops.length,
+        block_optimization: {
+          enabled: nAgents > 1,
+          split_mode: splitMode,
+          n_block_stops:
+            nAgents > 1
+              ? clusters.reduce(
+                  (sum, cluster) => sum + ('segments' in cluster ? cluster.segments.length : 0),
+                  0
+                )
+              : 0,
+        },
       }
     });
   } catch (error) {

@@ -4,6 +4,7 @@ import "./globals.css";
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { ThemeProvider } from "@/lib/theme-provider";
 import { PwaRegister } from '@/components/pwa/PwaRegister';
+import { Toaster } from '@/components/ui/sonner';
 
 const inter = Inter({
   variable: "--font-inter",
@@ -48,6 +49,7 @@ export default function RootLayout({
       >
         <ThemeProvider>
           <PwaRegister />
+          <Toaster richColors position="top-right" />
           {children}
         </ThemeProvider>
       </body>

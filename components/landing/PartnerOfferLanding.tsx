@@ -2,8 +2,9 @@
 
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
-import { ArcadeEmbed } from '@/components/landing/ArcadeEmbed';
-import { useEffect, useRef, useState } from 'react';
+import { ExclusiveOfferArcadeEmbed } from '@/components/landing/ExclusiveOfferArcadeEmbed';
+import { useEffect, useState } from 'react';
+import { isJustListedDmOffer } from '@/components/offers/partnerOfferUtils';
 
 const TRACKING_WORDS = [
   'Doors',
@@ -46,16 +47,199 @@ function formatLongDate(value: string): string {
   });
 }
 
+function toParagraphs(value: string | null): string[] {
+  return (value ?? '')
+    .split(/\n{2,}/)
+    .map((chunk) => chunk.trim())
+    .filter(Boolean);
+}
+
+const JUST_LISTED_DM_DEFAULTS = {
+  title: 'Use this listing to win the neighbourhood.',
+  primaryMessage: "You've already got the listing.",
+  secondaryMessage:
+    'Now use FLYR to turn it into more exposure, more conversations, and your next client.',
+  tertiaryMessage:
+    'Use flyers and doorknocking around your listing to create local buzz, uncover buyers, and meet nearby sellers before this window closes.',
+  primaryCta: 'See the listing play',
+  secondaryCta: 'See the listing strategy',
+} as const;
+
+function JustListedDmOfferLanding({
+  offerTitle,
+  offerMessage,
+  partnerName,
+  recipientName,
+  expiresAt,
+  ctaLabel,
+  onGetStarted,
+}: Omit<PartnerOfferLandingProps, 'offerToken'> & { onGetStarted: () => void }) {
+  const paragraphs = toParagraphs(offerMessage);
+  const shouldUseDefaultTitle = !offerTitle.trim() || /private access/i.test(offerTitle);
+  const usesLegacyMessage =
+    paragraphs.length === 0 ||
+    /invite-only|claim access|private link|private access/i.test(offerMessage ?? '');
+  const primaryMessage = usesLegacyMessage
+    ? JUST_LISTED_DM_DEFAULTS.primaryMessage
+    : (paragraphs[0] ?? JUST_LISTED_DM_DEFAULTS.primaryMessage);
+  const secondaryMessage = usesLegacyMessage
+    ? JUST_LISTED_DM_DEFAULTS.secondaryMessage
+    : (paragraphs[1] ?? JUST_LISTED_DM_DEFAULTS.secondaryMessage);
+  const tertiaryMessage = usesLegacyMessage
+    ? JUST_LISTED_DM_DEFAULTS.tertiaryMessage
+    : (paragraphs[2] ?? JUST_LISTED_DM_DEFAULTS.tertiaryMessage);
+  const primaryCta =
+    !ctaLabel?.trim() || /claim private access/i.test(ctaLabel)
+      ? JUST_LISTED_DM_DEFAULTS.primaryCta
+      : ctaLabel.trim();
+  const displayTitle = shouldUseDefaultTitle ? JUST_LISTED_DM_DEFAULTS.title : offerTitle;
+
+  return (
+    <div className="min-h-screen bg-[#09090b] text-white">
+      <header className="sticky top-0 z-50 border-b border-white/10 bg-black/55 backdrop-blur-md">
+        <div className="mx-auto flex w-full max-w-5xl items-center justify-between px-4 py-3 sm:px-6">
+          <Link href="/" className="flex items-end">
+            <span className="text-3xl font-black leading-none tracking-tight text-red-500 sm:text-4xl">
+              FLYR
+            </span>
+          </Link>
+          <div className="inline-flex items-center rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-red-200">
+            Listing advantage
+          </div>
+        </div>
+      </header>
+
+      <main className="pb-10">
+        <section className="px-4 pb-6 pt-5 sm:px-6 sm:pb-8 sm:pt-8">
+          <div className="mx-auto max-w-5xl">
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-5">
+              <div className="overflow-hidden rounded-[28px] border border-white/10 bg-[radial-gradient(circle_at_top,_rgba(239,68,68,0.18),_rgba(24,24,27,0.96)_42%)] p-5 shadow-[0_24px_80px_rgba(0,0,0,0.45)] sm:p-6">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center rounded-full border border-red-500/25 bg-red-500/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-red-200">
+                    Just listed
+                  </span>
+                  <span className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-300">
+                    Listing advantage
+                  </span>
+                </div>
+
+                <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs font-medium text-zinc-400 sm:text-sm">
+                  <span>{partnerName}</span>
+                  {recipientName ? <span>For {recipientName}</span> : null}
+                  <span>Expires {formatLongDate(expiresAt)}</span>
+                </div>
+
+                <h1 className="mt-4 max-w-2xl text-[2rem] font-black leading-[0.98] tracking-[-0.04em] text-white sm:text-[2.65rem]">
+                  {displayTitle}
+                </h1>
+                <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-200 sm:text-[15px]">
+                  {primaryMessage}
+                </p>
+                <p className="mt-2 max-w-xl text-sm leading-6 text-zinc-400 sm:text-[15px]">
+                  {secondaryMessage}
+                </p>
+
+                <div className="mt-5 flex flex-col gap-3 sm:mt-6 sm:max-w-md">
+                  <button
+                    type="button"
+                    onClick={onGetStarted}
+                    className="inline-flex min-h-14 w-full items-center justify-center rounded-2xl bg-red-600 px-5 text-base font-semibold text-white shadow-[0_18px_45px_rgba(239,68,68,0.35)] transition hover:bg-red-500"
+                  >
+                    {primaryCta}
+                    <ArrowRight className="ml-2 h-4 w-4" />
+                  </button>
+                  <p className="text-xs leading-5 text-zinc-400">
+                    {tertiaryMessage}
+                  </p>
+                </div>
+              </div>
+
+              <aside className="rounded-[24px] border border-white/10 bg-white/[0.04] p-4 shadow-[0_18px_50px_rgba(0,0,0,0.28)] sm:p-5">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-400">
+                  Why this works for hot listings
+                </p>
+                <div className="mt-4 space-y-3">
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-3.5">
+                    <p className="text-sm font-semibold text-white">Create momentum fast</p>
+                    <p className="mt-1 text-sm leading-5 text-zinc-400">
+                      Hit the surrounding homes while the listing is fresh and attention is highest.
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-3.5">
+                    <p className="text-sm font-semibold text-white">Turn one listing into more business</p>
+                    <p className="mt-1 text-sm leading-5 text-zinc-400">
+                      Use the property as your reason to start conversations with neighbours and uncover your next client.
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-3.5">
+                    <p className="text-sm font-semibold text-white">Flyers + doorknocking, tracked</p>
+                    <p className="mt-1 text-sm leading-5 text-zinc-400">
+                      Plan the area, work the homes around the listing, and track activity inside one system.
+                    </p>
+                  </div>
+                </div>
+              </aside>
+            </div>
+          </div>
+        </section>
+
+        <section className="px-4 py-2 sm:px-6">
+          <div className="mx-auto max-w-5xl rounded-[28px] border border-white/10 bg-white/[0.04] p-4 shadow-[0_22px_70px_rgba(0,0,0,0.3)] sm:p-6">
+            <div className="max-w-2xl">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-red-200">
+                Quick look
+              </p>
+              <h2 className="mt-2 text-2xl font-black tracking-[-0.03em] text-white sm:text-[2rem]">
+                See how FLYR helps you work a just-listed opportunity
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-zinc-400 sm:text-[15px]">
+                Use one listing to power a smarter local campaign with flyers, doorknocking, tracking, and follow-up built in.
+              </p>
+            </div>
+            <div className="mt-4 overflow-hidden rounded-[24px] border border-white/10 bg-black/30 p-4 sm:p-6">
+              <ExclusiveOfferArcadeEmbed variant="iphone" />
+            </div>
+          </div>
+        </section>
+
+        <section className="px-4 pb-12 pt-4 sm:px-6">
+          <div className="mx-auto max-w-5xl rounded-[28px] border border-white/10 bg-gradient-to-br from-white/[0.06] via-white/[0.04] to-red-500/[0.08] p-5 shadow-[0_22px_70px_rgba(0,0,0,0.3)] sm:p-6">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-400">
+              Ready to move?
+            </p>
+            <h2 className="mt-2 text-2xl font-black tracking-[-0.03em] text-white sm:text-[2rem]">
+              Don't just list it. Leverage it.
+            </h2>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-400 sm:text-[15px]">
+              See how to use FLYR around your just-listed property to build attention, generate conversations, and find your next seller.
+            </p>
+            <div className="mt-5 sm:max-w-md">
+              <button
+                type="button"
+                onClick={onGetStarted}
+                className="inline-flex min-h-14 w-full items-center justify-center rounded-2xl bg-white px-5 text-base font-semibold text-zinc-950 transition hover:bg-zinc-100"
+              >
+                {JUST_LISTED_DM_DEFAULTS.secondaryCta}
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  );
+}
+
 export function PartnerOfferLanding({
   offerTitle,
   offerMessage,
   partnerName,
   recipientName,
   expiresAt,
+  ctaLabel,
   offerToken,
 }: PartnerOfferLandingProps) {
   const [trackingWordIndex, setTrackingWordIndex] = useState(0);
-  const demoContainerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -67,6 +251,20 @@ export function PartnerOfferLanding({
   const handleGetStarted = async () => {
     window.location.href = `/onboarding?offer=exclusive30&partnerOfferToken=${encodeURIComponent(offerToken)}`;
   };
+
+  if (isJustListedDmOffer(offerTitle, offerMessage)) {
+    return (
+      <JustListedDmOfferLanding
+        offerTitle={offerTitle}
+        offerMessage={offerMessage}
+        partnerName={partnerName}
+        recipientName={recipientName}
+        expiresAt={expiresAt}
+        ctaLabel={ctaLabel}
+        onGetStarted={handleGetStarted}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-zinc-50 text-zinc-900">
@@ -123,7 +321,7 @@ export function PartnerOfferLanding({
                   onClick={handleGetStarted}
                   className="inline-flex h-12 items-center rounded-2xl bg-zinc-900 px-6 text-base font-semibold text-white transition hover:bg-zinc-700"
                 >
-                  Activate
+                  {ctaLabel?.trim() || 'Activate'}
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </button>
               </div>
@@ -137,11 +335,8 @@ export function PartnerOfferLanding({
             <p className="mt-3 text-center text-lg text-zinc-500">
               The same FLYR platform, with exclusive terms for your team.
             </p>
-            <div
-              ref={demoContainerRef}
-              className="mx-auto mt-8 w-full max-w-6xl overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm"
-            >
-              <ArcadeEmbed />
+            <div className="mx-auto mt-8 w-full max-w-6xl overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
+              <ExclusiveOfferArcadeEmbed />
             </div>
           </div>
         </section>
@@ -154,7 +349,7 @@ export function PartnerOfferLanding({
               onClick={handleGetStarted}
               className="mt-4 inline-flex h-12 items-center rounded-2xl bg-red-600 px-6 text-base font-semibold text-white transition hover:bg-red-500"
             >
-              Claim Free Access
+              {ctaLabel?.trim() || 'Claim Free Access'}
             </button>
           </div>
         </section>

@@ -4,7 +4,13 @@
  * Run with: npx tsx lib/services/__tests__/BlockRoutingService.test.ts
  */
 
-import { buildRoute, postmanSort } from '../BlockRoutingService';
+import {
+  buildBalancedBlockClusters,
+  buildBlockSegments,
+  buildNaturalZoneClusters,
+  buildRoute,
+  postmanSort,
+} from '../BlockRoutingService';
 import type { BlockAddress } from '../BlockRoutingService';
 
 let testsPassed = 0;
@@ -15,9 +21,10 @@ function test(name: string, fn: () => void) {
     fn();
     console.log(`✓ ${name}`);
     testsPassed++;
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
     console.error(`✗ ${name}`);
-    console.error(`  ${e.message}`);
+    console.error(`  ${message}`);
     testsFailed++;
   }
 }
@@ -27,14 +34,15 @@ async function testAsync(name: string, fn: () => Promise<void>) {
     await fn();
     console.log(`✓ ${name}`);
     testsPassed++;
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
     console.error(`✗ ${name}`);
-    console.error(`  ${e.message}`);
+    console.error(`  ${message}`);
     testsFailed++;
   }
 }
 
-function assertEqual(actual: any, expected: any, msg?: string) {
+function assertEqual(actual: unknown, expected: unknown, msg?: string) {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
     throw new Error(msg || `Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
   }
@@ -77,6 +85,39 @@ const evensAndOdds: BlockAddress[] = [
   { id: '6', lat: 40.71, lon: -74.000, house_number: '6', street_name: 'Test' },
 ];
 
+const multiBlockStreet: BlockAddress[] = [
+  { id: 'a1', lat: 43.9000, lon: -78.9000, house_number: '100', street_name: 'Wycombe St' },
+  { id: 'a2', lat: 43.9002, lon: -78.9000, house_number: '102', street_name: 'Wycombe St' },
+  { id: 'a3', lat: 43.9004, lon: -78.9000, house_number: '104', street_name: 'Wycombe St' },
+  { id: 'b1', lat: 43.9015, lon: -78.9000, house_number: '200', street_name: 'Wycombe St' },
+  { id: 'b2', lat: 43.9017, lon: -78.9000, house_number: '202', street_name: 'Wycombe St' },
+  { id: 'b3', lat: 43.9019, lon: -78.9000, house_number: '204', street_name: 'Wycombe St' },
+];
+
+const parallelCorridors: BlockAddress[] = [
+  { id: 'l1', lat: 43.9000, lon: -78.9015, house_number: '100', street_name: 'Left St' },
+  { id: 'l2', lat: 43.9002, lon: -78.9015, house_number: '102', street_name: 'Left St' },
+  { id: 'l3', lat: 43.9010, lon: -78.9015, house_number: '200', street_name: 'Left St' },
+  { id: 'l4', lat: 43.9012, lon: -78.9015, house_number: '202', street_name: 'Left St' },
+  { id: 'r1', lat: 43.9000, lon: -78.8985, house_number: '100', street_name: 'Right St' },
+  { id: 'r2', lat: 43.9002, lon: -78.8985, house_number: '102', street_name: 'Right St' },
+  { id: 'r3', lat: 43.9010, lon: -78.8985, house_number: '200', street_name: 'Right St' },
+  { id: 'r4', lat: 43.9012, lon: -78.8985, house_number: '202', street_name: 'Right St' },
+];
+
+const carnwithBoundaryNeighborhood: BlockAddress[] = [
+  { id: 'n1', lat: 43.9026, lon: -78.9010, house_number: '100', street_name: 'Alpha St' },
+  { id: 'n2', lat: 43.9028, lon: -78.9010, house_number: '102', street_name: 'Alpha St' },
+  { id: 'n3', lat: 43.9030, lon: -78.9002, house_number: '100', street_name: 'Beta St' },
+  { id: 'n4', lat: 43.9032, lon: -78.9002, house_number: '102', street_name: 'Beta St' },
+  { id: 'c1', lat: 43.9015, lon: -78.9008, house_number: '10', street_name: 'Carnwith Dr' },
+  { id: 'c2', lat: 43.9015, lon: -78.8998, house_number: '12', street_name: 'Carnwith Dr' },
+  { id: 's1', lat: 43.9002, lon: -78.9009, house_number: '100', street_name: 'Gamma St' },
+  { id: 's2', lat: 43.9004, lon: -78.9009, house_number: '102', street_name: 'Gamma St' },
+  { id: 's3', lat: 43.8998, lon: -78.8999, house_number: '100', street_name: 'Delta St' },
+  { id: 's4', lat: 43.9000, lon: -78.8999, house_number: '102', street_name: 'Delta St' },
+];
+
 // ==================== Tests ====================
 
 console.log('Running BlockRoutingService Tests...\n');
@@ -107,6 +148,20 @@ test('postmanSort: empty array', () => {
   assertEqual(ids, [], 'Empty returns empty');
 });
 
+test('buildBlockSegments: splits street into side + 100-block segments', () => {
+  const segments = buildBlockSegments(multiBlockStreet);
+  assertEqual(segments.length, 2, 'Should create two 100-block segments');
+  assertEqual(
+    segments.map((segment) => segment.blockStart),
+    [100, 200],
+    'Should preserve the 100-block boundaries'
+  );
+  assertTrue(
+    segments.every((segment) => segment.side === 'even'),
+    'All test addresses should land on the even side'
+  );
+});
+
 async function run() {
   await testAsync('buildRoute: returns all addresses once with contiguous sequence_index', async () => {
     const addresses = linearStreet.map((a) => ({ ...a }));
@@ -130,6 +185,51 @@ async function run() {
   await testAsync('buildRoute: empty input returns empty stops', async () => {
     const result = await buildRoute([], { lat: 0, lon: 0 }, {});
     assertEqual(result.stops.length, 0, 'Should return no stops');
+  });
+  await testAsync('buildBalancedBlockClusters: keeps 100-blocks intact across agents', async () => {
+    const depot = { lat: 43.9000, lon: -78.9002 };
+    const clusters = buildBalancedBlockClusters(multiBlockStreet, 2, depot);
+    assertEqual(clusters.length, 2, 'Should create two agent clusters');
+    assertTrue(
+      clusters.every((cluster) => cluster.segments.length === 1),
+      'Each agent should receive one whole block segment'
+    );
+    assertEqual(
+      clusters.map((cluster) => cluster.addresses.length).sort((a, b) => a - b),
+      [3, 3],
+      'Each block should stay intact with three addresses'
+    );
+  });
+  await testAsync('buildBalancedBlockClusters: prefers contiguous corridor growth over islands', async () => {
+    const depot = { lat: 43.9000, lon: -78.9000 };
+    const clusters = buildBalancedBlockClusters(parallelCorridors, 2, depot);
+    assertEqual(clusters.length, 2, 'Should create two agent clusters');
+
+    const clusterStreetSets = clusters.map((cluster) => new Set(cluster.segments.map((segment) => segment.streetName)));
+    assertEqual(
+      clusters.map((cluster) => cluster.addresses.length).sort((a, b) => a - b),
+      [4, 4],
+      'Parallel corridors should be evenly split by door count'
+    );
+    assertTrue(
+      clusterStreetSets.every((streetSet) => streetSet.size <= 2),
+      'Balanced mode can relax contiguity, but it should not spray segments across the whole map'
+    );
+  });
+  await testAsync('buildNaturalZoneClusters: splits north/south around Carnwith boundary before clustering', async () => {
+    const depot = { lat: 43.9015, lon: -78.9003 };
+    const clusters = buildNaturalZoneClusters(carnwithBoundaryNeighborhood, 4, depot);
+    assertEqual(clusters.length, 4, 'Should create four agent clusters');
+
+    const northOnly = clusters.filter((cluster) =>
+      cluster.segments.every((segment) => segment.centroid.lat > 43.9015)
+    );
+    const southOnly = clusters.filter((cluster) =>
+      cluster.segments.every((segment) => segment.centroid.lat <= 43.9015)
+    );
+
+    assertEqual(northOnly.length, 2, 'Two agents should stay in the north lobe');
+    assertEqual(southOnly.length, 2, 'Two agents should stay in the south lobe');
   });
 
   console.log(`\n${'='.repeat(50)}`);

@@ -4,10 +4,13 @@ import { useCallback, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { toast } from 'sonner';
 import { Copy, Loader2 } from 'lucide-react';
 import {
   buildOutreachCopy,
+  emailStatusLabel,
   formatLongDate,
+  isJustListedDmOffer,
   statusLabel,
   statusVariant,
   type PartnerOffer,
@@ -20,6 +23,7 @@ type PartnerOfferDetailPanelProps = {
 
 export function PartnerOfferDetailPanel({ offer, onRevoked }: PartnerOfferDetailPanelProps) {
   const [revokingId, setRevokingId] = useState<string | null>(null);
+  const [sendingEmail, setSendingEmail] = useState(false);
   const [copySuccess, setCopySuccess] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -61,7 +65,42 @@ export function PartnerOfferDetailPanel({ offer, onRevoked }: PartnerOfferDetail
     }
   }, [offer.id, onRevoked]);
 
+  const resendOfferEmail = useCallback(async () => {
+    setSendingEmail(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/admin/offers/${offer.id}/send-email`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || 'Failed to resend offer email');
+      }
+
+      onRevoked?.();
+
+      if (payload.emailSent) {
+        toast.success(`Offer email sent to ${offer.recipientEmail ?? 'the recipient'}.`);
+      } else {
+        const message =
+          typeof payload.emailError === 'string'
+            ? payload.emailError
+            : 'Offer email failed, but the private offer is still available.';
+        setError(message);
+        toast.error(message);
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Failed to resend offer email';
+      setError(message);
+      toast.error(message);
+    } finally {
+      setSendingEmail(false);
+    }
+  }, [offer.id, offer.recipientEmail, onRevoked]);
+
   const copy = buildOutreachCopy(offer);
+  const isDmTemplate = isJustListedDmOffer(offer.offerTitle, offer.offerMessage);
 
   return (
     <div className="max-w-3xl mx-auto p-6 space-y-4">
@@ -84,6 +123,54 @@ export function PartnerOfferDetailPanel({ offer, onRevoked }: PartnerOfferDetail
             ? ` • ${offer.viewCount}/${offer.maxViews} views`
             : ` • ${offer.viewCount} views`}
         </div>
+        {!isDmTemplate ? (
+          <div className="rounded-md border bg-muted/30 p-3 space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="text-xs font-medium text-muted-foreground">Email delivery</div>
+              <Badge
+                variant={
+                  offer.emailStatus === 'sent'
+                    ? 'default'
+                    : offer.emailStatus === 'failed'
+                      ? 'destructive'
+                      : 'outline'
+                }
+              >
+                {emailStatusLabel(offer.emailStatus)}
+              </Badge>
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {offer.emailStatus === 'sent'
+                ? `Sent to ${offer.emailRecipient ?? offer.recipientEmail ?? 'the recipient'}${offer.emailSentAt ? ` on ${formatLongDate(offer.emailSentAt)}` : ''}.`
+                : offer.emailStatus === 'failed'
+                  ? `Last attempt for ${offer.emailRecipient ?? offer.recipientEmail ?? 'this recipient'} did not go through.`
+                  : 'No email has been sent for this offer yet.'}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                type="button"
+                disabled={sendingEmail || !offer.recipientEmail}
+                onClick={() => void resendOfferEmail()}
+              >
+                {sendingEmail ? (
+                  <span className="inline-flex items-center gap-1">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Sending…
+                  </span>
+                ) : (
+                  'Resend offer email'
+                )}
+              </Button>
+              {!offer.recipientEmail ? (
+                <span className="text-xs text-muted-foreground self-center">
+                  Add a recipient email to send this offer.
+                </span>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
         <div className="flex flex-wrap items-center gap-2">
           <Input readOnly value={offer.shareUrl} className="h-9 text-xs font-mono" />
           <Button size="sm" variant="outline" type="button" onClick={() => void copyLink(offer)}>
@@ -113,36 +200,38 @@ export function PartnerOfferDetailPanel({ offer, onRevoked }: PartnerOfferDetail
         <div className="rounded-md bg-muted/40 p-3 space-y-2">
           <div className="text-xs font-medium text-muted-foreground">Outreach copy</div>
           <div className="grid gap-2">
-            <div className="rounded border bg-background p-2">
-              <div className="text-[11px] text-muted-foreground mb-1">Email</div>
-              <div className="text-xs whitespace-pre-wrap">
-                Subject: {copy.emailSubject}
-                {'\n\n'}
-                {copy.emailBody}
-              </div>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  type="button"
-                  onClick={() =>
-                    void copyText(`Subject: ${copy.emailSubject}\n\n${copy.emailBody}`, offer.id)
-                  }
-                >
-                  Copy email
-                </Button>
-                {copy.teamOfferEmailHtml ? (
+            {!isDmTemplate ? (
+              <div className="rounded border bg-background p-2">
+                <div className="text-[11px] text-muted-foreground mb-1">Email</div>
+                <div className="text-xs whitespace-pre-wrap">
+                  Subject: {copy.emailSubject}
+                  {'\n\n'}
+                  {copy.emailBody}
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
                   <Button
                     size="sm"
                     variant="outline"
                     type="button"
-                    onClick={() => void copyText(copy.teamOfferEmailHtml ?? '', offer.id)}
+                    onClick={() =>
+                      void copyText(`Subject: ${copy.emailSubject}\n\n${copy.emailBody}`, offer.id)
+                    }
                   >
-                    Copy HTML email (with demo)
+                    Copy email
                   </Button>
-                ) : null}
+                  {copy.teamOfferEmailHtml ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      type="button"
+                      onClick={() => void copyText(copy.teamOfferEmailHtml ?? '', offer.id)}
+                    >
+                      Copy HTML email (with demo)
+                    </Button>
+                  ) : null}
+                </div>
               </div>
-            </div>
+            ) : null}
             <div className="rounded border bg-background p-2">
               <div className="text-[11px] text-muted-foreground mb-1">Text message (SMS)</div>
               <div className="text-xs whitespace-pre-wrap">{copy.smsText}</div>
@@ -158,19 +247,59 @@ export function PartnerOfferDetailPanel({ offer, onRevoked }: PartnerOfferDetail
               </div>
             </div>
             <div className="rounded border bg-background p-2">
-              <div className="text-[11px] text-muted-foreground mb-1">Instagram DM</div>
-              <div className="text-xs whitespace-pre-wrap">{copy.igDmText}</div>
+              <div className="text-[11px] text-muted-foreground mb-1">
+                {isDmTemplate ? 'Instagram DM opener' : 'Instagram DM'}
+              </div>
+              <div className="text-xs whitespace-pre-wrap">
+                {isDmTemplate ? copy.igDmIntroText : copy.igDmText}
+              </div>
               <div className="mt-2">
                 <Button
                   size="sm"
                   variant="outline"
                   type="button"
-                  onClick={() => void copyText(copy.igDmText, offer.id)}
+                  onClick={() => void copyText(isDmTemplate ? copy.igDmIntroText : copy.igDmText, offer.id)}
                 >
-                  Copy IG DM
+                  {isDmTemplate ? 'Copy opener' : 'Copy IG DM'}
                 </Button>
               </div>
             </div>
+            {isDmTemplate ? (
+              <div className="rounded border bg-background p-2">
+                <div className="text-[11px] text-muted-foreground mb-1">Instagram DM reply</div>
+                <div className="text-xs whitespace-pre-wrap">{copy.igDmReplyText}</div>
+                <div className="mt-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    type="button"
+                    onClick={() => void copyText(copy.igDmReplyText, offer.id)}
+                  >
+                    Copy reply
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+            {isDmTemplate ? (
+              <div className="rounded border bg-background p-2">
+                <div className="text-[11px] text-muted-foreground mb-1">Instagram DM with link</div>
+                <div className="text-xs whitespace-pre-wrap">
+                  {copy.igDmLinkText}
+                  {'\n\n'}
+                  {offer.shareUrl}
+                </div>
+                <div className="mt-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    type="button"
+                    onClick={() => void copyText(`${copy.igDmLinkText}\n\n${offer.shareUrl}`, offer.id)}
+                  >
+                    Copy link message
+                  </Button>
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
       </div>

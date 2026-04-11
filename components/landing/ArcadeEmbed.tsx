@@ -2,8 +2,8 @@ export function ArcadeEmbed() {
   return (
     <div style={{ position: 'relative', paddingBottom: 'calc(64.94708994708994% + 41px)', height: '0', width: '100%' }}>
       <iframe
-        src="https://demo.arcade.software/nbvH4JKdrqCGt8a0O8pi?embed&embed_mobile=tab&embed_desktop=inline&show_copy_link=true"
-        title="FLYR: Team Prospecting Dashboard"
+        src="https://demo.arcade.software/8ccpKIGdJB6eW0WNy4W0?embed&embed_mobile=tab&embed_desktop=inline&show_copy_link=true"
+        title="LEAN Combined Desktop / Iphone"
         frameBorder="0"
         loading="lazy"
         allowFullScreen

@@ -22,6 +22,21 @@ function normalizeNextPath(next: string | null | undefined): string | null {
   return next.startsWith('/') ? next : null;
 }
 
+/** Preserve /onboarding and its query string when present; otherwise default onboarding URL. */
+function resolveOnboardingEntryPath(next: string | null): string {
+  const normalized = normalizeNextPath(next);
+  if (normalized?.startsWith('/onboarding')) {
+    return normalized;
+  }
+  return '/onboarding';
+}
+
+/** First screen for new accounts: App Store pitch, then continue into onboarding. */
+function downloadIosBeforeOnboardingPath(next: string | null): string {
+  const target = resolveOnboardingEntryPath(next);
+  return `/download-ios?next=${encodeURIComponent(target)}`;
+}
+
 function extractInviteTokenFromNext(next: string | null | undefined): string | null {
   const normalizedNext = normalizeNextPath(next);
   if (!normalizedNext) return null;
@@ -59,7 +74,7 @@ export async function getPostAuthRedirectForUserId(
     if (access.isFounder) {
       return { redirect: 'dashboard', path: founderPath };
     }
-    return { redirect: 'onboarding', path: '/onboarding' };
+    return { redirect: 'onboarding', path: downloadIosBeforeOnboardingPath(next) };
   }
 
   const { data: workspace, error: wsError } = await admin
@@ -88,7 +103,7 @@ export async function getPostAuthRedirectForUserId(
   }
 
   if (access.role === 'owner' && !onboardingComplete) {
-    return { redirect: 'onboarding', path: '/onboarding' };
+    return { redirect: 'onboarding', path: downloadIosBeforeOnboardingPath(next) };
   }
 
   if (access.level === 'member') {

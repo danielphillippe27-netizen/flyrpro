@@ -1,7 +1,7 @@
 'use client';
 
 import { Suspense, useState, useCallback, useEffect, useRef } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,7 +14,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { User, Users, Building2, Plus, Minus } from 'lucide-react';
-import { ArcadeEmbed } from '@/components/landing/ArcadeEmbed';
+import { ExclusiveOfferArcadeEmbed } from '@/components/landing/ExclusiveOfferArcadeEmbed';
 import { getClientAsync } from '@/lib/supabase/client';
 
 type BrokerageSuggestion = { id: string; name: string };
@@ -37,6 +37,35 @@ const SOLO_SEATS = 1;
 const TEAM_MIN_SEATS = 2;
 const MAX_SEATS = 100;
 
+function LogoutDoorEmblem({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden
+      className={className}
+    >
+      <path
+        d="M4 5v14h8V5H4z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M12 12h8M17 9l3 3-3 3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="9.5" cy="12" r="0.9" fill="currentColor" />
+    </svg>
+  );
+}
+
 function normalizeEmailList(values: string[]): string[] {
   const seen = new Set<string>();
   const normalized: string[] = [];
@@ -51,6 +80,7 @@ function normalizeEmailList(values: string[]): string[] {
 }
 
 function OnboardingContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const offerType = searchParams.get('offer');
   const partnerOfferToken = searchParams.get('partnerOfferToken');
@@ -68,6 +98,7 @@ function OnboardingContent() {
   const [accountPassword, setAccountPassword] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [signingOut, setSigningOut] = useState(false);
   const [useCase, setUseCase] = useState<'solo' | 'team'>('solo');
   const [workspaceName, setWorkspaceName] = useState('');
   const [industry, setIndustry] = useState('');
@@ -200,6 +231,17 @@ function OnboardingContent() {
     }
   };
 
+  const handleLogout = useCallback(async () => {
+    setSigningOut(true);
+    try {
+      const supabase = await getClientAsync();
+      await supabase.auth.signOut();
+      router.push('/login');
+    } catch {
+      setSigningOut(false);
+    }
+  }, [router]);
+
   const ensureExclusiveAuth = useCallback(async (): Promise<boolean> => {
     if (!isExclusivePartnerOnboarding) return true;
     const normalizedEmail = workEmail.trim().toLowerCase();
@@ -294,13 +336,21 @@ function OnboardingContent() {
   ]);
 
   return (
-    <div className="dark min-h-screen bg-gradient-to-br from-black to-[#262626] flex flex-col items-center justify-center p-6 relative overflow-hidden">
+    <div className="dark min-h-screen bg-gradient-to-br from-black to-[#262626] flex flex-col items-center justify-center p-6 pb-28 sm:pb-24 relative overflow-x-hidden overflow-y-auto">
       <div className="absolute inset-0 bg-gradient-to-b from-red-950/40 via-transparent to-black/80 pointer-events-none" />
       <div
-        className={`relative w-full space-y-8 rounded-2xl border border-white/15 bg-white/[0.06] p-10 backdrop-blur-2xl shadow-[0_24px_70px_rgba(0,0,0,0.6),0_10px_30px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.2)] ${step >= 4 ? 'max-w-5xl' : 'max-w-lg'}`}
+        className={`relative w-full min-w-0 space-y-8 rounded-2xl border border-white/15 bg-white/[0.06] p-6 sm:p-10 backdrop-blur-2xl shadow-[0_24px_70px_rgba(0,0,0,0.6),0_10px_30px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.2)] ${step >= 4 ? 'max-w-5xl' : 'max-w-lg'}`}
       >
         <div className="text-center space-y-2">
-          <h1 className={`font-bold leading-tight text-white ${step === 4 ? 'text-5xl' : step === 5 ? 'text-4xl' : 'text-3xl'}`}>
+          <h1
+            className={`max-w-full min-w-0 font-bold leading-tight text-white break-words [overflow-wrap:anywhere] ${
+              step === 4
+                ? 'text-3xl sm:text-4xl md:text-5xl'
+                : step === 5
+                  ? 'text-4xl'
+                  : 'text-3xl'
+            }`}
+          >
             {step === 1 && 'What should we call you?'}
             {step === 2 && 'How will you use FLYR?'}
             {step === 3 && 'Set up your workspace'}
@@ -343,7 +393,7 @@ function OnboardingContent() {
               Finish onboarding to activate your 30-day trial and watch demo if you havent already.
             </p>
             <div className="mt-4 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900">
-              <ArcadeEmbed />
+              <ExclusiveOfferArcadeEmbed />
             </div>
           </div>
         ) : null}
@@ -773,10 +823,23 @@ function OnboardingContent() {
                 ? 'Saving…'
                 : isExclusivePartnerOnboarding
                   ? 'Activate 30-day exclusive access'
-                  : 'Continue to billing'}
+                  : 'Continue for 14-day free trial'}
             </Button>
           )}
         </div>
+      </div>
+
+      <div className="fixed bottom-5 left-0 right-0 z-20 flex justify-center pointer-events-none px-4">
+        <button
+          type="button"
+          onClick={() => void handleLogout()}
+          disabled={signingOut}
+          title="Log out"
+          aria-label="Log out"
+          className="pointer-events-auto inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-black/40 text-zinc-400 backdrop-blur-sm transition-colors hover:border-white/25 hover:bg-white/10 hover:text-white disabled:opacity-50"
+        >
+          <LogoutDoorEmblem className="h-5 w-5" />
+        </button>
       </div>
     </div>
   );

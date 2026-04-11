@@ -73,6 +73,17 @@ interface StreetSegment {
   color: string;
 }
 
+interface StreetBlockSegment {
+  key: string;
+  street_stem: string;
+  street_name: string;
+  side: Parity;
+  block_start: number | null;
+  addresses: RouteAddress[];
+  start_sequence: number;
+  end_sequence: number;
+}
+
 type RoutePlanSegmentPayload = {
   street_name: string;
   side: 'odds' | 'evens' | 'both';
@@ -100,13 +111,16 @@ type TeamRosterResponse = {
   members?: TeamRosterMember[];
 };
 
+type SplitMode = 'natural' | 'balanced';
+type SelectionMode = 'tap' | 'draw';
+
 const COLORS = [
   '#ef4444', // red-500
-  '#f97316', // orange-500  
   '#22c55e', // green-500
   '#3b82f6', // blue-500
   '#8b5cf6', // violet-500
   '#d946ef', // fuchsia-500
+  '#f97316', // orange-500
 ];
 
 const UNKNOWN_COLOR = '#ffffff'; // Unknown (no parseable number): white, no sequence order
@@ -156,6 +170,98 @@ function parseSegmentLabel(name: string): { streetName: string; side: 'odds' | '
   if (side.includes('odd')) return { streetName: streetNameRaw || name, side: 'odds' };
   if (side.includes('even')) return { streetName: streetNameRaw || name, side: 'evens' };
   return { streetName: streetNameRaw || name, side: 'both' };
+}
+
+function getBlockStart(addr: RouteAddress, unknownSet: Set<string>): number | null {
+  if (unknownSet.has(addr.id)) return null;
+  const n = parseAddressNumber(addr);
+  if (isNaN(n)) return null;
+  return Math.floor(n / 100) * 100;
+}
+
+function detectBoundaryLatitude(orderedAddresses: RouteAddress[]): number | null {
+  const boundaryAddresses = orderedAddresses.filter((addr) => streetStem(addr.street_name).includes('carnwith'));
+  if (boundaryAddresses.length === 0) return null;
+  const sortedLats = boundaryAddresses.map((addr) => addr.lat).sort((a, b) => a - b);
+  const mid = Math.floor(sortedLats.length / 2);
+  return sortedLats.length % 2 === 0
+    ? (sortedLats[mid - 1] + sortedLats[mid]) / 2
+    : sortedLats[mid];
+}
+
+function allocateRepCountsByWeight(weights: number[], nAgents: number): number[] {
+  if (weights.length === 0) return [];
+  if (weights.length === 1) return [nAgents];
+
+  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0) || 1;
+  const base = weights.map((weight) => Math.max(1, Math.floor((weight / totalWeight) * nAgents)));
+  let assigned = base.reduce((sum, count) => sum + count, 0);
+
+  while (assigned > nAgents) {
+    let bestIdx = 0;
+    for (let i = 1; i < base.length; i += 1) {
+      if (base[i] > base[bestIdx]) bestIdx = i;
+    }
+    if (base[bestIdx] === 1) break;
+    base[bestIdx] -= 1;
+    assigned -= 1;
+  }
+
+  while (assigned < nAgents) {
+    let bestIdx = 0;
+    let bestScore = -Infinity;
+    for (let i = 0; i < base.length; i += 1) {
+      const target = (weights[i] / totalWeight) * nAgents;
+      const score = target - base[i];
+      if (score > bestScore) {
+        bestScore = score;
+        bestIdx = i;
+      }
+    }
+    base[bestIdx] += 1;
+    assigned += 1;
+  }
+
+  return base;
+}
+
+function buildStreetBlockSegments(
+  orderedAddresses: RouteAddress[],
+  addressUnknownSet: Set<string>
+): StreetBlockSegment[] {
+  const map = new Map<string, StreetBlockSegment>();
+
+  orderedAddresses.forEach((addr) => {
+    const stem = streetStem(addr.street_name);
+    const side = getParity(addr, addressUnknownSet);
+    const blockStart = getBlockStart(addr, addressUnknownSet);
+    const key = `${stem}_${side}_${blockStart ?? 'na'}`;
+
+    if (!map.has(key)) {
+      map.set(key, {
+        key,
+        street_stem: stem,
+        street_name: addr.street_name || 'Unnamed Street',
+        side,
+        block_start: blockStart,
+        addresses: [],
+        start_sequence: addr.sequence,
+        end_sequence: addr.sequence,
+      });
+    }
+
+    const segment = map.get(key)!;
+    segment.addresses.push(addr);
+    segment.start_sequence = Math.min(segment.start_sequence, addr.sequence);
+    segment.end_sequence = Math.max(segment.end_sequence, addr.sequence);
+  });
+
+  return Array.from(map.values())
+    .map((segment) => ({
+      ...segment,
+      addresses: [...segment.addresses].sort((a, b) => a.sequence - b.sequence),
+    }))
+    .sort((a, b) => a.start_sequence - b.start_sequence);
 }
 
 function buildStreetSegments(
@@ -217,11 +323,6 @@ function buildStreetSegments(
   return segments;
 }
 
-/**
- * Split walking route across N assignees by whole street-side segments (same grouping as route export),
- * in walking order, assigning each segment to whoever currently has the fewest stops — balances load
- * without cutting through a segment mid-street.
- */
 function splitStopsByBalancedSegments(
   ordered: RouteAddress[],
   addressUnknownSet: Set<string>,
@@ -229,19 +330,148 @@ function splitStopsByBalancedSegments(
 ): RouteAddress[][] {
   if (assigneeCount <= 0) return [ordered];
   if (assigneeCount === 1) return [ordered];
-  const segments = buildStreetSegments(ordered, addressUnknownSet);
+
+  const blockSegments = buildStreetBlockSegments(ordered, addressUnknownSet);
+  if (blockSegments.length === 0) return Array.from({ length: assigneeCount }, () => []);
+
+  const contiguousSplit = (segments: StreetBlockSegment[], nBins: number): RouteAddress[][] => {
+    if (nBins <= 0) return [];
+    if (nBins === 1) return [segments.flatMap((segment) => segment.addresses).sort((a, b) => a.sequence - b.sequence)];
+
+    const totalStops = segments.reduce((sum, segment) => sum + segment.addresses.length, 0);
+    const targetStopsPerRep = totalStops / nBins;
+    const bins: RouteAddress[][] = Array.from({ length: nBins }, () => []);
+    const counts = Array.from({ length: nBins }, () => 0);
+
+    let currentBin = 0;
+    for (let i = 0; i < segments.length; i += 1) {
+      const segment = segments[i];
+      const remainingSegments = segments.length - i;
+      const remainingBins = nBins - currentBin;
+      const currentCount = counts[currentBin];
+      const nextCount = currentCount + segment.addresses.length;
+
+      const shouldAdvanceBeforeAdding =
+        currentBin < nBins - 1 &&
+        currentCount > 0 &&
+        remainingSegments >= remainingBins &&
+        Math.abs(currentCount - targetStopsPerRep) <= Math.abs(nextCount - targetStopsPerRep);
+
+      if (shouldAdvanceBeforeAdding) currentBin += 1;
+
+      bins[currentBin].push(...segment.addresses);
+      counts[currentBin] += segment.addresses.length;
+    }
+
+    return bins.map((bin) => [...bin].sort((a, b) => a.sequence - b.sequence));
+  };
+
+  const boundaryLat = detectBoundaryLatitude(ordered);
+  if (boundaryLat === null) {
+    return contiguousSplit(blockSegments, assigneeCount);
+  }
+
+  const northSegments = blockSegments.filter((segment) => {
+    const avgLat = segment.addresses.reduce((sum, addr) => sum + addr.lat, 0) / segment.addresses.length;
+    return avgLat > boundaryLat;
+  });
+  const southSegments = blockSegments.filter((segment) => {
+    const avgLat = segment.addresses.reduce((sum, addr) => sum + addr.lat, 0) / segment.addresses.length;
+    return avgLat <= boundaryLat;
+  });
+
+  if (northSegments.length === 0 || southSegments.length === 0) {
+    return contiguousSplit(blockSegments, assigneeCount);
+  }
+
+  const zoneWeights = [
+    northSegments.reduce((sum, segment) => sum + segment.addresses.length, 0),
+    southSegments.reduce((sum, segment) => sum + segment.addresses.length, 0),
+  ];
+  const [northAgents, southAgents] = allocateRepCountsByWeight(zoneWeights, assigneeCount);
+
+  return [
+    ...contiguousSplit(northSegments, northAgents),
+    ...contiguousSplit(southSegments, southAgents),
+  ];
+}
+
+function splitStopsForBalancedMode(
+  ordered: RouteAddress[],
+  addressUnknownSet: Set<string>,
+  assigneeCount: number
+): RouteAddress[][] {
+  if (assigneeCount <= 0) return [ordered];
+  if (assigneeCount === 1) return [ordered];
+
+  const blockSegments = buildStreetBlockSegments(ordered, addressUnknownSet);
+  if (blockSegments.length === 0) return Array.from({ length: assigneeCount }, () => []);
+
   const bins: RouteAddress[][] = Array.from({ length: assigneeCount }, () => []);
-  const counts = new Array(assigneeCount).fill(0);
-  for (const seg of segments) {
+  const counts = Array.from({ length: assigneeCount }, () => 0);
+
+  for (const segment of blockSegments) {
     let bestIdx = 0;
     for (let i = 1; i < assigneeCount; i += 1) {
       if (counts[i] < counts[bestIdx]) bestIdx = i;
     }
-    bins[bestIdx].push(...seg.addresses);
-    counts[bestIdx] += seg.addresses.length;
+
+    bins[bestIdx].push(...segment.addresses);
+    counts[bestIdx] += segment.addresses.length;
   }
-  bins.forEach((bin) => bin.sort((a, b) => a.sequence - b.sequence));
-  return bins;
+
+  return bins.map((bin) => [...bin].sort((a, b) => a.sequence - b.sequence));
+}
+
+function splitStopsByMode(
+  ordered: RouteAddress[],
+  addressUnknownSet: Set<string>,
+  assigneeCount: number,
+  splitMode: SplitMode
+): RouteAddress[][] {
+  return splitMode === 'natural'
+    ? splitStopsByBalancedSegments(ordered, addressUnknownSet, assigneeCount)
+    : splitStopsForBalancedMode(ordered, addressUnknownSet, assigneeCount);
+}
+
+function buildAutoAssignmentMap(
+  ordered: RouteAddress[],
+  addressUnknownSet: Set<string>,
+  userIds: string[],
+  splitMode: SplitMode
+): Map<string, string> {
+  const assignmentMap = new Map<string, string>();
+  if (userIds.length === 0) return assignmentMap;
+
+  const chunks =
+    userIds.length > 1
+      ? splitStopsByMode(ordered, addressUnknownSet, userIds.length, splitMode)
+      : [ordered];
+
+  chunks.forEach((chunk, index) => {
+    const userId = userIds[index];
+    if (!userId) return;
+    chunk.forEach((addr) => assignmentMap.set(addr.id, userId));
+  });
+
+  return assignmentMap;
+}
+
+function groupStopsByAssignedUser(
+  ordered: RouteAddress[],
+  userIds: string[],
+  assignmentMap: Map<string, string>
+): RouteAddress[][] {
+  const buckets = new Map<string, RouteAddress[]>();
+  userIds.forEach((userId) => buckets.set(userId, []));
+
+  ordered.forEach((addr) => {
+    const userId = assignmentMap.get(addr.id);
+    if (!userId || !buckets.has(userId)) return;
+    buckets.get(userId)!.push(addr);
+  });
+
+  return userIds.map((userId) => (buckets.get(userId) ?? []).sort((a, b) => a.sequence - b.sequence));
 }
 
 function toSegmentsPayload(segments: StreetSegment[]): RoutePlanSegmentPayload[] {
@@ -347,10 +577,17 @@ export function OptimizedRouteView({ campaignId, campaignName, addresses }: Opti
   const { currentWorkspace, membershipsByWorkspaceId } = useWorkspace();
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
+  const hasFittedBoundsRef = useRef(false);
+  const appliedThemeRef = useRef<'light' | 'dark' | null>(null);
   const [members, setMembers] = useState<RouteMember[]>([]);
   const [routePlanName, setRoutePlanName] = useState('');
   const [assignToUserIds, setAssignToUserIds] = useState<string[]>([]);
   const [isAssignDropdownOpen, setIsAssignDropdownOpen] = useState(false);
+  const [splitMode, setSplitMode] = useState<SplitMode>('natural');
+  const [selectionMode, setSelectionMode] = useState<SelectionMode>('tap');
+  const [selectedAddressIds, setSelectedAddressIds] = useState<string[]>([]);
+  const [manualAssignments, setManualAssignments] = useState<Record<string, string>>({});
+  const [drawBox, setDrawBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
   const [assignmentPriority] = useState<'low' | 'normal' | 'high'>('normal');
   const [assignmentDueAt, setAssignmentDueAt] = useState('');
   const [assignmentNotes, setAssignmentNotes] = useState('');
@@ -358,6 +595,7 @@ export function OptimizedRouteView({ campaignId, campaignName, addresses }: Opti
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
   const [campaignBuildings, setCampaignBuildings] = useState<CampaignBuildingsGeoJSON | null>(null);
+  const drawStartRef = useRef<{ x: number; y: number } | null>(null);
 
   const currentWorkspaceId = currentWorkspace?.id ?? null;
   const currentRole = currentWorkspaceId ? membershipsByWorkspaceId[currentWorkspaceId] : null;
@@ -417,6 +655,10 @@ export function OptimizedRouteView({ campaignId, campaignName, addresses }: Opti
     return list;
   }, [addresses]);
 
+  useEffect(() => {
+    hasFittedBoundsRef.current = false;
+  }, [campaignId, orderedAddresses.length]);
+
   // Unknowns = no parseable house number (match backend getNum); highlight white, no sequence
   const addressUnknownSet = useMemo(() => {
     const set = new Set<string>();
@@ -426,22 +668,44 @@ export function OptimizedRouteView({ campaignId, campaignName, addresses }: Opti
     return set;
   }, [orderedAddresses]);
 
+  useEffect(() => {
+    const validAddressIds = new Set(orderedAddresses.map((addr) => addr.id));
+    setSelectedAddressIds((current) => current.filter((id) => validAddressIds.has(id)));
+  }, [orderedAddresses]);
+
+  useEffect(() => {
+    const validUserIds = new Set(assignToUserIds);
+    setManualAssignments((current) => {
+      const next = Object.fromEntries(
+        Object.entries(current).filter(([addressId, userId]) => validUserIds.has(userId) && orderedAddresses.some((addr) => addr.id === addressId))
+      );
+      return Object.keys(next).length === Object.keys(current).length ? current : next;
+    });
+  }, [assignToUserIds, orderedAddresses]);
+
+  const autoAssignmentByAddress = useMemo(
+    () => buildAutoAssignmentMap(orderedAddresses, addressUnknownSet, assignToUserIds, splitMode),
+    [orderedAddresses, addressUnknownSet, assignToUserIds, splitMode]
+  );
+
+  const effectiveAssignmentByAddress = useMemo(() => {
+    const next = new Map(autoAssignmentByAddress);
+    Object.entries(manualAssignments).forEach(([addressId, userId]) => {
+      if (assignToUserIds.includes(userId)) next.set(addressId, userId);
+    });
+    return next;
+  }, [autoAssignmentByAddress, manualAssignments, assignToUserIds]);
+
   const addressAssigneeColorMap = useMemo(() => {
     const map = new Map<string, string>();
     if (assignToUserIds.length === 0) return map;
-    const chunks = splitStopsByBalancedSegments(
-      orderedAddresses,
-      addressUnknownSet,
-      assignToUserIds.length
-    );
-    chunks.forEach((chunk, index) => {
-      const color = COLORS[index % COLORS.length];
-      chunk.forEach((addr) => {
-        map.set(addr.id, addressUnknownSet.has(addr.id) ? UNKNOWN_COLOR : color);
-      });
+    orderedAddresses.forEach((addr) => {
+      const userId = effectiveAssignmentByAddress.get(addr.id);
+      const colorIndex = userId ? assignToUserIds.indexOf(userId) : -1;
+      map.set(addr.id, addressUnknownSet.has(addr.id) ? UNKNOWN_COLOR : colorIndex >= 0 ? COLORS[colorIndex % COLORS.length] : UNASSIGNED_MAP_COLOR);
     });
     return map;
-  }, [assignToUserIds, orderedAddresses, addressUnknownSet]);
+  }, [assignToUserIds, orderedAddresses, addressUnknownSet, effectiveAssignmentByAddress]);
 
   /** Map colors: one color per assigned member, or neutral when unassigned (never street-segment colors). */
   const effectiveAddressColorMap = useMemo(() => {
@@ -455,21 +719,91 @@ export function OptimizedRouteView({ campaignId, campaignName, addresses }: Opti
 
   const assigneeSummaryRows = useMemo(() => {
     if (assignToUserIds.length === 0) return [];
-    const chunks = splitStopsByBalancedSegments(
-      orderedAddresses,
-      addressUnknownSet,
-      assignToUserIds.length
-    );
     return assignToUserIds.map((userId, index) => {
       const member = members.find((m) => m.userId === userId);
+      const count = orderedAddresses.filter((addr) => effectiveAssignmentByAddress.get(addr.id) === userId).length;
       return {
         userId,
         name: member ? displayMemberName(member) : 'Team member',
         color: COLORS[index % COLORS.length],
-        count: chunks[index]?.length ?? 0,
+        count,
       };
     });
-  }, [assignToUserIds, orderedAddresses, addressUnknownSet, members]);
+  }, [assignToUserIds, orderedAddresses, members, effectiveAssignmentByAddress]);
+
+  const handleAssignSelectedHomes = useCallback((userId: string) => {
+    setManualAssignments((current) => {
+      const next = { ...current };
+      selectedAddressIds.forEach((addressId) => {
+        next[addressId] = userId;
+      });
+      return next;
+    });
+    setSelectedAddressIds([]);
+  }, [selectedAddressIds]);
+
+  const handleResetSelectedHomes = useCallback(() => {
+    setManualAssignments((current) => {
+      const next = { ...current };
+      selectedAddressIds.forEach((addressId) => {
+        delete next[addressId];
+      });
+      return next;
+    });
+    setSelectedAddressIds([]);
+  }, [selectedAddressIds]);
+
+  const handleToggleAddressSelection = useCallback((addressId: string) => {
+    setSelectedAddressIds((current) =>
+      current.includes(addressId)
+        ? current.filter((id) => id !== addressId)
+        : [...current, addressId]
+    );
+  }, []);
+
+  const handleTapSelection = useCallback((event: mapboxgl.MapLayerMouseEvent) => {
+    if (selectionMode !== 'tap') return;
+    const feature = event.features?.find((candidate) => typeof candidate.properties?.addressId === 'string');
+    const addressId = typeof feature?.properties?.addressId === 'string' ? feature.properties.addressId : null;
+    if (!addressId) return;
+    handleToggleAddressSelection(addressId);
+  }, [handleToggleAddressSelection, selectionMode]);
+
+  const handleSelectionMouseEnter = useCallback(() => {
+    if (selectionMode !== 'tap') return;
+    map.current?.getCanvas().style.setProperty('cursor', 'pointer');
+  }, [selectionMode]);
+
+  const handleSelectionMouseLeave = useCallback(() => {
+    map.current?.getCanvas().style.setProperty('cursor', '');
+  }, []);
+
+  const handleDrawSelection = useCallback((start: { x: number; y: number }, end: { x: number; y: number }) => {
+    if (!map.current) return;
+
+    const minX = Math.min(start.x, end.x);
+    const maxX = Math.max(start.x, end.x);
+    const minY = Math.min(start.y, end.y);
+    const maxY = Math.max(start.y, end.y);
+
+    if (Math.abs(maxX - minX) < 4 || Math.abs(maxY - minY) < 4) return;
+
+    const sw = map.current.unproject([minX, maxY]);
+    const ne = map.current.unproject([maxX, minY]);
+
+    const selectedInBox = orderedAddresses
+      .filter((addr) =>
+        addr.lon >= sw.lng &&
+        addr.lon <= ne.lng &&
+        addr.lat >= sw.lat &&
+        addr.lat <= ne.lat
+      )
+      .map((addr) => addr.id);
+
+    if (selectedInBox.length === 0) return;
+
+    setSelectedAddressIds((current) => Array.from(new Set([...current, ...selectedInBox])));
+  }, [orderedAddresses]);
 
   const coloredBuildingFeatures = useMemo(() => {
     if (!campaignBuildings?.features?.length) return [] as GeoJSON.Feature[];
@@ -518,14 +852,21 @@ export function OptimizedRouteView({ campaignId, campaignName, addresses }: Opti
         (buildingId && colorByBuildingId.get(buildingId)) ||
         (gersId && colorByGersId.get(gersId)) ||
         '#ef4444';
+      const resolvedAddressId =
+        addressId ||
+        (buildingId
+          ? orderedAddresses.find((addr) => addr.building_id === buildingId)?.id ?? null
+          : null) ||
+        (gersId ? orderedAddresses.find((addr) => addr.gers_id === gersId)?.id ?? null : null);
+      const isSelected = resolvedAddressId ? selectedAddressIds.includes(resolvedAddressId) : false;
 
       return [{
         type: 'Feature',
-        properties: { color },
+        properties: { color: isSelected ? '#fde047' : color, addressId: resolvedAddressId, isSelected: isSelected ? 1 : 0 },
         geometry: feature.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon,
       }];
     });
-  }, [campaignBuildings, effectiveAddressColorMap, orderedAddresses]);
+  }, [campaignBuildings, effectiveAddressColorMap, orderedAddresses, selectedAddressIds]);
 
   const estimatedMinutes = useMemo(() => {
     const totalSeconds = addresses.reduce((sum, addr) => sum + (addr.walk_time_sec ?? 0), 0);
@@ -610,7 +951,7 @@ export function OptimizedRouteView({ campaignId, campaignName, addresses }: Opti
       const assigneeCount = assignToUserIds.length;
       const stopsByRoute =
         assigneeCount > 1
-          ? splitStopsByBalancedSegments(orderedAddresses, addressUnknownSet, assigneeCount)
+          ? groupStopsByAssignedUser(orderedAddresses, assignToUserIds, effectiveAssignmentByAddress)
           : [orderedAddresses];
       const targets = assigneeCount > 0 ? assignToUserIds : [null];
       const createdPlans: string[] = [];
@@ -705,7 +1046,7 @@ export function OptimizedRouteView({ campaignId, campaignName, addresses }: Opti
         );
       } else {
         setSaveSuccess(
-          `Created ${createdPlans.length} routes (balanced by street segments) for ${assigneeCount} team members.`
+          `Created ${createdPlans.length} ${splitMode === 'natural' ? 'natural zone' : 'balanced'} routes for ${assigneeCount} team members.`
         );
       }
       setAssignmentNotes('');
@@ -728,18 +1069,24 @@ export function OptimizedRouteView({ campaignId, campaignName, addresses }: Opti
     assignmentDueAt,
     assignmentNotes,
     members,
-    addressUnknownSet,
+    effectiveAssignmentByAddress,
+    splitMode,
   ]);
 
   // Draw route layers on the current map — called after every style.load
   const drawRoute = useCallback((m: mapboxgl.Map) => {
     if (orderedAddresses.length === 0) return;
 
-    ['route-footprints', 'route-points'].forEach((id) => {
-      if (m.getLayer(id)) m.removeLayer(id);
+    ['route-footprints', 'route-points', 'route-hitboxes'].forEach((id) => {
+      if (!m.getLayer(id)) return;
+      m.off('click', id, handleTapSelection);
+      m.off('mouseenter', id, handleSelectionMouseEnter);
+      m.off('mouseleave', id, handleSelectionMouseLeave);
+      m.removeLayer(id);
     });
     if (m.getSource('route-footprints-source')) m.removeSource('route-footprints-source');
     if (m.getSource('route-points-source')) m.removeSource('route-points-source');
+    if (m.getSource('route-hitboxes-source')) m.removeSource('route-hitboxes-source');
 
     if (coloredBuildingFeatures.length > 0) {
       m.addSource('route-footprints-source', {
@@ -763,6 +1110,9 @@ export function OptimizedRouteView({ campaignId, campaignName, addresses }: Opti
           'fill-extrusion-vertical-gradient': true,
         },
       });
+      m.on('click', 'route-footprints', handleTapSelection);
+      m.on('mouseenter', 'route-footprints', handleSelectionMouseEnter);
+      m.on('mouseleave', 'route-footprints', handleSelectionMouseLeave);
 
       try {
         m.setPitch(60);
@@ -778,8 +1128,10 @@ export function OptimizedRouteView({ campaignId, campaignName, addresses }: Opti
         type: 'Feature' as const,
         geometry: { type: 'Point' as const, coordinates: [addr.lon, addr.lat] },
         properties: {
-          color: effectiveAddressColorMap.get(addr.id) || '#ef4444',
+          color: selectedAddressIds.includes(addr.id) ? '#fde047' : effectiveAddressColorMap.get(addr.id) || '#ef4444',
           isUnknown: isUnknown ? 1 : 0,
+          addressId: addr.id,
+          isSelected: selectedAddressIds.includes(addr.id) ? 1 : 0,
         },
       };
     });
@@ -790,6 +1142,26 @@ export function OptimizedRouteView({ campaignId, campaignName, addresses }: Opti
         data: { type: 'FeatureCollection', features: pointFeatures },
       });
 
+      m.addSource('route-hitboxes-source', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: pointFeatures },
+      });
+
+      m.addLayer({
+        id: 'route-hitboxes',
+        type: 'circle',
+        source: 'route-hitboxes-source',
+        paint: {
+          'circle-radius': 12,
+          'circle-color': 'rgba(0,0,0,0)',
+          'circle-opacity': 1,
+          'circle-stroke-width': 0,
+        },
+      });
+      m.on('click', 'route-hitboxes', handleTapSelection);
+      m.on('mouseenter', 'route-hitboxes', handleSelectionMouseEnter);
+      m.on('mouseleave', 'route-hitboxes', handleSelectionMouseLeave);
+
       if (coloredBuildingFeatures.length === 0) {
         m.addLayer({
           id: 'route-points',
@@ -799,10 +1171,13 @@ export function OptimizedRouteView({ campaignId, campaignName, addresses }: Opti
             'circle-radius': 4,
             'circle-color': ['get', 'color'],
             'circle-opacity': 0.95,
-            'circle-stroke-width': 0,
+            'circle-stroke-width': ['case', ['==', ['get', 'isSelected'], 1], 2.5, 0],
             'circle-stroke-color': ['case', ['get', 'isUnknown'], '#94a3b8', '#fff'],
           },
         });
+        m.on('click', 'route-points', handleTapSelection);
+        m.on('mouseenter', 'route-points', handleSelectionMouseEnter);
+        m.on('mouseleave', 'route-points', handleSelectionMouseLeave);
       }
     }
 
@@ -811,10 +1186,11 @@ export function OptimizedRouteView({ campaignId, campaignName, addresses }: Opti
     orderedAddresses.forEach(addr => {
       if (isValidCoord(addr.lat, addr.lon)) bounds.extend([addr.lon, addr.lat]);
     });
-    if (!bounds.isEmpty()) {
+    if (!bounds.isEmpty() && !hasFittedBoundsRef.current) {
       m.fitBounds(bounds, { padding: 80, maxZoom: 16, duration: 600 });
+      hasFittedBoundsRef.current = true;
     }
-  }, [orderedAddresses, addressUnknownSet, effectiveAddressColorMap, coloredBuildingFeatures]);
+  }, [orderedAddresses, addressUnknownSet, effectiveAddressColorMap, coloredBuildingFeatures, handleSelectionMouseEnter, handleSelectionMouseLeave, handleTapSelection, selectedAddressIds]);
 
   // Manage map lifecycle: create once, draw on every style.load
   useEffect(() => {
@@ -827,9 +1203,10 @@ export function OptimizedRouteView({ campaignId, campaignName, addresses }: Opti
 
     // If map already exists, just update style (style.load handler will redraw)
     if (map.current) {
-      const currentStyle = map.current.getStyle()?.sprite;
-      if (currentStyle && !currentStyle.toString().includes(theme)) {
+      if (appliedThemeRef.current !== theme) {
+        hasFittedBoundsRef.current = false;
         map.current.setStyle(styleUrl);
+        appliedThemeRef.current = theme;
       }
       return;
     }
@@ -847,13 +1224,15 @@ export function OptimizedRouteView({ campaignId, campaignName, addresses }: Opti
     });
 
     map.current = m;
+    appliedThemeRef.current = theme;
 
     return () => {
       m.remove();
       map.current = null;
+      appliedThemeRef.current = null;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orderedAddresses, theme]);
+  }, [orderedAddresses.length, theme]);
 
   // Re-draw when data changes (without recreating map)
   useEffect(() => {
@@ -861,6 +1240,22 @@ export function OptimizedRouteView({ campaignId, campaignName, addresses }: Opti
     if (!map.current.isStyleLoaded()) return;
     drawRoute(map.current);
   }, [drawRoute, orderedAddresses.length]);
+
+  useEffect(() => {
+    if (!map.current) return;
+    if (selectionMode === 'draw') {
+      map.current.dragPan.disable();
+      map.current.doubleClickZoom.disable();
+      return () => {
+        map.current?.dragPan.enable();
+        map.current?.doubleClickZoom.enable();
+      };
+    }
+
+    map.current.dragPan.enable();
+    map.current.doubleClickZoom.enable();
+    return undefined;
+  }, [selectionMode]);
 
   if (orderedAddresses.length === 0) {
     return (
@@ -959,6 +1354,42 @@ export function OptimizedRouteView({ campaignId, campaignName, addresses }: Opti
                       .join(', ')}
                   </p>
                 ) : null}
+                {assignToUserIds.length > 1 ? (
+                  <div className="mt-3 space-y-2">
+                    <Label>Split mode</Label>
+                    <div className="inline-flex rounded-lg border border-border bg-muted/20 p-1">
+                      <button
+                        type="button"
+                        onClick={() => setSplitMode('natural')}
+                        disabled={isSavingPlan}
+                        className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                          splitMode === 'natural'
+                            ? 'bg-foreground text-background'
+                            : 'text-muted-foreground hover:bg-background/80'
+                        }`}
+                      >
+                        Natural Zones
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSplitMode('balanced')}
+                        disabled={isSavingPlan}
+                        className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                          splitMode === 'balanced'
+                            ? 'bg-foreground text-background'
+                            : 'text-muted-foreground hover:bg-background/80'
+                        }`}
+                      >
+                        Balanced Split
+                      </button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {splitMode === 'natural'
+                        ? 'Geography-first: keeps each rep in one coherent neighborhood zone.'
+                        : 'Count-first: keeps house counts closer, even if geography is a bit looser.'}
+                    </p>
+                  </div>
+                ) : null}
               </div>
               <div>
                 <Label htmlFor="route-due-at">Due date (optional)</Label>
@@ -1012,6 +1443,142 @@ export function OptimizedRouteView({ campaignId, campaignName, addresses }: Opti
       {/* Walking Route Map */}
       <div className="relative h-[560px] w-full rounded-lg border bg-card shadow-sm overflow-hidden">
         <div ref={mapContainer} className="absolute inset-0 w-full h-full" />
+        {selectionMode === 'draw' ? (
+          <div
+            className="absolute inset-0 z-[5] cursor-crosshair"
+            onPointerDown={(event) => {
+              if (!mapContainer.current) return;
+              const rect = mapContainer.current.getBoundingClientRect();
+              const x = event.clientX - rect.left;
+              const y = event.clientY - rect.top;
+              drawStartRef.current = { x, y };
+              setDrawBox({ left: x, top: y, width: 0, height: 0 });
+              event.currentTarget.setPointerCapture(event.pointerId);
+            }}
+            onPointerMove={(event) => {
+              if (!mapContainer.current || !drawStartRef.current) return;
+              const rect = mapContainer.current.getBoundingClientRect();
+              const x = event.clientX - rect.left;
+              const y = event.clientY - rect.top;
+              const start = drawStartRef.current;
+              setDrawBox({
+                left: Math.min(start.x, x),
+                top: Math.min(start.y, y),
+                width: Math.abs(x - start.x),
+                height: Math.abs(y - start.y),
+              });
+            }}
+            onPointerUp={(event) => {
+              if (!mapContainer.current || !drawStartRef.current) return;
+              const rect = mapContainer.current.getBoundingClientRect();
+              const end = {
+                x: event.clientX - rect.left,
+                y: event.clientY - rect.top,
+              };
+              handleDrawSelection(drawStartRef.current, end);
+              drawStartRef.current = null;
+              setDrawBox(null);
+              event.currentTarget.releasePointerCapture(event.pointerId);
+            }}
+            onPointerLeave={() => {
+              drawStartRef.current = null;
+              setDrawBox(null);
+            }}
+          >
+            {drawBox ? (
+              <div
+                className="absolute rounded-md border border-yellow-300 bg-yellow-300/15"
+                style={{
+                  left: drawBox.left,
+                  top: drawBox.top,
+                  width: drawBox.width,
+                  height: drawBox.height,
+                }}
+              />
+            ) : null}
+          </div>
+        ) : null}
+        {canManageRoutePlans && assignToUserIds.length > 0 ? (
+          <div className="absolute top-3 right-3 z-10 w-[260px] rounded-xl border border-border bg-background/92 p-3 shadow-lg backdrop-blur-sm">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm font-semibold">Edit homes</p>
+              <span className="text-xs text-muted-foreground">
+                {selectedAddressIds.length === 0 ? 'Tap homes' : `${selectedAddressIds.length} selected`}
+              </span>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {selectionMode === 'tap'
+                ? 'Tap homes on the map, then assign them to a member or reset them back to the automatic split.'
+                : 'Drag a box over homes to select them, then assign or reset them.'}
+            </p>
+            <div className="mt-3 inline-flex rounded-lg border border-border bg-muted/20 p-1">
+              <button
+                type="button"
+                onClick={() => setSelectionMode('tap')}
+                className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                  selectionMode === 'tap'
+                    ? 'bg-foreground text-background'
+                    : 'text-muted-foreground hover:bg-background/80'
+                }`}
+              >
+                Tap
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectionMode('draw')}
+                className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                  selectionMode === 'draw'
+                    ? 'bg-foreground text-background'
+                    : 'text-muted-foreground hover:bg-background/80'
+                }`}
+              >
+                Draw
+              </button>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {assignToUserIds.map((userId, index) => {
+                const member = members.find((entry) => entry.userId === userId);
+                return (
+                  <button
+                    key={userId}
+                    type="button"
+                    onClick={() => handleAssignSelectedHomes(userId)}
+                    disabled={selectedAddressIds.length === 0 || isSavingPlan}
+                    className="inline-flex items-center gap-2 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <span
+                      className="h-2.5 w-2.5 rounded-full"
+                      style={{ backgroundColor: COLORS[index % COLORS.length] }}
+                    />
+                    <span className="truncate max-w-[140px]">
+                      {member ? displayMemberName(member) : 'Team member'}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="mt-3 flex gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={handleResetSelectedHomes}
+                disabled={selectedAddressIds.length === 0 || isSavingPlan}
+              >
+                Reset selected
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => setSelectedAddressIds([])}
+                disabled={selectedAddressIds.length === 0 || isSavingPlan}
+              >
+                Clear
+              </Button>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {/* Members: names + house counts (colors match map) */}

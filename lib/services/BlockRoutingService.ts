@@ -50,6 +50,32 @@ export interface OrderedAddress extends BuildRouteAddress {
   sequence_index: number;
 }
 
+export interface BlockSegment {
+  id: string;
+  streetName: string;
+  side: 'even' | 'odd' | 'unknown';
+  blockStart: number | null;
+  addressIds: string[];
+  centroid: { lat: number; lon: number };
+  bbox: [number, number, number, number];
+  weight: number;
+}
+
+export interface AgentRouteCluster {
+  agent_id: number;
+  addresses: OrderedAddress[];
+  segments: BlockSegment[];
+}
+
+export type RouteSplitMode = 'natural' | 'balanced';
+
+interface SegmentClusterState {
+  agent_id: number;
+  segments: BlockSegment[];
+  weight: number;
+  centroid: { lat: number; lon: number };
+}
+
 export interface BuildRouteOptions {
   include_geometry?: boolean;
   threshold_meters?: number;
@@ -203,6 +229,479 @@ function groupByStreet(addresses: BlockAddress[]): Map<string, BlockAddress[]> {
     groups.get(key)!.push(addr);
   }
   return groups;
+}
+
+function getStreetSide(address: BlockAddress): 'even' | 'odd' | 'unknown' {
+  const n = getNum(address);
+  if (Number.isNaN(n)) return 'unknown';
+  return n % 2 === 0 ? 'even' : 'odd';
+}
+
+function getBlockStart(address: BlockAddress): number | null {
+  const n = getNum(address);
+  if (Number.isNaN(n)) return null;
+  return Math.floor(n / 100) * 100;
+}
+
+export function buildBlockSegments(addresses: BlockAddress[]): BlockSegment[] {
+  const segmentMap = new Map<string, BlockAddress[]>();
+
+  for (const address of addresses) {
+    const streetName = normalizeStreetName(address.street_name) || 'unnamed';
+    const side = getStreetSide(address);
+    const blockStart = getBlockStart(address);
+    const blockKey = blockStart === null ? 'na' : String(blockStart);
+    const key = `${streetName}::${side}::${blockKey}`;
+
+    if (!segmentMap.has(key)) segmentMap.set(key, []);
+    segmentMap.get(key)!.push(address);
+  }
+
+  return Array.from(segmentMap.entries())
+    .map(([key, segmentAddresses]) => {
+      const [streetName, sideRaw, blockRaw] = key.split('::');
+      const addressIds = postmanSort(segmentAddresses);
+      const lons = segmentAddresses.map((address) => address.lon);
+      const lats = segmentAddresses.map((address) => address.lat);
+      const centroid = segmentAddresses.reduce(
+        (acc, address) => ({
+          lat: acc.lat + address.lat / segmentAddresses.length,
+          lon: acc.lon + address.lon / segmentAddresses.length,
+        }),
+        { lat: 0, lon: 0 }
+      );
+
+      return {
+        id: key,
+        streetName,
+        side: sideRaw as BlockSegment['side'],
+        blockStart: blockRaw === 'na' ? null : Number(blockRaw),
+        addressIds,
+        centroid,
+        bbox: [
+          Math.min(...lons),
+          Math.min(...lats),
+          Math.max(...lons),
+          Math.max(...lats),
+        ],
+        weight: segmentAddresses.length,
+      };
+    })
+    .sort((a, b) => {
+      if (a.streetName !== b.streetName) return a.streetName.localeCompare(b.streetName);
+      if (a.blockStart === null && b.blockStart !== null) return 1;
+      if (a.blockStart !== null && b.blockStart === null) return -1;
+      if ((a.blockStart ?? 0) !== (b.blockStart ?? 0)) return (a.blockStart ?? 0) - (b.blockStart ?? 0);
+      return a.side.localeCompare(b.side);
+    });
+}
+
+function centroidDistanceKm(a: { lat: number; lon: number }, b: { lat: number; lon: number }): number {
+  return turf.distance(turf.point([a.lon, a.lat]), turf.point([b.lon, b.lat]), { units: 'kilometers' });
+}
+
+function chooseSeedSegments(
+  segments: BlockSegment[],
+  nSeeds: number,
+  depot: { lat: number; lon: number }
+): BlockSegment[] {
+  if (segments.length === 0 || nSeeds <= 0) return [];
+
+  const remaining = [...segments];
+  remaining.sort((a, b) => centroidDistanceKm(a.centroid, depot) - centroidDistanceKm(b.centroid, depot));
+
+  const seeds: BlockSegment[] = [remaining.shift()!];
+
+  while (seeds.length < nSeeds && remaining.length > 0) {
+    let bestIndex = 0;
+    let bestScore = -1;
+
+    for (let i = 0; i < remaining.length; i++) {
+      const segment = remaining[i];
+      const minDistanceToSeed = Math.min(
+        ...seeds.map((seed) => centroidDistanceKm(segment.centroid, seed.centroid))
+      );
+      if (minDistanceToSeed > bestScore) {
+        bestScore = minDistanceToSeed;
+        bestIndex = i;
+      }
+    }
+
+    seeds.push(remaining.splice(bestIndex, 1)[0]);
+  }
+
+  return seeds;
+}
+
+function weightedClusterCentroid(segments: BlockSegment[]): { lat: number; lon: number } {
+  if (segments.length === 0) return { lat: 0, lon: 0 };
+
+  const totalWeight = segments.reduce((sum, segment) => sum + segment.weight, 0) || 1;
+  return segments.reduce(
+    (acc, segment) => ({
+      lat: acc.lat + (segment.centroid.lat * segment.weight) / totalWeight,
+      lon: acc.lon + (segment.centroid.lon * segment.weight) / totalWeight,
+    }),
+    { lat: 0, lon: 0 }
+  );
+}
+
+function blockDifference(a: number | null, b: number | null): number {
+  if (a === null || b === null) return Number.POSITIVE_INFINITY;
+  return Math.abs(a - b);
+}
+
+function bboxGapKm(a: [number, number, number, number], b: [number, number, number, number]): number {
+  const lonGap =
+    a[2] < b[0] ? b[0] - a[2] : b[2] < a[0] ? a[0] - b[2] : 0;
+  const latGap =
+    a[3] < b[1] ? b[1] - a[3] : b[3] < a[1] ? a[1] - b[3] : 0;
+
+  if (lonGap === 0 && latGap === 0) return 0;
+
+  const centerLat = (a[1] + a[3] + b[1] + b[3]) / 4;
+  const kmPerLat = 111.32;
+  const kmPerLon = 111.32 * Math.cos((centerLat * Math.PI) / 180);
+  return Math.hypot(lonGap * kmPerLon, latGap * kmPerLat);
+}
+
+function segmentPairDistanceKm(
+  left: BlockSegment,
+  right: BlockSegment,
+  addressById: Map<string, BlockAddress>
+): number {
+  let best = Infinity;
+
+  for (const leftId of left.addressIds) {
+    const leftAddress = addressById.get(leftId);
+    if (!leftAddress) continue;
+    for (const rightId of right.addressIds) {
+      const rightAddress = addressById.get(rightId);
+      if (!rightAddress) continue;
+      const distance = centroidDistanceKm(
+        { lat: leftAddress.lat, lon: leftAddress.lon },
+        { lat: rightAddress.lat, lon: rightAddress.lon }
+      );
+      if (distance < best) best = distance;
+    }
+  }
+
+  return best;
+}
+
+function buildSegmentAdjacency(
+  segments: BlockSegment[],
+  addressById: Map<string, BlockAddress>
+): Map<string, Set<string>> {
+  const adjacency = new Map<string, Set<string>>();
+  for (const segment of segments) adjacency.set(segment.id, new Set<string>());
+
+  for (let i = 0; i < segments.length; i++) {
+    for (let j = i + 1; j < segments.length; j++) {
+      const left = segments[i];
+      const right = segments[j];
+
+      const sameStreet =
+        left.streetName === right.streetName &&
+        left.side === right.side &&
+        blockDifference(left.blockStart, right.blockStart) <= 100;
+      const closeBboxes = bboxGapKm(left.bbox, right.bbox) <= 0.06;
+      const closeAddresses = segmentPairDistanceKm(left, right, addressById) <= 0.08;
+
+      if (sameStreet || closeBboxes || closeAddresses) {
+        adjacency.get(left.id)!.add(right.id);
+        adjacency.get(right.id)!.add(left.id);
+      }
+    }
+  }
+
+  return adjacency;
+}
+
+function clusterTouchesSegment(
+  clusterSegments: BlockSegment[],
+  candidate: BlockSegment,
+  adjacency: Map<string, Set<string>>
+): boolean {
+  return clusterSegments.some((segment) => adjacency.get(segment.id)?.has(candidate.id));
+}
+
+function detectBoundaryLatitude(addresses: BlockAddress[]): number | null {
+  const boundaryAddresses = addresses.filter((address) => {
+    const normalized = normalizeStreetName(address.street_name);
+    return normalized.includes('carnwith');
+  });
+
+  if (boundaryAddresses.length === 0) return null;
+  const sortedLats = boundaryAddresses.map((address) => address.lat).sort((a, b) => a - b);
+  const mid = Math.floor(sortedLats.length / 2);
+  return sortedLats.length % 2 === 0
+    ? (sortedLats[mid - 1] + sortedLats[mid]) / 2
+    : sortedLats[mid];
+}
+
+function allocateRepCountsByWeight(weights: number[], nAgents: number): number[] {
+  if (weights.length === 0) return [];
+  if (weights.length === 1) return [nAgents];
+
+  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0) || 1;
+  const base = weights.map((weight) => Math.max(1, Math.floor((weight / totalWeight) * nAgents)));
+  let assigned = base.reduce((sum, count) => sum + count, 0);
+
+  while (assigned > nAgents) {
+    let bestIndex = 0;
+    for (let i = 1; i < base.length; i++) {
+      if (base[i] > base[bestIndex]) bestIndex = i;
+    }
+    if (base[bestIndex] === 1) break;
+    base[bestIndex] -= 1;
+    assigned -= 1;
+  }
+
+  while (assigned < nAgents) {
+    let bestIndex = 0;
+    let bestScore = -Infinity;
+    for (let i = 0; i < base.length; i++) {
+      const target = (weights[i] / totalWeight) * nAgents;
+      const score = target - base[i];
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = i;
+      }
+    }
+    base[bestIndex] += 1;
+    assigned += 1;
+  }
+
+  return base;
+}
+
+function clusterSegmentsIntoAgents(
+  segments: BlockSegment[],
+  addressById: Map<string, BlockAddress>,
+  nAgents: number,
+  depot: { lat: number; lon: number },
+  agentIdOffset = 0,
+  strategy: RouteSplitMode = 'natural'
+): AgentRouteCluster[] {
+  if (segments.length === 0 || nAgents <= 0) return [];
+
+  const adjacency = buildSegmentAdjacency(segments, addressById);
+  const nClusters = Math.min(nAgents, segments.length);
+  const seeds = chooseSeedSegments(segments, nClusters, depot);
+  const seedIds = new Set(seeds.map((seed) => seed.id));
+  const unassigned = segments
+    .filter((segment) => !seedIds.has(segment.id))
+    .sort((a, b) => b.weight - a.weight);
+
+  const clusters: SegmentClusterState[] = seeds.map((seed, idx) => ({
+    agent_id: agentIdOffset + idx + 1,
+    segments: [seed],
+    weight: seed.weight,
+    centroid: { ...seed.centroid },
+  }));
+
+  const totalWeight = segments.reduce((sum, segment) => sum + segment.weight, 0);
+  const targetWeight = totalWeight / nClusters;
+
+  while (unassigned.length > 0) {
+    let bestClusterIndex = 0;
+    let bestSegmentIndex = 0;
+    let bestScore = Infinity;
+
+    for (let clusterIndex = 0; clusterIndex < clusters.length; clusterIndex++) {
+      const cluster = clusters[clusterIndex];
+      const hasAdjacentFrontier = unassigned.some((segment) =>
+        clusterTouchesSegment(cluster.segments, segment, adjacency)
+      );
+
+      for (let segmentIndex = 0; segmentIndex < unassigned.length; segmentIndex++) {
+        const segment = unassigned[segmentIndex];
+        const touchesCluster = clusterTouchesSegment(cluster.segments, segment, adjacency);
+        if (strategy === 'natural' && hasAdjacentFrontier && !touchesCluster) continue;
+
+        const distancePenalty = centroidDistanceKm(cluster.centroid, segment.centroid);
+        const loadPenalty =
+          Math.abs(cluster.weight + segment.weight - targetWeight) / Math.max(1, targetWeight);
+        const deficitBonus = Math.max(0, targetWeight - cluster.weight) / Math.max(1, targetWeight);
+        const adjacencyBonus =
+          strategy === 'natural'
+            ? touchesCluster ? -0.9 : 0
+            : touchesCluster ? -0.15 : 0;
+        const score =
+          strategy === 'natural'
+            ? distancePenalty + loadPenalty * 0.55 - deficitBonus * 0.15 + adjacencyBonus
+            : distancePenalty * 0.35 + loadPenalty * 1.15 - deficitBonus * 0.35 + adjacencyBonus;
+
+        if (score < bestScore) {
+          bestScore = score;
+          bestClusterIndex = clusterIndex;
+          bestSegmentIndex = segmentIndex;
+        }
+      }
+    }
+
+    const chosen = unassigned.splice(bestSegmentIndex, 1)[0];
+    const cluster = clusters[bestClusterIndex];
+    cluster.segments.push(chosen);
+    cluster.weight += chosen.weight;
+    cluster.centroid = weightedClusterCentroid(cluster.segments);
+  }
+
+  return clusters
+    .sort((a, b) => a.agent_id - b.agent_id)
+    .map((cluster) => {
+      const orderedIds = orderSegmentsByProximity(cluster.segments, addressById, depot);
+      const orderedAddresses = orderedIds.map((id, sequenceIndex) => {
+        const address = addressById.get(id);
+        if (!address) throw new Error(`clusterSegmentsIntoAgents: unknown id ${id}`);
+        return {
+          ...address,
+          sequence_index: sequenceIndex,
+        };
+      });
+
+      return {
+        agent_id: cluster.agent_id,
+        addresses: orderedAddresses,
+        segments: cluster.segments,
+      };
+    });
+}
+
+function orderSegmentsByProximity(
+  segments: BlockSegment[],
+  addressById: Map<string, BlockAddress>,
+  start: { lat: number; lon: number }
+): string[] {
+  const orderedIds: string[] = [];
+  const remaining = segments.map((segment) => ({ ...segment, addressIds: [...segment.addressIds] }));
+  let walkerPos = { ...start };
+
+  while (remaining.length > 0) {
+    let bestIdx = 0;
+    let bestDist = Infinity;
+    let bestReverse = false;
+
+    for (let i = 0; i < remaining.length; i++) {
+      const segment = remaining[i];
+      const first = addressById.get(segment.addressIds[0]);
+      const last = addressById.get(segment.addressIds[segment.addressIds.length - 1]);
+      if (!first || !last) continue;
+
+      const distToEntry = centroidDistanceKm(walkerPos, { lat: first.lat, lon: first.lon });
+      const distToExit = centroidDistanceKm(walkerPos, { lat: last.lat, lon: last.lon });
+
+      if (distToEntry < bestDist) {
+        bestDist = distToEntry;
+        bestIdx = i;
+        bestReverse = false;
+      }
+      if (distToExit < bestDist) {
+        bestDist = distToExit;
+        bestIdx = i;
+        bestReverse = true;
+      }
+    }
+
+    const chosen = remaining.splice(bestIdx, 1)[0];
+    const ids = bestReverse ? [...chosen.addressIds].reverse() : chosen.addressIds;
+    orderedIds.push(...ids);
+
+    const exitAddr = addressById.get(ids[ids.length - 1]);
+    if (exitAddr) walkerPos = { lat: exitAddr.lat, lon: exitAddr.lon };
+  }
+
+  return orderedIds;
+}
+
+export function buildBalancedBlockClusters(
+  addresses: BuildRouteAddress[],
+  nAgents: number,
+  depot: { lat: number; lon: number }
+): AgentRouteCluster[] {
+  const safeAgentCount = Math.max(1, Math.floor(nAgents) || 1);
+  const blockAddresses: BlockAddress[] = addresses.map((a) => ({
+    id: a.id,
+    lon: a.lon,
+    lat: a.lat,
+    house_number: a.house_number,
+    street_number: a.street_number,
+    street_name: a.street_name,
+    formatted: a.formatted,
+  }));
+
+  const addressById = new Map(blockAddresses.map((address) => [address.id, address]));
+  const segments = buildBlockSegments(blockAddresses);
+  if (segments.length === 0) return [];
+
+  return clusterSegmentsIntoAgents(segments, addressById, safeAgentCount, depot, 0, 'balanced');
+}
+
+export function buildNaturalZoneClusters(
+  addresses: BuildRouteAddress[],
+  nAgents: number,
+  depot: { lat: number; lon: number }
+): AgentRouteCluster[] {
+  const safeAgentCount = Math.max(1, Math.floor(nAgents) || 1);
+  const blockAddresses: BlockAddress[] = addresses.map((a) => ({
+    id: a.id,
+    lon: a.lon,
+    lat: a.lat,
+    house_number: a.house_number,
+    street_number: a.street_number,
+    street_name: a.street_name,
+    formatted: a.formatted,
+  }));
+
+  const addressById = new Map(blockAddresses.map((address) => [address.id, address]));
+  const segments = buildBlockSegments(blockAddresses);
+  if (segments.length === 0) return [];
+  const boundaryLat = detectBoundaryLatitude(blockAddresses);
+  if (boundaryLat === null || safeAgentCount <= 1) {
+    return clusterSegmentsIntoAgents(segments, addressById, safeAgentCount, depot, 0, 'natural');
+  }
+
+  const northSegments = segments.filter((segment) => segment.centroid.lat > boundaryLat);
+  const southSegments = segments.filter((segment) => segment.centroid.lat <= boundaryLat);
+  if (northSegments.length === 0 || southSegments.length === 0) {
+    return clusterSegmentsIntoAgents(segments, addressById, safeAgentCount, depot, 0, 'natural');
+  }
+
+  const zoneWeights = [
+    northSegments.reduce((sum, segment) => sum + segment.weight, 0),
+    southSegments.reduce((sum, segment) => sum + segment.weight, 0),
+  ];
+  const [northAgents, southAgents] = allocateRepCountsByWeight(zoneWeights, safeAgentCount);
+
+  const northDepot =
+    northSegments.reduce(
+      (acc, segment) => ({
+        lat: acc.lat + segment.centroid.lat / northSegments.length,
+        lon: acc.lon + segment.centroid.lon / northSegments.length,
+      }),
+      { lat: 0, lon: 0 }
+    );
+  const southDepot =
+    southSegments.reduce(
+      (acc, segment) => ({
+        lat: acc.lat + segment.centroid.lat / southSegments.length,
+        lon: acc.lon + segment.centroid.lon / southSegments.length,
+      }),
+      { lat: 0, lon: 0 }
+    );
+
+  const northClusters = clusterSegmentsIntoAgents(northSegments, addressById, northAgents, northDepot, 0, 'natural');
+  const southClusters = clusterSegmentsIntoAgents(
+    southSegments,
+    addressById,
+    southAgents,
+    southDepot,
+    northClusters.length,
+    'natural'
+  );
+
+  return [...northClusters, ...southClusters];
 }
 
 /**

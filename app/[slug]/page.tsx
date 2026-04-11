@@ -1,15 +1,16 @@
 import type { Metadata } from 'next';
+import { notFound } from 'next/navigation';
 import { createAdminClient } from '@/lib/supabase/server';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { PartnerOfferLanding } from '@/components/landing/PartnerOfferLanding';
 import {
   incrementPublicPartnerOfferView,
   isPublicPartnerOfferAvailable,
-  loadPublicPartnerOfferByToken,
+  loadPublicPartnerOfferByVanitySlug,
 } from '@/lib/offers/publicPartnerOffer';
 
 type Params = {
-  params: Promise<{ token: string }>;
+  params: Promise<{ slug: string }>;
 };
 
 export const dynamic = 'force-dynamic';
@@ -29,18 +30,22 @@ export const metadata: Metadata = {
   },
 };
 
-export default async function PartnerOfferPage({ params }: Params) {
-  const { token } = await params;
+export default async function PartnerOfferVanityPage({ params }: Params) {
+  const { slug } = await params;
   const admin = createAdminClient();
 
-  const offer = await loadPublicPartnerOfferByToken(admin, token);
-  const isAvailable = offer ? isPublicPartnerOfferAvailable(offer) : false;
+  const offer = await loadPublicPartnerOfferByVanitySlug(admin, slug);
+  if (!offer) {
+    notFound();
+  }
 
-  if (offer && isAvailable) {
+  const isAvailable = isPublicPartnerOfferAvailable(offer);
+
+  if (isAvailable) {
     await incrementPublicPartnerOfferView(admin, offer);
   }
 
-  if (!offer || !isAvailable) {
+  if (!isAvailable) {
     return (
       <main className="min-h-screen bg-slate-50 text-slate-900 flex items-center justify-center p-6">
         <Card className="w-full max-w-xl border-slate-200">

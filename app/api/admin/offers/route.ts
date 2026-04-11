@@ -1,24 +1,14 @@
 import { randomBytes } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireFounderApi } from '@/app/api/admin/_utils/founder';
-
-type PartnerOfferRow = {
-  id: string;
-  token: string;
-  recipient_name: string | null;
-  recipient_email: string | null;
-  partner_name: string;
-  offer_title: string;
-  offer_message: string | null;
-  cta_label: string | null;
-  cta_url: string | null;
-  max_views: number | null;
-  view_count: number;
-  expires_at: string;
-  last_viewed_at: string | null;
-  revoked_at: string | null;
-  created_at: string;
-};
+import { getPartnerOfferMailerConfigError } from '@/lib/email/partnerOffers';
+import {
+  PARTNER_OFFER_SELECT,
+  type PartnerOfferRow,
+  toClientPartnerOffer,
+} from '@/lib/offers/partnerOfferRecord';
+import { resolveUniquePartnerOfferSlug } from '@/lib/offers/partnerOfferSlug';
+import { sendOfferEmailForRow } from '@/app/api/admin/offers/_lib/sendOfferEmail';
 
 function parseOptionalString(value: unknown, maxLen: number): string | null {
   if (typeof value !== 'string') return null;
@@ -35,32 +25,15 @@ function parseOptionalPositiveInt(value: unknown): number | null {
   return normalized > 0 ? normalized : null;
 }
 
-function computeStatus(row: PartnerOfferRow): 'active' | 'expired' | 'revoked' | 'maxed' {
-  if (row.revoked_at) return 'revoked';
-  if (new Date(row.expires_at).getTime() <= Date.now()) return 'expired';
-  if (row.max_views != null && row.view_count >= row.max_views) return 'maxed';
-  return 'active';
+function parseOptionalBoolean(value: unknown): boolean {
+  return value === true;
 }
 
-function toClientOffer(row: PartnerOfferRow, origin: string) {
-  return {
-    id: row.id,
-    recipientName: row.recipient_name,
-    recipientEmail: row.recipient_email,
-    partnerName: row.partner_name,
-    offerTitle: row.offer_title,
-    offerMessage: row.offer_message,
-    ctaLabel: row.cta_label,
-    ctaUrl: row.cta_url,
-    maxViews: row.max_views,
-    viewCount: row.view_count,
-    expiresAt: row.expires_at,
-    lastViewedAt: row.last_viewed_at,
-    revokedAt: row.revoked_at,
-    createdAt: row.created_at,
-    status: computeStatus(row),
-    shareUrl: `${origin}/partner-offer/${row.token}`,
-  };
+function parseOptionalEmail(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim().toLowerCase();
+  if (!trimmed) return null;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed) ? trimmed : null;
 }
 
 export async function GET(request: NextRequest) {
@@ -72,9 +45,8 @@ export async function GET(request: NextRequest) {
 
     const { data, error } = await auth.admin
       .from('partner_offers')
-      .select(
-        'id, token, recipient_name, recipient_email, partner_name, offer_title, offer_message, cta_label, cta_url, max_views, view_count, expires_at, last_viewed_at, revoked_at, created_at'
-      )
+      .select(PARTNER_OFFER_SELECT)
+      .eq('is_draft', false)
       .order('created_at', { ascending: false })
       .limit(100);
 
@@ -83,7 +55,7 @@ export async function GET(request: NextRequest) {
     }
 
     const origin = request.nextUrl.origin;
-    const offers = ((data ?? []) as PartnerOfferRow[]).map((row) => toClientOffer(row, origin));
+    const offers = ((data ?? []) as PartnerOfferRow[]).map((row) => toClientPartnerOffer(row, origin));
     return NextResponse.json({ offers });
   } catch (error) {
     console.error('[api/admin/offers] GET error:', error);
@@ -101,16 +73,19 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}));
 
     const recipientName = parseOptionalString(body?.recipientName, 120);
-    const recipientEmail = parseOptionalString(body?.recipientEmail, 254)?.toLowerCase() ?? null;
+    const recipientEmail = parseOptionalEmail(body?.recipientEmail);
     const partnerName = parseOptionalString(body?.partnerName, 160);
     const offerTitle = parseOptionalString(body?.offerTitle, 180);
     const offerMessage = parseOptionalString(body?.offerMessage, 5000);
     const ctaLabel = parseOptionalString(body?.ctaLabel, 80);
     const ctaUrl = parseOptionalString(body?.ctaUrl, 500);
+    const vanitySlugInput = parseOptionalString(body?.vanitySlug, 160);
     const maxViews = parseOptionalPositiveInt(body?.maxViews);
     const expiresAtRaw = parseOptionalString(body?.expiresAt, 80);
+    const sendOfferEmail = parseOptionalBoolean(body?.sendOfferEmail);
+    const isDraft = parseOptionalBoolean(body?.draft);
 
-    if (!partnerName) {
+    if (!partnerName && !isDraft) {
       return NextResponse.json({ error: 'Partner/company is required' }, { status: 400 });
     }
     if (!offerTitle) {
@@ -118,6 +93,9 @@ export async function POST(request: NextRequest) {
     }
     if (!expiresAtRaw) {
       return NextResponse.json({ error: 'Expiry is required' }, { status: 400 });
+    }
+    if (body?.recipientEmail && !recipientEmail) {
+      return NextResponse.json({ error: 'Recipient email is invalid' }, { status: 400 });
     }
 
     const expiresAtMs = new Date(expiresAtRaw).getTime();
@@ -136,25 +114,44 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    if (sendOfferEmail && !recipientEmail) {
+      return NextResponse.json(
+        { error: 'Recipient email is required when "Send offer email" is enabled' },
+        { status: 400 }
+      );
+    }
+
+    const emailConfigError = sendOfferEmail ? getPartnerOfferMailerConfigError() : null;
+    if (emailConfigError) {
+      return NextResponse.json({ error: emailConfigError }, { status: 400 });
+    }
+
+    const vanitySlug = await resolveUniquePartnerOfferSlug(
+      auth.admin,
+      vanitySlugInput || partnerName || offerTitle || 'offer'
+    );
     const token = randomBytes(24).toString('base64url');
     const { data, error } = await auth.admin
       .from('partner_offers')
       .insert({
         token,
+        vanity_slug: vanitySlug,
+        is_draft: isDraft,
         recipient_name: recipientName,
         recipient_email: recipientEmail,
-        partner_name: partnerName,
+        partner_name: partnerName || 'Untitled partner',
         offer_title: offerTitle,
         offer_message: offerMessage,
         cta_label: ctaLabel,
         cta_url: ctaUrl,
         max_views: maxViews,
         expires_at: new Date(expiresAtMs).toISOString(),
+        email_sent: false,
+        email_status: sendOfferEmail ? 'failed' : 'not_requested',
+        email_recipient: sendOfferEmail ? recipientEmail : null,
         created_by: auth.user.id,
       })
-      .select(
-        'id, token, recipient_name, recipient_email, partner_name, offer_title, offer_message, cta_label, cta_url, max_views, view_count, expires_at, last_viewed_at, revoked_at, created_at'
-      )
+      .select(PARTNER_OFFER_SELECT)
       .single();
 
     if (error || !data) {
@@ -162,7 +159,24 @@ export async function POST(request: NextRequest) {
     }
 
     const row = data as PartnerOfferRow;
-    return NextResponse.json({ offer: toClientOffer(row, request.nextUrl.origin) });
+    if (!sendOfferEmail) {
+      return NextResponse.json({
+        offer: toClientPartnerOffer(row, request.nextUrl.origin),
+        emailSent: false,
+      });
+    }
+
+    const emailResult = await sendOfferEmailForRow({
+      offer: row,
+      origin: request.nextUrl.origin,
+    });
+
+    return NextResponse.json({
+      offer: emailResult.offer,
+      emailSent: emailResult.emailSent,
+      emailError: emailResult.emailError,
+      resendMessageId: emailResult.resendMessageId,
+    });
   } catch (error) {
     console.error('[api/admin/offers] POST error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

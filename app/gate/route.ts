@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getPostAuthRedirect } from '@/app/lib/post-auth-gate';
 
 /**
- * Central post-auth gate: redirects to onboarding, subscribe, or dashboard.
+ * Central post-auth gate: redirects to App Store prompt, onboarding, subscribe, or dashboard.
  * Auth callback should redirect here instead of /home.
  */
 export async function GET(request: NextRequest) {
