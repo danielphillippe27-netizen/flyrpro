@@ -30,8 +30,8 @@ export function PartnerOfferDmPreview({
   };
 
   return (
-    <div className="flex h-full min-h-[560px] flex-col overflow-hidden rounded-lg border border-border bg-[#111827] shadow-sm">
-      <div className="border-b border-white/10 bg-[#0b1220] px-5 py-4 text-white">
+    <div className="flex h-full min-h-[420px] flex-col overflow-hidden rounded-lg border border-border bg-[#111827] shadow-sm sm:min-h-[560px]">
+      <div className="border-b border-white/10 bg-[#0b1220] px-4 py-4 text-white sm:px-5">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-full bg-red-500/15 text-red-300">
             <MessageCircle className="h-5 w-5" />
@@ -43,7 +43,7 @@ export function PartnerOfferDmPreview({
         </div>
       </div>
 
-      <div className="flex-1 space-y-4 overflow-y-auto bg-[radial-gradient(circle_at_top,_rgba(239,68,68,0.12),_rgba(17,24,39,1)_28%)] p-5">
+      <div className="flex-1 space-y-4 overflow-y-auto bg-[radial-gradient(circle_at_top,_rgba(239,68,68,0.12),_rgba(17,24,39,1)_28%)] p-4 sm:p-5">
         <div className="flex justify-end">
           <button
             type="button"

@@ -55,6 +55,7 @@ function buildRecipientLabel(name: string, email: string): string {
 }
 
 export function PartnerOfferCreateForm() {
+  const [mobilePanel, setMobilePanel] = useState<'compose' | 'preview'>('compose');
   const [selectedTemplate, setSelectedTemplate] = useState<OfferTemplate['id'] | null>(null);
   const [partnerName, setPartnerName] = useState('');
   const [recipientName, setRecipientName] = useState('');
@@ -359,10 +360,42 @@ export function PartnerOfferCreateForm() {
   }, [dmCopy.igDmIntroText, dmCopy.igDmLinkText, dmCopy.igDmReplyText, draftOffer?.shareUrl]);
 
   return (
-    <div className="h-full w-full bg-background px-6 py-6">
-      <div className="grid h-full min-h-[calc(100vh-9rem)] gap-6 xl:grid-cols-2">
-        <section className="flex min-h-0 flex-col rounded-lg border border-border bg-background">
-          <div className="border-b border-border px-6 py-5">
+    <div className="h-full w-full bg-background px-4 py-4 sm:px-6 sm:py-6">
+      <div className="mb-4 sm:hidden">
+        <div className="grid grid-cols-2 gap-2 rounded-lg border border-border bg-muted/30 p-1">
+          <Button
+            type="button"
+            variant={mobilePanel === 'compose' ? 'default' : 'ghost'}
+            className={cn(
+              'h-9',
+              mobilePanel === 'compose' ? 'bg-foreground text-background hover:bg-foreground/90' : ''
+            )}
+            onClick={() => setMobilePanel('compose')}
+          >
+            Compose
+          </Button>
+          <Button
+            type="button"
+            variant={mobilePanel === 'preview' ? 'default' : 'ghost'}
+            className={cn(
+              'h-9',
+              mobilePanel === 'preview' ? 'bg-foreground text-background hover:bg-foreground/90' : ''
+            )}
+            onClick={() => setMobilePanel('preview')}
+          >
+            Preview
+          </Button>
+        </div>
+      </div>
+      <div className="grid h-full min-h-0 gap-4 sm:gap-6 xl:min-h-[calc(100vh-9rem)] xl:grid-cols-2">
+        <section
+          className={cn(
+            'min-h-0 flex-col rounded-lg border border-border bg-background',
+            mobilePanel === 'compose' ? 'flex' : 'hidden',
+            'sm:flex'
+          )}
+        >
+          <div className="border-b border-border px-4 py-4 sm:px-6 sm:py-5">
             <h2 className="text-xl font-semibold text-foreground">Compose</h2>
             <p className="mt-1 text-sm text-muted-foreground">
               {isDmTemplate
@@ -371,7 +404,7 @@ export function PartnerOfferCreateForm() {
             </p>
           </div>
 
-          <div className="flex-1 space-y-6 overflow-y-auto px-6 py-6">
+          <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4 sm:space-y-6 sm:px-6 sm:py-6">
             <div className="space-y-3">
               <Label>Template</Label>
               <div className="flex flex-wrap gap-2">
@@ -433,7 +466,7 @@ export function PartnerOfferCreateForm() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="vanitySlug">Custom link</Label>
-                  <div className="flex items-center rounded-lg border border-input bg-background px-3">
+                  <div className="flex min-w-0 items-center rounded-lg border border-input bg-background px-3">
                     <span className="shrink-0 text-xs text-muted-foreground">flyr.software/</span>
                     <Input
                       id="vanitySlug"
@@ -443,7 +476,7 @@ export function PartnerOfferCreateForm() {
                         setVanitySlug(slugifyPartnerOfferPath(event.target.value));
                       }}
                       placeholder="acme-realty-group"
-                      className="border-0 px-2 shadow-none focus-visible:ring-0"
+                      className="min-w-0 border-0 px-2 shadow-none focus-visible:ring-0"
                     />
                   </div>
                 </div>
@@ -466,8 +499,8 @@ export function PartnerOfferCreateForm() {
                   value={messageBody}
                   onChange={(event) => setMessageBody(event.target.value)}
                   placeholder="Write the note your partner will receive."
-                  rows={14}
-                  className="min-h-[280px] resize-y"
+                  rows={10}
+                  className="min-h-[220px] resize-y sm:min-h-[280px]"
                 />
               </div>
 
@@ -506,7 +539,7 @@ export function PartnerOfferCreateForm() {
                 </div>
                 <div className="space-y-2">
                   <Label>Private link</Label>
-                  <div className="flex min-h-11 items-center gap-2 rounded-lg border border-border bg-muted/30 px-3">
+                  <div className="flex min-h-11 flex-col items-stretch gap-3 rounded-lg border border-border bg-muted/30 px-3 py-3 sm:flex-row sm:items-center sm:gap-2 sm:py-0">
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 text-sm font-medium text-foreground">
                         <Link2 className="h-4 w-4 text-muted-foreground" />
@@ -520,7 +553,7 @@ export function PartnerOfferCreateForm() {
                       type="button"
                       variant="outline"
                       size="sm"
-                      className="shrink-0"
+                      className="w-full shrink-0 sm:w-auto"
                       disabled={!draftOffer?.shareUrl || copying}
                       onClick={() => void handleCopyLink()}
                     >
@@ -533,7 +566,7 @@ export function PartnerOfferCreateForm() {
             </div>
           </div>
 
-          <div className="border-t border-border px-6 py-5">
+          <div className="border-t border-border px-4 py-4 sm:px-6 sm:py-5">
             <div className="mb-4 min-h-5">
               {composerError ? (
                 <p className="text-sm text-destructive">{composerError}</p>
@@ -602,7 +635,7 @@ export function PartnerOfferCreateForm() {
           </div>
         </section>
 
-        <section className="min-h-0">
+        <section className={cn('min-h-0', mobilePanel === 'preview' ? 'block' : 'hidden', 'sm:block')}>
           {isDmTemplate ? (
             <PartnerOfferDmPreview
               recipientName={recipientName}

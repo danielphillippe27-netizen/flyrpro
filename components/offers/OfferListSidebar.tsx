@@ -22,6 +22,8 @@ interface OfferListSidebarProps {
   collapsed?: boolean;
   onToggleCollapse?: () => void;
   width?: number;
+  variant?: 'desktop' | 'mobile';
+  onNavigate?: () => void;
 }
 
 export function OfferListSidebar({
@@ -29,6 +31,8 @@ export function OfferListSidebar({
   collapsed = false,
   onToggleCollapse,
   width = 280,
+  variant = 'desktop',
+  onNavigate,
 }: OfferListSidebarProps) {
   const pathname = usePathname();
   const [offers, setOffers] = useState<PartnerOffer[]>([]);
@@ -98,7 +102,7 @@ export function OfferListSidebar({
     return () => el.removeEventListener('wheel', handler);
   }, []);
 
-  if (collapsed) {
+  if (variant === 'desktop' && collapsed) {
     return (
       <aside className="shrink-0 flex flex-col bg-white dark:bg-[#0f0f10] w-9 h-12 items-center justify-center border-b border-border -mt-px">
         <button
@@ -116,21 +120,28 @@ export function OfferListSidebar({
 
   return (
     <aside
-      className="shrink-0 flex flex-col border-r border-border bg-white dark:bg-sidebar transition-[width] duration-200 ease-out overflow-hidden"
-      style={{ width }}
+      className={cn(
+        'flex flex-col bg-white dark:bg-sidebar overflow-hidden',
+        variant === 'desktop'
+          ? 'shrink-0 border-r border-border transition-[width] duration-200 ease-out'
+          : 'min-h-0 flex-1'
+      )}
+      style={variant === 'desktop' ? { width } : undefined}
     >
       <div className="p-3 pb-3 border-b border-border">
-        <div className="flex items-center justify-end gap-2 mb-2">
-          <button
-            type="button"
-            onClick={onToggleCollapse}
-            className="flex items-center justify-center w-[18px] h-[18px] rounded-sm bg-transparent hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0 ml-auto"
-            aria-label="Hide offer list"
-            title="Hide offer list"
-          >
-            <ChevronsLeft className="w-3.5 h-3.5" />
-          </button>
-        </div>
+        {variant === 'desktop' ? (
+          <div className="flex items-center justify-end gap-2 mb-2">
+            <button
+              type="button"
+              onClick={onToggleCollapse}
+              className="flex items-center justify-center w-[18px] h-[18px] rounded-sm bg-transparent hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0 ml-auto"
+              aria-label="Hide offer list"
+              title="Hide offer list"
+            >
+              <ChevronsLeft className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        ) : null}
         <div className="flex gap-1.5">
           <div className="relative flex-1 min-w-0">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
@@ -145,7 +156,10 @@ export function OfferListSidebar({
             size="icon"
             className="h-8 w-8 shrink-0 bg-red-600 text-white hover:bg-red-700 rounded-md"
             type="button"
-            onClick={onNewOffer}
+            onClick={() => {
+              onNavigate?.();
+              onNewOffer?.();
+            }}
             aria-label="New offer"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -183,6 +197,7 @@ export function OfferListSidebar({
                       <li key={offer.id}>
                         <Link
                           href={`/offers/${offer.id}`}
+                          onClick={onNavigate}
                           className={cn(
                             'block px-3 py-2 text-sm border-l-2 -ml-px transition-colors',
                             isSelected
@@ -225,6 +240,7 @@ export function OfferListSidebar({
                       <li key={offer.id}>
                         <Link
                           href={`/offers/${offer.id}`}
+                          onClick={onNavigate}
                           className={cn(
                             'block px-3 py-2 text-sm border-l-2 -ml-px transition-colors',
                             isSelected

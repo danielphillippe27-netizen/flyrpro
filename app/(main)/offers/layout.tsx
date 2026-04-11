@@ -2,8 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
+import { PanelLeft } from 'lucide-react';
 import { OfferListSidebar } from '@/components/offers/OfferListSidebar';
 import { CampaignsPageHeader } from '@/components/campaigns/CampaignsPageHeader';
+import { Button } from '@/components/ui/button';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { handleWheelScrollContainer } from '@/lib/scrollContainer';
 
 const OFFER_SIDEBAR_COLLAPSED_KEY = 'flyr-offer-sidebar-collapsed';
@@ -85,6 +88,7 @@ export default function OffersLayout({ children }: { children: React.ReactNode }
   const router = useRouter();
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileListOpen, setMobileListOpen] = useState(false);
   const headerTitle = useOffersHeaderTitle();
 
   useEffect(() => {
@@ -101,6 +105,10 @@ export default function OffersLayout({ children }: { children: React.ReactNode }
     } catch {}
   }, []);
 
+  useEffect(() => {
+    setMobileListOpen(false);
+  }, [pathname]);
+
   const mainContentRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = mainContentRef.current;
@@ -113,14 +121,47 @@ export default function OffersLayout({ children }: { children: React.ReactNode }
   return (
     <OffersFounderGuard>
       <div className="flex flex-1 h-full min-h-0 w-full overflow-hidden">
-        <OfferListSidebar
-          onNewOffer={() => router.push('/offers/new')}
-          collapsed={collapsed}
-          onToggleCollapse={() => setCollapsedPersisted(!collapsed)}
-          width={SIDEBAR_WIDTH}
-        />
+        <div className="hidden md:flex shrink-0">
+          <OfferListSidebar
+            onNewOffer={() => router.push('/offers/new')}
+            collapsed={collapsed}
+            onToggleCollapse={() => setCollapsedPersisted(!collapsed)}
+            width={SIDEBAR_WIDTH}
+          />
+        </div>
+        <Sheet open={mobileListOpen} onOpenChange={setMobileListOpen}>
+          <SheetContent side="left" className="w-[min(100vw,22rem)] p-0 md:hidden">
+            <SheetHeader className="border-b border-border px-4 py-4 text-left">
+              <SheetTitle className="text-base">Offers</SheetTitle>
+              <SheetDescription>Browse offers or create a new private link.</SheetDescription>
+            </SheetHeader>
+            <div className="flex h-full min-h-0 flex-col">
+              <OfferListSidebar
+                onNewOffer={() => {
+                  setMobileListOpen(false);
+                  router.push('/offers/new');
+                }}
+                width={SIDEBAR_WIDTH}
+                variant="mobile"
+                onNavigate={() => setMobileListOpen(false)}
+              />
+            </div>
+          </SheetContent>
+        </Sheet>
         <div className="flex-1 min-w-0 flex flex-col overflow-hidden bg-background">
           <CampaignsPageHeader title={headerTitle} />
+          <div className="border-b border-border bg-background px-4 py-2 md:hidden">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="w-full justify-start gap-2"
+              onClick={() => setMobileListOpen(true)}
+            >
+              <PanelLeft className="h-4 w-4" />
+              Browse offers
+            </Button>
+          </div>
           <div
             ref={mainContentRef}
             className="flex-1 min-h-0 overflow-y-auto overscroll-contain h-full"

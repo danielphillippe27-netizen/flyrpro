@@ -103,11 +103,11 @@ export function PartnerOfferDetailPanel({ offer, onRevoked }: PartnerOfferDetail
   const isDmTemplate = isJustListedDmOffer(offer.offerTitle, offer.offerMessage);
 
   return (
-    <div className="max-w-3xl mx-auto p-6 space-y-4">
+    <div className="mx-auto max-w-3xl space-y-4 p-4 sm:p-6">
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
       <div className="rounded-lg border p-4 space-y-4">
-        <div className="flex items-start justify-between gap-3">
-          <div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
             <div className="font-semibold text-foreground">{offer.offerTitle}</div>
             <div className="text-sm text-muted-foreground mt-1">
               {offer.partnerName}
@@ -171,8 +171,8 @@ export function PartnerOfferDetailPanel({ offer, onRevoked }: PartnerOfferDetail
             </div>
           </div>
         ) : null}
-        <div className="flex flex-wrap items-center gap-2">
-          <Input readOnly value={offer.shareUrl} className="h-9 text-xs font-mono" />
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+          <Input readOnly value={offer.shareUrl} className="h-9 text-xs font-mono sm:flex-1" />
           <Button size="sm" variant="outline" type="button" onClick={() => void copyLink(offer)}>
             <Copy className="h-3.5 w-3.5 mr-1" />
             {copySuccess === offer.id ? 'Copied' : 'Copy link'}
