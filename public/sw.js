@@ -1,12 +1,26 @@
+/**
+ * Minimal offline fallback only. Do not precache HTML — after a deploy, a stale
+ * cached document breaks Next.js chunk loading (client-side exception).
+ */
+const CACHE_NAME = 'flyr-nav-fallback-v2';
+
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open('flyr-shell-v1').then((cache) => cache.addAll(['/']))
-  );
-  self.skipWaiting();
+  event.waitUntil(self.skipWaiting());
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    (async () => {
+      const keys = await caches.keys();
+      await Promise.all(
+        keys.map((key) => {
+          if (key !== CACHE_NAME) return caches.delete(key);
+          return undefined;
+        })
+      );
+      await self.clients.claim();
+    })()
+  );
 });
 
 self.addEventListener('fetch', (event) => {
@@ -14,7 +28,7 @@ self.addEventListener('fetch', (event) => {
 
   event.respondWith(
     fetch(event.request).catch(async () => {
-      const cache = await caches.open('flyr-shell-v1');
+      const cache = await caches.open(CACHE_NAME);
       const fallback = await cache.match('/');
       return fallback || Response.error();
     })

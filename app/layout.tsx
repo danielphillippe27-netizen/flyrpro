@@ -19,20 +19,20 @@ export const metadata: Metadata = {
     default: "FLYR",
     template: "%s | FLYR",
   },
-  description: "Door-to-Door Sales Tracking Software",
+  description: "Door-to-door marketing software",
   icons: {
     icon: "/favicon.ico",
     apple: "/apple-touch-icon.png",
   },
   openGraph: {
     title: "FLYR",
-    description: "Door-to-Door Sales Tracking Software",
+    description: "Door-to-door marketing software",
     images: ["/og-image.png"],
   },
   twitter: {
     card: "summary_large_image",
     title: "FLYR",
-    description: "Door-to-Door Sales Tracking Software",
+    description: "Door-to-door marketing software",
     images: ["/og-image.png"],
   },
 };

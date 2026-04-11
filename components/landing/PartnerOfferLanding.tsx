@@ -73,7 +73,11 @@ function JustListedDmOfferLanding({
   expiresAt,
   ctaLabel,
   onGetStarted,
-}: Omit<PartnerOfferLandingProps, 'offerToken'> & { onGetStarted: () => void }) {
+  onShowDemo,
+}: Omit<PartnerOfferLandingProps, 'offerToken'> & {
+  onGetStarted: () => void;
+  onShowDemo: () => void;
+}) {
   const paragraphs = toParagraphs(offerMessage);
   const shouldUseDefaultTitle = !offerTitle.trim() || /private access/i.test(offerTitle);
   const usesLegacyMessage =
@@ -85,9 +89,6 @@ function JustListedDmOfferLanding({
   const secondaryMessage = usesLegacyMessage
     ? JUST_LISTED_DM_DEFAULTS.secondaryMessage
     : (paragraphs[1] ?? JUST_LISTED_DM_DEFAULTS.secondaryMessage);
-  const tertiaryMessage = usesLegacyMessage
-    ? JUST_LISTED_DM_DEFAULTS.tertiaryMessage
-    : (paragraphs[2] ?? JUST_LISTED_DM_DEFAULTS.tertiaryMessage);
   const primaryCta =
     !ctaLabel?.trim() || /claim private access/i.test(ctaLabel)
       ? JUST_LISTED_DM_DEFAULTS.primaryCta
@@ -104,7 +105,7 @@ function JustListedDmOfferLanding({
             </span>
           </Link>
           <div className="inline-flex items-center rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-red-200">
-            Listing advantage
+            Door-door software
           </div>
         </div>
       </header>
@@ -112,78 +113,38 @@ function JustListedDmOfferLanding({
       <main className="pb-10">
         <section className="px-4 pb-6 pt-5 sm:px-6 sm:pb-8 sm:pt-8">
           <div className="mx-auto max-w-5xl">
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-5">
-              <div className="overflow-hidden rounded-[28px] border border-white/10 bg-[radial-gradient(circle_at_top,_rgba(239,68,68,0.18),_rgba(24,24,27,0.96)_42%)] p-5 shadow-[0_24px_80px_rgba(0,0,0,0.45)] sm:p-6">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="inline-flex items-center rounded-full border border-red-500/25 bg-red-500/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-red-200">
-                    Just listed
-                  </span>
-                  <span className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-300">
-                    Listing advantage
-                  </span>
-                </div>
-
-                <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs font-medium text-zinc-400 sm:text-sm">
-                  <span>{partnerName}</span>
-                  {recipientName ? <span>For {recipientName}</span> : null}
-                  <span>Expires {formatLongDate(expiresAt)}</span>
-                </div>
-
-                <h1 className="mt-4 max-w-2xl text-[2rem] font-black leading-[0.98] tracking-[-0.04em] text-white sm:text-[2.65rem]">
-                  {displayTitle}
-                </h1>
-                <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-200 sm:text-[15px]">
-                  {primaryMessage}
-                </p>
-                <p className="mt-2 max-w-xl text-sm leading-6 text-zinc-400 sm:text-[15px]">
-                  {secondaryMessage}
-                </p>
-
-                <div className="mt-5 flex flex-col gap-3 sm:mt-6 sm:max-w-md">
-                  <button
-                    type="button"
-                    onClick={onGetStarted}
-                    className="inline-flex min-h-14 w-full items-center justify-center rounded-2xl bg-red-600 px-5 text-base font-semibold text-white shadow-[0_18px_45px_rgba(239,68,68,0.35)] transition hover:bg-red-500"
-                  >
-                    {primaryCta}
-                    <ArrowRight className="ml-2 h-4 w-4" />
-                  </button>
-                  <p className="text-xs leading-5 text-zinc-400">
-                    {tertiaryMessage}
-                  </p>
-                </div>
+            <div className="overflow-hidden rounded-[28px] border border-white/10 bg-[radial-gradient(circle_at_top,_rgba(239,68,68,0.18),_rgba(24,24,27,0.96)_42%)] p-5 shadow-[0_24px_80px_rgba(0,0,0,0.45)] sm:p-6">
+              <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs font-medium text-zinc-400 sm:text-sm">
+                <span>{partnerName}</span>
+                {recipientName ? <span>For {recipientName}</span> : null}
+                <span>Expires {formatLongDate(expiresAt)}</span>
               </div>
 
-              <aside className="rounded-[24px] border border-white/10 bg-white/[0.04] p-4 shadow-[0_18px_50px_rgba(0,0,0,0.28)] sm:p-5">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-400">
-                  Why this works for hot listings
-                </p>
-                <div className="mt-4 space-y-3">
-                  <div className="rounded-2xl border border-white/10 bg-black/20 p-3.5">
-                    <p className="text-sm font-semibold text-white">Create momentum fast</p>
-                    <p className="mt-1 text-sm leading-5 text-zinc-400">
-                      Hit the surrounding homes while the listing is fresh and attention is highest.
-                    </p>
-                  </div>
-                  <div className="rounded-2xl border border-white/10 bg-black/20 p-3.5">
-                    <p className="text-sm font-semibold text-white">Turn one listing into more business</p>
-                    <p className="mt-1 text-sm leading-5 text-zinc-400">
-                      Use the property as your reason to start conversations with neighbours and uncover your next client.
-                    </p>
-                  </div>
-                  <div className="rounded-2xl border border-white/10 bg-black/20 p-3.5">
-                    <p className="text-sm font-semibold text-white">Flyers + doorknocking, tracked</p>
-                    <p className="mt-1 text-sm leading-5 text-zinc-400">
-                      Plan the area, work the homes around the listing, and track activity inside one system.
-                    </p>
-                  </div>
-                </div>
-              </aside>
+              <h1 className="mt-4 max-w-2xl text-[2rem] font-black leading-[0.98] tracking-[-0.04em] text-white sm:text-[2.65rem]">
+                {displayTitle}
+              </h1>
+              <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-200 sm:text-[15px]">
+                {primaryMessage}
+              </p>
+              <p className="mt-2 max-w-xl text-sm leading-6 text-zinc-400 sm:text-[15px]">
+                {secondaryMessage}
+              </p>
+
+              <div className="mt-5 flex flex-col gap-3 sm:mt-6 sm:max-w-md">
+                <button
+                  type="button"
+                  onClick={onShowDemo}
+                  className="inline-flex min-h-14 w-full items-center justify-center rounded-2xl bg-red-600 px-5 text-base font-semibold text-white shadow-[0_18px_45px_rgba(239,68,68,0.35)] transition hover:bg-red-500"
+                >
+                  {primaryCta}
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </button>
+              </div>
             </div>
           </div>
         </section>
 
-        <section className="px-4 py-2 sm:px-6">
+        <section id="listing-play-demo" className="px-4 py-2 sm:px-6">
           <div className="mx-auto max-w-5xl rounded-[28px] border border-white/10 bg-white/[0.04] p-4 shadow-[0_22px_70px_rgba(0,0,0,0.3)] sm:p-6">
             <div className="max-w-2xl">
               <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-red-200">
@@ -197,29 +158,15 @@ function JustListedDmOfferLanding({
               </p>
             </div>
             <div className="mt-4 overflow-hidden rounded-[24px] border border-white/10 bg-black/30 p-4 sm:p-6">
-              <ExclusiveOfferArcadeEmbed variant="iphone" />
+              <ExclusiveOfferArcadeEmbed variant="iphone" instance={demoInstance} />
             </div>
-          </div>
-        </section>
-
-        <section className="px-4 pb-12 pt-4 sm:px-6">
-          <div className="mx-auto max-w-5xl rounded-[28px] border border-white/10 bg-gradient-to-br from-white/[0.06] via-white/[0.04] to-red-500/[0.08] p-5 shadow-[0_22px_70px_rgba(0,0,0,0.3)] sm:p-6">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-400">
-              Ready to move?
-            </p>
-            <h2 className="mt-2 text-2xl font-black tracking-[-0.03em] text-white sm:text-[2rem]">
-              Don't just list it. Leverage it.
-            </h2>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-400 sm:text-[15px]">
-              See how to use FLYR around your just-listed property to build attention, generate conversations, and find your next seller.
-            </p>
             <div className="mt-5 sm:max-w-md">
               <button
                 type="button"
                 onClick={onGetStarted}
                 className="inline-flex min-h-14 w-full items-center justify-center rounded-2xl bg-white px-5 text-base font-semibold text-zinc-950 transition hover:bg-zinc-100"
               >
-                {JUST_LISTED_DM_DEFAULTS.secondaryCta}
+                Continue for free trial
                 <ArrowRight className="ml-2 h-4 w-4" />
               </button>
             </div>
@@ -240,6 +187,7 @@ export function PartnerOfferLanding({
   offerToken,
 }: PartnerOfferLandingProps) {
   const [trackingWordIndex, setTrackingWordIndex] = useState(0);
+  const [demoInstance, setDemoInstance] = useState(0);
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -252,6 +200,14 @@ export function PartnerOfferLanding({
     window.location.href = `/onboarding?offer=exclusive30&partnerOfferToken=${encodeURIComponent(offerToken)}`;
   };
 
+  const handleShowDemo = () => {
+    setDemoInstance(demoInstance + 1);
+    document.getElementById('listing-play-demo')?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    });
+  };
+
   if (isJustListedDmOffer(offerTitle, offerMessage)) {
     return (
       <JustListedDmOfferLanding
@@ -262,6 +218,7 @@ export function PartnerOfferLanding({
         expiresAt={expiresAt}
         ctaLabel={ctaLabel}
         onGetStarted={handleGetStarted}
+        onShowDemo={handleShowDemo}
       />
     );
   }

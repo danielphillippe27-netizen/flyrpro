@@ -1,7 +1,7 @@
 'use client';
 
 import { Suspense, useState, useCallback, useEffect, useRef } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -81,6 +81,7 @@ function normalizeEmailList(values: string[]): string[] {
 
 function OnboardingContent() {
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const offerType = searchParams.get('offer');
   const partnerOfferToken = searchParams.get('partnerOfferToken');
@@ -88,6 +89,9 @@ function OnboardingContent() {
     offerType === 'exclusive30' &&
     typeof partnerOfferToken === 'string' &&
     partnerOfferToken.trim().length > 0;
+  const isIgOnboardingPath = pathname === '/onboarding/ig';
+  const onboardingEntryPath = isIgOnboardingPath ? '/onboarding/ig' : '/onboarding';
+  const onboardingDemo = isIgOnboardingPath ? 'ig-dm' : 'team';
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -289,7 +293,7 @@ function OnboardingContent() {
         return false;
       }
 
-      const onboardingNext = `/onboarding?offer=exclusive30&partnerOfferToken=${encodeURIComponent(
+      const onboardingNext = `${onboardingEntryPath}?offer=exclusive30&partnerOfferToken=${encodeURIComponent(
         partnerOfferToken ?? ''
       )}`;
       const callbackUrl = new URL('/auth/callback', window.location.origin);
@@ -331,6 +335,7 @@ function OnboardingContent() {
     firstName,
     isExclusivePartnerOnboarding,
     lastName,
+    onboardingEntryPath,
     partnerOfferToken,
     workEmail,
   ]);
@@ -393,7 +398,7 @@ function OnboardingContent() {
               Finish onboarding to activate your 30-day trial and watch demo if you havent already.
             </p>
             <div className="mt-4 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900">
-              <ExclusiveOfferArcadeEmbed />
+              <ExclusiveOfferArcadeEmbed demo={onboardingDemo} />
             </div>
           </div>
         ) : null}
