@@ -9,6 +9,7 @@ import {
   loadPublicPartnerOfferByVanitySlug,
 } from '@/lib/offers/publicPartnerOffer';
 import { buildPartnerOfferMetadata } from '@/lib/offers/partnerOfferMetadata';
+import { isPartnerOfferTeamExclusiveOnboarding } from '@/components/offers/partnerOfferUtils';
 
 type Params = {
   params: Promise<{ slug: string }>;
@@ -83,6 +84,10 @@ export default async function PartnerOfferVanityPage({ params }: Params) {
       expiresAt={offer.expires_at}
       ctaLabel={offer.cta_label}
       offerToken={offer.token}
+      partnerOnboardingTeamStyle={isPartnerOfferTeamExclusiveOnboarding(
+        offer.offer_title,
+        offer.offer_message
+      )}
     />
   );
 }

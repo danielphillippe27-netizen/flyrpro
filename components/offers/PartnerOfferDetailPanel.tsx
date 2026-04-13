@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
-import { Copy, Loader2 } from 'lucide-react';
+import { Copy, Loader2, QrCode } from 'lucide-react';
 import {
   buildOutreachCopy,
   emailStatusLabel,
@@ -26,6 +26,9 @@ export function PartnerOfferDetailPanel({ offer, onRevoked }: PartnerOfferDetail
   const [sendingEmail, setSendingEmail] = useState(false);
   const [copySuccess, setCopySuccess] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [offerQrBase64, setOfferQrBase64] = useState<string | null>(null);
+  const [offerQrTargetUrl, setOfferQrTargetUrl] = useState<string | null>(null);
+  const [offerQrLoading, setOfferQrLoading] = useState(false);
 
   const copyLink = useCallback(async (o: PartnerOffer) => {
     await navigator.clipboard.writeText(o.shareUrl);
@@ -64,6 +67,57 @@ export function PartnerOfferDetailPanel({ offer, onRevoked }: PartnerOfferDetail
       setRevokingId(null);
     }
   }, [offer.id, onRevoked]);
+
+  const generateOfferQr = useCallback(async () => {
+    setOfferQrLoading(true);
+    setError(null);
+    try {
+      const baseUrl = typeof window !== 'undefined' ? window.location.origin : undefined;
+      const res = await fetch(`/api/admin/offers/${offer.id}/qr`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ baseUrl }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(typeof data.error === 'string' ? data.error : `HTTP ${res.status}`);
+      }
+      const qrBase64 = data.qrBase64 as string | undefined;
+      const targetUrl = data.targetUrl as string | undefined;
+      if (qrBase64) {
+        setOfferQrBase64(qrBase64);
+        setOfferQrTargetUrl(typeof targetUrl === 'string' ? targetUrl : null);
+        const link = document.createElement('a');
+        link.href = qrBase64;
+        const slug =
+          offer.vanitySlug?.replace(/[^a-z0-9-]+/gi, '-').replace(/^-|-$/g, '').slice(0, 48) ||
+          offer.id.slice(0, 8);
+        link.download = `flyr-offer-${slug}-qr.png`;
+        link.click();
+      } else {
+        setOfferQrBase64(null);
+        setOfferQrTargetUrl(null);
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Failed to generate QR code';
+      setError(message);
+      toast.error(message);
+    } finally {
+      setOfferQrLoading(false);
+    }
+  }, [offer.id, offer.vanitySlug]);
+
+  const downloadOfferQr = useCallback(() => {
+    if (!offerQrBase64) return;
+    const link = document.createElement('a');
+    link.href = offerQrBase64;
+    const slug =
+      offer.vanitySlug?.replace(/[^a-z0-9-]+/gi, '-').replace(/^-|-$/g, '').slice(0, 48) ||
+      offer.id.slice(0, 8);
+    link.download = `flyr-offer-${slug}-qr.png`;
+    link.click();
+  }, [offer.id, offer.vanitySlug, offerQrBase64]);
 
   const resendOfferEmail = useCallback(async () => {
     setSendingEmail(true);
@@ -194,6 +248,58 @@ export function PartnerOfferDetailPanel({ offer, onRevoked }: PartnerOfferDetail
                 'Revoke'
               )}
             </Button>
+          ) : null}
+        </div>
+
+        <div className="rounded-md border bg-muted/20 p-3 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div className="text-xs font-medium text-muted-foreground">QR code</div>
+              <p className="text-[11px] text-muted-foreground mt-0.5 max-w-md">
+                Same PNG settings as campaign “basic” QRs (512px). Encodes your public offer link for print or slides.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2 shrink-0">
+              <Button
+                size="sm"
+                variant="secondary"
+                type="button"
+                disabled={offerQrLoading || offer.status !== 'active'}
+                onClick={() => void generateOfferQr()}
+              >
+                {offerQrLoading ? (
+                  <span className="inline-flex items-center gap-1">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Generating…
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1">
+                    <QrCode className="h-3.5 w-3.5" />
+                    {offerQrBase64 ? 'Regenerate & download' : 'Generate QR'}
+                  </span>
+                )}
+              </Button>
+              {offerQrBase64 ? (
+                <Button size="sm" variant="outline" type="button" onClick={downloadOfferQr}>
+                  Download PNG
+                </Button>
+              ) : null}
+            </div>
+          </div>
+          {offerQrBase64 ? (
+            <div className="flex flex-col sm:flex-row gap-4 items-start">
+              {/* eslint-disable-next-line @next/next/no-img-element -- data URL from server */}
+              <img
+                src={offerQrBase64}
+                alt={offerQrTargetUrl ? `QR code for ${offerQrTargetUrl}` : 'Offer link QR code'}
+                className="w-40 h-40 rounded border bg-white p-2 object-contain"
+              />
+              {offerQrTargetUrl ? (
+                <p className="text-[11px] text-muted-foreground font-mono break-all max-w-md pt-1">
+                  {offerQrTargetUrl}
+                </p>
+              ) : null}
+            </div>
           ) : null}
         </div>
 

@@ -96,6 +96,21 @@ export function isJustListedDmOffer(offerTitle: string, offerMessage?: string | 
   );
 }
 
+/** Team Partner template: dedicated team onboarding. DM / 30-day / others use standard flow + partner trial. */
+export function isPartnerOfferTeamExclusiveOnboarding(
+  offerTitle: string,
+  offerMessage: string | null | undefined
+): boolean {
+  if (isJustListedDmOffer(offerTitle, offerMessage)) return false;
+  if (/30\s*day\s*challenge/i.test(offerTitle)) return false;
+  if (/private access to the challenge/i.test(offerMessage ?? '')) return false;
+
+  const title = offerTitle.trim();
+  if (title === PARTNER_OFFER_EMAIL_SUBJECT_SENTINEL) return true;
+  if (/^FLYR is Built for\b/i.test(title)) return true;
+  return false;
+}
+
 export function formatLongDate(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;

@@ -35,7 +35,18 @@ type PartnerOfferLandingProps = {
   expiresAt: string;
   ctaLabel: string | null;
   offerToken: string;
+  /** Team Partner template uses forced team onboarding; DM / 30-day use standard flow + 30-day trial. */
+  partnerOnboardingTeamStyle: boolean;
 };
+
+function partnerOnboardingHref(offerToken: string, partnerOnboardingTeamStyle: boolean) {
+  const qs = new URLSearchParams({
+    offer: 'exclusive30',
+    partnerOfferToken: offerToken,
+    partnerExclusive: partnerOnboardingTeamStyle ? 'team' : 'solo',
+  });
+  return `/onboarding?${qs.toString()}`;
+}
 
 function formatLongDate(value: string): string {
   const date = new Date(value);
@@ -198,6 +209,7 @@ export function PartnerOfferLanding({
   expiresAt,
   ctaLabel,
   offerToken,
+  partnerOnboardingTeamStyle,
 }: PartnerOfferLandingProps) {
   const [trackingWordIndex, setTrackingWordIndex] = useState(0);
   const [demoInstance, setDemoInstance] = useState(0);
@@ -211,7 +223,7 @@ export function PartnerOfferLanding({
   }, []);
 
   const handleGetStarted = async () => {
-    window.location.href = `/onboarding?offer=exclusive30&partnerOfferToken=${encodeURIComponent(offerToken)}`;
+    window.location.href = partnerOnboardingHref(offerToken, partnerOnboardingTeamStyle);
   };
 
   const handleShowDemo = () => {

@@ -85,13 +85,61 @@ function OnboardingContent() {
   const searchParams = useSearchParams();
   const offerType = searchParams.get('offer');
   const partnerOfferToken = searchParams.get('partnerOfferToken');
+  const partnerExclusiveParam = searchParams.get('partnerExclusive');
   const isExclusivePartnerOnboarding =
     offerType === 'exclusive30' &&
     typeof partnerOfferToken === 'string' &&
     partnerOfferToken.trim().length > 0;
+  const [legacyPartnerExclusiveLayout, setLegacyPartnerExclusiveLayout] = useState<'team' | 'solo' | null>(
+    null
+  );
   const isIgOnboardingPath = pathname === '/onboarding/ig';
   const onboardingEntryPath = isIgOnboardingPath ? '/onboarding/ig' : '/onboarding';
-  const onboardingDemo = isIgOnboardingPath ? 'ig-dm' : 'team';
+
+  useEffect(() => {
+    if (!isExclusivePartnerOnboarding) {
+      setLegacyPartnerExclusiveLayout(null);
+      return;
+    }
+    if (partnerExclusiveParam === 'team' || partnerExclusiveParam === 'solo') {
+      setLegacyPartnerExclusiveLayout(null);
+      return;
+    }
+    let cancelled = false;
+    const token = partnerOfferToken.trim();
+    fetch(`/api/partner-offer/onboarding-hint?token=${encodeURIComponent(token)}`)
+      .then((r) => r.json())
+      .then((d: { partnerExclusive?: string }) => {
+        if (cancelled) return;
+        setLegacyPartnerExclusiveLayout(d.partnerExclusive === 'solo' ? 'solo' : 'team');
+      })
+      .catch(() => {
+        if (!cancelled) setLegacyPartnerExclusiveLayout('team');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isExclusivePartnerOnboarding, partnerOfferToken, partnerExclusiveParam]);
+
+  const resolvedPartnerExclusiveLayout: 'team' | 'solo' | null = !isExclusivePartnerOnboarding
+    ? null
+    : partnerExclusiveParam === 'team' || partnerExclusiveParam === 'solo'
+      ? partnerExclusiveParam
+      : legacyPartnerExclusiveLayout;
+
+  const isExclusivePartnerLayoutReady =
+    !isExclusivePartnerOnboarding ||
+    partnerExclusiveParam === 'team' ||
+    partnerExclusiveParam === 'solo' ||
+    legacyPartnerExclusiveLayout !== null;
+
+  const isExclusivePartnerTeamLayout =
+    isExclusivePartnerOnboarding && resolvedPartnerExclusiveLayout === 'team';
+
+  const onboardingDemo =
+    isIgOnboardingPath || (isExclusivePartnerOnboarding && resolvedPartnerExclusiveLayout === 'solo')
+      ? 'ig-dm'
+      : 'team';
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -127,10 +175,10 @@ function OnboardingContent() {
   }, [searchParams]);
 
   useEffect(() => {
-    if (!isExclusivePartnerOnboarding) return;
+    if (!isExclusivePartnerTeamLayout) return;
     setUseCase('team');
     setSeats((previous) => Math.max(TEAM_MIN_SEATS, previous));
-  }, [isExclusivePartnerOnboarding]);
+  }, [isExclusivePartnerTeamLayout]);
 
   const canStep1 =
     firstName.trim().length > 0 &&
@@ -206,20 +254,20 @@ function OnboardingContent() {
           lastName: lastName.trim(),
           workspaceName: workspaceName.trim(),
           industry: industry.trim(),
-          referralCode: isExclusivePartnerOnboarding
-            ? null
-            : referralCode.trim() || null,
+          referralCode:
+            isExclusivePartnerOnboarding && isExclusivePartnerTeamLayout
+              ? null
+              : referralCode.trim() || null,
           brokerage: brokerage.trim() || undefined,
           brokerageId: brokerageId ?? undefined,
-          useCase: isExclusivePartnerOnboarding ? 'team' : useCase,
-          maxSeats:
-            isExclusivePartnerOnboarding
-              ? Math.max(TEAM_MIN_SEATS, normalizedInviteEmails.length + 1, seats)
-              : useCase === 'team'
-                ? Math.max(TEAM_MIN_SEATS, seats)
-                : SOLO_SEATS,
+          useCase: isExclusivePartnerTeamLayout ? 'team' : useCase,
+          maxSeats: isExclusivePartnerTeamLayout
+            ? Math.max(TEAM_MIN_SEATS, normalizedInviteEmails.length + 1, seats)
+            : useCase === 'team'
+              ? Math.max(TEAM_MIN_SEATS, seats)
+              : SOLO_SEATS,
           partnerOfferToken: isExclusivePartnerOnboarding ? partnerOfferToken : undefined,
-          teamMemberEmails: isExclusivePartnerOnboarding ? normalizedInviteEmails : undefined,
+          teamMemberEmails: isExclusivePartnerTeamLayout ? normalizedInviteEmails : undefined,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -293,9 +341,16 @@ function OnboardingContent() {
         return false;
       }
 
-      const onboardingNext = `${onboardingEntryPath}?offer=exclusive30&partnerOfferToken=${encodeURIComponent(
-        partnerOfferToken ?? ''
-      )}`;
+      const nextQs = new URLSearchParams({
+        offer: 'exclusive30',
+        partnerOfferToken: partnerOfferToken ?? '',
+      });
+      if (partnerExclusiveParam === 'team' || partnerExclusiveParam === 'solo') {
+        nextQs.set('partnerExclusive', partnerExclusiveParam);
+      } else if (legacyPartnerExclusiveLayout === 'team' || legacyPartnerExclusiveLayout === 'solo') {
+        nextQs.set('partnerExclusive', legacyPartnerExclusiveLayout);
+      }
+      const onboardingNext = `${onboardingEntryPath}?${nextQs.toString()}`;
       const callbackUrl = new URL('/auth/callback', window.location.origin);
       callbackUrl.searchParams.set('next', onboardingNext);
 
@@ -335,10 +390,20 @@ function OnboardingContent() {
     firstName,
     isExclusivePartnerOnboarding,
     lastName,
+    legacyPartnerExclusiveLayout,
     onboardingEntryPath,
+    partnerExclusiveParam,
     partnerOfferToken,
     workEmail,
   ]);
+
+  if (!isExclusivePartnerLayoutReady) {
+    return (
+      <div className="dark min-h-screen bg-gradient-to-br from-black to-[#262626] flex flex-col items-center justify-center p-6">
+        <p className="text-zinc-400">Loading your offer…</p>
+      </div>
+    );
+  }
 
   return (
     <div className="dark min-h-screen bg-gradient-to-br from-black to-[#262626] flex flex-col items-center justify-center p-6 pb-28 sm:pb-24 relative overflow-x-hidden overflow-y-auto">
@@ -378,7 +443,7 @@ function OnboardingContent() {
             <p className="text-base text-[#AAAAAA]">
               {step === 1 && 'We use this to personalize your experience.'}
               {step === 2 &&
-                (isExclusivePartnerOnboarding
+                (isExclusivePartnerTeamLayout
                   ? 'We set this to team mode for your exclusive offer.'
                   : 'Choose solo or invite your team.')}
               {step === 3 && 'Name your business and tell us your industry.'}
@@ -389,13 +454,13 @@ function OnboardingContent() {
         {isExclusivePartnerOnboarding && step === 1 ? (
           <div className="rounded-xl border border-red-500/40 bg-red-500/10 p-4">
             <p className="text-center text-xs font-semibold uppercase tracking-wider text-red-300">
-              Exclusive Team Onboarding
+              {isExclusivePartnerTeamLayout ? 'Exclusive Team Onboarding' : 'Exclusive offer'}
             </p>
             <p className="mt-1 text-center text-lg font-semibold text-white">
               30-day exclusive offer unlocked
             </p>
             <p className="mt-1 text-center text-sm text-zinc-300">
-              Finish onboarding to activate your 30-day trial and watch demo if you havent already.
+              Finish onboarding to activate your 30-day trial and watch the demo if you haven&apos;t already.
             </p>
             <div className="mt-4 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900">
               <ExclusiveOfferArcadeEmbed demo={onboardingDemo} />
@@ -473,7 +538,7 @@ function OnboardingContent() {
         )}
 
         {step === 2 && (
-          isExclusivePartnerOnboarding ? (
+          isExclusivePartnerTeamLayout ? (
             <div className="space-y-4">
               <div className="rounded-xl border border-red-500/40 bg-red-500/10 p-4 text-center">
                 <p className="text-sm font-semibold text-white">Team onboarding is pre-selected for this exclusive offer.</p>
@@ -671,7 +736,7 @@ function OnboardingContent() {
                 )}
               </div>
             )}
-            {!isExclusivePartnerOnboarding ? (
+            {!(isExclusivePartnerOnboarding && isExclusivePartnerTeamLayout) ? (
               <div className="space-y-2">
                 <Label htmlFor="referralCode" className="text-base text-white">Referral code (optional)</Label>
                 <Input

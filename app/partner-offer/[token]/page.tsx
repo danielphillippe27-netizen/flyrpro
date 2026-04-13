@@ -8,6 +8,7 @@ import {
   loadPublicPartnerOfferByToken,
 } from '@/lib/offers/publicPartnerOffer';
 import { buildPartnerOfferMetadata } from '@/lib/offers/partnerOfferMetadata';
+import { isPartnerOfferTeamExclusiveOnboarding } from '@/components/offers/partnerOfferUtils';
 
 type Params = {
   params: Promise<{ token: string }>;
@@ -78,6 +79,10 @@ export default async function PartnerOfferPage({ params }: Params) {
       expiresAt={offer.expires_at}
       ctaLabel={offer.cta_label}
       offerToken={offer.token}
+      partnerOnboardingTeamStyle={isPartnerOfferTeamExclusiveOnboarding(
+        offer.offer_title,
+        offer.offer_message
+      )}
     />
   );
 }

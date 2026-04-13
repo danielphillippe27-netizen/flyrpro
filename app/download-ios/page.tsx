@@ -54,13 +54,13 @@ function DownloadIosContent() {
       <div className="absolute inset-0 bg-gradient-to-b from-red-950/40 via-transparent to-black/80 pointer-events-none" />
       <div className="relative w-full max-w-md space-y-8 rounded-2xl border border-white/15 bg-white/[0.06] p-8 sm:p-10 backdrop-blur-2xl shadow-[0_24px_70px_rgba(0,0,0,0.6),0_10px_30px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.2)]">
         <div className="flex flex-col items-center text-center space-y-6">
-          <div className="relative h-28 w-28 shrink-0 overflow-hidden rounded-[1.35rem] shadow-lg ring-1 ring-white/20">
+          <div className="flex shrink-0 justify-center px-2">
             <Image
-              src="/flyr-ios-app-icon.png"
-              alt="FLYR app icon"
-              width={112}
-              height={112}
-              className="object-cover"
+              src="/flyr-download-icon.png"
+              alt="FLYR"
+              width={160}
+              height={160}
+              className="h-36 w-auto max-w-[200px] object-contain"
               priority
             />
           </div>
