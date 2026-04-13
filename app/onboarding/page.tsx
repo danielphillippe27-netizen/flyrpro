@@ -86,6 +86,7 @@ function OnboardingContent() {
   const offerType = searchParams.get('offer');
   const partnerOfferToken = searchParams.get('partnerOfferToken');
   const partnerExclusiveParam = searchParams.get('partnerExclusive');
+  const challenge30FromUrl = searchParams.get('challenge30') === '1';
   const isExclusivePartnerOnboarding =
     offerType === 'exclusive30' &&
     typeof partnerOfferToken === 'string' &&
@@ -93,33 +94,53 @@ function OnboardingContent() {
   const [legacyPartnerExclusiveLayout, setLegacyPartnerExclusiveLayout] = useState<'team' | 'solo' | null>(
     null
   );
+  const [hintChallenge30, setHintChallenge30] = useState<boolean | null>(null);
   const isIgOnboardingPath = pathname === '/onboarding/ig';
   const onboardingEntryPath = isIgOnboardingPath ? '/onboarding/ig' : '/onboarding';
 
   useEffect(() => {
     if (!isExclusivePartnerOnboarding) {
       setLegacyPartnerExclusiveLayout(null);
+      setHintChallenge30(null);
       return;
     }
-    if (partnerExclusiveParam === 'team' || partnerExclusiveParam === 'solo') {
+
+    const needsLayoutHint =
+      partnerExclusiveParam !== 'team' && partnerExclusiveParam !== 'solo';
+    const needsChallengeHint = !challenge30FromUrl;
+
+    if (!needsLayoutHint && !needsChallengeHint) {
       setLegacyPartnerExclusiveLayout(null);
+      setHintChallenge30(null);
       return;
     }
+
     let cancelled = false;
     const token = partnerOfferToken.trim();
     fetch(`/api/partner-offer/onboarding-hint?token=${encodeURIComponent(token)}`)
       .then((r) => r.json())
-      .then((d: { partnerExclusive?: string }) => {
+      .then((d: { partnerExclusive?: string; challenge30?: boolean }) => {
         if (cancelled) return;
-        setLegacyPartnerExclusiveLayout(d.partnerExclusive === 'solo' ? 'solo' : 'team');
+        if (needsLayoutHint) {
+          setLegacyPartnerExclusiveLayout(d.partnerExclusive === 'solo' ? 'solo' : 'team');
+        } else {
+          setLegacyPartnerExclusiveLayout(null);
+        }
+        if (needsChallengeHint) {
+          setHintChallenge30(d.challenge30 === true);
+        } else {
+          setHintChallenge30(null);
+        }
       })
       .catch(() => {
-        if (!cancelled) setLegacyPartnerExclusiveLayout('team');
+        if (cancelled) return;
+        if (needsLayoutHint) setLegacyPartnerExclusiveLayout('team');
+        if (needsChallengeHint) setHintChallenge30(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [isExclusivePartnerOnboarding, partnerOfferToken, partnerExclusiveParam]);
+  }, [isExclusivePartnerOnboarding, partnerOfferToken, partnerExclusiveParam, challenge30FromUrl]);
 
   const resolvedPartnerExclusiveLayout: 'team' | 'solo' | null = !isExclusivePartnerOnboarding
     ? null
@@ -135,6 +156,8 @@ function OnboardingContent() {
 
   const isExclusivePartnerTeamLayout =
     isExclusivePartnerOnboarding && resolvedPartnerExclusiveLayout === 'team';
+
+  const hideExclusiveStep1Demo = challenge30FromUrl || hintChallenge30 === true;
 
   const onboardingDemo =
     isIgOnboardingPath || (isExclusivePartnerOnboarding && resolvedPartnerExclusiveLayout === 'solo')
@@ -350,6 +373,9 @@ function OnboardingContent() {
       } else if (legacyPartnerExclusiveLayout === 'team' || legacyPartnerExclusiveLayout === 'solo') {
         nextQs.set('partnerExclusive', legacyPartnerExclusiveLayout);
       }
+      if (challenge30FromUrl) {
+        nextQs.set('challenge30', '1');
+      }
       const onboardingNext = `${onboardingEntryPath}?${nextQs.toString()}`;
       const callbackUrl = new URL('/auth/callback', window.location.origin);
       callbackUrl.searchParams.set('next', onboardingNext);
@@ -390,6 +416,7 @@ function OnboardingContent() {
     firstName,
     isExclusivePartnerOnboarding,
     lastName,
+    challenge30FromUrl,
     legacyPartnerExclusiveLayout,
     onboardingEntryPath,
     partnerExclusiveParam,
@@ -460,11 +487,15 @@ function OnboardingContent() {
               30-day exclusive offer unlocked
             </p>
             <p className="mt-1 text-center text-sm text-zinc-300">
-              Finish onboarding to activate your 30-day trial and watch the demo if you haven&apos;t already.
+              {hideExclusiveStep1Demo
+                ? 'Finish onboarding to activate your 30-day trial.'
+                : 'Finish onboarding to activate your 30-day trial and watch the demo if you haven&apos;t already.'}
             </p>
-            <div className="mt-4 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900">
-              <ExclusiveOfferArcadeEmbed demo={onboardingDemo} />
-            </div>
+            {!hideExclusiveStep1Demo ? (
+              <div className="mt-4 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900">
+                <ExclusiveOfferArcadeEmbed demo={onboardingDemo} />
+              </div>
+            ) : null}
           </div>
         ) : null}
 

@@ -111,6 +111,16 @@ export function isPartnerOfferTeamExclusiveOnboarding(
   return false;
 }
 
+/** Free 30 Day Challenge template (and matching copy). Used to tune onboarding (e.g. hide step-1 demo). */
+export function isThirtyDayChallengePartnerOffer(
+  offerTitle: string,
+  offerMessage: string | null | undefined
+): boolean {
+  return (
+    /30\s*day\s*challenge/i.test(offerTitle) || /private access to the challenge/i.test(offerMessage ?? '')
+  );
+}
+
 export function formatLongDate(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
