@@ -40,11 +40,12 @@ type PartnerOfferLandingProps = {
 function formatLongDate(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString(undefined, {
+  return new Intl.DateTimeFormat('en-US', {
     year: 'numeric',
     month: 'long',
     day: 'numeric',
-  });
+    timeZone: 'UTC',
+  }).format(date);
 }
 
 function toParagraphs(value: string | null): string[] {
@@ -72,11 +73,17 @@ function JustListedDmOfferLanding({
   recipientName,
   expiresAt,
   ctaLabel,
+  demoInstance,
+  isDemoOpen,
   onGetStarted,
   onShowDemo,
+  onDemoOpenChange,
 }: Omit<PartnerOfferLandingProps, 'offerToken'> & {
+  demoInstance: number;
+  isDemoOpen: boolean;
   onGetStarted: () => void;
   onShowDemo: () => void;
+  onDemoOpenChange: (open: boolean) => void;
 }) {
   const paragraphs = toParagraphs(offerMessage);
   const shouldUseDefaultTitle = !offerTitle.trim() || /private access/i.test(offerTitle);
@@ -105,7 +112,7 @@ function JustListedDmOfferLanding({
             </span>
           </Link>
           <div className="inline-flex items-center rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-red-200">
-            Door-door software
+            Door-to-door software
           </div>
         </div>
       </header>
@@ -151,14 +158,20 @@ function JustListedDmOfferLanding({
                 Quick look
               </p>
               <h2 className="mt-2 text-2xl font-black tracking-[-0.03em] text-white sm:text-[2rem]">
-                See how FLYR helps you work a just-listed opportunity
+                See how FLYR helps you find your next client
               </h2>
               <p className="mt-2 text-sm leading-6 text-zinc-400 sm:text-[15px]">
                 Use one listing to power a smarter local campaign with flyers, doorknocking, tracking, and follow-up built in.
               </p>
             </div>
             <div className="mt-4 overflow-hidden rounded-[24px] border border-white/10 bg-black/30 p-4 sm:p-6">
-              <ExclusiveOfferArcadeEmbed variant="iphone" instance={demoInstance} />
+              <ExclusiveOfferArcadeEmbed
+                variant="iphone"
+                instance={demoInstance}
+                mode="modal"
+                open={isDemoOpen}
+                onOpenChange={onDemoOpenChange}
+              />
             </div>
             <div className="mt-5 sm:max-w-md">
               <button
@@ -188,6 +201,7 @@ export function PartnerOfferLanding({
 }: PartnerOfferLandingProps) {
   const [trackingWordIndex, setTrackingWordIndex] = useState(0);
   const [demoInstance, setDemoInstance] = useState(0);
+  const [isJustListedDemoOpen, setIsJustListedDemoOpen] = useState(false);
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -201,12 +215,14 @@ export function PartnerOfferLanding({
   };
 
   const handleShowDemo = () => {
-    setDemoInstance(demoInstance + 1);
-    document.getElementById('listing-play-demo')?.scrollIntoView({
-      behavior: 'smooth',
-      block: 'start',
-    });
+    setDemoInstance((current) => current + 1);
+    setIsJustListedDemoOpen(true);
   };
+
+  /** Same Arcade as Just Listed DM template (iPhone walkthrough), not the team dashboard embed. */
+  const useDmTemplateArcadeDemo =
+    /30\s*day\s*challenge/i.test(offerTitle) ||
+    /private access to the challenge/i.test(offerMessage ?? '');
 
   if (isJustListedDmOffer(offerTitle, offerMessage)) {
     return (
@@ -217,8 +233,11 @@ export function PartnerOfferLanding({
         recipientName={recipientName}
         expiresAt={expiresAt}
         ctaLabel={ctaLabel}
+        demoInstance={demoInstance}
+        isDemoOpen={isJustListedDemoOpen}
         onGetStarted={handleGetStarted}
         onShowDemo={handleShowDemo}
+        onDemoOpenChange={setIsJustListedDemoOpen}
       />
     );
   }
@@ -293,7 +312,9 @@ export function PartnerOfferLanding({
               The same FLYR platform, with exclusive terms for your team.
             </p>
             <div className="mx-auto mt-8 w-full max-w-6xl overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
-              <ExclusiveOfferArcadeEmbed />
+              <ExclusiveOfferArcadeEmbed
+                variant={useDmTemplateArcadeDemo ? 'iphone' : 'default'}
+              />
             </div>
           </div>
         </section>

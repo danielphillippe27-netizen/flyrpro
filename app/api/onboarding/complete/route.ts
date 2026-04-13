@@ -449,9 +449,12 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const nextPath = hasAccess ? '/home' : '/subscribe';
+    const redirect = `/download-ios?stage=post-onboarding&next=${encodeURIComponent(nextPath)}`;
+
     return NextResponse.json({
       success: true,
-      redirect: hasAccess ? '/home' : '/subscribe',
+      redirect,
       invites: {
         attempted: normalizedTeamInviteEmails.length,
         sent: inviteResults.filter((result) => result.sent).length,

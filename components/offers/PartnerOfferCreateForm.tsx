@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Loader2, CheckCircle2, Copy, Link2, Mail, MessageSquareMore, Save } from 'lucide-react';
+import { Loader2, CheckCircle2, Copy, Link2, Mail, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   OFFER_TEMPLATES,
@@ -272,6 +272,26 @@ export function PartnerOfferCreateForm() {
     }
   }, [persistOffer, selectedTemplate]);
 
+  const handleCreateOffer = useCallback(async () => {
+    if (!selectedTemplate) {
+      setComposerError('Select a template to generate an invite link first.');
+      return;
+    }
+
+    setComposerError(null);
+    setStatusMessage(null);
+    setIsSavingDraft(true);
+    try {
+      await persistOffer(true);
+      setStatusMessage('Offer created.');
+      window.dispatchEvent(new CustomEvent('flyr-offers-refresh'));
+    } catch (error) {
+      setComposerError(error instanceof Error ? error.message : 'Failed to create offer');
+    } finally {
+      setIsSavingDraft(false);
+    }
+  }, [persistOffer, selectedTemplate]);
+
   const handleSend = useCallback(async () => {
     if (!selectedTemplate) {
       setComposerError('Select a template to generate an invite link first.');
@@ -343,25 +363,9 @@ export function PartnerOfferCreateForm() {
   );
   const dmCopy = useMemo(() => buildOutreachCopy(previewOffer), [previewOffer]);
 
-  const handleCopyDmSequence = useCallback(async () => {
-    if (!draftOffer?.shareUrl) {
-      toast.error('Generate the private link first.');
-      return;
-    }
-
-    const linkMessage = `${dmCopy.igDmLinkText}\n\n${draftOffer.shareUrl}`;
-    const value = `Message 1:\n${dmCopy.igDmIntroText}\n\nMessage 2:\n${dmCopy.igDmReplyText}\n\nMessage 3:\n${linkMessage}`;
-    try {
-      await navigator.clipboard.writeText(value);
-      toast.success('3-part DM copied.');
-    } catch {
-      toast.error('Failed to copy DM sequence.');
-    }
-  }, [dmCopy.igDmIntroText, dmCopy.igDmLinkText, dmCopy.igDmReplyText, draftOffer?.shareUrl]);
-
   return (
-    <div className="h-full w-full bg-background px-4 py-4 sm:px-6 sm:py-6">
-      <div className="mb-4 sm:hidden">
+    <div className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background px-4 py-4 sm:px-6 sm:py-6">
+      <div className="mb-4 shrink-0 sm:hidden">
         <div className="grid grid-cols-2 gap-2 rounded-lg border border-border bg-muted/30 p-1">
           <Button
             type="button"
@@ -387,25 +391,22 @@ export function PartnerOfferCreateForm() {
           </Button>
         </div>
       </div>
-      <div className="grid h-full min-h-0 gap-4 sm:gap-6 xl:min-h-[calc(100vh-9rem)] xl:grid-cols-2">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden sm:gap-6 xl:grid xl:min-h-[calc(100vh-9rem)] xl:grid-cols-2 xl:gap-6">
         <section
           className={cn(
-            'min-h-0 flex-col rounded-lg border border-border bg-background',
-            mobilePanel === 'compose' ? 'flex' : 'hidden',
-            'sm:flex'
+            'min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-background',
+            mobilePanel === 'compose' ? 'flex flex-1' : 'hidden',
+            'sm:flex sm:min-h-0 sm:flex-1'
           )}
         >
-          <div className="border-b border-border px-4 py-4 sm:px-6 sm:py-5">
+          <div className="shrink-0 border-b border-border px-4 py-4 sm:px-6 sm:py-5">
             <h2 className="text-xl font-semibold text-foreground">Compose</h2>
             <p className="mt-1 text-sm text-muted-foreground">
               {isDmTemplate
                 ? 'Draft the partner DM and keep the private link live while you work.'
                 : 'Draft the partner email and keep the invite link live while you work.'}
             </p>
-          </div>
-
-          <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4 sm:space-y-6 sm:px-6 sm:py-6">
-            <div className="space-y-3">
+            <div className="mt-4 space-y-3 sm:mt-5">
               <Label>Template</Label>
               <div className="flex flex-wrap gap-2">
                 {OFFER_TEMPLATES.map((template) => {
@@ -428,7 +429,9 @@ export function PartnerOfferCreateForm() {
                 })}
               </div>
             </div>
+          </div>
 
+          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4 sm:space-y-6 sm:px-6 sm:py-6">
             <div className="grid gap-4">
               <div className="space-y-2">
                 <Label>To</Label>
@@ -566,7 +569,7 @@ export function PartnerOfferCreateForm() {
             </div>
           </div>
 
-          <div className="border-t border-border px-4 py-4 sm:px-6 sm:py-5">
+          <div className="shrink-0 border-t border-border bg-background px-4 py-4 sm:px-6 sm:py-5">
             <div className="mb-4 min-h-5">
               {composerError ? (
                 <p className="text-sm text-destructive">{composerError}</p>
@@ -607,10 +610,19 @@ export function PartnerOfferCreateForm() {
                 type="button"
                 className="w-full bg-red-600 text-white hover:bg-red-700"
                 disabled={isSavingDraft || isGeneratingLink || !draftOffer?.shareUrl}
-                onClick={() => void handleCopyDmSequence()}
+                onClick={() => void handleCreateOffer()}
               >
-                <MessageSquareMore className="mr-2 h-4 w-4" />
-                Copy 3-part DM
+                {isSavingDraft ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Creating offer…
+                  </>
+                ) : (
+                  <>
+                    <Save className="mr-2 h-4 w-4" />
+                    Create this offer
+                  </>
+                )}
               </Button>
             ) : (
               <Button
@@ -635,26 +647,34 @@ export function PartnerOfferCreateForm() {
           </div>
         </section>
 
-        <section className={cn('min-h-0', mobilePanel === 'preview' ? 'block' : 'hidden', 'sm:block')}>
-          {isDmTemplate ? (
-            <PartnerOfferDmPreview
-              recipientName={recipientName}
-              openerText={dmCopy.igDmIntroText}
-              replyText={dmCopy.igDmReplyText}
-              linkText={dmCopy.igDmLinkText}
-              privateOfferLink={previewOffer.shareUrl}
-            />
-          ) : (
-            <PartnerOfferEmailPreview
-              fromLabel={PARTNER_OFFER_FROM_LABEL}
-              toLabel={toLabel}
-              subjectField={subject}
-              companyName={partnerName}
-              recipientName={recipientName}
-              offerMessage={messageBody}
-              privateOfferLink={previewOffer.shareUrl}
-            />
+        <section
+          className={cn(
+            'min-h-0 flex-col overflow-hidden',
+            mobilePanel === 'preview' ? 'flex flex-1' : 'hidden',
+            'sm:flex sm:min-h-0 sm:flex-1'
           )}
+        >
+          <div className="flex min-h-0 flex-1 flex-col">
+            {isDmTemplate ? (
+              <PartnerOfferDmPreview
+                recipientName={recipientName}
+                openerText={dmCopy.igDmIntroText}
+                replyText={dmCopy.igDmReplyText}
+                linkText={dmCopy.igDmLinkText}
+                privateOfferLink={previewOffer.shareUrl}
+              />
+            ) : (
+              <PartnerOfferEmailPreview
+                fromLabel={PARTNER_OFFER_FROM_LABEL}
+                toLabel={toLabel}
+                subjectField={subject}
+                companyName={partnerName}
+                recipientName={recipientName}
+                offerMessage={messageBody}
+                privateOfferLink={previewOffer.shareUrl}
+              />
+            )}
+          </div>
         </section>
       </div>
     </div>

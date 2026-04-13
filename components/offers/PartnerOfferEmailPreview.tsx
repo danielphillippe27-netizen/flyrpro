@@ -30,7 +30,7 @@ export function PartnerOfferEmailPreview({
   const resolvedSubject = partnerOfferEmailSubject(subjectField, companyName);
 
   return (
-    <div className="flex h-full min-h-[420px] flex-col overflow-hidden rounded-lg border border-border bg-white shadow-sm sm:min-h-[560px]">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-white shadow-sm">
       <div className="border-b border-slate-200 bg-slate-50 px-4 py-4 sm:px-5">
         <div className="space-y-2 text-sm text-slate-600">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -54,7 +54,7 @@ export function PartnerOfferEmailPreview({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto bg-white p-4 sm:p-6">
+      <div className="min-h-0 flex-1 overflow-y-auto bg-white p-4 sm:p-6">
         <div className="mx-auto max-w-[560px] text-[15px] leading-relaxed text-slate-800">
           <p className="mb-4">Hi {greetingName},</p>
           <div className="mb-4 whitespace-pre-wrap">

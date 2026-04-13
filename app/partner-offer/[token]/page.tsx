@@ -7,6 +7,7 @@ import {
   isPublicPartnerOfferAvailable,
   loadPublicPartnerOfferByToken,
 } from '@/lib/offers/publicPartnerOffer';
+import { buildPartnerOfferMetadata } from '@/lib/offers/partnerOfferMetadata';
 
 type Params = {
   params: Promise<{ token: string }>;
@@ -15,19 +16,29 @@ type Params = {
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-export const metadata: Metadata = {
-  title: 'Private Partner Offer',
-  robots: {
-    index: false,
-    follow: false,
-    nocache: true,
-    googleBot: {
-      index: false,
-      follow: false,
-      noimageindex: true,
-    },
-  },
-};
+export async function generateMetadata({ params }: Params): Promise<Metadata> {
+  const { token } = await params;
+  const admin = createAdminClient();
+  const offer = await loadPublicPartnerOfferByToken(admin, token);
+
+  if (!offer) {
+    return {
+      title: 'Private Partner Offer',
+      robots: {
+        index: false,
+        follow: false,
+        nocache: true,
+        googleBot: {
+          index: false,
+          follow: false,
+          noimageindex: true,
+        },
+      },
+    };
+  }
+
+  return buildPartnerOfferMetadata(offer);
+}
 
 export default async function PartnerOfferPage({ params }: Params) {
   const { token } = await params;

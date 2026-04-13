@@ -935,11 +935,7 @@ export default function IntegrationsPage() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className={`${integrationLogoContainerClass} bg-blue-100 dark:bg-blue-900`}>
-                    <img
-                      src="https://logo.clearbit.com/followupboss.com"
-                      alt="Follow Up Boss logo"
-                      className={`${integrationLogoIconClass} object-contain`}
-                    />
+                    <Plug className={`${integrationLogoIconClass} text-blue-600 dark:text-blue-200`} />
                   </div>
                   <div>
                     <CardTitle>Follow Up Boss</CardTitle>
@@ -1074,11 +1070,7 @@ export default function IntegrationsPage() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className={`${integrationLogoContainerClass} bg-orange-100 dark:bg-orange-950`}>
-                    <img
-                      src="https://logo.clearbit.com/zapier.com"
-                      alt="Zapier logo"
-                      className={`${integrationLogoIconClass} object-contain`}
-                    />
+                    <Plug className={`${integrationLogoIconClass} text-orange-600 dark:text-orange-200`} />
                   </div>
                   <div>
                     <CardTitle>Zapier</CardTitle>
@@ -1188,11 +1180,7 @@ export default function IntegrationsPage() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className={`${integrationLogoContainerClass} bg-orange-100 dark:bg-orange-900`}>
-                    <img
-                      src="https://logo.clearbit.com/hubspot.com"
-                      alt="HubSpot logo"
-                      className={`${integrationLogoIconClass} object-contain`}
-                    />
+                    <Plug className={`${integrationLogoIconClass} text-orange-600 dark:text-orange-200`} />
                   </div>
                   <div>
                     <CardTitle>HubSpot</CardTitle>
@@ -1314,11 +1302,7 @@ export default function IntegrationsPage() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className={`${integrationLogoContainerClass} bg-emerald-100 dark:bg-emerald-950`}>
-                    <img
-                      src="https://logo.clearbit.com/boldtrail.com"
-                      alt="BoldTrail logo"
-                      className={`${integrationLogoIconClass} object-contain`}
-                    />
+                    <Plug className={`${integrationLogoIconClass} text-emerald-600 dark:text-emerald-200`} />
                   </div>
                   <div>
                     <CardTitle>BoldTrail / kvCORE</CardTitle>
@@ -1428,11 +1412,7 @@ export default function IntegrationsPage() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className={`${integrationLogoContainerClass} bg-yellow-100 dark:bg-yellow-900`}>
-                    <img
-                      src="https://logo.clearbit.com/monday.com"
-                      alt="Monday.com logo"
-                      className={`${integrationLogoIconClass} object-contain`}
-                    />
+                    <Plug className={`${integrationLogoIconClass} text-yellow-700 dark:text-yellow-200`} />
                   </div>
                   <div>
                     <CardTitle>Monday.com</CardTitle>

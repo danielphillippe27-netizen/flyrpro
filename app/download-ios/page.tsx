@@ -9,21 +9,45 @@ import { ExternalLink } from 'lucide-react';
 const IOS_APP_STORE_URL =
   'https://apps.apple.com/ca/app/flyr/id6755614702';
 
-function safeInternalNext(raw: string | null): string {
-  if (!raw) return '/onboarding';
-  const trimmed = raw.trim();
-  if (!trimmed.startsWith('/') || trimmed.startsWith('//')) return '/onboarding';
-  if (trimmed.includes('://')) return '/onboarding';
-  return trimmed.split('#')[0] ?? '/onboarding';
+type DownloadStage = 'pre-onboarding' | 'post-onboarding';
+
+function resolveStage(raw: string | null): DownloadStage {
+  return raw === 'post-onboarding' ? 'post-onboarding' : 'pre-onboarding';
 }
 
 function DownloadIosContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const nextPath = useMemo(
-    () => safeInternalNext(searchParams.get('next')),
+  const stage = useMemo(
+    () => resolveStage(searchParams.get('stage')),
     [searchParams]
   );
+  const nextPath = useMemo(
+    () => {
+      const fallback = stage === 'post-onboarding' ? '/home' : '/onboarding';
+      const raw = searchParams.get('next');
+      if (!raw) return fallback;
+      const trimmed = raw.trim();
+      if (!trimmed.startsWith('/') || trimmed.startsWith('//')) return fallback;
+      if (trimmed.includes('://')) return fallback;
+      return trimmed.split('#')[0] ?? fallback;
+    },
+    [searchParams, stage]
+  );
+  const content =
+    stage === 'post-onboarding'
+      ? {
+          title: 'Download the FLYR iPhone app',
+          description: 'Your onboarding is complete. Install the app to start knocking doors, tracking activity, and working leads on the go.',
+          primaryCta: 'Download on the App Store',
+          secondaryCta: 'Continue to FLYR on web',
+        }
+      : {
+          title: 'Get FLYR on iPhone',
+          description: 'Download the app for the best experience, then continue setup on the web.',
+          primaryCta: 'Download on the App Store',
+          secondaryCta: 'Continue setup on web',
+        };
 
   return (
     <div className="dark min-h-screen bg-gradient-to-br from-black to-[#262626] flex flex-col items-center justify-center p-6 pb-28 relative overflow-x-hidden">
@@ -42,10 +66,10 @@ function DownloadIosContent() {
           </div>
           <div className="space-y-2">
             <h1 className="text-3xl sm:text-4xl font-bold leading-tight text-white">
-              Get FLYR on iPhone
+              {content.title}
             </h1>
             <p className="text-base text-[#AAAAAA] leading-relaxed">
-              Download the app for the best experience—then continue setup on the web.
+              {content.description}
             </p>
           </div>
         </div>
@@ -61,7 +85,7 @@ function DownloadIosContent() {
               rel="noopener noreferrer"
               className="inline-flex items-center justify-center gap-2"
             >
-              Download on the App Store
+              {content.primaryCta}
               <ExternalLink className="h-4 w-4 opacity-90" aria-hidden />
             </a>
           </Button>
@@ -71,7 +95,7 @@ function DownloadIosContent() {
             onClick={() => router.push(nextPath)}
             className="w-full h-12 text-base border-zinc-600 text-white hover:bg-zinc-800 hover:text-white"
           >
-            Continue setup on web
+            {content.secondaryCta}
           </Button>
         </div>
 
