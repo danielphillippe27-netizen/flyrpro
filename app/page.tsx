@@ -46,6 +46,19 @@ export default function LandingPage() {
     const params = new URLSearchParams(window.location.search);
     const error = params.get('error');
     const errorCode = params.get('error_code');
+    const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
+    const fragment = new URLSearchParams(hash);
+    const type = params.get('type') ?? fragment.get('type');
+    const hasRecoverySignal = ['code', 'token', 'token_hash', 'access_token', 'refresh_token']
+      .some((key) => params.has(key) || fragment.has(key));
+
+    if (type === 'recovery' || hasRecoverySignal) {
+      const resetUrl = new URL('/reset-password', window.location.origin);
+      resetUrl.search = window.location.search;
+      resetUrl.hash = window.location.hash;
+      router.replace(`${resetUrl.pathname}${resetUrl.search}${resetUrl.hash}`);
+      return;
+    }
 
     if (error === 'access_denied' && errorCode) {
       const loginURL = new URL('/login', window.location.origin);
