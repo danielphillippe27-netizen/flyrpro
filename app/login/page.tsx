@@ -15,6 +15,7 @@ type InviteValidationResponse = {
 };
 
 const PENDING_INVITE_PROFILE_KEY = 'flyr.pendingInviteProfile';
+type AuthMode = 'sign-in' | 'recovery';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -22,6 +23,7 @@ export default function LoginPage() {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [password, setPassword] = useState('');
+  const [authMode, setAuthMode] = useState<AuthMode>('sign-in');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [hasChecked, setHasChecked] = useState(false);
@@ -101,6 +103,9 @@ export default function LoginPage() {
     }
     return callbackURL.toString();
   };
+  const buildPasswordRecoveryURL = () => {
+    return new URL('/reset-password', window.location.origin).toString();
+  };
 
   useEffect(() => {
     if (!inviteMode || !inviteToken?.trim()) {
@@ -155,6 +160,11 @@ export default function LoginPage() {
       setMessage({ type: 'error', text: 'Sign in with Apple didn’t complete. Please try again or use another sign-in option.' });
     } else if (error === 'pkce_verifier_mismatch') {
       setMessage({ type: 'error', text: 'Sign-in session expired or another sign-in was started. Please try again in a single tab (or use a private/incognito window).' });
+    } else if (error === 'reset_link_invalid') {
+      setMessage({
+        type: 'error',
+        text: 'This password reset link is invalid or has expired. Request a new reset email and open the newest link right away.',
+      });
     } else if (error === 'auth_failed' || error === 'callback_error') {
       setMessage({ type: 'error', text: 'Sign-in failed. Please try again.' });
     }
@@ -198,6 +208,31 @@ export default function LoginPage() {
       ).toLowerCase();
       const normalizedFirstName = firstName.trim();
       const normalizedLastName = lastName.trim();
+
+      if (authMode === 'recovery') {
+        if (!normalizedEmail) {
+          setMessage({ type: 'error', text: 'Enter your email to reset your password.' });
+          return;
+        }
+
+        const { error: resetError } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
+          redirectTo: buildPasswordRecoveryURL(),
+        });
+
+        if (resetError) {
+          setMessage({
+            type: 'error',
+            text: formatAuthError(resetError, 'Could not send the reset email. Please try again.'),
+          });
+          return;
+        }
+
+        setMessage({
+          type: 'success',
+          text: 'If that email is registered, we sent a password reset link.',
+        });
+        return;
+      }
 
       if (inviteMode && inviteInfo.status !== 'ready') {
         setMessage({
@@ -376,12 +411,14 @@ export default function LoginPage() {
           <p className="text-[#AAAAAA] text-lg">
             {inviteMode
               ? `Create your account to join ${inviteInfo.workspaceName ?? 'this workspace'}`
-              : 'Sign in or create an account to access your dashboard or onboarding'}
+              : authMode === 'recovery'
+                ? 'Enter your email and we will send a secure password reset link'
+                : 'Sign in or create an account to access your dashboard or onboarding'}
           </p>
         </div>
 
         <form onSubmit={handleEmailSubmit} className="mt-6 space-y-4">
-          {inviteMode ? (
+          {inviteMode && authMode === 'sign-in' ? (
             <>
               <div className="space-y-1.5">
                 <Label htmlFor="firstName" className="text-white text-base">First name</Label>
@@ -425,31 +462,72 @@ export default function LoginPage() {
               className="h-12 text-base text-white bg-white/[0.08] border border-white/15 placeholder:text-gray-500 focus-visible:border-white/40 focus-visible:ring-2 focus-visible:ring-white/40 backdrop-blur-sm"
             />
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="password" className="text-white text-base">Password</Label>
-            <Input
-              id="password"
-              type="password"
-              placeholder="Enter your password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              minLength={6}
-              disabled={loading}
-              className="h-12 text-base text-white bg-white/[0.08] border border-white/15 placeholder:text-gray-500 focus-visible:border-white/40 focus-visible:ring-2 focus-visible:ring-white/40 backdrop-blur-sm"
-            />
-          </div>
+          {authMode === 'sign-in' ? (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between gap-3">
+                <Label htmlFor="password" className="text-white text-base">Password</Label>
+                {!inviteMode ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthMode('recovery');
+                      setMessage(null);
+                    }}
+                    disabled={loading}
+                    className="text-sm text-red-300 transition hover:text-red-200 disabled:opacity-50"
+                  >
+                    Forgot password?
+                  </button>
+                ) : null}
+              </div>
+              <Input
+                id="password"
+                type="password"
+                placeholder="Enter your password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                minLength={6}
+                disabled={loading}
+                className="h-12 text-base text-white bg-white/[0.08] border border-white/15 placeholder:text-gray-500 focus-visible:border-white/40 focus-visible:ring-2 focus-visible:ring-white/40 backdrop-blur-sm"
+              />
+            </div>
+          ) : null}
           <Button
             type="submit"
             size="lg"
             className="w-full h-12 text-base bg-[#dc2626] text-white hover:bg-[#b91c1c] border border-red-900/40"
             disabled={loading || (inviteMode && inviteInfo.status === 'loading')}
           >
-            {loading ? 'Continuing...' : inviteMode ? 'Create account and continue' : 'Continue with Email'}
+            {loading
+              ? authMode === 'recovery'
+                ? 'Sending reset link...'
+                : 'Continuing...'
+              : authMode === 'recovery'
+                ? 'Send reset link'
+                : inviteMode
+                  ? 'Create account and continue'
+                  : 'Continue with Email'}
           </Button>
         </form>
 
-        {!inviteMode ? (
+        {!inviteMode && authMode === 'recovery' ? (
+          <div className="mt-4 text-center">
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode('sign-in');
+                setMessage(null);
+              }}
+              disabled={loading}
+              className="text-sm text-[#AAAAAA] transition hover:text-white disabled:opacity-50"
+            >
+              Back to sign in
+            </button>
+          </div>
+        ) : null}
+
+        {!inviteMode && authMode === 'sign-in' ? (
           <>
             <div className="relative mt-6 flex items-center gap-4">
               <span className="flex-1 border-t border-zinc-600" />

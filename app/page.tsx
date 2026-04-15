@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
 import { ArcadeEmbed } from '@/components/landing/ArcadeEmbed';
 import { useRef } from 'react';
+import { useRouter } from 'next/navigation';
 
 const TRACKING_WORDS = [
   'Doors',
@@ -28,6 +29,7 @@ const TRACKING_WORDS = [
 ];
 
 export default function LandingPage() {
+  const router = useRouter();
   const [trackingWordIndex, setTrackingWordIndex] = useState(0);
   const demoContainerRef = useRef<HTMLDivElement | null>(null);
 
@@ -37,6 +39,20 @@ export default function LandingPage() {
     }, 2200);
     return () => clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const params = new URLSearchParams(window.location.search);
+    const error = params.get('error');
+    const errorCode = params.get('error_code');
+
+    if (error === 'access_denied' && errorCode) {
+      const loginURL = new URL('/login', window.location.origin);
+      loginURL.searchParams.set('error', errorCode === 'otp_expired' ? 'reset_link_invalid' : 'auth_failed');
+      router.replace(`${loginURL.pathname}${loginURL.search}`);
+    }
+  }, [router]);
 
   const handleGetStarted = async () => {
     const demoContainer = demoContainerRef.current;

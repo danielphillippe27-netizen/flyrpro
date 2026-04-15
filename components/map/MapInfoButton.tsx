@@ -10,6 +10,7 @@ interface MapInfoButtonProps {
   show?: boolean;
   statusFilters?: StatusFilters;
   onStatusFiltersChange?: (filters: StatusFilters) => void;
+  portalContainer?: HTMLElement | null;
 }
 
 /**
@@ -20,6 +21,7 @@ export function MapInfoButton({
   show = true,
   statusFilters,
   onStatusFiltersChange,
+  portalContainer,
 }: MapInfoButtonProps) {
   const [open, setOpen] = useState(false);
 
@@ -27,10 +29,10 @@ export function MapInfoButton({
 
   return (
     <>
-      <div className="absolute top-3 left-3 z-10">
+      <div className="pointer-events-none absolute top-3 left-3 z-20">
         <Button
           variant="secondary"
-          className="h-9 rounded-full bg-red-500/80 hover:bg-red-500/90 shadow-sm border border-red-300/30 text-white px-4 text-xs font-semibold"
+          className="pointer-events-auto h-9 rounded-full border border-red-300/30 bg-red-500/80 px-4 text-xs font-semibold text-white shadow-sm hover:bg-red-500/90"
           onClick={() => setOpen(true)}
           aria-label="Map tools"
         >
@@ -42,6 +44,7 @@ export function MapInfoButton({
         onOpenChange={setOpen}
         statusFilters={statusFilters}
         onStatusFiltersChange={onStatusFiltersChange}
+        portalContainer={portalContainer}
       />
     </>
   );

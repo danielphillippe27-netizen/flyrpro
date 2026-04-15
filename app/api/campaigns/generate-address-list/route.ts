@@ -13,10 +13,12 @@ export const dynamic = 'force-dynamic';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const CAMPAIGN_POLYGON_ADDRESS_LIMIT = 2500;
+const DEFAULT_CAMPAIGN_POLYGON_ADDRESS_LIMIT = 2500;
+const MAX_POLYGON_ADDRESS_LIMIT = 5000;
 
 interface GenerateAddressListRequest {
   campaign_id: string;
+  address_limit?: number;
   starting_address?: string;
   count?: number;
   coordinates?: {
@@ -120,7 +122,11 @@ async function getRequestUser(request: NextRequest): Promise<User | null> {
 export async function POST(request: NextRequest) {
   try {
     const body: GenerateAddressListRequest = await request.json();
-    const { campaign_id, starting_address, count = 50, coordinates: providedCoordinates, polygon } = body;
+    const { campaign_id, address_limit, starting_address, count = 50, coordinates: providedCoordinates, polygon } = body;
+    const polygonAddressLimit = Math.min(
+      MAX_POLYGON_ADDRESS_LIMIT,
+      Math.max(1, Number(address_limit ?? DEFAULT_CAMPAIGN_POLYGON_ADDRESS_LIMIT) || DEFAULT_CAMPAIGN_POLYGON_ADDRESS_LIMIT)
+    );
 
     if (!campaign_id) return NextResponse.json({ error: 'campaign_id is required' }, { status: 400 });
     if (!starting_address && !polygon) {
@@ -206,7 +212,7 @@ export async function POST(request: NextRequest) {
         const goldAddresses = await GoldAddressService.fetchAddressesInPolygon(
           polygon as GeoJSON.Polygon,
           regionCode,
-          CAMPAIGN_POLYGON_ADDRESS_LIMIT
+          polygonAddressLimit
         );
         
         if (goldAddresses && goldAddresses.length > 0) {
@@ -249,7 +255,7 @@ export async function POST(request: NextRequest) {
             polygon as GeoJSON.Polygon,
             regionCode,
             campaign_id,
-            { limitAddresses: CAMPAIGN_POLYGON_ADDRESS_LIMIT, limitBuildings: 0, includeRoads: false }
+            { limitAddresses: polygonAddressLimit, limitBuildings: 0, includeRoads: false }
           );
           const addressData = await TileLambdaService.downloadAddresses(snapshot.urls.addresses);
           addressFeatures = addressData.features || [];
@@ -394,8 +400,8 @@ export async function POST(request: NextRequest) {
 
       const insertedCount = inserted?.length ?? 0;
       const coverageLimitWarning =
-        polygon && insertedCount >= CAMPAIGN_POLYGON_ADDRESS_LIMIT
-          ? `You hit the maximum coverage of ${CAMPAIGN_POLYGON_ADDRESS_LIMIT} homes. Try a smaller area.`
+        polygon && insertedCount >= polygonAddressLimit
+          ? `You hit the maximum coverage of ${polygonAddressLimit} homes. Try a smaller area.`
           : null;
       console.log(`[generate-address-list] Saved ${insertedCount} addresses (source: ${source})`);
 

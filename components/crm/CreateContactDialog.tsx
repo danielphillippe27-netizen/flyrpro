@@ -16,15 +16,31 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ContactsService } from '@/lib/services/ContactsService';
 import type { ContactStatus } from '@/types/database';
 
+type ContactFormData = {
+  first_name: string;
+  last_name: string;
+  phone: string;
+  email: string;
+};
+
+const emptyContactFormData = (): ContactFormData => ({
+  first_name: '',
+  last_name: '',
+  phone: '',
+  email: '',
+});
+
 interface CreateContactDialogProps {
   open: boolean;
   onClose: () => void;
   onSuccess: () => void;
   userId: string;
   workspaceId?: string;
+  portalContainer?: HTMLElement | null;
   initialAddress?: string;
   initialAddressId?: string;
   initialCampaignId?: string;
+  initialFarmId?: string;
   initialNotes?: string;
 }
 
@@ -34,17 +50,18 @@ export function CreateContactDialog({
   onSuccess,
   userId,
   workspaceId,
+  portalContainer,
   initialAddress,
   initialAddressId,
   initialCampaignId,
+  initialFarmId,
   initialNotes,
 }: CreateContactDialogProps) {
   const [loading, setLoading] = useState(false);
+  const [primaryContact, setPrimaryContact] = useState<ContactFormData>(emptyContactFormData);
+  const [showSecondContact, setShowSecondContact] = useState(false);
+  const [secondContact, setSecondContact] = useState<ContactFormData>(emptyContactFormData);
   const [formData, setFormData] = useState({
-    first_name: '',
-    last_name: '',
-    phone: '',
-    email: '',
     address: initialAddress || '',
     status: 'new' as ContactStatus,
     notes: initialNotes || '',
@@ -71,49 +88,56 @@ export function CreateContactDialog({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.first_name.trim()) {
+    if (!primaryContact.first_name.trim()) {
       alert('Please fill in the required field: First Name');
+      return;
+    }
+    if (showSecondContact && !secondContact.first_name.trim()) {
+      alert('Please fill in the required field: 2nd Contact First Name');
       return;
     }
 
     setLoading(true);
     try {
-      // Use createContactWithAddress if address_id is provided
-      if (initialAddressId) {
-        await ContactsService.createContactWithAddress(userId, {
-          first_name: formData.first_name.trim(),
-          last_name: formData.last_name.trim() || undefined,
-          phone: formData.phone.trim() || undefined,
-          email: formData.email.trim() || undefined,
+      const contactsToCreate = [
+        primaryContact,
+        ...(showSecondContact ? [secondContact] : []),
+      ];
+
+      for (const contact of contactsToCreate) {
+        const payload = {
+          first_name: contact.first_name.trim(),
+          last_name: contact.last_name.trim() || undefined,
+          phone: contact.phone.trim() || undefined,
+          email: contact.email.trim() || undefined,
           address: formData.address.trim() || undefined,
           campaign_id: initialCampaignId,
-          status: formData.status,
-          notes: formData.notes.trim() || undefined,
-          address_id: initialAddressId,
-          follow_up_at: toIsoString(formData.follow_up_at),
-          appointment_at: toIsoString(formData.appointment_at),
-        }, workspaceId);
-      } else {
-        await ContactsService.createContact(userId, {
-          first_name: formData.first_name.trim(),
-          last_name: formData.last_name.trim() || undefined,
-          phone: formData.phone.trim() || undefined,
-          email: formData.email.trim() || undefined,
-          address: formData.address.trim() || undefined,
-          campaign_id: initialCampaignId,
+          farm_id: initialFarmId,
           status: formData.status,
           notes: formData.notes.trim() || undefined,
           follow_up_at: toIsoString(formData.follow_up_at),
           appointment_at: toIsoString(formData.appointment_at),
-        }, workspaceId);
+        };
+
+        if (initialAddressId) {
+          await ContactsService.createContactWithAddress(
+            userId,
+            {
+              ...payload,
+              address_id: initialAddressId,
+            },
+            workspaceId
+          );
+        } else {
+          await ContactsService.createContact(userId, payload, workspaceId);
+        }
       }
 
       // Reset form
+      setPrimaryContact(emptyContactFormData());
+      setSecondContact(emptyContactFormData());
+      setShowSecondContact(false);
       setFormData({
-        first_name: '',
-        last_name: '',
-        phone: '',
-        email: '',
         address: '',
         status: 'new',
         notes: '',
@@ -134,11 +158,10 @@ export function CreateContactDialog({
 
   const handleClose = () => {
     if (!loading) {
+      setPrimaryContact(emptyContactFormData());
+      setSecondContact(emptyContactFormData());
+      setShowSecondContact(false);
       setFormData({
-        first_name: '',
-        last_name: '',
-        phone: '',
-        email: '',
         address: '',
         status: 'new',
         notes: '',
@@ -151,7 +174,10 @@ export function CreateContactDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent
+        className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto"
+        portalContainer={portalContainer}
+      >
         <DialogHeader>
           <DialogTitle>Add New Contact</DialogTitle>
           <DialogDescription>
@@ -160,30 +186,127 @@ export function CreateContactDialog({
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="first_name">
+                  First Name <span className="text-red-500">*</span>
+                </Label>
+                <Input
+                  id="first_name"
+                  value={primaryContact.first_name}
+                  onChange={(e) => setPrimaryContact({ ...primaryContact, first_name: e.target.value })}
+                  placeholder="John"
+                  required
+                  disabled={loading}
+                />
+              </div>
+              <div>
+                <Label htmlFor="last_name">Last Name</Label>
+                <Input
+                  id="last_name"
+                  value={primaryContact.last_name}
+                  onChange={(e) => setPrimaryContact({ ...primaryContact, last_name: e.target.value })}
+                  placeholder="Doe"
+                  disabled={loading}
+                />
+              </div>
+            </div>
+
             <div>
-              <Label htmlFor="first_name">
-                First Name <span className="text-red-500">*</span>
-              </Label>
+              <Label htmlFor="phone">Phone</Label>
               <Input
-                id="first_name"
-                value={formData.first_name}
-                onChange={(e) => setFormData({ ...formData, first_name: e.target.value })}
-                placeholder="John"
-                required
+                id="phone"
+                type="tel"
+                value={primaryContact.phone}
+                onChange={(e) => setPrimaryContact({ ...primaryContact, phone: e.target.value })}
+                placeholder="(555) 123-4567"
                 disabled={loading}
               />
             </div>
+
             <div>
-              <Label htmlFor="last_name">Last Name</Label>
+              <Label htmlFor="email">Email</Label>
               <Input
-                id="last_name"
-                value={formData.last_name}
-                onChange={(e) => setFormData({ ...formData, last_name: e.target.value })}
-                placeholder="Doe"
+                id="email"
+                type="email"
+                value={primaryContact.email}
+                onChange={(e) => setPrimaryContact({ ...primaryContact, email: e.target.value })}
+                placeholder="john@example.com"
                 disabled={loading}
               />
             </div>
+
+            <div className="flex justify-start">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  if (showSecondContact) {
+                    setSecondContact(emptyContactFormData());
+                  }
+                  setShowSecondContact((value) => !value);
+                }}
+                disabled={loading}
+              >
+                {showSecondContact ? 'Remove 2nd Contact' : 'Add 2nd Contact'}
+              </Button>
+            </div>
+
+            {showSecondContact && (
+              <div className="space-y-4 rounded-lg border border-gray-200 p-4 dark:border-zinc-800">
+                <p className="text-sm font-medium text-gray-900 dark:text-white">2nd Contact</p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="second_first_name">
+                      First Name <span className="text-red-500">*</span>
+                    </Label>
+                    <Input
+                      id="second_first_name"
+                      value={secondContact.first_name}
+                      onChange={(e) => setSecondContact({ ...secondContact, first_name: e.target.value })}
+                      placeholder="Jane"
+                      disabled={loading}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="second_last_name">Last Name</Label>
+                    <Input
+                      id="second_last_name"
+                      value={secondContact.last_name}
+                      onChange={(e) => setSecondContact({ ...secondContact, last_name: e.target.value })}
+                      placeholder="Doe"
+                      disabled={loading}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <Label htmlFor="second_phone">Phone</Label>
+                  <Input
+                    id="second_phone"
+                    type="tel"
+                    value={secondContact.phone}
+                    onChange={(e) => setSecondContact({ ...secondContact, phone: e.target.value })}
+                    placeholder="(555) 123-4567"
+                    disabled={loading}
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="second_email">Email</Label>
+                  <Input
+                    id="second_email"
+                    type="email"
+                    value={secondContact.email}
+                    onChange={(e) => setSecondContact({ ...secondContact, email: e.target.value })}
+                    placeholder="jane@example.com"
+                    disabled={loading}
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           <div>
@@ -199,30 +322,6 @@ export function CreateContactDialog({
           </div>
 
           <div>
-            <Label htmlFor="phone">Phone</Label>
-            <Input
-              id="phone"
-              type="tel"
-              value={formData.phone}
-              onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-              placeholder="(555) 123-4567"
-              disabled={loading}
-            />
-          </div>
-
-          <div>
-            <Label htmlFor="email">Email</Label>
-            <Input
-              id="email"
-              type="email"
-              value={formData.email}
-              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              placeholder="john@example.com"
-              disabled={loading}
-            />
-          </div>
-
-          <div>
             <Label htmlFor="status">
               Status <span className="text-red-500">*</span>
             </Label>
@@ -234,7 +333,7 @@ export function CreateContactDialog({
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent portalContainer={portalContainer}>
                 <SelectItem value="new">New</SelectItem>
                 <SelectItem value="hot">Hot</SelectItem>
                 <SelectItem value="warm">Warm</SelectItem>
@@ -287,8 +386,8 @@ export function CreateContactDialog({
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={loading || !formData.first_name.trim()}>
-              {loading ? 'Creating...' : 'Create Contact'}
+            <Button type="submit" disabled={loading || !primaryContact.first_name.trim()}>
+              {loading ? 'Creating...' : showSecondContact ? 'Create Contacts' : 'Create Contact'}
             </Button>
           </div>
         </form>

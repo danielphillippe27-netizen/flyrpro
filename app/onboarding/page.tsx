@@ -36,6 +36,7 @@ const INDUSTRIES_REST = [
 const SOLO_SEATS = 1;
 const TEAM_MIN_SEATS = 2;
 const MAX_SEATS = 100;
+const EXCLUSIVE_ONBOARDING_AUTH_DRAFT_KEY = 'flyr.exclusiveOnboardingAuthDraft';
 
 function LogoutDoorEmblem({ className }: { className?: string }) {
   return (
@@ -77,6 +78,35 @@ function normalizeEmailList(values: string[]): string[] {
     normalized.push(email);
   }
   return normalized;
+}
+
+function formatAuthError(
+  error: unknown,
+  fallback = 'Sign-in is temporarily unavailable. Please try again in a minute.'
+) {
+  const asRecord =
+    error && typeof error === 'object' ? (error as Record<string, unknown>) : null;
+  const rawMessage =
+    error instanceof Error
+      ? error.message
+      : typeof asRecord?.message === 'string'
+        ? asRecord.message
+        : '';
+  const message = rawMessage.trim();
+  const status = typeof asRecord?.status === 'number' ? asRecord.status : null;
+
+  const isUpstreamFailure =
+    message === '{}' ||
+    /upstream connect error|remote connection failure|service unavailable|fetch failed|timeout|timed out/i.test(
+      message
+    ) ||
+    (status !== null && status >= 500);
+
+  if (isUpstreamFailure) {
+    return fallback;
+  }
+
+  return message || fallback;
 }
 
 function OnboardingContent() {
@@ -173,6 +203,8 @@ function OnboardingContent() {
   const [accountPassword, setAccountPassword] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [authMode, setAuthMode] = useState<'credentials' | 'google' | 'apple' | null>(null);
+  const [authenticatedEmail, setAuthenticatedEmail] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const [useCase, setUseCase] = useState<'solo' | 'team'>('solo');
   const [workspaceName, setWorkspaceName] = useState('');
@@ -203,13 +235,119 @@ function OnboardingContent() {
     setSeats((previous) => Math.max(TEAM_MIN_SEATS, previous));
   }, [isExclusivePartnerTeamLayout]);
 
+  useEffect(() => {
+    if (!isExclusivePartnerOnboarding) {
+      setAuthenticatedEmail(null);
+      return;
+    }
+
+    if (typeof window !== 'undefined') {
+      try {
+        const storedDraft = window.localStorage.getItem(EXCLUSIVE_ONBOARDING_AUTH_DRAFT_KEY);
+        if (storedDraft) {
+          const parsed = JSON.parse(storedDraft) as {
+            firstName?: unknown;
+            lastName?: unknown;
+            workEmail?: unknown;
+          };
+          if (typeof parsed.firstName === 'string' && parsed.firstName.trim()) {
+            setFirstName((current) => current || parsed.firstName.trim());
+          }
+          if (typeof parsed.lastName === 'string' && parsed.lastName.trim()) {
+            setLastName((current) => current || parsed.lastName.trim());
+          }
+          if (typeof parsed.workEmail === 'string' && parsed.workEmail.trim()) {
+            setWorkEmail((current) => current || parsed.workEmail.trim().toLowerCase());
+          }
+        }
+      } catch {
+        // Ignore malformed local draft data from earlier attempts.
+      }
+    }
+
+    let cancelled = false;
+    getClientAsync()
+      .then((supabase) => supabase.auth.getUser())
+      .then(({ data: { user } }) => {
+        if (cancelled) return;
+        const email =
+          typeof user?.email === 'string' && user.email.trim()
+            ? user.email.trim().toLowerCase()
+            : null;
+        setAuthenticatedEmail(email);
+        if (email) {
+          setWorkEmail((current) => current.trim() || email);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAuthenticatedEmail(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isExclusivePartnerOnboarding]);
+
+  useEffect(() => {
+    if (!isExclusivePartnerOnboarding) return;
+
+    const error = searchParams.get('error');
+    const errorDescription = searchParams.get('error_description') || '';
+
+    if (error === 'apple_oauth_failed') {
+      setAuthError('Could not start Sign in with Apple. Please try again.');
+      return;
+    }
+    if (error === 'apple_exchange_failed') {
+      if (typeof window !== 'undefined' && errorDescription) {
+        console.warn('[Apple Sign-In]', errorDescription);
+      }
+      setAuthError('Sign in with Apple did not complete. Please try again or use another sign-in option.');
+      return;
+    }
+    if (error === 'pkce_verifier_mismatch') {
+      setAuthError('Sign-in session expired or another sign-in was started. Please try again in a single tab.');
+      return;
+    }
+    if (error === 'auth_failed' || error === 'callback_error') {
+      setAuthError('Sign-in failed. Please try again.');
+    }
+  }, [isExclusivePartnerOnboarding, searchParams]);
+
+  const normalizedWorkEmail = workEmail.trim().toLowerCase();
+  const hasAuthenticatedExclusiveSession =
+    !!authenticatedEmail &&
+    !!normalizedWorkEmail &&
+    authenticatedEmail === normalizedWorkEmail;
   const canStep1 =
     firstName.trim().length > 0 &&
     lastName.trim().length > 0 &&
     (!isExclusivePartnerOnboarding ||
-      (workEmail.trim().length > 0 && accountPassword.trim().length >= 6));
+      hasAuthenticatedExclusiveSession ||
+      (normalizedWorkEmail.length > 0 && accountPassword.trim().length >= 6));
   const canStep3 =
     workspaceName.trim().length > 0 && industry.length > 0;
+
+  const persistExclusiveAuthDraft = useCallback(() => {
+    if (!isExclusivePartnerOnboarding || typeof window === 'undefined') return;
+    window.localStorage.setItem(
+      EXCLUSIVE_ONBOARDING_AUTH_DRAFT_KEY,
+      JSON.stringify({
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        workEmail: normalizedWorkEmail,
+      })
+    );
+  }, [firstName, isExclusivePartnerOnboarding, lastName, normalizedWorkEmail]);
+
+  const buildExclusiveAuthCallbackURL = useCallback(() => {
+    const callbackUrl = new URL('/auth/callback', window.location.origin);
+    const nextPath = `${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ''}`;
+    callbackUrl.searchParams.set('next', nextPath);
+    return callbackUrl.toString();
+  }, [pathname, searchParams]);
 
   const fetchBrokerageSuggestions = useCallback(async (q: string) => {
     if (!q.trim()) {
@@ -295,6 +433,9 @@ function OnboardingContent() {
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.redirect) {
+        if (typeof window !== 'undefined') {
+          window.localStorage.removeItem(EXCLUSIVE_ONBOARDING_AUTH_DRAFT_KEY);
+        }
         window.location.href = data.redirect;
         return;
       }
@@ -319,14 +460,18 @@ function OnboardingContent() {
 
   const ensureExclusiveAuth = useCallback(async (): Promise<boolean> => {
     if (!isExclusivePartnerOnboarding) return true;
-    const normalizedEmail = workEmail.trim().toLowerCase();
+    const normalizedEmail = normalizedWorkEmail;
     if (!normalizedEmail || accountPassword.trim().length < 6) {
-      setAuthError('Enter a valid work email and a password (6+ characters).');
+      if (hasAuthenticatedExclusiveSession) {
+        return true;
+      }
+      setAuthError('Enter a valid work email and a password (6+ characters), or continue with Google or Apple.');
       return false;
     }
 
     setAuthError(null);
     setAuthLoading(true);
+    setAuthMode('credentials');
     try {
       const supabase = await getClientAsync();
       const {
@@ -360,7 +505,7 @@ function OnboardingContent() {
           .includes('invalid_credentials');
 
       if (!isInvalidCredentials) {
-        setAuthError(signInResult.error?.message || 'Failed to sign in with this email.');
+        setAuthError(formatAuthError(signInResult.error, 'Failed to sign in with this email.'));
         return false;
       }
 
@@ -393,7 +538,7 @@ function OnboardingContent() {
       });
 
       if (signUpResult.error) {
-        setAuthError(signUpResult.error.message || 'Failed to create account.');
+        setAuthError(formatAuthError(signUpResult.error, 'Failed to create account.'));
         return false;
       }
 
@@ -405,15 +550,17 @@ function OnboardingContent() {
         'Check your inbox to confirm your email, then return to finish onboarding.'
       );
       return false;
-    } catch {
-      setAuthError('Could not verify account. Please try again.');
+    } catch (error) {
+      setAuthError(formatAuthError(error, 'Could not verify account. Please try again.'));
       return false;
     } finally {
       setAuthLoading(false);
+      setAuthMode(null);
     }
   }, [
     accountPassword,
     firstName,
+    hasAuthenticatedExclusiveSession,
     isExclusivePartnerOnboarding,
     lastName,
     challenge30FromUrl,
@@ -421,8 +568,52 @@ function OnboardingContent() {
     onboardingEntryPath,
     partnerExclusiveParam,
     partnerOfferToken,
-    workEmail,
+    normalizedWorkEmail,
   ]);
+
+  const handleExclusiveOAuthSignIn = useCallback(
+    async (provider: 'google' | 'apple') => {
+      const normalizedFirstName = firstName.trim();
+      const normalizedLastName = lastName.trim();
+
+      if (!normalizedFirstName || !normalizedLastName) {
+        setAuthError('Enter your first and last name before continuing with Google or Apple.');
+        return;
+      }
+
+      setAuthError(null);
+      setAuthLoading(true);
+      setAuthMode(provider);
+      try {
+        persistExclusiveAuthDraft();
+        const supabase = await getClientAsync();
+        const { data, error } = await supabase.auth.signInWithOAuth({
+          provider,
+          options: {
+            redirectTo: buildExclusiveAuthCallbackURL(),
+          },
+        });
+        if (error) throw error;
+        if (data?.url) {
+          window.location.href = data.url;
+          return;
+        }
+        throw new Error(`Failed to start ${provider === 'google' ? 'Google' : 'Apple'} sign-in.`);
+      } catch (error) {
+        setAuthError(
+          formatAuthError(
+            error,
+            provider === 'google'
+              ? 'Failed to start Google sign-in.'
+              : 'Failed to start Sign in with Apple.'
+          )
+        );
+        setAuthLoading(false);
+        setAuthMode(null);
+      }
+    },
+    [buildExclusiveAuthCallbackURL, firstName, lastName, persistExclusiveAuthDraft]
+  );
 
   if (!isExclusivePartnerLayoutReady) {
     return (
@@ -531,7 +722,10 @@ function OnboardingContent() {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && canStep1) {
                     e.preventDefault();
-                    setStep((s) => s + 1);
+                    void (async () => {
+                      const authReady = await ensureExclusiveAuth();
+                      if (authReady) setStep((s) => s + 1);
+                    })();
                   }
                 }}
               />
@@ -544,7 +738,7 @@ function OnboardingContent() {
                     id="workEmail"
                     type="email"
                     value={workEmail}
-                    onChange={(e) => setWorkEmail(e.target.value)}
+                    onChange={(e) => setWorkEmail(e.target.value.trim().toLowerCase())}
                     placeholder="you@company.com"
                     className="h-16 text-2xl md:text-2xl text-white placeholder:text-gray-500 bg-[#2a2a2a] border-zinc-600 focus-visible:border-white focus-visible:ring-2 focus-visible:ring-white/40"
                   />
@@ -560,9 +754,67 @@ function OnboardingContent() {
                     className="h-16 text-2xl md:text-2xl text-white placeholder:text-gray-500 bg-[#2a2a2a] border-zinc-600 focus-visible:border-white focus-visible:ring-2 focus-visible:ring-white/40"
                   />
                 </div>
-                <p className="text-xs text-zinc-400">
-                  We will sign in or create this account before continuing so onboarding never runs on the wrong user.
-                </p>
+                {hasAuthenticatedExclusiveSession ? (
+                  <p className="text-xs text-emerald-300">
+                    Signed in as {authenticatedEmail}. Continue onboarding below, or choose another sign-in option.
+                  </p>
+                ) : (
+                  <p className="text-xs text-zinc-400">
+                    We will sign in or create this account before continuing so onboarding never runs on the wrong user.
+                  </p>
+                )}
+                <div className="relative flex items-center gap-4 pt-1">
+                  <span className="flex-1 border-t border-zinc-600" />
+                  <span className="shrink-0 text-xs uppercase tracking-[0.2em] text-zinc-500">
+                    Or continue with
+                  </span>
+                  <span className="flex-1 border-t border-zinc-600" />
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-12 border-zinc-600 bg-transparent text-white hover:bg-zinc-800 hover:text-white"
+                    onClick={() => void handleExclusiveOAuthSignIn('google')}
+                    disabled={authLoading}
+                  >
+                    <svg className="mr-2 h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="none">
+                      <path
+                        fill="currentColor"
+                        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                      />
+                      <path
+                        fill="currentColor"
+                        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                      />
+                      <path
+                        fill="currentColor"
+                        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+                      />
+                      <path
+                        fill="currentColor"
+                        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                      />
+                    </svg>
+                    {authLoading && authMode === 'google'
+                      ? 'Continuing with Google…'
+                      : 'Continue with Google'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-12 border-zinc-600 bg-transparent text-white hover:bg-zinc-800 hover:text-white"
+                    onClick={() => void handleExclusiveOAuthSignIn('apple')}
+                    disabled={authLoading}
+                  >
+                    <svg className="mr-2 h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M17.05 20.28c-.98.95-2.05.88-3.08.4-1.09-.5-2.08-.48-3.24 0-1.44.62-2.2.44-3.06-.4C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.54 4.09l.01-.01zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z" />
+                    </svg>
+                    {authLoading && authMode === 'apple'
+                      ? 'Continuing with Apple…'
+                      : 'Continue with Apple'}
+                  </Button>
+                </div>
               </>
             ) : null}
           </form>
@@ -911,7 +1163,13 @@ function OnboardingContent() {
               }
               className="w-full h-14 text-lg font-semibold bg-[#ef4444] text-white hover:bg-[#dc2626] border-0"
             >
-              {authLoading && step === 1 ? 'Verifying account…' : 'Continue'}
+              {authLoading && step === 1
+                ? authMode === 'google'
+                  ? 'Continuing with Google…'
+                  : authMode === 'apple'
+                    ? 'Continuing with Apple…'
+                    : 'Verifying account…'
+                : 'Continue'}
             </Button>
           ) : (
             <Button

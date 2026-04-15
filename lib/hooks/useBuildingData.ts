@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import type { Contact } from '@/types/contacts';
+import { compareAddressesForDisplay, displayAddressText, resolveHouseNumberLabel } from '@/lib/map/addressPresentation';
 
 /**
  * Address data resolved from a building's gers_id
@@ -93,15 +94,17 @@ export function useBuildingData(
       const supabase = createClient();
 
       const toResolved = (raw: { id: string; house_number?: string | null; street_name?: string | null; formatted?: string | null; gers_id?: string | null }): ResolvedAddress => {
-        const street = [raw.house_number, raw.street_name].filter(Boolean).join(' ') || raw.formatted || 'Unknown Address';
+        const houseNumber = resolveHouseNumberLabel(raw) || '';
+        const formatted = displayAddressText(raw);
+        const street = [houseNumber, raw.street_name].filter(Boolean).join(' ') || formatted || 'Unknown Address';
         return {
           id: raw.id,
           street,
-          formatted: raw.formatted || street,
+          formatted: formatted || street,
           locality: '',
           region: '',
           postalCode: '',
-          houseNumber: raw.house_number || '',
+          houseNumber,
           streetName: raw.street_name || '',
           gersId: raw.gers_id || gersId,
         };
@@ -184,9 +187,7 @@ export function useBuildingData(
         if (addrError) {
           console.error('[useBuildingData] Address fetch error:', addrError);
         } else if (addressRows && addressRows.length > 0) {
-          // Preserve order from links (first linked = first in list)
-          const orderMap = new Map(addressIds.map((id, i) => [id, i]));
-          const sorted = [...addressRows].sort((a, b) => (orderMap.get(a.id) ?? 0) - (orderMap.get(b.id) ?? 0));
+          const sorted = [...addressRows].sort(compareAddressesForDisplay);
           resolvedList = sorted.map((raw) => toResolved(raw));
         }
       }

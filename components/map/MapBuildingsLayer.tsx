@@ -8,6 +8,7 @@ import type { BuildingFeatureCollection, BuildingFeature, BuildingProperties, Ge
 import type { CampaignAddress } from '@/types/database';
 import { getCampaignAddressMapStatus, getCampaignBuildingStatus } from '@/lib/campaignStats';
 import { MAP_STATUS_CONFIG, type StatusFilters } from '@/lib/constants/mapStatus';
+import { displayAddressText, resolveHouseNumberLabel } from '@/lib/map/addressPresentation';
 
 interface MapBuildingsLayerProps {
   map: Map;
@@ -136,7 +137,7 @@ function buildAddressLabelFeatureCollection(
   return {
     type: 'FeatureCollection',
     features: (addresses ?? []).flatMap((address) => {
-      const houseNumber = address.house_number?.trim();
+      const houseNumber = resolveHouseNumberLabel(address);
       const coordinates = getAddressCoordinate(address);
 
       if (!houseNumber || !coordinates) {
@@ -404,8 +405,8 @@ export function MapBuildingsLayer({
               id: addr.id,
               feature_id: addr.id,
               address_id: addr.id,
-              address_text: addr.formatted,
-              house_number: addr.house_number || null,
+              address_text: displayAddressText(addr),
+              house_number: resolveHouseNumberLabel(addr),
               address_status: getCampaignAddressMapStatus(addr as CampaignAddress),
               status: getCampaignBuildingStatus(addr as CampaignAddress),
               scans_total: addr.scans || 0,
@@ -728,6 +729,15 @@ export function MapBuildingsLayer({
                 geometry: (scaledGeom ?? geom) as GeoJSON.Polygon,
                 properties: {
                   ...props,
+                  address_text: displayAddressText({
+                    formatted: props.address_text,
+                    house_number: props.house_number,
+                    street_name: props.street_name,
+                  }),
+                  house_number: resolveHouseNumberLabel({
+                    house_number: props.house_number,
+                    formatted: props.address_text,
+                  }),
                   feature_id: fid ?? (f as any).id,
                 },
               };

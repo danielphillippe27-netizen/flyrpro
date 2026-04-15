@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { getCampaignBuildingStatus } from '@/lib/campaignStats';
+import { displayAddressText, resolveHouseNumberLabel } from '@/lib/map/addressPresentation';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { gunzipSync } from 'zlib';
 
@@ -27,6 +28,25 @@ function hasPolygonFeatures(featureCollection: unknown): boolean {
     const geometry = (feature as { geometry?: { type?: unknown } }).geometry;
     const type = geometry?.type;
     return type === 'Polygon' || type === 'MultiPolygon';
+  });
+}
+
+function hasAddressPointFallbackFeatures(featureCollection: unknown): boolean {
+  if (!featureCollection || typeof featureCollection !== 'object') return false;
+  const features = (featureCollection as { features?: unknown }).features;
+  if (!Array.isArray(features)) return false;
+
+  return features.some((feature) => {
+    if (!feature || typeof feature !== 'object') return false;
+    const properties = (feature as {
+      properties?: { source?: unknown; feature_type?: unknown; feature_status?: unknown };
+    }).properties;
+
+    return (
+      properties?.source === 'address_point' ||
+      properties?.feature_type === 'address_point' ||
+      properties?.feature_status === 'address_point'
+    );
   });
 }
 
@@ -152,8 +172,8 @@ function buildGoldFallbackFeatureCollection(
         source: 'gold',
         address_count: linkedAddresses.length,
         address_id: linkedAddresses.length === 1 ? firstAddress?.id ?? null : null,
-        address_text: linkedAddresses.length === 1 ? firstAddress?.formatted ?? null : null,
-        house_number: linkedAddresses.length === 1 ? firstAddress?.house_number ?? null : null,
+        address_text: linkedAddresses.length === 1 ? displayAddressText(firstAddress ?? {}) : null,
+        house_number: linkedAddresses.length === 1 ? resolveHouseNumberLabel(firstAddress ?? {}) : null,
         street_name: linkedAddresses.length === 1 ? firstAddress?.street_name ?? null : null,
         address_status: linkedAddresses.length === 1 ? firstAddress?.address_status ?? null : null,
         height: 10,
@@ -343,7 +363,10 @@ export async function GET(
     let fallbackFeatures = campaignFeatures ?? null;
 
     if (!featuresError && campaignFeatures && campaignFeatures.features?.length > 0) {
-      if (hasPolygonFeatures(campaignFeatures)) {
+      const hasPolygons = hasPolygonFeatures(campaignFeatures);
+      const hasAddressPointFallbacks = hasAddressPointFallbackFeatures(campaignFeatures);
+
+      if (hasPolygons && !hasAddressPointFallbacks) {
         console.log(
           `[API] Returning ${campaignFeatures.features.length} polygon features ` +
             `(source: ${campaignFeatures.features[0]?.properties?.source || 'unknown'})`
@@ -351,7 +374,13 @@ export async function GET(
         return NextResponse.json(campaignFeatures);
       }
 
-      console.log('[API] RPC returned point-only features; attempting link repair before fallback');
+      if (hasPolygons) {
+        console.log(
+          '[API] RPC returned mixed polygon + address-point features; attempting link repair before returning partial result'
+        );
+      } else {
+        console.log('[API] RPC returned point-only features; attempting link repair before fallback');
+      }
     } else if (featuresError) {
       console.error('[API] Feature RPC error:', featuresError.message);
     } else {

@@ -6,9 +6,16 @@ import { FarmService } from '@/lib/services/FarmService';
 import type { Farm } from '@/types/database';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
+import { useWorkspace } from '@/lib/workspace-context';
+import {
+  formatFarmBudget,
+  formatFarmCadence,
+  formatFarmTouchTypeLabel,
+  normalizeFarmTouchTypes,
+} from '@/lib/farms/config';
 
 export function FarmListView({ userId }: { userId: string | null }) {
+  const { currentWorkspaceId } = useWorkspace();
   const [farms, setFarms] = useState<Farm[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -20,7 +27,7 @@ export function FarmListView({ userId }: { userId: string | null }) {
 
     const loadFarms = async () => {
       try {
-        const data = await FarmService.fetchFarms(userId);
+        const data = await FarmService.fetchFarms(userId, currentWorkspaceId);
         setFarms(data);
       } catch (error) {
         console.error('Error loading farms:', error);
@@ -30,7 +37,7 @@ export function FarmListView({ userId }: { userId: string | null }) {
     };
 
     loadFarms();
-  }, [userId]);
+  }, [userId, currentWorkspaceId]);
 
   if (loading) {
     return <div className="text-center py-8 text-gray-600 dark:text-gray-400">Loading farms...</div>;
@@ -70,19 +77,17 @@ export function FarmListView({ userId }: { userId: string | null }) {
             {farm.area_label && (
               <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">{farm.area_label}</p>
             )}
-            <div className="mb-2">
-              <div className="flex justify-between text-sm mb-1">
-                <span className="text-gray-600 dark:text-gray-400">Progress</span>
-                <span className="font-medium dark:text-gray-300">{Math.round((farm.progress || 0) * 100)}%</span>
+            <div className="space-y-1.5 text-xs text-gray-500 dark:text-gray-500 mt-2">
+              <div className="flex justify-between gap-3">
+                <span>{formatFarmCadence(farm)}</span>
+                <span>{(farm.address_count ?? 0).toLocaleString()} homes</span>
               </div>
-              <Progress value={(farm.progress || 0) * 100} className="h-2" />
-            </div>
-            <div className="flex justify-between text-xs text-gray-500 dark:text-gray-500 mt-2">
-              <span>{farm.frequency} touches/month</span>
-              <span>
-                {new Date(farm.start_date).toLocaleDateString()} -{' '}
-                {new Date(farm.end_date).toLocaleDateString()}
-              </span>
+              <div className="flex justify-between gap-3">
+                <span className="truncate">
+                  {normalizeFarmTouchTypes(farm.touch_types).map(formatFarmTouchTypeLabel).join(', ') || 'No touch types'}
+                </span>
+                <span>{formatFarmBudget(farm.annual_budget_cents) || 'No budget'}</span>
+              </div>
             </div>
           </Card>
         </Link>

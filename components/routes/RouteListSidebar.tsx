@@ -132,7 +132,7 @@ export function RouteListSidebar({
 
   if (collapsed) {
     return (
-      <aside className="shrink-0 flex flex-col bg-white dark:bg-[#0f0f10] w-9 h-12 items-center justify-center border-b border-border -mt-px">
+      <aside className="shrink-0 flex flex-col bg-white dark:bg-[#0f0f10] w-9 h-[49px] items-center justify-center border-r border-b border-border">
         <button
           onClick={onToggleCollapse}
           className="flex items-center justify-center w-[18px] h-[18px] rounded-sm bg-transparent hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"

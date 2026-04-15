@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Search } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import {
   Table,
@@ -13,6 +14,7 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 
 interface Recipient {
@@ -35,6 +37,7 @@ interface Recipient {
   house_number?: string;
   locality?: string;
   seq?: number;
+  contacts?: string[];
 }
 
 interface RecipientsTableProps {
@@ -45,6 +48,7 @@ interface RecipientsTableProps {
 
 export function RecipientsTable({ recipients, campaignId, onRefresh }: RecipientsTableProps) {
   const [loading, setLoading] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
   const router = useRouter();
   const supabase = createClient();
 
@@ -82,6 +86,38 @@ export function RecipientsTable({ recipients, campaignId, onRefresh }: Recipient
       .filter(Boolean)
       .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
       .join(' ');
+
+  const normalizeText = (value: string | null | undefined) =>
+    value?.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() ?? '';
+
+  const getAddressText = (recipient: Recipient) =>
+    recipient.house_number && recipient.street_name
+      ? `${recipient.house_number} ${recipient.street_name}`
+      : recipient.address_line || 'N/A';
+
+  const filteredRecipients = useMemo(() => {
+    const query = normalizeText(searchQuery);
+    if (!query) return recipients;
+
+    return recipients.filter((recipient) => {
+      const searchText = [
+        getAddressText(recipient),
+        recipient.address_line,
+        recipient.city,
+        recipient.region,
+        recipient.postal_code,
+        recipient.locality,
+        displayLabel(recipient),
+        recipient.contacts?.join(' '),
+      ]
+        .map(normalizeText)
+        .join(' ');
+
+      return searchText.includes(query);
+    });
+  }, [recipients, searchQuery]);
+
+  const showContactsColumn = recipients.some((recipient) => (recipient.contacts?.length ?? 0) > 0);
 
   const getStatusBadgeClass = (status: string) => {
     switch (status) {
@@ -121,76 +157,106 @@ export function RecipientsTable({ recipients, campaignId, onRefresh }: Recipient
   }
 
   return (
-    <div className="border rounded-xl overflow-hidden">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Address</TableHead>
-            <TableHead>QR Code</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Actions</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {recipients.map((recipient) => (
-            <TableRow key={recipient.id}>
-              <TableCell className="font-medium">
-                {recipient.house_number && recipient.street_name 
-                  ? `${recipient.house_number} ${recipient.street_name}`
-                  : recipient.address_line || 'N/A'}
-              </TableCell>
-              <TableCell className="px-6 py-4 whitespace-nowrap">
-                {recipient.qr_code_base64 ? (
-                  <div className="flex items-center">
-                    <img 
-                      src={recipient.qr_code_base64} 
-                      alt="QR Code" 
-                      className="h-12 w-12 border rounded-md"
-                    />
-                    <a 
-                      href={recipient.qr_code_base64} 
-                      download={`${recipient.address_line.replace(/[^a-zA-Z0-9]/g, '-')}.png`}
-                      className="ml-2 text-blue-600 hover:text-blue-800 text-xs"
-                    >
-                      ↓
-                    </a>
-                  </div>
-                ) : (
-                  <span className="text-gray-400 text-xs italic">Not generated</span>
-                )}
-              </TableCell>
-              <TableCell>
-                <Badge className={cn('font-normal', getStatusBadgeClass(recipient.status))} variant="secondary">
-                  {displayLabel(recipient)}
-                </Badge>
-              </TableCell>
-              <TableCell className="space-x-2">
-                {recipient.canMarkVisited && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleMarkSent(recipient.id)}
-                    disabled={loading === recipient.id}
-                  >
-                    {loading === recipient.id ? 'Updating...' : 'Mark Visited'}
-                  </Button>
-                )}
-                {recipient.qr_png_url && (
-                  <Button
-                    size="sm"
-                    variant="link"
-                    asChild
-                  >
-                    <a href={recipient.qr_png_url} target="_blank" rel="noopener noreferrer">
-                      View QR
-                    </a>
-                  </Button>
-                )}
-              </TableCell>
+    <div className="space-y-4">
+      <div className="relative max-w-sm">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+          placeholder="Search addresses, status, or contacts..."
+          className="pl-9"
+          aria-label="Search addresses"
+        />
+      </div>
+
+      <div className="border rounded-xl overflow-hidden">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Address</TableHead>
+              {showContactsColumn && <TableHead>Contacts</TableHead>}
+              <TableHead>QR Code</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Actions</TableHead>
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+          </TableHeader>
+          <TableBody>
+            {filteredRecipients.length === 0 ? (
+              <TableRow>
+                <TableCell
+                  colSpan={showContactsColumn ? 5 : 4}
+                  className="py-8 text-center text-sm text-muted-foreground"
+                >
+                  No addresses match your search.
+                </TableCell>
+              </TableRow>
+            ) : (
+              filteredRecipients.map((recipient) => {
+                const contactsText = recipient.contacts?.join(', ') || '—';
+
+                return (
+                  <TableRow key={recipient.id}>
+                    <TableCell className="font-medium">{getAddressText(recipient)}</TableCell>
+                    {showContactsColumn && (
+                      <TableCell className="max-w-[240px] truncate text-muted-foreground" title={contactsText}>
+                        {contactsText}
+                      </TableCell>
+                    )}
+                    <TableCell className="px-6 py-4 whitespace-nowrap">
+                      {recipient.qr_code_base64 ? (
+                        <div className="flex items-center">
+                          <img
+                            src={recipient.qr_code_base64}
+                            alt="QR Code"
+                            className="h-12 w-12 border rounded-md"
+                          />
+                          <a
+                            href={recipient.qr_code_base64}
+                            download={`${recipient.address_line.replace(/[^a-zA-Z0-9]/g, '-')}.png`}
+                            className="ml-2 text-blue-600 hover:text-blue-800 text-xs"
+                          >
+                            ↓
+                          </a>
+                        </div>
+                      ) : (
+                        <span className="text-gray-400 text-xs italic">Not generated</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Badge className={cn('font-normal', getStatusBadgeClass(recipient.status))} variant="secondary">
+                        {displayLabel(recipient)}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="space-x-2">
+                      {recipient.canMarkVisited && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleMarkSent(recipient.id)}
+                          disabled={loading === recipient.id}
+                        >
+                          {loading === recipient.id ? 'Updating...' : 'Mark Visited'}
+                        </Button>
+                      )}
+                      {recipient.qr_png_url && (
+                        <Button
+                          size="sm"
+                          variant="link"
+                          asChild
+                        >
+                          <a href={recipient.qr_png_url} target="_blank" rel="noopener noreferrer">
+                            View QR
+                          </a>
+                        </Button>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })
+            )}
+          </TableBody>
+        </Table>
+      </div>
     </div>
   );
 }

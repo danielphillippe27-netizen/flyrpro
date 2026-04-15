@@ -39,11 +39,11 @@ export function CampaignsFarmsDropdown({ onCampaignSelect }: CampaignsFarmsDropd
       </DialogTrigger>
       <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
         <DialogHeader>
-          <DialogTitle>Campaigns & Farms</DialogTitle>
+          <DialogTitle>Campaign & Farms</DialogTitle>
         </DialogHeader>
         <Tabs defaultValue="campaigns" className="flex-1 overflow-hidden flex flex-col min-h-0">
           <TabsList className="grid w-full grid-cols-2 shrink-0">
-            <TabsTrigger value="campaigns">Campaigns</TabsTrigger>
+            <TabsTrigger value="campaigns">Campaign</TabsTrigger>
             <TabsTrigger value="farms">Farms</TabsTrigger>
           </TabsList>
           <TabsContent value="campaigns" className="flex-1 overflow-y-auto mt-4 min-h-0">

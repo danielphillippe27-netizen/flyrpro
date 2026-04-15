@@ -12,6 +12,7 @@ type LegacyFieldLead = {
   email?: string | null;
   address?: string | null;
   campaign_id?: string | null;
+  farm_id?: string | null;
   status?: string | null;
   notes?: string | null;
   tags?: string | null;
@@ -68,6 +69,7 @@ export class ContactsService {
       email: row.email ?? undefined,
       address: (row.address ?? '').trim(),
       campaign_id: row.campaign_id ?? undefined,
+      farm_id: row.farm_id ?? undefined,
       status: this.normalizeLegacyStatus(row.status),
       notes: row.notes ?? undefined,
       reminder_date: row.reminder_date ?? row.follow_up_at ?? undefined,
@@ -131,6 +133,9 @@ export class ContactsService {
 
       if (filters?.campaignId) {
         legacyQuery = legacyQuery.eq('campaign_id', filters.campaignId);
+      }
+      if (filters?.farmId) {
+        legacyQuery = legacyQuery.eq('farm_id', filters.farmId);
       }
 
       const { data: legacyData, error: legacyError } = await legacyQuery.order('created_at', {

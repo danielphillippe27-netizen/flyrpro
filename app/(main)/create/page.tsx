@@ -2,7 +2,8 @@
 
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Megaphone, MapPin, QrCode, FileText, FileImage } from 'lucide-react';
+import { FarmIcon } from '@/components/icons/FarmIcon';
+import { Megaphone, QrCode, FileText, FileImage } from 'lucide-react';
 
 export default function CreatePage() {
   const router = useRouter();
@@ -56,7 +57,7 @@ export default function CreatePage() {
               onClick={() => handleCreate('farm')}
             >
               <div className="flex items-center gap-3 mb-2">
-                <MapPin className="w-6 h-6" />
+                <FarmIcon className="w-6 h-6 shrink-0" />
                 <span className="text-lg font-semibold">Farm</span>
               </div>
               <p className="text-sm text-gray-600 text-left">
@@ -114,4 +115,3 @@ export default function CreatePage() {
     </div>
   );
 }
-

@@ -42,7 +42,7 @@ function useCampaignHeaderTitle() {
   if (pathname === '/campaigns/create') return 'New Campaign';
   if (campaignId && campaignName) return campaignName;
   if (campaignId) return 'Campaign';
-  return 'Campaigns';
+  return 'Campaign';
 }
 
 export default function CampaignsLayout({

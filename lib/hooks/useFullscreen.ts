@@ -1,24 +1,35 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, type RefObject } from 'react';
 
-function isFullscreen(): boolean {
-  if (typeof document === 'undefined') return false;
-  return !!(
+function getFullscreenElement(): Element | null {
+  if (typeof document === 'undefined') return null;
+  return (
     document.fullscreenElement ??
-    (document as Document & { webkitFullscreenElement?: Element }).webkitFullscreenElement
+    (document as Document & { webkitFullscreenElement?: Element }).webkitFullscreenElement ??
+    null
   );
 }
 
 /**
- * Hook for toggling browser fullscreen on document.documentElement.
+ * Hook for toggling browser fullscreen on a target element.
+ * Falls back to document.documentElement when no target is provided.
  * Syncs with fullscreenchange and ESC; safe when API is not supported.
  */
-export function useFullscreen() {
+export function useFullscreen(targetRef?: RefObject<HTMLElement | null>) {
   const [isFs, setIsFs] = useState(false);
 
   useEffect(() => {
-    const handler = () => setIsFs(isFullscreen());
+    const handler = () => {
+      const fullscreenElement = getFullscreenElement();
+      if (!targetRef?.current) {
+        setIsFs(Boolean(fullscreenElement));
+        return;
+      }
+      setIsFs(fullscreenElement === targetRef.current);
+    };
+
+    handler();
     document.addEventListener('fullscreenchange', handler);
     document.addEventListener('webkitfullscreenchange', handler);
     return () => {
@@ -29,7 +40,7 @@ export function useFullscreen() {
 
   const enter = useCallback(async () => {
     try {
-      const el = document.documentElement;
+      const el = targetRef?.current ?? document.documentElement;
       if (el.requestFullscreen) {
         await el.requestFullscreen();
       } else if ((el as HTMLElement & { webkitRequestFullscreen?: () => Promise<void> }).webkitRequestFullscreen) {
@@ -38,7 +49,7 @@ export function useFullscreen() {
     } catch {
       // No-op if not supported or denied (e.g. not from user gesture in some browsers)
     }
-  }, []);
+  }, [targetRef]);
 
   const exit = useCallback(async () => {
     try {
@@ -54,7 +65,7 @@ export function useFullscreen() {
   }, []);
 
   const toggle = useCallback(async () => {
-    if (isFullscreen()) {
+    if (getFullscreenElement()) {
       await exit();
     } else {
       await enter();

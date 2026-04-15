@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import * as turf from '@turf/turf';
+import { Maximize2, Minimize2 } from 'lucide-react';
 import type { CampaignAddress, CampaignV2, CampaignParcel } from '@/types/database';
 import { MapBuildingsLayer } from '@/components/map/MapBuildingsLayer';
 import { MapInfoButton } from '@/components/map/MapInfoButton';
@@ -19,6 +20,7 @@ import {
   MAP_STATUS_CONFIG,
   type StatusFilters,
 } from '@/lib/constants/mapStatus';
+import { useFullscreen } from '@/lib/hooks/useFullscreen';
 
 const PARCEL_SOURCE_ID = 'campaign-parcels';
 const PARCEL_FILL_LAYER = 'campaign-parcels-fill';
@@ -61,21 +63,97 @@ function isCustomBuildingLayer(layerId: string): boolean {
   return CUSTOM_BUILDING_LAYER_PREFIXES.some((prefix) => layerId.startsWith(prefix));
 }
 
+function getAddressCoordinate(address: CampaignAddress): { lon: number; lat: number } | null {
+  if (address.coordinate) {
+    return address.coordinate;
+  }
+
+  const addressWithGeo = address as CampaignAddress & {
+    geometry?: unknown;
+    geom_json?: { type?: string; coordinates?: number[] };
+  };
+
+  if (
+    addressWithGeo.geom_json?.type === 'Point' &&
+    Array.isArray(addressWithGeo.geom_json.coordinates) &&
+    addressWithGeo.geom_json.coordinates.length >= 2
+  ) {
+    const [lon, lat] = addressWithGeo.geom_json.coordinates;
+    if (typeof lon === 'number' && typeof lat === 'number' && !Number.isNaN(lon) && !Number.isNaN(lat)) {
+      return { lon, lat };
+    }
+  }
+
+  let geometry = addressWithGeo.geometry;
+  if (typeof geometry === 'string') {
+    try {
+      geometry = JSON.parse(geometry) as { type?: string; coordinates?: number[] };
+    } catch {
+      geometry = null;
+    }
+  }
+
+  const geometryPoint = geometry as { type?: string; coordinates?: number[] } | null;
+  if (
+    geometryPoint?.type === 'Point' &&
+    Array.isArray(geometryPoint.coordinates) &&
+    geometryPoint.coordinates.length >= 2
+  ) {
+    const [lon, lat] = geometryPoint.coordinates;
+    if (typeof lon === 'number' && typeof lat === 'number' && !Number.isNaN(lon) && !Number.isNaN(lat)) {
+      return { lon, lat };
+    }
+  }
+
+  if (address.geom) {
+    try {
+      const geomValue = typeof address.geom === 'string' ? address.geom : JSON.stringify(address.geom);
+
+      try {
+        const parsed = JSON.parse(geomValue) as { coordinates?: number[] };
+        if (Array.isArray(parsed.coordinates) && parsed.coordinates.length >= 2) {
+          const [lon, lat] = parsed.coordinates;
+          if (typeof lon === 'number' && typeof lat === 'number' && !Number.isNaN(lon) && !Number.isNaN(lat)) {
+            return { lon, lat };
+          }
+        }
+      } catch {
+        const wktMatch = geomValue.match(/POINT\s*\(\s*([-\d.]+)\s+([-\d.]+)\s*\)/i);
+        if (wktMatch) {
+          return { lon: parseFloat(wktMatch[1]), lat: parseFloat(wktMatch[2]) };
+        }
+      }
+    } catch {
+      // Ignore malformed geometry values and fall through to null.
+    }
+  }
+
+  return null;
+}
+
 export function CampaignDetailMapView({
   campaignId,
   addresses,
   campaign,
   onSnapComplete,
+  renderLocationCardExtra,
 }: {
   campaignId: string;
   addresses: CampaignAddress[];
   campaign?: CampaignV2 | null;
   onSnapComplete?: () => void;
+  renderLocationCardExtra?: (args: {
+    selectedBuildingId: string;
+    selectedAddressId?: string | null;
+    campaignId: string;
+  }) => ReactNode;
 }) {
   const { theme } = useTheme();
   const { currentWorkspaceId } = useWorkspace();
+  const mapShellRef = useRef<HTMLDivElement>(null);
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
+  const { isFullscreen: isMapFullscreen, toggle: toggleMapFullscreen } = useFullscreen(mapShellRef);
   const [statusFilters, setStatusFilters] = useState<StatusFilters>(DEFAULT_STATUS_FILTERS);
   const [mapLoaded, setMapLoaded] = useState(false);
   const boundsFittedRef = useRef(false);
@@ -192,42 +270,9 @@ export function CampaignDetailMapView({
       const getInitialCenter = (): [number, number] => {
         if (addresses.length > 0) {
           const addr = addresses[0];
-          
-          // Try direct coordinate first
-          if (addr.coordinate) {
-            return [addr.coordinate.lon, addr.coordinate.lat];
-          }
-          
-          // GeoJSON-first: Check geometry field (type assertion for view fields)
-          const addrWithGeo = addr as CampaignAddress & { geometry?: any; geom_json?: any };
-          let geometry = addrWithGeo.geometry;
-          if (typeof geometry === 'string') {
-            try {
-              geometry = JSON.parse(geometry);
-            } catch {
-              // Not valid JSON
-            }
-          }
-          
-          if (geometry && typeof geometry === 'object' && geometry.type === 'Point') {
-            const coords = geometry.coordinates;
-            if (Array.isArray(coords) && coords.length >= 2) {
-              const [lon, lat] = coords;
-                  if (typeof lon === 'number' && typeof lat === 'number' && !isNaN(lon) && !isNaN(lat)) {
-                    return [lon, lat];
-                  }
-                }
-          }
-          
-          // Fallback: Check geom_json
-          if (addrWithGeo.geom_json && typeof addrWithGeo.geom_json === 'object' && addrWithGeo.geom_json.type === 'Point') {
-            const coords = addrWithGeo.geom_json.coordinates;
-            if (Array.isArray(coords) && coords.length >= 2) {
-              const [lon, lat] = coords;
-                  if (typeof lon === 'number' && typeof lat === 'number' && !isNaN(lon) && !isNaN(lat)) {
-                    return [lon, lat];
-                  }
-            }
+          const coordinate = getAddressCoordinate(addr);
+          if (coordinate) {
+            return [coordinate.lon, coordinate.lat];
           }
         }
         return [-79.3832, 43.6532]; // Toronto default
@@ -377,37 +422,10 @@ export function CampaignDetailMapView({
     if (!map.current || !mapLoaded) return;
 
     // Extract lon/lat from campaign_addresses_geojson: coordinate, then geom_json (Point), then geometry
-    const getCoordinate = (address: CampaignAddress): { lon: number; lat: number } | null => {
-      if (address.coordinate) return address.coordinate;
-      const addrWithGeo = address as CampaignAddress & { geometry?: any; geom_json?: any };
-      // Primary: geom_json from view — { type: "Point", coordinates: [lon, lat] }
-      if (addrWithGeo.geom_json && typeof addrWithGeo.geom_json === 'object' && addrWithGeo.geom_json.type === 'Point') {
-        const coords = addrWithGeo.geom_json.coordinates;
-        if (Array.isArray(coords) && coords.length >= 2) {
-          const [lon, lat] = coords;
-          if (typeof lon === 'number' && typeof lat === 'number' && !isNaN(lon) && !isNaN(lat)) return { lon, lat };
-        }
-      }
-      // Fallback: geometry (e.g. if returned by another source)
-      let geometry = addrWithGeo.geometry;
-      if (typeof geometry === 'string') {
-        try {
-          geometry = JSON.parse(geometry);
-        } catch {
-          geometry = null;
-        }
-      }
-      if (geometry?.type === 'Point' && Array.isArray(geometry?.coordinates) && geometry.coordinates.length >= 2) {
-        const [lon, lat] = geometry.coordinates;
-        if (typeof lon === 'number' && typeof lat === 'number' && !isNaN(lon) && !isNaN(lat)) return { lon, lat };
-      }
-      return null;
-    };
-
     // Fit bounds to show all addresses - buildings are shown via fill extrusions from MapBuildingsLayer
     if (addresses.length > 0) {
       const addressesWithCoords = addresses
-        .map(addr => getCoordinate(addr))
+        .map(addr => getAddressCoordinate(addr))
         .filter((coord): coord is { lon: number; lat: number } => coord !== null);
 
       if (addressesWithCoords.length > 0 && !boundsFittedRef.current) {
@@ -424,10 +442,24 @@ export function CampaignDetailMapView({
           if (!bounds.isEmpty()) {
             boundsFittedRef.current = true;
             map.current.fitBounds(bounds, {
-              padding: 100,
-              minZoom: 12, // MapBuildingsLayer fill-extrusion uses minzoom 12 — stay zoomed in enough to see footprints
+              padding: {
+                top: 72,
+                right: 40,
+                bottom: 24,
+                left: 40,
+              },
               maxZoom: 18,
               duration: 1000,
+            });
+
+            map.current.once('moveend', () => {
+              if (!map.current) return;
+              if (map.current.getZoom() >= 12) return;
+
+              map.current.easeTo({
+                zoom: 12,
+                duration: 300,
+              });
             });
           }
         }, 200);
@@ -451,34 +483,12 @@ export function CampaignDetailMapView({
     if (!mapInstance || !mapLoaded) return;
 
     // Same as bounds effect: coordinate, then geom_json (Point from campaign_addresses_geojson), then geometry
-    const getCoordinate = (address: CampaignAddress): { lon: number; lat: number } | null => {
-      if (address.coordinate) return address.coordinate;
-      const addrWithGeo = address as CampaignAddress & { geometry?: any; geom_json?: any };
-      if (addrWithGeo.geom_json?.type === 'Point' && Array.isArray(addrWithGeo.geom_json?.coordinates) && addrWithGeo.geom_json.coordinates.length >= 2) {
-        const [lon, lat] = addrWithGeo.geom_json.coordinates;
-        if (typeof lon === 'number' && typeof lat === 'number' && !isNaN(lon) && !isNaN(lat)) return { lon, lat };
-      }
-      let geometry = addrWithGeo.geometry;
-      if (typeof geometry === 'string') {
-        try {
-          geometry = JSON.parse(geometry);
-        } catch {
-          geometry = null;
-        }
-      }
-      if (geometry?.type === 'Point' && Array.isArray(geometry?.coordinates) && geometry.coordinates.length >= 2) {
-        const [lon, lat] = geometry.coordinates;
-        if (typeof lon === 'number' && typeof lat === 'number' && !isNaN(lon) && !isNaN(lat)) return { lon, lat };
-      }
-      return null;
-    };
-
     const buildAddressPointsGeoJSON = (): GeoJSON.FeatureCollection | null => {
       const radiusMeters = 2.5;
       const steps = 24;
       const features: GeoJSON.Feature<GeoJSON.Polygon>[] = [];
       for (const addr of addresses) {
-        const coord = getCoordinate(addr);
+        const coord = getAddressCoordinate(addr);
         if (!coord) continue;
         const center = [coord.lon, coord.lat] as [number, number];
         const circle = turf.circle(center, radiusMeters / 1000, { units: 'kilometers', steps });
@@ -658,6 +668,22 @@ export function CampaignDetailMapView({
       duration: 1000,
     });
   }, [mapLoaded]);
+
+  useEffect(() => {
+    if (!map.current || !mapLoaded) return;
+
+    const resizeMap = () => {
+      try {
+        map.current?.resize();
+      } catch {
+        // Ignore transient resize errors while fullscreen state is changing.
+      }
+    };
+
+    resizeMap();
+    const timeoutId = window.setTimeout(resizeMap, 150);
+    return () => window.clearTimeout(timeoutId);
+  }, [isMapFullscreen, mapLoaded]);
 
   // Boundary layer: show territory_boundary (and optional raw/snapped) when campaign has map source
   useEffect(() => {
@@ -855,7 +881,10 @@ export function CampaignDetailMapView({
   };
 
   return (
-    <div className="h-full w-full relative">
+    <div
+      ref={mapShellRef}
+      className={`relative h-full w-full ${isMapFullscreen ? 'bg-background' : ''}`}
+    >
       <div ref={mapContainer} className="h-full w-full" />
       {map.current && mapLoaded && (
         <>
@@ -863,28 +892,41 @@ export function CampaignDetailMapView({
             show
             statusFilters={statusFilters}
             onStatusFiltersChange={setStatusFilters}
+            portalContainer={mapShellRef.current}
           />
           {/* View switcher: Buildings | Addresses */}
-          <div className="absolute top-4 right-4 z-10 flex flex-col gap-2">
-            <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 bg-white/90 dark:bg-black/80 backdrop-blur-sm shadow-sm overflow-hidden">
+          <div className="pointer-events-none absolute top-4 right-4 z-20 flex flex-col items-end gap-2">
+            <div className="pointer-events-auto flex items-center gap-2">
+              <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 bg-white/90 dark:bg-black/80 backdrop-blur-sm shadow-sm overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setMapViewMode('buildings')}
+                  className={`px-3 py-2 text-sm font-medium transition-colors ${mapViewMode === 'buildings' ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
+                >
+                  Buildings
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMapViewMode('addresses')}
+                  className={`px-3 py-2 text-sm font-medium transition-colors ${mapViewMode === 'addresses' ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
+                >
+                  Addresses
+                </button>
+              </div>
               <button
                 type="button"
-                onClick={() => setMapViewMode('buildings')}
-                className={`px-3 py-2 text-sm font-medium transition-colors ${mapViewMode === 'buildings' ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
+                onClick={() => void toggleMapFullscreen()}
+                className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white/90 px-3 py-2 text-sm font-medium text-gray-600 shadow-sm backdrop-blur-sm transition-colors hover:bg-gray-100 dark:border-gray-700 dark:bg-black/80 dark:text-gray-300 dark:hover:bg-gray-800"
+                aria-label={isMapFullscreen ? 'Exit full screen map' : 'Full screen map'}
+                title={isMapFullscreen ? 'Exit full screen map' : 'Full screen map'}
               >
-                Buildings
-              </button>
-              <button
-                type="button"
-                onClick={() => setMapViewMode('addresses')}
-                className={`px-3 py-2 text-sm font-medium transition-colors ${mapViewMode === 'addresses' ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
-              >
-                Addresses
+                {isMapFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+                <span>{isMapFullscreen ? 'Exit full screen' : 'Full screen'}</span>
               </button>
             </div>
             {/* Parcels toggle - only show if parcels exist for this campaign */}
             {parcels.length > 0 && (
-              <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 bg-white/90 dark:bg-black/80 backdrop-blur-sm shadow-sm overflow-hidden">
+              <div className="pointer-events-auto flex rounded-lg border border-gray-200 dark:border-gray-700 bg-white/90 dark:bg-black/80 backdrop-blur-sm shadow-sm overflow-hidden">
                 <button
                   type="button"
                   onClick={() => setShowParcels((v) => !v)}
@@ -923,6 +965,15 @@ export function CampaignDetailMapView({
                 onSelectAddress={(id) => setSelectedAddressIdForCard(id ?? null)}
                 onClose={handleCloseLocationCard}
                 onAddContact={handleAddContact}
+                extraContent={
+                  renderLocationCardExtra
+                    ? renderLocationCardExtra({
+                        selectedBuildingId,
+                        selectedAddressId: selectedAddressIdForCard,
+                        campaignId,
+                      })
+                    : null
+                }
               />
             </div>
           )}
@@ -942,6 +993,7 @@ export function CampaignDetailMapView({
           onSuccess={handleContactCreated}
           userId={userId}
           workspaceId={currentWorkspaceId ?? undefined}
+          portalContainer={mapShellRef.current}
           initialAddress={selectedAddressText}
           initialAddressId={selectedAddressId}
           initialCampaignId={campaignId}

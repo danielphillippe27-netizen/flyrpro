@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
+import { compareAddressesForDisplay, displayAddressText, resolveHouseNumberLabel } from '@/lib/map/addressPresentation';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -148,8 +149,8 @@ export async function GET(
       // Silver path: Use building_address_links
       addresses = (links as BuildingLinkRow[]).map((link) => ({
         address_id: link.address_id,
-        formatted: link.campaign_addresses.formatted,
-        house_number: link.campaign_addresses.house_number,
+        formatted: displayAddressText(link.campaign_addresses) ?? '',
+        house_number: resolveHouseNumberLabel(link.campaign_addresses),
         street_name: link.campaign_addresses.street_name,
         unit_number: link.campaign_addresses.unit_number,
         match_type: link.match_type,
@@ -172,8 +173,8 @@ export async function GET(
       
       addresses = ((goldAddresses || []) as GoldAddressRow[]).map((addr) => ({
         address_id: addr.id,
-        formatted: addr.formatted,
-        house_number: addr.house_number,
+        formatted: displayAddressText(addr) ?? '',
+        house_number: resolveHouseNumberLabel(addr),
         street_name: addr.street_name,
         unit_number: addr.unit_number,
         match_type: addr.match_source || 'gold_exact',
@@ -206,6 +207,21 @@ export async function GET(
         address_status: stateById.get(address.address_id)?.address_status ?? null,
       }));
     }
+
+    addresses.sort((left, right) =>
+      compareAddressesForDisplay(
+        {
+          house_number: left.house_number,
+          street_name: left.street_name,
+          formatted: left.formatted,
+        },
+        {
+          house_number: right.house_number,
+          street_name: right.street_name,
+          formatted: right.formatted,
+        }
+      )
+    );
     
     // Calculate summary
     const outsideCount = addresses.filter(a => a.is_outside_footprint).length;

@@ -27,6 +27,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useWorkspace } from '@/lib/workspace-context';
 import { ActivityPageView } from '@/components/activity/ActivityPageView';
 import { AssignedRoutesView } from '@/components/routes/AssignedRoutesView';
+import { FinancePanel } from '@/components/finance/FinancePanel';
 import {
   buildLegacyCampaignText,
   isMissingCampaignColumnErrorMessage,
@@ -785,11 +786,35 @@ export default function CampaignDetailPage() {
       <div className="flex flex-col items-center justify-center min-h-[320px] px-6 text-center">
         <h2 className="text-lg font-semibold text-foreground mb-2">Campaign not found</h2>
         <Button asChild variant="outline">
-          <Link href="/campaigns">Back to Campaigns</Link>
+          <Link href="/campaigns">Back to Campaign</Link>
         </Button>
       </div>
     );
   }
+
+  const normalizeAddressText = (value: string | null | undefined) =>
+    value?.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() ?? '';
+
+  const getAddressSearchCandidates = (addr: CampaignAddress) => {
+    const joinedStreet = [addr.house_number, addr.street_name].filter(Boolean).join(' ').trim();
+    const fullAddress = [
+      joinedStreet || addr.address || addr.formatted || '',
+      addr.locality || '',
+      addr.region || '',
+      addr.postal_code || '',
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+
+    return Array.from(
+      new Set(
+        [addr.formatted, addr.address, joinedStreet, fullAddress]
+          .map((value) => normalizeAddressText(value))
+          .filter(Boolean)
+      )
+    );
+  };
 
   // Dedupe by logical address: one row per (formatted + postal_code), prefer scanned
   const addressKey = (addr: CampaignAddress) =>
@@ -813,6 +838,44 @@ export default function CampaignDetailPage() {
     }
   }
   const dedupedAddresses = Array.from(seen.values());
+  const addressIdToLogicalKey = new Map(addresses.map((addr) => [addr.id, addressKey(addr)]));
+  const logicalKeysBySearchText = new Map<string, Set<string>>();
+
+  for (const addr of addresses) {
+    const logicalKey = addressKey(addr);
+    for (const candidate of getAddressSearchCandidates(addr)) {
+      const keys = logicalKeysBySearchText.get(candidate) ?? new Set<string>();
+      keys.add(logicalKey);
+      logicalKeysBySearchText.set(candidate, keys);
+    }
+  }
+
+  const contactsByLogicalAddress = new Map<string, Set<string>>();
+
+  for (const contact of contacts) {
+    const contactLabel = contact.name?.trim() || contact.email?.trim() || contact.phone?.trim();
+    if (!contactLabel) continue;
+
+    const matchedLogicalKeys = new Set<string>();
+
+    if (contact.address_id) {
+      const logicalKey = addressIdToLogicalKey.get(contact.address_id);
+      if (logicalKey) matchedLogicalKeys.add(logicalKey);
+    }
+
+    const normalizedContactAddress = normalizeAddressText(contact.address);
+    if (normalizedContactAddress) {
+      const logicalKeys = logicalKeysBySearchText.get(normalizedContactAddress);
+      logicalKeys?.forEach((logicalKey) => matchedLogicalKeys.add(logicalKey));
+    }
+
+    matchedLogicalKeys.forEach((logicalKey) => {
+      const labels = contactsByLogicalAddress.get(logicalKey) ?? new Set<string>();
+      labels.add(contactLabel);
+      contactsByLogicalAddress.set(logicalKey, labels);
+    });
+  }
+
   const totalHomesInCampaign = campaignStats.addresses || dedupedAddresses.length;
   const homesWithQrScans = campaignStats.scanned || dedupedAddresses.filter((addr) => (addr.scans || 0) > 0).length;
   const fallbackTotalQrScans = Math.max(
@@ -832,6 +895,8 @@ export default function CampaignDetailPage() {
 
   const formattedRecipients = dedupedAddresses.map((addr) => {
     const { statusKey, label } = getAddressRecipientsStatus(addr);
+    const matchedContacts = Array.from(contactsByLogicalAddress.get(addressKey(addr)) ?? []);
+
     return {
       id: addr.id,
       address_line: addr.formatted || addr.address || '',
@@ -850,6 +915,7 @@ export default function CampaignDetailPage() {
       house_number: addr.house_number,
       locality: addr.locality,
       seq: addr.seq,
+      contacts: matchedContacts,
     };
   });
 
@@ -879,6 +945,7 @@ export default function CampaignDetailPage() {
             <TabsTrigger value="addresses">Addresses</TabsTrigger>
             <TabsTrigger value="contacts">Contacts</TabsTrigger>
             <TabsTrigger value="qr">QR Codes</TabsTrigger>
+            <TabsTrigger value="finance">Finance</TabsTrigger>
             <TabsTrigger value="routes">Routes</TabsTrigger>
             <TabsTrigger value="notes">Notes</TabsTrigger>
           </TabsList>
@@ -1066,6 +1133,15 @@ export default function CampaignDetailPage() {
                 </div>
               )}
             </div>
+          </TabsContent>
+
+          <TabsContent value="finance" className="mt-4">
+            <FinancePanel
+              targetType="campaign"
+              targetId={campaignId}
+              workspaceId={campaign?.workspace_id ?? currentWorkspaceId}
+              addresses={addresses}
+            />
           </TabsContent>
 
           <TabsContent value="routes" className="mt-4">

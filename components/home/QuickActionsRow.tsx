@@ -29,10 +29,10 @@ export function QuickActionsRow({
 }: QuickActionsRowProps) {
   const tiles: QuickActionTile[] = [
     {
-      label: 'My Campaigns',
+      label: 'My Campaign',
       href: '/campaigns',
       icon: Target,
-      ariaLabel: 'View my campaigns',
+      ariaLabel: 'View my campaign',
     },
     {
       label: 'Recent Activity',

@@ -12,18 +12,15 @@ import {
   CreditCard, 
   LogOut, 
   Shield,
-  Bell,
   Globe,
-  Plug
+  Plug,
+  Flag
 } from 'lucide-react';
+import { FarmIcon } from '@/components/icons/FarmIcon';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-
-interface UserProfile {
-  pro_active: boolean;
-  stripe_customer_id: string | null;
-}
+import type { User as SupabaseUser } from '@supabase/supabase-js';
 
 interface EntitlementSnapshot {
   plan: string;
@@ -36,8 +33,7 @@ interface EntitlementSnapshot {
 function SettingsPageContent() {
   const { theme, setTheme } = useTheme();
   const router = useRouter();
-  const [user, setUser] = useState<any>(null);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [user, setUser] = useState<SupabaseUser | null>(null);
   const [entitlement, setEntitlement] = useState<EntitlementSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [upgradeLoading, setUpgradeLoading] = useState(false);
@@ -61,7 +57,6 @@ function SettingsPageContent() {
           .single();
         
         if (userProfile) {
-          setProfile(userProfile);
         } else {
           // Create profile if it doesn't exist
           const { data: newProfile } = await supabase
@@ -70,7 +65,7 @@ function SettingsPageContent() {
             .select()
             .single();
           if (newProfile) {
-            setProfile(newProfile);
+            void newProfile;
           }
         }
         const entRes = await fetch('/api/billing/entitlement', { credentials: 'include' });
@@ -272,6 +267,66 @@ function SettingsPageContent() {
                 >
                   <Plug className="w-4 h-4 mr-2" />
                   Manage
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <FarmIcon className="w-5 h-5" />
+                <CardTitle>Farm</CardTitle>
+              </div>
+              <CardDescription>
+                Manage reusable farm areas and repeatable session modes
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-base font-medium dark:text-white mb-1">Farm areas</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Create farm territories, revisit them, and run different session modes.
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => router.push('/farms')}
+                >
+                  <FarmIcon className="w-4 h-4 mr-2" />
+                  Open Farm
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Flag className="w-5 h-5" />
+                <CardTitle>Challenges</CardTitle>
+              </div>
+              <CardDescription>
+                View active global and team challenges from Settings
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-base font-medium dark:text-white mb-1">Challenge center</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Track progress, review upcoming challenges, and check completed runs.
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => router.push('/settings/challenges')}
+                >
+                  <Flag className="w-4 h-4 mr-2" />
+                  Open Challenges
                 </Button>
               </div>
             </CardContent>

@@ -67,6 +67,7 @@ export type CampaignStatus = 'draft' | 'active' | 'completed' | 'paused';
 export interface CampaignV2 {
   id: string;
   owner_id: string;
+  workspace_id?: string | null;
   name: string;
   type: CampaignType;
   address_source: AddressSource;
@@ -175,7 +176,7 @@ export interface CampaignParcel {
   campaign_id: string;
   external_id?: string; // "PARCELID" from source data (e.g., PCL030544)
   geom: string; // PostGIS MultiPolygon geometry
-  properties?: Record<string, any>; // OBJECTID, SHAPE_Area, etc.
+  properties?: Record<string, unknown>; // OBJECTID, SHAPE_Area, etc.
   created_at: string;
 }
 
@@ -253,7 +254,7 @@ export interface LandingPageData {
   cta_url: string;
   image_url?: string;
   video_url?: string;
-  dynamic_data?: Record<string, any>;
+  dynamic_data?: Record<string, unknown>;
   slug?: string;
   created_at: string;
   updated_at: string;
@@ -287,34 +288,71 @@ export interface LandingPageTemplate {
   id: string;
   name: string;
   description?: string;
-  components: Record<string, any>;
+  components: Record<string, unknown>;
 }
 
 // Farm Types
 export interface Farm {
   id: string;
   owner_id: string;
+  workspace_id?: string | null;
+  linked_campaign_id?: string | null;
   name: string;
+  description?: string | null;
   polygon?: string; // GeoJSON string
   start_date: string;
   end_date: string;
-  frequency: number; // Touches per month (1-4)
+  frequency: number; // Legacy cadence field retained for compatibility
   created_at: string;
+  updated_at?: string;
   area_label?: string;
   polygon_coordinates?: Coordinate[];
   is_active: boolean;
+  touches_per_interval?: number | null;
+  touches_interval?: FarmTouchInterval | null;
+  goal_type?: FarmGoalType | null;
+  goal_target?: number | null;
+  cycle_completion_window_days?: number | null;
+  touch_types?: FarmTouchType[] | null;
+  annual_budget_cents?: number | null;
   progress?: number;
+  home_limit?: number;
+  address_count?: number;
+  last_generated_at?: string | null;
 }
 
+export type FarmSessionMode = 'doorknock' | 'flyer' | 'canada_post' | 'pop_by' | 'letter';
+export type FarmTouchInterval = 'month' | 'year';
+export type FarmGoalType = 'touches_per_year' | 'touches_per_cycle' | 'homes_per_cycle';
+export type FarmTouchType = 'doorknock' | 'flyer' | 'canada_post' | 'pop_by' | 'letter';
 export type FarmLeadSource = 'qr_scan' | 'door_knock' | 'flyer' | 'event' | 'newsletter' | 'ad' | 'custom';
+export type FarmAddressOutcomeStatus =
+  | 'none'
+  | 'no_answer'
+  | 'delivered'
+  | 'talked'
+  | 'appointment'
+  | 'do_not_knock'
+  | 'future_seller'
+  | 'hot_lead';
 
 export interface FarmTouch {
   id: string;
   farm_id: string;
+  workspace_id?: string | null;
+  cycle_number?: number | null;
+  mode?: FarmSessionMode;
+  title?: string | null;
   scheduled_date: string;
+  started_at?: string | null;
   completed_date?: string;
-  status: 'scheduled' | 'completed' | 'skipped';
+  last_completed_at?: string | null;
+  status: 'scheduled' | 'in_progress' | 'completed' | 'skipped';
   notes?: string;
+  homes_target?: number | null;
+  homes_reached?: number | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface FarmLead {
@@ -327,6 +365,78 @@ export interface FarmLead {
   email?: string;
   address?: string;
   created_at: string;
+}
+
+export interface FarmAddress {
+  id: string;
+  farm_id: string;
+  campaign_address_id?: string | null;
+  formatted: string;
+  postal_code?: string | null;
+  source: string;
+  gers_id?: string | null;
+  house_number?: string | null;
+  street_name?: string | null;
+  locality?: string | null;
+  region?: string | null;
+  coordinate?: {
+    lat: number;
+    lon: number;
+  } | null;
+  geom?: string | null;
+  visited_count?: number;
+  last_visited_at?: string | null;
+  last_touch_id?: string | null;
+  last_outcome_status?: FarmAddressOutcomeStatus | null;
+  created_at: string;
+}
+
+export interface FarmTouchAddress {
+  id: string;
+  farm_id: string;
+  farm_touch_id: string;
+  farm_address_id: string;
+  campaign_address_id?: string | null;
+  status: FarmAddressOutcomeStatus;
+  notes?: string | null;
+  occurred_at: string;
+  created_by?: string | null;
+  created_at: string;
+  updated_at?: string | null;
+}
+
+export type FinanceEntryCategory =
+  | 'postal_drop'
+  | 'printing'
+  | 'delivery'
+  | 'materials'
+  | 'fuel'
+  | 'meals'
+  | 'software'
+  | 'ads'
+  | 'other';
+
+export interface FinanceEntry {
+  id: string;
+  workspace_id?: string | null;
+  created_by: string;
+  campaign_id?: string | null;
+  farm_id?: string | null;
+  agent_user_id?: string | null;
+  category: FinanceEntryCategory;
+  description: string;
+  vendor?: string | null;
+  postal_code?: string | null;
+  quantity: number;
+  unit_label: string;
+  unit_cost_cents: number;
+  total_cost_cents: number;
+  currency: 'CAD';
+  incurred_on: string;
+  notes?: string | null;
+  metadata?: Record<string, unknown> | null;
+  created_at: string;
+  updated_at?: string | null;
 }
 
 // Contact Types

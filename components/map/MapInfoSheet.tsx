@@ -50,6 +50,7 @@ interface MapInfoSheetProps {
   onOpenChange: (open: boolean) => void;
   statusFilters?: StatusFilters;
   onStatusFiltersChange?: (filters: StatusFilters) => void;
+  portalContainer?: HTMLElement | null;
 }
 
 /**
@@ -68,6 +69,7 @@ export function MapInfoSheet({
   onOpenChange,
   statusFilters,
   onStatusFiltersChange,
+  portalContainer,
 }: MapInfoSheetProps) {
   const activeStatusFilters: StatusFilters = statusFilters ?? {
     QR_SCANNED: true,
@@ -88,7 +90,10 @@ export function MapInfoSheet({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[460px] w-[460px] rounded-2xl p-5">
+      <DialogContent
+        className="sm:max-w-[460px] w-[460px] rounded-2xl p-5"
+        portalContainer={portalContainer}
+      >
         <DialogHeader className="text-left pb-1.5 border-b border-border/60">
           <DialogTitle className="text-sm font-semibold">Tools</DialogTitle>
         </DialogHeader>

@@ -1,5 +1,5 @@
-import { ChallengesPageView } from '@/components/challenges/ChallengesPageView';
+import { redirect } from 'next/navigation';
 
 export default function ChallengesPage() {
-  return <ChallengesPageView />;
+  redirect('/settings/challenges');
 }

@@ -8,7 +8,8 @@ import { WorkspaceProvider } from '@/lib/workspace-context';
 import AppTopHeader from '@/components/layout/AppTopHeader';
 import { MainLayoutNavProvider, useMainLayoutNav } from '@/components/layout/MainLayoutNavContext';
 import { MainRouteGuard } from '@/components/guard/MainRouteGuard';
-import { Home, Map, Trophy, Users, Settings, Target, Gauge, Plug, MessageCircle, Activity, CalendarCheck, CornerDownRight, Plus, Link2, Route, Flag } from 'lucide-react';
+import { FarmIcon } from '@/components/icons/FarmIcon';
+import { Home, Map, Trophy, Users, Settings, Target, Gauge, Plug, MessageCircle, Activity, CalendarCheck, CornerDownRight, Plus, Link2, Route } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { DashboardAccessLevel } from '@/app/api/_utils/workspace';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
@@ -18,9 +19,9 @@ const SIDEBAR_EXPANDED_W = 160;   // 10rem – icons + labels
 
 const baseTabs = [
   { href: '/home', icon: Home, label: 'Home' },
-  { href: '/campaigns', icon: Target, label: 'Campaigns' },
+  { href: '/campaigns', icon: Target, label: 'Campaign' },
+  { href: '/farms', icon: FarmIcon, label: 'Farm' },
   { href: '/routes', icon: Route, label: 'Routes' },
-  { href: '/challenges', icon: Flag, label: 'Challenges' },
   { href: '/map', icon: Map, label: 'Map' },
   { href: '/activity', icon: Activity, label: 'Activity' },
   { href: '/leads', icon: Users, label: 'Leads' },
@@ -34,12 +35,20 @@ const baseTabs = [
 const supportTab = { href: '/support', icon: MessageCircle, label: 'Support' };
 const offersTab = { href: '/offers', icon: Link2, label: 'Offers' };
 const settingsTab = { href: '/settings', icon: Settings, label: 'Settings' };
+const founderTabs = [
+  ...baseTabs.slice(0, 4),
+  offersTab,
+  ...baseTabs.slice(4, 10),
+  settingsTab,
+  baseTabs[11],
+  supportTab,
+];
 const memberTabs = baseTabs.filter((tab) =>
   [
     '/home',
     '/campaigns',
+    '/farms',
     '/routes',
-    '/challenges',
     '/map',
     '/leads',
     '/activity',
@@ -51,7 +60,7 @@ const memberTabs = baseTabs.filter((tab) =>
   ].includes(tab.href)
 );
 
-type TabDef = { href: string; icon: LucideIcon; label: string };
+type TabDef = { href: string; icon: LucideIcon | typeof FarmIcon; label: string };
 
 function tabIsActive(tab: TabDef, pathname: string | null): boolean {
   const isIntegrations = tab.href === '/settings/integrations';
@@ -206,6 +215,7 @@ function MainLayoutShell({
             className={cn(
               'flex flex-1 flex-col min-h-0 p-0 m-0',
               pathname?.startsWith('/campaigns') ||
+              pathname?.startsWith('/farms') ||
               pathname?.startsWith('/routes') ||
               pathname?.startsWith('/offers') ||
               pathname?.startsWith('/map')
@@ -217,6 +227,7 @@ function MainLayoutShell({
               className={cn(
                 'flex flex-col min-h-0',
                 pathname?.startsWith('/campaigns') ||
+                pathname?.startsWith('/farms') ||
                 pathname?.startsWith('/routes') ||
                 pathname?.startsWith('/offers') ||
                 pathname?.startsWith('/map')
@@ -257,7 +268,7 @@ export default function MainLayoutClient({
   const tabs: TabDef[] = (() => {
     if (accessLevel === 'member') return [...memberTabs, settingsTab];
     if (accessLevel === 'founder') {
-      return [...baseTabs.slice(0, 3), offersTab, ...baseTabs.slice(3), supportTab, settingsTab];
+      return founderTabs;
     }
     return [...baseTabs, settingsTab];
   })();

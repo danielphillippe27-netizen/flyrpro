@@ -22,6 +22,10 @@ function normalizeNextPath(next: string | null | undefined): string | null {
   return next.startsWith('/') ? next : null;
 }
 
+function shouldBypassWorkspaceGate(next: string | null): boolean {
+  return next?.startsWith('/reset-password') ?? false;
+}
+
 /** Preserve /onboarding and its query string when present; otherwise default onboarding URL. */
 function resolveOnboardingEntryPath(next: string | null): string {
   const normalized = normalizeNextPath(next);
@@ -59,6 +63,10 @@ export async function getPostAuthRedirectForUserId(
 ): Promise<PostAuthRedirect> {
   const next = normalizeNextPath(options.next);
   const inviteToken = options.inviteToken?.trim() || extractInviteTokenFromNext(next);
+
+  if (shouldBypassWorkspaceGate(next)) {
+    return { redirect: 'dashboard', path: next };
+  }
 
   if (inviteToken) {
     return { redirect: 'join', path: `/join?token=${encodeURIComponent(inviteToken)}` };

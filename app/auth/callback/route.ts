@@ -2,6 +2,37 @@ import { NextResponse } from 'next/server';
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 
+function isOnboardingPath(next: string | null): boolean {
+  return typeof next === 'string' && next.startsWith('/onboarding');
+}
+
+function buildErrorRedirectUrl(
+  origin: string,
+  next: string,
+  options: {
+    error: string;
+    errorDescription?: string;
+    inviteToken?: string | null;
+    workspaceIntent?: string | null;
+  }
+) {
+  const target = new URL(isOnboardingPath(next) ? next : '/login', origin);
+  target.searchParams.set('error', options.error);
+  if (options.errorDescription) {
+    target.searchParams.set('error_description', options.errorDescription);
+  }
+  if (!isOnboardingPath(next) && next && next !== '/home') {
+    target.searchParams.set('next', next);
+  }
+  if (options.inviteToken?.trim()) {
+    target.searchParams.set('token', options.inviteToken.trim());
+  }
+  if (options.workspaceIntent?.trim()) {
+    target.searchParams.set('workspace', options.workspaceIntent.trim());
+  }
+  return target;
+}
+
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get('code');
@@ -35,6 +66,9 @@ export async function GET(request: Request) {
     const { error } = await supabase.auth.exchangeCodeForSession(code);
 
     if (!error) {
+      if (isOnboardingPath(next)) {
+        return NextResponse.redirect(new URL(next, origin));
+      }
       const gateUrl = new URL('/gate', origin);
       if (next && next !== '/home') gateUrl.searchParams.set('next', next);
       if (inviteToken?.trim()) gateUrl.searchParams.set('token', inviteToken.trim());
@@ -43,26 +77,26 @@ export async function GET(request: Request) {
     }
 
     console.error('Auth callback error:', error);
-    const loginUrl = new URL('/login', origin);
-    if (error.message?.includes('code verifier') || (error as { code?: string }).code === 'pkce_code_verifier_not_found') {
-      loginUrl.searchParams.set('error', 'pkce_verifier_mismatch');
-    } else {
-      loginUrl.searchParams.set('error', 'auth_failed');
-    }
-    if (next && next !== '/home') loginUrl.searchParams.set('next', next);
-    if (inviteToken?.trim()) loginUrl.searchParams.set('token', inviteToken.trim());
-    if (workspaceIntent?.trim()) loginUrl.searchParams.set('workspace', workspaceIntent.trim());
-    return NextResponse.redirect(loginUrl);
+    return NextResponse.redirect(
+      buildErrorRedirectUrl(origin, next, {
+        error:
+          error.message?.includes('code verifier') ||
+          (error as { code?: string }).code === 'pkce_code_verifier_not_found'
+            ? 'pkce_verifier_mismatch'
+            : 'auth_failed',
+        inviteToken,
+        workspaceIntent,
+      })
+    );
   }
 
   // No code: e.g. Apple/Google error or user cancelled
-  const loginUrl = new URL('/login', origin);
-  if (errorParam) {
-    loginUrl.searchParams.set('error', errorParam === 'access_denied' ? 'apple_exchange_failed' : 'auth_failed');
-    if (errorDescription) loginUrl.searchParams.set('error_description', errorDescription);
-  }
-  if (next && next !== '/home') loginUrl.searchParams.set('next', next);
-  if (inviteToken?.trim()) loginUrl.searchParams.set('token', inviteToken.trim());
-  if (workspaceIntent?.trim()) loginUrl.searchParams.set('workspace', workspaceIntent.trim());
-  return NextResponse.redirect(loginUrl);
+  return NextResponse.redirect(
+    buildErrorRedirectUrl(origin, next, {
+      error: errorParam === 'access_denied' ? 'apple_exchange_failed' : 'auth_failed',
+      errorDescription,
+      inviteToken,
+      workspaceIntent,
+    })
+  );
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useBuildingData } from '@/lib/hooks/useBuildingData';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
@@ -27,6 +27,7 @@ interface LocationCardProps {
   onClose: () => void;
   onEditContact?: (contactId: string) => void;
   onAddContact?: (addressId?: string, addressText?: string, notes?: string) => void;
+  extraContent?: ReactNode;
   className?: string;
 }
 
@@ -42,6 +43,7 @@ export function LocationCard({
   onClose,
   onEditContact,
   onAddContact,
+  extraContent,
   className = '',
 }: LocationCardProps) {
   const {
@@ -359,6 +361,7 @@ export function LocationCard({
 
               {/* Action Footer */}
               <div className="px-5 pb-5 pt-2 border-t border-gray-100 dark:border-white/10">
+                {extraContent ? <div className="mb-3">{extraContent}</div> : null}
                 <div className="flex gap-2">
                   {onAddContact && (
                     <Button

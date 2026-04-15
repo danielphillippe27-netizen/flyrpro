@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { StatsService } from '@/lib/services/StatsService';
-import type { UserStats } from '@/types/database';
+import { createClient } from '@/lib/supabase/client';
+import type { FinanceEntry, UserStats } from '@/types/database';
 import { useWorkspace } from '@/lib/workspace-context';
 import {
   formatDistanceWalked,
@@ -52,9 +53,33 @@ type TeamSummaryResponse = {
   };
 };
 
+type FinanceSource = 'campaign' | 'farm' | null;
+
+function formatCurrencyFromCents(value: number): string {
+  return new Intl.NumberFormat('en-CA', {
+    style: 'currency',
+    currency: 'CAD',
+    maximumFractionDigits: value % 100 === 0 ? 0 : 2,
+  }).format(value / 100);
+}
+
+function getFinanceEntrySource(entry: FinanceEntry): FinanceSource {
+  if (entry.farm_id) return 'farm';
+  if (entry.campaign_id) return 'campaign';
+  return null;
+}
+
+function formatSpendDateLabel(value: string): string {
+  return new Date(`${value}T00:00:00`).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+  });
+}
+
 export function YouViewContent({ userId, authChecked = false }: { userId: string | null; authChecked?: boolean }) {
   const { currentWorkspaceId, membershipsByWorkspaceId, memberCountByWorkspaceId } = useWorkspace();
   const [stats, setStats] = useState<UserStats | null>(null);
+  const [financeEntries, setFinanceEntries] = useState<FinanceEntry[]>([]);
   const [leadCount, setLeadCount] = useState(0);
   const [appointmentCount, setAppointmentCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -69,6 +94,7 @@ export function YouViewContent({ userId, authChecked = false }: { userId: string
   const loadStats = useCallback(async () => {
     if (!userId) {
       setStats(null);
+      setFinanceEntries([]);
       setLeadCount(0);
       setAppointmentCount(0);
       setLoading(false);
@@ -77,6 +103,16 @@ export function YouViewContent({ userId, authChecked = false }: { userId: string
     setLoading(true);
     setError(null);
     try {
+      const supabase = createClient();
+      const financePromise = currentWorkspaceId
+        ? supabase
+            .from('finance_entries')
+            .select('*')
+            .eq('workspace_id', currentWorkspaceId)
+            .order('incurred_on', { ascending: true })
+            .order('created_at', { ascending: true })
+        : Promise.resolve({ data: [], error: null });
+
       if (scope === 'team' && canViewTeamMetrics && currentWorkspaceId) {
         const rosterResponse = await fetch(`/api/team/roster?workspaceId=${encodeURIComponent(currentWorkspaceId)}`);
         if (!rosterResponse.ok) {
@@ -118,10 +154,18 @@ export function YouViewContent({ userId, authChecked = false }: { userId: string
         setLeadCount(leadCountResult.status === 'fulfilled' ? leadCountResult.value : 0);
         setAppointmentCount(appointmentResult.status === 'fulfilled' ? appointmentResult.value : 0);
       }
+
+      const financeResult = await financePromise;
+      if (financeResult.error) {
+        setFinanceEntries([]);
+      } else {
+        setFinanceEntries((financeResult.data ?? []) as FinanceEntry[]);
+      }
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Failed to load stats';
       setError(message);
       setStats(null);
+      setFinanceEntries([]);
       setLeadCount(0);
       setAppointmentCount(0);
     } finally {
@@ -137,6 +181,84 @@ export function YouViewContent({ userId, authChecked = false }: { userId: string
     if (canViewTeamMetrics) return;
     setScope('self');
   }, [canViewTeamMetrics]);
+
+  const displayStats = stats ?? EMPTY_STATS;
+  const effectiveLeadsCreated = Math.max(displayStats.leads_created, leadCount);
+  const effectiveLeadPerConversation =
+    displayStats.conversations > 0 ? (effectiveLeadsCreated / displayStats.conversations) * 100 : 0;
+  const appointmentPerConversation =
+    displayStats.conversations > 0 ? (appointmentCount / displayStats.conversations) * 100 : 0;
+  const heading = scope === 'team' ? 'Team stats' : 'Your stats';
+  const description =
+    scope === 'team'
+      ? 'Team metrics aggregate your workspace members, and lead totals are reconciled from CRM contacts.'
+      : 'Session metrics come from the app, and lead totals are reconciled from CRM contacts.';
+  const emptyCopy =
+    scope === 'team'
+      ? 'No team stats recorded yet. Complete a session in the app to see team numbers here.'
+      : 'No stats recorded yet. Complete a session in the app to see your numbers here.';
+  const visibleFinanceEntries = useMemo(
+    () =>
+      financeEntries.filter((entry) => {
+        const source = getFinanceEntrySource(entry);
+        if (!source) return false;
+        if (scope === 'team') return true;
+        const ownerId = entry.agent_user_id || entry.created_by;
+        return ownerId === userId;
+      }),
+    [financeEntries, scope, userId]
+  );
+  const totalSpendCents = useMemo(
+    () => visibleFinanceEntries.reduce((sum, entry) => sum + Number(entry.total_cost_cents || 0), 0),
+    [visibleFinanceEntries]
+  );
+  const campaignSpendCents = useMemo(
+    () =>
+      visibleFinanceEntries.reduce((sum, entry) => {
+        return getFinanceEntrySource(entry) === 'campaign' ? sum + Number(entry.total_cost_cents || 0) : sum;
+      }, 0),
+    [visibleFinanceEntries]
+  );
+  const farmSpendCents = useMemo(
+    () =>
+      visibleFinanceEntries.reduce((sum, entry) => {
+        return getFinanceEntrySource(entry) === 'farm' ? sum + Number(entry.total_cost_cents || 0) : sum;
+      }, 0),
+    [visibleFinanceEntries]
+  );
+  const spendTrend = useMemo(() => {
+    const grouped = new Map<string, { campaignCents: number; farmCents: number }>();
+
+    for (const entry of visibleFinanceEntries) {
+      const dateKey = entry.incurred_on || entry.created_at.slice(0, 10);
+      const bucket = grouped.get(dateKey) ?? { campaignCents: 0, farmCents: 0 };
+      const amount = Number(entry.total_cost_cents || 0);
+      const source = getFinanceEntrySource(entry);
+
+      if (source === 'campaign') {
+        bucket.campaignCents += amount;
+      } else if (source === 'farm') {
+        bucket.farmCents += amount;
+      }
+
+      grouped.set(dateKey, bucket);
+    }
+
+    return Array.from(grouped.entries())
+      .sort(([left], [right]) => left.localeCompare(right))
+      .slice(-6)
+      .map(([date, bucket]) => ({
+        date,
+        campaignCents: bucket.campaignCents,
+        farmCents: bucket.farmCents,
+        totalCents: bucket.campaignCents + bucket.farmCents,
+      }));
+  }, [visibleFinanceEntries]);
+  const spendChartMax = Math.max(1, ...spendTrend.map((row) => row.totalCents));
+  const financeDescription =
+    scope === 'team'
+      ? 'Campaign and farm financials logged across the team workspace.'
+      : 'Campaign and farm financials logged under your spend.';
 
   // Still resolving auth or loading stats
   if (!authChecked || (userId && loading && !stats && !error)) {
@@ -170,22 +292,6 @@ export function YouViewContent({ userId, authChecked = false }: { userId: string
       </div>
     );
   }
-
-  const displayStats = stats ?? EMPTY_STATS;
-  const effectiveLeadsCreated = Math.max(displayStats.leads_created, leadCount);
-  const effectiveLeadPerConversation =
-    displayStats.conversations > 0 ? (effectiveLeadsCreated / displayStats.conversations) * 100 : 0;
-  const appointmentPerConversation =
-    displayStats.conversations > 0 ? (appointmentCount / displayStats.conversations) * 100 : 0;
-  const heading = scope === 'team' ? 'Team stats' : 'Your stats';
-  const description =
-    scope === 'team'
-      ? 'Team metrics aggregate your workspace members, and lead totals are reconciled from CRM contacts.'
-      : 'Session metrics come from the app, and lead totals are reconciled from CRM contacts.';
-  const emptyCopy =
-    scope === 'team'
-      ? 'No team stats recorded yet. Complete a session in the app to see team numbers here.'
-      : 'No stats recorded yet. Complete a session in the app to see your numbers here.';
 
   return (
     <div className="space-y-6">
@@ -252,6 +358,82 @@ export function YouViewContent({ userId, authChecked = false }: { userId: string
             description="Appointments per conversation"
           />
         </div>
+      </section>
+
+      <section>
+        <div className="mb-4">
+          <h3 className="text-lg font-semibold text-foreground">Financial Metrics</h3>
+          <p className="mt-1 text-sm text-muted-foreground">{financeDescription}</p>
+        </div>
+
+        {visibleFinanceEntries.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-border px-4 py-5 text-sm text-muted-foreground">
+            No campaign or farm financials have been logged yet.
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <StatCard label="Total Spend" value={formatCurrencyFromCents(totalSpendCents)} />
+              <StatCard label="Campaign Spend" value={formatCurrencyFromCents(campaignSpendCents)} />
+              <StatCard label="Farm Spend" value={formatCurrencyFromCents(farmSpendCents)} />
+            </div>
+
+            <div className="rounded-2xl border border-border bg-card p-5">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="text-sm font-medium text-foreground">Total Spend Graph</p>
+                  <p className="text-xs text-muted-foreground">
+                    Recent spend by day from campaign and farm finance entries.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
+                  <span className="inline-flex items-center gap-2">
+                    <span className="h-2.5 w-2.5 rounded-full bg-amber-400" aria-hidden />
+                    Campaign
+                  </span>
+                  <span className="inline-flex items-center gap-2">
+                    <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" aria-hidden />
+                    Farm
+                  </span>
+                  <span>{visibleFinanceEntries.length} entries</span>
+                </div>
+              </div>
+
+              <div className="mt-4 space-y-3">
+                {spendTrend.map((row) => {
+                  const totalWidth = Math.min(100, (row.totalCents / spendChartMax) * 100);
+                  const campaignWidth = row.totalCents > 0 ? (row.campaignCents / row.totalCents) * 100 : 0;
+                  const farmWidth = row.totalCents > 0 ? (row.farmCents / row.totalCents) * 100 : 0;
+
+                  return (
+                    <div
+                      key={row.date}
+                      className="grid grid-cols-[72px_minmax(0,1fr)_96px] items-center gap-3 text-sm"
+                    >
+                      <span className="text-muted-foreground">{formatSpendDateLabel(row.date)}</span>
+                      <div className="h-6 rounded-full bg-muted/30 p-1">
+                        <div
+                          className="flex h-full overflow-hidden rounded-full"
+                          style={{ width: `${Math.max(totalWidth, 4)}%` }}
+                        >
+                          {row.campaignCents > 0 ? (
+                            <div className="h-full bg-amber-400" style={{ width: `${campaignWidth}%` }} />
+                          ) : null}
+                          {row.farmCents > 0 ? (
+                            <div className="h-full bg-emerald-400" style={{ width: `${farmWidth}%` }} />
+                          ) : null}
+                        </div>
+                      </div>
+                      <span className="text-right font-medium text-foreground">
+                        {formatCurrencyFromCents(row.totalCents)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
       </section>
 
       {/* Refresh */}
