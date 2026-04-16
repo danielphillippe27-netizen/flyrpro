@@ -20,7 +20,17 @@ interface MapBuildingsLayerProps {
   footprintStatusColors?: boolean;
   onBuildingClick?: (buildingId: string, addressId?: string) => void;
   onAddToCRM?: (data: { address: string; addressId?: string; gersId?: string; campaignId?: string }) => void;
+  onRenderStateChange?: (state: MapBuildingsRenderState) => void;
 }
+
+export type MapBuildingsRenderState = {
+  isFetching: boolean;
+  hasData: boolean;
+  hasVisibleFeatures: boolean;
+  featureCount: number;
+  visibleFeatureCount: number;
+  zoomLevel: number;
+};
 
 const defaultStatusFilters: StatusFilters = {
   QR_SCANNED: true,
@@ -171,8 +181,10 @@ export function MapBuildingsLayer({
   footprintStatusColors = true,
   onBuildingClick,
   onAddToCRM,
+  onRenderStateChange,
 }: MapBuildingsLayerProps) {
   const [features, setFeatures] = useState<BuildingFeatureCollection | null>(null);
+  const [isFetching, setIsFetching] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(15);
   const sourceId = 'map-buildings-source';
   const layerId = 'map-buildings-extrusion';
@@ -186,6 +198,10 @@ export function MapBuildingsLayer({
   // Debounce fetching to prevent spamming Supabase during rapid panning
   const fetchTimeout = useRef<NodeJS.Timeout | undefined>(undefined);
   const isMountedRef = useRef(true);
+  // Geometry is precomputed once when features are fetched.
+  // This eliminates the JSON.parse deep-clone + scaleFootprint call from the hot update path.
+  const normalizedFeaturesRef = useRef<BuildingFeatureCollection | null>(null);
+  const lastSetDataRef = useRef<BuildingFeatureCollection | null>(null);
 
   useEffect(() => {
     if (!map || !campaignId || !features?.features?.length || !addressStateOverrides?.length) return;
@@ -338,25 +354,17 @@ export function MapBuildingsLayer({
   const fetchCampaignData = useCallback(async () => {
     if (!isMountedRef.current || !campaignId) return;
 
-    console.log('[MapBuildingsLayer] Campaign Mode: Fetching full campaign data', { campaignId });
+    setIsFetching(true);
 
     try {
       // Use API endpoint directly - handles both Gold and Silver buildings
-      console.log('[MapBuildingsLayer] Fetching from API endpoint');
       const buildingsResponse = await fetch(`/api/campaigns/${campaignId}/buildings`);
       if (!buildingsResponse.ok) {
         console.error('[MapBuildingsLayer] API error:', buildingsResponse.status, buildingsResponse.statusText);
       }
       if (buildingsResponse.ok) {
         const buildings = await buildingsResponse.json();
-        console.log('[MapBuildingsLayer] API response:', {
-          status: buildingsResponse.status,
-          hasFeatures: !!buildings?.features,
-          featuresCount: buildings?.features?.length,
-          firstFeature: buildings?.features?.[0],
-        });
         if (buildings?.features?.length > 0) {
-          console.log('[MapBuildingsLayer] Using buildings from API:', buildings.features.length);
           campaignDataLoadedRef.current = campaignId;
           setFeatures(buildings as BuildingFeatureCollection);
           return;
@@ -364,8 +372,6 @@ export function MapBuildingsLayer({
       }
 
       // LAST RESORT: Fetch campaign addresses and create point features
-      console.log('[MapBuildingsLayer] No buildings found, creating from addresses');
-      
       const { data: addresses, error: addrError } = await supabase
         .from('campaign_addresses_geojson')
         .select('id, formatted, house_number, geom, geom_json, visited, coordinate, scans, last_scanned_at, address_status')
@@ -421,7 +427,6 @@ export function MapBuildingsLayer({
         );
         
         if (addressFeatures.length > 0) {
-          console.log('[MapBuildingsLayer] Created features from addresses:', addressFeatures.length);
           campaignDataLoadedRef.current = campaignId;
           setFeatures({
             type: 'FeatureCollection',
@@ -430,12 +435,61 @@ export function MapBuildingsLayer({
           return;
         }
       }
-
-      console.log('[MapBuildingsLayer] No buildings or addresses found from any source');
     } catch (err) {
       console.error('[MapBuildingsLayer] Error in fetchCampaignData:', err);
+    } finally {
+      if (isMountedRef.current) {
+        setIsFetching(false);
+      }
     }
   }, [supabase, campaignId]);
+
+  // Precompute scaled geometry once per fetch — never inside the render/update effect.
+  useEffect(() => {
+    if (!features) {
+      normalizedFeaturesRef.current = null;
+      lastSetDataRef.current = null;
+      return;
+    }
+
+    normalizedFeaturesRef.current = {
+      type: 'FeatureCollection',
+      features: features.features.map((f) => {
+        const props = f.properties ?? {};
+        const fid = props.feature_id ?? props.gers_id ?? f.id ?? (props as any).id;
+        const geom = f.geometry;
+
+        // Deep-clone geometry ONCE here so we never mutate the source data.
+        const scaledGeom =
+          geom?.type === 'Polygon' || geom?.type === 'MultiPolygon'
+            ? (JSON.parse(JSON.stringify(geom)) as GeoJSON.Polygon | GeoJSON.MultiPolygon)
+            : geom;
+
+        if (scaledGeom && (scaledGeom.type === 'Polygon' || scaledGeom.type === 'MultiPolygon')) {
+          scaleFootprint(scaledGeom, FOOTPRINT_SCALE);
+        }
+
+        return {
+          ...f,
+          geometry: (scaledGeom ?? geom) as GeoJSON.Polygon,
+          properties: {
+            ...props,
+            address_text: displayAddressText({
+              formatted: props.address_text,
+              house_number: props.house_number,
+              street_name: props.street_name,
+            }),
+            house_number: resolveHouseNumberLabel({
+              house_number: props.house_number,
+              formatted: props.address_text,
+            }),
+            feature_id: fid ?? (f as any).id,
+          },
+        };
+      }),
+    } as BuildingFeatureCollection;
+    lastSetDataRef.current = null;
+  }, [features]);
 
   // EXPLORATION MODE: Fetch buildings in viewport bounding box (when no campaignId)
   const fetchBuildingsInViewport = useCallback(async (bounds: { ne: [number, number]; sw: [number, number] }) => {
@@ -577,37 +631,24 @@ export function MapBuildingsLayer({
   // CAMPAIGN MODE: Fetch full campaign data once when campaignId is set
   // This is the "fetch once, render forever" pattern for smooth pan/zoom
   useEffect(() => {
-    console.log('[MapBuildingsLayer] Campaign fetch effect running:', { 
-      hasMap: !!map, 
-      campaignId, 
-      alreadyLoaded: campaignDataLoadedRef.current 
-    });
-    
     if (!map || !campaignId) {
-      console.log('[MapBuildingsLayer] Skipping fetch - missing map or campaignId:', { hasMap: !!map, campaignId });
       return;
     }
     
     // Only fetch if we haven't already loaded this campaign's data
     if (campaignDataLoadedRef.current === campaignId) {
-      console.log('[MapBuildingsLayer] Campaign data already loaded, skipping fetch');
       return;
     }
 
     const doFetch = () => {
-      console.log('[MapBuildingsLayer] doFetch called, map.loaded():', map.loaded(), 'isStyleLoaded:', map.isStyleLoaded());
-      
       // Use isStyleLoaded() which is sufficient for our RPC call
       // map.loaded() waits for ALL resources (tiles, etc.) which takes too long
       if (map.isStyleLoaded()) {
-        console.log('[MapBuildingsLayer] Style loaded, fetching campaign data now');
         setZoomLevel(map.getZoom());
         fetchCampaignData();
       } else {
-        console.log('[MapBuildingsLayer] Style not loaded, waiting for style.load event');
         // Use 'style.load' event which fires when style is ready (more reliable than 'load')
         map.once('style.load', () => {
-          console.log('[MapBuildingsLayer] style.load event fired, fetching data');
           setZoomLevel(map.getZoom());
           fetchCampaignData();
         });
@@ -615,7 +656,6 @@ export function MapBuildingsLayer({
         // Fallback: Also try 'idle' event in case style.load already fired
         const idleHandler = () => {
           if (!campaignDataLoadedRef.current) {
-            console.log('[MapBuildingsLayer] idle event fired, fetching data as fallback');
             setZoomLevel(map.getZoom());
             fetchCampaignData();
           }
@@ -666,41 +706,68 @@ export function MapBuildingsLayer({
     };
   }, [map, campaignId, onViewportChanged]);
 
+  useEffect(() => {
+    if (!onRenderStateChange) return;
+
+    const reportRenderState = () => {
+      const featureCount = features?.features.length ?? 0;
+      let visibleFeatureCount = 0;
+
+      if (map && map.isStyleLoaded() && zoomLevel >= 12) {
+        try {
+          visibleFeatureCount = map.queryRenderedFeatures(undefined, {
+            layers: [layerId, circleLayerId],
+          }).length;
+        } catch {
+          visibleFeatureCount = 0;
+        }
+      }
+
+      onRenderStateChange({
+        isFetching,
+        hasData: featureCount > 0,
+        hasVisibleFeatures: visibleFeatureCount > 0,
+        featureCount,
+        visibleFeatureCount,
+        zoomLevel,
+      });
+    };
+
+    reportRenderState();
+
+    if (!map) return;
+
+    let frameId: number | null = null;
+    const scheduleReport = () => {
+      if (frameId !== null) cancelAnimationFrame(frameId);
+      frameId = requestAnimationFrame(reportRenderState);
+    };
+
+    map.on('idle', scheduleReport);
+    map.on('moveend', scheduleReport);
+    map.on('zoomend', scheduleReport);
+    map.on('style.load', scheduleReport);
+
+    return () => {
+      map.off('idle', scheduleReport);
+      map.off('moveend', scheduleReport);
+      map.off('zoomend', scheduleReport);
+      map.off('style.load', scheduleReport);
+      if (frameId !== null) cancelAnimationFrame(frameId);
+    };
+  }, [circleLayerId, features, isFetching, layerId, map, onRenderStateChange, zoomLevel]);
+
   // Update Mapbox source and layer when features change
   useEffect(() => {
-    // Log every time this effect runs to debug reactivity
-    const geometryTypes = features?.features?.reduce((acc: Record<string, number>, f) => {
-      const type = f.geometry?.type || 'unknown';
-      acc[type] = (acc[type] || 0) + 1;
-      return acc;
-    }, {});
-    
-    console.log('[MapBuildingsLayer] Layer update effect triggered:', {
-      hasMap: !!map,
-      hasFeatures: !!features,
-      featuresCount: features?.features?.length,
-      geometryTypes,
-      zoomLevel,
-    });
-
     // Only bail if map doesn't exist
     if (!map) {
-      console.log('[MapBuildingsLayer] Skipping layer update: no map');
       return;
     }
 
     // Define the update logic as a function we can call or defer
     const updateLayers = () => {
-      console.log('[MapBuildingsLayer] updateLayers called:', {
-        hasFeatures: !!features,
-        featuresCount: features?.features?.length,
-        isStyleLoaded: map.isStyleLoaded(),
-        mapLoaded: map.loaded(),
-      });
-
       // Check if style is loaded - we need this to add layers
       if (!map.isStyleLoaded()) {
-        console.log('[MapBuildingsLayer] Style not loaded in updateLayers, will retry on idle');
         return;
       }
 
@@ -708,71 +775,24 @@ export function MapBuildingsLayer({
       const labelSource = map.getSource(addressLabelSourceId) as mapboxgl.GeoJSONSource | undefined;
       const addressLabelFeatures = buildAddressLabelFeatureCollection(addressStateOverrides);
 
-      // Ensure every feature has feature_id for promoteId (required for setFeatureState)
-      // Scale footprints toward centroid so markers appear skinnier on the map
-      const normalizedFeatures: BuildingFeatureCollection | null = features
-        ? {
-            type: 'FeatureCollection',
-            features: features.features.map((f) => {
-              const props = f.properties ?? {};
-              const fid = props.feature_id ?? props.gers_id ?? f.id ?? (props as any).id;
-              const geom = f.geometry;
-              const scaledGeom =
-                geom?.type === 'Polygon' || geom?.type === 'MultiPolygon'
-                  ? (JSON.parse(JSON.stringify(geom)) as GeoJSON.Polygon | GeoJSON.MultiPolygon)
-                  : geom;
-              if (scaledGeom && (scaledGeom.type === 'Polygon' || scaledGeom.type === 'MultiPolygon')) {
-                scaleFootprint(scaledGeom, FOOTPRINT_SCALE);
-              }
-              return {
-                ...f,
-                geometry: (scaledGeom ?? geom) as GeoJSON.Polygon,
-                properties: {
-                  ...props,
-                  address_text: displayAddressText({
-                    formatted: props.address_text,
-                    house_number: props.house_number,
-                    street_name: props.street_name,
-                  }),
-                  house_number: resolveHouseNumberLabel({
-                    house_number: props.house_number,
-                    formatted: props.address_text,
-                  }),
-                  feature_id: fid ?? (f as any).id,
-                },
-              };
-            }),
-          } as BuildingFeatureCollection
-        : null;
+      // Use precomputed geometry — no clone/rescale on this path.
+      const normalizedFeatures = normalizedFeaturesRef.current;
 
-      // If source already exists and we have features, update the data immediately
-      // This handles the race condition where features arrive after source was created
-      if (source && normalizedFeatures) {
-        console.log('[MapBuildingsLayer] Updating existing source with', normalizedFeatures.features.length, 'features');
+      // Only call setData if geometry actually changed.
+      if (source && normalizedFeatures && normalizedFeatures !== lastSetDataRef.current) {
         source.setData(normalizedFeatures);
+        lastSetDataRef.current = normalizedFeatures;
       }
 
       if (labelSource) {
         labelSource.setData(addressLabelFeatures);
       }
 
-      // Check if we should proceed with layer creation/updates
-      console.log('[MapBuildingsLayer] Checking layer creation conditions:', {
-        hasNormalizedFeatures: !!normalizedFeatures,
-        normalizedFeaturesCount: normalizedFeatures?.features?.length,
-        zoomLevel,
-        zoomCheck: zoomLevel >= 12,
-        firstFeatureGeometry: normalizedFeatures?.features?.[0]?.geometry?.type,
-        firstFeatureId: normalizedFeatures?.features?.[0]?.properties?.feature_id,
-      });
-      
       if (!normalizedFeatures || normalizedFeatures.features.length === 0) {
-        console.log('[MapBuildingsLayer] Skipping: no normalized features');
         return;
       }
       
       if (zoomLevel < 12) {
-        console.log('[MapBuildingsLayer] Skipping: zoom too low (< 12)');
         return;
       }
 
@@ -808,6 +828,7 @@ export function MapBuildingsLayer({
             // Tolerance for geometry simplification (smaller = more detail)
             tolerance: 0.5,
           });
+          lastSetDataRef.current = normalizedFeatures;
         } catch (err) {
           console.error('Error adding source:', err);
           return;
@@ -827,93 +848,87 @@ export function MapBuildingsLayer({
       }
 
       // Add or update fill-extrusion layer (for Polygon/MultiPolygon geometries)
-    if (!map.getLayer(layerId)) {
-      try {
-        // NOTE: Shadow layer removed to fix "dark square" visual artifact
-        // The 3D fill-extrusion with proper lighting provides sufficient visual depth
-        const filterExpr = getFilterExpression(showOrphans, !!campaignId, statusFilters);
+      if (!map.getLayer(layerId)) {
+        try {
+          // NOTE: Shadow layer removed to fix "dark square" visual artifact
+          // The 3D fill-extrusion with proper lighting provides sufficient visual depth
+          const filterExpr = getFilterExpression(showOrphans, !!campaignId, statusFilters);
 
-        // Filter for polygon features only
-        const polygonFilter: any[] = ['any', ['==', ['geometry-type'], 'Polygon'], ['==', ['geometry-type'], 'MultiPolygon']];
-        
-        // Add the main building layer
-        // Add without beforeId to place at end (on top of everything, including labels)
-        const layerConfig: any = {
-          id: layerId,
-          type: 'fill-extrusion' as const,
-          source: sourceId,
-          minzoom: 12,
-          filter: filterExpr ? ['all', polygonFilter, filterExpr] : polygonFilter,
-          paint: {
-            'fill-extrusion-color': getFootprintFillColor(),
-            'fill-extrusion-vertical-gradient': true,
-            'fill-extrusion-height': ['coalesce', ['get', 'height'], ['get', 'height_m'], 14] as any,
-            'fill-extrusion-base': 0,
-            'fill-extrusion-opacity': getFootprintFillOpacity(),
-          },
-        };
-        
-        // Add without beforeId - this places it at the end (on top of everything)
-        console.log('[MapBuildingsLayer] Adding fill-extrusion layer with config:', {
-          id: layerConfig.id,
-          filter: layerConfig.filter,
-          featureCount: normalizedFeatures.features.length,
-        });
-        map.addLayer(layerConfig);
-        console.log('[MapBuildingsLayer] Fill-extrusion layer added');
-        
-        // Add circle layer for Point geometries (addresses without building polygons)
-        if (!map.getLayer(circleLayerId)) {
-          const circleLayerConfig: any = {
-            id: circleLayerId,
-            type: 'circle' as const,
+          // Filter for polygon features only
+          const polygonFilter: any[] = ['any', ['==', ['geometry-type'], 'Polygon'], ['==', ['geometry-type'], 'MultiPolygon']];
+          
+          // Add the main building layer
+          // Add without beforeId to place at end (on top of everything, including labels)
+          const layerConfig: any = {
+            id: layerId,
+            type: 'fill-extrusion' as const,
             source: sourceId,
             minzoom: 12,
-            filter: filterExpr 
-              ? ['all', ['==', ['geometry-type'], 'Point'], filterExpr]
-              : ['==', ['geometry-type'], 'Point'],
+            filter: filterExpr ? ['all', polygonFilter, filterExpr] : polygonFilter,
             paint: {
-              'circle-radius': 5,
-              'circle-color': getFootprintFillColor(),
-              'circle-opacity': getCircleOpacity(),
-              'circle-stroke-width': 1.5,
-              'circle-stroke-color': '#ffffff',
+              'fill-extrusion-color': getFootprintFillColor(),
+              'fill-extrusion-vertical-gradient': true,
+              'fill-extrusion-height': ['coalesce', ['get', 'height'], ['get', 'height_m'], 14] as any,
+              'fill-extrusion-base': 0,
+              'fill-extrusion-opacity': getFootprintFillOpacity(),
             },
           };
-          map.addLayer(circleLayerConfig);
-        }
+          
+          // Add without beforeId - this places it at the end (on top of everything)
+          map.addLayer(layerConfig);
+          
+          // Add circle layer for Point geometries (addresses without building polygons)
+          if (!map.getLayer(circleLayerId)) {
+            const circleLayerConfig: any = {
+              id: circleLayerId,
+              type: 'circle' as const,
+              source: sourceId,
+              minzoom: 12,
+              filter: filterExpr 
+                ? ['all', ['==', ['geometry-type'], 'Point'], filterExpr]
+                : ['==', ['geometry-type'], 'Point'],
+              paint: {
+                'circle-radius': 5,
+                'circle-color': getFootprintFillColor(),
+                'circle-opacity': getCircleOpacity(),
+                'circle-stroke-width': 1.5,
+                'circle-stroke-color': '#ffffff',
+              },
+            };
+            map.addLayer(circleLayerConfig);
+          }
 
-        if (!map.getLayer(addressLabelLayerId)) {
-          map.addLayer({
-            id: addressLabelLayerId,
-            type: 'symbol',
-            source: addressLabelSourceId,
-            minzoom: ADDRESS_LABEL_MIN_ZOOM,
-            filter: ['has', 'house_number'],
-            layout: {
-              'text-field': ['get', 'house_number'],
-              'text-size': [
-                'interpolate',
-                ['linear'],
-                ['zoom'],
-                ADDRESS_LABEL_MIN_ZOOM,
-                10,
-                22,
-                13,
-              ],
-              'text-font': ['DIN Offc Pro Medium', 'Arial Unicode MS Regular'],
-              'text-anchor': 'center',
-              'text-allow-overlap': false,
-              'text-ignore-placement': false,
-            },
-            paint: {
-              'text-color': '#f9fafb',
-              'text-opacity': 0.95,
-              'text-halo-color': '#111827',
-              'text-halo-width': 1.5,
-            },
-          });
-        }
+          if (!map.getLayer(addressLabelLayerId)) {
+            map.addLayer({
+              id: addressLabelLayerId,
+              type: 'symbol',
+              source: addressLabelSourceId,
+              minzoom: ADDRESS_LABEL_MIN_ZOOM,
+              filter: ['has', 'house_number'],
+              layout: {
+                'text-field': ['get', 'house_number'],
+                'text-size': [
+                  'interpolate',
+                  ['linear'],
+                  ['zoom'],
+                  ADDRESS_LABEL_MIN_ZOOM,
+                  10,
+                  22,
+                  13,
+                ],
+                'text-font': ['DIN Offc Pro Medium', 'Arial Unicode MS Regular'],
+                'text-anchor': 'center',
+                'text-allow-overlap': false,
+                'text-ignore-placement': false,
+              },
+              paint: {
+                'text-color': '#f9fafb',
+                'text-opacity': 0.95,
+                'text-halo-color': '#111827',
+                'text-halo-width': 1.5,
+              },
+            });
+          }
 
         // Outline layer removed to eliminate dark shadow effect underneath buildings
 
@@ -929,41 +944,6 @@ export function MapBuildingsLayer({
         } catch (lightErr) {
           console.warn('[MapBuildingsLayer] Error setting map lighting:', lightErr);
         }
-        
-        // Verify the layer was actually added and check all properties
-        const addedLayer = map.getLayer(layerId);
-        const currentZoom = map.getZoom();
-        const layerMinzoom = addedLayer ? (addedLayer as any).minzoom : null;
-        const layerVisibility = addedLayer ? map.getLayoutProperty(layerId, 'visibility') : null;
-        const paintOpacity = addedLayer ? map.getPaintProperty(layerId, 'fill-extrusion-opacity') : null;
-        const paintColor = addedLayer ? map.getPaintProperty(layerId, 'fill-extrusion-color') : null;
-        const paintHeight = addedLayer ? map.getPaintProperty(layerId, 'fill-extrusion-height') : null;
-        const paintGradient = addedLayer ? map.getPaintProperty(layerId, 'fill-extrusion-vertical-gradient') : null;
-        
-        // Check source data
-        const sourceAfter = map.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined;
-        const sourceData = sourceAfter ? (sourceAfter as any)._data : null;
-        const sourceFeatureCount = sourceData?.features?.length || 0;
-        
-        // Check layer order - find what's above and below
-        const allLayers = map.getStyle().layers;
-        const layerIndex = allLayers.findIndex(l => l.id === layerId);
-        const layerAbove = layerIndex > 0 ? allLayers[layerIndex - 1] : null;
-        const layerBelow = layerIndex < allLayers.length - 1 ? allLayers[layerIndex + 1] : null;
-        
-        
-        console.log('[MapBuildingsLayer] Building layer added successfully', {
-          layerId,
-          featuresCount: normalizedFeatures.features.length,
-          zoomLevel,
-          layerExists: !!addedLayer,
-          opacity: paintOpacity,
-          currentZoom,
-          statusFilters,
-          colorExpression: getFootprintFillColor(),
-          sampleFeatureStatus: normalizedFeatures.features[0]?.properties?.status,
-        });
-        
 
         // Helpers used in click handler (must be defined before popup content)
         const escapeHtml = (text: string): string => {
@@ -1199,134 +1179,83 @@ export function MapBuildingsLayer({
         if (map.getLayer(addressLabelLayerId)) {
           map.moveLayer(addressLabelLayerId);
         }
-      } catch (err) {
-        console.error('Error adding fill-extrusion layer:', err);
-      }
-    } else {
+        } catch (err) {
+          console.error('Error adding fill-extrusion layer:', err);
+        }
+      } else {
         // Update paint properties for existing layer to ensure opacity is correct
         try {
-        const colorExpr = getFootprintFillColor();
-        console.log('[MapBuildingsLayer] Updating existing layer colors', {
-          statusFilters,
-          colorExpression: colorExpr,
-          layerId,
-        });
-        map.setPaintProperty(layerId, 'fill-extrusion-opacity', getFootprintFillOpacity());
-        map.setPaintProperty(layerId, 'fill-extrusion-color', colorExpr);
-        map.setPaintProperty(layerId, 'fill-extrusion-vertical-gradient', true);
-        
-        
-        // Move layer to the end (on top of everything)
-        try {
-          // Remove and re-add to move to end, or use moveLayer with undefined to move to end
-          // Actually, we can't move to end directly, so we'll remove and re-add
-          const layerConfig = map.getLayer(layerId);
-          if (layerConfig) {
-            // Get current paint properties
-            const currentPaint = {
-              opacity: map.getPaintProperty(layerId, 'fill-extrusion-opacity'),
-              color: map.getPaintProperty(layerId, 'fill-extrusion-color'),
-              height: map.getPaintProperty(layerId, 'fill-extrusion-height'),
-              base: map.getPaintProperty(layerId, 'fill-extrusion-base'),
-              gradient: map.getPaintProperty(layerId, 'fill-extrusion-vertical-gradient'),
-            };
-            
-            // Remove and re-add at end
-            map.removeLayer(layerId);
-            const readdConfig: any = {
-              id: layerId,
-              type: 'fill-extrusion',
-              source: sourceId,
-              minzoom: (layerConfig as any).minzoom || 12,
-              paint: {
-                'fill-extrusion-color': getFootprintFillColor(),
-                'fill-extrusion-vertical-gradient': true,
-                'fill-extrusion-height': currentPaint.height || ['coalesce', ['get', 'height'], ['get', 'height_m'], 14],
-                'fill-extrusion-base': currentPaint.base || 0,
-                'fill-extrusion-opacity': getFootprintFillOpacity(),
-              },
-            };
-            // Only add filter if the original layer had one
-            if ((layerConfig as any).filter) {
-              readdConfig.filter = (layerConfig as any).filter;
-            }
-            map.addLayer(readdConfig); // No beforeId - adds at end (on top)
-            if (map.getLayer(addressLabelLayerId)) {
-              map.moveLayer(addressLabelLayerId);
+          map.setPaintProperty(layerId, 'fill-extrusion-opacity', getFootprintFillOpacity());
+          map.setPaintProperty(layerId, 'fill-extrusion-color', getFootprintFillColor());
+          map.setPaintProperty(layerId, 'fill-extrusion-vertical-gradient', true);
+
+          if (map.getLayer(layerId)) {
+            try {
+              map.moveLayer(layerId);
+              if (map.getLayer(addressLabelLayerId)) {
+                map.moveLayer(addressLabelLayerId);
+              }
+            } catch (moveErr) {
+              console.warn('[MapBuildingsLayer] Layer reorder error:', moveErr);
             }
           }
-        } catch (moveErr) {
-          console.log('Layer move to end error:', moveErr);
-        }
 
-        if (!map.getLayer(addressLabelLayerId) && map.getSource(addressLabelSourceId)) {
-          map.addLayer({
-            id: addressLabelLayerId,
-            type: 'symbol',
-            source: addressLabelSourceId,
-            minzoom: ADDRESS_LABEL_MIN_ZOOM,
-            filter: ['has', 'house_number'],
-            layout: {
-              'text-field': ['get', 'house_number'],
-              'text-size': [
-                'interpolate',
-                ['linear'],
-                ['zoom'],
-                ADDRESS_LABEL_MIN_ZOOM,
-                10,
-                22,
-                13,
-              ],
-              'text-font': ['DIN Offc Pro Medium', 'Arial Unicode MS Regular'],
-              'text-anchor': 'center',
-              'text-allow-overlap': false,
-              'text-ignore-placement': false,
-            },
-            paint: {
-              'text-color': '#f9fafb',
-              'text-opacity': 0.95,
-              'text-halo-color': '#111827',
-              'text-halo-width': 1.5,
-            },
-          });
+          if (!map.getLayer(addressLabelLayerId) && map.getSource(addressLabelSourceId)) {
+            map.addLayer({
+              id: addressLabelLayerId,
+              type: 'symbol',
+              source: addressLabelSourceId,
+              minzoom: ADDRESS_LABEL_MIN_ZOOM,
+              filter: ['has', 'house_number'],
+              layout: {
+                'text-field': ['get', 'house_number'],
+                'text-size': [
+                  'interpolate',
+                  ['linear'],
+                  ['zoom'],
+                  ADDRESS_LABEL_MIN_ZOOM,
+                  10,
+                  22,
+                  13,
+                ],
+                'text-font': ['DIN Offc Pro Medium', 'Arial Unicode MS Regular'],
+                'text-anchor': 'center',
+                'text-allow-overlap': false,
+                'text-ignore-placement': false,
+              },
+              paint: {
+                'text-color': '#f9fafb',
+                'text-opacity': 0.95,
+                'text-halo-color': '#111827',
+                'text-halo-width': 1.5,
+              },
+            });
+          }
+        } catch (err) {
+          console.error('Error updating layer paint properties:', err);
         }
-      } catch (err) {
-        console.error('Error updating layer paint properties:', err);
       }
-    }
-    
-      // Final verification - check layer state after all operations
-      setTimeout(() => {
-        const finalLayer = map.getLayer(layerId);
-        const finalSource = map.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined;
-        const finalSourceData = finalSource ? (finalSource as any)._data : null;
-      }, 100);
     }; // End of updateLayers function
 
     // Always attempt to run updateLayers - it will handle style loading state internally
     // If style isn't loaded yet, we also set up an idle listener as backup
     const styleLoaded = map.isStyleLoaded();
-    console.log('[MapBuildingsLayer] Checking style loaded:', styleLoaded, 'features:', !!features);
     
     // Wrapper for idle listener so we can remove it
     const onIdle = () => {
-      console.log('[MapBuildingsLayer] Idle event fired, running updateLayers');
       updateLayers();
     };
     
     // Wrapper for style.load listener
     const onStyleLoad = () => {
-      console.log('[MapBuildingsLayer] Style load event fired, running updateLayers');
       updateLayers();
     };
     
     if (styleLoaded) {
       // Style is ready - run immediately
-      console.log('[MapBuildingsLayer] Style loaded, running updateLayers immediately');
       updateLayers();
     } else {
       // Style not ready - set up idle listener as backup
-      console.log('[MapBuildingsLayer] Style not loaded, setting up idle listener');
       map.once('idle', onIdle);
     }
     
@@ -1347,7 +1276,6 @@ export function MapBuildingsLayer({
     try {
       const colorExpr = getFootprintFillColor();
       const filterExpr = getFilterExpression();
-      console.log('[MapBuildingsLayer] Updating color/filter for statusFilters change', { statusFilters, campaignId, colorExpr, filterExpr });
       map.setPaintProperty(layerId, 'fill-extrusion-color', colorExpr);
       map.setPaintProperty(layerId, 'fill-extrusion-opacity', getFootprintFillOpacity());
       map.setFilter(layerId, filterExpr ? ['all', POLYGON_GEOMETRY_FILTER, filterExpr] : POLYGON_GEOMETRY_FILTER);
@@ -1367,7 +1295,6 @@ export function MapBuildingsLayer({
     
     const updateFilters = () => {
       const filterExpr = getFilterExpression();
-      console.log('[MapBuildingsLayer] Updating filter for showOrphans change', { showOrphans, campaignId, filterExpr });
       
       try {
         if (map.getLayer(layerId)) {

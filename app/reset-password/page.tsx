@@ -25,6 +25,51 @@ export default function ResetPasswordPage() {
     const checkRecoverySession = async () => {
       try {
         const supabase = await getClientAsync();
+        const currentUrl = new URL(window.location.href);
+        const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+        const queryType = currentUrl.searchParams.get('type');
+        const queryTokenHash = currentUrl.searchParams.get('token_hash');
+        const queryCode = currentUrl.searchParams.get('code');
+        const hashType = hashParams.get('type');
+        const hashAccessToken = hashParams.get('access_token');
+        const hashRefreshToken = hashParams.get('refresh_token');
+
+        const normalizeRecoveryUrl = () => {
+          window.history.replaceState({}, document.title, '/reset-password');
+        };
+
+        if (queryType === 'recovery' && queryTokenHash) {
+          const { error } = await supabase.auth.verifyOtp({
+            type: 'recovery',
+            token_hash: queryTokenHash,
+          });
+
+          if (error) {
+            throw error;
+          }
+
+          normalizeRecoveryUrl();
+        } else if (queryCode) {
+          const { error } = await supabase.auth.exchangeCodeForSession(queryCode);
+
+          if (error) {
+            throw error;
+          }
+
+          normalizeRecoveryUrl();
+        } else if (hashType === 'recovery' && hashAccessToken && hashRefreshToken) {
+          const { error } = await supabase.auth.setSession({
+            access_token: hashAccessToken,
+            refresh_token: hashRefreshToken,
+          });
+
+          if (error) {
+            throw error;
+          }
+
+          normalizeRecoveryUrl();
+        }
+
         const applySessionState = async () => {
           const {
             data: { session },

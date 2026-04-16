@@ -3,6 +3,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -11,6 +19,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useTheme } from '@/lib/theme-provider';
 import { useWorkspace } from '@/lib/workspace-context';
 import { getMapboxToken } from '@/lib/mapbox';
+import { handleWheelScrollContainer } from '@/lib/scrollContainer';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import MapboxDraw from '@mapbox/mapbox-gl-draw';
@@ -19,13 +28,14 @@ import { AddressAutocomplete } from '@/components/address/AddressAutocomplete';
 import { MapInfoButton } from '@/components/map/MapInfoButton';
 import { UserLocationLayer } from '@/components/map/UserLocationLayer';
 import type { AddressSuggestion } from '@/lib/services/MapboxAutocompleteService';
-import { Satellite, Map, Trash2, Pencil, Search } from 'lucide-react';
+import { CircleAlert, Map, Pencil, Satellite, Search, Trash2, TriangleAlert } from 'lucide-react';
 import * as turf from '@turf/turf';
 import Lottie from 'lottie-react';
-import { FarmService } from '@/lib/services/FarmService';
-import { FARM_GOAL_TYPE_OPTIONS, FARM_TOUCH_INTERVAL_OPTIONS, formatFarmGoal } from '@/lib/farms/config';
+import { FarmTouchService } from '@/lib/services/FarmService';
+import { FARM_TOUCH_INTERVAL_OPTIONS } from '@/lib/farms/config';
+import { buildCadenceTouchPlan } from '@/lib/farms/plan';
 import { FarmTouchTypePicker } from '@/components/farms/FarmTouchTypePicker';
-import type { FarmGoalType, FarmTouchInterval, FarmTouchType } from '@/types/database';
+import type { FarmTouchInterval, FarmTouchType } from '@/types/database';
 
 const MAP_STYLES = {
   light: 'mapbox://styles/mapbox/streets-v11',
@@ -35,6 +45,15 @@ const MAP_STYLES = {
 const DEFAULT_HOME_LIMIT = 5000;
 const DEFAULT_TOUCHES_PER_INTERVAL = 2;
 const DEFAULT_FARM_DURATION_DAYS = 365;
+
+type CreateFarmDialogTone = 'default' | 'warning' | 'destructive';
+
+type CreateFarmDialogState = {
+  title: string;
+  description: string;
+  tone: CreateFarmDialogTone;
+  actionLabel: string;
+};
 
 function formatDateInput(date: Date): string {
   return date.toISOString().slice(0, 10);
@@ -65,9 +84,6 @@ export default function CreateFarmPage() {
   const [startDate, setStartDate] = useState(() => formatDateInput(new Date()));
   const [touchesPerInterval, setTouchesPerInterval] = useState(DEFAULT_TOUCHES_PER_INTERVAL);
   const [touchesInterval, setTouchesInterval] = useState<FarmTouchInterval>('month');
-  const [goalType, setGoalType] = useState<FarmGoalType>('touches_per_cycle');
-  const [goalTarget, setGoalTarget] = useState(DEFAULT_TOUCHES_PER_INTERVAL);
-  const [cycleCompletionWindowDays, setCycleCompletionWindowDays] = useState('');
   const [touchTypes, setTouchTypes] = useState<FarmTouchType[]>([]);
   const [annualBudget, setAnnualBudget] = useState('');
   const [loading, setLoading] = useState(false);
@@ -87,11 +103,14 @@ export default function CreateFarmPage() {
   const [snappingBoundary, setSnappingBoundary] = useState(false);
   const [boundaryRaw, setBoundaryRaw] = useState<{ type: 'Polygon'; coordinates: number[][][] } | null>(null);
   const [boundarySnapped, setBoundarySnapped] = useState<{ type: 'Polygon'; coordinates: number[][][] } | null>(null);
+  const [feedbackDialog, setFeedbackDialog] = useState<CreateFarmDialogState | null>(null);
   const mapContainer = useRef<HTMLDivElement>(null);
+  const formScrollRef = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const drawRef = useRef<MapboxDraw | null>(null);
   const boundaryLayerIdsRef = useRef<string[]>([]);
   const hasCenteredOnUserLocationRef = useRef(false);
+  const feedbackDialogResolveRef = useRef<(() => void) | null>(null);
   const isDark = theme === 'dark';
   const lottieSrc = useMemo(
     () => (isDark ? '/loading/white.json' : '/loading/black.json'),
@@ -129,6 +148,45 @@ export default function CreateFarmPage() {
       cancelled = true;
     };
   }, [lottieSrc]);
+
+  useEffect(() => {
+    const el = formScrollRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => handleWheelScrollContainer(e, el);
+    el.addEventListener('wheel', handler, { passive: false });
+    return () => el.removeEventListener('wheel', handler);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      feedbackDialogResolveRef.current?.();
+      feedbackDialogResolveRef.current = null;
+    };
+  }, []);
+
+  const dismissFeedbackDialog = () => {
+    setFeedbackDialog(null);
+    const resolve = feedbackDialogResolveRef.current;
+    feedbackDialogResolveRef.current = null;
+    resolve?.();
+  };
+
+  const showFeedbackDialog = ({
+    title,
+    description,
+    tone = 'default',
+    actionLabel = 'OK',
+  }: {
+    title: string;
+    description: string;
+    tone?: CreateFarmDialogTone;
+    actionLabel?: string;
+  }) =>
+    new Promise<void>((resolve) => {
+      feedbackDialogResolveRef.current?.();
+      feedbackDialogResolveRef.current = resolve;
+      setFeedbackDialog({ title, description, tone, actionLabel });
+    });
 
   const add2DBuildingsLayer = (m: mapboxgl.Map) => {
     const buildingLayerId = '2d-buildings';
@@ -554,25 +612,19 @@ export default function CreateFarmPage() {
     if (!userId) return;
     if (!name.trim()) return;
     if (!startDate) {
-      alert('Please choose a start date.');
+      await showFeedbackDialog({
+        title: 'Start date required',
+        description: 'Choose a start date before creating this farm.',
+        tone: 'warning',
+      });
       return;
     }
     if (!Number.isFinite(touchesPerInterval) || touchesPerInterval < 1) {
-      alert('Please enter at least 1 touch.');
-      return;
-    }
-    if (!Number.isFinite(goalTarget) || goalTarget < 1) {
-      alert('Please enter a valid goal target.');
-      return;
-    }
-
-    const trimmedCycleWindow = cycleCompletionWindowDays.trim();
-    const parsedCycleWindow = trimmedCycleWindow ? parseInt(trimmedCycleWindow, 10) : null;
-    if (
-      trimmedCycleWindow &&
-      (!Number.isFinite(parsedCycleWindow ?? Number.NaN) || (parsedCycleWindow ?? 0) < 1)
-    ) {
-      alert('Please enter a valid completion window in days.');
+      await showFeedbackDialog({
+        title: 'Touch plan required',
+        description: 'Enter at least 1 touch for each cadence interval before continuing.',
+        tone: 'warning',
+      });
       return;
     }
 
@@ -584,7 +636,11 @@ export default function CreateFarmPage() {
       trimmedBudget &&
       (!Number.isFinite(annualBudgetCents ?? Number.NaN) || (annualBudgetCents ?? 0) < 0)
     ) {
-      alert('Please enter a valid yearly budget.');
+      await showFeedbackDialog({
+        title: 'Budget is invalid',
+        description: 'Enter a valid yearly budget or leave the field empty.',
+        tone: 'warning',
+      });
       return;
     }
 
@@ -592,7 +648,11 @@ export default function CreateFarmPage() {
     let bbox: number[] | undefined;
     const features = drawRef.current?.getAll();
     if (!features || features.features.length === 0) {
-      alert('Please draw a territory boundary on the map');
+      await showFeedbackDialog({
+        title: 'Draw a boundary',
+        description: 'Draw a territory boundary on the map before creating this farm.',
+        tone: 'warning',
+      });
       return;
     }
 
@@ -600,14 +660,22 @@ export default function CreateFarmPage() {
       (feature) => feature.geometry?.type === 'Polygon' && feature.geometry.coordinates?.[0]?.length >= 3
     );
     if (!polygonFeature) {
-      alert('Please draw a territory boundary on the map. Double-click to finish your shape.');
+      await showFeedbackDialog({
+        title: 'Finish the boundary',
+        description: 'Double-click to finish your shape, then try creating the farm again.',
+        tone: 'warning',
+      });
       return;
     }
     polygon = polygonFeature.geometry as { type: 'Polygon'; coordinates: number[][][] };
 
     const ring = polygon.coordinates[0];
     if (!ring || ring.length < 3) {
-      alert('Please draw a proper territory with at least 3 corners. The shape you drew has too few points.');
+      await showFeedbackDialog({
+        title: 'Boundary is too small',
+        description: 'Draw a proper territory with at least 3 corners.',
+        tone: 'warning',
+      });
       return;
     }
 
@@ -630,37 +698,36 @@ export default function CreateFarmPage() {
 
     setLoading(true);
     try {
-      const farm = await FarmService.createFarm(userId, {
-        name: name.trim(),
-        description: description.trim() || undefined,
-        polygon: JSON.stringify(polygon),
-        start_date: startDate,
-        end_date: formatDateInput(addDays(new Date(`${startDate}T12:00:00`), DEFAULT_FARM_DURATION_DAYS)),
-        frequency: touchesPerInterval,
-        touches_per_interval: touchesPerInterval,
-        touches_interval: touchesInterval,
-        goal_type: goalType,
-        goal_target: goalTarget,
-        cycle_completion_window_days: parsedCycleWindow,
-        touch_types: touchTypes,
-        annual_budget_cents: annualBudgetCents,
-        workspace_id: currentWorkspaceId ?? undefined,
-        area_label: bbox ? `Area ${bbox[1].toFixed(3)}, ${bbox[0].toFixed(3)}` : undefined,
-        home_limit: DEFAULT_HOME_LIMIT,
-      });
-
-      const campaignResponse = await fetch(`/api/farms/${farm.id}/campaign`, {
+      const createRes = await fetch('/api/farms', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name.trim(),
+          description: description.trim() || undefined,
+          polygon: JSON.stringify(polygon),
+          start_date: startDate,
+          end_date: formatDateInput(addDays(new Date(`${startDate}T12:00:00`), DEFAULT_FARM_DURATION_DAYS)),
+          frequency: touchesPerInterval,
+          touches_per_interval: touchesPerInterval,
+          touches_interval: touchesInterval,
+          goal_type: 'touches_per_cycle',
+          goal_target: touchesPerInterval,
+          cycle_completion_window_days: null,
+          touch_types: touchTypes,
+          annual_budget_cents: annualBudgetCents,
+          workspace_id: currentWorkspaceId ?? undefined,
+          area_label: bbox ? `Area ${bbox[1].toFixed(3)}, ${bbox[0].toFixed(3)}` : undefined,
+          home_limit: DEFAULT_HOME_LIMIT,
+        }),
       });
-      if (!campaignResponse.ok) {
-        const error = await campaignResponse.json().catch(() => ({}));
-        throw new Error(error.error || `Failed to create linked campaign (${campaignResponse.status})`);
+      if (!createRes.ok) {
+        const error = await createRes.json().catch(() => ({}));
+        throw new Error(error.error || `Failed to create farm (${createRes.status})`);
       }
 
-      const campaignResult = await campaignResponse.json();
-      const campaignId = campaignResult.linked_campaign_id as string | undefined;
+      const farm = await createRes.json();
+      const campaignId = farm.linked_campaign_id as string | undefined;
       if (!campaignId) {
         throw new Error('Linked campaign id was not returned for this farm');
       }
@@ -714,7 +781,11 @@ export default function CreateFarmPage() {
         insertedCount = addressResult.inserted_count || 0;
         setAddressCount(insertedCount);
         if (addressResult.warning) {
-          alert(addressResult.warning);
+          await showFeedbackDialog({
+            title: 'Coverage limit reached',
+            description: addressResult.warning,
+            tone: 'warning',
+          });
         }
 
         if (insertedCount > 0) {
@@ -744,11 +815,13 @@ export default function CreateFarmPage() {
 
             if (!provisionResponse.ok) {
               const error = await provisionResponse.json().catch(() => ({}));
-              alert(
-                error.error
+              await showFeedbackDialog({
+                title: 'Provisioning incomplete',
+                description: error.error
                   ? `Farm homes were generated, but building provisioning failed: ${error.error}`
-                  : 'Farm homes were generated, but building provisioning failed.'
-              );
+                  : 'Farm homes were generated, but building provisioning failed.',
+                tone: 'warning',
+              });
             } else {
               const result = await provisionResponse.json();
               const { addresses_saved = 0, links_created = 0 } = result;
@@ -759,13 +832,21 @@ export default function CreateFarmPage() {
             }
           } catch (provisionError) {
             console.error('Error provisioning buildings:', provisionError);
-            alert('Addresses saved but building provisioning failed. You can provision later.');
+            await showFeedbackDialog({
+              title: 'Provisioning incomplete',
+              description: 'Addresses were saved, but building provisioning failed. You can provision later.',
+              tone: 'warning',
+            });
           } finally {
             setProvisioning(false);
             setProvisionProgress('');
           }
         } else {
-          alert('No addresses found in the drawn polygon. Please try a different area.');
+          await showFeedbackDialog({
+            title: 'No homes found',
+            description: 'No addresses were found in the drawn polygon. Try a smaller area or adjust the boundary.',
+            tone: 'warning',
+          });
         }
       } finally {
         setGeneratingAddresses(false);
@@ -784,10 +865,35 @@ export default function CreateFarmPage() {
 
       const syncResult = await syncResponse.json();
       setGeneratedHomes(syncResult.inserted_count || insertedCount || 0);
+
+      const defaultMode = touchTypes[0] ?? 'doorknock';
+      const autoPlan = buildCadenceTouchPlan(
+        {
+          start_date: farm.start_date,
+          touches_interval: farm.touches_interval ?? touchesInterval,
+          frequency: farm.frequency,
+        },
+        12,
+      );
+
+      for (const plannedTouch of autoPlan) {
+        await FarmTouchService.createSession({
+          farmId: farm.id,
+          workspaceId: farm.workspace_id ?? currentWorkspaceId ?? undefined,
+          cycleNumber: plannedTouch.cycleNumber,
+          mode: defaultMode,
+          scheduledDate: new Date(`${plannedTouch.suggestedDate}T12:00:00`).toISOString(),
+        });
+      }
+
       router.push(`/farms/${farm.id}`);
     } catch (error) {
       console.error('Error creating farm:', error);
-      alert(getErrorMessage(error));
+      await showFeedbackDialog({
+        title: 'Couldn’t create farm',
+        description: getErrorMessage(error),
+        tone: 'destructive',
+      });
     } finally {
       setSyncingFarm(false);
       setLoading(false);
@@ -795,10 +901,10 @@ export default function CreateFarmPage() {
   };
 
   return (
-    <div className="h-screen flex bg-gray-50 dark:bg-background overflow-hidden">
-      <div className="w-full max-w-[360px] xl:max-w-[400px] shrink-0 border-r border-border bg-card">
-        <div className="flex h-full flex-col">
-          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-5">
+    <div className="flex h-full min-h-0 bg-gray-50 dark:bg-background overflow-hidden">
+      <div className="w-full max-w-[360px] xl:max-w-[400px] shrink-0 min-h-0 border-r border-border bg-card">
+        <div className="flex h-full min-h-0 flex-col">
+          <div ref={formScrollRef} className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-5">
             <div className="space-y-1">
               <p className="text-sm text-muted-foreground">Farm</p>
               <h1 className="text-2xl font-semibold text-foreground truncate">
@@ -887,73 +993,6 @@ export default function CreateFarmPage() {
 
             <div className="space-y-3 rounded-2xl border border-border bg-muted/30 p-4">
               <div className="space-y-1">
-                <p className="font-medium text-foreground">Goal tracking</p>
-                <p className="text-sm text-muted-foreground">
-                  Add a success target and optional completion window for each cycle.
-                </p>
-              </div>
-              <div className="grid grid-cols-[minmax(0,1fr),140px] gap-3">
-                <div className="space-y-2">
-                  <Label>Goal type</Label>
-                  <Select value={goalType} onValueChange={(value) => setGoalType(value as FarmGoalType)}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {FARM_GOAL_TYPE_OPTIONS.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="goalTarget">Target</Label>
-                  <Input
-                    id="goalTarget"
-                    type="number"
-                    min="1"
-                    value={goalTarget < 1 ? '' : String(goalTarget)}
-                    onChange={(e) => {
-                      if (e.target.value === '') {
-                        setGoalTarget(0);
-                        return;
-                      }
-
-                      const parsed = parseInt(e.target.value, 10);
-                      setGoalTarget(Number.isFinite(parsed) ? Math.max(1, parsed) : 0);
-                    }}
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="cycleCompletionWindowDays">Target completion window</Label>
-                <Input
-                  id="cycleCompletionWindowDays"
-                  type="number"
-                  min="1"
-                  value={cycleCompletionWindowDays}
-                  onChange={(e) => setCycleCompletionWindowDays(e.target.value)}
-                  placeholder="Optional, e.g. 14 days"
-                />
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Goal: {formatFarmGoal({
-                  goal_type: goalType,
-                  goal_target: goalTarget,
-                  touches_per_interval: touchesPerInterval,
-                  touches_interval: touchesInterval,
-                  frequency: touchesPerInterval,
-                })}
-                {cycleCompletionWindowDays.trim()
-                  ? `. Complete each cycle within ${cycleCompletionWindowDays.trim()} day${cycleCompletionWindowDays.trim() === '1' ? '' : 's'}.`
-                  : '.'}
-              </p>
-            </div>
-
-            <div className="space-y-3 rounded-2xl border border-border bg-muted/30 p-4">
-              <div className="space-y-1">
                 <p className="font-medium text-foreground">Type of touches</p>
                 <p className="text-sm text-muted-foreground">
                   Choose the touch types you expect to run in this farm.
@@ -1008,7 +1047,7 @@ export default function CreateFarmPage() {
             </div>
           </div>
 
-          <div className="border-t border-border px-4 py-4 bg-card">
+          <div className="shrink-0 border-t border-border px-4 py-4 bg-card">
             <div className="flex gap-3">
               <Button
                 type="button"
@@ -1155,6 +1194,49 @@ export default function CreateFarmPage() {
           </div>
         )}
       </div>
+
+      <Dialog open={!!feedbackDialog} onOpenChange={(open) => !open && dismissFeedbackDialog()}>
+        <DialogContent className="sm:max-w-md" showCloseButton={false}>
+          {feedbackDialog ? (
+            <>
+              <DialogHeader className="text-left sm:text-left">
+                <div className="flex items-start gap-3">
+                  <div
+                    className={`mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-full border ${
+                      feedbackDialog.tone === 'destructive'
+                        ? 'border-destructive/30 bg-destructive/10 text-destructive'
+                        : feedbackDialog.tone === 'warning'
+                          ? 'border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                          : 'border-primary/30 bg-primary/10 text-primary'
+                    }`}
+                  >
+                    {feedbackDialog.tone === 'destructive' ? (
+                      <CircleAlert className="size-5" />
+                    ) : (
+                      <TriangleAlert className="size-5" />
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <DialogTitle className="text-lg leading-6">{feedbackDialog.title}</DialogTitle>
+                    <DialogDescription className="text-sm leading-6">
+                      {feedbackDialog.description}
+                    </DialogDescription>
+                  </div>
+                </div>
+              </DialogHeader>
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant={feedbackDialog.tone === 'destructive' ? 'destructive' : 'default'}
+                  onClick={dismissFeedbackDialog}
+                >
+                  {feedbackDialog.actionLabel}
+                </Button>
+              </DialogFooter>
+            </>
+          ) : null}
+        </DialogContent>
+      </Dialog>
 
       {(snappingBoundary || provisioning || generatingAddresses || syncingFarm) && (
         <div className="fixed inset-0 bg-black/35 backdrop-blur-[1px] flex items-center justify-center z-50">

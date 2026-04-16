@@ -15,7 +15,22 @@ type InviteValidationResponse = {
 };
 
 const PENDING_INVITE_PROFILE_KEY = 'flyr.pendingInviteProfile';
+const DEFAULT_APP_ORIGIN = 'https://www.flyrpro.app';
 type AuthMode = 'sign-in' | 'recovery';
+
+function resolveAppOrigin(origin: string): string {
+  const raw = process.env.NEXT_PUBLIC_APP_URL?.trim() || origin;
+
+  try {
+    const parsed = new URL(raw);
+    if (parsed.hostname.toLowerCase() === 'flyrpro.app') {
+      parsed.hostname = 'www.flyrpro.app';
+    }
+    return parsed.origin;
+  } catch {
+    return origin || DEFAULT_APP_ORIGIN;
+  }
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -104,7 +119,7 @@ export default function LoginPage() {
     return callbackURL.toString();
   };
   const buildPasswordRecoveryURL = () => {
-    return new URL('/reset-password', window.location.origin).toString();
+    return new URL('/reset-password', resolveAppOrigin(window.location.origin)).toString();
   };
 
   useEffect(() => {

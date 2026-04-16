@@ -8,8 +8,10 @@
 import { createAdminClient } from '@/lib/supabase/server';
 import { TileLambdaService, type LambdaSnapshotResponse } from './TileLambdaService';
 
-const DEFAULT_GOLD_ADDRESS_LIMIT = 2500;
+const DEFAULT_GOLD_ADDRESS_LIMIT = 5000;
 const GOLD_ADDRESS_RPC_FILTERED = 'get_gold_addresses_in_polygon_geojson_filtered';
+const GOLD_RPC_PAGE_SIZE = 1000;
+const LEGACY_GOLD_RPC_CAP = 2500;
 
 export interface GoldAddressResult {
   source: 'gold' | 'silver' | 'lambda';
@@ -25,6 +27,11 @@ export interface GoldAddressResult {
 }
 
 export class GoldAddressService {
+  private static applyRpcRange<T>(builder: T, from: number, to: number): T {
+    const query = builder as T & { range?: (from: number, to: number) => T };
+    return typeof query.range === 'function' ? query.range(from, to) : builder;
+  }
+
   private static parseGoldAddressRows(raw: unknown): any[] {
     if (!raw) return [];
 
@@ -157,6 +164,47 @@ export class GoldAddressService {
     );
   }
 
+  private static async queryLegacyGoldAddressesPage(
+    supabase: ReturnType<typeof createAdminClient>,
+    polygonGeoJSON: string,
+    province: string | undefined,
+    from: number,
+    to: number
+  ) {
+    const normalizedProvince = this.normalizeProvince(province);
+
+    const twoArgResult = await this.applyRpcRange(
+      supabase.rpc(
+        'get_gold_addresses_in_polygon_geojson',
+        { p_polygon_geojson: polygonGeoJSON, p_province: normalizedProvince }
+      ),
+      from,
+      to
+    );
+
+    if (!twoArgResult.error) {
+      return twoArgResult;
+    }
+
+    const errorMessage = twoArgResult.error.message || '';
+    const twoArgMissing =
+      this.isMissingFunctionError(errorMessage, 'get_gold_addresses_in_polygon_geojson') &&
+      errorMessage.includes('p_province');
+
+    if (!twoArgMissing) {
+      return twoArgResult;
+    }
+
+    return this.applyRpcRange(
+      supabase.rpc(
+        'get_gold_addresses_in_polygon_geojson',
+        { p_polygon_geojson: polygonGeoJSON }
+      ),
+      from,
+      to
+    );
+  }
+
   /**
    * Handles mixed DB states where either the new single-signature RPC exists
    * or older overloaded RPC signatures are still deployed.
@@ -184,6 +232,90 @@ export class GoldAddressService {
     return this.queryLegacyGoldAddresses(supabase, polygonGeoJSON, normalizedProvince ?? undefined);
   }
 
+  private static async queryGoldAddressesPage(
+    supabase: ReturnType<typeof createAdminClient>,
+    polygonGeoJSON: string,
+    province: string | undefined,
+    from: number,
+    to: number
+  ) {
+    const normalizedProvince = this.normalizeProvince(province);
+    const filteredResult = await this.applyRpcRange(
+      supabase.rpc(
+        GOLD_ADDRESS_RPC_FILTERED,
+        { p_polygon_geojson: polygonGeoJSON, p_province: normalizedProvince }
+      ),
+      from,
+      to
+    );
+
+    if (!filteredResult.error) {
+      return filteredResult;
+    }
+
+    const errorMessage = filteredResult.error.message || '';
+    if (!this.isMissingFunctionError(errorMessage, GOLD_ADDRESS_RPC_FILTERED)) {
+      return filteredResult;
+    }
+
+    return this.queryLegacyGoldAddressesPage(
+      supabase,
+      polygonGeoJSON,
+      normalizedProvince ?? undefined,
+      from,
+      to
+    );
+  }
+
+  private static async fetchGoldAddressesWithLimit(
+    supabase: ReturnType<typeof createAdminClient>,
+    polygonGeoJSON: string,
+    province: string | undefined,
+    limit: number
+  ): Promise<any[]> {
+    const collectPages = async (provinceOverride?: string) => {
+      const rows: any[] = [];
+
+      for (let from = 0; rows.length < limit; from += GOLD_RPC_PAGE_SIZE) {
+        const to = from + Math.min(GOLD_RPC_PAGE_SIZE, limit - rows.length) - 1;
+        const { data, error } = await this.queryGoldAddressesPage(
+          supabase,
+          polygonGeoJSON,
+          provinceOverride,
+          from,
+          to
+        );
+
+        if (error) {
+          throw error;
+        }
+
+        const batch = this.parseGoldAddressRows(data);
+        if (batch.length === 0) break;
+
+        rows.push(...batch);
+        if (batch.length < GOLD_RPC_PAGE_SIZE) break;
+      }
+
+      return rows.slice(0, limit);
+    };
+
+    const normalizedProvince = this.normalizeProvince(province);
+    const primaryRows = await collectPages(normalizedProvince ?? undefined);
+
+    if (primaryRows.length === 0 && normalizedProvince) {
+      const fallbackRows = await collectPages(undefined);
+      if (fallbackRows.length > 0) {
+        console.warn(
+          `[GoldAddressService] Province-filtered query returned 0 for ${normalizedProvince}; unfiltered returned ${fallbackRows.length}`
+        );
+        return fallbackRows;
+      }
+    }
+
+    return primaryRows;
+  }
+
   /**
    * Fetch addresses from Gold Standard database
    * Returns addresses with geom as GeoJSON string for easy insertion
@@ -198,30 +330,21 @@ export class GoldAddressService {
     
     console.log('[GoldAddressService] Querying Gold Standard addresses...');
     
-    // Query addresses with geom as GeoJSON string
-    const { data: goldAddressesRaw, error } = await this.queryGoldAddresses(
-      supabase,
-      polygonGeoJSON,
-      province
-    );
-    
-    if (error) {
-      console.warn('[GoldAddressService] Gold query error:', error.message);
+    try {
+      const goldAddresses = await this.fetchGoldAddressesWithLimit(
+        supabase,
+        polygonGeoJSON,
+        province,
+        limit
+      );
+
+      console.log(`[GoldAddressService] Found ${goldAddresses.length} Gold addresses`);
+      return goldAddresses;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn('[GoldAddressService] Gold query error:', message);
       return [];
     }
-    
-    const goldAddresses = this.parseGoldAddressRows(goldAddressesRaw);
-    const limitedGoldAddresses = goldAddresses.slice(0, limit);
-
-    if (limitedGoldAddresses.length < goldAddresses.length) {
-      console.log(
-        `[GoldAddressService] Found ${goldAddresses.length} Gold addresses, capped to ${limitedGoldAddresses.length}`
-      );
-    } else {
-      console.log(`[GoldAddressService] Found ${goldAddresses.length} Gold addresses`);
-    }
-
-    return limitedGoldAddresses;
   }
 
   /**
@@ -246,39 +369,29 @@ export class GoldAddressService {
     console.log('[GoldAddressService] Querying Gold Standard table...');
     
     const normalizedRegion = this.normalizeProvince(regionCode);
-    const { data: goldAddressesRaw, error: goldError } = await this.queryGoldAddresses(
-      supabase,
-      polygonGeoJSON,
-      normalizedRegion
-    );
-    
-    if (goldError) {
-      console.warn('[GoldAddressService] Gold query error:', goldError.message);
-    }
-    
-    let goldAddresses = this.parseGoldAddressRows(goldAddressesRaw);
+    let goldAddresses: any[] = [];
 
-    // Province filter can be stale/wrong; retry once without it when it yields zero.
-    if (goldAddresses.length === 0 && normalizedRegion) {
-      const fallback = await this.queryGoldAddresses(supabase, polygonGeoJSON);
-      if (!fallback.error) {
-        const unfiltered = this.parseGoldAddressRows(fallback.data);
-        if (unfiltered.length > 0) {
-          console.warn(
-            `[GoldAddressService] Province-filtered query returned 0 for ${normalizedRegion}; unfiltered returned ${unfiltered.length}`
-          );
-          goldAddresses = unfiltered;
-        }
-      }
+    try {
+      goldAddresses = await this.fetchGoldAddressesWithLimit(
+        supabase,
+        polygonGeoJSON,
+        normalizedRegion ?? undefined,
+        DEFAULT_GOLD_ADDRESS_LIMIT
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn('[GoldAddressService] Gold query error:', message);
     }
 
     const goldCount = goldAddresses.length;
     console.log(`[GoldAddressService] Found ${goldCount} Gold Standard addresses`);
+    const shouldTopUpFromLambda =
+      goldCount >= LEGACY_GOLD_RPC_CAP && DEFAULT_GOLD_ADDRESS_LIMIT > goldCount;
     
     // =============================================================================
     // STEP 2: If Gold has good coverage, use it exclusively
     // =============================================================================
-    if (goldCount >= 10) {
+    if (goldCount >= 10 && !shouldTopUpFromLambda) {
       console.log('[GoldAddressService] Using Gold Standard exclusively');
       
       // Also get buildings from Gold if available (with GeoJSON)
@@ -303,6 +416,10 @@ export class GoldAddressService {
           total: goldCount
         }
       };
+    }
+
+    if (shouldTopUpFromLambda) {
+      console.log('[GoldAddressService] Gold RPC appears capped at 2500 rows, topping up with Lambda...');
     }
     
     // =============================================================================
@@ -367,7 +484,7 @@ export class GoldAddressService {
         addressMap.set(key, addr);
       });
       
-      finalAddresses = Array.from(addressMap.values());
+      finalAddresses = Array.from(addressMap.values()).slice(0, DEFAULT_GOLD_ADDRESS_LIMIT);
       console.log(`[GoldAddressService] Merged: ${goldCount} Gold + ${lambdaAddresses.length} Lambda = ${finalAddresses.length} total`);
     }
     

@@ -952,7 +952,16 @@ export default function CampaignDetailPage() {
 
           <TabsContent value="map" className="mt-4 space-y-4">
             <div className="bg-card rounded-xl border border-border overflow-hidden" style={{ height: '560px' }}>
-              <CampaignDetailMapView campaignId={campaignId} addresses={addresses} campaign={campaign} onSnapComplete={loadData} />
+              <CampaignDetailMapView
+                campaignId={campaignId}
+                addresses={addresses}
+                campaign={campaign}
+                onSnapComplete={loadData}
+                buildingPendingOverlay={{
+                  title: 'Rendering campaign map',
+                  description: 'Large campaigns can take a little longer to render. Buildings will appear as the map finishes loading.',
+                }}
+              />
             </div>
           </TabsContent>
 

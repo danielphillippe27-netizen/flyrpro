@@ -12,6 +12,13 @@ import type {
 } from '@/types/database';
 import type { CreateFarmPayload } from '@/types/farms';
 
+type LegacyFarmTouchRow = Partial<FarmTouch> & {
+  date?: string | null;
+  type?: string | null;
+  completed?: boolean | null;
+  completed_at?: string | null;
+};
+
 function formatError(error: unknown): string {
   if (!error) return 'Unknown error';
   if (typeof error === 'string') return error;
@@ -55,10 +62,84 @@ function withFarmProgress<T extends Farm>(farm: T): T {
   };
 }
 
-function normalizeFarmTouchMode(mode: FarmTouch['mode'] | 'canvassing' | 'flyer_drop' | null | undefined): FarmTouch['mode'] {
-  if (mode === 'canvassing') return 'doorknock';
-  if (mode === 'flyer_drop') return 'flyer';
-  return mode;
+function normalizeFarmTouchModeValue(
+  value: FarmTouch['mode'] | 'canvassing' | 'flyer_drop' | 'mail' | 'event' | 'door_knock' | 'letters' | string | null | undefined
+): FarmTouch['mode'] {
+  if (value === 'canvassing') return 'doorknock';
+  if (value === 'door_knock') return 'doorknock';
+  if (value === 'flyer_drop') return 'flyer';
+  if (value === 'mail') return 'letter';
+  if (value === 'letters') return 'letter';
+  if (value === 'event') return 'pop_by';
+  return value as FarmTouch['mode'];
+}
+
+function resolveFarmTouchMode(touch: LegacyFarmTouchRow): FarmTouch['mode'] {
+  if (touch.mode && touch.mode !== 'canvassing') {
+    return normalizeFarmTouchModeValue(touch.mode);
+  }
+  if (touch.type) {
+    return normalizeFarmTouchModeValue(touch.type);
+  }
+  return normalizeFarmTouchModeValue(touch.mode);
+}
+
+function formatLegacyTouchDate(value: string): string | null {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString().slice(0, 10);
+}
+
+function getDefaultFarmTouchTitle(mode: FarmSessionMode): string {
+  switch (mode) {
+    case 'flyer':
+      return 'Flyer session';
+    case 'canada_post':
+      return 'Canada Post session';
+    case 'pop_by':
+      return 'Pop by session';
+    case 'letter':
+      return 'Letter session';
+    case 'doorknock':
+    default:
+      return 'Doorknock session';
+  }
+}
+
+function getLegacyFarmTouchType(mode: FarmSessionMode): 'door_knock' | 'flyer' | 'event' {
+  switch (mode) {
+    case 'doorknock':
+      return 'door_knock';
+    case 'pop_by':
+      return 'event';
+    case 'flyer':
+    case 'canada_post':
+    case 'letter':
+    default:
+      return 'flyer';
+  }
+}
+
+function normalizeFarmTouchStatus(
+  touch: LegacyFarmTouchRow
+): FarmTouch['status'] {
+  if (touch.status === 'scheduled' || touch.status === 'in_progress' || touch.status === 'completed' || touch.status === 'skipped') {
+    return touch.status;
+  }
+  if (touch.completed || touch.completed_at || touch.completed_date || touch.last_completed_at) return 'completed';
+  if (touch.started_at) return 'in_progress';
+  return 'scheduled';
+}
+
+function withFarmTouchDefaults<T extends LegacyFarmTouchRow>(touch: T): T & Pick<FarmTouch, 'mode' | 'status' | 'scheduled_date' | 'completed_date' | 'last_completed_at'> {
+  return {
+    ...touch,
+    mode: resolveFarmTouchMode(touch),
+    scheduled_date: touch.scheduled_date ?? touch.date ?? touch.created_at ?? new Date().toISOString(),
+    completed_date: touch.completed_date ?? touch.completed_at ?? undefined,
+    last_completed_at: touch.last_completed_at ?? touch.completed_at ?? touch.completed_date ?? undefined,
+    status: normalizeFarmTouchStatus(touch),
+  };
 }
 
 const FARM_ADDRESS_OUTCOME_STATUSES: FarmAddressOutcomeStatus[] = [
@@ -261,21 +342,37 @@ export class FarmTouchService {
     const resolvedCycleNumber =
       payload.cycleNumber ??
       getNextFarmCycleNumber(existingTouches, farm?.touches_per_interval ?? farm?.frequency ?? 1);
+    const scheduledDate = payload.scheduledDate ?? new Date().toISOString();
+    const legacyDate = formatLegacyTouchDate(scheduledDate);
+    const resolvedTitle = payload.title?.trim() || getDefaultFarmTouchTitle(payload.mode);
+    const legacyType = getLegacyFarmTouchType(payload.mode);
 
     const basePayload = {
       farm_id: payload.farmId,
       workspace_id: payload.workspaceId ?? undefined,
       cycle_number: resolvedCycleNumber,
       mode: payload.mode,
-      title: payload.title ?? null,
-      scheduled_date: payload.scheduledDate ?? new Date().toISOString(),
-      status: 'scheduled',
+      type: legacyType,
+      title: resolvedTitle,
+      scheduled_date: scheduledDate,
+      date: legacyDate,
+      completed: false,
       notes: payload.notes ?? null,
       homes_target: payload.homesTarget ?? null,
     };
 
     const fallbackPayload: Record<string, unknown> = { ...basePayload };
-    const removableColumns = ['workspace_id', 'cycle_number', 'mode', 'title', 'scheduled_date', 'homes_target'] as const;
+    const removableColumns = [
+      'workspace_id',
+      'cycle_number',
+      'mode',
+      'type',
+      'title',
+      'scheduled_date',
+      'date',
+      'completed',
+      'homes_target',
+    ] as const;
 
     let { data, error } = await this.client.from('farm_touches').insert(fallbackPayload).select().single();
 
@@ -291,7 +388,7 @@ export class FarmTouchService {
     }
 
     if (error) throw new Error(formatError(error));
-    return data as FarmTouch;
+    return withFarmTouchDefaults(data as FarmTouch);
   }
 
   static async scheduleTouch(payload: {
@@ -319,29 +416,42 @@ export class FarmTouchService {
         .from('farm_touches')
         .select('*')
         .eq('farm_id', farmId)
+        .order('date', { ascending: false, nullsFirst: false });
+      data = fallback.data;
+      error = fallback.error;
+    }
+
+    if (error && isMissingColumnError(error, 'date')) {
+      const fallback = await this.client
+        .from('farm_touches')
+        .select('*')
+        .eq('farm_id', farmId)
         .order('created_at', { ascending: false });
       data = fallback.data;
       error = fallback.error;
     }
 
     if (error) throw new Error(formatError(error));
-    return ((data || []) as FarmTouch[]).map((touch) => ({
-      ...touch,
-      mode: normalizeFarmTouchMode(touch.mode),
-    }));
+    return ((data || []) as LegacyFarmTouchRow[]).map((touch) => withFarmTouchDefaults(touch) as FarmTouch);
   }
 
   static async updateTouch(touchId: string, updates: Partial<FarmTouch>): Promise<void> {
-    const nextUpdates = {
+    const nextUpdates: Record<string, unknown> = {
       ...updates,
       updated_at: new Date().toISOString(),
     };
-    const { error } = await this.client.from('farm_touches').update(nextUpdates).eq('id', touchId);
 
-    if (error && isMissingColumnError(error, 'updated_at')) {
-      const retry = await this.client.from('farm_touches').update(updates).eq('id', touchId);
-      if (retry.error) throw new Error(formatError(retry.error));
-      return;
+    let { error } = await this.client.from('farm_touches').update(nextUpdates).eq('id', touchId);
+
+    while (error) {
+      const missingColumn = Object.keys(nextUpdates).find(
+        (column) => column in nextUpdates && isMissingColumnError(error, column)
+      );
+      if (!missingColumn) break;
+      delete nextUpdates[missingColumn];
+      if (Object.keys(nextUpdates).length === 0) return;
+      const retry = await this.client.from('farm_touches').update(nextUpdates).eq('id', touchId);
+      error = retry.error;
     }
 
     if (error) throw new Error(formatError(error));
@@ -368,10 +478,12 @@ export class FarmTouchService {
     }
   ): Promise<void> {
     const completedAt = new Date().toISOString();
-    const updates: Partial<FarmTouch> = {
+    const updates: Partial<FarmTouch> & { completed?: boolean; completed_at?: string } = {
       status: 'completed',
       completed_date: completedAt,
       last_completed_at: completedAt,
+      completed: true,
+      completed_at: completedAt,
       notes: options?.notes,
       homes_reached: options?.homesReached ?? null,
     };
@@ -388,6 +500,8 @@ export class FarmTouchService {
       await this.updateTouch(touchId, {
         status: 'completed',
         completed_date: completedAt,
+        completed: true,
+        completed_at: completedAt,
         notes: options?.notes,
       });
     }
@@ -491,4 +605,3 @@ export class FarmTouchOutcomeService {
     return data;
   }
 }
-

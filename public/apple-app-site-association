@@ -7,9 +7,15 @@
           { "/": "/auth/callback", "comment": "Supabase auth redirect" },
           { "/": "/password/reset", "comment": "Primary password recovery redirect" },
           { "/": "/auth/reset-password", "comment": "Supabase password recovery redirect" },
+          { "/": "/reset-password", "comment": "App password reset page" },
           { "/": "/challenges/join", "comment": "Challenge invite link" }
         ]
       }
+    ]
+  },
+  "webcredentials": {
+    "apps": [
+      "2AR5T8ZYAS.com.danielphillippe.FLYR"
     ]
   }
 }

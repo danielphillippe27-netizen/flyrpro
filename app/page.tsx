@@ -44,6 +44,7 @@ export default function LandingPage() {
     if (typeof window === 'undefined') return;
 
     const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
     const error = params.get('error');
     const errorCode = params.get('error_code');
     const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
@@ -57,6 +58,16 @@ export default function LandingPage() {
       resetUrl.search = window.location.search;
       resetUrl.hash = window.location.hash;
       router.replace(`${resetUrl.pathname}${resetUrl.search}${resetUrl.hash}`);
+      return;
+    }
+
+    if (code) {
+      const callbackURL = new URL('/auth/callback', window.location.origin);
+      callbackURL.search = params.toString();
+      if (!callbackURL.searchParams.has('next')) {
+        callbackURL.searchParams.set('next', '/home');
+      }
+      router.replace(`${callbackURL.pathname}${callbackURL.search}`);
       return;
     }
 

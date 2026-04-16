@@ -1,13 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
+import {
+  formatApiError,
+  resolveBackingCampaignId,
+  selectFarmCampaignRow,
+  userCanAccessFarm,
+} from '@/app/api/farms/_utils/backingCampaign';
 import { createAdminClient, getSupabaseServerClient } from '@/lib/supabase/server';
-import { TileLambdaService } from '@/lib/services/TileLambdaService';
-import { resolveCampaignRegion } from '@/lib/geo/regionResolver';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const FARM_ADDRESS_LIMIT = 5000;
-const INSERT_BATCH_SIZE = 500;
 
 type GenerateFarmAddressListRequest = {
   farm_id: string;
@@ -17,24 +20,15 @@ type GenerateFarmAddressListRequest = {
   };
 };
 
-function normalizePolygon(candidate: unknown): GeoJSON.Polygon | null {
-  if (!candidate || typeof candidate !== 'object') return null;
-  const polygon = candidate as { type?: unknown; coordinates?: unknown };
-  if (polygon.type !== 'Polygon' || !Array.isArray(polygon.coordinates)) return null;
-  const ring = polygon.coordinates[0];
-  if (!Array.isArray(ring) || ring.length < 3) return null;
-  return polygon as GeoJSON.Polygon;
-}
-
 export async function POST(request: NextRequest) {
   try {
     const authClient = await getSupabaseServerClient();
     const {
       data: { user },
-      error: userError,
+      error: authError,
     } = await authClient.auth.getUser();
 
-    if (userError || !user) {
+    if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -44,106 +38,81 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'farm_id is required' }, { status: 400 });
     }
 
-    const { data: farm, error: farmError } = await authClient
-      .from('farms')
-      .select('id, owner_id, polygon, home_limit')
-      .eq('id', farmId)
-      .maybeSingle();
-
-    if (farmError) {
-      return NextResponse.json({ error: farmError.message }, { status: 500 });
-    }
-
+    const admin = createAdminClient();
+    const { farm, hasLinkedCampaignColumn } = await selectFarmCampaignRow(admin, farmId);
     if (!farm) {
       return NextResponse.json({ error: 'Farm not found' }, { status: 404 });
     }
 
-    const polygon =
-      normalizePolygon(body.polygon) ??
-      (() => {
-        if (typeof farm.polygon !== 'string' || !farm.polygon.trim()) return null;
-        try {
-          return normalizePolygon(JSON.parse(farm.polygon));
-        } catch {
-          return null;
-        }
-      })();
-
-    if (!polygon) {
-      return NextResponse.json({ error: 'Farm polygon is required to generate homes' }, { status: 400 });
+    const canAccess = await userCanAccessFarm(admin, user.id, farm);
+    if (!canAccess) {
+      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
-    const resolvedRegion = await resolveCampaignRegion({
-      polygon,
+    const linkedCampaignId = await resolveBackingCampaignId(admin, farm, hasLinkedCampaignColumn);
+    if (!linkedCampaignId) {
+      return NextResponse.json({ error: 'Farm has no linked campaign' }, { status: 400 });
+    }
+
+    const forwardedHeaders: HeadersInit = {
+      'Content-Type': 'application/json',
+    };
+    const cookie = request.headers.get('cookie');
+    const authorization = request.headers.get('authorization');
+    if (cookie) {
+      forwardedHeaders['cookie'] = cookie;
+    }
+    if (authorization) {
+      forwardedHeaders['authorization'] = authorization;
+    }
+
+    const addressResponse = await fetch(new URL('/api/campaigns/generate-address-list', request.nextUrl.origin), {
+      method: 'POST',
+      headers: forwardedHeaders,
+      body: JSON.stringify({
+        campaign_id: linkedCampaignId,
+        polygon: body.polygon,
+        address_limit: Math.min(
+          FARM_ADDRESS_LIMIT,
+          Math.max(1, Number(farm.home_limit ?? FARM_ADDRESS_LIMIT) || FARM_ADDRESS_LIMIT)
+        ),
+      }),
+      cache: 'no-store',
     });
 
-    const snapshot = await TileLambdaService.generateSnapshots(
-      polygon,
-      resolvedRegion.regionCode,
-      farmId,
-      {
-        includeRoads: false,
-        limitAddresses: FARM_ADDRESS_LIMIT,
-        limitBuildings: FARM_ADDRESS_LIMIT,
-      }
-    );
-
-    const geojson = await TileLambdaService.downloadAddresses(snapshot.urls.addresses);
-    const homeLimit = Math.min(FARM_ADDRESS_LIMIT, Number(farm.home_limit ?? FARM_ADDRESS_LIMIT) || FARM_ADDRESS_LIMIT);
-    const selected = geojson.features.slice(0, homeLimit);
-
-    const rows = selected.map((feature) => ({
-      farm_id: farmId,
-      campaign_address_id: null,
-      gers_id: feature.properties.gers_id || null,
-      formatted: feature.properties.formatted || feature.properties.label,
-      house_number: feature.properties.house_number || null,
-      street_name: feature.properties.street_name || null,
-      locality: feature.properties.city || null,
-      region: feature.properties.state || resolvedRegion.regionCode,
-      postal_code: feature.properties.postal_code || null,
-      source: 'map',
-      latitude: feature.geometry.coordinates[1],
-      longitude: feature.geometry.coordinates[0],
-      geom: feature.geometry,
-      visited_count: 0,
-    }));
-
-    const admin = createAdminClient();
-    const { error: deleteError } = await admin.from('farm_addresses').delete().eq('farm_id', farmId);
-    if (deleteError) {
-      return NextResponse.json({ error: deleteError.message }, { status: 500 });
+    const addressResult = await addressResponse.json().catch(() => ({}));
+    if (!addressResponse.ok) {
+      return NextResponse.json(
+        { error: addressResult.error || `Failed to generate farm homes (${addressResponse.status})` },
+        { status: addressResponse.status }
+      );
     }
 
-    for (let index = 0; index < rows.length; index += INSERT_BATCH_SIZE) {
-      const batch = rows.slice(index, index + INSERT_BATCH_SIZE);
-      if (batch.length === 0) continue;
-      const { error } = await admin.from('farm_addresses').insert(batch);
-      if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
-      }
+    const syncResponse = await fetch(new URL(`/api/farms/${farm.id}/sync-addresses`, request.nextUrl.origin), {
+      method: 'POST',
+      headers: forwardedHeaders,
+      cache: 'no-store',
+    });
+    const syncResult = await syncResponse.json().catch(() => ({}));
+    if (!syncResponse.ok) {
+      return NextResponse.json(
+        { error: syncResult.error || `Failed to sync farm homes (${syncResponse.status})` },
+        { status: syncResponse.status }
+      );
     }
-
-    await admin
-      .from('farms')
-      .update({
-        address_count: rows.length,
-        home_limit: homeLimit,
-        last_generated_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', farmId);
 
     return NextResponse.json({
-      inserted_count: rows.length,
-      warning:
-        geojson.features.length > homeLimit
-          ? `This farm was capped at ${homeLimit} homes. Draw a smaller area if you need fewer homes in one farm.`
-          : undefined,
+      farm_id: farm.id,
+      linked_campaign_id: linkedCampaignId,
+      inserted_count: syncResult.inserted_count ?? addressResult.inserted_count ?? 0,
+      campaign_inserted_count: addressResult.inserted_count ?? 0,
+      warning: addressResult.warning,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to generate farm homes';
     console.error('[farm generate-address-list]', error);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json(
+      { error: formatApiError(error) },
+      { status: 500 }
+    );
   }
 }

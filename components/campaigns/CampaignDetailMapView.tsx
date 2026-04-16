@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import * as turf from '@turf/turf';
 import { Maximize2, Minimize2 } from 'lucide-react';
+import Lottie from 'lottie-react';
 import type { CampaignAddress, CampaignV2, CampaignParcel } from '@/types/database';
-import { MapBuildingsLayer } from '@/components/map/MapBuildingsLayer';
+import { MapBuildingsLayer, type MapBuildingsRenderState } from '@/components/map/MapBuildingsLayer';
 import { MapInfoButton } from '@/components/map/MapInfoButton';
 import { LocationCard } from '@/components/map/LocationCard';
 import { CreateContactDialog } from '@/components/crm/CreateContactDialog';
@@ -38,6 +39,11 @@ const BOUNDARY_LAYER_RAW_LINE = 'campaign-boundary-raw-line';
 const BOUNDARY_LAYER_SNAPPED_FILL = 'campaign-boundary-snapped-fill';
 const BOUNDARY_LAYER_SNAPPED_LINE = 'campaign-boundary-snapped-line';
 const CUSTOM_BUILDING_LAYER_PREFIXES = ['map-buildings-', 'campaign-parcels'];
+
+type BuildingPendingOverlayConfig = {
+  title: string;
+  description: string;
+};
 
 /** Safe getLayer: avoid "getOwnLayer of undefined" during style transition or when map is hidden (e.g. tab switch). */
 function safeGetLayer(m: mapboxgl.Map, layerId: string): boolean {
@@ -137,6 +143,7 @@ export function CampaignDetailMapView({
   campaign,
   onSnapComplete,
   renderLocationCardExtra,
+  buildingPendingOverlay,
 }: {
   campaignId: string;
   addresses: CampaignAddress[];
@@ -147,6 +154,7 @@ export function CampaignDetailMapView({
     selectedAddressId?: string | null;
     campaignId: string;
   }) => ReactNode;
+  buildingPendingOverlay?: BuildingPendingOverlayConfig;
 }) {
   const { theme } = useTheme();
   const { currentWorkspaceId } = useWorkspace();
@@ -156,8 +164,19 @@ export function CampaignDetailMapView({
   const { isFullscreen: isMapFullscreen, toggle: toggleMapFullscreen } = useFullscreen(mapShellRef);
   const [statusFilters, setStatusFilters] = useState<StatusFilters>(DEFAULT_STATUS_FILTERS);
   const [mapLoaded, setMapLoaded] = useState(false);
+  const [loadingAnimationData, setLoadingAnimationData] = useState<object | null>(null);
+  const [buildingsRenderState, setBuildingsRenderState] = useState<MapBuildingsRenderState>({
+    isFetching: false,
+    hasData: false,
+    hasVisibleFeatures: false,
+    featureCount: 0,
+    visibleFeatureCount: 0,
+    zoomLevel: 15,
+  });
+  const [showBuildingPendingOverlay, setShowBuildingPendingOverlay] = useState(false);
   const boundsFittedRef = useRef(false);
   const initAttemptedRef = useRef(false);
+  const hasRenderedBuildingsRef = useRef(false);
   
   // Location Card state
   const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(null);
@@ -179,6 +198,13 @@ export function CampaignDetailMapView({
   const [parcels, setParcels] = useState<CampaignParcel[]>([]);
   const [showParcels, setShowParcels] = useState(false);
   const [parcelsLoading, setParcelsLoading] = useState(false);
+  const lottieSrc = useMemo(
+    () => (theme === 'dark' ? '/loading/white.json' : '/loading/black.json'),
+    [theme]
+  );
+  const handleBuildingsRenderStateChange = useCallback((state: MapBuildingsRenderState) => {
+    setBuildingsRenderState(state);
+  }, []);
 
   // Get user ID on mount
   useEffect(() => {
@@ -187,6 +213,42 @@ export function CampaignDetailMapView({
       setUserId(user?.id || null);
     });
   }, []);
+
+  useEffect(() => {
+    if (!buildingPendingOverlay) return;
+
+    let cancelled = false;
+    fetch(lottieSrc)
+      .then((response) => response.json())
+      .then((data) => {
+        if (!cancelled) setLoadingAnimationData(data);
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [buildingPendingOverlay, lottieSrc]);
+
+  useEffect(() => {
+    if (buildingsRenderState.hasVisibleFeatures) {
+      hasRenderedBuildingsRef.current = true;
+      setShowBuildingPendingOverlay(false);
+    }
+  }, [buildingsRenderState.hasVisibleFeatures]);
+
+  useEffect(() => {
+    hasRenderedBuildingsRef.current = false;
+    setBuildingsRenderState({
+      isFetching: false,
+      hasData: false,
+      hasVisibleFeatures: false,
+      featureCount: 0,
+      visibleFeatureCount: 0,
+      zoomLevel: 15,
+    });
+    setShowBuildingPendingOverlay(false);
+  }, [campaignId]);
 
   // Fetch parcels for this campaign
   useEffect(() => {
@@ -880,6 +942,38 @@ export function CampaignDetailMapView({
     }
   };
 
+  const anyStatusFilterActive = Object.values(statusFilters).some(Boolean);
+  const waitingForInitialBuildingRender =
+    Boolean(buildingPendingOverlay) &&
+    mapLoaded &&
+    mapViewMode === 'buildings' &&
+    anyStatusFilterActive &&
+    !hasRenderedBuildingsRef.current &&
+    (buildingsRenderState.isFetching ||
+      (buildingsRenderState.hasData &&
+        buildingsRenderState.zoomLevel >= 12 &&
+        !buildingsRenderState.hasVisibleFeatures));
+
+  useEffect(() => {
+    if (mapViewMode !== 'buildings') {
+      setShowBuildingPendingOverlay(false);
+      return;
+    }
+
+    if (!waitingForInitialBuildingRender) {
+      setShowBuildingPendingOverlay(false);
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setShowBuildingPendingOverlay(true);
+    }, 1200);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [mapViewMode, waitingForInitialBuildingRender]);
+
   return (
     <div
       ref={mapShellRef}
@@ -946,6 +1040,34 @@ export function CampaignDetailMapView({
               </div>
             )}
           </div>
+          {showBuildingPendingOverlay && buildingPendingOverlay ? (
+            <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center p-4">
+              <div className="w-full max-w-sm rounded-lg border border-border bg-background/92 p-4 shadow-lg backdrop-blur-sm">
+                <div className="flex items-center gap-4">
+                  <div className="flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted/40">
+                    {loadingAnimationData ? (
+                      <Lottie
+                        animationData={loadingAnimationData}
+                        loop
+                        className="h-full w-full"
+                        rendererSettings={{ preserveAspectRatio: 'xMidYMid meet' }}
+                      />
+                    ) : (
+                      <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-primary" />
+                    )}
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold text-foreground">
+                      {buildingPendingOverlay.title}
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      {buildingPendingOverlay.description}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : null}
           {mapViewMode === 'buildings' && (
             <MapBuildingsLayer 
               map={map.current} 
@@ -953,6 +1075,7 @@ export function CampaignDetailMapView({
               addressStateOverrides={addresses}
               statusFilters={statusFilters}
               onBuildingClick={handleBuildingClick}
+              onRenderStateChange={handleBuildingsRenderStateChange}
             />
           )}
           {/* Location Card - floating card when building is clicked */}

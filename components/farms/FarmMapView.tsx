@@ -205,6 +205,10 @@ export function FarmMapView({
         campaignId={linkedCampaignId}
         addresses={campaignAddresses}
         campaign={linkedCampaign}
+        buildingPendingOverlay={{
+          title: 'Rendering farm map',
+          description: 'Big farms can take a little longer to render. Buildings will appear as the map finishes loading.',
+        }}
         renderLocationCardExtra={showOutcomeControls ? ({ selectedAddressId }) => {
           const selectedFarmAddress =
             addresses.find((address) => address.campaign_address_id === selectedAddressId) ??

@@ -13,8 +13,11 @@ export type FarmCampaignRow = {
   name: string;
   description?: string | null;
   polygon?: string | null;
+  home_limit?: number | null;
   linked_campaign_id?: string | null;
 };
+
+const FARM_SELECT_BASE = 'id, owner_id, workspace_id, name, description, polygon';
 
 export function formatApiError(error: unknown): string {
   if (!error) return 'Unknown error';
@@ -38,17 +41,29 @@ export async function selectFarmCampaignRow(
   farmId: string
 ): Promise<{ farm: FarmCampaignRow | null; hasLinkedCampaignColumn: boolean }> {
   let hasLinkedCampaignColumn = true;
+  let hasHomeLimitColumn = true;
   let { data, error } = await admin
     .from('farms')
-    .select('id, owner_id, workspace_id, name, description, polygon, linked_campaign_id')
+    .select(`${FARM_SELECT_BASE}, home_limit, linked_campaign_id`)
     .eq('id', farmId)
     .maybeSingle();
+
+  if (error && isMissingFarmColumnError(error, 'home_limit')) {
+    hasHomeLimitColumn = false;
+    const fallback = await admin
+      .from('farms')
+      .select(`${FARM_SELECT_BASE}, linked_campaign_id`)
+      .eq('id', farmId)
+      .maybeSingle();
+    data = fallback.data;
+    error = fallback.error;
+  }
 
   if (error && isMissingFarmColumnError(error, 'linked_campaign_id')) {
     hasLinkedCampaignColumn = false;
     const fallback = await admin
       .from('farms')
-      .select('id, owner_id, workspace_id, name, description, polygon')
+      .select(hasHomeLimitColumn ? `${FARM_SELECT_BASE}, home_limit` : FARM_SELECT_BASE)
       .eq('id', farmId)
       .maybeSingle();
     data = fallback.data;

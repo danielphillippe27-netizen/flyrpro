@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { getCampaignBuildingStatus } from '@/lib/campaignStats';
 import { displayAddressText, resolveHouseNumberLabel } from '@/lib/map/addressPresentation';
+import { fetchAllInPages } from '@/lib/supabase/fetchAllInPages';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { gunzipSync } from 'zlib';
 
@@ -74,6 +75,8 @@ interface CampaignAddressRow {
   visited: boolean | null;
   scans: number | null;
 }
+
+const GOLD_BUILDING_LOOKUP_BATCH_SIZE = 200;
 
 function parseGoldBuildingRows(raw: unknown): GoldBuildingRow[] {
   if (!raw) return [];
@@ -206,13 +209,24 @@ async function fetchGoldFallbackFeatures(
     return null;
   }
 
-  const { data: campaignAddresses, error: addressesError } = await supabase
-    .from('campaign_addresses')
-    .select('id, formatted, house_number, street_name, building_id, visited, scans, address_statuses(status)')
-    .eq('campaign_id', campaignId);
+  let campaignAddresses: Array<
+    CampaignAddressRow & {
+      address_statuses?: { status?: string | null } | Array<{ status?: string | null }> | null;
+    }
+  > = [];
 
-  if (addressesError) {
-    console.warn('[API] Gold fallback address query failed:', addressesError.message);
+  try {
+    campaignAddresses = await fetchAllInPages((from, to) =>
+      supabase
+        .from('campaign_addresses')
+        .select('id, formatted, house_number, street_name, building_id, visited, scans, address_statuses(status)')
+        .eq('campaign_id', campaignId)
+        .order('id', { ascending: true })
+        .range(from, to)
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn('[API] Gold fallback address query failed:', message);
     return null;
   }
 
@@ -240,17 +254,31 @@ async function fetchGoldFallbackFeatures(
   console.log(`[API] Gold fallback found ${linkedBuildingIds.length} linked building ids on campaign addresses`);
 
   if (linkedBuildingIds.length > 0) {
-    const { data: linkedBuildings, error: linkedBuildingsError } = await supabase
-      .from('ref_buildings_gold')
-      .select('id, area_sqm, building_type, geom')
-      .in('id', linkedBuildingIds);
+    const linkedBuildings: GoldBuildingRow[] = [];
+    let linkedBuildingsFailed = false;
 
-    if (linkedBuildingsError) {
-      console.warn('[API] Gold fallback direct linked-building query failed:', linkedBuildingsError.message);
-    } else if (Array.isArray(linkedBuildings) && linkedBuildings.length > 0) {
+    for (let index = 0; index < linkedBuildingIds.length; index += GOLD_BUILDING_LOOKUP_BATCH_SIZE) {
+      const idBatch = linkedBuildingIds.slice(index, index + GOLD_BUILDING_LOOKUP_BATCH_SIZE);
+      const { data: buildingBatch, error: linkedBuildingsError } = await supabase
+        .from('ref_buildings_gold')
+        .select('id, area_sqm, building_type, geom')
+        .in('id', idBatch);
+
+      if (linkedBuildingsError) {
+        console.warn('[API] Gold fallback direct linked-building query failed:', linkedBuildingsError.message);
+        linkedBuildingsFailed = true;
+        break;
+      }
+
+      if (Array.isArray(buildingBatch) && buildingBatch.length > 0) {
+        linkedBuildings.push(...(buildingBatch as GoldBuildingRow[]));
+      }
+    }
+
+    if (!linkedBuildingsFailed && linkedBuildings.length > 0) {
       console.log(`[API] Gold fallback loaded ${linkedBuildings.length} buildings directly by linked ids`);
       const fallback = buildGoldFallbackFeatureCollection(
-        linkedBuildings as GoldBuildingRow[],
+        linkedBuildings,
         normalizedAddresses
       );
       if (fallback.features.length > 0) {

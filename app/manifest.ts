@@ -5,7 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
     id: '/',
     name: 'FLYR',
     short_name: 'FLYR',
-    description: 'The operating system for field prospecting.',
+    description: 'Door-to-door software',
     start_url: '/',
     scope: '/',
     display: 'standalone',

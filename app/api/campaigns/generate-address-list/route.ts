@@ -13,8 +13,9 @@ export const dynamic = 'force-dynamic';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const DEFAULT_CAMPAIGN_POLYGON_ADDRESS_LIMIT = 2500;
+const DEFAULT_CAMPAIGN_POLYGON_ADDRESS_LIMIT = 5000;
 const MAX_POLYGON_ADDRESS_LIMIT = 5000;
+const LEGACY_GOLD_RPC_CAP = 2500;
 
 interface GenerateAddressListRequest {
   campaign_id: string;
@@ -93,6 +94,109 @@ function sortByDistanceAndTake(
   });
   withDistance.sort((a, b) => a.distance - b.distance);
   return withDistance.slice(0, limit).map((x) => x.f);
+}
+
+function goldAddressToFeature(address: {
+  id: string;
+  street_number?: string | null;
+  street_name?: string | null;
+  city?: string | null;
+  zip?: string | null;
+  province?: string | null;
+  lat: number;
+  lon: number;
+}): AddressFeature {
+  const houseNumber = address.street_number?.trim() ?? '';
+  const streetName = address.street_name?.trim() ?? '';
+  const city = address.city?.trim() ?? '';
+  const postalCode = address.zip?.trim() ?? '';
+  const formatted = [houseNumber, streetName].filter(Boolean).join(' ').trim();
+  const locality = city || undefined;
+  const label = [formatted, city].filter(Boolean).join(', ');
+
+  return {
+    type: 'Feature',
+    geometry: {
+      type: 'Point',
+      coordinates: [address.lon, address.lat],
+    },
+    properties: {
+      layer: 'addresses',
+      id: `gold_${address.id}`,
+      gers_id: `gold_${address.id}`,
+      label,
+      formatted: label || formatted,
+      house_number: houseNumber || undefined,
+      street_name: streetName || undefined,
+      city: locality,
+      postal_code: postalCode || undefined,
+      state: address.province?.trim() || undefined,
+    },
+  };
+}
+
+function getAddressFeatureKey(feature: AddressFeature): string {
+  const { house_number, street_name, city, postal_code } = feature.properties;
+  const normalizedAddressKey = [house_number, street_name, city, postal_code]
+    .map((value) => value?.trim().toLowerCase() ?? '')
+    .join('|');
+
+  if (normalizedAddressKey !== '|||') {
+    return normalizedAddressKey;
+  }
+
+  return [
+    feature.properties.gers_id?.trim().toLowerCase() ?? '',
+    feature.geometry.coordinates[0].toFixed(6),
+    feature.geometry.coordinates[1].toFixed(6),
+  ].join('|');
+}
+
+function mergeAddressFeatures(
+  preferredFeatures: AddressFeature[],
+  supplementalFeatures: AddressFeature[],
+  limit: number
+): AddressFeature[] {
+  const merged = new Map<string, AddressFeature>();
+
+  for (const feature of preferredFeatures) {
+    merged.set(getAddressFeatureKey(feature), feature);
+  }
+
+  for (const feature of supplementalFeatures) {
+    const key = getAddressFeatureKey(feature);
+    if (!merged.has(key)) {
+      merged.set(key, feature);
+    }
+    if (merged.size >= limit) break;
+  }
+
+  return Array.from(merged.values()).slice(0, limit);
+}
+
+async function storeCampaignSnapshot(
+  supabaseAdmin: ReturnType<typeof createAdminClient>,
+  campaignId: string,
+  snapshot: Awaited<ReturnType<typeof TileLambdaService.generateSnapshots>>
+): Promise<void> {
+  await supabaseAdmin.from('campaign_snapshots').upsert({
+    campaign_id: campaignId,
+    bucket: snapshot.bucket,
+    prefix: snapshot.prefix,
+    buildings_key: snapshot.s3_keys.buildings,
+    addresses_key: snapshot.s3_keys.addresses,
+    roads_key: snapshot.s3_keys.roads ?? null,
+    metadata_key: snapshot.s3_keys.metadata,
+    buildings_url: snapshot.urls.buildings,
+    addresses_url: snapshot.urls.addresses,
+    roads_url: snapshot.urls.roads ?? null,
+    metadata_url: snapshot.urls.metadata,
+    buildings_count: snapshot.counts.buildings,
+    addresses_count: snapshot.counts.addresses,
+    roads_count: snapshot.counts.roads ?? 0,
+    overture_release: snapshot.metadata?.overture_release ?? null,
+    expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+  }, { onConflict: 'campaign_id' });
 }
 
 async function getRequestUser(request: NextRequest): Promise<User | null> {
@@ -216,24 +320,44 @@ export async function POST(request: NextRequest) {
         );
         
         if (goldAddresses && goldAddresses.length > 0) {
-          console.log(`[generate-address-list] Found ${goldAddresses.length} Gold addresses. Skipping Lambda.`);
+          const goldFeatures = goldAddresses.map((addr: any) => goldAddressToFeature(addr));
+          const shouldTopUpFromLambda =
+            polygonAddressLimit > LEGACY_GOLD_RPC_CAP && goldAddresses.length >= LEGACY_GOLD_RPC_CAP;
+
+          console.log(
+            `[generate-address-list] Found ${goldAddresses.length} Gold addresses.${
+              shouldTopUpFromLambda ? ' Legacy Gold RPC cap detected; topping up with Lambda.' : ' Skipping Lambda.'
+            }`
+          );
           source = 'gold';
-          
-          // Convert Gold addresses to AddressFeature format
-          addressFeatures = goldAddresses.map((addr: any) => ({
-            type: 'Feature' as const,
-            geometry: JSON.parse(addr.geom_geojson),
-            properties: {
-              gers_id: `gold_${addr.id}`, // Generate pseudo-GERS ID
-              house_number: addr.street_number,
-              street_name: addr.street_name,
-              city: addr.city,
-              postal_code: addr.zip,
-              state: addr.province,
-              formatted: `${addr.street_number} ${addr.street_name}, ${addr.city}`,
-              source: 'gold'
+
+          addressFeatures = goldFeatures;
+
+          if (shouldTopUpFromLambda) {
+            try {
+              const snapshot = await TileLambdaService.generateSnapshots(
+                polygon as GeoJSON.Polygon,
+                regionCode,
+                campaign_id,
+                { limitAddresses: polygonAddressLimit, limitBuildings: 0, includeRoads: false }
+              );
+              const addressData = await TileLambdaService.downloadAddresses(snapshot.urls.addresses);
+              await storeCampaignSnapshot(supabaseAdmin, campaign_id, snapshot);
+              addressFeatures = mergeAddressFeatures(
+                goldFeatures,
+                addressData.features || [],
+                polygonAddressLimit
+              );
+              console.log(
+                `[generate-address-list] Topped up Gold addresses to ${addressFeatures.length} total features`
+              );
+            } catch (lambdaTopUpError: any) {
+              console.warn(
+                '[generate-address-list] Lambda top-up failed, continuing with Gold-only results:',
+                lambdaTopUpError?.message || lambdaTopUpError
+              );
             }
-          }));
+          }
         } else {
           console.log('[generate-address-list] No Gold addresses found, falling back to Lambda...');
         }
@@ -260,25 +384,7 @@ export async function POST(request: NextRequest) {
           const addressData = await TileLambdaService.downloadAddresses(snapshot.urls.addresses);
           addressFeatures = addressData.features || [];
           console.log(`[generate-address-list] Found ${addressFeatures.length} addresses from Lambda`);
-          // Store snapshot so provision can reuse (avoid duplicate Lambda call)
-          await supabaseAdmin.from('campaign_snapshots').upsert({
-            campaign_id,
-            bucket: snapshot.bucket,
-            prefix: snapshot.prefix,
-            buildings_key: snapshot.s3_keys.buildings,
-            addresses_key: snapshot.s3_keys.addresses,
-            roads_key: snapshot.s3_keys.roads ?? null,
-            metadata_key: snapshot.s3_keys.metadata,
-            buildings_url: snapshot.urls.buildings,
-            addresses_url: snapshot.urls.addresses,
-            roads_url: snapshot.urls.roads ?? null,
-            metadata_url: snapshot.urls.metadata,
-            buildings_count: snapshot.counts.buildings,
-            addresses_count: snapshot.counts.addresses,
-            roads_count: snapshot.counts.roads ?? 0,
-            overture_release: snapshot.metadata?.overture_release ?? null,
-            expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-          }, { onConflict: 'campaign_id' });
+          await storeCampaignSnapshot(supabaseAdmin, campaign_id, snapshot);
         } catch (err: any) {
           console.error('[generate-address-list] Lambda polygon error:', err);
           const msg = err.message || String(err);
@@ -326,25 +432,7 @@ export async function POST(request: NextRequest) {
         const allFeatures = addressData.features || [];
         addressFeatures = sortByDistanceAndTake(allFeatures, coordinates.lat, coordinates.lon, count);
         console.log(`[generate-address-list] Found ${addressFeatures.length} nearest addresses`);
-        // Store snapshot so provision can reuse (avoid duplicate Lambda call)
-        await supabaseAdmin.from('campaign_snapshots').upsert({
-          campaign_id,
-          bucket: snapshot.bucket,
-          prefix: snapshot.prefix,
-          buildings_key: snapshot.s3_keys.buildings,
-          addresses_key: snapshot.s3_keys.addresses,
-          roads_key: snapshot.s3_keys.roads ?? null,
-          metadata_key: snapshot.s3_keys.metadata,
-          buildings_url: snapshot.urls.buildings,
-          addresses_url: snapshot.urls.addresses,
-          roads_url: snapshot.urls.roads ?? null,
-          metadata_url: snapshot.urls.metadata,
-          buildings_count: snapshot.counts.buildings,
-          addresses_count: snapshot.counts.addresses,
-          roads_count: snapshot.counts.roads ?? 0,
-          overture_release: snapshot.metadata?.overture_release ?? null,
-          expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-        }, { onConflict: 'campaign_id' });
+        await storeCampaignSnapshot(supabaseAdmin, campaign_id, snapshot);
       } catch (err: any) {
         console.error('[generate-address-list] Lambda closest-home error:', err);
         return NextResponse.json(
@@ -401,7 +489,7 @@ export async function POST(request: NextRequest) {
       const insertedCount = inserted?.length ?? 0;
       const coverageLimitWarning =
         polygon && insertedCount >= polygonAddressLimit
-          ? `You hit the maximum coverage of ${polygonAddressLimit} homes. Try a smaller area.`
+          ? `You hit the maximum of ${polygonAddressLimit} homes. Some homes may be missing, and we recommend redoing the campaign creation.`
           : null;
       console.log(`[generate-address-list] Saved ${insertedCount} addresses (source: ${source})`);
 
