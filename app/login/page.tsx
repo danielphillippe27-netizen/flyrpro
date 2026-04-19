@@ -14,7 +14,6 @@ type InviteValidationResponse = {
   email?: string | null;
 };
 
-const PENDING_INVITE_PROFILE_KEY = 'flyr.pendingInviteProfile';
 const DEFAULT_APP_ORIGIN = 'https://www.flyrpro.app';
 type AuthMode = 'sign-in' | 'recovery';
 
@@ -32,11 +31,18 @@ function resolveAppOrigin(origin: string): string {
   }
 }
 
+function normalizeInviteEmail(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().replace(/^['"]+|['"]+$/g, '').toLowerCase();
+  if (normalized.endsWith('@invite.flyr.invalid')) {
+    return null;
+  }
+  return normalized.length > 0 ? normalized : null;
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState('');
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
   const [password, setPassword] = useState('');
   const [authMode, setAuthMode] = useState<AuthMode>('sign-in');
   const [loading, setLoading] = useState(false);
@@ -137,16 +143,17 @@ export default function LoginPage() {
       .then((response) => response.json().catch(() => ({} as InviteValidationResponse)))
       .then((payload: InviteValidationResponse) => {
         if (!mounted) return;
-        const inviteEmail =
-          typeof payload?.email === 'string' ? sanitizeEmail(payload.email).toLowerCase() : '';
-        if (payload?.valid && inviteEmail) {
+        const inviteEmail = normalizeInviteEmail(payload?.email);
+        if (payload?.valid) {
           setInviteInfo({
             status: 'ready',
             workspaceName:
               typeof payload.workspaceName === 'string' ? payload.workspaceName : null,
             email: inviteEmail,
           });
-          setEmail(inviteEmail);
+          if (inviteEmail) {
+            setEmail(inviteEmail);
+          }
           return;
         }
         setInviteInfo({ status: 'invalid', workspaceName: null, email: null });
@@ -221,8 +228,6 @@ export default function LoginPage() {
       const normalizedEmail = sanitizeEmail(
         inviteMode && inviteInfo.email ? inviteInfo.email : email
       ).toLowerCase();
-      const normalizedFirstName = firstName.trim();
-      const normalizedLastName = lastName.trim();
 
       if (authMode === 'recovery') {
         if (!normalizedEmail) {
@@ -269,23 +274,6 @@ export default function LoginPage() {
         return;
       }
 
-      if (inviteMode && (!normalizedFirstName || !normalizedLastName)) {
-        setMessage({
-          type: 'error',
-          text: 'Enter your first and last name to continue.',
-        });
-        return;
-      }
-
-      const pendingInviteProfile =
-        inviteMode && inviteToken?.trim() && normalizedFirstName && normalizedLastName
-          ? {
-              token: inviteToken.trim(),
-              firstName: normalizedFirstName,
-              lastName: normalizedLastName,
-            }
-          : null;
-
       // Try sign-in first (existing user)
       const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
         email: normalizedEmail,
@@ -293,12 +281,6 @@ export default function LoginPage() {
       });
 
       if (!signInError && signInData?.session) {
-        if (typeof window !== 'undefined' && pendingInviteProfile) {
-          window.localStorage.setItem(
-            `${PENDING_INVITE_PROFILE_KEY}:${pendingInviteProfile.token}`,
-            JSON.stringify(pendingInviteProfile)
-          );
-        }
         router.replace(gatePath);
         return;
       }
@@ -321,13 +303,6 @@ export default function LoginPage() {
         password,
         options: {
           emailRedirectTo: buildAuthCallbackURL(),
-          data:
-            normalizedFirstName || normalizedLastName
-              ? {
-                  first_name: normalizedFirstName || undefined,
-                  last_name: normalizedLastName || undefined,
-                }
-              : undefined,
         },
       });
 
@@ -342,12 +317,6 @@ export default function LoginPage() {
       }
 
       if (signUpData?.session) {
-        if (typeof window !== 'undefined' && pendingInviteProfile) {
-          window.localStorage.setItem(
-            `${PENDING_INVITE_PROFILE_KEY}:${pendingInviteProfile.token}`,
-            JSON.stringify(pendingInviteProfile)
-          );
-        }
         router.replace(gatePath);
         return;
       }
@@ -425,7 +394,7 @@ export default function LoginPage() {
           </div>
           <p className="text-[#AAAAAA] text-lg">
             {inviteMode
-              ? `Create your account to join ${inviteInfo.workspaceName ?? 'this workspace'}`
+              ? `Sign in or create an account to join ${inviteInfo.workspaceName ?? 'this workspace'}`
               : authMode === 'recovery'
                 ? 'Enter your email and we will send a secure password reset link'
                 : 'Sign in or create an account to access your dashboard or onboarding'}
@@ -433,36 +402,6 @@ export default function LoginPage() {
         </div>
 
         <form onSubmit={handleEmailSubmit} className="mt-6 space-y-4">
-          {inviteMode && authMode === 'sign-in' ? (
-            <>
-              <div className="space-y-1.5">
-                <Label htmlFor="firstName" className="text-white text-base">First name</Label>
-                <Input
-                  id="firstName"
-                  type="text"
-                  placeholder="First name"
-                  value={firstName}
-                  onChange={(e) => setFirstName(e.target.value)}
-                  required
-                  disabled={loading}
-                  className="h-12 text-base text-white bg-white/[0.08] border border-white/15 placeholder:text-gray-500 focus-visible:border-white/40 focus-visible:ring-2 focus-visible:ring-white/40 backdrop-blur-sm"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="lastName" className="text-white text-base">Last name</Label>
-                <Input
-                  id="lastName"
-                  type="text"
-                  placeholder="Last name"
-                  value={lastName}
-                  onChange={(e) => setLastName(e.target.value)}
-                  required
-                  disabled={loading}
-                  className="h-12 text-base text-white bg-white/[0.08] border border-white/15 placeholder:text-gray-500 focus-visible:border-white/40 focus-visible:ring-2 focus-visible:ring-white/40 backdrop-blur-sm"
-                />
-              </div>
-            </>
-          ) : null}
           <div className="space-y-1.5">
             <Label htmlFor="email" className="text-white text-base">Email</Label>
             <Input
@@ -481,19 +420,17 @@ export default function LoginPage() {
             <div className="space-y-1.5">
               <div className="flex items-center justify-between gap-3">
                 <Label htmlFor="password" className="text-white text-base">Password</Label>
-                {!inviteMode ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAuthMode('recovery');
-                      setMessage(null);
-                    }}
-                    disabled={loading}
-                    className="text-sm text-red-300 transition hover:text-red-200 disabled:opacity-50"
-                  >
-                    Forgot password?
-                  </button>
-                ) : null}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthMode('recovery');
+                    setMessage(null);
+                  }}
+                  disabled={loading}
+                  className="text-sm text-red-300 transition hover:text-red-200 disabled:opacity-50"
+                >
+                  Forgot password?
+                </button>
               </div>
               <Input
                 id="password"
@@ -520,13 +457,11 @@ export default function LoginPage() {
                 : 'Continuing...'
               : authMode === 'recovery'
                 ? 'Send reset link'
-                : inviteMode
-                  ? 'Create account and continue'
-                  : 'Continue with Email'}
+                : 'Continue with Email'}
           </Button>
         </form>
 
-        {!inviteMode && authMode === 'recovery' ? (
+        {authMode === 'recovery' ? (
           <div className="mt-4 text-center">
             <button
               type="button"
@@ -542,7 +477,7 @@ export default function LoginPage() {
           </div>
         ) : null}
 
-        {!inviteMode && authMode === 'sign-in' ? (
+        {authMode === 'sign-in' ? (
           <>
             <div className="relative mt-6 flex items-center gap-4">
               <span className="flex-1 border-t border-zinc-600" />

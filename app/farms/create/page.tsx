@@ -100,9 +100,6 @@ export default function CreateFarmPage() {
   const [isSatellite, setIsSatellite] = useState(false);
   const [mapSearchQuery, setMapSearchQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
-  const [snappingBoundary, setSnappingBoundary] = useState(false);
-  const [boundaryRaw, setBoundaryRaw] = useState<{ type: 'Polygon'; coordinates: number[][][] } | null>(null);
-  const [boundarySnapped, setBoundarySnapped] = useState<{ type: 'Polygon'; coordinates: number[][][] } | null>(null);
   const [feedbackDialog, setFeedbackDialog] = useState<CreateFarmDialogState | null>(null);
   const mapContainer = useRef<HTMLDivElement>(null);
   const formScrollRef = useRef<HTMLDivElement>(null);
@@ -119,9 +116,7 @@ export default function CreateFarmPage() {
 
   const currentStepText = syncingFarm
     ? 'Step 5/5: Syncing farm homes'
-    : snappingBoundary
-        ? 'Step 1/5: Snapping boundary to roads'
-        : generatingAddresses
+    : generatingAddresses
             ? 'Step 3/5: Fetching addresses'
             : provisionProgress.includes('Scanning')
                 ? 'Step 4/5: Fetching buildings'
@@ -501,112 +496,6 @@ export default function CreateFarmPage() {
     setSearchOpen(false);
   };
 
-  const safeGetLayer = (m: mapboxgl.Map, layerId: string): boolean => {
-    try {
-      if (!m.isStyleLoaded()) return false;
-      return !!m.getLayer(layerId);
-    } catch {
-      return false;
-    }
-  };
-
-  const addBoundaryLayersAndCrossFade = (
-    raw: { type: 'Polygon'; coordinates: number[][][] },
-    snapped: { type: 'Polygon'; coordinates: number[][][] }
-  ) => {
-    const m = map.current;
-    if (!m || !m.getStyle() || !m.isStyleLoaded()) return;
-
-    const rawSourceId = 'campaign-boundary-raw';
-    const snappedSourceId = 'campaign-boundary-snapped';
-    const rawFillId = 'campaign-boundary-raw-fill';
-    const rawLineId = 'campaign-boundary-raw-line';
-    const snappedFillId = 'campaign-boundary-snapped-fill';
-    const snappedLineId = 'campaign-boundary-snapped-line';
-
-    const removeExisting = () => {
-      const ids = boundaryLayerIdsRef.current.filter((id): id is string => typeof id === 'string' && id.length > 0);
-      ids.forEach((id) => {
-        try {
-          if (safeGetLayer(m, id)) m.removeLayer(id);
-        } catch {}
-      });
-      try {
-        if (m.getSource(rawSourceId)) m.removeSource(rawSourceId);
-        if (m.getSource(snappedSourceId)) m.removeSource(snappedSourceId);
-      } catch {}
-      boundaryLayerIdsRef.current = [];
-    };
-    removeExisting();
-
-    const rawFeature: GeoJSON.Feature<GeoJSON.Polygon> = { type: 'Feature', geometry: raw, properties: {} };
-    const snappedFeature: GeoJSON.Feature<GeoJSON.Polygon> = { type: 'Feature', geometry: snapped, properties: {} };
-
-    m.addSource(rawSourceId, { type: 'geojson', data: rawFeature });
-    m.addSource(snappedSourceId, { type: 'geojson', data: snappedFeature });
-
-    m.addLayer({
-      id: rawFillId,
-      type: 'fill',
-      source: rawSourceId,
-      paint: { 'fill-color': '#ef4444', 'fill-opacity': 0.08 },
-    });
-    m.addLayer({
-      id: rawLineId,
-      type: 'line',
-      source: rawSourceId,
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: {
-        'line-color': '#ef4444',
-        'line-width': 2,
-        'line-opacity': 0.3,
-        'line-dasharray': [1, 1.5],
-      },
-    });
-    m.addLayer({
-      id: snappedFillId,
-      type: 'fill',
-      source: snappedSourceId,
-      paint: { 'fill-color': '#ef4444', 'fill-opacity': 0.15 },
-    });
-    m.addLayer({
-      id: snappedLineId,
-      type: 'line',
-      source: snappedSourceId,
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: {
-        'line-color': '#ef4444',
-        'line-width': 3,
-        'line-opacity': 0,
-      },
-    });
-
-    boundaryLayerIdsRef.current = [rawFillId, rawLineId, snappedFillId, snappedLineId];
-
-    const duration = 600;
-    const start = performance.now();
-    const tick = (now: number) => {
-      const elapsed = now - start;
-      const opacity = Math.min(1, elapsed / duration);
-      if (safeGetLayer(m, snappedLineId) && safeGetLayer(m, snappedFillId)) {
-        m.setPaintProperty(snappedLineId, 'line-opacity', opacity);
-        m.setPaintProperty(snappedFillId, 'fill-opacity', 0.08 + 0.07 * opacity);
-      }
-      if (opacity < 1) requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-  };
-
-  useEffect(() => {
-    const m = map.current;
-    if (!m || !boundaryRaw || !boundarySnapped || !m.isStyleLoaded()) return;
-    const rawLineId = 'campaign-boundary-raw-line';
-    const snappedLineId = 'campaign-boundary-snapped-line';
-    if (!safeGetLayer(m, rawLineId) || !safeGetLayer(m, snappedLineId)) return;
-    m.setPaintProperty(rawLineId, 'line-opacity', 0.3);
-    m.setPaintProperty(snappedLineId, 'line-opacity', 1);
-  }, [boundaryRaw, boundarySnapped]);
-
   const handleSubmit = async (e?: React.FormEvent | React.MouseEvent) => {
     e?.preventDefault();
     if (!userId) return;
@@ -732,32 +621,6 @@ export default function CreateFarmPage() {
         throw new Error('Linked campaign id was not returned for this farm');
       }
 
-      setSnappingBoundary(true);
-      let polygonForAddresses = polygon;
-      try {
-        const snapResponse = await fetch(`/api/campaigns/${campaignId}/snap`, {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-        });
-        if (snapResponse.ok) {
-          const snapResult = await snapResponse.json();
-          polygonForAddresses = snapResult.polygon ?? polygon;
-          if (snapResult.wasSnapped && snapResult.polygon) {
-            setBoundaryRaw(polygon);
-            setBoundarySnapped(snapResult.polygon);
-            addBoundaryLayersAndCrossFade(polygon, snapResult.polygon);
-            await new Promise((resolve) => setTimeout(resolve, 700));
-          }
-        }
-      } catch (snapError) {
-        console.error('Snap to roads failed, using drawn polygon for farm:', snapError);
-      } finally {
-        setSnappingBoundary(false);
-      }
-
-      fetch(`/api/campaigns/${campaignId}/roads/prepare`, { method: 'POST' }).catch(() => {});
-
       setGeneratingAddresses(true);
       let insertedCount = 0;
       try {
@@ -767,7 +630,7 @@ export default function CreateFarmPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             campaign_id: campaignId,
-            polygon: polygonForAddresses,
+            polygon,
             address_limit: DEFAULT_HOME_LIMIT,
           }),
         });
@@ -1054,7 +917,7 @@ export default function CreateFarmPage() {
                 variant="outline"
                 className="flex-1"
                 onClick={() => router.back()}
-                disabled={loading || snappingBoundary || provisioning || generatingAddresses || syncingFarm}
+                disabled={loading || provisioning || generatingAddresses || syncingFarm}
               >
                 Cancel
               </Button>
@@ -1063,7 +926,6 @@ export default function CreateFarmPage() {
                 className="flex-1"
                 disabled={
                   loading ||
-                  snappingBoundary ||
                   provisioning ||
                   generatingAddresses ||
                   syncingFarm ||
@@ -1073,9 +935,7 @@ export default function CreateFarmPage() {
               >
                 {loading
                   ? 'Creating...'
-                  : snappingBoundary
-                    ? 'Snapping...'
-                    : generatingAddresses
+                  : generatingAddresses
                       ? 'Finding...'
                       : provisioning
                         ? 'Provisioning...'
@@ -1238,7 +1098,7 @@ export default function CreateFarmPage() {
         </DialogContent>
       </Dialog>
 
-      {(snappingBoundary || provisioning || generatingAddresses || syncingFarm) && (
+      {(provisioning || generatingAddresses || syncingFarm) && (
         <div className="fixed inset-0 bg-black/35 backdrop-blur-[1px] flex items-center justify-center z-50">
           <div className="max-w-lg w-full mx-4 text-center">
             <div className="h-80 w-full flex items-center justify-center">

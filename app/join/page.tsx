@@ -10,11 +10,48 @@ import { Loader2, Users } from 'lucide-react';
 type InviteInfo = {
   valid: boolean;
   workspaceName: string | null;
-  email: string;
+  campaignId?: string | null;
+  campaignTitle?: string | null;
+  sessionId?: string | null;
+  email: string | null;
   role: string;
 };
 
 const PENDING_INVITE_PROFILE_KEY = 'flyr.pendingInviteProfile';
+
+function tryOpenInviteInApp(options: {
+  token: string;
+  fallbackRedirect: string;
+}): boolean {
+  if (typeof window === 'undefined') return false;
+
+  const userAgent = window.navigator.userAgent ?? '';
+  const isIOSDevice = /iPhone|iPad|iPod/i.test(userAgent);
+  if (!isIOSDevice) {
+    return false;
+  }
+
+  const appURL = `flyr://join?token=${encodeURIComponent(options.token)}`;
+  const startedAt = Date.now();
+
+  window.setTimeout(() => {
+    if (Date.now() - startedAt < 1600) {
+      window.location.replace(options.fallbackRedirect);
+    }
+  }, 1200);
+
+  window.location.href = appURL;
+  return true;
+}
+
+function normalizeInviteEmail(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().replace(/^['"]+|['"]+$/g, '').toLowerCase();
+  if (normalized.endsWith('@invite.flyr.invalid')) {
+    return null;
+  }
+  return normalized.length > 0 ? normalized : null;
+}
 
 function JoinContent() {
   const router = useRouter();
@@ -45,7 +82,16 @@ function JoinContent() {
         fetch(`/api/invites/validate?token=${encodeURIComponent(token)}`)
           .then((r) => r.json())
           .then((data) => {
-            if (mounted) setInvite(data.valid ? data : null);
+            if (!mounted) return;
+            if (!data?.valid) {
+              setInvite(null);
+              return;
+            }
+
+            setInvite({
+              ...data,
+              email: normalizeInviteEmail(data.email),
+            });
           })
           .catch(() => {
             if (mounted) setInvite(null);
@@ -108,6 +154,9 @@ function JoinContent() {
         if (typeof window !== 'undefined') {
           window.localStorage.removeItem(`${PENDING_INVITE_PROFILE_KEY}:${token}`);
         }
+        if (tryOpenInviteInApp({ token, fallbackRedirect: data.redirect })) {
+          return;
+        }
         router.push(data.redirect);
         return;
       }
@@ -125,11 +174,9 @@ function JoinContent() {
 
   useEffect(() => {
     if (!invite || !user || !token || loading || hasAutoAcceptedRef.current) return;
-    const emailMatch =
-      user.email &&
-      invite.email &&
-      user.email.toLowerCase().trim() === invite.email.toLowerCase().trim();
-    if (!emailMatch) return;
+    const userEmail = normalizeInviteEmail(user.email);
+    const inviteEmail = normalizeInviteEmail(invite.email);
+    if (inviteEmail && (!userEmail || userEmail !== inviteEmail)) return;
     hasAutoAcceptedRef.current = true;
     handleAccept('auto');
   }, [handleAccept, invite, loading, token, user]);
@@ -183,10 +230,11 @@ function JoinContent() {
     );
   }
 
-  const emailMatch =
-    user?.email &&
-    invite.email &&
-    user.email.toLowerCase().trim() === invite.email.toLowerCase().trim();
+  const inviteEmail = normalizeInviteEmail(invite.email);
+  const userEmail = normalizeInviteEmail(user?.email);
+  const emailMatch = !inviteEmail || (!!userEmail && userEmail === inviteEmail);
+  const targetName = invite.campaignTitle ?? invite.workspaceName ?? 'workspace';
+  const isLiveInvite = Boolean(invite.sessionId || invite.campaignId);
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-background flex flex-col items-center justify-center p-6">
@@ -195,13 +243,15 @@ function JoinContent() {
           <Users className="h-12 w-12 text-primary" />
         </div>
         <h1 className="text-xl font-semibold text-foreground">
-          Join {invite.workspaceName ?? 'workspace'}
+          Join {targetName}
         </h1>
         <p className="text-sm text-muted-foreground">
-          You have been invited to join as {invite.role}.
-          {!emailMatch && (
+          {isLiveInvite
+            ? `You have been invited to join this live session as ${invite.role}.`
+            : `You have been invited to join as ${invite.role}.`}
+          {!emailMatch && inviteEmail && (
             <span className="block mt-2 text-amber-600 dark:text-amber-400">
-              This invite was sent to {invite.email}. Sign in with that email to accept.
+              This invite was sent to {inviteEmail}. Sign in with that email to accept.
             </span>
           )}
         </p>
@@ -217,7 +267,7 @@ function JoinContent() {
               Joining…
             </>
           ) : (
-            'Join workspace'
+            isLiveInvite ? 'Join live session' : 'Join workspace'
           )}
         </Button>
         <Button variant="ghost" asChild>

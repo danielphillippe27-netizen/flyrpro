@@ -4,10 +4,12 @@
       {
         "appIDs": ["2AR5T8ZYAS.com.danielphillippe.FLYR"],
         "components": [
+          { "/": "/", "comment": "Root callback fallback for recovery links" },
           { "/": "/auth/callback", "comment": "Supabase auth redirect" },
           { "/": "/password/reset", "comment": "Primary password recovery redirect" },
           { "/": "/auth/reset-password", "comment": "Supabase password recovery redirect" },
           { "/": "/reset-password", "comment": "App password reset page" },
+          { "/": "/join", "comment": "Workspace and campaign invite link" },
           { "/": "/challenges/join", "comment": "Challenge invite link" }
         ]
       }

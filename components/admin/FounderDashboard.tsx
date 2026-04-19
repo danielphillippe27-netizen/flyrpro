@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, MessageCircle, AlertTriangle, Bug, DollarSign } from 'lucide-react';
+import { Loader2, MessageCircle, AlertTriangle, Bug, DollarSign, UserRoundPlus, CheckCircle2, Copy } from 'lucide-react';
 import { FounderGlobalChallengesSection } from '@/components/challenges/FounderGlobalChallengesSection';
 
 type SupportThreadPreview = {
@@ -123,6 +123,45 @@ type SummaryPayload = {
   };
 };
 
+type AmbassadorApplication = {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  fullName: string;
+  email: string;
+  phone: string | null;
+  city: string | null;
+  primaryNiche: string;
+  primaryPlatform: string;
+  audienceSize: string | null;
+  instagramHandle: string | null;
+  tiktokHandle: string | null;
+  youtubeHandle: string | null;
+  websiteUrl: string | null;
+  audienceSummary: string | null;
+  whyFlyr: string;
+  promotionPlan: string | null;
+  status: 'applied' | 'approved' | 'rejected' | 'paused';
+  reviewNotes: string | null;
+  approvedAt: string | null;
+  rejectedAt: string | null;
+  stripeConnectAccountId: string | null;
+  stripeOnboardingCompleted: boolean;
+  stripeDetailsSubmitted: boolean;
+  stripeChargesEnabled: boolean;
+  stripePayoutsEnabled: boolean;
+};
+
+type AmbassadorInboxPayload = {
+  setupRequired: boolean;
+  kpis: {
+    applied: number;
+    approved: number;
+    payoutsReady: number;
+  };
+  applications: AmbassadorApplication[];
+};
+
 async function readJson<T>(url: string): Promise<T> {
   const response = await fetch(url, { credentials: 'include' });
   const payload = await response.json().catch(() => ({}));
@@ -158,8 +197,11 @@ export function FounderDashboard() {
   const [support, setSupport] = useState<SupportInboxPayload | null>(null);
   const [feedback, setFeedback] = useState<FeedbackInboxPayload | null>(null);
   const [summary, setSummary] = useState<SummaryPayload | null>(null);
+  const [ambassadors, setAmbassadors] = useState<AmbassadorInboxPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [ambassadorActionState, setAmbassadorActionState] = useState<Record<string, string>>({});
+  const [ambassadorStatusMessage, setAmbassadorStatusMessage] = useState<string | null>(null);
 
   const loadSupport = useCallback(async () => {
     const payload = await readJson<SupportInboxPayload>('/api/admin/inbox/support');
@@ -178,17 +220,22 @@ export function FounderDashboard() {
     setSummary(payload);
   }, []);
 
+  const loadAmbassadors = useCallback(async () => {
+    const payload = await readJson<AmbassadorInboxPayload>('/api/admin/ambassadors?limit=20');
+    setAmbassadors(payload);
+  }, []);
+
   const loadAll = useCallback(async () => {
     setError(null);
     setLoading(true);
     try {
-      await Promise.all([loadSupport(), loadFeedback(), loadSummary()]);
+      await Promise.all([loadSupport(), loadFeedback(), loadSummary(), loadAmbassadors()]);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load founder dashboard');
     } finally {
       setLoading(false);
     }
-  }, [loadFeedback, loadSummary, loadSupport]);
+  }, [loadAmbassadors, loadFeedback, loadSummary, loadSupport]);
 
   useEffect(() => {
     void loadAll();
@@ -226,6 +273,89 @@ export function FounderDashboard() {
       void supabase.removeChannel(channel);
     };
   }, [loadFeedback, loadSupport]);
+
+  const setActionLoading = useCallback((applicationId: string, label: string | null) => {
+    setAmbassadorActionState((current) => {
+      const next = { ...current };
+      if (label) {
+        next[applicationId] = label;
+      } else {
+        delete next[applicationId];
+      }
+      return next;
+    });
+  }, []);
+
+  const handleAmbassadorStatusUpdate = useCallback(
+    async (
+      applicationId: string,
+      status: AmbassadorApplication['status'],
+      loadingLabel: string
+    ) => {
+      setActionLoading(applicationId, loadingLabel);
+      setAmbassadorStatusMessage(null);
+      try {
+        const response = await fetch(`/api/admin/ambassadors/${applicationId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ status }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload.error || 'Failed to update ambassador.');
+        }
+        await loadAmbassadors();
+        setAmbassadorStatusMessage(`Application marked ${status}.`);
+      } catch (e) {
+        setAmbassadorStatusMessage(
+          e instanceof Error ? e.message : 'Failed to update ambassador.'
+        );
+      } finally {
+        setActionLoading(applicationId, null);
+      }
+    },
+    [loadAmbassadors, setActionLoading]
+  );
+
+  const handleApproveAndCreateStripeLink = useCallback(
+    async (applicationId: string) => {
+      setActionLoading(applicationId, 'stripe');
+      setAmbassadorStatusMessage(null);
+      try {
+        const response = await fetch(
+          `/api/admin/ambassadors/${applicationId}/stripe-connect`,
+          {
+            method: 'POST',
+            credentials: 'include',
+          }
+        );
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload.error || 'Failed to create Stripe onboarding link.');
+        }
+
+        const onboardingUrl =
+          typeof payload.onboardingUrl === 'string' ? payload.onboardingUrl : '';
+        if (onboardingUrl && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(onboardingUrl);
+        }
+        await loadAmbassadors();
+        setAmbassadorStatusMessage(
+          onboardingUrl
+            ? 'Approved. Stripe onboarding link copied to clipboard.'
+            : 'Approved and Stripe onboarding link created.'
+        );
+      } catch (e) {
+        setAmbassadorStatusMessage(
+          e instanceof Error ? e.message : 'Failed to create Stripe onboarding link.'
+        );
+      } finally {
+        setActionLoading(applicationId, null);
+      }
+    },
+    [loadAmbassadors, setActionLoading]
+  );
 
   const revenueAmount = useMemo(
     () =>
@@ -361,6 +491,169 @@ export function FounderDashboard() {
             <CardDescription>Monthly Revenue</CardDescription>
             <CardTitle>{revenueAmount}</CardTitle>
           </CardHeader>
+        </Card>
+      </section>
+
+      <section>
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <UserRoundPlus className="h-4 w-4" />
+              Ambassador Applications
+            </CardTitle>
+            <CardDescription>
+              Review creator applications and approve them into Stripe onboarding in one click.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="rounded-md border p-3">
+                <div className="text-muted-foreground text-sm">Awaiting review</div>
+                <div className="font-semibold text-lg">{ambassadors?.kpis.applied ?? 0}</div>
+              </div>
+              <div className="rounded-md border p-3">
+                <div className="text-muted-foreground text-sm">Approved</div>
+                <div className="font-semibold text-lg">{ambassadors?.kpis.approved ?? 0}</div>
+              </div>
+              <div className="rounded-md border p-3">
+                <div className="text-muted-foreground text-sm">Payouts ready</div>
+                <div className="font-semibold text-lg">{ambassadors?.kpis.payoutsReady ?? 0}</div>
+              </div>
+            </div>
+
+            {ambassadors?.setupRequired ? (
+              <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                Ambassador storage is not ready yet. Run the migration for
+                <span className="font-medium"> ambassador_applications </span>
+                before using this inbox.
+              </div>
+            ) : null}
+
+            {ambassadorStatusMessage ? (
+              <div className="rounded-md border p-3 text-sm">{ambassadorStatusMessage}</div>
+            ) : null}
+
+            {ambassadors?.applications.length ? (
+              <div className="space-y-3">
+                {ambassadors.applications.map((application) => {
+                  const loadingState = ambassadorActionState[application.id];
+                  const handles = [
+                    application.instagramHandle,
+                    application.tiktokHandle,
+                    application.youtubeHandle,
+                  ].filter(Boolean);
+
+                  return (
+                    <div key={application.id} className="rounded-md border p-4">
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="min-w-0 space-y-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <div className="font-medium text-sm">
+                              {application.fullName}
+                            </div>
+                            <Badge
+                              variant={
+                                application.status === 'approved'
+                                  ? 'default'
+                                  : application.status === 'rejected'
+                                    ? 'destructive'
+                                    : 'secondary'
+                              }
+                            >
+                              {application.status}
+                            </Badge>
+                            {application.stripePayoutsEnabled ? (
+                              <Badge variant="outline" className="gap-1">
+                                <CheckCircle2 className="h-3 w-3" />
+                                payouts ready
+                              </Badge>
+                            ) : null}
+                            {application.stripeConnectAccountId ? (
+                              <Badge variant="outline" className="gap-1">
+                                <Copy className="h-3 w-3" />
+                                Stripe linked
+                              </Badge>
+                            ) : null}
+                          </div>
+                          <div className="text-xs text-muted-foreground flex flex-wrap gap-x-3 gap-y-1">
+                            <span>{application.email}</span>
+                            <span>{application.primaryNiche}</span>
+                            <span>{application.primaryPlatform}</span>
+                            {application.city ? <span>{application.city}</span> : null}
+                            {application.audienceSize ? <span>{application.audienceSize}</span> : null}
+                          </div>
+                          {handles.length ? (
+                            <div className="text-xs text-muted-foreground flex flex-wrap gap-x-3 gap-y-1">
+                              {handles.map((handle) => (
+                                <span key={handle}>{handle}</span>
+                              ))}
+                            </div>
+                          ) : null}
+                          <div className="text-sm text-muted-foreground line-clamp-2">
+                            {application.whyFlyr}
+                          </div>
+                          {application.promotionPlan ? (
+                            <div className="text-xs text-muted-foreground line-clamp-2">
+                              Promotion plan: {application.promotionPlan}
+                            </div>
+                          ) : null}
+                          <div className="text-xs text-muted-foreground">
+                            Applied {formatDateTime(application.createdAt)}
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2 lg:justify-end">
+                          <Button
+                            size="sm"
+                            onClick={() => void handleApproveAndCreateStripeLink(application.id)}
+                            disabled={loadingState === 'stripe' || !!loadingState}
+                          >
+                            {loadingState === 'stripe'
+                              ? 'Creating Stripe link...'
+                              : application.stripeConnectAccountId
+                                ? 'Copy Stripe link'
+                                : 'Approve + Stripe'}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() =>
+                              void handleAmbassadorStatusUpdate(
+                                application.id,
+                                'paused',
+                                'pause'
+                              )
+                            }
+                            disabled={!!loadingState}
+                          >
+                            Pause
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() =>
+                              void handleAmbassadorStatusUpdate(
+                                application.id,
+                                'rejected',
+                                'reject'
+                              )
+                            }
+                            disabled={!!loadingState}
+                          >
+                            Reject
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : ambassadors?.setupRequired ? null : (
+              <div className="text-sm text-muted-foreground">
+                No ambassador applications yet.
+              </div>
+            )}
+          </CardContent>
         </Card>
       </section>
 

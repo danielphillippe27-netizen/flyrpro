@@ -434,8 +434,7 @@ export class GoldAddressService {
       {
         limitBuildings: 10000,
         limitAddresses: 10000,
-        limitRoads: 5000,
-        includeRoads: true,
+        includeRoads: false,
       }
     );
     

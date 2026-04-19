@@ -6,7 +6,7 @@
  * - Lambda queries flyr-data-lake (master tiled data)
  * - Lambda writes to flyr-snapshots (campaign assets with 30-day TTL)
  * - Only addresses (leads) are ingested into Supabase
- * - Buildings/Roads stay in S3 for direct rendering
+ * - Buildings stay in S3 for direct rendering
  * 
  * Environment Variables:
  * - SLICE_LAMBDA_URL: The Lambda function URL
@@ -135,7 +135,7 @@ export class TileLambdaService {
         limitBuildings: options?.limitBuildings ?? 5000,
         limitAddresses: options?.limitAddresses ?? 5000,
         limitRoads: options?.limitRoads ?? 1000,
-        includeRoads: options?.includeRoads ?? true,
+        includeRoads: options?.includeRoads ?? false,
       }),
     });
 
@@ -161,8 +161,6 @@ export class TileLambdaService {
     console.log('[TileLambda] Snapshots generated in', elapsed, 'ms');
     console.log('[TileLambda] Buildings:', result.counts.buildings);
     console.log('[TileLambda] Addresses:', result.counts.addresses);
-    console.log('[TileLambda] Roads:', result.counts.roads);
-    
     if (result.warning) {
       console.warn('[TileLambda] Warning:', result.warning);
     }
@@ -197,13 +195,6 @@ export class TileLambdaService {
    */
   static getBuildingsUrl(snapshot: LambdaSnapshotResponse): string {
     return snapshot.urls.buildings;
-  }
-
-  /**
-   * Get direct S3 URL for roads (for iOS app to render)
-   */
-  static getRoadsUrl(snapshot: LambdaSnapshotResponse): string | undefined {
-    return snapshot.urls.roads;
   }
 
   /**

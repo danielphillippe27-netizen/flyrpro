@@ -70,6 +70,11 @@ import {
 } from '@/lib/farms/config';
 import { buildFarmDashboardAnalytics } from '@/lib/farms/analytics';
 import { buildCadenceTouchPlan, formatDateInput } from '@/lib/farms/plan';
+import {
+  buildLegacyCampaignText,
+  isMissingCampaignColumnErrorMessage,
+  parseLegacyCampaignText,
+} from '@/lib/campaignLegacyFields';
 
 const MODE_LABELS: Record<FarmSessionMode, string> = {
   doorknock: 'Doorknock',
@@ -85,7 +90,7 @@ type ActivityItem =
   | { id: string; type: 'contact'; timestamp: string; title: string; description: string; touchId?: string | null };
 
 type DashboardScope = 'current_cycle' | 'all_time';
-type MapLayerScope = 'all_time' | 'current_cycle' | 'session';
+type MapLayerScope = 'all_time' | 'cycle' | 'session';
 type PlannerTouchDraft = {
   slotId: string;
   touchId: string | null;
@@ -100,6 +105,10 @@ type PlannerTouchDraft = {
 };
 
 type PlannerTouchSlot = PlannerTouchDraft;
+
+type CampaignWithLegacyDescription = CampaignV2 & {
+  description?: string | null;
+};
 
 function formatPercentage(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return '0%';
@@ -211,6 +220,11 @@ function formatSupabaseError(error: unknown, fallback: string): string {
   return parts.length > 0 ? parts.join('\n') : fallback;
 }
 
+function isMissingCampaignColumnError(error: unknown, column: 'notes' | 'scripts' | 'flyer_url'): boolean {
+  const message = formatSupabaseError(error, '').toLowerCase();
+  return isMissingCampaignColumnErrorMessage(message, column);
+}
+
 export default function FarmPage() {
   const params = useParams();
   const farmId = params.id as string;
@@ -230,6 +244,8 @@ export default function FarmPage() {
   const [activeTab, setActiveTab] = useState('overview');
   const [overviewScope, setOverviewScope] = useState<DashboardScope>('current_cycle');
   const [mapLayerScope, setMapLayerScope] = useState<MapLayerScope>('all_time');
+  const [showMapContactsOverlay, setShowMapContactsOverlay] = useState(true);
+  const [selectedMapCycleNumber, setSelectedMapCycleNumber] = useState<string>('latest');
   const [selectedMapTouchId, setSelectedMapTouchId] = useState<string>('all');
   const [selectedCycleFilter, setSelectedCycleFilter] = useState<string>('all');
   const [selectedTouchFilter, setSelectedTouchFilter] = useState<string>('all');
@@ -282,6 +298,10 @@ export default function FarmPage() {
   const [generatingBasicQr, setGeneratingBasicQr] = useState(false);
   const [generatingQrCodes, setGeneratingQrCodes] = useState(false);
   const [qrScanEventsCount, setQrScanEventsCount] = useState<number | null>(null);
+  const legacyCampaignText = parseLegacyCampaignText(
+    (linkedCampaign as CampaignWithLegacyDescription | null)?.description
+  );
+  const currentFlyerUrl = linkedCampaign?.flyer_url ?? legacyCampaignText.flyerUrl ?? null;
 
   const loadData = useCallback(async (resolvedUserId?: string | null) => {
     try {
@@ -426,14 +446,41 @@ export default function FarmPage() {
   }, [linkedCampaign?.video_url]);
 
   useEffect(() => {
-    setFarmCampaignNotes(linkedCampaign?.notes ?? '');
+    if (linkedCampaign?.notes !== undefined) {
+      setFarmCampaignNotes(linkedCampaign.notes ?? '');
+    } else {
+      setFarmCampaignNotes(legacyCampaignText.notes ?? '');
+    }
     setCampaignNotesDirty(false);
-  }, [linkedCampaign?.notes]);
+  }, [legacyCampaignText.notes, linkedCampaign?.notes]);
 
   useEffect(() => {
-    setFarmScripts(linkedCampaign?.scripts ?? '');
+    if (linkedCampaign?.scripts !== undefined) {
+      setFarmScripts(linkedCampaign.scripts ?? '');
+    } else {
+      setFarmScripts(legacyCampaignText.scripts ?? '');
+    }
     setScriptsDirty(false);
-  }, [linkedCampaign?.scripts]);
+  }, [legacyCampaignText.scripts, linkedCampaign?.scripts]);
+
+  const saveLegacyCampaignText = useCallback(
+    async (campaignId: string, updates: { notes?: string; scripts?: string; flyerUrl?: string }) => {
+      const supabase = createClient();
+      const { error } = await supabase
+        .from('campaigns')
+        .update({
+          description: buildLegacyCampaignText({
+            notes: updates.notes ?? farmCampaignNotes,
+            scripts: updates.scripts ?? farmScripts,
+            flyerUrl: updates.flyerUrl ?? currentFlyerUrl ?? undefined,
+          }),
+        })
+        .eq('id', campaignId);
+
+      if (error) throw error;
+    },
+    [currentFlyerUrl, farmCampaignNotes, farmScripts]
+  );
 
   const activityItems = useMemo<ActivityItem[]>(() => {
     const allowedTouchIds =
@@ -499,11 +546,21 @@ export default function FarmPage() {
 
   useEffect(() => {
     if (resolvedTouches.length === 0) {
+      setSelectedMapCycleNumber('latest');
       setSelectedMapTouchId('all');
       if (mapLayerScope === 'session') {
         setMapLayerScope('all_time');
       }
       return;
+    }
+
+    const latestCycleNumber = String(Math.max(...resolvedTouches.map((touch) => touch.resolvedCycleNumber), 1));
+
+    if (
+      selectedMapCycleNumber === 'latest' ||
+      !resolvedTouches.some((touch) => String(touch.resolvedCycleNumber) === selectedMapCycleNumber)
+    ) {
+      setSelectedMapCycleNumber(latestCycleNumber);
     }
 
     if (selectedMapTouchId === 'all' && resolvedTouches[0]) {
@@ -514,7 +571,7 @@ export default function FarmPage() {
     if (!resolvedTouches.some((touch) => touch.id === selectedMapTouchId)) {
       setSelectedMapTouchId(resolvedTouches[0].id);
     }
-  }, [mapLayerScope, resolvedTouches, selectedMapTouchId]);
+  }, [mapLayerScope, resolvedTouches, selectedMapCycleNumber, selectedMapTouchId]);
 
   const kpis = useMemo(() => {
     return {
@@ -535,6 +592,30 @@ export default function FarmPage() {
     () => resolvedTouches.find((touch) => touch.id === selectedMapTouchId) ?? null,
     [resolvedTouches, selectedMapTouchId]
   );
+  const selectedMapCycleTouches = useMemo(
+    () =>
+      resolvedTouches.filter((touch) => String(touch.resolvedCycleNumber) === selectedMapCycleNumber),
+    [resolvedTouches, selectedMapCycleNumber]
+  );
+  const selectedMapCycleTouchIds = useMemo(
+    () => selectedMapCycleTouches.map((touch) => touch.id),
+    [selectedMapCycleTouches]
+  );
+  const selectedMapCycleLabel = useMemo(() => {
+    if (selectedMapCycleTouches[0]) {
+      return `Cycle ${selectedMapCycleTouches[0].resolvedCycleNumber}`;
+    }
+    if (selectedMapCycleNumber !== 'latest') {
+      return `Cycle ${selectedMapCycleNumber}`;
+    }
+    return kpis.currentCycleLabel;
+  }, [kpis.currentCycleLabel, selectedMapCycleNumber, selectedMapCycleTouches]);
+  const selectedMapCycleSelectValue = useMemo(() => {
+    if (cycleFilterOptions.some((cycle) => cycle.value === selectedMapCycleNumber)) {
+      return selectedMapCycleNumber;
+    }
+    return cycleFilterOptions[0]?.value ?? '';
+  }, [cycleFilterOptions, selectedMapCycleNumber]);
 
   const overviewSnapshot = useMemo(() => {
     if (overviewScope === 'all_time') {
@@ -866,7 +947,13 @@ export default function FarmPage() {
         .update({ notes: farmCampaignNotes || null })
         .eq('id', campaignId);
 
-      if (error) throw error;
+      if (error) {
+        if (isMissingCampaignColumnError(error, 'notes')) {
+          await saveLegacyCampaignText(campaignId, { notes: farmCampaignNotes });
+        } else {
+          throw error;
+        }
+      }
 
       setCampaignNotesDirty(false);
       await loadData(userId);
@@ -875,7 +962,7 @@ export default function FarmPage() {
     } finally {
       setIsSavingCampaignNotes(false);
     }
-  }, [farmCampaignNotes, handleCreateLinkedCampaign, linkedCampaignId, loadData, userId]);
+  }, [farmCampaignNotes, handleCreateLinkedCampaign, linkedCampaignId, loadData, saveLegacyCampaignText, userId]);
 
   const handleSaveScripts = useCallback(async () => {
     const campaignId = linkedCampaignId ?? (await handleCreateLinkedCampaign());
@@ -889,7 +976,13 @@ export default function FarmPage() {
         .update({ scripts: farmScripts || null })
         .eq('id', campaignId);
 
-      if (error) throw error;
+      if (error) {
+        if (isMissingCampaignColumnError(error, 'scripts')) {
+          await saveLegacyCampaignText(campaignId, { scripts: farmScripts });
+        } else {
+          throw error;
+        }
+      }
 
       setScriptsDirty(false);
       await loadData(userId);
@@ -898,7 +991,7 @@ export default function FarmPage() {
     } finally {
       setIsSavingScripts(false);
     }
-  }, [farmScripts, handleCreateLinkedCampaign, linkedCampaignId, loadData, userId]);
+  }, [farmScripts, handleCreateLinkedCampaign, linkedCampaignId, loadData, saveLegacyCampaignText, userId]);
 
   const handleFlyerUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -949,7 +1042,13 @@ export default function FarmPage() {
         .update({ flyer_url: urlData.publicUrl })
         .eq('id', campaignId);
 
-      if (updateError) throw updateError;
+      if (updateError) {
+        if (isMissingCampaignColumnError(updateError, 'flyer_url')) {
+          await saveLegacyCampaignText(campaignId, { flyerUrl: urlData.publicUrl });
+        } else {
+          throw updateError;
+        }
+      }
 
       await loadData(userId);
     } catch (error) {
@@ -958,7 +1057,7 @@ export default function FarmPage() {
       setUploadingFlyer(false);
       event.target.value = '';
     }
-  }, [handleCreateLinkedCampaign, linkedCampaignId, loadData, userId]);
+  }, [handleCreateLinkedCampaign, linkedCampaignId, loadData, saveLegacyCampaignText, userId]);
 
   const handleGenerateBasicQr = useCallback(async () => {
     const campaignId = linkedCampaignId ?? (await handleCreateLinkedCampaign());
@@ -1614,7 +1713,7 @@ export default function FarmPage() {
               <div className="space-y-1">
                 <h2 className="text-lg font-semibold text-foreground">Next 12 Cycles</h2>
                 <p className="text-sm text-muted-foreground">
-                  Generated from the farm start date and cadence settings. Edit each cycle's touch type, date, title, notes, and target homes before saving.
+                  Generated from the farm start date and cadence settings. Edit each cycle&apos;s touch type, date, title, notes, and target homes before saving.
                 </p>
                 <p className="text-xs text-muted-foreground">
                   Cadence: {formatFarmCadence(farm)}. Start date: {formatDateLabel(farm.start_date)}. Goal: {planningSummary.goal}.
@@ -1722,9 +1821,9 @@ export default function FarmPage() {
           <div className="mb-4 rounded-xl border border-border bg-card p-4">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <h2 className="text-sm font-semibold text-foreground">Session Layers</h2>
+                <h2 className="text-sm font-semibold text-foreground">Master Farm Map</h2>
                 <p className="text-sm text-muted-foreground">
-                  Separate the farm map by all activity, the active farm cycle, or a specific session.
+                  Use the master map as the farm&apos;s long-term memory, then slice it by cycle or session when you need the operational view.
                 </p>
               </div>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -1738,18 +1837,18 @@ export default function FarmPage() {
                         : 'text-muted-foreground hover:text-foreground'
                     }`}
                   >
-                    All Time
+                    Master
                   </button>
                   <button
                     type="button"
-                    onClick={() => setMapLayerScope('current_cycle')}
+                    onClick={() => setMapLayerScope('cycle')}
                     className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
-                      mapLayerScope === 'current_cycle'
+                      mapLayerScope === 'cycle'
                         ? 'bg-background text-foreground shadow-sm'
                         : 'text-muted-foreground hover:text-foreground'
                     }`}
                   >
-                    {kpis.currentCycleLabel}
+                    Cycle
                   </button>
                   <button
                     type="button"
@@ -1781,7 +1880,30 @@ export default function FarmPage() {
                       ))}
                     </SelectContent>
                   </Select>
+                ) : mapLayerScope === 'cycle' ? (
+                  <Select value={selectedMapCycleSelectValue} onValueChange={setSelectedMapCycleNumber}>
+                    <SelectTrigger className="w-[220px]">
+                      <SelectValue placeholder="Select cycle" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {cycleFilterOptions.map((cycle) => (
+                        <SelectItem key={cycle.value} value={cycle.value}>
+                          {cycle.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 ) : null}
+                <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2">
+                  <Switch
+                    id="farm-map-contacts-overlay"
+                    checked={showMapContactsOverlay}
+                    onCheckedChange={setShowMapContactsOverlay}
+                  />
+                  <Label htmlFor="farm-map-contacts-overlay" className="cursor-pointer text-sm">
+                    Contact overlay
+                  </Label>
+                </div>
               </div>
             </div>
             <p className="mt-3 text-xs text-muted-foreground">
@@ -1789,21 +1911,23 @@ export default function FarmPage() {
                 ? `Showing homes whose latest recorded farm touch is ${
                     selectedMapTouch?.title || (selectedMapTouch ? MODE_LABELS[selectedMapTouch.mode ?? 'doorknock'] : 'the selected session')
                   }.`
-                : mapLayerScope === 'current_cycle'
-                  ? `Showing homes last touched during ${kpis.currentCycleLabel.toLowerCase()}.`
-                  : 'Showing cumulative visit state across the farm.'}
+                : mapLayerScope === 'cycle'
+                  ? `Showing homes last touched during ${selectedMapCycleLabel.toLowerCase()}.`
+                  : 'Showing cumulative visit state across the farm, with optional contact pins layered on top.'}
             </p>
           </div>
           <div className="bg-card rounded-xl border border-border overflow-hidden" style={{ height: '560px' }}>
             <FarmMapView
-              key={`${farm.id}:${mapTabVersion}:${mapLayerScope}:${selectedMapTouchId}`}
+              key={`${farm.id}:${mapTabVersion}:${mapLayerScope}:${selectedMapCycleNumber}:${selectedMapTouchId}`}
               farm={farm}
               addresses={addresses}
               linkedCampaignId={linkedCampaignId}
               layerScope={mapLayerScope}
-              currentCycleTouchIds={kpis.currentCycleTouchIds}
+              cycleTouchIds={selectedMapCycleTouchIds}
               selectedTouchId={mapLayerScope === 'session' ? selectedMapTouchId : null}
               touchOutcomes={touchOutcomes}
+              contacts={contacts}
+              showContactsOverlay={showMapContactsOverlay}
               onDataChanged={() => loadData(userId)}
               showOutcomeControls={false}
             />
@@ -2323,9 +2447,9 @@ export default function FarmPage() {
                       {uploadingFlyer ? 'Uploading...' : 'Choose photo or PDF'}
                     </span>
                   </label>
-                  {linkedCampaign?.flyer_url ? (
+                  {currentFlyerUrl ? (
                     <a
-                      href={linkedCampaign.flyer_url}
+                      href={currentFlyerUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-sm text-primary hover:underline"

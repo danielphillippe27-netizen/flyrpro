@@ -42,9 +42,6 @@ export default function CreateCampaignPage() {
   const [mapLoaded, setMapLoaded] = useState(false);
   const [isSatellite, setIsSatellite] = useState(false);
   const [mapSearchQuery, setMapSearchQuery] = useState('');
-  const [snappingBoundary, setSnappingBoundary] = useState(false);
-  const [boundaryRaw, setBoundaryRaw] = useState<{ type: 'Polygon'; coordinates: number[][][] } | null>(null);
-  const [boundarySnapped, setBoundarySnapped] = useState<{ type: 'Polygon'; coordinates: number[][][] } | null>(null);
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const drawRef = useRef<MapboxDraw | null>(null);
@@ -76,9 +73,7 @@ export default function CreateCampaignPage() {
     };
   }, [lottieSrc]);
 
-  const currentStepText = snappingBoundary
-    ? 'Step 1/5: Snapping boundary to roads'
-    : generatingAddresses
+  const currentStepText = generatingAddresses
         ? 'Step 3/5: Fetching addresses'
         : provisionProgress.includes('Scanning')
           ? 'Step 4/5: Fetching buildings'
@@ -422,119 +417,6 @@ export default function CreateCampaignPage() {
     });
   };
 
-  /** Safe getLayer: avoid "getOwnLayer of undefined" during style transition */
-  const safeGetLayer = (m: mapboxgl.Map, layerId: string): boolean => {
-    try {
-      if (!m.isStyleLoaded()) return false;
-      return !!m.getLayer(layerId);
-    } catch {
-      return false;
-    }
-  };
-
-  /** Add raw + snapped boundary layers and animate snapped line opacity 0 -> 1 over 600ms */
-  const addBoundaryLayersAndCrossFade = (
-    raw: { type: 'Polygon'; coordinates: number[][][] },
-    snapped: { type: 'Polygon'; coordinates: number[][][] }
-  ) => {
-    const m = map.current;
-    if (!m || !m.getStyle() || !m.isStyleLoaded()) return;
-
-    const rawSourceId = 'campaign-boundary-raw';
-    const snappedSourceId = 'campaign-boundary-snapped';
-    const rawFillId = 'campaign-boundary-raw-fill';
-    const rawLineId = 'campaign-boundary-raw-line';
-    const snappedFillId = 'campaign-boundary-snapped-fill';
-    const snappedLineId = 'campaign-boundary-snapped-line';
-
-    const removeExisting = () => {
-      const ids = boundaryLayerIdsRef.current.filter((id): id is string => typeof id === 'string' && id.length > 0);
-      ids.forEach((id) => {
-        try {
-          if (safeGetLayer(m, id)) m.removeLayer(id);
-        } catch {
-          // Map style may have changed; layer registry can be undefined during transition
-        }
-      });
-      try {
-        if (m.getSource(rawSourceId)) m.removeSource(rawSourceId);
-        if (m.getSource(snappedSourceId)) m.removeSource(snappedSourceId);
-      } catch {
-        // Sources may already be gone after style change
-      }
-      boundaryLayerIdsRef.current = [];
-    };
-    removeExisting();
-
-    const rawFeature: GeoJSON.Feature<GeoJSON.Polygon> = { type: 'Feature', geometry: raw, properties: {} };
-    const snappedFeature: GeoJSON.Feature<GeoJSON.Polygon> = { type: 'Feature', geometry: snapped, properties: {} };
-
-    m.addSource(rawSourceId, { type: 'geojson', data: rawFeature });
-    m.addSource(snappedSourceId, { type: 'geojson', data: snappedFeature });
-
-    m.addLayer({
-      id: rawFillId,
-      type: 'fill',
-      source: rawSourceId,
-      paint: { 'fill-color': '#ef4444', 'fill-opacity': 0.08 },
-    });
-    m.addLayer({
-      id: rawLineId,
-      type: 'line',
-      source: rawSourceId,
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: {
-        'line-color': '#ef4444',
-        'line-width': 2,
-        'line-opacity': 0.3,
-        'line-dasharray': [1, 1.5],
-      },
-    });
-    m.addLayer({
-      id: snappedFillId,
-      type: 'fill',
-      source: snappedSourceId,
-      paint: { 'fill-color': '#ef4444', 'fill-opacity': 0.15 },
-    });
-    m.addLayer({
-      id: snappedLineId,
-      type: 'line',
-      source: snappedSourceId,
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: {
-        'line-color': '#ef4444',
-        'line-width': 3,
-        'line-opacity': 0,
-      },
-    });
-
-    boundaryLayerIdsRef.current = [rawFillId, rawLineId, snappedFillId, snappedLineId];
-
-    const duration = 600;
-    const start = performance.now();
-    const tick = (now: number) => {
-      const elapsed = now - start;
-      const opacity = Math.min(1, elapsed / duration);
-      if (safeGetLayer(m, snappedLineId) && safeGetLayer(m, snappedFillId)) {
-        m.setPaintProperty(snappedLineId, 'line-opacity', opacity);
-        m.setPaintProperty(snappedFillId, 'fill-opacity', 0.08 + 0.07 * opacity);
-      }
-      if (opacity < 1) requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-  };
-
-  /** Set boundary layer opacity (snapped emphasized by default) */
-  useEffect(() => {
-    const m = map.current;
-    if (!m || !boundaryRaw || !boundarySnapped || !m.isStyleLoaded()) return;
-    const rawLineId = 'campaign-boundary-raw-line';
-    const snappedLineId = 'campaign-boundary-snapped-line';
-    if (!safeGetLayer(m, rawLineId) || !safeGetLayer(m, snappedLineId)) return;
-    m.setPaintProperty(rawLineId, 'line-opacity', 0.3);
-    m.setPaintProperty(snappedLineId, 'line-opacity', 1);
-  }, [boundaryRaw, boundarySnapped]);
-
   const handleSubmit = async (e?: React.FormEvent | React.MouseEvent) => {
     e?.preventDefault();
     if (!userId) return;
@@ -606,35 +488,7 @@ export default function CreateCampaignPage() {
       const campaign = await createRes.json();
       console.log('Campaign created:', campaign?.id, campaign?.name);
 
-      // Snap to roads: align boundary to road centerlines before address generation
       if (polygon) {
-        setSnappingBoundary(true);
-        let polygonForAddresses = polygon;
-        try {
-          const snapRes = await fetch(`/api/campaigns/${campaign.id}/snap`, {
-            method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-          });
-          if (snapRes.ok) {
-            const snapData = await snapRes.json();
-            polygonForAddresses = snapData.polygon ?? polygon;
-            if (snapData.wasSnapped && snapData.polygon) {
-              setBoundaryRaw(polygon);
-              setBoundarySnapped(snapData.polygon);
-              addBoundaryLayersAndCrossFade(polygon, snapData.polygon);
-              await new Promise((r) => setTimeout(r, 700));
-            }
-          }
-        } catch (snapErr) {
-          console.error('Snap to roads failed, using drawn polygon:', snapErr);
-        } finally {
-          setSnappingBoundary(false);
-        }
-
-        // Fire and forget — roads are additive, never block campaign creation
-        fetch(`/api/campaigns/${campaign.id}/roads/prepare`, { method: 'POST' }).catch(() => {});
-
         setGeneratingAddresses(true);
         try {
           console.log('Saving addresses from polygon...');
@@ -646,7 +500,7 @@ export default function CreateCampaignPage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               campaign_id: campaign.id,
-              polygon: polygonForAddresses,
+              polygon,
             }),
           });
 
@@ -767,16 +621,16 @@ export default function CreateCampaignPage() {
 
           {/* Action Buttons */}
           <div className="flex items-center gap-2 ml-auto">
-            <Button type="button" variant="outline" size="sm" className="bg-gray-200 dark:bg-neutral-600 dark:border-neutral-500 dark:hover:bg-neutral-500" onClick={() => router.back()} disabled={loading || snappingBoundary || provisioning || generatingAddresses}>
+            <Button type="button" variant="outline" size="sm" className="bg-gray-200 dark:bg-neutral-600 dark:border-neutral-500 dark:hover:bg-neutral-500" onClick={() => router.back()} disabled={loading || provisioning || generatingAddresses}>
               Cancel
             </Button>
             <Button 
               type="button" 
               size="sm" 
-              disabled={loading || snappingBoundary || provisioning || generatingAddresses || !name}
+              disabled={loading || provisioning || generatingAddresses || !name}
               onClick={handleSubmit}
             >
-              {loading ? 'Creating...' : snappingBoundary ? 'Snapping...' : generatingAddresses ? 'Finding...' : provisioning ? 'Provisioning...' : 'Create Campaign'}
+              {loading ? 'Creating...' : generatingAddresses ? 'Finding...' : provisioning ? 'Provisioning...' : 'Create Campaign'}
             </Button>
           </div>
         </div>
@@ -870,7 +724,7 @@ export default function CreateCampaignPage() {
       </div>
 
       {/* Loading Modal */}
-      {(snappingBoundary || provisioning || generatingAddresses) && (
+      {(provisioning || generatingAddresses) && (
         <div className="fixed inset-0 bg-black/35 backdrop-blur-[1px] flex items-center justify-center z-50">
           <div className="max-w-lg w-full mx-4 text-center">
             <div className="h-80 w-full flex items-center justify-center">

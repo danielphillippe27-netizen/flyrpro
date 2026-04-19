@@ -175,7 +175,7 @@ export async function POST(request: NextRequest) {
       // Try to reuse existing snapshot from DB (from generate-address-list or previous provision)
       const { data: existingSnapshotRow } = await supabase
         .from('campaign_snapshots')
-        .select('buildings_url, addresses_url, metadata_url, roads_url, overture_release, expires_at')
+        .select('buildings_url, addresses_url, metadata_url, overture_release, expires_at')
         .eq('campaign_id', campaign_id!)
         .single();
 
@@ -193,7 +193,6 @@ export async function POST(request: NextRequest) {
             buildings: existingSnapshotRow!.buildings_url,
             addresses: existingSnapshotRow!.addresses_url,
             metadata: existingSnapshotRow!.metadata_url,
-            roads: existingSnapshotRow!.roads_url ?? undefined,
           },
           metadata: { overture_release: existingSnapshotRow!.overture_release ?? undefined },
         } as Awaited<ReturnType<typeof TileLambdaService.generateSnapshots>>;
@@ -247,8 +246,7 @@ export async function POST(request: NextRequest) {
             {
               limitBuildings: 10000,
               limitAddresses: 10000,
-              limitRoads: 5000,
-              includeRoads: true,
+              includeRoads: false,
             }
           );
         } else if (!goldBuildings || goldBuildings.length === 0) {
@@ -260,8 +258,7 @@ export async function POST(request: NextRequest) {
             {
               limitBuildings: 10000,
               limitAddresses: 100,
-              limitRoads: 5000,
-              includeRoads: true,
+              includeRoads: false,
             }
           );
         } else {
@@ -380,15 +377,12 @@ export async function POST(request: NextRequest) {
             prefix: snapshot.prefix,
             buildings_key: snapshot.s3_keys.buildings,
             addresses_key: snapshot.s3_keys.addresses,
-            roads_key: snapshot.s3_keys.roads || null,
             metadata_key: snapshot.s3_keys.metadata,
             buildings_url: snapshot.urls.buildings,
             addresses_url: snapshot.urls.addresses,
-            roads_url: snapshot.urls.roads || null,
             metadata_url: snapshot.urls.metadata,
             buildings_count: snapshot.counts.buildings,
             addresses_count: snapshot.counts.addresses,
-            roads_count: snapshot.counts.roads,
             overture_release: snapshot.metadata?.overture_release,
             tile_metrics: snapshot.metadata?.tile_metrics || null,
             expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), // 30 days
@@ -742,7 +736,6 @@ export async function POST(request: NextRequest) {
         campaign_id: campaign_id,
         addresses_saved: insertedCount,
         buildings_saved: goldBuildings?.length || snapshot?.counts?.buildings || 0,
-        roads_count: snapshot?.counts?.roads || 0,
         source: addressSource,
         links_created: spatialJoinSummary.matched,
         units_created: townhouseSummary.units_created,
@@ -750,10 +743,8 @@ export async function POST(request: NextRequest) {
         townhouse_split: townhouseSummary,
         map_layers: snapshot ? {
           buildings: snapshot.urls.buildings,
-          roads: snapshot.urls.roads,
         } : {
           buildings: null,
-          roads: null,
         },
         snapshot_metadata: snapshot ? {
           bucket: snapshot.bucket,
@@ -773,7 +764,7 @@ export async function POST(request: NextRequest) {
         } : null,
         message: snapshot
           ? `Gold Standard provisioning complete: ${insertedCount} leads ready.` +
-            (snapshot?.counts ? ` Buildings (${snapshot.counts.buildings}) and roads (${snapshot.counts.roads ?? 0}) served from S3.` : ' S3 snapshot.')
+            (snapshot?.counts ? ` Buildings (${snapshot.counts.buildings}) served from S3.` : ' S3 snapshot.')
             + (optimizedPathInfo ? ` Optimized walking loop: ${optimizedPathInfo.totalDistanceKm.toFixed(2)}km, ${optimizedPathInfo.totalTimeMinutes}min.` : '')
           : `Gold Standard provisioning complete: ${insertedCount} leads ready using municipal data.`,
       };

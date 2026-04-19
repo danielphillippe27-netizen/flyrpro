@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
 import { ArcadeEmbed } from '@/components/landing/ArcadeEmbed';
+import { AmbassadorProgramSection } from '@/components/landing/AmbassadorProgramSection';
 import { useRef } from 'react';
 import { useRouter } from 'next/navigation';
 
@@ -107,6 +108,12 @@ export default function LandingPage() {
 
           <div className="flex items-center gap-5 md:gap-6">
             <Link
+              href="#ambassador-program"
+              className="text-sm font-medium text-zinc-600 transition hover:text-zinc-900"
+            >
+              Ambassador
+            </Link>
+            <Link
               href="/plans"
               className="text-sm font-medium text-zinc-600 transition hover:text-zinc-900"
             >
@@ -186,14 +193,24 @@ export default function LandingPage() {
         <section className="px-5 pb-14 pt-10 md:px-8 md:pb-16">
           <div className="mx-auto flex max-w-7xl flex-col items-center text-center">
             <p className="text-lg font-medium text-zinc-700">Ready to turn prospecting into a system?</p>
-            <Link
-              href="/login"
-              className="mt-4 inline-flex h-12 items-center rounded-2xl bg-red-600 px-6 text-base font-semibold text-white transition hover:bg-red-500"
-            >
-              Start your free trial
-            </Link>
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
+              <Link
+                href="/login"
+                className="inline-flex h-12 items-center rounded-2xl bg-red-600 px-6 text-base font-semibold text-white transition hover:bg-red-500"
+              >
+                Start your free trial
+              </Link>
+              <Link
+                href="#ambassador-program"
+                className="inline-flex h-12 items-center rounded-md border border-zinc-300 bg-white px-6 text-base font-semibold text-zinc-900 transition hover:bg-zinc-100"
+              >
+                Apply to Ambassador Program
+              </Link>
+            </div>
           </div>
         </section>
+
+        <AmbassadorProgramSection />
       </main>
 
     </div>

@@ -1,20 +1,21 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { CampaignDetailMapView } from '@/components/campaigns/CampaignDetailMapView';
+import { CampaignDetailMapView, type MapPointOverlay } from '@/components/campaigns/CampaignDetailMapView';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { FarmTouchOutcomeService } from '@/lib/services/FarmService';
 import type {
   CampaignAddress,
   CampaignV2,
+  Contact,
   Farm,
   FarmAddress,
   FarmAddressOutcomeStatus,
   FarmTouchAddress,
 } from '@/types/database';
 
-type MapLayerScope = 'all_time' | 'current_cycle' | 'session';
+type MapLayerScope = 'all_time' | 'cycle' | 'session';
 const VISITED_OUTCOME_STATUSES = new Set<FarmAddressOutcomeStatus>([
   'no_answer',
   'delivered',
@@ -49,9 +50,11 @@ export function FarmMapView({
   addresses,
   linkedCampaignId,
   layerScope = 'all_time',
-  currentCycleTouchIds = [],
+  cycleTouchIds = [],
   selectedTouchId,
   touchOutcomes = [],
+  contacts = [],
+  showContactsOverlay = false,
   onDataChanged,
   className,
   showOutcomeControls = true,
@@ -60,9 +63,11 @@ export function FarmMapView({
   addresses: FarmAddress[];
   linkedCampaignId?: string | null;
   layerScope?: MapLayerScope;
-  currentCycleTouchIds?: string[];
+  cycleTouchIds?: string[];
   selectedTouchId?: string | null;
   touchOutcomes?: FarmTouchAddress[];
+  contacts?: Contact[];
+  showContactsOverlay?: boolean;
   onDataChanged?: () => void | Promise<void>;
   className?: string;
   showOutcomeControls?: boolean;
@@ -84,8 +89,8 @@ export function FarmMapView({
 
   const currentCycleOutcomeByAddress = useMemo(() => {
     const map = new Map<string, FarmTouchAddress>();
-    if (currentCycleTouchIds.length === 0) return map;
-    const touchIdSet = new Set(currentCycleTouchIds);
+    if (cycleTouchIds.length === 0) return map;
+    const touchIdSet = new Set(cycleTouchIds);
     for (const outcome of touchOutcomes) {
       if (!touchIdSet.has(outcome.farm_touch_id)) continue;
       if (!map.has(outcome.farm_address_id)) {
@@ -93,7 +98,7 @@ export function FarmMapView({
       }
     }
     return map;
-  }, [currentCycleTouchIds, touchOutcomes]);
+  }, [cycleTouchIds, touchOutcomes]);
 
   const selectedSessionOutcomeByAddress = useMemo(() => {
     const map = new Map<string, FarmTouchAddress>();
@@ -111,7 +116,7 @@ export function FarmMapView({
     () =>
       addresses.map((address) => {
         const scopedOutcome =
-          layerScope === 'current_cycle'
+          layerScope === 'cycle'
             ? currentCycleOutcomeByAddress.get(address.id)
             : layerScope === 'session'
               ? selectedSessionOutcomeByAddress.get(address.id)
@@ -119,8 +124,8 @@ export function FarmMapView({
 
         const visitedAllTime = Number(address.visited_count ?? 0) > 0;
         const visitedInCycle =
-          layerScope === 'current_cycle'
-            ? Boolean(address.last_touch_id && currentCycleTouchIds.includes(address.last_touch_id))
+          layerScope === 'cycle'
+            ? Boolean(address.last_touch_id && cycleTouchIds.includes(address.last_touch_id))
             : false;
         const visitedInSelectedSession =
           layerScope === 'session' && selectedTouchId
@@ -128,7 +133,7 @@ export function FarmMapView({
             : false;
 
         const fallbackVisited =
-          layerScope === 'current_cycle'
+          layerScope === 'cycle'
             ? visitedInCycle
             : layerScope === 'session'
               ? visitedInSelectedSession
@@ -136,7 +141,10 @@ export function FarmMapView({
         const isVisited = scopedOutcome
           ? VISITED_OUTCOME_STATUSES.has(scopedOutcome.status)
           : fallbackVisited;
-        const scopedStatus = scopedOutcome?.status ?? address.last_outcome_status ?? (isVisited ? 'delivered' : 'none');
+        const scopedStatus =
+          scopedOutcome?.status ??
+          (layerScope === 'all_time' ? address.last_outcome_status : null) ??
+          (isVisited ? 'delivered' : 'none');
 
         return {
           id: address.campaign_address_id ?? address.id,
@@ -162,7 +170,7 @@ export function FarmMapView({
     [
       addresses,
       currentCycleOutcomeByAddress,
-      currentCycleTouchIds,
+      cycleTouchIds,
       latestOutcomeByAddress,
       layerScope,
       linkedCampaignId,
@@ -170,6 +178,76 @@ export function FarmMapView({
       selectedTouchId,
     ]
   );
+
+  const contactOverlays = useMemo<MapPointOverlay[]>(() => {
+    if (!showContactsOverlay) return [];
+
+    const addressById = new Map(addresses.map((address) => [address.id, address]));
+    const addressByCampaignAddressId = new Map(
+      addresses
+        .filter((address) => address.campaign_address_id)
+        .map((address) => [address.campaign_address_id!, address])
+    );
+    const addressIdsBySearchCandidate = new Map<string, Set<string>>();
+
+    for (const address of addresses) {
+      for (const candidate of [
+        address.formatted,
+        address.postal_code,
+        address.house_number && address.street_name ? `${address.house_number} ${address.street_name}` : null,
+        address.locality,
+        address.region,
+      ]) {
+        const normalized = candidate?.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+        if (!normalized) continue;
+        const ids = addressIdsBySearchCandidate.get(normalized) ?? new Set<string>();
+        ids.add(address.id);
+        addressIdsBySearchCandidate.set(normalized, ids);
+      }
+    }
+
+    const contactsByAddressId = new Map<string, Contact[]>();
+
+    for (const contact of contacts) {
+      const matchedAddressIds = new Set<string>();
+
+      if (contact.address_id && addressByCampaignAddressId.has(contact.address_id)) {
+        matchedAddressIds.add(addressByCampaignAddressId.get(contact.address_id)!.id);
+      }
+
+      const normalizedAddress = contact.address?.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+      if (normalizedAddress) {
+        addressIdsBySearchCandidate.get(normalizedAddress)?.forEach((addressId) => matchedAddressIds.add(addressId));
+      }
+
+      matchedAddressIds.forEach((addressId) => {
+        const existing = contactsByAddressId.get(addressId) ?? [];
+        if (!existing.some((entry) => entry.id === contact.id)) {
+          existing.push(contact);
+          contactsByAddressId.set(addressId, existing);
+        }
+      });
+    }
+
+    return Array.from(contactsByAddressId.entries())
+      .map(([addressId, matchedContacts]) => {
+        const address = addressById.get(addressId);
+        const coordinate = address?.coordinate;
+        if (!address || !coordinate || matchedContacts.length === 0) return null;
+
+        return {
+          id: `farm-contact:${addressId}`,
+          lon: coordinate.lon,
+          lat: coordinate.lat,
+          addressId: address.campaign_address_id ?? address.id,
+          buildingId: address.gers_id ?? address.campaign_address_id ?? address.id,
+          count: matchedContacts.length,
+          label: matchedContacts.length > 1 ? String(matchedContacts.length) : null,
+          color: '#dc2626',
+        } satisfies MapPointOverlay;
+      })
+      .filter((overlay): overlay is MapPointOverlay => Boolean(overlay));
+  }, [addresses, contacts, showContactsOverlay]);
 
   const linkedCampaign = useMemo<CampaignV2 | null>(() => {
     if (!linkedCampaignId) return null;
@@ -205,6 +283,7 @@ export function FarmMapView({
         campaignId={linkedCampaignId}
         addresses={campaignAddresses}
         campaign={linkedCampaign}
+        pointOverlays={contactOverlays}
         buildingPendingOverlay={{
           title: 'Rendering farm map',
           description: 'Big farms can take a little longer to render. Buildings will appear as the map finishes loading.',

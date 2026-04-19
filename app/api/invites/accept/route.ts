@@ -1,16 +1,55 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
+import {
+  buildInviteRedirectPath,
+  resolveInviteTarget,
+} from '@/app/api/invites/_lib/targets';
 
 type InviteRow = {
   id: string;
   workspace_id: string;
-  email: string;
+  email: string | null;
   role: 'admin' | 'member';
-  status: string;
+  status?: string | null;
   expires_at: string | null;
+  accepted_at?: string | null;
   accepted_by_user_id?: string | null;
 };
+
+function normalizeInviteEmail(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase();
+  if (normalized.endsWith('@invite.flyr.invalid')) {
+    return null;
+  }
+  return normalized.length > 0 ? normalized : null;
+}
+
+function inviteAcceptedResponse(options: {
+  workspaceId: string;
+  campaignId?: string | null;
+  sessionId?: string | null;
+  alreadyAccepted: boolean;
+}) {
+  const redirect = buildInviteRedirectPath({
+    campaignId: options.campaignId,
+    sessionId: options.sessionId,
+  });
+
+  return NextResponse.json({
+    success: true,
+    alreadyAccepted: options.alreadyAccepted,
+    already_accepted: options.alreadyAccepted,
+    workspaceId: options.workspaceId,
+    workspace_id: options.workspaceId,
+    campaignId: options.campaignId ?? null,
+    campaign_id: options.campaignId ?? null,
+    sessionId: options.sessionId ?? null,
+    session_id: options.sessionId ?? null,
+    redirect,
+  });
+}
 
 function isLegacyAcceptedTriggerNullUserError(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
@@ -26,41 +65,49 @@ async function getInviteByToken(
   admin: ReturnType<typeof createAdminClient>,
   token: string
 ): Promise<{ invite: InviteRow | null; error: unknown }> {
-  const withAcceptedBy = await admin
-    .from('workspace_invites')
-    .select('id, workspace_id, email, role, status, expires_at, accepted_by_user_id')
-    .eq('token', token)
-    .maybeSingle();
+  const candidates: Array<'token' | 'invite_token'> = ['token', 'invite_token'];
 
-  if (!withAcceptedBy.error) {
-    return {
-      invite: (withAcceptedBy.data as InviteRow | null) ?? null,
-      error: null,
-    };
+  for (const candidate of candidates) {
+    const withAcceptedBy = await admin
+      .from('workspace_invites')
+      .select('id, workspace_id, email, role, status, expires_at, accepted_at, accepted_by_user_id')
+      .eq(candidate, token)
+      .maybeSingle();
+
+    if (!withAcceptedBy.error) {
+      return {
+        invite: (withAcceptedBy.data as InviteRow | null) ?? null,
+        error: null,
+      };
+    }
+
+    const maybeError = withAcceptedBy.error as { code?: string; message?: string } | null;
+    const missingAcceptedByColumn =
+      maybeError?.code === '42703' &&
+      typeof maybeError.message === 'string' &&
+      maybeError.message.includes('accepted_by_user_id');
+
+    if (!missingAcceptedByColumn) {
+      continue;
+    }
+
+    const fallback = await admin
+      .from('workspace_invites')
+      .select('id, workspace_id, email, role, status, expires_at, accepted_at')
+      .eq(candidate, token)
+      .maybeSingle();
+
+    if (!fallback.error) {
+      return {
+        invite: fallback.data
+          ? ({ ...fallback.data, accepted_by_user_id: null } as InviteRow)
+          : null,
+        error: null,
+      };
+    }
   }
 
-  const maybeError = withAcceptedBy.error as { code?: string; message?: string } | null;
-  const missingAcceptedByColumn =
-    maybeError?.code === '42703' &&
-    typeof maybeError.message === 'string' &&
-    maybeError.message.includes('accepted_by_user_id');
-
-  if (!missingAcceptedByColumn) {
-    return { invite: null, error: withAcceptedBy.error };
-  }
-
-  const fallback = await admin
-    .from('workspace_invites')
-    .select('id, workspace_id, email, role, status, expires_at')
-    .eq('token', token)
-    .maybeSingle();
-
-  return {
-    invite: fallback.data
-      ? ({ ...fallback.data, accepted_by_user_id: null } as InviteRow)
-      : null,
-    error: fallback.error,
-  };
+  return { invite: null, error: null };
 }
 
 async function markInviteAccepted(
@@ -140,7 +187,7 @@ export async function POST(request: NextRequest) {
     if (!requestUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-    const userEmail = (requestUser.email ?? '').toLowerCase().trim();
+    const userEmail = normalizeInviteEmail(requestUser.email) ?? '';
 
     const body = await request.json().catch(() => ({}));
     const token = typeof body?.token === 'string' ? body.token.trim() : null;
@@ -165,6 +212,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const inviteTarget = await resolveInviteTarget(admin, invite.id);
+
     const expiresAt = invite.expires_at ? new Date(invite.expires_at) : null;
     if (expiresAt && expiresAt <= new Date()) {
       return NextResponse.json(
@@ -173,8 +222,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const inviteEmail = (invite.email ?? '').toLowerCase().trim();
-    if (userEmail !== inviteEmail) {
+    const inviteEmail = normalizeInviteEmail(invite.email);
+    if (inviteEmail && userEmail !== inviteEmail) {
       return NextResponse.json(
         { error: 'This invite was sent to a different email address' },
         { status: 403 }
@@ -201,22 +250,24 @@ export async function POST(request: NextRequest) {
     const acceptedByCurrentUser =
       invite.accepted_by_user_id === requestUser.id || membershipAlreadyExists;
 
-    if ((invite.status === 'accepted' || invite.status === 'expired') && acceptedByCurrentUser) {
+    const inviteStatus = invite.status ?? (invite.accepted_at ? 'accepted' : 'pending');
+
+    if ((inviteStatus === 'accepted' || inviteStatus === 'expired') && acceptedByCurrentUser) {
       console.info('[invite-accept] duplicate accept resolved safely', {
         inviteId: invite.id,
         workspaceId: invite.workspace_id,
         userId: requestUser.id,
         result: 'already_accepted',
       });
-      return NextResponse.json({
-        success: true,
-        alreadyAccepted: true,
+      return inviteAcceptedResponse({
         workspaceId: invite.workspace_id,
-        redirect: '/home',
+        campaignId: inviteTarget.campaignId,
+        sessionId: inviteTarget.sessionId,
+        alreadyAccepted: true,
       });
     }
 
-    if (invite.status !== 'pending') {
+    if (inviteStatus !== 'pending') {
       return NextResponse.json(
         { error: 'This invite has already been used' },
         { status: 400 }
@@ -388,11 +439,11 @@ export async function POST(request: NextRequest) {
       membershipAlreadyExists,
     });
 
-    return NextResponse.json({
-      success: true,
-      alreadyAccepted: false,
+    return inviteAcceptedResponse({
       workspaceId: invite.workspace_id,
-      redirect: '/home',
+      campaignId: inviteTarget.campaignId,
+      sessionId: inviteTarget.sessionId,
+      alreadyAccepted: false,
     });
   } catch (e) {
     console.error('Accept invite error:', e);

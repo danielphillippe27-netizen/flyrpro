@@ -45,6 +45,17 @@ type BuildingPendingOverlayConfig = {
   description: string;
 };
 
+export type MapPointOverlay = {
+  id: string;
+  lon: number;
+  lat: number;
+  addressId?: string | null;
+  buildingId?: string | null;
+  count?: number;
+  color?: string;
+  label?: string | null;
+};
+
 /** Safe getLayer: avoid "getOwnLayer of undefined" during style transition or when map is hidden (e.g. tab switch). */
 function safeGetLayer(m: mapboxgl.Map, layerId: string): boolean {
   try {
@@ -144,6 +155,7 @@ export function CampaignDetailMapView({
   onSnapComplete,
   renderLocationCardExtra,
   buildingPendingOverlay,
+  pointOverlays = [],
 }: {
   campaignId: string;
   addresses: CampaignAddress[];
@@ -155,6 +167,7 @@ export function CampaignDetailMapView({
     campaignId: string;
   }) => ReactNode;
   buildingPendingOverlay?: BuildingPendingOverlayConfig;
+  pointOverlays?: MapPointOverlay[];
 }) {
   const { theme } = useTheme();
   const { currentWorkspaceId } = useWorkspace();
@@ -538,6 +551,9 @@ export function CampaignDetailMapView({
 
   const addressPointsSourceId = 'campaign-address-points';
   const addressPointsLayerId = 'campaign-address-points-extrusion';
+  const pointOverlaySourceId = 'campaign-point-overlays';
+  const pointOverlayCircleLayerId = 'campaign-point-overlays-circle';
+  const pointOverlayLabelLayerId = 'campaign-point-overlays-label';
 
   // Addresses view: circular fill-extrusion points, same status highlighting as buildings
   useEffect(() => {
@@ -576,7 +592,7 @@ export function CampaignDetailMapView({
     };
 
     // Address map colors: address_statuses — green = delivered, blue = talked | appointment, purple = QR scanned
-    const getColorExpression = (): any => {
+    const getColorExpression = (): mapboxgl.Expression => {
       const getAddressStatus = () => ['coalesce', ['feature-state', 'address_status'], ['get', 'address_status'], 'none'];
       const getQrScanned = () => ['coalesce', ['feature-state', 'qr_scanned'], ['get', 'qr_scanned'], false];
       const getScansTotal = () => ['coalesce', ['feature-state', 'scans_total'], ['get', 'scans_total'], 0];
@@ -600,7 +616,7 @@ export function CampaignDetailMapView({
         ['all', isUntouched, statusFilters.UNTOUCHED],
         MAP_STATUS_CONFIG.UNTOUCHED.color,
         '#6b7280',
-      ] as any;
+      ] as mapboxgl.Expression;
     };
 
     const addAddressPointsLayer = () => {
@@ -679,6 +695,138 @@ export function CampaignDetailMapView({
       removeAddressPointsLayer();
     };
   }, [mapViewMode, mapLoaded, addresses, statusFilters, theme]);
+
+  useEffect(() => {
+    const mapInstance = map.current;
+    if (!mapInstance || !mapLoaded) return;
+
+    const buildPointOverlayGeoJSON = (): GeoJSON.FeatureCollection<GeoJSON.Point> | null => {
+      const features: GeoJSON.Feature<GeoJSON.Point>[] = pointOverlays
+        .filter((overlay) => Number.isFinite(overlay.lon) && Number.isFinite(overlay.lat))
+        .map((overlay) => ({
+          type: 'Feature',
+          geometry: {
+            type: 'Point',
+            coordinates: [overlay.lon, overlay.lat],
+          },
+          properties: {
+            feature_id: overlay.id,
+            address_id: overlay.addressId ?? null,
+            building_id: overlay.buildingId ?? overlay.addressId ?? null,
+            count: overlay.count ?? 0,
+            label: overlay.label ?? (overlay.count ? String(overlay.count) : ''),
+            color: overlay.color ?? '#ef4444',
+          },
+        }));
+
+      return features.length > 0 ? { type: 'FeatureCollection', features } : null;
+    };
+
+    const removePointOverlayLayers = () => {
+      try {
+        if (safeGetLayer(mapInstance, pointOverlayLabelLayerId)) mapInstance.removeLayer(pointOverlayLabelLayerId);
+        if (safeGetLayer(mapInstance, pointOverlayCircleLayerId)) mapInstance.removeLayer(pointOverlayCircleLayerId);
+        if (safeGetSource(mapInstance, pointOverlaySourceId)) mapInstance.removeSource(pointOverlaySourceId);
+      } catch {}
+    };
+
+    const addPointOverlayLayers = () => {
+      if (!mapInstance.isStyleLoaded()) return;
+
+      const geo = buildPointOverlayGeoJSON();
+      if (!geo) {
+        removePointOverlayLayers();
+        return;
+      }
+
+      try {
+        const existingSource = mapInstance.getSource(pointOverlaySourceId);
+        if (existingSource && 'setData' in existingSource) {
+          (existingSource as mapboxgl.GeoJSONSource).setData(geo);
+        } else if (!existingSource) {
+          mapInstance.addSource(pointOverlaySourceId, {
+            type: 'geojson',
+            data: geo,
+            promoteId: 'feature_id',
+          });
+        }
+
+        if (!safeGetLayer(mapInstance, pointOverlayCircleLayerId)) {
+          mapInstance.addLayer({
+            id: pointOverlayCircleLayerId,
+            type: 'circle',
+            source: pointOverlaySourceId,
+            paint: {
+              'circle-color': ['coalesce', ['get', 'color'], '#ef4444'],
+              'circle-radius': [
+                'interpolate',
+                ['linear'],
+                ['coalesce', ['get', 'count'], 1],
+                1,
+                8,
+                5,
+                12,
+              ],
+              'circle-stroke-width': 2,
+              'circle-stroke-color': '#ffffff',
+              'circle-opacity': 0.95,
+            },
+          });
+        }
+
+        if (!safeGetLayer(mapInstance, pointOverlayLabelLayerId)) {
+          mapInstance.addLayer({
+            id: pointOverlayLabelLayerId,
+            type: 'symbol',
+            source: pointOverlaySourceId,
+            layout: {
+              'text-field': ['coalesce', ['get', 'label'], ''],
+              'text-size': 11,
+              'text-font': ['Open Sans Semibold', 'Arial Unicode MS Bold'],
+              'text-offset': [0, 0],
+              'text-anchor': 'center',
+            },
+            paint: {
+              'text-color': '#ffffff',
+            },
+          });
+        }
+      } catch (error) {
+        console.error('[CampaignDetailMapView] Error adding point overlay layer:', error);
+      }
+    };
+
+    const onPointOverlayClick = (event: mapboxgl.MapLayerMouseEvent) => {
+      const feature = event.features?.[0];
+      if (!feature?.properties) return;
+      const addressId = feature.properties.address_id as string | undefined;
+      const buildingId =
+        (feature.properties.building_id as string | undefined) ??
+        addressId;
+      if (buildingId) {
+        handleBuildingClick(buildingId, addressId);
+      }
+    };
+
+    if (pointOverlays.length === 0) {
+      removePointOverlayLayers();
+      return;
+    }
+
+    if (mapInstance.isStyleLoaded()) {
+      addPointOverlayLayers();
+    } else {
+      mapInstance.once('style.load', addPointOverlayLayers);
+    }
+
+    mapInstance.off('click', pointOverlayCircleLayerId, onPointOverlayClick);
+    mapInstance.on('click', pointOverlayCircleLayerId, onPointOverlayClick);
+
+    return () => {
+      mapInstance.off('click', pointOverlayCircleLayerId, onPointOverlayClick);
+      removePointOverlayLayers();
+    };
+  }, [mapLoaded, pointOverlays, theme]);
 
   // Sync map style with app theme (light/dark)
   useEffect(() => {
