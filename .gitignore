@@ -61,3 +61,5 @@ master_addresses_parquet/
 
 # Debug scripts
 debug-*.js
+kimi-cli/node_modules/
+web/node_modules/
