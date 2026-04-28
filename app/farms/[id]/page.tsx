@@ -90,7 +90,7 @@ type ActivityItem =
   | { id: string; type: 'contact'; timestamp: string; title: string; description: string; touchId?: string | null };
 
 type DashboardScope = 'current_cycle' | 'all_time';
-type MapLayerScope = 'all_time' | 'cycle' | 'session';
+type MapLayerScope = 'all_time' | 'cycle';
 type PlannerTouchDraft = {
   slotId: string;
   touchId: string | null;
@@ -246,7 +246,6 @@ export default function FarmPage() {
   const [mapLayerScope, setMapLayerScope] = useState<MapLayerScope>('all_time');
   const [showMapContactsOverlay, setShowMapContactsOverlay] = useState(true);
   const [selectedMapCycleNumber, setSelectedMapCycleNumber] = useState<string>('latest');
-  const [selectedMapTouchId, setSelectedMapTouchId] = useState<string>('all');
   const [selectedCycleFilter, setSelectedCycleFilter] = useState<string>('all');
   const [selectedTouchFilter, setSelectedTouchFilter] = useState<string>('all');
   const [sessionDialogOpen, setSessionDialogOpen] = useState(false);
@@ -267,10 +266,10 @@ export default function FarmPage() {
   const [configName, setConfigName] = useState('');
   const [configDescription, setConfigDescription] = useState('');
   const [configStartDate, setConfigStartDate] = useState('');
-  const [configTouchesPerInterval, setConfigTouchesPerInterval] = useState(2);
+  const [configTouchesPerInterval, setConfigTouchesPerInterval] = useState(500);
   const [configTouchesInterval, setConfigTouchesInterval] = useState<FarmTouchInterval>('month');
-  const [configGoalType, setConfigGoalType] = useState<FarmGoalType>('touches_per_cycle');
-  const [configGoalTarget, setConfigGoalTarget] = useState(2);
+  const [configGoalType, setConfigGoalType] = useState<FarmGoalType>('homes_per_cycle');
+  const [configGoalTarget, setConfigGoalTarget] = useState(500);
   const [configCycleCompletionWindowDays, setConfigCycleCompletionWindowDays] = useState('');
   const [configTouchTypes, setConfigTouchTypes] = useState<FarmTouchType[]>([]);
   const [configAnnualBudget, setConfigAnnualBudget] = useState('');
@@ -380,6 +379,17 @@ export default function FarmPage() {
   }, [currentWorkspaceId, farmId, loadData]);
 
   useEffect(() => {
+    const status = linkedCampaign?.parcel_enrichment_status;
+    if (!linkedCampaignId || (status !== 'queued' && status !== 'processing')) return;
+
+    const interval = setInterval(() => {
+      void loadData(userId);
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [linkedCampaign?.parcel_enrichment_status, linkedCampaignId, loadData, userId]);
+
+  useEffect(() => {
     if (activeTab === 'map') {
       setMapTabVersion((current) => current + 1);
     }
@@ -423,10 +433,16 @@ export default function FarmPage() {
     setConfigName(farm.name ?? '');
     setConfigDescription(farm.description ?? '');
     setConfigStartDate(formatDateInput(farm.start_date));
-    setConfigTouchesPerInterval(Math.max(1, farm.touches_per_interval ?? farm.frequency ?? 2));
+    const resolvedGoalType = getFarmGoalType(farm);
+    const resolvedGoalTarget = getFarmGoalTarget(farm);
+    setConfigTouchesPerInterval(
+      resolvedGoalType === 'homes_per_cycle'
+        ? resolvedGoalTarget
+        : Math.max(1, farm.touches_per_interval ?? farm.frequency ?? 1)
+    );
     setConfigTouchesInterval(farm.touches_interval === 'year' ? 'year' : 'month');
-    setConfigGoalType(getFarmGoalType(farm));
-    setConfigGoalTarget(getFarmGoalTarget(farm));
+    setConfigGoalType(resolvedGoalType);
+    setConfigGoalTarget(resolvedGoalTarget);
     setConfigCycleCompletionWindowDays(
       typeof farm.cycle_completion_window_days === 'number'
         ? String(farm.cycle_completion_window_days)
@@ -547,10 +563,6 @@ export default function FarmPage() {
   useEffect(() => {
     if (resolvedTouches.length === 0) {
       setSelectedMapCycleNumber('latest');
-      setSelectedMapTouchId('all');
-      if (mapLayerScope === 'session') {
-        setMapLayerScope('all_time');
-      }
       return;
     }
 
@@ -562,16 +574,7 @@ export default function FarmPage() {
     ) {
       setSelectedMapCycleNumber(latestCycleNumber);
     }
-
-    if (selectedMapTouchId === 'all' && resolvedTouches[0]) {
-      setSelectedMapTouchId(resolvedTouches[0].id);
-      return;
-    }
-
-    if (!resolvedTouches.some((touch) => touch.id === selectedMapTouchId)) {
-      setSelectedMapTouchId(resolvedTouches[0].id);
-    }
-  }, [mapLayerScope, resolvedTouches, selectedMapCycleNumber, selectedMapTouchId]);
+  }, [resolvedTouches, selectedMapCycleNumber]);
 
   const kpis = useMemo(() => {
     return {
@@ -588,10 +591,6 @@ export default function FarmPage() {
     };
   }, [analytics]);
 
-  const selectedMapTouch = useMemo(
-    () => resolvedTouches.find((touch) => touch.id === selectedMapTouchId) ?? null,
-    [resolvedTouches, selectedMapTouchId]
-  );
   const selectedMapCycleTouches = useMemo(
     () =>
       resolvedTouches.filter((touch) => String(touch.resolvedCycleNumber) === selectedMapCycleNumber),
@@ -698,7 +697,7 @@ export default function FarmPage() {
 
   const defaultPlannedHomesTarget = useMemo(() => {
     if (!farm || getFarmGoalType(farm) !== 'homes_per_cycle') return '';
-    return String(Math.max(1, Math.ceil(getFarmGoalTarget(farm) / Math.max(1, farm.touches_per_interval ?? farm.frequency ?? 1))));
+    return String(getFarmGoalTarget(farm));
   }, [farm]);
 
   const plannerSlots = useMemo<PlannerTouchSlot[]>(() => {
@@ -1212,10 +1211,9 @@ export default function FarmPage() {
       await FarmTouchService.createSession({
         farmId: farm.id,
         workspaceId: farm.workspace_id ?? currentWorkspaceId,
-        cycleNumber:
-          kpis.currentCycleTouches.length >= Math.max(1, farm.touches_per_interval ?? farm.frequency ?? 1)
-            ? kpis.currentCycleNumber + 1
-            : kpis.currentCycleNumber,
+        cycleNumber: kpis.currentCycleTouches.length === 0 && kpis.currentCycleNumber === 1
+          ? 1
+          : kpis.currentCycleNumber + 1,
         mode: sessionMode,
         title: sessionTitle || undefined,
         scheduledDate: new Date(`${sessionDate}T12:00:00`).toISOString(),
@@ -1351,7 +1349,7 @@ export default function FarmPage() {
       return;
     }
     if (!Number.isFinite(configTouchesPerInterval) || configTouchesPerInterval < 1) {
-      alert('Please enter at least 1 touch.');
+      alert('Please enter at least 1 target home.');
       return;
     }
     if (!Number.isFinite(configGoalTarget) || configGoalTarget < 1) {
@@ -1394,16 +1392,18 @@ export default function FarmPage() {
         : 365 * 24 * 60 * 60 * 1000;
       const nextEndDate = new Date(new Date(`${configStartDate}T12:00:00`).getTime() + durationMs);
 
+      const resolvedGoalTarget = configGoalType === 'homes_per_cycle' ? configTouchesPerInterval : configGoalTarget;
+
       await FarmService.updateFarm(farm.id, {
         name: configName.trim(),
         description: configDescription.trim() || null,
         start_date: configStartDate,
         end_date: formatDateInput(nextEndDate),
-        frequency: configTouchesPerInterval,
-        touches_per_interval: configTouchesPerInterval,
+        frequency: 1,
+        touches_per_interval: 1,
         touches_interval: configTouchesInterval,
         goal_type: configGoalType,
-        goal_target: configGoalTarget,
+        goal_target: resolvedGoalTarget,
         cycle_completion_window_days: parsedCycleWindow,
         touch_types: configTouchTypes,
         annual_budget_cents: annualBudgetCents,
@@ -1823,7 +1823,7 @@ export default function FarmPage() {
               <div>
                 <h2 className="text-sm font-semibold text-foreground">Master Farm Map</h2>
                 <p className="text-sm text-muted-foreground">
-                  Use the master map as the farm&apos;s long-term memory, then slice it by cycle or session when you need the operational view.
+                  Use the master map as the farm&apos;s long-term memory, then slice it by cycle when you need the operational view.
                 </p>
               </div>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -1850,37 +1850,8 @@ export default function FarmPage() {
                   >
                     Cycle
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMapLayerScope('session');
-                      if (selectedMapTouchId === 'all' && resolvedTouches[0]) {
-                        setSelectedMapTouchId(resolvedTouches[0].id);
-                      }
-                    }}
-                    className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
-                      mapLayerScope === 'session'
-                        ? 'bg-background text-foreground shadow-sm'
-                        : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    Session
-                  </button>
                 </div>
-                {mapLayerScope === 'session' ? (
-                  <Select value={selectedMapTouchId} onValueChange={setSelectedMapTouchId}>
-                    <SelectTrigger className="w-[280px]">
-                      <SelectValue placeholder="Select session" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {resolvedTouches.map((touch) => (
-                        <SelectItem key={touch.id} value={touch.id}>
-                          {touch.title || MODE_LABELS[touch.mode ?? 'doorknock']} • Cycle {touch.resolvedCycleNumber}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : mapLayerScope === 'cycle' ? (
+                {mapLayerScope === 'cycle' ? (
                   <Select value={selectedMapCycleSelectValue} onValueChange={setSelectedMapCycleNumber}>
                     <SelectTrigger className="w-[220px]">
                       <SelectValue placeholder="Select cycle" />
@@ -1907,24 +1878,20 @@ export default function FarmPage() {
               </div>
             </div>
             <p className="mt-3 text-xs text-muted-foreground">
-              {mapLayerScope === 'session'
-                ? `Showing homes whose latest recorded farm touch is ${
-                    selectedMapTouch?.title || (selectedMapTouch ? MODE_LABELS[selectedMapTouch.mode ?? 'doorknock'] : 'the selected session')
-                  }.`
-                : mapLayerScope === 'cycle'
-                  ? `Showing homes last touched during ${selectedMapCycleLabel.toLowerCase()}.`
-                  : 'Showing cumulative visit state across the farm, with optional contact pins layered on top.'}
+              {mapLayerScope === 'cycle'
+                ? `Showing homes last touched during ${selectedMapCycleLabel.toLowerCase()}.`
+                : 'Showing cumulative visit state across the farm, with optional contact pins layered on top.'}
             </p>
           </div>
           <div className="bg-card rounded-xl border border-border overflow-hidden" style={{ height: '560px' }}>
             <FarmMapView
-              key={`${farm.id}:${mapTabVersion}:${mapLayerScope}:${selectedMapCycleNumber}:${selectedMapTouchId}`}
+              key={`${farm.id}:${mapTabVersion}:${mapLayerScope}:${selectedMapCycleNumber}`}
               farm={farm}
               addresses={addresses}
               linkedCampaignId={linkedCampaignId}
+              linkedCampaign={linkedCampaign}
               layerScope={mapLayerScope}
               cycleTouchIds={selectedMapCycleTouchIds}
-              selectedTouchId={mapLayerScope === 'session' ? selectedMapTouchId : null}
               touchOutcomes={touchOutcomes}
               contacts={contacts}
               showContactsOverlay={showMapContactsOverlay}
@@ -2507,7 +2474,7 @@ export default function FarmPage() {
 
                   <div className="grid gap-3 md:grid-cols-[minmax(0,1fr),180px]">
                     <div className="space-y-2">
-                      <Label htmlFor="configTouchesPerInterval"># of touches</Label>
+                      <Label htmlFor="configTouchesPerInterval">Target homes per cycle</Label>
                       <Input
                         id="configTouchesPerInterval"
                         type="number"
@@ -2520,9 +2487,11 @@ export default function FarmPage() {
                           }
 
                           const parsed = parseInt(e.target.value, 10);
-                          setConfigTouchesPerInterval(
-                            Number.isFinite(parsed) ? Math.max(1, parsed) : 0
-                          );
+                          const nextValue = Number.isFinite(parsed) ? Math.max(1, parsed) : 0;
+                          setConfigTouchesPerInterval(nextValue);
+                          if (configGoalType === 'homes_per_cycle') {
+                            setConfigGoalTarget(nextValue);
+                          }
                         }}
                       />
                     </div>
@@ -2552,7 +2521,7 @@ export default function FarmPage() {
                     <div className="space-y-1">
                       <p className="font-medium text-foreground">Goal tracking</p>
                       <p className="text-sm text-muted-foreground">
-                        Define the main target for this farm and how quickly each cycle should be completed.
+                        One cycle equals one planned area hit. Track either homes reached or session volume against that cycle.
                       </p>
                     </div>
                     <div className="grid gap-3 md:grid-cols-[minmax(0,1fr),140px]">
@@ -2560,7 +2529,13 @@ export default function FarmPage() {
                         <Label>Goal type</Label>
                         <Select
                           value={configGoalType}
-                          onValueChange={(value) => setConfigGoalType(value as FarmGoalType)}
+                          onValueChange={(value) => {
+                            const nextValue = value as FarmGoalType;
+                            setConfigGoalType(nextValue);
+                            if (nextValue === 'homes_per_cycle') {
+                              setConfigGoalTarget(configTouchesPerInterval);
+                            }
+                          }}
                         >
                           <SelectTrigger>
                             <SelectValue />
@@ -2584,11 +2559,18 @@ export default function FarmPage() {
                           onChange={(e) => {
                             if (e.target.value === '') {
                               setConfigGoalTarget(0);
+                              if (configGoalType === 'homes_per_cycle') {
+                                setConfigTouchesPerInterval(0);
+                              }
                               return;
                             }
 
                             const parsed = parseInt(e.target.value, 10);
-                            setConfigGoalTarget(Number.isFinite(parsed) ? Math.max(1, parsed) : 0);
+                            const nextValue = Number.isFinite(parsed) ? Math.max(1, parsed) : 0;
+                            setConfigGoalTarget(nextValue);
+                            if (configGoalType === 'homes_per_cycle') {
+                              setConfigTouchesPerInterval(nextValue);
+                            }
                           }}
                         />
                       </div>
@@ -2650,15 +2632,15 @@ export default function FarmPage() {
                         : 'No start date selected'}
                     </p>
                     <p className="text-muted-foreground">
-                      {configTouchesPerInterval} {configTouchesPerInterval === 1 ? 'touch' : 'touches'} / {configTouchesInterval}
+                      {`1 cycle / ${configTouchesInterval}`}
                     </p>
                     <p className="text-muted-foreground">
                       {formatFarmGoal({
                         goal_type: configGoalType,
-                        goal_target: configGoalTarget,
-                        touches_per_interval: configTouchesPerInterval,
+                        goal_target: configGoalType === 'homes_per_cycle' ? configTouchesPerInterval : configGoalTarget,
+                        touches_per_interval: 1,
                         touches_interval: configTouchesInterval,
-                        frequency: configTouchesPerInterval,
+                        frequency: 1,
                       })}
                     </p>
                     <p className="text-muted-foreground">

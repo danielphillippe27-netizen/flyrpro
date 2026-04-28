@@ -5,11 +5,12 @@
  * and address points with semantic validation, multi-unit detection,
  * and comprehensive quality assurance.
  * 
- * Implements 4-Tier Matching Hierarchy:
+ * Implements 5-Tier Matching Hierarchy:
  * - Tier 1: Direct Containment + Street Verification (Confidence 1.0)
  * - Tier 2: Point-on-Surface (Confidence 0.9)
- * - Tier 3: Proximity + Semantic Match (Confidence 0.8)
- * - Tier 4: Fallback Nearest Valid (Confidence 0.5)
+ * - Tier 3: Parcel Bridge (Confidence 0.95)
+ * - Tier 4: Proximity + Semantic Match (Confidence 0.8)
+ * - Tier 5: Fallback Nearest Valid (Confidence 0.5)
  */
 
 import { SupabaseClient } from '@supabase/supabase-js';
@@ -33,8 +34,8 @@ export interface MatchResult {
   addressId: string;
   addressGersId: string | null;
   buildingId: string;
-  matchType: 'containment_verified' | 'containment_suspect' | 'point_on_surface' | 
-             'proximity_verified' | 'proximity_fallback' | 'manual' | 'orphan';
+  matchType: 'containment_verified' | 'containment_suspect' | 'point_on_surface' |
+             'parcel_verified' | 'proximity_verified' | 'proximity_fallback' | 'manual' | 'orphan';
   confidence: number;
   distanceMeters: number;
   streetMatchScore: number;
@@ -86,6 +87,7 @@ export interface SpatialJoinSummary {
     containmentVerified: number;
     containmentSuspect: number;
     pointOnSurface: number;
+    parcelVerified: number;
     proximityVerified: number;
     proximityFallback: number;
   };
@@ -93,11 +95,11 @@ export interface SpatialJoinSummary {
 }
 
 // Building feature from GeoJSON (S3/TileLambda may include primary_street or street_name)
-interface BuildingFeature {
+export interface BuildingFeature {
   type: 'Feature';
   geometry: {
-    type: 'Polygon';
-    coordinates: number[][][];
+    type: 'Polygon' | 'MultiPolygon';
+    coordinates: number[][][] | number[][][][];
   };
   properties: {
     gers_id: string;
@@ -107,6 +109,29 @@ interface BuildingFeature {
     primary_street?: string | null;
     street_name?: string | null;
   };
+}
+
+interface ParcelFeature {
+  externalId: string;
+  geometry: {
+    type: 'MultiPolygon';
+    coordinates: number[][][][];
+  };
+}
+
+interface PreparedParcelFeature extends ParcelFeature {
+  bbox: [number, number, number, number];
+  buildingCandidates: Array<{
+    building: BuildingFeature;
+    centroid: [number, number];
+    area: number;
+  }>;
+}
+
+interface SpatialJoinOptions {
+  parcels?: ParcelFeature[];
+  resetExisting?: boolean;
+  persistenceMode?: 'silver' | 'gold';
 }
 
 // Address from database
@@ -135,7 +160,8 @@ export class StableLinkerService {
   async runSpatialJoin(
     campaignId: string,
     buildingsGeoJSON: { features: BuildingFeature[] },
-    overtureRelease: string = '2026-01-21.0'
+    overtureRelease: string = '2026-01-21.0',
+    options: SpatialJoinOptions = {}
   ): Promise<SpatialJoinSummary> {
     const joinStartMs = Date.now();
     try {
@@ -159,12 +185,12 @@ export class StableLinkerService {
       );
       
       // Parse geom field which may be string or object from Supabase
-      const addresses: CampaignAddress[] = (rawAddresses || []).map((addr: any) => {
+      const addresses: CampaignAddress[] = (rawAddresses || []).map((addr) => {
         let geom = addr.geom;
         if (typeof geom === 'string') {
           try {
             geom = JSON.parse(geom);
-          } catch (e) {
+          } catch {
             console.warn(`[StableLinker] Failed to parse geom for address ${addr.id}, using fallback`);
             geom = { type: 'Point', coordinates: [0, 0] };
           }
@@ -184,6 +210,7 @@ export class StableLinkerService {
             containmentVerified: 0,
             containmentSuspect: 0,
             pointOnSurface: 0,
+            parcelVerified: 0,
             proximityVerified: 0,
             proximityFallback: 0,
           },
@@ -203,6 +230,13 @@ export class StableLinkerService {
       const validBuildings = this.filterValidBuildings(buildingsGeoJSON.features);
       console.log(`[StableLinker] Valid buildings after filtering: ${validBuildings.length}`);
 
+      const preparedParcels = options.parcels?.length
+        ? this.prepareParcelBridge(options.parcels, validBuildings)
+        : [];
+      if (preparedParcels.length > 0) {
+        console.log(`[StableLinker] Parcel bridge enabled with ${preparedParcels.length} prepared parcels`);
+      }
+
       if (validBuildings.length === 0) {
         console.error('[StableLinker] No valid buildings after filtering!');
         return {
@@ -215,6 +249,7 @@ export class StableLinkerService {
             containmentVerified: 0,
             containmentSuspect: 0,
             pointOnSurface: 0,
+            parcelVerified: 0,
             proximityVerified: 0,
             proximityFallback: 0,
           },
@@ -226,6 +261,10 @@ export class StableLinkerService {
             density_warning_count: 0,
           },
         };
+      }
+
+      if (options.resetExisting) {
+        await this.resetCampaignArtifacts(campaignId, options.persistenceMode === 'gold');
       }
 
       // 3. Run 4-tier matching algorithm
@@ -242,7 +281,8 @@ export class StableLinkerService {
           const raw = this.matchAddressToBuilding(
             address,
             validBuildings,
-            matchedBuildingIds
+            matchedBuildingIds,
+            preparedParcels
           );
           const result: MatchResult = Array.isArray(raw) ? raw[0] : raw;
           const densityWarning = Array.isArray(raw) && raw[1].densityWarning;
@@ -272,7 +312,12 @@ export class StableLinkerService {
       this.detectMultiUnitBuildings(matches);
 
       // 5. Save results to database
-      await this.saveMatches(campaignId, matches, overtureRelease);
+      await this.saveMatches(
+        campaignId,
+        matches,
+        overtureRelease,
+        options.persistenceMode ?? 'silver'
+      );
       await this.saveOrphans(campaignId, orphans);
 
       // 6. Generate summary with telemetry
@@ -303,7 +348,7 @@ export class StableLinkerService {
    */
   private filterValidBuildings(buildings: BuildingFeature[]): BuildingFeature[] {
     const filtered = buildings.filter(b => {
-      const area = this.calculatePolygonArea(b.geometry.coordinates[0]);
+      const area = this.calculateBuildingArea(b);
       if (area < 5) {
         return false; // noise_geometry
       }
@@ -317,13 +362,14 @@ export class StableLinkerService {
   }
 
   /**
-   * 4-Tier Matching Algorithm (with tie-break; can throw DataIntegrityError).
+   * 5-Tier Matching Algorithm (with tie-break; can throw DataIntegrityError).
    * Returns MatchResult or [MatchResult, { densityWarning: true }] when density guard triggers.
    */
   private matchAddressToBuilding(
     address: CampaignAddress,
     buildings: BuildingFeature[],
-    matchedBuildingIds: Set<string>
+    matchedBuildingIds: Set<string>,
+    parcels: PreparedParcelFeature[]
   ): MatchResult | [MatchResult, { densityWarning: true }] {
     const addressCoords = address.geom.coordinates;
 
@@ -371,13 +417,35 @@ export class StableLinkerService {
       );
     }
 
-    // TIER 3: Proximity within 50m; prefer street match, then area, then distance
+    // TIER 3: Parcel bridge; if address and building share a parcel, treat that as a hard container.
+    const parcelBridgeBuilding = this.pickBestParcelBridgedBuildingOrThrow(
+      address.id,
+      addressCoords,
+      address.street_name ?? '',
+      parcels
+    );
+    if (parcelBridgeBuilding) {
+      const streetScore = this.calculateStreetMatchScore(
+        address.street_name ?? '',
+        this.getBuildingStreet(parcelBridgeBuilding.building) ?? ''
+      );
+      return this.createMatchResult(
+        address,
+        parcelBridgeBuilding.building,
+        'parcel_verified',
+        0.95,
+        parcelBridgeBuilding.distance,
+        streetScore
+      );
+    }
+
+    // TIER 4: Proximity within 50m; prefer street match, then area, then distance
     const nearestMatches = this.findNearestBuildings(addressCoords, buildings, 10);
     const within50 = nearestMatches.filter(c => c.distance <= 50);
     if (within50.length > 0) {
       const withStreet = within50.map(c => ({
         ...c,
-        area: this.calculatePolygonArea(c.building.geometry.coordinates[0]),
+        area: this.calculateBuildingArea(c.building),
         streetScore: this.calculateStreetMatchScore(
           address.street_name ?? '',
           this.getBuildingStreet(c.building) ?? ''
@@ -406,7 +474,7 @@ export class StableLinkerService {
       }
     }
 
-    // TIER 4: Fallback (nearest within 100m, not already matched); no street requirement
+    // TIER 5: Fallback (nearest within 100m, not already matched); no street requirement
     const within100 = nearestMatches.filter(
       c => c.distance <= 100 && !matchedBuildingIds.has(c.building.properties.gers_id)
     );
@@ -433,6 +501,55 @@ export class StableLinkerService {
       0,
       0
     );
+  }
+
+  private async resetCampaignArtifacts(campaignId: string, clearCampaignAddressLinks: boolean): Promise<void> {
+    const operations: Array<Promise<{ error: { message: string } | null }>> = [
+      this.supabase
+        .from('building_address_links')
+        .delete()
+        .eq('campaign_id', campaignId),
+      this.supabase
+        .from('building_slices')
+        .delete()
+        .eq('campaign_id', campaignId),
+      this.supabase
+        .from('address_orphans')
+        .delete()
+        .eq('campaign_id', campaignId),
+    ];
+
+    if (clearCampaignAddressLinks) {
+      operations.push(
+        this.supabase
+          .from('campaign_addresses')
+          .update({
+            building_id: null,
+            match_source: null,
+            confidence: null,
+          })
+          .eq('campaign_id', campaignId)
+      );
+    }
+
+    const results = await Promise.all(operations);
+    const deleteLinksError = results[0].error;
+    const deleteSlicesError = results[1].error;
+    const deleteOrphansError = results[2].error;
+    const resetAddressesError = clearCampaignAddressLinks ? results[3]?.error ?? null : null;
+
+    if (deleteLinksError) {
+      throw new Error(`Failed to clear building links: ${deleteLinksError.message}`);
+    }
+    if (deleteSlicesError) {
+      throw new Error(`Failed to clear building slices: ${deleteSlicesError.message}`);
+    }
+    if (deleteOrphansError) {
+      throw new Error(`Failed to clear address orphans: ${deleteOrphansError.message}`);
+    }
+    if (resetAddressesError) {
+      throw new Error(`Failed to clear campaign address links: ${resetAddressesError.message}`);
+    }
   }
 
   /**
@@ -507,14 +624,13 @@ export class StableLinkerService {
   ): BuildingFeature[] {
     const containing: BuildingFeature[] = [];
     for (const building of buildings) {
-      const coords = building.geometry.coordinates[0];
-      if (this.isPointInPolygon(point, coords)) {
+      if (this.isPointInBuilding(point, building)) {
         containing.push(building);
       }
     }
     return containing.sort((a, b) => {
-      const areaA = this.calculatePolygonArea(a.geometry.coordinates[0]);
-      const areaB = this.calculatePolygonArea(b.geometry.coordinates[0]);
+      const areaA = this.calculateBuildingArea(a);
+      const areaB = this.calculateBuildingArea(b);
       return areaB - areaA; // largest first
     });
   }
@@ -530,8 +646,8 @@ export class StableLinkerService {
     const containing = this.findAllContainingBuildings(point, buildings);
     if (containing.length === 0) return null;
     if (containing.length === 1) return containing[0];
-    const area0 = this.calculatePolygonArea(containing[0].geometry.coordinates[0]);
-    const area1 = this.calculatePolygonArea(containing[1].geometry.coordinates[0]);
+    const area0 = this.calculateBuildingArea(containing[0]);
+    const area1 = this.calculateBuildingArea(containing[1]);
     if (area0 > 2 * area1) return containing[0];
     throw new DataIntegrityError(
       addressId,
@@ -561,13 +677,13 @@ export class StableLinkerService {
   ): BuildingFeature[] {
     const onSurface: BuildingFeature[] = [];
     for (const building of buildings) {
-      if (this.isPointOnPolygonBoundary(point, building.geometry.coordinates[0])) {
+      if (this.isPointOnBuildingBoundary(point, building)) {
         onSurface.push(building);
       }
     }
     return onSurface.sort((a, b) => {
-      const areaA = this.calculatePolygonArea(a.geometry.coordinates[0]);
-      const areaB = this.calculatePolygonArea(b.geometry.coordinates[0]);
+      const areaA = this.calculateBuildingArea(a);
+      const areaB = this.calculateBuildingArea(b);
       return areaB - areaA;
     });
   }
@@ -583,8 +699,8 @@ export class StableLinkerService {
     const onSurface = this.findAllPointOnSurfaceBuildings(point, buildings);
     if (onSurface.length === 0) return null;
     if (onSurface.length === 1) return onSurface[0];
-    const area0 = this.calculatePolygonArea(onSurface[0].geometry.coordinates[0]);
-    const area1 = this.calculatePolygonArea(onSurface[1].geometry.coordinates[0]);
+    const area0 = this.calculateBuildingArea(onSurface[0]);
+    const area1 = this.calculateBuildingArea(onSurface[1]);
     if (area0 > 2 * area1) return onSurface[0];
     throw new DataIntegrityError(
       addressId,
@@ -615,7 +731,7 @@ export class StableLinkerService {
   ): number {
     let count = 0;
     for (const building of buildings) {
-      const centroid = this.calculateCentroid(building.geometry.coordinates[0]);
+      const centroid = this.calculateBuildingCentroid(building);
       if (this.calculateDistance(point, centroid) <= radiusMeters) count++;
     }
     return count;
@@ -630,7 +746,7 @@ export class StableLinkerService {
     k: number
   ): Array<{ building: BuildingFeature; distance: number }> {
     const distances = buildings.map(building => {
-      const centroid = this.calculateCentroid(building.geometry.coordinates[0]);
+      const centroid = this.calculateBuildingCentroid(building);
       const distance = this.calculateDistance(point, centroid);
       return { building, distance };
     });
@@ -638,6 +754,86 @@ export class StableLinkerService {
     return distances
       .sort((a, b) => a.distance - b.distance)
       .slice(0, k);
+  }
+
+  private prepareParcelBridge(
+    parcels: ParcelFeature[],
+    buildings: BuildingFeature[]
+  ): PreparedParcelFeature[] {
+    const buildingCentroids = buildings.map((building) => ({
+      building,
+      centroid: this.calculateBuildingCentroid(building),
+      area: this.calculateBuildingArea(building),
+    }));
+
+    const prepared: PreparedParcelFeature[] = [];
+    for (const parcel of parcels) {
+      const bbox = this.calculateMultiPolygonBbox(parcel.geometry.coordinates);
+      const buildingCandidates = buildingCentroids.filter(({ centroid }) =>
+        this.pointInBbox(centroid, bbox) &&
+        this.isPointInMultiPolygon(centroid, parcel.geometry.coordinates)
+      );
+
+      if (buildingCandidates.length === 0) {
+        continue;
+      }
+
+      prepared.push({
+        ...parcel,
+        bbox,
+        buildingCandidates,
+      });
+    }
+
+    return prepared;
+  }
+
+  private pickBestParcelBridgedBuildingOrThrow(
+    addressId: string,
+    point: [number, number],
+    addressStreet: string,
+    parcels: PreparedParcelFeature[]
+  ): { building: BuildingFeature; distance: number } | null {
+    if (parcels.length === 0) return null;
+
+    const candidateMap = new Map<string, {
+      building: BuildingFeature;
+      distance: number;
+      area: number;
+      streetScore: number;
+    }>();
+
+    for (const parcel of parcels) {
+      if (!this.pointInBbox(point, parcel.bbox)) continue;
+      if (!this.isPointInMultiPolygon(point, parcel.geometry.coordinates)) continue;
+
+      for (const candidate of parcel.buildingCandidates) {
+        const streetScore = this.calculateStreetMatchScore(
+          addressStreet,
+          this.getBuildingStreet(candidate.building) ?? ''
+        );
+        const distance = this.calculateDistance(point, candidate.centroid);
+        const existing = candidateMap.get(candidate.building.properties.gers_id);
+        if (!existing || distance < existing.distance) {
+          candidateMap.set(candidate.building.properties.gers_id, {
+            building: candidate.building,
+            distance,
+            area: candidate.area,
+            streetScore,
+          });
+        }
+      }
+    }
+
+    if (candidateMap.size === 0) {
+      return null;
+    }
+
+    return this.pickBestProximityOrThrow(
+      addressId,
+      Array.from(candidateMap.values()),
+      0.95
+    );
   }
 
   /**
@@ -651,7 +847,7 @@ export class StableLinkerService {
     if (candidates.length === 0) return null;
     const withArea = candidates.map(c => ({
       ...c,
-      area: c.area ?? this.calculatePolygonArea(c.building.geometry.coordinates[0]),
+      area: c.area ?? this.calculateBuildingArea(c.building),
     }));
     withArea.sort((a, b) => {
       if (a.streetScore != null && b.streetScore != null && b.streetScore !== a.streetScore) {
@@ -726,6 +922,111 @@ export class StableLinkerService {
     const metersPerDegreeLon = 111320 * Math.cos(avgLat * Math.PI / 180);
     
     return area * metersPerDegreeLat * metersPerDegreeLon;
+  }
+
+  private calculateMultiPolygonBbox(
+    coordinates: number[][][][]
+  ): [number, number, number, number] {
+    let minLon = Infinity;
+    let minLat = Infinity;
+    let maxLon = -Infinity;
+    let maxLat = -Infinity;
+
+    for (const polygon of coordinates) {
+      for (const ring of polygon) {
+        for (const [lon, lat] of ring) {
+          minLon = Math.min(minLon, lon);
+          minLat = Math.min(minLat, lat);
+          maxLon = Math.max(maxLon, lon);
+          maxLat = Math.max(maxLat, lat);
+        }
+      }
+    }
+
+    return [minLon, minLat, maxLon, maxLat];
+  }
+
+  private pointInBbox(
+    point: [number, number],
+    bbox: [number, number, number, number]
+  ): boolean {
+    return point[0] >= bbox[0] &&
+      point[0] <= bbox[2] &&
+      point[1] >= bbox[1] &&
+      point[1] <= bbox[3];
+  }
+
+  private isPointInMultiPolygon(
+    point: [number, number],
+    coordinates: number[][][][]
+  ): boolean {
+    return coordinates.some((polygon) => this.isPointInPolygonRings(point, polygon));
+  }
+
+  private isPointInPolygonRings(
+    point: [number, number],
+    rings: number[][][]
+  ): boolean {
+    if (rings.length === 0) return false;
+    if (!this.isPointInPolygon(point, rings[0])) return false;
+
+    for (let i = 1; i < rings.length; i += 1) {
+      if (this.isPointInPolygon(point, rings[i])) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private getPolygonRings(building: BuildingFeature): number[][][] {
+    if (building.geometry.type === 'Polygon') {
+      return building.geometry.coordinates as number[][][];
+    }
+
+    const polygons = building.geometry.coordinates as number[][][][];
+    if (polygons.length === 0) {
+      return [];
+    }
+
+    return polygons.reduce((largest, polygon) => {
+      const largestArea = largest.length > 0 ? this.calculatePolygonArea(largest[0] ?? []) : 0;
+      const polygonArea = polygon.length > 0 ? this.calculatePolygonArea(polygon[0] ?? []) : 0;
+      return polygonArea > largestArea ? polygon : largest;
+    }, polygons[0] ?? []);
+  }
+
+  private calculateBuildingArea(building: BuildingFeature): number {
+    if (building.geometry.type === 'Polygon') {
+      const rings = building.geometry.coordinates as number[][][];
+      return this.calculatePolygonArea(rings[0] ?? []);
+    }
+
+    const polygons = building.geometry.coordinates as number[][][][];
+    return polygons.reduce((sum, polygon) => sum + this.calculatePolygonArea(polygon[0] ?? []), 0);
+  }
+
+  private calculateBuildingCentroid(building: BuildingFeature): [number, number] {
+    const rings = this.getPolygonRings(building);
+    return this.calculateCentroid(rings[0] ?? []);
+  }
+
+  private isPointInBuilding(point: [number, number], building: BuildingFeature): boolean {
+    if (building.geometry.type === 'Polygon') {
+      return this.isPointInPolygonRings(point, building.geometry.coordinates as number[][][]);
+    }
+
+    return this.isPointInMultiPolygon(point, building.geometry.coordinates as number[][][][]);
+  }
+
+  private isPointOnBuildingBoundary(point: [number, number], building: BuildingFeature): boolean {
+    if (building.geometry.type === 'Polygon') {
+      const rings = building.geometry.coordinates as number[][][];
+      return rings.some((ring) => this.isPointOnPolygonBoundary(point, ring));
+    }
+
+    const polygons = building.geometry.coordinates as number[][][][];
+    return polygons.some((polygon) => polygon.some((ring) => this.isPointOnPolygonBoundary(point, ring)));
   }
 
   /**
@@ -809,7 +1110,7 @@ export class StableLinkerService {
       };
     }
 
-    const area = this.calculatePolygonArea(building.geometry.coordinates[0]);
+    const area = this.calculateBuildingArea(building);
     
     return {
       addressId: address.id,
@@ -844,7 +1145,7 @@ export class StableLinkerService {
     }
     
     // Analyze each building with multiple addresses
-    for (const [buildingId, buildingMatches] of buildingGroups) {
+    for (const [, buildingMatches] of buildingGroups) {
       if (buildingMatches.length <= 1) continue;
       
       // Mark all as multi-unit
@@ -881,7 +1182,7 @@ export class StableLinkerService {
     // Find top 3 suggestions
     const nearest = this.findNearestBuildings(addressCoords, buildings, 3);
     const suggestions: SuggestedBuilding[] = nearest.map(n => {
-      const area = this.calculatePolygonArea(n.building.geometry.coordinates[0]);
+      const area = this.calculateBuildingArea(n.building);
       
       // Confidence based purely on distance
       let confidence = 0.3;
@@ -947,7 +1248,8 @@ export class StableLinkerService {
   private async saveMatches(
     campaignId: string,
     matches: MatchResult[],
-    overtureRelease: string
+    overtureRelease: string,
+    persistenceMode: 'silver' | 'gold'
   ): Promise<void> {
     const validMatches = matches.filter(m => m.matchType !== 'orphan');
     
@@ -979,14 +1281,48 @@ export class StableLinkerService {
       const batch = records.slice(i, i + batchSize);
       const { error } = await this.supabase
         .from('building_address_links')
-        .insert(batch);
+        .upsert(batch, { onConflict: 'campaign_id,address_id' });
       
       if (error) {
         console.error(`[StableLinker] Error saving batch ${i / batchSize + 1}:`, error.message);
       }
     }
 
+    if (persistenceMode === 'gold') {
+      const addressUpdates = validMatches.map((match) =>
+        this.supabase
+          .from('campaign_addresses')
+          .update({
+            building_id: match.buildingId,
+            match_source: this.toGoldMatchSource(match.matchType),
+            confidence: match.confidence,
+          })
+          .eq('id', match.addressId)
+          .eq('campaign_id', campaignId)
+      );
+      const results = await Promise.all(addressUpdates);
+      const firstError = results.find((result) => result.error)?.error;
+      if (firstError) {
+        console.error('[StableLinker] Error saving Gold address assignments:', firstError.message);
+      }
+    }
+
     console.log(`[StableLinker] Saved ${validMatches.length} matches`);
+  }
+
+  private toGoldMatchSource(
+    matchType: MatchResult['matchType']
+  ): 'gold_exact' | 'gold_parcel' | 'gold_proximity' {
+    switch (matchType) {
+      case 'containment_verified':
+      case 'containment_suspect':
+      case 'point_on_surface':
+        return 'gold_exact';
+      case 'parcel_verified':
+        return 'gold_parcel';
+      default:
+        return 'gold_proximity';
+    }
   }
 
   /**
@@ -1040,6 +1376,7 @@ export class StableLinkerService {
     const containmentVerified = validMatches.filter(m => m.matchType === 'containment_verified').length;
     const containmentSuspect = validMatches.filter(m => m.matchType === 'containment_suspect').length;
     const pointOnSurface = validMatches.filter(m => m.matchType === 'point_on_surface').length;
+    const parcelVerified = validMatches.filter(m => m.matchType === 'parcel_verified').length;
     const proximityVerified = validMatches.filter(m => m.matchType === 'proximity_verified').length;
     const proximityFallback = validMatches.filter(m => m.matchType === 'proximity_fallback').length;
 
@@ -1051,7 +1388,10 @@ export class StableLinkerService {
       : 0;
 
     const proximityMatches = validMatches.filter(
-      m => m.matchType === 'proximity_verified' || m.matchType === 'proximity_fallback'
+      m =>
+        m.matchType === 'parcel_verified' ||
+        m.matchType === 'proximity_verified' ||
+        m.matchType === 'proximity_fallback'
     );
     const avgPrecisionMeters =
       proximityMatches.length > 0
@@ -1071,6 +1411,7 @@ export class StableLinkerService {
         containmentVerified,
         containmentSuspect,
         pointOnSurface,
+        parcelVerified,
         proximityVerified,
         proximityFallback,
       },

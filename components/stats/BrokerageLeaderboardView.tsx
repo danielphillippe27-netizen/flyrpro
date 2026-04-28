@@ -12,31 +12,27 @@ import {
 } from '@/components/ui/select';
 
 const METRICS: { value: LeaderboardSortBy; label: string }[] = [
-  { value: 'flyers', label: 'Doors' },
+  { value: 'doorknocks', label: 'Doors' },
   { value: 'conversations', label: 'Conversations' },
   { value: 'distance', label: 'Distance' },
 ];
 
 function getDisplayValue(entry: BrokerageLeaderboardEntry, sortBy: LeaderboardSortBy): string {
   switch (sortBy) {
-    case 'flyers':
-      return String(entry.flyers);
+    case 'doorknocks':
+      return String(entry.doorknocks);
     case 'conversations':
       return String(entry.conversations);
     case 'distance':
       return `${entry.distance.toFixed(1)} km`;
-    case 'day_streak':
-      return String(entry.day_streak);
-    case 'best_streak':
-      return String(entry.best_streak);
     default:
-      return String(entry.flyers);
+      return String(entry.doorknocks);
   }
 }
 
 function getSubtitle(entry: BrokerageLeaderboardEntry): string {
   const parts: string[] = [];
-  if (entry.flyers > 0) parts.push(`${entry.flyers} flyers`);
+  if (entry.doorknocks > 0) parts.push(`${entry.doorknocks} doors`);
   if (entry.conversations > 0) parts.push(`${entry.conversations} conv`);
   if (entry.agent_count > 0) parts.push(`${entry.agent_count} agents`);
   return parts.join(' · ') || '—';

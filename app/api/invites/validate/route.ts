@@ -7,10 +7,13 @@ type InviteRow = {
   workspace_id: string;
   email: string | null;
   role: string;
+  access_scope?: string | null;
   status?: string | null;
   expires_at: string | null;
   accepted_at?: string | null;
 };
+
+type InviteAccessScope = 'workspace' | 'campaign';
 
 function normalizeInviteEmail(value: string | null | undefined): string | null {
   if (typeof value !== 'string') return null;
@@ -25,13 +28,16 @@ async function getInviteByToken(
   admin: ReturnType<typeof createAdminClient>,
   token: string
 ): Promise<{ invite: InviteRow | null; error: unknown }> {
-  const columns = 'id, workspace_id, email, role, status, expires_at, accepted_at';
+  const primaryColumns =
+    'id, workspace_id, email, role, access_scope, status, expires_at, accepted_at';
+  const fallbackColumns =
+    'id, workspace_id, email, role, status, expires_at, accepted_at';
   const candidates: Array<'token' | 'invite_token'> = ['token', 'invite_token'];
 
   for (const candidate of candidates) {
     const result = await admin
       .from('workspace_invites')
-      .select(columns)
+      .select(primaryColumns)
       .eq(candidate, token)
       .maybeSingle();
 
@@ -41,9 +47,47 @@ async function getInviteByToken(
         error: null,
       };
     }
+
+    const maybeError = result.error as { code?: string; message?: string } | null;
+    const missingAccessScopeColumn =
+      maybeError?.code === '42703' &&
+      typeof maybeError.message === 'string' &&
+      maybeError.message.includes('access_scope');
+
+    if (!missingAccessScopeColumn) {
+      continue;
+    }
+
+    const fallback = await admin
+      .from('workspace_invites')
+      .select(fallbackColumns)
+      .eq(candidate, token)
+      .maybeSingle();
+
+    if (!fallback.error) {
+      return {
+        invite: fallback.data
+          ? ({ ...fallback.data, access_scope: null } as InviteRow)
+          : null,
+        error: null,
+      };
+    }
   }
 
   return { invite: null, error: null };
+}
+
+function normalizeInviteAccessScope(
+  value: string | null | undefined,
+  fallback: {
+    campaignId: string | null;
+    sessionId: string | null;
+  }
+): InviteAccessScope {
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === 'workspace') return 'workspace';
+  if (normalized === 'campaign') return 'campaign';
+  return fallback.campaignId || fallback.sessionId ? 'campaign' : 'workspace';
 }
 
 /**
@@ -104,6 +148,7 @@ export async function GET(request: NextRequest) {
 
   const workspaceName = workspace?.name ?? null;
   const campaignTitle = campaign.data?.title ?? null;
+  const accessScope = normalizeInviteAccessScope(invite.access_scope, target);
   const response = {
     valid: true,
     alreadyAccepted: inviteStatus === 'accepted',
@@ -116,6 +161,8 @@ export async function GET(request: NextRequest) {
     campaign_title: campaignTitle,
     sessionId: target.sessionId,
     session_id: target.sessionId,
+    accessScope,
+    access_scope: accessScope,
     email: normalizeInviteEmail(invite.email),
     role: invite.role,
   };

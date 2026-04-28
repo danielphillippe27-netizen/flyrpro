@@ -36,11 +36,11 @@ const supportTab = { href: '/support', icon: MessageCircle, label: 'Support' };
 const offersTab = { href: '/offers', icon: Link2, label: 'Offers' };
 const settingsTab = { href: '/settings', icon: Settings, label: 'Settings' };
 const founderTabs = [
-  ...baseTabs.slice(0, 4),
+  ...baseTabs.filter((tab) => ['/home', '/campaigns', '/farms', '/routes'].includes(tab.href)),
   offersTab,
-  ...baseTabs.slice(4, 10),
+  ...baseTabs.filter((tab) => ['/map', '/activity', '/leads', '/follow-up', '/appointments'].includes(tab.href)),
   settingsTab,
-  baseTabs[11],
+  ...baseTabs.filter((tab) => ['/stats'].includes(tab.href)),
   supportTab,
 ];
 const memberTabs = baseTabs.filter((tab) =>

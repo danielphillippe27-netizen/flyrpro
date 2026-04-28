@@ -12,6 +12,8 @@ type CreateInviteBody = {
   sessionId?: string | null;
 };
 
+type InviteAccessScope = 'workspace' | 'campaign';
+
 type CampaignRow = {
   id: string;
   title: string | null;
@@ -179,6 +181,17 @@ async function canUserAccessCampaign(
     }
   }
 
+  const { data: campaignMember } = await admin
+    .from('campaign_members')
+    .select('campaign_id')
+    .eq('campaign_id', campaign.id)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (campaignMember?.campaign_id) {
+    return true;
+  }
+
   return false;
 }
 
@@ -327,10 +340,12 @@ export async function POST(request: NextRequest) {
       campaignId: campaign.id,
       sessionId: activeSession?.id ?? null,
     });
+    const accessScope: InviteAccessScope = 'campaign';
     let inviteInsert: Record<string, string | null> = {
       workspace_id: workspace.id,
       campaign_id: campaign.id,
       session_id: activeSession?.id ?? null,
+      access_scope: accessScope,
       invited_by: requestUser.id,
       email: null,
       role: 'member',
@@ -357,11 +372,24 @@ export async function POST(request: NextRequest) {
       }
 
       if (
+        !appliedFallbacks.has('access_scope') &&
+        isMissingColumnError(insertResult.error, 'access_scope')
+      ) {
+        const withoutAccessScope = { ...inviteInsert };
+        delete withoutAccessScope.access_scope;
+        inviteInsert = withoutAccessScope;
+        appliedFallbacks.add('access_scope');
+        insertResult = await admin.from('workspace_invites').insert(inviteInsert);
+        continue;
+      }
+
+      if (
         !appliedFallbacks.has('session_id') &&
         isMissingColumnError(insertResult.error, 'session_id')
       ) {
         storedSessionId = null;
-        const { session_id: _sessionId, ...withoutSessionId } = inviteInsert;
+        const withoutSessionId = { ...inviteInsert };
+        delete withoutSessionId.session_id;
         inviteInsert = {
           ...withoutSessionId,
           message: fallbackTargetMessage,
@@ -376,7 +404,8 @@ export async function POST(request: NextRequest) {
         isMissingColumnError(insertResult.error, 'campaign_id')
       ) {
         storedCampaignId = null;
-        const { campaign_id: _campaignId, ...withoutCampaignId } = inviteInsert;
+        const withoutCampaignId = { ...inviteInsert };
+        delete withoutCampaignId.campaign_id;
         inviteInsert = {
           ...withoutCampaignId,
           message: fallbackTargetMessage,
@@ -390,7 +419,8 @@ export async function POST(request: NextRequest) {
         !appliedFallbacks.has('message') &&
         isMissingColumnError(insertResult.error, 'message')
       ) {
-        const { message: _message, ...withoutMessage } = inviteInsert;
+        const withoutMessage = { ...inviteInsert };
+        delete withoutMessage.message;
         inviteInsert = withoutMessage;
         appliedFallbacks.add('message');
         insertResult = await admin.from('workspace_invites').insert(inviteInsert);
@@ -427,6 +457,8 @@ export async function POST(request: NextRequest) {
       campaignTitle: campaign.title,
       session_id: storedSessionId,
       sessionId: storedSessionId,
+      access_scope: accessScope,
+      accessScope,
       role: 'member',
       expires_at: expiresAt,
       expiresAt,

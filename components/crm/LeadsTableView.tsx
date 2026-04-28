@@ -3,6 +3,7 @@
 import type { Contact } from '@/types/database';
 import type { UserStats } from '@/types/database';
 import { StatCard } from '@/components/stats/StatCard';
+import { Badge } from '@/components/ui/badge';
 import {
   Table,
   TableBody,
@@ -37,6 +38,13 @@ function formatCreatedAt(createdAt: string): string {
   }
 }
 
+function formatDateTime(value: string | null | undefined): string {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleString();
+}
+
 function getInitials(fullName: string): string {
   const parts = fullName.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return '?';
@@ -56,11 +64,21 @@ export function LeadsTableView({
   userStats,
   loading,
   onContactSelect,
+  contactListLabelsById,
+  selectedContactIds,
+  allVisibleSelected,
+  onToggleContactSelection,
+  onToggleSelectAll,
 }: {
   contacts: Contact[];
   userStats: UserStats | null;
   loading: boolean;
   onContactSelect: (contact: Contact) => void;
+  contactListLabelsById: Record<string, string[]>;
+  selectedContactIds: string[];
+  allVisibleSelected: boolean;
+  onToggleContactSelection: (contactId: string, checked: boolean) => void;
+  onToggleSelectAll: (checked: boolean) => void;
 }) {
   const toPercent = (numerator: number, denominator: number): number | null => {
     if (denominator <= 0) return null;
@@ -101,12 +119,22 @@ export function LeadsTableView({
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-12">
+                  <input
+                    type="checkbox"
+                    aria-label="Select all visible leads"
+                    checked={allVisibleSelected}
+                    onChange={(event) => onToggleSelectAll(event.target.checked)}
+                    className="h-4 w-4 rounded border-border align-middle"
+                  />
+                </TableHead>
                 <TableHead>Name</TableHead>
                 <TableHead>Phone</TableHead>
                 <TableHead>Email</TableHead>
                 <TableHead>Address</TableHead>
+                <TableHead>Lists</TableHead>
+                <TableHead>Last Contacted</TableHead>
                 <TableHead>Created</TableHead>
-                <TableHead>Tags</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -116,6 +144,15 @@ export function LeadsTableView({
                   className="cursor-pointer"
                   onClick={() => onContactSelect(contact)}
                 >
+                  <TableCell onClick={(event) => event.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${contact.full_name}`}
+                      checked={selectedContactIds.includes(contact.id)}
+                      onChange={(event) => onToggleContactSelection(contact.id, event.target.checked)}
+                      className="h-4 w-4 rounded border-border align-middle"
+                    />
+                  </TableCell>
                   <TableCell className="font-medium">
                     <div className="flex items-center gap-3">
                       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-medium text-primary">
@@ -133,11 +170,24 @@ export function LeadsTableView({
                   <TableCell className="max-w-[200px] truncate text-muted-foreground">
                     {formatAddressShort(contact.address)}
                   </TableCell>
+                  <TableCell className="max-w-[260px]">
+                    <div className="flex flex-wrap gap-1.5">
+                      {(contactListLabelsById[contact.id] ?? []).length > 0 ? (
+                        (contactListLabelsById[contact.id] ?? []).map((label) => (
+                          <Badge key={`${contact.id}-${label}`} variant="outline" className="rounded-full px-2 py-0 text-[11px]">
+                            {label}
+                          </Badge>
+                        ))
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground whitespace-nowrap">
+                    {formatDateTime(contact.last_contacted)}
+                  </TableCell>
                   <TableCell className="text-muted-foreground whitespace-nowrap">
                     {formatCreatedAt(contact.created_at)}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {contact.tags?.trim() ? contact.tags : '—'}
                   </TableCell>
                 </TableRow>
               ))}

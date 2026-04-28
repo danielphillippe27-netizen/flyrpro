@@ -61,6 +61,7 @@ export async function GET(
         containment_verified: 0,
         containment_suspect: 0,
         point_on_surface: 0,
+        parcel_verified: 0,
         proximity_verified: 0,
         proximity_fallback: 0,
         manual: 0,

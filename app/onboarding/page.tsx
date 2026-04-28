@@ -230,6 +230,14 @@ function OnboardingContent() {
   }, [searchParams]);
 
   useEffect(() => {
+    const referralCodeFromUrl =
+      searchParams.get('referralCode') ?? searchParams.get('ref') ?? '';
+    const normalizedReferralCode = referralCodeFromUrl.trim().toUpperCase();
+    if (!normalizedReferralCode) return;
+    setReferralCode(normalizedReferralCode);
+  }, [searchParams]);
+
+  useEffect(() => {
     if (!isExclusivePartnerTeamLayout) return;
     setUseCase('team');
     setSeats((previous) => Math.max(TEAM_MIN_SEATS, previous));

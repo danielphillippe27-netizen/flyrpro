@@ -15,21 +15,21 @@ function getInitials(name: string): string {
 
 function getDisplayValue(entry: LeaderboardEntry, sortBy: LeaderboardSortBy): string {
   switch (sortBy) {
-    case 'flyers':
-      return String(entry.flyers);
+    case 'doorknocks':
+      return String(entry.doorknocks);
     case 'conversations':
       return String(entry.conversations);
     case 'distance':
       return `${entry.distance.toFixed(1)} km`;
     default:
-      return String(entry.flyers);
+      return String(entry.doorknocks);
   }
 }
 
 function getSubtitle(entry: LeaderboardEntry, sortBy: LeaderboardSortBy): string {
   switch (sortBy) {
-    case 'flyers':
-      return `${entry.flyers} doors`;
+    case 'doorknocks':
+      return `${entry.doorknocks} doors`;
     case 'conversations':
       return `${entry.conversations} conversations`;
     case 'distance':
@@ -48,7 +48,7 @@ export function LeaderboardRowCard({
   sortBy: LeaderboardSortBy;
   isLast?: boolean;
 }) {
-  const displayName = entry.name || entry.user_email || 'User';
+  const displayName = entry.name || 'User';
   const value = getDisplayValue(entry, sortBy);
   const subtitle = getSubtitle(entry, sortBy);
 

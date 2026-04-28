@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
 import { ArcadeEmbed } from '@/components/landing/ArcadeEmbed';
-import { AmbassadorProgramSection } from '@/components/landing/AmbassadorProgramSection';
+import { PublicSiteHeader } from '@/components/landing/PublicSiteHeader';
 import { useRef } from 'react';
 import { useRouter } from 'next/navigation';
 
@@ -100,40 +100,7 @@ export default function LandingPage() {
 
   return (
     <div className="min-h-screen bg-zinc-50 text-zinc-900">
-      <header className="sticky top-0 z-50 border-b border-zinc-200/80 bg-zinc-50/90 backdrop-blur-sm">
-        <div className="flex w-full items-center justify-between px-4 py-3 md:px-6">
-          <Link href="/" className="flex items-end">
-            <span className="text-4xl font-black leading-none tracking-tight text-red-600 md:text-5xl">FLYR</span>
-          </Link>
-
-          <div className="flex items-center gap-5 md:gap-6">
-            <Link
-              href="#ambassador-program"
-              className="text-sm font-medium text-zinc-600 transition hover:text-zinc-900"
-            >
-              Ambassador
-            </Link>
-            <Link
-              href="/plans"
-              className="text-sm font-medium text-zinc-600 transition hover:text-zinc-900"
-            >
-              Pricing
-            </Link>
-            <Link
-              href="/download"
-              className="text-sm font-medium text-zinc-600 transition hover:text-zinc-900"
-            >
-              Download
-            </Link>
-            <Link
-              href="/login"
-              className="inline-flex h-9 items-center rounded-lg border border-zinc-300 bg-white px-4 text-sm font-semibold text-zinc-900 transition hover:bg-zinc-100"
-            >
-              Sign in
-            </Link>
-          </div>
-        </div>
-      </header>
+      <PublicSiteHeader />
 
       <main>
         <section className="relative overflow-hidden px-5 py-24 md:px-8 md:py-32">
@@ -201,7 +168,7 @@ export default function LandingPage() {
                 Start your free trial
               </Link>
               <Link
-                href="#ambassador-program"
+                href="/ambassador"
                 className="inline-flex h-12 items-center rounded-md border border-zinc-300 bg-white px-6 text-base font-semibold text-zinc-900 transition hover:bg-zinc-100"
               >
                 Apply to Ambassador Program
@@ -209,8 +176,6 @@ export default function LandingPage() {
             </div>
           </div>
         </section>
-
-        <AmbassadorProgramSection />
       </main>
 
     </div>

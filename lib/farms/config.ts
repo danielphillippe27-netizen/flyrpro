@@ -14,9 +14,9 @@ export const FARM_TOUCH_TYPE_OPTIONS: Array<{ value: FarmTouchType; label: strin
 ];
 
 export const FARM_GOAL_TYPE_OPTIONS: Array<{ value: FarmGoalType; label: string }> = [
-  { value: 'touches_per_year', label: 'Touches per year' },
-  { value: 'touches_per_cycle', label: 'Touches per cycle' },
   { value: 'homes_per_cycle', label: 'Homes per cycle' },
+  { value: 'touches_per_cycle', label: 'Sessions per cycle' },
+  { value: 'touches_per_year', label: 'Sessions per year' },
 ];
 
 const TOUCH_TYPE_LABELS: Record<FarmTouchType, string> = Object.fromEntries(
@@ -48,7 +48,7 @@ export function getFarmGoalType(
   farm: Pick<Farm, 'goal_type' | 'touches_interval'>
 ): FarmGoalType {
   if (farm.goal_type) return farm.goal_type;
-  return farm.touches_interval === 'year' ? 'touches_per_year' : 'touches_per_cycle';
+  return 'homes_per_cycle';
 }
 
 export function getFarmGoalTarget(
@@ -66,12 +66,12 @@ export function formatFarmGoal(
 ): string {
   const type = getFarmGoalType(farm);
   const target = getFarmGoalTarget(farm);
-  const noun = type === 'homes_per_cycle' ? 'home' : 'touch';
+  const noun = type === 'homes_per_cycle' ? 'home' : 'session';
   return `${target} ${target === 1 ? noun : `${noun}s`} / ${type === 'touches_per_year' ? 'year' : 'cycle'}`;
 }
 
 export function getFarmTouchCount(farm: Pick<Farm, 'touches_per_interval' | 'frequency'>): number {
-  return Math.max(1, farm.touches_per_interval ?? farm.frequency ?? 1);
+  return 1;
 }
 
 export function getFarmTouchInterval(
@@ -83,9 +83,8 @@ export function getFarmTouchInterval(
 export function formatFarmCadence(
   farm: Pick<Farm, 'touches_per_interval' | 'touches_interval' | 'frequency'>
 ): string {
-  const count = getFarmTouchCount(farm);
   const interval = getFarmTouchInterval(farm);
-  return `${count} ${count === 1 ? 'touch' : 'touches'} / ${interval}`;
+  return `1 cycle / ${interval}`;
 }
 
 export function formatFarmBudget(cents?: number | null): string | null {

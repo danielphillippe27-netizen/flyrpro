@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { CampaignDetailMapView, type MapPointOverlay } from '@/components/campaigns/CampaignDetailMapView';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -15,7 +15,7 @@ import type {
   FarmTouchAddress,
 } from '@/types/database';
 
-type MapLayerScope = 'all_time' | 'cycle' | 'session';
+type MapLayerScope = 'all_time' | 'cycle';
 const VISITED_OUTCOME_STATUSES = new Set<FarmAddressOutcomeStatus>([
   'no_answer',
   'delivered',
@@ -34,21 +34,11 @@ const MAP_OUTCOME_ACTIONS: Array<{ status: FarmAddressOutcomeStatus; label: stri
   { status: 'none', label: 'Reset' },
 ];
 
-function parseFarmPolygon(farm: Farm): GeoJSON.Polygon | null {
-  if (!farm.polygon) return null;
-  try {
-    const parsed = JSON.parse(farm.polygon) as GeoJSON.Polygon;
-    if (parsed?.type === 'Polygon' && Array.isArray(parsed.coordinates)) {
-      return parsed;
-    }
-  } catch {}
-  return null;
-}
-
 export function FarmMapView({
   farm,
   addresses,
   linkedCampaignId,
+  linkedCampaign,
   layerScope = 'all_time',
   cycleTouchIds = [],
   selectedTouchId,
@@ -62,6 +52,7 @@ export function FarmMapView({
   farm: Farm;
   addresses: FarmAddress[];
   linkedCampaignId?: string | null;
+  linkedCampaign?: CampaignV2 | null;
   layerScope?: MapLayerScope;
   cycleTouchIds?: string[];
   selectedTouchId?: string | null;
@@ -72,7 +63,6 @@ export function FarmMapView({
   className?: string;
   showOutcomeControls?: boolean;
 }) {
-  const polygon = useMemo(() => parseFarmPolygon(farm), [farm]);
   const [outcomeNotes, setOutcomeNotes] = useState('');
   const [savingStatus, setSavingStatus] = useState<FarmAddressOutcomeStatus | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -100,47 +90,25 @@ export function FarmMapView({
     return map;
   }, [cycleTouchIds, touchOutcomes]);
 
-  const selectedSessionOutcomeByAddress = useMemo(() => {
-    const map = new Map<string, FarmTouchAddress>();
-    if (!selectedTouchId) return map;
-    for (const outcome of touchOutcomes) {
-      if (outcome.farm_touch_id !== selectedTouchId) continue;
-      if (!map.has(outcome.farm_address_id)) {
-        map.set(outcome.farm_address_id, outcome);
-      }
-    }
-    return map;
-  }, [selectedTouchId, touchOutcomes]);
-
   const campaignAddresses = useMemo<CampaignAddress[]>(
     () =>
       addresses.map((address) => {
         const scopedOutcome =
           layerScope === 'cycle'
             ? currentCycleOutcomeByAddress.get(address.id)
-            : layerScope === 'session'
-              ? selectedSessionOutcomeByAddress.get(address.id)
-              : latestOutcomeByAddress.get(address.id);
+            : latestOutcomeByAddress.get(address.id);
 
         const visitedAllTime = Number(address.visited_count ?? 0) > 0;
-        const visitedInCycle =
-          layerScope === 'cycle'
-            ? Boolean(address.last_touch_id && cycleTouchIds.includes(address.last_touch_id))
-            : false;
-        const visitedInSelectedSession =
-          layerScope === 'session' && selectedTouchId
-            ? address.last_touch_id === selectedTouchId
-            : false;
-
-        const fallbackVisited =
-          layerScope === 'cycle'
-            ? visitedInCycle
-            : layerScope === 'session'
-              ? visitedInSelectedSession
-              : visitedAllTime;
-        const isVisited = scopedOutcome
-          ? VISITED_OUTCOME_STATUSES.has(scopedOutcome.status)
-          : fallbackVisited;
+        // Scoped map slices must be driven by canonical per-touch outcomes only.
+        // Using denormalized `last_touch_id` here can leak stale/legacy state from
+        // earlier iterations into a cycle/session that did not actually record an
+        // outcome for this house.
+        const isVisited =
+          layerScope === 'all_time'
+            ? (scopedOutcome
+                ? VISITED_OUTCOME_STATUSES.has(scopedOutcome.status)
+                : visitedAllTime)
+            : Boolean(scopedOutcome && VISITED_OUTCOME_STATUSES.has(scopedOutcome.status));
         const scopedStatus =
           scopedOutcome?.status ??
           (layerScope === 'all_time' ? address.last_outcome_status : null) ??
@@ -163,19 +131,19 @@ export function FarmMapView({
           street_name: address.street_name ?? undefined,
           locality: address.locality ?? undefined,
           region: address.region ?? undefined,
-          scans: isVisited ? (layerScope === 'all_time' ? address.visited_count ?? 1 : 1) : 0,
-          last_scanned_at: isVisited ? (scopedOutcome?.occurred_at ?? address.last_visited_at ?? undefined) : undefined,
+          // Farm touch history is not the same thing as QR scans. If we synthesize
+          // scans from visited_count / touched outcomes, the shared map color logic
+          // promotes those homes to the QR-scanned purple state.
+          scans: 0,
+          last_scanned_at: undefined,
         };
       }),
     [
       addresses,
       currentCycleOutcomeByAddress,
-      cycleTouchIds,
       latestOutcomeByAddress,
       layerScope,
       linkedCampaignId,
-      selectedSessionOutcomeByAddress,
-      selectedTouchId,
     ]
   );
 
@@ -249,27 +217,7 @@ export function FarmMapView({
       .filter((overlay): overlay is MapPointOverlay => Boolean(overlay));
   }, [addresses, contacts, showContactsOverlay]);
 
-  const linkedCampaign = useMemo<CampaignV2 | null>(() => {
-    if (!linkedCampaignId) return null;
-    return {
-      id: linkedCampaignId,
-      owner_id: farm.owner_id,
-      workspace_id: farm.workspace_id ?? null,
-      name: farm.name,
-      type: 'door_knock',
-      address_source: 'map',
-      total_flyers: 0,
-      scans: 0,
-      conversions: 0,
-      created_at: farm.created_at,
-      status: farm.is_active === false ? 'paused' : 'active',
-      description: farm.description ?? undefined,
-      territory_boundary: polygon ?? undefined,
-      campaign_polygon_snapped: polygon ?? undefined,
-    };
-  }, [farm, linkedCampaignId, polygon]);
-
-  if (!linkedCampaignId || !linkedCampaign) {
+  if (!linkedCampaignId) {
     return (
       <div className="flex h-[520px] items-center justify-center rounded-xl border border-border bg-muted/20 text-sm text-muted-foreground">
         Linked campaign map is not available for this farm yet.
@@ -326,7 +274,7 @@ export function FarmMapView({
                     ? selectedFarmAddress
                       ? 'Save this address against the selected farm session.'
                       : 'Select a specific address in this building to save a session outcome.'
-                    : 'Switch the map to Session mode to save per-session address outcomes.'}
+                    : 'Select a farm session before saving per-session address outcomes.'}
                 </p>
               </div>
               <Textarea

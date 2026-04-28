@@ -45,10 +45,15 @@ export function isStripeSecretKeyConfigured(): boolean {
 
 export function getStripeWebhookSecret(): string {
   if (getStripeMode() === 'test') {
-    return firstNonEmpty(
-      process.env.STRIPE_WEBHOOK_SECRET_TEST,
-      process.env.STRIPE_WEBHOOK_SECRET
+    const explicitTestSecret = firstNonEmpty(process.env.STRIPE_WEBHOOK_SECRET_TEST);
+    if (explicitTestSecret) return explicitTestSecret;
+
+    const hasExplicitLiveSecret = Boolean(
+      firstNonEmpty(process.env.STRIPE_WEBHOOK_SECRET_LIVE)
     );
+    return hasExplicitLiveSecret
+      ? ''
+      : firstNonEmpty(process.env.STRIPE_WEBHOOK_SECRET);
   }
 
   return firstNonEmpty(
@@ -57,7 +62,7 @@ export function getStripeWebhookSecret(): string {
   );
 }
 
-export function getStripePriceEnv(baseName: string): string {
+export function getStripeModeEnv(baseName: string): string {
   if (getStripeMode() === 'test') {
     return firstNonEmpty(
       process.env[`${baseName}_TEST`],
@@ -69,4 +74,8 @@ export function getStripePriceEnv(baseName: string): string {
     process.env[`${baseName}_LIVE`],
     process.env[baseName]
   );
+}
+
+export function getStripePriceEnv(baseName: string): string {
+  return getStripeModeEnv(baseName);
 }

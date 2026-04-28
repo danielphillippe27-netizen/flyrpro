@@ -12,6 +12,10 @@ import {
   normalizeInviteEmail,
   updateWorkspaceInviteRecord,
 } from '@/app/api/team/_lib/manage';
+import {
+  normalizeAmbassadorReferralCodeInput,
+  resolveApprovedAmbassadorReferralCode,
+} from '@/app/lib/billing/ambassador-program';
 import { sendWorkspaceInviteEmail } from '@/lib/email/resend';
 
 const INDUSTRIES = [
@@ -264,8 +268,29 @@ export async function POST(request: NextRequest) {
         : industry.trim();
     }
     if (referralCode !== undefined) {
-      updates.referral_code_used =
-        typeof referralCode === 'string' && referralCode.trim() ? referralCode.trim() : null;
+      const normalizedReferralCode =
+        typeof referralCode === 'string' && referralCode.trim()
+          ? normalizeAmbassadorReferralCodeInput(referralCode)
+          : null;
+
+      if (normalizedReferralCode) {
+        const ambassadorReferral = await resolveApprovedAmbassadorReferralCode(
+          admin,
+          normalizedReferralCode
+        );
+
+        if (ambassadorReferral?.referralStats?.isAtLimit) {
+          return NextResponse.json(
+            {
+              error:
+                'That ambassador referral code has reached its limit. Please ask for a new code.',
+            },
+            { status: 400 }
+          );
+        }
+      }
+
+      updates.referral_code_used = normalizedReferralCode;
     }
     if (maxSeats !== undefined || useCase !== undefined) {
       const requestedSeats =

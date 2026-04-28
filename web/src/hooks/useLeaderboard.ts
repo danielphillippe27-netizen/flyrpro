@@ -5,7 +5,7 @@ import { supabase } from '../supabase'
 
 export function useLeaderboard() {
   const [users, setUsers] = useState<LeaderboardUser[]>([])
-  const [metric, setMetric] = useState<LeaderboardMetric>('flyers')
+  const [metric, setMetric] = useState<LeaderboardMetric>('doorknocks')
   const [timeframe, setTimeframe] = useState<LeaderboardTimeframe>('all_time')
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<Error | null>(null)

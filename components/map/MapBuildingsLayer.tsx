@@ -13,12 +13,22 @@ import { displayAddressText, resolveHouseNumberLabel } from '@/lib/map/addressPr
 interface MapBuildingsLayerProps {
   map: Map;
   campaignId?: string | null;
+  refreshKey?: number;
   addressStateOverrides?: CampaignAddress[];
+  hiddenBuildingIds?: string[];
+  deletedAddressIds?: string[];
   statusFilters?: StatusFilters;
   showOrphans?: boolean; // Toggle to show/hide orphan buildings (buildings without address links)
+  showAddressLabels?: boolean;
   /** When false, footprints use a neutral gray (not status colors); roads unchanged. Default true. */
   footprintStatusColors?: boolean;
-  onBuildingClick?: (buildingId: string, addressId?: string) => void;
+  onBuildingClick?: (
+    buildingId: string,
+    addressId?: string,
+    options?: {
+      additive?: boolean;
+    }
+  ) => void;
   onAddToCRM?: (data: { address: string; addressId?: string; gersId?: string; campaignId?: string }) => void;
   onRenderStateChange?: (state: MapBuildingsRenderState) => void;
 }
@@ -175,9 +185,13 @@ function buildAddressLabelFeatureCollection(
 export function MapBuildingsLayer({
   map,
   campaignId,
+  refreshKey = 0,
   addressStateOverrides,
+  hiddenBuildingIds = [],
+  deletedAddressIds = [],
   statusFilters = defaultStatusFilters,
   showOrphans = true,
+  showAddressLabels = true,
   footprintStatusColors = true,
   onBuildingClick,
   onAddToCRM,
@@ -227,7 +241,10 @@ export function MapBuildingsLayer({
     const statusRank = { not_visited: 0, visited: 1, hot: 2 } as const;
 
     for (const address of addressStateOverrides) {
-      const buildingId = (address as CampaignAddress & { building_id?: string | null }).building_id;
+      const buildingId =
+        (address as CampaignAddress & { building_id?: string | null }).building_id ??
+        address.gers_id ??
+        null;
       if (!buildingId) continue;
 
       const nextState = {
@@ -355,6 +372,7 @@ export function MapBuildingsLayer({
     if (!isMountedRef.current || !campaignId) return;
 
     setIsFetching(true);
+    const campaignDataKey = `${campaignId}:${refreshKey}`;
 
     try {
       // Use API endpoint directly - handles both Gold and Silver buildings
@@ -365,7 +383,7 @@ export function MapBuildingsLayer({
       if (buildingsResponse.ok) {
         const buildings = await buildingsResponse.json();
         if (buildings?.features?.length > 0) {
-          campaignDataLoadedRef.current = campaignId;
+          campaignDataLoadedRef.current = campaignDataKey;
           setFeatures(buildings as BuildingFeatureCollection);
           return;
         }
@@ -427,7 +445,7 @@ export function MapBuildingsLayer({
         );
         
         if (addressFeatures.length > 0) {
-          campaignDataLoadedRef.current = campaignId;
+          campaignDataLoadedRef.current = campaignDataKey;
           setFeatures({
             type: 'FeatureCollection',
             features: addressFeatures,
@@ -442,7 +460,7 @@ export function MapBuildingsLayer({
         setIsFetching(false);
       }
     }
-  }, [supabase, campaignId]);
+  }, [supabase, campaignId, refreshKey]);
 
   // Precompute scaled geometry once per fetch — never inside the render/update effect.
   useEffect(() => {
@@ -452,12 +470,40 @@ export function MapBuildingsLayer({
       return;
     }
 
+    const hiddenBuildingIdSet = new Set(
+      hiddenBuildingIds
+        .map((value) => String(value ?? '').trim())
+        .filter(Boolean)
+    );
+    const deletedAddressIdSet = new Set(
+      deletedAddressIds
+        .map((value) => String(value ?? '').trim())
+        .filter(Boolean)
+    );
+
     normalizedFeaturesRef.current = {
       type: 'FeatureCollection',
-      features: features.features.map((f) => {
+      features: features.features.flatMap((f) => {
         const props = f.properties ?? {};
         const fid = props.feature_id ?? props.gers_id ?? f.id ?? (props as any).id;
         const geom = f.geometry;
+        const featureAddressId = typeof props.address_id === 'string' ? props.address_id.trim() : '';
+        const buildingIdentifiers = [
+          props.building_id,
+          props.gers_id,
+          props.id,
+          f.id,
+        ]
+          .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+          .map((value) => value.trim());
+
+        if (featureAddressId && deletedAddressIdSet.has(featureAddressId)) {
+          return [];
+        }
+
+        if (buildingIdentifiers.some((identifier) => hiddenBuildingIdSet.has(identifier))) {
+          return [];
+        }
 
         // Deep-clone geometry ONCE here so we never mutate the source data.
         const scaledGeom =
@@ -469,7 +515,7 @@ export function MapBuildingsLayer({
           scaleFootprint(scaledGeom, FOOTPRINT_SCALE);
         }
 
-        return {
+        return [{
           ...f,
           geometry: (scaledGeom ?? geom) as GeoJSON.Polygon,
           properties: {
@@ -485,11 +531,11 @@ export function MapBuildingsLayer({
             }),
             feature_id: fid ?? (f as any).id,
           },
-        };
+        }];
       }),
     } as BuildingFeatureCollection;
     lastSetDataRef.current = null;
-  }, [features]);
+  }, [deletedAddressIds, features, hiddenBuildingIds]);
 
   // EXPLORATION MODE: Fetch buildings in viewport bounding box (when no campaignId)
   const fetchBuildingsInViewport = useCallback(async (bounds: { ne: [number, number]; sw: [number, number] }) => {
@@ -636,7 +682,8 @@ export function MapBuildingsLayer({
     }
     
     // Only fetch if we haven't already loaded this campaign's data
-    if (campaignDataLoadedRef.current === campaignId) {
+    const campaignDataKey = `${campaignId}:${refreshKey}`;
+    if (campaignDataLoadedRef.current === campaignDataKey) {
       return;
     }
 
@@ -655,7 +702,7 @@ export function MapBuildingsLayer({
         
         // Fallback: Also try 'idle' event in case style.load already fired
         const idleHandler = () => {
-          if (!campaignDataLoadedRef.current) {
+          if (campaignDataLoadedRef.current !== campaignDataKey) {
             setZoomLevel(map.getZoom());
             fetchCampaignData();
           }
@@ -672,7 +719,7 @@ export function MapBuildingsLayer({
     return () => {
       map.off('zoomend', onZoomChanged);
     };
-  }, [map, campaignId, fetchCampaignData, onZoomChanged]);
+  }, [map, campaignId, fetchCampaignData, onZoomChanged, refreshKey]);
 
   // EXPLORATION MODE: Set up viewport event listeners (only when no campaignId)
   useEffect(() => {
@@ -871,6 +918,7 @@ export function MapBuildingsLayer({
               'fill-extrusion-height': ['coalesce', ['get', 'height'], ['get', 'height_m'], 14] as any,
               'fill-extrusion-base': 0,
               'fill-extrusion-opacity': getFootprintFillOpacity(),
+              'fill-extrusion-emissive-strength': 0.85,
             },
           };
           
@@ -929,6 +977,9 @@ export function MapBuildingsLayer({
               },
             });
           }
+          if (map.getLayer(addressLabelLayerId)) {
+            map.setLayoutProperty(addressLabelLayerId, 'visibility', showAddressLabels ? 'visible' : 'none');
+          }
 
         // Outline layer removed to eliminate dark shadow effect underneath buildings
 
@@ -963,6 +1014,10 @@ export function MapBuildingsLayer({
 
         // Add click handler to fetch and display resident data
         const clickHandler = async (e: mapboxgl.MapLayerMouseEvent) => {
+          const additiveSelection = Boolean(
+            (e.originalEvent as MouseEvent | undefined)?.metaKey ||
+            (e.originalEvent as MouseEvent | undefined)?.ctrlKey
+          );
           console.log('[MapBuildingsLayer] Click event:', {
             featureCount: e.features?.length,
             point: e.point,
@@ -990,7 +1045,7 @@ export function MapBuildingsLayer({
             });
             
             // Pass both gersId (parent building) and address_id (specific unit)
-            onBuildingClick(gersId, props.address_id);
+            onBuildingClick(gersId, props.address_id, { additive: additiveSelection });
             return; // Early return - we've handled the click
           }
           
@@ -998,7 +1053,7 @@ export function MapBuildingsLayer({
           if (!gersId) {
             console.log('[MapBuildingsLayer] No gers_id or id, using fallback');
             if (props.id && onBuildingClick) {
-              onBuildingClick(props.id);
+              onBuildingClick(props.id, undefined, { additive: additiveSelection });
             }
             return;
           }
@@ -1113,7 +1168,7 @@ export function MapBuildingsLayer({
             // The LocationCard provides a richer UI than the popup.
             // Pass address_id when present (Gold/Silver linked features) so the card can show the address.
             if (onBuildingClick) {
-              onBuildingClick(gersId, props.address_id);
+              onBuildingClick(gersId, props.address_id, { additive: additiveSelection });
               // Skip showing the basic popup since LocationCard will handle the UI
               return;
             }
@@ -1143,9 +1198,9 @@ export function MapBuildingsLayer({
             console.error('[MapBuildingsLayer] Error in click handler:', err);
             // Fallback to onBuildingClick - always pass address_id when available
             if (gersId && onBuildingClick) {
-              onBuildingClick(gersId, props.address_id);
+              onBuildingClick(gersId, props.address_id, { additive: additiveSelection });
             } else if (props.id && onBuildingClick) {
-              onBuildingClick(props.id, props.address_id);
+              onBuildingClick(props.id, props.address_id, { additive: additiveSelection });
             }
           }
         };
@@ -1231,6 +1286,9 @@ export function MapBuildingsLayer({
               },
             });
           }
+          if (map.getLayer(addressLabelLayerId)) {
+            map.setLayoutProperty(addressLabelLayerId, 'visibility', showAddressLabels ? 'visible' : 'none');
+          }
         } catch (err) {
           console.error('Error updating layer paint properties:', err);
         }
@@ -1267,7 +1325,7 @@ export function MapBuildingsLayer({
       map.off('idle', onIdle);
       map.off('style.load', onStyleLoad);
     };
-  }, [map, features, zoomLevel, onBuildingClick, statusFilters, campaignId, supabase, onAddToCRM, showOrphans, footprintStatusColors, addressStateOverrides]);
+  }, [map, features, zoomLevel, onBuildingClick, statusFilters, campaignId, supabase, onAddToCRM, showOrphans, showAddressLabels, footprintStatusColors, addressStateOverrides]);
 
   // Update color and filter when statusFilters or campaignId changes
   useEffect(() => {

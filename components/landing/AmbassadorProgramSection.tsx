@@ -42,7 +42,7 @@ const INITIAL_STATE: ApplicationState = {
 };
 
 const PROGRAM_BULLETS = [
-  '20% recurring commission for 12 months on paid users you refer',
+  '25% recurring commission for 12 months on paid users you refer',
   '30-day free trial for your audience with your custom link and code',
   'Cash bonuses at key milestones for top-performing partners',
   'Monthly payouts with a clear Stripe-based payout path for approved ambassadors',
@@ -54,19 +54,36 @@ const PROGRAM_STEPS = [
   'Top partners can be upgraded into paid content + higher commission tiers.',
 ];
 
+const FORM_FIELD_CLASS =
+  'mt-2 rounded-md border-zinc-200 !bg-zinc-100 text-zinc-900 placeholder:text-zinc-500 [color-scheme:light] ' +
+  'dark:!border-zinc-200 dark:!bg-zinc-100 dark:!text-zinc-900 dark:placeholder:!text-zinc-500 ' +
+  '[&:-webkit-autofill]:shadow-[inset_0_0_0px_1000px_rgb(244_244_245)] ' +
+  '[&:-webkit-autofill]:[-webkit-text-fill-color:#18181b] ' +
+  '[&:-webkit-autofill:hover]:shadow-[inset_0_0_0px_1000px_rgb(244_244_245)] ' +
+  '[&:-webkit-autofill:focus]:shadow-[inset_0_0_0px_1000px_rgb(244_244_245)]';
+
+const INPUT_FIELD_CLASS = `${FORM_FIELD_CLASS} h-11`;
+const TEXTAREA_FIELD_CLASS = `${FORM_FIELD_CLASS} min-h-24`;
+const TALL_TEXTAREA_FIELD_CLASS = `${FORM_FIELD_CLASS} min-h-28`;
+const SELECT_FIELD_CLASS =
+  'mt-2 h-11 w-full rounded-md border border-zinc-200 !bg-zinc-100 px-3 text-sm text-zinc-900 outline-none transition [color-scheme:light] focus:border-zinc-900 ' +
+  'dark:!border-zinc-200 dark:!bg-zinc-100 dark:!text-zinc-900';
+
 export function AmbassadorProgramSection() {
   const [form, setForm] = useState<ApplicationState>(INITIAL_STATE);
   const [status, setStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
   const [message, setMessage] = useState<string>('');
 
-  const canSubmit = useMemo(() => {
-    return Boolean(
-      form.fullName.trim() &&
-      form.email.trim() &&
-      form.primaryNiche.trim() &&
-      form.primaryPlatform.trim() &&
-      form.whyFlyr.trim().length >= 20
-    );
+  const validationMessage = useMemo(() => {
+    if (!form.fullName.trim()) return 'Please enter your full name.';
+    if (!form.email.trim()) return 'Please enter your email.';
+    if (!form.primaryNiche.trim()) return 'Please enter your primary niche.';
+    if (!form.primaryPlatform.trim()) return 'Please choose your primary platform.';
+    if (form.whyFlyr.trim().length < 20) {
+      return 'Please add at least 20 characters about why you want to partner with FLYR.';
+    }
+
+    return '';
   }, [form]);
 
   const handleChange = (field: keyof ApplicationState, value: string) => {
@@ -75,7 +92,13 @@ export function AmbassadorProgramSection() {
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!canSubmit || status === 'submitting') return;
+    if (status === 'submitting') return;
+
+    if (validationMessage) {
+      setStatus('error');
+      setMessage(validationMessage);
+      return;
+    }
 
     setStatus('submitting');
     setMessage('');
@@ -139,7 +162,7 @@ export function AmbassadorProgramSection() {
               <p className="text-sm font-semibold uppercase tracking-[0.06em] text-zinc-500">
                 Base
               </p>
-              <p className="mt-3 text-2xl font-black text-zinc-900">20%</p>
+              <p className="mt-3 text-2xl font-black text-zinc-900">25%</p>
               <p className="mt-2 text-sm text-zinc-600">Recurring commission for 12 months</p>
             </div>
             <div className="border border-zinc-200 p-5">
@@ -196,7 +219,7 @@ export function AmbassadorProgramSection() {
                 id="ambassador-full-name"
                 value={form.fullName}
                 onChange={(event) => handleChange('fullName', event.target.value)}
-                className="mt-2 h-11 rounded-md border-zinc-300 bg-white"
+                className={INPUT_FIELD_CLASS}
                 placeholder="Your name"
                 required
               />
@@ -209,7 +232,7 @@ export function AmbassadorProgramSection() {
                 type="email"
                 value={form.email}
                 onChange={(event) => handleChange('email', event.target.value)}
-                className="mt-2 h-11 rounded-md border-zinc-300 bg-white"
+                className={INPUT_FIELD_CLASS}
                 placeholder="you@example.com"
                 required
               />
@@ -221,7 +244,7 @@ export function AmbassadorProgramSection() {
                 id="ambassador-phone"
                 value={form.phone}
                 onChange={(event) => handleChange('phone', event.target.value)}
-                className="mt-2 h-11 rounded-md border-zinc-300 bg-white"
+                className={INPUT_FIELD_CLASS}
                 placeholder="Optional"
               />
             </div>
@@ -232,7 +255,7 @@ export function AmbassadorProgramSection() {
                 id="ambassador-city"
                 value={form.city}
                 onChange={(event) => handleChange('city', event.target.value)}
-                className="mt-2 h-11 rounded-md border-zinc-300 bg-white"
+                className={INPUT_FIELD_CLASS}
                 placeholder="Toronto, Dallas, Phoenix..."
               />
             </div>
@@ -243,7 +266,7 @@ export function AmbassadorProgramSection() {
                 id="ambassador-niche"
                 value={form.primaryNiche}
                 onChange={(event) => handleChange('primaryNiche', event.target.value)}
-                className="mt-2 h-11 rounded-md border-zinc-300 bg-white"
+                className={INPUT_FIELD_CLASS}
                 placeholder="Real estate coaching, field sales..."
                 required
               />
@@ -255,7 +278,7 @@ export function AmbassadorProgramSection() {
                 id="ambassador-platform"
                 value={form.primaryPlatform}
                 onChange={(event) => handleChange('primaryPlatform', event.target.value)}
-                className="mt-2 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 outline-none transition focus:border-zinc-900"
+                className={SELECT_FIELD_CLASS}
               >
                 <option>Instagram</option>
                 <option>TikTok</option>
@@ -273,7 +296,7 @@ export function AmbassadorProgramSection() {
                 id="ambassador-audience-size"
                 value={form.audienceSize}
                 onChange={(event) => handleChange('audienceSize', event.target.value)}
-                className="mt-2 h-11 rounded-md border-zinc-300 bg-white"
+                className={INPUT_FIELD_CLASS}
                 placeholder="5k-20k, 25k+, etc."
               />
             </div>
@@ -284,7 +307,7 @@ export function AmbassadorProgramSection() {
                 id="ambassador-instagram"
                 value={form.instagramHandle}
                 onChange={(event) => handleChange('instagramHandle', event.target.value)}
-                className="mt-2 h-11 rounded-md border-zinc-300 bg-white"
+                className={INPUT_FIELD_CLASS}
                 placeholder="@handle"
               />
             </div>
@@ -295,7 +318,7 @@ export function AmbassadorProgramSection() {
                 id="ambassador-tiktok"
                 value={form.tiktokHandle}
                 onChange={(event) => handleChange('tiktokHandle', event.target.value)}
-                className="mt-2 h-11 rounded-md border-zinc-300 bg-white"
+                className={INPUT_FIELD_CLASS}
                 placeholder="@handle"
               />
             </div>
@@ -306,7 +329,7 @@ export function AmbassadorProgramSection() {
                 id="ambassador-youtube"
                 value={form.youtubeHandle}
                 onChange={(event) => handleChange('youtubeHandle', event.target.value)}
-                className="mt-2 h-11 rounded-md border-zinc-300 bg-white"
+                className={INPUT_FIELD_CLASS}
                 placeholder="Channel or show name"
               />
             </div>
@@ -318,7 +341,7 @@ export function AmbassadorProgramSection() {
                 type="url"
                 value={form.websiteUrl}
                 onChange={(event) => handleChange('websiteUrl', event.target.value)}
-                className="mt-2 h-11 rounded-md border-zinc-300 bg-white"
+                className={INPUT_FIELD_CLASS}
                 placeholder="https://"
               />
             </div>
@@ -329,7 +352,7 @@ export function AmbassadorProgramSection() {
                 id="ambassador-audience-summary"
                 value={form.audienceSummary}
                 onChange={(event) => handleChange('audienceSummary', event.target.value)}
-                className="mt-2 min-h-24 rounded-md border-zinc-300 bg-white"
+                className={TEXTAREA_FIELD_CLASS}
                 placeholder="Who follows you and why do they trust your recommendations?"
               />
             </div>
@@ -340,10 +363,14 @@ export function AmbassadorProgramSection() {
                 id="ambassador-why-flyr"
                 value={form.whyFlyr}
                 onChange={(event) => handleChange('whyFlyr', event.target.value)}
-                className="mt-2 min-h-28 rounded-md border-zinc-300 bg-white"
+                className={TALL_TEXTAREA_FIELD_CLASS}
                 placeholder="Share why your audience is a fit and how you would position FLYR."
+                minLength={20}
                 required
               />
+              <p className="mt-2 text-xs text-zinc-500">
+                Minimum 20 characters.
+              </p>
             </div>
 
             <div className="md:col-span-2">
@@ -352,7 +379,7 @@ export function AmbassadorProgramSection() {
                 id="ambassador-promotion-plan"
                 value={form.promotionPlan}
                 onChange={(event) => handleChange('promotionPlan', event.target.value)}
-                className="mt-2 min-h-24 rounded-md border-zinc-300 bg-white"
+                className={TEXTAREA_FIELD_CLASS}
                 placeholder="Short-form video, live demo, webinar, newsletter, coaching cohort..."
               />
             </div>
@@ -371,12 +398,17 @@ export function AmbassadorProgramSection() {
           ) : null}
 
           <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm text-zinc-500">
-              Approved ambassadors are onboarded for payouts through Stripe.
-            </p>
+            <div className="space-y-1">
+              <p className="text-sm text-zinc-500">
+                Approved ambassadors are onboarded for payouts through Stripe.
+              </p>
+              {validationMessage ? (
+                <p className="text-xs text-zinc-500">{validationMessage}</p>
+              ) : null}
+            </div>
             <Button
               type="submit"
-              disabled={!canSubmit || status === 'submitting'}
+              disabled={status === 'submitting'}
               className="h-11 rounded-md bg-red-600 px-5 text-sm font-semibold text-white hover:bg-red-500"
             >
               {status === 'submitting' ? 'Submitting...' : 'Apply now'}

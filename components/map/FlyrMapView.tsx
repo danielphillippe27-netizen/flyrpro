@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { CampaignMarkersLayer } from './CampaignMarkersLayer';
@@ -15,21 +15,23 @@ import { CreateContactDialog } from '@/components/crm/CreateContactDialog';
 import { CampaignsService } from '@/lib/services/CampaignsService';
 import { createClient } from '@/lib/supabase/client';
 import { useTheme } from '@/lib/theme-provider';
+import { useMapStyle } from '@/lib/map-style-provider';
 import { useWorkspace } from '@/lib/workspace-context';
 import { getMapboxToken } from '@/lib/mapbox';
+import { applyPresetVisualTweaks, applyResolvedMapStyle, getResolvedMapInitOptions, hideBaseBuildingLayers, resolveMapStyle } from '@/lib/map-styles';
 import { getCampaignAddressMapStatus } from '@/lib/campaignStats';
 import { DEFAULT_STATUS_FILTERS, MAP_STATUS_CONFIG, type StatusFilters } from '@/lib/constants/mapStatus';
 import type { CampaignV2, CampaignAddress } from '@/types/database';
 import * as turf from '@turf/turf';
 
-const MAP_STYLES = {
-  light: 'mapbox://styles/fliper27/cml6z0dhg002301qo9xxc08k4',
-  dark: 'mapbox://styles/fliper27/cml6zc5pq002801qo4lh13o19',
-} as const;
-
 export function FlyrMapView() {
   const { theme } = useTheme();
+  const { preset: mapPreset } = useMapStyle();
   const { currentWorkspaceId } = useWorkspace();
+  const resolvedMapStyle = useMemo(
+    () => resolveMapStyle(mapPreset, theme, 'v12'),
+    [mapPreset, theme],
+  );
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const [statusFilters, setStatusFilters] = useState<StatusFilters>(DEFAULT_STATUS_FILTERS);
@@ -114,9 +116,10 @@ export function FlyrMapView() {
 
   useEffect(() => {
     if (!mapContainer.current || map.current) return;
+    let cancelled = false;
 
     // Initialize map immediately
-    const initMap = () => {
+    const initMap = async () => {
       if (!mapContainer.current) return;
       
       try {
@@ -133,9 +136,12 @@ export function FlyrMapView() {
           mapboxgl.workerCount = 2;
         }
 
+        const mapInitOptions = await getResolvedMapInitOptions(resolvedMapStyle);
+        if (cancelled || !mapContainer.current || map.current) return;
+
         map.current = new mapboxgl.Map({
           container: mapContainer.current,
-          style: MAP_STYLES[theme] ?? MAP_STYLES.light,
+          ...mapInitOptions,
           center: [-79.3832, 43.6532], // Toronto default
           zoom: 12,
           pitch: 0,
@@ -152,12 +158,13 @@ export function FlyrMapView() {
             try {
               const style = map.current.getStyle();
               if (style && style.layers) {
+                applyPresetVisualTweaks(map.current, resolvedMapStyle, {
+                  preserveLayerPrefixes: ['map-buildings-', 'campaign-', 'route-', 'assigned-routes-', 'flyr-', 'gl-draw-'],
+                });
+                hideBaseBuildingLayers(map.current, {
+                  preserveLayerPrefixes: ['map-buildings-'],
+                });
                 style.layers.forEach((layer) => {
-                  // Hide layers that contain "building" in their id
-                  if (layer.id.toLowerCase().includes('building')) {
-                    map.current?.setLayoutProperty(layer.id, 'visibility', 'none');
-                  }
-                  
                   // Remove layers that reference non-existent source layers
                   if (layer.id && (
                     layer.id.includes('road-label') || 
@@ -263,14 +270,15 @@ export function FlyrMapView() {
 
     // Use requestAnimationFrame to ensure DOM is ready
     const rafId = requestAnimationFrame(() => {
-      initMap();
+      void initMap();
     });
 
     return () => {
+      cancelled = true;
       cancelAnimationFrame(rafId);
       map.current?.remove();
     };
-  }, []);
+  }, [resolvedMapStyle]);
 
   // Keep Mapbox canvas in sync with container size (sidebar collapse/expand, viewport changes).
   // Debounce resize so we don't flash during the sidebar's width transition (~200ms).
@@ -319,13 +327,11 @@ export function FlyrMapView() {
     };
   }, [mapLoaded]);
 
-  // Sync map style with app theme (light/dark)
+  // Sync map style with the selected map preset.
   useEffect(() => {
     if (!map.current || !mapLoaded) return;
-
-    const styleUrl = MAP_STYLES[theme] ?? MAP_STYLES.light;
     try {
-      map.current.setStyle(styleUrl);
+      applyResolvedMapStyle(map.current, resolvedMapStyle);
     } catch (err) {
       console.error('Error setting map style:', err);
       setError(`Failed to load map style: ${err instanceof Error ? err.message : String(err)}`);
@@ -336,10 +342,13 @@ export function FlyrMapView() {
       try {
         const style = map.current.getStyle();
         if (style?.layers) {
+          applyPresetVisualTweaks(map.current, resolvedMapStyle, {
+            preserveLayerPrefixes: ['map-buildings-', 'campaign-', 'route-', 'assigned-routes-', 'flyr-', 'gl-draw-'],
+          });
+          hideBaseBuildingLayers(map.current, {
+            preserveLayerPrefixes: ['map-buildings-'],
+          });
           style.layers.forEach((layer) => {
-            if (layer.id.toLowerCase().includes('building')) {
-              map.current?.setLayoutProperty(layer.id, 'visibility', 'none');
-            }
             if (layer.id && (layer.id.includes('road-label') || layer.id.includes('road_label'))) {
               try {
                 map.current.removeLayer(layer.id);
@@ -353,7 +362,7 @@ export function FlyrMapView() {
     map.current.once('style.load', () => {
       cleanupLayers();
     });
-  }, [theme, mapLoaded]);
+  }, [mapLoaded, resolvedMapStyle]);
 
   // Handle 3D view pitch and bearing
   useEffect(() => {
@@ -675,6 +684,7 @@ export function FlyrMapView() {
               'fill-extrusion-base': 0,
               'fill-extrusion-opacity': 1,
               'fill-extrusion-vertical-gradient': true,
+              'fill-extrusion-emissive-strength': 0.85,
             },
             ...(filterExpr ? { filter: filterExpr as mapboxgl.Expression } : {}),
           });
@@ -716,7 +726,7 @@ export function FlyrMapView() {
       mapInstance.off('click', addressPointsLayerId, onAddressPointClick);
       removeAddressPointsLayer();
     };
-  }, [mapViewMode, mapLoaded, campaignAddresses, statusFilters, theme, selectedCampaignId]);
+  }, [mapViewMode, mapLoaded, campaignAddresses, statusFilters, resolvedMapStyle.key, selectedCampaignId]);
 
   return (
     <div className="relative h-full w-full">

@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { after, NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { TileLambdaService } from '@/lib/services/TileLambdaService';
 import { RoutingService } from '@/lib/services/RoutingService';
@@ -11,6 +11,8 @@ import { AddressAdapter } from '@/lib/services/AddressAdapter';
 import { resolveCampaignRegion } from '@/lib/geo/regionResolver';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { fetchAllInPages } from '@/lib/supabase/fetchAllInPages';
+import { ParcelEnrichmentService } from '@/lib/services/ParcelEnrichmentService';
+import { CampaignLinkQualityService } from '@/lib/services/CampaignLinkQualityService';
 
 // FIX: Ensure Node.js runtime
 export const runtime = 'nodejs';
@@ -18,6 +20,10 @@ export const dynamic = 'force-dynamic';
 
 interface ProvisionRequest {
   campaign_id: string;
+}
+
+function shouldQueueParcelEnrichment(regionCode: string | null | undefined) {
+  return Boolean((regionCode || '').trim());
 }
 
 // Retry wrapper with exponential backoff
@@ -165,7 +171,7 @@ export async function POST(request: NextRequest) {
     // GOLD STANDARD: Hybrid Provisioning - Reuse snapshot when possible (avoid triple Lambda)
     // =============================================================================
 
-    const result = await retryWithBackoff(async () => {
+    const result: Record<string, unknown> = await retryWithBackoff(async () => {
       let addressesToInsert: Array<Record<string, unknown>> = [];
       let goldBuildings: Array<Record<string, unknown>> | null = null;
       let snapshot: Awaited<ReturnType<typeof TileLambdaService.generateSnapshots>> | null = null;
@@ -498,10 +504,24 @@ export async function POST(request: NextRequest) {
       // END PEDESTRIAN ROUTING
       // =============================================================================
 
+      let parcelPreparation:
+        | Awaited<ReturnType<ParcelEnrichmentService['prepareParcelsForProvision']>>
+        | null = null;
+      const parcelEnrichment = shouldQueueParcelEnrichment(regionCode)
+        ? new ParcelEnrichmentService(supabase)
+        : null;
+      if (parcelEnrichment) {
+        try {
+          parcelPreparation = await parcelEnrichment.prepareParcelsForProvision(campaign_id!);
+        } catch (parcelError) {
+          console.warn('[Provision] Parcel preparation failed before linking:', parcelError);
+        }
+      }
+
       // =============================================================================
       // GOLD STANDARD SPATIAL LINKER: Fast PostGIS-based matching
       // =============================================================================
-      console.log('[Provision] Gold Standard Spatial Linker: Running PostGIS spatial join...');
+      console.log('[Provision] Spatial linker: Running canonical TypeScript spatial join...');
       let spatialJoinSummary = {
         matched: 0,
         orphans: 0,
@@ -512,182 +532,31 @@ export async function POST(request: NextRequest) {
           containmentVerified: 0,
           containmentSuspect: 0,
           pointOnSurface: 0,
+          parcelVerified: 0,
           proximityVerified: 0,
           proximityFallback: 0,
         },
       };
       
       try {
-        if (goldBuildings && goldBuildings.length > 0) {
-          // Use SQL-based linker for Gold data, but tolerate mixed DB states
-          // (two-arg linker, legacy one-arg linker, or consolidated linker).
-          console.log('[Provision] Using SQL-based Gold linker with compatibility fallbacks...');
-
-          const toNumber = (value: unknown): number => {
-            const num = Number(value);
-            return Number.isFinite(num) ? num : 0;
-          };
-
-          const parseLinkCounts = (data: unknown) => {
-            const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | null | undefined;
-            if (!row || typeof row !== 'object') return null;
-
-            const exact = toNumber(row.exact_matches ?? row.gold_exact);
-            const proximity = toNumber(row.proximity_matches ?? row.gold_prox);
-            const silverExact = toNumber(row.silver_exact);
-            const silverProximity = toNumber(row.silver_prox);
-            const total = toNumber(
-              row.total_linked ?? (exact + proximity + silverExact + silverProximity)
-            );
-
-            return { exact, proximity, silverExact, silverProximity, total };
-          };
-
-          const getPersistedLinkTotals = async () => {
-            const [{ count: goldLinked, error: goldCountError }, { count: silverLinked, error: silverCountError }] =
-              await Promise.all([
-                supabase
-                  .from('campaign_addresses')
-                  .select('*', { count: 'exact', head: true })
-                  .eq('campaign_id', campaign_id)
-                  .not('building_id', 'is', null),
-                supabase
-                  .from('building_address_links')
-                  .select('*', { count: 'exact', head: true })
-                  .eq('campaign_id', campaign_id),
-              ]);
-
-            if (goldCountError) {
-              console.warn('[Provision] Failed to count Gold links:', goldCountError.message);
-            }
-            if (silverCountError) {
-              console.warn('[Provision] Failed to count Silver links:', silverCountError.message);
-            }
-
-            return {
-              goldLinked: toNumber(goldLinked),
-              silverLinked: toNumber(silverLinked),
-              total: toNumber(goldLinked) + toNumber(silverLinked),
-            };
-          };
-
-          let exact = 0;
-          let proximity = 0;
-          let silverExact = 0;
-          let silverProximity = 0;
-          let total = 0;
-          let linkerMethod: 'gold_two_arg' | 'gold_one_arg' | 'all' | 'none' = 'none';
-
-          // 1) Preferred: two-arg Gold linker (campaign_id + polygon)
-          const { data: linkResultTwoArg, error: linkErrorTwoArg } = await supabase.rpc(
-            'link_campaign_addresses_gold',
-            {
-              p_campaign_id: campaign_id,
-              p_polygon_geojson: polygon,
-            }
-          );
-
-          if (!linkErrorTwoArg) {
-            const parsed = parseLinkCounts(linkResultTwoArg);
-            if (parsed) {
-              exact = parsed.exact;
-              proximity = parsed.proximity;
-              silverExact = parsed.silverExact;
-              silverProximity = parsed.silverProximity;
-              total = parsed.total;
-            }
-            linkerMethod = 'gold_two_arg';
-          } else {
-            console.warn('[Provision] Two-arg Gold linker unavailable/failed:', linkErrorTwoArg.message);
+        const linkerService = new StableLinkerService(supabase);
+        spatialJoinSummary = await linkerService.runSpatialJoin(
+          campaign_id!,
+          normalizedBuildingsGeoJSON,
+          overtureRelease,
+          {
+            parcels:
+              parcelPreparation?.status === 'ready' && parcelPreparation.parcelCount > 0
+                ? parcelPreparation.parcels.map((parcel) => ({
+                    externalId: parcel.externalId,
+                    geometry: parcel.geometry,
+                  }))
+                : undefined,
+            resetExisting: true,
+            persistenceMode: goldBuildings && goldBuildings.length > 0 ? 'gold' : 'silver',
           }
-
-          // 2) Compatibility fallback: legacy one-arg Gold linker
-          if (linkErrorTwoArg) {
-            const { data: linkResultOneArg, error: linkErrorOneArg } = await supabase.rpc(
-              'link_campaign_addresses_gold',
-              { p_campaign_id: campaign_id }
-            );
-
-            if (!linkErrorOneArg) {
-              const parsed = parseLinkCounts(linkResultOneArg);
-              if (parsed) {
-                exact = parsed.exact;
-                proximity = parsed.proximity;
-                silverExact = parsed.silverExact;
-                silverProximity = parsed.silverProximity;
-                total = parsed.total;
-              }
-              linkerMethod = 'gold_one_arg';
-            } else {
-              console.warn('[Provision] One-arg Gold linker unavailable/failed:', linkErrorOneArg.message);
-            }
-          }
-
-          // 3) If still no links, use consolidated linker (Gold + Silver fallback)
-          if (total === 0) {
-            const { data: linkResultAll, error: linkErrorAll } = await supabase.rpc(
-              'link_campaign_addresses_all',
-              { p_campaign_id: campaign_id }
-            );
-
-            if (!linkErrorAll) {
-              const parsed = parseLinkCounts(linkResultAll);
-              if (parsed) {
-                exact = parsed.exact;
-                proximity = parsed.proximity;
-                silverExact = parsed.silverExact;
-                silverProximity = parsed.silverProximity;
-                total = parsed.total;
-              }
-              linkerMethod = 'all';
-            } else {
-              console.warn('[Provision] Consolidated linker unavailable/failed:', linkErrorAll.message);
-            }
-          }
-
-          // Some linker variants return void; trust persisted link counts when RPC rows are empty.
-          if (total === 0) {
-            const persisted = await getPersistedLinkTotals();
-            total = persisted.total;
-            if (exact + proximity + silverExact + silverProximity === 0) {
-              exact = persisted.goldLinked;
-              silverExact = persisted.silverLinked;
-            }
-          }
-
-          console.log(
-            `[Provision] SQL linker complete [${linkerMethod}]: ` +
-              `${exact} gold exact, ${proximity} gold proximity, ` +
-              `${silverExact} silver exact, ${silverProximity} silver proximity, ${total} total`
-          );
-
-          spatialJoinSummary = {
-            matched: Number(total),
-            orphans: Math.max(insertedCount - Number(total), 0),
-            suspect: 0,
-            avgConfidence: total > 0
-              ? (exact * 1.0 + proximity * 0.8 + silverExact * 1.0 + silverProximity * 0.8) / total
-              : 0,
-            coveragePercent: insertedCount > 0 ? (Number(total) / insertedCount) * 100 : 0,
-            matchBreakdown: {
-              containmentVerified: Number(exact + silverExact),
-              containmentSuspect: 0,
-              pointOnSurface: 0,
-              proximityVerified: Number(proximity + silverProximity),
-              proximityFallback: 0,
-            },
-          };
-        } else {
-          // Use JavaScript linker for Silver/Lambda data
-          console.log('[Provision] Using JavaScript linker for Silver data...');
-          const linkerService = new StableLinkerService(supabase);
-          spatialJoinSummary = await linkerService.runSpatialJoin(
-            campaign_id!,
-            normalizedBuildingsGeoJSON,
-            overtureRelease
-          );
-          console.log('[Provision] Spatial join complete:', spatialJoinSummary);
-        }
+        );
+        console.log('[Provision] Spatial join complete:', spatialJoinSummary);
       } catch (linkerError) {
         console.error('[Provision] Spatial linker FAILED:', linkerError);
       }
@@ -730,6 +599,28 @@ export async function POST(request: NextRequest) {
       // =============================================================================
       // END GOLD STANDARD WORKFLOW
       // =============================================================================
+
+      const linkQualityService = new CampaignLinkQualityService(supabase);
+      const linkQuality = CampaignLinkQualityService.assess(spatialJoinSummary, insertedCount);
+      await linkQualityService.persist(campaign_id!, linkQuality);
+
+      let queuedBackgroundRepair = false;
+      const shouldRetryParcelRepair =
+        linkQuality.repairRecommended &&
+        parcelEnrichment &&
+        parcelPreparation &&
+        parcelPreparation.status === 'failed';
+      if (shouldRetryParcelRepair) {
+        await linkQualityService.updateStatus(
+          campaign_id!,
+          'repairing',
+          linkQuality.reason ? `Repair queued: ${linkQuality.reason}` : 'Repair queued after degraded first-pass linking.'
+        );
+        after(async () => {
+          await parcelEnrichment.runForCampaign(campaign_id!);
+        });
+        queuedBackgroundRepair = true;
+      }
       
       return {
         success: true,
@@ -741,6 +632,7 @@ export async function POST(request: NextRequest) {
         units_created: townhouseSummary.units_created,
         spatial_join: spatialJoinSummary,
         townhouse_split: townhouseSummary,
+        link_quality: linkQuality,
         map_layers: snapshot ? {
           buildings: snapshot.urls.buildings,
         } : {
@@ -767,6 +659,8 @@ export async function POST(request: NextRequest) {
             (snapshot?.counts ? ` Buildings (${snapshot.counts.buildings}) served from S3.` : ' S3 snapshot.')
             + (optimizedPathInfo ? ` Optimized walking loop: ${optimizedPathInfo.totalDistanceKm.toFixed(2)}km, ${optimizedPathInfo.totalTimeMinutes}min.` : '')
           : `Gold Standard provisioning complete: ${insertedCount} leads ready using municipal data.`,
+        parcel_enrichment_status: parcelPreparation?.status ?? 'not_started',
+        repair_queued: queuedBackgroundRepair,
       };
     });
 

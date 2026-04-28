@@ -129,6 +129,18 @@ export function isMissingLastSentAtColumnError(error: unknown): boolean {
   );
 }
 
+function isMissingAccessScopeColumnError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const maybeError = error as { code?: string; message?: string };
+  const message = typeof maybeError.message === 'string' ? maybeError.message.toLowerCase() : '';
+  const referencesAccessScope = message.includes('access_scope');
+  return (
+    (maybeError.code === 'PGRST204' && referencesAccessScope) ||
+    (maybeError.code === '42703' && referencesAccessScope) ||
+    (referencesAccessScope && message.includes('column') && message.includes('does not exist'))
+  );
+}
+
 export function normalizeInviteEmail(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const normalized = value.trim().toLowerCase();
@@ -183,7 +195,7 @@ export async function getSeatUsage(
   workspaceId: string
 ): Promise<SeatUsage> {
   const nowIso = new Date().toISOString();
-  const [workspaceResult, activeMembershipsResult, pendingInvitesResult] =
+  const [workspaceResult, activeMembershipsResult] =
     await Promise.all([
       supabase
         .from('workspaces')
@@ -194,13 +206,24 @@ export async function getSeatUsage(
         .from('workspace_members')
         .select('role')
         .eq('workspace_id', workspaceId),
-      supabase
-        .from('workspace_invites')
-        .select('role')
-        .eq('workspace_id', workspaceId)
-        .eq('status', 'pending')
-        .gt('expires_at', nowIso),
     ]);
+
+  let pendingInvitesResult = await supabase
+    .from('workspace_invites')
+    .select('role')
+    .eq('workspace_id', workspaceId)
+    .eq('status', 'pending')
+    .eq('access_scope', 'workspace')
+    .gt('expires_at', nowIso);
+
+  if (isMissingAccessScopeColumnError(pendingInvitesResult.error)) {
+    pendingInvitesResult = await supabase
+      .from('workspace_invites')
+      .select('role')
+      .eq('workspace_id', workspaceId)
+      .eq('status', 'pending')
+      .gt('expires_at', nowIso);
+  }
 
   if (activeMembershipsResult.error) {
     throw activeMembershipsResult.error;
@@ -285,10 +308,14 @@ export async function listPendingWorkspaceInvites(
     .select(inviteSelectColumns())
     .eq('workspace_id', workspaceId)
     .eq('status', 'pending')
+    .eq('access_scope', 'workspace')
     .gt('expires_at', nowIso)
     .order('created_at', { ascending: false });
 
-  if (!isMissingLastSentAtColumnError(withLastSentAt.error)) {
+  if (
+    !isMissingLastSentAtColumnError(withLastSentAt.error) &&
+    !isMissingAccessScopeColumnError(withLastSentAt.error)
+  ) {
     if (!withLastSentAt.error) {
       return {
         data: normalizeInviteRecords(withLastSentAt.data as Record<string, unknown>[] | null),
@@ -308,6 +335,7 @@ export async function listPendingWorkspaceInvites(
     .select(inviteSelectColumns({ includeLastSentAt: false }))
     .eq('workspace_id', workspaceId)
     .eq('status', 'pending')
+    .eq('access_scope', 'workspace')
     .gt('expires_at', nowIso)
     .order('created_at', { ascending: false });
 
@@ -316,6 +344,22 @@ export async function listPendingWorkspaceInvites(
       data: normalizeInviteRecords(withoutLastSentAt.data as Record<string, unknown>[] | null),
       error: null,
     };
+  }
+  if (isMissingAccessScopeColumnError(withoutLastSentAt.error)) {
+    const legacyWithoutScope = await supabase
+      .from('workspace_invites')
+      .select(inviteSelectColumns({ includeLastSentAt: false }))
+      .eq('workspace_id', workspaceId)
+      .eq('status', 'pending')
+      .gt('expires_at', nowIso)
+      .order('created_at', { ascending: false });
+
+    if (!legacyWithoutScope.error) {
+      return {
+        data: normalizeInviteRecords(legacyWithoutScope.data as Record<string, unknown>[] | null),
+        error: null,
+      };
+    }
   }
   if (isMissingRelation(withoutLastSentAt.error, 'workspace_invites')) {
     return {
@@ -394,9 +438,13 @@ export async function getWorkspaceInviteRecord(
     .from('workspace_invites')
     .select(inviteSelectColumns({ includeWorkspaceId: true }))
     .eq('id', inviteId)
+    .eq('access_scope', 'workspace')
     .maybeSingle();
 
-  if (!isMissingLastSentAtColumnError(withLastSentAt.error)) {
+  if (
+    !isMissingLastSentAtColumnError(withLastSentAt.error) &&
+    !isMissingAccessScopeColumnError(withLastSentAt.error)
+  ) {
     return {
       data: normalizeInviteRecord(withLastSentAt.data as Record<string, unknown> | null),
       error: withLastSentAt.error,
@@ -407,7 +455,21 @@ export async function getWorkspaceInviteRecord(
     .from('workspace_invites')
     .select(inviteSelectColumns({ includeWorkspaceId: true, includeLastSentAt: false }))
     .eq('id', inviteId)
+    .eq('access_scope', 'workspace')
     .maybeSingle();
+
+  if (isMissingAccessScopeColumnError(withoutLastSentAt.error)) {
+    const legacyWithoutScope = await supabase
+      .from('workspace_invites')
+      .select(inviteSelectColumns({ includeWorkspaceId: true, includeLastSentAt: false }))
+      .eq('id', inviteId)
+      .maybeSingle();
+
+    return {
+      data: normalizeInviteRecord(legacyWithoutScope.data as Record<string, unknown> | null),
+      error: legacyWithoutScope.error,
+    };
+  }
 
   return {
     data: normalizeInviteRecord(withoutLastSentAt.data as Record<string, unknown> | null),
@@ -423,25 +485,34 @@ export async function createWorkspaceInviteRecord(
     role: PendingInviteRole;
     token: string;
     status: 'pending';
+    access_scope?: 'workspace';
     invited_by: string;
     expires_at: string;
     last_sent_at?: string;
   }
 ): Promise<{ data: TeamInviteRecord | null; error: unknown }> {
+  const insertValues = {
+    ...values,
+    access_scope: 'workspace' as const,
+  };
   const withLastSentAt = await supabase
     .from('workspace_invites')
-    .insert(values)
+    .insert(insertValues)
     .select(inviteSelectColumns())
     .single();
 
-  if (!isMissingLastSentAtColumnError(withLastSentAt.error)) {
+  if (
+    !isMissingLastSentAtColumnError(withLastSentAt.error) &&
+    !isMissingAccessScopeColumnError(withLastSentAt.error)
+  ) {
     return {
       data: normalizeInviteRecord(withLastSentAt.data as Record<string, unknown> | null),
       error: withLastSentAt.error,
     };
   }
 
-  const legacyValues = { ...values };
+  const legacyValues = { ...insertValues };
+  delete legacyValues.access_scope;
   delete legacyValues.last_sent_at;
   const withoutLastSentAt = await supabase
     .from('workspace_invites')
