@@ -9,7 +9,7 @@ import AppTopHeader from '@/components/layout/AppTopHeader';
 import { MainLayoutNavProvider, useMainLayoutNav } from '@/components/layout/MainLayoutNavContext';
 import { MainRouteGuard } from '@/components/guard/MainRouteGuard';
 import { FarmIcon } from '@/components/icons/FarmIcon';
-import { Home, Map, Trophy, Users, Settings, Target, Gauge, Plug, MessageCircle, Activity, CalendarCheck, CornerDownRight, Plus, Link2, Route } from 'lucide-react';
+import { Home, Trophy, Users, Settings, Target, Gauge, Plug, MessageCircle, Activity, CalendarCheck, CornerDownRight, Plus, Link2, Route, UserRoundPlus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { DashboardAccessLevel } from '@/app/api/_utils/workspace';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
@@ -22,7 +22,6 @@ const baseTabs = [
   { href: '/campaigns', icon: Target, label: 'Campaign' },
   { href: '/farms', icon: FarmIcon, label: 'Farm' },
   { href: '/routes', icon: Route, label: 'Routes' },
-  { href: '/map', icon: Map, label: 'Map' },
   { href: '/activity', icon: Activity, label: 'Activity' },
   { href: '/leads', icon: Users, label: 'Leads' },
   { href: '/follow-up', icon: CornerDownRight, label: 'Follow Up' },
@@ -34,11 +33,13 @@ const baseTabs = [
 
 const supportTab = { href: '/support', icon: MessageCircle, label: 'Support' };
 const offersTab = { href: '/offers', icon: Link2, label: 'Offers' };
+const ambassadorsTab = { href: '/ambassadors', icon: UserRoundPlus, label: 'Ambassadors' };
 const settingsTab = { href: '/settings', icon: Settings, label: 'Settings' };
 const founderTabs = [
   ...baseTabs.filter((tab) => ['/home', '/campaigns', '/farms', '/routes'].includes(tab.href)),
   offersTab,
-  ...baseTabs.filter((tab) => ['/map', '/activity', '/leads', '/follow-up', '/appointments'].includes(tab.href)),
+  ambassadorsTab,
+  ...baseTabs.filter((tab) => ['/activity', '/leads', '/follow-up', '/appointments'].includes(tab.href)),
   settingsTab,
   ...baseTabs.filter((tab) => ['/stats'].includes(tab.href)),
   supportTab,
@@ -49,7 +50,6 @@ const memberTabs = baseTabs.filter((tab) =>
     '/campaigns',
     '/farms',
     '/routes',
-    '/map',
     '/leads',
     '/activity',
     '/appointments',
