@@ -12,6 +12,8 @@ import { Progress } from '@/components/ui/progress';
 import { getMapboxToken } from '@/lib/mapbox';
 import { MAP_STATUS_CONFIG } from '@/lib/constants/mapStatus';
 import { useTheme } from '@/lib/theme-provider';
+import { useMapStyle } from '@/lib/map-style-provider';
+import { applyPresetVisualTweaks, applyResolvedMapStyle, getResolvedMapInitOptions, resolveMapStyle } from '@/lib/map-styles';
 import { useWorkspace } from '@/lib/workspace-context';
 import { cn } from '@/lib/utils';
 
@@ -253,11 +255,6 @@ type CampaignBuildingsGeoJSON = {
   features: CampaignBuildingFeature[];
 };
 
-const MAP_STYLES = {
-  light: 'mapbox://styles/fliper27/cml6z0dhg002301qo9xxc08k4',
-  dark: 'mapbox://styles/fliper27/cml6zc5pq002801qo4lh13o19',
-} as const;
-
 function isValidCoord(lat: number, lng: number): boolean {
   return !isNaN(lat) && !isNaN(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
 }
@@ -305,7 +302,12 @@ export function AssignedRoutesView({
 }: AssignedRoutesViewProps) {
   const router = useRouter();
   const { theme } = useTheme();
+  const { preset: mapPreset } = useMapStyle();
   const { currentWorkspaceId } = useWorkspace();
+  const resolvedMapStyle = useMemo(
+    () => resolveMapStyle(mapPreset, theme, 'v12'),
+    [mapPreset, theme],
+  );
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const [assignments, setAssignments] = useState<AssignmentRow[]>([]);
@@ -604,6 +606,7 @@ export function AssignedRoutesView({
           'fill-extrusion-base': 0,
           'fill-extrusion-opacity': 1,
           'fill-extrusion-vertical-gradient': true,
+          'fill-extrusion-emissive-strength': 0.85,
         },
       });
     }
@@ -627,6 +630,7 @@ export function AssignedRoutesView({
           'fill-extrusion-base': 0,
           'fill-extrusion-opacity': 1,
           'fill-extrusion-vertical-gradient': true,
+          'fill-extrusion-emissive-strength': 0.85,
         },
       });
     }
@@ -656,25 +660,46 @@ export function AssignedRoutesView({
 
   useEffect(() => {
     if (!mapContainer.current || mapRef.current) return;
+    let cancelled = false;
     mapboxgl.accessToken = getMapboxToken();
-    const instance = new mapboxgl.Map({
-      container: mapContainer.current,
-      style: MAP_STYLES[theme] ?? MAP_STYLES.light,
-      center: [-79.3832, 43.6532],
-      zoom: 11,
-    });
-    instance.on('style.load', () => drawMap(instance));
-    mapRef.current = instance;
+
+    const initMap = async () => {
+      const mapInitOptions = await getResolvedMapInitOptions(resolvedMapStyle);
+      if (cancelled || !mapContainer.current || mapRef.current) return;
+
+      const instance = new mapboxgl.Map({
+        container: mapContainer.current,
+        ...mapInitOptions,
+        center: [-79.3832, 43.6532],
+        zoom: 11,
+      });
+      instance.on('style.load', () => {
+        applyPresetVisualTweaks(instance, resolvedMapStyle, {
+          preserveLayerPrefixes: ['assigned-routes-', 'route-', 'map-buildings-', 'campaign-', 'flyr-'],
+        });
+        drawMap(instance);
+      });
+      mapRef.current = instance;
+    };
+
+    void initMap();
     return () => {
-      instance.remove();
+      cancelled = true;
+      mapRef.current?.remove();
       mapRef.current = null;
     };
-  }, [drawMap, theme]);
+  }, [drawMap, resolvedMapStyle]);
 
   useEffect(() => {
     if (!mapRef.current) return;
-    mapRef.current.setStyle(MAP_STYLES[theme] ?? MAP_STYLES.light);
-  }, [theme]);
+    applyResolvedMapStyle(mapRef.current, resolvedMapStyle);
+    mapRef.current.once('style.load', () => {
+      if (!mapRef.current) return;
+      applyPresetVisualTweaks(mapRef.current, resolvedMapStyle, {
+        preserveLayerPrefixes: ['assigned-routes-', 'route-', 'map-buildings-', 'campaign-', 'flyr-'],
+      });
+    });
+  }, [resolvedMapStyle]);
 
   useEffect(() => {
     if (!mapRef.current || !mapRef.current.isStyleLoaded()) return;

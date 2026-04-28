@@ -20,6 +20,7 @@ import { FarmIcon } from '@/components/icons/FarmIcon';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { PowerDialerSettingsCard } from '@/components/settings/PowerDialerSettingsCard';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
 
 interface EntitlementSnapshot {
@@ -240,6 +241,8 @@ function SettingsPageContent() {
               </div>
             </CardContent>
           </Card>
+
+          <PowerDialerSettingsCard />
 
           {/* Integrations Section */}
           <Card>

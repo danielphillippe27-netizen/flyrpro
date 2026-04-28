@@ -1,17 +1,14 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { useTheme } from '@/lib/theme-provider';
+import { useMapStyle } from '@/lib/map-style-provider';
 import { useWorkspace } from '@/lib/workspace-context';
 import { getMapboxToken } from '@/lib/mapbox';
+import { applyPresetVisualTweaks, applyResolvedMapStyle, getResolvedMapInitOptions, resolveMapStyle } from '@/lib/map-styles';
 import { Card, CardContent } from '@/components/ui/card';
-
-const MAP_STYLES = {
-  light: 'mapbox://styles/fliper27/cml6z0dhg002301qo9xxc08k4',
-  dark: 'mapbox://styles/fliper27/cml6zc5pq002801qo4lh13o19',
-} as const;
 
 const ROUTES_SOURCE_ID = 'team-routes';
 const ROUTES_LAYER_ID = 'team-routes-layer';
@@ -72,7 +69,12 @@ function buildRoutesGeoJSON(
 
 export function TeamMapTab({ range, memberIds, mapMode }: TeamMapTabProps) {
   const { theme } = useTheme();
+  const { preset: mapPreset } = useMapStyle();
   const { currentWorkspaceId } = useWorkspace();
+  const resolvedMapStyle = useMemo(
+    () => resolveMapStyle(mapPreset, theme, 'v12'),
+    [mapPreset, theme],
+  );
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const popupRef = useRef<mapboxgl.Popup | null>(null);
@@ -128,33 +130,49 @@ export function TeamMapTab({ range, memberIds, mapMode }: TeamMapTabProps) {
   // Map init
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
-    const token = getMapboxToken();
-    if (!token) {
-      setError('Mapbox token not configured');
-      return;
-    }
-    mapboxgl.accessToken = token;
-    const map = new mapboxgl.Map({
-      container: mapContainerRef.current,
-      style: MAP_STYLES.light,
-      center: [-79.3832, 43.6532],
-      zoom: 11,
-    });
-    map.on('load', () => setMapLoaded(true));
-    mapRef.current = map;
+    let cancelled = false;
+
+    const initMap = async () => {
+      if (!mapContainerRef.current || mapRef.current) return;
+      const token = getMapboxToken();
+      if (!token) {
+        setError('Mapbox token not configured');
+        return;
+      }
+      mapboxgl.accessToken = token;
+      const mapInitOptions = await getResolvedMapInitOptions(resolvedMapStyle);
+      if (cancelled || !mapContainerRef.current || mapRef.current) return;
+
+      const map = new mapboxgl.Map({
+        container: mapContainerRef.current,
+        ...mapInitOptions,
+        center: [-79.3832, 43.6532],
+        zoom: 11,
+      });
+      map.on('load', () => setMapLoaded(true));
+      mapRef.current = map;
+    };
+
+    void initMap();
     return () => {
-      map.remove();
+      cancelled = true;
+      mapRef.current?.remove();
       mapRef.current = null;
       popupRef.current?.remove();
       popupRef.current = null;
     };
-  }, []);
+  }, [resolvedMapStyle]);
 
   useEffect(() => {
     if (!mapRef.current || !mapLoaded) return;
-    const style = MAP_STYLES[theme === 'dark' ? 'dark' : 'light'] ?? MAP_STYLES.light;
-    mapRef.current.setStyle(style);
-  }, [theme, mapLoaded]);
+    applyResolvedMapStyle(mapRef.current, resolvedMapStyle);
+    mapRef.current.once('style.load', () => {
+      if (!mapRef.current) return;
+      applyPresetVisualTweaks(mapRef.current, resolvedMapStyle, {
+        preserveLayerPrefixes: ['team-'],
+      });
+    });
+  }, [mapLoaded, resolvedMapStyle]);
 
   // Routes layer
   useEffect(() => {

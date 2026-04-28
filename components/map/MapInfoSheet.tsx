@@ -1,11 +1,13 @@
 'use client';
 
+import { useState, type ReactNode } from 'react';
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import {
   MAP_STATUS_CONFIG,
@@ -13,6 +15,11 @@ import {
   type MapStatusKey,
   type StatusFilters,
 } from '@/lib/constants/mapStatus';
+import { useMapStyle } from '@/lib/map-style-provider';
+import {
+  MAP_STYLE_PRESET_META,
+  type MapStylePreset,
+} from '@/lib/map-styles';
 import {
   Move,
   ZoomIn,
@@ -51,6 +58,7 @@ interface MapInfoSheetProps {
   statusFilters?: StatusFilters;
   onStatusFiltersChange?: (filters: StatusFilters) => void;
   portalContainer?: HTMLElement | null;
+  extraContent?: ReactNode;
 }
 
 /**
@@ -70,7 +78,10 @@ export function MapInfoSheet({
   statusFilters,
   onStatusFiltersChange,
   portalContainer,
+  extraContent,
 }: MapInfoSheetProps) {
+  const [showMapConfigurator, setShowMapConfigurator] = useState(false);
+  const { preset, setPreset } = useMapStyle();
   const activeStatusFilters: StatusFilters = statusFilters ?? {
     QR_SCANNED: true,
     CONVERSATIONS: true,
@@ -87,6 +98,9 @@ export function MapInfoSheet({
   };
 
   const canToggleStatuses = Boolean(statusFilters && onStatusFiltersChange);
+  const presetEntries = Object.entries(MAP_STYLE_PRESET_META) as Array<
+    [MapStylePreset, (typeof MAP_STYLE_PRESET_META)[MapStylePreset]]
+  >;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -98,8 +112,55 @@ export function MapInfoSheet({
           <DialogTitle className="text-sm font-semibold">Tools</DialogTitle>
         </DialogHeader>
 
+        <section className="space-y-2">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-xs font-semibold text-foreground">Map style</h3>
+              <p className="text-[11px] text-muted-foreground">
+                Change the basemap preset across FLYR map views.
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 shrink-0"
+              onClick={() => setShowMapConfigurator((current) => !current)}
+            >
+              {showMapConfigurator ? 'Hide styles' : 'Configure Maps'}
+            </Button>
+          </div>
+
+          {showMapConfigurator ? (
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {presetEntries.map(([presetKey, meta]) => {
+                const selected = preset === presetKey;
+                return (
+                  <button
+                    key={presetKey}
+                    type="button"
+                    onClick={() => setPreset(presetKey)}
+                    title={meta.description}
+                    className={`flex min-h-14 items-center justify-center rounded-xl border px-2 py-3 text-center transition-colors ${
+                      selected
+                        ? 'border-red-400/70 bg-red-500/10 text-foreground'
+                        : 'border-border/70 bg-muted/20 text-muted-foreground hover:bg-muted/35 hover:text-foreground'
+                    }`}
+                    aria-pressed={selected}
+                    aria-label={meta.label}
+                  >
+                    <span className="text-[11px] font-semibold leading-tight sm:text-xs">
+                      {meta.label}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+        </section>
+
         {canToggleStatuses && (
-          <section className="space-y-2">
+          <section className="space-y-2 border-t border-border/60 pt-3">
             <div>
               <h3 className="text-xs font-semibold text-foreground">Map filters</h3>
               <p className="text-[11px] text-muted-foreground">
@@ -133,6 +194,13 @@ export function MapInfoSheet({
             </ul>
           </section>
         )}
+
+        {extraContent ? (
+          <section className="space-y-2 border-t border-border/60 pt-3">
+            <h3 className="text-xs font-semibold text-foreground">Selection</h3>
+            {extraContent}
+          </section>
+        ) : null}
 
         <section className="space-y-2 border-t border-border/60 pt-3">
           <h3 className="text-xs font-semibold text-foreground">Read me</h3>

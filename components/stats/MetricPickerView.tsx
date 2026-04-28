@@ -4,16 +4,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import type { LeaderboardSortBy, LeaderboardTimeframe } from '@/types/database';
 
 const METRICS: { value: LeaderboardSortBy; label: string }[] = [
-  { value: 'flyers', label: 'Flyers' },
+  { value: 'doorknocks', label: 'Doors' },
   { value: 'conversations', label: 'Conversations' },
   { value: 'distance', label: 'Distance' },
 ];
 
 const TIMEFRAMES: { value: LeaderboardTimeframe; label: string }[] = [
-  { value: 'day', label: 'Today' },
-  { value: 'week', label: 'This Week' },
-  { value: 'month', label: 'This Month' },
-  { value: 'year', label: 'This Year' },
+  { value: 'daily', label: 'Today' },
+  { value: 'weekly', label: 'This Week' },
+  { value: 'monthly', label: 'This Month' },
   { value: 'all_time', label: 'All Time' },
 ];
 

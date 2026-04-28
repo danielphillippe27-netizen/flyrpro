@@ -8,6 +8,8 @@ import {
   updateWorkspaceSubscriptionForUser,
 } from '@/app/lib/billing/stripe-subscription-sync';
 import { getStripeWebhookSecret } from '@/app/lib/billing/stripe-env';
+import { recordAmbassadorCommissionForInvoice } from '@/app/lib/billing/ambassador-program';
+import { markWorkspacePowerDialerAddonInactiveForUser } from '@/app/lib/billing/workspace-addons';
 
 const secret = getStripeWebhookSecret();
 if (!secret) {
@@ -38,6 +40,36 @@ async function setStripeInactive(
     status: 'inactive',
     trialEndsAt: null,
   });
+  await markWorkspacePowerDialerAddonInactiveForUser(supabase, row.user_id);
+
+  await supabase
+    .from('ambassador_referrals')
+    .update({
+      stripe_subscription_status: 'canceled',
+      status: 'canceled',
+      updated_at: new Date().toISOString(),
+    })
+    .eq('stripe_customer_id', customerId);
+}
+
+async function syncAmbassadorStripeAccount(
+  supabase: ReturnType<typeof createAdminClient>,
+  account: Stripe.Account
+): Promise<void> {
+  const { error } = await supabase
+    .from('ambassador_applications')
+    .update({
+      stripe_onboarding_completed: account.details_submitted ?? false,
+      stripe_details_submitted: account.details_submitted ?? false,
+      stripe_charges_enabled: account.charges_enabled ?? false,
+      stripe_payouts_enabled: account.payouts_enabled ?? false,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('stripe_connect_account_id', account.id);
+
+  if (error) {
+    console.warn('[stripe webhook] failed syncing ambassador connect account', error);
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -53,7 +85,7 @@ export async function POST(request: NextRequest) {
   let event: Stripe.Event;
   try {
     event = stripe.webhooks.constructEvent(body, signature, secret);
-  } catch (err) {
+  } catch {
     console.error('Webhook signature verification failed');
     return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
   }
@@ -116,12 +148,18 @@ export async function POST(request: NextRequest) {
         break;
       }
 
+      case 'account.updated': {
+        const account = event.data.object as Stripe.Account;
+        await syncAmbassadorStripeAccount(supabase, account);
+        break;
+      }
+
       case 'invoice.paid': {
         const invoice = event.data.object as Stripe.Invoice;
         const subId =
-          typeof invoice.subscription === 'string'
-            ? invoice.subscription
-            : invoice.subscription?.id;
+          typeof invoice.parent?.subscription_details?.subscription === 'string'
+            ? invoice.parent.subscription_details.subscription
+            : invoice.parent?.subscription_details?.subscription?.id;
         if (subId) {
           const subscription = await stripe.subscriptions.retrieve(subId);
           const customerId =
@@ -139,6 +177,12 @@ export async function POST(request: NextRequest) {
                 supabase,
                 row.user_id,
                 subscription
+              );
+              await recordAmbassadorCommissionForInvoice(
+                supabase,
+                row.user_id,
+                subscription,
+                invoice
               );
             }
           }

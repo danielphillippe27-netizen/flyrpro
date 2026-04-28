@@ -108,7 +108,7 @@ const MODE_LABELS: Record<NonNullable<FarmTouch['mode']>, string> = {
 function getTouchCountPerInterval(
   farm: Pick<Farm, 'touches_per_interval' | 'frequency'> | null
 ): number {
-  return Math.max(1, farm?.touches_per_interval ?? farm?.frequency ?? 1);
+  return 1;
 }
 
 function getTouchInterval(
@@ -148,7 +148,7 @@ export function resolveFarmTouchesWithCycles(
   touches: FarmTouch[],
   touchesPerInterval: number
 ): EnrichedFarmTouch[] {
-  const countPerCycle = Math.max(1, touchesPerInterval);
+  void touchesPerInterval;
   const ordered = [...touches].sort((left, right) => {
     const leftValue = toTimestamp(getTouchEffectiveDate(left));
     const rightValue = toTimestamp(getTouchEffectiveDate(right));
@@ -158,7 +158,7 @@ export function resolveFarmTouchesWithCycles(
 
   const resolvedById = new Map<string, number>();
   ordered.forEach((touch, index) => {
-    const fallbackCycleNumber = Math.floor(index / countPerCycle) + 1;
+    const fallbackCycleNumber = index + 1;
     resolvedById.set(touch.id, Math.max(1, touch.cycle_number ?? fallbackCycleNumber));
   });
 
@@ -173,14 +173,12 @@ export function getNextFarmCycleNumber(
   touches: FarmTouch[],
   touchesPerInterval: number
 ): number {
+  void touchesPerInterval;
   const resolvedTouches = resolveFarmTouchesWithCycles(touches, touchesPerInterval);
   if (resolvedTouches.length === 0) return 1;
 
   const currentCycleNumber = Math.max(...resolvedTouches.map((touch) => touch.resolvedCycleNumber), 1);
-  const currentCycleTouches = resolvedTouches.filter((touch) => touch.resolvedCycleNumber === currentCycleNumber);
-  return currentCycleTouches.length >= Math.max(1, touchesPerInterval)
-    ? currentCycleNumber + 1
-    : currentCycleNumber;
+  return currentCycleNumber + 1;
 }
 
 export function buildFarmDashboardAnalytics({
@@ -194,6 +192,7 @@ export function buildFarmDashboardAnalytics({
 }: BuildFarmDashboardAnalyticsArgs): FarmDashboardAnalytics {
   const touchesPerInterval = getTouchCountPerInterval(farm);
   const interval = getTouchInterval(farm);
+  const nonNoneOutcomes = touchOutcomes.filter((outcome) => outcome.status !== 'none');
   const resolvedTouches = resolveFarmTouchesWithCycles(touches, touchesPerInterval).sort(
     (left, right) => toTimestamp(right.effectiveDate) - toTimestamp(left.effectiveDate)
   );
@@ -202,24 +201,36 @@ export function buildFarmDashboardAnalytics({
   const currentCycleTouches = resolvedTouches.filter((touch) => touch.resolvedCycleNumber === currentCycleNumber);
   const currentCycleTouchIds = currentCycleTouches.map((touch) => touch.id);
   const completedTouches = resolvedTouches.filter((touch) => touch.status === 'completed');
-  const currentCycleCompletedTouches = currentCycleTouches.filter((touch) => touch.status === 'completed');
+
+  const outcomesByTouchId = new Map<string, FarmTouchAddress[]>();
+  const outcomeTouchCountByAddressId = new Map<string, number>();
+  for (const outcome of nonNoneOutcomes) {
+    const byTouch = outcomesByTouchId.get(outcome.farm_touch_id) ?? [];
+    byTouch.push(outcome);
+    outcomesByTouchId.set(outcome.farm_touch_id, byTouch);
+    outcomeTouchCountByAddressId.set(
+      outcome.farm_address_id,
+      (outcomeTouchCountByAddressId.get(outcome.farm_address_id) ?? 0) + 1
+    );
+  }
+
+  const uniqueVisitedAddressIds = new Set(nonNoneOutcomes.map((outcome) => outcome.farm_address_id));
+  const currentCycleOutcomes = nonNoneOutcomes.filter((outcome) => currentCycleTouchIds.includes(outcome.farm_touch_id));
+  const currentCycleVisitedAddressIds = new Set(currentCycleOutcomes.map((outcome) => outcome.farm_address_id));
 
   const totalHomes = addresses.length;
-  const totalVisits = completedTouches.reduce((sum, touch) => sum + Number(touch.homes_reached ?? 0), 0);
+  const totalVisits = nonNoneOutcomes.length;
   const totalContacts = Math.max(leads.length, contacts.length);
   const totalContactRate = totalVisits > 0 ? totalContacts / totalVisits : 0;
   const totalSpendCents = financeEntries.reduce((sum, entry) => sum + Number(entry.total_cost_cents ?? 0), 0);
   const costPerContactCents = totalContacts > 0 ? Math.round(totalSpendCents / totalContacts) : null;
   const costPerHomeVisitedCents = totalVisits > 0 ? Math.round(totalSpendCents / totalVisits) : null;
-  const allTimeUniqueVisitedHomes = addresses.filter((address) => Number(address.visited_count ?? 0) > 0).length;
+  const allTimeUniqueVisitedHomes = uniqueVisitedAddressIds.size;
   const allTimeCoverageRate = totalHomes > 0 ? allTimeUniqueVisitedHomes / totalHomes : 0;
   const allSessionCount = resolvedTouches.length;
-  const avgHomesPerSession = completedTouches.length > 0 ? totalVisits / completedTouches.length : 0;
+  const avgHomesPerSession = resolvedTouches.length > 0 ? totalVisits / resolvedTouches.length : 0;
 
-  const currentCycleVisits = currentCycleCompletedTouches.reduce(
-    (sum, touch) => sum + Number(touch.homes_reached ?? 0),
-    0
-  );
+  const currentCycleVisits = currentCycleOutcomes.length;
   const currentCycleLeadCount = leads.filter((lead) =>
     lead.touch_id ? currentCycleTouchIds.includes(lead.touch_id) : false
   ).length;
@@ -236,9 +247,7 @@ export function buildFarmDashboardAnalytics({
   ).length;
   const currentCycleContacts = Math.max(currentCycleLeadCount, currentCycleContactCount);
   const currentCycleContactRate = currentCycleVisits > 0 ? currentCycleContacts / currentCycleVisits : 0;
-  const currentCycleCoverageCount = addresses.filter((address) =>
-    address.last_touch_id ? currentCycleTouchIds.includes(address.last_touch_id) : false
-  ).length;
+  const currentCycleCoverageCount = currentCycleVisitedAddressIds.size;
   const currentCycleCoverageRate = totalHomes > 0 ? currentCycleCoverageCount / totalHomes : 0;
 
   const currentCycleSpendCents = financeEntries
@@ -257,7 +266,7 @@ export function buildFarmDashboardAnalytics({
   const currentCycleCostPerHomeVisitedCents =
     currentCycleVisits > 0 ? Math.round(currentCycleSpendCents / currentCycleVisits) : null;
   const currentCycleAvgHomesPerSession =
-    currentCycleCompletedTouches.length > 0 ? currentCycleVisits / currentCycleCompletedTouches.length : 0;
+    currentCycleTouches.length > 0 ? currentCycleVisits / currentCycleTouches.length : 0;
 
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -308,9 +317,10 @@ export function buildFarmDashboardAnalytics({
   }
 
   const bestSession = completedTouches.reduce<FarmBestSession | null>((best, touch) => {
+    const homes = outcomesByTouchId.get(touch.id)?.length ?? Number(touch.homes_reached ?? 0);
     const candidate: FarmBestSession = {
       touch,
-      homes: Number(touch.homes_reached ?? 0),
+      homes,
       contacts: leadCountByTouchId.get(touch.id) ?? 0,
     };
     if (!best) return candidate;
@@ -327,7 +337,7 @@ export function buildFarmDashboardAnalytics({
 
   const penetration = {
     uniqueHomesTouched: allTimeUniqueVisitedHomes,
-    repeatTouchedHomes: addresses.filter((address) => Number(address.visited_count ?? 0) > 1).length,
+    repeatTouchedHomes: Array.from(outcomeTouchCountByAddressId.values()).filter((count) => count > 1).length,
   };
 
   const outcomeBreakdown = touchOutcomes.reduce<FarmOutcomeBreakdown>(
@@ -369,9 +379,8 @@ export function buildFarmDashboardAnalytics({
     .map((cycleNumber) => {
       const cycleTouches = resolvedTouches.filter((touch) => touch.resolvedCycleNumber === cycleNumber);
       const cycleTouchIds = cycleTouches.map((touch) => touch.id);
-      const visits = cycleTouches
-        .filter((touch) => touch.status === 'completed')
-        .reduce((sum, touch) => sum + Number(touch.homes_reached ?? 0), 0);
+      const cycleOutcomes = nonNoneOutcomes.filter((outcome) => cycleTouchIds.includes(outcome.farm_touch_id));
+      const visits = cycleOutcomes.length;
       const cycleLeadTotal = leads.filter((lead) =>
         lead.touch_id ? cycleTouchIds.includes(lead.touch_id) : false
       ).length;
@@ -382,9 +391,7 @@ export function buildFarmDashboardAnalytics({
           return new Date(contact.created_at).toDateString() === new Date(touchDate).toDateString();
         })
       ).length;
-      const coverageCount = addresses.filter((address) =>
-        address.last_touch_id ? cycleTouchIds.includes(address.last_touch_id) : false
-      ).length;
+      const coverageCount = new Set(cycleOutcomes.map((outcome) => outcome.farm_address_id)).size;
 
       return {
         cycleNumber,

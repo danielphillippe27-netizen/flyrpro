@@ -1,17 +1,30 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { MapInfoButton } from '@/components/map/MapInfoButton';
 import { useTheme } from '@/lib/theme-provider';
+import { useMapStyle } from '@/lib/map-style-provider';
 import { getMapboxToken } from '@/lib/mapbox';
+import { applyPresetVisualTweaks, applyResolvedMapStyle, getResolvedMapInitOptions, hideBaseBuildingLayers, resolveMapStyle } from '@/lib/map-styles';
 
-const MAP_STYLES = {
-  light: 'mapbox://styles/fliper27/cml6z0dhg002301qo9xxc08k4',
-  dark: 'mapbox://styles/fliper27/cml6zc5pq002801qo4lh13o19',
-} as const;
+type OvertureBuildingFeature = {
+  geometry: {
+    coordinates: [number, number];
+  };
+  properties: {
+    id: string;
+    centroid?: [number, number];
+    height?: number;
+    levels?: number;
+  };
+};
+
+type OvertureBuildingResponse = {
+  features?: OvertureBuildingFeature[];
+};
 
 /**
  * OvertureMap Component
@@ -21,6 +34,11 @@ const MAP_STYLES = {
  */
 export function OvertureMap() {
   const { theme } = useTheme();
+  const { preset: mapPreset } = useMapStyle();
+  const resolvedMapStyle = useMemo(
+    () => resolveMapStyle(mapPreset, theme, 'v12'),
+    [mapPreset, theme],
+  );
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
@@ -37,6 +55,7 @@ export function OvertureMap() {
 
   useEffect(() => {
     if (!mapContainer.current || map.current) return;
+    let cancelled = false;
 
     // Initialize Mapbox
     const token = getMapboxToken();
@@ -52,66 +71,71 @@ export function OvertureMap() {
       mapboxgl.workerCount = 2;
     }
 
-    map.current = new mapboxgl.Map({
-      container: mapContainer.current,
-      style: MAP_STYLES[theme] ?? MAP_STYLES.light,
-      center: [-78.688, 43.914], // Bowmanville, ON
-      zoom: 15.5,
-      pitch: 45,
-      bearing: 0,
-    });
+    const initMap = async () => {
+      const mapInitOptions = await getResolvedMapInitOptions(resolvedMapStyle);
+      if (cancelled || !mapContainer.current || map.current) return;
 
-    map.current.on('load', () => {
-      setMapLoaded(true);
-      
-      // Hide standard building extrusion layers to prevent z-fighting
-      try {
-        const style = map.current?.getStyle();
-        if (style && style.layers) {
-          style.layers.forEach((layer) => {
-            if (layer.id.toLowerCase().includes('building')) {
-              map.current?.setLayoutProperty(layer.id, 'visibility', 'none');
-            }
-          });
+      map.current = new mapboxgl.Map({
+        container: mapContainer.current,
+        ...mapInitOptions,
+        center: [-78.688, 43.914], // Bowmanville, ON
+        zoom: 15.5,
+        pitch: 45,
+        bearing: 0,
+      });
+
+      map.current.on('load', () => {
+        setMapLoaded(true);
+        
+        // Hide standard building extrusion layers to prevent z-fighting
+        try {
+          const style = map.current?.getStyle();
+          if (style && style.layers) {
+            applyPresetVisualTweaks(map.current, resolvedMapStyle, {
+              preserveLayerPrefixes: ['overture-'],
+            });
+            hideBaseBuildingLayers(map.current);
+          }
+        } catch (err) {
+          console.warn('Error hiding building layers:', err);
         }
-      } catch (err) {
-        console.warn('Error hiding building layers:', err);
-      }
 
-      // Fetch and render building data
-      loadBuildings();
-    });
+        // Fetch and render building data
+        loadBuildings();
+      });
 
-    // Handle errors
-    map.current.on('error', (e) => {
-      console.error('Mapbox error:', e);
-      setError('Failed to load map');
-    });
+      // Handle errors
+      map.current.on('error', (e) => {
+        console.error('Mapbox error:', e);
+        setError('Failed to load map');
+      });
+    };
+
+    void initMap();
 
     // Cleanup
     return () => {
+      cancelled = true;
       if (map.current) {
         map.current.remove();
         map.current = null;
       }
     };
-  }, []);
+  }, [resolvedMapStyle]);
 
-  // Sync map style with app theme (light/dark)
+  // Sync map style with the selected map preset.
   useEffect(() => {
     if (!map.current || !mapLoaded) return;
-    const styleUrl = MAP_STYLES[theme] ?? MAP_STYLES.light;
     try {
-      map.current.setStyle(styleUrl);
+      applyResolvedMapStyle(map.current, resolvedMapStyle);
       map.current.once('style.load', () => {
         try {
           const style = map.current?.getStyle();
           if (style?.layers) {
-            style.layers.forEach((layer) => {
-              if (layer.id.toLowerCase().includes('building')) {
-                map.current?.setLayoutProperty(layer.id, 'visibility', 'none');
-              }
+            applyPresetVisualTweaks(map.current, resolvedMapStyle, {
+              preserveLayerPrefixes: ['overture-'],
             });
+            hideBaseBuildingLayers(map.current);
           }
         } catch {}
         loadBuildings();
@@ -119,7 +143,7 @@ export function OvertureMap() {
     } catch (err) {
       console.error('Error setting map style:', err);
     }
-  }, [theme, mapLoaded]);
+  }, [mapLoaded, resolvedMapStyle]);
 
   const loadBuildings = async () => {
     if (!map.current) return;
@@ -138,7 +162,7 @@ export function OvertureMap() {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
-      const data = await response.json();
+      const data = (await response.json()) as OvertureBuildingResponse;
       console.log('Received building data:', data);
       console.log('Number of features:', data.features?.length || 0);
 
@@ -150,10 +174,10 @@ export function OvertureMap() {
 
       // Transform features to fill-extrusion format
       // Convert Point centroids to simple square Polygons for extrusion
-      const extrusionFeatures: GeoJSON.Feature[] = data.features.map((feature: any) => {
+      const extrusionFeatures: GeoJSON.Feature[] = data.features.map((feature) => {
         const centroid = feature.properties.centroid || feature.geometry.coordinates; // [lng, lat]
-        const height = feature.properties.height || feature.properties.levels 
-          ? (feature.properties.levels || 2) * 3 
+        const height = feature.properties.height || feature.properties.levels
+          ? (feature.properties.levels || 2) * 3
           : 10; // Default 10m or levels * 3m
         
         // Create a small square polygon around the centroid (approximately 10m x 10m)

@@ -171,7 +171,7 @@ ${opts.bbox ? `-- Bounding Box: [${opts.bbox.west}, ${opts.bbox.south}, ${opts.b
 --   class,
 --   subclass,
 --   ST_GeomFromGeoJSON(geom_geojson) as geom
--- FROM read_parquet('${parquetPath.replace(/\/g, '/')}');
+-- FROM read_parquet('${parquetPath.replace(/\\/g, '/')}');
 
 -- Verify the load:
 SELECT 'Walk network load complete' as status;

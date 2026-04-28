@@ -17,8 +17,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { createClient } from '@/lib/supabase/client';
 import { useTheme } from '@/lib/theme-provider';
+import { useMapStyle } from '@/lib/map-style-provider';
 import { useWorkspace } from '@/lib/workspace-context';
 import { getMapboxToken } from '@/lib/mapbox';
+import { applyPresetVisualTweaks, applyResolvedMapStyle, hideBaseBuildingLayers, resolveMapStyle } from '@/lib/map-styles';
 import { handleWheelScrollContainer } from '@/lib/scrollContainer';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
@@ -36,11 +38,6 @@ import { FARM_TOUCH_INTERVAL_OPTIONS } from '@/lib/farms/config';
 import { buildCadenceTouchPlan } from '@/lib/farms/plan';
 import { FarmTouchTypePicker } from '@/components/farms/FarmTouchTypePicker';
 import type { FarmTouchInterval, FarmTouchType } from '@/types/database';
-
-const MAP_STYLES = {
-  light: 'mapbox://styles/mapbox/streets-v11',
-  dark: 'mapbox://styles/mapbox/dark-v11',
-} as const;
 
 const DEFAULT_HOME_LIMIT = 5000;
 const DEFAULT_TOUCHES_PER_INTERVAL = 2;
@@ -78,7 +75,12 @@ function getErrorMessage(error: unknown): string {
 export default function CreateFarmPage() {
   const router = useRouter();
   const { theme } = useTheme();
+  const { preset: mapPreset } = useMapStyle();
   const { currentWorkspaceId } = useWorkspace();
+  const resolvedMapStyle = useMemo(
+    () => resolveMapStyle(mapPreset, theme, 'v11'),
+    [mapPreset, theme],
+  );
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [startDate, setStartDate] = useState(() => formatDateInput(new Date()));
@@ -106,6 +108,7 @@ export default function CreateFarmPage() {
   const map = useRef<mapboxgl.Map | null>(null);
   const drawRef = useRef<MapboxDraw | null>(null);
   const boundaryLayerIdsRef = useRef<string[]>([]);
+  const appliedBaseStyleKeyRef = useRef<string | null>(null);
   const hasCenteredOnUserLocationRef = useRef(false);
   const feedbackDialogResolveRef = useRef<(() => void) | null>(null);
   const isDark = theme === 'dark';
@@ -191,18 +194,17 @@ export default function CreateFarmPage() {
 
     const layers = m.getStyle().layers;
 
-    for (const layer of layers) {
-      const layerId = layer.id.toLowerCase();
-      if ((layerId.includes('building') || layerId.includes('structure')) && layer.id !== buildingLayerId) {
-        try {
-          m.setLayoutProperty(layer.id, 'visibility', 'none');
-        } catch {}
-      }
-    }
+    applyPresetVisualTweaks(m, resolvedMapStyle, {
+      preserveLayerIds: [buildingLayerId],
+      preserveLayerPrefixes: ['gl-draw-'],
+    });
+
+    hideBaseBuildingLayers(m, { preserveLayerIds: [buildingLayerId] });
 
     let labelLayerId: string | undefined;
     for (const layer of layers) {
-      if (layer.type === 'symbol' && (layer as any).layout?.['text-field']) {
+      const symbolLayer = layer as mapboxgl.SymbolLayer;
+      if (layer.type === 'symbol' && symbolLayer.layout?.['text-field']) {
         labelLayerId = layer.id;
         break;
       }
@@ -254,10 +256,12 @@ export default function CreateFarmPage() {
 
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
-      style: MAP_STYLES[theme] ?? MAP_STYLES.light,
+      style: resolvedMapStyle.style,
+      config: resolvedMapStyle.config,
       center: [-79.35, 43.65],
       zoom: 15,
     });
+    appliedBaseStyleKeyRef.current = resolvedMapStyle.key;
 
     map.current.on('load', () => {
       setMapLoaded(true);
@@ -375,18 +379,13 @@ export default function CreateFarmPage() {
     };
   }, []);
 
-  const savedFeaturesRef = useRef<any>(null);
+  const savedFeaturesRef = useRef<GeoJSON.FeatureCollection | null>(null);
 
   useEffect(() => {
     if (!map.current || !mapLoaded) return;
 
-    const expectedStyle = isSatellite
-      ? 'mapbox://styles/mapbox/satellite-streets-v12'
-      : (MAP_STYLES[theme] ?? MAP_STYLES.light);
-
-    const currentStyle = map.current.getStyle()?.name || '';
-    const isCurrentlySatellite = currentStyle.toLowerCase().includes('satellite');
-    if (isSatellite === isCurrentlySatellite && drawRef.current) return;
+    const expectedStyleKey = isSatellite ? 'satellite' : resolvedMapStyle.key;
+    if (appliedBaseStyleKeyRef.current === expectedStyleKey && drawRef.current) return;
 
     if (drawRef.current) {
       try {
@@ -399,10 +398,15 @@ export default function CreateFarmPage() {
     }
 
     boundaryLayerIdsRef.current = [];
-    map.current.setStyle(expectedStyle);
+    if (isSatellite) {
+      map.current.setStyle('mapbox://styles/mapbox/satellite-streets-v12');
+    } else {
+      applyResolvedMapStyle(map.current, resolvedMapStyle);
+    }
 
     map.current.once('style.load', () => {
       if (!map.current) return;
+      appliedBaseStyleKeyRef.current = expectedStyleKey;
 
       if (!isSatellite) {
         add2DBuildingsLayer(map.current);
@@ -433,7 +437,7 @@ export default function CreateFarmPage() {
         newDraw.changeMode('draw_polygon');
       }
     });
-  }, [isSatellite, theme, mapLoaded]);
+  }, [isSatellite, mapLoaded, resolvedMapStyle]);
 
   useEffect(() => {
     if (!mapLoaded || !map.current || !mapContainer.current) return;
@@ -510,8 +514,8 @@ export default function CreateFarmPage() {
     }
     if (!Number.isFinite(touchesPerInterval) || touchesPerInterval < 1) {
       await showFeedbackDialog({
-        title: 'Touch plan required',
-        description: 'Enter at least 1 touch for each cadence interval before continuing.',
+        title: 'Cycle workload required',
+        description: 'Enter at least 1 target home for each cycle before continuing.',
         tone: 'warning',
       });
       return;
@@ -597,10 +601,10 @@ export default function CreateFarmPage() {
           polygon: JSON.stringify(polygon),
           start_date: startDate,
           end_date: formatDateInput(addDays(new Date(`${startDate}T12:00:00`), DEFAULT_FARM_DURATION_DAYS)),
-          frequency: touchesPerInterval,
-          touches_per_interval: touchesPerInterval,
+          frequency: 1,
+          touches_per_interval: 1,
           touches_interval: touchesInterval,
-          goal_type: 'touches_per_cycle',
+          goal_type: 'homes_per_cycle',
           goal_target: touchesPerInterval,
           cycle_completion_window_days: null,
           touch_types: touchTypes,
@@ -811,12 +815,12 @@ export default function CreateFarmPage() {
               <div className="space-y-1">
                 <p className="font-medium text-foreground">Touch plan</p>
                 <p className="text-sm text-muted-foreground">
-                  Set how often this farm should be worked.
+                  Each cycle is one planned pass through the farm. Set how many homes that pass should cover.
                 </p>
               </div>
               <div className="grid grid-cols-[minmax(0,1fr),150px] gap-3">
                 <div className="space-y-2">
-                  <Label htmlFor="touchesPerInterval"># of touches</Label>
+                  <Label htmlFor="touchesPerInterval"># of homes</Label>
                   <Input
                     id="touchesPerInterval"
                     type="number"

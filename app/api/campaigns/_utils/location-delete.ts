@@ -1,0 +1,251 @@
+import { createAdminClient } from '@/lib/supabase/server';
+
+type AdminClient = ReturnType<typeof createAdminClient>;
+
+export function uniqueNonEmpty(values: Array<string | null | undefined>) {
+  return Array.from(new Set(values.map((value) => value?.trim()).filter(Boolean) as string[]));
+}
+
+export async function resolveBuildingRow(
+  admin: AdminClient,
+  campaignId: string,
+  buildingIdParam: string
+) {
+  const uuidMatch = buildingIdParam.match(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  );
+
+  const query = admin
+    .from('buildings')
+    .select('id, gers_id, source')
+    .eq('campaign_id', campaignId)
+    .limit(1);
+
+  const builder = uuidMatch
+    ? query.or(`id.eq.${buildingIdParam},gers_id.eq.${buildingIdParam}`)
+    : query.eq('gers_id', buildingIdParam);
+
+  const { data, error } = await builder.maybeSingle();
+  if (error || !data) {
+    return null;
+  }
+
+  return data as { id: string; gers_id: string | null; source: string | null };
+}
+
+export async function deleteBuildingDeep(
+  admin: AdminClient,
+  campaignId: string,
+  buildingId: string
+) {
+  const row = await resolveBuildingRow(admin, campaignId, buildingId);
+  const publicBuildingId = row?.gers_id ?? row?.id ?? buildingId.trim();
+  const buildingIdentifiers = uniqueNonEmpty([row?.id, row?.gers_id, buildingId]);
+
+  let linkedAddressIds: string[] = [];
+
+  if (buildingIdentifiers.length > 0) {
+    const { data: linkRows, error: linkQueryError } = await admin
+      .from('building_address_links')
+      .select('address_id')
+      .eq('campaign_id', campaignId)
+      .in('building_id', buildingIdentifiers);
+
+    if (linkQueryError) {
+      throw new Error(linkQueryError.message);
+    }
+
+    linkedAddressIds.push(
+      ...(linkRows || [])
+        .map((entry: { address_id?: string | null }) => entry.address_id)
+        .filter((value): value is string => Boolean(value))
+    );
+
+    const { data: directBuildingAddresses, error: directBuildingAddressesError } = await admin
+      .from('campaign_addresses')
+      .select('id')
+      .eq('campaign_id', campaignId)
+      .in('building_id', buildingIdentifiers);
+
+    if (directBuildingAddressesError) {
+      throw new Error(directBuildingAddressesError.message);
+    }
+
+    linkedAddressIds.push(
+      ...(directBuildingAddresses || [])
+        .map((entry: { id?: string | null }) => entry.id)
+        .filter((value): value is string => Boolean(value))
+    );
+  }
+
+  if (publicBuildingId) {
+    const { data: gersAddresses, error: gersAddressesError } = await admin
+      .from('campaign_addresses')
+      .select('id')
+      .eq('campaign_id', campaignId)
+      .eq('building_gers_id', publicBuildingId);
+
+    if (gersAddressesError) {
+      throw new Error(gersAddressesError.message);
+    }
+
+    linkedAddressIds.push(
+      ...(gersAddresses || [])
+        .map((entry: { id?: string | null }) => entry.id)
+        .filter((value): value is string => Boolean(value))
+    );
+
+    const { error: hiddenBuildingError } = await admin
+      .from('campaign_hidden_buildings')
+      .upsert({
+        campaign_id: campaignId,
+        public_building_id: publicBuildingId,
+      });
+
+    if (hiddenBuildingError) {
+      console.warn('[location-delete] Hidden building upsert skipped:', hiddenBuildingError);
+    }
+  }
+
+  linkedAddressIds = uniqueNonEmpty(linkedAddressIds);
+
+  if (!row && linkedAddressIds.length === 0) {
+    return {
+      found: false,
+      buildingId: publicBuildingId,
+      deletedAddressIds: [] as string[],
+      deletedBuildingRow: false,
+    };
+  }
+
+  if (linkedAddressIds.length > 0) {
+    const { error: addressDeleteError } = await admin
+      .from('campaign_addresses')
+      .delete()
+      .eq('campaign_id', campaignId)
+      .in('id', linkedAddressIds);
+
+    if (addressDeleteError) {
+      throw new Error(addressDeleteError.message);
+    }
+  }
+
+  if (buildingIdentifiers.length > 0) {
+    const { error: linkDeleteError } = await admin
+      .from('building_address_links')
+      .delete()
+      .eq('campaign_id', campaignId)
+      .in('building_id', buildingIdentifiers);
+
+    if (linkDeleteError) {
+      throw new Error(linkDeleteError.message);
+    }
+  }
+
+  if (publicBuildingId) {
+    const { error: statsDeleteError } = await admin
+      .from('building_stats')
+      .delete()
+      .eq('campaign_id', campaignId)
+      .eq('gers_id', publicBuildingId);
+
+    if (statsDeleteError) {
+      console.warn('[location-delete] Building stats delete warning:', statsDeleteError);
+    }
+
+    const { error: unitsDeleteError } = await admin
+      .from('building_units')
+      .delete()
+      .eq('campaign_id', campaignId)
+      .eq('parent_building_id', publicBuildingId);
+
+    if (unitsDeleteError) {
+      console.warn('[location-delete] Building units delete warning:', unitsDeleteError);
+    }
+  }
+
+  if (row) {
+    const { error: deleteError } = await admin
+      .from('buildings')
+      .delete()
+      .eq('campaign_id', campaignId)
+      .eq('id', row.id);
+
+    if (deleteError) {
+      throw new Error(deleteError.message);
+    }
+  }
+
+  return {
+    found: true,
+    buildingId: publicBuildingId,
+    deletedAddressIds: linkedAddressIds,
+    deletedBuildingRow: Boolean(row),
+  };
+}
+
+export async function deleteAddressIfExists(
+  admin: AdminClient,
+  campaignId: string,
+  addressId: string
+) {
+  const { data: address, error: addressError } = await admin
+    .from('campaign_addresses')
+    .select('id')
+    .eq('campaign_id', campaignId)
+    .eq('id', addressId)
+    .maybeSingle();
+
+  if (addressError) {
+    throw new Error(addressError.message);
+  }
+
+  if (!address) {
+    return { found: false, addressId };
+  }
+
+  const { error: deleteError } = await admin
+    .from('campaign_addresses')
+    .delete()
+    .eq('campaign_id', campaignId)
+    .eq('id', addressId);
+
+  if (deleteError) {
+    throw new Error(deleteError.message);
+  }
+
+  return { found: true, addressId };
+}
+
+export async function deleteParcelIfExists(
+  admin: AdminClient,
+  campaignId: string,
+  parcelId: string
+) {
+  const { data: parcel, error: parcelError } = await admin
+    .from('campaign_parcels')
+    .select('id')
+    .eq('campaign_id', campaignId)
+    .eq('id', parcelId)
+    .maybeSingle();
+
+  if (parcelError) {
+    throw new Error(parcelError.message);
+  }
+
+  if (!parcel) {
+    return { found: false, parcelId };
+  }
+
+  const { error: deleteError } = await admin
+    .from('campaign_parcels')
+    .delete()
+    .eq('campaign_id', campaignId)
+    .eq('id', parcelId);
+
+  if (deleteError) {
+    throw new Error(deleteError.message);
+  }
+
+  return { found: true, parcelId };
+}

@@ -12,7 +12,7 @@ import {
 } from '@/components/ui/select';
 
 const METRICS: { value: LeaderboardSortBy; label: string }[] = [
-  { value: 'flyers', label: 'Doors' },
+  { value: 'doorknocks', label: 'Doors' },
   { value: 'conversations', label: 'Conversations' },
   { value: 'distance', label: 'Distance' },
 ];

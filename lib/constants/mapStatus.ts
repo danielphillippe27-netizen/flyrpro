@@ -36,7 +36,7 @@ export const MAP_STATUS_CONFIG: Record<MapStatusKey, MapStatusConfig> = {
   UNTOUCHED: {
     key: 'UNTOUCHED',
     label: 'Untouched',
-    color: '#ef4444', // Red — building_stats.status = 'not_visited'
+    color: '#dc2626', // Darker red — building_stats.status = 'not_visited'
   },
 } as const;
 

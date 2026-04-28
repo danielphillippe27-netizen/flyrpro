@@ -1,36 +1,40 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useRouter } from 'next/navigation';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import * as turf from '@turf/turf';
-import { Maximize2, Minimize2 } from 'lucide-react';
+import { Maximize2, Minimize2, Trash2 } from 'lucide-react';
 import Lottie from 'lottie-react';
 import type { CampaignAddress, CampaignV2, CampaignParcel } from '@/types/database';
 import { MapBuildingsLayer, type MapBuildingsRenderState } from '@/components/map/MapBuildingsLayer';
 import { MapInfoButton } from '@/components/map/MapInfoButton';
 import { LocationCard } from '@/components/map/LocationCard';
 import { CreateContactDialog } from '@/components/crm/CreateContactDialog';
+import { Button } from '@/components/ui/button';
 import { getCampaignAddressMapStatus } from '@/lib/campaignStats';
 import { createClient } from '@/lib/supabase/client';
+import { fetchAllInPages } from '@/lib/supabase/fetchAllInPages';
 import { useTheme } from '@/lib/theme-provider';
+import { useMapStyle } from '@/lib/map-style-provider';
 import { useWorkspace } from '@/lib/workspace-context';
 import { getMapboxToken } from '@/lib/mapbox';
+import { applyPresetVisualTweaks, applyResolvedMapStyle, getResolvedMapInitOptions, hideBaseBuildingLayers, resolveMapStyle } from '@/lib/map-styles';
 import {
   DEFAULT_STATUS_FILTERS,
   MAP_STATUS_CONFIG,
+  MAP_STATUS_PRIORITY,
+  type MapStatusKey,
   type StatusFilters,
 } from '@/lib/constants/mapStatus';
 import { useFullscreen } from '@/lib/hooks/useFullscreen';
 
 const PARCEL_SOURCE_ID = 'campaign-parcels';
+const PARCEL_LABEL_SOURCE_ID = 'campaign-parcels-labels';
 const PARCEL_FILL_LAYER = 'campaign-parcels-fill';
 const PARCEL_LINE_LAYER = 'campaign-parcels-line';
-
-const MAP_STYLES = {
-  light: 'mapbox://styles/fliper27/cml6z0dhg002301qo9xxc08k4',
-  dark: 'mapbox://styles/fliper27/cml6zc5pq002801qo4lh13o19',
-} as const;
+const PARCEL_LABEL_LAYER = 'campaign-parcels-label';
 
 const BOUNDARY_SOURCE_RAW = 'campaign-boundary-raw';
 const BOUNDARY_SOURCE_SNAPPED = 'campaign-boundary-snapped';
@@ -43,6 +47,23 @@ const CUSTOM_BUILDING_LAYER_PREFIXES = ['map-buildings-', 'campaign-parcels'];
 type BuildingPendingOverlayConfig = {
   title: string;
   description: string;
+};
+
+type PreparedAddressPoint = {
+  addressId: string;
+  buildingId: string | null;
+  lon: number;
+  lat: number;
+  statusKey: MapStatusKey;
+  houseNumber: string;
+  formattedAddress: string;
+};
+
+type SelectedMapTarget = {
+  key: string;
+  buildingId: string | null;
+  addressId: string | null;
+  parcelId: string | null;
 };
 
 export type MapPointOverlay = {
@@ -148,6 +169,81 @@ function getAddressCoordinate(address: CampaignAddress): { lon: number; lat: num
   return null;
 }
 
+function getParcelAddressStatusKey(address: CampaignAddress): MapStatusKey {
+  const hasQrScan = Number(address.scans ?? 0) > 0 || Boolean(address.last_scanned_at);
+  if (hasQrScan) return 'QR_SCANNED';
+
+  const status = getCampaignAddressMapStatus(address);
+  if (['talked', 'appointment', 'future_seller', 'hot_lead'].includes(status)) {
+    return 'CONVERSATIONS';
+  }
+  if (status === 'none') {
+    return 'UNTOUCHED';
+  }
+  return 'TOUCHED';
+}
+
+function getParcelAddressLabel(parcel: CampaignParcel): string {
+  const rawAddress = parcel.properties?.address;
+  if (typeof rawAddress === 'string' && rawAddress.trim()) {
+    return rawAddress.trim();
+  }
+
+  const streetNumber = parcel.properties?.street_number;
+  const streetName = parcel.properties?.street_name;
+  const addressParts = [
+    typeof streetNumber === 'string' || typeof streetNumber === 'number' ? String(streetNumber).trim() : '',
+    typeof streetName === 'string' ? streetName.trim() : '',
+  ].filter(Boolean);
+  if (addressParts.length > 0) {
+    return addressParts.join(' ');
+  }
+
+  return '';
+}
+
+function extractLeadingHouseNumber(formattedAddress: string): string {
+  const match = formattedAddress.trim().match(/^(\d+[A-Za-z0-9-]*)\b/);
+  return match?.[1]?.trim() ?? '';
+}
+
+function getPreferredParcelAddressLabel(addressesInParcel: PreparedAddressPoint[]): string {
+  const houseNumbers = Array.from(
+    new Set(
+      addressesInParcel
+        .map((address) => address.houseNumber.trim())
+        .filter(Boolean)
+    )
+  );
+
+  if (houseNumbers.length > 0) {
+    return houseNumbers.join(', ');
+  }
+
+  const formatted = Array.from(
+    new Set(
+      addressesInParcel
+        .map((address) => address.formattedAddress.trim())
+        .filter(Boolean)
+    )
+  );
+
+  if (formatted.length > 0) {
+    return formatted[0];
+  }
+
+  return '';
+}
+
+function getPrimaryParcelTarget(addressesInParcel: PreparedAddressPoint[]): PreparedAddressPoint | null {
+  const withBuildings = addressesInParcel.filter((address) => address.buildingId);
+  if (withBuildings.length > 0) {
+    return withBuildings[0];
+  }
+
+  return addressesInParcel[0] ?? null;
+}
+
 export function CampaignDetailMapView({
   campaignId,
   addresses,
@@ -170,7 +266,13 @@ export function CampaignDetailMapView({
   pointOverlays?: MapPointOverlay[];
 }) {
   const { theme } = useTheme();
+  const { preset: mapPreset } = useMapStyle();
+  const router = useRouter();
   const { currentWorkspaceId } = useWorkspace();
+  const resolvedMapStyle = useMemo(
+    () => resolveMapStyle(mapPreset, theme, 'v12'),
+    [mapPreset, theme],
+  );
   const mapShellRef = useRef<HTMLDivElement>(null);
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
@@ -193,8 +295,16 @@ export function CampaignDetailMapView({
   
   // Location Card state
   const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(null);
+  const [selectedBuildingDeleteId, setSelectedBuildingDeleteId] = useState<string | null>(null);
   const [selectedAddressIdForCard, setSelectedAddressIdForCard] = useState<string | null>(null);
+  const [selectedParcelId, setSelectedParcelId] = useState<string | null>(null);
+  const [multiSelectedTargets, setMultiSelectedTargets] = useState<SelectedMapTarget[]>([]);
   const [locationCardOpen, setLocationCardOpen] = useState(false);
+  const [deletingTarget, setDeletingTarget] = useState<'selection' | null>(null);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [mapRefreshKey, setMapRefreshKey] = useState(0);
+  const [optimisticallyHiddenBuildingIds, setOptimisticallyHiddenBuildingIds] = useState<string[]>([]);
+  const [optimisticallyDeletedAddressIds, setOptimisticallyDeletedAddressIds] = useState<string[]>([]);
   
   // Create Contact Dialog state
   const [createContactOpen, setCreateContactOpen] = useState(false);
@@ -203,14 +313,25 @@ export function CampaignDetailMapView({
   const [selectedAddressText, setSelectedAddressText] = useState<string | undefined>(undefined);
   const [selectedContactNotes, setSelectedContactNotes] = useState<string | undefined>(undefined);
 
-  // Map view: 3D buildings vs 3D address points (circular fill-extrusions)
-  const [mapViewMode, setMapViewMode] = useState<'buildings' | 'addresses'>('buildings');
+  // Map view: 3D buildings vs 3D address points vs parcel polygons
+  const [mapViewMode, setMapViewMode] = useState<'buildings' | 'addresses' | 'parcels'>('buildings');
   // Boundary: Snap to Roads and Raw vs Snapped toggle
   const [snapping, setSnapping] = useState(false);
-  // Parcels layer toggle
   const [parcels, setParcels] = useState<CampaignParcel[]>([]);
-  const [showParcels, setShowParcels] = useState(false);
   const [parcelsLoading, setParcelsLoading] = useState(false);
+  const parcelEnrichmentStatus = campaign?.parcel_enrichment_status ?? 'not_started';
+  const parcelEnrichmentError = typeof campaign?.parcel_enrichment_error === 'string'
+    ? campaign.parcel_enrichment_error.trim()
+    : '';
+  const parcelsReady = parcels.length > 0;
+  const parcelsProcessing = parcelEnrichmentStatus === 'queued' || parcelEnrichmentStatus === 'processing';
+  const parcelsUnavailable = parcelEnrichmentStatus === 'skipped' || parcelEnrichmentStatus === 'failed';
+  const showParcels = mapViewMode === 'parcels' && parcelsReady;
+  const parcelStrokeColor = theme === 'dark' ? '#ffffff' : '#000000';
+  const parcelFillOpacity = theme === 'dark' ? 0.12 : 0.1;
+  const parcelLineOpacity = theme === 'dark' ? 0.38 : 0.28;
+  const parcelLineWidth = theme === 'dark' ? 0.52 : 0.46;
+  const parcelLabelHaloColor = theme === 'dark' ? 'rgba(0, 0, 0, 0.82)' : 'rgba(255, 255, 255, 0.92)';
   const lottieSrc = useMemo(
     () => (theme === 'dark' ? '/loading/white.json' : '/loading/black.json'),
     [theme]
@@ -218,6 +339,54 @@ export function CampaignDetailMapView({
   const handleBuildingsRenderStateChange = useCallback((state: MapBuildingsRenderState) => {
     setBuildingsRenderState(state);
   }, []);
+
+  const visibleAddresses = useMemo(
+    () =>
+      addresses.filter((address) => !optimisticallyDeletedAddressIds.includes(address.id)),
+    [addresses, optimisticallyDeletedAddressIds]
+  );
+
+  const applyOptimisticMapDeletion = useCallback(
+    ({
+      buildingIds = [],
+      addressIds = [],
+    }: {
+      buildingIds?: Array<string | null | undefined>;
+      addressIds?: Array<string | null | undefined>;
+    }) => {
+      const normalizedBuildingIds = Array.from(
+        new Set(
+          buildingIds
+            .map((value) => String(value ?? '').trim())
+            .filter(Boolean)
+        )
+      );
+      const normalizedAddressIds = Array.from(
+        new Set(
+          addressIds
+            .map((value) => String(value ?? '').trim())
+            .filter(Boolean)
+        )
+      );
+
+      if (normalizedBuildingIds.length > 0) {
+        setOptimisticallyHiddenBuildingIds((prev) =>
+          Array.from(new Set([...prev, ...normalizedBuildingIds]))
+        );
+      }
+
+      if (normalizedAddressIds.length > 0) {
+        setOptimisticallyDeletedAddressIds((prev) =>
+          Array.from(new Set([...prev, ...normalizedAddressIds]))
+        );
+      }
+
+      if (normalizedBuildingIds.length > 0 || normalizedAddressIds.length > 0) {
+        setMapRefreshKey((prev) => prev + 1);
+      }
+    },
+    []
+  );
 
   // Get user ID on mount
   useEffect(() => {
@@ -261,44 +430,321 @@ export function CampaignDetailMapView({
       zoomLevel: 15,
     });
     setShowBuildingPendingOverlay(false);
+    setMultiSelectedTargets([]);
+    setSelectedBuildingId(null);
+    setSelectedBuildingDeleteId(null);
+    setSelectedAddressIdForCard(null);
+    setSelectedParcelId(null);
+    setLocationCardOpen(false);
+    setMapRefreshKey(0);
+    setOptimisticallyHiddenBuildingIds([]);
+    setOptimisticallyDeletedAddressIds([]);
   }, [campaignId]);
 
   // Fetch parcels for this campaign
   useEffect(() => {
     if (!campaignId) return;
-    
+
+    let cancelled = false;
+
     const fetchParcels = async () => {
       setParcelsLoading(true);
       const supabase = createClient();
-      const { data, error } = await supabase
-        .from('campaign_parcels')
-        .select('*')
-        .eq('campaign_id', campaignId);
-      
-      if (!error && data) {
-        setParcels(data);
+      try {
+        const data = await fetchAllInPages((from, to) =>
+          supabase
+            .from('campaign_parcels')
+            .select('*')
+            .eq('campaign_id', campaignId)
+            .order('id', { ascending: true })
+            .range(from, to)
+        );
+
+        if (!cancelled) {
+          setParcels(data);
+          setParcelsLoading(false);
+        }
+      } catch (error) {
+        console.error('Failed to fetch campaign parcels:', error);
+        if (!cancelled) {
+          setParcels([]);
+          setParcelsLoading(false);
+        }
       }
-      setParcelsLoading(false);
     };
-    
-    fetchParcels();
-  }, [campaignId]);
+
+    void fetchParcels();
+
+    if (parcelsProcessing) {
+      const interval = setInterval(() => {
+        void fetchParcels();
+      }, 5000);
+
+      return () => {
+        cancelled = true;
+        clearInterval(interval);
+      };
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [campaignId, parcelsProcessing]);
 
   // Handle building click - opens LocationCard
   // For unit slices, addressId is passed to show specific unit
-  const handleBuildingClick = (buildingId: string, addressId?: string) => {
-    console.log('Building clicked:', { buildingId, addressId });
-    setSelectedBuildingId(buildingId);
+  const toggleMultiSelection = useCallback((target: SelectedMapTarget) => {
+    setMultiSelectedTargets((prev) => {
+      const exists = prev.some((item) => item.key === target.key);
+      if (exists) {
+        return prev.filter((item) => item.key !== target.key);
+      }
+      return [...prev, target];
+    });
+  }, []);
+
+  const openLocationCard = (
+    locationCardId: string,
+    addressId?: string,
+    parcelId?: string | null,
+    buildingDeleteId?: string | null
+  ) => {
+    console.log('Map target clicked:', { locationCardId, addressId, parcelId, buildingDeleteId });
+    setSelectedBuildingId(locationCardId);
+    setSelectedBuildingDeleteId(buildingDeleteId ?? null);
     setSelectedAddressIdForCard(addressId || null);
+    setSelectedParcelId(parcelId ?? null);
     setLocationCardOpen(true);
   };
 
+  const handleMapTargetClick = useCallback((
+    target: {
+      buildingId?: string | null;
+      addressId?: string | null;
+      parcelId?: string | null;
+    },
+    options?: {
+      additive?: boolean;
+    }
+  ) => {
+    const buildingId = target.buildingId ?? null;
+    const addressId = target.addressId ?? null;
+    const parcelId = target.parcelId ?? null;
+    const key = parcelId
+      ? `parcel:${parcelId}`
+      : buildingId
+        ? `building:${buildingId}:${addressId ?? ''}`
+        : `address:${addressId ?? ''}`;
+
+    if (options?.additive) {
+      setLocationCardOpen(false);
+      setSelectedBuildingId(null);
+      setSelectedBuildingDeleteId(null);
+      setSelectedAddressIdForCard(null);
+      setSelectedParcelId(null);
+      toggleMultiSelection({
+        key,
+        buildingId,
+        addressId,
+        parcelId,
+      });
+      return;
+    }
+
+    setMultiSelectedTargets([]);
+    if (buildingId || addressId) {
+      openLocationCard(
+        buildingId ?? addressId ?? '',
+        addressId ?? undefined,
+        parcelId,
+        buildingId ?? null
+      );
+    }
+  }, [toggleMultiSelection]);
+
+  const handleBuildingClick = (
+    buildingId: string,
+    addressId?: string,
+    options?: {
+      additive?: boolean;
+    }
+  ) => {
+    handleMapTargetClick({ buildingId, addressId: addressId ?? null, parcelId: null }, options);
+  };
+
   // Handle closing the location card
-  const handleCloseLocationCard = () => {
+  const handleCloseLocationCard = useCallback(() => {
     setLocationCardOpen(false);
     setSelectedBuildingId(null);
+    setSelectedBuildingDeleteId(null);
     setSelectedAddressIdForCard(null);
+    setSelectedParcelId(null);
+  }, []);
+
+  const getAccessToken = useCallback(async () => {
+    const supabase = createClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token ?? null;
+  }, []);
+
+  type AuthRequestOptions = RequestInit & {
+    ignoreStatuses?: number[];
   };
+
+  const requestWithAuth = useCallback(async (url: string, init?: AuthRequestOptions) => {
+    const token = await getAccessToken();
+    if (!token) {
+      throw new Error('Not authenticated');
+    }
+
+    const { ignoreStatuses, ...requestInit } = init ?? {};
+    const response = await fetch(url, {
+      ...requestInit,
+      headers: {
+        ...(requestInit.headers ?? {}),
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!response.ok) {
+      if (ignoreStatuses?.includes(response.status)) {
+        return response;
+      }
+
+      const payload = await response.json().catch(() => null);
+      throw new Error(payload?.error || 'Delete failed');
+    }
+
+    return response;
+  }, [getAccessToken]);
+
+  const deleteJsonWithAuth = useCallback(async (url: string, options?: { allowMissing?: boolean }) => {
+    const response = await requestWithAuth(url, {
+      method: 'DELETE',
+      ignoreStatuses: options?.allowMissing ? [404] : undefined,
+    });
+    if (response.status === 404) {
+      return null;
+    }
+    return response.json().catch(() => null);
+  }, [requestWithAuth]);
+
+  const handleDeleteSelectedLocation = useCallback(async () => {
+    const addressId = selectedAddressIdForCard;
+    const buildingId = selectedBuildingDeleteId;
+    const parcelId = selectedParcelId;
+
+    if (!addressId && !buildingId && !parcelId) return;
+    if (!window.confirm('Delete this location from the campaign? Any linked address, building, and parcel shown here will be removed.')) {
+      return;
+    }
+
+    setDeletingTarget('selection');
+    try {
+      const response = await requestWithAuth(`/api/campaigns/${campaignId}/location`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          buildingId,
+          addressId,
+          parcelId,
+        }),
+      });
+      const result = await response.json().catch(() => null);
+      const deletedAddressIds = Array.isArray(result?.deleted_address_ids)
+        ? result.deleted_address_ids.filter((value: unknown): value is string => typeof value === 'string')
+        : [];
+      const deletedBuildingId = typeof result?.building_id === 'string' ? result.building_id : null;
+
+      applyOptimisticMapDeletion({
+        buildingIds: deletedBuildingId ? [deletedBuildingId] : [],
+        addressIds: deletedAddressIds,
+      });
+
+      if (parcelId) {
+        setParcels((prev) => prev.filter((parcel) => parcel.id !== parcelId));
+      }
+
+      handleCloseLocationCard();
+      router.refresh();
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Failed to delete selected location');
+    } finally {
+      setDeletingTarget(null);
+    }
+  }, [
+    campaignId,
+    applyOptimisticMapDeletion,
+    handleCloseLocationCard,
+    requestWithAuth,
+    router,
+    selectedAddressIdForCard,
+    selectedBuildingDeleteId,
+    selectedParcelId,
+  ]);
+
+  const handleBulkDeleteSelectedTargets = useCallback(async () => {
+    if (multiSelectedTargets.length === 0) return;
+    const uniqueBuildingIds = Array.from(
+      new Set(
+        multiSelectedTargets
+          .map((target) => target.buildingId)
+          .filter((value): value is string => Boolean(value))
+      )
+    );
+
+    if (!window.confirm(`Delete ${multiSelectedTargets.length} selected house${multiSelectedTargets.length === 1 ? '' : 's'}?`)) {
+      return;
+    }
+
+    setBulkDeleting(true);
+    try {
+      const deletedAddressIds: string[] = [];
+      const deletedBuildingIds: string[] = [];
+      const uniqueAddressIds = Array.from(
+        new Set([
+          ...multiSelectedTargets
+            .filter((target) => !target.buildingId && target.addressId)
+            .map((target) => target.addressId)
+            .filter((value): value is string => Boolean(value)),
+        ])
+      );
+
+      for (const addressId of uniqueAddressIds) {
+        const result = await deleteJsonWithAuth(`/api/campaigns/${campaignId}/addresses/${addressId}`, { allowMissing: true });
+        if (typeof result?.address_id === 'string') {
+          deletedAddressIds.push(result.address_id);
+        }
+      }
+
+      for (const buildingId of uniqueBuildingIds) {
+        const result = await deleteJsonWithAuth(`/api/campaigns/${campaignId}/buildings/${buildingId}`, { allowMissing: true });
+        if (typeof result?.building_id === 'string') {
+          deletedBuildingIds.push(result.building_id);
+        }
+        if (Array.isArray(result?.deleted_address_ids)) {
+          deletedAddressIds.push(
+            ...result.deleted_address_ids.filter((value: unknown): value is string => typeof value === 'string')
+          );
+        }
+      }
+
+      applyOptimisticMapDeletion({
+        buildingIds: deletedBuildingIds,
+        addressIds: deletedAddressIds,
+      });
+
+      setMultiSelectedTargets([]);
+      handleCloseLocationCard();
+      router.refresh();
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Failed to delete selected houses');
+    } finally {
+      setBulkDeleting(false);
+    }
+  }, [campaignId, deleteJsonWithAuth, handleCloseLocationCard, multiSelectedTargets, router, applyOptimisticMapDeletion]);
 
   // Handle adding a contact from LocationCard
   const handleAddContact = (addressId?: string, addressText?: string, notes?: string) => {
@@ -325,9 +771,10 @@ export function CampaignDetailMapView({
 
   useEffect(() => {
     if (!mapContainer.current || map.current || initAttemptedRef.current) return;
+    let cancelled = false;
 
     // Check if container has dimensions before initializing
-    const checkAndInit = () => {
+    const checkAndInit = async () => {
       if (!mapContainer.current) return;
       
       const rect = mapContainer.current.getBoundingClientRect();
@@ -343,8 +790,8 @@ export function CampaignDetailMapView({
 
       // Helper to get initial center from addresses (GeoJSON-first approach)
       const getInitialCenter = (): [number, number] => {
-        if (addresses.length > 0) {
-          const addr = addresses[0];
+        if (visibleAddresses.length > 0) {
+          const addr = visibleAddresses[0];
           const coordinate = getAddressCoordinate(addr);
           if (coordinate) {
             return [coordinate.lon, coordinate.lat];
@@ -353,9 +800,15 @@ export function CampaignDetailMapView({
         return [-79.3832, 43.6532]; // Toronto default
       };
 
+      const mapInitOptions = await getResolvedMapInitOptions(resolvedMapStyle);
+      if (cancelled || !mapContainer.current || map.current) {
+        initAttemptedRef.current = false;
+        return;
+      }
+
       map.current = new mapboxgl.Map({
         container: mapContainer.current,
-        style: MAP_STYLES[theme] ?? MAP_STYLES.light,
+        ...mapInitOptions,
         center: getInitialCenter(),
         zoom: 12,
       });
@@ -370,14 +823,13 @@ export function CampaignDetailMapView({
           try {
             const style = map.current.getStyle();
             if (style && style.layers) {
+              applyPresetVisualTweaks(map.current, resolvedMapStyle, {
+                preserveLayerPrefixes: ['map-buildings-', 'campaign-', 'route-', 'assigned-routes-', 'flyr-', 'gl-draw-'],
+              });
+              hideBaseBuildingLayers(map.current, {
+                preserveLayerPrefixes: CUSTOM_BUILDING_LAYER_PREFIXES,
+              });
               style.layers.forEach((layer) => {
-                // Hide layers that contain "building" in their id
-                if (layer.id.toLowerCase().includes('building')) {
-                  if (!isCustomBuildingLayer(layer.id)) {
-                    map.current?.setLayoutProperty(layer.id, 'visibility', 'none');
-                  }
-                }
-                
                 // Remove layers that reference non-existent source layers
                 if (layer.id && (
                   layer.id.includes('road-label') || 
@@ -445,9 +897,13 @@ export function CampaignDetailMapView({
     };
 
     // Use requestAnimationFrame to ensure container is rendered
-    requestAnimationFrame(checkAndInit);
+    const frameId = requestAnimationFrame(() => {
+      void checkAndInit();
+    });
 
     return () => {
+      cancelled = true;
+      cancelAnimationFrame(frameId);
       if (map.current) {
         map.current.remove();
         map.current = null;
@@ -455,7 +911,7 @@ export function CampaignDetailMapView({
         setMapLoaded(false);
       }
     };
-  }, [addresses]);
+  }, [resolvedMapStyle, visibleAddresses]);
 
   // Keep Mapbox canvas in sync with container size (sidebar collapse/expand, viewport changes).
   useEffect(() => {
@@ -498,8 +954,8 @@ export function CampaignDetailMapView({
 
     // Extract lon/lat from campaign_addresses_geojson: coordinate, then geom_json (Point), then geometry
     // Fit bounds to show all addresses - buildings are shown via fill extrusions from MapBuildingsLayer
-    if (addresses.length > 0) {
-      const addressesWithCoords = addresses
+    if (visibleAddresses.length > 0) {
+      const addressesWithCoords = visibleAddresses
         .map(addr => getAddressCoordinate(addr))
         .filter((coord): coord is { lon: number; lat: number } => coord !== null);
 
@@ -547,7 +1003,29 @@ export function CampaignDetailMapView({
     return () => {
       boundsFittedRef.current = false; // Reset when addresses change
     };
-  }, [mapLoaded, addresses]);
+  }, [mapLoaded, visibleAddresses]);
+
+  const preparedAddressPoints = useMemo<PreparedAddressPoint[]>(() => {
+    return visibleAddresses
+      .map((address) => {
+        const coordinate = getAddressCoordinate(address);
+        if (!coordinate) return null;
+        const linkedBuildingId =
+          (address as CampaignAddress & { building_id?: unknown }).building_id ??
+          address.gers_id;
+
+        return {
+          addressId: address.id,
+          buildingId: typeof linkedBuildingId === 'string' && linkedBuildingId.trim() ? linkedBuildingId : null,
+          lon: coordinate.lon,
+          lat: coordinate.lat,
+          statusKey: getParcelAddressStatusKey(address),
+          houseNumber: String(address.house_number ?? '').trim() || extractLeadingHouseNumber(String(address.formatted ?? address.address ?? '')),
+          formattedAddress: String(address.formatted ?? address.address ?? '').trim(),
+        };
+      })
+      .filter((value): value is PreparedAddressPoint => value !== null);
+  }, [visibleAddresses]);
 
   const addressPointsSourceId = 'campaign-address-points';
   const addressPointsLayerId = 'campaign-address-points-extrusion';
@@ -565,7 +1043,7 @@ export function CampaignDetailMapView({
       const radiusMeters = 2.5;
       const steps = 24;
       const features: GeoJSON.Feature<GeoJSON.Polygon>[] = [];
-      for (const addr of addresses) {
+      for (const addr of visibleAddresses) {
         const coord = getAddressCoordinate(addr);
         if (!coord) continue;
         const center = [coord.lon, coord.lat] as [number, number];
@@ -646,6 +1124,7 @@ export function CampaignDetailMapView({
               'fill-extrusion-base': 0,
               'fill-extrusion-opacity': 1,
               'fill-extrusion-vertical-gradient': true,
+              'fill-extrusion-emissive-strength': 0.85,
             },
           });
         } else {
@@ -667,8 +1146,14 @@ export function CampaignDetailMapView({
       const f = e.features?.[0];
       if (!f?.properties) return;
       const addressId = f.properties.address_id as string | undefined;
-      const gersId = (f.properties.gers_id as string | undefined) ?? addressId;
-      if (addressId && handleBuildingClick) handleBuildingClick(gersId ?? addressId, addressId);
+      if (addressId) {
+        handleMapTargetClick(
+          { buildingId: null, addressId, parcelId: null },
+          {
+            additive: Boolean((e.originalEvent as MouseEvent | undefined)?.metaKey || (e.originalEvent as MouseEvent | undefined)?.ctrlKey),
+          }
+        );
+      }
     };
 
     if (mapViewMode !== 'addresses') {
@@ -676,7 +1161,7 @@ export function CampaignDetailMapView({
       return;
     }
 
-    if (addresses.length === 0) {
+    if (visibleAddresses.length === 0) {
       removeAddressPointsLayer();
       return;
     }
@@ -694,7 +1179,7 @@ export function CampaignDetailMapView({
       mapInstance.off('click', addressPointsLayerId, onAddressPointClick);
       removeAddressPointsLayer();
     };
-  }, [mapViewMode, mapLoaded, addresses, statusFilters, theme]);
+  }, [handleMapTargetClick, mapViewMode, mapLoaded, resolvedMapStyle.key, statusFilters, visibleAddresses]);
 
   useEffect(() => {
     const mapInstance = map.current;
@@ -712,7 +1197,7 @@ export function CampaignDetailMapView({
           properties: {
             feature_id: overlay.id,
             address_id: overlay.addressId ?? null,
-            building_id: overlay.buildingId ?? overlay.addressId ?? null,
+            building_id: overlay.buildingId ?? null,
             count: overlay.count ?? 0,
             label: overlay.label ?? (overlay.count ? String(overlay.count) : ''),
             color: overlay.color ?? '#ef4444',
@@ -800,11 +1285,14 @@ export function CampaignDetailMapView({
       const feature = event.features?.[0];
       if (!feature?.properties) return;
       const addressId = feature.properties.address_id as string | undefined;
-      const buildingId =
-        (feature.properties.building_id as string | undefined) ??
-        addressId;
-      if (buildingId) {
-        handleBuildingClick(buildingId, addressId);
+      const buildingId = feature.properties.building_id as string | undefined;
+      if (buildingId || addressId) {
+        handleMapTargetClick(
+          { buildingId: buildingId ?? null, addressId: addressId ?? null, parcelId: null },
+          {
+            additive: Boolean((event.originalEvent as MouseEvent | undefined)?.metaKey || (event.originalEvent as MouseEvent | undefined)?.ctrlKey),
+          }
+        );
       }
     };
 
@@ -826,15 +1314,14 @@ export function CampaignDetailMapView({
       mapInstance.off('click', pointOverlayCircleLayerId, onPointOverlayClick);
       removePointOverlayLayers();
     };
-  }, [mapLoaded, pointOverlays, theme]);
+  }, [handleMapTargetClick, mapLoaded, pointOverlays, resolvedMapStyle.key]);
 
-  // Sync map style with app theme (light/dark)
+  // Sync map style with the selected map preset.
   useEffect(() => {
     if (!map.current || !mapLoaded) return;
 
-    const styleUrl = MAP_STYLES[theme] ?? MAP_STYLES.light;
     try {
-      map.current.setStyle(styleUrl);
+      applyResolvedMapStyle(map.current, resolvedMapStyle);
     } catch (err) {
       console.error('Error setting map style:', err);
     }
@@ -845,13 +1332,14 @@ export function CampaignDetailMapView({
         if (!map.current.isStyleLoaded()) return;
         const style = map.current.getStyle();
         if (style?.layers) {
+          applyPresetVisualTweaks(map.current, resolvedMapStyle, {
+            preserveLayerPrefixes: ['map-buildings-', 'campaign-', 'route-', 'assigned-routes-', 'flyr-', 'gl-draw-'],
+          });
+          hideBaseBuildingLayers(map.current, {
+            preserveLayerPrefixes: CUSTOM_BUILDING_LAYER_PREFIXES,
+          });
           style.layers.forEach((layer) => {
             try {
-              if (layer.id?.toLowerCase().includes('building')) {
-                if (!isCustomBuildingLayer(layer.id)) {
-                  map.current?.setLayoutProperty(layer.id, 'visibility', 'none');
-                }
-              }
               if (layer.id && (layer.id.includes('road-label') || layer.id.includes('road_label'))) {
                 if (safeGetLayer(map.current!, layer.id)) map.current?.removeLayer(layer.id);
               }
@@ -866,7 +1354,7 @@ export function CampaignDetailMapView({
     map.current.once('style.load', () => {
       cleanupLayers();
     });
-  }, [theme, mapLoaded]);
+  }, [mapLoaded, resolvedMapStyle]);
 
   // Auto-set pitch for 3D view (fill-extrusion buildings look better with pitch)
   useEffect(() => {
@@ -993,32 +1481,111 @@ export function CampaignDetailMapView({
     if (parcels.length === 0) return;
 
     const removeParcelsLayer = () => {
+      if (safeGetLayer(m, PARCEL_LABEL_LAYER)) m.removeLayer(PARCEL_LABEL_LAYER);
       if (safeGetLayer(m, PARCEL_FILL_LAYER)) m.removeLayer(PARCEL_FILL_LAYER);
       if (safeGetLayer(m, PARCEL_LINE_LAYER)) m.removeLayer(PARCEL_LINE_LAYER);
+      if (safeGetSource(m, PARCEL_LABEL_SOURCE_ID)) m.removeSource(PARCEL_LABEL_SOURCE_ID);
       if (safeGetSource(m, PARCEL_SOURCE_ID)) m.removeSource(PARCEL_SOURCE_ID);
+    };
+
+    const getParcelFillColorExpression = (): mapboxgl.Expression => {
+      const status = ['get', 'status_key'];
+      return [
+        'case',
+        ['all', ['==', status, 'QR_SCANNED'], statusFilters.QR_SCANNED],
+        MAP_STATUS_CONFIG.QR_SCANNED.color,
+        ['all', ['==', status, 'CONVERSATIONS'], statusFilters.CONVERSATIONS],
+        MAP_STATUS_CONFIG.CONVERSATIONS.color,
+        ['all', ['==', status, 'TOUCHED'], statusFilters.TOUCHED],
+        MAP_STATUS_CONFIG.TOUCHED.color,
+        ['all', ['==', status, 'UNTOUCHED'], statusFilters.UNTOUCHED],
+        MAP_STATUS_CONFIG.UNTOUCHED.color,
+        parcelStrokeColor,
+      ] as mapboxgl.Expression;
+    };
+
+    const getParcelFillOpacityExpression = (): mapboxgl.Expression => {
+      const status = ['get', 'status_key'];
+      return [
+        'case',
+        ['all', ['==', status, 'QR_SCANNED'], statusFilters.QR_SCANNED],
+        parcelFillOpacity,
+        ['all', ['==', status, 'CONVERSATIONS'], statusFilters.CONVERSATIONS],
+        parcelFillOpacity,
+        ['all', ['==', status, 'TOUCHED'], statusFilters.TOUCHED],
+        parcelFillOpacity,
+        ['all', ['==', status, 'UNTOUCHED'], statusFilters.UNTOUCHED],
+        parcelFillOpacity,
+        0,
+      ] as mapboxgl.Expression;
     };
 
     const addParcelsLayer = () => {
       if (!m.isStyleLoaded()) return;
-      
-      // Convert parcels to GeoJSON
-      const features: GeoJSON.Feature<GeoJSON.Polygon>[] = parcels.map((parcel) => {
-        const geom = typeof parcel.geom === 'string' 
-          ? JSON.parse(parcel.geom) 
-          : parcel.geom;
-        return {
-          type: 'Feature',
-          geometry: geom,
-          properties: {
-            external_id: parcel.external_id,
-            feature_type: parcel.properties?.FEATURE_TYPE || 'COMMON',
-          },
-        };
-      });
 
-      const geojson: GeoJSON.FeatureCollection = {
+      const parcelFeatures: Array<GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>> = [];
+      const parcelLabelFeatures: Array<GeoJSON.Feature<GeoJSON.Point>> = [];
+
+      for (const parcel of parcels) {
+        const geom = typeof parcel.geom === 'string'
+          ? JSON.parse(parcel.geom)
+          : parcel.geom;
+        if (!geom || (geom.type !== 'Polygon' && geom.type !== 'MultiPolygon')) continue;
+
+        const turfFeature = turf.feature(geom as GeoJSON.Polygon | GeoJSON.MultiPolygon);
+        const statuses = new Set<MapStatusKey>();
+        const addressesInParcel: PreparedAddressPoint[] = [];
+        for (const addressPoint of preparedAddressPoints) {
+          const point = turf.point([addressPoint.lon, addressPoint.lat]);
+          if (turf.booleanPointInPolygon(point, turfFeature)) {
+            statuses.add(addressPoint.statusKey);
+            addressesInParcel.push(addressPoint);
+          }
+        }
+
+        if (statuses.size === 0) {
+          continue;
+        }
+
+        const statusKey = MAP_STATUS_PRIORITY.find((key) => statuses.has(key)) ?? 'UNTOUCHED';
+        const parcelLabel = getParcelAddressLabel(parcel);
+        const primaryLabel = getPreferredParcelAddressLabel(addressesInParcel) || parcelLabel;
+        const primaryTarget = getPrimaryParcelTarget(addressesInParcel);
+
+        parcelFeatures.push({
+          type: 'Feature',
+          geometry: geom as GeoJSON.Polygon | GeoJSON.MultiPolygon,
+          properties: {
+            external_id: parcel.external_id ?? null,
+            parcel_row_id: parcel.id,
+            address_id: primaryTarget?.addressId ?? null,
+            building_id: primaryTarget?.buildingId ?? null,
+            label: primaryLabel,
+            feature_type: parcel.properties?.FEATURE_TYPE || parcel.properties?.feature_type || 'COMMON',
+            status_key: statusKey,
+          },
+        });
+
+        if (primaryLabel) {
+          const labelPoint = turf.pointOnFeature(turfFeature);
+          parcelLabelFeatures.push({
+            type: 'Feature',
+            geometry: labelPoint.geometry,
+            properties: {
+              label: primaryLabel,
+            },
+          });
+        }
+      }
+
+      const geojson: GeoJSON.FeatureCollection<GeoJSON.Polygon | GeoJSON.MultiPolygon> = {
         type: 'FeatureCollection',
-        features,
+        features: parcelFeatures,
+      };
+
+      const labelGeojson: GeoJSON.FeatureCollection<GeoJSON.Point> = {
+        type: 'FeatureCollection',
+        features: parcelLabelFeatures,
       };
 
       try {
@@ -1026,19 +1593,21 @@ export function CampaignDetailMapView({
           type: 'geojson',
           data: geojson,
         });
+        m.addSource(PARCEL_LABEL_SOURCE_ID, {
+          type: 'geojson',
+          data: labelGeojson,
+        });
 
-        // Fill layer - subtle yellow/cream fill
         m.addLayer({
           id: PARCEL_FILL_LAYER,
           type: 'fill',
           source: PARCEL_SOURCE_ID,
           paint: {
-            'fill-color': '#fbbf24',
-            'fill-opacity': 0.1,
+            'fill-color': getParcelFillColorExpression(),
+            'fill-opacity': getParcelFillOpacityExpression(),
           },
         });
 
-        // Line layer - amber outline
         m.addLayer({
           id: PARCEL_LINE_LAYER,
           type: 'line',
@@ -1048,9 +1617,41 @@ export function CampaignDetailMapView({
             'line-join': 'round',
           },
           paint: {
-            'line-color': '#f59e0b',
-            'line-width': 1.5,
-            'line-opacity': 0.7,
+            'line-color': getParcelFillColorExpression(),
+            'line-width': [
+              'interpolate',
+              ['linear'],
+              ['zoom'],
+              12,
+              0.12,
+              14,
+              0.18,
+              16,
+              0.28,
+              18,
+              parcelLineWidth,
+            ],
+            'line-opacity': parcelLineOpacity,
+          },
+        });
+
+        m.addLayer({
+          id: PARCEL_LABEL_LAYER,
+          type: 'symbol',
+          source: PARCEL_LABEL_SOURCE_ID,
+          minzoom: 16,
+          layout: {
+            'text-field': ['coalesce', ['get', 'label'], ''],
+            'text-size': 12,
+            'text-font': ['Open Sans Semibold', 'Arial Unicode MS Bold'],
+            'text-allow-overlap': false,
+            'text-ignore-placement': false,
+          },
+          paint: {
+            'text-color': parcelStrokeColor,
+            'text-halo-color': parcelLabelHaloColor,
+            'text-halo-width': 1,
+            'text-opacity': 0.9,
           },
         });
       } catch (err) {
@@ -1058,7 +1659,38 @@ export function CampaignDetailMapView({
       }
     };
 
+    const onParcelClick = (event: mapboxgl.MapLayerMouseEvent) => {
+      const feature = event.features?.[0];
+      if (!feature?.properties) return;
+      const parcelRowId = feature.properties.parcel_row_id as string | undefined;
+      const addressId = feature.properties.address_id as string | undefined;
+      const buildingId = feature.properties.building_id as string | undefined;
+      if (parcelRowId || buildingId || addressId) {
+        handleMapTargetClick(
+          {
+            buildingId: buildingId ?? null,
+            addressId: addressId ?? null,
+            parcelId: parcelRowId ?? null,
+          },
+          {
+            additive: Boolean((event.originalEvent as MouseEvent | undefined)?.metaKey || (event.originalEvent as MouseEvent | undefined)?.ctrlKey),
+          }
+        );
+      }
+    };
+
+    const setParcelCursor = () => {
+      m.getCanvas().style.cursor = 'pointer';
+    };
+
+    const clearParcelCursor = () => {
+      m.getCanvas().style.cursor = '';
+    };
+
     if (!showParcels) {
+      m.off('click', PARCEL_FILL_LAYER, onParcelClick);
+      m.off('mouseenter', PARCEL_FILL_LAYER, setParcelCursor);
+      m.off('mouseleave', PARCEL_FILL_LAYER, clearParcelCursor);
       removeParcelsLayer();
       return;
     }
@@ -1069,10 +1701,32 @@ export function CampaignDetailMapView({
       m.once('style.load', addParcelsLayer);
     }
 
+    m.off('click', PARCEL_FILL_LAYER, onParcelClick);
+    m.off('mouseenter', PARCEL_FILL_LAYER, setParcelCursor);
+    m.off('mouseleave', PARCEL_FILL_LAYER, clearParcelCursor);
+    m.on('click', PARCEL_FILL_LAYER, onParcelClick);
+    m.on('mouseenter', PARCEL_FILL_LAYER, setParcelCursor);
+    m.on('mouseleave', PARCEL_FILL_LAYER, clearParcelCursor);
+
     return () => {
+      m.off('click', PARCEL_FILL_LAYER, onParcelClick);
+      m.off('mouseenter', PARCEL_FILL_LAYER, setParcelCursor);
+      m.off('mouseleave', PARCEL_FILL_LAYER, clearParcelCursor);
       removeParcelsLayer();
     };
-  }, [mapLoaded, showParcels, parcels]);
+  }, [
+    mapLoaded,
+    showParcels,
+    parcels,
+    preparedAddressPoints,
+    statusFilters,
+    parcelStrokeColor,
+    parcelFillOpacity,
+    parcelLineOpacity,
+    parcelLineWidth,
+    parcelLabelHaloColor,
+    handleMapTargetClick,
+  ]);
 
   const handleSnapToRoads = async () => {
     setSnapping(true);
@@ -1135,8 +1789,54 @@ export function CampaignDetailMapView({
             statusFilters={statusFilters}
             onStatusFiltersChange={setStatusFilters}
             portalContainer={mapShellRef.current}
+            extraContent={
+              multiSelectedTargets.length > 0 ? (
+                <div className="space-y-2">
+                  <p className="text-[11px] text-muted-foreground">
+                    {multiSelectedTargets.length} house{multiSelectedTargets.length === 1 ? '' : 's'} selected with Command-click.
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleBulkDeleteSelectedTargets}
+                      disabled={bulkDeleting}
+                      className="h-8 gap-1.5 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 dark:border-red-900/60 dark:text-red-300 dark:hover:bg-red-950/40"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      {bulkDeleting ? 'Deleting…' : 'Delete Selected'}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setMultiSelectedTargets([])}
+                      disabled={bulkDeleting}
+                      className="h-8 px-2 text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
+                    >
+                      Clear
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-[11px] text-muted-foreground">
+                  Hold Command and click houses on the map to multi-select them for deletion.
+                </p>
+              )
+            }
           />
-          {/* View switcher: Buildings | Addresses */}
+          {multiSelectedTargets.length > 0 ? (
+            <div className="pointer-events-none absolute top-14 left-3 z-20">
+              <div className="rounded-xl border border-amber-200 bg-white/92 px-3 py-2 shadow-sm backdrop-blur-sm dark:border-amber-900/50 dark:bg-black/82">
+                <p className="text-sm font-medium text-gray-900 dark:text-white">
+                  {multiSelectedTargets.length} house{multiSelectedTargets.length === 1 ? '' : 's'} selected
+                </p>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                  Open Tools to delete or clear selection
+                </p>
+              </div>
+            </div>
+          ) : null}
+          {/* View switcher: Buildings | Addresses | Parcels */}
           <div className="pointer-events-none absolute top-4 right-4 z-20 flex flex-col items-end gap-2">
             <div className="pointer-events-auto flex items-center gap-2">
               <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 bg-white/90 dark:bg-black/80 backdrop-blur-sm shadow-sm overflow-hidden">
@@ -1154,37 +1854,47 @@ export function CampaignDetailMapView({
                 >
                   Addresses
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setMapViewMode('parcels')}
+                  className={`px-3 py-2 text-sm font-medium transition-colors ${
+                    mapViewMode === 'parcels'
+                      ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
+                      : parcelsReady
+                        ? 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                        : 'text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/30'
+                  }`}
+                  title={
+                    parcelsReady
+                      ? `${parcels.length} parcel${parcels.length !== 1 ? 's' : ''} available`
+                      : parcelEnrichmentError || 'Parcel coverage is not available yet for this campaign.'
+                  }
+                >
+                  Parcels
+                  <span className="ml-1 text-xs opacity-60">({parcels.length})</span>
+                </button>
               </div>
               <button
                 type="button"
                 onClick={() => void toggleMapFullscreen()}
-                className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white/90 px-3 py-2 text-sm font-medium text-gray-600 shadow-sm backdrop-blur-sm transition-colors hover:bg-gray-100 dark:border-gray-700 dark:bg-black/80 dark:text-gray-300 dark:hover:bg-gray-800"
+                className="flex h-10 w-10 items-center justify-center rounded-lg border border-gray-200 bg-white/90 text-sm font-medium text-gray-600 shadow-sm backdrop-blur-sm transition-colors hover:bg-gray-100 dark:border-gray-700 dark:bg-black/80 dark:text-gray-300 dark:hover:bg-gray-800"
                 aria-label={isMapFullscreen ? 'Exit full screen map' : 'Full screen map'}
                 title={isMapFullscreen ? 'Exit full screen map' : 'Full screen map'}
               >
                 {isMapFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-                <span>{isMapFullscreen ? 'Exit full screen' : 'Full screen'}</span>
               </button>
             </div>
-            {/* Parcels toggle - only show if parcels exist for this campaign */}
-            {parcels.length > 0 && (
-              <div className="pointer-events-auto flex rounded-lg border border-gray-200 dark:border-gray-700 bg-white/90 dark:bg-black/80 backdrop-blur-sm shadow-sm overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => setShowParcels((v) => !v)}
-                  className={`px-3 py-2 text-sm font-medium transition-colors flex items-center gap-2 ${
-                    showParcels 
-                      ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300' 
-                      : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
-                  }`}
-                  title={`${parcels.length} parcel${parcels.length !== 1 ? 's' : ''} available`}
+            {!parcelsReady && parcelsProcessing && (
+              <div className="pointer-events-auto flex rounded-lg border border-amber-200 dark:border-amber-800 bg-white/90 dark:bg-black/80 backdrop-blur-sm shadow-sm overflow-hidden">
+                <div
+                  className="px-3 py-2 text-sm font-medium text-amber-700 dark:text-amber-300 flex items-center gap-2"
+                  title="Parcel coverage is still processing in the background"
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M5 3a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2V5a2 2 0 00-2-2H5zm0 2h10v10H5V5z" clipRule="evenodd" />
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 animate-pulse" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v3a1 1 0 002 0V7zm-1 8a1.25 1.25 0 100-2.5A1.25 1.25 0 0010 15z" clipRule="evenodd" />
                   </svg>
-                  {showParcels ? 'Hide Parcels' : 'Show Parcels'}
-                  <span className="text-xs opacity-60">({parcels.length})</span>
-                </button>
+                  {parcelsLoading ? 'Loading parcel coverage…' : 'Parcels processing…'}
+                </div>
               </div>
             )}
           </div>
@@ -1216,12 +1926,44 @@ export function CampaignDetailMapView({
               </div>
             </div>
           ) : null}
+          {mapViewMode === 'parcels' && !parcelsReady ? (
+            <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center p-4">
+              <div className="w-full max-w-sm rounded-lg border border-border bg-background/92 p-4 shadow-lg backdrop-blur-sm">
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-foreground">
+                    {parcelsProcessing ? 'Parcel coverage is processing' : 'No parcel coverage available'}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    {parcelsProcessing
+                      ? parcelsLoading
+                        ? 'Loading parcel polygons for this campaign now.'
+                        : 'Parcel polygons are being prepared in the background and will appear here automatically.'
+                      : parcelEnrichmentError || 'This campaign does not have parcel polygons loaded yet.'}
+                  </p>
+                  {!parcelsProcessing && parcelEnrichmentStatus !== 'not_started' ? (
+                    <p className="pt-2 text-xs uppercase tracking-wide text-muted-foreground/80">
+                      Status: {parcelEnrichmentStatus}
+                    </p>
+                  ) : null}
+                  {parcelsUnavailable && !parcelEnrichmentError ? (
+                    <p className="pt-2 text-xs text-muted-foreground">
+                      Parcel enrichment completed without loading any parcel dataset for this region.
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          ) : null}
           {mapViewMode === 'buildings' && (
             <MapBuildingsLayer 
               map={map.current} 
               campaignId={campaignId}
-              addressStateOverrides={addresses}
+              refreshKey={mapRefreshKey}
+              addressStateOverrides={visibleAddresses}
+              hiddenBuildingIds={optimisticallyHiddenBuildingIds}
+              deletedAddressIds={optimisticallyDeletedAddressIds}
               statusFilters={statusFilters}
+              showAddressLabels={mapViewMode !== 'parcels'}
               onBuildingClick={handleBuildingClick}
               onRenderStateChange={handleBuildingsRenderStateChange}
             />
@@ -1237,13 +1979,27 @@ export function CampaignDetailMapView({
                 onClose={handleCloseLocationCard}
                 onAddContact={handleAddContact}
                 extraContent={
-                  renderLocationCardExtra
-                    ? renderLocationCardExtra({
-                        selectedBuildingId,
-                        selectedAddressId: selectedAddressIdForCard,
-                        campaignId,
-                      })
-                    : null
+                  <div className="space-y-2">
+                    {(selectedParcelId || selectedBuildingDeleteId || selectedAddressIdForCard) && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleDeleteSelectedLocation}
+                        disabled={deletingTarget !== null}
+                        className="w-full justify-start gap-2 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 dark:border-red-900/60 dark:text-red-300 dark:hover:bg-red-950/40"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        {deletingTarget === 'selection' ? 'Deleting location…' : 'Delete Location'}
+                      </Button>
+                    )}
+                    {renderLocationCardExtra
+                      ? renderLocationCardExtra({
+                          selectedBuildingId,
+                          selectedAddressId: selectedAddressIdForCard,
+                          campaignId,
+                        })
+                      : null}
+                  </div>
                 }
               />
             </div>

@@ -13,8 +13,10 @@ export interface CreateContactPayload {
   campaign_id?: string;
   farm_id?: string;
   status: ContactStatus;
+  source?: string;
   notes?: string;
   address_id?: string; // Optional: link to campaign_addresses.id
+  last_contacted?: string;
   follow_up_at?: string;
   appointment_at?: string;
   tags?: string; // Optional comma-separated tags

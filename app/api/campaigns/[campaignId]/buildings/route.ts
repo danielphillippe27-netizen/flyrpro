@@ -19,6 +19,22 @@ const s3Client = new S3Client({
   },
 });
 
+type FeatureCollectionLike = {
+  type?: unknown;
+  features?: Array<{
+    id?: unknown;
+    geometry?: { type?: unknown };
+    properties?: {
+      id?: unknown;
+      building_id?: unknown;
+      gers_id?: unknown;
+      source?: unknown;
+      feature_type?: unknown;
+      feature_status?: unknown;
+    };
+  }>;
+};
+
 function hasPolygonFeatures(featureCollection: unknown): boolean {
   if (!featureCollection || typeof featureCollection !== 'object') return false;
   const features = (featureCollection as { features?: unknown }).features;
@@ -51,6 +67,61 @@ function hasAddressPointFallbackFeatures(featureCollection: unknown): boolean {
   });
 }
 
+function isPolygonFeature(feature: unknown): boolean {
+  if (!feature || typeof feature !== 'object') return false;
+  const geometry = (feature as { geometry?: { type?: unknown } }).geometry;
+  const type = geometry?.type;
+  return type === 'Polygon' || type === 'MultiPolygon';
+}
+
+function getFeatureBuildingIdentifiers(feature: unknown): string[] {
+  if (!feature || typeof feature !== 'object') return [];
+  const properties = (feature as {
+    id?: unknown;
+    properties?: { id?: unknown; building_id?: unknown; gers_id?: unknown };
+  }).properties;
+  const identifiers = [
+    properties?.building_id,
+    properties?.gers_id,
+    properties?.id,
+    (feature as { id?: unknown }).id,
+  ];
+
+  return Array.from(
+    new Set(
+      identifiers
+        .filter((value): value is string | number => typeof value === 'string' || typeof value === 'number')
+        .map((value) => String(value).trim())
+        .filter((value) => value.length > 0)
+    )
+  );
+}
+
+function filterHiddenBuildingFeatures(
+  featureCollection: FeatureCollectionLike | null | undefined,
+  hiddenBuildingIds: Set<string>
+) : FeatureCollectionLike | null | undefined {
+  if (!featureCollection) {
+    return featureCollection;
+  }
+
+  const features = featureCollection.features;
+  if (!Array.isArray(features) || hiddenBuildingIds.size === 0) {
+    return featureCollection;
+  }
+
+  const visibleFeatures = features.filter((feature) => {
+    if (!isPolygonFeature(feature)) return true;
+    const buildingIdentifiers = getFeatureBuildingIdentifiers(feature);
+    return !buildingIdentifiers.some((identifier) => hiddenBuildingIds.has(identifier));
+  });
+
+  return {
+    ...featureCollection,
+    features: visibleFeatures,
+  };
+}
+
 interface CampaignAccessRow {
   owner_id: string;
   workspace_id: string | null;
@@ -71,9 +142,78 @@ interface CampaignAddressRow {
   house_number: string | null;
   street_name: string | null;
   building_id: string | null;
+  building_gers_id?: string | null;
   address_status?: string | null;
   visited: boolean | null;
   scans: number | null;
+}
+
+interface CampaignBuildingRow {
+  id: string;
+  gers_id: string | null;
+  source?: string | null;
+  geom?: unknown;
+  height_m?: number | null;
+  height?: number | null;
+  latest_status?: string | null;
+  house_name?: string | null;
+  addr_street?: string | null;
+}
+
+interface BuildingAddressLinkRow {
+  building_id: string;
+  address_id: string;
+  match_type: string | null;
+  confidence: number | null;
+}
+
+async function fetchHiddenBuildingIds(
+  supabase: ReturnType<typeof createAdminClient>,
+  campaignId: string
+): Promise<Set<string>> {
+  const hiddenIds = new Set<string>();
+
+  const [{ data: campaignHiddenRows, error: campaignHiddenError }, hiddenBuildingRowsResult] =
+    await Promise.all([
+      supabase
+        .from('campaign_hidden_buildings')
+        .select('public_building_id')
+        .eq('campaign_id', campaignId),
+      supabase
+        .from('buildings')
+        .select('id, gers_id')
+        .eq('campaign_id', campaignId)
+        .eq('is_hidden', true),
+    ]);
+
+  if (campaignHiddenError) {
+    console.warn('[API] Failed to load campaign_hidden_buildings:', campaignHiddenError.message);
+  } else {
+    for (const row of campaignHiddenRows ?? []) {
+      const publicBuildingId = String(
+        (row as { public_building_id?: string | null }).public_building_id ?? ''
+      ).trim();
+      if (publicBuildingId) {
+        hiddenIds.add(publicBuildingId);
+      }
+    }
+  }
+
+  if (hiddenBuildingRowsResult.error) {
+    console.warn('[API] Failed to load hidden buildings:', hiddenBuildingRowsResult.error.message);
+  } else {
+    for (const row of hiddenBuildingRowsResult.data ?? []) {
+      const building = row as { id?: string | null; gers_id?: string | null };
+      for (const identifier of [building.id, building.gers_id]) {
+        const normalized = String(identifier ?? '').trim();
+        if (normalized) {
+          hiddenIds.add(normalized);
+        }
+      }
+    }
+  }
+
+  return hiddenIds;
 }
 
 const GOLD_BUILDING_LOOKUP_BATCH_SIZE = 200;
@@ -82,6 +222,16 @@ function parseGoldBuildingRows(raw: unknown): GoldBuildingRow[] {
   if (!raw) return [];
 
   if (Array.isArray(raw)) {
+    if (raw.length === 0) return [];
+    const first = raw[0] as Record<string, unknown>;
+    if ('geom_geojson' in first) {
+      return raw as GoldBuildingRow[];
+    }
+    if (first?.type === 'Feature') {
+      return raw
+        .map((feature) => featureToGoldBuildingRow(feature as Record<string, unknown>))
+        .filter((feature): feature is GoldBuildingRow => Boolean(feature));
+    }
     return raw as GoldBuildingRow[];
   }
 
@@ -98,9 +248,34 @@ function parseGoldBuildingRows(raw: unknown): GoldBuildingRow[] {
     if ('get_gold_buildings_in_polygon_geojson' in obj) {
       return parseGoldBuildingRows(obj.get_gold_buildings_in_polygon_geojson);
     }
+    if (obj.type === 'FeatureCollection' && Array.isArray(obj.features)) {
+      return obj.features
+        .map((feature) => featureToGoldBuildingRow(feature as Record<string, unknown>))
+        .filter((feature): feature is GoldBuildingRow => Boolean(feature));
+    }
+    if (obj.type === 'Feature') {
+      const feature = featureToGoldBuildingRow(obj);
+      return feature ? [feature] : [];
+    }
   }
 
   return [];
+}
+
+function featureToGoldBuildingRow(feature: Record<string, unknown>): GoldBuildingRow | null {
+  const geometry = feature.geometry as Record<string, unknown> | undefined;
+  if (!geometry) return null;
+  const properties = (feature.properties as Record<string, unknown> | undefined) ?? {};
+  const id = properties.id ?? feature.id;
+  if (!id) return null;
+
+  return {
+    id: String(id),
+    area_sqm: typeof properties.area_sqm === 'number' ? properties.area_sqm : null,
+    building_type: typeof properties.building_type === 'string' ? properties.building_type : null,
+    geom_geojson: JSON.stringify(geometry),
+    geom: geometry,
+  };
 }
 
 function toGoldBuildingGeometry(building: GoldBuildingRow): GeoJSON.Polygon | GeoJSON.MultiPolygon | null {
@@ -131,6 +306,148 @@ function toGoldBuildingGeometry(building: GoldBuildingRow): GeoJSON.Polygon | Ge
   }
 
   return null;
+}
+
+function toCampaignBuildingGeometry(
+  building: Pick<CampaignBuildingRow, 'geom'>
+): GeoJSON.Polygon | GeoJSON.MultiPolygon | null {
+  if (typeof building.geom === 'string' && building.geom.trim()) {
+    try {
+      return JSON.parse(building.geom) as GeoJSON.Polygon | GeoJSON.MultiPolygon;
+    } catch {
+      return null;
+    }
+  }
+
+  if (building.geom && typeof building.geom === 'object') {
+    const candidate = building.geom as { type?: unknown; coordinates?: unknown };
+    if (
+      (candidate.type === 'Polygon' || candidate.type === 'MultiPolygon') &&
+      Array.isArray(candidate.coordinates)
+    ) {
+      return candidate as GeoJSON.Polygon | GeoJSON.MultiPolygon;
+    }
+  }
+
+  return null;
+}
+
+function getCampaignBuildingSource(building: Pick<CampaignBuildingRow, 'source'>): 'manual' | 'silver' {
+  return String(building.source ?? '').toLowerCase() === 'manual' ? 'manual' : 'silver';
+}
+
+function buildCampaignBuildingFallbackFeatureCollection(
+  buildings: CampaignBuildingRow[],
+  campaignAddresses: CampaignAddressRow[],
+  buildingLinks: BuildingAddressLinkRow[]
+) {
+  const addressById = new Map(campaignAddresses.map((address) => [address.id, address]));
+  const buildingLinksById = new Map<string, BuildingAddressLinkRow[]>();
+  const addressesByBuildingKey = new Map<string, CampaignAddressRow[]>();
+
+  for (const link of buildingLinks) {
+    const group = buildingLinksById.get(link.building_id) ?? [];
+    group.push(link);
+    buildingLinksById.set(link.building_id, group);
+  }
+
+  for (const address of campaignAddresses) {
+    const keys = new Set(
+      [address.building_id, address.building_gers_id].filter(
+        (value): value is string => typeof value === 'string' && value.length > 0
+      )
+    );
+
+    for (const key of keys) {
+      const group = addressesByBuildingKey.get(key) ?? [];
+      group.push(address);
+      addressesByBuildingKey.set(key, group);
+    }
+  }
+
+  const features = buildings.flatMap((building) => {
+    const geometry = toCampaignBuildingGeometry(building);
+    if (!geometry) return [];
+
+    const publicBuildingId = building.gers_id ?? building.id;
+    const linkedAddressMap = new Map<
+      string,
+      { address: CampaignAddressRow; link?: BuildingAddressLinkRow | null }
+    >();
+
+    const candidateKeys = Array.from(
+      new Set([building.id, publicBuildingId].filter((value): value is string => value.length > 0))
+    );
+
+    for (const key of candidateKeys) {
+      const linksForKey = buildingLinksById.get(key) ?? [];
+      for (const link of linksForKey) {
+        const address = addressById.get(link.address_id);
+        if (address) {
+          linkedAddressMap.set(address.id, { address, link });
+        }
+      }
+
+      const directAddresses = addressesByBuildingKey.get(key) ?? [];
+      for (const address of directAddresses) {
+        const existing = linkedAddressMap.get(address.id);
+        linkedAddressMap.set(address.id, {
+          address,
+          link: existing?.link ?? null,
+        });
+      }
+    }
+
+    const linkedEntries = Array.from(linkedAddressMap.values());
+    const linkedAddresses = linkedEntries.map((entry) => entry.address);
+    const firstAddress = linkedAddresses[0] ?? null;
+    const firstLinkedEntry = linkedEntries.find((entry) => entry.link) ?? linkedEntries[0] ?? null;
+    const scansTotal = linkedAddresses.reduce((sum, address) => sum + (address.scans ?? 0), 0);
+    const source = getCampaignBuildingSource(building);
+    const statusRank = { not_visited: 0, visited: 1, hot: 2 } as const;
+    const buildingStatus = linkedAddresses.reduce<'not_visited' | 'visited' | 'hot'>(
+      (current, address) => {
+        const next = getCampaignBuildingStatus(address);
+        return statusRank[next] > statusRank[current] ? next : current;
+      },
+      building.latest_status === 'interested' ? 'visited' : 'not_visited'
+    );
+
+    return [{
+      type: 'Feature',
+      id: publicBuildingId,
+      geometry,
+      properties: {
+        id: publicBuildingId,
+        building_id: publicBuildingId,
+        gers_id: publicBuildingId,
+        source,
+        address_count: linkedAddresses.length,
+        address_id: linkedAddresses.length === 1 ? firstAddress?.id ?? null : null,
+        address_text: linkedAddresses.length === 1 ? displayAddressText(firstAddress ?? {}) : null,
+        house_number: linkedAddresses.length === 1 ? resolveHouseNumberLabel(firstAddress ?? {}) : null,
+        street_name: linkedAddresses.length === 1 ? firstAddress?.street_name ?? null : null,
+        height: Math.max(building.height_m ?? building.height ?? 10, 10),
+        height_m: Math.max(building.height_m ?? building.height ?? 10, 10),
+        min_height: 0,
+        is_townhome: false,
+        units_count: Math.max(linkedAddresses.length, 1),
+        feature_type: source === 'manual' ? 'manual_building' : linkedAddresses.length > 0 ? 'matched_house' : 'orphan',
+        feature_status: linkedAddresses.length > 0 ? 'matched' : source === 'manual' ? 'manual' : 'unlinked',
+        match_method: firstLinkedEntry?.link?.match_type ?? (linkedAddresses.length > 0 ? source : null),
+        confidence: firstLinkedEntry?.link?.confidence ?? (linkedAddresses.length > 0 ? 0.8 : null),
+        status: buildingStatus,
+        scans_today: 0,
+        scans_total: scansTotal,
+        qr_scanned: scansTotal > 0,
+      },
+    }];
+  });
+
+  return {
+    type: 'FeatureCollection',
+    features,
+  } as const;
 }
 
 function buildGoldFallbackFeatureCollection(
@@ -197,6 +514,122 @@ function buildGoldFallbackFeatureCollection(
     type: 'FeatureCollection',
     features,
   } as const;
+}
+
+function isMissingBuildingsSourceColumnError(message: string): boolean {
+  return /column .*source does not exist/i.test(message) && /\bbuildings?\b/i.test(message);
+}
+
+async function fetchCampaignBuildingRows(
+  supabase: ReturnType<typeof createAdminClient>,
+  campaignId: string
+): Promise<CampaignBuildingRow[]> {
+  const selectClauses = [
+    'id, gers_id, source, geom, height_m, height, latest_status, house_name, addr_street, is_hidden',
+    'id, gers_id, geom, height, latest_status, house_name, addr_street, is_hidden',
+  ];
+  let lastError: string | null = null;
+
+  for (const selectClause of selectClauses) {
+    const { data, error } = await supabase
+      .from('buildings')
+      .select(selectClause)
+      .eq('campaign_id', campaignId)
+      .order('id', { ascending: true });
+
+    if (error) {
+      lastError = error.message;
+      continue;
+    }
+
+    return ((data ?? []) as Array<CampaignBuildingRow & { is_hidden?: boolean | null }>)
+      .filter((building) => !building.is_hidden)
+      .map((building) => {
+        const normalized = { ...building };
+        delete (normalized as { is_hidden?: boolean | null }).is_hidden;
+        if (!('source' in normalized)) normalized.source = null;
+        if (!('height_m' in normalized)) normalized.height_m = null;
+        return normalized;
+      });
+  }
+
+  if (lastError && isMissingBuildingsSourceColumnError(lastError)) {
+    console.warn('[API] Campaign building fallback retrying without buildings.source column');
+  }
+
+  throw new Error(lastError ?? 'Unknown buildings query error');
+}
+
+async function fetchCampaignBuildingFallbackFeatures(
+  supabase: ReturnType<typeof createAdminClient>,
+  campaignId: string
+) {
+  let buildings: CampaignBuildingRow[] = [];
+
+  try {
+    buildings = await fetchCampaignBuildingRows(supabase, campaignId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn('[API] Campaign building fallback query failed:', message);
+    return null;
+  }
+
+  if (buildings.length === 0) {
+    console.log('[API] Campaign building fallback found 0 campaign-scoped buildings');
+    return null;
+  }
+
+  const [campaignAddresses, buildingLinks] = await Promise.all([
+    fetchAllInPages((from, to) =>
+      supabase
+        .from('campaign_addresses')
+        .select(
+          'id, formatted, house_number, street_name, building_id, building_gers_id, visited, scans, address_statuses(status)'
+        )
+        .eq('campaign_id', campaignId)
+        .order('id', { ascending: true })
+        .range(from, to)
+    ),
+    fetchAllInPages((from, to) =>
+      supabase
+        .from('building_address_links')
+        .select('building_id, address_id, match_type, confidence')
+        .eq('campaign_id', campaignId)
+        .order('address_id', { ascending: true })
+        .range(from, to)
+    ),
+  ]).catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn('[API] Campaign building fallback link query failed:', message);
+    return [null, null] as const;
+  });
+
+  if (!campaignAddresses || !buildingLinks) {
+    return null;
+  }
+
+  const normalizedAddresses = (campaignAddresses as Array<CampaignAddressRow & {
+    address_statuses?: { status?: string | null } | Array<{ status?: string | null }> | null;
+  }>).map((address) => ({
+    ...address,
+    address_status: Array.isArray(address.address_statuses)
+      ? address.address_statuses[0]?.status ?? null
+      : address.address_statuses?.status ?? null,
+  }));
+
+  const fallback = buildCampaignBuildingFallbackFeatureCollection(
+    buildings,
+    normalizedAddresses,
+    buildingLinks as BuildingAddressLinkRow[]
+  );
+
+  if (fallback.features.length === 0) {
+    console.warn('[API] Campaign building fallback found rows but no renderable geometries');
+    return null;
+  }
+
+  console.log(`[API] Campaign building fallback loaded ${fallback.features.length} campaign-scoped polygon buildings`);
+  return fallback;
 }
 
 async function fetchGoldFallbackFeatures(
@@ -353,6 +786,7 @@ export async function GET(
     }
 
     const supabase = createAdminClient();
+    const hiddenBuildingIdsPromise = fetchHiddenBuildingIds(supabase, campaignId);
 
     const { data: campaignAccess, error: campaignAccessError } = await supabase
       .from('campaigns')
@@ -388,26 +822,30 @@ export async function GET(
       'rpc_get_campaign_full_features',
       { p_campaign_id: campaignId }
     );
-    let fallbackFeatures = campaignFeatures ?? null;
+    const normalizedCampaignFeatures = (campaignFeatures ?? null) as FeatureCollectionLike | null;
+    const fallbackFeatures = normalizedCampaignFeatures;
+    const hiddenBuildingIds = await hiddenBuildingIdsPromise;
+    const visibleCampaignFeatures = filterHiddenBuildingFeatures(normalizedCampaignFeatures, hiddenBuildingIds);
+    const visibleFallbackFeatures = filterHiddenBuildingFeatures(fallbackFeatures, hiddenBuildingIds);
 
-    if (!featuresError && campaignFeatures && campaignFeatures.features?.length > 0) {
-      const hasPolygons = hasPolygonFeatures(campaignFeatures);
-      const hasAddressPointFallbacks = hasAddressPointFallbackFeatures(campaignFeatures);
+    if (!featuresError && visibleCampaignFeatures && visibleCampaignFeatures.features?.length > 0) {
+      const hasPolygons = hasPolygonFeatures(visibleCampaignFeatures);
+      const hasAddressPointFallbacks = hasAddressPointFallbackFeatures(visibleCampaignFeatures);
 
       if (hasPolygons && !hasAddressPointFallbacks) {
         console.log(
-          `[API] Returning ${campaignFeatures.features.length} polygon features ` +
-            `(source: ${campaignFeatures.features[0]?.properties?.source || 'unknown'})`
+          `[API] Returning ${visibleCampaignFeatures.features.length} polygon features ` +
+            `(source: ${visibleCampaignFeatures.features[0]?.properties?.source || 'unknown'})`
         );
-        return NextResponse.json(campaignFeatures);
+        return NextResponse.json(visibleCampaignFeatures);
       }
 
       if (hasPolygons) {
         console.log(
-          '[API] RPC returned mixed polygon + address-point features; attempting link repair before returning partial result'
+          '[API] RPC returned mixed polygon + address-point features; falling back to stored polygon sources before returning points'
         );
       } else {
-        console.log('[API] RPC returned point-only features; attempting link repair before fallback');
+        console.log('[API] RPC returned point-only features; falling back to stored polygon sources');
       }
     } else if (featuresError) {
       console.error('[API] Feature RPC error:', featuresError.message);
@@ -415,53 +853,7 @@ export async function GET(
       console.log('[API] No linked features from RPC');
     }
 
-    // Self-heal: relink on demand for campaigns that have addresses but no polygon links yet.
-    // This handles mixed DB states where the provision step may have skipped linker RPCs.
-    let repairAttempted = false;
     const campaignRow = campaignAccess as CampaignAccessRow;
-
-    if (campaignRow?.territory_boundary) {
-      const { error: goldRepairError } = await supabase.rpc('link_campaign_addresses_gold', {
-        p_campaign_id: campaignId,
-        p_polygon_geojson: campaignRow.territory_boundary,
-      });
-
-      if (goldRepairError) {
-        console.warn('[API] Gold link repair failed (continuing):', goldRepairError.message);
-      } else {
-        repairAttempted = true;
-      }
-    }
-
-    const { data: allRepairData, error: allRepairError } = await supabase.rpc(
-      'link_campaign_addresses_all',
-      { p_campaign_id: campaignId }
-    );
-
-    if (allRepairError) {
-      console.warn('[API] Consolidated link repair failed (continuing):', allRepairError.message);
-    } else {
-      repairAttempted = true;
-      const row = Array.isArray(allRepairData) ? allRepairData[0] : allRepairData;
-      console.log('[API] Consolidated link repair result:', row ?? 'ok');
-    }
-
-    if (repairAttempted) {
-      const { data: repairedFeatures, error: repairedError } = await supabase.rpc(
-        'rpc_get_campaign_full_features',
-        { p_campaign_id: campaignId }
-      );
-
-      if (!repairedError && repairedFeatures && repairedFeatures.features?.length > 0) {
-        fallbackFeatures = repairedFeatures;
-        if (hasPolygonFeatures(repairedFeatures)) {
-          console.log(`[API] Returning ${repairedFeatures.features.length} polygon features after repair`);
-          return NextResponse.json(repairedFeatures);
-        }
-      } else if (repairedError) {
-        console.warn('[API] Feature RPC after repair failed:', repairedError.message);
-      }
-    }
 
     const goldFallback = await fetchGoldFallbackFeatures(
       supabase,
@@ -470,11 +862,38 @@ export async function GET(
     );
 
     if (goldFallback) {
-      console.log(`[API] Returning ${goldFallback.features.length} Gold polygon features via direct fallback`);
-      return NextResponse.json({
-        type: 'FeatureCollection',
-        features: goldFallback.features,
-      });
+      const visibleGoldFallback = filterHiddenBuildingFeatures(goldFallback, hiddenBuildingIds);
+      const visibleGoldFeatures = (visibleGoldFallback as { features?: unknown[] }).features ?? [];
+      if (visibleGoldFeatures.length > 0) {
+        console.log(`[API] Returning ${visibleGoldFeatures.length} Gold polygon features via direct fallback`);
+        return NextResponse.json({
+          type: 'FeatureCollection',
+          features: visibleGoldFeatures,
+        });
+      }
+    }
+
+    const campaignBuildingFallback = await fetchCampaignBuildingFallbackFeatures(
+      supabase,
+      campaignId
+    );
+
+    if (campaignBuildingFallback) {
+      const visibleCampaignBuildingFallback = filterHiddenBuildingFeatures(
+        campaignBuildingFallback,
+        hiddenBuildingIds
+      );
+      const visibleCampaignBuildingFeatures =
+        (visibleCampaignBuildingFallback as { features?: unknown[] }).features ?? [];
+      if (visibleCampaignBuildingFeatures.length > 0) {
+        console.log(
+          `[API] Returning ${visibleCampaignBuildingFeatures.length} campaign-scoped polygon features via direct fallback`
+        );
+        return NextResponse.json({
+          type: 'FeatureCollection',
+          features: visibleCampaignBuildingFeatures,
+        });
+      }
     }
     
     // SNAPSHOT PATH: Fetch from S3 snapshot when RPC is point-only or empty
@@ -487,9 +906,9 @@ export async function GET(
       .maybeSingle();
     
     if (snapshotError || !snapshot?.buildings_key) {
-      if (fallbackFeatures?.features?.length > 0) {
-        console.log(`[API] No snapshot found, returning ${fallbackFeatures.features.length} point features`);
-        return NextResponse.json(fallbackFeatures);
+      if (visibleFallbackFeatures?.features?.length > 0) {
+        console.log(`[API] No snapshot found, returning ${visibleFallbackFeatures.features.length} point features`);
+        return NextResponse.json(visibleFallbackFeatures);
       }
 
       console.log('[API] No snapshot found, returning empty');
@@ -514,10 +933,19 @@ export async function GET(
     // Decompress gzip content
     const decompressed = gunzipSync(Buffer.from(bodyBuffer));
     const geojson = JSON.parse(decompressed.toString('utf-8'));
+    const visibleGeojson = filterHiddenBuildingFeatures(geojson, hiddenBuildingIds);
+    const visibleSnapshotFeatures = (visibleGeojson as { features?: unknown[] }).features ?? [];
+
+    if (visibleSnapshotFeatures.length === 0 && visibleFallbackFeatures?.features?.length) {
+      console.log(
+        `[API] Snapshot buildings all filtered out; returning ${visibleFallbackFeatures.features.length} point features`
+      );
+      return NextResponse.json(visibleFallbackFeatures);
+    }
     
-    console.log(`[API] Returning ${geojson.features?.length || 0} Silver buildings from S3`);
+    console.log(`[API] Returning ${visibleSnapshotFeatures.length} Silver buildings from S3`);
     
-    return NextResponse.json(geojson);
+    return NextResponse.json(visibleGeojson);
     
   } catch (error) {
     console.error('[API] Error fetching buildings:', error);

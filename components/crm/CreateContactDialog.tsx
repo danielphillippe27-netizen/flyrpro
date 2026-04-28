@@ -64,6 +64,9 @@ export function CreateContactDialog({
   const [formData, setFormData] = useState({
     address: initialAddress || '',
     status: 'new' as ContactStatus,
+    source: '',
+    tags: '',
+    last_contacted: '',
     notes: initialNotes || '',
     follow_up_at: '',
     appointment_at: '',
@@ -114,6 +117,9 @@ export function CreateContactDialog({
           campaign_id: initialCampaignId,
           farm_id: initialFarmId,
           status: formData.status,
+          source: formData.source.trim() || undefined,
+          tags: formData.tags.trim() || undefined,
+          last_contacted: toIsoString(formData.last_contacted),
           notes: formData.notes.trim() || undefined,
           follow_up_at: toIsoString(formData.follow_up_at),
           appointment_at: toIsoString(formData.appointment_at),
@@ -140,6 +146,9 @@ export function CreateContactDialog({
       setFormData({
         address: '',
         status: 'new',
+        source: '',
+        tags: '',
+        last_contacted: '',
         notes: '',
         follow_up_at: '',
         appointment_at: '',
@@ -164,6 +173,9 @@ export function CreateContactDialog({
       setFormData({
         address: '',
         status: 'new',
+        source: '',
+        tags: '',
+        last_contacted: '',
         notes: '',
         follow_up_at: '',
         appointment_at: '',
@@ -342,6 +354,29 @@ export function CreateContactDialog({
             </Select>
           </div>
 
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <Label htmlFor="source">Source</Label>
+              <Input
+                id="source"
+                value={formData.source}
+                onChange={(e) => setFormData({ ...formData, source: e.target.value })}
+                placeholder="Referral, Open house, Website..."
+                disabled={loading}
+              />
+            </div>
+            <div>
+              <Label htmlFor="tags">Tags</Label>
+              <Input
+                id="tags"
+                value={formData.tags}
+                onChange={(e) => setFormData({ ...formData, tags: e.target.value })}
+                placeholder="Buyer, Seller, Investor"
+                disabled={loading}
+              />
+            </div>
+          </div>
+
           <div>
             <Label htmlFor="notes">Notes</Label>
             <Textarea
@@ -356,6 +391,16 @@ export function CreateContactDialog({
 
           <div className="grid grid-cols-2 gap-4">
             <div>
+              <Label htmlFor="last_contacted">Last Contacted</Label>
+              <Input
+                id="last_contacted"
+                type="datetime-local"
+                value={formData.last_contacted}
+                onChange={(e) => setFormData({ ...formData, last_contacted: e.target.value })}
+                disabled={loading}
+              />
+            </div>
+            <div>
               <Label htmlFor="follow_up_at">Follow Up</Label>
               <Input
                 id="follow_up_at"
@@ -365,6 +410,9 @@ export function CreateContactDialog({
                 disabled={loading}
               />
             </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <Label htmlFor="appointment_at">Appointment</Label>
               <Input

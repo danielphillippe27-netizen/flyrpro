@@ -9,6 +9,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useTheme } from '@/lib/theme-provider';
 import { useWorkspace } from '@/lib/workspace-context';
 import { getMapboxToken } from '@/lib/mapbox';
+import { applyPresetVisualTweaks, applyResolvedMapStyle, hideBaseBuildingLayers, resolveMapStyle } from '@/lib/map-styles';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import MapboxDraw from '@mapbox/mapbox-gl-draw';
@@ -21,16 +22,14 @@ import { Satellite, Map, Trash2, Pencil } from 'lucide-react';
 import * as turf from '@turf/turf';
 import Lottie from 'lottie-react';
 
-// Mapbox v11 styles with 2D building footprints – used only on create campaign so we see buildings
-const MAP_STYLES = {
-  light: 'mapbox://styles/mapbox/streets-v11',
-  dark: 'mapbox://styles/mapbox/dark-v11',
-} as const;
-
 export default function CreateCampaignPage() {
   const router = useRouter();
   const { theme } = useTheme();
   const { currentWorkspaceId } = useWorkspace();
+  const resolvedMapStyle = useMemo(
+    () => resolveMapStyle('standard', theme, 'v11'),
+    [theme],
+  );
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
   const [provisioning, setProvisioning] = useState(false);
@@ -46,6 +45,7 @@ export default function CreateCampaignPage() {
   const map = useRef<mapboxgl.Map | null>(null);
   const drawRef = useRef<MapboxDraw | null>(null);
   const boundaryLayerIdsRef = useRef<string[]>([]);
+  const appliedBaseStyleKeyRef = useRef<string | null>(null);
   const hasCenteredOnUserLocationRef = useRef(false);
   const isDark = theme === 'dark';
   const lottieSrc = useMemo(
@@ -94,20 +94,19 @@ export default function CreateCampaignPage() {
 
     const layers = m.getStyle().layers;
 
+    applyPresetVisualTweaks(m, resolvedMapStyle, {
+      preserveLayerIds: [buildingLayerId],
+      preserveLayerPrefixes: ['gl-draw-'],
+    });
+
     // Hide ALL built-in building layers from the base style (includes 3D extrusions)
-    for (const layer of layers) {
-      const lid = layer.id.toLowerCase();
-      if ((lid.includes('building') || lid.includes('structure')) && layer.id !== buildingLayerId) {
-        try {
-          m.setLayoutProperty(layer.id, 'visibility', 'none');
-        } catch {}
-      }
-    }
+    hideBaseBuildingLayers(m, { preserveLayerIds: [buildingLayerId] });
 
     // Find the first symbol layer so buildings render beneath labels
     let labelLayerId: string | undefined;
     for (const layer of layers) {
-      if (layer.type === 'symbol' && (layer as any).layout?.['text-field']) {
+      const symbolLayer = layer as mapboxgl.SymbolLayer;
+      if (layer.type === 'symbol' && symbolLayer.layout?.['text-field']) {
         labelLayerId = layer.id;
         break;
       }
@@ -157,10 +156,12 @@ export default function CreateCampaignPage() {
     // Initialize map (style follows app theme)
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
-      style: MAP_STYLES[theme] ?? MAP_STYLES.light,
+      style: resolvedMapStyle.style,
+      config: resolvedMapStyle.config,
       center: [-79.35, 43.65], // Default to Toronto area
       zoom: 15,
     });
+    appliedBaseStyleKeyRef.current = resolvedMapStyle.key;
 
     map.current.on('load', () => {
       setMapLoaded(true);
@@ -282,23 +283,14 @@ export default function CreateCampaignPage() {
   }, []);
 
   // Store drawn features for restoration after style change
-  const savedFeaturesRef = useRef<any>(null);
+  const savedFeaturesRef = useRef<GeoJSON.FeatureCollection | null>(null);
 
   // Handle map style change - recreate draw instance to avoid source conflicts
   useEffect(() => {
     if (!map.current || !mapLoaded) return;
 
-    // Determine the correct style: satellite toggle or theme (light/dark)
-    const expectedStyle = isSatellite 
-      ? 'mapbox://styles/mapbox/satellite-streets-v12'
-      : (MAP_STYLES[theme] ?? MAP_STYLES.light);
-
-    // Get current style name (if available)
-    const currentStyle = map.current.getStyle()?.name || '';
-    const isCurrentlySatellite = currentStyle.toLowerCase().includes('satellite');
-    
-    // Skip if already on the correct style type
-    if (isSatellite === isCurrentlySatellite && drawRef.current) return;
+    const expectedStyleKey = isSatellite ? 'satellite' : resolvedMapStyle.key;
+    if (appliedBaseStyleKeyRef.current === expectedStyleKey && drawRef.current) return;
 
     // Save features before destroying draw
     if (drawRef.current) {
@@ -314,11 +306,16 @@ export default function CreateCampaignPage() {
     // Clear boundary layer ref so we never call getLayer with stale IDs after style replace
     boundaryLayerIdsRef.current = [];
     // Change style
-    map.current.setStyle(expectedStyle);
+    if (isSatellite) {
+      map.current.setStyle('mapbox://styles/mapbox/satellite-streets-v12');
+    } else {
+      applyResolvedMapStyle(map.current, resolvedMapStyle);
+    }
 
     // After style loads, re-add 2D buildings and create fresh draw instance
     map.current.once('style.load', () => {
       if (!map.current) return;
+      appliedBaseStyleKeyRef.current = expectedStyleKey;
 
       // Keep custom residential building overlays off satellite mode.
       if (!isSatellite) {
@@ -352,7 +349,7 @@ export default function CreateCampaignPage() {
         newDraw.changeMode('draw_polygon');
       }
     });
-  }, [isSatellite, theme, mapLoaded]);
+  }, [isSatellite, mapLoaded, resolvedMapStyle]);
 
   // Keep map fully sized when surrounding layout (e.g. campaign sidebar) collapses/expands.
   useEffect(() => {
@@ -577,11 +574,15 @@ export default function CreateCampaignPage() {
       }
 
       router.push(`/campaigns/${campaign.id}`);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error creating campaign:', error);
       // Extract meaningful error message
-      const errorMessage = error?.message || error?.details || error?.hint || 'Unknown error occurred';
-      const errorCode = error?.code ? ` (${error.code})` : '';
+      const errorDetails =
+        error && typeof error === 'object'
+          ? (error as { message?: string; details?: string; hint?: string; code?: string })
+          : {};
+      const errorMessage = errorDetails.message || errorDetails.details || errorDetails.hint || 'Unknown error occurred';
+      const errorCode = errorDetails.code ? ` (${errorDetails.code})` : '';
       alert(`Failed to create campaign: ${errorMessage}${errorCode}`);
     } finally {
       setLoading(false);

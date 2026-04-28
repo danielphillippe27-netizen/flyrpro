@@ -107,6 +107,40 @@ function isMissingCampaignColumnError(error: unknown, column: 'notes' | 'scripts
   return isMissingCampaignColumnErrorMessage(message, column);
 }
 
+function getLinkQualityBanner(campaign: CampaignV2 | null): {
+  badgeVariant: 'default' | 'secondary' | 'outline' | 'destructive';
+  badgeLabel: string;
+  message: string;
+} | null {
+  const status = campaign?.link_quality_status ?? 'unknown';
+  const score = campaign?.link_quality_score;
+  const reason = campaign?.link_quality_reason;
+
+  if (status === 'unknown') return null;
+
+  if (status === 'healthy') {
+    return {
+      badgeVariant: 'outline',
+      badgeLabel: `Link Quality${typeof score === 'number' ? ` ${score}` : ''}`,
+      message: 'Link coverage and confidence are within target thresholds.',
+    };
+  }
+
+  if (status === 'repairing') {
+    return {
+      badgeVariant: 'secondary',
+      badgeLabel: 'Link Repair Queued',
+      message: reason || 'A background repair pass is queued to improve campaign link quality.',
+    };
+  }
+
+  return {
+    badgeVariant: status === 'failed' ? 'destructive' : 'secondary',
+    badgeLabel: 'Link Quality Review',
+    message: reason || 'This campaign has degraded link quality and may need review.',
+  };
+}
+
 function CampaignContactsList({
   contacts,
   campaignId,
@@ -465,6 +499,17 @@ export default function CampaignDetailPage() {
     }, 3000);
     return () => clearInterval(interval);
   }, [campaignId, roadMetadata?.roads_status]);
+
+  useEffect(() => {
+    const status = campaign?.parcel_enrichment_status;
+    if (!campaignId || (status !== 'queued' && status !== 'processing')) return;
+
+    const interval = setInterval(() => {
+      void loadData();
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [campaignId, campaign?.parcel_enrichment_status, loadData]);
 
   useEffect(() => {
     if (campaign?.video_url) setDestinationUrl(campaign.video_url);
@@ -918,6 +963,7 @@ export default function CampaignDetailPage() {
       contacts: matchedContacts,
     };
   });
+  const linkQualityBanner = getLinkQualityBanner(campaign);
 
   return (
     <div className="min-h-full bg-muted/30 dark:bg-background relative">
@@ -937,6 +983,16 @@ export default function CampaignDetailPage() {
 
       <main className="w-full px-4 sm:px-6 lg:px-8 py-6 space-y-6">
         <StatsHeader stats={campaignStats} />
+        {linkQualityBanner ? (
+          <div className="rounded-xl border border-border bg-card px-4 py-3">
+            <div className="flex flex-wrap items-start gap-3">
+              <Badge variant={linkQualityBanner.badgeVariant}>{linkQualityBanner.badgeLabel}</Badge>
+              <div className="min-w-0 space-y-1">
+                <p className="text-sm text-muted-foreground">{linkQualityBanner.message}</p>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         <Tabs defaultValue="map" className="w-full">
           <TabsList>

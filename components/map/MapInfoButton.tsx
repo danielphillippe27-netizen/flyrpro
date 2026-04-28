@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { MapInfoSheet } from './MapInfoSheet';
 import type { StatusFilters } from '@/lib/constants/mapStatus';
@@ -11,6 +11,7 @@ interface MapInfoButtonProps {
   statusFilters?: StatusFilters;
   onStatusFiltersChange?: (filters: StatusFilters) => void;
   portalContainer?: HTMLElement | null;
+  extraContent?: ReactNode;
 }
 
 /**
@@ -22,6 +23,7 @@ export function MapInfoButton({
   statusFilters,
   onStatusFiltersChange,
   portalContainer,
+  extraContent,
 }: MapInfoButtonProps) {
   const [open, setOpen] = useState(false);
 
@@ -45,6 +47,7 @@ export function MapInfoButton({
         statusFilters={statusFilters}
         onStatusFiltersChange={onStatusFiltersChange}
         portalContainer={portalContainer}
+        extraContent={extraContent}
       />
     </>
   );

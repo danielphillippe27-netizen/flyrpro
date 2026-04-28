@@ -310,12 +310,14 @@ export class CampaignsService {
   }
 
   static async deleteCampaign(id: string): Promise<void> {
-    const { error } = await this.client
-      .from('campaigns')
-      .delete()
-      .eq('id', id);
+    const response = await fetch(`/api/campaigns/${id}`, {
+      method: 'DELETE',
+    });
 
-    if (error) throw error;
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null);
+      throw new Error(payload?.error || 'Failed to delete campaign');
+    }
   }
 
   // ============================================

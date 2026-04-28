@@ -28,6 +28,7 @@ export default function ResetPasswordPage() {
         const currentUrl = new URL(window.location.href);
         const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
         const queryType = currentUrl.searchParams.get('type');
+        const queryToken = currentUrl.searchParams.get('token');
         const queryTokenHash = currentUrl.searchParams.get('token_hash');
         const queryCode = currentUrl.searchParams.get('code');
         const hashType = hashParams.get('type');
@@ -37,6 +38,25 @@ export default function ResetPasswordPage() {
         const normalizeRecoveryUrl = () => {
           window.history.replaceState({}, document.title, '/reset-password');
         };
+
+        if (queryType === 'recovery' && queryToken) {
+          const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+
+          if (!supabaseUrl) {
+            throw new Error('Missing NEXT_PUBLIC_SUPABASE_URL for recovery token verification.');
+          }
+
+          const verifyUrl = new URL('/auth/v1/verify', supabaseUrl);
+          verifyUrl.searchParams.set('token', queryToken);
+          verifyUrl.searchParams.set('type', 'recovery');
+          verifyUrl.searchParams.set(
+            'redirect_to',
+            new URL('/reset-password', window.location.origin).toString()
+          );
+
+          window.location.replace(verifyUrl.toString());
+          return;
+        }
 
         if (queryType === 'recovery' && queryTokenHash) {
           const { error } = await supabase.auth.verifyOtp({

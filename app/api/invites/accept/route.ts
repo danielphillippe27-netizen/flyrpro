@@ -11,11 +11,14 @@ type InviteRow = {
   workspace_id: string;
   email: string | null;
   role: 'admin' | 'member';
+  access_scope?: string | null;
   status?: string | null;
   expires_at: string | null;
   accepted_at?: string | null;
   accepted_by_user_id?: string | null;
 };
+
+type InviteAccessScope = 'workspace' | 'campaign';
 
 function normalizeInviteEmail(value: string | null | undefined): string | null {
   if (typeof value !== 'string') return null;
@@ -30,6 +33,7 @@ function inviteAcceptedResponse(options: {
   workspaceId: string;
   campaignId?: string | null;
   sessionId?: string | null;
+  accessScope: InviteAccessScope;
   alreadyAccepted: boolean;
 }) {
   const redirect = buildInviteRedirectPath({
@@ -47,8 +51,23 @@ function inviteAcceptedResponse(options: {
     campaign_id: options.campaignId ?? null,
     sessionId: options.sessionId ?? null,
     session_id: options.sessionId ?? null,
+    accessScope: options.accessScope,
+    access_scope: options.accessScope,
     redirect,
   });
+}
+
+function normalizeInviteAccessScope(
+  value: string | null | undefined,
+  fallback: {
+    campaignId: string | null;
+    sessionId: string | null;
+  }
+): InviteAccessScope {
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === 'workspace') return 'workspace';
+  if (normalized === 'campaign') return 'campaign';
+  return fallback.campaignId || fallback.sessionId ? 'campaign' : 'workspace';
 }
 
 function isLegacyAcceptedTriggerNullUserError(error: unknown): boolean {
@@ -70,7 +89,7 @@ async function getInviteByToken(
   for (const candidate of candidates) {
     const withAcceptedBy = await admin
       .from('workspace_invites')
-      .select('id, workspace_id, email, role, status, expires_at, accepted_at, accepted_by_user_id')
+      .select('id, workspace_id, email, role, access_scope, status, expires_at, accepted_at, accepted_by_user_id')
       .eq(candidate, token)
       .maybeSingle();
 
@@ -86,8 +105,12 @@ async function getInviteByToken(
       maybeError?.code === '42703' &&
       typeof maybeError.message === 'string' &&
       maybeError.message.includes('accepted_by_user_id');
+    const missingAccessScopeColumn =
+      maybeError?.code === '42703' &&
+      typeof maybeError.message === 'string' &&
+      maybeError.message.includes('access_scope');
 
-    if (!missingAcceptedByColumn) {
+    if (!missingAcceptedByColumn && !missingAccessScopeColumn) {
       continue;
     }
 
@@ -100,7 +123,7 @@ async function getInviteByToken(
     if (!fallback.error) {
       return {
         invite: fallback.data
-          ? ({ ...fallback.data, accepted_by_user_id: null } as InviteRow)
+          ? ({ ...fallback.data, access_scope: null, accepted_by_user_id: null } as InviteRow)
           : null,
         error: null,
       };
@@ -175,6 +198,24 @@ async function ensureMembership(
     );
 }
 
+async function ensureCampaignMembership(
+  admin: ReturnType<typeof createAdminClient>,
+  campaignId: string,
+  invite: InviteRow,
+  userId: string
+) {
+  return admin
+    .from('campaign_members')
+    .upsert(
+      {
+        campaign_id: campaignId,
+        user_id: userId,
+        role: invite.role,
+      },
+      { onConflict: 'campaign_id,user_id' }
+    );
+}
+
 /**
  * POST /api/invites/accept
  * Body: { token: string }
@@ -213,6 +254,7 @@ export async function POST(request: NextRequest) {
     }
 
     const inviteTarget = await resolveInviteTarget(admin, invite.id);
+    const accessScope = normalizeInviteAccessScope(invite.access_scope, inviteTarget);
 
     const expiresAt = invite.expires_at ? new Date(invite.expires_at) : null;
     if (expiresAt && expiresAt <= new Date()) {
@@ -231,22 +273,50 @@ export async function POST(request: NextRequest) {
     }
 
     const nowIso = new Date().toISOString();
-    const { data: existingMembership, error: membershipLookupError } = await admin
-      .from('workspace_members')
-      .select('workspace_id, role')
-      .eq('workspace_id', invite.workspace_id)
-      .eq('user_id', requestUser.id)
-      .maybeSingle();
-
-    if (membershipLookupError) {
-      console.error('[invite-accept] membership lookup error:', membershipLookupError);
+    if (accessScope === 'campaign' && !inviteTarget.campaignId) {
       return NextResponse.json(
-        { error: 'Failed to accept invite' },
-        { status: 500 }
+        { error: 'This invite is missing its campaign target' },
+        { status: 400 }
       );
     }
 
-    const membershipAlreadyExists = !!existingMembership?.workspace_id;
+    let membershipAlreadyExists = false;
+    if (accessScope === 'workspace') {
+      const { data: existingMembership, error: membershipLookupError } = await admin
+        .from('workspace_members')
+        .select('workspace_id, role')
+        .eq('workspace_id', invite.workspace_id)
+        .eq('user_id', requestUser.id)
+        .maybeSingle();
+
+      if (membershipLookupError) {
+        console.error('[invite-accept] membership lookup error:', membershipLookupError);
+        return NextResponse.json(
+          { error: 'Failed to accept invite' },
+          { status: 500 }
+        );
+      }
+
+      membershipAlreadyExists = !!existingMembership?.workspace_id;
+    } else if (inviteTarget.campaignId) {
+      const { data: existingCampaignMembership, error: campaignMembershipLookupError } = await admin
+        .from('campaign_members')
+        .select('campaign_id')
+        .eq('campaign_id', inviteTarget.campaignId)
+        .eq('user_id', requestUser.id)
+        .maybeSingle();
+
+      if (campaignMembershipLookupError) {
+        console.error('[invite-accept] campaign membership lookup error:', campaignMembershipLookupError);
+        return NextResponse.json(
+          { error: 'Failed to accept invite' },
+          { status: 500 }
+        );
+      }
+
+      membershipAlreadyExists = !!existingCampaignMembership?.campaign_id;
+    }
+
     const acceptedByCurrentUser =
       invite.accepted_by_user_id === requestUser.id || membershipAlreadyExists;
 
@@ -257,12 +327,14 @@ export async function POST(request: NextRequest) {
         inviteId: invite.id,
         workspaceId: invite.workspace_id,
         userId: requestUser.id,
+        accessScope,
         result: 'already_accepted',
       });
       return inviteAcceptedResponse({
         workspaceId: invite.workspace_id,
         campaignId: inviteTarget.campaignId,
         sessionId: inviteTarget.sessionId,
+        accessScope,
         alreadyAccepted: true,
       });
     }
@@ -282,7 +354,7 @@ export async function POST(request: NextRequest) {
     );
     let membershipEnsuredByLegacyFallback = false;
 
-    if (updateError && isLegacyAcceptedTriggerNullUserError(updateError)) {
+    if (accessScope === 'workspace' && updateError && isLegacyAcceptedTriggerNullUserError(updateError)) {
       const { error: legacyMembershipError } = await ensureMembership(
         admin,
         invite,
@@ -343,15 +415,19 @@ export async function POST(request: NextRequest) {
     }
 
     if (!membershipAlreadyExists && !membershipEnsuredByLegacyFallback) {
-      const { error: membershipUpsertError } = await ensureMembership(
-        admin,
-        invite,
-        requestUser.id,
-        nowIso
-      );
+      const membershipUpsertResult =
+        accessScope === 'workspace'
+          ? await ensureMembership(admin, invite, requestUser.id, nowIso)
+          : await ensureCampaignMembership(
+              admin,
+              inviteTarget.campaignId!,
+              invite,
+              requestUser.id
+            );
+      const membershipUpsertError = membershipUpsertResult.error;
 
       if (membershipUpsertError) {
-        console.error('[invite-accept] membership upsert error:', membershipUpsertError);
+        console.error('[invite-accept] access upsert error:', membershipUpsertError);
         return NextResponse.json(
           { error: 'Failed to accept invite' },
           { status: 500 }
@@ -421,21 +497,24 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const { error: workspacePreferenceError } = await admin
-      .from('user_profiles')
-      .update({
-        current_workspace_id: invite.workspace_id,
-      })
-      .eq('user_id', requestUser.id);
+    if (accessScope === 'workspace') {
+      const { error: workspacePreferenceError } = await admin
+        .from('user_profiles')
+        .update({
+          current_workspace_id: invite.workspace_id,
+        })
+        .eq('user_id', requestUser.id);
 
-    if (workspacePreferenceError) {
-      console.warn('Accept invite: failed to update current workspace preference', workspacePreferenceError);
+      if (workspacePreferenceError) {
+        console.warn('Accept invite: failed to update current workspace preference', workspacePreferenceError);
+      }
     }
 
     console.info('[invite-accept] invite accepted', {
       inviteId: invite.id,
       workspaceId: invite.workspace_id,
       userId: requestUser.id,
+      accessScope,
       membershipAlreadyExists,
     });
 
@@ -443,6 +522,7 @@ export async function POST(request: NextRequest) {
       workspaceId: invite.workspace_id,
       campaignId: inviteTarget.campaignId,
       sessionId: inviteTarget.sessionId,
+      accessScope,
       alreadyAccepted: false,
     });
   } catch (e) {

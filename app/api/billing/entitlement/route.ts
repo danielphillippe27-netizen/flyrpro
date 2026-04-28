@@ -1,11 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getEntitlementForUser } from '@/app/lib/billing/entitlements';
 import type { EntitlementSnapshot } from '@/types/database';
-import { getDefaultUpgradePriceId } from '@/app/lib/billing/stripe-products';
+import {
+  getDefaultUpgradePriceId,
+  getPowerDialerAddonOffer,
+  getRequestBillingCurrency,
+} from '@/app/lib/billing/stripe-products';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { createAdminClient } from '@/lib/supabase/server';
+import { getWorkspacePowerDialerAddon } from '@/app/lib/billing/workspace-addons';
+import { normalizePhoneNumber } from '@/lib/dialer/phone';
 
 type WorkspaceBilling = {
+  id?: string;
   subscription_status?: string | null;
   trial_ends_at?: string | null;
 };
@@ -27,7 +34,7 @@ async function resolvePrimaryWorkspaceBilling(userId: string): Promise<Workspace
 
   const { data: ownedWorkspace } = await admin
     .from('workspaces')
-    .select('subscription_status, trial_ends_at')
+    .select('id, subscription_status, trial_ends_at')
     .eq('owner_id', userId)
     .order('created_at', { ascending: true })
     .limit(1)
@@ -51,7 +58,7 @@ async function resolvePrimaryWorkspaceBilling(userId: string): Promise<Workspace
 
   const { data: workspace } = await admin
     .from('workspaces')
-    .select('subscription_status, trial_ends_at')
+    .select('id, subscription_status, trial_ends_at')
     .eq('id', membership.workspace_id)
     .maybeSingle();
 
@@ -76,6 +83,26 @@ export async function GET(request: NextRequest) {
     const effectivePeriodEnd =
       entitlement.current_period_end ??
       (workspaceAccess ? workspace?.trial_ends_at ?? null : null);
+    const dialerOffer = getPowerDialerAddonOffer(getRequestBillingCurrency(request));
+    const workspaceId = workspace?.id ?? null;
+    let dialerAddon = null;
+    let dialerNumber: string | null = null;
+    let dialerNumberStatus: string | null = null;
+
+    if (workspaceId) {
+      const admin = createAdminClient();
+      const [{ data: dialerSettings }, addon] = await Promise.all([
+        admin
+          .from('workspace_dialer_settings')
+          .select('default_from_number, number_status')
+          .eq('workspace_id', workspaceId)
+          .maybeSingle(),
+        getWorkspacePowerDialerAddon(admin, workspaceId),
+      ]);
+      dialerAddon = addon;
+      dialerNumber = normalizePhoneNumber(dialerSettings?.default_from_number).e164;
+      dialerNumberStatus = dialerSettings?.number_status ?? null;
+    }
 
     const snapshot: EntitlementSnapshot & { upgrade_price_id?: string } = {
       plan:
@@ -85,6 +112,30 @@ export async function GET(request: NextRequest) {
       is_active: entitlement.is_active || workspaceAccess,
       source: entitlement.source,
       current_period_end: effectivePeriodEnd,
+      dialer_offer: {
+        price_id: dialerOffer.priceId || null,
+        amount: dialerOffer.amount,
+        currency: dialerOffer.currency,
+        period: dialerOffer.period,
+      },
+      dialer_addon: dialerAddon
+        ? {
+            status: dialerAddon.status,
+            is_active: dialerAddon.status === 'active',
+            price_id: dialerAddon.stripe_price_id ?? null,
+            amount_cents: dialerAddon.amount_cents ?? null,
+            currency: dialerAddon.currency ?? null,
+          }
+        : {
+            status: 'inactive',
+            is_active: false,
+            price_id: null,
+            amount_cents: null,
+            currency: null,
+          },
+      dialer_number: dialerNumber,
+      dialer_number_status: (dialerNumberStatus as EntitlementSnapshot['dialer_number_status']) ?? null,
+      dialer_uses_shared_default: !dialerNumber,
     };
     const defaultPriceId = getDefaultUpgradePriceId();
     if (defaultPriceId) {

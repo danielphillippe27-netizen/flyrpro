@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { ThemeProvider } from "@/lib/theme-provider";
+import { MapStyleProvider } from '@/lib/map-style-provider';
 import { PwaRegister } from '@/components/pwa/PwaRegister';
 import { Toaster } from '@/components/ui/sonner';
 
@@ -48,9 +49,11 @@ export default function RootLayout({
         className={`${inter.variable} font-sans antialiased`}
       >
         <ThemeProvider>
-          <PwaRegister />
-          <Toaster richColors position="top-right" />
-          {children}
+          <MapStyleProvider>
+            <PwaRegister />
+            <Toaster richColors position="top-right" />
+            {children}
+          </MapStyleProvider>
         </ThemeProvider>
       </body>
     </html>

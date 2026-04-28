@@ -1,24 +1,17 @@
 /** Snapshot of metrics for a timeframe (daily, weekly, all_time). */
 export interface MetricSnapshot {
-  flyers: number
+  doorknocks: number
   leads: number
   conversations: number
   distance: number
-  time_minutes: number
-  day_streak: number
-  best_streak: number
 }
 
 export type LeaderboardMetric =
-  | 'flyers'
-  | 'leads'
+  | 'doorknocks'
   | 'conversations'
   | 'distance'
-  | 'time'
-  | 'day_streak'
-  | 'best_streak'
 
-export type LeaderboardTimeframe = 'daily' | 'weekly' | 'all_time'
+export type LeaderboardTimeframe = 'daily' | 'weekly' | 'monthly' | 'all_time'
 
 export interface LeaderboardUser {
   id: string
@@ -27,6 +20,7 @@ export interface LeaderboardUser {
   snapshots: {
     daily?: MetricSnapshot
     weekly?: MetricSnapshot
+    monthly?: MetricSnapshot
     all_time: MetricSnapshot
   }
 }

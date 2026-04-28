@@ -6,6 +6,8 @@ import {
 } from '@/app/lib/billing/entitlements';
 import type { Entitlement } from '@/types/database';
 import { planFromStripePriceId } from '@/app/lib/billing/stripe-products';
+import { syncAmbassadorReferralForSubscription } from '@/app/lib/billing/ambassador-program';
+import { syncWorkspacePowerDialerAddonFromStripe } from '@/app/lib/billing/workspace-addons';
 
 export type SupabaseAdmin = ReturnType<typeof createAdminClient>;
 export type WorkspaceSubscriptionStatus =
@@ -13,6 +15,19 @@ export type WorkspaceSubscriptionStatus =
   | 'trialing'
   | 'active'
   | 'past_due';
+
+function resolvePrimaryPlanItem(
+  subscription: Stripe.Subscription
+): Stripe.SubscriptionItem | null {
+  return (
+    subscription.items?.data?.find((item) => {
+      const priceId = item.price?.id ?? '';
+      return planFromStripePriceId(priceId) !== 'free';
+    }) ??
+    subscription.items?.data?.[0] ??
+    null
+  );
+}
 
 /**
  * Resolve app user_id from a Stripe Checkout session (metadata or entitlements lookup).
@@ -52,10 +67,11 @@ export async function applyStripeSubscriptionUpdate(
 
   const isActive =
     subscription.status === 'active' || subscription.status === 'trialing';
-  const priceId = subscription.items?.data?.[0]?.price?.id ?? '';
+  const planItem = resolvePrimaryPlanItem(subscription);
+  const priceId = planItem?.price?.id ?? '';
   const plan = planFromStripePriceId(priceId);
-  const periodEnd = subscription.current_period_end
-    ? new Date(subscription.current_period_end * 1000).toISOString()
+  const periodEnd = planItem?.current_period_end
+    ? new Date(planItem.current_period_end * 1000).toISOString()
     : null;
 
   let existing: Entitlement;
@@ -104,6 +120,8 @@ export async function applyStripeSubscriptionUpdate(
   }
 
   await syncWorkspaceSubscriptionFromStripe(supabase, userId, subscription);
+  await syncWorkspacePowerDialerAddonFromStripe(supabase, userId, subscription);
+  await syncAmbassadorReferralForSubscription(supabase, userId, subscription);
 }
 
 /**
@@ -195,7 +213,7 @@ export async function syncWorkspaceSubscriptionFromStripe(
     status === 'trialing' && subscription.trial_end != null
       ? new Date(subscription.trial_end * 1000).toISOString()
       : null;
-  const seatQuantity = Math.max(1, subscription.items?.data?.[0]?.quantity ?? 1);
+  const seatQuantity = Math.max(1, resolvePrimaryPlanItem(subscription)?.quantity ?? 1);
 
   await updateWorkspaceSubscriptionForUser(supabase, userId, {
     status,

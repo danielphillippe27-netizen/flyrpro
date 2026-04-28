@@ -35,7 +35,7 @@ const SCOPES: { value: LeaderboardScope; label: string }[] = [
 ];
 
 function getMetricValue(
-  entry: Pick<LeaderboardEntry, 'flyers' | 'conversations' | 'distance'>,
+  entry: Pick<LeaderboardEntry, 'doorknocks' | 'conversations' | 'distance'>,
   sortBy: LeaderboardSortBy
 ): number {
   switch (sortBy) {
@@ -43,9 +43,9 @@ function getMetricValue(
       return entry.conversations;
     case 'distance':
       return entry.distance;
-    case 'flyers':
+    case 'doorknocks':
     default:
-      return entry.flyers;
+      return entry.doorknocks;
   }
 }
 
@@ -60,7 +60,7 @@ function sortLeaderboardEntries(
       if (right.conversations !== left.conversations) {
         return right.conversations - left.conversations;
       }
-      return (left.name || left.user_email).localeCompare(right.name || right.user_email);
+      return left.name.localeCompare(right.name);
     })
     .map((entry, index) => ({
       ...entry,
@@ -75,21 +75,18 @@ function mapTeamRows(rows: TeamLeaderboardRow[]): LeaderboardEntry[] {
     user_email: '',
     name: row.display_name,
     avatar_url: row.avatar_url ?? null,
-    flyers: Number(row.doors_knocked) || 0,
+    doorknocks: Number(row.doors_knocked) || 0,
     conversations: Number(row.conversations) || 0,
     leads: 0,
     distance: (Number(row.distance_meters) || 0) / 1000,
-    time_minutes: (Number(row.total_duration_seconds) || 0) / 60,
-    day_streak: 0,
-    best_streak: 0,
     rank: 0,
-    updated_at: row.last_active_at ?? '',
+    updated_at: row.last_active_at ?? undefined,
   }));
 }
 
 export function LeaderboardContentView() {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
-  const [sortBy, setSortBy] = useState<LeaderboardSortBy>('flyers');
+  const [sortBy, setSortBy] = useState<LeaderboardSortBy>('doorknocks');
   const [scope, setScope] = useState<LeaderboardScope>('global');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

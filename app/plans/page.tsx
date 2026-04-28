@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { PublicSiteHeader } from '@/components/landing/PublicSiteHeader';
 import { PricingCard } from '@/components/pricing/PricingCard';
 import { TeamSeatSelector } from '@/components/pricing/TeamSeatSelector';
 
@@ -35,27 +36,7 @@ export default function PlansPage() {
 
   return (
     <div className="min-h-screen bg-zinc-50 text-zinc-900">
-      <header className="sticky top-0 z-40 border-b border-zinc-200/80 bg-zinc-50/90 backdrop-blur-sm">
-        <div className="mx-auto flex w-full max-w-7xl items-center justify-between px-4 py-3 md:px-6">
-          <Link href="/" className="text-3xl font-black leading-none tracking-tight text-red-600 md:text-4xl">
-            FLYR
-          </Link>
-          <div className="flex items-center gap-3">
-            <Link
-              href="/"
-              className="inline-flex h-9 items-center rounded-lg bg-zinc-100 px-4 text-sm font-semibold text-zinc-900 transition hover:bg-zinc-200"
-            >
-              Home
-            </Link>
-            <Link
-              href="/login"
-              className="inline-flex h-9 items-center rounded-lg border border-zinc-300 bg-white px-4 text-sm font-semibold text-zinc-900 transition hover:bg-zinc-100"
-            >
-              Sign in
-            </Link>
-          </div>
-        </div>
-      </header>
+      <PublicSiteHeader active="pricing" />
 
       <main className="px-5 py-20 md:px-8">
         <div className="mx-auto max-w-5xl">

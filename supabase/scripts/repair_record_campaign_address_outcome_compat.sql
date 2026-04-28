@@ -64,7 +64,10 @@ begin
   if p_session_event_type is not null and p_session_event_type not in (
     'completed_manual',
     'completed_auto',
-    'completion_undone'
+    'completion_undone',
+    'flyer_left',
+    'conversation',
+    'address_tap'
   ) then
     raise exception 'Unsupported session event type: %', p_session_event_type;
   end if;
@@ -74,7 +77,10 @@ begin
   join public.campaigns c on c.id = ca.campaign_id
   where ca.id = v_campaign_address_id
     and ca.campaign_id = p_campaign_id
-    and c.owner_id = auth.uid();
+    and (
+      c.owner_id = auth.uid()
+      or (c.workspace_id is not null and public.is_workspace_member(c.workspace_id))
+    );
 
   if not found then
     raise exception 'Campaign address not found or access denied';
@@ -232,7 +238,7 @@ begin
     )
     returning id into v_session_event_id;
 
-    if p_session_event_type in ('completed_manual', 'completed_auto') then
+    if p_session_event_type in ('completed_manual', 'completed_auto', 'flyer_left', 'conversation') then
       update public.sessions
       set completed_count = completed_count + 1,
           updated_at = now()

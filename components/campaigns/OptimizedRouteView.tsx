@@ -4,8 +4,10 @@ import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { useTheme } from '@/lib/theme-provider';
+import { useMapStyle } from '@/lib/map-style-provider';
 import { useWorkspace } from '@/lib/workspace-context';
 import { getMapboxToken } from '@/lib/mapbox';
+import { applyPresetVisualTweaks, applyResolvedMapStyle, getResolvedMapInitOptions, resolveMapStyle } from '@/lib/map-styles';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -517,11 +519,6 @@ function displayMemberName(member: RouteMember): string {
   return member.userId.slice(0, 8);
 }
 
-const MAP_STYLES = {
-  light: 'mapbox://styles/fliper27/cml6z0dhg002301qo9xxc08k4',
-  dark: 'mapbox://styles/fliper27/cml6zc5pq002801qo4lh13o19',
-} as const;
-
 function isValidCoord(lat: number | undefined, lon: number | undefined): boolean {
   return (
     typeof lat === 'number' &&
@@ -574,11 +571,16 @@ function getAddressCoords(addr: {
 
 export function OptimizedRouteView({ campaignId, campaignName, addresses }: OptimizedRouteViewProps) {
   const { theme } = useTheme();
+  const { preset: mapPreset } = useMapStyle();
   const { currentWorkspace, membershipsByWorkspaceId } = useWorkspace();
+  const resolvedMapStyle = useMemo(
+    () => resolveMapStyle(mapPreset, theme, 'v12'),
+    [mapPreset, theme],
+  );
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const hasFittedBoundsRef = useRef(false);
-  const appliedThemeRef = useRef<'light' | 'dark' | null>(null);
+  const appliedStyleKeyRef = useRef<string | null>(null);
   const [members, setMembers] = useState<RouteMember[]>([]);
   const [routePlanName, setRoutePlanName] = useState('');
   const [assignToUserIds, setAssignToUserIds] = useState<string[]>([]);
@@ -1108,6 +1110,7 @@ export function OptimizedRouteView({ campaignId, campaignName, addresses }: Opti
           'fill-extrusion-base': 0,
           'fill-extrusion-opacity': 1,
           'fill-extrusion-vertical-gradient': true,
+          'fill-extrusion-emissive-strength': 0.85,
         },
       });
       m.on('click', 'route-footprints', handleTapSelection);
@@ -1195,44 +1198,54 @@ export function OptimizedRouteView({ campaignId, campaignName, addresses }: Opti
   // Manage map lifecycle: create once, draw on every style.load
   useEffect(() => {
     if (!mapContainer.current || orderedAddresses.length === 0) return;
+    let cancelled = false;
 
     const token = getMapboxToken();
     mapboxgl.accessToken = token;
 
-    const styleUrl = MAP_STYLES[theme] ?? MAP_STYLES.light;
-
     // If map already exists, just update style (style.load handler will redraw)
     if (map.current) {
-      if (appliedThemeRef.current !== theme) {
+      if (appliedStyleKeyRef.current !== resolvedMapStyle.key) {
         hasFittedBoundsRef.current = false;
-        map.current.setStyle(styleUrl);
-        appliedThemeRef.current = theme;
+        applyResolvedMapStyle(map.current, resolvedMapStyle);
+        appliedStyleKeyRef.current = resolvedMapStyle.key;
       }
       return;
     }
 
-    const m = new mapboxgl.Map({
-      container: mapContainer.current,
-      style: styleUrl,
-      center: [-79.3832, 43.6532],
-      zoom: 12,
-    });
+    const initMap = async () => {
+      const mapInitOptions = await getResolvedMapInitOptions(resolvedMapStyle);
+      if (cancelled || !mapContainer.current || map.current) return;
 
-    // Draw route after every style load (initial + theme changes)
-    m.on('style.load', () => {
-      drawRoute(m);
-    });
+      const m = new mapboxgl.Map({
+        container: mapContainer.current,
+        ...mapInitOptions,
+        center: [-79.3832, 43.6532],
+        zoom: 12,
+      });
 
-    map.current = m;
-    appliedThemeRef.current = theme;
+      // Draw route after every style load (initial + theme changes)
+      m.on('style.load', () => {
+        applyPresetVisualTweaks(m, resolvedMapStyle, {
+          preserveLayerPrefixes: ['route-', 'assigned-routes-', 'map-buildings-', 'campaign-', 'flyr-'],
+        });
+        drawRoute(m);
+      });
+
+      map.current = m;
+      appliedStyleKeyRef.current = resolvedMapStyle.key;
+    };
+
+    void initMap();
 
     return () => {
-      m.remove();
+      cancelled = true;
+      map.current?.remove();
       map.current = null;
-      appliedThemeRef.current = null;
+      appliedStyleKeyRef.current = null;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orderedAddresses.length, theme]);
+  }, [orderedAddresses.length, resolvedMapStyle]);
 
   // Re-draw when data changes (without recreating map)
   useEffect(() => {

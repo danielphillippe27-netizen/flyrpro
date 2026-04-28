@@ -39,6 +39,8 @@ export interface UserProfile {
 /** Entitlements: source of truth for plan/status (web + iOS). */
 export type EntitlementPlan = 'free' | 'pro' | 'team';
 export type EntitlementSource = 'none' | 'stripe' | 'apple';
+export type WorkspaceBillingAddonStatus = 'inactive' | 'active' | 'past_due' | 'canceled';
+export type WorkspaceDialerNumberStatus = 'unassigned' | 'active' | 'released';
 
 export interface Entitlement {
   user_id: string;
@@ -57,12 +59,129 @@ export interface EntitlementSnapshot {
   is_active: boolean;
   source: EntitlementSource;
   current_period_end: string | null;
+  dialer_offer?: {
+    price_id?: string | null;
+    amount: string;
+    currency: 'USD' | 'CAD';
+    period: string;
+  };
+  dialer_addon?: {
+    status: WorkspaceBillingAddonStatus;
+    is_active: boolean;
+    price_id?: string | null;
+    amount_cents?: number | null;
+    currency?: string | null;
+  };
+  dialer_number?: string | null;
+  dialer_number_status?: WorkspaceDialerNumberStatus | null;
+  dialer_uses_shared_default?: boolean;
+}
+
+export type AmbassadorApplicationStatus = 'applied' | 'approved' | 'rejected' | 'paused';
+export type AmbassadorReferralStatus = 'attributed' | 'active' | 'expired' | 'canceled';
+export type AmbassadorCommissionStatus = 'pending' | 'paid' | 'voided';
+export type AmbassadorPayoutBatchStatus = 'draft' | 'processing' | 'paid' | 'failed';
+
+export interface AmbassadorApplication {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  full_name: string;
+  email: string;
+  phone: string | null;
+  city: string | null;
+  primary_niche: string;
+  primary_platform: string;
+  audience_size: string | null;
+  instagram_handle: string | null;
+  tiktok_handle: string | null;
+  youtube_handle: string | null;
+  website_url: string | null;
+  audience_summary: string | null;
+  why_flyr: string;
+  promotion_plan: string | null;
+  status: AmbassadorApplicationStatus;
+  review_notes: string | null;
+  approved_at: string | null;
+  rejected_at: string | null;
+  stripe_connect_account_id: string | null;
+  stripe_onboarding_completed: boolean;
+  stripe_details_submitted: boolean;
+  stripe_charges_enabled: boolean;
+  stripe_payouts_enabled: boolean;
+  referral_code: string | null;
+  referral_code_max_uses: number | null;
+  stripe_promotion_code_id: string | null;
+  commission_rate_bps: number;
+  commission_duration_months: number;
+}
+
+export interface AmbassadorReferral {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  ambassador_application_id: string;
+  referred_user_id: string;
+  referred_workspace_id: string;
+  referral_code: string;
+  stripe_customer_id: string | null;
+  stripe_subscription_id: string | null;
+  stripe_subscription_status: string | null;
+  commission_rate_bps: number;
+  commission_duration_months: number;
+  first_paid_at: string | null;
+  eligible_until: string | null;
+  last_paid_at: string | null;
+  status: AmbassadorReferralStatus;
+}
+
+export interface AmbassadorCommission {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  ambassador_referral_id: string;
+  ambassador_application_id: string;
+  referred_user_id: string;
+  referred_workspace_id: string;
+  stripe_customer_id: string | null;
+  stripe_subscription_id: string;
+  stripe_invoice_id: string;
+  revenue_amount_cents: number;
+  commission_rate_bps: number;
+  commission_amount_cents: number;
+  currency: string;
+  earned_at: string;
+  status: AmbassadorCommissionStatus;
+  paid_out_at?: string | null;
+  payout_batch_id?: string | null;
+  stripe_transfer_id?: string | null;
+}
+
+export interface AmbassadorPayoutBatch {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  ambassador_application_id?: string | null;
+  created_by_user_id: string | null;
+  status: AmbassadorPayoutBatchStatus;
+  currency: string;
+  total_commission_cents: number;
+  note: string | null;
+  stripe_connect_account_id?: string | null;
+  stripe_transfer_id?: string | null;
+  transfer_group?: string | null;
+  commission_snapshot_hash?: string | null;
+  failure_reason?: string | null;
+  processed_at?: string | null;
+  paid_at: string | null;
 }
 
 // Enhanced Campaign Types (iOS Schema)
 export type CampaignType = 'flyer' | 'door_knock' | 'event' | 'survey' | 'gift' | 'pop_by' | 'open_house';
 export type AddressSource = 'closest_home' | 'import_list' | 'map' | 'same_street';
 export type CampaignStatus = 'draft' | 'active' | 'completed' | 'paused';
+export type ParcelEnrichmentStatus = 'not_started' | 'queued' | 'processing' | 'ready' | 'failed' | 'skipped';
+export type LinkQualityStatus = 'unknown' | 'healthy' | 'degraded' | 'repairing' | 'failed';
 
 export interface CampaignV2 {
   id: string;
@@ -76,6 +195,18 @@ export interface CampaignV2 {
   conversions: number;
   created_at: string;
   status: CampaignStatus;
+  provision_status?: 'pending' | 'ready' | 'failed' | null;
+  parcel_enrichment_status?: ParcelEnrichmentStatus | null;
+  parcel_source_id?: string | null;
+  parcel_count?: number | null;
+  parcel_enriched_at?: string | null;
+  parcel_enrichment_error?: string | null;
+  parcel_enrichment_debug?: Record<string, unknown> | null;
+  link_quality_status?: LinkQualityStatus | null;
+  link_quality_score?: number | null;
+  link_quality_reason?: string | null;
+  link_quality_checked_at?: string | null;
+  link_quality_metrics?: Record<string, unknown> | null;
   seed_query?: string;
   description?: string;
   video_url?: string; // Optional video URL to redirect to when QR code is scanned
@@ -238,7 +369,7 @@ export interface Batch {
 }
 
 // Landing Page Types
-export type LandingPageTemplate = 'minimal_black' | 'luxe_card' | 'spotlight';
+export type LandingPageTemplateVariant = 'minimal_black' | 'luxe_card' | 'spotlight';
 
 // Legacy landing_pages table (for backward compatibility)
 export interface LandingPageData {
@@ -442,17 +573,45 @@ export interface FinanceEntry {
 // Contact Types
 export type ContactStatus = 'hot' | 'warm' | 'cold' | 'new';
 export type ActivityType = 'knock' | 'call' | 'flyer' | 'note' | 'text' | 'email' | 'meeting';
+export type DialerSessionStatus = 'draft' | 'active' | 'paused' | 'completed';
+export type DialerSessionLeadStatus = 'pending' | 'claimed' | 'calling' | 'completed' | 'skipped' | 'invalid';
+export type DialerCallStatus =
+  | 'pending'
+  | 'initiated'
+  | 'ringing'
+  | 'in-progress'
+  | 'answered'
+  | 'completed'
+  | 'busy'
+  | 'failed'
+  | 'no-answer'
+  | 'canceled';
+export type DialerCallDisposition =
+  | 'connected'
+  | 'no_answer'
+  | 'left_voicemail'
+  | 'callback_requested'
+  | 'follow_up'
+  | 'appointment_set'
+  | 'do_not_call'
+  | 'bad_number'
+  | 'not_interested';
 
 export interface Contact {
   id: string;
   user_id: string;
   full_name: string;
   phone?: string;
+  phone_e164?: string;
+  phone_last_validated_at?: string;
+  phone_validation_error?: string;
   email?: string;
   address: string;
+  workspace_id?: string | null;
   campaign_id?: string;
   farm_id?: string;
   status: ContactStatus;
+  source?: string;
   last_contacted?: string;
   notes?: string;
   reminder_date?: string;
@@ -472,6 +631,119 @@ export interface ContactActivity {
   note?: string;
   timestamp: string;
   created_at: string;
+}
+
+export interface WorkspaceDialerSettings {
+  id: string;
+  workspace_id: string;
+  enabled: boolean;
+  default_from_number?: string | null;
+  default_sms_from_number?: string | null;
+  inbound_forward_to?: string | null;
+  allow_sms_followup: boolean;
+  twilio_incoming_phone_number_sid?: string | null;
+  number_status: WorkspaceDialerNumberStatus;
+  number_assigned_at?: string | null;
+  provisioning_metadata?: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkspaceBillingAddon {
+  id: string;
+  workspace_id: string;
+  addon_key: 'power_dialer';
+  status: WorkspaceBillingAddonStatus;
+  stripe_subscription_id?: string | null;
+  stripe_subscription_item_id?: string | null;
+  stripe_price_id?: string | null;
+  quantity: number;
+  amount_cents?: number | null;
+  currency?: string | null;
+  activated_at?: string | null;
+  canceled_at?: string | null;
+  metadata?: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DialerSession {
+  id: string;
+  workspace_id: string;
+  user_id: string;
+  name?: string | null;
+  status: DialerSessionStatus;
+  source_filter?: Record<string, unknown> | null;
+  started_at?: string | null;
+  ended_at?: string | null;
+  tab_id?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DialerSessionLead {
+  id: string;
+  session_id: string;
+  workspace_id: string;
+  contact_id: string;
+  position: number;
+  status: DialerSessionLeadStatus;
+  attempt_count: number;
+  last_call_id?: string | null;
+  claimed_by_user_id?: string | null;
+  claimed_at?: string | null;
+  completed_at?: string | null;
+  skip_reason?: string | null;
+  created_at: string;
+  updated_at: string;
+  contact?: Contact;
+}
+
+export interface DialerCall {
+  id: string;
+  workspace_id: string;
+  session_id: string;
+  session_lead_id: string;
+  contact_id: string;
+  user_id: string;
+  call_request_id: string;
+  twilio_call_sid?: string | null;
+  twilio_parent_call_sid?: string | null;
+  to_number_raw?: string | null;
+  to_number_e164?: string | null;
+  from_number_e164?: string | null;
+  status: DialerCallStatus;
+  direction: 'outbound';
+  answered_at?: string | null;
+  ended_at?: string | null;
+  duration_seconds?: number | null;
+  disposition?: DialerCallDisposition | null;
+  disposition_note?: string | null;
+  follow_up_at?: string | null;
+  appointment_at?: string | null;
+  status_payload?: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DialerSmsFollowup {
+  id: string;
+  workspace_id: string;
+  call_id: string;
+  contact_id: string;
+  user_id: string;
+  twilio_message_sid?: string | null;
+  from_number_e164?: string | null;
+  to_number_e164?: string | null;
+  body: string;
+  status: string;
+  error_code?: string | null;
+  error_message?: string | null;
+  sent_at?: string | null;
+  delivered_at?: string | null;
+  status_payload?: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
 }
 
 // Stats Types (public.user_stats)
@@ -498,8 +770,8 @@ export interface UserStats {
   created_at: string | null;
 }
 
-export type LeaderboardSortBy = 'flyers' | 'conversations' | 'leads' | 'distance' | 'time' | 'day_streak' | 'best_streak';
-export type LeaderboardTimeframe = 'day' | 'week' | 'month' | 'year' | 'all_time';
+export type LeaderboardSortBy = 'doorknocks' | 'conversations' | 'leads' | 'distance';
+export type LeaderboardTimeframe = 'daily' | 'weekly' | 'monthly' | 'all_time';
 
 export interface LeaderboardEntry {
   id: string;
@@ -507,15 +779,13 @@ export interface LeaderboardEntry {
   user_email: string;
   name: string;
   avatar_url: string | null;
-  flyers: number;
+  brokerage?: string | null;
+  doorknocks: number;
   conversations: number;
   leads: number;
   distance: number;
-  time_minutes: number;
-  day_streak: number;
-  best_streak: number;
   rank: number;
-  updated_at: string;
+  updated_at?: string;
 }
 
 /** Brokerage leaderboard: only all_time and month MVs supported */
@@ -524,7 +794,7 @@ export type BrokerageLeaderboardTimeframe = 'all_time' | 'month';
 export interface BrokerageLeaderboardEntry {
   brokerage_key: string;
   display_name: string;
-  flyers: number;
+  doorknocks: number;
   conversations: number;
   leads: number;
   distance: number;

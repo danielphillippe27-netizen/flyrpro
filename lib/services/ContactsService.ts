@@ -14,8 +14,10 @@ type LegacyFieldLead = {
   campaign_id?: string | null;
   farm_id?: string | null;
   status?: string | null;
+  source?: string | null;
   notes?: string | null;
   tags?: string | null;
+  last_contacted?: string | null;
   reminder_date?: string | null;
   follow_up_at?: string | null;
   appointment_at?: string | null;
@@ -71,6 +73,8 @@ export class ContactsService {
       campaign_id: row.campaign_id ?? undefined,
       farm_id: row.farm_id ?? undefined,
       status: this.normalizeLegacyStatus(row.status),
+      source: row.source ?? undefined,
+      last_contacted: row.last_contacted ?? undefined,
       notes: row.notes ?? undefined,
       reminder_date: row.reminder_date ?? row.follow_up_at ?? undefined,
       follow_up_at: row.follow_up_at ?? row.reminder_date ?? undefined,
@@ -202,6 +206,8 @@ export class ContactsService {
       campaign_id: payload.campaign_id,
       farm_id: payload.farm_id,
       status: payload.status,
+      source: payload.source ?? undefined,
+      last_contacted: payload.last_contacted ?? undefined,
       notes: payload.notes,
       follow_up_at: payload.follow_up_at ?? undefined,
       appointment_at: payload.appointment_at ?? undefined,
@@ -214,13 +220,16 @@ export class ContactsService {
       .select()
       .single();
 
-    const missingFollowUpColumn = this.isMissingContactsColumn(error, 'follow_up_at');
-    const missingAppointmentColumn = this.isMissingContactsColumn(error, 'appointment_at');
+    const optionalColumns = ['source', 'last_contacted', 'follow_up_at', 'appointment_at'] as const;
+    const missingOptionalColumns = optionalColumns.filter((column) =>
+      this.isMissingContactsColumn(error, column)
+    );
 
-    if (error && (missingFollowUpColumn || missingAppointmentColumn)) {
+    if (error && missingOptionalColumns.length > 0) {
       const fallbackPayload = { ...insertPayload };
-      delete (fallbackPayload as { follow_up_at?: string }).follow_up_at;
-      delete (fallbackPayload as { appointment_at?: string }).appointment_at;
+      for (const column of missingOptionalColumns) {
+        delete (fallbackPayload as Partial<typeof insertPayload>)[column];
+      }
 
       const retryResult = await this.client
         .from('contacts')
