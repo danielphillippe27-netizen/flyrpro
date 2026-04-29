@@ -486,90 +486,56 @@ export default function CreateCampaignPage() {
       console.log('Campaign created:', campaign?.id, campaign?.name);
 
       if (polygon) {
-        setGeneratingAddresses(true);
+        setProvisioning(true);
+        setProvisionProgress('Scanning 3D Shapes...');
         try {
-          console.log('Saving addresses from polygon...');
-          
-          // Step 1: Fetch and save addresses from polygon (snapped if available)
-          const addressResponse = await fetch('/api/campaigns/generate-address-list', {
-            method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              campaign_id: campaign.id,
-              polygon,
-            }),
-          });
+          const progressInterval = setInterval(() => {
+            setProvisionProgress((prev) => {
+              if (prev === 'Scanning 3D Shapes...') return 'Matching Addresses...';
+              if (prev === 'Matching Addresses...') return 'Finalizing Mission Territory...';
+              return prev;
+            });
+          }, 2000);
 
-          if (!addressResponse.ok) {
-            const error = await addressResponse.json();
-            console.error('Address generation error:', error);
-            alert(`Campaign created but address generation failed: ${error.error || 'Unknown error'}`);
-          } else {
-            const addressResult = await addressResponse.json();
-            setAddressCount(addressResult.inserted_count || 0);
-            console.log(`Saved ${addressResult.inserted_count} addresses from polygon`);
-            if (addressResult.warning) {
-              alert(addressResult.warning);
-            }
-            
-            if (addressResult.inserted_count > 0) {
-              // Step 2: Provision buildings (no boundary needed - uses addresses)
-              setGeneratingAddresses(false);
-              setProvisioning(true);
-              setProvisionProgress('Scanning 3D Shapes...');
-              
-              try {
-                // Simulate progress updates
-                const progressInterval = setInterval(() => {
-                  setProvisionProgress((prev) => {
-                    if (prev === 'Scanning 3D Shapes...') return 'Matching Addresses...';
-                    if (prev === 'Matching Addresses...') return 'Finalizing Mission Territory...';
-                    return prev;
-                  });
-                }, 2000);
+          try {
+            const provisionResponse = await fetch('/api/campaigns/provision', {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                campaign_id: campaign.id,
+              }),
+            });
 
-                const provisionResponse = await fetch('/api/campaigns/provision', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    campaign_id: campaign.id,
-                    // No boundary - will use addresses from campaign_addresses
-                  }),
-                });
+            clearInterval(progressInterval);
+            setProvisionProgress('Finalizing Mission Territory...');
 
-                clearInterval(progressInterval);
-                setProvisionProgress('Finalizing Mission Territory...');
-
-                if (!provisionResponse.ok) {
-                  const error = await provisionResponse.json();
-                  console.error('Provisioning error:', error);
-                  alert(`Addresses saved but provisioning failed: ${error.error || 'Unknown error'}`);
-                } else {
-                  const result = await provisionResponse.json();
-                  const { addresses_saved = 0, buildings_saved = 0, links_created = 0 } = result;
-                  console.log(`Stable Linker: ${addresses_saved} addresses, ${buildings_saved} buildings, ${links_created} links`);
-                  if (links_created < addresses_saved) {
-                    setProvisionProgress(`Linking: ${links_created} / ${addresses_saved} addresses...`);
-                  }
-                  await new Promise(resolve => setTimeout(resolve, 800));
-                }
-              } catch (provisionError) {
-                console.error('Error provisioning buildings:', provisionError);
-                alert('Addresses saved but building provisioning failed. You can provision later.');
-              } finally {
-                setProvisioning(false);
-                setProvisionProgress('');
-              }
+            if (!provisionResponse.ok) {
+              const error = await provisionResponse.json().catch(() => ({}));
+              console.error('Provisioning error:', error);
+              alert(`Campaign created but provisioning failed: ${error.error || 'Unknown error'}`);
             } else {
-              alert('No addresses found in the drawn polygon. Please try a different area.');
+              const result = await provisionResponse.json();
+              const { addresses_saved = 0, buildings_saved = 0, links_created = 0 } = result;
+              setAddressCount(addresses_saved);
+              console.log(`Staged provision: ${addresses_saved} addresses, ${buildings_saved} buildings, ${links_created} links`);
+              if (result.warning) {
+                alert(result.warning);
+              }
+              if (links_created < addresses_saved) {
+                setProvisionProgress(`Linking: ${links_created} / ${addresses_saved} addresses...`);
+              }
+              await new Promise(resolve => setTimeout(resolve, 800));
             }
+          } finally {
+            clearInterval(progressInterval);
           }
-        } catch (addressError) {
-          console.error('Error generating addresses:', addressError);
-          alert('Campaign created but address generation failed. You can generate addresses later.');
+        } catch (provisionError) {
+          console.error('Error provisioning campaign:', provisionError);
+          alert('Campaign created but provisioning failed. You can provision later.');
         } finally {
-          setGeneratingAddresses(false);
+          setProvisioning(false);
+          setProvisionProgress('');
         }
       }
 

@@ -45,6 +45,14 @@ export interface BuildingData {
   refetch: () => Promise<void>;
 }
 
+type ApiBuildingAddress = {
+  address_id: string;
+  formatted?: string | null;
+  house_number?: string | null;
+  street_name?: string | null;
+  gers_id?: string | null;
+};
+
 /**
  * Hook to bridge building gers_id (from map click) to internal address data.
  * 
@@ -109,6 +117,14 @@ export function useBuildingData(
           gersId: raw.gers_id || gersId,
         };
       };
+      const apiAddressToResolved = (raw: ApiBuildingAddress): ResolvedAddress =>
+        toResolved({
+          id: raw.address_id,
+          house_number: raw.house_number,
+          street_name: raw.street_name,
+          formatted: raw.formatted,
+          gers_id: raw.gers_id,
+        });
 
       let resolvedAddress: { id: string; house_number?: string | null; street_name?: string | null; formatted?: string | null; gers_id?: string | null } | null = null;
       let resolvedList: ResolvedAddress[] | null = null;
@@ -127,68 +143,99 @@ export function useBuildingData(
         }
       }
 
-      // Fetch ALL address IDs linked to this building (e.g. 6 for a townhouse).
-      // Two-step query: get address_ids from links, then fetch addresses.
-      // Try Silver path: building_address_links table (building_id = GERS id text)
-      const { data: linkRows, error: linkError } = await supabase
-        .from('building_address_links')
-        .select('address_id')
-        .eq('campaign_id', campaignId)
-        .eq('building_id', gersId);
+      try {
+        const response = await fetch(
+          `/api/campaigns/${encodeURIComponent(campaignId)}/buildings/${encodeURIComponent(gersId)}/addresses`,
+          { cache: 'no-store' }
+        );
+        if (response.ok) {
+          const payload = await response.json();
+          const apiAddresses = Array.isArray(payload?.addresses)
+            ? (payload.addresses as ApiBuildingAddress[])
+            : [];
+          const selectedApiAddresses = preferredAddressId
+            ? apiAddresses.filter((item) => item.address_id === preferredAddressId)
+            : apiAddresses;
 
-      if (linkError) {
-        console.error('[useBuildingData] Link query error:', linkError);
+          if (selectedApiAddresses.length > 0) {
+            resolvedList = selectedApiAddresses
+              .map(apiAddressToResolved)
+              .sort(compareAddressesForDisplay);
+            setBuildingExists(true);
+          }
+        }
+      } catch (apiError) {
+        console.warn('[useBuildingData] Building-address API lookup failed:', apiError);
       }
 
-      let addressIds = (linkRows || []).map((r: { address_id: string }) => r.address_id).filter(Boolean);
-      
-      // If no links found, try Gold path: campaign_addresses.building_id
-      if (addressIds.length === 0) {
-        console.log('[useBuildingData] No links found, trying Gold path for building:', gersId);
-        const { data: goldAddresses, error: goldError } = await supabase
-          .from('campaign_addresses')
-          .select('id')
+      if (!resolvedList) {
+        // Fetch ALL address IDs linked to this building (e.g. 6 for a townhouse).
+        // Two-step query: get address_ids from links, then fetch addresses.
+        // Try Silver path: building_address_links table (building_id = GERS id text)
+        const { data: linkRows, error: linkError } = await supabase
+          .from('building_address_links')
+          .select('address_id')
           .eq('campaign_id', campaignId)
           .eq('building_id', gersId);
-        
-        if (goldError) {
-          console.error('[useBuildingData] Gold query error:', goldError);
-        } else if (goldAddresses && goldAddresses.length > 0) {
-          console.log('[useBuildingData] Found Gold addresses:', goldAddresses.length);
-          addressIds = goldAddresses.map((a: { id: string }) => a.id);
-        }
-      }
 
-      // Final fallback: gersId might BE a campaign_addresses.id itself
-      // (happens when features come from address-point fallback where id = campaign_addresses.id)
-      if (addressIds.length === 0) {
-        console.log('[useBuildingData] Trying direct address lookup for id:', gersId);
-        const { data: directAddress, error: directError } = await supabase
-          .from('campaign_addresses')
-          .select('id')
-          .eq('campaign_id', campaignId)
-          .eq('id', gersId)
-          .maybeSingle();
-        
-        if (!directError && directAddress) {
-          console.log('[useBuildingData] Found direct address match:', directAddress.id);
-          addressIds = [directAddress.id];
+        if (linkError) {
+          console.error('[useBuildingData] Link query error:', linkError);
         }
-      }
-      
-      if (addressIds.length > 0) {
-        setBuildingExists(true);
-        const { data: addressRows, error: addrError } = await supabase
-          .from('campaign_addresses')
-          .select('id, house_number, street_name, formatted, gers_id')
-          .eq('campaign_id', campaignId)
-          .in('id', addressIds);
 
-        if (addrError) {
-          console.error('[useBuildingData] Address fetch error:', addrError);
-        } else if (addressRows && addressRows.length > 0) {
-          const sorted = [...addressRows].sort(compareAddressesForDisplay);
-          resolvedList = sorted.map((raw) => toResolved(raw));
+        let addressIds = (linkRows || []).map((r: { address_id: string }) => r.address_id).filter(Boolean);
+
+        // If no links found, try Gold path: campaign_addresses.building_id
+        if (addressIds.length === 0) {
+          console.log('[useBuildingData] No links found, trying Gold path for building:', gersId);
+          const { data: goldAddresses, error: goldError } = await supabase
+            .from('campaign_addresses')
+            .select('id')
+            .eq('campaign_id', campaignId)
+            .eq('building_id', gersId);
+
+          if (goldError) {
+            console.error('[useBuildingData] Gold query error:', goldError);
+          } else if (goldAddresses && goldAddresses.length > 0) {
+            console.log('[useBuildingData] Found Gold addresses:', goldAddresses.length);
+            addressIds = goldAddresses.map((a: { id: string }) => a.id);
+          }
+        }
+
+        // Final fallback: gersId might BE a campaign_addresses.id itself
+        // (happens when features come from address-point fallback where id = campaign_addresses.id)
+        if (addressIds.length === 0) {
+          console.log('[useBuildingData] Trying direct address lookup for id:', gersId);
+          const { data: directAddress, error: directError } = await supabase
+            .from('campaign_addresses')
+            .select('id')
+            .eq('campaign_id', campaignId)
+            .eq('id', gersId)
+            .maybeSingle();
+
+          if (!directError && directAddress) {
+            console.log('[useBuildingData] Found direct address match:', directAddress.id);
+            addressIds = [directAddress.id];
+          }
+        }
+
+        if (preferredAddressId && addressIds.includes(preferredAddressId)) {
+          addressIds = [preferredAddressId];
+        }
+
+        if (addressIds.length > 0) {
+          setBuildingExists(true);
+          const { data: addressRows, error: addrError } = await supabase
+            .from('campaign_addresses')
+            .select('id, house_number, street_name, formatted, gers_id')
+            .eq('campaign_id', campaignId)
+            .in('id', addressIds);
+
+          if (addrError) {
+            console.error('[useBuildingData] Address fetch error:', addrError);
+          } else if (addressRows && addressRows.length > 0) {
+            const sorted = [...addressRows].sort(compareAddressesForDisplay);
+            resolvedList = sorted.map((raw) => toResolved(raw));
+          }
         }
       }
 

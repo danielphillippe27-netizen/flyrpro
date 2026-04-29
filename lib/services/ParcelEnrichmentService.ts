@@ -6,6 +6,7 @@ import * as wkx from 'wkx';
 import { fetchAllInPages } from '@/lib/supabase/fetchAllInPages';
 import { StableLinkerService, type BuildingFeature as SnapshotBuildingFeature } from '@/lib/services/StableLinkerService';
 import { TownhouseSplitterService } from '@/lib/services/TownhouseSplitterService';
+import { CampaignMapModeService } from '@/lib/services/CampaignMapModeService';
 import regionBounds from '../../scripts/regions.json';
 
 const PARCEL_BUCKET = 'flyr-pro-addresses-2025';
@@ -493,6 +494,10 @@ export class ParcelEnrichmentService {
           error: result.error,
           debug: result.debug,
         });
+        await new CampaignMapModeService(this.supabase).computeAndPersist(campaignId, {
+          hasParcels: false,
+          parcelCount: 0,
+        });
         return;
       }
 
@@ -502,6 +507,10 @@ export class ParcelEnrichmentService {
           sourceId: result.sourceId,
           parcelCount: 0,
           debug: result.debug,
+        });
+        await new CampaignMapModeService(this.supabase).computeAndPersist(campaignId, {
+          hasParcels: false,
+          parcelCount: 0,
         });
         return;
       }
@@ -529,6 +538,10 @@ export class ParcelEnrichmentService {
           },
           completed_at: new Date().toISOString(),
         },
+      });
+      await new CampaignMapModeService(this.supabase).computeAndPersist(campaignId, {
+        hasParcels: result.parcelCount > 0,
+        parcelCount: result.parcelCount,
       });
     } catch (error) {
       await this.markTerminalState(campaignId, 'failed', {

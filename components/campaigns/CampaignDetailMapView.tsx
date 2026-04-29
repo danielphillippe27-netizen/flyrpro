@@ -772,15 +772,19 @@ export function CampaignDetailMapView({
   useEffect(() => {
     if (!mapContainer.current || map.current || initAttemptedRef.current) return;
     let cancelled = false;
+    let retryFrameId: number | null = null;
+    let resizeTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
     // Check if container has dimensions before initializing
     const checkAndInit = async () => {
-      if (!mapContainer.current) return;
+      if (cancelled || !mapContainer.current) return;
       
       const rect = mapContainer.current.getBoundingClientRect();
       if (rect.width === 0 || rect.height === 0) {
         // Container not visible yet, try again on next frame
-        requestAnimationFrame(checkAndInit);
+        retryFrameId = requestAnimationFrame(() => {
+          void checkAndInit();
+        });
         return;
       }
 
@@ -889,9 +893,13 @@ export function CampaignDetailMapView({
       });
 
       // Trigger resize after a short delay to ensure map renders properly
-      setTimeout(() => {
-        if (map.current) {
-          map.current.resize();
+      resizeTimeoutId = setTimeout(() => {
+        if (!cancelled && map.current) {
+          try {
+            map.current.resize();
+          } catch (resizeError) {
+            console.warn('Mapbox resize skipped during teardown:', resizeError);
+          }
         }
       }, 100);
     };
@@ -904,9 +912,24 @@ export function CampaignDetailMapView({
     return () => {
       cancelled = true;
       cancelAnimationFrame(frameId);
-      if (map.current) {
-        map.current.remove();
-        map.current = null;
+      if (retryFrameId !== null) {
+        cancelAnimationFrame(retryFrameId);
+      }
+      if (resizeTimeoutId !== null) {
+        clearTimeout(resizeTimeoutId);
+      }
+      const mapInstance = map.current;
+      map.current = null;
+      if (mapInstance) {
+        try {
+          mapInstance.remove();
+        } catch (removeError) {
+          if (!(removeError instanceof DOMException && removeError.name === 'AbortError')) {
+            console.warn('Mapbox remove skipped during teardown:', removeError);
+          }
+        }
+      }
+      if (initAttemptedRef.current) {
         initAttemptedRef.current = false;
         setMapLoaded(false);
       }

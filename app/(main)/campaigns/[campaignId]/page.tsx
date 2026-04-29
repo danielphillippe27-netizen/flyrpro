@@ -121,23 +121,23 @@ function getLinkQualityBanner(campaign: CampaignV2 | null): {
   if (status === 'healthy') {
     return {
       badgeVariant: 'outline',
-      badgeLabel: `Link Quality${typeof score === 'number' ? ` ${score}` : ''}`,
-      message: 'Link coverage and confidence are within target thresholds.',
+      badgeLabel: `Data Quality${typeof score === 'number' ? ` ${score}` : ''}`,
+      message: 'Address and building coverage are within target thresholds.',
     };
   }
 
   if (status === 'repairing') {
     return {
       badgeVariant: 'secondary',
-      badgeLabel: 'Link Repair Queued',
-      message: reason || 'A background repair pass is queued to improve campaign link quality.',
+      badgeLabel: 'Data Repair Queued',
+      message: reason || 'A background repair pass is queued to improve campaign data quality.',
     };
   }
 
   return {
     badgeVariant: status === 'failed' ? 'destructive' : 'secondary',
-    badgeLabel: 'Link Quality Review',
-    message: reason || 'This campaign has degraded link quality and may need review.',
+    badgeLabel: 'Data Quality Review',
+    message: reason || 'This campaign has degraded data quality and may need review.',
   };
 }
 
@@ -501,15 +501,23 @@ export default function CampaignDetailPage() {
   }, [campaignId, roadMetadata?.roads_status]);
 
   useEffect(() => {
-    const status = campaign?.parcel_enrichment_status;
-    if (!campaignId || (status !== 'queued' && status !== 'processing')) return;
+    const parcelStatus = campaign?.parcel_enrichment_status;
+    const provisionStatus = campaign?.provision_status;
+    const provisionPhase = campaign?.provision_phase;
+    const shouldPollParcelStatus = parcelStatus === 'queued' || parcelStatus === 'processing';
+    const shouldPollProvisionStage =
+      provisionStatus === 'pending' ||
+      provisionPhase === 'map_ready' ||
+      provisionPhase === 'optimizing';
+
+    if (!campaignId || (!shouldPollParcelStatus && !shouldPollProvisionStage)) return;
 
     const interval = setInterval(() => {
       void loadData();
     }, 5000);
 
     return () => clearInterval(interval);
-  }, [campaignId, campaign?.parcel_enrichment_status, loadData]);
+  }, [campaignId, campaign?.parcel_enrichment_status, campaign?.provision_status, campaign?.provision_phase, loadData]);
 
   useEffect(() => {
     if (campaign?.video_url) setDestinationUrl(campaign.video_url);

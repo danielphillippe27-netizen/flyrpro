@@ -625,98 +625,65 @@ export default function CreateFarmPage() {
         throw new Error('Linked campaign id was not returned for this farm');
       }
 
-      setGeneratingAddresses(true);
       let insertedCount = 0;
       try {
-        const addressResponse = await fetch('/api/campaigns/generate-address-list', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            campaign_id: campaignId,
-            polygon,
-            address_limit: DEFAULT_HOME_LIMIT,
-          }),
-        });
+        setProvisioning(true);
+        setProvisionProgress('Scanning 3D Shapes...');
 
-        if (!addressResponse.ok) {
-          const error = await addressResponse.json().catch(() => ({}));
-          throw new Error(error.error || `Failed to generate farm homes (${addressResponse.status})`);
-        }
-
-        const addressResult = await addressResponse.json();
-        insertedCount = addressResult.inserted_count || 0;
-        setAddressCount(insertedCount);
-        if (addressResult.warning) {
-          await showFeedbackDialog({
-            title: 'Coverage limit reached',
-            description: addressResult.warning,
-            tone: 'warning',
+        const progressInterval = setInterval(() => {
+          setProvisionProgress((prev) => {
+            if (prev === 'Scanning 3D Shapes...') return 'Matching Addresses...';
+            if (prev === 'Matching Addresses...') return 'Finalizing Mission Territory...';
+            return prev;
           });
-        }
+        }, 2000);
 
-        if (insertedCount > 0) {
-          setGeneratingAddresses(false);
-          setProvisioning(true);
-          setProvisionProgress('Scanning 3D Shapes...');
+        try {
+          const provisionResponse = await fetch('/api/campaigns/provision', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              campaign_id: campaignId,
+            }),
+          });
 
-          try {
-            const progressInterval = setInterval(() => {
-              setProvisionProgress((prev) => {
-                if (prev === 'Scanning 3D Shapes...') return 'Matching Addresses...';
-                if (prev === 'Matching Addresses...') return 'Finalizing Mission Territory...';
-                return prev;
-              });
-            }, 2000);
+          clearInterval(progressInterval);
+          setProvisionProgress('Finalizing Mission Territory...');
 
-            const provisionResponse = await fetch('/api/campaigns/provision', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                campaign_id: campaignId,
-              }),
-            });
+          if (!provisionResponse.ok) {
+            const error = await provisionResponse.json().catch(() => ({}));
+            throw new Error(error.error || `Failed to provision farm homes (${provisionResponse.status})`);
+          }
 
-            clearInterval(progressInterval);
-            setProvisionProgress('Finalizing Mission Territory...');
-
-            if (!provisionResponse.ok) {
-              const error = await provisionResponse.json().catch(() => ({}));
-              await showFeedbackDialog({
-                title: 'Provisioning incomplete',
-                description: error.error
-                  ? `Farm homes were generated, but building provisioning failed: ${error.error}`
-                  : 'Farm homes were generated, but building provisioning failed.',
-                tone: 'warning',
-              });
-            } else {
-              const result = await provisionResponse.json();
-              const { addresses_saved = 0, links_created = 0 } = result;
-              if (links_created < addresses_saved) {
-                setProvisionProgress(`Linking: ${links_created} / ${addresses_saved} addresses...`);
-              }
-              await new Promise((resolve) => setTimeout(resolve, 800));
-            }
-          } catch (provisionError) {
-            console.error('Error provisioning buildings:', provisionError);
+          const result = await provisionResponse.json();
+          insertedCount = result.addresses_saved || 0;
+          setAddressCount(insertedCount);
+          if (result.warning) {
             await showFeedbackDialog({
-              title: 'Provisioning incomplete',
-              description: 'Addresses were saved, but building provisioning failed. You can provision later.',
+              title: 'Coverage limit reached',
+              description: result.warning,
               tone: 'warning',
             });
-          } finally {
-            setProvisioning(false);
-            setProvisionProgress('');
           }
-        } else {
-          await showFeedbackDialog({
-            title: 'No homes found',
-            description: 'No addresses were found in the drawn polygon. Try a smaller area or adjust the boundary.',
-            tone: 'warning',
-          });
+          const { addresses_saved = 0, links_created = 0 } = result;
+          if (links_created < addresses_saved) {
+            setProvisionProgress(`Linking: ${links_created} / ${addresses_saved} addresses...`);
+          }
+          await new Promise((resolve) => setTimeout(resolve, 800));
+        } finally {
+          clearInterval(progressInterval);
         }
+      } catch (provisionError) {
+        console.error('Error provisioning farm campaign:', provisionError);
+        await showFeedbackDialog({
+          title: 'Provisioning incomplete',
+          description: 'Farm was created, but staged campaign provisioning failed. You can retry later from the linked campaign.',
+          tone: 'warning',
+        });
       } finally {
-        setGeneratingAddresses(false);
+        setProvisioning(false);
+        setProvisionProgress('');
       }
 
       setSyncingFarm(true);

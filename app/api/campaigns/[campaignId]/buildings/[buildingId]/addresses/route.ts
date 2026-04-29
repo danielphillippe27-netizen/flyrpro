@@ -53,6 +53,10 @@ type AuthorizedContext = {
   supabase: ReturnType<typeof createAdminClient>;
 };
 
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
 async function resolveAuthorizedContext(
   request: NextRequest,
   campaignId: string
@@ -116,6 +120,31 @@ export async function GET(
     
     // Get threshold for "outside footprint" warning
     const outsideThreshold = parseFloat(process.env.ADDRESS_OUTSIDE_THRESHOLD_METERS || '10');
+    const candidateBuildingIds = new Set([buildingId]);
+
+    try {
+      const buildingQuery = supabase
+        .from('buildings')
+        .select('id, gers_id')
+        .eq('campaign_id', campaignId);
+
+      const { data: buildingRows, error: buildingLookupError } = isUuid(buildingId)
+        ? await buildingQuery.or(`id.eq.${buildingId},gers_id.eq.${buildingId}`)
+        : await buildingQuery.eq('gers_id', buildingId);
+
+      if (buildingLookupError) {
+        console.warn('[API] Building identifier expansion failed:', buildingLookupError.message);
+      } else {
+        for (const row of buildingRows ?? []) {
+          if (typeof row.id === 'string' && row.id.length > 0) candidateBuildingIds.add(row.id);
+          if (typeof row.gers_id === 'string' && row.gers_id.length > 0) candidateBuildingIds.add(row.gers_id);
+        }
+      }
+    } catch (lookupError) {
+      console.warn('[API] Building identifier expansion threw:', lookupError);
+    }
+
+    const candidateBuildingIdList = Array.from(candidateBuildingIds);
     
     // Fetch addresses linked to this building
     // Try building_address_links first (Silver path)
@@ -138,7 +167,7 @@ export async function GET(
         )
       `)
       .eq('campaign_id', campaignId)
-      .eq('building_id', buildingId)
+      .in('building_id', candidateBuildingIdList)
       .order('confidence', { ascending: false });
     
     if (linksError) {
@@ -165,7 +194,7 @@ export async function GET(
         .from('campaign_addresses')
         .select('id, formatted, house_number, street_name, unit_number, geom, match_source, confidence')
         .eq('campaign_id', campaignId)
-        .eq('building_id', buildingId);
+        .in('building_id', candidateBuildingIdList);
       
       if (goldError) {
         console.warn('[API] Error fetching Gold addresses:', goldError.message);

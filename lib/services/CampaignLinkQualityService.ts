@@ -119,6 +119,70 @@ export class CampaignLinkQualityService {
     }
   }
 
+  async assessPersistedLinks(campaignId: string): Promise<LinkQualityAssessment> {
+    const [{ count: totalAddresses, error: totalError }, { data: goldRows, error: goldError }, { data: silverRows, error: silverError }] =
+      await Promise.all([
+        this.supabase
+          .from('campaign_addresses')
+          .select('id', { count: 'exact', head: true })
+          .eq('campaign_id', campaignId),
+        this.supabase
+          .from('campaign_addresses')
+          .select('id, confidence')
+          .eq('campaign_id', campaignId)
+          .not('building_id', 'is', null),
+        this.supabase
+          .from('building_address_links')
+          .select('address_id, confidence, match_type')
+          .eq('campaign_id', campaignId),
+      ]);
+
+    if (totalError) throw new Error(`Failed to count campaign addresses: ${totalError.message}`);
+    if (goldError) throw new Error(`Failed to count Gold linked addresses: ${goldError.message}`);
+    if (silverError) throw new Error(`Failed to count Silver linked addresses: ${silverError.message}`);
+
+    const total = totalAddresses ?? 0;
+    const linkedAddressIds = new Set<string>();
+    const confidences: number[] = [];
+    let parcelBridgeCount = 0;
+
+    for (const row of goldRows ?? []) {
+      if (typeof row.id === 'string') linkedAddressIds.add(row.id);
+      if (typeof row.confidence === 'number') confidences.push(row.confidence);
+    }
+
+    for (const row of silverRows ?? []) {
+      if (typeof row.address_id === 'string') linkedAddressIds.add(row.address_id);
+      if (typeof row.confidence === 'number') confidences.push(row.confidence);
+      if (row.match_type === 'parcel_verified') parcelBridgeCount += 1;
+    }
+
+    const matched = linkedAddressIds.size;
+    const coveragePercent = total > 0 ? Math.round((matched / total) * 10000) / 100 : 0;
+    const avgConfidence = confidences.length > 0
+      ? Math.round((confidences.reduce((sum, value) => sum + value, 0) / confidences.length) * 100) / 100
+      : matched > 0 ? 1 : 0;
+
+    return CampaignLinkQualityService.assess(
+      {
+        matched,
+        orphans: Math.max(total - matched, 0),
+        suspect: 0,
+        avgConfidence,
+        coveragePercent,
+        matchBreakdown: {
+          containmentVerified: 0,
+          containmentSuspect: 0,
+          pointOnSurface: 0,
+          parcelVerified: parcelBridgeCount,
+          proximityVerified: 0,
+          proximityFallback: 0,
+        },
+      },
+      total
+    );
+  }
+
   async updateStatus(
     campaignId: string,
     status: Extract<LinkQualityStatus, 'repairing' | 'failed' | 'healthy' | 'degraded'>,

@@ -31,6 +31,8 @@ type FeatureCollectionLike = {
       source?: unknown;
       feature_type?: unknown;
       feature_status?: unknown;
+      area_sqm?: unknown;
+      building_type?: unknown;
     };
   }>;
 };
@@ -122,10 +124,121 @@ function filterHiddenBuildingFeatures(
   };
 }
 
+const MIN_LINKABLE_BUILDING_AREA_SQM = 30;
+const NON_LINKABLE_BUILDING_TYPES = new Set([
+  'shed',
+  'garage',
+  'garages',
+  'carport',
+  'parking',
+  'parking_garage',
+  'outbuilding',
+  'accessory',
+  'ancillary',
+]);
+
+function getFeatureNumericProperty(feature: unknown, key: string): number | null {
+  if (!feature || typeof feature !== 'object') return null;
+  const value = (feature as { properties?: Record<string, unknown> }).properties?.[key];
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function getFeatureStringProperty(feature: unknown, key: string): string | null {
+  if (!feature || typeof feature !== 'object') return null;
+  const value = (feature as { properties?: Record<string, unknown> }).properties?.[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function ringAreaSqm(ring: unknown): number {
+  if (!Array.isArray(ring) || ring.length < 4) return 0;
+
+  const points = ring
+    .map((point) => {
+      if (!Array.isArray(point) || point.length < 2) return null;
+      const lon = Number(point[0]);
+      const lat = Number(point[1]);
+      if (!Number.isFinite(lon) || !Number.isFinite(lat)) return null;
+      return { lon, lat };
+    })
+    .filter((point): point is { lon: number; lat: number } => Boolean(point));
+
+  if (points.length < 4) return 0;
+
+  const avgLatRad = points.reduce((sum, point) => sum + point.lat, 0) / points.length * Math.PI / 180;
+  const metersPerDegreeLat = 111_320;
+  const metersPerDegreeLon = Math.max(Math.cos(avgLatRad), 0.01) * 111_320;
+  let area = 0;
+
+  for (let index = 0; index < points.length; index += 1) {
+    const current = points[index];
+    const next = points[(index + 1) % points.length];
+    area += (current.lon * metersPerDegreeLon) * (next.lat * metersPerDegreeLat);
+    area -= (next.lon * metersPerDegreeLon) * (current.lat * metersPerDegreeLat);
+  }
+
+  return Math.abs(area) / 2;
+}
+
+function polygonAreaSqm(coordinates: unknown): number {
+  if (!Array.isArray(coordinates) || coordinates.length === 0) return 0;
+  const [outer, ...holes] = coordinates;
+  const outerArea = ringAreaSqm(outer);
+  const holeArea = holes.reduce((sum, hole) => sum + ringAreaSqm(hole), 0);
+  return Math.max(outerArea - holeArea, 0);
+}
+
+function featureGeometryAreaSqm(feature: unknown): number | null {
+  if (!feature || typeof feature !== 'object') return null;
+  const geometry = (feature as { geometry?: { type?: unknown; coordinates?: unknown } }).geometry;
+  if (!geometry) return null;
+
+  if (geometry.type === 'Polygon') {
+    return polygonAreaSqm(geometry.coordinates);
+  }
+
+  if (geometry.type === 'MultiPolygon' && Array.isArray(geometry.coordinates)) {
+    return geometry.coordinates.reduce((sum, polygon) => sum + polygonAreaSqm(polygon), 0);
+  }
+
+  return null;
+}
+
+function isLinkableBuildingFeature(feature: unknown): boolean {
+  if (!isPolygonFeature(feature)) return true;
+
+  const source = getFeatureStringProperty(feature, 'source')?.toLowerCase();
+  if (source === 'manual') return true;
+
+  const buildingType = getFeatureStringProperty(feature, 'building_type')?.toLowerCase();
+  if (buildingType && NON_LINKABLE_BUILDING_TYPES.has(buildingType)) return false;
+
+  const area = getFeatureNumericProperty(feature, 'area_sqm') ?? featureGeometryAreaSqm(feature);
+  return area == null || area >= MIN_LINKABLE_BUILDING_AREA_SQM;
+}
+
+function filterNonLinkableBuildingFeatures(
+  featureCollection: FeatureCollectionLike | null | undefined
+): FeatureCollectionLike | null | undefined {
+  if (!featureCollection || !Array.isArray(featureCollection.features)) {
+    return featureCollection;
+  }
+
+  return {
+    ...featureCollection,
+    features: featureCollection.features.filter(isLinkableBuildingFeature),
+  };
+}
+
 interface CampaignAccessRow {
   owner_id: string;
   workspace_id: string | null;
   territory_boundary: GeoJSON.Polygon | null;
+  provision_source: string | null;
 }
 
 interface GoldBuildingRow {
@@ -790,7 +903,7 @@ export async function GET(
 
     const { data: campaignAccess, error: campaignAccessError } = await supabase
       .from('campaigns')
-      .select('owner_id, workspace_id, territory_boundary')
+      .select('owner_id, workspace_id, territory_boundary, provision_source')
       .eq('id', campaignId)
       .maybeSingle();
 
@@ -825,8 +938,12 @@ export async function GET(
     const normalizedCampaignFeatures = (campaignFeatures ?? null) as FeatureCollectionLike | null;
     const fallbackFeatures = normalizedCampaignFeatures;
     const hiddenBuildingIds = await hiddenBuildingIdsPromise;
-    const visibleCampaignFeatures = filterHiddenBuildingFeatures(normalizedCampaignFeatures, hiddenBuildingIds);
-    const visibleFallbackFeatures = filterHiddenBuildingFeatures(fallbackFeatures, hiddenBuildingIds);
+    const visibleCampaignFeatures = filterNonLinkableBuildingFeatures(
+      filterHiddenBuildingFeatures(normalizedCampaignFeatures, hiddenBuildingIds)
+    );
+    const visibleFallbackFeatures = filterNonLinkableBuildingFeatures(
+      filterHiddenBuildingFeatures(fallbackFeatures, hiddenBuildingIds)
+    );
 
     if (!featuresError && visibleCampaignFeatures && visibleCampaignFeatures.features?.length > 0) {
       const hasPolygons = hasPolygonFeatures(visibleCampaignFeatures);
@@ -855,14 +972,65 @@ export async function GET(
 
     const campaignRow = campaignAccess as CampaignAccessRow;
 
-    const goldFallback = await fetchGoldFallbackFeatures(
-      supabase,
-      campaignId,
-      campaignRow?.territory_boundary ?? null
-    );
+    console.log('[API] Trying buildings from S3 snapshot');
+    
+    const { data: snapshot, error: snapshotError } = await supabase
+      .from('campaign_snapshots')
+      .select('bucket, buildings_key, buildings_count')
+      .eq('campaign_id', campaignId)
+      .maybeSingle();
+    
+    if (!snapshotError && snapshot?.buildings_key) {
+      console.log(`[API] Fetching from S3: ${snapshot.bucket}/${snapshot.buildings_key}`);
+      
+      const command = new GetObjectCommand({
+        Bucket: snapshot.bucket,
+        Key: snapshot.buildings_key,
+      });
+      
+      const response = await s3Client.send(command);
+      const bodyBuffer = await response.Body?.transformToByteArray();
+      
+      if (!bodyBuffer) {
+        throw new Error('Empty response from S3');
+      }
+      
+      const decompressed = gunzipSync(Buffer.from(bodyBuffer));
+      const geojson = JSON.parse(decompressed.toString('utf-8'));
+      const visibleGeojson = filterNonLinkableBuildingFeatures(
+        filterHiddenBuildingFeatures(geojson, hiddenBuildingIds)
+      );
+      const visibleSnapshotFeatures = (visibleGeojson as { features?: unknown[] }).features ?? [];
+
+      if (visibleSnapshotFeatures.length > 0) {
+        console.log(`[API] Returning ${visibleSnapshotFeatures.length} Silver buildings from S3`);
+        return NextResponse.json(visibleGeojson);
+      }
+
+      if (visibleFallbackFeatures?.features?.length) {
+        console.log(
+          `[API] Snapshot buildings all filtered out; returning ${visibleFallbackFeatures.features.length} point features`
+        );
+        return NextResponse.json(visibleFallbackFeatures);
+      }
+    } else if (snapshotError) {
+      console.warn('[API] Snapshot lookup failed:', snapshotError.message);
+    } else {
+      console.log('[API] No snapshot found, continuing to direct DB fallbacks');
+    }
+
+    const goldFallback = campaignRow?.provision_source === 'gold'
+      ? await fetchGoldFallbackFeatures(
+          supabase,
+          campaignId,
+          campaignRow?.territory_boundary ?? null
+        )
+      : null;
 
     if (goldFallback) {
-      const visibleGoldFallback = filterHiddenBuildingFeatures(goldFallback, hiddenBuildingIds);
+      const visibleGoldFallback = filterNonLinkableBuildingFeatures(
+        filterHiddenBuildingFeatures(goldFallback, hiddenBuildingIds)
+      );
       const visibleGoldFeatures = (visibleGoldFallback as { features?: unknown[] }).features ?? [];
       if (visibleGoldFeatures.length > 0) {
         console.log(`[API] Returning ${visibleGoldFeatures.length} Gold polygon features via direct fallback`);
@@ -879,9 +1047,8 @@ export async function GET(
     );
 
     if (campaignBuildingFallback) {
-      const visibleCampaignBuildingFallback = filterHiddenBuildingFeatures(
-        campaignBuildingFallback,
-        hiddenBuildingIds
+      const visibleCampaignBuildingFallback = filterNonLinkableBuildingFeatures(
+        filterHiddenBuildingFeatures(campaignBuildingFallback, hiddenBuildingIds)
       );
       const visibleCampaignBuildingFeatures =
         (visibleCampaignBuildingFallback as { features?: unknown[] }).features ?? [];
@@ -895,57 +1062,14 @@ export async function GET(
         });
       }
     }
-    
-    // SNAPSHOT PATH: Fetch from S3 snapshot when RPC is point-only or empty
-    console.log('[API] Trying buildings from S3 snapshot');
-    
-    const { data: snapshot, error: snapshotError } = await supabase
-      .from('campaign_snapshots')
-      .select('bucket, buildings_key, buildings_count')
-      .eq('campaign_id', campaignId)
-      .maybeSingle();
-    
-    if (snapshotError || !snapshot?.buildings_key) {
-      if (visibleFallbackFeatures?.features?.length > 0) {
-        console.log(`[API] No snapshot found, returning ${visibleFallbackFeatures.features.length} point features`);
-        return NextResponse.json(visibleFallbackFeatures);
-      }
 
-      console.log('[API] No snapshot found, returning empty');
-      return NextResponse.json({ type: 'FeatureCollection', features: [] });
-    }
-    
-    console.log(`[API] Fetching from S3: ${snapshot.bucket}/${snapshot.buildings_key}`);
-    
-    // Fetch fresh from S3
-    const command = new GetObjectCommand({
-      Bucket: snapshot.bucket,
-      Key: snapshot.buildings_key,
-    });
-    
-    const response = await s3Client.send(command);
-    const bodyBuffer = await response.Body?.transformToByteArray();
-    
-    if (!bodyBuffer) {
-      throw new Error('Empty response from S3');
-    }
-    
-    // Decompress gzip content
-    const decompressed = gunzipSync(Buffer.from(bodyBuffer));
-    const geojson = JSON.parse(decompressed.toString('utf-8'));
-    const visibleGeojson = filterHiddenBuildingFeatures(geojson, hiddenBuildingIds);
-    const visibleSnapshotFeatures = (visibleGeojson as { features?: unknown[] }).features ?? [];
-
-    if (visibleSnapshotFeatures.length === 0 && visibleFallbackFeatures?.features?.length) {
-      console.log(
-        `[API] Snapshot buildings all filtered out; returning ${visibleFallbackFeatures.features.length} point features`
-      );
+    if (visibleFallbackFeatures?.features?.length > 0) {
+      console.log(`[API] Returning ${visibleFallbackFeatures.features.length} point features after polygon fallbacks`);
       return NextResponse.json(visibleFallbackFeatures);
     }
-    
-    console.log(`[API] Returning ${visibleSnapshotFeatures.length} Silver buildings from S3`);
-    
-    return NextResponse.json(visibleGeojson);
+
+    console.log('[API] No buildings found after all fallbacks, returning empty FeatureCollection');
+    return NextResponse.json({ type: 'FeatureCollection', features: [] });
     
   } catch (error) {
     console.error('[API] Error fetching buildings:', error);

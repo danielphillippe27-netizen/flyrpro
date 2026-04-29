@@ -180,6 +180,17 @@ export interface AmbassadorPayoutBatch {
 export type CampaignType = 'flyer' | 'door_knock' | 'event' | 'survey' | 'gift' | 'pop_by' | 'open_house';
 export type AddressSource = 'closest_home' | 'import_list' | 'map' | 'same_street';
 export type CampaignStatus = 'draft' | 'active' | 'completed' | 'paused';
+export type CampaignProvisionStatus = 'pending' | 'ready' | 'failed';
+export type CampaignProvisionSource = 'gold' | 'silver' | 'lambda';
+export type CampaignProvisionPhase =
+  | 'created'
+  | 'source_probed'
+  | 'addresses_loading'
+  | 'addresses_ready'
+  | 'map_ready'
+  | 'optimizing'
+  | 'optimized'
+  | 'failed';
 export type ParcelEnrichmentStatus = 'not_started' | 'queued' | 'processing' | 'ready' | 'failed' | 'skipped';
 export type LinkQualityStatus = 'unknown' | 'healthy' | 'degraded' | 'repairing' | 'failed';
 
@@ -195,7 +206,15 @@ export interface CampaignV2 {
   conversions: number;
   created_at: string;
   status: CampaignStatus;
-  provision_status?: 'pending' | 'ready' | 'failed' | null;
+  provision_status?: CampaignProvisionStatus | null;
+  provision_source?: CampaignProvisionSource | null;
+  provision_phase?: CampaignProvisionPhase | null;
+  addresses_ready_at?: string | null;
+  map_ready_at?: string | null;
+  optimized_at?: string | null;
+  has_parcels?: boolean | null;
+  building_link_confidence?: number | null;
+  map_mode?: 'smart_buildings' | 'hybrid' | 'standard_pins' | null;
   parcel_enrichment_status?: ParcelEnrichmentStatus | null;
   parcel_source_id?: string | null;
   parcel_count?: number | null;

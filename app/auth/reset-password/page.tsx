@@ -1,5 +1,20 @@
+import { Suspense } from 'react';
 import { ResetPasswordAliasRedirect } from '@/components/auth/ResetPasswordAliasRedirect';
 
 export default function AuthResetPasswordAliasPage() {
-  return <ResetPasswordAliasRedirect sourcePath="/auth/reset-password" />;
+  return (
+    <Suspense fallback={<ResetPasswordAliasRedirectFallback sourcePath="/auth/reset-password" />}>
+      <ResetPasswordAliasRedirect sourcePath="/auth/reset-password" />
+    </Suspense>
+  );
+}
+
+function ResetPasswordAliasRedirectFallback({ sourcePath }: { sourcePath: string }) {
+  return (
+    <div className="dark min-h-screen bg-gradient-to-br from-black to-[#262626] flex items-center justify-center p-4">
+      <div className="rounded-2xl border border-white/15 bg-white/[0.06] px-6 py-4 text-base text-[#AAAAAA] backdrop-blur-2xl">
+        Redirecting your recovery link from <span className="text-white">{sourcePath}</span>...
+      </div>
+    </div>
+  );
 }
