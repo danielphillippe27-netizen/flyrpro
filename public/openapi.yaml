@@ -1,0 +1,3147 @@
+openapi: 3.0.3
+info:
+  title: FLYR PRO API
+  description: |
+    REST API for the FLYR PRO web application — a field prospecting platform for real estate agents.
+
+    ## Important notes for contributors
+
+    ### iOS coupling
+    The iOS app (FLYR) calls many of these routes directly in production. Routes tagged
+    with `x-ios-coupled: true` must not be modified without coordinating with iOS development.
+    See ARCHITECTURE.md Section 10 for the full coupling map.
+
+    ### Route status
+    Each route has an `x-status` extension with one of the following values:
+    - `working` — verified functional
+    - `broken` — known to return incorrect results or errors
+    - `stub` — exists but returns hardcoded/empty response
+    - `unknown` — not verified
+
+    ### Authentication
+    Most routes require an authenticated Supabase session passed via cookies.
+    iOS routes use a Bearer token in the Authorization header.
+    Admin routes require the service role key or a founder-level entitlement.
+
+  version: "1.0.0"
+  contact:
+    name: Harry Brown
+
+servers:
+  - url: https://flyrpro.app
+    description: Production
+  - url: https://www.flyrpro.app
+    description: Production (www)
+  - url: http://localhost:3000
+    description: Local development
+
+tags:
+  - name: access
+    description: Post-auth routing and access state
+  - name: account
+    description: User account management
+  - name: accountability
+    description: Accountability cards and posts
+  - name: activity
+    description: User activity feed
+  - name: admin
+    description: Founder/admin only routes
+  - name: ai
+    description: AI-powered flyer and image generation
+  - name: ambassador
+    description: Ambassador program
+  - name: auth
+    description: Authentication handoffs (used by iOS)
+  - name: background
+    description: Background removal utility
+  - name: beacon
+    description: Safety beacon (public session tracking)
+  - name: billing
+    description: Stripe and Apple IAP billing
+  - name: brokerages
+    description: Brokerage search and leaderboard
+  - name: buildings
+    description: Building data and management
+  - name: campaigns
+    description: Campaign CRUD, provisioning, addresses, buildings, routes
+  - name: canva
+    description: Canva-style QR and flyer generation
+  - name: challenges
+    description: Challenges and rolling leaderboard
+  - name: currency
+    description: Currency detection utility
+  - name: daily-content
+    description: Daily quotes and riddles
+  - name: editor
+    description: Flyer editor (Canva clone) — partially stubbed
+  - name: farms
+    description: Farm management and address sync
+  - name: feedback
+    description: User feedback submission
+  - name: flyers
+    description: Flyer management — partially stubbed
+  - name: generate-qrs
+    description: QR code generation for campaigns
+  - name: home
+    description: Home dashboard data
+  - name: integrations
+    description: CRM integrations (FUB, HubSpot, BoldTrail, monday, Zapier)
+  - name: invites
+    description: Workspace invite management
+  - name: landing-page
+    description: Landing page CTA tracking
+  - name: leads
+    description: Lead CRM sync
+  - name: mapbox
+    description: Mapbox tilequery proxy
+  - name: onboarding
+    description: Onboarding completion
+  - name: open
+    description: Legacy QR scan redirect
+  - name: partner-offer
+    description: Partner offer onboarding
+  - name: profile
+    description: User profile management
+  - name: q
+    description: Modern slug-based QR scan redirect
+  - name: qr
+    description: QR code analytics, creation, deletion
+  - name: qr-generation-jobs
+    description: QR generation job status polling
+  - name: routes
+    description: Route plans and assignments
+  - name: scan
+    description: Legacy QR scan handler
+  - name: share-card
+    description: Challenge share cards
+  - name: team
+    description: Team dashboard, members, leaderboard, activity
+  - name: upload-csv
+    description: CSV recipient upload
+  - name: user
+    description: User goals
+  - name: zip-qrs
+    description: ZIP download of QR codes
+
+# ─────────────────────────────────────────────────────────────
+# COMPONENTS
+# ─────────────────────────────────────────────────────────────
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: sb-access-token
+      description: Supabase session cookie (web)
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Supabase JWT (iOS)
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        details:
+          type: string
+
+    Campaign:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        owner_id:
+          type: string
+          format: uuid
+        workspace_id:
+          type: string
+          format: uuid
+        video_url:
+          type: string
+        scans:
+          type: integer
+        provision_status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    CampaignAddress:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        campaign_id:
+          type: string
+          format: uuid
+        formatted:
+          type: string
+        address:
+          type: string
+        house_number:
+          type: string
+        street_name:
+          type: string
+        locality:
+          type: string
+        region:
+          type: string
+        postal_code:
+          type: string
+        qr_code_base64:
+          type: string
+          description: Base64-encoded QR PNG stored directly in DB. Written by /api/generate-qrs.
+        purl:
+          type: string
+          description: Tracking URL encoded in QR. Points to /api/scan?id={address_id}.
+        qr_png_url:
+          type: string
+          description: |
+            Supabase Storage URL for QR PNG. NOT written by current generate-qrs.
+            Filtered on by zip-qrs and vdp-manifest — this mismatch is a known bug.
+        scans:
+          type: integer
+        last_scanned_at:
+          type: string
+          format: date-time
+        visited:
+          type: boolean
+        seq:
+          type: integer
+
+    QRCode:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        campaign_id:
+          type: string
+          format: uuid
+        address_id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+          description: 8-character alphanumeric short ID
+        qr_url:
+          type: string
+          description: Full short URL e.g. https://flyrpro.app/q/{slug}
+        destination_type:
+          type: string
+          enum: [landingPage, directLink]
+        direct_url:
+          type: string
+        landing_page_id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+
+    Entitlement:
+      type: object
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        plan:
+          type: string
+          enum: [free, pro, team]
+        is_active:
+          type: boolean
+        source:
+          type: string
+          enum: [stripe, apple]
+        current_period_end:
+          type: string
+          format: date-time
+
+    Workspace:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        owner_id:
+          type: string
+          format: uuid
+        subscription_status:
+          type: string
+
+    Building:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        gers_id:
+          type: string
+        campaign_id:
+          type: string
+          format: uuid
+
+# ─────────────────────────────────────────────────────────────
+# PATHS
+# ─────────────────────────────────────────────────────────────
+paths:
+
+  # ── ACCESS ──────────────────────────────────────────────────
+  /api/access/redirect:
+    get:
+      tags: [access]
+      summary: Resolve post-auth redirect
+      description: |
+        Resolves where to send a user after authentication. Used by the iOS app
+        and web gate to determine the correct destination (onboarding, subscribe, dashboard).
+      x-status: working
+      x-ios-coupled: true
+      x-ios-caller: FLYR/Features/Auth/Services/AccessAPI.swift:91
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "302":
+          description: Redirects to appropriate destination
+        "200":
+          description: Returns redirect URL as JSON
+
+  /api/access/state:
+    get:
+      tags: [access]
+      summary: Get current access state
+      description: |
+        Returns the current user's access state including workspace, subscription status,
+        and entitlement. Called by the web layout on every page load and by the iOS app.
+      x-status: working
+      x-ios-coupled: true
+      x-ios-caller: FLYR/Features/Auth/Services/AccessAPI.swift:110
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Access state object
+        "401":
+          description: Unauthorized
+
+  # ── ACCOUNT ─────────────────────────────────────────────────
+  /api/account/delete:
+    delete:
+      tags: [account]
+      summary: Delete user account
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Account deleted
+        "401":
+          description: Unauthorized
+
+  # ── ACCOUNTABILITY ───────────────────────────────────────────
+  /api/accountability-card/latest:
+    get:
+      tags: [accountability]
+      summary: Get latest accountability card
+      x-status: broken
+      description: |
+        Returns 500 in current state. Pre-existing error unrelated to recent changes.
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Latest accountability card
+        "500":
+          description: Server error (known issue)
+
+  /api/accountability-card:
+    get:
+      tags: [accountability]
+      summary: Get accountability cards
+      x-status: unknown
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Accountability cards list
+    post:
+      tags: [accountability]
+      summary: Create accountability card
+      x-status: unknown
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Created card
+
+  /api/accountability-card/share:
+    post:
+      tags: [accountability]
+      summary: Share accountability card
+      x-status: unknown
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Share result
+
+  # ── ACTIVITY ────────────────────────────────────────────────
+  /api/activity:
+    get:
+      tags: [activity]
+      summary: Get user activity feed
+      x-status: unknown
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Activity events
+
+  # ── ADMIN ───────────────────────────────────────────────────
+  /api/admin/ambassadors:
+    get:
+      tags: [admin]
+      summary: List ambassador applications
+      x-status: working
+      x-auth: founder
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Ambassador applications list
+
+  /api/admin/ambassadors/{applicationId}:
+    patch:
+      tags: [admin]
+      summary: Update ambassador application
+      x-status: working
+      x-auth: founder
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: applicationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Updated application
+
+  /api/admin/ambassadors/{applicationId}/stripe-connect:
+    post:
+      tags: [admin]
+      summary: Connect ambassador to Stripe
+      x-status: unknown
+      x-auth: founder
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: applicationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Stripe connect result
+
+  /api/admin/challenges:
+    get:
+      tags: [admin]
+      summary: List challenge templates
+      x-status: unknown
+      x-auth: founder
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Challenge templates
+
+  /api/admin/challenges/{id}:
+    patch:
+      tags: [admin]
+      summary: Update challenge template
+      x-status: unknown
+      x-auth: founder
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Updated challenge
+
+  /api/admin/inbox/feedback:
+    get:
+      tags: [admin]
+      summary: Get feedback inbox
+      x-status: unknown
+      x-auth: founder
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Feedback items
+
+  /api/admin/inbox/summary:
+    get:
+      tags: [admin]
+      summary: Get inbox summary
+      x-status: unknown
+      x-auth: founder
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Inbox summary
+
+  /api/admin/inbox/support:
+    get:
+      tags: [admin]
+      summary: Get support inbox
+      x-status: unknown
+      x-auth: founder
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Support threads
+
+  /api/admin/offers:
+    get:
+      tags: [admin]
+      summary: List partner offers
+      x-status: working
+      x-auth: founder
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Partner offers list
+    post:
+      tags: [admin]
+      summary: Create partner offer
+      x-status: working
+      x-auth: founder
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Created offer
+
+  /api/admin/offers/{offerId}:
+    get:
+      tags: [admin]
+      summary: Get partner offer
+      x-status: working
+      x-auth: founder
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: offerId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Partner offer
+    patch:
+      tags: [admin]
+      summary: Update partner offer
+      x-status: working
+      x-auth: founder
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: offerId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Updated offer
+
+  /api/admin/offers/{offerId}/qr:
+    post:
+      tags: [admin]
+      summary: Generate QR for partner offer
+      x-status: unknown
+      x-auth: founder
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: offerId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: QR code generated
+
+  /api/admin/offers/{offerId}/revoke:
+    post:
+      tags: [admin]
+      summary: Revoke partner offer
+      x-status: unknown
+      x-auth: founder
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: offerId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Offer revoked
+
+  /api/admin/offers/{offerId}/send-email:
+    post:
+      tags: [admin]
+      summary: Send partner offer email
+      x-status: unknown
+      x-auth: founder
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: offerId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Email sent
+
+  /api/admin/workspaces/{workspaceId}/reset:
+    post:
+      tags: [admin]
+      summary: Reset workspace
+      x-status: unknown
+      x-auth: founder
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Workspace reset
+
+  # ── AI ───────────────────────────────────────────────────────
+  /api/ai/flyer:
+    post:
+      tags: [ai]
+      summary: Generate AI flyer
+      x-status: unknown
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Generated flyer
+
+  /api/ai/flyer/save:
+    post:
+      tags: [ai]
+      summary: Save AI-generated flyer
+      x-status: unknown
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Saved flyer
+
+  /api/ai-flyer/generate:
+    post:
+      tags: [ai]
+      summary: Generate AI flyer (alternate endpoint)
+      x-status: unknown
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Generated flyer
+
+  /api/ai-flyer/image:
+    post:
+      tags: [ai]
+      summary: Generate AI flyer image
+      x-status: unknown
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Generated image
+
+  # ── AMBASSADOR ───────────────────────────────────────────────
+  /api/ambassador/apply:
+    post:
+      tags: [ambassador]
+      summary: Submit ambassador application
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Application submitted
+
+  # ── AUTH ─────────────────────────────────────────────────────
+  /api/auth/handoff:
+    post:
+      tags: [auth]
+      summary: Create auth handoff token
+      description: |
+        Creates a short-lived handoff token for cross-surface authentication.
+        Called by the iOS app to initiate a session handoff to the web app.
+      x-status: working
+      x-ios-coupled: true
+      x-ios-caller: FLYR/Services/OvertureAddressService.swift:344
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Handoff token created
+
+  /api/auth/redeem-handoff:
+    post:
+      tags: [auth]
+      summary: Redeem auth handoff token
+      description: |
+        Redeems a handoff token and establishes a web session.
+        Called by the iOS app to complete a session handoff.
+      x-status: working
+      x-ios-coupled: true
+      x-ios-caller: FLYR/Services/OvertureAddressService.swift:365
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Session established
+
+  # ── BACKGROUND REMOVER ───────────────────────────────────────
+  /api/background-remover:
+    post:
+      tags: [background]
+      summary: Remove image background
+      x-status: unknown
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Image with background removed
+
+  # ── BEACON ───────────────────────────────────────────────────
+  /api/beacon/{token}:
+    get:
+      tags: [beacon]
+      summary: Get public safety beacon session
+      description: Public route — no auth required. Used for safety beacon feature.
+      x-status: unknown
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Beacon session data
+
+  # ── BILLING ──────────────────────────────────────────────────
+  /api/billing/apple/verify:
+    post:
+      tags: [billing]
+      summary: Verify Apple IAP transaction
+      description: |
+        Called directly by the iOS app with a Bearer token to verify an Apple
+        in-app purchase and update the user's entitlement. Do not modify without
+        coordinating with iOS development.
+      x-status: working
+      x-ios-coupled: true
+      x-ios-caller: FLYR/Features/Billing/EntitlementsService.swift:120
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                transactionId:
+                  type: string
+      responses:
+        "200":
+          description: Entitlement updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Entitlement"
+        "400":
+          description: Invalid transaction
+        "401":
+          description: Unauthorized
+
+  /api/billing/entitlement:
+    get:
+      tags: [billing]
+      summary: Get current user entitlement
+      description: |
+        Returns the current user's entitlement (plan, status, expiry).
+        Called by both the web app and the iOS app.
+      x-status: working
+      x-ios-coupled: true
+      x-ios-caller: FLYR/Features/Billing/EntitlementsService.swift:82
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current entitlement
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Entitlement"
+        "401":
+          description: Unauthorized
+
+  /api/billing/prices:
+    get:
+      tags: [billing]
+      summary: Get Stripe price list
+      x-status: working
+      responses:
+        "200":
+          description: Available prices
+
+  /api/billing/stripe/checkout:
+    post:
+      tags: [billing]
+      summary: Create Stripe checkout session
+      description: Creates a Stripe subscription checkout session for the current user.
+      x-status: working
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                priceId:
+                  type: string
+                plan:
+                  type: string
+                  enum: [pro, team]
+                seats:
+                  type: integer
+      responses:
+        "200":
+          description: Checkout session URL
+        "401":
+          description: Unauthorized
+
+  /api/billing/stripe/confirm-session:
+    post:
+      tags: [billing]
+      summary: Confirm Stripe checkout session
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Session confirmed
+
+  /api/billing/stripe/portal:
+    post:
+      tags: [billing]
+      summary: Create Stripe customer portal session
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Portal URL
+
+  /api/billing/stripe/referral:
+    get:
+      tags: [billing]
+      summary: Get referral info
+      x-status: unknown
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Referral data
+
+  /api/billing/stripe/seats:
+    post:
+      tags: [billing]
+      summary: Update workspace seat count
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Seats updated
+
+  /api/billing/stripe/webhook:
+    post:
+      tags: [billing]
+      summary: Stripe webhook handler
+      description: |
+        Receives Stripe subscription lifecycle events. Verified via Stripe signature.
+        Not called by the web UI — called by Stripe directly.
+      x-status: working
+      responses:
+        "200":
+          description: Webhook processed
+
+  # ── BROKERAGES ───────────────────────────────────────────────
+  /api/brokerages/search:
+    get:
+      tags: [brokerages]
+      summary: Search brokerages
+      description: Used during onboarding to find and select a brokerage.
+      x-status: working
+      parameters:
+        - name: q
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 15
+      responses:
+        "200":
+          description: Matching brokerages
+
+  # ── BUILDINGS ────────────────────────────────────────────────
+  /api/buildings/{gersId}:
+    get:
+      tags: [buildings]
+      summary: Get building by GERS ID
+      description: |
+        Supports both cookie auth (web) and Bearer token auth (iOS).
+        The route explicitly handles both patterns.
+      x-status: working
+      x-ios-coupled: true
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: gersId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Building data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Building"
+        "404":
+          description: Building not found
+
+  # ── CAMPAIGNS ────────────────────────────────────────────────
+  /api/campaigns:
+    post:
+      tags: [campaigns]
+      summary: Create campaign
+      description: Creates a new campaign for the current user's workspace.
+      x-status: working
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                workspace_id:
+                  type: string
+                  format: uuid
+      responses:
+        "200":
+          description: Created campaign
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Campaign"
+        "401":
+          description: Unauthorized
+
+  /api/campaigns/provision:
+    post:
+      tags: [campaigns]
+      summary: Provision campaign addresses and buildings
+      description: |
+        Runs the cascading geocoder to generate address and building data for a campaign.
+        Called by both the web app and the iOS app.
+      x-status: working
+      x-ios-coupled: true
+      x-ios-caller: FLYR/Feautures/Campaigns/CampaignsAPI.swift:555
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                campaignId:
+                  type: string
+                  format: uuid
+      responses:
+        "200":
+          description: Provisioning started or completed
+        "401":
+          description: Unauthorized
+
+  /api/campaigns/generate-address-list:
+    post:
+      tags: [campaigns]
+      summary: Generate address list for campaign area
+      description: |
+        Generates a list of addresses within a campaign's target area.
+        Called by the iOS app during campaign setup.
+      x-status: working
+      x-ios-coupled: true
+      x-ios-caller: FLYR/Services/OvertureAddressService.swift:185
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Address list
+
+  /api/addresses-same-street:
+    post:
+      tags: [campaigns]
+      summary: Find addresses on the same street
+      description: Called by the iOS app to find neighboring addresses.
+      x-status: working
+      x-ios-coupled: true
+      x-ios-caller: FLYR/Services/OvertureAddressService.swift:277
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Addresses on same street
+
+  /api/campaigns/{campaignId}/addresses:
+    get:
+      tags: [campaigns]
+      summary: Get campaign addresses
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Campaign addresses
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CampaignAddress"
+
+  /api/campaigns/{campaignId}/addresses/manual:
+    post:
+      tags: [campaigns]
+      summary: Add manual address to campaign
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Address added
+
+  /api/campaigns/{campaignId}/addresses/{addressId}/manual:
+    delete:
+      tags: [campaigns]
+      summary: Remove manual address from campaign
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: addressId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Address removed
+
+  /api/campaigns/{campaignId}/buildings:
+    get:
+      tags: [campaigns]
+      summary: Get campaign buildings
+      description: |
+        Returns building data for all addresses in a campaign.
+        Called by both web and iOS app.
+      x-status: working
+      x-ios-coupled: true
+      x-ios-caller: FLYR/Feautures/Campaigns/API/BuildingsAPI.swift:584
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Campaign buildings
+
+  /api/campaigns/{campaignId}/buildings/manual:
+    post:
+      tags: [campaigns]
+      summary: Add manual building to campaign
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Building added
+
+  /api/campaigns/{campaignId}/buildings/{buildingId}:
+    delete:
+      tags: [campaigns]
+      summary: Remove manual building from campaign
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: buildingId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Building removed
+
+  /api/campaigns/{campaignId}/buildings/{buildingId}/addresses:
+    get:
+      tags: [campaigns]
+      summary: Get addresses for a building
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: buildingId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Building addresses
+    post:
+      tags: [campaigns]
+      summary: Add address to building
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: buildingId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Address added
+    delete:
+      tags: [campaigns]
+      summary: Remove address from building
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: buildingId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Address removed
+
+  /api/campaigns/{campaignId}/buildings/{buildingId}/nearby-addresses:
+    get:
+      tags: [campaigns]
+      summary: Get nearby unlinked addresses for a building
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: buildingId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Nearby addresses
+
+  /api/campaigns/{campaignId}/flyer-upload:
+    post:
+      tags: [campaigns]
+      summary: Upload campaign flyer
+      description: Uploads a flyer image or PDF to Supabase Storage (flyers bucket).
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Flyer uploaded, returns storage URL
+
+  /api/campaigns/{campaignId}/generate-basic-qr:
+    post:
+      tags: [campaigns]
+      summary: Generate basic campaign-level QR code
+      description: Generates a single QR code for the campaign (not per-address).
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: QR code generated
+
+  /api/campaigns/{campaignId}/matches:
+    get:
+      tags: [campaigns]
+      summary: Get campaign building matches
+      x-status: unknown
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Match quality data
+
+  /api/campaigns/{campaignId}/orphans:
+    get:
+      tags: [campaigns]
+      summary: Get unlinked orphan addresses
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Orphan addresses
+
+  /api/campaigns/{campaignId}/orphans/{orphanId}/assign:
+    post:
+      tags: [campaigns]
+      summary: Assign orphan address to building
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: orphanId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Orphan assigned
+
+  /api/campaigns/{campaignId}/roads/prepare:
+    post:
+      tags: [campaigns]
+      summary: Prepare campaign road data
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Road preparation started
+
+  /api/campaigns/{campaignId}/routes/optimize:
+    get:
+      tags: [campaigns]
+      summary: Get optimized routes for campaign
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Optimized route data
+    post:
+      tags: [campaigns]
+      summary: Generate optimized routes for campaign
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Routes generated
+
+  /api/campaigns/{campaignId}/snap:
+    post:
+      tags: [campaigns]
+      summary: Snap campaign addresses to roads
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Addresses snapped to roads
+
+  /api/campaigns/{campaignId}/split-errors:
+    get:
+      tags: [campaigns]
+      summary: Get building split errors
+      x-status: unknown
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Split errors
+
+  /api/campaigns/{campaignId}/split-errors/{errorId}/resolve:
+    post:
+      tags: [campaigns]
+      summary: Resolve a building split error
+      x-status: unknown
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: errorId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Error resolved
+
+  /api/campaigns/{campaignId}/units:
+    get:
+      tags: [campaigns]
+      summary: Get campaign building units
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Building units
+    post:
+      tags: [campaigns]
+      summary: Add building unit to campaign
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Unit added
+
+  /api/campaigns/{campaignId}/vdp-manifest:
+    get:
+      tags: [campaigns]
+      summary: Download VDP manifest CSV for professional printing
+      description: |
+        Generates a CSV file for Variable Data Printing. Each row contains
+        address data and a QR URL for one print piece.
+
+        **Currently broken:** Filters addresses on `qr_png_url IS NOT NULL`,
+        but `generate-qrs` writes `qr_code_base64` instead — so this always
+        returns 404 for any campaign generated today. Fix planned in Phase 3.
+
+        No runtime web UI caller found — this route is not yet wired to a button.
+      x-status: broken
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: VDP manifest CSV file
+          content:
+            text/csv:
+              schema:
+                type: string
+        "404":
+          description: No addresses with QR codes found (currently always returned)
+
+  # ── CANVA ────────────────────────────────────────────────────
+  /api/canva/generate:
+    post:
+      tags: [canva]
+      summary: Generate Canva-style QR flyer
+      description: Generates a flyer with per-address QR codes embedded using Canva-style templating.
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Generated flyer data
+
+  # ── CHALLENGES ───────────────────────────────────────────────
+  /api/challenges:
+    get:
+      tags: [challenges]
+      summary: List active challenges
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Challenges list
+
+  /api/challenges/{challengeId}:
+    get:
+      tags: [challenges]
+      summary: Get challenge detail
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: challengeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Challenge detail
+
+  # ── CURRENCY ─────────────────────────────────────────────────
+  /api/currency:
+    get:
+      tags: [currency]
+      summary: Detect user currency
+      x-status: working
+      responses:
+        "200":
+          description: Detected currency code
+
+  # ── DAILY CONTENT ────────────────────────────────────────────
+  /api/daily-content:
+    get:
+      tags: [daily-content]
+      summary: Get daily quote and riddle
+      description: Returns cached daily content. Cache is refreshed once per day.
+      x-status: working
+      responses:
+        "200":
+          description: Daily content
+
+  # ── EDITOR ───────────────────────────────────────────────────
+  /api/editor/ai/generate-image:
+    post:
+      tags: [editor]
+      summary: Generate image via AI for editor
+      x-status: unknown
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Generated image
+
+  /api/editor/ai/remove-bg:
+    post:
+      tags: [editor]
+      summary: Remove background for editor
+      x-status: unknown
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Image with background removed
+
+  /api/editor/icons:
+    get:
+      tags: [editor]
+      summary: Get icon library for editor
+      x-status: unknown
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Icons list
+
+  /api/editor/projects:
+    get:
+      tags: [editor]
+      summary: List editor projects
+      x-status: unknown
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Editor projects
+    post:
+      tags: [editor]
+      summary: Create editor project
+      x-status: unknown
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Created project
+
+  /api/editor/projects/templates:
+    get:
+      tags: [editor]
+      summary: List editor templates
+      x-status: unknown
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Templates list
+
+  /api/editor/projects/{id}:
+    get:
+      tags: [editor]
+      summary: Get editor project
+      x-status: unknown
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Editor project
+    patch:
+      tags: [editor]
+      summary: Update editor project
+      x-status: unknown
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Updated project
+    delete:
+      tags: [editor]
+      summary: Delete editor project
+      x-status: unknown
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Project deleted
+
+  /api/editor/projects/{id}/resources:
+    get:
+      tags: [editor]
+      summary: Get editor project resources (QR codes, images)
+      x-status: unknown
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Project resources
+
+  /api/editor/subscriptions/billing:
+    post:
+      tags: [editor]
+      summary: Editor subscription billing
+      x-status: unknown
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Billing result
+
+  /api/editor/subscriptions/current:
+    get:
+      tags: [editor]
+      summary: Get current editor subscription
+      x-status: unknown
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Editor subscription
+
+  # ── FARMS ────────────────────────────────────────────────────
+  /api/farms:
+    post:
+      tags: [farms]
+      summary: Create farm
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Created farm
+
+  /api/farms/{farmId}/campaign:
+    get:
+      tags: [farms]
+      summary: Get farm linked campaign
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: farmId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Linked campaign
+    post:
+      tags: [farms]
+      summary: Link campaign to farm
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: farmId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Campaign linked
+    patch:
+      tags: [farms]
+      summary: Update farm campaign link
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: farmId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Link updated
+
+  /api/farms/{farmId}/sync-addresses:
+    post:
+      tags: [farms]
+      summary: Sync farm addresses
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: farmId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Addresses synced
+
+  /api/farms/generate-address-list:
+    post:
+      tags: [farms]
+      summary: Generate address list for farm area
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Address list
+
+  # ── FEEDBACK ─────────────────────────────────────────────────
+  /api/feedback:
+    post:
+      tags: [feedback]
+      summary: Submit user feedback
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Feedback submitted
+
+  # ── FLYERS ───────────────────────────────────────────────────
+  /api/flyers/{flyerId}/add-qr:
+    post:
+      tags: [flyers]
+      summary: Add QR code to flyer
+      x-status: unknown
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: flyerId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: QR added to flyer
+
+  /api/flyers/{flyerId}/export:
+    post:
+      tags: [flyers]
+      summary: Export flyer
+      description: |
+        **Stub — not implemented.** Returns a TODO response.
+        Server-side export functionality has not been built.
+        The upload-to-storage and return-public-URL steps are all TODO comments.
+      x-status: stub
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: flyerId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "501":
+          description: Not implemented
+
+  # ── GENERATE QRS ─────────────────────────────────────────────
+  /api/generate-qrs:
+    post:
+      tags: [generate-qrs]
+      summary: Generate QR codes for all campaign addresses
+      description: |
+        Generates a QR PNG for every address in a campaign and writes it to
+        `campaign_addresses.qr_code_base64`. Also writes `campaign_addresses.purl`
+        pointing at `/api/scan?id={address_id}`.
+
+        **Known issue:** Does not write to the `qr_codes` table or Supabase Storage.
+        This means `zip-qrs` and `vdp-manifest` — which filter on `qr_png_url` —
+        return empty results for any campaign generated by this route.
+
+        **iOS safe:** The iOS app does not call this route.
+
+        Called by: campaign page (`app/(main)/campaigns/[campaignId]/page.tsx:592`)
+        and farms page (`app/farms/[id]/page.tsx:1104`).
+      x-status: working
+      x-ios-coupled: false
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [campaignId]
+              properties:
+                campaignId:
+                  type: string
+                  format: uuid
+                baseUrl:
+                  type: string
+                  description: Override base URL for QR tracking links. Defaults to NEXT_PUBLIC_APP_URL.
+                forceRegenerate:
+                  type: boolean
+                  default: true
+                  description: If false, skips addresses that already have QR codes.
+      responses:
+        "200":
+          description: QR codes generated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  count:
+                    type: integer
+                  message:
+                    type: string
+        "400":
+          description: Missing campaignId
+        "500":
+          description: Generation error
+
+  # ── HOME ─────────────────────────────────────────────────────
+  /api/home/dashboard:
+    get:
+      tags: [home]
+      summary: Get home dashboard data
+      description: Returns stats, recent activity, and daily content for the home screen.
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: workspaceId
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Dashboard data
+
+  # ── INTEGRATIONS ─────────────────────────────────────────────
+  /api/integrations/followupboss/connect:
+    post:
+      tags: [integrations]
+      summary: Connect Follow Up Boss integration
+      x-status: working
+      x-ios-coupled: true
+      x-note: iOS uses /api/integrations/fub/connect alias
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: FUB connected
+
+  /api/integrations/followupboss/disconnect:
+    post:
+      tags: [integrations]
+      summary: Disconnect Follow Up Boss integration
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: FUB disconnected
+
+  /api/integrations/followupboss/oauth/start:
+    get:
+      tags: [integrations]
+      summary: Start Follow Up Boss OAuth flow
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "302":
+          description: Redirects to FUB OAuth
+
+  /api/integrations/followupboss/oauth/callback:
+    get:
+      tags: [integrations]
+      summary: Follow Up Boss OAuth callback
+      x-status: working
+      responses:
+        "302":
+          description: Redirects after OAuth
+
+  /api/integrations/followupboss/push-lead:
+    post:
+      tags: [integrations]
+      summary: Push lead to Follow Up Boss
+      x-status: working
+      x-ios-coupled: true
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Lead pushed
+
+  /api/integrations/followupboss/status:
+    get:
+      tags: [integrations]
+      summary: Get Follow Up Boss connection status
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Connection status
+
+  /api/integrations/followupboss/test:
+    post:
+      tags: [integrations]
+      summary: Test Follow Up Boss connection
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Test result
+
+  /api/integrations/followupboss/voice-log:
+    post:
+      tags: [integrations]
+      summary: Log voice note to Follow Up Boss
+      x-status: working
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Voice log created
+
+  /api/integrations/hubspot/disconnect:
+    post:
+      tags: [integrations]
+      summary: Disconnect HubSpot integration
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: HubSpot disconnected
+
+  /api/integrations/hubspot/oauth/start:
+    get:
+      tags: [integrations]
+      summary: Start HubSpot OAuth flow
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "302":
+          description: Redirects to HubSpot OAuth
+
+  /api/integrations/hubspot/oauth/callback:
+    get:
+      tags: [integrations]
+      summary: HubSpot OAuth callback
+      x-status: working
+      responses:
+        "302":
+          description: Redirects after OAuth
+
+  /api/integrations/hubspot/push-lead:
+    post:
+      tags: [integrations]
+      summary: Push lead to HubSpot
+      x-status: working
+      x-ios-coupled: true
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Lead pushed
+
+  /api/integrations/hubspot/status:
+    get:
+      tags: [integrations]
+      summary: Get HubSpot connection status
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Connection status
+
+  /api/integrations/hubspot/test:
+    post:
+      tags: [integrations]
+      summary: Test HubSpot connection
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Test result
+
+  /api/integrations/boldtrail/connect:
+    post:
+      tags: [integrations]
+      summary: Connect BoldTrail integration
+      x-status: working
+      x-ios-coupled: true
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: BoldTrail connected
+
+  /api/integrations/boldtrail/disconnect:
+    post:
+      tags: [integrations]
+      summary: Disconnect BoldTrail integration
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: BoldTrail disconnected
+
+  /api/integrations/boldtrail/push-lead:
+    post:
+      tags: [integrations]
+      summary: Push lead to BoldTrail
+      x-status: working
+      x-ios-coupled: true
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Lead pushed
+
+  /api/integrations/boldtrail/status:
+    get:
+      tags: [integrations]
+      summary: Get BoldTrail connection status
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Connection status
+
+  /api/integrations/boldtrail/test:
+    post:
+      tags: [integrations]
+      summary: Test BoldTrail connection
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Test result
+
+  /api/integrations/monday/boards:
+    get:
+      tags: [integrations]
+      summary: Get monday.com boards
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Boards list
+
+  /api/integrations/monday/disconnect:
+    post:
+      tags: [integrations]
+      summary: Disconnect monday.com integration
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: monday disconnected
+
+  /api/integrations/monday/oauth/start:
+    get:
+      tags: [integrations]
+      summary: Start monday.com OAuth flow
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "302":
+          description: Redirects to monday OAuth
+
+  /api/integrations/monday/oauth/callback:
+    get:
+      tags: [integrations]
+      summary: monday.com OAuth callback
+      x-status: working
+      responses:
+        "302":
+          description: Redirects after OAuth
+
+  /api/integrations/monday/select-board:
+    post:
+      tags: [integrations]
+      summary: Select monday.com board for integration
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Board selected
+
+  /api/integrations/monday/status:
+    get:
+      tags: [integrations]
+      summary: Get monday.com connection status
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Connection status
+
+  /api/integrations/zapier/connect:
+    post:
+      tags: [integrations]
+      summary: Connect Zapier integration
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Zapier connected
+
+  /api/integrations/zapier/disconnect:
+    post:
+      tags: [integrations]
+      summary: Disconnect Zapier integration
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Zapier disconnected
+
+  /api/integrations/zapier/push-lead:
+    post:
+      tags: [integrations]
+      summary: Push lead to Zapier
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Lead pushed
+
+  /api/integrations/zapier/status:
+    get:
+      tags: [integrations]
+      summary: Get Zapier connection status
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Connection status
+
+  /api/integrations/zapier/test:
+    post:
+      tags: [integrations]
+      summary: Test Zapier connection
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Test result
+
+  /api/integrations/test-lead:
+    post:
+      tags: [integrations]
+      summary: Send test lead across all active integrations
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Test leads sent
+
+  # ── FUB ALIASES (iOS compatibility) ──────────────────────────
+  # These routes are aliases of the followupboss routes above.
+  # They exist specifically for iOS compatibility and must not be removed.
+  /api/integrations/fub/connect:
+    post:
+      tags: [integrations]
+      summary: "[iOS alias] Connect Follow Up Boss"
+      description: Alias of /api/integrations/followupboss/connect. Exists for iOS compatibility. Do not remove.
+      x-status: working
+      x-ios-coupled: true
+      x-ios-alias: true
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: FUB connected
+
+  /api/integrations/fub/disconnect:
+    post:
+      tags: [integrations]
+      summary: "[iOS alias] Disconnect Follow Up Boss"
+      description: Alias for iOS compatibility.
+      x-status: working
+      x-ios-coupled: true
+      x-ios-alias: true
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: FUB disconnected
+
+  /api/integrations/fub/push-lead:
+    post:
+      tags: [integrations]
+      summary: "[iOS alias] Push lead to Follow Up Boss"
+      description: Alias for iOS compatibility.
+      x-status: working
+      x-ios-coupled: true
+      x-ios-alias: true
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Lead pushed
+
+  # ── INVITES ──────────────────────────────────────────────────
+  /api/invites/accept:
+    post:
+      tags: [invites]
+      summary: Accept workspace invite
+      x-status: working
+      x-ios-coupled: true
+      x-ios-caller: FLYR/Features/Invites/Services/InviteService.swift
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Invite accepted
+
+  /api/invites/create:
+    post:
+      tags: [invites]
+      summary: Create workspace invite
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Invite created with link
+
+  /api/invites/validate:
+    get:
+      tags: [invites]
+      summary: Validate invite token
+      x-status: working
+      x-ios-coupled: true
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: token
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Invite validity and metadata
+
+  # ── LANDING PAGE ─────────────────────────────────────────────
+  /api/landing-page/cta-click:
+    post:
+      tags: [landing-page]
+      summary: Record landing page CTA click
+      x-status: working
+      responses:
+        "200":
+          description: Click recorded
+
+  # ── LEADS ────────────────────────────────────────────────────
+  /api/leads/sync-crm:
+    post:
+      tags: [leads]
+      summary: Sync leads to connected CRM
+      x-status: working
+      x-ios-coupled: true
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Leads synced
+
+  # ── MAPBOX ───────────────────────────────────────────────────
+  /api/mapbox/tilequery-buildings:
+    post:
+      tags: [mapbox]
+      summary: Proxy Mapbox tilequery for buildings
+      description: Proxies Mapbox tilequery API to avoid exposing the access token client-side.
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Tilequery results
+
+  # ── ONBOARDING ───────────────────────────────────────────────
+  /api/onboarding/complete:
+    post:
+      tags: [onboarding]
+      summary: Complete onboarding flow
+      description: Called after the user finishes the onboarding wizard. Creates workspace and profile.
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Onboarding completed, redirects to download or home
+
+  # ── OPEN (LEGACY) ────────────────────────────────────────────
+  /api/open:
+    get:
+      tags: [open]
+      summary: Legacy QR scan redirect
+      description: |
+        Legacy scan handler. Some older printed QR codes may still point here.
+        Marks address as visited and redirects. Superseded by /api/scan and /api/q/[slug].
+        Do not remove — may still be in the wild on printed flyers.
+      x-status: working
+      x-legacy: true
+      parameters:
+        - name: id
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Address ID or recipient ID
+      responses:
+        "302":
+          description: Redirects to campaign URL or app
+
+  # ── PARTNER OFFER ────────────────────────────────────────────
+  /api/partner-offer/onboarding-hint:
+    get:
+      tags: [partner-offer]
+      summary: Get partner offer onboarding hint
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Onboarding hint for current partner offer
+
+  # ── PROFILE ──────────────────────────────────────────────────
+  /api/profile:
+    get:
+      tags: [profile]
+      summary: Get current user profile
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: User profile
+    patch:
+      tags: [profile]
+      summary: Update current user profile
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Updated profile
+
+  /api/profile/avatar:
+    post:
+      tags: [profile]
+      summary: Upload avatar image
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Avatar URL
+
+  # ── Q (MODERN QR REDIRECT) ───────────────────────────────────
+  /api/q/{slug}:
+    get:
+      tags: [q]
+      summary: Modern slug-based QR scan redirect
+      description: |
+        Looks up the slug in the `qr_codes` table, performs bot filtering,
+        records a scan in `qr_code_scans`, calls `record_public_qr_scan_outcome`
+        on first scan, and redirects to the destination (landing page or direct URL).
+
+        This handler is fully implemented and correct. It is not yet used by
+        web-generated QR codes — `generate-qrs` still encodes `/api/scan` URLs.
+        Fix planned in Phase 3.
+      x-status: working
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+            description: 8-character alphanumeric slug
+      responses:
+        "302":
+          description: Redirects to destination URL
+        "404":
+          description: Slug not found
+
+  # ── QR ───────────────────────────────────────────────────────
+  /api/qr/analytics:
+    post:
+      tags: [qr]
+      summary: Get QR code analytics
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: QR analytics data
+
+  /api/qr/create:
+    post:
+      tags: [qr]
+      summary: Create a QR code record
+      description: Creates a qr_codes row with slug and destination. Used by the QR creation UI.
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Created QR code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QRCode"
+
+  /api/qr/delete:
+    post:
+      tags: [qr]
+      summary: Delete QR codes for a campaign
+      description: Clears qr_code_base64, purl, and qr_png_url from campaign_addresses rows.
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: QR codes deleted
+
+  # ── QR GENERATION JOBS ───────────────────────────────────────
+  /api/qr-generation-jobs/{jobId}:
+    get:
+      tags: [qr-generation-jobs]
+      summary: Get QR generation job status
+      description: Polls the status of an async QR generation job. No runtime web caller found.
+      x-status: unknown
+      x-no-web-caller: true
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Job status
+
+  # ── ROUTES ───────────────────────────────────────────────────
+  /api/routes/assign:
+    post:
+      tags: [routes]
+      summary: Assign route to team member
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Route assigned
+
+  /api/routes/assignments:
+    get:
+      tags: [routes]
+      summary: List route assignments
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Route assignments
+
+  /api/routes/assignments/status:
+    post:
+      tags: [routes]
+      summary: Update route assignment status
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Status updated
+
+  /api/routes/assignments/{assignmentId}:
+    get:
+      tags: [routes]
+      summary: Get route assignment detail
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: assignmentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Assignment detail
+
+  /api/routes/assignments/{assignmentId}/map:
+    get:
+      tags: [routes]
+      summary: Get map data for route assignment
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: assignmentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Route map data
+
+  /api/routes/create_from_segments:
+    post:
+      tags: [routes]
+      summary: Create route plan from road segments
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Route plan created
+
+  # ── SCAN (LEGACY HANDLER) ────────────────────────────────────
+  /api/scan:
+    get:
+      tags: [scan]
+      summary: Legacy QR scan handler
+      description: |
+        The current active scan handler for web-generated QR codes. All QR codes
+        generated by `/api/generate-qrs` point here via `purl`.
+
+        Handles multiple address resolution strategies including:
+        - Direct address ID (`?id=`)
+        - Campaign + address string (Canva-style QR codes)
+        - Campaign-level basic QR (`?campaignId=&basic=true`)
+
+        On successful scan: inserts `scan_events`, calls `increment_building_scans`
+        RPC, calls `increment_scan` RPC, then redirects to `campaign.video_url`.
+
+        This handler does NOT write to `qr_code_scans`. Analytics reading from
+        that table will not see scans recorded here.
+      x-status: working
+      x-note: Superseded by /api/q/[slug] for new QR codes. Do not remove — live QR codes in the wild point here.
+      parameters:
+        - name: id
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: campaign_addresses row ID
+        - name: campaignId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: address
+          in: query
+          schema:
+            type: string
+          description: Address string (Canva-style QR codes)
+        - name: basic
+          in: query
+          schema:
+            type: boolean
+          description: If true, record campaign-level scan only
+      responses:
+        "302":
+          description: Redirects to campaign video URL or app URL
+
+  # ── SHARE CARD ───────────────────────────────────────────────
+  /api/share-card:
+    get:
+      tags: [share-card]
+      summary: Get share card
+      x-status: unknown
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Share card data
+    post:
+      tags: [share-card]
+      summary: Generate share card
+      x-status: unknown
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Generated share card
+
+  # ── TEAM ─────────────────────────────────────────────────────
+  /api/team/activity:
+    get:
+      tags: [team]
+      summary: Get team activity feed
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Team activity events
+
+  /api/team/goals:
+    get:
+      tags: [team]
+      summary: Get team weekly goals
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Team goals
+    patch:
+      tags: [team]
+      summary: Update team weekly goals
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Goals updated
+
+  /api/team/invites:
+    get:
+      tags: [team]
+      summary: List team invites
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Team invites
+    post:
+      tags: [team]
+      summary: Create team invite
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Invite created
+
+  /api/team/invites/test-email:
+    post:
+      tags: [team]
+      summary: Send test invite email
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Test email sent
+
+  /api/team/invites/{inviteId}:
+    patch:
+      tags: [team]
+      summary: Update team invite
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: inviteId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Invite updated
+    delete:
+      tags: [team]
+      summary: Cancel team invite
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: inviteId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Invite cancelled
+
+  /api/team/leaderboard:
+    get:
+      tags: [team]
+      summary: Get team leaderboard
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Leaderboard data
+
+  /api/team/map:
+    get:
+      tags: [team]
+      summary: Get team map data
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Team map features
+
+  /api/team/members:
+    get:
+      tags: [team]
+      summary: List team members
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Team members with stats
+
+  /api/team/members/{userId}:
+    patch:
+      tags: [team]
+      summary: Update team member
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Member updated
+    delete:
+      tags: [team]
+      summary: Remove team member
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Member removed
+
+  /api/team/report:
+    get:
+      tags: [team]
+      summary: Get team performance report
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Team report
+
+  /api/team/roster:
+    get:
+      tags: [team]
+      summary: Get team roster
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Team roster
+
+  /api/team/session:
+    post:
+      tags: [team]
+      summary: Record team session event
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Session recorded
+
+  /api/team/summary:
+    get:
+      tags: [team]
+      summary: Get team dashboard summary
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Team summary
+
+  # ── UPLOAD CSV ───────────────────────────────────────────────
+  /api/upload-csv:
+    post:
+      tags: [upload-csv]
+      summary: Upload CSV of recipient addresses
+      description: |
+        Parses a CSV file and inserts rows into `campaign_addresses`.
+        Legacy path for adding addresses — map-based provisioning is preferred.
+      x-status: working
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                campaignId:
+                  type: string
+                  format: uuid
+      responses:
+        "200":
+          description: Addresses inserted
+        "400":
+          description: Invalid CSV
+
+  # ── USER GOALS ───────────────────────────────────────────────
+  /api/user/goals:
+    get:
+      tags: [user]
+      summary: Get user weekly goals
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: User goals
+    patch:
+      tags: [user]
+      summary: Update user weekly goals
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Goals updated
+
+  # ── ZIP QRS ──────────────────────────────────────────────────
+  /api/zip-qrs:
+    get:
+      tags: [zip-qrs]
+      summary: Download ZIP of campaign QR codes
+      description: |
+        Downloads all QR code PNGs for a campaign as a ZIP file, plus a
+        `vdp-manifest.csv` for professional printers.
+
+        **Currently broken:** Filters addresses on `qr_png_url IS NOT NULL`,
+        but `generate-qrs` writes `qr_code_base64` instead — so this always
+        returns 404 for any campaign generated today.
+
+        **Requires Pro entitlement.** Returns 402 for free users.
+
+        **iOS safe:** The iOS app does not call this route.
+
+        No runtime web UI caller found — this route is not yet wired to a download button.
+      x-status: broken
+      x-ios-coupled: false
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: campaignId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: ZIP file download
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        "402":
+          description: Pro subscription required
+        "404":
+          description: No QR codes found (currently always returned)
+        "401":
+          description: Unauthorized
+
+  # ── STRIPE LEGACY ALIASES ────────────────────────────────────
+  /api/stripe/checkout:
+    post:
+      tags: [billing]
+      summary: "[Legacy alias] Stripe checkout"
+      description: Re-exports /api/billing/stripe/checkout. Kept for backward compatibility.
+      x-status: working
+      x-legacy: true
+      x-alias-of: /api/billing/stripe/checkout
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Checkout session URL
+
+  /api/stripe/webhook:
+    post:
+      tags: [billing]
+      summary: "[Legacy alias] Stripe webhook"
+      description: Re-exports /api/billing/stripe/webhook. Kept for backward compatibility.
+      x-status: working
+      x-legacy: true
+      x-alias-of: /api/billing/stripe/webhook
+      responses:
+        "200":
+          description: Webhook processed
+
+  # ── TEST MODELS ──────────────────────────────────────────────
+  /api/test-models:
+    get:
+      tags: [admin]
+      summary: Test AI model availability
+      description: Development/debug route. No runtime web caller found.
+      x-status: unknown
+      x-no-web-caller: true
+      responses:
+        "200":
+          description: Model test results
