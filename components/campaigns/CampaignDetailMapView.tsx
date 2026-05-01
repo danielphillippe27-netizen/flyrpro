@@ -329,14 +329,9 @@ export function CampaignDetailMapView({
   // Boundary: Snap to Roads and Raw vs Snapped toggle
   const [snapping, setSnapping] = useState(false);
   const [parcels, setParcels] = useState<CampaignParcel[]>([]);
-  const [parcelsLoading, setParcelsLoading] = useState(false);
   const parcelEnrichmentStatus = campaign?.parcel_enrichment_status ?? 'not_started';
-  const parcelEnrichmentError = typeof campaign?.parcel_enrichment_error === 'string'
-    ? campaign.parcel_enrichment_error.trim()
-    : '';
   const parcelsReady = parcels.length > 0;
   const parcelsProcessing = parcelEnrichmentStatus === 'queued' || parcelEnrichmentStatus === 'processing';
-  const parcelsUnavailable = parcelEnrichmentStatus === 'skipped' || parcelEnrichmentStatus === 'failed';
   const showParcels = mapViewMode === 'parcels' && parcelsReady;
   const parcelStrokeColor = theme === 'dark' ? '#ffffff' : '#000000';
   const parcelFillOpacity = theme === 'dark' ? 0.12 : 0.1;
@@ -356,6 +351,11 @@ export function CampaignDetailMapView({
       addresses.filter((address) => !optimisticallyDeletedAddressIds.includes(address.id)),
     [addresses, optimisticallyDeletedAddressIds]
   );
+  const visibleAddressesRef = useRef(visibleAddresses);
+
+  useEffect(() => {
+    visibleAddressesRef.current = visibleAddresses;
+  }, [visibleAddresses]);
 
   const applyOptimisticMapDeletion = useCallback(
     ({
@@ -452,6 +452,12 @@ export function CampaignDetailMapView({
     setOptimisticallyDeletedAddressIds([]);
   }, [campaignId]);
 
+  useEffect(() => {
+    if (!parcelsReady && mapViewMode === 'parcels') {
+      setMapViewMode('buildings');
+    }
+  }, [mapViewMode, parcelsReady]);
+
   // Fetch parcels for this campaign
   useEffect(() => {
     if (!campaignId) return;
@@ -459,7 +465,6 @@ export function CampaignDetailMapView({
     let cancelled = false;
 
     const fetchParcels = async () => {
-      setParcelsLoading(true);
       const supabase = createClient();
       try {
         const data = await fetchAllInPages((from, to) =>
@@ -473,13 +478,11 @@ export function CampaignDetailMapView({
 
         if (!cancelled) {
           setParcels(data);
-          setParcelsLoading(false);
         }
       } catch (error) {
         console.error('Failed to fetch campaign parcels:', error);
         if (!cancelled) {
           setParcels([]);
-          setParcelsLoading(false);
         }
       }
     };
@@ -805,8 +808,9 @@ export function CampaignDetailMapView({
 
       // Helper to get initial center from addresses (GeoJSON-first approach)
       const getInitialCenter = (): [number, number] => {
-        if (visibleAddresses.length > 0) {
-          const addr = visibleAddresses[0];
+        const currentVisibleAddresses = visibleAddressesRef.current;
+        if (currentVisibleAddresses.length > 0) {
+          const addr = currentVisibleAddresses[0];
           const coordinate = getAddressCoordinate(addr);
           if (coordinate) {
             return [coordinate.lon, coordinate.lat];
@@ -939,7 +943,7 @@ export function CampaignDetailMapView({
         setMapLoaded(false);
       }
     };
-  }, [resolvedMapStyle, visibleAddresses]);
+  }, [resolvedMapStyle]);
 
   // Keep Mapbox canvas in sync with container size (sidebar collapse/expand, viewport changes).
   useEffect(() => {
@@ -1024,13 +1028,7 @@ export function CampaignDetailMapView({
         }, 200);
       }
     }
-
-    // Buildings are handled by MapBuildingsLayer component which provides fill extrusions
-
-    // Cleanup on unmount or address change
-    return () => {
-      boundsFittedRef.current = false; // Reset when addresses change
-    };
+    // Buildings are handled by MapBuildingsLayer component which provides fill extrusions.
   }, [mapLoaded, visibleAddresses]);
 
   const preparedAddressPoints = useMemo<PreparedAddressPoint[]>(() => {
@@ -1546,7 +1544,6 @@ export function CampaignDetailMapView({
   useEffect(() => {
     const m = map.current;
     if (!m || !mapLoaded) return;
-    if (parcels.length === 0) return;
 
     const removeParcelsLayer = () => {
       if (safeGetLayer(m, PARCEL_LABEL_LAYER)) m.removeLayer(PARCEL_LABEL_LAYER);
@@ -1555,6 +1552,11 @@ export function CampaignDetailMapView({
       if (safeGetSource(m, PARCEL_LABEL_SOURCE_ID)) m.removeSource(PARCEL_LABEL_SOURCE_ID);
       if (safeGetSource(m, PARCEL_SOURCE_ID)) m.removeSource(PARCEL_SOURCE_ID);
     };
+
+    if (parcels.length === 0) {
+      removeParcelsLayer();
+      return;
+    }
 
     const getParcelFillColorExpression = (): mapboxgl.Expression => {
       const status = ['get', 'status_key'];
@@ -1938,25 +1940,21 @@ export function CampaignDetailMapView({
                 >
                   Addresses
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setMapViewMode('parcels')}
-                  className={`px-3 py-2 text-sm font-medium transition-colors ${
-                    mapViewMode === 'parcels'
-                      ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
-                      : parcelsReady
-                        ? 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
-                        : 'text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/30'
-                  }`}
-                  title={
-                    parcelsReady
-                      ? `${parcels.length} parcel${parcels.length !== 1 ? 's' : ''} available`
-                      : parcelEnrichmentError || 'Parcel coverage is not available yet for this campaign.'
-                  }
-                >
-                  Parcels
-                  <span className="ml-1 text-xs opacity-60">({parcels.length})</span>
-                </button>
+                {parcelsReady ? (
+                  <button
+                    type="button"
+                    onClick={() => setMapViewMode('parcels')}
+                    className={`px-3 py-2 text-sm font-medium transition-colors ${
+                      mapViewMode === 'parcels'
+                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
+                        : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                    }`}
+                    title={`${parcels.length} parcel${parcels.length !== 1 ? 's' : ''} available`}
+                  >
+                    Parcels
+                    <span className="ml-1 text-xs opacity-60">({parcels.length})</span>
+                  </button>
+                ) : null}
               </div>
               <button
                 type="button"
@@ -1968,19 +1966,6 @@ export function CampaignDetailMapView({
                 {isMapFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
               </button>
             </div>
-            {!parcelsReady && parcelsProcessing && (
-              <div className="pointer-events-auto flex rounded-lg border border-amber-200 dark:border-amber-800 bg-white/90 dark:bg-black/80 backdrop-blur-sm shadow-sm overflow-hidden">
-                <div
-                  className="px-3 py-2 text-sm font-medium text-amber-700 dark:text-amber-300 flex items-center gap-2"
-                  title="Parcel coverage is still processing in the background"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 animate-pulse" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v3a1 1 0 002 0V7zm-1 8a1.25 1.25 0 100-2.5A1.25 1.25 0 0010 15z" clipRule="evenodd" />
-                  </svg>
-                  {parcelsLoading ? 'Loading parcel coverage…' : 'Parcels processing…'}
-                </div>
-              </div>
-            )}
           </div>
           {showBuildingPendingOverlay && buildingPendingOverlay ? (
             <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center p-4">
@@ -2006,34 +1991,6 @@ export function CampaignDetailMapView({
                       {buildingPendingOverlay.description}
                     </p>
                   </div>
-                </div>
-              </div>
-            </div>
-          ) : null}
-          {mapViewMode === 'parcels' && !parcelsReady ? (
-            <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center p-4">
-              <div className="w-full max-w-sm rounded-lg border border-border bg-background/92 p-4 shadow-lg backdrop-blur-sm">
-                <div className="space-y-1">
-                  <p className="text-sm font-semibold text-foreground">
-                    {parcelsProcessing ? 'Parcel coverage is processing' : 'No parcel coverage available'}
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    {parcelsProcessing
-                      ? parcelsLoading
-                        ? 'Loading parcel polygons for this campaign now.'
-                        : 'Parcel polygons are being prepared in the background and will appear here automatically.'
-                      : parcelEnrichmentError || 'This campaign does not have parcel polygons loaded yet.'}
-                  </p>
-                  {!parcelsProcessing && parcelEnrichmentStatus !== 'not_started' ? (
-                    <p className="pt-2 text-xs uppercase tracking-wide text-muted-foreground/80">
-                      Status: {parcelEnrichmentStatus}
-                    </p>
-                  ) : null}
-                  {parcelsUnavailable && !parcelEnrichmentError ? (
-                    <p className="pt-2 text-xs text-muted-foreground">
-                      Parcel enrichment completed without loading any parcel dataset for this region.
-                    </p>
-                  ) : null}
                 </div>
               </div>
             </div>
