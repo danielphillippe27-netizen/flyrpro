@@ -49,6 +49,14 @@ function formatExpiryChip(value: string): string {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
+function defaultFlyrPartnerExpiry(): string {
+  const couponExpiry = new Date(2026, 11, 31);
+  if (couponExpiry.getTime() > Date.now()) {
+    return toLocalDateInputValue(couponExpiry);
+  }
+  return toLocalDateInputValue(new Date(Date.now() + 1000 * 60 * 60 * 24 * 14));
+}
+
 function buildRecipientLabel(name: string, email: string): string {
   if (name.trim() && email.trim()) return `${name.trim()} <${email.trim()}>`;
   return name.trim() || email.trim() || 'Recipient';
@@ -105,12 +113,13 @@ export function PartnerOfferCreateForm() {
   }, [customLinkTouched, partnerName, subject]);
 
   const createDraft = useCallback(
-    async (template: OfferTemplate) => {
+    async (template: OfferTemplate, templateExpiresAt?: string) => {
       const previousDraft = draftOffer;
       const nextPayload = buildPayload({
         offerTitle: template.title,
         offerMessage: template.message,
         ctaLabel: template.ctaLabel,
+        ...(templateExpiresAt ? { expiresAt: expiresAtIsoFromDateInput(templateExpiresAt) } : {}),
         draft: true,
       });
 
@@ -230,13 +239,18 @@ export function PartnerOfferCreateForm() {
       setSubject(template.title);
       setMessageBody(template.message);
       setCtaLabel(template.ctaLabel);
+      const templateExpiresAt =
+        template.id === 'flyr-partner-free-forever' ? defaultFlyrPartnerExpiry() : undefined;
+      if (template.id === 'flyr-partner-free-forever') {
+        setExpiresAt(templateExpiresAt ?? expiresAt);
+      }
       if (!customLinkTouched) {
         const seed = partnerName.trim() || template.title;
         setVanitySlug(slugifyPartnerOfferPath(seed));
       }
-      await createDraft(template);
+      await createDraft(template, templateExpiresAt);
     },
-    [createDraft, customLinkTouched, partnerName]
+    [createDraft, customLinkTouched, expiresAt, partnerName]
   );
 
   const handleCopyLink = useCallback(async () => {

@@ -818,7 +818,7 @@ export function OptimizedRouteView({ campaignId, campaignName, addresses }: Opti
     const colorByGersId = new Map<string, string>();
 
     orderedAddresses.forEach((addr) => {
-      const color = effectiveAddressColorMap.get(addr.id) ?? '#ef4444';
+      const color = effectiveAddressColorMap.get(addr.id) ?? UNASSIGNED_MAP_COLOR;
       visibleAddressIds.add(addr.id);
       colorByAddressId.set(addr.id, color);
       if (addr.building_id) {
@@ -853,7 +853,7 @@ export function OptimizedRouteView({ campaignId, campaignName, addresses }: Opti
         (addressId && colorByAddressId.get(addressId)) ||
         (buildingId && colorByBuildingId.get(buildingId)) ||
         (gersId && colorByGersId.get(gersId)) ||
-        '#ef4444';
+        UNASSIGNED_MAP_COLOR;
       const resolvedAddressId =
         addressId ||
         (buildingId
@@ -1131,7 +1131,7 @@ export function OptimizedRouteView({ campaignId, campaignName, addresses }: Opti
         type: 'Feature' as const,
         geometry: { type: 'Point' as const, coordinates: [addr.lon, addr.lat] },
         properties: {
-          color: selectedAddressIds.includes(addr.id) ? '#fde047' : effectiveAddressColorMap.get(addr.id) || '#ef4444',
+          color: selectedAddressIds.includes(addr.id) ? '#fde047' : effectiveAddressColorMap.get(addr.id) || UNASSIGNED_MAP_COLOR,
           isUnknown: isUnknown ? 1 : 0,
           addressId: addr.id,
           isSelected: selectedAddressIds.includes(addr.id) ? 1 : 0,

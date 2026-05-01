@@ -28,7 +28,7 @@ const VISITED_OUTCOME_STATUSES = new Set<FarmAddressOutcomeStatus>([
 
 const MAP_OUTCOME_ACTIONS: Array<{ status: FarmAddressOutcomeStatus; label: string }> = [
   { status: 'delivered', label: 'Visited' },
-  { status: 'no_answer', label: 'No Answer' },
+  { status: 'no_answer', label: 'Attempted' },
   { status: 'talked', label: 'Conversation' },
   { status: 'do_not_knock', label: 'DNC' },
   { status: 'none', label: 'Reset' },

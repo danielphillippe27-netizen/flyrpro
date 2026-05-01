@@ -2,11 +2,12 @@
 --
 -- The shed-filter migration only affected new candidates. Existing
 -- campaign_addresses.building_id and building_address_links rows remained, and
--- the proximity passes could still reuse one footprint for several detached
--- addresses. This migration:
+-- the proximity passes could still create stale/ambiguous address assignments.
+-- This migration:
 --   1. clears existing campaign links at the start of each SQL linker run
 --   2. keeps the shed/outbuilding filter
---   3. makes parcel/proximity fallback one-to-one by requiring mutual best pairs
+--   3. ranks parcel/proximity fallback by address, so each address keeps only
+--      its single best building while buildings may keep multiple addresses
 
 CREATE OR REPLACE FUNCTION public.clear_campaign_building_links(
     p_campaign_id UUID
@@ -63,7 +64,7 @@ BEGIN
       AND b.geom && ca.geom
       AND ST_Covers(b.geom, ca.geom);
 
-    -- Parcel bridge: mutual best address/building pair inside the same parcel.
+    -- Parcel bridge: best building for each address inside the same parcel.
     WITH candidates AS (
         SELECT
             ca.id AS address_id,
@@ -85,8 +86,7 @@ BEGIN
     ranked AS (
         SELECT
             *,
-            row_number() OVER (PARTITION BY address_id ORDER BY area_sqm DESC, dist ASC, building_id) AS address_rank,
-            row_number() OVER (PARTITION BY building_id ORDER BY dist ASC, address_id) AS building_rank
+            row_number() OVER (PARTITION BY address_id ORDER BY area_sqm DESC, dist ASC, building_id) AS address_rank
         FROM candidates
     )
     UPDATE public.campaign_addresses ca
@@ -95,11 +95,9 @@ BEGIN
         confidence = 0.95
     FROM ranked
     WHERE ca.id = ranked.address_id
-      AND ranked.address_rank = 1
-      AND ranked.building_rank = 1;
+      AND ranked.address_rank = 1;
 
-    -- Proximity fallback: mutual nearest, so one detached footprint cannot be
-    -- claimed by multiple neighboring addresses.
+    -- Proximity fallback: nearest valid building per address.
     WITH candidates AS (
         SELECT
             ca.id AS address_id,
@@ -118,8 +116,7 @@ BEGIN
     ranked AS (
         SELECT
             *,
-            row_number() OVER (PARTITION BY address_id ORDER BY dist ASC, building_id) AS address_rank,
-            row_number() OVER (PARTITION BY building_id ORDER BY dist ASC, address_id) AS building_rank
+            row_number() OVER (PARTITION BY address_id ORDER BY dist ASC, building_id) AS address_rank
         FROM candidates
     )
     UPDATE public.campaign_addresses ca
@@ -128,8 +125,7 @@ BEGIN
         confidence = GREATEST(0.5, 1.0 - (ranked.dist / 60.0))
     FROM ranked
     WHERE ca.id = ranked.address_id
-      AND ranked.address_rank = 1
-      AND ranked.building_rank = 1;
+      AND ranked.address_rank = 1;
 END;
 $$;
 
@@ -193,7 +189,7 @@ BEGIN
 
     GET DIAGNOSTICS v_gold_exact = ROW_COUNT;
 
-    -- Gold parcel, one-to-one.
+    -- Gold parcel: best building per address.
     WITH candidates AS (
         SELECT
             ca.id AS address_id,
@@ -215,8 +211,7 @@ BEGIN
     ranked AS (
         SELECT
             *,
-            row_number() OVER (PARTITION BY address_id ORDER BY area_sqm DESC, dist ASC, building_id) AS address_rank,
-            row_number() OVER (PARTITION BY building_id ORDER BY dist ASC, address_id) AS building_rank
+            row_number() OVER (PARTITION BY address_id ORDER BY area_sqm DESC, dist ASC, building_id) AS address_rank
         FROM candidates
     )
     UPDATE public.campaign_addresses ca
@@ -225,12 +220,11 @@ BEGIN
         confidence = 0.95
     FROM ranked
     WHERE ca.id = ranked.address_id
-      AND ranked.address_rank = 1
-      AND ranked.building_rank = 1;
+      AND ranked.address_rank = 1;
 
     GET DIAGNOSTICS v_gold_parcel = ROW_COUNT;
 
-    -- Gold proximity, one-to-one.
+    -- Gold proximity: nearest valid building per address.
     WITH candidates AS (
         SELECT
             ca.id AS address_id,
@@ -249,8 +243,7 @@ BEGIN
     ranked AS (
         SELECT
             *,
-            row_number() OVER (PARTITION BY address_id ORDER BY dist ASC, building_id) AS address_rank,
-            row_number() OVER (PARTITION BY building_id ORDER BY dist ASC, address_id) AS building_rank
+            row_number() OVER (PARTITION BY address_id ORDER BY dist ASC, building_id) AS address_rank
         FROM candidates
     )
     UPDATE public.campaign_addresses ca
@@ -259,8 +252,7 @@ BEGIN
         confidence = GREATEST(0.5, 1.0 - (ranked.dist / 60.0))
     FROM ranked
     WHERE ca.id = ranked.address_id
-      AND ranked.address_rank = 1
-      AND ranked.building_rank = 1;
+      AND ranked.address_rank = 1;
 
     GET DIAGNOSTICS v_gold_prox = ROW_COUNT;
 
@@ -286,7 +278,7 @@ BEGIN
 
     GET DIAGNOSTICS v_silver_exact = ROW_COUNT;
 
-    -- Silver parcel, one-to-one.
+    -- Silver parcel: best building per address.
     WITH candidates AS (
         SELECT
             ca.id AS address_id,
@@ -312,8 +304,7 @@ BEGIN
     ranked AS (
         SELECT
             *,
-            row_number() OVER (PARTITION BY address_id ORDER BY area_sqm DESC, dist ASC, building_id) AS address_rank,
-            row_number() OVER (PARTITION BY building_id ORDER BY dist ASC, address_id) AS building_rank
+            row_number() OVER (PARTITION BY address_id ORDER BY area_sqm DESC, dist ASC, building_id) AS address_rank
         FROM candidates
     )
     INSERT INTO public.building_address_links (campaign_id, address_id, building_id, match_type, confidence, distance_meters)
@@ -326,12 +317,11 @@ BEGIN
         ROUND(dist::numeric, 2)
     FROM ranked
     WHERE address_rank = 1
-      AND building_rank = 1
     ON CONFLICT (campaign_id, address_id) DO NOTHING;
 
     GET DIAGNOSTICS v_silver_parcel = ROW_COUNT;
 
-    -- Silver proximity, one-to-one.
+    -- Silver proximity: nearest valid building per address.
     WITH candidates AS (
         SELECT
             ca.id AS address_id,
@@ -354,8 +344,7 @@ BEGIN
     ranked AS (
         SELECT
             *,
-            row_number() OVER (PARTITION BY address_id ORDER BY dist ASC, building_id) AS address_rank,
-            row_number() OVER (PARTITION BY building_id ORDER BY dist ASC, address_id) AS building_rank
+            row_number() OVER (PARTITION BY address_id ORDER BY dist ASC, building_id) AS address_rank
         FROM candidates
     )
     INSERT INTO public.building_address_links (campaign_id, address_id, building_id, match_type, confidence, distance_meters)
@@ -368,7 +357,6 @@ BEGIN
         dist
     FROM ranked
     WHERE address_rank = 1
-      AND building_rank = 1
     ON CONFLICT (campaign_id, address_id) DO NOTHING;
 
     GET DIAGNOSTICS v_silver_prox = ROW_COUNT;
@@ -386,9 +374,9 @@ GRANT EXECUTE ON FUNCTION public.link_campaign_addresses_gold(UUID, JSONB) TO au
 GRANT EXECUTE ON FUNCTION public.link_campaign_addresses_all(UUID) TO authenticated, service_role;
 
 COMMENT ON FUNCTION public.link_campaign_addresses_gold(UUID, JSONB) IS
-'Gold linker with reset, shed filtering, and one-to-one parcel/proximity assignment.';
+'Gold linker with reset, shed filtering, and one-best-building-per-address parcel/proximity assignment.';
 
 COMMENT ON FUNCTION public.link_campaign_addresses_all(UUID) IS
-'Gold/Silver linker with reset, shed filtering, and one-to-one parcel/proximity assignment.';
+'Gold/Silver linker with reset, shed filtering, and one-best-building-per-address parcel/proximity assignment.';
 
 NOTIFY pgrst, 'reload schema';

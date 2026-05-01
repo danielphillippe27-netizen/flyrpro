@@ -554,16 +554,39 @@ export function AssignedRoutesView({
     const isQrScanned = ['any', ['==', getQrScanned(), true], ['>', getScansTotal(), 0]];
     const isConversation = [
       'any',
-      ['in', getAddressStatus(), ['literal', ['talked', 'appointment']]],
+      ['==', getAddressStatus(), 'talked'],
       ['==', getStatus(), 'hot'],
+    ];
+    const isHotLead = [
+      'any',
+      ['in', getAddressStatus(), ['literal', ['appointment', 'future_seller', 'hot_lead']]],
+      ['==', getStatus(), 'hot_lead'],
+    ];
+    const isLead = [
+      'any',
+      ['==', getStatus(), 'lead'],
+    ];
+    const isDoNotKnock = ['any', ['==', getAddressStatus(), 'do_not_knock'], ['==', getStatus(), 'do_not_knock']];
+    const isNoOneHome = [
+      'any',
+      ['in', getAddressStatus(), ['literal', ['no_answer', 'not_home']]],
+      ['==', getStatus(), 'no_answer'],
     ];
     const isTouched = ['any', ['==', getAddressStatus(), 'delivered'], ['==', getStatus(), 'visited']];
     return [
       'case',
       isQrScanned,
       MAP_STATUS_CONFIG.QR_SCANNED.color,
+      isHotLead,
+      MAP_STATUS_CONFIG.HOT_LEADS.color,
+      isLead,
+      MAP_STATUS_CONFIG.LEADS.color,
       isConversation,
       MAP_STATUS_CONFIG.CONVERSATIONS.color,
+      isDoNotKnock,
+      MAP_STATUS_CONFIG.DO_NOT_KNOCK.color,
+      isNoOneHome,
+      MAP_STATUS_CONFIG.NO_ONE_HOME.color,
       isTouched,
       MAP_STATUS_CONFIG.TOUCHED.color,
       MAP_STATUS_CONFIG.UNTOUCHED.color,

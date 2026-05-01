@@ -10,6 +10,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import {
+  DEFAULT_STATUS_FILTERS,
   MAP_STATUS_CONFIG,
   MAP_STATUS_PRIORITY,
   type MapStatusKey,
@@ -67,8 +68,11 @@ interface MapInfoSheetProps {
  */
 const TOOL_FILTER_ITEMS: Array<{ key: MapStatusKey; label: string }> = [
   { key: 'QR_SCANNED', label: 'QR codes scanned' },
+  { key: 'LEADS', label: 'Leads' },
   { key: 'CONVERSATIONS', label: 'Conversations' },
   { key: 'TOUCHED', label: 'Visited homes' },
+  { key: 'NO_ONE_HOME', label: 'Attempted' },
+  { key: 'DO_NOT_KNOCK', label: 'Do not knock' },
   { key: 'UNTOUCHED', label: 'Unvisited' },
 ];
 
@@ -82,12 +86,7 @@ export function MapInfoSheet({
 }: MapInfoSheetProps) {
   const [showMapConfigurator, setShowMapConfigurator] = useState(false);
   const { preset, setPreset } = useMapStyle();
-  const activeStatusFilters: StatusFilters = statusFilters ?? {
-    QR_SCANNED: true,
-    CONVERSATIONS: true,
-    TOUCHED: true,
-    UNTOUCHED: true,
-  };
+  const activeStatusFilters: StatusFilters = statusFilters ?? DEFAULT_STATUS_FILTERS;
 
   const handleStatusToggle = (key: MapStatusKey, checked: boolean) => {
     if (!statusFilters || !onStatusFiltersChange) return;

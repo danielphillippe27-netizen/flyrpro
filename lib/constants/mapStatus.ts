@@ -3,9 +3,20 @@
 
 // ----- Building / session map (building_stats) -----
 // Table: building_stats, Column: status
-// Green = visited (touched/knocked), Blue = hot (conversation), Red = not_visited
+// Flyer mode: red = unvisited, green = visited.
+// Door-knock mode: slate = unvisited, coral = no answer, green = conversation,
+// blue = lead, gold = hot lead / appointment / follow-up,
+// purple = QR scan, black = do not knock.
 
-export type MapStatusKey = 'QR_SCANNED' | 'CONVERSATIONS' | 'TOUCHED' | 'UNTOUCHED';
+export type MapStatusKey =
+  | 'QR_SCANNED'
+  | 'CONVERSATIONS'
+  | 'LEADS'
+  | 'HOT_LEADS'
+  | 'TOUCHED'
+  | 'NO_ONE_HOME'
+  | 'DO_NOT_KNOCK'
+  | 'UNTOUCHED';
 
 export interface MapStatusConfig {
   key: MapStatusKey;
@@ -14,35 +25,60 @@ export interface MapStatusConfig {
 }
 
 /**
- * Building map status config. Raw DB values: not_visited | visited | hot.
- * Priority: QR_SCANNED > CONVERSATIONS (hot) > TOUCHED (visited) > UNTOUCHED (not_visited).
+ * Building map status config.
+ * Priority: QR_SCANNED > HOT_LEADS > LEADS > CONVERSATIONS > DO_NOT_KNOCK > NO_ONE_HOME > TOUCHED > UNTOUCHED.
  */
 export const MAP_STATUS_CONFIG: Record<MapStatusKey, MapStatusConfig> = {
   QR_SCANNED: {
     key: 'QR_SCANNED',
     label: 'QR Code Scanned',
-    color: '#a855f7', // Purple
+    color: '#8b5cf6',
   },
   CONVERSATIONS: {
     key: 'CONVERSATIONS',
-    label: 'Conversations',
-    color: '#3b82f6', // Blue — building_stats.status = 'hot'
+    label: 'Conversation',
+    color: '#22c55e',
+  },
+  LEADS: {
+    key: 'LEADS',
+    label: 'Lead',
+    color: '#3b82f6',
+  },
+  HOT_LEADS: {
+    key: 'HOT_LEADS',
+    label: 'Hot lead',
+    color: '#facc15',
   },
   TOUCHED: {
     key: 'TOUCHED',
-    label: 'Touched',
-    color: '#22c55e', // Green — building_stats.status = 'visited'
+    label: 'Visited',
+    color: '#22c55e',
+  },
+  NO_ONE_HOME: {
+    key: 'NO_ONE_HOME',
+    label: 'Attempted',
+    color: '#f87171',
+  },
+  DO_NOT_KNOCK: {
+    key: 'DO_NOT_KNOCK',
+    label: 'Do not knock',
+    color: '#000000',
   },
   UNTOUCHED: {
     key: 'UNTOUCHED',
-    label: 'Untouched',
-    color: '#dc2626', // Darker red — building_stats.status = 'not_visited'
+    label: 'Unvisited',
+    color: '#475569',
   },
+} as const;
+
+export const FLYER_MODE_STATUS_COLORS = {
+  unvisited: MAP_STATUS_CONFIG.UNTOUCHED.color,
+  visited: '#22c55e',
 } as const;
 
 // ----- Address map (address_statuses) -----
 // Table: address_statuses, Column: status
-// Green = delivered, Blue = talked | appointment
+// Door-knock address colors follow the shared campaign map palette.
 
 export type AddressStatusValue =
   | 'none'
@@ -57,7 +93,7 @@ export type AddressStatusValue =
 /** Map address_status to display label (optional, for UI). */
 export const ADDRESS_STATUS_LABELS: Record<AddressStatusValue, string> = {
   none: 'None',
-  no_answer: 'No answer',
+  no_answer: 'Attempted',
   delivered: 'Delivered',
   talked: 'Talked',
   appointment: 'Appointment',
@@ -66,13 +102,17 @@ export const ADDRESS_STATUS_LABELS: Record<AddressStatusValue, string> = {
   hot_lead: 'Hot lead',
 };
 
-/** Address map colors: green = delivered, blue = talked/appointment, red = rest. */
+/** Address map colors follow the shared campaign map palette. */
 export const ADDRESS_STATUS_COLORS: Record<string, string> = {
-  delivered: '#22c55e',   // Green
-  talked: '#3b82f6',      // Blue
-  appointment: '#3b82f6', // Blue
+  no_answer: MAP_STATUS_CONFIG.NO_ONE_HOME.color,
+  delivered: MAP_STATUS_CONFIG.TOUCHED.color,
+  talked: MAP_STATUS_CONFIG.CONVERSATIONS.color,
+  appointment: MAP_STATUS_CONFIG.HOT_LEADS.color,
+  do_not_knock: MAP_STATUS_CONFIG.DO_NOT_KNOCK.color,
+  future_seller: MAP_STATUS_CONFIG.HOT_LEADS.color,
+  hot_lead: MAP_STATUS_CONFIG.HOT_LEADS.color,
 };
-const ADDRESS_MAP_DEFAULT_COLOR = '#ef4444'; // Red for none, no_answer, etc.
+const ADDRESS_MAP_DEFAULT_COLOR = MAP_STATUS_CONFIG.UNTOUCHED.color;
 
 export function getAddressStatusColor(status: string | undefined | null): string {
   if (!status) return ADDRESS_MAP_DEFAULT_COLOR;
@@ -81,7 +121,7 @@ export function getAddressStatusColor(status: string | undefined | null): string
 
 /** True if address status should show as blue (conversation). */
 export function isAddressStatusBlue(status: string | undefined | null): boolean {
-  return status === 'talked' || status === 'appointment';
+  return status === 'talked';
 }
 
 /** True if address status should show as green (delivered). */
@@ -94,7 +134,11 @@ export function isAddressStatusGreen(status: string | undefined | null): boolean
  */
 export const MAP_STATUS_PRIORITY: MapStatusKey[] = [
   'QR_SCANNED',
-  'CONVERSATIONS', 
+  'HOT_LEADS',
+  'LEADS',
+  'CONVERSATIONS',
+  'DO_NOT_KNOCK',
+  'NO_ONE_HOME',
   'TOUCHED',
   'UNTOUCHED',
 ];
@@ -105,7 +149,11 @@ export const MAP_STATUS_PRIORITY: MapStatusKey[] = [
 export const DEFAULT_STATUS_FILTERS: Record<MapStatusKey, boolean> = {
   QR_SCANNED: true,
   CONVERSATIONS: true,
+  LEADS: true,
+  HOT_LEADS: true,
   TOUCHED: true,
+  NO_ONE_HOME: true,
+  DO_NOT_KNOCK: true,
   UNTOUCHED: true,
 };
 

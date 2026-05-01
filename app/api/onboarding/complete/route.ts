@@ -17,6 +17,10 @@ import {
   resolveApprovedAmbassadorReferralCode,
 } from '@/app/lib/billing/ambassador-program';
 import { sendWorkspaceInviteEmail } from '@/lib/email/resend';
+import {
+  FLYR_PARTNER_FREE_FOREVER_REFERRAL_CODE,
+  isFlyrPartnerFreeForeverOffer,
+} from '@/components/offers/partnerOfferUtils';
 
 const INDUSTRIES = [
   'Real Estate',
@@ -225,10 +229,11 @@ export async function POST(request: NextRequest) {
         : null;
 
     let isValidPartnerExclusiveOffer = false;
+    let partnerOfferReferralCode: string | null = null;
     if (partnerOfferToken) {
       const { data: offer } = await admin
         .from('partner_offers')
-        .select('id, expires_at, revoked_at, max_views, view_count')
+        .select('id, offer_title, offer_message, expires_at, revoked_at, max_views, view_count')
         .eq('token', partnerOfferToken)
         .maybeSingle();
       if (offer) {
@@ -237,6 +242,12 @@ export async function POST(request: NextRequest) {
         const underViewLimit =
           offer.max_views == null || offer.view_count < offer.max_views;
         isValidPartnerExclusiveOffer = notRevoked && notExpired && underViewLimit;
+        if (
+          isValidPartnerExclusiveOffer &&
+          isFlyrPartnerFreeForeverOffer(offer.offer_title, offer.offer_message)
+        ) {
+          partnerOfferReferralCode = FLYR_PARTNER_FREE_FOREVER_REFERRAL_CODE;
+        }
       }
     }
 
@@ -267,13 +278,14 @@ export async function POST(request: NextRequest) {
         ? industry
         : industry.trim();
     }
-    if (referralCode !== undefined) {
+    if (referralCode !== undefined || partnerOfferReferralCode) {
       const normalizedReferralCode =
-        typeof referralCode === 'string' && referralCode.trim()
+        partnerOfferReferralCode ??
+        (typeof referralCode === 'string' && referralCode.trim()
           ? normalizeAmbassadorReferralCodeInput(referralCode)
-          : null;
+          : null);
 
-      if (normalizedReferralCode) {
+      if (normalizedReferralCode && !partnerOfferReferralCode) {
         const ambassadorReferral = await resolveApprovedAmbassadorReferralCode(
           admin,
           normalizedReferralCode

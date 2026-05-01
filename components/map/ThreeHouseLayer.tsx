@@ -58,7 +58,7 @@ export class ThreeHouseLayer {
     const addressId = feature.properties.address_id;
     const isScanned = addressId && this.scannedPropertyIds.has(addressId);
     if (isScanned) {
-      return '#a855f7';
+      return '#8b5cf6';
     }
 
     if (feature.properties.color) {
@@ -78,16 +78,29 @@ export class ThreeHouseLayer {
   private getStatusColor(status?: BuildingStatus | string): string {
     switch (status) {
       case 'interested':
-        return '#10b981'; // Green
+        return '#3b82f6';
       case 'dnc':
-        return '#ef4444'; // Red
+      case 'do_not_knock':
+        return '#000000';
       case 'available':
-        return '#ef4444'; // Red (for newly provisioned buildings)
+      case 'not_visited':
+        return '#475569';
       case 'not_home':
-        return '#f97316'; // Orange
+      case 'no_answer':
+        return '#f87171';
+      case 'visited':
+        return '#22c55e';
+      case 'hot':
+        return '#22c55e';
+      case 'lead':
+        return '#3b82f6';
+      case 'hot_lead':
+      case 'appointment':
+      case 'future_seller':
+        return '#facc15';
       case 'default':
       default:
-        return '#6b7280'; // Grey
+        return '#475569';
     }
   }
 

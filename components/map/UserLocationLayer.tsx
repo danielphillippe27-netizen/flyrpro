@@ -29,6 +29,7 @@ export function UserLocationLayer({
   const markerRef = useRef<mapboxgl.Marker | null>(null);
   const rootRef = useRef<ReturnType<typeof createRoot> | null>(null);
   const elRef = useRef<HTMLDivElement | null>(null);
+  const locationRequestIdRef = useRef(0);
   const onLocationFoundRef = useRef(onLocationFound);
   const onLocationErrorRef = useRef(onLocationError);
 
@@ -45,14 +46,20 @@ export function UserLocationLayer({
       markerRef.current.remove();
       markerRef.current = null;
     }
-    if (rootRef.current && elRef.current) {
-      rootRef.current.unmount();
+
+    const root = rootRef.current;
+    if (root) {
       rootRef.current = null;
       elRef.current = null;
+      setTimeout(() => {
+        root.unmount();
+      }, 0);
     }
   }, []);
 
   useEffect(() => {
+    const requestId = ++locationRequestIdRef.current;
+
     if (!showUserLocation || !map || !mapLoaded) {
       clearMarker();
       return;
@@ -72,6 +79,8 @@ export function UserLocationLayer({
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
+        if (requestId !== locationRequestIdRef.current) return;
+
         const { longitude, latitude } = position.coords;
         if (!map) return;
 
@@ -94,6 +103,7 @@ export function UserLocationLayer({
         onLocationFoundRef.current?.(longitude, latitude);
       },
       (err) => {
+        if (requestId !== locationRequestIdRef.current) return;
         onLocationErrorRef.current?.(err);
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }

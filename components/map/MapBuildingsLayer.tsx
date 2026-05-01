@@ -1,18 +1,19 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import type { Map } from 'mapbox-gl';
+import type { Map as MapboxMap } from 'mapbox-gl';
 import mapboxgl from 'mapbox-gl';
 import { createClient } from '@/lib/supabase/client';
 import type { BuildingFeatureCollection, BuildingFeature, BuildingProperties, GetBuildingsInBboxParams } from '@/types/map-buildings';
-import type { CampaignAddress } from '@/types/database';
+import type { CampaignAddress, CampaignType } from '@/types/database';
 import { getCampaignAddressMapStatus, getCampaignBuildingStatus } from '@/lib/campaignStats';
-import { MAP_STATUS_CONFIG, type StatusFilters } from '@/lib/constants/mapStatus';
+import { DEFAULT_STATUS_FILTERS, FLYER_MODE_STATUS_COLORS, MAP_STATUS_CONFIG, type StatusFilters } from '@/lib/constants/mapStatus';
 import { displayAddressText, resolveHouseNumberLabel } from '@/lib/map/addressPresentation';
 
 interface MapBuildingsLayerProps {
-  map: Map;
+  map: MapboxMap;
   campaignId?: string | null;
+  campaignType?: CampaignType | null;
   refreshKey?: number;
   addressStateOverrides?: CampaignAddress[];
   hiddenBuildingIds?: string[];
@@ -42,12 +43,7 @@ export type MapBuildingsRenderState = {
   zoomLevel: number;
 };
 
-const defaultStatusFilters: StatusFilters = {
-  QR_SCANNED: true,
-  CONVERSATIONS: true,
-  TOUCHED: true,
-  UNTOUCHED: true,
-};
+const defaultStatusFilters: StatusFilters = DEFAULT_STATUS_FILTERS;
 
 /** Scale factor for building footprints (1 = unchanged, <1 = skinnier). */
 const FOOTPRINT_SCALE = 1;
@@ -182,9 +178,19 @@ function buildAddressLabelFeatureCollection(
   };
 }
 
+function safeGetSource(map: MapboxMap, sourceId: string): boolean {
+  try {
+    if (!map.isStyleLoaded()) return false;
+    return Boolean(map.getSource(sourceId));
+  } catch {
+    return false;
+  }
+}
+
 export function MapBuildingsLayer({
   map,
   campaignId,
+  campaignType,
   refreshKey = 0,
   addressStateOverrides,
   hiddenBuildingIds = [],
@@ -197,13 +203,16 @@ export function MapBuildingsLayer({
   onAddToCRM,
   onRenderStateChange,
 }: MapBuildingsLayerProps) {
+  const isFlyerMode = campaignType === 'flyer';
   const [features, setFeatures] = useState<BuildingFeatureCollection | null>(null);
   const [isFetching, setIsFetching] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(15);
   const sourceId = 'map-buildings-source';
   const layerId = 'map-buildings-extrusion';
   const shadowLayerId = 'map-buildings-shadow';
+  const leadGlowLayerId = 'map-buildings-lead-glow';
   const circleLayerId = 'map-buildings-extrusion-points';
+  const circleLeadGlowLayerId = 'map-buildings-lead-glow-points';
   const addressLabelSourceId = 'map-address-centroid-label-source';
   const addressLabelLayerId = 'map-address-centroid-labels';
   const supabase = createClient();
@@ -221,6 +230,7 @@ export function MapBuildingsLayer({
     if (!map || !campaignId || !features?.features?.length || !addressStateOverrides?.length) return;
 
     let cancelled = false;
+    let frameId: number | null = null;
 
     const addressStateById = new Map(
       addressStateOverrides.map((address) => [
@@ -235,10 +245,10 @@ export function MapBuildingsLayer({
 
     const buildingStateById = new Map<
       string,
-      { status: 'not_visited' | 'visited' | 'hot'; scans_total: number; qr_scanned: boolean }
+      { status: 'not_visited' | 'visited' | 'hot' | 'lead' | 'hot_lead' | 'no_answer' | 'do_not_knock'; scans_total: number; qr_scanned: boolean }
     >();
 
-    const statusRank = { not_visited: 0, visited: 1, hot: 2 } as const;
+    const statusRank = { not_visited: 0, visited: 1, no_answer: 2, do_not_knock: 3, hot: 4, lead: 5, hot_lead: 6 } as const;
 
     for (const address of addressStateOverrides) {
       const buildingId =
@@ -272,9 +282,9 @@ export function MapBuildingsLayer({
     const applyOverrides = (attempt = 0) => {
       if (cancelled) return;
 
-      if (!map.getSource(sourceId)) {
+      if (!safeGetSource(map, sourceId)) {
         if (attempt < 5) {
-          requestAnimationFrame(() => applyOverrides(attempt + 1));
+          frameId = requestAnimationFrame(() => applyOverrides(attempt + 1));
         }
         return;
       }
@@ -303,6 +313,7 @@ export function MapBuildingsLayer({
 
     return () => {
       cancelled = true;
+      if (frameId !== null) cancelAnimationFrame(frameId);
     };
   }, [map, campaignId, features, addressStateOverrides]);
 
@@ -313,40 +324,78 @@ export function MapBuildingsLayer({
   };
 
   // Generate unified color expression based on status priority
-  // Priority: QR_SCANNED > CONVERSATIONS > TOUCHED > UNTOUCHED
+  // Priority: QR_SCANNED > LEADS > CONVERSATIONS > DO_NOT_KNOCK > NO_ONE_HOME > TOUCHED > UNTOUCHED
   // Uses ['feature-state', ...] for real-time updates via setFeatureState(),
   // with fallback to ['get', ...] for initial data from properties
   const getColorExpression = (): any => {
     // Helper expressions - check feature-state first (real-time), then source properties (initial load)
     const getStatusValue = () => ['coalesce', ['feature-state', 'status'], ['get', 'status'], 'not_visited'];
+    const getAddressStatus = () => ['coalesce', ['feature-state', 'address_status'], ['get', 'address_status'], 'none'];
     const getScansTotal = () => ['coalesce', ['feature-state', 'scans_total'], ['get', 'scans_total'], 0];
     const getQrScanned = () => ['coalesce', ['feature-state', 'qr_scanned'], ['get', 'qr_scanned'], false];
+    if (isFlyerMode) {
+      const isVisited = [
+        'any',
+        ['==', getStatusValue(), 'visited'],
+        ['==', getStatusValue(), 'hot'],
+        ['==', getStatusValue(), 'lead'],
+        ['==', getStatusValue(), 'hot_lead'],
+        ['==', getStatusValue(), 'no_answer'],
+        ['==', getStatusValue(), 'do_not_knock'],
+        ['!=', getAddressStatus(), 'none'],
+        ['==', getQrScanned(), true],
+        ['>', getScansTotal(), 0],
+      ];
+      return ['case', isVisited, FLYER_MODE_STATUS_COLORS.visited, FLYER_MODE_STATUS_COLORS.unvisited] as any;
+    }
     const isQrScanned = ['any', ['==', getQrScanned(), true], ['>', getScansTotal(), 0]];
-    const isConversation = ['all', ['==', getStatusValue(), 'hot'], ['!', isQrScanned]];
-    const isTouched = ['all', ['==', getStatusValue(), 'visited'], ['!', isQrScanned]];
-    const isUntouched = ['==', getStatusValue(), 'not_visited'];
+    const isHotLead = ['any', ['==', getStatusValue(), 'hot_lead'], ['in', getAddressStatus(), ['literal', ['appointment', 'future_seller', 'hot_lead']]]];
+    const isLead = ['==', getStatusValue(), 'lead'];
+    const isConversation = ['any', ['==', getStatusValue(), 'hot'], ['==', getAddressStatus(), 'talked']];
+    const isDoNotKnock = ['any', ['==', getStatusValue(), 'do_not_knock'], ['==', getAddressStatus(), 'do_not_knock']];
+    const isNoOneHome = ['any', ['==', getStatusValue(), 'no_answer'], ['in', getAddressStatus(), ['literal', ['no_answer', 'not_home']]]];
+    const isTouched = ['any', ['==', getStatusValue(), 'visited'], ['==', getAddressStatus(), 'delivered']];
+    const isUntouched = ['all', ['==', getStatusValue(), 'not_visited'], ['==', getAddressStatus(), 'none']];
     
     return [
       'case',
       // QR_SCANNED (highest priority)
       ['all', isQrScanned, statusFilters.QR_SCANNED],
-      MAP_STATUS_CONFIG.QR_SCANNED.color, // Purple
+      MAP_STATUS_CONFIG.QR_SCANNED.color,
+
+      ['all', isHotLead, statusFilters.HOT_LEADS],
+      MAP_STATUS_CONFIG.HOT_LEADS.color,
+
+      ['all', isLead, statusFilters.LEADS],
+      MAP_STATUS_CONFIG.LEADS.color,
       
-      // CONVERSATIONS
       ['all', isConversation, statusFilters.CONVERSATIONS],
-      MAP_STATUS_CONFIG.CONVERSATIONS.color, // Blue
+      MAP_STATUS_CONFIG.CONVERSATIONS.color,
+
+      ['all', isDoNotKnock, statusFilters.DO_NOT_KNOCK],
+      MAP_STATUS_CONFIG.DO_NOT_KNOCK.color,
+
+      ['all', isNoOneHome, statusFilters.NO_ONE_HOME],
+      MAP_STATUS_CONFIG.NO_ONE_HOME.color,
       
-      // TOUCHED
       ['all', isTouched, statusFilters.TOUCHED],
-      MAP_STATUS_CONFIG.TOUCHED.color, // Green
+      MAP_STATUS_CONFIG.TOUCHED.color,
       
-      // UNTOUCHED
       ['all', isUntouched, statusFilters.UNTOUCHED],
-      MAP_STATUS_CONFIG.UNTOUCHED.color, // Red
+      MAP_STATUS_CONFIG.UNTOUCHED.color,
 
       // Baseline when no toggle applies
       NEUTRAL_FOOTPRINT_COLOR,
     ] as any;
+  };
+
+  const getLeadGlowOpacityExpression = (): any => {
+    if (isFlyerMode) return ['case', false, 0, 0] as any;
+    const getStatusValue = () => ['coalesce', ['feature-state', 'status'], ['get', 'status'], 'not_visited'];
+    const getAddressStatus = () => ['coalesce', ['feature-state', 'address_status'], ['get', 'address_status'], 'none'];
+    const isLead = ['any', ['==', getStatusValue(), 'hot_lead'], ['in', getAddressStatus(), ['literal', ['appointment', 'future_seller', 'hot_lead']]]];
+
+    return ['case', ['all', isLead, statusFilters.HOT_LEADS], 0.82, 0] as any;
   };
 
   /** Neutral footprint when not using status colors (visible on map, not loud red/salmon). */
@@ -598,9 +647,23 @@ export function MapBuildingsLayer({
           // Layer might not exist
         }
       }
+      if (map.getLayer(leadGlowLayerId)) {
+        try {
+          map.removeLayer(leadGlowLayerId);
+        } catch (err) {
+          // Layer might not exist
+        }
+      }
       if (map.getLayer(circleLayerId)) {
         try {
           map.removeLayer(circleLayerId);
+        } catch (err) {
+          // Layer might not exist
+        }
+      }
+      if (map.getLayer(circleLeadGlowLayerId)) {
+        try {
+          map.removeLayer(circleLeadGlowLayerId);
         } catch (err) {
           // Layer might not exist
         }
@@ -633,9 +696,23 @@ export function MapBuildingsLayer({
           // Layer might not exist
         }
       }
+      if (map.getLayer(leadGlowLayerId)) {
+        try {
+          map.removeLayer(leadGlowLayerId);
+        } catch (err) {
+          // Layer might not exist
+        }
+      }
       if (map.getLayer(circleLayerId)) {
         try {
           map.removeLayer(circleLayerId);
+        } catch (err) {
+          // Layer might not exist
+        }
+      }
+      if (map.getLayer(circleLeadGlowLayerId)) {
+        try {
+          map.removeLayer(circleLeadGlowLayerId);
         } catch (err) {
           // Layer might not exist
         }
@@ -924,8 +1001,42 @@ export function MapBuildingsLayer({
           
           // Add without beforeId - this places it at the end (on top of everything)
           map.addLayer(layerConfig);
+
+          if (!map.getLayer(leadGlowLayerId)) {
+            map.addLayer({
+              id: leadGlowLayerId,
+              type: 'line' as const,
+              source: sourceId,
+              minzoom: 12,
+              filter: filterExpr ? ['all', polygonFilter, filterExpr] : polygonFilter,
+              paint: {
+                'line-color': MAP_STATUS_CONFIG.HOT_LEADS.color,
+                'line-width': 7,
+                'line-opacity': getLeadGlowOpacityExpression(),
+                'line-blur': 5,
+              },
+            });
+          }
           
           // Add circle layer for Point geometries (addresses without building polygons)
+          if (!map.getLayer(circleLeadGlowLayerId)) {
+            map.addLayer({
+              id: circleLeadGlowLayerId,
+              type: 'circle' as const,
+              source: sourceId,
+              minzoom: 12,
+              filter: filterExpr
+                ? ['all', ['==', ['geometry-type'], 'Point'], filterExpr]
+                : ['==', ['geometry-type'], 'Point'],
+              paint: {
+                'circle-radius': 14,
+                'circle-color': MAP_STATUS_CONFIG.HOT_LEADS.color,
+                'circle-opacity': getLeadGlowOpacityExpression(),
+                'circle-blur': 0.85,
+              },
+            });
+          }
+
           if (!map.getLayer(circleLayerId)) {
             const circleLayerConfig: any = {
               id: circleLayerId,
@@ -1337,6 +1448,14 @@ export function MapBuildingsLayer({
       map.setPaintProperty(layerId, 'fill-extrusion-color', colorExpr);
       map.setPaintProperty(layerId, 'fill-extrusion-opacity', getFootprintFillOpacity());
       map.setFilter(layerId, filterExpr ? ['all', POLYGON_GEOMETRY_FILTER, filterExpr] : POLYGON_GEOMETRY_FILTER);
+      if (map.getLayer(leadGlowLayerId)) {
+        map.setPaintProperty(leadGlowLayerId, 'line-opacity', getLeadGlowOpacityExpression());
+        map.setFilter(leadGlowLayerId, filterExpr ? ['all', POLYGON_GEOMETRY_FILTER, filterExpr] : POLYGON_GEOMETRY_FILTER);
+      }
+      if (map.getLayer(circleLeadGlowLayerId)) {
+        map.setPaintProperty(circleLeadGlowLayerId, 'circle-opacity', getLeadGlowOpacityExpression());
+        map.setFilter(circleLeadGlowLayerId, filterExpr ? ['all', POINT_GEOMETRY_FILTER, filterExpr] : POINT_GEOMETRY_FILTER);
+      }
       if (map.getLayer(circleLayerId)) {
         map.setPaintProperty(circleLayerId, 'circle-color', colorExpr);
         map.setPaintProperty(circleLayerId, 'circle-opacity', getCircleOpacity());
@@ -1397,6 +1516,12 @@ export function MapBuildingsLayer({
           map.setPaintProperty(layerId, 'fill-extrusion-color', getFootprintFillColor());
           map.setPaintProperty(layerId, 'fill-extrusion-opacity', getFootprintFillOpacity());
           map.setPaintProperty(layerId, 'fill-extrusion-vertical-gradient', true);
+        }
+        if (map.getLayer(leadGlowLayerId)) {
+          map.setPaintProperty(leadGlowLayerId, 'line-opacity', getLeadGlowOpacityExpression());
+        }
+        if (map.getLayer(circleLeadGlowLayerId)) {
+          map.setPaintProperty(circleLeadGlowLayerId, 'circle-opacity', getLeadGlowOpacityExpression());
         }
         if (map.getLayer(circleLayerId)) {
           map.setPaintProperty(circleLayerId, 'circle-color', getFootprintFillColor());

@@ -39,6 +39,7 @@ type Bounds = [number, number, number, number];
 
 interface RegionBoundsRow {
   code: string;
+  name: string;
   country: string;
   bbox: [number, number, number, number];
 }
@@ -71,20 +72,11 @@ const US_REGION_BOUNDS: Record<string, Bounds> = (regionBounds as RegionBoundsRo
   }, {});
 
 const REGION_NAME_TO_CODE: Record<string, string> = {
-  'BRITISH COLUMBIA': 'BC',
-  'ALBERTA': 'AB',
-  'SASKATCHEWAN': 'SK',
-  'MANITOBA': 'MB',
-  'ONTARIO': 'ON',
-  'QUEBEC': 'QC',
+  ...(regionBounds as RegionBoundsRow[]).reduce<Record<string, string>>((acc, row) => {
+    acc[row.name.trim().toUpperCase()] = row.code;
+    return acc;
+  }, {}),
   'QUÉBEC': 'QC',
-  'NEW BRUNSWICK': 'NB',
-  'NOVA SCOTIA': 'NS',
-  'PRINCE EDWARD ISLAND': 'PE',
-  'NEWFOUNDLAND AND LABRADOR': 'NL',
-  'YUKON': 'YT',
-  'NORTHWEST TERRITORIES': 'NT',
-  'NUNAVUT': 'NU',
 };
 
 function isNumber(value: unknown): value is number {
@@ -211,7 +203,7 @@ async function inferRegionFromMapbox(point: Point): Promise<string | null> {
 
   const url =
     `https://api.mapbox.com/geocoding/v5/mapbox.places/${point.lng},${point.lat}.json` +
-    `?types=region,country&limit=5&country=CA,US&access_token=${token}`;
+    `?types=region,country&country=ca,us&access_token=${token}`;
 
   try {
     const response = await fetch(url);

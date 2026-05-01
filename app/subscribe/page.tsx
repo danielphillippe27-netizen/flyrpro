@@ -67,6 +67,15 @@ function SubscribeContent() {
       ? Math.max(0, Math.min(100, referralPreview.discount.percentOff))
       : 0;
   const discountMultiplier = 1 - percentOff / 100;
+  const isFreeForeverOffer =
+    referralPreview?.hasDiscount &&
+    percentOff >= 100 &&
+    referralPreview.discount?.duration === 'forever';
+  const referralSummary = isFreeForeverOffer
+    ? 'free forever'
+    : percentOff > 0
+      ? `${percentOff}% off${referralPreview?.discount?.duration === 'forever' ? ' forever' : ''}`
+      : '';
   const annualTotal = annualTotalBase * discountMultiplier;
   const annualMonthlyEquivalent = annualMonthlyEquivalentBase * seats * discountMultiplier;
   const monthlyTotal = monthlyTotalBase * discountMultiplier;
@@ -272,7 +281,7 @@ function SubscribeContent() {
         {referralPreview?.hasDiscount && referralPreview.referralCode && (
           <p className="relative z-10 mt-2 text-center text-sm text-emerald-300">
             Referral {referralPreview.referralCode} applied
-            {percentOff > 0 ? `: ${percentOff}% off` : ''}.
+            {referralSummary ? `: ${referralSummary}` : ''}.
           </p>
         )}
 
@@ -410,10 +419,14 @@ function SubscribeContent() {
             disabled={checkoutLoading}
             className="w-full bg-[#ef4444] text-white hover:bg-[#dc2626] border-0"
           >
-            {checkoutLoading ? 'Redirecting…' : 'Continue to checkout'}
+            {checkoutLoading
+              ? 'Redirecting…'
+              : isFreeForeverOffer
+                ? 'Activate free partner subscription'
+                : 'Continue to checkout'}
           </Button>
           <p className="text-xs text-[#AAAAAA] text-center">
-            Recurring billing. Cancel anytime.
+            {isFreeForeverOffer ? 'Free forever with your FLYR Partner offer.' : 'Recurring billing. Cancel anytime.'}
           </p>
         </div>
 

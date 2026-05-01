@@ -146,60 +146,24 @@ export async function GET(
 
     const candidateBuildingIdList = Array.from(candidateBuildingIds);
     
-    // Fetch addresses linked to this building
-    // Try building_address_links first (Silver path)
+    // Fetch addresses linked to this building.
+    // Gold assignments live on campaign_addresses.building_id and are the source
+    // of truth when present. building_address_links can contain stale Silver
+    // assignments from prior linker passes, so only use links when no Gold rows
+    // exist for this building.
     let addresses: AddressResult[] = [];
-    
-    const { data: links, error: linksError } = await supabase
-      .from('building_address_links')
-      .select(`
-        address_id,
-        match_type,
-        confidence,
-        distance_meters,
-        campaign_addresses:campaign_addresses!inner (
-          id,
-          formatted,
-          house_number,
-          street_name,
-          unit_number,
-          geom
-        )
-      `)
+
+    const { data: goldAddresses, error: goldError } = await supabase
+      .from('campaign_addresses')
+      .select('id, formatted, house_number, street_name, unit_number, geom, match_source, confidence')
       .eq('campaign_id', campaignId)
-      .in('building_id', candidateBuildingIdList)
-      .order('confidence', { ascending: false });
-    
-    if (linksError) {
-      console.warn('[API] Error fetching from links table:', linksError.message);
+      .in('building_id', candidateBuildingIdList);
+
+    if (goldError) {
+      console.warn('[API] Error fetching Gold addresses:', goldError.message);
     }
-    
-    if (links && links.length > 0) {
-      // Silver path: Use building_address_links
-      addresses = (links as BuildingLinkRow[]).map((link) => ({
-        address_id: link.address_id,
-        formatted: displayAddressText(link.campaign_addresses) ?? '',
-        house_number: resolveHouseNumberLabel(link.campaign_addresses),
-        street_name: link.campaign_addresses.street_name,
-        unit_number: link.campaign_addresses.unit_number,
-        match_type: link.match_type,
-        confidence: link.confidence,
-        distance_meters: link.distance_meters,
-        is_outside_footprint: link.distance_meters > outsideThreshold,
-        geom: link.campaign_addresses.geom,
-      }));
-    } else {
-      // Gold path: Use campaign_addresses.building_id
-      const { data: goldAddresses, error: goldError } = await supabase
-        .from('campaign_addresses')
-        .select('id, formatted, house_number, street_name, unit_number, geom, match_source, confidence')
-        .eq('campaign_id', campaignId)
-        .in('building_id', candidateBuildingIdList);
-      
-      if (goldError) {
-        console.warn('[API] Error fetching Gold addresses:', goldError.message);
-      }
-      
+
+    if (goldAddresses && goldAddresses.length > 0) {
       addresses = ((goldAddresses || []) as GoldAddressRow[]).map((addr) => ({
         address_id: addr.id,
         formatted: displayAddressText(addr) ?? '',
@@ -211,6 +175,43 @@ export async function GET(
         distance_meters: 0, // Gold links are spatially exact
         is_outside_footprint: false,
         geom: addr.geom,
+      }));
+    } else {
+      const { data: links, error: linksError } = await supabase
+        .from('building_address_links')
+        .select(`
+          address_id,
+          match_type,
+          confidence,
+          distance_meters,
+          campaign_addresses:campaign_addresses!inner (
+            id,
+            formatted,
+            house_number,
+            street_name,
+            unit_number,
+            geom
+          )
+        `)
+        .eq('campaign_id', campaignId)
+        .in('building_id', candidateBuildingIdList)
+        .order('confidence', { ascending: false });
+
+      if (linksError) {
+        console.warn('[API] Error fetching from links table:', linksError.message);
+      }
+
+      addresses = ((links || []) as BuildingLinkRow[]).map((link) => ({
+        address_id: link.address_id,
+        formatted: displayAddressText(link.campaign_addresses) ?? '',
+        house_number: resolveHouseNumberLabel(link.campaign_addresses),
+        street_name: link.campaign_addresses.street_name,
+        unit_number: link.campaign_addresses.unit_number,
+        match_type: link.match_type,
+        confidence: link.confidence,
+        distance_meters: link.distance_meters,
+        is_outside_footprint: link.distance_meters > outsideThreshold,
+        geom: link.campaign_addresses.geom,
       }));
     }
 

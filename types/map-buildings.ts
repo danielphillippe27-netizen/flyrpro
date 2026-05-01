@@ -24,7 +24,7 @@ export interface MapBuilding {
 export interface BuildingStats {
   building_id: string; // UUID, FK to map_buildings.id
   campaign_id: string | null; // FK to campaigns
-  status: 'not_visited' | 'visited' | 'hot';
+  status: 'not_visited' | 'visited' | 'hot' | 'lead' | 'hot_lead' | 'no_answer' | 'do_not_knock';
   scans_total: number;
   scans_today: number;
   last_scan_at: string | null; // ISO timestamp
@@ -55,7 +55,7 @@ export interface BuildingProperties {
   min_height: number;
   is_townhome: boolean;
   units_count: number;
-  status: 'not_visited' | 'visited' | 'hot';
+  status: 'not_visited' | 'visited' | 'hot' | 'lead' | 'hot_lead' | 'no_answer' | 'do_not_knock';
   scans_today: number;
   scans_total: number;
   qr_scanned?: boolean; // True when scans_total > 0, used for purple color

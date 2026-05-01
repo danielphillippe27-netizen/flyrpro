@@ -2,7 +2,6 @@ import {
   PARTNER_OFFER_EMAIL_BODY_HOOK,
   PARTNER_OFFER_EMAIL_SUBJECT_SENTINEL,
 } from '@/lib/email/partnerOfferEmailCopy';
-import { slugifyPartnerOfferPath } from '@/lib/offers/partnerOfferSlug';
 
 export type OfferStatus = 'active' | 'expired' | 'revoked' | 'maxed';
 export type OfferEmailStatus = 'not_requested' | 'sent' | 'failed';
@@ -33,8 +32,16 @@ export type PartnerOffer = {
   shareUrl: string;
 };
 
+export const FLYR_PARTNER_FREE_FOREVER_REFERRAL_CODE = 'Free2026';
+
 export type OfferTemplate = {
-  id: 'team-partner' | 'free-30-day-challenge' | 'solo-agent' | 'affiliate' | 'just-listed-dm';
+  id:
+    | 'team-partner'
+    | 'flyr-partner-free-forever'
+    | 'free-30-day-challenge'
+    | 'solo-agent'
+    | 'affiliate'
+    | 'just-listed-dm';
   label: string;
   title: string;
   message: string;
@@ -48,6 +55,14 @@ export const OFFER_TEMPLATES: OfferTemplate[] = [
     title: PARTNER_OFFER_EMAIL_SUBJECT_SENTINEL,
     message: PARTNER_OFFER_EMAIL_BODY_HOOK,
     ctaLabel: 'Book your team onboarding',
+  },
+  {
+    id: 'flyr-partner-free-forever',
+    label: 'FLYR Partner Free Forever',
+    title: 'FLYR Partner Offer',
+    message:
+      'Private FLYR Partner access for your team. Complete onboarding through this invite and your workspace will be set up with FLYR Pro free forever.',
+    ctaLabel: 'Claim free partner access',
   },
   {
     id: 'free-30-day-challenge',
@@ -119,6 +134,14 @@ export function isThirtyDayChallengePartnerOffer(
   return (
     /30\s*day\s*challenge/i.test(offerTitle) || /private access to the challenge/i.test(offerMessage ?? '')
   );
+}
+
+export function isFlyrPartnerFreeForeverOffer(
+  offerTitle: string,
+  offerMessage: string | null | undefined
+): boolean {
+  const content = `${offerTitle}\n${offerMessage ?? ''}`;
+  return /FLYR Partner Offer/i.test(offerTitle) || /free forever/i.test(content);
 }
 
 export function formatLongDate(value: string): string {

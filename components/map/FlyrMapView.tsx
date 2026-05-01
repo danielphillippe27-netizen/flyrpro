@@ -17,10 +17,10 @@ import { createClient } from '@/lib/supabase/client';
 import { useTheme } from '@/lib/theme-provider';
 import { useMapStyle } from '@/lib/map-style-provider';
 import { useWorkspace } from '@/lib/workspace-context';
-import { getMapboxToken } from '@/lib/mapbox';
+import { getMapboxToken, removeMapboxMapWhenSafe } from '@/lib/mapbox';
 import { applyPresetVisualTweaks, applyResolvedMapStyle, getResolvedMapInitOptions, hideBaseBuildingLayers, resolveMapStyle } from '@/lib/map-styles';
 import { getCampaignAddressMapStatus } from '@/lib/campaignStats';
-import { DEFAULT_STATUS_FILTERS, MAP_STATUS_CONFIG, type StatusFilters } from '@/lib/constants/mapStatus';
+import { DEFAULT_STATUS_FILTERS, FLYER_MODE_STATUS_COLORS, MAP_STATUS_CONFIG, type StatusFilters } from '@/lib/constants/mapStatus';
 import type { CampaignV2, CampaignAddress } from '@/types/database';
 import * as turf from '@turf/turf';
 
@@ -54,6 +54,7 @@ export function FlyrMapView() {
   const [campaignBbox, setCampaignBbox] = useState<{ minLon: number; minLat: number; maxLon: number; maxLat: number } | null>(null);
   const [showUserLocation, setShowUserLocation] = useState(true);
   const [mapViewMode, setMapViewMode] = useState<'buildings' | 'addresses'>('buildings');
+  const isFlyerCampaign = selectedCampaign?.type === 'flyer';
   const regularMapViewRef = useRef<{
     center: [number, number];
     zoom: number;
@@ -276,7 +277,10 @@ export function FlyrMapView() {
     return () => {
       cancelled = true;
       cancelAnimationFrame(rafId);
-      map.current?.remove();
+      if (map.current) {
+        removeMapboxMapWhenSafe(map.current);
+        map.current = null;
+      }
     };
   }, [resolvedMapStyle]);
 
@@ -553,11 +557,13 @@ export function FlyrMapView() {
   // Address points layer (Map tab): when mapViewMode === 'addresses', show circular fill-extrusions per address
   const addressPointsSourceId = 'flyr-map-address-points';
   const addressPointsLayerId = 'flyr-map-address-points-extrusion';
+  const addressPointsGlowLayerId = 'flyr-map-address-points-lead-glow';
   useEffect(() => {
     const mapInstance = map.current;
     if (!mapInstance || !mapLoaded) return;
     if (mapViewMode !== 'addresses' || !selectedCampaignId || campaignAddresses.length === 0) {
       try {
+        if (mapInstance.getLayer(addressPointsGlowLayerId)) mapInstance.removeLayer(addressPointsGlowLayerId);
         if (mapInstance.getLayer(addressPointsLayerId)) mapInstance.removeLayer(addressPointsLayerId);
         if (mapInstance.getSource(addressPointsSourceId)) mapInstance.removeSource(addressPointsSourceId);
       } catch (_) {}
@@ -621,16 +627,33 @@ export function FlyrMapView() {
       const getAddressStatus = () => ['coalesce', ['feature-state', 'address_status'], ['get', 'address_status'], 'none'];
       const getQrScanned = () => ['coalesce', ['feature-state', 'qr_scanned'], ['get', 'qr_scanned'], false];
       const getScansTotal = () => ['coalesce', ['feature-state', 'scans_total'], ['get', 'scans_total'], 0];
+      if (isFlyerCampaign) {
+        const isVisited = ['any', ['!=', getAddressStatus(), 'none'], ['==', getQrScanned(), true], ['>', getScansTotal(), 0]];
+        return ['case', isVisited, FLYER_MODE_STATUS_COLORS.visited, FLYER_MODE_STATUS_COLORS.unvisited] as unknown[];
+      }
       return [
         'case',
         ['any', ['==', getQrScanned(), true], ['>', getScansTotal(), 0]],
         MAP_STATUS_CONFIG.QR_SCANNED.color,
-        ['in', getAddressStatus(), ['literal', ['talked', 'appointment']]],
+        ['in', getAddressStatus(), ['literal', ['appointment', 'future_seller', 'hot_lead']]],
+        MAP_STATUS_CONFIG.HOT_LEADS.color,
+        ['==', getAddressStatus(), 'talked'],
         MAP_STATUS_CONFIG.CONVERSATIONS.color,
+        ['==', getAddressStatus(), 'do_not_knock'],
+        MAP_STATUS_CONFIG.DO_NOT_KNOCK.color,
+        ['in', getAddressStatus(), ['literal', ['no_answer', 'not_home']]],
+        MAP_STATUS_CONFIG.NO_ONE_HOME.color,
         ['==', getAddressStatus(), 'delivered'],
         MAP_STATUS_CONFIG.TOUCHED.color,
         MAP_STATUS_CONFIG.UNTOUCHED.color,
       ] as unknown[];
+    };
+
+    const getLeadGlowOpacityExpression = (): unknown[] => {
+      if (isFlyerCampaign) return ['case', false, 0, 0] as unknown[];
+      const getAddressStatus = () => ['coalesce', ['feature-state', 'address_status'], ['get', 'address_status'], 'none'];
+      const isLead = ['in', getAddressStatus(), ['literal', ['appointment', 'future_seller', 'hot_lead']]];
+      return ['case', ['all', isLead, statusFilters.HOT_LEADS], 0.82, 0] as unknown[];
     };
 
     const getFilterExpression = (): unknown[] | undefined => {
@@ -638,21 +661,30 @@ export function FlyrMapView() {
       const getQrScanned = () => ['coalesce', ['feature-state', 'qr_scanned'], ['get', 'qr_scanned'], false];
       const getScansTotal = () => ['coalesce', ['feature-state', 'scans_total'], ['get', 'scans_total'], 0];
       const isQrScanned = ['any', ['==', getQrScanned(), true], ['>', getScansTotal(), 0]];
-      const isConversation = ['in', getAddressStatus(), ['literal', ['talked', 'appointment']]];
+      const isConversation = ['==', getAddressStatus(), 'talked'];
+      const isLead = ['in', getAddressStatus(), ['literal', ['appointment', 'future_seller', 'hot_lead']]];
+      const isDoNotKnock = ['==', getAddressStatus(), 'do_not_knock'];
+      const isNoOneHome = ['in', getAddressStatus(), ['literal', ['no_answer', 'not_home']]];
       const isTouched = ['==', getAddressStatus(), 'delivered'];
       const isUntouchedStrict = [
         'all',
         ['!=', getAddressStatus(), 'delivered'],
-        ['!', ['in', getAddressStatus(), ['literal', ['talked', 'appointment']]]],
+        ['!=', getAddressStatus(), 'talked'],
+        ['!', ['in', getAddressStatus(), ['literal', ['appointment', 'future_seller', 'hot_lead']]]],
+        ['!=', getAddressStatus(), 'do_not_knock'],
+        ['!', ['in', getAddressStatus(), ['literal', ['no_answer', 'not_home']]]],
         ['!', isQrScanned],
       ];
       const statusConditions: unknown[] = [];
       if (statusFilters.QR_SCANNED) statusConditions.push(isQrScanned);
+      if (statusFilters.HOT_LEADS) statusConditions.push(isLead);
       if (statusFilters.CONVERSATIONS) statusConditions.push(isConversation);
+      if (statusFilters.DO_NOT_KNOCK) statusConditions.push(isDoNotKnock);
+      if (statusFilters.NO_ONE_HOME) statusConditions.push(isNoOneHome);
       if (statusFilters.TOUCHED) statusConditions.push(isTouched);
       if (statusFilters.UNTOUCHED) statusConditions.push(isUntouchedStrict);
       if (statusConditions.length === 0) return ['==', 1, 0];
-      if (statusFilters.QR_SCANNED && statusFilters.CONVERSATIONS && statusFilters.TOUCHED && statusFilters.UNTOUCHED) return undefined;
+      if (Object.values(statusFilters).every(Boolean)) return undefined;
       return ['any', ...statusConditions] as unknown[];
     };
 
@@ -679,7 +711,7 @@ export function FlyrMapView() {
             source: addressPointsSourceId,
             minzoom: 12,
             paint: {
-              'fill-extrusion-color': getColorExpression() as string[],
+              'fill-extrusion-color': getColorExpression() as mapboxgl.Expression,
               'fill-extrusion-height': 7.5,
               'fill-extrusion-base': 0,
               'fill-extrusion-opacity': 1,
@@ -688,10 +720,27 @@ export function FlyrMapView() {
             },
             ...(filterExpr ? { filter: filterExpr as mapboxgl.Expression } : {}),
           });
+          mapInstance.addLayer({
+            id: addressPointsGlowLayerId,
+            type: 'line',
+            source: addressPointsSourceId,
+            minzoom: 12,
+            paint: {
+              'line-color': MAP_STATUS_CONFIG.HOT_LEADS.color,
+              'line-width': 8,
+              'line-opacity': getLeadGlowOpacityExpression() as mapboxgl.Expression,
+              'line-blur': 6,
+            },
+            ...(filterExpr ? { filter: filterExpr as mapboxgl.Expression } : {}),
+          });
         } else {
-          mapInstance.setPaintProperty(addressPointsLayerId, 'fill-extrusion-color', getColorExpression() as string[]);
+          mapInstance.setPaintProperty(addressPointsLayerId, 'fill-extrusion-color', getColorExpression() as mapboxgl.Expression);
           const filterExpr = getFilterExpression();
           mapInstance.setFilter(addressPointsLayerId, (filterExpr ?? ['all']) as mapboxgl.Expression);
+          if (mapInstance.getLayer(addressPointsGlowLayerId)) {
+            mapInstance.setPaintProperty(addressPointsGlowLayerId, 'line-opacity', getLeadGlowOpacityExpression() as mapboxgl.Expression);
+            mapInstance.setFilter(addressPointsGlowLayerId, (filterExpr ?? ['all']) as mapboxgl.Expression);
+          }
         }
       } catch (err) {
         console.error('[FlyrMapView] Error adding address points layer:', err);
@@ -700,6 +749,7 @@ export function FlyrMapView() {
 
     const removeAddressPointsLayer = () => {
       try {
+        if (mapInstance.getLayer(addressPointsGlowLayerId)) mapInstance.removeLayer(addressPointsGlowLayerId);
         if (mapInstance.getLayer(addressPointsLayerId)) mapInstance.removeLayer(addressPointsLayerId);
         if (mapInstance.getSource(addressPointsSourceId)) mapInstance.removeSource(addressPointsSourceId);
       } catch (_) {}
@@ -726,7 +776,7 @@ export function FlyrMapView() {
       mapInstance.off('click', addressPointsLayerId, onAddressPointClick);
       removeAddressPointsLayer();
     };
-  }, [mapViewMode, mapLoaded, campaignAddresses, statusFilters, resolvedMapStyle.key, selectedCampaignId]);
+  }, [mapViewMode, mapLoaded, campaignAddresses, statusFilters, resolvedMapStyle.key, selectedCampaignId, isFlyerCampaign]);
 
   return (
     <div className="relative h-full w-full">
@@ -754,6 +804,7 @@ export function FlyrMapView() {
             <MapBuildingsLayer 
               map={map.current} 
               campaignId={selectedCampaignId}
+              campaignType={selectedCampaign?.type ?? null}
               addressStateOverrides={campaignAddresses}
               statusFilters={statusFilters}
               onBuildingClick={handleBuildingClick}

@@ -13,10 +13,9 @@ const VISITED_STATUSES = new Set([
 
 const CONTACTED_STATUSES = new Set([
   'talked',
-  'appointment',
-  'future_seller',
-  'hot_lead',
 ]);
+
+const HOT_LEAD_STATUSES = new Set(['appointment', 'future_seller', 'hot_lead']);
 
 function normalizeStatus(status?: string | null): string {
   return (status ?? '').trim().toLowerCase();
@@ -32,7 +31,7 @@ export function getCampaignAddressMapStatus(
 
 const ADDRESS_OUTCOME_LABELS: Record<string, string> = {
   none: 'Not visited',
-  no_answer: 'No answer',
+  no_answer: 'Attempted',
   delivered: 'Visited',
   talked: 'Conversation',
   appointment: 'Appointment',
@@ -81,9 +80,12 @@ export function isContactedCampaignAddress(address: Pick<CampaignAddress, 'addre
 
 export function getCampaignBuildingStatus(
   address: Pick<CampaignAddress, 'address_status' | 'visited'>
-): 'not_visited' | 'visited' | 'hot' {
+): 'not_visited' | 'visited' | 'hot' | 'lead' | 'hot_lead' | 'no_answer' | 'do_not_knock' {
   const status = getCampaignAddressMapStatus(address);
   if (CONTACTED_STATUSES.has(status)) return 'hot';
+  if (HOT_LEAD_STATUSES.has(status)) return 'hot_lead';
+  if (status === 'do_not_knock') return 'do_not_knock';
+  if (status === 'no_answer') return 'no_answer';
   if (VISITED_STATUSES.has(status)) return 'visited';
   return 'not_visited';
 }

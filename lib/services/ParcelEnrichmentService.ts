@@ -348,6 +348,19 @@ function parseGeometryValue(geometry: unknown): GeoJSONMultiPolygon | null {
   }
 }
 
+function parseParcelJsonLine(line: string): { parsed: unknown; sanitizedNonFiniteNumber: boolean } {
+  try {
+    return { parsed: JSON.parse(line), sanitizedNonFiniteNumber: false };
+  } catch (error) {
+    if (!/\bNaN\b/.test(line)) {
+      throw error;
+    }
+
+    const sanitized = line.replace(/(:|,|\[)\s*NaN(?=\s*[,}\]])/g, '$1 null');
+    return { parsed: JSON.parse(sanitized), sanitizedNonFiniteNumber: true };
+  }
+}
+
 function normalizeParcelLine(raw: unknown): NormalizedParcelRecord | null {
   if (!raw || typeof raw !== 'object') return null;
 
@@ -669,13 +682,17 @@ export class ParcelEnrichmentService {
     let parsedRecords = 0;
     let bboxCandidates = 0;
     let polygonMatches = 0;
+    let sanitizedNonFiniteNumberLines = 0;
+    let malformedLines = 0;
+    let firstMalformedLineError: unknown = null;
     for await (const line of streamBodyLines(response.Body)) {
       const trimmed = line.trim();
       if (!trimmed) continue;
       scannedLines += 1;
 
       try {
-        const parsed = JSON.parse(trimmed);
+        const { parsed, sanitizedNonFiniteNumber } = parseParcelJsonLine(trimmed);
+        if (sanitizedNonFiniteNumber) sanitizedNonFiniteNumberLines += 1;
         const parcel = normalizeParcelLine(parsed);
         if (!parcel) continue;
         parsedRecords += 1;
@@ -685,7 +702,8 @@ export class ParcelEnrichmentService {
         polygonMatches += 1;
         deduped.set(parcel.externalId, parcel);
       } catch (error) {
-        console.warn('[ParcelEnrichment] Skipping malformed parcel line:', error);
+        malformedLines += 1;
+        firstMalformedLineError ??= error;
       }
     }
 
@@ -696,6 +714,17 @@ export class ParcelEnrichmentService {
     debug.polygon_matches = polygonMatches;
     debug.inserted_count = parcels.length;
     debug.completed_at = new Date().toISOString();
+    if (sanitizedNonFiniteNumberLines > 0) {
+      console.warn(
+        `[ParcelEnrichment] Replaced NaN numeric values with null in ${sanitizedNonFiniteNumberLines} parcel lines from ${dataset.key}`
+      );
+    }
+    if (malformedLines > 0) {
+      console.warn(
+        `[ParcelEnrichment] Skipped ${malformedLines} malformed parcel lines from ${dataset.key}:`,
+        firstMalformedLineError
+      );
+    }
 
     if (scannedLines === 0) {
       return {

@@ -19,10 +19,11 @@ import { fetchAllInPages } from '@/lib/supabase/fetchAllInPages';
 import { useTheme } from '@/lib/theme-provider';
 import { useMapStyle } from '@/lib/map-style-provider';
 import { useWorkspace } from '@/lib/workspace-context';
-import { getMapboxToken } from '@/lib/mapbox';
+import { getMapboxToken, removeMapboxMapWhenSafe } from '@/lib/mapbox';
 import { applyPresetVisualTweaks, applyResolvedMapStyle, getResolvedMapInitOptions, hideBaseBuildingLayers, resolveMapStyle } from '@/lib/map-styles';
 import {
   DEFAULT_STATUS_FILTERS,
+  FLYER_MODE_STATUS_COLORS,
   MAP_STATUS_CONFIG,
   MAP_STATUS_PRIORITY,
   type MapStatusKey,
@@ -174,8 +175,17 @@ function getParcelAddressStatusKey(address: CampaignAddress): MapStatusKey {
   if (hasQrScan) return 'QR_SCANNED';
 
   const status = getCampaignAddressMapStatus(address);
-  if (['talked', 'appointment', 'future_seller', 'hot_lead'].includes(status)) {
+  if (['appointment', 'future_seller', 'hot_lead'].includes(status)) {
+    return 'HOT_LEADS';
+  }
+  if (status === 'talked') {
     return 'CONVERSATIONS';
+  }
+  if (status === 'do_not_knock') {
+    return 'DO_NOT_KNOCK';
+  }
+  if (status === 'no_answer' || status === 'not_home') {
+    return 'NO_ONE_HOME';
   }
   if (status === 'none') {
     return 'UNTOUCHED';
@@ -273,6 +283,7 @@ export function CampaignDetailMapView({
     () => resolveMapStyle(mapPreset, theme, 'v12'),
     [mapPreset, theme],
   );
+  const isFlyerCampaign = campaign?.type === 'flyer';
   const mapShellRef = useRef<HTMLDivElement>(null);
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
@@ -921,13 +932,7 @@ export function CampaignDetailMapView({
       const mapInstance = map.current;
       map.current = null;
       if (mapInstance) {
-        try {
-          mapInstance.remove();
-        } catch (removeError) {
-          if (!(removeError instanceof DOMException && removeError.name === 'AbortError')) {
-            console.warn('Mapbox remove skipped during teardown:', removeError);
-          }
-        }
+        removeMapboxMapWhenSafe(mapInstance);
       }
       if (initAttemptedRef.current) {
         initAttemptedRef.current = false;
@@ -1052,6 +1057,7 @@ export function CampaignDetailMapView({
 
   const addressPointsSourceId = 'campaign-address-points';
   const addressPointsLayerId = 'campaign-address-points-extrusion';
+  const addressPointsGlowLayerId = 'campaign-address-points-lead-glow';
   const pointOverlaySourceId = 'campaign-point-overlays';
   const pointOverlayCircleLayerId = 'campaign-point-overlays-circle';
   const pointOverlayLabelLayerId = 'campaign-point-overlays-label';
@@ -1092,32 +1098,55 @@ export function CampaignDetailMapView({
       return { type: 'FeatureCollection', features };
     };
 
-    // Address map colors: address_statuses — green = delivered, blue = talked | appointment, purple = QR scanned
+    // Address map colors follow the shared campaign status palette.
     const getColorExpression = (): mapboxgl.Expression => {
       const getAddressStatus = () => ['coalesce', ['feature-state', 'address_status'], ['get', 'address_status'], 'none'];
       const getQrScanned = () => ['coalesce', ['feature-state', 'qr_scanned'], ['get', 'qr_scanned'], false];
       const getScansTotal = () => ['coalesce', ['feature-state', 'scans_total'], ['get', 'scans_total'], 0];
+      if (isFlyerCampaign) {
+        const isVisited = ['any', ['!=', getAddressStatus(), 'none'], ['==', getQrScanned(), true], ['>', getScansTotal(), 0]];
+        return ['case', isVisited, FLYER_MODE_STATUS_COLORS.visited, FLYER_MODE_STATUS_COLORS.unvisited] as mapboxgl.Expression;
+      }
       const isQrScanned = ['any', ['==', getQrScanned(), true], ['>', getScansTotal(), 0]];
-      const isConversation = ['in', getAddressStatus(), ['literal', ['talked', 'appointment']]];
+      const isConversation = ['==', getAddressStatus(), 'talked'];
+      const isLead = ['in', getAddressStatus(), ['literal', ['appointment', 'future_seller', 'hot_lead']]];
+      const isDoNotKnock = ['==', getAddressStatus(), 'do_not_knock'];
+      const isNoOneHome = ['in', getAddressStatus(), ['literal', ['no_answer', 'not_home']]];
       const isTouched = ['==', getAddressStatus(), 'delivered'];
       const isUntouched = [
         'all',
         ['!=', getAddressStatus(), 'delivered'],
-        ['!', ['in', getAddressStatus(), ['literal', ['talked', 'appointment']]]],
+        ['!=', getAddressStatus(), 'talked'],
+        ['!', ['in', getAddressStatus(), ['literal', ['appointment', 'future_seller', 'hot_lead']]]],
+        ['!=', getAddressStatus(), 'do_not_knock'],
+        ['!', ['in', getAddressStatus(), ['literal', ['no_answer', 'not_home']]]],
         ['!', isQrScanned],
       ];
       return [
         'case',
         ['all', isQrScanned, statusFilters.QR_SCANNED],
         MAP_STATUS_CONFIG.QR_SCANNED.color,
+        ['all', isLead, statusFilters.HOT_LEADS],
+        MAP_STATUS_CONFIG.HOT_LEADS.color,
         ['all', isConversation, statusFilters.CONVERSATIONS],
         MAP_STATUS_CONFIG.CONVERSATIONS.color,
+        ['all', isDoNotKnock, statusFilters.DO_NOT_KNOCK],
+        MAP_STATUS_CONFIG.DO_NOT_KNOCK.color,
+        ['all', isNoOneHome, statusFilters.NO_ONE_HOME],
+        MAP_STATUS_CONFIG.NO_ONE_HOME.color,
         ['all', isTouched, statusFilters.TOUCHED],
         MAP_STATUS_CONFIG.TOUCHED.color,
         ['all', isUntouched, statusFilters.UNTOUCHED],
         MAP_STATUS_CONFIG.UNTOUCHED.color,
         '#6b7280',
       ] as mapboxgl.Expression;
+    };
+
+    const getLeadGlowOpacityExpression = (): mapboxgl.Expression => {
+      if (isFlyerCampaign) return ['case', false, 0, 0] as mapboxgl.Expression;
+      const getAddressStatus = () => ['coalesce', ['feature-state', 'address_status'], ['get', 'address_status'], 'none'];
+      const isLead = ['in', getAddressStatus(), ['literal', ['appointment', 'future_seller', 'hot_lead']]];
+      return ['case', ['all', isLead, statusFilters.HOT_LEADS], 0.82, 0] as mapboxgl.Expression;
     };
 
     const addAddressPointsLayer = () => {
@@ -1150,8 +1179,23 @@ export function CampaignDetailMapView({
               'fill-extrusion-emissive-strength': 0.85,
             },
           });
+          mapInstance.addLayer({
+            id: addressPointsGlowLayerId,
+            type: 'line',
+            source: addressPointsSourceId,
+            minzoom: 12,
+            paint: {
+              'line-color': MAP_STATUS_CONFIG.HOT_LEADS.color,
+              'line-width': 8,
+              'line-opacity': getLeadGlowOpacityExpression(),
+              'line-blur': 6,
+            },
+          });
         } else {
           mapInstance.setPaintProperty(addressPointsLayerId, 'fill-extrusion-color', getColorExpression());
+          if (safeGetLayer(mapInstance, addressPointsGlowLayerId)) {
+            mapInstance.setPaintProperty(addressPointsGlowLayerId, 'line-opacity', getLeadGlowOpacityExpression());
+          }
         }
       } catch (err) {
         console.error('[CampaignDetailMapView] Error adding address points layer:', err);
@@ -1160,6 +1204,7 @@ export function CampaignDetailMapView({
 
     const removeAddressPointsLayer = () => {
       try {
+        if (safeGetLayer(mapInstance, addressPointsGlowLayerId)) mapInstance.removeLayer(addressPointsGlowLayerId);
         if (safeGetLayer(mapInstance, addressPointsLayerId)) mapInstance.removeLayer(addressPointsLayerId);
         if (safeGetSource(mapInstance, addressPointsSourceId)) mapInstance.removeSource(addressPointsSourceId);
       } catch (_) {}
@@ -1202,7 +1247,7 @@ export function CampaignDetailMapView({
       mapInstance.off('click', addressPointsLayerId, onAddressPointClick);
       removeAddressPointsLayer();
     };
-  }, [handleMapTargetClick, mapViewMode, mapLoaded, resolvedMapStyle.key, statusFilters, visibleAddresses]);
+  }, [handleMapTargetClick, mapViewMode, mapLoaded, resolvedMapStyle.key, statusFilters, visibleAddresses, isFlyerCampaign]);
 
   useEffect(() => {
     const mapInstance = map.current;
@@ -1517,8 +1562,16 @@ export function CampaignDetailMapView({
         'case',
         ['all', ['==', status, 'QR_SCANNED'], statusFilters.QR_SCANNED],
         MAP_STATUS_CONFIG.QR_SCANNED.color,
+        ['all', ['==', status, 'HOT_LEADS'], statusFilters.HOT_LEADS],
+        MAP_STATUS_CONFIG.HOT_LEADS.color,
+        ['all', ['==', status, 'LEADS'], statusFilters.LEADS],
+        MAP_STATUS_CONFIG.LEADS.color,
         ['all', ['==', status, 'CONVERSATIONS'], statusFilters.CONVERSATIONS],
         MAP_STATUS_CONFIG.CONVERSATIONS.color,
+        ['all', ['==', status, 'DO_NOT_KNOCK'], statusFilters.DO_NOT_KNOCK],
+        MAP_STATUS_CONFIG.DO_NOT_KNOCK.color,
+        ['all', ['==', status, 'NO_ONE_HOME'], statusFilters.NO_ONE_HOME],
+        MAP_STATUS_CONFIG.NO_ONE_HOME.color,
         ['all', ['==', status, 'TOUCHED'], statusFilters.TOUCHED],
         MAP_STATUS_CONFIG.TOUCHED.color,
         ['all', ['==', status, 'UNTOUCHED'], statusFilters.UNTOUCHED],
@@ -1533,7 +1586,15 @@ export function CampaignDetailMapView({
         'case',
         ['all', ['==', status, 'QR_SCANNED'], statusFilters.QR_SCANNED],
         parcelFillOpacity,
+        ['all', ['==', status, 'HOT_LEADS'], statusFilters.HOT_LEADS],
+        parcelFillOpacity,
+        ['all', ['==', status, 'LEADS'], statusFilters.LEADS],
+        parcelFillOpacity,
         ['all', ['==', status, 'CONVERSATIONS'], statusFilters.CONVERSATIONS],
+        parcelFillOpacity,
+        ['all', ['==', status, 'DO_NOT_KNOCK'], statusFilters.DO_NOT_KNOCK],
+        parcelFillOpacity,
+        ['all', ['==', status, 'NO_ONE_HOME'], statusFilters.NO_ONE_HOME],
         parcelFillOpacity,
         ['all', ['==', status, 'TOUCHED'], statusFilters.TOUCHED],
         parcelFillOpacity,
@@ -1981,6 +2042,7 @@ export function CampaignDetailMapView({
             <MapBuildingsLayer 
               map={map.current} 
               campaignId={campaignId}
+              campaignType={campaign?.type ?? null}
               refreshKey={mapRefreshKey}
               addressStateOverrides={visibleAddresses}
               hiddenBuildingIds={optimisticallyHiddenBuildingIds}

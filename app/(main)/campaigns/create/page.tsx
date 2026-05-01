@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { createClient } from '@/lib/supabase/client';
 import { useTheme } from '@/lib/theme-provider';
 import { useWorkspace } from '@/lib/workspace-context';
-import { getMapboxToken } from '@/lib/mapbox';
+import { getMapboxToken, removeMapboxMapWhenSafe } from '@/lib/mapbox';
 import { applyPresetVisualTweaks, applyResolvedMapStyle, hideBaseBuildingLayers, resolveMapStyle } from '@/lib/map-styles';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
@@ -275,7 +275,7 @@ export default function CreateCampaignPage() {
           if (e.reason?.name === 'AbortError') e.preventDefault();
         };
         window.addEventListener('unhandledrejection', suppressAbort);
-        map.current.remove();
+        removeMapboxMapWhenSafe(map.current);
         map.current = null;
         setTimeout(() => window.removeEventListener('unhandledrejection', suppressAbort), 0);
       }

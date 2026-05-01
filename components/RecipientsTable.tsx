@@ -27,7 +27,7 @@ interface Recipient {
   status: string;
   /** User-facing label; falls back to title-casing `status` when omitted. */
   statusLabel?: string;
-  /** When true, show “Mark visited” for addresses without a knock outcome yet. */
+  /** When true, show "Mark attempted" for addresses without a knock outcome yet. */
   canMarkVisited?: boolean;
   qr_png_url: string | null;
   qr_code_base64?: string | null;  // NEW: Add QR code base64
@@ -58,7 +58,7 @@ export function RecipientsTable({ recipients, campaignId, onRefresh }: Recipient
       const { error } = await supabase.rpc('record_campaign_address_outcome', {
         p_campaign_id: campaignId,
         p_campaign_address_id: recipientId,
-        p_status: 'delivered',
+        p_status: 'no_answer',
         p_notes: '',
         p_occurred_at: new Date().toISOString(),
       });
@@ -123,22 +123,21 @@ export function RecipientsTable({ recipients, campaignId, onRefresh }: Recipient
     switch (status) {
       case 'none':
       case 'pending':
-        return 'bg-muted text-muted-foreground border border-border';
+        return 'bg-slate-500/15 text-slate-700 dark:text-slate-200 border border-slate-500/30';
       case 'qr_scanned':
-        return 'bg-sky-500/15 text-sky-700 dark:text-sky-300 border border-sky-500/30';
+        return 'bg-violet-500/15 text-violet-800 dark:text-violet-200 border border-violet-500/30';
       case 'no_answer':
-        return 'bg-amber-500/15 text-amber-800 dark:text-amber-200 border border-amber-500/25';
+        return 'bg-red-500/15 text-red-800 dark:text-red-200 border border-red-500/30';
       case 'delivered':
         return 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-200 border border-emerald-500/25';
       case 'talked':
-        return 'bg-violet-500/15 text-violet-800 dark:text-violet-200 border border-violet-500/25';
-      case 'appointment':
-        return 'bg-primary/15 text-primary border border-primary/25';
+        return 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-200 border border-emerald-500/25';
       case 'do_not_knock':
-        return 'bg-destructive/15 text-destructive border border-destructive/25';
+        return 'bg-black text-white border border-black';
+      case 'appointment':
       case 'future_seller':
       case 'hot_lead':
-        return 'bg-orange-500/15 text-orange-800 dark:text-orange-200 border border-orange-500/25';
+        return 'bg-yellow-400/20 text-yellow-900 dark:text-yellow-200 border border-yellow-400/40';
       case 'sent':
         return 'bg-red-200 dark:bg-red-900/30 text-red-800 dark:text-red-300';
       case 'scanned':
@@ -235,7 +234,7 @@ export function RecipientsTable({ recipients, campaignId, onRefresh }: Recipient
                           onClick={() => handleMarkSent(recipient.id)}
                           disabled={loading === recipient.id}
                         >
-                          {loading === recipient.id ? 'Updating...' : 'Mark Visited'}
+                          {loading === recipient.id ? 'Updating...' : 'Mark Attempted'}
                         </Button>
                       )}
                       {recipient.qr_png_url && (
