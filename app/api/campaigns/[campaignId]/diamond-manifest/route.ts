@@ -9,6 +9,7 @@ import {
   resolveArtifactUrl,
   resolveGeometryEtag,
   resolveGeometryVersion,
+  resolveLatestParcelPmtilesKeys,
 } from '@/lib/diamond/geometry';
 
 export const runtime = 'nodejs';
@@ -110,7 +111,7 @@ export async function GET(
 
   const { data: campaign, error: campaignError } = await supabase
     .from('campaigns')
-    .select('id, bbox')
+    .select('id, bbox, region')
     .eq('id', campaignId)
     .maybeSingle();
 
@@ -211,6 +212,21 @@ export async function GET(
     stringMetric(snapshotRow.tile_metrics, 'vector_tile_cdn_url_template') ??
     null;
   const pmtilesCdnUrl = geometryCdnBaseUrl() ? geometryUrl : null;
+  const parcelTiles =
+    artifactType === 'white_gold'
+      ? await resolveLatestParcelPmtilesKeys(
+          typeof (campaign as { region?: unknown }).region === 'string'
+            ? (campaign as { region: string }).region
+            : null,
+          { bucket: snapshotRow.bucket }
+        )
+      : null;
+  const parcelTileCacheKey = parcelTiles
+    ? encodeURIComponent(`${parcelTiles.datePart}:${parcelTiles.pmtilesKey}`)
+    : null;
+  const parcelVectorTileUrlTemplate = parcelTiles
+    ? `${baseUrl}/api/campaigns/${campaignId}/parcel-tiles/{z}/{x}/{y}.mvt?v=${parcelTileCacheKey}`
+    : null;
 
   return NextResponse.json({
     campaign_id: campaignId,
@@ -224,20 +240,27 @@ export async function GET(
     geometry_etag: geometryEtag,
     tilejson_url: tilejsonUrl,
     vector_tile_url_template: backendVectorTileUrlTemplate,
+    parcel_pmtiles_key: parcelTiles?.pmtilesKey ?? null,
+    parcel_tilejson_key: parcelTiles?.tilejsonKey ?? null,
+    parcel_vector_tile_url_template: parcelVectorTileUrlTemplate,
+    parcel_source_layer: parcelTiles?.sourceLayer ?? null,
+    parcel_promote_id: parcelTiles?.promoteId ?? null,
+    parcel_minzoom: parcelTiles?.minzoom ?? null,
+    parcel_maxzoom: parcelTiles?.maxzoom ?? null,
     ...deliveryModeResponse({
       pmtilesCdnUrl,
       staticVectorTileUrlTemplate,
     }),
     source_layers: {
       buildings: stringMetric(sourceLayers, 'buildings') ?? 'buildings',
-      parcels: stringMetric(sourceLayers, 'parcels') ?? (artifactType === 'white_gold' ? null : 'parcels'),
+      parcels: stringMetric(sourceLayers, 'parcels') ?? (parcelTiles ? parcelTiles.sourceLayer : artifactType === 'white_gold' ? null : 'parcels'),
       addresses: stringMetric(sourceLayers, 'addresses'),
       address_circles: stringMetric(sourceLayers, 'address_circles'),
       address_building_links: stringMetric(sourceLayers, 'address_building_links'),
     },
     promote_ids: {
       buildings: stringMetric(promoteIds, 'buildings') ?? 'address_id',
-      parcels: stringMetric(promoteIds, 'parcels') ?? (artifactType === 'white_gold' ? null : 'parcel_id'),
+      parcels: stringMetric(promoteIds, 'parcels') ?? (parcelTiles ? parcelTiles.promoteId : artifactType === 'white_gold' ? null : 'parcel_id'),
       addresses: stringMetric(promoteIds, 'addresses'),
       address_circles: stringMetric(promoteIds, 'address_circles'),
       address_building_links: stringMetric(promoteIds, 'address_building_links'),
@@ -247,9 +270,12 @@ export async function GET(
     bounds: Array.isArray(bounds) ? bounds : (campaign as { bbox?: unknown }).bbox ?? null,
     minzoom,
     maxzoom,
-    sources: sources ?? {
-      buildings: artifactType === 'white_gold' ? 'overture' : 'diamond',
-      addresses: artifactType === 'white_gold' ? 'netsyms' : 'supabase',
+    sources: {
+      ...(sources ?? {
+        buildings: artifactType === 'white_gold' ? 'overture' : 'diamond',
+        addresses: artifactType === 'white_gold' ? 'netsyms' : 'supabase',
+      }),
+      ...(parcelTiles ? { parcels: 'landrecords_pmtiles' } : {}),
     },
     state_source: 'supabase',
     state_cursor: stateCursor,

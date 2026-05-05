@@ -12,6 +12,14 @@ export type CampaignMapManifest = {
   pmtiles_url?: string | null;
   vector_tile_url_template?: string | null;
   static_vector_tile_url_template?: string | null;
+  parcel_pmtiles_key?: string | null;
+  parcel_tilejson_key?: string | null;
+  parcel_vector_tile_url_template?: string | null;
+  parcel_source_layer?: string | null;
+  parcel_promote_id?: string | null;
+  parcel_minzoom?: number | null;
+  parcel_maxzoom?: number | null;
+  parcel_bounds?: [number, number, number, number] | null;
   source_layers?: {
     buildings?: string | null;
     parcels?: string | null;

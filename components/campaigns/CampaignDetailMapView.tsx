@@ -21,6 +21,7 @@ import { useTheme } from '@/lib/theme-provider';
 import { useMapStyle } from '@/lib/map-style-provider';
 import { useWorkspace } from '@/lib/workspace-context';
 import { getMapboxToken, removeMapboxMapWhenSafe } from '@/lib/mapbox';
+import { appendTileAccessToken, fetchCampaignMapManifest, type CampaignMapManifest } from '@/lib/map/campaignMapManifest';
 import { applyPresetVisualTweaks, applyResolvedMapStyle, getResolvedMapInitOptions, hideBaseBuildingLayers, resolveMapStyle } from '@/lib/map-styles';
 import {
   DEFAULT_STATUS_FILTERS,
@@ -68,6 +69,15 @@ type SelectedMapTarget = {
   parcelId: string | null;
 };
 
+type ParcelTileSource = {
+  url: string;
+  sourceLayer: string;
+  promoteId: string;
+  minzoom: number;
+  maxzoom: number;
+  bounds?: [number, number, number, number];
+};
+
 export type MapPointOverlay = {
   id: string;
   lon: number;
@@ -101,6 +111,21 @@ function safeGetSource(m: mapboxgl.Map, sourceId: string): boolean {
 
 function isCustomBuildingLayer(layerId: string): boolean {
   return CUSTOM_BUILDING_LAYER_PREFIXES.some((prefix) => layerId.startsWith(prefix));
+}
+
+function toParcelTileSource(manifest: CampaignMapManifest | null, accessToken: string | null): ParcelTileSource | null {
+  const sourceLayer = manifest?.parcel_source_layer ?? manifest?.source_layers?.parcels;
+  const urlTemplate = manifest?.parcel_vector_tile_url_template;
+  if (!sourceLayer || !urlTemplate) return null;
+
+  return {
+    url: appendTileAccessToken(urlTemplate, accessToken),
+    sourceLayer,
+    promoteId: manifest?.parcel_promote_id ?? manifest?.promote_ids?.parcels ?? 'parcel_id',
+    minzoom: manifest?.parcel_minzoom ?? 10,
+    maxzoom: manifest?.parcel_maxzoom ?? 15,
+    bounds: manifest?.parcel_bounds ?? manifest?.bounds ?? undefined,
+  };
 }
 
 function getAddressCoordinate(address: CampaignAddress): { lon: number; lat: number } | null {
@@ -330,8 +355,11 @@ export function CampaignDetailMapView({
   // Boundary: Snap to Roads and Raw vs Snapped toggle
   const [snapping, setSnapping] = useState(false);
   const [parcels, setParcels] = useState<CampaignParcel[]>([]);
+  const [parcelTileSource, setParcelTileSource] = useState<ParcelTileSource | null>(null);
   const parcelEnrichmentStatus = campaign?.parcel_enrichment_status ?? 'not_started';
-  const parcelsReady = parcels.length > 0;
+  const dbParcelsReady = parcels.length > 0;
+  const pmtilesParcelsReady = Boolean(parcelTileSource);
+  const parcelsReady = dbParcelsReady || pmtilesParcelsReady;
   const parcelsProcessing = parcelEnrichmentStatus === 'queued' || parcelEnrichmentStatus === 'processing';
   const showParcels = mapViewMode === 'parcels' && parcelsReady;
   const parcelStrokeColor = theme === 'dark' ? '#ffffff' : '#000000';
@@ -465,6 +493,7 @@ export function CampaignDetailMapView({
     setMapRefreshKey(0);
     setOptimisticallyHiddenBuildingIds([]);
     setOptimisticallyDeletedAddressIds([]);
+    setParcelTileSource(null);
   }, [campaignId]);
 
   useEffect(() => {
@@ -472,6 +501,35 @@ export function CampaignDetailMapView({
       setMapViewMode('buildings');
     }
   }, [mapViewMode, parcelsReady]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadParcelTileSource = async () => {
+      if (!campaignId) {
+        setParcelTileSource(null);
+        return;
+      }
+
+      try {
+        const { manifest, accessToken } = await fetchCampaignMapManifest(campaignId);
+        if (!cancelled) {
+          setParcelTileSource(toParcelTileSource(manifest, accessToken));
+        }
+      } catch (error) {
+        console.warn('[CampaignDetailMapView] Parcel PMTiles manifest unavailable:', error);
+        if (!cancelled) {
+          setParcelTileSource(null);
+        }
+      }
+    };
+
+    void loadParcelTileSource();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [campaignId]);
 
   // Fetch parcels for this campaign
   useEffect(() => {
@@ -1386,7 +1444,71 @@ export function CampaignDetailMapView({
       if (safeGetSource(m, PARCEL_SOURCE_ID)) m.removeSource(PARCEL_SOURCE_ID);
     };
 
-    if (parcels.length === 0) {
+    const addParcelPmtilesLayer = () => {
+      if (!m.isStyleLoaded() || !parcelTileSource) return;
+
+      try {
+        removeParcelsLayer();
+        const vectorSource: mapboxgl.VectorSourceSpecification & { promoteId?: Record<string, string> } = {
+          type: 'vector',
+          tiles: [parcelTileSource.url],
+          minzoom: parcelTileSource.minzoom,
+          maxzoom: parcelTileSource.maxzoom,
+          promoteId: {
+            [parcelTileSource.sourceLayer]: parcelTileSource.promoteId,
+          },
+        };
+        if (parcelTileSource.bounds) vectorSource.bounds = parcelTileSource.bounds;
+
+        m.addSource(PARCEL_SOURCE_ID, vectorSource);
+        m.addLayer({
+          id: PARCEL_FILL_LAYER,
+          type: 'fill',
+          source: PARCEL_SOURCE_ID,
+          'source-layer': parcelTileSource.sourceLayer,
+          minzoom: parcelTileSource.minzoom,
+          filter: ['==', '$type', 'Polygon'],
+          paint: {
+            'fill-color': parcelStrokeColor,
+            'fill-opacity': parcelFillOpacity,
+          },
+        });
+
+        m.addLayer({
+          id: PARCEL_LINE_LAYER,
+          type: 'line',
+          source: PARCEL_SOURCE_ID,
+          'source-layer': parcelTileSource.sourceLayer,
+          minzoom: parcelTileSource.minzoom,
+          filter: ['==', '$type', 'Polygon'],
+          layout: {
+            'line-cap': 'round',
+            'line-join': 'round',
+          },
+          paint: {
+            'line-color': parcelStrokeColor,
+            'line-width': [
+              'interpolate',
+              ['linear'],
+              ['zoom'],
+              10,
+              0.08,
+              14,
+              0.18,
+              16,
+              0.28,
+              18,
+              parcelLineWidth,
+            ],
+            'line-opacity': parcelLineOpacity,
+          },
+        });
+      } catch (err) {
+        console.error('Error adding parcel PMTiles layer:', err);
+      }
+    };
+
+    if (parcels.length === 0 && !parcelTileSource) {
       removeParcelsLayer();
       return;
     }
@@ -1441,6 +1563,13 @@ export function CampaignDetailMapView({
 
     const addParcelsLayer = () => {
       if (!m.isStyleLoaded()) return;
+
+      if (parcels.length === 0 && parcelTileSource) {
+        addParcelPmtilesLayer();
+        return;
+      }
+
+      removeParcelsLayer();
 
       const parcelFeatures: Array<GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>> = [];
       const parcelLabelFeatures: Array<GeoJSON.Feature<GeoJSON.Point>> = [];
@@ -1637,6 +1766,7 @@ export function CampaignDetailMapView({
     mapLoaded,
     showParcels,
     parcels,
+    parcelTileSource,
     preparedAddressPoints,
     statusFilters,
     parcelStrokeColor,
@@ -1782,10 +1912,14 @@ export function CampaignDetailMapView({
                         ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
                         : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
                     }`}
-                    title={`${parcels.length} parcel${parcels.length !== 1 ? 's' : ''} available`}
+                    title={dbParcelsReady
+                      ? `${parcels.length} parcel${parcels.length !== 1 ? 's' : ''} available`
+                      : 'Parcel PMTiles available'}
                   >
                     Parcels
-                    <span className="ml-1 text-xs opacity-60">({parcels.length})</span>
+                    {dbParcelsReady ? (
+                      <span className="ml-1 text-xs opacity-60">({parcels.length})</span>
+                    ) : null}
                   </button>
                 ) : null}
               </div>
