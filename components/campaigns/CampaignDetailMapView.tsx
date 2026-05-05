@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import mapboxgl from 'mapbox-gl';
+import type { PostgrestError } from '@supabase/supabase-js';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import * as turf from '@turf/turf';
 import { Maximize2, Minimize2, Trash2 } from 'lucide-react';
@@ -540,13 +541,13 @@ export function CampaignDetailMapView({
     const fetchParcels = async () => {
       const supabase = createClient();
       try {
-        const data = await fetchAllInPages((from, to) =>
+        const data = await fetchAllInPages<CampaignParcel>((from, to) =>
           supabase
             .from('campaign_parcels')
             .select('*')
             .eq('campaign_id', campaignId)
             .order('id', { ascending: true })
-            .range(from, to)
+            .range(from, to) as unknown as Promise<{ data: CampaignParcel[] | null; error: PostgrestError | null }>
         );
 
         if (!cancelled) {
@@ -900,7 +901,7 @@ export function CampaignDetailMapView({
 
       map.current = new mapboxgl.Map({
         container: mapContainer.current,
-        ...mapInitOptions,
+        ...(mapInitOptions as Pick<mapboxgl.MapOptions, 'style' | 'config'>),
         center: getInitialCenter(),
         zoom: 12,
       });
@@ -1972,7 +1973,7 @@ export function CampaignDetailMapView({
               hiddenBuildingIds={optimisticallyHiddenBuildingIds}
               deletedAddressIds={optimisticallyDeletedAddressIds}
               statusFilters={statusFilters}
-              showAddressLabels={mapViewMode !== 'parcels'}
+              showAddressLabels={true}
               onBuildingClick={handleBuildingClick}
               onRenderStateChange={handleBuildingsRenderStateChange}
             />

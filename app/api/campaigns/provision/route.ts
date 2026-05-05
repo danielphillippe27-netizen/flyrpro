@@ -6,7 +6,6 @@ import { buildRoute } from '@/lib/services/BlockRoutingService';
 import {
   StableLinkerService,
   type BuildingFeature as StableBuildingFeature,
-  type SpatialJoinSummary,
 } from '@/lib/services/StableLinkerService';
 import { TownhouseSplitterService, type BuildingFeature as TownhouseBuildingFeature } from '@/lib/services/TownhouseSplitterService';
 import { GoldAddressService } from '@/lib/services/GoldAddressService';
@@ -17,12 +16,10 @@ import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { fetchAllInPages } from '@/lib/supabase/fetchAllInPages';
 import {
   ParcelEnrichmentService,
-  type ParcelPreparationResult,
 } from '@/lib/services/ParcelEnrichmentService';
 import { CampaignLinkQualityService } from '@/lib/services/CampaignLinkQualityService';
 import {
   CampaignMapModeService,
-  type CampaignMapModeAssessment,
 } from '@/lib/services/CampaignMapModeService';
 import { isParcelRegionSupported } from '@/lib/geo/parcelRegions';
 import { triggerDiamondBuild } from '@/lib/diamond/buildTrigger';
@@ -71,13 +68,6 @@ const GOLD_SUCCESS_THRESHOLD = 10;
 const DEFAULT_GOLD_ADDRESS_LIMIT = 5000;
 const FALLBACK_INSERT_BATCH_SIZE = 500;
 const BULK_ADDRESS_RPC = 'add_campaign_addresses';
-
-type CampaignLinkingResult = {
-  spatialJoinSummary: SpatialJoinSummary;
-  mapModeAssessment: CampaignMapModeAssessment;
-  buildingsCount: number;
-  parcelPreparation: ParcelPreparationResult | null;
-};
 
 class ProvisionError extends Error {
   constructor(message: string, readonly status: number = 500) {
@@ -791,97 +781,6 @@ async function runCampaignPostProcessing(params: {
   }
 }
 
-async function runInitialCampaignLinking(params: {
-  campaignId: string;
-  polygon: GeoJSON.Polygon;
-  regionCode: string;
-  source: ProvisionSource;
-  snapshot: LambdaSnapshotResponse | null;
-  insertedCount: number;
-}): Promise<CampaignLinkingResult> {
-  const { campaignId, polygon, regionCode, source, snapshot, insertedCount } = params;
-  const supabase = createAdminClient();
-
-  const goldBuildings =
-    source === 'gold'
-      ? (await GoldAddressService.getBuildingsForPolygon(polygon)).buildings
-      : null;
-
-  const { buildings: normalizedBuildingsGeoJSON, overtureRelease } =
-    await BuildingAdapter.fetchAndNormalize(goldBuildings ?? null, snapshot, undefined);
-
-  const buildingsCount = normalizedBuildingsGeoJSON.features.length;
-  console.log('[Provision] Initial spatial linker before map_ready:', {
-    campaignId,
-    addresses: insertedCount,
-    buildings: buildingsCount,
-    source,
-  });
-
-  let parcelPreparation: ParcelPreparationResult | null = null;
-  const parcelEnrichment = isParcelRegionSupported(regionCode)
-    ? new ParcelEnrichmentService(supabase)
-    : null;
-
-  if (parcelEnrichment) {
-    try {
-      parcelPreparation = await parcelEnrichment.prepareParcelsForProvision(campaignId);
-      console.log('[Provision] Initial parcel preparation before map_ready:', {
-        campaignId,
-        status: parcelPreparation.status,
-        parcelCount: parcelPreparation.parcelCount,
-        sourceId: parcelPreparation.sourceId,
-      });
-    } catch (parcelError) {
-      console.warn('[Provision] Initial parcel preparation failed before map_ready:', parcelError);
-    }
-  }
-
-  const linkerService = new StableLinkerService(supabase);
-  const spatialJoinSummary = await linkerService.runSpatialJoin(
-    campaignId,
-    normalizedBuildingsGeoJSON as unknown as { features: StableBuildingFeature[] },
-    overtureRelease,
-    {
-      parcels:
-        parcelPreparation?.status === 'ready' && parcelPreparation.parcelCount > 0
-          ? parcelPreparation.parcels.map((parcel) => ({
-              externalId: parcel.externalId,
-              geometry: parcel.geometry,
-            }))
-          : undefined,
-      resetExisting: true,
-      persistenceMode: source === 'gold' ? 'gold' : 'silver',
-    }
-  );
-
-  const linkQualityService = new CampaignLinkQualityService(supabase);
-  const linkQuality = await linkQualityService.assessPersistedLinks(campaignId);
-  await linkQualityService.persist(campaignId, linkQuality);
-
-  const mapModeService = new CampaignMapModeService(supabase);
-  const mapModeAssessment = await mapModeService.computeAndPersist(campaignId, {
-    totalAddresses: insertedCount,
-    hasParcels: (parcelPreparation?.parcelCount ?? 0) > 0,
-    parcelCount: parcelPreparation?.parcelCount ?? 0,
-  });
-
-  console.log('[Provision] Initial linking complete:', {
-    campaignId,
-    matched: spatialJoinSummary.matched,
-    linkedAddressCount: mapModeAssessment.linkedAddressCount,
-    buildingLinkConfidence: mapModeAssessment.buildingLinkConfidence,
-    mapMode: mapModeAssessment.mapMode,
-  });
-
-  return {
-    spatialJoinSummary,
-    mapModeAssessment,
-    buildingsCount,
-    parcelPreparation,
-  };
-}
-
 export async function POST(request: NextRequest) {
   console.log('[Provision] Starting staged map-ready provisioning...');
   console.log('[Provision] Lambda URL exists?', !!process.env.SLICE_LAMBDA_URL);
@@ -1109,33 +1008,13 @@ export async function POST(request: NextRequest) {
 
       await upsertSnapshotMetadata(supabase, campaignId!, snapshot);
 
-      const initialLinking = await runInitialCampaignLinking({
-        campaignId: campaignId!,
-        polygon: polygon as GeoJSON.Polygon,
-        regionCode,
-        source: addressSource,
-        snapshot,
-        insertedCount: finalAddressCount,
-      }).catch((linkingError) => {
-        console.error('[Provision] Initial spatial linking failed before map_ready:', linkingError);
-        return null;
-      });
+      const linkedAddressCount = 0;
+      const buildingLinkConfidence = 0;
+      const mapMode = 'standard_pins';
+      const linkedBuildingCount = 0;
+      const effectiveBuildingCount = snapshot?.counts.buildings ?? 0;
+      const parcelEnrichmentStatus = isParcelRegionSupported(regionCode) ? 'queued' : 'skipped';
 
-      const linkedAddressCount = initialLinking?.mapModeAssessment.linkedAddressCount ?? 0;
-      const buildingLinkConfidence = initialLinking?.mapModeAssessment.buildingLinkConfidence ?? 0;
-      const mapMode = initialLinking?.mapModeAssessment.mapMode ?? 'standard_pins';
-      const linkedBuildingCount = initialLinking?.spatialJoinSummary.matched ?? 0;
-      const effectiveBuildingCount = initialLinking?.buildingsCount ?? snapshot?.counts.buildings ?? 0;
-
-      const initialParcelPreparation = initialLinking?.parcelPreparation ?? null;
-      const parcelEnrichmentStatus =
-        initialParcelPreparation?.status === 'ready'
-          ? 'ready'
-          : initialParcelPreparation?.status === 'failed'
-            ? 'failed'
-            : isParcelRegionSupported(regionCode)
-              ? 'queued'
-              : 'skipped';
       if (parcelEnrichmentStatus === 'queued') {
         await new ParcelEnrichmentService(supabase).markQueued(campaignId!);
       }
@@ -1146,51 +1025,52 @@ export async function POST(request: NextRequest) {
         provision_source: addressSource,
         provisioned_at: readyAt,
         map_ready_at: readyAt,
-        has_parcels: (initialParcelPreparation?.parcelCount ?? 0) > 0,
+        has_parcels: false,
         building_link_confidence: buildingLinkConfidence,
         map_mode: mapMode,
         parcel_enrichment_status: parcelEnrichmentStatus,
       });
 
-      const whiteGoldBuild = await triggerWhiteGoldBuild({
-        campaignId: campaignId!,
-        reason: 'provision_map_ready',
-        source: addressSource,
-        addressCount: finalAddressCount,
-        buildingCount: effectiveBuildingCount,
-        mapMode,
-      });
-
-      console.log('[Provision] White Gold build trigger:', {
-        campaignId,
-        status: whiteGoldBuild.status,
-        ...(whiteGoldBuild.status === 'queued' ? { statusCode: whiteGoldBuild.statusCode } : {}),
-        ...(whiteGoldBuild.status === 'skipped' ? { reason: whiteGoldBuild.reason } : {}),
-        ...(whiteGoldBuild.status === 'failed'
-          ? { statusCode: whiteGoldBuild.statusCode, error: whiteGoldBuild.error }
-          : {}),
-      });
-
-      const diamondBuild = await triggerDiamondBuild({
-        campaignId: campaignId!,
-        reason: 'provision_map_ready',
-        source: addressSource,
-        addressCount: finalAddressCount,
-        buildingCount: effectiveBuildingCount,
-        mapMode,
-      });
-
-      console.log('[Provision] Diamond build trigger:', {
-        campaignId,
-        status: diamondBuild.status,
-        ...(diamondBuild.status === 'queued' ? { statusCode: diamondBuild.statusCode } : {}),
-        ...(diamondBuild.status === 'skipped' ? { reason: diamondBuild.reason } : {}),
-        ...(diamondBuild.status === 'failed'
-          ? { statusCode: diamondBuild.statusCode, error: diamondBuild.error }
-          : {}),
-      });
-
       after(async () => {
+        const [whiteGoldBuild, diamondBuild] = await Promise.all([
+          triggerWhiteGoldBuild({
+            campaignId: campaignId!,
+            reason: 'provision_map_ready',
+            source: addressSource,
+            addressCount: finalAddressCount,
+            buildingCount: effectiveBuildingCount,
+            mapMode,
+          }),
+          triggerDiamondBuild({
+            campaignId: campaignId!,
+            reason: 'provision_map_ready',
+            source: addressSource,
+            addressCount: finalAddressCount,
+            buildingCount: effectiveBuildingCount,
+            mapMode,
+          }),
+        ]);
+
+        console.log('[Provision] White Gold build trigger:', {
+          campaignId,
+          status: whiteGoldBuild.status,
+          ...(whiteGoldBuild.status === 'queued' ? { statusCode: whiteGoldBuild.statusCode } : {}),
+          ...(whiteGoldBuild.status === 'skipped' ? { reason: whiteGoldBuild.reason } : {}),
+          ...(whiteGoldBuild.status === 'failed'
+            ? { statusCode: whiteGoldBuild.statusCode, error: whiteGoldBuild.error }
+            : {}),
+        });
+
+        console.log('[Provision] Diamond build trigger:', {
+          campaignId,
+          status: diamondBuild.status,
+          ...(diamondBuild.status === 'queued' ? { statusCode: diamondBuild.statusCode } : {}),
+          ...(diamondBuild.status === 'skipped' ? { reason: diamondBuild.reason } : {}),
+          ...(diamondBuild.status === 'failed'
+            ? { statusCode: diamondBuild.statusCode, error: diamondBuild.error }
+            : {}),
+        });
+
         await runCampaignPostProcessing({
           campaignId: campaignId!,
           polygon: polygon as GeoJSON.Polygon,
@@ -1209,7 +1089,7 @@ export async function POST(request: NextRequest) {
         source: addressSource,
         links_created: linkedBuildingCount,
         units_created: 0,
-        has_parcels: (initialParcelPreparation?.parcelCount ?? 0) > 0,
+        has_parcels: false,
         building_link_confidence: buildingLinkConfidence,
         map_mode: mapMode,
         linked_address_count: linkedAddressCount,
@@ -1220,8 +1100,8 @@ export async function POST(request: NextRequest) {
         map_ready: true,
         optimized: false,
         postprocess_deferred: true,
-        white_gold_build: whiteGoldBuild,
-        diamond_build: diamondBuild,
+        white_gold_build: { status: 'deferred' },
+        diamond_build: { status: 'deferred' },
         parcel_enrichment_status: parcelEnrichmentStatus,
         map_layers: snapshot
           ? {
