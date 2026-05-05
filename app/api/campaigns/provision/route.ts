@@ -3,37 +3,41 @@ import { createAdminClient } from '@/lib/supabase/server';
 import { TileLambdaService, type LambdaSnapshotResponse } from '@/lib/services/TileLambdaService';
 import { RoutingService } from '@/lib/services/RoutingService';
 import { buildRoute } from '@/lib/services/BlockRoutingService';
-import { StableLinkerService } from '@/lib/services/StableLinkerService';
-import { TownhouseSplitterService } from '@/lib/services/TownhouseSplitterService';
+import {
+  StableLinkerService,
+  type BuildingFeature as StableBuildingFeature,
+  type SpatialJoinSummary,
+} from '@/lib/services/StableLinkerService';
+import { TownhouseSplitterService, type BuildingFeature as TownhouseBuildingFeature } from '@/lib/services/TownhouseSplitterService';
 import { GoldAddressService } from '@/lib/services/GoldAddressService';
 import { BuildingAdapter } from '@/lib/services/BuildingAdapter';
 import { AddressAdapter, type StandardCampaignAddress } from '@/lib/services/AddressAdapter';
 import { resolveCampaignRegion } from '@/lib/geo/regionResolver';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { fetchAllInPages } from '@/lib/supabase/fetchAllInPages';
-import { ParcelEnrichmentService } from '@/lib/services/ParcelEnrichmentService';
+import {
+  ParcelEnrichmentService,
+  type ParcelPreparationResult,
+} from '@/lib/services/ParcelEnrichmentService';
 import { CampaignLinkQualityService } from '@/lib/services/CampaignLinkQualityService';
-import { CampaignMapModeService } from '@/lib/services/CampaignMapModeService';
+import {
+  CampaignMapModeService,
+  type CampaignMapModeAssessment,
+} from '@/lib/services/CampaignMapModeService';
 import { isParcelRegionSupported } from '@/lib/geo/parcelRegions';
+import { triggerDiamondBuild } from '@/lib/diamond/buildTrigger';
+import { triggerWhiteGoldBuild } from '@/lib/white-gold/buildTrigger';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 interface ProvisionRequest {
   campaign_id: string;
+  allow_gold?: boolean;
+  geometry_tier?: 'diamond' | 'white_gold' | 'standard';
 }
 
 type ProvisionSource = 'gold' | 'silver' | 'lambda';
-type ProvisionPhase =
-  | 'created'
-  | 'source_probed'
-  | 'addresses_loading'
-  | 'addresses_ready'
-  | 'map_ready'
-  | 'optimizing'
-  | 'optimized'
-  | 'failed';
-
 type SnapshotTileMetrics = NonNullable<NonNullable<LambdaSnapshotResponse['metadata']>['tile_metrics']>;
 
 type ExistingSnapshotRow = {
@@ -63,11 +67,17 @@ type ExistingCampaignAddressSignatureRow = {
   gers_id: string | null;
 };
 
-const GOLD_PROBE_LIMIT = 50;
 const GOLD_SUCCESS_THRESHOLD = 10;
 const DEFAULT_GOLD_ADDRESS_LIMIT = 5000;
 const FALLBACK_INSERT_BATCH_SIZE = 500;
 const BULK_ADDRESS_RPC = 'add_campaign_addresses';
+
+type CampaignLinkingResult = {
+  spatialJoinSummary: SpatialJoinSummary;
+  mapModeAssessment: CampaignMapModeAssessment;
+  buildingsCount: number;
+  parcelPreparation: ParcelPreparationResult | null;
+};
 
 class ProvisionError extends Error {
   constructor(message: string, readonly status: number = 500) {
@@ -108,12 +118,6 @@ async function retryWithBackoff<T>(
   }
 
   throw lastError ?? new Error('Retry failed');
-}
-
-function normalizeRegionCode(regionCode: string | null | undefined): string | null {
-  if (typeof regionCode !== 'string') return null;
-  const normalized = regionCode.trim().toUpperCase();
-  return normalized.length > 0 ? normalized : null;
 }
 
 function deduplicateAddresses(addresses: StandardCampaignAddress[]): StandardCampaignAddress[] {
@@ -258,46 +262,6 @@ function isUniqueConstraintError(error: { message?: string; code?: string; detai
 
   const text = `${error.message ?? ''} ${error.details ?? ''}`.toLowerCase();
   return error.code === '23505' || text.includes('unique') || text.includes('constraint') || text.includes('conflict');
-}
-
-function mergeGoldProbeWithLambdaAddresses(
-  goldProbeRows: any[],
-  lambdaAddresses: Array<Record<string, unknown>>,
-  campaignId: string,
-  regionCode: string
-): Array<Record<string, unknown>> {
-  if (goldProbeRows.length === 0) {
-    return lambdaAddresses;
-  }
-
-  const normalizedRegion = normalizeRegionCode(regionCode);
-  const goldAsCampaign = goldProbeRows.map((address: any) => ({
-    campaign_id: campaignId,
-    formatted: `${address.street_number} ${address.street_name}${address.unit ? ` ${address.unit}` : ''}, ${address.city}`,
-    house_number: address.street_number,
-    street_name: address.street_name,
-    locality: address.city,
-    region: normalizeRegionCode(address.province) ?? normalizedRegion,
-    postal_code: address.zip,
-    coordinate: { lat: address.lat, lon: address.lon },
-    geom: address.geom_geojson,
-    source: 'gold' as const,
-    gers_id: null,
-  }));
-
-  const merged = new Map<string, Record<string, unknown>>();
-
-  for (const address of lambdaAddresses) {
-    const key = `${String(address.house_number ?? '').toLowerCase()}|${String(address.street_name ?? '').toLowerCase()}`;
-    merged.set(key, address);
-  }
-
-  for (const address of goldAsCampaign) {
-    const key = `${String(address.house_number ?? '').toLowerCase()}|${String(address.street_name ?? '').toLowerCase()}`;
-    merged.set(key, address);
-  }
-
-  return Array.from(merged.values()).slice(0, DEFAULT_GOLD_ADDRESS_LIMIT);
 }
 
 function isSnapshotReusable(snapshot: ExistingSnapshotRow | null | undefined): snapshot is ExistingSnapshotRow {
@@ -448,7 +412,7 @@ async function upsertCampaignAddressBatch(
 
   console.warn(
     '[Provision] campaign/gers upsert hit a unique constraint; retrying campaign/source_id:',
-    gersResult.error.message
+    gersResult.error?.message ?? 'unknown unique constraint'
   );
 
   const sourceIdResult = await supabase
@@ -464,7 +428,7 @@ async function upsertCampaignAddressBatch(
 
   console.warn(
     '[Provision] campaign/source_id upsert still hit a unique constraint; falling back to duplicate-tolerant row inserts:',
-    sourceIdResult.error.message
+    sourceIdResult.error?.message ?? 'unknown unique constraint'
   );
 
   for (const address of batch) {
@@ -629,8 +593,8 @@ async function runCampaignPostProcessing(params: {
           house_number: string | null;
           street_name: string | null;
           formatted: string | null;
-        }>((from, to) =>
-          supabase
+        }>(async (from, to) =>
+          await supabase
             .from('campaign_addresses')
             .select('id, geom, house_number, street_name, formatted')
             .eq('campaign_id', campaignId)
@@ -693,7 +657,6 @@ async function runCampaignPostProcessing(params: {
                 .update({
                   cluster_id: 1,
                   sequence: index,
-                  seq: index,
                 })
                 .eq('id', stop.id)
             )
@@ -739,7 +702,7 @@ async function runCampaignPostProcessing(params: {
     const linkerService = new StableLinkerService(supabase);
     spatialJoinSummary = await linkerService.runSpatialJoin(
       campaignId,
-      normalizedBuildingsGeoJSON as any,
+      normalizedBuildingsGeoJSON as unknown as { features: StableBuildingFeature[] },
       overtureRelease,
       {
         parcels:
@@ -768,7 +731,7 @@ async function runCampaignPostProcessing(params: {
       const splitterService = new TownhouseSplitterService(supabase);
       townhouseSummary = await splitterService.processCampaignTownhouses(
         campaignId,
-        normalizedBuildingsGeoJSON as any,
+        normalizedBuildingsGeoJSON as unknown as { features: TownhouseBuildingFeature[] },
         overtureRelease
       );
     } catch (splitterError) {
@@ -828,6 +791,97 @@ async function runCampaignPostProcessing(params: {
   }
 }
 
+async function runInitialCampaignLinking(params: {
+  campaignId: string;
+  polygon: GeoJSON.Polygon;
+  regionCode: string;
+  source: ProvisionSource;
+  snapshot: LambdaSnapshotResponse | null;
+  insertedCount: number;
+}): Promise<CampaignLinkingResult> {
+  const { campaignId, polygon, regionCode, source, snapshot, insertedCount } = params;
+  const supabase = createAdminClient();
+
+  const goldBuildings =
+    source === 'gold'
+      ? (await GoldAddressService.getBuildingsForPolygon(polygon)).buildings
+      : null;
+
+  const { buildings: normalizedBuildingsGeoJSON, overtureRelease } =
+    await BuildingAdapter.fetchAndNormalize(goldBuildings ?? null, snapshot, undefined);
+
+  const buildingsCount = normalizedBuildingsGeoJSON.features.length;
+  console.log('[Provision] Initial spatial linker before map_ready:', {
+    campaignId,
+    addresses: insertedCount,
+    buildings: buildingsCount,
+    source,
+  });
+
+  let parcelPreparation: ParcelPreparationResult | null = null;
+  const parcelEnrichment = isParcelRegionSupported(regionCode)
+    ? new ParcelEnrichmentService(supabase)
+    : null;
+
+  if (parcelEnrichment) {
+    try {
+      parcelPreparation = await parcelEnrichment.prepareParcelsForProvision(campaignId);
+      console.log('[Provision] Initial parcel preparation before map_ready:', {
+        campaignId,
+        status: parcelPreparation.status,
+        parcelCount: parcelPreparation.parcelCount,
+        sourceId: parcelPreparation.sourceId,
+      });
+    } catch (parcelError) {
+      console.warn('[Provision] Initial parcel preparation failed before map_ready:', parcelError);
+    }
+  }
+
+  const linkerService = new StableLinkerService(supabase);
+  const spatialJoinSummary = await linkerService.runSpatialJoin(
+    campaignId,
+    normalizedBuildingsGeoJSON as unknown as { features: StableBuildingFeature[] },
+    overtureRelease,
+    {
+      parcels:
+        parcelPreparation?.status === 'ready' && parcelPreparation.parcelCount > 0
+          ? parcelPreparation.parcels.map((parcel) => ({
+              externalId: parcel.externalId,
+              geometry: parcel.geometry,
+            }))
+          : undefined,
+      resetExisting: true,
+      persistenceMode: source === 'gold' ? 'gold' : 'silver',
+    }
+  );
+
+  const linkQualityService = new CampaignLinkQualityService(supabase);
+  const linkQuality = await linkQualityService.assessPersistedLinks(campaignId);
+  await linkQualityService.persist(campaignId, linkQuality);
+
+  const mapModeService = new CampaignMapModeService(supabase);
+  const mapModeAssessment = await mapModeService.computeAndPersist(campaignId, {
+    totalAddresses: insertedCount,
+    hasParcels: (parcelPreparation?.parcelCount ?? 0) > 0,
+    parcelCount: parcelPreparation?.parcelCount ?? 0,
+  });
+
+  console.log('[Provision] Initial linking complete:', {
+    campaignId,
+    matched: spatialJoinSummary.matched,
+    linkedAddressCount: mapModeAssessment.linkedAddressCount,
+    buildingLinkConfidence: mapModeAssessment.buildingLinkConfidence,
+    mapMode: mapModeAssessment.mapMode,
+  });
+
+  return {
+    spatialJoinSummary,
+    mapModeAssessment,
+    buildingsCount,
+    parcelPreparation,
+  };
+}
+
 export async function POST(request: NextRequest) {
   console.log('[Provision] Starting staged map-ready provisioning...');
   console.log('[Provision] Lambda URL exists?', !!process.env.SLICE_LAMBDA_URL);
@@ -843,6 +897,7 @@ export async function POST(request: NextRequest) {
 
     const body: ProvisionRequest = await request.json();
     campaignId = body.campaign_id;
+    const allowGoldProvision = body.allow_gold === true;
 
     if (!campaignId) {
       return NextResponse.json({ error: 'Campaign ID required' }, { status: 400 });
@@ -947,25 +1002,39 @@ export async function POST(request: NextRequest) {
 
       const existingSnapshot = (existingSnapshotRow ?? null) as ExistingSnapshotRow | null;
 
-      if (isSnapshotReusable(existingSnapshot ?? null)) {
+      if (existingSnapshot && isSnapshotReusable(existingSnapshot)) {
         addressSource = 'lambda';
         snapshot = snapshotRowToLambdaSnapshot(campaignId!, existingSnapshot);
         console.log('[Provision] Reusing snapshot from campaign_snapshots (skip Lambda generation)');
       } else {
-        const goldProbeRows = await GoldAddressService.fetchAddressesInPolygon(
-          polygon as GeoJSON.Polygon,
-          regionCode,
-          GOLD_PROBE_LIMIT
-        );
+        if (allowGoldProvision) {
+          const goldRows = await GoldAddressService.fetchAddressesInPolygon(
+            polygon as GeoJSON.Polygon,
+            regionCode,
+            DEFAULT_GOLD_ADDRESS_LIMIT
+          );
 
-        console.log(`[Provision] Gold probe returned ${goldProbeRows.length} address rows`);
+          console.log(`[Provision] Gold query returned ${goldRows.length} address rows`);
 
-        if (goldProbeRows.length >= GOLD_SUCCESS_THRESHOLD) {
-          addressSource = 'gold';
-        } else if (goldProbeRows.length > 0) {
-          addressSource = 'silver';
-          deferSilverLambdaTopUp = true;
-        } else {
+          if (goldRows.length >= GOLD_SUCCESS_THRESHOLD) {
+            addressSource = 'gold';
+            addressesToInsert = AddressAdapter.normalizeArray(
+              goldRows,
+              campaignId!,
+              regionCode
+            );
+          } else if (goldRows.length > 0) {
+            addressSource = 'silver';
+            deferSilverLambdaTopUp = true;
+            addressesToInsert = AddressAdapter.normalizeArray(
+              goldRows,
+              campaignId!,
+              regionCode
+            );
+          }
+        }
+
+        if (addressSource === 'lambda') {
           addressSource = 'lambda';
           snapshot = await TileLambdaService.generateSnapshots(
             polygon as GeoJSON.Polygon,
@@ -985,14 +1054,8 @@ export async function POST(request: NextRequest) {
               campaignId!,
               regionCode
             ) as Array<Record<string, unknown>>;
-            const mergedAddresses = mergeGoldProbeWithLambdaAddresses(
-              goldProbeRows,
-              lambdaAddresses,
-              campaignId!,
-              regionCode
-            );
             addressesToInsert = AddressAdapter.normalizeArray(
-              mergedAddresses,
+              lambdaAddresses,
               campaignId!,
               regionCode
             );
@@ -1012,16 +1075,18 @@ export async function POST(request: NextRequest) {
 
       if (finalAddressCount === 0) {
         if (addressSource === 'gold' || deferSilverLambdaTopUp) {
-          const fullGoldAddresses = await GoldAddressService.fetchAddressesInPolygon(
-            polygon as GeoJSON.Polygon,
-            regionCode,
-            DEFAULT_GOLD_ADDRESS_LIMIT
-          );
-          addressesToInsert = AddressAdapter.normalizeArray(
-            fullGoldAddresses,
-            campaignId!,
-            regionCode
-          );
+          if (addressesToInsert.length === 0) {
+            const fullGoldAddresses = await GoldAddressService.fetchAddressesInPolygon(
+              polygon as GeoJSON.Polygon,
+              regionCode,
+              DEFAULT_GOLD_ADDRESS_LIMIT
+            );
+            addressesToInsert = AddressAdapter.normalizeArray(
+              fullGoldAddresses,
+              campaignId!,
+              regionCode
+            );
+          }
           addressesToInsert = deduplicateAddresses(addressesToInsert);
           finalAddressCount = await bulkInsertAddresses(supabase, campaignId!, addressesToInsert);
         } else {
@@ -1044,7 +1109,33 @@ export async function POST(request: NextRequest) {
 
       await upsertSnapshotMetadata(supabase, campaignId!, snapshot);
 
-      const parcelEnrichmentStatus = isParcelRegionSupported(regionCode) ? 'queued' : 'skipped';
+      const initialLinking = await runInitialCampaignLinking({
+        campaignId: campaignId!,
+        polygon: polygon as GeoJSON.Polygon,
+        regionCode,
+        source: addressSource,
+        snapshot,
+        insertedCount: finalAddressCount,
+      }).catch((linkingError) => {
+        console.error('[Provision] Initial spatial linking failed before map_ready:', linkingError);
+        return null;
+      });
+
+      const linkedAddressCount = initialLinking?.mapModeAssessment.linkedAddressCount ?? 0;
+      const buildingLinkConfidence = initialLinking?.mapModeAssessment.buildingLinkConfidence ?? 0;
+      const mapMode = initialLinking?.mapModeAssessment.mapMode ?? 'standard_pins';
+      const linkedBuildingCount = initialLinking?.spatialJoinSummary.matched ?? 0;
+      const effectiveBuildingCount = initialLinking?.buildingsCount ?? snapshot?.counts.buildings ?? 0;
+
+      const initialParcelPreparation = initialLinking?.parcelPreparation ?? null;
+      const parcelEnrichmentStatus =
+        initialParcelPreparation?.status === 'ready'
+          ? 'ready'
+          : initialParcelPreparation?.status === 'failed'
+            ? 'failed'
+            : isParcelRegionSupported(regionCode)
+              ? 'queued'
+              : 'skipped';
       if (parcelEnrichmentStatus === 'queued') {
         await new ParcelEnrichmentService(supabase).markQueued(campaignId!);
       }
@@ -1055,10 +1146,48 @@ export async function POST(request: NextRequest) {
         provision_source: addressSource,
         provisioned_at: readyAt,
         map_ready_at: readyAt,
-        has_parcels: false,
-        building_link_confidence: 0,
-        map_mode: 'standard_pins',
+        has_parcels: (initialParcelPreparation?.parcelCount ?? 0) > 0,
+        building_link_confidence: buildingLinkConfidence,
+        map_mode: mapMode,
         parcel_enrichment_status: parcelEnrichmentStatus,
+      });
+
+      const whiteGoldBuild = await triggerWhiteGoldBuild({
+        campaignId: campaignId!,
+        reason: 'provision_map_ready',
+        source: addressSource,
+        addressCount: finalAddressCount,
+        buildingCount: effectiveBuildingCount,
+        mapMode,
+      });
+
+      console.log('[Provision] White Gold build trigger:', {
+        campaignId,
+        status: whiteGoldBuild.status,
+        ...(whiteGoldBuild.status === 'queued' ? { statusCode: whiteGoldBuild.statusCode } : {}),
+        ...(whiteGoldBuild.status === 'skipped' ? { reason: whiteGoldBuild.reason } : {}),
+        ...(whiteGoldBuild.status === 'failed'
+          ? { statusCode: whiteGoldBuild.statusCode, error: whiteGoldBuild.error }
+          : {}),
+      });
+
+      const diamondBuild = await triggerDiamondBuild({
+        campaignId: campaignId!,
+        reason: 'provision_map_ready',
+        source: addressSource,
+        addressCount: finalAddressCount,
+        buildingCount: effectiveBuildingCount,
+        mapMode,
+      });
+
+      console.log('[Provision] Diamond build trigger:', {
+        campaignId,
+        status: diamondBuild.status,
+        ...(diamondBuild.status === 'queued' ? { statusCode: diamondBuild.statusCode } : {}),
+        ...(diamondBuild.status === 'skipped' ? { reason: diamondBuild.reason } : {}),
+        ...(diamondBuild.status === 'failed'
+          ? { statusCode: diamondBuild.statusCode, error: diamondBuild.error }
+          : {}),
       });
 
       after(async () => {
@@ -1076,14 +1205,14 @@ export async function POST(request: NextRequest) {
         success: true,
         campaign_id: campaignId,
         addresses_saved: finalAddressCount,
-        buildings_saved: snapshot?.counts.buildings ?? 0,
+        buildings_saved: effectiveBuildingCount,
         source: addressSource,
-        links_created: 0,
+        links_created: linkedBuildingCount,
         units_created: 0,
-        has_parcels: false,
-        building_link_confidence: 0,
-        map_mode: 'standard_pins',
-        linked_address_count: 0,
+        has_parcels: (initialParcelPreparation?.parcelCount ?? 0) > 0,
+        building_link_confidence: buildingLinkConfidence,
+        map_mode: mapMode,
+        linked_address_count: linkedAddressCount,
         total_campaign_addresses: finalAddressCount,
         provision_status: 'ready',
         provision_phase: 'map_ready',
@@ -1091,6 +1220,8 @@ export async function POST(request: NextRequest) {
         map_ready: true,
         optimized: false,
         postprocess_deferred: true,
+        white_gold_build: whiteGoldBuild,
+        diamond_build: diamondBuild,
         parcel_enrichment_status: parcelEnrichmentStatus,
         map_layers: snapshot
           ? {
@@ -1113,7 +1244,13 @@ export async function POST(request: NextRequest) {
             },
         warning: snapshot?.warning ?? null,
         message:
-          `${addressSource === 'gold' ? 'Gold' : addressSource === 'silver' ? 'Gold-seeded Silver' : 'Lambda'} campaign is map-ready: ` +
+          `${allowGoldProvision
+            ? addressSource === 'gold'
+              ? 'Gold'
+              : addressSource === 'silver'
+                ? 'Gold-seeded Silver'
+                : 'Diamond-seeded Lambda'
+            : 'Diamond/White Gold'} campaign is map-ready: ` +
           `${finalAddressCount} leads loaded. ` +
           `${deferSilverLambdaTopUp ? 'Lambda top-up, ' : ''}` +
           `route optimization, building linking, townhouse splitting, and parcel enrichment will continue in the background.`,

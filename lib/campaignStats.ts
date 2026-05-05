@@ -3,8 +3,12 @@ import type { CampaignStats } from '@/lib/services/CampaignsService';
 
 const VISITED_STATUSES = new Set([
   'no_answer',
+  'not_home',
+  'attempted',
   'delivered',
   'talked',
+  'lead',
+  'interested',
   'appointment',
   'do_not_knock',
   'future_seller',
@@ -15,7 +19,8 @@ const CONTACTED_STATUSES = new Set([
   'talked',
 ]);
 
-const HOT_LEAD_STATUSES = new Set(['appointment', 'future_seller', 'hot_lead']);
+const LEAD_STATUSES = new Set(['lead', 'interested', 'hot_lead']);
+const HOT_LEAD_STATUSES = new Set(['appointment', 'future_seller']);
 
 function normalizeStatus(status?: string | null): string {
   return (status ?? '').trim().toLowerCase();
@@ -31,13 +36,17 @@ export function getCampaignAddressMapStatus(
 
 const ADDRESS_OUTCOME_LABELS: Record<string, string> = {
   none: 'Not visited',
+  not_home: 'Attempted',
+  attempted: 'Attempted',
   no_answer: 'Attempted',
   delivered: 'Visited',
   talked: 'Conversation',
+  lead: 'Lead',
+  interested: 'Lead',
   appointment: 'Appointment',
   do_not_knock: 'Do not knock',
   future_seller: 'Future seller',
-  hot_lead: 'Hot lead',
+  hot_lead: 'Lead',
   qr_scanned: 'QR scanned',
 };
 
@@ -83,9 +92,10 @@ export function getCampaignBuildingStatus(
 ): 'not_visited' | 'visited' | 'hot' | 'lead' | 'hot_lead' | 'no_answer' | 'do_not_knock' {
   const status = getCampaignAddressMapStatus(address);
   if (CONTACTED_STATUSES.has(status)) return 'hot';
+  if (LEAD_STATUSES.has(status)) return 'lead';
   if (HOT_LEAD_STATUSES.has(status)) return 'hot_lead';
   if (status === 'do_not_knock') return 'do_not_knock';
-  if (status === 'no_answer') return 'no_answer';
+  if (status === 'no_answer' || status === 'not_home' || status === 'attempted') return 'no_answer';
   if (VISITED_STATUSES.has(status)) return 'visited';
   return 'not_visited';
 }

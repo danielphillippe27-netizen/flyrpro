@@ -85,6 +85,8 @@ export type AddressStatusValue =
   | 'no_answer'
   | 'delivered'
   | 'talked'
+  | 'lead'
+  | 'interested'
   | 'appointment'
   | 'do_not_knock'
   | 'future_seller'
@@ -96,21 +98,27 @@ export const ADDRESS_STATUS_LABELS: Record<AddressStatusValue, string> = {
   no_answer: 'Attempted',
   delivered: 'Delivered',
   talked: 'Talked',
+  lead: 'Lead',
+  interested: 'Lead',
   appointment: 'Appointment',
   do_not_knock: 'Do not knock',
   future_seller: 'Future seller',
-  hot_lead: 'Hot lead',
+  hot_lead: 'Lead',
 };
 
 /** Address map colors follow the shared campaign map palette. */
 export const ADDRESS_STATUS_COLORS: Record<string, string> = {
+  not_home: MAP_STATUS_CONFIG.NO_ONE_HOME.color,
+  attempted: MAP_STATUS_CONFIG.NO_ONE_HOME.color,
   no_answer: MAP_STATUS_CONFIG.NO_ONE_HOME.color,
   delivered: MAP_STATUS_CONFIG.TOUCHED.color,
   talked: MAP_STATUS_CONFIG.CONVERSATIONS.color,
+  lead: MAP_STATUS_CONFIG.LEADS.color,
+  interested: MAP_STATUS_CONFIG.LEADS.color,
   appointment: MAP_STATUS_CONFIG.HOT_LEADS.color,
   do_not_knock: MAP_STATUS_CONFIG.DO_NOT_KNOCK.color,
   future_seller: MAP_STATUS_CONFIG.HOT_LEADS.color,
-  hot_lead: MAP_STATUS_CONFIG.HOT_LEADS.color,
+  hot_lead: MAP_STATUS_CONFIG.LEADS.color,
 };
 const ADDRESS_MAP_DEFAULT_COLOR = MAP_STATUS_CONFIG.UNTOUCHED.color;
 
@@ -119,9 +127,9 @@ export function getAddressStatusColor(status: string | undefined | null): string
   return ADDRESS_STATUS_COLORS[status] ?? ADDRESS_MAP_DEFAULT_COLOR;
 }
 
-/** True if address status should show as blue (conversation). */
+/** True if address status should show as blue (lead). */
 export function isAddressStatusBlue(status: string | undefined | null): boolean {
-  return status === 'talked';
+  return status === 'lead' || status === 'interested' || status === 'hot_lead';
 }
 
 /** True if address status should show as green (delivered). */

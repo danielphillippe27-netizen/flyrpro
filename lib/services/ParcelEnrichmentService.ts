@@ -1,7 +1,8 @@
 import { GetObjectCommand, ListObjectsV2Command, S3Client } from '@aws-sdk/client-s3';
 import { bbox as turfBbox, booleanIntersects, feature } from '@turf/turf';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { gunzipSync } from 'zlib';
+import { createGunzip, gunzipSync } from 'zlib';
+import { Readable } from 'stream';
 import * as wkx from 'wkx';
 import { fetchAllInPages } from '@/lib/supabase/fetchAllInPages';
 import { StableLinkerService, type BuildingFeature as SnapshotBuildingFeature } from '@/lib/services/StableLinkerService';
@@ -379,6 +380,8 @@ function normalizeParcelLine(raw: unknown): NormalizedParcelRecord | null {
 
   const properties = isFeature
     ? featureProperties
+    : record.properties && typeof record.properties === 'object' && !Array.isArray(record.properties)
+      ? { ...(record.properties as Record<string, unknown>) }
     : Object.fromEntries(
         Object.entries(record).filter(([key]) => !['geometry', 'geom', 'geom_json'].includes(key))
       );
@@ -414,13 +417,16 @@ async function streamBodyToBytes(body: { transformToByteArray?: () => Promise<Ui
   return body.transformToByteArray();
 }
 
-async function* streamBodyLines(body: unknown): AsyncGenerator<string> {
+async function* streamBodyLines(body: unknown, options?: { compressed?: boolean }): AsyncGenerator<string> {
   const asyncIterable = body as AsyncIterable<Uint8Array> | null;
   if (asyncIterable && typeof asyncIterable[Symbol.asyncIterator] === 'function') {
+    const source = options?.compressed
+      ? Readable.from(asyncIterable).pipe(createGunzip())
+      : asyncIterable;
     const decoder = new TextDecoder('utf-8');
     let buffered = '';
 
-    for await (const chunk of asyncIterable) {
+    for await (const chunk of source) {
       buffered += decoder.decode(chunk, { stream: true });
       const lines = buffered.split(/\r?\n/);
       buffered = lines.pop() ?? '';
@@ -436,8 +442,12 @@ async function* streamBodyLines(body: unknown): AsyncGenerator<string> {
     return;
   }
 
-  const text = await streamBodyToString(body as { transformToString?: () => Promise<string> } | undefined);
-  for (const line of text.split(/\r?\n/)) {
+  const normalizedText = options?.compressed
+    ? gunzipSync(Buffer.from(
+        (await streamBodyToBytes(body as { transformToByteArray?: () => Promise<Uint8Array> } | undefined)) ?? []
+      )).toString('utf8')
+    : await streamBodyToString(body as { transformToString?: () => Promise<string> } | undefined);
+  for (const line of normalizedText.split(/\r?\n/)) {
     yield line;
   }
 }
@@ -685,7 +695,11 @@ export class ParcelEnrichmentService {
     let sanitizedNonFiniteNumberLines = 0;
     let malformedLines = 0;
     let firstMalformedLineError: unknown = null;
-    for await (const line of streamBodyLines(response.Body)) {
+    const isCompressed =
+      response.ContentEncoding === 'gzip' ||
+      response.Metadata?.content_encoding === 'gzip' ||
+      dataset.key.endsWith('.gz');
+    for await (const line of streamBodyLines(response.Body, { compressed: isCompressed })) {
       const trimmed = line.trim();
       if (!trimmed) continue;
       scannedLines += 1;
@@ -1080,7 +1094,7 @@ export class ParcelEnrichmentService {
   } | null> {
     const { data: snapshot, error: snapshotError } = await this.supabase
       .from('campaign_snapshots')
-      .select('bucket, buildings_key, overture_release')
+      .select('bucket, buildings_key, overture_release, tile_metrics')
       .eq('campaign_id', campaignId)
       .maybeSingle();
 
@@ -1088,18 +1102,37 @@ export class ParcelEnrichmentService {
       return null;
     }
 
+    const tileMetrics =
+      snapshot.tile_metrics && typeof snapshot.tile_metrics === 'object'
+        ? snapshot.tile_metrics as Record<string, unknown>
+        : {};
+    const buildingsGeojsonKey =
+      typeof tileMetrics.buildings_geojson_key === 'string'
+        ? tileMetrics.buildings_geojson_key
+        : null;
+    const buildingsKey = buildingsGeojsonKey ?? snapshot.buildings_key;
+    if (!buildingsKey.endsWith('.geojson') && !buildingsKey.endsWith('.geojson.gz')) {
+      console.warn('[ParcelEnrichment] Snapshot buildings key is not GeoJSON; skipping snapshot relink:', {
+        campaignId,
+        buildingsKey,
+      });
+      return null;
+    }
+
     const response = await this.s3.send(
       new GetObjectCommand({
         Bucket: snapshot.bucket,
-        Key: snapshot.buildings_key,
+        Key: buildingsKey,
       })
     );
 
     const bytes = await streamBodyToBytes(response.Body);
     if (!bytes) return null;
 
-    const decompressed = gunzipSync(Buffer.from(bytes));
-    const buildingsGeoJSON = JSON.parse(decompressed.toString('utf-8')) as { features?: SnapshotBuildingFeature[] };
+    const text = buildingsKey.endsWith('.gz') || response.ContentEncoding === 'gzip'
+      ? gunzipSync(Buffer.from(bytes)).toString('utf-8')
+      : Buffer.from(bytes).toString('utf-8');
+    const buildingsGeoJSON = JSON.parse(text) as { features?: SnapshotBuildingFeature[] };
     if (!Array.isArray(buildingsGeoJSON.features) || buildingsGeoJSON.features.length === 0) {
       return null;
     }

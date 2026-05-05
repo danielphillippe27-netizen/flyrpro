@@ -33,7 +33,6 @@ type BuildingLinkRow = {
     formatted: string;
     house_number: string | null;
     street_name: string | null;
-    unit_number: string | null;
     geom: AddressResult['geom'];
   };
 };
@@ -43,7 +42,6 @@ type GoldAddressRow = {
   formatted: string;
   house_number: string | null;
   street_name: string | null;
-  unit_number: string | null;
   geom: AddressResult['geom'];
   match_source: string | null;
   confidence: number | null;
@@ -55,6 +53,47 @@ type AuthorizedContext = {
 
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function chooseLinksForDisplay(links: BuildingLinkRow[]): BuildingLinkRow[] {
+  if (links.length <= 1) return links;
+
+  const provenLinks = links.filter((link) => {
+    const matchType = (link.match_type ?? '').toLowerCase();
+    if (matchType === 'manual') return true;
+    if (matchType === 'containment_verified') return true;
+    if (matchType === 'point_on_surface') return true;
+    if (matchType === 'parcel_verified') return true;
+    return false;
+  });
+
+  if (provenLinks.length > 0) {
+    return provenLinks;
+  }
+
+  const proximityVerifiedLinks = links.filter((link) => {
+    const matchType = (link.match_type ?? '').toLowerCase();
+    return matchType === 'proximity_verified' && (link.confidence ?? 0) >= 0.75;
+  });
+  if (proximityVerifiedLinks.length > 0) {
+    return [pickBestLink(proximityVerifiedLinks)];
+  }
+
+  const fallbackLinks = links.filter((link) => (link.match_type ?? '').toLowerCase() === 'proximity_fallback');
+  if (fallbackLinks.length > 0) {
+    return [pickBestLink(fallbackLinks)];
+  }
+
+  return links;
+}
+
+function pickBestLink(links: BuildingLinkRow[]): BuildingLinkRow {
+  return [...links].sort((a, b) => {
+    const distanceA = a.distance_meters ?? Number.POSITIVE_INFINITY;
+    const distanceB = b.distance_meters ?? Number.POSITIVE_INFINITY;
+    if (distanceA !== distanceB) return distanceA - distanceB;
+    return (b.confidence ?? 0) - (a.confidence ?? 0);
+  })[0];
 }
 
 async function resolveAuthorizedContext(
@@ -155,7 +194,7 @@ export async function GET(
 
     const { data: goldAddresses, error: goldError } = await supabase
       .from('campaign_addresses')
-      .select('id, formatted, house_number, street_name, unit_number, geom, match_source, confidence')
+      .select('id, formatted, house_number, street_name, geom, match_source, confidence')
       .eq('campaign_id', campaignId)
       .in('building_id', candidateBuildingIdList);
 
@@ -169,7 +208,7 @@ export async function GET(
         formatted: displayAddressText(addr) ?? '',
         house_number: resolveHouseNumberLabel(addr),
         street_name: addr.street_name,
-        unit_number: addr.unit_number,
+        unit_number: null,
         match_type: addr.match_source || 'gold_exact',
         confidence: addr.confidence || 1.0,
         distance_meters: 0, // Gold links are spatially exact
@@ -189,7 +228,6 @@ export async function GET(
             formatted,
             house_number,
             street_name,
-            unit_number,
             geom
           )
         `)
@@ -201,12 +239,12 @@ export async function GET(
         console.warn('[API] Error fetching from links table:', linksError.message);
       }
 
-      addresses = ((links || []) as BuildingLinkRow[]).map((link) => ({
+      addresses = chooseLinksForDisplay((links || []) as BuildingLinkRow[]).map((link) => ({
         address_id: link.address_id,
         formatted: displayAddressText(link.campaign_addresses) ?? '',
         house_number: resolveHouseNumberLabel(link.campaign_addresses),
         street_name: link.campaign_addresses.street_name,
-        unit_number: link.campaign_addresses.unit_number,
+        unit_number: null,
         match_type: link.match_type,
         confidence: link.confidence,
         distance_meters: link.distance_meters,

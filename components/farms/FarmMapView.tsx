@@ -233,8 +233,8 @@ export function FarmMapView({
         campaign={linkedCampaign}
         pointOverlays={contactOverlays}
         buildingPendingOverlay={{
-          title: 'Rendering farm map',
-          description: 'Big farms can take a little longer to render. Buildings will appear as the map finishes loading.',
+          title: 'Buildings loading',
+          description: 'Addresses are ready. Building footprints will appear when Diamond finishes.',
         }}
         renderLocationCardExtra={showOutcomeControls ? ({ selectedAddressId }) => {
           const selectedFarmAddress =

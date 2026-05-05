@@ -26,6 +26,20 @@ function formatError(error: unknown): string {
   return parts.length > 0 ? parts.join(', ') : JSON.stringify(error);
 }
 
+type CampaignAddressBaseState = {
+  building_id: string | null;
+  visited: boolean;
+  scans: number;
+  last_scanned_at: string | null;
+};
+
+type CampaignAddressStatusRow = {
+  campaign_address_id?: string | null;
+  address_id?: string | null;
+  status?: string | null;
+  updated_at?: string | null;
+};
+
 export class CampaignsService {
   private static client = createClient();
 
@@ -157,44 +171,49 @@ export class CampaignsService {
       const baseState = await fetchAllInPages((from, to) =>
         this.client
           .from('campaign_addresses')
-          .select('id, building_id, visited, scans, last_scanned_at, address_statuses(status)')
+          .select('id, building_id, visited, scans, last_scanned_at')
           .eq('campaign_id', campaignId)
           .order('id', { ascending: true })
           .range(from, to)
       );
-
-      const stateById = new Map(
-        (baseState || []).map((row) => {
-          const rel = (row as {
-            id: string;
-            building_id?: string | null;
-            visited?: boolean | null;
-            scans?: number | null;
-            last_scanned_at?: string | null;
-            address_statuses?: { status?: string | null }[] | { status?: string | null } | null;
-          }).address_statuses;
-
-          const addressStatus = Array.isArray(rel)
-            ? (rel[0]?.status ?? null)
-            : (rel?.status ?? null);
-
-          return [
-            (row as { id: string }).id,
-            {
-              building_id: (row as { building_id?: string | null }).building_id ?? null,
-              visited: Boolean((row as { visited?: boolean | null }).visited),
-              scans: Number((row as { scans?: number | null }).scans ?? 0),
-              last_scanned_at: (row as { last_scanned_at?: string | null }).last_scanned_at ?? null,
-              address_status: addressStatus ?? undefined,
-            },
-          ];
-        })
+      const statusRows = await fetchAllInPages((from, to) =>
+        this.client
+          .from('address_statuses')
+          .select('campaign_address_id, status, updated_at')
+          .eq('campaign_id', campaignId)
+          .order('updated_at', { ascending: false, nullsFirst: false })
+          .range(from, to)
       );
 
-      return ((data || []) as Array<CampaignAddress & { building_id?: string | null }>).map((row) => ({
-        ...row,
-        ...(stateById.get(row.id) ?? {}),
-      }));
+      const statusByAddressId = new Map<string, string>();
+      for (const row of (statusRows || []) as CampaignAddressStatusRow[]) {
+        const addressId = row.campaign_address_id ?? row.address_id ?? null;
+        const status = row.status?.trim();
+        if (addressId && status && !statusByAddressId.has(addressId)) {
+          statusByAddressId.set(addressId, status);
+        }
+      }
+
+      const stateById = new Map<string, CampaignAddressBaseState>(
+        (baseState || []).map((row) => [
+          (row as { id: string }).id,
+          {
+            building_id: (row as { building_id?: string | null }).building_id ?? null,
+            visited: Boolean((row as { visited?: boolean | null }).visited),
+            scans: Number((row as { scans?: number | null }).scans ?? 0),
+            last_scanned_at: (row as { last_scanned_at?: string | null }).last_scanned_at ?? null,
+          },
+        ])
+      );
+
+      return ((data || []) as Array<CampaignAddress & { building_id?: string | null }>).map((row) => {
+        const state = stateById.get(row.id);
+        return {
+          ...row,
+          ...(state ?? {}),
+          address_status: statusByAddressId.get(row.id) ?? row.address_status,
+        };
+      });
     } catch (error) {
       console.error('Error fetching addresses, returning empty array:', formatError(error));
       // Gracefully handle errors - return empty array instead of crashing

@@ -349,6 +349,72 @@ async function run() {
     assertTrue(matches.every((match: any) => match.unitCount === 3), 'Expected unitCount=3 for townhouse row');
   });
 
+  test('Detached fallback: weak proximity does not reuse an already matched building', () => {
+    const service = new StableLinkerService({} as any);
+    const alreadyMatched = makeBuilding(
+      'detached-a',
+      rectangle(-79.00420, 43.00400, -79.00405, 43.00415)
+    );
+    const unusedNeighbor = makeBuilding(
+      'detached-b',
+      rectangle(-79.00455, 43.00400, -79.00440, 43.00415)
+    );
+    const address = makeAddress('41', -79.00418, 43.00430, 'Moyse Drive');
+
+    const match = (service as any).matchAddressToBuilding(
+      address,
+      [alreadyMatched, unusedNeighbor],
+      new Set(['detached-a']),
+      []
+    );
+
+    assertEqual(match.matchType, 'proximity_fallback');
+    assertEqual(match.buildingId, 'detached-b');
+  });
+
+  test('Detached fallback: verified proximity does not reuse an already matched building', () => {
+    const service = new StableLinkerService({} as any);
+    const alreadyMatched = makeBuilding(
+      'detached-a',
+      rectangle(-79.00420, 43.00400, -79.00405, 43.00415),
+      { primaryStreet: 'Highland Avenue' }
+    );
+    const unusedNeighbor = makeBuilding(
+      'detached-b',
+      rectangle(-79.00455, 43.00400, -79.00440, 43.00415),
+      { primaryStreet: 'Highland Avenue' }
+    );
+    const address = makeAddress('324', -79.00418, 43.00430, 'Highland Avenue');
+
+    const match = (service as any).matchAddressToBuilding(
+      address,
+      [alreadyMatched, unusedNeighbor],
+      new Set(['detached-a']),
+      []
+    );
+
+    assertEqual(match.matchType, 'proximity_fallback');
+    assertEqual(match.buildingId, 'detached-b');
+  });
+
+  test('Detached fallback: weak proximity becomes orphan when every candidate is already matched', () => {
+    const service = new StableLinkerService({} as any);
+    const alreadyMatched = makeBuilding(
+      'detached-only',
+      rectangle(-79.00420, 43.00400, -79.00405, 43.00415)
+    );
+    const address = makeAddress('43', -79.00418, 43.00430, 'Moyse Drive');
+
+    const match = (service as any).matchAddressToBuilding(
+      address,
+      [alreadyMatched],
+      new Set(['detached-only']),
+      []
+    );
+
+    assertEqual(match.matchType, 'orphan');
+  });
+
   test('Dense ambiguity: equal-distance buildings raise DataIntegrityError instead of guessing', () => {
     const service = new StableLinkerService({} as any);
     const left = makeBuilding(

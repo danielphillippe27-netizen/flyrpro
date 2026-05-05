@@ -5,6 +5,7 @@ import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { CampaignMarkersLayer } from './CampaignMarkersLayer';
 import { MapBuildingsLayer } from './MapBuildingsLayer';
+import { CampaignAddressPmtilesLayer } from './CampaignAddressPmtilesLayer';
 import { MapInfoButton } from './MapInfoButton';
 import { UserLocationLayer } from './UserLocationLayer';
 import { House, LocateFixed } from 'lucide-react';
@@ -19,10 +20,8 @@ import { useMapStyle } from '@/lib/map-style-provider';
 import { useWorkspace } from '@/lib/workspace-context';
 import { getMapboxToken, removeMapboxMapWhenSafe } from '@/lib/mapbox';
 import { applyPresetVisualTweaks, applyResolvedMapStyle, getResolvedMapInitOptions, hideBaseBuildingLayers, resolveMapStyle } from '@/lib/map-styles';
-import { getCampaignAddressMapStatus } from '@/lib/campaignStats';
-import { DEFAULT_STATUS_FILTERS, FLYER_MODE_STATUS_COLORS, MAP_STATUS_CONFIG, type StatusFilters } from '@/lib/constants/mapStatus';
+import { DEFAULT_STATUS_FILTERS, type StatusFilters } from '@/lib/constants/mapStatus';
 import type { CampaignV2, CampaignAddress } from '@/types/database';
-import * as turf from '@turf/turf';
 
 export function FlyrMapView() {
   const { theme } = useTheme();
@@ -54,7 +53,6 @@ export function FlyrMapView() {
   const [campaignBbox, setCampaignBbox] = useState<{ minLon: number; minLat: number; maxLon: number; maxLat: number } | null>(null);
   const [showUserLocation, setShowUserLocation] = useState(true);
   const [mapViewMode, setMapViewMode] = useState<'buildings' | 'addresses'>('buildings');
-  const isFlyerCampaign = selectedCampaign?.type === 'flyer';
   const regularMapViewRef = useRef<{
     center: [number, number];
     zoom: number;
@@ -554,230 +552,6 @@ export function FlyrMapView() {
     }
   }, [selectedCampaignId, campaignAddresses, mapLoaded]);
 
-  // Address points layer (Map tab): when mapViewMode === 'addresses', show circular fill-extrusions per address
-  const addressPointsSourceId = 'flyr-map-address-points';
-  const addressPointsLayerId = 'flyr-map-address-points-extrusion';
-  const addressPointsGlowLayerId = 'flyr-map-address-points-lead-glow';
-  useEffect(() => {
-    const mapInstance = map.current;
-    if (!mapInstance || !mapLoaded) return;
-    if (mapViewMode !== 'addresses' || !selectedCampaignId || campaignAddresses.length === 0) {
-      try {
-        if (mapInstance.getLayer(addressPointsGlowLayerId)) mapInstance.removeLayer(addressPointsGlowLayerId);
-        if (mapInstance.getLayer(addressPointsLayerId)) mapInstance.removeLayer(addressPointsLayerId);
-        if (mapInstance.getSource(addressPointsSourceId)) mapInstance.removeSource(addressPointsSourceId);
-      } catch (_) {}
-      return;
-    }
-
-    const getCoord = (address: CampaignAddress): { lon: number; lat: number } | null => {
-      if (address.coordinate) return address.coordinate;
-      const a = address as CampaignAddress & { geometry?: unknown; geom_json?: { type: string; coordinates?: number[] } };
-      if (a.geom_json?.type === 'Point' && Array.isArray(a.geom_json?.coordinates) && a.geom_json.coordinates.length >= 2) {
-        const [lon, lat] = a.geom_json.coordinates;
-        if (typeof lon === 'number' && typeof lat === 'number' && !isNaN(lon) && !isNaN(lat)) return { lon, lat };
-      }
-      let geometry = a.geometry;
-      if (typeof geometry === 'string') {
-        try {
-          geometry = JSON.parse(geometry as string) as { type?: string; coordinates?: number[] };
-        } catch {
-          geometry = null;
-        }
-      }
-      const g = geometry as { type?: string; coordinates?: number[] } | null;
-      if (g?.type === 'Point' && Array.isArray(g?.coordinates) && g.coordinates.length >= 2) {
-        const [lon, lat] = g.coordinates;
-        if (typeof lon === 'number' && typeof lat === 'number' && !isNaN(lon) && !isNaN(lat)) return { lon, lat };
-      }
-      return getCoordinate(address);
-    };
-
-    const buildAddressPointsGeoJSON = (): GeoJSON.FeatureCollection | null => {
-      const radiusMeters = 2.5 * (2 / 3);
-      const steps = 24;
-      const features: GeoJSON.Feature<GeoJSON.Polygon>[] = [];
-      for (const addr of campaignAddresses) {
-        const coord = getCoord(addr);
-        if (!coord) continue;
-        const center = [coord.lon, coord.lat] as [number, number];
-        const circle = turf.circle(center, radiusMeters / 1000, { units: 'kilometers', steps });
-        const poly = circle.geometry;
-        if (poly.type !== 'Polygon') continue;
-        const scansTotal = addr.scans ?? 0;
-        const qrScanned = scansTotal > 0 || !!addr.last_scanned_at;
-        const addressStatus = getCampaignAddressMapStatus(addr);
-        features.push({
-          type: 'Feature',
-          geometry: poly,
-          properties: {
-            feature_id: addr.id,
-            address_id: addr.id,
-            address_status: addressStatus,
-            scans_total: scansTotal,
-            qr_scanned: qrScanned,
-          },
-        });
-      }
-      if (features.length === 0) return null;
-      return { type: 'FeatureCollection', features };
-    };
-
-    const getColorExpression = (): unknown[] => {
-      const getAddressStatus = () => ['coalesce', ['feature-state', 'address_status'], ['get', 'address_status'], 'none'];
-      const getQrScanned = () => ['coalesce', ['feature-state', 'qr_scanned'], ['get', 'qr_scanned'], false];
-      const getScansTotal = () => ['coalesce', ['feature-state', 'scans_total'], ['get', 'scans_total'], 0];
-      if (isFlyerCampaign) {
-        const isVisited = ['any', ['!=', getAddressStatus(), 'none'], ['==', getQrScanned(), true], ['>', getScansTotal(), 0]];
-        return ['case', isVisited, FLYER_MODE_STATUS_COLORS.visited, FLYER_MODE_STATUS_COLORS.unvisited] as unknown[];
-      }
-      return [
-        'case',
-        ['any', ['==', getQrScanned(), true], ['>', getScansTotal(), 0]],
-        MAP_STATUS_CONFIG.QR_SCANNED.color,
-        ['in', getAddressStatus(), ['literal', ['appointment', 'future_seller', 'hot_lead']]],
-        MAP_STATUS_CONFIG.HOT_LEADS.color,
-        ['==', getAddressStatus(), 'talked'],
-        MAP_STATUS_CONFIG.CONVERSATIONS.color,
-        ['==', getAddressStatus(), 'do_not_knock'],
-        MAP_STATUS_CONFIG.DO_NOT_KNOCK.color,
-        ['in', getAddressStatus(), ['literal', ['no_answer', 'not_home']]],
-        MAP_STATUS_CONFIG.NO_ONE_HOME.color,
-        ['==', getAddressStatus(), 'delivered'],
-        MAP_STATUS_CONFIG.TOUCHED.color,
-        MAP_STATUS_CONFIG.UNTOUCHED.color,
-      ] as unknown[];
-    };
-
-    const getLeadGlowOpacityExpression = (): unknown[] => {
-      if (isFlyerCampaign) return ['case', false, 0, 0] as unknown[];
-      const getAddressStatus = () => ['coalesce', ['feature-state', 'address_status'], ['get', 'address_status'], 'none'];
-      const isLead = ['in', getAddressStatus(), ['literal', ['appointment', 'future_seller', 'hot_lead']]];
-      return ['case', ['all', isLead, statusFilters.HOT_LEADS], 0.82, 0] as unknown[];
-    };
-
-    const getFilterExpression = (): unknown[] | undefined => {
-      const getAddressStatus = () => ['coalesce', ['feature-state', 'address_status'], ['get', 'address_status'], 'none'];
-      const getQrScanned = () => ['coalesce', ['feature-state', 'qr_scanned'], ['get', 'qr_scanned'], false];
-      const getScansTotal = () => ['coalesce', ['feature-state', 'scans_total'], ['get', 'scans_total'], 0];
-      const isQrScanned = ['any', ['==', getQrScanned(), true], ['>', getScansTotal(), 0]];
-      const isConversation = ['==', getAddressStatus(), 'talked'];
-      const isLead = ['in', getAddressStatus(), ['literal', ['appointment', 'future_seller', 'hot_lead']]];
-      const isDoNotKnock = ['==', getAddressStatus(), 'do_not_knock'];
-      const isNoOneHome = ['in', getAddressStatus(), ['literal', ['no_answer', 'not_home']]];
-      const isTouched = ['==', getAddressStatus(), 'delivered'];
-      const isUntouchedStrict = [
-        'all',
-        ['!=', getAddressStatus(), 'delivered'],
-        ['!=', getAddressStatus(), 'talked'],
-        ['!', ['in', getAddressStatus(), ['literal', ['appointment', 'future_seller', 'hot_lead']]]],
-        ['!=', getAddressStatus(), 'do_not_knock'],
-        ['!', ['in', getAddressStatus(), ['literal', ['no_answer', 'not_home']]]],
-        ['!', isQrScanned],
-      ];
-      const statusConditions: unknown[] = [];
-      if (statusFilters.QR_SCANNED) statusConditions.push(isQrScanned);
-      if (statusFilters.HOT_LEADS) statusConditions.push(isLead);
-      if (statusFilters.CONVERSATIONS) statusConditions.push(isConversation);
-      if (statusFilters.DO_NOT_KNOCK) statusConditions.push(isDoNotKnock);
-      if (statusFilters.NO_ONE_HOME) statusConditions.push(isNoOneHome);
-      if (statusFilters.TOUCHED) statusConditions.push(isTouched);
-      if (statusFilters.UNTOUCHED) statusConditions.push(isUntouchedStrict);
-      if (statusConditions.length === 0) return ['==', 1, 0];
-      if (Object.values(statusFilters).every(Boolean)) return undefined;
-      return ['any', ...statusConditions] as unknown[];
-    };
-
-    const addAddressPointsLayer = () => {
-      if (!mapInstance.isStyleLoaded()) return;
-      const geo = buildAddressPointsGeoJSON();
-      if (!geo || geo.features.length === 0) return;
-      try {
-        const existingSource = mapInstance.getSource(addressPointsSourceId);
-        if (existingSource && 'setData' in existingSource) {
-          (existingSource as mapboxgl.GeoJSONSource).setData(geo);
-        } else if (!existingSource) {
-          mapInstance.addSource(addressPointsSourceId, {
-            type: 'geojson',
-            data: geo,
-            promoteId: 'feature_id',
-          });
-        }
-        if (!mapInstance.getLayer(addressPointsLayerId)) {
-          const filterExpr = getFilterExpression();
-          mapInstance.addLayer({
-            id: addressPointsLayerId,
-            type: 'fill-extrusion',
-            source: addressPointsSourceId,
-            minzoom: 12,
-            paint: {
-              'fill-extrusion-color': getColorExpression() as mapboxgl.Expression,
-              'fill-extrusion-height': 7.5,
-              'fill-extrusion-base': 0,
-              'fill-extrusion-opacity': 1,
-              'fill-extrusion-vertical-gradient': true,
-              'fill-extrusion-emissive-strength': 0.85,
-            },
-            ...(filterExpr ? { filter: filterExpr as mapboxgl.Expression } : {}),
-          });
-          mapInstance.addLayer({
-            id: addressPointsGlowLayerId,
-            type: 'line',
-            source: addressPointsSourceId,
-            minzoom: 12,
-            paint: {
-              'line-color': MAP_STATUS_CONFIG.HOT_LEADS.color,
-              'line-width': 8,
-              'line-opacity': getLeadGlowOpacityExpression() as mapboxgl.Expression,
-              'line-blur': 6,
-            },
-            ...(filterExpr ? { filter: filterExpr as mapboxgl.Expression } : {}),
-          });
-        } else {
-          mapInstance.setPaintProperty(addressPointsLayerId, 'fill-extrusion-color', getColorExpression() as mapboxgl.Expression);
-          const filterExpr = getFilterExpression();
-          mapInstance.setFilter(addressPointsLayerId, (filterExpr ?? ['all']) as mapboxgl.Expression);
-          if (mapInstance.getLayer(addressPointsGlowLayerId)) {
-            mapInstance.setPaintProperty(addressPointsGlowLayerId, 'line-opacity', getLeadGlowOpacityExpression() as mapboxgl.Expression);
-            mapInstance.setFilter(addressPointsGlowLayerId, (filterExpr ?? ['all']) as mapboxgl.Expression);
-          }
-        }
-      } catch (err) {
-        console.error('[FlyrMapView] Error adding address points layer:', err);
-      }
-    };
-
-    const removeAddressPointsLayer = () => {
-      try {
-        if (mapInstance.getLayer(addressPointsGlowLayerId)) mapInstance.removeLayer(addressPointsGlowLayerId);
-        if (mapInstance.getLayer(addressPointsLayerId)) mapInstance.removeLayer(addressPointsLayerId);
-        if (mapInstance.getSource(addressPointsSourceId)) mapInstance.removeSource(addressPointsSourceId);
-      } catch (_) {}
-    };
-
-    const onAddressPointClick = (e: mapboxgl.MapLayerMouseEvent) => {
-      const f = e.features?.[0];
-      if (!f?.properties) return;
-      const addressId = f.properties.address_id as string | undefined;
-      const gersId = (f.properties.gers_id as string | undefined) ?? addressId;
-      if (addressId) handleBuildingClick(gersId ?? addressId, addressId);
-    };
-
-    if (mapInstance.isStyleLoaded()) {
-      addAddressPointsLayer();
-    } else {
-      mapInstance.once('style.load', addAddressPointsLayer);
-    }
-
-    mapInstance.off('click', addressPointsLayerId, onAddressPointClick);
-    mapInstance.on('click', addressPointsLayerId, onAddressPointClick);
-
-    return () => {
-      mapInstance.off('click', addressPointsLayerId, onAddressPointClick);
-      removeAddressPointsLayer();
-    };
-  }, [mapViewMode, mapLoaded, campaignAddresses, statusFilters, resolvedMapStyle.key, selectedCampaignId, isFlyerCampaign]);
-
   return (
     <div className="relative h-full w-full">
       {error && (
@@ -811,6 +585,19 @@ export function FlyrMapView() {
               onAddToCRM={handleAddToCRM}
             />
           )}
+          <CampaignAddressPmtilesLayer
+            map={map.current}
+            campaignId={selectedCampaignId}
+            mapLoaded={mapLoaded}
+            visible={mapViewMode === 'addresses'}
+            addresses={campaignAddresses}
+            campaignType={selectedCampaign?.type ?? null}
+            statusFilters={statusFilters}
+            styleKey={resolvedMapStyle.key}
+            onAddressClick={(addressId, buildingId) => {
+              handleBuildingClick(buildingId ?? addressId, addressId);
+            }}
+          />
           <CampaignMarkersLayer
             map={map.current}
             mapLoaded={mapLoaded}

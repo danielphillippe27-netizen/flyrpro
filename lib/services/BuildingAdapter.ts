@@ -6,14 +6,19 @@
  * - Silver (Lambda): S3 GeoJSON → Standard GeoJSON (pass-through with validation)
  */
 
+import { filterLinkableBuildingFootprints } from '@/lib/geo/buildingFootprintFilter';
+
 export interface GoldBuildingRow {
   id: string;
   source_id?: string;
   external_id?: string;
   area_sqm?: number;
+  height_m?: number | null;
+  floors?: number | null;
   geom_geojson: string; // GeoJSON string from ST_AsGeoJSON
   centroid_geojson?: string;
   building_type?: string;
+  subtype?: string;
 }
 
 export interface StandardBuildingFeature {
@@ -25,7 +30,7 @@ export interface StandardBuildingFeature {
     area?: number;
     height?: number | null;
     layer: 'building';
-    [key: string]: any;
+    [key: string]: unknown;
   };
 }
 
@@ -34,21 +39,68 @@ export interface StandardBuildingCollection {
   features: StandardBuildingFeature[];
 }
 
+type RawBuildingFeature = {
+  geometry?: GeoJSON.Polygon | GeoJSON.MultiPolygon;
+  properties?: Record<string, unknown>;
+};
+
 export class BuildingAdapter {
+  private static filterRenderableRows<T extends Record<string, unknown>>(rows: T[], source: 'Gold' | 'Lambda'): T[] {
+    const filtered = filterLinkableBuildingFootprints(rows);
+    const removed = rows.length - filtered.length;
+    if (removed > 0) {
+      console.log(`[BuildingAdapter] Filtered ${removed} shed/accessory ${source} building footprint(s)`);
+    }
+    return filtered;
+  }
+
+  private static filterRenderableFeatures<T extends StandardBuildingFeature>(features: T[], source: 'Gold' | 'Lambda'): T[] {
+    const filtered = filterLinkableBuildingFootprints(features);
+    const removed = features.length - filtered.length;
+    if (removed > 0) {
+      console.log(`[BuildingAdapter] Filtered ${removed} shed/accessory ${source} building feature(s)`);
+    }
+    return filtered;
+  }
+
+  private static inferredHeightMeters(row: GoldBuildingRow): number {
+    if (typeof row.height_m === 'number' && Number.isFinite(row.height_m) && row.height_m > 0) {
+      return row.height_m;
+    }
+    if (typeof row.floors === 'number' && Number.isFinite(row.floors) && row.floors > 0) {
+      return Math.max(row.floors * 3, 3);
+    }
+
+    const area = typeof row.area_sqm === 'number' && Number.isFinite(row.area_sqm)
+      ? row.area_sqm
+      : 0;
+    if (area >= 1000) return 14;
+    if (area >= 450) return 12;
+    if (area >= 220) return 10;
+    if (area >= 90) return 8;
+    return 6;
+  }
+
   /**
    * Convert Gold database rows to standard GeoJSON
    */
   static fromGoldRows(rows: GoldBuildingRow[]): StandardBuildingCollection {
+    const renderableRows = this.filterRenderableRows(rows, 'Gold');
     return {
       type: 'FeatureCollection',
-      features: rows.map((row) => ({
+      features: renderableRows.map((row) => ({
         type: 'Feature',
         geometry: JSON.parse(row.geom_geojson),
         properties: {
           gers_id: row.id,
           external_id: row.external_id || row.source_id,
           area: row.area_sqm,
-          height: null,
+          area_sqm: row.area_sqm,
+          height: this.inferredHeightMeters(row),
+          height_m: this.inferredHeightMeters(row),
+          floors: row.floors,
+          building_type: row.building_type,
+          subtype: row.subtype,
           layer: 'building',
         },
       })),
@@ -59,26 +111,36 @@ export class BuildingAdapter {
    * Validate and normalize Lambda/Silver GeoJSON
    * Ensures consistent property names even if Lambda format changes
    */
-  static fromLambdaGeoJSON(geojson: any): StandardBuildingCollection {
-    if (!geojson || !Array.isArray(geojson.features)) {
+  static fromLambdaGeoJSON(geojson: unknown): StandardBuildingCollection {
+    const featuresRaw = geojson && typeof geojson === 'object'
+      ? (geojson as { features?: unknown }).features
+      : null;
+    if (!Array.isArray(featuresRaw)) {
       console.warn('[BuildingAdapter] Invalid Lambda GeoJSON, returning empty collection');
       return { type: 'FeatureCollection', features: [] };
     }
 
+    const features: StandardBuildingFeature[] = featuresRaw.flatMap((feature) => {
+      const raw = feature as RawBuildingFeature;
+      if (!raw.geometry || !['Polygon', 'MultiPolygon'].includes(String(raw.geometry.type))) return [];
+      const properties = raw.properties ?? {};
+      return [{
+        type: 'Feature' as const,
+        geometry: raw.geometry,
+        properties: {
+          gers_id: String(properties.gers_id || properties.id || properties.external_id || ''),
+          external_id: properties.external_id || properties.id,
+          area: properties.area || properties.area_sqm,
+          height: properties.height || null,
+          layer: 'building',
+          ...properties, // Preserve any additional properties
+        },
+      }];
+    });
+
     return {
       type: 'FeatureCollection',
-      features: geojson.features.map((f: any) => ({
-        type: 'Feature',
-        geometry: f.geometry,
-        properties: {
-          gers_id: f.properties?.gers_id || f.properties?.id || f.properties?.external_id,
-          external_id: f.properties?.external_id || f.properties?.id,
-          area: f.properties?.area || f.properties?.area_sqm,
-          height: f.properties?.height || null,
-          layer: 'building',
-          ...f.properties, // Preserve any additional properties
-        },
-      })),
+      features: this.filterRenderableFeatures(features, 'Lambda'),
     };
   }
 
@@ -104,10 +166,13 @@ export class BuildingAdapter {
 
     // Silver path: use pre-fetched GeoJSON or download from S3
     if (snapshot) {
-      let geojson: any;
+      let geojson: unknown;
       if (preFetchedBuildingsGeo != null) {
         geojson = preFetchedBuildingsGeo;
-        console.log(`[BuildingAdapter] Using ${geojson?.features?.length ?? 0} pre-fetched Lambda buildings`);
+        const featureCount = geojson && typeof geojson === 'object' && Array.isArray((geojson as { features?: unknown }).features)
+          ? (geojson as { features: unknown[] }).features.length
+          : 0;
+        console.log(`[BuildingAdapter] Using ${featureCount} pre-fetched Lambda buildings`);
       } else {
         console.log(`[BuildingAdapter] Fetching from Lambda: ${snapshot.urls.buildings}`);
         const response = await fetch(snapshot.urls.buildings);
@@ -115,7 +180,10 @@ export class BuildingAdapter {
           throw new Error(`Failed to fetch buildings: ${response.status}`);
         }
         geojson = await response.json();
-        console.log(`[BuildingAdapter] Downloaded ${geojson.features?.length || 0} Lambda buildings`);
+        const featureCount = geojson && typeof geojson === 'object' && Array.isArray((geojson as { features?: unknown }).features)
+          ? (geojson as { features: unknown[] }).features.length
+          : 0;
+        console.log(`[BuildingAdapter] Downloaded ${featureCount} Lambda buildings`);
       }
       return {
         buildings: this.fromLambdaGeoJSON(geojson),

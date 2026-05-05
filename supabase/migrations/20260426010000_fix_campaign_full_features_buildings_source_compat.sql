@@ -202,7 +202,7 @@ BEGIN
             to_jsonb(b)->>'source' AS source,
             b.height_m,
             b.height,
-            b.levels,
+            NULLIF(to_jsonb(b)->>'levels', '')::numeric AS levels,
             b.is_townhome_row,
             b.units_count,
             b.latest_status,
@@ -255,7 +255,7 @@ BEGIN
             to_jsonb(b)->>'source',
             b.height_m,
             b.height,
-            b.levels,
+            NULLIF(to_jsonb(b)->>'levels', '')::numeric,
             b.is_townhome_row,
             b.units_count,
             b.latest_status

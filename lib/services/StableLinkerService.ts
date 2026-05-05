@@ -141,6 +141,10 @@ interface CampaignAddress {
   formatted: string | null;
   house_number: string | null;
   street_name: string | null;
+  geom: unknown;
+}
+
+interface CampaignAddressWithPoint extends Omit<CampaignAddress, 'geom'> {
   geom: {
     type: 'Point';
     coordinates: [number, number];
@@ -152,6 +156,75 @@ export class StableLinkerService {
 
   constructor(supabase: SupabaseClient) {
     this.supabase = supabase;
+  }
+
+  private parsePointGeometry(value: unknown): CampaignAddressWithPoint['geom'] | null {
+    if (!value) return null;
+
+    if (typeof value === 'object') {
+      const geometry = value as { type?: unknown; coordinates?: unknown; geometry?: unknown };
+      if (geometry.type === 'Point' && Array.isArray(geometry.coordinates)) {
+        return this.pointFromCoordinates(geometry.coordinates);
+      }
+      if (geometry.geometry) {
+        return this.parsePointGeometry(geometry.geometry);
+      }
+      return null;
+    }
+
+    if (typeof value !== 'string') return null;
+
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+
+    try {
+      return this.parsePointGeometry(JSON.parse(trimmed));
+    } catch {
+      // Continue through WKT/EWKB parsing.
+    }
+
+    const wktMatch = trimmed.match(/(?:SRID=\d+;)?POINT\s*\(\s*([-\d.]+)[,\s]+([-\d.]+)\s*\)/i);
+    if (wktMatch) {
+      return this.pointFromLonLat(Number(wktMatch[1]), Number(wktMatch[2]));
+    }
+
+    return this.pointFromWkbHex(trimmed);
+  }
+
+  private pointFromCoordinates(coordinates: unknown[]): CampaignAddressWithPoint['geom'] | null {
+    if (coordinates.length < 2) return null;
+    return this.pointFromLonLat(Number(coordinates[0]), Number(coordinates[1]));
+  }
+
+  private pointFromLonLat(lon: number, lat: number): CampaignAddressWithPoint['geom'] | null {
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) return null;
+    if (Math.abs(lon) > 180 || Math.abs(lat) > 90) return null;
+    return { type: 'Point', coordinates: [lon, lat] };
+  }
+
+  private pointFromWkbHex(value: string): CampaignAddressWithPoint['geom'] | null {
+    const hex = value.replace(/^\\x/i, '');
+    if (!/^[0-9a-f]+$/i.test(hex) || hex.length < 42) return null;
+
+    try {
+      const buffer = Buffer.from(hex, 'hex');
+      const littleEndian = buffer.readUInt8(0) === 1;
+      const readUInt32 = (offset: number) =>
+        littleEndian ? buffer.readUInt32LE(offset) : buffer.readUInt32BE(offset);
+      const readDouble = (offset: number) =>
+        littleEndian ? buffer.readDoubleLE(offset) : buffer.readDoubleBE(offset);
+
+      const rawType = readUInt32(1);
+      const hasSrid = (rawType & 0x20000000) !== 0;
+      const geometryType = rawType & 0xff;
+      if (geometryType !== 1) return null;
+
+      const coordinateOffset = 5 + (hasSrid ? 4 : 0);
+      if (buffer.length < coordinateOffset + 16) return null;
+      return this.pointFromLonLat(readDouble(coordinateOffset), readDouble(coordinateOffset + 8));
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -175,8 +248,8 @@ export class StableLinkerService {
       }
 
       // 1. Fetch addresses for this campaign (PostgREST caps unbounded selects at 1000 rows)
-      const rawAddresses = await fetchAllInPages((from, to) =>
-        this.supabase
+      const rawAddresses = await fetchAllInPages<CampaignAddress>(async (from, to) =>
+        await this.supabase
           .from('campaign_addresses')
           .select('id, gers_id, formatted, house_number, street_name, geom')
           .eq('campaign_id', campaignId)
@@ -185,17 +258,13 @@ export class StableLinkerService {
       );
       
       // Parse geom field which may be string or object from Supabase
-      const addresses: CampaignAddress[] = (rawAddresses || []).map((addr) => {
-        let geom = addr.geom;
-        if (typeof geom === 'string') {
-          try {
-            geom = JSON.parse(geom);
-          } catch {
-            console.warn(`[StableLinker] Failed to parse geom for address ${addr.id}, using fallback`);
-            geom = { type: 'Point', coordinates: [0, 0] };
-          }
+      const addresses: CampaignAddressWithPoint[] = (rawAddresses || []).flatMap((addr) => {
+        const geom = this.parsePointGeometry(addr.geom);
+        if (!geom) {
+          console.warn(`[StableLinker] Skipping address ${addr.id}; unsupported point geometry`);
+          return [];
         }
-        return { ...addr, geom };
+        return [{ ...addr, geom }];
       });
 
       if (!addresses || addresses.length === 0) {
@@ -366,7 +435,7 @@ export class StableLinkerService {
    * Returns MatchResult or [MatchResult, { densityWarning: true }] when density guard triggers.
    */
   private matchAddressToBuilding(
-    address: CampaignAddress,
+    address: CampaignAddressWithPoint,
     buildings: BuildingFeature[],
     matchedBuildingIds: Set<string>,
     parcels: PreparedParcelFeature[]
@@ -439,7 +508,10 @@ export class StableLinkerService {
       );
     }
 
-    // TIER 4: Proximity within 50m; prefer street match, then area, then distance
+    // TIER 4: Proximity within 50m; prefer street match, then area, then distance.
+    // Proximity alone should not assign multiple detached addresses to the same
+    // footprint; true multi-unit matches should be proven by containment, surface,
+    // or parcel evidence above.
     const nearestMatches = this.findNearestBuildings(addressCoords, buildings, 10);
     const within50 = nearestMatches.filter(c => c.distance <= 50);
     if (within50.length > 0) {
@@ -463,6 +535,24 @@ export class StableLinkerService {
           this.getBuildingStreet(best.building) ?? ''
         );
         const verified = streetScore >= 0.8;
+        if (matchedBuildingIds.has(best.building.properties.gers_id)) {
+          const unusedFallback = this.pickBestProximityOrThrow(
+            address.id,
+            withStreet.filter(c => !matchedBuildingIds.has(c.building.properties.gers_id)),
+            0.5
+          );
+          if (!unusedFallback) {
+            return this.createMatchResult(address, null, 'orphan', 0, 0, 0);
+          }
+          return this.createMatchResult(
+            address,
+            unusedFallback.building,
+            'proximity_fallback',
+            Math.max(0.5, 0.7 - unusedFallback.distance * 0.01),
+            unusedFallback.distance,
+            0
+          );
+        }
         return this.createMatchResult(
           address,
           best.building,
@@ -504,7 +594,7 @@ export class StableLinkerService {
   }
 
   private async resetCampaignArtifacts(campaignId: string, clearCampaignAddressLinks: boolean): Promise<void> {
-    const operations: Array<Promise<{ error: { message: string } | null }>> = [
+    const operations: Array<PromiseLike<{ error: { message: string } | null }>> = [
       this.supabase
         .from('building_address_links')
         .delete()
@@ -1085,7 +1175,7 @@ export class StableLinkerService {
    * Create match result object
    */
   private createMatchResult(
-    address: CampaignAddress,
+    address: CampaignAddressWithPoint,
     building: BuildingFeature | null,
     matchType: MatchResult['matchType'],
     confidence: number,
@@ -1174,7 +1264,7 @@ export class StableLinkerService {
    * Create orphan record with suggestions (Pure Spatial)
    */
   private createOrphanRecord(
-    address: CampaignAddress,
+    address: CampaignAddressWithPoint,
     buildings: BuildingFeature[]
   ): OrphanRecord {
     const addressCoords = address.geom.coordinates;
@@ -1219,7 +1309,7 @@ export class StableLinkerService {
    * Create orphan record for ambiguous match (DataIntegrityError)
    */
   private createAmbiguousOrphanRecord(
-    address: CampaignAddress,
+    address: CampaignAddressWithPoint,
     buildingIds: string[]
   ): OrphanRecord {
     return {
@@ -1294,6 +1384,7 @@ export class StableLinkerService {
           .from('campaign_addresses')
           .update({
             building_id: match.buildingId,
+            building_gers_id: match.buildingId,
             match_source: this.toGoldMatchSource(match.matchType),
             confidence: match.confidence,
           })

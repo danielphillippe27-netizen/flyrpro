@@ -6,6 +6,7 @@
  */
 
 import { createAdminClient } from '@/lib/supabase/server';
+import { filterLinkableBuildingFootprints } from '@/lib/geo/buildingFootprintFilter';
 import { TileLambdaService, type LambdaSnapshotResponse } from './TileLambdaService';
 
 const DEFAULT_GOLD_ADDRESS_LIMIT = 5000;
@@ -114,10 +115,22 @@ export class GoldAddressService {
       source_id: props.source_id ?? null,
       external_id: props.external_id ?? null,
       area_sqm: props.area_sqm ?? null,
+      height_m: props.height_m ?? null,
+      floors: props.floors ?? null,
       geom_geojson: JSON.stringify(geometry),
       centroid_geojson: props.centroid_geojson ?? null,
       building_type: props.building_type ?? null,
+      subtype: props.subtype ?? null,
     };
+  }
+
+  private static filterRenderableGoldBuildings<T>(rows: T[]): T[] {
+    const filtered = filterLinkableBuildingFootprints(rows as Array<T & Record<string, unknown>>) as T[];
+    const removed = rows.length - filtered.length;
+    if (removed > 0) {
+      console.log(`[GoldAddressService] Filtered ${removed} shed/outbuilding footprints from Gold buildings`);
+    }
+    return filtered;
   }
 
   private static normalizeProvince(value?: string | null): string | null {
@@ -404,7 +417,9 @@ export class GoldAddressService {
         console.warn('[GoldAddressService] Gold buildings query error:', buildingsError.message);
       }
       
-      const goldBuildings = this.parseGoldBuildingRows(goldBuildingsRaw);
+      const goldBuildings = this.filterRenderableGoldBuildings(
+        this.parseGoldBuildingRows(goldBuildingsRaw)
+      );
 
       return {
         source: 'gold',
@@ -517,8 +532,11 @@ export class GoldAddressService {
     );
     
     if (!error && goldBuildings && goldBuildings.length > 0) {
-      console.log(`[GoldAddressService] Using ${goldBuildings.length} Gold buildings`);
-      return { buildings: goldBuildings, source: 'gold' };
+      const filteredGoldBuildings = this.filterRenderableGoldBuildings(
+        this.parseGoldBuildingRows(goldBuildings)
+      );
+      console.log(`[GoldAddressService] Using ${filteredGoldBuildings.length} Gold buildings`);
+      return { buildings: filteredGoldBuildings, source: 'gold' };
     }
     
     // Fall back to Lambda buildings (returned separately)

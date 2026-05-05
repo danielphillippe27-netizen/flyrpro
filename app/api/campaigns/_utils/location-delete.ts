@@ -39,10 +39,41 @@ export async function deleteBuildingDeep(
   buildingId: string
 ) {
   const row = await resolveBuildingRow(admin, campaignId, buildingId);
-  const publicBuildingId = row?.gers_id ?? row?.id ?? buildingId.trim();
-  const buildingIdentifiers = uniqueNonEmpty([row?.id, row?.gers_id, buildingId]);
+  let addressBackedBuildingId: string | null = null;
+  let addressBackedPublicBuildingId: string | null = null;
+  let directAddressId: string | null = null;
+
+  if (!row) {
+    const { data: addressRow, error: addressError } = await admin
+      .from('campaign_addresses')
+      .select('id, building_id, building_gers_id')
+      .eq('campaign_id', campaignId)
+      .eq('id', buildingId)
+      .maybeSingle();
+
+    if (addressError) {
+      throw new Error(addressError.message);
+    }
+
+    if (addressRow) {
+      const address = addressRow as {
+        id: string;
+        building_id?: string | null;
+        building_gers_id?: string | null;
+      };
+      directAddressId = address.id;
+      addressBackedBuildingId = address.building_id ?? null;
+      addressBackedPublicBuildingId = address.building_gers_id ?? address.building_id ?? null;
+    }
+  }
+
+  const publicBuildingId = row?.gers_id ?? row?.id ?? addressBackedPublicBuildingId ?? buildingId.trim();
+  const buildingIdentifiers = uniqueNonEmpty([row?.id, row?.gers_id, addressBackedBuildingId, addressBackedPublicBuildingId, buildingId]);
 
   let linkedAddressIds: string[] = [];
+  if (directAddressId) {
+    linkedAddressIds.push(directAddressId);
+  }
 
   if (buildingIdentifiers.length > 0) {
     const { data: linkRows, error: linkQueryError } = await admin

@@ -9,6 +9,7 @@ import { Maximize2, Minimize2, Trash2 } from 'lucide-react';
 import Lottie from 'lottie-react';
 import type { CampaignAddress, CampaignV2, CampaignParcel } from '@/types/database';
 import { MapBuildingsLayer, type MapBuildingsRenderState } from '@/components/map/MapBuildingsLayer';
+import { CampaignAddressPmtilesLayer } from '@/components/map/CampaignAddressPmtilesLayer';
 import { MapInfoButton } from '@/components/map/MapInfoButton';
 import { LocationCard } from '@/components/map/LocationCard';
 import { CreateContactDialog } from '@/components/crm/CreateContactDialog';
@@ -23,7 +24,6 @@ import { getMapboxToken, removeMapboxMapWhenSafe } from '@/lib/mapbox';
 import { applyPresetVisualTweaks, applyResolvedMapStyle, getResolvedMapInitOptions, hideBaseBuildingLayers, resolveMapStyle } from '@/lib/map-styles';
 import {
   DEFAULT_STATUS_FILTERS,
-  FLYER_MODE_STATUS_COLORS,
   MAP_STATUS_CONFIG,
   MAP_STATUS_PRIORITY,
   type MapStatusKey,
@@ -43,6 +43,7 @@ const BOUNDARY_LAYER_RAW_FILL = 'campaign-boundary-raw-fill';
 const BOUNDARY_LAYER_RAW_LINE = 'campaign-boundary-raw-line';
 const BOUNDARY_LAYER_SNAPPED_FILL = 'campaign-boundary-snapped-fill';
 const BOUNDARY_LAYER_SNAPPED_LINE = 'campaign-boundary-snapped-line';
+const SHOW_CAMPAIGN_BOUNDARY_OVERLAY = false;
 const CUSTOM_BUILDING_LAYER_PREFIXES = ['map-buildings-', 'campaign-parcels'];
 
 type BuildingPendingOverlayConfig = {
@@ -283,7 +284,6 @@ export function CampaignDetailMapView({
     () => resolveMapStyle(mapPreset, theme, 'v12'),
     [mapPreset, theme],
   );
-  const isFlyerCampaign = campaign?.type === 'flyer';
   const mapShellRef = useRef<HTMLDivElement>(null);
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
@@ -295,6 +295,7 @@ export function CampaignDetailMapView({
     isFetching: false,
     hasData: false,
     hasVisibleFeatures: false,
+    hasBuildingPolygons: false,
     featureCount: 0,
     visibleFeatureCount: 0,
     zoomLevel: 15,
@@ -343,7 +344,20 @@ export function CampaignDetailMapView({
     [theme]
   );
   const handleBuildingsRenderStateChange = useCallback((state: MapBuildingsRenderState) => {
-    setBuildingsRenderState(state);
+    setBuildingsRenderState((previous) => {
+      if (
+        previous.isFetching === state.isFetching &&
+        previous.hasData === state.hasData &&
+        previous.hasVisibleFeatures === state.hasVisibleFeatures &&
+        previous.hasBuildingPolygons === state.hasBuildingPolygons &&
+        previous.featureCount === state.featureCount &&
+        previous.visibleFeatureCount === state.visibleFeatureCount &&
+        previous.zoomLevel === state.zoomLevel
+      ) {
+        return previous;
+      }
+      return state;
+    });
   }, []);
 
   const visibleAddresses = useMemo(
@@ -424,11 +438,11 @@ export function CampaignDetailMapView({
   }, [buildingPendingOverlay, lottieSrc]);
 
   useEffect(() => {
-    if (buildingsRenderState.hasVisibleFeatures) {
+    if (buildingsRenderState.hasBuildingPolygons) {
       hasRenderedBuildingsRef.current = true;
       setShowBuildingPendingOverlay(false);
     }
-  }, [buildingsRenderState.hasVisibleFeatures]);
+  }, [buildingsRenderState.hasBuildingPolygons]);
 
   useEffect(() => {
     hasRenderedBuildingsRef.current = false;
@@ -436,6 +450,7 @@ export function CampaignDetailMapView({
       isFetching: false,
       hasData: false,
       hasVisibleFeatures: false,
+      hasBuildingPolygons: false,
       featureCount: 0,
       visibleFeatureCount: 0,
       zoomLevel: 15,
@@ -984,8 +999,7 @@ export function CampaignDetailMapView({
   useEffect(() => {
     if (!map.current || !mapLoaded) return;
 
-    // Extract lon/lat from campaign_addresses_geojson: coordinate, then geom_json (Point), then geometry
-    // Fit bounds to show all addresses - buildings are shown via fill extrusions from MapBuildingsLayer
+    // Fit bounds to show all addresses; rendered campaign geometry comes from PMTiles layers.
     if (visibleAddresses.length > 0) {
       const addressesWithCoords = visibleAddresses
         .map(addr => getAddressCoordinate(addr))
@@ -1053,199 +1067,9 @@ export function CampaignDetailMapView({
       .filter((value): value is PreparedAddressPoint => value !== null);
   }, [visibleAddresses]);
 
-  const addressPointsSourceId = 'campaign-address-points';
-  const addressPointsLayerId = 'campaign-address-points-extrusion';
-  const addressPointsGlowLayerId = 'campaign-address-points-lead-glow';
   const pointOverlaySourceId = 'campaign-point-overlays';
   const pointOverlayCircleLayerId = 'campaign-point-overlays-circle';
   const pointOverlayLabelLayerId = 'campaign-point-overlays-label';
-
-  // Addresses view: circular fill-extrusion points, same status highlighting as buildings
-  useEffect(() => {
-    const mapInstance = map.current;
-    if (!mapInstance || !mapLoaded) return;
-
-    // Same as bounds effect: coordinate, then geom_json (Point from campaign_addresses_geojson), then geometry
-    const buildAddressPointsGeoJSON = (): GeoJSON.FeatureCollection | null => {
-      const radiusMeters = 2.5;
-      const steps = 24;
-      const features: GeoJSON.Feature<GeoJSON.Polygon>[] = [];
-      for (const addr of visibleAddresses) {
-        const coord = getAddressCoordinate(addr);
-        if (!coord) continue;
-        const center = [coord.lon, coord.lat] as [number, number];
-        const circle = turf.circle(center, radiusMeters / 1000, { units: 'kilometers', steps });
-        const poly = circle.geometry;
-        if (poly.type !== 'Polygon') continue;
-        const scansTotal = addr.scans ?? 0;
-        const qrScanned = scansTotal > 0 || !!addr.last_scanned_at;
-        const addressStatus = getCampaignAddressMapStatus(addr);
-        features.push({
-          type: 'Feature',
-          geometry: poly,
-          properties: {
-            feature_id: addr.id,
-            address_id: addr.id,
-            address_status: addressStatus,
-            scans_total: scansTotal,
-            qr_scanned: qrScanned,
-          },
-        });
-      }
-      if (features.length === 0) return null;
-      return { type: 'FeatureCollection', features };
-    };
-
-    // Address map colors follow the shared campaign status palette.
-    const getColorExpression = (): mapboxgl.Expression => {
-      const getAddressStatus = () => ['coalesce', ['feature-state', 'address_status'], ['get', 'address_status'], 'none'];
-      const getQrScanned = () => ['coalesce', ['feature-state', 'qr_scanned'], ['get', 'qr_scanned'], false];
-      const getScansTotal = () => ['coalesce', ['feature-state', 'scans_total'], ['get', 'scans_total'], 0];
-      if (isFlyerCampaign) {
-        const isVisited = ['any', ['!=', getAddressStatus(), 'none'], ['==', getQrScanned(), true], ['>', getScansTotal(), 0]];
-        return ['case', isVisited, FLYER_MODE_STATUS_COLORS.visited, FLYER_MODE_STATUS_COLORS.unvisited] as mapboxgl.Expression;
-      }
-      const isQrScanned = ['any', ['==', getQrScanned(), true], ['>', getScansTotal(), 0]];
-      const isConversation = ['==', getAddressStatus(), 'talked'];
-      const isLead = ['in', getAddressStatus(), ['literal', ['appointment', 'future_seller', 'hot_lead']]];
-      const isDoNotKnock = ['==', getAddressStatus(), 'do_not_knock'];
-      const isNoOneHome = ['in', getAddressStatus(), ['literal', ['no_answer', 'not_home']]];
-      const isTouched = ['==', getAddressStatus(), 'delivered'];
-      const isUntouched = [
-        'all',
-        ['!=', getAddressStatus(), 'delivered'],
-        ['!=', getAddressStatus(), 'talked'],
-        ['!', ['in', getAddressStatus(), ['literal', ['appointment', 'future_seller', 'hot_lead']]]],
-        ['!=', getAddressStatus(), 'do_not_knock'],
-        ['!', ['in', getAddressStatus(), ['literal', ['no_answer', 'not_home']]]],
-        ['!', isQrScanned],
-      ];
-      return [
-        'case',
-        ['all', isQrScanned, statusFilters.QR_SCANNED],
-        MAP_STATUS_CONFIG.QR_SCANNED.color,
-        ['all', isLead, statusFilters.HOT_LEADS],
-        MAP_STATUS_CONFIG.HOT_LEADS.color,
-        ['all', isConversation, statusFilters.CONVERSATIONS],
-        MAP_STATUS_CONFIG.CONVERSATIONS.color,
-        ['all', isDoNotKnock, statusFilters.DO_NOT_KNOCK],
-        MAP_STATUS_CONFIG.DO_NOT_KNOCK.color,
-        ['all', isNoOneHome, statusFilters.NO_ONE_HOME],
-        MAP_STATUS_CONFIG.NO_ONE_HOME.color,
-        ['all', isTouched, statusFilters.TOUCHED],
-        MAP_STATUS_CONFIG.TOUCHED.color,
-        ['all', isUntouched, statusFilters.UNTOUCHED],
-        MAP_STATUS_CONFIG.UNTOUCHED.color,
-        '#6b7280',
-      ] as mapboxgl.Expression;
-    };
-
-    const getLeadGlowOpacityExpression = (): mapboxgl.Expression => {
-      if (isFlyerCampaign) return ['case', false, 0, 0] as mapboxgl.Expression;
-      const getAddressStatus = () => ['coalesce', ['feature-state', 'address_status'], ['get', 'address_status'], 'none'];
-      const isLead = ['in', getAddressStatus(), ['literal', ['appointment', 'future_seller', 'hot_lead']]];
-      return ['case', ['all', isLead, statusFilters.HOT_LEADS], 0.82, 0] as mapboxgl.Expression;
-    };
-
-    const addAddressPointsLayer = () => {
-      if (!mapInstance.isStyleLoaded()) return;
-      const geo = buildAddressPointsGeoJSON();
-      if (!geo || geo.features.length === 0) return;
-      try {
-        const existingSource = mapInstance.getSource(addressPointsSourceId);
-        if (existingSource && 'setData' in existingSource) {
-          (existingSource as mapboxgl.GeoJSONSource).setData(geo);
-        } else if (!existingSource) {
-          mapInstance.addSource(addressPointsSourceId, {
-            type: 'geojson',
-            data: geo,
-            promoteId: 'feature_id',
-          });
-        }
-        if (!safeGetLayer(mapInstance, addressPointsLayerId)) {
-          mapInstance.addLayer({
-            id: addressPointsLayerId,
-            type: 'fill-extrusion',
-            source: addressPointsSourceId,
-            minzoom: 12,
-            paint: {
-              'fill-extrusion-color': getColorExpression(),
-              'fill-extrusion-height': 7.5,
-              'fill-extrusion-base': 0,
-              'fill-extrusion-opacity': 1,
-              'fill-extrusion-vertical-gradient': true,
-              'fill-extrusion-emissive-strength': 0.85,
-            },
-          });
-          mapInstance.addLayer({
-            id: addressPointsGlowLayerId,
-            type: 'line',
-            source: addressPointsSourceId,
-            minzoom: 12,
-            paint: {
-              'line-color': MAP_STATUS_CONFIG.HOT_LEADS.color,
-              'line-width': 8,
-              'line-opacity': getLeadGlowOpacityExpression(),
-              'line-blur': 6,
-            },
-          });
-        } else {
-          mapInstance.setPaintProperty(addressPointsLayerId, 'fill-extrusion-color', getColorExpression());
-          if (safeGetLayer(mapInstance, addressPointsGlowLayerId)) {
-            mapInstance.setPaintProperty(addressPointsGlowLayerId, 'line-opacity', getLeadGlowOpacityExpression());
-          }
-        }
-      } catch (err) {
-        console.error('[CampaignDetailMapView] Error adding address points layer:', err);
-      }
-    };
-
-    const removeAddressPointsLayer = () => {
-      try {
-        if (safeGetLayer(mapInstance, addressPointsGlowLayerId)) mapInstance.removeLayer(addressPointsGlowLayerId);
-        if (safeGetLayer(mapInstance, addressPointsLayerId)) mapInstance.removeLayer(addressPointsLayerId);
-        if (safeGetSource(mapInstance, addressPointsSourceId)) mapInstance.removeSource(addressPointsSourceId);
-      } catch (_) {}
-    };
-
-    const onAddressPointClick = (e: mapboxgl.MapLayerMouseEvent) => {
-      const f = e.features?.[0];
-      if (!f?.properties) return;
-      const addressId = f.properties.address_id as string | undefined;
-      if (addressId) {
-        handleMapTargetClick(
-          { buildingId: null, addressId, parcelId: null },
-          {
-            additive: Boolean((e.originalEvent as MouseEvent | undefined)?.metaKey || (e.originalEvent as MouseEvent | undefined)?.ctrlKey),
-          }
-        );
-      }
-    };
-
-    if (mapViewMode !== 'addresses') {
-      removeAddressPointsLayer();
-      return;
-    }
-
-    if (visibleAddresses.length === 0) {
-      removeAddressPointsLayer();
-      return;
-    }
-
-    if (mapInstance.isStyleLoaded()) {
-      addAddressPointsLayer();
-    } else {
-      mapInstance.once('style.load', addAddressPointsLayer);
-    }
-
-    mapInstance.off('click', addressPointsLayerId, onAddressPointClick);
-    mapInstance.on('click', addressPointsLayerId, onAddressPointClick);
-
-    return () => {
-      mapInstance.off('click', addressPointsLayerId, onAddressPointClick);
-      removeAddressPointsLayer();
-    };
-  }, [handleMapTargetClick, mapViewMode, mapLoaded, resolvedMapStyle.key, statusFilters, visibleAddresses, isFlyerCampaign]);
 
   useEffect(() => {
     const mapInstance = map.current;
@@ -1449,7 +1273,8 @@ export function CampaignDetailMapView({
     return () => window.clearTimeout(timeoutId);
   }, [isMapFullscreen, mapLoaded]);
 
-  // Boundary layer: show territory_boundary (and optional raw/snapped) when campaign has map source
+  // Boundary layer cleanup. The saved campaign territory is metadata for provisioning/snap,
+  // but the live campaign map should render actual buildings, addresses, and parcels.
   useEffect(() => {
     const m = map.current;
     if (!m || !mapLoaded || !campaign?.territory_boundary) return;
@@ -1467,6 +1292,13 @@ export function CampaignDetailMapView({
       if (safeGetSource(m, BOUNDARY_SOURCE_RAW)) m.removeSource(BOUNDARY_SOURCE_RAW);
       if (safeGetSource(m, BOUNDARY_SOURCE_SNAPPED)) m.removeSource(BOUNDARY_SOURCE_SNAPPED);
     };
+
+    if (!SHOW_CAMPAIGN_BOUNDARY_OVERLAY) {
+      removeBoundaryLayers();
+      return () => {
+        removeBoundaryLayers();
+      };
+    }
 
     if (!m.isStyleLoaded()) {
       m.once('style.load', () => {
@@ -1534,6 +1366,7 @@ export function CampaignDetailMapView({
   // Boundary line opacity: snapped emphasized (raw dimmed)
   useEffect(() => {
     const m = map.current;
+    if (!SHOW_CAMPAIGN_BOUNDARY_OVERLAY) return;
     if (!m || !mapLoaded || !hasRawAndSnapped) return;
     if (!safeGetLayer(m, BOUNDARY_LAYER_RAW_LINE) || !safeGetLayer(m, BOUNDARY_LAYER_SNAPPED_LINE)) return;
     m.setPaintProperty(BOUNDARY_LAYER_RAW_LINE, 'line-opacity', 0.3);
@@ -1840,7 +1673,7 @@ export function CampaignDetailMapView({
     (buildingsRenderState.isFetching ||
       (buildingsRenderState.hasData &&
         buildingsRenderState.zoomLevel >= 12 &&
-        !buildingsRenderState.hasVisibleFeatures));
+        !buildingsRenderState.hasBuildingPolygons));
 
   useEffect(() => {
     if (mapViewMode !== 'buildings') {
@@ -2010,6 +1843,20 @@ export function CampaignDetailMapView({
               onRenderStateChange={handleBuildingsRenderStateChange}
             />
           )}
+          <CampaignAddressPmtilesLayer
+            map={map.current}
+            campaignId={campaignId}
+            mapLoaded={mapLoaded}
+            visible={mapViewMode === 'addresses'}
+            addresses={visibleAddresses}
+            campaignType={campaign?.type ?? null}
+            statusFilters={statusFilters}
+            deletedAddressIds={optimisticallyDeletedAddressIds}
+            styleKey={resolvedMapStyle.key}
+            onAddressClick={(addressId, buildingId, options) => {
+              handleMapTargetClick({ buildingId, addressId, parcelId: null }, options);
+            }}
+          />
           {/* Location Card - floating card when building is clicked */}
           {locationCardOpen && selectedBuildingId && (
             <div className="absolute bottom-6 left-4 z-20">

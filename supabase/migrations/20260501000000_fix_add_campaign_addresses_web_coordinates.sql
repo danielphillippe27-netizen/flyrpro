@@ -22,7 +22,6 @@ BEGIN
         postal_code,
         source,
         gers_id,
-        seq,
         visited,
         coordinate,
         geom,
@@ -39,7 +38,6 @@ BEGIN
         NULLIF(addr->>'postal_code', ''),
         COALESCE(NULLIF(addr->>'source', ''), 'lambda'),
         NULLIF(addr->>'gers_id', ''),
-        COALESCE((addr->>'seq')::int, (addr->>'sequence')::int, 0),
         COALESCE((addr->>'visited')::boolean, false),
         COALESCE(
             addr->'coordinate',

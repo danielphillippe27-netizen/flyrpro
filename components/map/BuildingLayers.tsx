@@ -3,11 +3,23 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { Map } from 'mapbox-gl';
 import mapboxgl from 'mapbox-gl';
-// @ts-expect-error - pmtiles types may not be available yet
-import { installProtocol } from 'pmtiles';
 import { createClient } from '@/lib/supabase/client';
+import { isPmtilesGeometryProvider, toPmtilesProtocolUrl } from '@/lib/map/campaignMapManifest';
+import { ensurePmtilesProtocolRegistered } from '@/lib/map/pmtilesProtocol';
 
 export type RenderingMode = '3d' | '2d';
+
+type CampaignMapManifest = {
+  artifact_type?: 'diamond' | 'white_gold' | 'basic';
+  geometry_provider?: string | null;
+  vector_tile_url_template?: string | null;
+  source_layers?: {
+    buildings?: string | null;
+  } | null;
+  minzoom?: number | null;
+  maxzoom?: number | null;
+  bounds?: [number, number, number, number] | null;
+};
 
 // Get PMTiles URL from environment or construct from Supabase URL
 function getPmtilesUrl(): string {
@@ -24,6 +36,38 @@ function getPmtilesUrl(): string {
   }
   const cleanUrl = supabaseUrl.trim().replace(/\/$/, '');
   return `${cleanUrl}/storage/v1/object/public/map-tiles/buildings.pmtiles`;
+}
+
+function appendAccessToken(tileTemplate: string, accessToken?: string | null): string {
+  if (!accessToken) return tileTemplate;
+  const separator = tileTemplate.includes('?') ? '&' : '?';
+  return `${tileTemplate}${separator}access_token=${encodeURIComponent(accessToken)}`;
+}
+
+async function fetchCampaignMapManifest(campaignId: string): Promise<{
+  manifest: CampaignMapManifest | null;
+  accessToken: string | null;
+}> {
+  const supabase = createClient();
+  const { data: sessionData } = await supabase.auth.getSession();
+  const accessToken = sessionData.session?.access_token ?? null;
+
+  const response = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/diamond-manifest`, {
+    headers: {
+      Accept: 'application/json',
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+    },
+  });
+
+  if (!response.ok) {
+    console.warn('[BuildingLayers] Campaign map manifest unavailable:', response.status);
+    return { manifest: null, accessToken };
+  }
+
+  return {
+    manifest: (await response.json()) as CampaignMapManifest,
+    accessToken,
+  };
 }
 
 interface BuildingLayersProps {
@@ -45,21 +89,8 @@ export function BuildingLayers({
 }: BuildingLayersProps) {
   const extrusionLayerRef = useRef<string | null>(null);
   const isMountedRef = useRef(true);
-  const protocolInstalledRef = useRef(false);
+  const usingManifestSourceRef = useRef(false);
   const [activeBuildingIds, setActiveBuildingIds] = useState<Set<string>>(new Set());
-
-  // Install PMTiles protocol once when map loads
-  useEffect(() => {
-    if (!map || protocolInstalledRef.current) return;
-
-    try {
-      installProtocol(map);
-      protocolInstalledRef.current = true;
-      console.log('[BuildingLayers] PMTiles protocol installed');
-    } catch (error) {
-      console.error('[BuildingLayers] Failed to install PMTiles protocol:', error);
-    }
-  }, [map]);
 
   // Fetch active campaign GERS IDs (source_id) from Supabase
   // GERS-First Architecture: Query source_id instead of building_id
@@ -129,9 +160,13 @@ export function BuildingLayers({
     const loadPmtilesBuildings = async () => {
       try {
         if (!campaignId) {
+          usingManifestSourceRef.current = false;
           // Cleanup when campaign is deselected
           if (extrusionLayerRef.current) {
             try {
+              if (map.getLayer('flyr-campaign-buildings-line')) {
+                map.removeLayer('flyr-campaign-buildings-line');
+              }
               if (map.getLayer('flyr-campaign-buildings-extrusion')) {
                 map.removeLayer('flyr-campaign-buildings-extrusion');
               }
@@ -154,7 +189,121 @@ export function BuildingLayers({
 
         const sourceId = 'flyr-campaign-buildings-source';
         const layerId = 'flyr-campaign-buildings-extrusion';
-        const pmtilesUrl = getPmtilesUrl();
+        const lineLayerId = 'flyr-campaign-buildings-line';
+        const { manifest, accessToken } = await fetchCampaignMapManifest(campaignId);
+        const manifestBuildingLayer = manifest?.source_layers?.buildings ?? null;
+
+        if (manifest && isPmtilesGeometryProvider(manifest.geometry_provider) && manifest.vector_tile_url_template && manifestBuildingLayer) {
+          usingManifestSourceRef.current = true;
+          const tileTemplate = appendAccessToken(manifest.vector_tile_url_template, accessToken);
+
+          if (map.getLayer(lineLayerId)) map.removeLayer(lineLayerId);
+          if (map.getLayer(layerId)) map.removeLayer(layerId);
+          if (map.getSource(sourceId)) map.removeSource(sourceId);
+
+          map.addSource(sourceId, {
+            type: 'vector',
+            tiles: [tileTemplate],
+            minzoom: manifest.minzoom ?? 13,
+            maxzoom: manifest.maxzoom ?? 18,
+            ...(manifest.bounds ? { bounds: manifest.bounds } : {}),
+          });
+
+          if (mode === '2d') {
+            map.addLayer({
+              id: layerId,
+              type: 'fill',
+              source: sourceId,
+              'source-layer': manifestBuildingLayer,
+              minzoom: manifest.minzoom ?? 13,
+              paint: {
+                'fill-color': [
+                  'case',
+                  ['has', 'address_id'],
+                  '#ef4444',
+                  '#9ca3af',
+                ],
+                'fill-opacity': 0.72,
+                'fill-outline-color': '#111827',
+              },
+            });
+
+            map.addLayer({
+              id: lineLayerId,
+              type: 'line',
+              source: sourceId,
+              'source-layer': manifestBuildingLayer,
+              minzoom: manifest.minzoom ?? 13,
+              paint: {
+                'line-color': '#111827',
+                'line-opacity': 0.75,
+                'line-width': 1,
+              },
+            });
+          } else {
+            map.addLayer({
+              id: layerId,
+              type: 'fill-extrusion',
+              source: sourceId,
+              'source-layer': manifestBuildingLayer,
+              minzoom: manifest.minzoom ?? 13,
+              filter: ['==', '$type', 'Polygon'],
+              paint: {
+                'fill-extrusion-color': [
+                  'case',
+                  ['has', 'address_id'],
+                  '#ef4444',
+                  '#9ca3af',
+                ],
+                'fill-extrusion-opacity': 0.85,
+                'fill-extrusion-height': [
+                  'case',
+                  ['has', 'height'],
+                  ['get', 'height'],
+                  ['has', 'render_height'],
+                  ['get', 'render_height'],
+                  8,
+                ],
+                'fill-extrusion-base': [
+                  'case',
+                  ['has', 'min_height'],
+                  ['get', 'min_height'],
+                  0,
+                ],
+                'fill-extrusion-vertical-gradient': true,
+              },
+            });
+          }
+
+          console.log(
+            `[BuildingLayers] Added ${manifest.artifact_type ?? 'campaign'} manifest layer: ${manifestBuildingLayer}`
+          );
+
+          const manifestClickHandler = (e: mapboxgl.MapLayerMouseEvent) => {
+            const feature = e.features?.[0];
+            const props = feature?.properties || {};
+            const addressId = props.address_id ? String(props.address_id) : null;
+            const buildingId = props.building_id || props.id || props.gers_id;
+
+            if (addressId && onMarkerClick) onMarkerClick(addressId);
+            if (buildingId && onBuildingClick) onBuildingClick(String(buildingId));
+          };
+
+          map.on('click', layerId, manifestClickHandler);
+          map.on('mouseenter', layerId, () => {
+            map.getCanvas().style.cursor = 'pointer';
+          });
+          map.on('mouseleave', layerId, () => {
+            map.getCanvas().style.cursor = '';
+          });
+
+          extrusionLayerRef.current = layerId;
+          onLayerReady?.(layerId);
+          return;
+        }
+
+        usingManifestSourceRef.current = false;
+        const pmtilesUrl = toPmtilesProtocolUrl(getPmtilesUrl());
         if (!pmtilesUrl) {
           console.warn('[BuildingLayers] Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_PMTILES_URL');
           return;
@@ -178,9 +327,13 @@ export function BuildingLayers({
           }
         } else {
           // Add PMTiles vector source
+          if (!ensurePmtilesProtocolRegistered()) {
+            console.warn('[BuildingLayers] PMTiles protocol unavailable; skipping direct PMTiles source.');
+            return;
+          }
           map.addSource(sourceId, {
             type: 'vector',
-            url: `pmtiles://${pmtilesUrl}`,
+            url: pmtilesUrl,
           });
 
           console.log(`[BuildingLayers] Added PMTiles source: ${pmtilesUrl}`);
@@ -378,7 +531,7 @@ export function BuildingLayers({
           const activeIds = await fetchActiveBuildingIds();
           setActiveBuildingIds(activeIds);
           // Update layer paint property with new GERS IDs
-          if (map.getLayer('flyr-campaign-buildings-extrusion')) {
+          if (!usingManifestSourceRef.current && map.getLayer('flyr-campaign-buildings-extrusion')) {
             map.setPaintProperty('flyr-campaign-buildings-extrusion', 'fill-extrusion-color', [
               'match',
               ['get', 'id'],
@@ -398,7 +551,7 @@ export function BuildingLayers({
 
   // Update layer paint property when active GERS IDs change
   useEffect(() => {
-    if (!map || activeBuildingIds.size === 0) return;
+    if (!map || activeBuildingIds.size === 0 || usingManifestSourceRef.current) return;
     
     // Update the match expression with new GERS IDs
     if (map.getLayer('flyr-campaign-buildings-extrusion')) {

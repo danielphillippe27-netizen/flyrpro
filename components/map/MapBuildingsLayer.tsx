@@ -1,14 +1,40 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import type { Map as MapboxMap } from 'mapbox-gl';
+import type {
+  CircleLayerSpecification,
+  ExpressionSpecification,
+  FillExtrusionLayerSpecification,
+  FilterSpecification,
+  LineLayerSpecification,
+  Map as MapboxMap,
+} from 'mapbox-gl';
 import mapboxgl from 'mapbox-gl';
 import { createClient } from '@/lib/supabase/client';
-import type { BuildingFeatureCollection, BuildingFeature, BuildingProperties, GetBuildingsInBboxParams } from '@/types/map-buildings';
+import type { BuildingFeatureCollection, BuildingProperties, GetBuildingsInBboxParams } from '@/types/map-buildings';
 import type { CampaignAddress, CampaignType } from '@/types/database';
-import { getCampaignAddressMapStatus, getCampaignBuildingStatus } from '@/lib/campaignStats';
+import { getCampaignBuildingStatus } from '@/lib/campaignStats';
 import { DEFAULT_STATUS_FILTERS, FLYER_MODE_STATUS_COLORS, MAP_STATUS_CONFIG, type StatusFilters } from '@/lib/constants/mapStatus';
 import { displayAddressText, resolveHouseNumberLabel } from '@/lib/map/addressPresentation';
+import {
+  appendTileAccessToken,
+  fetchCampaignMapManifest,
+  hasDirectWebPmtiles,
+  hasRenderablePmtilesBuildings,
+  toPmtilesProtocolUrl,
+  type CampaignMapManifest,
+} from '@/lib/map/campaignMapManifest';
+import { ensurePmtilesProtocolRegistered } from '@/lib/map/pmtilesProtocol';
+
+type ManifestBuildingSource = {
+  deliveryMode: 'pmtiles_protocol' | 'static_zxy_cdn' | 'backend_zxy';
+  url: string;
+  sourceLayer: string;
+  promoteId: string;
+  minzoom: number;
+  maxzoom: number;
+  bounds?: [number, number, number, number];
+};
 
 interface MapBuildingsLayerProps {
   map: MapboxMap;
@@ -38,6 +64,7 @@ export type MapBuildingsRenderState = {
   isFetching: boolean;
   hasData: boolean;
   hasVisibleFeatures: boolean;
+  hasBuildingPolygons: boolean;
   featureCount: number;
   visibleFeatureCount: number;
   zoomLevel: number;
@@ -48,8 +75,8 @@ const defaultStatusFilters: StatusFilters = DEFAULT_STATUS_FILTERS;
 /** Scale factor for building footprints (1 = unchanged, <1 = skinnier). */
 const FOOTPRINT_SCALE = 1;
 const ADDRESS_LABEL_MIN_ZOOM = 18;
-const POLYGON_GEOMETRY_FILTER: any[] = ['any', ['==', ['geometry-type'], 'Polygon'], ['==', ['geometry-type'], 'MultiPolygon']];
-const POINT_GEOMETRY_FILTER: any[] = ['==', ['geometry-type'], 'Point'];
+const POLYGON_GEOMETRY_FILTER: FilterSpecification = ['==', '$type', 'Polygon'];
+const POINT_GEOMETRY_FILTER: FilterSpecification = ['==', '$type', 'Point'];
 
 /**
  * Scale a polygon ring toward a centroid by a factor (in place).
@@ -70,7 +97,8 @@ function scaleRing(
  * Compute centroid of a ring (average of coordinates).
  */
 function ringCentroid(ring: number[][]): [number, number] {
-  let sx = 0, sy = 0, n = ring.length;
+  let sx = 0, sy = 0;
+  const n = ring.length;
   if (n === 0) return [0, 0];
   for (let i = 0; i < n; i++) {
     sx += ring[i][0];
@@ -187,6 +215,80 @@ function safeGetSource(map: MapboxMap, sourceId: string): boolean {
   }
 }
 
+function toRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' ? value as Record<string, unknown> : {};
+}
+
+function getStringRecordValue(record: Record<string, unknown>, key: string): string | undefined {
+  const value = record[key];
+  if (typeof value === 'string' && value.trim().length > 0) return value;
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return undefined;
+}
+
+function toManifestBuildingSource(
+  manifest: CampaignMapManifest,
+  accessToken: string | null
+): ManifestBuildingSource | null {
+  const sourceLayer = manifest.source_layers?.buildings;
+  if (!sourceLayer) return null;
+
+  if (hasDirectWebPmtiles(manifest) && manifest.pmtiles_url) {
+    const pmtilesUrl = toPmtilesProtocolUrl(manifest.pmtiles_url);
+    if (pmtilesUrl && ensurePmtilesProtocolRegistered()) {
+      return {
+        deliveryMode: 'pmtiles_protocol',
+        url: pmtilesUrl,
+        sourceLayer,
+        promoteId: manifest.promote_ids?.buildings ?? 'building_id',
+        minzoom: manifest.minzoom ?? 13,
+        maxzoom: manifest.maxzoom ?? 18,
+        bounds: manifest.bounds ?? undefined,
+      };
+    }
+  }
+
+  if (manifest.static_vector_tile_url_template) {
+    return {
+      deliveryMode: 'static_zxy_cdn',
+      url: manifest.static_vector_tile_url_template,
+      sourceLayer,
+      promoteId: manifest.promote_ids?.buildings ?? 'building_id',
+      minzoom: manifest.minzoom ?? 13,
+      maxzoom: manifest.maxzoom ?? 18,
+      bounds: manifest.bounds ?? undefined,
+    };
+  }
+
+  if (!manifest.vector_tile_url_template) return null;
+
+  return {
+    deliveryMode: 'backend_zxy',
+    url: appendTileAccessToken(manifest.vector_tile_url_template, accessToken),
+    sourceLayer,
+    promoteId: manifest.promote_ids?.buildings ?? 'building_id',
+    minzoom: manifest.minzoom ?? 13,
+    maxzoom: manifest.maxzoom ?? 18,
+    bounds: manifest.bounds ?? undefined,
+  };
+}
+
+function safeRemoveLayer(map: MapboxMap, layerId: string) {
+  try {
+    if (map.getLayer(layerId)) map.removeLayer(layerId);
+  } catch {
+    // Ignore transient style teardown errors.
+  }
+}
+
+function safeRemoveSource(map: MapboxMap, sourceId: string) {
+  try {
+    if (map.getSource(sourceId)) map.removeSource(sourceId);
+  } catch {
+    // Ignore transient style teardown errors.
+  }
+}
+
 export function MapBuildingsLayer({
   map,
   campaignId,
@@ -205,6 +307,7 @@ export function MapBuildingsLayer({
 }: MapBuildingsLayerProps) {
   const isFlyerMode = campaignType === 'flyer';
   const [features, setFeatures] = useState<BuildingFeatureCollection | null>(null);
+  const [manifestSource, setManifestSource] = useState<ManifestBuildingSource | null>(null);
   const [isFetching, setIsFetching] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(15);
   const sourceId = 'map-buildings-source';
@@ -225,6 +328,21 @@ export function MapBuildingsLayer({
   // This eliminates the JSON.parse deep-clone + scaleFootprint call from the hot update path.
   const normalizedFeaturesRef = useRef<BuildingFeatureCollection | null>(null);
   const lastSetDataRef = useRef<BuildingFeatureCollection | null>(null);
+  const onBuildingClickRef = useRef(onBuildingClick);
+  const onRenderStateChangeRef = useRef(onRenderStateChange);
+  const isFetchingRef = useRef(isFetching);
+
+  useEffect(() => {
+    onBuildingClickRef.current = onBuildingClick;
+  }, [onBuildingClick]);
+
+  useEffect(() => {
+    onRenderStateChangeRef.current = onRenderStateChange;
+  }, [onRenderStateChange]);
+
+  useEffect(() => {
+    isFetchingRef.current = isFetching;
+  }, [isFetching]);
 
   useEffect(() => {
     if (!map || !campaignId || !features?.features?.length || !addressStateOverrides?.length) return;
@@ -319,7 +437,7 @@ export function MapBuildingsLayer({
 
   // Status toggles now control color emphasis (not visibility).
   // Non-selected statuses render as neutral gray baseline.
-  const getFilterExpression = (): any[] | undefined => {
+  const getFilterExpression = (): FilterSpecification | undefined => {
     return undefined;
   };
 
@@ -327,7 +445,7 @@ export function MapBuildingsLayer({
   // Priority: QR_SCANNED > LEADS > CONVERSATIONS > DO_NOT_KNOCK > NO_ONE_HOME > TOUCHED > UNTOUCHED
   // Uses ['feature-state', ...] for real-time updates via setFeatureState(),
   // with fallback to ['get', ...] for initial data from properties
-  const getColorExpression = (): any => {
+  const getColorExpression = (): ExpressionSpecification => {
     // Helper expressions - check feature-state first (real-time), then source properties (initial load)
     const getStatusValue = () => ['coalesce', ['feature-state', 'status'], ['get', 'status'], 'not_visited'];
     const getAddressStatus = () => ['coalesce', ['feature-state', 'address_status'], ['get', 'address_status'], 'none'];
@@ -346,14 +464,14 @@ export function MapBuildingsLayer({
         ['==', getQrScanned(), true],
         ['>', getScansTotal(), 0],
       ];
-      return ['case', isVisited, FLYER_MODE_STATUS_COLORS.visited, FLYER_MODE_STATUS_COLORS.unvisited] as any;
+      return ['case', isVisited, FLYER_MODE_STATUS_COLORS.visited, FLYER_MODE_STATUS_COLORS.unvisited] as ExpressionSpecification;
     }
     const isQrScanned = ['any', ['==', getQrScanned(), true], ['>', getScansTotal(), 0]];
-    const isHotLead = ['any', ['==', getStatusValue(), 'hot_lead'], ['in', getAddressStatus(), ['literal', ['appointment', 'future_seller', 'hot_lead']]]];
-    const isLead = ['==', getStatusValue(), 'lead'];
+    const isHotLead = ['any', ['==', getStatusValue(), 'hot_lead'], ['in', getAddressStatus(), ['literal', ['appointment', 'future_seller']]]];
+    const isLead = ['any', ['==', getStatusValue(), 'lead'], ['in', getAddressStatus(), ['literal', ['lead', 'interested', 'hot_lead']]]];
     const isConversation = ['any', ['==', getStatusValue(), 'hot'], ['==', getAddressStatus(), 'talked']];
     const isDoNotKnock = ['any', ['==', getStatusValue(), 'do_not_knock'], ['==', getAddressStatus(), 'do_not_knock']];
-    const isNoOneHome = ['any', ['==', getStatusValue(), 'no_answer'], ['in', getAddressStatus(), ['literal', ['no_answer', 'not_home']]]];
+    const isNoOneHome = ['any', ['==', getStatusValue(), 'no_answer'], ['in', getAddressStatus(), ['literal', ['no_answer', 'not_home', 'attempted']]]];
     const isTouched = ['any', ['==', getStatusValue(), 'visited'], ['==', getAddressStatus(), 'delivered']];
     const isUntouched = ['all', ['==', getStatusValue(), 'not_visited'], ['==', getAddressStatus(), 'none']];
     
@@ -386,23 +504,23 @@ export function MapBuildingsLayer({
 
       // Baseline when no toggle applies
       NEUTRAL_FOOTPRINT_COLOR,
-    ] as any;
+    ] as ExpressionSpecification;
   };
 
-  const getLeadGlowOpacityExpression = (): any => {
-    if (isFlyerMode) return ['case', false, 0, 0] as any;
+  const getLeadGlowOpacityExpression = (): ExpressionSpecification => {
+    if (isFlyerMode) return ['case', false, 0, 0] as ExpressionSpecification;
     const getStatusValue = () => ['coalesce', ['feature-state', 'status'], ['get', 'status'], 'not_visited'];
     const getAddressStatus = () => ['coalesce', ['feature-state', 'address_status'], ['get', 'address_status'], 'none'];
-    const isLead = ['any', ['==', getStatusValue(), 'hot_lead'], ['in', getAddressStatus(), ['literal', ['appointment', 'future_seller', 'hot_lead']]]];
+    const isLead = ['any', ['==', getStatusValue(), 'lead'], ['in', getAddressStatus(), ['literal', ['lead', 'interested', 'hot_lead']]]];
 
-    return ['case', ['all', isLead, statusFilters.HOT_LEADS], 0.82, 0] as any;
+    return ['case', ['all', isLead, statusFilters.LEADS], 0.82, 0] as ExpressionSpecification;
   };
 
   /** Neutral footprint when not using status colors (visible on map, not loud red/salmon). */
   const NEUTRAL_FOOTPRINT_COLOR = '#6b7280';
   const NEUTRAL_EXTRUSION_OPACITY = 0.55;
   const NEUTRAL_CIRCLE_OPACITY = 0.88;
-  const getFootprintFillColor = (): any =>
+  const getFootprintFillColor = (): string | ExpressionSpecification =>
     footprintStatusColors ? getColorExpression() : NEUTRAL_FOOTPRINT_COLOR;
   const getFootprintFillOpacity = (): number =>
     footprintStatusColors ? 1 : NEUTRAL_EXTRUSION_OPACITY;
@@ -412,8 +530,17 @@ export function MapBuildingsLayer({
   // Track if campaign data has been loaded (for "fetch once, render forever" pattern)
   const campaignDataLoadedRef = useRef<string | null>(null);
 
-  useEffect(() => {
-  }, [map, campaignId]);
+  const cleanupRenderedLayers = useCallback(() => {
+    if (!map) return;
+    safeRemoveLayer(map, addressLabelLayerId);
+    safeRemoveLayer(map, circleLayerId);
+    safeRemoveLayer(map, circleLeadGlowLayerId);
+    safeRemoveLayer(map, leadGlowLayerId);
+    safeRemoveLayer(map, layerId);
+    safeRemoveLayer(map, shadowLayerId);
+    safeRemoveSource(map, addressLabelSourceId);
+    safeRemoveSource(map, sourceId);
+  }, [map, addressLabelLayerId, circleLayerId, circleLeadGlowLayerId, leadGlowLayerId, layerId, shadowLayerId, addressLabelSourceId, sourceId]);
 
   // CAMPAIGN MODE: Fetch ALL campaign features once (no viewport filtering)
   // This enables "fetch once, render forever" for buttery smooth pan/zoom
@@ -424,84 +551,21 @@ export function MapBuildingsLayer({
     const campaignDataKey = `${campaignId}:${refreshKey}`;
 
     try {
-      // Use API endpoint directly - handles both Gold and Silver buildings
-      const buildingsResponse = await fetch(`/api/campaigns/${campaignId}/buildings`);
-      if (!buildingsResponse.ok) {
-        console.error('[MapBuildingsLayer] API error:', buildingsResponse.status, buildingsResponse.statusText);
-      }
-      if (buildingsResponse.ok) {
-        const buildings = await buildingsResponse.json();
-        if (buildings?.features?.length > 0) {
+      const { manifest, accessToken } = await fetchCampaignMapManifest(campaignId);
+      if (hasRenderablePmtilesBuildings(manifest)) {
+        const nextSource = toManifestBuildingSource(manifest!, accessToken);
+        if (nextSource) {
           campaignDataLoadedRef.current = campaignDataKey;
-          setFeatures(buildings as BuildingFeatureCollection);
+          setFeatures(null);
+          setManifestSource(nextSource);
           return;
         }
       }
 
-      // LAST RESORT: Fetch campaign addresses and create point features
-      const { data: addresses, error: addrError } = await supabase
-        .from('campaign_addresses_geojson')
-        .select('id, formatted, house_number, geom, geom_json, visited, coordinate, scans, last_scanned_at, address_status')
-        .eq('campaign_id', campaignId)
-        .not('geom', 'is', null)
-        .limit(5000);
-      
-      if (!addrError && addresses && addresses.length > 0) {
-        // Create simple point features from addresses
-        const addressFeatures: BuildingFeature[] = addresses.map((addr: any) => {
-          // Parse geom to get coordinates
-          let coords: [number, number] = [0, 0];
-          try {
-            if (addr.coordinate) {
-              coords = [addr.coordinate.lon, addr.coordinate.lat];
-            } else if (addr.geom_json?.type === 'Point' && Array.isArray(addr.geom_json.coordinates)) {
-              coords = [addr.geom_json.coordinates[0], addr.geom_json.coordinates[1]];
-            } else if (addr.geom) {
-              // Try to parse PostGIS point
-              const match = addr.geom.match(/POINT\s*\(\s*([-\d.]+)\s+([-\d.]+)\s*\)/i);
-              if (match) {
-                coords = [parseFloat(match[1]), parseFloat(match[2])];
-              }
-            }
-          } catch (e) {
-            console.warn('Failed to parse coordinate for address:', addr.id);
-          }
-          
-          return {
-            type: 'Feature',
-            id: addr.id,
-            geometry: {
-              type: 'Point',
-              coordinates: coords,
-            } as GeoJSON.Point,
-            properties: {
-              id: addr.id,
-              feature_id: addr.id,
-              address_id: addr.id,
-              address_text: displayAddressText(addr),
-              house_number: resolveHouseNumberLabel(addr),
-              address_status: getCampaignAddressMapStatus(addr as CampaignAddress),
-              status: getCampaignBuildingStatus(addr as CampaignAddress),
-              scans_total: addr.scans || 0,
-              qr_scanned: (addr.scans || 0) > 0 || !!addr.last_scanned_at,
-              height: 14,
-              height_m: 14,
-              feature_type: 'address_point',
-            } as BuildingProperties,
-          };
-        }).filter((f: BuildingFeature) => 
-          f.geometry.coordinates[0] !== 0 && f.geometry.coordinates[1] !== 0
-        );
-        
-        if (addressFeatures.length > 0) {
-          campaignDataLoadedRef.current = campaignDataKey;
-          setFeatures({
-            type: 'FeatureCollection',
-            features: addressFeatures,
-          } as BuildingFeatureCollection);
-          return;
-        }
-      }
+      console.warn('[MapBuildingsLayer] PMTiles building layer unavailable.');
+      campaignDataLoadedRef.current = campaignDataKey;
+      setManifestSource(null);
+      setFeatures({ type: 'FeatureCollection', features: [] } as BuildingFeatureCollection);
     } catch (err) {
       console.error('[MapBuildingsLayer] Error in fetchCampaignData:', err);
     } finally {
@@ -509,7 +573,7 @@ export function MapBuildingsLayer({
         setIsFetching(false);
       }
     }
-  }, [supabase, campaignId, refreshKey]);
+  }, [campaignId, refreshKey]);
 
   // Precompute scaled geometry once per fetch — never inside the render/update effect.
   useEffect(() => {
@@ -534,7 +598,8 @@ export function MapBuildingsLayer({
       type: 'FeatureCollection',
       features: features.features.flatMap((f) => {
         const props = f.properties ?? {};
-        const fid = props.feature_id ?? props.gers_id ?? f.id ?? (props as any).id;
+        const propsRecord = toRecord(props);
+        const fid = props.feature_id ?? props.gers_id ?? f.id ?? getStringRecordValue(propsRecord, 'id');
         const geom = f.geometry;
         const featureAddressId = typeof props.address_id === 'string' ? props.address_id.trim() : '';
         const buildingIdentifiers = [
@@ -578,7 +643,7 @@ export function MapBuildingsLayer({
               house_number: props.house_number,
               formatted: props.address_text,
             }),
-            feature_id: fid ?? (f as any).id,
+            feature_id: fid ?? f.id,
           },
         }];
       }),
@@ -835,11 +900,16 @@ export function MapBuildingsLayer({
 
     const reportRenderState = () => {
       const featureCount = features?.features.length ?? 0;
+      const hasBuildingPolygons = Boolean(
+        features?.features.some((feature) =>
+          feature.geometry?.type === 'Polygon' || feature.geometry?.type === 'MultiPolygon'
+        )
+      );
       let visibleFeatureCount = 0;
 
       if (map && map.isStyleLoaded() && zoomLevel >= 12) {
         try {
-          visibleFeatureCount = map.queryRenderedFeatures(undefined, {
+          visibleFeatureCount = map.queryRenderedFeatures({
             layers: [layerId, circleLayerId],
           }).length;
         } catch {
@@ -851,6 +921,7 @@ export function MapBuildingsLayer({
         isFetching,
         hasData: featureCount > 0,
         hasVisibleFeatures: visibleFeatureCount > 0,
+        hasBuildingPolygons,
         featureCount,
         visibleFeatureCount,
         zoomLevel,
@@ -881,8 +952,239 @@ export function MapBuildingsLayer({
     };
   }, [circleLayerId, features, isFetching, layerId, map, onRenderStateChange, zoomLevel]);
 
+  useEffect(() => {
+    if (!map || !manifestSource) return;
+
+    const addManifestLayers = () => {
+      if (!map.isStyleLoaded()) return;
+      cleanupRenderedLayers();
+
+      const vectorSource: mapboxgl.VectorSourceSpecification & { promoteId?: Record<string, string> } = {
+        type: 'vector',
+        minzoom: manifestSource.minzoom,
+        maxzoom: manifestSource.maxzoom,
+        promoteId: {
+          [manifestSource.sourceLayer]: manifestSource.promoteId,
+        },
+      };
+      if (manifestSource.deliveryMode === 'pmtiles_protocol') {
+        vectorSource.url = manifestSource.url;
+      } else {
+        vectorSource.tiles = [manifestSource.url];
+      }
+      if (manifestSource.bounds) vectorSource.bounds = manifestSource.bounds;
+
+      map.addSource(sourceId, vectorSource);
+      const filterExpr = getFilterExpression();
+
+      map.addLayer({
+        id: layerId,
+        type: 'fill-extrusion',
+        source: sourceId,
+        'source-layer': manifestSource.sourceLayer,
+        minzoom: manifestSource.minzoom,
+        filter: filterExpr ? ['all', POLYGON_GEOMETRY_FILTER, filterExpr] : POLYGON_GEOMETRY_FILTER,
+        paint: {
+          'fill-extrusion-color': getFootprintFillColor(),
+          'fill-extrusion-vertical-gradient': true,
+          'fill-extrusion-height': ['coalesce', ['get', 'height'], ['get', 'height_m'], ['get', 'render_height'], 10] as ExpressionSpecification,
+          'fill-extrusion-base': ['coalesce', ['get', 'min_height'], 0] as ExpressionSpecification,
+          'fill-extrusion-opacity': getFootprintFillOpacity(),
+          'fill-extrusion-emissive-strength': 0.85,
+        },
+      });
+
+      map.addLayer({
+        id: leadGlowLayerId,
+        type: 'line',
+        source: sourceId,
+        'source-layer': manifestSource.sourceLayer,
+        minzoom: manifestSource.minzoom,
+        filter: filterExpr ? ['all', POLYGON_GEOMETRY_FILTER, filterExpr] : POLYGON_GEOMETRY_FILTER,
+        paint: {
+          'line-color': MAP_STATUS_CONFIG.LEADS.color,
+          'line-width': 7,
+          'line-opacity': getLeadGlowOpacityExpression(),
+          'line-blur': 5,
+        },
+      });
+
+      try {
+        map.setLight({
+          anchor: 'map',
+          color: 'white',
+          intensity: 0.6,
+          position: [1.15, 210, 30],
+        });
+      } catch (error) {
+        console.warn('[MapBuildingsLayer] Error setting PMTiles map lighting:', error);
+      }
+
+      const clickHandler = (event: mapboxgl.MapLayerMouseEvent) => {
+        const feature = event.features?.[0];
+        const props = feature?.properties as BuildingProperties | undefined;
+        if (!props) return;
+        const buildingId = String(props.building_id ?? props.gers_id ?? props.id ?? '').trim();
+        if (!buildingId) return;
+        const addressId = String(props.address_id ?? '').trim() || undefined;
+        const originalEvent = event.originalEvent as MouseEvent | undefined;
+        onBuildingClickRef.current?.(buildingId, addressId, {
+          additive: Boolean(originalEvent?.metaKey || originalEvent?.ctrlKey),
+        });
+      };
+      const enterHandler = () => {
+        map.getCanvas().style.cursor = 'pointer';
+      };
+      const leaveHandler = () => {
+        map.getCanvas().style.cursor = '';
+      };
+
+      map.on('click', layerId, clickHandler);
+      map.on('mouseenter', layerId, enterHandler);
+      map.on('mouseleave', layerId, leaveHandler);
+
+      return () => {
+        map.off('click', layerId, clickHandler);
+        map.off('mouseenter', layerId, enterHandler);
+        map.off('mouseleave', layerId, leaveHandler);
+      };
+    };
+
+    let cleanupHandlers: (() => void) | undefined;
+    let cancelled = false;
+    const onStyleLoad = () => {
+      if (!cancelled) cleanupHandlers = addManifestLayers();
+    };
+
+    if (map.isStyleLoaded()) {
+      cleanupHandlers = addManifestLayers();
+    } else {
+      map.once('style.load', onStyleLoad);
+    }
+
+    const reportRenderState = () => {
+      const report = onRenderStateChangeRef.current;
+      if (!report) return;
+      let visibleFeatureCount = 0;
+      if (map.isStyleLoaded()) {
+        try {
+          visibleFeatureCount = map.queryRenderedFeatures({ layers: [layerId] }).length;
+        } catch {
+          visibleFeatureCount = 0;
+        }
+      }
+      report({
+        isFetching: isFetchingRef.current,
+        hasData: true,
+        hasVisibleFeatures: visibleFeatureCount > 0,
+        hasBuildingPolygons: true,
+        featureCount: visibleFeatureCount,
+        visibleFeatureCount,
+        zoomLevel: map.getZoom(),
+      });
+    };
+
+    map.on('idle', reportRenderState);
+    map.on('moveend', reportRenderState);
+    map.on('zoomend', reportRenderState);
+
+    return () => {
+      cancelled = true;
+      map.off('style.load', onStyleLoad);
+      cleanupHandlers?.();
+      map.off('idle', reportRenderState);
+      map.off('moveend', reportRenderState);
+      map.off('zoomend', reportRenderState);
+      cleanupRenderedLayers();
+    };
+  }, [map, manifestSource, cleanupRenderedLayers, sourceId, layerId, leadGlowLayerId]);
+
+  useEffect(() => {
+    if (!map || !manifestSource || !campaignId || !addressStateOverrides?.length) return;
+
+    let frameId: number | null = null;
+    const statusRank = { not_visited: 0, visited: 1, no_answer: 2, do_not_knock: 3, hot: 4, lead: 5, hot_lead: 6 } as const;
+    const buildingStateById = new Map<
+      string,
+      { status: 'not_visited' | 'visited' | 'hot' | 'lead' | 'hot_lead' | 'no_answer' | 'do_not_knock'; scans_total: number; qr_scanned: boolean }
+    >();
+    const addressStateById = new Map<
+      string,
+      { status: 'not_visited' | 'visited' | 'hot' | 'lead' | 'hot_lead' | 'no_answer' | 'do_not_knock'; scans_total: number; qr_scanned: boolean }
+    >();
+
+    for (const address of addressStateOverrides) {
+      addressStateById.set(address.id, {
+        status: getCampaignBuildingStatus(address),
+        scans_total: Number(address.scans ?? 0),
+        qr_scanned: Number(address.scans ?? 0) > 0 || Boolean(address.last_scanned_at),
+      });
+
+      const buildingId =
+        (address as CampaignAddress & { building_id?: string | null }).building_id ??
+        address.gers_id ??
+        null;
+      if (!buildingId) continue;
+
+      const nextState = {
+        status: getCampaignBuildingStatus(address),
+        scans_total: Number(address.scans ?? 0),
+        qr_scanned: Number(address.scans ?? 0) > 0 || Boolean(address.last_scanned_at),
+      };
+      const currentState = buildingStateById.get(buildingId);
+      if (!currentState) {
+        buildingStateById.set(buildingId, nextState);
+        continue;
+      }
+      buildingStateById.set(buildingId, {
+        status:
+          statusRank[nextState.status] > statusRank[currentState.status]
+            ? nextState.status
+            : currentState.status,
+        scans_total: currentState.scans_total + nextState.scans_total,
+        qr_scanned: currentState.qr_scanned || nextState.qr_scanned,
+      });
+    }
+
+    const applyState = (attempt = 0) => {
+      if (!safeGetSource(map, sourceId)) {
+        if (attempt < 8) frameId = requestAnimationFrame(() => applyState(attempt + 1));
+        return;
+      }
+
+      for (const [addressId, featureState] of addressStateById.entries()) {
+        try {
+          map.setFeatureState(
+            { source: sourceId, sourceLayer: manifestSource.sourceLayer, id: addressId },
+            featureState
+          );
+        } catch (error) {
+          console.warn('[MapBuildingsLayer] Failed to apply PMTiles address feature-state:', error);
+        }
+      }
+
+      for (const [buildingId, featureState] of buildingStateById.entries()) {
+        try {
+          map.setFeatureState(
+            { source: sourceId, sourceLayer: manifestSource.sourceLayer, id: buildingId },
+            featureState
+          );
+        } catch (error) {
+          console.warn('[MapBuildingsLayer] Failed to apply PMTiles building feature-state:', error);
+        }
+      }
+    };
+
+    applyState();
+
+    return () => {
+      if (frameId !== null) cancelAnimationFrame(frameId);
+    };
+  }, [map, manifestSource, campaignId, addressStateOverrides, sourceId]);
+
   // Update Mapbox source and layer when features change
   useEffect(() => {
+    if (manifestSource) return;
     // Only bail if map doesn't exist
     if (!map) {
       return;
@@ -976,23 +1278,24 @@ export function MapBuildingsLayer({
         try {
           // NOTE: Shadow layer removed to fix "dark square" visual artifact
           // The 3D fill-extrusion with proper lighting provides sufficient visual depth
-          const filterExpr = getFilterExpression(showOrphans, !!campaignId, statusFilters);
+          const filterExpr = getFilterExpression();
 
           // Filter for polygon features only
-          const polygonFilter: any[] = ['any', ['==', ['geometry-type'], 'Polygon'], ['==', ['geometry-type'], 'MultiPolygon']];
+          const polygonFilter: FilterSpecification = POLYGON_GEOMETRY_FILTER;
+          const buildingHeightExpression = ['coalesce', ['get', 'height'], ['get', 'height_m'], 14] as ExpressionSpecification;
           
           // Add the main building layer
           // Add without beforeId to place at end (on top of everything, including labels)
-          const layerConfig: any = {
+          const layerConfig: FillExtrusionLayerSpecification = {
             id: layerId,
-            type: 'fill-extrusion' as const,
+            type: 'fill-extrusion',
             source: sourceId,
             minzoom: 12,
             filter: filterExpr ? ['all', polygonFilter, filterExpr] : polygonFilter,
             paint: {
               'fill-extrusion-color': getFootprintFillColor(),
               'fill-extrusion-vertical-gradient': true,
-              'fill-extrusion-height': ['coalesce', ['get', 'height'], ['get', 'height_m'], 14] as any,
+              'fill-extrusion-height': buildingHeightExpression,
               'fill-extrusion-base': 0,
               'fill-extrusion-opacity': getFootprintFillOpacity(),
               'fill-extrusion-emissive-strength': 0.85,
@@ -1003,19 +1306,20 @@ export function MapBuildingsLayer({
           map.addLayer(layerConfig);
 
           if (!map.getLayer(leadGlowLayerId)) {
-            map.addLayer({
+            const leadGlowLayerConfig: LineLayerSpecification = {
               id: leadGlowLayerId,
-              type: 'line' as const,
+              type: 'line',
               source: sourceId,
               minzoom: 12,
               filter: filterExpr ? ['all', polygonFilter, filterExpr] : polygonFilter,
               paint: {
-                'line-color': MAP_STATUS_CONFIG.HOT_LEADS.color,
+                'line-color': MAP_STATUS_CONFIG.LEADS.color,
                 'line-width': 7,
                 'line-opacity': getLeadGlowOpacityExpression(),
                 'line-blur': 5,
               },
-            });
+            };
+            map.addLayer(leadGlowLayerConfig);
           }
           
           // Add circle layer for Point geometries (addresses without building polygons)
@@ -1030,7 +1334,7 @@ export function MapBuildingsLayer({
                 : ['==', ['geometry-type'], 'Point'],
               paint: {
                 'circle-radius': 14,
-                'circle-color': MAP_STATUS_CONFIG.HOT_LEADS.color,
+                'circle-color': MAP_STATUS_CONFIG.LEADS.color,
                 'circle-opacity': getLeadGlowOpacityExpression(),
                 'circle-blur': 0.85,
               },
@@ -1038,9 +1342,9 @@ export function MapBuildingsLayer({
           }
 
           if (!map.getLayer(circleLayerId)) {
-            const circleLayerConfig: any = {
+            const circleLayerConfig: CircleLayerSpecification = {
               id: circleLayerId,
-              type: 'circle' as const,
+              type: 'circle',
               source: sourceId,
               minzoom: 12,
               filter: filterExpr 
@@ -1567,10 +1871,13 @@ export function MapBuildingsLayer({
           console.log('[MapBuildingsLayer] Received building_stats change:', payload);
           
           if (payload.new && isMountedRef.current) {
-            const newProps = payload.new as any;
-            const updatedGersId = newProps.gers_id;
-            const newStatus = newProps.status;
-            const scansTotal = newProps.scans_total || 0;
+            const newProps = toRecord(payload.new);
+            const updatedGersId = getStringRecordValue(newProps, 'gers_id');
+            const newStatus = getStringRecordValue(newProps, 'status') ?? 'not_visited';
+            const scansTotalValue = newProps.scans_total;
+            const scansTotal = typeof scansTotalValue === 'number'
+              ? scansTotalValue
+              : Number(scansTotalValue ?? 0) || 0;
             
             console.log('[MapBuildingsLayer] Real-time building_stats update:', {
               gers_id: updatedGersId,
@@ -1592,11 +1899,11 @@ export function MapBuildingsLayer({
                 const source = map.getSource(sourceId) as mapboxgl.GeoJSONSource & { _data?: GeoJSON.FeatureCollection } | undefined;
                 const data = source?._data;
                 const featuresToUpdate = data?.features?.filter(
-                  (f: GeoJSON.Feature) => (f.properties as any)?.gers_id === updatedGersId
+                  (f: GeoJSON.Feature) => getStringRecordValue(toRecord(f.properties), 'gers_id') === updatedGersId
                 ) ?? [];
                 const ids = featuresToUpdate
-                  .map((f: GeoJSON.Feature) => (f.properties as any)?.feature_id)
-                  .filter(Boolean);
+                  .map((f: GeoJSON.Feature) => getStringRecordValue(toRecord(f.properties), 'feature_id'))
+                  .filter((id): id is string => Boolean(id));
                 if (ids.length === 0) {
                   // Fallback: treat gers_id as feature id (detached or legacy data without feature_id)
                   ids.push(updatedGersId);
@@ -1647,8 +1954,8 @@ export function MapBuildingsLayer({
           console.log('[MapBuildingsLayer] Received scan_event INSERT:', payload);
           
           if (payload.new && isMountedRef.current) {
-            const newScan = payload.new as any;
-            const buildingId = newScan.building_id;
+            const newScan = toRecord(payload.new);
+            const buildingId = getStringRecordValue(newScan, 'building_id');
             
             // Look up the gers_id for this building
             if (buildingId) {
