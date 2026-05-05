@@ -212,15 +212,12 @@ export async function GET(
     stringMetric(snapshotRow.tile_metrics, 'vector_tile_cdn_url_template') ??
     null;
   const pmtilesCdnUrl = geometryCdnBaseUrl() ? geometryUrl : null;
-  const parcelTiles =
-    artifactType === 'white_gold'
-      ? await resolveLatestParcelPmtilesKeys(
-          typeof (campaign as { region?: unknown }).region === 'string'
-            ? (campaign as { region: string }).region
-            : null,
-          { bucket: snapshotRow.bucket }
-        )
-      : null;
+  const parcelTiles = await resolveLatestParcelPmtilesKeys(
+    typeof (campaign as { region?: unknown }).region === 'string'
+      ? (campaign as { region: string }).region
+      : null,
+    { bucket: snapshotRow.bucket }
+  );
   const parcelTileCacheKey = parcelTiles
     ? encodeURIComponent(`${parcelTiles.datePart}:${parcelTiles.pmtilesKey}`)
     : null;
