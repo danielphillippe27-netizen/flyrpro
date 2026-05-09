@@ -1,11 +1,13 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   eslint: {
-    // Ignore ESLint errors during builds to allow deployment
+    // TODO: Re-enable once TypeScript errors are resolved.
+    // Current error count: 343 (as of May 2026). See KNOWN_ISSUES.md.
     ignoreDuringBuilds: true,
   },
   typescript: {
-    // Ignore TypeScript errors during builds
+    // TODO: Re-enable once TypeScript errors are resolved.
+    // Current error count: 343 (as of May 2026). See KNOWN_ISSUES.md.
     ignoreBuildErrors: true,
   },
   images: {
