@@ -88,6 +88,8 @@ tags:
     description: Home dashboard data
   - name: integrations
     description: CRM integrations (FUB, HubSpot, BoldTrail, monday, Zapier)
+  - name: internal
+    description: Internal build and provisioning webhooks
   - name: invites
     description: Workspace invite management
   - name: landing-page
@@ -1403,6 +1405,183 @@ paths:
         "200":
           description: QR code generated
 
+  /api/campaigns/{campaignId}/state:
+    get:
+      tags: [campaigns]
+      summary: Get campaign address state changes
+      description: Returns address status changes for a campaign, optionally scoped to the authenticated user's assigned addresses and filtered by an updated-at cursor.
+      x-status: working
+      x-ios-coupled: true
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [all, assigned_to_me]
+            default: all
+        - name: since
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Campaign state delta
+        "401":
+          description: Unauthorized
+        "404":
+          description: Campaign not found or access denied
+
+  /api/campaigns/{campaignId}/diamond-manifest:
+    get:
+      tags: [campaigns]
+      summary: Get campaign diamond map manifest
+      description: Returns the campaign geometry manifest, delivery mode metadata, tile URL templates, source layer names, promote IDs, and state cursor for diamond/white-gold map rendering.
+      x-status: working
+      x-ios-coupled: true
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Campaign map manifest
+        "401":
+          description: Unauthorized
+        "404":
+          description: Campaign not found or access denied
+
+  /api/campaigns/{campaignId}/diamond-tiles/buildings/{z}/{x}/{y}.mvt:
+    get:
+      tags: [campaigns]
+      summary: Get campaign diamond building vector tile
+      description: Reads a building vector tile from the campaign PMTiles artifact and returns it as an MVT payload.
+      x-status: working
+      x-ios-coupled: true
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: z
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: x
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: y
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: access_token
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: token
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Mapbox vector tile
+          content:
+            application/vnd.mapbox-vector-tile:
+              schema:
+                type: string
+                format: binary
+        "204":
+          description: Tile is missing or could not be read
+        "401":
+          description: Unauthorized
+        "404":
+          description: Campaign or PMTiles artifact not found
+
+  /api/campaigns/{campaignId}/parcel-tiles/{z}/{x}/{y}.mvt:
+    get:
+      tags: [campaigns]
+      summary: Get parcel vector tile for campaign region
+      description: Reads the latest parcel PMTiles artifact for the campaign region and returns the requested MVT tile.
+      x-status: working
+      x-ios-coupled: true
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: z
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: x
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: y
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: access_token
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: token
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Mapbox vector tile
+          content:
+            application/vnd.mapbox-vector-tile:
+              schema:
+                type: string
+                format: binary
+        "204":
+          description: Tile is missing or could not be read
+        "401":
+          description: Unauthorized
+        "404":
+          description: Campaign or parcel PMTiles artifact not found
+
   /api/campaigns/{campaignId}/matches:
     get:
       tags: [campaigns]
@@ -1643,6 +1822,71 @@ paths:
                 type: string
         "404":
           description: No addresses with qr_png_url found
+
+  # ── INTERNAL ─────────────────────────────────────────────────
+  /api/internal/diamond-build:
+    post:
+      tags: [internal]
+      summary: Queue diamond geometry build
+      description: Starts a detached background diamond build command for a valid campaign UUID. Requires `DIAMOND_BUILD_WEBHOOK_SECRET` in production.
+      x-status: working
+      x-ios-coupled: false
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                campaignId:
+                  type: string
+                  format: uuid
+                campaign_id:
+                  type: string
+                  format: uuid
+                dryRun:
+                  type: boolean
+      responses:
+        "202":
+          description: Build queued
+        "400":
+          description: Valid campaignId is required
+        "401":
+          description: Unauthorized
+
+  /api/internal/white-gold-build:
+    post:
+      tags: [internal]
+      summary: Queue white-gold geometry build
+      description: Starts a detached background white-gold build command for a valid campaign UUID. Requires `WHITE_GOLD_BUILD_WEBHOOK_SECRET` or `DIAMOND_BUILD_WEBHOOK_SECRET` in production.
+      x-status: working
+      x-ios-coupled: false
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                campaignId:
+                  type: string
+                  format: uuid
+                campaign_id:
+                  type: string
+                  format: uuid
+                dryRun:
+                  type: boolean
+      responses:
+        "202":
+          description: Build queued
+        "400":
+          description: Valid campaignId is required
+        "401":
+          description: Unauthorized
 
   # ── CANVA ────────────────────────────────────────────────────
   /api/canva/generate:

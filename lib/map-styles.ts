@@ -33,13 +33,13 @@ export const MAP_STYLE_PRESET_META: Record<
 };
 
 const STANDARD_V12_STYLES: Record<Theme, string> = {
-  light: 'mapbox://styles/fliper27/cml6z0dhg002301qo9xxc08k4',
-  dark: 'mapbox://styles/fliper27/cml6zc5pq002801qo4lh13o19',
+  light: process.env.NEXT_PUBLIC_MAPBOX_STYLE_ID_STANDARD_LIGHT ?? '',
+  dark: process.env.NEXT_PUBLIC_MAPBOX_STYLE_ID_STANDARD_DARK ?? '',
 };
 
 const STANDARD_V11_STYLES: Record<Theme, string> = {
-  light: 'mapbox://styles/mapbox/streets-v11',
-  dark: 'mapbox://styles/mapbox/dark-v11',
+  light: process.env.NEXT_PUBLIC_MAPBOX_STYLE_ID_LEGACY_LIGHT ?? '',
+  dark: process.env.NEXT_PUBLIC_MAPBOX_STYLE_ID_LEGACY_DARK ?? '',
 };
 
 const strippedStyleCache = new Map<string, Record<string, unknown>>();
@@ -52,14 +52,14 @@ export function resolveMapStyle(
   if (preset === 'whiteOut') {
     return {
       key: 'whiteOut:classic:light',
-      style: 'mapbox://styles/mapbox/light-v11',
+      style: process.env.NEXT_PUBLIC_MAPBOX_STYLE_ID_WHITEOUT ?? '',
     };
   }
 
   if (preset === 'blackOps') {
     return {
       key: 'blackOps:classic:dark',
-      style: 'mapbox://styles/mapbox/dark-v11',
+      style: process.env.NEXT_PUBLIC_MAPBOX_STYLE_ID_BLACKOUT ?? '',
     };
   }
 
