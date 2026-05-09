@@ -7,7 +7,6 @@
 -- Do not edit manually. To update, re-export from Supabase.
 --
 -- 124 tables, 1591 columns
--- Generated: May 2026 by Harry Brown
 --
 -- IMPORTANT NOTES:
 -- 1. Tables marked [iOS-ONLY] were created by the FLYR iOS repo
