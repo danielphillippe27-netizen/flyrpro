@@ -1,11 +1,32 @@
 /** @type {import('next').NextConfig} */
+const supabaseHost = process.env.NEXT_PUBLIC_SUPABASE_URL
+  ? new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).hostname
+  : null;
+
+if (!supabaseHost) {
+  console.warn('NEXT_PUBLIC_SUPABASE_URL is not set; Supabase image remote pattern and function rewrite are disabled.');
+}
+
+const supabaseRemotePatterns = supabaseHost
+  ? [
+      {
+        protocol: 'https',
+        hostname: supabaseHost,
+      },
+    ]
+  : [];
+
+const supabaseFunctionsBaseUrl = supabaseHost ? `https://${supabaseHost}/functions/v1` : null;
+
 const nextConfig = {
   eslint: {
-    // Ignore ESLint errors during builds to allow deployment
+    // TODO: Re-enable once TypeScript errors are resolved.
+    // Current error count: 343 (as of May 2026). See KNOWN_ISSUES.md.
     ignoreDuringBuilds: true,
   },
   typescript: {
-    // Ignore TypeScript errors during builds
+    // TODO: Re-enable once TypeScript errors are resolved.
+    // Current error count: 343 (as of May 2026). See KNOWN_ISSUES.md.
     ignoreBuildErrors: true,
   },
   images: {
@@ -14,10 +35,7 @@ const nextConfig = {
         protocol: 'https',
         hostname: 'lh3.googleusercontent.com',
       },
-      {
-        protocol: 'https',
-        hostname: 'kfnsnwqylsdsbgnwgxva.supabase.co',
-      },
+      ...supabaseRemotePatterns,
     ],
   },
   // Exclude problematic native modules from server-side bundling
@@ -83,12 +101,14 @@ const nextConfig = {
     // - Backward compatibility with existing production behavior
     // The Edge Function then redirects to https://flyrpro.app/l/<landing_page_slug>
     // Landing pages at /l/<slug> are handled by Next.js route
-    return [
-      {
-        source: "/q/:slug",
-        destination: "https://kfnsnwqylsdsbgnwgxva.supabase.co/functions/v1/qr_redirect?slug=:slug"
-      }
-    ];
+    return supabaseFunctionsBaseUrl
+      ? [
+          {
+            source: "/q/:slug",
+            destination: `${supabaseFunctionsBaseUrl}/qr_redirect?slug=:slug`
+          }
+        ]
+      : [];
   },
   webpack: (config, { isServer }) => {
     // Fix for Mapbox GL JS

@@ -98,7 +98,7 @@ export async function POST(request: NextRequest) {
     const fallbackBaseUrl = request.nextUrl.origin;
     const domain = requestedBaseUrl && !isLocalhostUrl(requestedBaseUrl)
       ? requestedBaseUrl
-      : (envBaseUrl || fallbackBaseUrl || 'https://flyrpro.vercel.app');
+      : (envBaseUrl || fallbackBaseUrl);
     
     console.log(`Using domain for QR codes: ${domain}`);
 
