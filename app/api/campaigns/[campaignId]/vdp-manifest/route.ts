@@ -71,6 +71,7 @@ export async function GET(
       .from('campaign_addresses')
       .select(`
         id,
+        address,
         formatted,
         postal_code,
         qr_png_url,

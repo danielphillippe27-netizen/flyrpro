@@ -62,8 +62,8 @@ export async function POST(
       return NextResponse.json({ error: 'Farm has no linked campaign' }, { status: 400 });
     }
 
-    const campaignAddresses = await fetchAllInPages((from, to) =>
-      admin
+    const campaignAddresses = await fetchAllInPages(async (from, to) =>
+      await admin
         .from('campaign_addresses')
         .select('id, formatted, gers_id, house_number, street_name, locality, region, postal_code, source, coordinate, geom')
         .eq('campaign_id', linkedCampaignId)

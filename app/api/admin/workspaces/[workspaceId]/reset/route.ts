@@ -104,112 +104,112 @@ export async function POST(
     const deletions: DeleteSummary[] = [];
 
     deletions.push(
-      await deleteRows('route_assignments', () =>
-        auth.admin.from('route_assignments').delete({ count: 'exact' }).eq('workspace_id', workspaceId)
+      await deleteRows('route_assignments', async () =>
+        await auth.admin.from('route_assignments').delete({ count: 'exact' }).eq('workspace_id', workspaceId)
       )
     );
     deletions.push(
-      await deleteRows('route_plans', () =>
-        auth.admin.from('route_plans').delete({ count: 'exact' }).eq('workspace_id', workspaceId)
+      await deleteRows('route_plans', async () =>
+        await auth.admin.from('route_plans').delete({ count: 'exact' }).eq('workspace_id', workspaceId)
       )
     );
     deletions.push(
-      await deleteRows('field_sessions', () =>
-        auth.admin.from('field_sessions').delete({ count: 'exact' }).eq('workspace_id', workspaceId)
+      await deleteRows('field_sessions', async () =>
+        await auth.admin.from('field_sessions').delete({ count: 'exact' }).eq('workspace_id', workspaceId)
       )
     );
     deletions.push(
-      await deleteRows('activity_events', () =>
-        auth.admin.from('activity_events').delete({ count: 'exact' }).eq('workspace_id', workspaceId)
+      await deleteRows('activity_events', async () =>
+        await auth.admin.from('activity_events').delete({ count: 'exact' }).eq('workspace_id', workspaceId)
       )
     );
     deletions.push(
-      await deleteRows('sessions', () =>
-        auth.admin.from('sessions').delete({ count: 'exact' }).eq('workspace_id', workspaceId)
+      await deleteRows('sessions', async () =>
+        await auth.admin.from('sessions').delete({ count: 'exact' }).eq('workspace_id', workspaceId)
       )
     );
     deletions.push(
-      await deleteRows('session_events', () =>
-        auth.admin.from('session_events').delete({ count: 'exact' }).eq('workspace_id', workspaceId)
+      await deleteRows('session_events', async () =>
+        await auth.admin.from('session_events').delete({ count: 'exact' }).eq('workspace_id', workspaceId)
       )
     );
     deletions.push(
-      await deleteRows('feedback_submissions', () =>
-        auth.admin.from('feedback_submissions').delete({ count: 'exact' }).eq('workspace_id', workspaceId)
+      await deleteRows('feedback_submissions', async () =>
+        await auth.admin.from('feedback_submissions').delete({ count: 'exact' }).eq('workspace_id', workspaceId)
       )
     );
     deletions.push(
-      await deleteRows('workspace_invites', () =>
-        auth.admin.from('workspace_invites').delete({ count: 'exact' }).eq('workspace_id', workspaceId)
+      await deleteRows('workspace_invites', async () =>
+        await auth.admin.from('workspace_invites').delete({ count: 'exact' }).eq('workspace_id', workspaceId)
       )
     );
     deletions.push(
-      await deleteRows('crm_connections', () =>
-        auth.admin.from('crm_connections').delete({ count: 'exact' }).eq('workspace_id', workspaceId)
+      await deleteRows('crm_connections', async () =>
+        await auth.admin.from('crm_connections').delete({ count: 'exact' }).eq('workspace_id', workspaceId)
       )
     );
     deletions.push(
-      await deleteRows('contacts', () =>
-        auth.admin.from('contacts').delete({ count: 'exact' }).eq('workspace_id', workspaceId)
+      await deleteRows('contacts', async () =>
+        await auth.admin.from('contacts').delete({ count: 'exact' }).eq('workspace_id', workspaceId)
       )
     );
     deletions.push(
-      await deleteRows('field_leads', () =>
-        auth.admin.from('field_leads').delete({ count: 'exact' }).eq('workspace_id', workspaceId)
+      await deleteRows('field_leads', async () =>
+        await auth.admin.from('field_leads').delete({ count: 'exact' }).eq('workspace_id', workspaceId)
       )
     );
 
     if (campaignIds.length > 0) {
       deletions.push(
-        await deleteRows('map_buildings', () =>
-          auth.admin.from('map_buildings').delete({ count: 'exact' }).in('campaign_id', campaignIds)
+        await deleteRows('map_buildings', async () =>
+          await auth.admin.from('map_buildings').delete({ count: 'exact' }).in('campaign_id', campaignIds)
         )
       );
       deletions.push(
-        await deleteRows('building_stats', () =>
-          auth.admin.from('building_stats').delete({ count: 'exact' }).in('campaign_id', campaignIds)
+        await deleteRows('building_stats', async () =>
+          await auth.admin.from('building_stats').delete({ count: 'exact' }).in('campaign_id', campaignIds)
         )
       );
       deletions.push(
-        await deleteRows('scan_events', () =>
-          auth.admin.from('scan_events').delete({ count: 'exact' }).in('campaign_id', campaignIds)
+        await deleteRows('scan_events', async () =>
+          await auth.admin.from('scan_events').delete({ count: 'exact' }).in('campaign_id', campaignIds)
         )
       );
       deletions.push(
-        await deleteRows('campaign_snapshots', () =>
-          auth.admin.from('campaign_snapshots').delete({ count: 'exact' }).in('campaign_id', campaignIds)
+        await deleteRows('campaign_snapshots', async () =>
+          await auth.admin.from('campaign_snapshots').delete({ count: 'exact' }).in('campaign_id', campaignIds)
         )
       );
       deletions.push(
-        await deleteRows('campaign_qr_batches', () =>
-          auth.admin.from('campaign_qr_batches').delete({ count: 'exact' }).in('campaign_id', campaignIds)
+        await deleteRows('campaign_qr_batches', async () =>
+          await auth.admin.from('campaign_qr_batches').delete({ count: 'exact' }).in('campaign_id', campaignIds)
         )
       );
       deletions.push(
-        await deleteRows('qr_generation_jobs', () =>
-          auth.admin.from('qr_generation_jobs').delete({ count: 'exact' }).in('campaign_id', campaignIds)
+        await deleteRows('qr_generation_jobs', async () =>
+          await auth.admin.from('qr_generation_jobs').delete({ count: 'exact' }).in('campaign_id', campaignIds)
         )
       );
       deletions.push(
-        await deleteRows('building_touches', () =>
-          auth.admin.from('building_touches').delete({ count: 'exact' }).in('campaign_id', campaignIds)
+        await deleteRows('building_touches', async () =>
+          await auth.admin.from('building_touches').delete({ count: 'exact' }).in('campaign_id', campaignIds)
         )
       );
       deletions.push(
-        await deleteRows('campaign_parcels', () =>
-          auth.admin.from('campaign_parcels').delete({ count: 'exact' }).in('campaign_id', campaignIds)
+        await deleteRows('campaign_parcels', async () =>
+          await auth.admin.from('campaign_parcels').delete({ count: 'exact' }).in('campaign_id', campaignIds)
         )
       );
     }
 
     deletions.push(
-      await deleteRows('campaigns', () =>
-        auth.admin.from('campaigns').delete({ count: 'exact' }).eq('workspace_id', workspaceId)
+      await deleteRows('campaigns', async () =>
+        await auth.admin.from('campaigns').delete({ count: 'exact' }).eq('workspace_id', workspaceId)
       )
     );
     deletions.push(
-      await deleteRows('buildings', () =>
-        auth.admin.from('buildings').delete({ count: 'exact' }).eq('workspace_id', workspaceId)
+      await deleteRows('buildings', async () =>
+        await auth.admin.from('buildings').delete({ count: 'exact' }).eq('workspace_id', workspaceId)
       )
     );
 

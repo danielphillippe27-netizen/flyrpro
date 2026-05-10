@@ -724,8 +724,8 @@ async function fetchCampaignBuildingFallbackFeatures(
   }
 
   const [campaignAddresses, buildingLinks] = await Promise.all([
-    fetchAllInPages((from, to) =>
-      supabase
+    fetchAllInPages(async (from, to) =>
+      await supabase
         .from('campaign_addresses')
         .select(
           'id, formatted, house_number, street_name, building_id, building_gers_id, visited, scans, address_statuses(status)'
@@ -734,8 +734,8 @@ async function fetchCampaignBuildingFallbackFeatures(
         .order('id', { ascending: true })
         .range(from, to)
     ),
-    fetchAllInPages((from, to) =>
-      supabase
+    fetchAllInPages(async (from, to) =>
+      await supabase
         .from('building_address_links')
         .select('building_id, address_id, match_type, confidence')
         .eq('campaign_id', campaignId)
@@ -793,8 +793,8 @@ async function fetchGoldFallbackFeatures(
   > = [];
 
   try {
-    campaignAddresses = await fetchAllInPages((from, to) =>
-      supabase
+    campaignAddresses = await fetchAllInPages(async (from, to) =>
+      await supabase
         .from('campaign_addresses')
         .select('id, formatted, house_number, street_name, building_id, visited, scans, address_statuses(status)')
         .eq('campaign_id', campaignId)

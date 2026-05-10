@@ -159,8 +159,8 @@ export class CampaignsService {
 
   static async fetchAddresses(campaignId: string): Promise<CampaignAddress[]> {
     try {
-      const data = await fetchAllInPages((from, to) =>
-        this.client
+      const data = await fetchAllInPages(async (from, to) =>
+        await this.client
           .from('campaign_addresses_geojson')
           .select('*, qr_code_base64') // Explicitly include qr_code_base64
           .eq('campaign_id', campaignId)
@@ -168,16 +168,16 @@ export class CampaignsService {
           .order('id', { ascending: true })
           .range(from, to)
       );
-      const baseState = await fetchAllInPages((from, to) =>
-        this.client
+      const baseState = await fetchAllInPages(async (from, to) =>
+        await this.client
           .from('campaign_addresses')
           .select('id, building_id, visited, scans, last_scanned_at')
           .eq('campaign_id', campaignId)
           .order('id', { ascending: true })
           .range(from, to)
       );
-      const statusRows = await fetchAllInPages((from, to) =>
-        this.client
+      const statusRows = await fetchAllInPages(async (from, to) =>
+        await this.client
           .from('address_statuses')
           .select('campaign_address_id, status, updated_at')
           .eq('campaign_id', campaignId)

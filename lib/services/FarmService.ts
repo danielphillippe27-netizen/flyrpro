@@ -291,8 +291,8 @@ export class FarmService {
 
   static async fetchAddresses(farmId: string): Promise<FarmAddress[]> {
     try {
-      const rows = await fetchAllInPages((from, to) =>
-        this.client
+      const rows = await fetchAllInPages(async (from, to) =>
+        await this.client
           .from('farm_addresses')
           .select('*')
           .eq('farm_id', farmId)

@@ -19,6 +19,12 @@ interface UploadsSidebarProps {
   onChangeActiveTool: (tool: ActiveTool) => void;
 }
 
+type UploadImage = {
+  id: string;
+  url: string;
+  name?: string | null;
+};
+
 export const UploadsSidebar = ({ editor, activeTool, onChangeActiveTool }: UploadsSidebarProps) => {
   const { data, isLoading, isError } = useGetImages();
 
@@ -74,7 +80,7 @@ export const UploadsSidebar = ({ editor, activeTool, onChangeActiveTool }: Uploa
         <div className="p-4">
           {data && data.length > 0 ? (
             <div className="grid grid-cols-2 gap-4">
-              {data.map((image) => (
+              {data.map((image: UploadImage) => (
                 <button
                   key={image.id}
                   onClick={() => handleImageClick(image.url)}
@@ -108,7 +114,6 @@ export const UploadsSidebar = ({ editor, activeTool, onChangeActiveTool }: Uploa
     </aside>
   );
 };
-
 
 
 

@@ -249,7 +249,7 @@ export class ThreeHouseLayer {
     console.log(`Populating ${this.features.length} models...`);
 
     // Clear existing models
-    this.models.forEach((record) => {
+    this.models.forEach((record: ModelRecord) => {
       this.scene.remove(record.object);
     });
     this.models.clear();
@@ -861,10 +861,10 @@ export class ThreeHouseLayer {
     }
 
     // Clean up models
-    this.models.forEach((record) => {
+    this.models.forEach((record: ModelRecord) => {
       this.scene.remove(record.object);
       // Dispose of geometries and materials
-      record.object.traverse((node) => {
+      record.object.traverse((node: THREE.Object3D) => {
         if (node instanceof THREE.Mesh) {
           if (node.geometry) node.geometry.dispose();
           if (node.material) {
@@ -960,7 +960,7 @@ export class ThreeHouseLayer {
     }
 
     // Update color
-    record.object.traverse((node) => {
+    record.object.traverse((node: THREE.Object3D) => {
       if (node instanceof THREE.Mesh && node.material) {
         if (Array.isArray(node.material)) {
           node.material.forEach((m) => {

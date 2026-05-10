@@ -429,7 +429,8 @@ export default function CreateCampaignPage() {
 
     // Find the first completed Polygon feature (skip points, lines, or incomplete geometries)
     const polygonFeature = features.features.find(
-      (f) => f.geometry?.type === 'Polygon' && f.geometry.coordinates?.[0]?.length >= 3
+      (f: { geometry?: { type?: string; coordinates?: number[][][] } }) =>
+        f.geometry?.type === 'Polygon' && f.geometry.coordinates?.[0]?.length >= 3
     );
     if (!polygonFeature) {
       alert('Please draw a territory boundary on the map. Double-click to finish your shape.');

@@ -550,7 +550,8 @@ export default function CreateFarmPage() {
     }
 
     const polygonFeature = features.features.find(
-      (feature) => feature.geometry?.type === 'Polygon' && feature.geometry.coordinates?.[0]?.length >= 3
+      (feature: { geometry?: { type?: string; coordinates?: number[][][] } }) =>
+        feature.geometry?.type === 'Polygon' && feature.geometry.coordinates?.[0]?.length >= 3
     );
     if (!polygonFeature) {
       await showFeedbackDialog({

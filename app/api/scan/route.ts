@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 
+type AddressCandidateRow = {
+  id: string;
+  address?: string | null;
+  formatted?: string | null;
+  locality?: string | null;
+  postal_code?: string | null;
+};
+
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   
@@ -48,7 +56,7 @@ export async function GET(request: NextRequest) {
           .select('id, campaign_id, address, formatted, locality, region, postal_code, house_number')
           .eq('campaign_id', campaignId);
         const { data } = await predicate(q).limit(20);
-        return data || [];
+        return (data || []) as AddressCandidateRow[];
       };
       
       // Strategy 1: Exact match on address or formatted (use streetPart to avoid comma in .or())
@@ -58,7 +66,8 @@ export async function GET(request: NextRequest) {
       });
       if (candidates.length > 0) {
         const fullMatch = candidates.find(
-          (r) => (r.address || '').toLowerCase() === line || (r.formatted || '').toLowerCase() === line
+          (r: AddressCandidateRow) =>
+            (r.address || '').toLowerCase() === line || (r.formatted || '').toLowerCase() === line
         );
         addressId = (fullMatch || candidates[0]).id;
         console.log('Found exact address match:', addressId);
@@ -69,7 +78,7 @@ export async function GET(request: NextRequest) {
         const escaped = line.replace(/%/g, '\\%').replace(/_/g, '\\_');
         candidates = await fetchCandidates((q) => q.or(`address.ilike.%${escaped}%,formatted.ilike.%${escaped}%`));
         if (candidates.length > 0) {
-          const scored = candidates.map((row) => {
+          const scored = candidates.map((row: AddressCandidateRow) => {
             let score = 0;
             const a = (row.address || '').toLowerCase();
             const f = (row.formatted || '').toLowerCase();
@@ -79,7 +88,12 @@ export async function GET(request: NextRequest) {
             if (city && (row.locality || '').toLowerCase().includes(city.toLowerCase().trim())) score += 20;
             if (postalCode && (row.postal_code || '').toLowerCase().includes(postalCode.toLowerCase().trim())) score += 15;
             return { row, score };
-          }).sort((x, y) => y.score - x.score);
+          }).sort(
+            (
+              x: { row: AddressCandidateRow; score: number },
+              y: { row: AddressCandidateRow; score: number }
+            ) => y.score - x.score
+          );
           addressId = scored[0].row.id;
           console.log('Found contains match:', addressId, 'score:', scored[0].score);
         }
@@ -92,7 +106,7 @@ export async function GET(request: NextRequest) {
         if (candidates.length > 0) {
           // Prefer row whose address/formatted starts with street part
           const best = candidates.find(
-            (r) =>
+            (r: AddressCandidateRow) =>
               (r.address || '').toLowerCase().startsWith(streetPart) ||
               (r.formatted || '').toLowerCase().startsWith(streetPart)
           ) || candidates[0];
