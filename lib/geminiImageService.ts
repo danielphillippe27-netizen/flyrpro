@@ -8,6 +8,20 @@ type GenerateGeminiImageParams = {
   aspectRatio?: '1:1' | '3:4' | '4:3' | '16:9' | '9:16';
 };
 
+type GeminiInlineDataPart = {
+  inlineData?: {
+    data?: string;
+    mimeType?: string;
+  };
+};
+
+type GeminiInlineImagePart = {
+  inlineData: {
+    data: string;
+    mimeType?: string;
+  };
+};
+
 /**
  * Server-side helper to call Gemini 3 Pro Image Preview
  * and return a data: URL (base64) for the generated image.
@@ -45,14 +59,21 @@ Return a single high-quality PNG image.
 
     // Find inline image data in parts
     const parts = candidates[0].content.parts ?? [];
-    const inlinePart = parts.find((p: any) => p.inlineData?.data);
+    const inlinePart = parts.find((p): p is GeminiInlineImagePart =>
+      typeof (p as GeminiInlineDataPart).inlineData?.data === 'string'
+    );
 
     if (!inlinePart) {
       throw new Error('No image data found in Gemini response');
     }
 
-    const base64 = inlinePart.inlineData.data as string;
-    const mime = (inlinePart.inlineData.mimeType as string) || 'image/png';
+    const inlineData = inlinePart.inlineData;
+    if (!inlineData?.data) {
+      throw new Error('No image data found in Gemini response');
+    }
+
+    const base64 = inlineData.data;
+    const mime = inlineData.mimeType || 'image/png';
     return `data:${mime};base64,${base64}`;
   } catch (error) {
     if (error instanceof Error) {
@@ -66,5 +87,3 @@ Return a single high-quality PNG image.
     throw new Error(`Failed to generate Gemini image: ${String(error)}`);
   }
 }
-
-

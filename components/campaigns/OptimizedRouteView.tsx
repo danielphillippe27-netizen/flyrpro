@@ -807,8 +807,8 @@ export function OptimizedRouteView({ campaignId, campaignName, addresses }: Opti
     setSelectedAddressIds((current) => Array.from(new Set([...current, ...selectedInBox])));
   }, [orderedAddresses]);
 
-  const coloredBuildingFeatures = useMemo(() => {
-    if (!campaignBuildings?.features?.length) return [] as GeoJSON.Feature[];
+  const coloredBuildingFeatures = useMemo<GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>[]>(() => {
+    if (!campaignBuildings?.features?.length) return [];
 
     const visibleAddressIds = new Set<string>();
     const visibleBuildingIds = new Set<string>();

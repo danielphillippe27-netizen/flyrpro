@@ -363,7 +363,7 @@ export class MapBuildingsService {
       try {
         const inserts = batch.map((building) => ({
           source: building.source,
-          gers_id: building.gers_id,
+          source_id: building.source_id,
           geom: JSON.stringify(building.geometry),
           height_m: building.height_m || 6,
           levels: building.height_m ? Math.ceil(building.height_m / 3) : 2,
@@ -430,7 +430,7 @@ export class MapBuildingsService {
       try {
         // Prepare batch data for RPC
         const batchData = batch.map((building) => ({
-          gers_id: building.gers_id,
+          gers_id: building.source_id,
           geom_wkb_hex: building.geom_wkb_hex,
           height_m: building.height_m || 6,
           levels: building.levels || (building.height_m ? Math.ceil(building.height_m / 3) : 2),

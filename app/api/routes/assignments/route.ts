@@ -97,7 +97,9 @@ export async function GET(request: NextRequest) {
       query = query.eq('assigned_to_user_id', user.id);
     }
 
-    let { data: assignmentData, error: assignmentError } = await query;
+    const initialAssignmentResult = await query;
+    let assignmentData: AssignmentRow[] | null = initialAssignmentResult.data as AssignmentRow[] | null;
+    let assignmentError = initialAssignmentResult.error;
     let hasWorkflowColumns = true;
 
     if (assignmentError && isMissingColumnError(assignmentError)) {
@@ -116,7 +118,7 @@ export async function GET(request: NextRequest) {
       }
 
       const fallback = await fallbackQuery;
-      assignmentData = fallback.data;
+      assignmentData = fallback.data as AssignmentRow[] | null;
       assignmentError = fallback.error;
     }
 
@@ -129,7 +131,6 @@ export async function GET(request: NextRequest) {
         ? assignment
         : {
             ...assignment,
-            priority: undefined,
             due_at: null,
             notes: null,
             accepted_at: null,

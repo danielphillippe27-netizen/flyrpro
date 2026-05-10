@@ -1,11 +1,10 @@
 import { toast } from "sonner";
-import { InferRequestType, InferResponseType } from "hono";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { client } from "@/lib/editor-canva/lib/hono";
 
-type ResponseType = InferResponseType<typeof client.api.projects[":id"]["$delete"], 200>;
-type RequestType = InferRequestType<typeof client.api.projects[":id"]["$delete"]>["param"];
+type ResponseType = { data: { id: string } };
+type RequestType = { id: string };
 
 export const useDeleteProject = () => {
   const queryClient = useQueryClient();

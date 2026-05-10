@@ -46,7 +46,6 @@ export const UploadsSidebar = ({ editor, activeTool, onChangeActiveTool }: Uploa
       <ToolSidebarHeader 
         title="Uploads" 
         description="Your uploaded assets library" 
-        onClose={onClose}
       />
       <div className="p-4 border-b">
         <UploadButton
@@ -114,6 +113,5 @@ export const UploadsSidebar = ({ editor, activeTool, onChangeActiveTool }: Uploa
     </aside>
   );
 };
-
 
 

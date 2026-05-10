@@ -1272,7 +1272,7 @@ export default function FarmPage() {
           mode: draft.mode,
           title: draft.title.trim() || null,
           scheduled_date: scheduledDateIso,
-          notes: draft.notes.trim() || null,
+          notes: draft.notes.trim() || undefined,
           homes_target: homesTargetValue,
         } satisfies Partial<FarmTouch>;
 

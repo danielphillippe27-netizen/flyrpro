@@ -11,7 +11,7 @@ export interface CampaignBuilding {
   campaign_id: string;
   address_id: string;
   building_id?: string;
-  geometry: string; // PostGIS geometry as GeoJSON string
+  geometry: string | GeoJSON.Polygon | GeoJSON.MultiPolygon | GeoJSON.Feature; // PostGIS geometry as GeoJSON string or parsed GeoJSON
   height_m?: number;
   min_height_m?: number;
   front_bearing?: number;
@@ -196,7 +196,7 @@ export class MapService {
    * Calculate the centroid of a polygon geometry
    */
   static calculatePolygonCentroid(geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon): [number, number] {
-    let coordinates: number[][][] = [];
+    let coordinates: GeoJSON.Position[][][] = [];
     
     if (geometry.type === 'Polygon') {
       coordinates = [geometry.coordinates];
@@ -214,8 +214,8 @@ export class MapService {
     const count = ring.length - 1; // Exclude last point if it's the same as first
     
     for (let i = 0; i < count; i++) {
-      sumLon += ring[i][0];
-      sumLat += ring[i][1];
+      sumLon += Number(ring[i][0]);
+      sumLat += Number(ring[i][1]);
     }
     
     return [sumLon / count, sumLat / count];
@@ -226,7 +226,7 @@ export class MapService {
    * Uses the longest edge of the polygon as the front direction
    */
   static calculateFrontBearing(geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon): number {
-    let coordinates: number[][][] = [];
+    let coordinates: GeoJSON.Position[][][] = [];
     
     if (geometry.type === 'Polygon') {
       coordinates = [geometry.coordinates];
@@ -246,8 +246,8 @@ export class MapService {
       const [lon2, lat2] = ring[i + 1];
       
       // Calculate distance
-      const dx = lon2 - lon1;
-      const dy = lat2 - lat1;
+      const dx = Number(lon2) - Number(lon1);
+      const dy = Number(lat2) - Number(lat1);
       const length = Math.sqrt(dx * dx + dy * dy);
       
       if (length > maxLength) {
@@ -299,7 +299,8 @@ export class MapService {
     // Step 1: Group by street_name for neighbor calculations
     const streetGroups = new Map<string, BuildingModelPoint[]>();
     for (const point of modelPoints) {
-      const address = addresses.get(point.properties.address_id);
+      const addressId = point.properties.address_id;
+      const address = addressId ? addresses.get(addressId) : undefined;
       const streetName = point.properties.street_name || address?.street_name || 'unknown';
       if (!streetGroups.has(streetName)) {
         streetGroups.set(streetName, []);
@@ -311,7 +312,8 @@ export class MapService {
     const processedPoints: BuildingModelPoint[] = [];
 
     for (const point of modelPoints) {
-      const address = addresses.get(point.properties.address_id);
+      const addressId = point.properties.address_id;
+      const address = addressId ? addresses.get(addressId) : undefined;
       const streetName = point.properties.street_name || address?.street_name || 'unknown';
       const streetPoints = streetGroups.get(streetName) || [];
       
@@ -400,7 +402,8 @@ export class MapService {
     const pointTurf = turf.point(pointCoords);
     
     // Get road bearing to determine "along street" direction
-    const address = addresses.get(point.properties.address_id);
+      const addressId = point.properties.address_id;
+      const address = addressId ? addresses.get(addressId) : undefined;
     const roadBearing = point.properties.road_bearing || address?.road_bearing || 0;
 
     // Find all neighbors on the same street
@@ -471,9 +474,13 @@ export class MapService {
             }
           } else if (building.geometry && typeof building.geometry === 'object') {
             // Already an object - might be GeoJSON directly
-            const geom = building.geometry as any;
+            const geom = building.geometry as GeoJSON.Geometry | GeoJSON.Feature;
             if (geom.type === 'Feature') {
-              geometry = geom.geometry;
+              if (geom.geometry.type === 'Polygon' || geom.geometry.type === 'MultiPolygon') {
+                geometry = geom.geometry;
+              } else {
+                throw new Error(`Unexpected feature geometry type: ${geom.geometry.type}`);
+              }
             } else if (geom.type === 'Polygon' || geom.type === 'MultiPolygon') {
               geometry = geom;
             } else {
@@ -506,7 +513,7 @@ export class MapService {
             height_m: building.height_m,
             min_height_m: building.min_height_m,
           },
-        };
+        } satisfies BuildingModelPoint;
       });
 
     // Apply spacing and townhouse logic if addresses are provided
@@ -604,7 +611,7 @@ export class MapService {
   ): GeoJSON.FeatureCollection {
     const features: GeoJSON.Feature[] = buildings
       .filter((building) => building.geometry)
-      .map((building) => {
+      .flatMap((building): GeoJSON.Feature[] => {
         // Parse geometry to get centroid
         let geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon;
         try {
@@ -616,7 +623,7 @@ export class MapService {
           }
         } catch (e) {
           console.error('Error parsing building geometry:', e);
-          return null;
+          return [];
         }
         
         const centroid = this.calculatePolygonCentroid(geometry);
@@ -634,7 +641,7 @@ export class MapService {
         // Determine status (default to pending if not provided)
         const status = statusMap?.get(building.address_id) || 'pending';
         
-        return {
+        return [{
           type: 'Feature',
           geometry: houseFootprint,
           properties: {
@@ -643,9 +650,8 @@ export class MapService {
             min_height: building.min_height_m || 0.0,
             status: status,
           },
-        };
-      })
-      .filter((f): f is GeoJSON.Feature => f !== null);
+        }];
+      });
     
     return {
       type: 'FeatureCollection',
@@ -672,7 +678,8 @@ export class MapService {
     // Group features by street_name
     const streetGroups = new Map<string, BuildingModelPoint[]>();
     for (const feature of features) {
-      const address = addresses.get(feature.properties.address_id);
+      const addressId = feature.properties.address_id;
+      const address = addressId ? addresses.get(addressId) : undefined;
       const streetName = feature.properties.street_name || address?.street_name;
       if (streetName) {
         if (!streetGroups.has(streetName)) {
@@ -684,16 +691,17 @@ export class MapService {
 
     // For each feature, find neighbors on the same street
     for (const feature of features) {
-      const address = addresses.get(feature.properties.address_id);
+      const addressId = feature.properties.address_id;
+      const address = addressId ? addresses.get(addressId) : undefined;
       const streetName = feature.properties.street_name || address?.street_name;
       if (!streetName) {
-        distanceMap.set(feature.properties.address_id, { left: null, right: null });
+        if (addressId) distanceMap.set(addressId, { left: null, right: null });
         continue;
       }
 
       const streetFeatures = streetGroups.get(streetName) || [];
       if (streetFeatures.length < 2) {
-        distanceMap.set(feature.properties.address_id, { left: null, right: null });
+        if (addressId) distanceMap.set(addressId, { left: null, right: null });
         continue;
       }
 
@@ -719,7 +727,8 @@ export class MapService {
       const minDistance = neighbors.length > 0 ? neighbors[0].distance : null;
       const secondDistance = neighbors.length > 1 ? neighbors[1].distance : null;
 
-      distanceMap.set(feature.properties.address_id, {
+      if (!addressId) continue;
+      distanceMap.set(addressId, {
         left: minDistance,
         right: secondDistance,
       });
@@ -764,7 +773,8 @@ export class MapService {
     // Group features by street_name
     const streetGroups = new Map<string, BuildingModelPoint[]>();
     for (const feature of features) {
-      const address = addresses.get(feature.properties.address_id);
+      const addressId = feature.properties.address_id;
+      const address = addressId ? addresses.get(addressId) : undefined;
       const streetName = feature.properties.street_name || address?.street_name;
       if (streetName) {
         if (!streetGroups.has(streetName)) {
@@ -779,14 +789,16 @@ export class MapService {
       // Find all pairs within townhouse detection distance
       for (let i = 0; i < streetFeatures.length; i++) {
         const feature1 = streetFeatures[i];
-        if (processed.has(feature1.properties.address_id)) continue;
+        const feature1AddressId = feature1.properties.address_id;
+        if (!feature1AddressId || processed.has(feature1AddressId)) continue;
 
         const cluster: BuildingModelPoint[] = [feature1];
         const clusterId = `cluster-${clusterCounter++}`;
 
         for (let j = i + 1; j < streetFeatures.length; j++) {
           const feature2 = streetFeatures[j];
-          if (processed.has(feature2.properties.address_id)) continue;
+          const feature2AddressId = feature2.properties.address_id;
+          if (!feature2AddressId || processed.has(feature2AddressId)) continue;
 
           const point1 = turf.point(feature1.geometry.coordinates);
           const point2 = turf.point(feature2.geometry.coordinates);
@@ -794,15 +806,17 @@ export class MapService {
 
           if (distance < this.TOWNHOUSE_DETECTION_DISTANCE_M) {
             cluster.push(feature2);
-            processed.add(feature2.properties.address_id);
+            processed.add(feature2AddressId);
           }
         }
 
         // If cluster has more than one unit, mark all as townhouses
         if (cluster.length > 1) {
           for (const feature of cluster) {
-            clusterMap.set(feature.properties.address_id, clusterId);
-            processed.add(feature.properties.address_id);
+            const addressId = feature.properties.address_id;
+            if (!addressId) continue;
+            clusterMap.set(addressId, clusterId);
+            processed.add(addressId);
           }
         }
       }
@@ -994,7 +1008,7 @@ export class MapService {
         spatialScale = BuildingService.calculateSpatialScale(building, neighbors);
 
         // Use setback point coordinates if available, otherwise use centroid
-        const finalCoords = setbackPoint
+        const finalCoords: [number, number] = setbackPoint
           ? setbackPoint.coordinates as [number, number]
           : [lon, lat];
 

@@ -26,6 +26,12 @@ type ImageResult = {
     thumb?: string;
   };
   alt_description?: string | null;
+  links: {
+    html: string;
+  };
+  user: {
+    name: string;
+  };
 };
 
 export const ImageSidebar = ({ editor, activeTool, onChangeActiveTool }: ImageSidebarProps) => {

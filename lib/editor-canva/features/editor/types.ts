@@ -213,6 +213,7 @@ export type BuildEditorProps = {
 };
 
 export interface Editor {
+  save: (skip?: boolean) => void;
   savePng: () => void;
   saveJpg: () => void;
   saveSvg: () => void;

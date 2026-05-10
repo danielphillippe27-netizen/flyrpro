@@ -430,7 +430,7 @@ export default function CreateFarmPage() {
       map.current.addControl(newDraw);
       drawRef.current = newDraw;
 
-      if (savedFeaturesRef.current?.features?.length > 0) {
+      if ((savedFeaturesRef.current?.features?.length ?? 0) > 0) {
         newDraw.set(savedFeaturesRef.current);
         newDraw.changeMode('simple_select');
       } else {

@@ -198,8 +198,8 @@ export function PowerDialerSettingsCard() {
               <p>
                 Caller ID:{' '}
                 <span className="font-medium text-gray-900 dark:text-white">
-                  {dialerSettingsStatus?.settings.dedicatedFromNumber ??
-                    dialerSettingsStatus?.settings.defaultFromNumber ??
+                  {dialerSettingsStatus?.settings?.dedicatedFromNumber ??
+                    dialerSettingsStatus?.settings?.defaultFromNumber ??
                     'Not configured'}
                 </span>
               </p>

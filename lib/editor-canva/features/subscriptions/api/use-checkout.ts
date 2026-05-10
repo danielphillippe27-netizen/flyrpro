@@ -1,10 +1,9 @@
 import { toast } from "sonner";
 import { useMutation } from "@tanstack/react-query";
-import { InferResponseType } from "hono";
 
 import { client } from "@/lib/editor-canva/lib/hono";
 
-type ResponseType = InferResponseType<typeof client.api.subscriptions.checkout["$post"], 200>;
+type ResponseType = { data: string };
 
 export const useCheckout = () => {
   const mutation = useMutation<

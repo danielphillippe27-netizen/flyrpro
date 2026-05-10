@@ -791,7 +791,10 @@ export async function POST(request: NextRequest) {
     // ---------------------------------------------------------------------
     // 7. RETURN ZIP DOWNLOAD
     // ---------------------------------------------------------------------
-    return new NextResponse(zipBuffer, {
+    const responseBody = new Uint8Array(zipBuffer.length);
+    responseBody.set(zipBuffer);
+
+    return new NextResponse(responseBody, {
       status: 200,
       headers: {
         'Content-Type': 'application/zip',

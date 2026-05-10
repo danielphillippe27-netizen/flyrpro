@@ -259,6 +259,8 @@ export interface CampaignAddress {
     lat: number;
     lon: number;
   };
+  geometry?: unknown;
+  geom_json?: unknown;
   geom?: string; // PostGIS geometry
   created_at: string;
   building_outline?: Coordinate[][];
@@ -272,10 +274,11 @@ export interface CampaignAddress {
   house_number?: string; // House/unit number from Overture address data
   locality?: string; // Town/City from Overture address data
   region?: string; // Province/State from Overture address data
+  building_id?: string | null; // Linked building UUID
   building_gers_id?: string; // Parent building GERS ID from Overture (parent_id) for handshake optimization
   // Scan tracking fields
   scans?: number; // Total number of times this address QR code has been scanned
-  last_scanned_at?: string; // Timestamp of the most recent QR code scan
+  last_scanned_at?: string | null; // Timestamp of the most recent QR code scan
   // QR code fields
   qr_code_base64?: string; // Base64-encoded QR code image (data URL format)
   purl?: string; // Tracking URL for QR code scans (e.g., /api/scan?id={address_id})
@@ -870,6 +873,7 @@ export interface Building {
   addr_housenumber?: string; // House number from Overture address
   addr_street?: string; // Street name from Overture address
   addr_unit?: string; // Unit number from Overture address
+  source?: string;
   created_at: string;
   updated_at: string;
 }

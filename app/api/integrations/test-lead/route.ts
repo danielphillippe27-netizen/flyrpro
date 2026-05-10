@@ -17,6 +17,7 @@ import {
   buildMondayColumnValues,
   createMondayItem,
   fetchMondayBoards,
+  type MondayColumnMappingEntry,
   resolveMondayColumnMapping,
   validateMondayBoardSelection,
 } from '@/app/api/integrations/monday/_lib/client';
@@ -32,7 +33,7 @@ type MondayIntegrationRow = {
   access_token: string | null;
   selected_board_id: string | null;
   provider_config: {
-    columnMapping?: Record<string, unknown>;
+    columnMapping?: Record<string, MondayColumnMappingEntry>;
   } | null;
 };
 

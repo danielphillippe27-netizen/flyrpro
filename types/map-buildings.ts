@@ -74,6 +74,8 @@ export interface BuildingProperties {
   address_status?: string | null;
   /** Unique id for Mapbox promoteId (unit id for slices, gers_id for detached). Used for setFeatureState. */
   feature_id?: string;
+  unit_id?: string | null;
+  unit_number?: string | null;
 }
 
 // GeoJSON Feature with BuildingProperties

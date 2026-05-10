@@ -9,6 +9,12 @@ type AddressCandidateRow = {
   postal_code?: string | null;
 };
 
+type AddressCandidateQuery = {
+  ilike(column: string, pattern: string): AddressCandidateQuery;
+  limit(count: number): PromiseLike<{ data: AddressCandidateRow[] | null }>;
+  or(filters: string): AddressCandidateQuery;
+};
+
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   
@@ -50,11 +56,11 @@ export async function GET(request: NextRequest) {
       // Street-only part (before first comma) for flexible matching
       const streetPart = line.split(',')[0]?.trim() || line;
       
-      const fetchCandidates = async (predicate: (q: ReturnType<typeof supabase.from>) => ReturnType<typeof supabase.from>) => {
+      const fetchCandidates = async (predicate: (q: AddressCandidateQuery) => AddressCandidateQuery) => {
         const q = supabase
           .from('campaign_addresses_geojson')
           .select('id, campaign_id, address, formatted, locality, region, postal_code, house_number')
-          .eq('campaign_id', campaignId);
+          .eq('campaign_id', campaignId) as unknown as AddressCandidateQuery;
         const { data } = await predicate(q).limit(20);
         return (data || []) as AddressCandidateRow[];
       };

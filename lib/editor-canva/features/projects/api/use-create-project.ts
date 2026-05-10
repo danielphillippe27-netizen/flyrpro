@@ -1,11 +1,9 @@
 import { toast } from "sonner";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { InferRequestType, InferResponseType } from "hono";
-
 import { client } from "@/lib/editor-canva/lib/hono";
 
-type ResponseType = InferResponseType<(typeof client.api.projects)["$post"], 200>;
-type RequestType = InferRequestType<(typeof client.api.projects)["$post"]>["json"];
+type ResponseType = unknown;
+type RequestType = Record<string, unknown>;
 
 export const useCreateProject = () => {
   const queryClient = useQueryClient();

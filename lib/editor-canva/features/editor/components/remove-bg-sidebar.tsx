@@ -1,5 +1,6 @@
 import Image from "next/image";
 import { AlertTriangle } from "lucide-react";
+import { fabric } from "fabric";
 
 import { usePaywall } from "@/lib/editor-canva/features/subscriptions/hooks/use-paywall";
 
@@ -31,8 +32,11 @@ export const RemoveBgSidebar = ({
 
   const selectedObject = editor?.selectedObjects[0];
 
-  // @ts-ignore
-  const imageSrc = selectedObject?._originalElement?.currentSrc || selectedObject?.src;
+  const imageObject = selectedObject as (fabric.Object & {
+    _originalElement?: { currentSrc?: string };
+    src?: string;
+  }) | undefined;
+  const imageSrc = imageObject?._originalElement?.currentSrc || imageObject?.src;
 
   const onClose = () => {
     onChangeActiveTool("select");
@@ -69,8 +73,10 @@ export const RemoveBgSidebar = ({
       editor?.addImage(data.url);
       editor?.save();
       toast.success('Background removed – new image added.');
-    } catch (err: any) {
-      const errorMessage = err?.message || 'We couldn\'t remove the background. Please try another image.';
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error
+        ? err.message
+        : 'We couldn\'t remove the background. Please try another image.';
       setError(errorMessage);
       console.error('Background removal error:', err);
     } finally {

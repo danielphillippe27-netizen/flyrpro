@@ -223,7 +223,7 @@ function BackgroundImage({
     <KonvaImage
       x={0}
       y={0}
-      image={image}
+      image={image ?? undefined}
       width={width}
       height={height}
     />
@@ -264,7 +264,7 @@ function ImageElement({
       }}
     >
       <KonvaImage
-        image={image}
+        image={image ?? undefined}
         width={element.width}
         height={element.height}
       />
@@ -337,4 +337,3 @@ function QRCodeElement({
     </Group>
   );
 }
-

@@ -6,7 +6,7 @@ import type { Theme } from '@/lib/theme-provider';
 export type MapStylePreset = 'standard' | 'whiteOut' | 'blackOps';
 export type MapStyleVersion = 'v11' | 'v12';
 
-type MapStyleConfig = Record<string, unknown>;
+type MapStyleConfig = mapboxgl.MapboxOptions['config'];
 
 export type ResolvedMapStyle = {
   key: string;
@@ -161,10 +161,18 @@ export function applyResolvedMapStyle(
   map: mapboxgl.Map,
   resolvedStyle: ResolvedMapStyle,
 ) {
+  const setStyleOptions = resolvedStyle.config
+    ? {
+        config: resolvedStyle.config,
+        localFontFamily: undefined,
+        localIdeographFontFamily: undefined,
+      }
+    : undefined;
+
   void resolveStylePayload(resolvedStyle)
     .then((stylePayload) => {
-      if (typeof stylePayload === 'string' && resolvedStyle.config) {
-        map.setStyle(stylePayload, { config: resolvedStyle.config });
+      if (typeof stylePayload === 'string' && setStyleOptions) {
+        map.setStyle(stylePayload, setStyleOptions);
         return;
       }
 
@@ -172,8 +180,8 @@ export function applyResolvedMapStyle(
     })
     .catch((error) => {
       console.error('Failed to apply resolved map style:', error);
-      if (resolvedStyle.config) {
-        map.setStyle(resolvedStyle.style, { config: resolvedStyle.config });
+      if (setStyleOptions) {
+        map.setStyle(resolvedStyle.style, setStyleOptions);
         return;
       }
       map.setStyle(resolvedStyle.style);

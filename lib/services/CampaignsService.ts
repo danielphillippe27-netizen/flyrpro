@@ -208,11 +208,15 @@ export class CampaignsService {
 
       return ((data || []) as Array<CampaignAddress & { building_id?: string | null }>).map((row) => {
         const state = stateById.get(row.id);
-        return {
+        const merged: CampaignAddress = {
           ...row,
           ...(state ?? {}),
-          address_status: statusByAddressId.get(row.id) ?? row.address_status,
         };
+        const addressStatus = statusByAddressId.get(row.id) ?? row.address_status;
+        if (addressStatus !== undefined) {
+          merged.address_status = addressStatus;
+        }
+        return merged;
       });
     } catch (error) {
       console.error('Error fetching addresses, returning empty array:', formatError(error));

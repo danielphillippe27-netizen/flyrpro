@@ -342,7 +342,7 @@ export default function CreateCampaignPage() {
       drawRef.current = newDraw;
 
       // Restore saved features
-      if (savedFeaturesRef.current?.features?.length > 0) {
+      if ((savedFeaturesRef.current?.features?.length ?? 0) > 0) {
         newDraw.set(savedFeaturesRef.current);
         newDraw.changeMode('simple_select');
       } else {

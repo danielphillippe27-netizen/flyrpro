@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import type { PostgrestError } from '@supabase/supabase-js';
 import { requireFounderApi } from '@/app/api/admin/_utils/founder';
 import {
   getAmbassadorReferralCodeStats,
@@ -63,6 +64,12 @@ type AmbassadorPayoutBatchRow = {
   created_at: string;
   stripe_transfer_id: string | null;
   failure_reason: string | null;
+};
+
+type QueryRowsResponse<T> = {
+  data: T[] | null;
+  error: PostgrestError | null;
+  count?: number | null;
 };
 
 const SELECT_FIELDS = `
@@ -215,8 +222,8 @@ export async function GET(request: NextRequest) {
           .limit(25),
       ]);
 
-    let applicationsRes = initialApplicationsRes;
-    let payoutBatchesRes = await auth.admin
+    let applicationsRes: QueryRowsResponse<Partial<AmbassadorApplicationRow>> = initialApplicationsRes;
+    let payoutBatchesRes: QueryRowsResponse<AmbassadorPayoutBatchRow> = await auth.admin
       .from('ambassador_payout_batches')
       .select(
         'id, ambassador_application_id, currency, total_commission_cents, status, paid_at, created_at, stripe_transfer_id, failure_reason'
@@ -233,7 +240,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (payoutBatchesRes.error && hasMissingColumnError(payoutBatchesRes.error.message)) {
-      payoutBatchesRes = { data: [], error: null };
+      payoutBatchesRes = { data: [], error: null, count: null };
     }
 
     const possibleErrors = [
@@ -309,20 +316,19 @@ export async function GET(request: NextRequest) {
 
     let lookupRows: AmbassadorApplicationRow[] = [];
     if (missingApplicationIds.length > 0) {
-      let { data, error } = await auth.admin
+      let lookupResponse: QueryRowsResponse<Partial<AmbassadorApplicationRow>> = await auth.admin
         .from('ambassador_applications')
         .select(SELECT_FIELDS)
         .in('id', missingApplicationIds);
 
-      if (error && hasMissingColumnError(error.message)) {
-        const legacyResponse = await auth.admin
+      if (lookupResponse.error && hasMissingColumnError(lookupResponse.error.message)) {
+        lookupResponse = await auth.admin
           .from('ambassador_applications')
           .select(LEGACY_SELECT_FIELDS)
           .in('id', missingApplicationIds);
-
-        data = legacyResponse.data;
-        error = legacyResponse.error;
       }
+
+      const { data, error } = lookupResponse;
 
       if (error) {
         if (isMissingAmbassadorSchemaError(error.message)) {
@@ -459,6 +465,7 @@ export async function GET(request: NextRequest) {
         totalRevenueCents: number;
         oldestEarnedAt: string;
       }>())
+        .values()
     ).sort((a, b) => b.totalCommissionCents - a.totalCommissionCents);
 
     const serializedRecentCommissions = recentCommissions.map((commission) => {
