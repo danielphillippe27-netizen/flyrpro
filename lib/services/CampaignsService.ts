@@ -458,6 +458,7 @@ export class CampaignsService {
 
     return {
       addresses: totalAddresses,
+      contacts: stats?.contacts || 0,
       contacted: contactedCount,
       visited: visitedCount,
       scanned: scannedCount,

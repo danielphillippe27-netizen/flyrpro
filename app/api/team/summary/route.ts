@@ -364,7 +364,7 @@ export async function GET(request: NextRequest) {
 
     const currentSummary = summarizeSessions((currentSessionsRes.data ?? []) as SessionRow[]);
     const previousSummary = summarizeSessions((previousSessionsRes.data ?? []) as SessionRow[]);
-    const contacts = contactsRes.error ? [] : ((contactsRes.data ?? []) as ContactRow[]);
+    const contacts = contactsRes.error ? [] : ((contactsRes.data ?? []) as unknown as ContactRow[]);
     const currentContactSummary = summarizeContacts(contacts, start, end);
     const previousContactSummary = summarizeContacts(contacts, previousStart, previousEnd);
     const currentAppointmentsCount =

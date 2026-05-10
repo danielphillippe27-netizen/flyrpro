@@ -256,8 +256,9 @@ export function FlyrMapView() {
 
         // Handle data loading errors
         mapInstance.on('data', (e) => {
-          if (e.dataType === 'error') {
-            const eventError = (e as { error?: Error }).error;
+          const dataEvent = e as { dataType?: string; error?: Error };
+          if (dataEvent.dataType === 'error') {
+            const eventError = dataEvent.error;
             console.error('Mapbox data error:', e);
             setError(`Data loading error: ${eventError?.message || 'Failed to load map data'}`);
           }

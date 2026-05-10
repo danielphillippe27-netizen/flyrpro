@@ -254,6 +254,7 @@ export function PartnerOfferLanding({
       <JustListedDmOfferLanding
         offerTitle={offerTitle}
         offerMessage={offerMessage}
+        partnerOnboardingTeamStyle={partnerOnboardingTeamStyle}
         partnerName={partnerName}
         recipientName={recipientName}
         expiresAt={expiresAt}

@@ -109,6 +109,8 @@ export type ActiveTool =
   | "layers"
   | "uploads"
   | "background"
+  | "ai"
+  | "draw"
   | "icons"
   | "qr";
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { CampaignDetailMapView, type MapPointOverlay } from '@/components/campaigns/CampaignDetailMapView';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -121,10 +121,10 @@ export function FarmMapView({
           formatted: address.formatted,
           postal_code: address.postal_code ?? undefined,
           source: 'map',
-          gers_id: address.gers_id,
+          gers_id: address.gers_id ?? undefined,
           visited: isVisited,
           address_status: scopedStatus,
-          coordinate: address.coordinate,
+          coordinate: address.coordinate ?? undefined,
           geom: address.geom ?? undefined,
           created_at: address.created_at,
           house_number: address.house_number ?? undefined,
@@ -198,12 +198,12 @@ export function FarmMapView({
     }
 
     return Array.from(contactsByAddressId.entries())
-      .map(([addressId, matchedContacts]) => {
+      .flatMap(([addressId, matchedContacts]) => {
         const address = addressById.get(addressId);
         const coordinate = address?.coordinate;
-        if (!address || !coordinate || matchedContacts.length === 0) return null;
+        if (!address || !coordinate || matchedContacts.length === 0) return [];
 
-        return {
+        return [{
           id: `farm-contact:${addressId}`,
           lon: coordinate.lon,
           lat: coordinate.lat,
@@ -212,9 +212,8 @@ export function FarmMapView({
           count: matchedContacts.length,
           label: matchedContacts.length > 1 ? String(matchedContacts.length) : null,
           color: '#dc2626',
-        } satisfies MapPointOverlay;
-      })
-      .filter((overlay): overlay is MapPointOverlay => Boolean(overlay));
+        } satisfies MapPointOverlay];
+      });
   }, [addresses, contacts, showContactsOverlay]);
 
   if (!linkedCampaignId) {

@@ -28,9 +28,9 @@ interface NearbyAddress {
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { campaignId: string; buildingId: string } }
+  { params }: { params: Promise<{ campaignId: string; buildingId: string }> }
 ) {
-  const { campaignId, buildingId } = params;
+  const { campaignId, buildingId } = await params;
   
   console.log(`[API] GET /campaigns/${campaignId}/buildings/${buildingId}/nearby-addresses`);
   

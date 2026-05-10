@@ -161,10 +161,10 @@ export const runtime = 'nodejs';
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { campaignId: string } }
+  { params }: { params: Promise<{ campaignId: string }> }
 ) {
   try {
-    const { campaignId } = params;
+    const { campaignId } = await params;
 
     // DEBUG: Log campaign ID
     console.log(`[API] Received request for campaign: ${campaignId}`);

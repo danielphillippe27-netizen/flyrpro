@@ -59,7 +59,7 @@ Return a single high-quality PNG image.
 
     // Find inline image data in parts
     const parts = candidates[0].content.parts ?? [];
-    const inlinePart = parts.find((p): p is GeminiInlineImagePart =>
+    const inlinePart = parts.find((p) =>
       typeof (p as GeminiInlineDataPart).inlineData?.data === 'string'
     );
 
@@ -67,7 +67,7 @@ Return a single high-quality PNG image.
       throw new Error('No image data found in Gemini response');
     }
 
-    const inlineData = inlinePart.inlineData;
+    const inlineData = (inlinePart as unknown as GeminiInlineImagePart).inlineData;
     if (!inlineData?.data) {
       throw new Error('No image data found in Gemini response');
     }

@@ -318,7 +318,7 @@ export async function listPendingWorkspaceInvites(
   ) {
     if (!withLastSentAt.error) {
       return {
-        data: normalizeInviteRecords(withLastSentAt.data as Record<string, unknown>[] | null),
+        data: normalizeInviteRecords(withLastSentAt.data as unknown as Record<string, unknown>[] | null),
         error: null,
       };
     }
@@ -341,7 +341,7 @@ export async function listPendingWorkspaceInvites(
 
   if (!withoutLastSentAt.error) {
     return {
-      data: normalizeInviteRecords(withoutLastSentAt.data as Record<string, unknown>[] | null),
+      data: normalizeInviteRecords(withoutLastSentAt.data as unknown as Record<string, unknown>[] | null),
       error: null,
     };
   }
@@ -356,7 +356,7 @@ export async function listPendingWorkspaceInvites(
 
     if (!legacyWithoutScope.error) {
       return {
-        data: normalizeInviteRecords(legacyWithoutScope.data as Record<string, unknown>[] | null),
+        data: normalizeInviteRecords(legacyWithoutScope.data as unknown as Record<string, unknown>[] | null),
         error: null,
       };
     }
@@ -511,7 +511,7 @@ export async function createWorkspaceInviteRecord(
     };
   }
 
-  const legacyValues = { ...insertValues };
+  const legacyValues: Partial<typeof insertValues> = { ...insertValues };
   delete legacyValues.access_scope;
   delete legacyValues.last_sent_at;
   const withoutLastSentAt = await supabase

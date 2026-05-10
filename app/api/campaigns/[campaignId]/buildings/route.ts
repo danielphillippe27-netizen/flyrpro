@@ -699,7 +699,7 @@ async function fetchCampaignBuildingRows(
       continue;
     }
 
-    return ((data ?? []) as Array<CampaignBuildingRow & { is_hidden?: boolean | null }>)
+    return ((data ?? []) as unknown as Array<CampaignBuildingRow & { is_hidden?: boolean | null }>)
       .filter((building) => !building.is_hidden)
       .map((building) => {
         const normalized = { ...building };

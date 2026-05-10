@@ -73,7 +73,7 @@ export function SupportInbox({
       setError(threadsError.message);
       return;
     }
-    setThreads((data as SupportThreadRow[]) ?? []);
+    setThreads((data as unknown as SupportThreadRow[]) ?? []);
   }, []);
 
   const markThreadReadForSupport = useCallback(async (threadId: string) => {

@@ -241,7 +241,7 @@ export async function GET(request: NextRequest) {
 
       if (!linkError && link) {
         buildingId = link.building_id;
-        const building = link.buildings as { id: string; gers_id: string | null };
+        const building = link.buildings as unknown as { id: string; gers_id: string | null };
         buildingGersId = building?.gers_id || null;
         console.log('Found building via stable linker:', { buildingId, buildingGersId });
       } else {

@@ -48,6 +48,14 @@ export interface SplitUnit {
   area_sqm: number;
 }
 
+export interface ManualSplitUnitInput {
+  address_id: string;
+  unit_geometry: GeoJSON.Polygon;
+  unit_number: string;
+  validation?: 'passed' | 'warning' | 'failed' | 'manual_override';
+  area_sqm?: number;
+}
+
 export interface SplitResult {
   status: 'success' | 'error';
   building_id: string;
@@ -786,6 +794,67 @@ export class TownhouseSplitterService {
 
     console.log(`[TownhouseSplitter] Saved ${records.length} units`);
     return true;
+  }
+
+  /**
+   * Resolve a manually reviewed split error by persisting user-provided units.
+   */
+  async resolveSplitError(
+    errorId: string,
+    units: ManualSplitUnitInput[],
+    resolvedBy: string,
+    notes?: string
+  ): Promise<void> {
+    const { data: splitError, error: fetchError } = await this.supabase
+      .from('building_split_errors')
+      .select('campaign_id, building_id')
+      .eq('id', errorId)
+      .single();
+
+    if (fetchError || !splitError) {
+      throw new Error(fetchError?.message || 'Split error not found');
+    }
+
+    const records = units.map((unit) => ({
+      campaign_id: splitError.campaign_id,
+      parent_building_id: splitError.building_id,
+      address_id: unit.address_id,
+      unit_number: unit.unit_number,
+      unit_geometry: unit.unit_geometry,
+      parent_building_area: unit.area_sqm ?? null,
+      split_method: 'manual',
+      parent_type: 'townhouse',
+      validation_status: unit.validation ?? 'manual_override',
+    }));
+
+    const { data: insertedUnits, error: insertError } = await this.supabase
+      .from('building_units')
+      .insert(records)
+      .select('id');
+
+    if (insertError) {
+      throw new Error(`Failed to create manual split units: ${insertError.message}`);
+    }
+
+    const createdUnitIds = (insertedUnits ?? [])
+      .map((unit: { id?: string | null }) => unit.id)
+      .filter((id): id is string => typeof id === 'string');
+
+    const { error: updateError } = await this.supabase
+      .from('building_split_errors')
+      .update({
+        status: 'resolved',
+        resolved_by: resolvedBy,
+        resolved_at: new Date().toISOString(),
+        resolution_notes: notes ?? null,
+        resolution_method: 'manual',
+        created_unit_ids: createdUnitIds,
+      })
+      .eq('id', errorId);
+
+    if (updateError) {
+      throw new Error(`Failed to mark split error resolved: ${updateError.message}`);
+    }
   }
 
   /**

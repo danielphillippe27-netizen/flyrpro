@@ -4,7 +4,7 @@ import { getCampaignBuildingStatus } from '@/lib/campaignStats';
 import * as turf from '@turf/turf';
 import * as THREE from 'three';
 import { BuildingService } from './BuildingService';
-import type { LineString } from '@turf/turf';
+import type { Feature, LineString, Point } from 'geojson';
 
 export interface CampaignBuilding {
   id: string;
@@ -960,7 +960,7 @@ export class MapService {
    */
   static async createBuildingModelPointsFromBuildings(
     buildings: Building[],
-    roadGeometry?: LineString | turf.Feature<LineString>,
+    roadGeometry?: LineString | Feature<LineString>,
     modelId: string = 'house-model'
   ): Promise<BuildingModelPoint[]> {
     const modelPoints: BuildingModelPoint[] = [];
@@ -985,7 +985,7 @@ export class MapService {
 
         // Calculate orientation and spatial scale using BuildingService
         let houseBearing = 0;
-        let setbackPoint: turf.Point | null = null;
+        let setbackPoint: Point | null = null;
         let spatialScale = { scaleFactor: 1.0, widthMeters: this.BASE_HOUSE_WIDTH_M, minDistance: Infinity };
 
         if (roadGeometry) {
@@ -1000,7 +1000,7 @@ export class MapService {
           );
         } else {
           // Fallback: use centroid directly if no road geometry
-          setbackPoint = turf.point([lon, lat]);
+          setbackPoint = turf.point([lon, lat]).geometry;
         }
 
         // Find neighbors and calculate spatial scale (70% rule)
@@ -1020,6 +1020,7 @@ export class MapService {
           },
           properties: {
             'model-id': modelId,
+            'front_bearing': houseBearing,
             'house_bearing': houseBearing,
             'building_id': building.id,
             'gers_id': building.gers_id, // Add GERS ID for Overture lookup

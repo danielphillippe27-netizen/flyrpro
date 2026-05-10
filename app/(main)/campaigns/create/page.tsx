@@ -342,8 +342,9 @@ export default function CreateCampaignPage() {
       drawRef.current = newDraw;
 
       // Restore saved features
-      if ((savedFeaturesRef.current?.features?.length ?? 0) > 0) {
-        newDraw.set(savedFeaturesRef.current);
+      const savedFeatures = savedFeaturesRef.current;
+      if ((savedFeatures?.features?.length ?? 0) > 0 && savedFeatures) {
+        newDraw.set(savedFeatures);
         newDraw.changeMode('simple_select');
       } else {
         newDraw.changeMode('draw_polygon');
@@ -429,8 +430,8 @@ export default function CreateCampaignPage() {
 
     // Find the first completed Polygon feature (skip points, lines, or incomplete geometries)
     const polygonFeature = features.features.find(
-      (f: { geometry?: { type?: string; coordinates?: number[][][] } }) =>
-        f.geometry?.type === 'Polygon' && f.geometry.coordinates?.[0]?.length >= 3
+      (feature): feature is GeoJSON.Feature<GeoJSON.Polygon> =>
+        feature.geometry?.type === 'Polygon' && feature.geometry.coordinates[0]?.length >= 3
     );
     if (!polygonFeature) {
       alert('Please draw a territory boundary on the map. Double-click to finish your shape.');

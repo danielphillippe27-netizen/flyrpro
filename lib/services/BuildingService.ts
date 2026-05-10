@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/client';
 import type { Building, BuildingInteraction, BuildingStatus } from '@/types/database';
 import * as turf from '@turf/turf';
-import type { Feature, Point, LineString, MultiPolygon, Polygon } from '@turf/turf';
+import type { Feature, LineString, MultiPolygon, Point, Polygon } from 'geojson';
 
 export interface HouseOrientation {
   houseBearing: number; // Bearing from centroid to nearest point on road (0-360)
@@ -347,22 +347,16 @@ export class BuildingService {
       return {
         id: goldData.id,
         gers_id: goldData.id, // Use Gold ID as GERS ID
-        gers_id_uuid: goldData.id,
+        campaign_id: '',
         geom: goldData.geom,
         centroid: goldData.centroid,
-        area_sqm: goldData.area_sqm,
         height: 10, // Default height
-        addr_housenumber: null, // Gold buildings don't have address in this table
-        addr_street: null,
-        addr_unit: null,
-        addr_city: null,
-        addr_postcode: null,
         latest_status: 'default',
         is_hidden: false,
         source: 'gold',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
-      } as Building;
+      };
     }
 
     if (goldError && goldError.code !== 'PGRST116') {
@@ -594,4 +588,3 @@ export class BuildingService {
     return null;
   }
 }
-

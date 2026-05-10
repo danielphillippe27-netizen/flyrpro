@@ -1,11 +1,12 @@
 import { redirect } from "next/navigation";
 
-import { auth } from "@/auth";
+import { getSupabaseServerClient } from "@/lib/supabase/server";
 
 export const protectServer = async () => {
-  const session = await auth();
+  const supabase = await getSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
 
-  if (!session) {
+  if (!user) {
     redirect("/api/auth/signin");
   }
 };
