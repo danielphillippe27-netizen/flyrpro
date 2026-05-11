@@ -7,7 +7,6 @@ import {
   type CampaignSnapshotRow,
   type ParcelPmtilesResolution,
   resolveCampaignMapArtifact,
-  resolveArtifactUrl,
   resolveGeometryEtag,
   resolveGeometryVersion,
 } from '@/lib/diamond/geometry';
@@ -106,14 +105,10 @@ async function currentObjectVersion(bucket: string, key: string) {
   }
 }
 
-function deliveryModeResponse(hasPmtilesArchive = false) {
-  const supportedDeliveryModes = hasPmtilesArchive
-    ? ['backend_zxy', 'pmtiles_archive']
-    : ['backend_zxy'];
-
+function deliveryModeResponse() {
   return {
     geometry_delivery_mode: 'backend_zxy',
-    supported_delivery_modes: supportedDeliveryModes,
+    supported_delivery_modes: ['backend_zxy'],
     preferred_delivery_modes: {
       web: 'backend_zxy',
       ios: 'backend_zxy',
@@ -273,10 +268,8 @@ export async function GET(
     const bounds = snapshotRow.tile_metrics?.address_bounds ?? snapshotRow.tile_metrics?.bounds;
     const geometryVersion = resolveGeometryVersion(snapshotRow);
     const geometryEtag = resolveGeometryEtag(snapshotRow);
-    const addressPmtilesUrl = await resolveArtifactUrl(snapshotRow, basicAddressPmtilesKey);
-    const addressTilejsonUrl = basicAddressTilejsonKey
-      ? await resolveArtifactUrl(snapshotRow, basicAddressTilejsonKey)
-      : null;
+    const addressPmtilesUrl = null;
+    const addressTilejsonUrl = null;
     const addressTileCacheKey = encodeURIComponent(`${geometryEtag ?? geometryVersion ?? 'address'}:${basicAddressPmtilesKey}`);
     const addressVectorTileUrlTemplate =
       `${baseUrl}/api/campaigns/${campaignId}/address-tiles/{z}/{x}/{y}.mvt?v=${addressTileCacheKey}`;
@@ -288,8 +281,8 @@ export async function GET(
       diamond_mode: true,
       geometry_provider: 'pmtiles_addresses',
       geometry_version: geometryVersion,
-      geometry_url: addressPmtilesUrl,
-      pmtiles_url: addressPmtilesUrl,
+      geometry_url: null,
+      pmtiles_url: null,
       address_pmtiles_key: basicAddressPmtilesKey,
       address_tilejson_key: basicAddressTilejsonKey,
       address_pmtiles_url: addressPmtilesUrl,
@@ -313,7 +306,7 @@ export async function GET(
       parcel_minzoom: null,
       parcel_maxzoom: null,
       geometry_delivery_mode: 'backend_zxy',
-      supported_delivery_modes: ['backend_zxy', 'pmtiles_archive'],
+      supported_delivery_modes: ['backend_zxy'],
       preferred_delivery_modes: {
         web: 'backend_zxy',
         ios: 'backend_zxy',
@@ -370,7 +363,7 @@ export async function GET(
     return NextResponse.json({ error: 'No PMTiles artifact exists for this campaign' }, { status: 404 });
   }
 
-  const geometryUrl = await resolveArtifactUrl(snapshotRow, pmtilesKey);
+  const geometryUrl = null;
   const artifactType = artifact.artifactType;
   const sourceLayers = objectMetric(snapshotRow.tile_metrics, 'source_layers');
   const promoteIds = objectMetric(snapshotRow.tile_metrics, 'promote_ids');
@@ -380,10 +373,7 @@ export async function GET(
   const bounds = snapshotRow.tile_metrics?.bounds;
   const geometryVersion = resolveGeometryVersion(snapshotRow);
   const geometryEtag = resolveGeometryEtag(snapshotRow);
-  const tilejsonKey =
-    stringMetric(snapshotRow.tile_metrics, 'tilejson_key') ??
-    pmtilesKey.replace(/\.pmtiles$/i, '.json');
-  const tilejsonUrl = await resolveArtifactUrl(snapshotRow, tilejsonKey);
+  const tilejsonUrl = null;
   const addressPmtilesKey =
     stringMetric(snapshotRow.tile_metrics, 'addresses_pmtiles_key') ??
     (snapshotRow.addresses_key?.endsWith('.pmtiles') ? snapshotRow.addresses_key : null);
@@ -391,12 +381,8 @@ export async function GET(
     stringMetric(snapshotRow.tile_metrics, 'addresses_tilejson_key') ??
     addressPmtilesKey?.replace(/\.pmtiles$/i, '.json') ??
     null;
-  const addressPmtilesUrl = addressPmtilesKey
-    ? await resolveArtifactUrl(snapshotRow, addressPmtilesKey)
-    : null;
-  const addressTilejsonUrl = addressTilejsonKey
-    ? await resolveArtifactUrl(snapshotRow, addressTilejsonKey)
-    : null;
+  const addressPmtilesUrl = null;
+  const addressTilejsonUrl = null;
   const currentGeometryObjectVersion = await currentObjectVersion(snapshotRow.bucket, pmtilesKey);
   const currentGeometryCacheKey =
     currentGeometryObjectVersion ?? String(geometryEtag ?? geometryVersion ?? pmtilesKey);
@@ -410,12 +396,8 @@ export async function GET(
     ? `${baseUrl}/api/campaigns/${campaignId}/address-tiles/{z}/{x}/{y}.mvt?v=${addressTileCacheKey}`
     : null;
   const parcelTiles = parcelTilesFromSnapshot(snapshotRow);
-  const parcelPmtilesUrl = parcelTiles
-    ? await resolveArtifactUrl(snapshotRow, parcelTiles.pmtilesKey)
-    : null;
-  const parcelTilejsonUrl = parcelTiles
-    ? await resolveArtifactUrl(snapshotRow, parcelTiles.tilejsonKey)
-    : null;
+  const parcelPmtilesUrl = null;
+  const parcelTilejsonUrl = null;
   const parcelTileCacheKey = parcelTiles
     ? encodeURIComponent(`${parcelTiles.datePart}:${parcelTiles.pmtilesKey}`)
     : null;
@@ -437,7 +419,7 @@ export async function GET(
     geometry_provider: artifact.geometryProvider,
     geometry_version: geometryVersion,
     geometry_url: geometryUrl,
-    pmtiles_url: geometryUrl,
+    pmtiles_url: null,
     address_pmtiles_key: addressPmtilesKey,
     address_tilejson_key: addressTilejsonKey,
     address_pmtiles_url: addressPmtilesUrl,
@@ -459,7 +441,7 @@ export async function GET(
     parcel_promote_id: parcelTiles?.promoteId ?? null,
     parcel_minzoom: parcelTiles?.minzoom ?? null,
     parcel_maxzoom: parcelTiles?.maxzoom ?? null,
-    ...deliveryModeResponse(true),
+    ...deliveryModeResponse(),
     source_layers: {
       buildings: stringMetric(sourceLayers, 'buildings') ?? 'buildings',
       parcels: stringMetric(sourceLayers, 'parcels') ?? (parcelTiles ? parcelTiles.sourceLayer : null),
@@ -469,7 +451,7 @@ export async function GET(
     },
     layers: {
       buildings: {
-        url: geometryUrl,
+        url: null,
         vectorTileUrlTemplate: backendVectorTileUrlTemplate,
         sourceLayer: stringMetric(sourceLayers, 'buildings') ?? 'buildings',
         promoteId: stringMetric(promoteIds, 'buildings') ?? 'building_id',

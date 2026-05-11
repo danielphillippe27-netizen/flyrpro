@@ -13,29 +13,11 @@ import {
 } from '@/lib/diamond/geometry';
 import { VectorTile } from '@mapbox/vector-tile';
 import Pbf from 'pbf';
-import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { gunzipSync } from 'zlib';
 import type { PostgrestError } from '@supabase/supabase-js';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-let s3Client: S3Client | null = null;
-
-function getS3Client() {
-  if (!s3Client) {
-    s3Client = new S3Client({
-      region: process.env.AWS_REGION || 'us-east-2',
-      credentials: process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY
-        ? {
-            accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-            secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-          }
-        : undefined,
-    });
-  }
-  return s3Client;
-}
 
 type FeatureCollectionLike = {
   type?: unknown;
@@ -115,6 +97,66 @@ function filterAddressPointFallbackFeatures(
     ...featureCollection,
     features: featureCollection.features.filter(isAddressPointFallbackFeature),
   };
+}
+
+function normalizeGeoJSONArtifact(value: unknown, key: string): FeatureCollectionLike {
+  if (value && typeof value === 'object') {
+    const candidate = value as { type?: unknown; features?: unknown };
+    if (candidate.type === 'FeatureCollection' && Array.isArray(candidate.features)) {
+      return candidate as FeatureCollectionLike;
+    }
+    if (candidate.type === 'Feature') {
+      return { type: 'FeatureCollection', features: [candidate as NonNullable<FeatureCollectionLike['features']>[number]] };
+    }
+  }
+
+  if (Array.isArray(value)) {
+    const features = value.filter(
+      (entry): entry is NonNullable<FeatureCollectionLike['features']>[number] =>
+        Boolean(entry && typeof entry === 'object' && (entry as { type?: unknown }).type === 'Feature')
+    );
+    return { type: 'FeatureCollection', features };
+  }
+
+  throw new Error(`Unsupported GeoJSON artifact shape for ${key}`);
+}
+
+function parseGeoJSONArtifactText(text: string, key: string): FeatureCollectionLike {
+  const trimmed = text.trim();
+  if (!trimmed) return { type: 'FeatureCollection', features: [] };
+
+  try {
+    return normalizeGeoJSONArtifact(JSON.parse(trimmed), key);
+  } catch (jsonError) {
+    const features = trimmed
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as unknown)
+      .filter(
+        (entry): entry is NonNullable<FeatureCollectionLike['features']>[number] =>
+          Boolean(entry && typeof entry === 'object' && (entry as { type?: unknown }).type === 'Feature')
+      );
+
+    if (features.length > 0) {
+      return { type: 'FeatureCollection', features };
+    }
+
+    throw jsonError;
+  }
+}
+
+async function fetchSnapshotGeoJSONArtifact(snapshot: CampaignSnapshotRow, key: string): Promise<FeatureCollectionLike> {
+  const artifactUrl = await resolveArtifactUrl(snapshot, key);
+  const response = await fetch(artifactUrl);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch snapshot GeoJSON artifact: ${response.status}`);
+  }
+
+  const bodyBuffer = Buffer.from(await response.arrayBuffer());
+  const isGzip = bodyBuffer[0] === 0x1f && bodyBuffer[1] === 0x8b;
+  const geojsonBuffer = isGzip ? gunzipSync(bodyBuffer) : bodyBuffer;
+  return parseGeoJSONArtifactText(geojsonBuffer.toString('utf-8'), key);
 }
 
 function allowDirectDbPolygonFallback(): boolean {
@@ -1296,26 +1338,13 @@ export async function GET(
         } else {
           console.log('[API] Snapshot has PMTiles but campaign bbox is unavailable');
         }
-      } else if (geojsonKey && !geojsonKey.endsWith('.pmtiles')) {
-        console.log(`[API] Fetching snapshot GeoJSON from S3: ${snapshot.bucket}/${geojsonKey}`);
+      }
+
+      if (geojsonKey && !geojsonKey.endsWith('.pmtiles')) {
+        console.log(`[API] Fetching snapshot GeoJSON artifact fallback: ${snapshot.bucket}/${geojsonKey}`);
 
         try {
-          const command = new GetObjectCommand({
-            Bucket: snapshot.bucket,
-            Key: geojsonKey,
-          });
-
-          const response = await getS3Client().send(command);
-          const bodyBuffer = await response.Body?.transformToByteArray();
-
-          if (!bodyBuffer) {
-            throw new Error('Empty response from S3');
-          }
-
-          const compressedOrPlain = Buffer.from(bodyBuffer);
-          const isGzip = compressedOrPlain[0] === 0x1f && compressedOrPlain[1] === 0x8b;
-          const geojsonBuffer = isGzip ? gunzipSync(compressedOrPlain) : compressedOrPlain;
-          const geojson = JSON.parse(geojsonBuffer.toString('utf-8'));
+          const geojson = await fetchSnapshotGeoJSONArtifact(snapshotRow, geojsonKey);
           const visibleGeojson = filterCampaignBoundaryFeatures(
             filterNonLinkableBuildingFeatures(
               filterHiddenBuildingFeatures(geojson, hiddenBuildingIds)
@@ -1325,19 +1354,19 @@ export async function GET(
           const visibleSnapshotFeatures = (visibleGeojson as { features?: unknown[] }).features ?? [];
 
           if (visibleSnapshotFeatures.length > 0) {
-            console.log(`[API] Returning ${visibleSnapshotFeatures.length} snapshot buildings from S3`);
+            console.log(`[API] Returning ${visibleSnapshotFeatures.length} snapshot GeoJSON fallback buildings`);
             return NextResponse.json(visibleGeojson);
           }
 
           if (visibleFallbackFeatures?.features?.length) {
             console.log(
-              `[API] Snapshot buildings all filtered out; returning ${visibleFallbackFeatures.features.length} point features`
+              `[API] Snapshot GeoJSON fallback buildings all filtered out; returning ${visibleFallbackFeatures.features.length} point features`
             );
             return NextResponse.json(visibleFallbackFeatures);
           }
         } catch (snapshotFetchError) {
           console.warn(
-            '[API] Snapshot GeoJSON fetch failed; continuing to direct DB fallbacks:',
+            '[API] Snapshot GeoJSON fallback fetch failed; continuing to direct DB fallbacks:',
             snapshotFetchError instanceof Error ? snapshotFetchError.message : snapshotFetchError
           );
         }
