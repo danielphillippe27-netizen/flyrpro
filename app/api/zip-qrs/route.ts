@@ -9,6 +9,14 @@ import { getSupabaseAnonKey, getSupabaseUrl } from '@/lib/supabase/env';
 
 export async function GET(request: NextRequest) {
   try {
+    /*
+     * Builds a printer-ready QR ZIP for a campaign: one PNG per address,
+     * a vdp-manifest.csv, and README.txt instructions. Web-generated QR
+     * campaigns store the PNG data URI in campaign_addresses.qr_code_base64,
+     * not in the older Supabase Storage URL column, so this route now reads
+     * the active Model A data written by generate-qrs. See QR_SYSTEM.md for
+     * full context and the future Model B migration plan.
+     */
     const searchParams = request.nextUrl.searchParams;
     const campaignId = searchParams.get('campaignId');
 
@@ -62,7 +70,7 @@ export async function GET(request: NextRequest) {
       .from('campaign_addresses')
       .select('*')
       .eq('campaign_id', campaignId)
-      .not('qr_png_url', 'is', null)
+      .not('qr_code_base64', 'is', null)
       .order('seq', { ascending: true, nullsFirst: false })
       .order('id', { ascending: true });
 
@@ -86,19 +94,18 @@ export async function GET(request: NextRequest) {
 
     for (const address of addresses) {
       try {
-        // Extract the file path from the public URL
-        const url = new URL(address.qr_png_url);
-        const filePath = url.pathname.split('/storage/v1/object/public/qr/')[1];
-
-        // Download from Supabase Storage
-        const { data, error } = await adminSupabase.storage
-          .from('qr')
-          .download(filePath);
-
-        if (error || !data) {
-          console.error(`Error downloading ${filePath}:`, error);
+        // QR images are stored as base64 data URIs in campaign_addresses.qr_code_base64.
+        // Strip the data URI prefix (e.g. "data:image/png;base64,") to get raw base64,
+        // then convert to a Buffer for inclusion in the ZIP.
+        // Note: qr_png_url (Supabase Storage URL) is always NULL for web-generated
+        // campaigns — generate-qrs was updated to use base64 storage instead.
+        // See QR_SYSTEM.md for full context.
+        if (!address.qr_code_base64) {
+          console.error(`Address ${address.id} has no qr_code_base64, skipping`);
           continue;
         }
+        const base64Data = address.qr_code_base64.replace(/^data:image\/\w+;base64,/, '');
+        const data = Buffer.from(base64Data, 'base64');
 
         // Add to ZIP
         const addressLabel = (address.formatted || address.address || 'address').replace(/[^a-z0-9]/gi, '_');
