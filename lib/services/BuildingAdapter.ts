@@ -1,25 +1,8 @@
 /**
- * BuildingAdapter - Normalizes buildings from any source to standard GeoJSON
- * 
- * This module implements the Adapter Pattern:
- * - Gold: Database rows → Standard GeoJSON
- * - Silver (Lambda): S3 GeoJSON → Standard GeoJSON (pass-through with validation)
+ * BuildingAdapter - Normalizes static CloudFront/S3 building geometry to standard GeoJSON.
  */
 
 import { filterLinkableBuildingFootprints } from '@/lib/geo/buildingFootprintFilter';
-
-export interface GoldBuildingRow {
-  id: string;
-  source_id?: string;
-  external_id?: string;
-  area_sqm?: number;
-  height_m?: number | null;
-  floors?: number | null;
-  geom_geojson: string; // GeoJSON string from ST_AsGeoJSON
-  centroid_geojson?: string;
-  building_type?: string;
-  subtype?: string;
-}
 
 export interface StandardBuildingFeature {
   type: 'Feature';
@@ -45,16 +28,11 @@ type RawBuildingFeature = {
 };
 
 export class BuildingAdapter {
-  private static filterRenderableRows<T extends Record<string, unknown>>(rows: T[], source: 'Gold' | 'Lambda'): T[] {
-    const filtered = filterLinkableBuildingFootprints(rows);
-    const removed = rows.length - filtered.length;
-    if (removed > 0) {
-      console.log(`[BuildingAdapter] Filtered ${removed} shed/accessory ${source} building footprint(s)`);
-    }
-    return filtered;
+  private static isPmtilesUrl(url: string | null | undefined): boolean {
+    return Boolean(url?.split('?')[0]?.toLowerCase().endsWith('.pmtiles'));
   }
 
-  private static filterRenderableFeatures<T extends StandardBuildingFeature>(features: T[], source: 'Gold' | 'Lambda'): T[] {
+  private static filterRenderableFeatures<T extends StandardBuildingFeature>(features: T[], source: 'CloudFront/S3'): T[] {
     const filtered = filterLinkableBuildingFootprints(features);
     const removed = features.length - filtered.length;
     if (removed > 0) {
@@ -63,60 +41,16 @@ export class BuildingAdapter {
     return filtered;
   }
 
-  private static inferredHeightMeters(row: GoldBuildingRow): number {
-    if (typeof row.height_m === 'number' && Number.isFinite(row.height_m) && row.height_m > 0) {
-      return row.height_m;
-    }
-    if (typeof row.floors === 'number' && Number.isFinite(row.floors) && row.floors > 0) {
-      return Math.max(row.floors * 3, 3);
-    }
-
-    const area = typeof row.area_sqm === 'number' && Number.isFinite(row.area_sqm)
-      ? row.area_sqm
-      : 0;
-    if (area >= 1000) return 14;
-    if (area >= 450) return 12;
-    if (area >= 220) return 10;
-    if (area >= 90) return 8;
-    return 6;
-  }
-
   /**
-   * Convert Gold database rows to standard GeoJSON
+   * Validate and normalize CloudFront/S3 GeoJSON.
+   * Ensures consistent property names even if the static geometry format changes.
    */
-  static fromGoldRows(rows: GoldBuildingRow[]): StandardBuildingCollection {
-    const renderableRows = this.filterRenderableRows(rows, 'Gold');
-    return {
-      type: 'FeatureCollection',
-      features: renderableRows.map((row) => ({
-        type: 'Feature',
-        geometry: JSON.parse(row.geom_geojson),
-        properties: {
-          gers_id: row.id,
-          external_id: row.external_id || row.source_id,
-          area: row.area_sqm,
-          area_sqm: row.area_sqm,
-          height: this.inferredHeightMeters(row),
-          height_m: this.inferredHeightMeters(row),
-          floors: row.floors,
-          building_type: row.building_type,
-          subtype: row.subtype,
-          layer: 'building',
-        },
-      })),
-    };
-  }
-
-  /**
-   * Validate and normalize Lambda/Silver GeoJSON
-   * Ensures consistent property names even if Lambda format changes
-   */
-  static fromLambdaGeoJSON(geojson: unknown): StandardBuildingCollection {
+  static fromStaticGeometryGeoJSON(geojson: unknown): StandardBuildingCollection {
     const featuresRaw = geojson && typeof geojson === 'object'
       ? (geojson as { features?: unknown }).features
       : null;
     if (!Array.isArray(featuresRaw)) {
-      console.warn('[BuildingAdapter] Invalid Lambda GeoJSON, returning empty collection');
+      console.warn('[BuildingAdapter] Invalid CloudFront/S3 GeoJSON, returning empty collection');
       return { type: 'FeatureCollection', features: [] };
     }
 
@@ -124,47 +58,39 @@ export class BuildingAdapter {
       const raw = feature as RawBuildingFeature;
       if (!raw.geometry || !['Polygon', 'MultiPolygon'].includes(String(raw.geometry.type))) return [];
       const properties = raw.properties ?? {};
+      const externalId = properties.external_id ?? properties.id;
+      const area = properties.area ?? properties.area_sqm;
       return [{
         type: 'Feature' as const,
         geometry: raw.geometry,
         properties: {
-          gers_id: String(properties.gers_id || properties.id || properties.external_id || ''),
-          external_id: properties.external_id || properties.id,
-          area: properties.area || properties.area_sqm,
-          height: properties.height || null,
-          layer: 'building',
           ...properties, // Preserve any additional properties
+          gers_id: String(properties.gers_id || properties.id || properties.external_id || ''),
+          external_id:
+            typeof externalId === 'string' || typeof externalId === 'number'
+              ? String(externalId)
+              : undefined,
+          area: typeof area === 'number' && Number.isFinite(area) ? area : undefined,
+          height: typeof properties.height === 'number' ? properties.height : null,
+          layer: 'building',
         },
       }];
     });
 
     return {
       type: 'FeatureCollection',
-      features: this.filterRenderableFeatures(features, 'Lambda'),
+      features: this.filterRenderableFeatures(features, 'CloudFront/S3'),
     };
   }
 
   /**
-   * Fetch and normalize from either source
-   * This is the main entry point for the adapter pattern.
-   * When preFetchedBuildingsGeo is provided (e.g. from parallel S3 fetch), skips building download.
+   * Fetch and normalize CloudFront/S3 static building geometry.
+   * When preFetchedBuildingsGeo is provided, skips building download.
    */
   static async fetchAndNormalize(
-    goldBuildings: GoldBuildingRow[] | null | undefined,
     snapshot: { urls: { buildings: string }; metadata?: { overture_release?: string } } | null,
     preFetchedBuildingsGeo?: unknown
-  ): Promise<{ buildings: StandardBuildingCollection; overtureRelease: string; source: 'gold' | 'lambda' }> {
-    // Gold path: Database rows
-    if (goldBuildings && goldBuildings.length > 0) {
-      console.log(`[BuildingAdapter] Normalizing ${goldBuildings.length} Gold buildings`);
-      return {
-        buildings: this.fromGoldRows(goldBuildings),
-        overtureRelease: '2026-01-21.0',
-        source: 'gold',
-      };
-    }
-
-    // Silver path: use pre-fetched GeoJSON or download from S3
+  ): Promise<{ buildings: StandardBuildingCollection; overtureRelease: string; source: 'static_geometry' }> {
     if (snapshot) {
       let geojson: unknown;
       if (preFetchedBuildingsGeo != null) {
@@ -172,9 +98,18 @@ export class BuildingAdapter {
         const featureCount = geojson && typeof geojson === 'object' && Array.isArray((geojson as { features?: unknown }).features)
           ? (geojson as { features: unknown[] }).features.length
           : 0;
-        console.log(`[BuildingAdapter] Using ${featureCount} pre-fetched Lambda buildings`);
+        console.log(`[BuildingAdapter] Using ${featureCount} pre-fetched CloudFront/S3 buildings`);
       } else {
-        console.log(`[BuildingAdapter] Fetching from Lambda: ${snapshot.urls.buildings}`);
+        if (this.isPmtilesUrl(snapshot.urls.buildings)) {
+          console.log('[BuildingAdapter] Skipping direct PMTiles building fetch; scoped GeoJSON extraction handles PMTiles snapshots');
+          return {
+            buildings: { type: 'FeatureCollection', features: [] },
+            overtureRelease: snapshot.metadata?.overture_release || '2026-01-21.0',
+            source: 'static_geometry',
+          };
+        }
+
+        console.log(`[BuildingAdapter] Fetching from CloudFront: ${snapshot.urls.buildings}`);
         const response = await fetch(snapshot.urls.buildings);
         if (!response.ok) {
           throw new Error(`Failed to fetch buildings: ${response.status}`);
@@ -183,21 +118,20 @@ export class BuildingAdapter {
         const featureCount = geojson && typeof geojson === 'object' && Array.isArray((geojson as { features?: unknown }).features)
           ? (geojson as { features: unknown[] }).features.length
           : 0;
-        console.log(`[BuildingAdapter] Downloaded ${featureCount} Lambda buildings`);
+        console.log(`[BuildingAdapter] Downloaded ${featureCount} CloudFront/S3 buildings`);
       }
       return {
-        buildings: this.fromLambdaGeoJSON(geojson),
+        buildings: this.fromStaticGeometryGeoJSON(geojson),
         overtureRelease: snapshot.metadata?.overture_release || '2026-01-21.0',
-        source: 'lambda',
+        source: 'static_geometry',
       };
     }
 
-    // No buildings available
-    console.warn('[BuildingAdapter] No buildings available from any source');
+    console.warn('[BuildingAdapter] No CloudFront/S3 buildings available');
     return {
       buildings: { type: 'FeatureCollection', features: [] },
       overtureRelease: '2026-01-21.0',
-      source: 'lambda',
+      source: 'static_geometry',
     };
   }
 }

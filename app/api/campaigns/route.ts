@@ -7,6 +7,37 @@ import type { MinimalSupabaseClient } from '@/app/api/_utils/workspace';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+const ALLOWED_CAMPAIGN_TYPES = new Set([
+  'flyer',
+  'door_knock',
+  'event',
+  'survey',
+  'gift',
+  'pop_by',
+  'open_house',
+  'coming_soon',
+  'market_update',
+  'letters',
+  'just_sold',
+  'just_listed',
+  'prospecting',
+  'other',
+]);
+
+const EXPANDED_CAMPAIGN_TYPES = new Set(['just_sold', 'just_listed', 'prospecting', 'coming_soon', 'market_update', 'other']);
+const LEGACY_CAMPAIGN_TYPE_FALLBACK = 'flyer';
+
+function isCampaignTypeConstraintError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const candidate = error as { code?: string; message?: string; details?: string | null };
+  return (
+    candidate.code === '23514' ||
+    candidate.message?.includes('campaigns_type_check') ||
+    candidate.details?.includes('campaigns_type_check') ||
+    false
+  );
+}
+
 interface CreateCampaignBody {
   name: string;
   type: string;
@@ -34,10 +65,18 @@ export async function POST(request: NextRequest) {
     const admin = createAdminClient();
     const body: CreateCampaignBody = await request.json();
     const { name, type, address_source, region, workspace_id, seed_query, bbox, territory_boundary } = body;
+    const normalizedType = typeof type === 'string' ? type.trim() : type;
 
     if (!name || !type || !address_source) {
       return NextResponse.json(
         { error: 'name, type, and address_source are required' },
+        { status: 400 }
+      );
+    }
+
+    if (!ALLOWED_CAMPAIGN_TYPES.has(normalizedType)) {
+      return NextResponse.json(
+        { error: 'Unsupported campaign type' },
         { status: 400 }
       );
     }
@@ -110,27 +149,66 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const { data: campaign, error: insertError } = await admin
+    const insertPayload = {
+      owner_id: user.id,
+      workspace_id: targetWorkspaceId,
+      name,
+      title: name,
+      description: '',
+      type: normalizedType,
+      address_source,
+      region: regionResolution.regionCode,
+      seed_query: seed_query ?? null,
+      bbox: bbox ?? null,
+      territory_boundary: territory_boundary ?? null,
+      total_flyers: 0,
+      scans: 0,
+      conversions: 0,
+      status: 'draft',
+      provision_status: territory_boundary ? 'pending' : null,
+      provision_phase: territory_boundary ? 'created' : null,
+      provision_source: null,
+      provisioned_at: null,
+      addresses_ready_at: null,
+      map_ready_at: null,
+      optimized_at: null,
+      has_parcels: false,
+      building_link_confidence: 0,
+      map_mode: 'standard_pins',
+      parcel_enrichment_status: 'not_started',
+      link_quality_status: 'unknown',
+      link_quality_score: 0,
+      link_quality_reason: null,
+      link_quality_checked_at: null,
+      link_quality_metrics: {},
+    };
+
+    let { data: campaign, error: insertError } = await admin
       .from('campaigns')
-      .insert({
-        owner_id: user.id,
-        workspace_id: targetWorkspaceId,
-        name,
-        title: name,
-        description: '',
-        type,
-        address_source,
-        region: regionResolution.regionCode,
-        seed_query: seed_query ?? null,
-        bbox: bbox ?? null,
-        territory_boundary: territory_boundary ?? null,
-        total_flyers: 0,
-        scans: 0,
-        conversions: 0,
-        status: 'draft',
-      })
+      .insert(insertPayload)
       .select()
       .single();
+
+    if (
+      insertError &&
+      EXPANDED_CAMPAIGN_TYPES.has(normalizedType) &&
+      isCampaignTypeConstraintError(insertError)
+    ) {
+      console.warn('[POST /api/campaigns] campaigns_type_check does not allow expanded type yet; retrying with legacy fallback', {
+        requested_type: normalizedType,
+        fallback_type: LEGACY_CAMPAIGN_TYPE_FALLBACK,
+      });
+      const retry = await admin
+        .from('campaigns')
+        .insert({
+          ...insertPayload,
+          type: LEGACY_CAMPAIGN_TYPE_FALLBACK,
+        })
+        .select()
+        .single();
+      campaign = retry.data;
+      insertError = retry.error;
+    }
 
     if (insertError) {
       console.error('[POST /api/campaigns] Insert error:', insertError);
@@ -143,6 +221,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       ...campaign,
       name: campaign.title || campaign.name,
+      type: EXPANDED_CAMPAIGN_TYPES.has(normalizedType) ? normalizedType : campaign.type,
     });
   } catch (err: unknown) {
     console.error('[POST /api/campaigns] Unhandled error:', err);

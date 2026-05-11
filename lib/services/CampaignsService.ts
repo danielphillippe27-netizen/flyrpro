@@ -28,6 +28,9 @@ function formatError(error: unknown): string {
 
 type CampaignAddressBaseState = {
   building_id: string | null;
+  building_gers_id: string | null;
+  gers_id: string | null;
+  source_id: string | null;
   visited: boolean;
   scans: number;
   last_scanned_at: string | null;
@@ -171,7 +174,7 @@ export class CampaignsService {
       const baseState = await fetchAllInPages((from, to) =>
         this.client
           .from('campaign_addresses')
-          .select('id, building_id, visited, scans, last_scanned_at')
+          .select('id, building_id, building_gers_id, gers_id, source_id, visited, scans, last_scanned_at')
           .eq('campaign_id', campaignId)
           .order('id', { ascending: true })
           .range(from, to)
@@ -199,6 +202,9 @@ export class CampaignsService {
           (row as { id: string }).id,
           {
             building_id: (row as { building_id?: string | null }).building_id ?? null,
+            building_gers_id: (row as { building_gers_id?: string | null }).building_gers_id ?? null,
+            gers_id: (row as { gers_id?: string | null }).gers_id ?? null,
+            source_id: (row as { source_id?: string | null }).source_id ?? null,
             visited: Boolean((row as { visited?: boolean | null }).visited),
             scans: Number((row as { scans?: number | null }).scans ?? 0),
             last_scanned_at: (row as { last_scanned_at?: string | null }).last_scanned_at ?? null,

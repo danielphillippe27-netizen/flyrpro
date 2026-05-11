@@ -1,19 +1,36 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { HeadObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { ensureCampaignAccess } from '@/app/api/campaigns/_utils/access';
 import {
   type CampaignSnapshotRow,
-  geometryCdnBaseUrl,
+  type ParcelPmtilesResolution,
   resolveCampaignMapArtifact,
-  resolveArtifactUrl,
   resolveGeometryEtag,
   resolveGeometryVersion,
-  resolveLatestParcelPmtilesKeys,
 } from '@/lib/diamond/geometry';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+let s3Client: S3Client | null = null;
+
+function getS3Client() {
+  if (!s3Client) {
+    s3Client = new S3Client({
+      region: process.env.AWS_REGION || 'us-east-2',
+      credentials: process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY
+        ? {
+            accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+            secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+          }
+        : undefined,
+    });
+  }
+
+  return s3Client;
+}
 
 function apiBaseUrl(request: NextRequest) {
   const configured = request.nextUrl.origin.replace(/\/+$/, '');
@@ -72,24 +89,72 @@ function numberMetric(metrics: Record<string, unknown> | null | undefined, key: 
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-function deliveryModeResponse(options: {
-  pmtilesCdnUrl: string | null;
-  staticVectorTileUrlTemplate: string | null;
-}) {
-  const supportedDeliveryModes = [
-    ...(options.pmtilesCdnUrl ? ['pmtiles_cdn'] : []),
-    ...(options.staticVectorTileUrlTemplate ? ['static_zxy_cdn'] : []),
-    'backend_zxy',
-  ];
+async function currentObjectVersion(bucket: string, key: string) {
+  try {
+    const response = await getS3Client().send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+    const etag = response.ETag?.replace(/^"|"$/g, '');
+    const updatedAt = response.LastModified?.getTime();
+    return [etag, updatedAt].filter(Boolean).join(':') || null;
+  } catch (error) {
+    console.warn('[DiamondManifest] Failed to read artifact version:', {
+      bucket,
+      key,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
 
+function deliveryModeResponse() {
   return {
-    geometry_delivery_mode: options.pmtilesCdnUrl ? 'platform_split' : 'backend_zxy',
-    supported_delivery_modes: supportedDeliveryModes,
+    geometry_delivery_mode: 'backend_zxy',
+    supported_delivery_modes: ['backend_zxy'],
     preferred_delivery_modes: {
-      web: options.pmtilesCdnUrl ? 'pmtiles_cdn' : 'backend_zxy',
+      web: 'backend_zxy',
       ios: 'backend_zxy',
     },
-    static_vector_tile_url_template: options.staticVectorTileUrlTemplate,
+    static_vector_tile_url_template: null,
+  };
+}
+
+function parcelTilesFromSnapshot(snapshot: CampaignSnapshotRow): ParcelPmtilesResolution | null {
+  const metricParcelPmtilesKey = stringMetric(snapshot.tile_metrics, 'parcels_pmtiles_key');
+  const metricParcelTilejsonKey =
+    stringMetric(snapshot.tile_metrics, 'parcels_tilejson_key') ??
+    metricParcelPmtilesKey?.replace(/\.pmtiles$/i, '.json') ??
+    null;
+
+  if (metricParcelPmtilesKey) {
+    return {
+      bucket: snapshot.bucket,
+      pmtilesKey: metricParcelPmtilesKey,
+      tilejsonKey: metricParcelTilejsonKey ?? metricParcelPmtilesKey.replace(/\.pmtiles$/i, '.json'),
+      datePart: 'snapshot',
+      sourceLayer: 'parcels',
+      promoteId: 'parcel_id',
+      minzoom: numberMetric(snapshot.tile_metrics, 'parcel_minzoom') ?? 10,
+      maxzoom: numberMetric(snapshot.tile_metrics, 'parcel_maxzoom') ?? 16,
+    };
+  }
+
+  const buildingPmtilesKey = resolveCampaignMapArtifact(snapshot).pmtilesKey;
+  const isBedrockNzSnapshot =
+    snapshot.tile_metrics?.bedrock_mode === true &&
+    stringMetric(snapshot.tile_metrics, 'bedrock_country_code') === 'NZ' &&
+    buildingPmtilesKey?.endsWith('/buildings/buildings.pmtiles');
+
+  if (!isBedrockNzSnapshot || !buildingPmtilesKey) return null;
+
+  const pmtilesKey = buildingPmtilesKey.replace(/\/buildings\/buildings\.pmtiles$/i, '/parcels/parcels.pmtiles');
+  return {
+    bucket: snapshot.bucket,
+    pmtilesKey,
+    tilejsonKey: pmtilesKey.replace(/\.pmtiles$/i, '.json'),
+    datePart: 'snapshot',
+    sourceLayer: 'parcels',
+    promoteId: 'parcel_id',
+    minzoom: numberMetric(snapshot.tile_metrics, 'parcel_minzoom') ?? 10,
+    maxzoom: numberMetric(snapshot.tile_metrics, 'parcel_maxzoom') ?? 16,
   };
 }
 
@@ -121,7 +186,7 @@ export async function GET(
 
   const { data: snapshot, error: snapshotError } = await supabase
     .from('campaign_snapshots')
-    .select('bucket, prefix, buildings_key, buildings_url, metadata_key, buildings_count, created_at, tile_metrics')
+    .select('bucket, prefix, buildings_key, addresses_key, buildings_url, metadata_key, buildings_count, created_at, tile_metrics')
     .eq('campaign_id', campaignId)
     .maybeSingle();
 
@@ -136,8 +201,15 @@ export async function GET(
   const artifact = resolveCampaignMapArtifact(snapshotRow);
   const stateCursor = await latestCursor(supabase, campaignId);
   const baseUrl = apiBaseUrl(request);
+  const basicAddressPmtilesKey =
+    stringMetric(snapshotRow?.tile_metrics, 'addresses_pmtiles_key') ??
+    (snapshotRow?.addresses_key?.endsWith('.pmtiles') ? snapshotRow.addresses_key : null);
+  const basicAddressTilejsonKey =
+    stringMetric(snapshotRow?.tile_metrics, 'addresses_tilejson_key') ??
+    basicAddressPmtilesKey?.replace(/\.pmtiles$/i, '.json') ??
+    null;
 
-  if (!snapshotRow || artifact.geometryProvider === 'address_points' || !artifact.pmtilesKey) {
+  if (!snapshotRow || (artifact.geometryProvider === 'address_points' && !basicAddressPmtilesKey) || (!artifact.pmtilesKey && !basicAddressPmtilesKey)) {
     return NextResponse.json({
       campaign_id: campaignId,
       map_status: artifact.mapStatus,
@@ -189,7 +261,109 @@ export async function GET(
     });
   }
 
-  const geometryUrl = await resolveArtifactUrl(snapshotRow, artifact.pmtilesKey);
+  if (!artifact.pmtilesKey && basicAddressPmtilesKey) {
+    const sourceLayers = objectMetric(snapshotRow.tile_metrics, 'source_layers');
+    const promoteIds = objectMetric(snapshotRow.tile_metrics, 'promote_ids');
+    const sources = objectMetric(snapshotRow.tile_metrics, 'sources');
+    const bounds = snapshotRow.tile_metrics?.address_bounds ?? snapshotRow.tile_metrics?.bounds;
+    const geometryVersion = resolveGeometryVersion(snapshotRow);
+    const geometryEtag = resolveGeometryEtag(snapshotRow);
+    const addressPmtilesUrl = null;
+    const addressTilejsonUrl = null;
+    const addressTileCacheKey = encodeURIComponent(`${geometryEtag ?? geometryVersion ?? 'address'}:${basicAddressPmtilesKey}`);
+    const addressVectorTileUrlTemplate =
+      `${baseUrl}/api/campaigns/${campaignId}/address-tiles/{z}/{x}/{y}.mvt?v=${addressTileCacheKey}`;
+
+    return NextResponse.json({
+      campaign_id: campaignId,
+      map_status: artifact.mapStatus,
+      artifact_type: 'diamond',
+      diamond_mode: true,
+      geometry_provider: 'pmtiles_addresses',
+      geometry_version: geometryVersion,
+      geometry_url: null,
+      pmtiles_url: null,
+      address_pmtiles_key: basicAddressPmtilesKey,
+      address_tilejson_key: basicAddressTilejsonKey,
+      address_pmtiles_url: addressPmtilesUrl,
+      address_tilejson_url: addressTilejsonUrl,
+      address_vector_tile_url_template: addressVectorTileUrlTemplate,
+      address_source_layer: stringMetric(sourceLayers, 'addresses') ?? 'addresses',
+      address_promote_id: stringMetric(promoteIds, 'addresses') ?? 'address_detail_pid',
+      address_minzoom: numberMetric(snapshotRow.tile_metrics, 'address_minzoom') ?? 8,
+      address_maxzoom: numberMetric(snapshotRow.tile_metrics, 'address_maxzoom') ?? 16,
+      address_bounds: Array.isArray(bounds) ? bounds : (campaign as { bbox?: unknown }).bbox ?? null,
+      geometry_etag: geometryEtag,
+      tilejson_url: null,
+      vector_tile_url_template: null,
+      parcel_pmtiles_key: null,
+      parcel_tilejson_key: null,
+      parcel_pmtiles_url: null,
+      parcel_tilejson_url: null,
+      parcel_vector_tile_url_template: null,
+      parcel_source_layer: null,
+      parcel_promote_id: null,
+      parcel_minzoom: null,
+      parcel_maxzoom: null,
+      geometry_delivery_mode: 'backend_zxy',
+      supported_delivery_modes: ['backend_zxy'],
+      preferred_delivery_modes: {
+        web: 'backend_zxy',
+        ios: 'backend_zxy',
+      },
+      static_vector_tile_url_template: null,
+      source_layers: {
+        buildings: null,
+        parcels: null,
+        addresses: stringMetric(sourceLayers, 'addresses') ?? 'addresses',
+        address_circles: null,
+        address_building_links: null,
+      },
+      layers: {
+        buildings: null,
+        addresses: {
+          url: addressPmtilesUrl,
+          vectorTileUrlTemplate: addressVectorTileUrlTemplate,
+          sourceLayer: stringMetric(sourceLayers, 'addresses') ?? 'addresses',
+          promoteId:
+            stringMetric(promoteIds, 'addresses') ??
+            'address_detail_pid',
+          minzoom: numberMetric(snapshotRow.tile_metrics, 'address_minzoom') ?? 8,
+          maxzoom: numberMetric(snapshotRow.tile_metrics, 'address_maxzoom') ?? 16,
+          bounds: Array.isArray(bounds) ? bounds : (campaign as { bbox?: unknown }).bbox ?? null,
+        },
+        parcels: null,
+      },
+      promote_ids: {
+        buildings: null,
+        parcels: null,
+        addresses: stringMetric(promoteIds, 'addresses') ?? 'address_detail_pid',
+        address_circles: null,
+        address_building_links: null,
+      },
+      join_key: stringMetric(snapshotRow.tile_metrics, 'join_key') ?? 'address_detail_pid',
+      primary_state_layer: 'addresses',
+      bounds: Array.isArray(bounds) ? bounds : (campaign as { bbox?: unknown }).bbox ?? null,
+      minzoom: numberMetric(snapshotRow.tile_metrics, 'address_minzoom') ?? 8,
+      maxzoom: numberMetric(snapshotRow.tile_metrics, 'address_maxzoom') ?? 16,
+      sources: sources ?? {
+        addresses: 'G-NAF',
+      },
+      state_source: 'supabase',
+      state_cursor: stateCursor,
+      supports_feature_state: true,
+      supports_differential_state_sync: true,
+      supports_rep_scope: true,
+      fallback_geometry_provider: null,
+    });
+  }
+
+  const pmtilesKey = artifact.pmtilesKey;
+  if (!pmtilesKey) {
+    return NextResponse.json({ error: 'No PMTiles artifact exists for this campaign' }, { status: 404 });
+  }
+
+  const geometryUrl = null;
   const artifactType = artifact.artifactType;
   const sourceLayers = objectMetric(snapshotRow.tile_metrics, 'source_layers');
   const promoteIds = objectMetric(snapshotRow.tile_metrics, 'promote_ids');
@@ -199,31 +373,43 @@ export async function GET(
   const bounds = snapshotRow.tile_metrics?.bounds;
   const geometryVersion = resolveGeometryVersion(snapshotRow);
   const geometryEtag = resolveGeometryEtag(snapshotRow);
-  const tilejsonKey =
-    typeof snapshotRow.tile_metrics?.tilejson_key === 'string'
-      ? snapshotRow.tile_metrics.tilejson_key
-      : artifact.pmtilesKey.replace(/\.pmtiles$/i, '.json');
-  const tilejsonUrl = await resolveArtifactUrl(snapshotRow, tilejsonKey);
-  const tileCacheKey = encodeURIComponent(String(geometryEtag ?? geometryVersion ?? artifact.pmtilesKey));
+  const tilejsonUrl = null;
+  const addressPmtilesKey =
+    stringMetric(snapshotRow.tile_metrics, 'addresses_pmtiles_key') ??
+    (snapshotRow.addresses_key?.endsWith('.pmtiles') ? snapshotRow.addresses_key : null);
+  const addressTilejsonKey =
+    stringMetric(snapshotRow.tile_metrics, 'addresses_tilejson_key') ??
+    addressPmtilesKey?.replace(/\.pmtiles$/i, '.json') ??
+    null;
+  const addressPmtilesUrl = null;
+  const addressTilejsonUrl = null;
+  const currentGeometryObjectVersion = await currentObjectVersion(snapshotRow.bucket, pmtilesKey);
+  const currentGeometryCacheKey =
+    currentGeometryObjectVersion ?? String(geometryEtag ?? geometryVersion ?? pmtilesKey);
+  const tileCacheKey = encodeURIComponent(currentGeometryCacheKey);
   const backendVectorTileUrlTemplate =
     `${baseUrl}/api/campaigns/${campaignId}/diamond-tiles/buildings/{z}/{x}/{y}.mvt?v=${tileCacheKey}`;
-  const staticVectorTileUrlTemplate =
-    stringMetric(snapshotRow.tile_metrics, 'static_vector_tile_url_template') ??
-    stringMetric(snapshotRow.tile_metrics, 'vector_tile_cdn_url_template') ??
-    null;
-  const pmtilesCdnUrl = geometryCdnBaseUrl() ? geometryUrl : null;
-  const parcelTiles = await resolveLatestParcelPmtilesKeys(
-    typeof (campaign as { region?: unknown }).region === 'string'
-      ? (campaign as { region: string }).region
-      : null,
-    { bucket: snapshotRow.bucket }
-  );
+  const addressTileCacheKey = addressPmtilesKey
+    ? encodeURIComponent(`${geometryEtag ?? geometryVersion ?? 'address'}:${addressPmtilesKey}`)
+    : null;
+  const addressVectorTileUrlTemplate = addressPmtilesKey
+    ? `${baseUrl}/api/campaigns/${campaignId}/address-tiles/{z}/{x}/{y}.mvt?v=${addressTileCacheKey}`
+    : null;
+  const parcelTiles = parcelTilesFromSnapshot(snapshotRow);
+  const parcelPmtilesUrl = null;
+  const parcelTilejsonUrl = null;
   const parcelTileCacheKey = parcelTiles
     ? encodeURIComponent(`${parcelTiles.datePart}:${parcelTiles.pmtilesKey}`)
     : null;
   const parcelVectorTileUrlTemplate = parcelTiles
     ? `${baseUrl}/api/campaigns/${campaignId}/parcel-tiles/{z}/{x}/{y}.mvt?v=${parcelTileCacheKey}`
     : null;
+  const renderAddressSourceLayer =
+    stringMetric(sourceLayers, 'addresses') ??
+    (addressPmtilesKey ? 'addresses' : null);
+  const renderAddressPromoteId =
+    stringMetric(promoteIds, 'addresses') ??
+    (addressPmtilesKey ? 'address_id' : null);
 
   return NextResponse.json({
     campaign_id: campaignId,
@@ -233,33 +419,74 @@ export async function GET(
     geometry_provider: artifact.geometryProvider,
     geometry_version: geometryVersion,
     geometry_url: geometryUrl,
-    pmtiles_url: pmtilesCdnUrl,
+    pmtiles_url: null,
+    address_pmtiles_key: addressPmtilesKey,
+    address_tilejson_key: addressTilejsonKey,
+    address_pmtiles_url: addressPmtilesUrl,
+    address_tilejson_url: addressTilejsonUrl,
+    address_vector_tile_url_template: addressVectorTileUrlTemplate,
+    address_source_layer: renderAddressSourceLayer,
+    address_promote_id: renderAddressPromoteId,
+    address_minzoom: numberMetric(snapshotRow.tile_metrics, 'address_minzoom') ?? (addressPmtilesKey ? 10 : null),
+    address_maxzoom: numberMetric(snapshotRow.tile_metrics, 'address_maxzoom') ?? (addressPmtilesKey ? 16 : null),
     geometry_etag: geometryEtag,
     tilejson_url: tilejsonUrl,
     vector_tile_url_template: backendVectorTileUrlTemplate,
     parcel_pmtiles_key: parcelTiles?.pmtilesKey ?? null,
     parcel_tilejson_key: parcelTiles?.tilejsonKey ?? null,
+    parcel_pmtiles_url: parcelPmtilesUrl,
+    parcel_tilejson_url: parcelTilejsonUrl,
     parcel_vector_tile_url_template: parcelVectorTileUrlTemplate,
     parcel_source_layer: parcelTiles?.sourceLayer ?? null,
     parcel_promote_id: parcelTiles?.promoteId ?? null,
     parcel_minzoom: parcelTiles?.minzoom ?? null,
     parcel_maxzoom: parcelTiles?.maxzoom ?? null,
-    ...deliveryModeResponse({
-      pmtilesCdnUrl,
-      staticVectorTileUrlTemplate,
-    }),
+    ...deliveryModeResponse(),
     source_layers: {
       buildings: stringMetric(sourceLayers, 'buildings') ?? 'buildings',
-      parcels: stringMetric(sourceLayers, 'parcels') ?? (parcelTiles ? parcelTiles.sourceLayer : artifactType === 'white_gold' ? null : 'parcels'),
+      parcels: stringMetric(sourceLayers, 'parcels') ?? (parcelTiles ? parcelTiles.sourceLayer : null),
       addresses: stringMetric(sourceLayers, 'addresses'),
-      address_circles: stringMetric(sourceLayers, 'address_circles'),
+      address_circles: null,
       address_building_links: stringMetric(sourceLayers, 'address_building_links'),
     },
+    layers: {
+      buildings: {
+        url: null,
+        vectorTileUrlTemplate: backendVectorTileUrlTemplate,
+        sourceLayer: stringMetric(sourceLayers, 'buildings') ?? 'buildings',
+        promoteId: stringMetric(promoteIds, 'buildings') ?? 'building_id',
+        minzoom,
+        maxzoom,
+        bounds: Array.isArray(bounds) ? bounds : (campaign as { bbox?: unknown }).bbox ?? null,
+      },
+      addresses: addressPmtilesKey
+        ? {
+            url: addressPmtilesUrl,
+            vectorTileUrlTemplate: addressVectorTileUrlTemplate,
+            sourceLayer: renderAddressSourceLayer ?? 'addresses',
+            promoteId: renderAddressPromoteId ?? 'address_id',
+            minzoom: numberMetric(snapshotRow.tile_metrics, 'address_minzoom') ?? 10,
+            maxzoom: numberMetric(snapshotRow.tile_metrics, 'address_maxzoom') ?? 16,
+            bounds: Array.isArray(bounds) ? bounds : (campaign as { bbox?: unknown }).bbox ?? null,
+          }
+        : null,
+      parcels: parcelTiles
+        ? {
+            url: parcelPmtilesUrl,
+            vectorTileUrlTemplate: parcelVectorTileUrlTemplate,
+            sourceLayer: parcelTiles.sourceLayer,
+            promoteId: parcelTiles.promoteId,
+            minzoom: parcelTiles.minzoom,
+            maxzoom: parcelTiles.maxzoom,
+            bounds: Array.isArray(bounds) ? bounds : (campaign as { bbox?: unknown }).bbox ?? null,
+          }
+        : null,
+    },
     promote_ids: {
-      buildings: stringMetric(promoteIds, 'buildings') ?? 'address_id',
-      parcels: stringMetric(promoteIds, 'parcels') ?? (parcelTiles ? parcelTiles.promoteId : artifactType === 'white_gold' ? null : 'parcel_id'),
+      buildings: stringMetric(promoteIds, 'buildings') ?? 'building_id',
+      parcels: stringMetric(promoteIds, 'parcels') ?? (parcelTiles ? parcelTiles.promoteId : null),
       addresses: stringMetric(promoteIds, 'addresses'),
-      address_circles: stringMetric(promoteIds, 'address_circles'),
+      address_circles: null,
       address_building_links: stringMetric(promoteIds, 'address_building_links'),
     },
     join_key: stringMetric(snapshotRow.tile_metrics, 'join_key') ?? 'address_id',

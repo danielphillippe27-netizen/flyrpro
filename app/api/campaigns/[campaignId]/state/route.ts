@@ -39,23 +39,70 @@ async function assignedAddressIds(
   campaignId: string,
   userId: string
 ) {
-  const { data, error } = await supabase
-    .from('campaign_addresses')
-    .select('id, assigned_user_id')
+  const { data: assignments, error: assignmentError } = await supabase
+    .from('campaign_assignments')
+    .select('id, mode, assigned_to_user_id')
     .eq('campaign_id', campaignId)
-    .eq('assigned_user_id', userId);
+    .eq('assigned_to_user_id', userId)
+    .in('status', ['assigned', 'in_progress']);
 
-  if (error) {
-    return { addressIds: null, fallbackReason: error.message };
+  if (assignmentError) {
+    return {
+      addressIds: null,
+      assignedUserByAddressId: new Map<string, string>(),
+      fallbackReason: assignmentError.message,
+    };
   }
 
-  const addressIds = new Set(
-    (data ?? [])
-      .map((row) => (row as { id?: string }).id)
-      .filter((id): id is string => Boolean(id))
-  );
+  const activeAssignments = (assignments ?? []) as Array<{
+    id: string;
+    mode: 'zone_split' | 'whole_team';
+    assigned_to_user_id: string;
+  }>;
 
-  return { addressIds, fallbackReason: null };
+  if (activeAssignments.some((assignment) => assignment.mode === 'whole_team')) {
+    return {
+      addressIds: null,
+      assignedUserByAddressId: new Map<string, string>(),
+      fallbackReason: null,
+    };
+  }
+
+  if (activeAssignments.length === 0) {
+    return {
+      addressIds: new Set<string>(),
+      assignedUserByAddressId: new Map<string, string>(),
+      fallbackReason: null,
+    };
+  }
+
+  const { data: homes, error: homesError } = await supabase
+    .from('campaign_assignment_homes')
+    .select('campaign_address_id, assignment_id')
+    .in('assignment_id', activeAssignments.map((assignment) => assignment.id));
+
+  if (homesError) {
+    return {
+      addressIds: null,
+      assignedUserByAddressId: new Map<string, string>(),
+      fallbackReason: homesError.message,
+    };
+  }
+
+  const assignedUserByAddressId = new Map<string, string>();
+  const assignmentUserById = new Map(
+    activeAssignments.map((assignment) => [assignment.id, assignment.assigned_to_user_id])
+  );
+  const addressIds = new Set<string>();
+
+  for (const home of (homes ?? []) as Array<{ campaign_address_id?: string | null; assignment_id?: string | null }>) {
+    if (!home.campaign_address_id || !home.assignment_id) continue;
+    addressIds.add(home.campaign_address_id);
+    const assignedUserId = assignmentUserById.get(home.assignment_id);
+    if (assignedUserId) assignedUserByAddressId.set(home.campaign_address_id, assignedUserId);
+  }
+
+  return { addressIds, assignedUserByAddressId, fallbackReason: null };
 }
 
 export async function GET(
@@ -79,13 +126,15 @@ export async function GET(
   const { since, cursorWasInvalid } = parseSince(searchParams.get('since'));
 
   let scopedAddressIds: Set<string> | null = null;
+  let assignedUserByAddressId = new Map<string, string>();
   let scopeApplied = 'all';
   let scopeFallbackReason: string | null = null;
 
   if (scope === 'assigned_to_me') {
     const scoped = await assignedAddressIds(supabase, campaignId, requestUser.id);
     scopedAddressIds = scoped.addressIds;
-    scopeApplied = scoped.addressIds ? 'assigned_to_me' : 'all';
+    assignedUserByAddressId = scoped.assignedUserByAddressId;
+    scopeApplied = scoped.fallbackReason ? 'all' : 'assigned_to_me';
     scopeFallbackReason = scoped.fallbackReason;
   }
 
@@ -131,7 +180,10 @@ export async function GET(
       .map((row) => ({
         address_id: row.campaign_address_id ?? row.address_id ?? null,
         status: row.status ?? 'none',
-        assigned_user_id: row.assigned_user_id ?? null,
+        assigned_user_id:
+          row.campaign_address_id && assignedUserByAddressId.has(row.campaign_address_id)
+            ? assignedUserByAddressId.get(row.campaign_address_id) ?? null
+            : row.assigned_user_id ?? null,
         updated_at: row.updated_at,
         version: row.visit_count ?? null,
         notes: row.notes ?? null,

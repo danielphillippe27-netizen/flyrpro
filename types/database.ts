@@ -177,11 +177,25 @@ export interface AmbassadorPayoutBatch {
 }
 
 // Enhanced Campaign Types (iOS Schema)
-export type CampaignType = 'flyer' | 'door_knock' | 'event' | 'survey' | 'gift' | 'pop_by' | 'open_house';
+export type CampaignType =
+  | 'flyer'
+  | 'door_knock'
+  | 'event'
+  | 'survey'
+  | 'gift'
+  | 'pop_by'
+  | 'open_house'
+  | 'coming_soon'
+  | 'market_update'
+  | 'letters'
+  | 'just_sold'
+  | 'just_listed'
+  | 'prospecting'
+  | 'other';
 export type AddressSource = 'closest_home' | 'import_list' | 'map' | 'same_street';
 export type CampaignStatus = 'draft' | 'active' | 'completed' | 'paused';
 export type CampaignProvisionStatus = 'pending' | 'ready' | 'failed';
-export type CampaignProvisionSource = 'gold' | 'silver' | 'lambda';
+export type CampaignProvisionSource = 'diamond' | 'bedrock_nz' | 'bedrock_au' | 'bedrock_ca' | 'bedrock_us';
 export type CampaignProvisionPhase =
   | 'created'
   | 'source_probed'
@@ -252,7 +266,9 @@ export interface CampaignAddress {
   formatted?: string;
   postal_code?: string;
   source: AddressSource;
+  source_id?: string | null;
   gers_id?: string; // Overture GERS ID or other source identifier - UUID v4 format (128-bit)
+  building_id?: string | null;
   seq?: number; // Sequence number for ordering
   visited?: boolean;
   coordinate?: {
@@ -465,16 +481,17 @@ export interface Farm {
   cycle_completion_window_days?: number | null;
   touch_types?: FarmTouchType[] | null;
   annual_budget_cents?: number | null;
+  include_social_ads_in_spend?: boolean | null;
   progress?: number;
   home_limit?: number;
   address_count?: number;
   last_generated_at?: string | null;
 }
 
-export type FarmSessionMode = 'doorknock' | 'flyer' | 'canada_post' | 'pop_by' | 'letter';
+export type FarmSessionMode = 'doorknock' | 'flyer' | 'canada_post' | 'pop_by' | 'letter' | 'phone_call' | 'social_ad' | 'event';
 export type FarmTouchInterval = 'month' | 'year';
 export type FarmGoalType = 'touches_per_year' | 'touches_per_cycle' | 'homes_per_cycle';
-export type FarmTouchType = 'doorknock' | 'flyer' | 'canada_post' | 'pop_by' | 'letter';
+export type FarmTouchType = 'doorknock' | 'flyer' | 'canada_post' | 'pop_by' | 'letter' | 'phone_call' | 'social_ad' | 'event';
 export type FarmLeadSource = 'qr_scan' | 'door_knock' | 'flyer' | 'event' | 'newsletter' | 'ad' | 'custom';
 export type FarmAddressOutcomeStatus =
   | 'none'
@@ -553,6 +570,80 @@ export interface FarmTouchAddress {
   created_by?: string | null;
   created_at: string;
   updated_at?: string | null;
+}
+
+export interface MetaConnection {
+  id: string;
+  user_id: string;
+  team_id?: string | null;
+  meta_user_id?: string | null;
+  token_expires_at?: string | null;
+  scopes?: string[] | null;
+  connected_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface MetaAdAccount {
+  id: string;
+  user_id: string;
+  team_id?: string | null;
+  meta_connection_id?: string | null;
+  meta_ad_account_id: string;
+  name?: string | null;
+  currency?: string | null;
+  account_status?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface FarmMetaCampaignLink {
+  id: string;
+  farm_id: string;
+  user_id: string;
+  team_id?: string | null;
+  meta_connection_id?: string | null;
+  meta_ad_account_id: string;
+  meta_campaign_id: string;
+  meta_campaign_name?: string | null;
+  status?: string | null;
+  linked_at?: string | null;
+  last_synced_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface FarmMetaAdDailyMetric {
+  id: string;
+  farm_id: string;
+  farm_meta_campaign_link_id: string;
+  meta_campaign_id: string;
+  date: string;
+  spend: number;
+  impressions: number;
+  reach: number;
+  clicks: number;
+  leads: number;
+  actions?: Array<Record<string, unknown>> | null;
+  raw_payload?: Record<string, unknown> | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface MetaSyncLog {
+  id: string;
+  farm_id?: string | null;
+  farm_meta_campaign_link_id?: string | null;
+  meta_campaign_id?: string | null;
+  user_id?: string | null;
+  team_id?: string | null;
+  status: 'success' | 'error';
+  message?: string | null;
+  error_code?: string | null;
+  synced_from?: string | null;
+  synced_to?: string | null;
+  rows_synced?: number | null;
+  created_at?: string | null;
 }
 
 export type FinanceEntryCategory =

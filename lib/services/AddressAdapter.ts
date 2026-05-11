@@ -52,7 +52,7 @@ export interface StandardCampaignAddress {
   lat?: number;
   lon?: number;
   geom: string; // GeoJSON string for PostGIS
-  source: 'gold' | 'lambda';
+  source: 'diamond' | 'gold' | 'lambda' | 'bedrock_nz' | 'bedrock_au' | 'bedrock_ca' | 'bedrock_us';
   gers_id?: string | null;
 }
 
@@ -161,7 +161,15 @@ export class AddressAdapter {
         : geometryPoint ?? undefined;
     const lat = Number.isFinite(Number(addr.lat)) ? Number(addr.lat) : coordinate?.lat;
     const lon = Number.isFinite(Number(addr.lon)) ? Number(addr.lon) : coordinate?.lon;
-    const source = addr.source === 'gold' ? 'gold' : 'lambda';
+    const source =
+      addr.source === 'gold' ||
+      addr.source === 'diamond' ||
+      addr.source === 'bedrock_nz' ||
+      addr.source === 'bedrock_au' ||
+      addr.source === 'bedrock_ca' ||
+      addr.source === 'bedrock_us'
+        ? addr.source
+        : 'lambda';
 
     return {
       campaign_id: campaignId,

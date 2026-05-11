@@ -413,7 +413,7 @@ export class StableLinkerService {
   /**
    * Filter out noise and optionally small outbuildings (gold standard).
    * - Noise: exclude area < 5 m².
-   * - Shed/outbuilding: exclude area < 30 m² so main building wins when multiple candidates (tie-break by area handles the rest).
+   * - Shed/outbuilding: exclude area < 40 m² so main building wins when multiple candidates (tie-break by area handles the rest).
    */
   private filterValidBuildings(buildings: BuildingFeature[]): BuildingFeature[] {
     const filtered = buildings.filter(b => {
@@ -421,12 +421,12 @@ export class StableLinkerService {
       if (area < 5) {
         return false; // noise_geometry
       }
-      if (area < 30) {
+      if (area < 40) {
         return false; // shed/outbuilding; prefer main building (area tie-break in match)
       }
       return true;
     });
-    console.log(`[StableLinker] Filtered: ${filtered.length}/${buildings.length} buildings (excluded < 5 m² noise, < 30 m² sheds)`);
+    console.log(`[StableLinker] Filtered: ${filtered.length}/${buildings.length} buildings (excluded < 5 m² noise, < 40 m² sheds)`);
     return filtered;
   }
 

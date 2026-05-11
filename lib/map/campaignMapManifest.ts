@@ -10,10 +10,23 @@ export type CampaignMapManifest = {
     ios?: string | null;
   } | null;
   pmtiles_url?: string | null;
+  geometry_url?: string | null;
+  address_pmtiles_key?: string | null;
+  address_tilejson_key?: string | null;
+  address_pmtiles_url?: string | null;
+  address_tilejson_url?: string | null;
+  address_source_layer?: string | null;
+  address_promote_id?: string | null;
+  address_minzoom?: number | null;
+  address_maxzoom?: number | null;
+  address_bounds?: [number, number, number, number] | null;
+  address_vector_tile_url_template?: string | null;
   vector_tile_url_template?: string | null;
   static_vector_tile_url_template?: string | null;
   parcel_pmtiles_key?: string | null;
   parcel_tilejson_key?: string | null;
+  parcel_pmtiles_url?: string | null;
+  parcel_tilejson_url?: string | null;
   parcel_vector_tile_url_template?: string | null;
   parcel_source_layer?: string | null;
   parcel_promote_id?: string | null;
@@ -37,12 +50,45 @@ export type CampaignMapManifest = {
   minzoom?: number | null;
   maxzoom?: number | null;
   bounds?: [number, number, number, number] | null;
+  layers?: {
+    buildings?: {
+      url?: string | null;
+      vectorTileUrlTemplate?: string | null;
+      sourceLayer?: string | null;
+      promoteId?: string | null;
+      minzoom?: number | null;
+      maxzoom?: number | null;
+      bounds?: [number, number, number, number] | null;
+    } | null;
+    addresses?: {
+      url?: string | null;
+      vectorTileUrlTemplate?: string | null;
+      sourceLayer?: string | null;
+      promoteId?: string | null;
+      minzoom?: number | null;
+      maxzoom?: number | null;
+      bounds?: [number, number, number, number] | null;
+    } | null;
+    parcels?: {
+      url?: string | null;
+      vectorTileUrlTemplate?: string | null;
+      sourceLayer?: string | null;
+      promoteId?: string | null;
+      minzoom?: number | null;
+      maxzoom?: number | null;
+      bounds?: [number, number, number, number] | null;
+    } | null;
+  } | null;
 };
 
 export type CampaignMapManifestResult = {
   manifest: CampaignMapManifest | null;
   accessToken: string | null;
 };
+
+const MANIFEST_CACHE_TTL_MS = 5000;
+const manifestCache = new Map<string, { expiresAt: number; result: CampaignMapManifestResult }>();
+const manifestInFlight = new Map<string, Promise<CampaignMapManifestResult>>();
 
 export function appendTileAccessToken(tileTemplate: string, accessToken?: string | null): string {
   if (!accessToken) return tileTemplate;
@@ -54,31 +100,14 @@ export function isPmtilesGeometryProvider(provider: string | null | undefined): 
   return Boolean(provider && (provider === 'pmtiles' || provider.startsWith('pmtiles_')));
 }
 
-export function toPmtilesProtocolUrl(url: string | null | undefined): string | null {
-  const trimmed = url?.trim();
-  if (!trimmed) return null;
-  if (trimmed.startsWith('pmtiles://')) return trimmed;
-  if (/^https?:\/\//i.test(trimmed)) return `pmtiles://${trimmed}`;
-  return null;
-}
-
-export function hasDirectWebPmtiles(manifest: CampaignMapManifest | null): boolean {
-  if (!manifest) return false;
-
-  return Boolean(
-    isPmtilesGeometryProvider(manifest.geometry_provider) &&
-      toPmtilesProtocolUrl(manifest.pmtiles_url) &&
-      manifest.supported_delivery_modes?.includes('pmtiles_cdn') &&
-      manifest.preferred_delivery_modes?.web === 'pmtiles_cdn'
-  );
-}
-
 export function hasRenderablePmtilesBuildings(manifest: CampaignMapManifest | null): boolean {
   if (!manifest) return false;
 
   return Boolean(
     isPmtilesGeometryProvider(manifest.geometry_provider) &&
-      (hasDirectWebPmtiles(manifest) || manifest.static_vector_tile_url_template || manifest.vector_tile_url_template) &&
+      (
+        manifest.vector_tile_url_template
+      ) &&
       manifest.source_layers?.buildings
   );
 }
@@ -86,10 +115,40 @@ export function hasRenderablePmtilesBuildings(manifest: CampaignMapManifest | nu
 export function hasRenderablePmtilesAddresses(manifest: CampaignMapManifest | null): boolean {
   if (!manifest) return false;
 
+  const layer = manifest.layers?.addresses;
+  const hasSeparateAddressTiles = Boolean(
+    layer?.vectorTileUrlTemplate ||
+      manifest.address_vector_tile_url_template
+  );
+  const addressSourceLayer =
+    hasSeparateAddressTiles
+      ? layer?.sourceLayer ?? manifest.address_source_layer ?? manifest.source_layers?.addresses
+      : layer?.sourceLayer ??
+        manifest.address_source_layer ??
+        manifest.source_layers?.addresses;
+
   return Boolean(
     isPmtilesGeometryProvider(manifest.geometry_provider) &&
-      (hasDirectWebPmtiles(manifest) || manifest.static_vector_tile_url_template || manifest.vector_tile_url_template) &&
-      manifest.source_layers?.addresses
+      (
+        layer?.vectorTileUrlTemplate ||
+        manifest.address_vector_tile_url_template ||
+        manifest.vector_tile_url_template
+      ) &&
+      addressSourceLayer
+  );
+}
+
+export function hasRenderablePmtilesParcels(manifest: CampaignMapManifest | null): boolean {
+  if (!manifest) return false;
+  const layer = manifest.layers?.parcels;
+
+  return Boolean(
+    isPmtilesGeometryProvider(manifest.geometry_provider) &&
+      (
+        layer?.vectorTileUrlTemplate ||
+        manifest.parcel_vector_tile_url_template
+      ) &&
+      (layer?.sourceLayer || manifest.parcel_source_layer || manifest.source_layers?.parcels)
   );
 }
 
@@ -97,21 +156,43 @@ export async function fetchCampaignMapManifest(campaignId: string): Promise<Camp
   const supabase = createClient();
   const { data: sessionData } = await supabase.auth.getSession();
   const accessToken = sessionData.session?.access_token ?? null;
-
-  const response = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/diamond-manifest`, {
-    headers: {
-      Accept: 'application/json',
-      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-    },
-  });
-
-  if (!response.ok) {
-    console.warn('[CampaignMapManifest] Manifest unavailable:', response.status);
-    return { manifest: null, accessToken };
+  const cacheKey = `${campaignId}:${accessToken ?? ''}`;
+  const cached = manifestCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.result;
   }
 
-  return {
-    manifest: (await response.json()) as CampaignMapManifest,
-    accessToken,
-  };
+  const existingRequest = manifestInFlight.get(cacheKey);
+  if (existingRequest) return existingRequest;
+
+  const request = (async () => {
+    const response = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/diamond-manifest`, {
+      headers: {
+        Accept: 'application/json',
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      },
+    });
+
+    if (!response.ok) {
+      console.warn('[CampaignMapManifest] Manifest unavailable:', response.status);
+      return { manifest: null, accessToken };
+    }
+
+    return {
+      manifest: (await response.json()) as CampaignMapManifest,
+      accessToken,
+    };
+  })();
+
+  manifestInFlight.set(cacheKey, request);
+  try {
+    const result = await request;
+    manifestCache.set(cacheKey, {
+      expiresAt: Date.now() + MANIFEST_CACHE_TTL_MS,
+      result,
+    });
+    return result;
+  } finally {
+    manifestInFlight.delete(cacheKey);
+  }
 }

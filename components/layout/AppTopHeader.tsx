@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import Image from 'next/image';
-import { MessageCircleQuestion, Moon, Sun, Maximize2, Minimize2, Menu } from 'lucide-react';
+import { Moon, Sun, Maximize2, Minimize2, Menu } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -288,10 +288,9 @@ export default function AppTopHeader() {
               variant="outline"
               size="sm"
               onClick={() => setFeedbackOpen(true)}
-              className="gap-1 px-2 sm:gap-2 sm:px-3"
+              className="px-2 sm:px-3"
             >
-              <MessageCircleQuestion className="h-4 w-4 shrink-0" />
-              <span className="hidden sm:inline">Feedback ?</span>
+              <span>Feedback ?</span>
             </Button>
 
             <Button

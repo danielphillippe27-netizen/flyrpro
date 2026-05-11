@@ -103,11 +103,15 @@ const MODE_LABELS: Record<NonNullable<FarmTouch['mode']>, string> = {
   canada_post: 'Canada Post',
   pop_by: 'Pop by',
   letter: 'Letter',
+  phone_call: 'Phone call',
+  social_ad: 'Social media ad',
+  event: 'Event',
 };
 
 function getTouchCountPerInterval(
   farm: Pick<Farm, 'touches_per_interval' | 'frequency'> | null
 ): number {
+  void farm;
   return 1;
 }
 

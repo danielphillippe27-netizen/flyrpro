@@ -4,15 +4,17 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import type { Map } from 'mapbox-gl';
 import mapboxgl from 'mapbox-gl';
 import { createClient } from '@/lib/supabase/client';
-import { isPmtilesGeometryProvider, toPmtilesProtocolUrl } from '@/lib/map/campaignMapManifest';
-import { ensurePmtilesProtocolRegistered } from '@/lib/map/pmtilesProtocol';
+import { isPmtilesGeometryProvider } from '@/lib/map/campaignMapManifest';
 
 export type RenderingMode = '3d' | '2d';
 
 type CampaignMapManifest = {
   artifact_type?: 'diamond' | 'white_gold' | 'basic';
   geometry_provider?: string | null;
+  pmtiles_url?: string | null;
+  geometry_url?: string | null;
   vector_tile_url_template?: string | null;
+  static_vector_tile_url_template?: string | null;
   source_layers?: {
     buildings?: string | null;
   } | null;
@@ -20,23 +22,6 @@ type CampaignMapManifest = {
   maxzoom?: number | null;
   bounds?: [number, number, number, number] | null;
 };
-
-// Get PMTiles URL from environment or construct from Supabase URL
-function getPmtilesUrl(): string {
-  // Check for explicit PMTILES_URL environment variable
-  const explicitUrl = process.env.NEXT_PUBLIC_PMTILES_URL;
-  if (explicitUrl) {
-    return explicitUrl;
-  }
-
-  // Construct from Supabase URL
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  if (!supabaseUrl) {
-    return '';
-  }
-  const cleanUrl = supabaseUrl.trim().replace(/\/$/, '');
-  return `${cleanUrl}/storage/v1/object/public/map-tiles/buildings.pmtiles`;
-}
 
 function appendAccessToken(tileTemplate: string, accessToken?: string | null): string {
   if (!accessToken) return tileTemplate;
@@ -192,22 +177,30 @@ export function BuildingLayers({
         const lineLayerId = 'flyr-campaign-buildings-line';
         const { manifest, accessToken } = await fetchCampaignMapManifest(campaignId);
         const manifestBuildingLayer = manifest?.source_layers?.buildings ?? null;
+        const manifestTileTemplate = manifest?.vector_tile_url_template ?? null;
 
-        if (manifest && isPmtilesGeometryProvider(manifest.geometry_provider) && manifest.vector_tile_url_template && manifestBuildingLayer) {
+        if (
+          manifest &&
+          isPmtilesGeometryProvider(manifest.geometry_provider) &&
+          manifestBuildingLayer &&
+          manifestTileTemplate
+        ) {
           usingManifestSourceRef.current = true;
-          const tileTemplate = appendAccessToken(manifest.vector_tile_url_template, accessToken);
 
           if (map.getLayer(lineLayerId)) map.removeLayer(lineLayerId);
           if (map.getLayer(layerId)) map.removeLayer(layerId);
           if (map.getSource(sourceId)) map.removeSource(sourceId);
 
-          map.addSource(sourceId, {
+          const vectorSource: mapboxgl.VectorSourceSpecification & { buffer?: number } = {
             type: 'vector',
-            tiles: [tileTemplate],
             minzoom: manifest.minzoom ?? 13,
             maxzoom: manifest.maxzoom ?? 18,
+            buffer: 128,
             ...(manifest.bounds ? { bounds: manifest.bounds } : {}),
-          });
+          };
+          vectorSource.tiles = [appendAccessToken(manifestTileTemplate, accessToken)];
+
+          map.addSource(sourceId, vectorSource);
 
           if (mode === '2d') {
             map.addLayer({
@@ -224,7 +217,7 @@ export function BuildingLayers({
                   '#9ca3af',
                 ],
                 'fill-opacity': 0.72,
-                'fill-outline-color': '#111827',
+                'fill-outline-color': 'rgba(0, 0, 0, 0)',
               },
             });
 
@@ -236,7 +229,7 @@ export function BuildingLayers({
               minzoom: manifest.minzoom ?? 13,
               paint: {
                 'line-color': '#111827',
-                'line-opacity': 0.75,
+                'line-opacity': 0,
                 'line-width': 1,
               },
             });
@@ -303,203 +296,8 @@ export function BuildingLayers({
         }
 
         usingManifestSourceRef.current = false;
-        const pmtilesUrl = toPmtilesProtocolUrl(getPmtilesUrl());
-        if (!pmtilesUrl) {
-          console.warn('[BuildingLayers] Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_PMTILES_URL');
-          return;
-        }
-
-        // Convert Set to Array for match expression
-        const activeGersIdsArray = Array.from(activeIds);
-
-        // Add or update vector source
-        if (map.getSource(sourceId)) {
-          // Source already exists, update layer paint properties with new GERS IDs
-          if (map.getLayer(layerId)) {
-            // Update the match expression with new GERS IDs
-            map.setPaintProperty(layerId, 'fill-extrusion-color', [
-              'match',
-              ['get', 'id'], // Match against 'id' property (GERS ID from PMTiles)
-              activeGersIdsArray,
-              '#10b981', // Green for active campaigns
-              '#9ca3af'  // Gray for inactive
-            ]);
-          }
-        } else {
-          // Add PMTiles vector source
-          if (!ensurePmtilesProtocolRegistered()) {
-            console.warn('[BuildingLayers] PMTiles protocol unavailable; skipping direct PMTiles source.');
-            return;
-          }
-          map.addSource(sourceId, {
-            type: 'vector',
-            url: pmtilesUrl,
-          });
-
-          console.log(`[BuildingLayers] Added PMTiles source: ${pmtilesUrl}`);
-
-          // Wait for source to load
-          map.once('sourcedata', () => {
-            if (!isMountedRef.current) return;
-
-            // Add fill-extrusion layer
-            if (!map.getLayer(layerId)) {
-              map.addLayer({
-                id: layerId,
-                type: 'fill-extrusion',
-                source: sourceId,
-                'source-layer': 'buildings', // PMTiles layer name (matches -L buildings: flag in tippecanoe)
-                minzoom: 10,
-                filter: ['==', '$type', 'Polygon'],
-                paint: {
-                  // GERS-First Architecture: Use match expression to color by GERS ID
-                  // Match 'id' property (GERS ID) against list of active source_ids
-                  'fill-extrusion-color': [
-                    'match',
-                    ['get', 'id'], // Get 'id' property from PMTiles feature (this is the GERS ID)
-                    activeGersIdsArray, // List of active GERS IDs from campaign_addresses.gers_id
-                    '#10b981', // Green for active campaigns
-                    '#9ca3af'  // Gray for inactive
-                  ],
-                  'fill-extrusion-opacity': 0.85,
-                  'fill-extrusion-height': [
-                    'case',
-                    ['has', 'height'],
-                    ['get', 'height'],
-                    ['get', 'render_height'],
-                    10, // Default
-                  ],
-                  'fill-extrusion-base': [
-                    'case',
-                    ['has', 'min_height'],
-                    ['get', 'min_height'],
-                    0,
-                  ],
-                  'fill-extrusion-vertical-gradient': true,
-                },
-              });
-
-              console.log('[BuildingLayers] Added fill-extrusion layer with GERS ID matching');
-            }
-          });
-        }
-
-        // Add click handler with popup
-        // GERS-First Architecture: Extract GERS ID from PMTiles feature properties
-        const clickHandler = async (e: mapboxgl.MapLayerMouseEvent) => {
-          if (!e.features || e.features.length === 0) return;
-
-          const feature = e.features[0];
-          const props = feature.properties || {};
-
-          // Extract GERS ID from PMTiles feature properties
-          // The 'id' property should contain the GERS ID (baked into PMTiles by bake.sql)
-          const gersId = props.id || props.gers_id;
-          
-          if (!gersId) {
-            console.warn('[BuildingLayers] No GERS ID found in feature properties:', props);
-            // Fallback: show popup with basic info
-            const fullAddress = props.full_address || 'Address not available';
-            const renderHeight = props.height || props.render_height || 10;
-            new mapboxgl.Popup({ closeOnClick: true })
-              .setLngLat(e.lngLat)
-              .setHTML(`
-                <div style="padding: 8px;">
-                  <div style="font-weight: 600; margin-bottom: 4px;">${fullAddress}</div>
-                  <div style="font-size: 0.875rem; color: #6b7280;">
-                    Height: <span style="color: #111827;">${Math.round(renderHeight)}m</span>
-                  </div>
-                  <div style="font-size: 0.75rem; color: #ef4444; margin-top: 4px;">
-                    ⚠️ No GERS ID found
-                  </div>
-                </div>
-              `)
-              .addTo(map);
-            return;
-          }
-
-          // Fetch building details from API using GERS ID
-          try {
-            const response = await fetch(`/api/buildings/${gersId}${campaignId ? `?campaign_id=${campaignId}` : ''}`);
-            
-            if (!response.ok) {
-              throw new Error(`API returned ${response.status}`);
-            }
-
-            const buildingData = await response.json();
-
-            // Create popup with building details
-            new mapboxgl.Popup({ closeOnClick: true })
-              .setLngLat(e.lngLat)
-              .setHTML(`
-                <div style="padding: 8px;">
-                  <div style="font-weight: 600; margin-bottom: 4px;">${buildingData.address || props.full_address || 'Address not available'}</div>
-                  <div style="font-size: 0.875rem; color: #6b7280; margin-bottom: 2px;">
-                    Campaign: <span style="color: #111827;">${buildingData.campaign_name || 'Unknown'}</span>
-                  </div>
-                  <div style="font-size: 0.875rem; color: #6b7280; margin-bottom: 2px;">
-                    Status: <span style="color: ${buildingData.status === 'visited' ? '#10b981' : '#6b7280'};">${buildingData.status || 'not_visited'}</span>
-                  </div>
-                  ${buildingData.scans > 0 ? `
-                    <div style="font-size: 0.875rem; color: #6b7280;">
-                      Scans: <span style="color: #111827;">${buildingData.scans}</span>
-                    </div>
-                  ` : ''}
-                  <div style="font-size: 0.75rem; color: #9ca3af; margin-top: 4px; font-family: monospace;">
-                    GERS ID: ${gersId.substring(0, 20)}...
-                  </div>
-                </div>
-              `)
-              .addTo(map);
-
-            // Trigger callbacks
-            if (onBuildingClick) {
-              onBuildingClick(gersId);
-            }
-            if (buildingData.address_id && onMarkerClick) {
-              onMarkerClick(buildingData.address_id);
-            }
-          } catch (error) {
-            console.error('[BuildingLayers] Error fetching building details:', error);
-            // Fallback popup on error
-            const fullAddress = props.full_address || 'Address not available';
-            const renderHeight = props.height || props.render_height || 10;
-            new mapboxgl.Popup({ closeOnClick: true })
-              .setLngLat(e.lngLat)
-              .setHTML(`
-                <div style="padding: 8px;">
-                  <div style="font-weight: 600; margin-bottom: 4px;">${fullAddress}</div>
-                  <div style="font-size: 0.875rem; color: #6b7280;">
-                    Height: <span style="color: #111827;">${Math.round(renderHeight)}m</span>
-                  </div>
-                  <div style="font-size: 0.75rem; color: #ef4444; margin-top: 4px;">
-                    ⚠️ Error loading details
-                  </div>
-                </div>
-              `)
-              .addTo(map);
-          }
-        };
-
-        // Remove existing handlers and add new one
-        map.off('click', layerId, clickHandler);
-        map.on('click', layerId, clickHandler);
-
-        // Change cursor on hover
-        map.on('mouseenter', layerId, () => {
-          if (map.getCanvas()) {
-            map.getCanvas().style.cursor = 'pointer';
-          }
-        });
-
-        map.on('mouseleave', layerId, () => {
-          if (map.getCanvas()) {
-            map.getCanvas().style.cursor = '';
-          }
-        });
-
-        extrusionLayerRef.current = layerId;
-        onLayerReady?.(layerId);
+        console.warn('[BuildingLayers] No backend ZXY building manifest source available.');
+        return;
       } catch (error) {
         console.error('[BuildingLayers] Error loading PMTiles buildings:', error);
       }

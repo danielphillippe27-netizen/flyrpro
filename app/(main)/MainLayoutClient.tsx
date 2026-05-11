@@ -9,7 +9,7 @@ import AppTopHeader from '@/components/layout/AppTopHeader';
 import { MainLayoutNavProvider, useMainLayoutNav } from '@/components/layout/MainLayoutNavContext';
 import { MainRouteGuard } from '@/components/guard/MainRouteGuard';
 import { FarmIcon } from '@/components/icons/FarmIcon';
-import { Home, Trophy, Users, Settings, Target, Gauge, Plug, MessageCircle, Activity, CalendarCheck, CornerDownRight, Plus, Link2, Route, UserRoundPlus } from 'lucide-react';
+import { Home, Trophy, Users, Settings, Target, Gauge, Plug, MessageCircle, Activity, CalendarCheck, CornerDownRight, Plus, Link2, UserRoundPlus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { DashboardAccessLevel } from '@/app/api/_utils/workspace';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
@@ -21,7 +21,6 @@ const baseTabs = [
   { href: '/home', icon: Home, label: 'Home' },
   { href: '/campaigns', icon: Target, label: 'Campaign' },
   { href: '/farms', icon: FarmIcon, label: 'Farm' },
-  { href: '/routes', icon: Route, label: 'Routes' },
   { href: '/activity', icon: Activity, label: 'Activity' },
   { href: '/leads', icon: Users, label: 'Leads' },
   { href: '/follow-up', icon: CornerDownRight, label: 'Follow Up' },
@@ -36,7 +35,7 @@ const offersTab = { href: '/offers', icon: Link2, label: 'Offers' };
 const ambassadorsTab = { href: '/ambassadors', icon: UserRoundPlus, label: 'Ambassadors' };
 const settingsTab = { href: '/settings', icon: Settings, label: 'Settings' };
 const founderTabs = [
-  ...baseTabs.filter((tab) => ['/home', '/campaigns', '/farms', '/routes'].includes(tab.href)),
+  ...baseTabs.filter((tab) => ['/home', '/campaigns', '/farms'].includes(tab.href)),
   offersTab,
   ambassadorsTab,
   ...baseTabs.filter((tab) => ['/activity', '/leads', '/follow-up', '/appointments'].includes(tab.href)),
@@ -49,7 +48,6 @@ const memberTabs = baseTabs.filter((tab) =>
     '/home',
     '/campaigns',
     '/farms',
-    '/routes',
     '/leads',
     '/activity',
     '/appointments',
@@ -216,7 +214,6 @@ function MainLayoutShell({
               'flex flex-1 flex-col min-h-0 p-0 m-0',
               pathname?.startsWith('/campaigns') ||
               pathname?.startsWith('/farms') ||
-              pathname?.startsWith('/routes') ||
               pathname?.startsWith('/offers') ||
               pathname?.startsWith('/map')
                 ? 'overflow-hidden'
@@ -228,7 +225,6 @@ function MainLayoutShell({
                 'flex flex-col min-h-0',
                 pathname?.startsWith('/campaigns') ||
                 pathname?.startsWith('/farms') ||
-                pathname?.startsWith('/routes') ||
                 pathname?.startsWith('/offers') ||
                 pathname?.startsWith('/map')
                   ? 'flex-1 flex flex-col overflow-hidden min-h-0 [&>*]:flex-1 [&>*]:min-h-0'

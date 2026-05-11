@@ -1,4 +1,4 @@
-export const MIN_LINKABLE_BUILDING_AREA_SQM = 30;
+export const MIN_LINKABLE_BUILDING_AREA_SQM = 40;
 
 export const NON_LINKABLE_BUILDING_TYPES = new Set([
   'shed',

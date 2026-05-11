@@ -8,8 +8,7 @@ import type {
 
 export const METRICS: { value: LeaderboardMetric; label: string }[] = [
   { value: 'doorknocks', label: 'Doors' },
-  { value: 'conversations', label: 'Conversations' },
-  { value: 'distance', label: 'Distance' },
+  { value: 'conversations', label: "Convo's" },
 ]
 
 export const TIMEFRAMES: { value: LeaderboardTimeframe; label: string }[] = [

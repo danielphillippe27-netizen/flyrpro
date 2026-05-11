@@ -30,11 +30,16 @@ type BuildingLinkRow = {
   confidence: number;
   distance_meters: number;
   campaign_addresses: {
+    id: string;
     formatted: string;
     house_number: string | null;
     street_name: string | null;
     geom: AddressResult['geom'];
   };
+};
+
+type BuildingLinkSelectRow = Omit<BuildingLinkRow, 'campaign_addresses'> & {
+  campaign_addresses: BuildingLinkRow['campaign_addresses'] | BuildingLinkRow['campaign_addresses'][] | null;
 };
 
 type GoldAddressRow = {
@@ -94,6 +99,26 @@ function pickBestLink(links: BuildingLinkRow[]): BuildingLinkRow {
     if (distanceA !== distanceB) return distanceA - distanceB;
     return (b.confidence ?? 0) - (a.confidence ?? 0);
   })[0];
+}
+
+function normalizeBuildingLinks(rows: BuildingLinkSelectRow[]): BuildingLinkRow[] {
+  return rows.flatMap((row) => {
+    const address = Array.isArray(row.campaign_addresses)
+      ? row.campaign_addresses[0]
+      : row.campaign_addresses;
+
+    if (!address) return [];
+
+    return [
+      {
+        address_id: row.address_id,
+        match_type: row.match_type,
+        confidence: row.confidence,
+        distance_meters: row.distance_meters,
+        campaign_addresses: address,
+      },
+    ];
+  });
 }
 
 async function resolveAuthorizedContext(
@@ -184,26 +209,51 @@ export async function GET(
     }
 
     const candidateBuildingIdList = Array.from(candidateBuildingIds);
+    const uuidCandidateBuildingIds = candidateBuildingIdList.filter(isUuid);
+    const goldAddressSelect = 'id, formatted, house_number, street_name, geom, match_source, confidence';
     
     // Fetch addresses linked to this building.
     // Gold assignments live on campaign_addresses.building_id and are the source
-    // of truth when present. building_address_links can contain stale Silver
-    // assignments from prior linker passes, so only use links when no Gold rows
-    // exist for this building.
+    // of truth when present. Bedrock/NZ and other external datasets can address
+    // buildings by public LINZ/GERS ids, so keep those out of UUID-typed
+    // building_id queries and look them up through building_gers_id instead.
     let addresses: AddressResult[] = [];
+    const goldAddressById = new Map<string, GoldAddressRow>();
 
-    const { data: goldAddresses, error: goldError } = await supabase
-      .from('campaign_addresses')
-      .select('id, formatted, house_number, street_name, geom, match_source, confidence')
-      .eq('campaign_id', campaignId)
-      .in('building_id', candidateBuildingIdList);
+    if (uuidCandidateBuildingIds.length > 0) {
+      const { data: uuidGoldAddresses, error: uuidGoldError } = await supabase
+        .from('campaign_addresses')
+        .select(goldAddressSelect)
+        .eq('campaign_id', campaignId)
+        .in('building_id', uuidCandidateBuildingIds);
 
-    if (goldError) {
-      console.warn('[API] Error fetching Gold addresses:', goldError.message);
+      if (uuidGoldError) {
+        console.warn('[API] Error fetching Gold addresses by UUID building_id:', uuidGoldError.message);
+      } else {
+        for (const addr of (uuidGoldAddresses || []) as GoldAddressRow[]) {
+          goldAddressById.set(addr.id, addr);
+        }
+      }
     }
 
-    if (goldAddresses && goldAddresses.length > 0) {
-      addresses = ((goldAddresses || []) as GoldAddressRow[]).map((addr) => ({
+    const { data: gersGoldAddresses, error: gersGoldError } = await supabase
+      .from('campaign_addresses')
+      .select(goldAddressSelect)
+      .eq('campaign_id', campaignId)
+      .in('building_gers_id', candidateBuildingIdList);
+
+    if (gersGoldError) {
+      console.warn('[API] Error fetching Gold addresses by building_gers_id:', gersGoldError.message);
+    } else {
+      for (const addr of (gersGoldAddresses || []) as GoldAddressRow[]) {
+        goldAddressById.set(addr.id, addr);
+      }
+    }
+
+    const goldAddresses = Array.from(goldAddressById.values());
+
+    if (goldAddresses.length > 0) {
+      addresses = goldAddresses.map((addr) => ({
         address_id: addr.id,
         formatted: displayAddressText(addr) ?? '',
         house_number: resolveHouseNumberLabel(addr),
@@ -239,7 +289,7 @@ export async function GET(
         console.warn('[API] Error fetching from links table:', linksError.message);
       }
 
-      addresses = chooseLinksForDisplay((links || []) as BuildingLinkRow[]).map((link) => ({
+      addresses = chooseLinksForDisplay(normalizeBuildingLinks((links || []) as unknown as BuildingLinkSelectRow[])).map((link) => ({
         address_id: link.address_id,
         formatted: displayAddressText(link.campaign_addresses) ?? '',
         house_number: resolveHouseNumberLabel(link.campaign_addresses),

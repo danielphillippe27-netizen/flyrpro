@@ -580,6 +580,7 @@ export function FlyrMapView() {
               campaignId={selectedCampaignId}
               campaignType={selectedCampaign?.type ?? null}
               addressStateOverrides={campaignAddresses}
+              campaignBoundary={(selectedCampaign?.territory_boundary as GeoJSON.Polygon | null | undefined) ?? null}
               statusFilters={statusFilters}
               onBuildingClick={handleBuildingClick}
               onAddToCRM={handleAddToCRM}
@@ -593,6 +594,7 @@ export function FlyrMapView() {
             addresses={campaignAddresses}
             campaignType={selectedCampaign?.type ?? null}
             statusFilters={statusFilters}
+            campaignBoundary={(selectedCampaign?.territory_boundary as GeoJSON.Polygon | null | undefined) ?? null}
             styleKey={resolvedMapStyle.key}
             onAddressClick={(addressId, buildingId) => {
               handleBuildingClick(buildingId ?? addressId, addressId);

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { CampaignDetailMapView, type MapPointOverlay } from '@/components/campaigns/CampaignDetailMapView';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -37,6 +37,7 @@ const MAP_OUTCOME_ACTIONS: Array<{ status: FarmAddressOutcomeStatus; label: stri
 export function FarmMapView({
   farm,
   addresses,
+  campaignAddresses = [],
   linkedCampaignId,
   linkedCampaign,
   layerScope = 'all_time',
@@ -51,6 +52,7 @@ export function FarmMapView({
 }: {
   farm: Farm;
   addresses: FarmAddress[];
+  campaignAddresses?: CampaignAddress[];
   linkedCampaignId?: string | null;
   linkedCampaign?: CampaignV2 | null;
   layerScope?: MapLayerScope;
@@ -90,62 +92,105 @@ export function FarmMapView({
     return map;
   }, [cycleTouchIds, touchOutcomes]);
 
-  const campaignAddresses = useMemo<CampaignAddress[]>(
-    () =>
-      addresses.map((address) => {
-        const scopedOutcome =
-          layerScope === 'cycle'
-            ? currentCycleOutcomeByAddress.get(address.id)
-            : latestOutcomeByAddress.get(address.id);
+  const mapAddresses = useMemo<CampaignAddress[]>(() => {
+    const keyForAddress = (address: {
+      formatted?: string | null;
+      address?: string | null;
+      postal_code?: string | null;
+    }) =>
+      `${(address.formatted || address.address || '').trim().toLowerCase()}|${(address.postal_code || '').trim().toLowerCase()}`;
 
-        const visitedAllTime = Number(address.visited_count ?? 0) > 0;
-        // Scoped map slices must be driven by canonical per-touch outcomes only.
-        // Using denormalized `last_touch_id` here can leak stale/legacy state from
-        // earlier iterations into a cycle/session that did not actually record an
-        // outcome for this house.
-        const isVisited =
-          layerScope === 'all_time'
-            ? (scopedOutcome
-                ? VISITED_OUTCOME_STATUSES.has(scopedOutcome.status)
-                : visitedAllTime)
-            : Boolean(scopedOutcome && VISITED_OUTCOME_STATUSES.has(scopedOutcome.status));
-        const scopedStatus =
-          scopedOutcome?.status ??
-          (layerScope === 'all_time' ? address.last_outcome_status : null) ??
-          (isVisited ? 'delivered' : 'none');
+    const farmAddressByCampaignAddressId = new Map(
+      addresses
+        .filter((address) => address.campaign_address_id)
+        .map((address) => [address.campaign_address_id!, address])
+    );
+    const farmAddressByDisplayKey = new Map(
+      addresses.map((address) => [
+        keyForAddress({ formatted: address.formatted, postal_code: address.postal_code }),
+        address,
+      ])
+    );
 
-        return {
-          id: address.campaign_address_id ?? address.id,
-          campaign_id: linkedCampaignId ?? '',
-          address: address.formatted,
-          formatted: address.formatted,
-          postal_code: address.postal_code ?? undefined,
-          source: 'map',
-          gers_id: address.gers_id,
-          visited: isVisited,
-          address_status: scopedStatus,
-          coordinate: address.coordinate,
-          geom: address.geom ?? undefined,
-          created_at: address.created_at,
-          house_number: address.house_number ?? undefined,
-          street_name: address.street_name ?? undefined,
-          locality: address.locality ?? undefined,
-          region: address.region ?? undefined,
-          // Farm touch history is not the same thing as QR scans. If we synthesize
-          // scans from visited_count / touched outcomes, the shared map color logic
-          // promotes those homes to the QR-scanned purple state.
-          scans: 0,
-          last_scanned_at: undefined,
-        };
-      }),
-    [
-      addresses,
-      currentCycleOutcomeByAddress,
-      latestOutcomeByAddress,
-      layerScope,
-      linkedCampaignId,
-    ]
-  );
+    const fallbackCampaignAddresses = addresses.map((address) => ({
+      id: address.campaign_address_id ?? address.id,
+      campaign_id: linkedCampaignId ?? '',
+      address: address.formatted,
+      formatted: address.formatted,
+      postal_code: address.postal_code ?? undefined,
+      source: 'map',
+      gers_id: address.gers_id ?? undefined,
+      coordinate: address.coordinate ?? undefined,
+      geom: address.geom ?? undefined,
+      created_at: address.created_at,
+      house_number: address.house_number ?? undefined,
+      street_name: address.street_name ?? undefined,
+      locality: address.locality ?? undefined,
+      region: address.region ?? undefined,
+      scans: 0,
+      last_scanned_at: undefined,
+    })) as CampaignAddress[];
+
+    const sourceAddresses = campaignAddresses.length > 0 ? campaignAddresses : fallbackCampaignAddresses;
+
+    return sourceAddresses.map((campaignAddress) => {
+      const farmAddress =
+        farmAddressByCampaignAddressId.get(campaignAddress.id) ??
+        farmAddressByDisplayKey.get(keyForAddress(campaignAddress)) ??
+        null;
+      const scopedOutcome =
+        layerScope === 'cycle'
+          ? (farmAddress ? currentCycleOutcomeByAddress.get(farmAddress.id) : undefined)
+          : (farmAddress ? latestOutcomeByAddress.get(farmAddress.id) : undefined);
+
+      const visitedAllTime = farmAddress
+        ? Number(farmAddress.visited_count ?? 0) > 0
+        : Boolean(campaignAddress.visited);
+      // Scoped map slices must be driven by canonical per-touch outcomes only.
+      // Using denormalized `last_touch_id` here can leak stale/legacy state from
+      // earlier iterations into a cycle/session that did not actually record an
+      // outcome for this house.
+      const isVisited =
+        layerScope === 'all_time'
+          ? (scopedOutcome
+              ? VISITED_OUTCOME_STATUSES.has(scopedOutcome.status)
+              : visitedAllTime)
+          : Boolean(scopedOutcome && VISITED_OUTCOME_STATUSES.has(scopedOutcome.status));
+      const scopedStatus =
+        scopedOutcome?.status ??
+        (layerScope === 'all_time' ? farmAddress?.last_outcome_status : null) ??
+        (isVisited ? 'delivered' : 'none');
+
+      return {
+        ...campaignAddress,
+        campaign_id: campaignAddress.campaign_id || linkedCampaignId || '',
+        address: campaignAddress.address || campaignAddress.formatted || farmAddress?.formatted || '',
+        formatted: campaignAddress.formatted ?? campaignAddress.address ?? farmAddress?.formatted,
+        postal_code: campaignAddress.postal_code ?? farmAddress?.postal_code ?? undefined,
+        gers_id: campaignAddress.gers_id ?? farmAddress?.gers_id ?? undefined,
+        visited: isVisited,
+        address_status: scopedStatus,
+        coordinate: campaignAddress.coordinate ?? farmAddress?.coordinate ?? undefined,
+        geom: campaignAddress.geom ?? farmAddress?.geom ?? undefined,
+        house_number: campaignAddress.house_number ?? farmAddress?.house_number ?? undefined,
+        street_name: campaignAddress.street_name ?? farmAddress?.street_name ?? undefined,
+        locality: campaignAddress.locality ?? farmAddress?.locality ?? undefined,
+        region: campaignAddress.region ?? farmAddress?.region ?? undefined,
+        // Farm touch history is not the same thing as QR scans. If we synthesize
+        // scans from visited_count / touched outcomes, the shared map color logic
+        // promotes those homes to the QR-scanned purple state.
+        scans: 0,
+        last_scanned_at: undefined,
+      };
+    });
+  }, [
+    addresses,
+    campaignAddresses,
+    currentCycleOutcomeByAddress,
+    latestOutcomeByAddress,
+    layerScope,
+    linkedCampaignId,
+  ]);
 
   const contactOverlays = useMemo<MapPointOverlay[]>(() => {
     if (!showContactsOverlay) return [];
@@ -198,7 +243,7 @@ export function FarmMapView({
     }
 
     return Array.from(contactsByAddressId.entries())
-      .map(([addressId, matchedContacts]) => {
+      .map<MapPointOverlay | null>(([addressId, matchedContacts]) => {
         const address = addressById.get(addressId);
         const coordinate = address?.coordinate;
         if (!address || !coordinate || matchedContacts.length === 0) return null;
@@ -229,9 +274,10 @@ export function FarmMapView({
     <div className={`relative w-full overflow-hidden rounded-xl border border-border ${className ?? 'h-[520px]'}`}>
       <CampaignDetailMapView
         campaignId={linkedCampaignId}
-        addresses={campaignAddresses}
+        addresses={mapAddresses}
         campaign={linkedCampaign}
         pointOverlays={contactOverlays}
+        initialMapViewMode="addresses"
         buildingPendingOverlay={{
           title: 'Buildings loading',
           description: 'Addresses are ready. Building footprints will appear when Diamond finishes.',

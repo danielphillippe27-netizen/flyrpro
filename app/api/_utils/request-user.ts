@@ -94,6 +94,18 @@ export async function resolveUserFromRequest(
   }
 
   const cookieStore = await cookies();
+  const hasSupabaseAuthCookie = cookieStore.getAll().some((cookie) => {
+    const name = cookie.name;
+    return (
+      name === 'supabase-auth-token' ||
+      (name.startsWith('sb-') && name.includes('-auth-token'))
+    );
+  });
+
+  if (!hasSupabaseAuthCookie) {
+    return null;
+  }
+
   const cookieClient = createServerClient(supabaseUrl, supabaseAnonKey, {
     cookies: {
       getAll() {

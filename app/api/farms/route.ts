@@ -122,6 +122,7 @@ export async function POST(request: NextRequest) {
       cycle_completion_window_days: body.cycle_completion_window_days ?? null,
       touch_types: body.touch_types ?? [],
       annual_budget_cents: body.annual_budget_cents ?? null,
+      include_social_ads_in_spend: body.include_social_ads_in_spend ?? false,
       area_label: body.area_label ?? null,
       home_limit: Math.min(5000, Math.max(1, Number(body.home_limit ?? 5000) || 5000)),
       address_count: body.address_count ?? 0,
@@ -138,6 +139,7 @@ export async function POST(request: NextRequest) {
       'cycle_completion_window_days',
       'touch_types',
       'annual_budget_cents',
+      'include_social_ads_in_spend',
       'home_limit',
       'address_count',
     ] as const;

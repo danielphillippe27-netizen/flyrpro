@@ -42,6 +42,7 @@ export interface CreateFarmPayload {
   cycle_completion_window_days?: number | null;
   touch_types?: FarmTouchType[] | null;
   annual_budget_cents?: number | null;
+  include_social_ads_in_spend?: boolean | null;
   workspace_id?: string | null;
   area_label?: string;
   home_limit?: number;
@@ -53,4 +54,3 @@ export interface FarmWithDetails extends Farm {
   leads: FarmLead[];
   addresses: FarmAddress[];
 }
-

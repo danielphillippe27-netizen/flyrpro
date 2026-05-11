@@ -13,8 +13,7 @@ import {
 
 const METRICS: { value: LeaderboardSortBy; label: string }[] = [
   { value: 'doorknocks', label: 'Doors' },
-  { value: 'conversations', label: 'Conversations' },
-  { value: 'distance', label: 'Distance' },
+  { value: 'conversations', label: "Convo's" },
 ];
 
 function getDisplayValue(entry: BrokerageLeaderboardEntry, sortBy: LeaderboardSortBy): string {

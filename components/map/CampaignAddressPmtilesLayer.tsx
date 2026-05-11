@@ -4,27 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 import type { CampaignAddress, CampaignType } from '@/types/database';
 import { getCampaignAddressMapStatus } from '@/lib/campaignStats';
-import { DEFAULT_STATUS_FILTERS, FLYER_MODE_STATUS_COLORS, MAP_STATUS_CONFIG, type StatusFilters } from '@/lib/constants/mapStatus';
-import {
-  appendTileAccessToken,
-  fetchCampaignMapManifest,
-  hasDirectWebPmtiles,
-  hasRenderablePmtilesAddresses,
-  toPmtilesProtocolUrl,
-  type CampaignMapManifest,
-} from '@/lib/map/campaignMapManifest';
-import { ensurePmtilesProtocolRegistered } from '@/lib/map/pmtilesProtocol';
-
-type ManifestSource = {
-  deliveryMode: 'pmtiles_protocol' | 'static_zxy_cdn' | 'backend_zxy';
-  url: string;
-  sourceLayer: string;
-  sourceGeometry: 'polygon' | 'point';
-  promoteId: string;
-  minzoom: number;
-  maxzoom: number;
-  bounds?: [number, number, number, number];
-};
+import type { StatusFilters } from '@/lib/constants/mapStatus';
 
 type CampaignAddressPmtilesLayerProps = {
   map: mapboxgl.Map;
@@ -35,6 +15,8 @@ type CampaignAddressPmtilesLayerProps = {
   campaignType?: CampaignType | null;
   statusFilters?: StatusFilters;
   deletedAddressIds?: string[];
+  campaignBoundary?: GeoJSON.Polygon | null;
+  campaignBbox?: [number, number, number, number] | null;
   styleKey?: string;
   onAddressClick?: (
     addressId: string,
@@ -50,8 +32,27 @@ const GLOW_LAYER_ID = 'campaign-addresses-pmtiles-lead-glow';
 const CIRCLE_LAYER_ID = 'campaign-addresses-pmtiles-circle';
 const LABEL_LAYER_ID = 'campaign-addresses-pmtiles-label';
 const ADDRESS_LABEL_MIN_ZOOM = 17;
-const ADDRESS_CYLINDER_HEIGHT_METERS = 8;
+const ADDRESS_CYLINDER_RADIUS_METERS = 2.6;
+const ADDRESS_CYLINDER_HEIGHT_METERS = 12;
+const ADDRESS_CYLINDER_COLOR = '#6b7280';
 const ADDRESS_LABEL_CAP_CLEARANCE_METERS = 0.08;
+const ADDRESS_LABEL_EXPRESSION: mapboxgl.Expression = [
+  'coalesce',
+  ['get', 'house_number_label'],
+  ['get', 'house_number'],
+  ['get', 'street_number'],
+  '',
+];
+const ADDRESS_ID_EXPRESSION: mapboxgl.Expression = [
+  'coalesce',
+  ['get', 'address_id'],
+  ['get', 'address_detail_pid'],
+  ['get', 'gers_id'],
+  ['get', 'building_gers_id'],
+  ['get', 'id'],
+  '',
+];
+const NO_FEATURES_FILTER: mapboxgl.Expression = ['==', ['literal', 1], 0];
 
 function safeRemoveLayer(map: mapboxgl.Map, layerId: string) {
   try {
@@ -76,56 +77,13 @@ function cleanupAddressLayers(map: mapboxgl.Map) {
   safeRemoveSource(map, SOURCE_ID);
 }
 
-function toManifestSource(manifest: CampaignMapManifest, accessToken: string | null): ManifestSource | null {
-  const sourceLayer = manifest.source_layers?.address_circles ?? manifest.source_layers?.addresses;
-  if (!sourceLayer) return null;
-  const sourceGeometry = manifest.source_layers?.address_circles ? 'polygon' : 'point';
-  const promoteId =
-    sourceGeometry === 'polygon'
-      ? manifest.promote_ids?.address_circles ?? manifest.promote_ids?.addresses ?? 'address_id'
-      : manifest.promote_ids?.addresses ?? 'address_id';
-
-  if (hasDirectWebPmtiles(manifest) && manifest.pmtiles_url) {
-    const pmtilesUrl = toPmtilesProtocolUrl(manifest.pmtiles_url);
-    if (pmtilesUrl && ensurePmtilesProtocolRegistered()) {
-      return {
-        deliveryMode: 'pmtiles_protocol',
-        url: pmtilesUrl,
-        sourceLayer,
-        sourceGeometry,
-        promoteId,
-        minzoom: manifest.minzoom ?? 13,
-        maxzoom: manifest.maxzoom ?? 18,
-        bounds: manifest.bounds ?? undefined,
-      };
-    }
+function canAddCustomMapLayers(map: mapboxgl.Map): boolean {
+  try {
+    const style = map.getStyle();
+    return Boolean(style && Array.isArray(style.layers) && style.sources);
+  } catch {
+    return false;
   }
-
-  if (manifest.static_vector_tile_url_template) {
-    return {
-      deliveryMode: 'static_zxy_cdn',
-      url: manifest.static_vector_tile_url_template,
-      sourceLayer,
-      sourceGeometry,
-      promoteId,
-      minzoom: manifest.minzoom ?? 13,
-      maxzoom: manifest.maxzoom ?? 18,
-      bounds: manifest.bounds ?? undefined,
-    };
-  }
-
-  if (!manifest.vector_tile_url_template) return null;
-
-  return {
-    deliveryMode: 'backend_zxy',
-    url: appendTileAccessToken(manifest.vector_tile_url_template, accessToken),
-    sourceLayer,
-    sourceGeometry,
-    promoteId,
-    minzoom: manifest.minzoom ?? 13,
-    maxzoom: manifest.maxzoom ?? 18,
-    bounds: manifest.bounds ?? undefined,
-  };
 }
 
 function getStatusState(address: CampaignAddress) {
@@ -137,97 +95,232 @@ function getStatusState(address: CampaignAddress) {
   };
 }
 
+function getAddressCoordinate(address: CampaignAddress): { lon: number; lat: number } | null {
+  if (address.coordinate) {
+    const { lon, lat } = address.coordinate;
+    if (Number.isFinite(lon) && Number.isFinite(lat)) {
+      return { lon, lat };
+    }
+  }
+
+  const addressWithGeo = address as CampaignAddress & {
+    geometry?: unknown;
+    geom_json?: unknown;
+  };
+
+  const geomJson = addressWithGeo.geom_json;
+  if (geomJson && typeof geomJson === 'object' && (geomJson as GeoJSON.Point).type === 'Point') {
+    const coordinates = (geomJson as GeoJSON.Point).coordinates;
+    if (Array.isArray(coordinates) && coordinates.length >= 2) {
+      const [lon, lat] = coordinates;
+      if (typeof lon === 'number' && typeof lat === 'number' && Number.isFinite(lon) && Number.isFinite(lat)) {
+        return { lon, lat };
+      }
+    }
+  }
+
+  let geometry = addressWithGeo.geometry;
+  if (typeof geometry === 'string') {
+    try {
+      geometry = JSON.parse(geometry);
+    } catch {
+      geometry = null;
+    }
+  }
+
+  if (geometry && typeof geometry === 'object' && (geometry as GeoJSON.Point).type === 'Point') {
+    const coordinates = (geometry as GeoJSON.Point).coordinates;
+    if (Array.isArray(coordinates) && coordinates.length >= 2) {
+      const [lon, lat] = coordinates;
+      if (typeof lon === 'number' && typeof lat === 'number' && Number.isFinite(lon) && Number.isFinite(lat)) {
+        return { lon, lat };
+      }
+    }
+  }
+
+  if (address.geom) {
+    try {
+      const geomValue = typeof address.geom === 'string' ? address.geom : JSON.stringify(address.geom);
+      try {
+        const parsed = JSON.parse(geomValue) as { coordinates?: unknown[] };
+        const coordinates = parsed.coordinates;
+        if (Array.isArray(coordinates) && coordinates.length >= 2) {
+          const [lon, lat] = coordinates;
+          if (typeof lon === 'number' && typeof lat === 'number' && Number.isFinite(lon) && Number.isFinite(lat)) {
+            return { lon, lat };
+          }
+        }
+      } catch {
+        const match = geomValue.match(/POINT\s*\(\s*([-\d.]+)\s+([-\d.]+)\s*\)/i);
+        if (match) {
+          const lon = Number.parseFloat(match[1]);
+          const lat = Number.parseFloat(match[2]);
+          if (Number.isFinite(lon) && Number.isFinite(lat)) {
+            return { lon, lat };
+          }
+        }
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+function getHouseNumber(address: CampaignAddress): string {
+  const explicit = String(address.house_number ?? '').trim();
+  if (explicit) return explicit;
+
+  const formatted = String(address.formatted ?? address.address ?? '').trim();
+  return formatted.match(/^(\d+[A-Za-z0-9-]*)\b/)?.[1] ?? '';
+}
+
+function stringIdentifier(value: unknown): string | null {
+  if (typeof value !== 'string' && typeof value !== 'number') return null;
+  const normalized = String(value).trim();
+  return normalized || null;
+}
+
+function makeCirclePolygon(
+  center: { lon: number; lat: number },
+  radiusMeters: number,
+  steps = 28
+): GeoJSON.Polygon {
+  const latRadians = center.lat * Math.PI / 180;
+  const metersPerDegreeLat = 111_320;
+  const metersPerDegreeLon = Math.max(1, Math.abs(Math.cos(latRadians)) * 111_320);
+  const ring: Array<[number, number]> = [];
+
+  for (let index = 0; index < steps; index += 1) {
+    const angle = (index / steps) * Math.PI * 2;
+    const dx = Math.cos(angle) * radiusMeters;
+    const dy = Math.sin(angle) * radiusMeters;
+    ring.push([
+      center.lon + dx / metersPerDegreeLon,
+      center.lat + dy / metersPerDegreeLat,
+    ]);
+  }
+
+  ring.push([...ring[0]]);
+  return {
+    type: 'Polygon',
+    coordinates: [ring],
+  };
+}
+
+function buildFallbackAddressFeatureCollection(
+  addresses: CampaignAddress[],
+  deletedAddressSet: Set<string>
+): GeoJSON.FeatureCollection<GeoJSON.Point | GeoJSON.Polygon> {
+  return {
+    type: 'FeatureCollection',
+    features: addresses.flatMap((address) => {
+      if (deletedAddressSet.has(address.id)) return [];
+      const coordinate = getAddressCoordinate(address);
+      if (!coordinate) return [];
+      const buildingId =
+        (address as CampaignAddress & { building_id?: string | null }).building_id ??
+        address.building_gers_id ??
+        address.gers_id ??
+        null;
+      const statusState = getStatusState(address);
+      const properties = {
+        id: address.id,
+        address_id: address.id,
+        building_id: buildingId,
+        gers_id: address.gers_id ?? null,
+        house_number: getHouseNumber(address),
+        house_number_label: getHouseNumber(address),
+        formatted: address.formatted ?? address.address ?? '',
+        address_status: statusState.address_status,
+        scans_total: statusState.scans_total,
+        qr_scanned: statusState.qr_scanned,
+      };
+
+      return [
+        ({
+          type: 'Feature',
+          id: `${address.id}:cylinder`,
+          geometry: makeCirclePolygon(coordinate, ADDRESS_CYLINDER_RADIUS_METERS),
+          properties: {
+            ...properties,
+            geometry_source: 'campaign_address_cylinder',
+          },
+        } satisfies GeoJSON.Feature<GeoJSON.Polygon>),
+        ({
+        type: 'Feature',
+        id: `${address.id}:label`,
+        geometry: {
+          type: 'Point',
+          coordinates: [coordinate.lon, coordinate.lat],
+        },
+        properties: {
+          ...properties,
+          geometry_source: 'campaign_address_point',
+        },
+      } satisfies GeoJSON.Feature<GeoJSON.Point>),
+      ];
+    }),
+  };
+}
+
 export function CampaignAddressPmtilesLayer({
   map,
   campaignId,
   mapLoaded,
   visible,
   addresses,
-  campaignType,
-  statusFilters = DEFAULT_STATUS_FILTERS,
   deletedAddressIds = [],
   styleKey,
   onAddressClick,
 }: CampaignAddressPmtilesLayerProps) {
-  const [manifestSource, setManifestSource] = useState<ManifestSource | null>(null);
+  const [manifestSource, setManifestSource] = useState<null | undefined>(undefined);
   const onAddressClickRef = useRef(onAddressClick);
-  const isFlyerMode = campaignType === 'flyer';
   const deletedAddressSet = useMemo(
     () => new Set(deletedAddressIds.map((id) => String(id ?? '').trim()).filter(Boolean)),
     [deletedAddressIds]
   );
+  const campaignAddressIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const address of addresses) {
+      [
+        address.id,
+        address.source_id,
+        address.gers_id,
+        address.building_gers_id,
+        (address as CampaignAddress & { address_detail_pid?: string | null }).address_detail_pid,
+      ].forEach((value) => {
+        const normalized = stringIdentifier(value);
+        if (normalized) ids.add(normalized);
+      });
+    }
+    return ids;
+  }, [addresses]);
 
   useEffect(() => {
     onAddressClickRef.current = onAddressClick;
   }, [onAddressClick]);
 
-  const getAddressColorExpression = (): mapboxgl.Expression => {
-    const getAddressStatus = () => ['coalesce', ['feature-state', 'address_status'], ['get', 'address_status'], 'none'];
-    const getQrScanned = () => ['coalesce', ['feature-state', 'qr_scanned'], ['get', 'qr_scanned'], false];
-    const getScansTotal = () => ['coalesce', ['feature-state', 'scans_total'], ['get', 'scans_total'], 0];
-
-    if (isFlyerMode) {
-      const isVisited = ['any', ['!=', getAddressStatus(), 'none'], ['==', getQrScanned(), true], ['>', getScansTotal(), 0]];
-      return ['case', isVisited, FLYER_MODE_STATUS_COLORS.visited, FLYER_MODE_STATUS_COLORS.unvisited] as mapboxgl.Expression;
-    }
-
-    const isQrScanned = ['any', ['==', getQrScanned(), true], ['>', getScansTotal(), 0]];
-    const isLead = ['in', getAddressStatus(), ['literal', ['lead', 'interested', 'hot_lead']]];
-    const isHotLead = ['in', getAddressStatus(), ['literal', ['appointment', 'future_seller']]];
-    const isConversation = ['==', getAddressStatus(), 'talked'];
-    const isDoNotKnock = ['==', getAddressStatus(), 'do_not_knock'];
-    const isNoOneHome = ['in', getAddressStatus(), ['literal', ['no_answer', 'not_home', 'attempted']]];
-    const isTouched = ['==', getAddressStatus(), 'delivered'];
-    const isUntouched = [
-      'all',
-      ['!=', getAddressStatus(), 'delivered'],
-      ['!=', getAddressStatus(), 'talked'],
-      ['!', ['in', getAddressStatus(), ['literal', ['lead', 'interested', 'hot_lead', 'appointment', 'future_seller']]]],
-      ['!=', getAddressStatus(), 'do_not_knock'],
-      ['!', ['in', getAddressStatus(), ['literal', ['no_answer', 'not_home', 'attempted']]]],
-      ['!', isQrScanned],
-    ];
-
-    return [
-      'case',
-      ['all', isQrScanned, statusFilters.QR_SCANNED],
-      MAP_STATUS_CONFIG.QR_SCANNED.color,
-      ['all', isHotLead, statusFilters.HOT_LEADS],
-      MAP_STATUS_CONFIG.HOT_LEADS.color,
-      ['all', isLead, statusFilters.LEADS],
-      MAP_STATUS_CONFIG.LEADS.color,
-      ['all', isConversation, statusFilters.CONVERSATIONS],
-      MAP_STATUS_CONFIG.CONVERSATIONS.color,
-      ['all', isDoNotKnock, statusFilters.DO_NOT_KNOCK],
-      MAP_STATUS_CONFIG.DO_NOT_KNOCK.color,
-      ['all', isNoOneHome, statusFilters.NO_ONE_HOME],
-      MAP_STATUS_CONFIG.NO_ONE_HOME.color,
-      ['all', isTouched, statusFilters.TOUCHED],
-      MAP_STATUS_CONFIG.TOUCHED.color,
-      ['all', isUntouched, statusFilters.UNTOUCHED],
-      MAP_STATUS_CONFIG.UNTOUCHED.color,
-      '#6b7280',
-    ] as mapboxgl.Expression;
-  };
-
-  const getLeadGlowOpacityExpression = (): mapboxgl.Expression => {
-    if (isFlyerMode) return ['case', false, 0, 0] as mapboxgl.Expression;
-    const getAddressStatus = () => ['coalesce', ['feature-state', 'address_status'], ['get', 'address_status'], 'none'];
-    const isLead = ['in', getAddressStatus(), ['literal', ['lead', 'interested', 'hot_lead']]];
-    return ['case', ['all', isLead, statusFilters.LEADS], 0.82, 0] as mapboxgl.Expression;
-  };
-
   const getVisibilityFilter = (): mapboxgl.Expression | undefined => {
     if (deletedAddressSet.size === 0) return undefined;
-    return ['!', ['in', ['get', 'address_id'], ['literal', Array.from(deletedAddressSet)]]] as mapboxgl.Expression;
+    return ['!', ['in', ADDRESS_ID_EXPRESSION, ['literal', Array.from(deletedAddressSet)]]] as mapboxgl.Expression;
+  };
+
+  const getCampaignScopeFilter = (): mapboxgl.Expression => {
+    if (campaignAddressIds.size === 0) return NO_FEATURES_FILTER;
+    return ['in', ADDRESS_ID_EXPRESSION, ['literal', Array.from(campaignAddressIds)]] as mapboxgl.Expression;
   };
 
   const getLayerFilter = (geometryType: 'Point' | 'Polygon'): mapboxgl.Expression => {
     const visibilityFilter = getVisibilityFilter();
     const geometryFilter = ['==', ['geometry-type'], geometryType] as mapboxgl.Expression;
-    return visibilityFilter
-      ? ['all', geometryFilter, visibilityFilter] as mapboxgl.Expression
-      : geometryFilter;
+    return [
+      'all',
+      geometryFilter,
+      getCampaignScopeFilter(),
+      ...(visibilityFilter ? [visibilityFilter] : []),
+    ] as mapboxgl.Expression;
   };
 
   useEffect(() => {
@@ -239,16 +332,7 @@ export function CampaignAddressPmtilesLayer({
         return;
       }
 
-      const { manifest, accessToken } = await fetchCampaignMapManifest(campaignId);
-      if (cancelled) return;
-
-      if (!hasRenderablePmtilesAddresses(manifest)) {
-        console.warn('[CampaignAddressPmtilesLayer] PMTiles address layer unavailable.');
-        setManifestSource(null);
-        return;
-      }
-
-      setManifestSource(toManifestSource(manifest!, accessToken));
+      if (!cancelled) setManifestSource(null);
     };
 
     void loadManifest();
@@ -256,147 +340,85 @@ export function CampaignAddressPmtilesLayer({
     return () => {
       cancelled = true;
     };
-  }, [campaignId, visible]);
+  }, [campaignId, visible, addresses.length]);
 
   useEffect(() => {
-    if (!map || !mapLoaded || !visible || !manifestSource) {
+    if (!map || !mapLoaded || !visible) {
       cleanupAddressLayers(map);
       return;
     }
 
-    const addLayers = () => {
-      if (!map.isStyleLoaded()) return;
+    if (manifestSource === undefined) {
+      cleanupAddressLayers(map);
+      return;
+    }
+
+    const hasExpectedAddressLayers = () =>
+      Boolean(map.getSource(SOURCE_ID) && map.getLayer(CIRCLE_LAYER_ID));
+
+    const addLocalCylinderLayers = () => {
+      if (!canAddCustomMapLayers(map)) return;
       cleanupAddressLayers(map);
 
-      const vectorSource: mapboxgl.VectorSourceSpecification & { promoteId?: Record<string, string> } = {
-        type: 'vector',
-        minzoom: manifestSource.minzoom,
-        maxzoom: manifestSource.maxzoom,
-        promoteId: {
-          [manifestSource.sourceLayer]: manifestSource.promoteId,
+      const geojson = buildFallbackAddressFeatureCollection(addresses, deletedAddressSet);
+      if (geojson.features.length === 0) return;
+
+      map.addSource(SOURCE_ID, {
+        type: 'geojson',
+        data: geojson,
+        promoteId: 'address_id',
+      });
+
+      map.addLayer({
+        id: CIRCLE_LAYER_ID,
+        type: 'fill-extrusion',
+        source: SOURCE_ID,
+        minzoom: 12,
+        filter: getLayerFilter('Polygon'),
+        paint: {
+          'fill-extrusion-color': ADDRESS_CYLINDER_COLOR,
+          'fill-extrusion-opacity': 0.96,
+          'fill-extrusion-height': ADDRESS_CYLINDER_HEIGHT_METERS,
+          'fill-extrusion-base': 0,
+          'fill-extrusion-vertical-gradient': true,
+          'fill-extrusion-emissive-strength': 0.45,
         },
-      };
-      if (manifestSource.deliveryMode === 'pmtiles_protocol') {
-        vectorSource.url = manifestSource.url;
-      } else {
-        vectorSource.tiles = [manifestSource.url];
-      }
-      if (manifestSource.bounds) vectorSource.bounds = manifestSource.bounds;
-
-      map.addSource(SOURCE_ID, vectorSource);
-      const labelFilter = getLayerFilter(manifestSource.sourceGeometry === 'polygon' ? 'Polygon' : 'Point');
-      const hasExtrudedAddressCylinders = manifestSource.sourceGeometry === 'polygon';
-
-      if (hasExtrudedAddressCylinders) {
-        const polygonFilter = getLayerFilter('Polygon');
-        map.addLayer({
-          id: GLOW_LAYER_ID,
-          type: 'line',
-          source: SOURCE_ID,
-          'source-layer': manifestSource.sourceLayer,
-          minzoom: manifestSource.minzoom,
-          filter: polygonFilter,
-          paint: {
-            'line-color': MAP_STATUS_CONFIG.LEADS.color,
-            'line-width': ['interpolate', ['linear'], ['zoom'], 12, 5, 18, 9],
-            'line-opacity': getLeadGlowOpacityExpression(),
-            'line-blur': 5,
-          },
-        });
-
-        map.addLayer({
-          id: CIRCLE_LAYER_ID,
-          type: 'fill-extrusion',
-          source: SOURCE_ID,
-          'source-layer': manifestSource.sourceLayer,
-          minzoom: manifestSource.minzoom,
-          filter: polygonFilter,
-          paint: {
-            'fill-extrusion-color': getAddressColorExpression(),
-            'fill-extrusion-height': ADDRESS_CYLINDER_HEIGHT_METERS,
-            'fill-extrusion-base': 0,
-            'fill-extrusion-opacity': 0.98,
-            'fill-extrusion-vertical-gradient': true,
-            'fill-extrusion-emissive-strength': 0.85,
-          },
-        } as mapboxgl.AnyLayer);
-      } else {
-        const pointFilter = getLayerFilter('Point');
-        map.addLayer({
-          id: GLOW_LAYER_ID,
-          type: 'circle',
-          source: SOURCE_ID,
-          'source-layer': manifestSource.sourceLayer,
-          minzoom: manifestSource.minzoom,
-          filter: pointFilter,
-          paint: {
-            'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 10, 18, 17],
-            'circle-color': MAP_STATUS_CONFIG.LEADS.color,
-            'circle-opacity': getLeadGlowOpacityExpression(),
-            'circle-blur': 0.85,
-          },
-        });
-
-        map.addLayer({
-          id: CIRCLE_LAYER_ID,
-          type: 'circle',
-          source: SOURCE_ID,
-          'source-layer': manifestSource.sourceLayer,
-          minzoom: manifestSource.minzoom,
-          filter: pointFilter,
-          paint: {
-            'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 4, 18, 7],
-            'circle-color': getAddressColorExpression(),
-            'circle-opacity': 0.96,
-            'circle-stroke-width': 1.5,
-            'circle-stroke-color': '#ffffff',
-          },
-        });
-      }
+      } as mapboxgl.AnyLayer);
 
       map.addLayer({
         id: LABEL_LAYER_ID,
         type: 'symbol',
         source: SOURCE_ID,
-        'source-layer': manifestSource.sourceLayer,
         minzoom: ADDRESS_LABEL_MIN_ZOOM,
-        filter: labelFilter,
+        filter: getLayerFilter('Point'),
         layout: {
-          'text-field': ['coalesce', ['get', 'house_number_label'], ['get', 'house_number'], ''],
+          'text-field': ADDRESS_LABEL_EXPRESSION,
           'text-size': ['interpolate', ['linear'], ['zoom'], ADDRESS_LABEL_MIN_ZOOM, 10, 22, 13],
           'text-font': ['DIN Offc Pro Medium', 'Arial Unicode MS Regular'],
           'text-anchor': 'center',
-          'text-pitch-alignment': hasExtrudedAddressCylinders ? 'map' : 'viewport',
-          'text-rotation-alignment': hasExtrudedAddressCylinders ? 'map' : 'viewport',
-          'text-allow-overlap': hasExtrudedAddressCylinders,
-          'text-ignore-placement': hasExtrudedAddressCylinders,
-          ...(hasExtrudedAddressCylinders
-            ? {
-                'symbol-placement': 'point',
-                'symbol-z-order': 'auto',
-                'symbol-z-elevate': true,
-                'symbol-elevation-reference': 'ground',
-              }
-            : {}),
+          'text-pitch-alignment': 'map',
+          'text-rotation-alignment': 'map',
+          'text-allow-overlap': true,
+          'text-ignore-placement': true,
+          'symbol-placement': 'point',
+          'symbol-z-order': 'auto',
+          'symbol-z-elevate': true,
+          'symbol-elevation-reference': 'ground',
         },
         paint: {
           'text-color': '#f9fafb',
           'text-opacity': 0.95,
           'text-halo-color': '#111827',
           'text-halo-width': 1.5,
-          ...(hasExtrudedAddressCylinders
-            ? {
-                'symbol-z-offset': ADDRESS_LABEL_CAP_CLEARANCE_METERS,
-                'text-occlusion-opacity': 1,
-              }
-            : {}),
+          'symbol-z-offset': ADDRESS_LABEL_CAP_CLEARANCE_METERS,
+          'text-occlusion-opacity': 1,
         },
       } as mapboxgl.AnyLayer);
 
       const clickHandler = (event: mapboxgl.MapLayerMouseEvent) => {
         const feature = event.features?.[0];
         const props = feature?.properties ?? {};
-        const addressId = String(props.address_id ?? props.id ?? '').trim();
+        const addressId = String(props.address_id ?? props.address_detail_pid ?? props.id ?? '').trim();
         if (!addressId) return;
         const buildingId = String(props.building_id ?? props.building_gers_id ?? props.gers_id ?? '').trim() || null;
         const originalEvent = event.originalEvent as MouseEvent | undefined;
@@ -424,80 +446,81 @@ export function CampaignAddressPmtilesLayer({
 
     let cleanupHandlers: (() => void) | undefined;
     let cancelled = false;
-    const onStyleLoad = () => {
-      if (!cancelled) cleanupHandlers = addLayers();
+    let retryIntervalId: number | undefined;
+    const clearRetry = () => {
+      map.off('style.load', tryAddAddressLayers);
+      map.off('styledata', tryAddAddressLayers);
+      map.off('load', tryAddAddressLayers);
+      map.off('idle', tryAddAddressLayers);
+      if (retryIntervalId !== undefined) {
+        window.clearInterval(retryIntervalId);
+        retryIntervalId = undefined;
+      }
+    };
+    const tryAddAddressLayers = () => {
+      if (cancelled) return;
+      if (hasExpectedAddressLayers()) {
+        clearRetry();
+        return;
+      }
+      if (cleanupHandlers || !canAddCustomMapLayers(map)) return;
+      try {
+        cleanupHandlers = addLocalCylinderLayers();
+        if (cleanupHandlers && hasExpectedAddressLayers()) clearRetry();
+      } catch (error) {
+        cleanupHandlers?.();
+        cleanupHandlers = undefined;
+        cleanupAddressLayers(map);
+        console.warn('[CampaignAddressPmtilesLayer] Custom address layer attach deferred:', error);
+      }
     };
 
-    if (map.isStyleLoaded()) {
-      cleanupHandlers = addLayers();
-    } else {
-      map.once('style.load', onStyleLoad);
+    tryAddAddressLayers();
+    if (!cleanupHandlers) {
+      map.on('style.load', tryAddAddressLayers);
+      map.on('styledata', tryAddAddressLayers);
+      map.on('load', tryAddAddressLayers);
+      map.on('idle', tryAddAddressLayers);
+      retryIntervalId = window.setInterval(tryAddAddressLayers, 150);
     }
 
     return () => {
       cancelled = true;
-      map.off('style.load', onStyleLoad);
+      clearRetry();
       cleanupHandlers?.();
       cleanupAddressLayers(map);
     };
   // Layer creation is keyed to the map/style/source; paint and filter changes are refreshed below to avoid full layer teardown.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [map, mapLoaded, visible, manifestSource, styleKey]);
+  }, [map, mapLoaded, visible, manifestSource, styleKey, addresses, deletedAddressSet, campaignAddressIds]);
 
   useEffect(() => {
-    if (!map || !manifestSource || !visible) return;
+    if (!map || !visible) return;
+    if (manifestSource === undefined) return;
 
-    let frameId: number | null = null;
-    const applyState = (attempt = 0) => {
-      if (!map.getSource(SOURCE_ID)) {
-        if (attempt < 8) frameId = requestAnimationFrame(() => applyState(attempt + 1));
-        return;
-      }
-
-      for (const address of addresses) {
-        try {
-          map.setFeatureState({
-            source: SOURCE_ID,
-            sourceLayer: manifestSource.sourceLayer,
-            id: address.id,
-          }, getStatusState(address));
-        } catch (error) {
-          console.warn('[CampaignAddressPmtilesLayer] Failed to apply address feature-state:', error);
+    if (manifestSource === null) {
+      try {
+        const source = map.getSource(SOURCE_ID) as mapboxgl.GeoJSONSource | undefined;
+        if (source) {
+          source.setData(buildFallbackAddressFeatureCollection(addresses, deletedAddressSet));
         }
-      }
-    };
-
-    applyState();
-
-    return () => {
-      if (frameId !== null) cancelAnimationFrame(frameId);
-    };
-  }, [map, manifestSource, visible, addresses]);
-
-  useEffect(() => {
-    if (!map || !manifestSource || !visible) return;
-    const layerFilter = getLayerFilter(manifestSource.sourceGeometry === 'polygon' ? 'Polygon' : 'Point');
-    try {
-      for (const layerId of [GLOW_LAYER_ID, CIRCLE_LAYER_ID, LABEL_LAYER_ID]) {
-        if (map.getLayer(layerId)) {
-          map.setFilter(layerId, layerFilter);
+        if (map.getLayer(GLOW_LAYER_ID)) {
+          map.setFilter(GLOW_LAYER_ID, getLayerFilter('Polygon'));
         }
+        if (map.getLayer(CIRCLE_LAYER_ID)) {
+          map.setFilter(CIRCLE_LAYER_ID, getLayerFilter('Polygon'));
+          map.setPaintProperty(CIRCLE_LAYER_ID, 'fill-extrusion-color', ADDRESS_CYLINDER_COLOR);
+        }
+        if (map.getLayer(LABEL_LAYER_ID)) {
+          map.setFilter(LABEL_LAYER_ID, getLayerFilter('Point'));
+        }
+      } catch (error) {
+        console.warn('[CampaignAddressPmtilesLayer] Failed to refresh local address cylinder styling:', error);
       }
-      if (map.getLayer(GLOW_LAYER_ID) && manifestSource.sourceGeometry === 'polygon') {
-        map.setPaintProperty(GLOW_LAYER_ID, 'line-opacity', getLeadGlowOpacityExpression());
-      } else if (map.getLayer(GLOW_LAYER_ID)) {
-        map.setPaintProperty(GLOW_LAYER_ID, 'circle-opacity', getLeadGlowOpacityExpression());
-      }
-      if (map.getLayer(CIRCLE_LAYER_ID) && manifestSource.sourceGeometry === 'polygon') {
-        map.setPaintProperty(CIRCLE_LAYER_ID, 'fill-extrusion-color', getAddressColorExpression());
-      } else if (map.getLayer(CIRCLE_LAYER_ID)) {
-        map.setPaintProperty(CIRCLE_LAYER_ID, 'circle-color', getAddressColorExpression());
-      }
-    } catch (error) {
-      console.warn('[CampaignAddressPmtilesLayer] Failed to refresh address layer styling:', error);
+      return;
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [map, manifestSource, visible, statusFilters, deletedAddressSet, isFlyerMode]);
+  }, [map, manifestSource, visible, deletedAddressSet, addresses, campaignAddressIds]);
 
   return null;
 }

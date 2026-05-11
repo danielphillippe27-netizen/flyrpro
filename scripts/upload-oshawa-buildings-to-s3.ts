@@ -55,6 +55,7 @@ const dryRun = args.includes('--dry-run');
 const keepWorkdir = args.includes('--keep-workdir');
 const minzoom = Number(readFlag('minzoom') ?? '13');
 const maxzoom = Number(readFlag('maxzoom') ?? '18');
+const BUILDING_TILE_BUFFER_UNITS = Number(process.env.BUILDING_TILE_BUFFER_UNITS ?? 8);
 const paddingMeters = Number(readFlag('padding-meters') ?? '80');
 const maxAddressBuildingMeters = Number(readFlag('max-address-building-meters') ?? '55');
 
@@ -416,6 +417,10 @@ async function runTippecanoe(buildingsGeojsonPath: string, parcelsGeojsonPath: s
     String(minzoom),
     '--maximum-zoom',
     String(maxzoom),
+    // Keep extruded building footprints from being clipped at tile edges.
+    '--buffer',
+    String(BUILDING_TILE_BUFFER_UNITS),
+    '--no-clipping',
     '--drop-densest-as-needed',
     '--extend-zooms-if-still-dropping',
     '--named-layer',

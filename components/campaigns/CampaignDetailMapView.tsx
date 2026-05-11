@@ -11,6 +11,7 @@ import Lottie from 'lottie-react';
 import type { CampaignAddress, CampaignV2, CampaignParcel } from '@/types/database';
 import { MapBuildingsLayer, type MapBuildingsRenderState } from '@/components/map/MapBuildingsLayer';
 import { CampaignAddressPmtilesLayer } from '@/components/map/CampaignAddressPmtilesLayer';
+import { CampaignParcelPmtilesLayer } from '@/components/map/CampaignParcelPmtilesLayer';
 import { MapInfoButton } from '@/components/map/MapInfoButton';
 import { LocationCard } from '@/components/map/LocationCard';
 import { CreateContactDialog } from '@/components/crm/CreateContactDialog';
@@ -22,7 +23,7 @@ import { useTheme } from '@/lib/theme-provider';
 import { useMapStyle } from '@/lib/map-style-provider';
 import { useWorkspace } from '@/lib/workspace-context';
 import { getMapboxToken, removeMapboxMapWhenSafe } from '@/lib/mapbox';
-import { appendTileAccessToken, fetchCampaignMapManifest, type CampaignMapManifest } from '@/lib/map/campaignMapManifest';
+import { fetchCampaignMapManifest, hasRenderablePmtilesParcels } from '@/lib/map/campaignMapManifest';
 import { applyPresetVisualTweaks, applyResolvedMapStyle, getResolvedMapInitOptions, hideBaseBuildingLayers, resolveMapStyle } from '@/lib/map-styles';
 import {
   DEFAULT_STATUS_FILTERS,
@@ -48,10 +49,25 @@ const BOUNDARY_LAYER_SNAPPED_LINE = 'campaign-boundary-snapped-line';
 const SHOW_CAMPAIGN_BOUNDARY_OVERLAY = false;
 const CUSTOM_BUILDING_LAYER_PREFIXES = ['map-buildings-', 'campaign-parcels'];
 
+type FlyrMapDebugWindow = Window & {
+  __flyrMapInitDebug?: Record<string, unknown>;
+};
+
+function setFlyrMapInitDebug(debug: Record<string, unknown>) {
+  if (typeof window === 'undefined') return;
+  (window as FlyrMapDebugWindow).__flyrMapInitDebug = {
+    ...(window as FlyrMapDebugWindow).__flyrMapInitDebug,
+    ...debug,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
 type BuildingPendingOverlayConfig = {
   title: string;
   description: string;
 };
+
+type MapViewMode = 'buildings' | 'addresses' | 'parcels';
 
 type PreparedAddressPoint = {
   addressId: string;
@@ -59,8 +75,6 @@ type PreparedAddressPoint = {
   lon: number;
   lat: number;
   statusKey: MapStatusKey;
-  houseNumber: string;
-  formattedAddress: string;
 };
 
 type SelectedMapTarget = {
@@ -68,15 +82,6 @@ type SelectedMapTarget = {
   buildingId: string | null;
   addressId: string | null;
   parcelId: string | null;
-};
-
-type ParcelTileSource = {
-  url: string;
-  sourceLayer: string;
-  promoteId: string;
-  minzoom: number;
-  maxzoom: number;
-  bounds?: [number, number, number, number];
 };
 
 export type MapPointOverlay = {
@@ -112,21 +117,6 @@ function safeGetSource(m: mapboxgl.Map, sourceId: string): boolean {
 
 function isCustomBuildingLayer(layerId: string): boolean {
   return CUSTOM_BUILDING_LAYER_PREFIXES.some((prefix) => layerId.startsWith(prefix));
-}
-
-function toParcelTileSource(manifest: CampaignMapManifest | null, accessToken: string | null): ParcelTileSource | null {
-  const sourceLayer = manifest?.parcel_source_layer ?? manifest?.source_layers?.parcels;
-  const urlTemplate = manifest?.parcel_vector_tile_url_template;
-  if (!sourceLayer || !urlTemplate) return null;
-
-  return {
-    url: appendTileAccessToken(urlTemplate, accessToken),
-    sourceLayer,
-    promoteId: manifest?.parcel_promote_id ?? manifest?.promote_ids?.parcels ?? 'parcel_id',
-    minzoom: manifest?.parcel_minzoom ?? 10,
-    maxzoom: manifest?.parcel_maxzoom ?? 15,
-    bounds: manifest?.parcel_bounds ?? manifest?.bounds ?? undefined,
-  };
 }
 
 function getAddressCoordinate(address: CampaignAddress): { lon: number; lat: number } | null {
@@ -221,55 +211,64 @@ function getParcelAddressStatusKey(address: CampaignAddress): MapStatusKey {
 }
 
 function getParcelAddressLabel(parcel: CampaignParcel): string {
-  const rawAddress = parcel.properties?.address;
-  if (typeof rawAddress === 'string' && rawAddress.trim()) {
-    return rawAddress.trim();
+  const properties = parcel.properties ?? {};
+  const houseNumberCandidates = [
+    properties.house_number,
+    properties.street_number,
+    properties.address_number,
+    properties.addr_housenumber,
+    properties.number,
+    properties.number_first,
+    properties.situs_house_number,
+  ];
+
+  for (const candidate of houseNumberCandidates) {
+    if (typeof candidate === 'string' || typeof candidate === 'number') {
+      const normalized = String(candidate).trim();
+      if (normalized) return normalized;
+    }
   }
 
-  const streetNumber = parcel.properties?.street_number;
-  const streetName = parcel.properties?.street_name;
-  const addressParts = [
-    typeof streetNumber === 'string' || typeof streetNumber === 'number' ? String(streetNumber).trim() : '',
-    typeof streetName === 'string' ? streetName.trim() : '',
-  ].filter(Boolean);
-  if (addressParts.length > 0) {
-    return addressParts.join(' ');
+  const rawAddressCandidates = [
+    properties.address,
+    properties.full_address,
+    properties.display_address,
+    properties.situs_address,
+  ];
+
+  for (const candidate of rawAddressCandidates) {
+    if (typeof candidate !== 'string') continue;
+    const houseNumber = extractLeadingHouseNumber(candidate);
+    if (houseNumber) return houseNumber;
   }
 
   return '';
+}
+
+function getCampaignParcelExternalId(parcel: CampaignParcel): string | null {
+  const candidates = [
+    parcel.external_id,
+    parcel.properties?.parcel_id,
+    parcel.properties?.external_id,
+    parcel.properties?.PARCELID,
+    parcel.properties?.gisid,
+    parcel.properties?.roll_number,
+    parcel.properties?.id,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' || typeof candidate === 'number') {
+      const normalized = String(candidate).trim();
+      if (normalized) return normalized;
+    }
+  }
+
+  return null;
 }
 
 function extractLeadingHouseNumber(formattedAddress: string): string {
-  const match = formattedAddress.trim().match(/^(\d+[A-Za-z0-9-]*)\b/);
+  const match = formattedAddress.trim().match(/^(\d+[A-Za-z]?(?:\/\d+[A-Za-z]?)?)/);
   return match?.[1]?.trim() ?? '';
-}
-
-function getPreferredParcelAddressLabel(addressesInParcel: PreparedAddressPoint[]): string {
-  const houseNumbers = Array.from(
-    new Set(
-      addressesInParcel
-        .map((address) => address.houseNumber.trim())
-        .filter(Boolean)
-    )
-  );
-
-  if (houseNumbers.length > 0) {
-    return houseNumbers.join(', ');
-  }
-
-  const formatted = Array.from(
-    new Set(
-      addressesInParcel
-        .map((address) => address.formattedAddress.trim())
-        .filter(Boolean)
-    )
-  );
-
-  if (formatted.length > 0) {
-    return formatted[0];
-  }
-
-  return '';
 }
 
 function getPrimaryParcelTarget(addressesInParcel: PreparedAddressPoint[]): PreparedAddressPoint | null {
@@ -289,6 +288,7 @@ export function CampaignDetailMapView({
   renderLocationCardExtra,
   buildingPendingOverlay,
   pointOverlays = [],
+  initialMapViewMode = 'buildings',
 }: {
   campaignId: string;
   addresses: CampaignAddress[];
@@ -301,6 +301,7 @@ export function CampaignDetailMapView({
   }) => ReactNode;
   buildingPendingOverlay?: BuildingPendingOverlayConfig;
   pointOverlays?: MapPointOverlay[];
+  initialMapViewMode?: MapViewMode;
 }) {
   const { theme } = useTheme();
   const { preset: mapPreset } = useMapStyle();
@@ -352,17 +353,18 @@ export function CampaignDetailMapView({
   const [selectedContactNotes, setSelectedContactNotes] = useState<string | undefined>(undefined);
 
   // Map view: 3D buildings vs 3D address points vs parcel polygons
-  const [mapViewMode, setMapViewMode] = useState<'buildings' | 'addresses' | 'parcels'>('buildings');
+  const [mapViewMode, setMapViewMode] = useState<MapViewMode>(initialMapViewMode);
   // Boundary: Snap to Roads and Raw vs Snapped toggle
   const [snapping, setSnapping] = useState(false);
   const [parcels, setParcels] = useState<CampaignParcel[]>([]);
-  const [parcelTileSource, setParcelTileSource] = useState<ParcelTileSource | null>(null);
+  const [pmtilesParcelsReady, setPmtilesParcelsReady] = useState(false);
+  const [parcelFetchSuppressed, setParcelFetchSuppressed] = useState(false);
+  const parcelFetchFailureCountRef = useRef(0);
   const parcelEnrichmentStatus = campaign?.parcel_enrichment_status ?? 'not_started';
-  const dbParcelsReady = parcels.length > 0;
-  const pmtilesParcelsReady = Boolean(parcelTileSource);
-  const parcelsReady = dbParcelsReady || pmtilesParcelsReady;
+  const hasParcelPmtilesScope = parcels.length > 0 || Boolean(campaign?.territory_boundary);
+  const parcelsReady = parcels.length > 0 || (pmtilesParcelsReady && hasParcelPmtilesScope);
   const parcelsProcessing = parcelEnrichmentStatus === 'queued' || parcelEnrichmentStatus === 'processing';
-  const showParcels = mapViewMode === 'parcels' && parcelsReady;
+  const showGeojsonParcels = mapViewMode === 'parcels' && parcels.length > 0;
   const parcelStrokeColor = theme === 'dark' ? '#ffffff' : '#000000';
   const parcelFillOpacity = theme === 'dark' ? 0.12 : 0.1;
   const parcelLineOpacity = theme === 'dark' ? 0.38 : 0.28;
@@ -372,6 +374,10 @@ export function CampaignDetailMapView({
     () => (theme === 'dark' ? '/loading/white.json' : '/loading/black.json'),
     [theme]
   );
+
+  useEffect(() => {
+    setFlyrMapInitDebug({ stage: 'component_mounted', campaignId });
+  }, [campaignId]);
   const handleBuildingsRenderStateChange = useCallback((state: MapBuildingsRenderState) => {
     setBuildingsRenderState((previous) => {
       if (
@@ -395,10 +401,34 @@ export function CampaignDetailMapView({
     [addresses, optimisticallyDeletedAddressIds]
   );
   const visibleAddressesRef = useRef(visibleAddresses);
+  const mapProvisionRefreshKey = [
+    campaign?.provision_status ?? '',
+    campaign?.provision_phase ?? '',
+    campaign?.map_mode ?? '',
+    campaign?.map_ready_at ?? '',
+    campaign?.optimized_at ?? '',
+    visibleAddresses.length,
+  ].join(':');
+  const lastMapProvisionRefreshKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     visibleAddressesRef.current = visibleAddresses;
   }, [visibleAddresses]);
+
+  useEffect(() => {
+    if (!campaignId || !mapLoaded) return;
+
+    if (lastMapProvisionRefreshKeyRef.current === null) {
+      lastMapProvisionRefreshKeyRef.current = mapProvisionRefreshKey;
+      return;
+    }
+
+    if (lastMapProvisionRefreshKeyRef.current === mapProvisionRefreshKey) return;
+
+    lastMapProvisionRefreshKeyRef.current = mapProvisionRefreshKey;
+    hasRenderedBuildingsRef.current = false;
+    setMapRefreshKey((prev) => prev + 1);
+  }, [campaignId, mapLoaded, mapProvisionRefreshKey]);
 
   const applyOptimisticMapDeletion = useCallback(
     ({
@@ -494,8 +524,10 @@ export function CampaignDetailMapView({
     setMapRefreshKey(0);
     setOptimisticallyHiddenBuildingIds([]);
     setOptimisticallyDeletedAddressIds([]);
-    setParcelTileSource(null);
-  }, [campaignId]);
+    setMapViewMode(initialMapViewMode);
+    setParcelFetchSuppressed(false);
+    parcelFetchFailureCountRef.current = 0;
+  }, [campaignId, initialMapViewMode]);
 
   useEffect(() => {
     if (!parcelsReady && mapViewMode === 'parcels') {
@@ -506,26 +538,19 @@ export function CampaignDetailMapView({
   useEffect(() => {
     let cancelled = false;
 
-    const loadParcelTileSource = async () => {
+    const loadParcelManifest = async () => {
       if (!campaignId) {
-        setParcelTileSource(null);
+        setPmtilesParcelsReady(false);
         return;
       }
 
-      try {
-        const { manifest, accessToken } = await fetchCampaignMapManifest(campaignId);
-        if (!cancelled) {
-          setParcelTileSource(toParcelTileSource(manifest, accessToken));
-        }
-      } catch (error) {
-        console.warn('[CampaignDetailMapView] Parcel PMTiles manifest unavailable:', error);
-        if (!cancelled) {
-          setParcelTileSource(null);
-        }
+      const { manifest } = await fetchCampaignMapManifest(campaignId);
+      if (!cancelled) {
+        setPmtilesParcelsReady(hasRenderablePmtilesParcels(manifest));
       }
     };
 
-    void loadParcelTileSource();
+    void loadParcelManifest();
 
     return () => {
       cancelled = true;
@@ -534,14 +559,15 @@ export function CampaignDetailMapView({
 
   // Fetch parcels for this campaign
   useEffect(() => {
-    if (!campaignId) return;
+    if (!campaignId || parcelFetchSuppressed) return;
 
     let cancelled = false;
+    const maxParcelFetchFailures = 3;
 
     const fetchParcels = async () => {
       const supabase = createClient();
       try {
-        const data = await fetchAllInPages<CampaignParcel>((from, to) =>
+        const dbParcels = await fetchAllInPages<CampaignParcel>((from, to) =>
           supabase
             .from('campaign_parcels')
             .select('*')
@@ -549,6 +575,42 @@ export function CampaignDetailMapView({
             .order('id', { ascending: true })
             .range(from, to) as unknown as Promise<{ data: CampaignParcel[] | null; error: PostgrestError | null }>
         );
+
+        let data: CampaignParcel[];
+        if (dbParcels.length > 0) {
+          parcelFetchFailureCountRef.current = 0;
+          data = dbParcels;
+        } else {
+          const response = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/parcels`, {
+            credentials: 'include',
+          });
+          if (!response.ok) {
+            const nextFailureCount = parcelFetchFailureCountRef.current + 1;
+            parcelFetchFailureCountRef.current = nextFailureCount;
+
+            if (nextFailureCount >= maxParcelFetchFailures) {
+              console.warn('Disabling campaign parcel API retries after repeated failures', {
+                campaignId,
+                status: response.status,
+                failures: nextFailureCount,
+              });
+              if (!cancelled) {
+                setParcelFetchSuppressed(true);
+                setParcels([]);
+              }
+            }
+
+            throw new Error(`Campaign parcels request failed with status ${response.status}`);
+          }
+
+          if (response.headers.get('X-FLYR-Parcels-Suppressed')) {
+            setParcelFetchSuppressed(true);
+          }
+
+          parcelFetchFailureCountRef.current = 0;
+          const payload = await response.json() as unknown;
+          data = Array.isArray(payload) ? payload as CampaignParcel[] : [];
+        }
 
         if (!cancelled) {
           setParcels(data);
@@ -577,7 +639,7 @@ export function CampaignDetailMapView({
     return () => {
       cancelled = true;
     };
-  }, [campaignId, parcelsProcessing]);
+  }, [campaignId, parcelFetchSuppressed, parcelsProcessing]);
 
   // Handle building click - opens LocationCard
   // For unit slices, addressId is passed to show specific unit
@@ -858,55 +920,89 @@ export function CampaignDetailMapView({
   };
 
   useEffect(() => {
-    if (!mapContainer.current || map.current || initAttemptedRef.current) return;
+    if (map.current || initAttemptedRef.current) return;
     let cancelled = false;
     let retryFrameId: number | null = null;
     let resizeTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
+    const scheduleRetry = () => {
+      retryFrameId = requestAnimationFrame(() => {
+        void checkAndInit();
+      });
+    };
+
     // Check if container has dimensions before initializing
     const checkAndInit = async () => {
-      if (cancelled || !mapContainer.current) return;
+      if (cancelled) return;
+
+      if (!mapContainer.current) {
+        setFlyrMapInitDebug({ stage: 'waiting_for_container' });
+        scheduleRetry();
+        return;
+      }
       
       const rect = mapContainer.current.getBoundingClientRect();
       if (rect.width === 0 || rect.height === 0) {
-        // Container not visible yet, try again on next frame
-        retryFrameId = requestAnimationFrame(() => {
-          void checkAndInit();
+        setFlyrMapInitDebug({
+          stage: 'waiting_for_dimensions',
+          width: rect.width,
+          height: rect.height,
         });
+        // Container not visible yet, try again on next frame
+        scheduleRetry();
         return;
       }
 
-      initAttemptedRef.current = true;
-      const token = getMapboxToken();
-      mapboxgl.accessToken = token;
+      try {
+        initAttemptedRef.current = true;
+        setFlyrMapInitDebug({
+          stage: 'initializing',
+          width: rect.width,
+          height: rect.height,
+          styleKey: resolvedMapStyle.key,
+        });
+        const token = getMapboxToken();
+        mapboxgl.accessToken = token;
 
-      // Helper to get initial center from addresses (GeoJSON-first approach)
-      const getInitialCenter = (): [number, number] => {
-        const currentVisibleAddresses = visibleAddressesRef.current;
-        if (currentVisibleAddresses.length > 0) {
-          const addr = currentVisibleAddresses[0];
-          const coordinate = getAddressCoordinate(addr);
-          if (coordinate) {
-            return [coordinate.lon, coordinate.lat];
+        // Helper to get initial center from addresses (GeoJSON-first approach)
+        const getInitialCenter = (): [number, number] => {
+          const currentVisibleAddresses = visibleAddressesRef.current;
+          if (currentVisibleAddresses.length > 0) {
+            const addr = currentVisibleAddresses[0];
+            const coordinate = getAddressCoordinate(addr);
+            if (coordinate) {
+              return [coordinate.lon, coordinate.lat];
+            }
           }
-        }
-        return [-79.3832, 43.6532]; // Toronto default
-      };
+          return [-79.3832, 43.6532]; // Toronto default
+        };
 
-      const mapInitOptions = await getResolvedMapInitOptions(resolvedMapStyle);
-      if (cancelled || !mapContainer.current || map.current) {
+        const mapInitOptions = await getResolvedMapInitOptions(resolvedMapStyle);
+        if (cancelled || !mapContainer.current || map.current) {
+          initAttemptedRef.current = false;
+          return;
+        }
+
+        map.current = new mapboxgl.Map({
+          container: mapContainer.current,
+          ...(mapInitOptions as Pick<mapboxgl.MapOptions, 'style' | 'config'>),
+          center: getInitialCenter(),
+          zoom: 12,
+        });
+        setFlyrMapInitDebug({ stage: 'map_created' });
+      } catch (error) {
+        console.error('[CampaignDetailMapView] Failed to initialize Mapbox map:', error);
+        setFlyrMapInitDebug({
+          stage: 'init_failed',
+          error: error instanceof Error ? error.message : String(error),
+        });
         initAttemptedRef.current = false;
+        scheduleRetry();
         return;
       }
-
-      map.current = new mapboxgl.Map({
-        container: mapContainer.current,
-        ...(mapInitOptions as Pick<mapboxgl.MapOptions, 'style' | 'config'>),
-        center: getInitialCenter(),
-        zoom: 12,
-      });
 
       map.current.on('load', () => {
+        setFlyrMapInitDebug({ stage: 'map_loaded' });
         setMapLoaded(true);
         
         // Clean up problematic layers and hide building layers
@@ -1058,51 +1154,77 @@ export function CampaignDetailMapView({
   useEffect(() => {
     if (!map.current || !mapLoaded) return;
 
-    // Fit bounds to show all addresses; rendered campaign geometry comes from PMTiles layers.
-    if (visibleAddresses.length > 0) {
-      const addressesWithCoords = visibleAddresses
+    if (!boundsFittedRef.current) {
+      const bounds = new mapboxgl.LngLatBounds();
+      visibleAddresses
         .map(addr => getAddressCoordinate(addr))
-        .filter((coord): coord is { lon: number; lat: number } => coord !== null);
+        .filter((coord): coord is { lon: number; lat: number } => coord !== null)
+        .forEach((coord) => {
+          bounds.extend([coord.lon, coord.lat]);
+        });
 
-      if (addressesWithCoords.length > 0 && !boundsFittedRef.current) {
-        // Use setTimeout to ensure map is fully ready
+      if (bounds.isEmpty()) {
+        const bbox = campaign?.bbox;
+
+        if (
+          Array.isArray(bbox) &&
+          bbox.length === 4 &&
+          bbox.every((value) => typeof value === 'number' && Number.isFinite(value))
+        ) {
+          bounds.extend([bbox[0], bbox[1]]);
+          bounds.extend([bbox[2], bbox[3]]);
+        } else {
+          const boundary = campaign?.territory_boundary as GeoJSON.Polygon | null | undefined;
+          const ring = boundary?.coordinates?.[0] ?? [];
+          for (const coordinate of ring) {
+            const [lon, lat] = coordinate;
+            if (Number.isFinite(lon) && Number.isFinite(lat)) {
+              bounds.extend([lon, lat]);
+            }
+          }
+        }
+      }
+
+      if (bounds.isEmpty()) {
+        const boundary = campaign?.territory_boundary as GeoJSON.Polygon | null | undefined;
+        const ring = boundary?.coordinates?.[0] ?? [];
+        for (const coordinate of ring) {
+          const [lon, lat] = coordinate;
+          if (Number.isFinite(lon) && Number.isFinite(lat)) {
+            bounds.extend([lon, lat]);
+          }
+        }
+      }
+
+      if (!bounds.isEmpty()) {
         setTimeout(() => {
           if (!map.current || boundsFittedRef.current) return;
-          
-          const bounds = new mapboxgl.LngLatBounds();
-          addressesWithCoords.forEach((coord) => {
-            bounds.extend([coord.lon, coord.lat]);
+          boundsFittedRef.current = true;
+          map.current.fitBounds(bounds, {
+            padding: {
+              top: 40,
+              right: 40,
+              bottom: 132,
+              left: 40,
+            },
+            maxZoom: 15,
+            duration: 1000,
           });
-          
-          // Only fit bounds if we have valid bounds
-          if (!bounds.isEmpty()) {
-            boundsFittedRef.current = true;
-            map.current.fitBounds(bounds, {
-              padding: {
-                top: 72,
-                right: 40,
-                bottom: 24,
-                left: 40,
-              },
-              maxZoom: 18,
-              duration: 1000,
-            });
 
-            map.current.once('moveend', () => {
-              if (!map.current) return;
-              if (map.current.getZoom() >= 12) return;
-
+          map.current.once('moveend', () => {
+            if (!map.current) return;
+            if (map.current.getZoom() < 12) {
               map.current.easeTo({
                 zoom: 12,
                 duration: 300,
               });
-            });
-          }
+            }
+          });
         }, 200);
       }
     }
     // Buildings are handled by MapBuildingsLayer component which provides fill extrusions.
-  }, [mapLoaded, visibleAddresses]);
+  }, [campaign?.bbox, campaign?.territory_boundary, mapLoaded, mapViewMode, visibleAddresses]);
 
   const preparedAddressPoints = useMemo<PreparedAddressPoint[]>(() => {
     return visibleAddresses
@@ -1119,12 +1241,48 @@ export function CampaignDetailMapView({
           lon: coordinate.lon,
           lat: coordinate.lat,
           statusKey: getParcelAddressStatusKey(address),
-          houseNumber: String(address.house_number ?? '').trim() || extractLeadingHouseNumber(String(address.formatted ?? address.address ?? '')),
-          formattedAddress: String(address.formatted ?? address.address ?? '').trim(),
         };
       })
       .filter((value): value is PreparedAddressPoint => value !== null);
   }, [visibleAddresses]);
+
+  const parcelStatusByExternalId = useMemo<Record<string, MapStatusKey>>(() => {
+    const statusByExternalId: Record<string, MapStatusKey> = {};
+
+    for (const parcel of parcels) {
+      const externalId = getCampaignParcelExternalId(parcel);
+      if (!externalId) continue;
+
+      let geom: unknown = parcel.geom;
+      if (typeof geom === 'string') {
+        try {
+          geom = JSON.parse(geom);
+        } catch {
+          continue;
+        }
+      }
+      if (
+        !geom ||
+        typeof geom !== 'object' ||
+        !['Polygon', 'MultiPolygon'].includes((geom as { type?: string }).type ?? '')
+      ) {
+        continue;
+      }
+
+      const parcelFeature = turf.feature(geom as GeoJSON.Polygon | GeoJSON.MultiPolygon);
+      const statuses = new Set<MapStatusKey>();
+      for (const addressPoint of preparedAddressPoints) {
+        const point = turf.point([addressPoint.lon, addressPoint.lat]);
+        if (turf.booleanPointInPolygon(point, parcelFeature)) {
+          statuses.add(addressPoint.statusKey);
+        }
+      }
+
+      statusByExternalId[externalId] = MAP_STATUS_PRIORITY.find((key) => statuses.has(key)) ?? 'UNTOUCHED';
+    }
+
+    return statusByExternalId;
+  }, [parcels, preparedAddressPoints]);
 
   const pointOverlaySourceId = 'campaign-point-overlays';
   const pointOverlayCircleLayerId = 'campaign-point-overlays-circle';
@@ -1135,7 +1293,8 @@ export function CampaignDetailMapView({
     if (!mapInstance || !mapLoaded) return;
 
     const buildPointOverlayGeoJSON = (): GeoJSON.FeatureCollection<GeoJSON.Point> | null => {
-      const features: GeoJSON.Feature<GeoJSON.Point>[] = pointOverlays
+      const visiblePointOverlays = mapViewMode === 'parcels' ? [] : pointOverlays;
+      const features: GeoJSON.Feature<GeoJSON.Point>[] = visiblePointOverlays
         .filter((overlay) => Number.isFinite(overlay.lon) && Number.isFinite(overlay.lat))
         .map((overlay) => ({
           type: 'Feature',
@@ -1245,7 +1404,7 @@ export function CampaignDetailMapView({
       }
     };
 
-    if (pointOverlays.length === 0) {
+    if (mapViewMode === 'parcels' || pointOverlays.length === 0) {
       removePointOverlayLayers();
       return;
     }
@@ -1263,7 +1422,7 @@ export function CampaignDetailMapView({
       mapInstance.off('click', pointOverlayCircleLayerId, onPointOverlayClick);
       removePointOverlayLayers();
     };
-  }, [handleMapTargetClick, mapLoaded, pointOverlays, resolvedMapStyle.key]);
+  }, [handleMapTargetClick, mapLoaded, mapViewMode, pointOverlays, resolvedMapStyle.key]);
 
   // Sync map style with the selected map preset.
   useEffect(() => {
@@ -1304,17 +1463,6 @@ export function CampaignDetailMapView({
       cleanupLayers();
     });
   }, [mapLoaded, resolvedMapStyle]);
-
-  // Auto-set pitch for 3D view (fill-extrusion buildings look better with pitch)
-  useEffect(() => {
-    if (!map.current || !mapLoaded) return;
-    
-    // Set pitch to 60° for better 3D building visualization
-    map.current.easeTo({
-      pitch: 60,
-      duration: 1000,
-    });
-  }, [mapLoaded]);
 
   useEffect(() => {
     if (!map.current || !mapLoaded) return;
@@ -1445,71 +1593,7 @@ export function CampaignDetailMapView({
       if (safeGetSource(m, PARCEL_SOURCE_ID)) m.removeSource(PARCEL_SOURCE_ID);
     };
 
-    const addParcelPmtilesLayer = () => {
-      if (!m.isStyleLoaded() || !parcelTileSource) return;
-
-      try {
-        removeParcelsLayer();
-        const vectorSource: mapboxgl.VectorSourceSpecification & { promoteId?: Record<string, string> } = {
-          type: 'vector',
-          tiles: [parcelTileSource.url],
-          minzoom: parcelTileSource.minzoom,
-          maxzoom: parcelTileSource.maxzoom,
-          promoteId: {
-            [parcelTileSource.sourceLayer]: parcelTileSource.promoteId,
-          },
-        };
-        if (parcelTileSource.bounds) vectorSource.bounds = parcelTileSource.bounds;
-
-        m.addSource(PARCEL_SOURCE_ID, vectorSource);
-        m.addLayer({
-          id: PARCEL_FILL_LAYER,
-          type: 'fill',
-          source: PARCEL_SOURCE_ID,
-          'source-layer': parcelTileSource.sourceLayer,
-          minzoom: parcelTileSource.minzoom,
-          filter: ['==', '$type', 'Polygon'],
-          paint: {
-            'fill-color': parcelStrokeColor,
-            'fill-opacity': parcelFillOpacity,
-          },
-        });
-
-        m.addLayer({
-          id: PARCEL_LINE_LAYER,
-          type: 'line',
-          source: PARCEL_SOURCE_ID,
-          'source-layer': parcelTileSource.sourceLayer,
-          minzoom: parcelTileSource.minzoom,
-          filter: ['==', '$type', 'Polygon'],
-          layout: {
-            'line-cap': 'round',
-            'line-join': 'round',
-          },
-          paint: {
-            'line-color': parcelStrokeColor,
-            'line-width': [
-              'interpolate',
-              ['linear'],
-              ['zoom'],
-              10,
-              0.08,
-              14,
-              0.18,
-              16,
-              0.28,
-              18,
-              parcelLineWidth,
-            ],
-            'line-opacity': parcelLineOpacity,
-          },
-        });
-      } catch (err) {
-        console.error('Error adding parcel PMTiles layer:', err);
-      }
-    };
-
-    if (parcels.length === 0 && !parcelTileSource) {
+    if (parcels.length === 0) {
       removeParcelsLayer();
       return;
     }
@@ -1565,11 +1649,6 @@ export function CampaignDetailMapView({
     const addParcelsLayer = () => {
       if (!m.isStyleLoaded()) return;
 
-      if (parcels.length === 0 && parcelTileSource) {
-        addParcelPmtilesLayer();
-        return;
-      }
-
       removeParcelsLayer();
 
       const parcelFeatures: Array<GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>> = [];
@@ -1592,13 +1671,8 @@ export function CampaignDetailMapView({
           }
         }
 
-        if (statuses.size === 0) {
-          continue;
-        }
-
         const statusKey = MAP_STATUS_PRIORITY.find((key) => statuses.has(key)) ?? 'UNTOUCHED';
         const parcelLabel = getParcelAddressLabel(parcel);
-        const primaryLabel = getPreferredParcelAddressLabel(addressesInParcel) || parcelLabel;
         const primaryTarget = getPrimaryParcelTarget(addressesInParcel);
 
         parcelFeatures.push({
@@ -1609,19 +1683,19 @@ export function CampaignDetailMapView({
             parcel_row_id: parcel.id,
             address_id: primaryTarget?.addressId ?? null,
             building_id: primaryTarget?.buildingId ?? null,
-            label: primaryLabel,
+            label: parcelLabel,
             feature_type: parcel.properties?.FEATURE_TYPE || parcel.properties?.feature_type || 'COMMON',
             status_key: statusKey,
           },
         });
 
-        if (primaryLabel) {
+        if (parcelLabel) {
           const labelPoint = turf.pointOnFeature(turfFeature);
           parcelLabelFeatures.push({
             type: 'Feature',
             geometry: labelPoint.geometry,
             properties: {
-              label: primaryLabel,
+              label: parcelLabel,
             },
           });
         }
@@ -1736,7 +1810,7 @@ export function CampaignDetailMapView({
       m.getCanvas().style.cursor = '';
     };
 
-    if (!showParcels) {
+    if (!showGeojsonParcels) {
       m.off('click', PARCEL_FILL_LAYER, onParcelClick);
       m.off('mouseenter', PARCEL_FILL_LAYER, setParcelCursor);
       m.off('mouseleave', PARCEL_FILL_LAYER, clearParcelCursor);
@@ -1765,9 +1839,8 @@ export function CampaignDetailMapView({
     };
   }, [
     mapLoaded,
-    showParcels,
+    showGeojsonParcels,
     parcels,
-    parcelTileSource,
     preparedAddressPoints,
     statusFilters,
     parcelStrokeColor,
@@ -1805,6 +1878,11 @@ export function CampaignDetailMapView({
       (buildingsRenderState.hasData &&
         buildingsRenderState.zoomLevel >= 12 &&
         !buildingsRenderState.hasBuildingPolygons));
+  const campaignBbox = Array.isArray(campaign?.bbox) &&
+    campaign.bbox.length === 4 &&
+    campaign.bbox.every((value) => typeof value === 'number' && Number.isFinite(value))
+    ? (campaign.bbox as [number, number, number, number])
+    : null;
 
   useEffect(() => {
     if (mapViewMode !== 'buildings') {
@@ -1910,16 +1988,20 @@ export function CampaignDetailMapView({
                     onClick={() => setMapViewMode('parcels')}
                     className={`px-3 py-2 text-sm font-medium transition-colors ${
                       mapViewMode === 'parcels'
-                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
+                        ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
                         : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
                     }`}
-                    title={dbParcelsReady
-                      ? `${parcels.length} parcel${parcels.length !== 1 ? 's' : ''} available`
-                      : 'Parcel PMTiles available'}
+                    title={
+                      pmtilesParcelsReady
+                        ? 'Parcel PMTiles from Diamond S3'
+                        : `${parcels.length} parcel${parcels.length !== 1 ? 's' : ''} in campaign polygon`
+                    }
                   >
                     Parcels
-                    {dbParcelsReady ? (
-                      <span className="ml-1 text-xs opacity-60">({parcels.length})</span>
+                    {!pmtilesParcelsReady ? (
+                      <span className="ml-1 text-xs opacity-60">
+                        ({parcels.length})
+                      </span>
                     ) : null}
                   </button>
                 ) : null}
@@ -1972,6 +2054,8 @@ export function CampaignDetailMapView({
               addressStateOverrides={visibleAddresses}
               hiddenBuildingIds={optimisticallyHiddenBuildingIds}
               deletedAddressIds={optimisticallyDeletedAddressIds}
+              campaignBoundary={(campaign?.territory_boundary as GeoJSON.Polygon | null | undefined) ?? null}
+              campaignBbox={campaignBbox}
               statusFilters={statusFilters}
               showAddressLabels={true}
               onBuildingClick={handleBuildingClick}
@@ -1987,9 +2071,26 @@ export function CampaignDetailMapView({
             campaignType={campaign?.type ?? null}
             statusFilters={statusFilters}
             deletedAddressIds={optimisticallyDeletedAddressIds}
+            campaignBoundary={(campaign?.territory_boundary as GeoJSON.Polygon | null | undefined) ?? null}
+            campaignBbox={campaignBbox}
             styleKey={resolvedMapStyle.key}
             onAddressClick={(addressId, buildingId, options) => {
               handleMapTargetClick({ buildingId, addressId, parcelId: null }, options);
+            }}
+          />
+          <CampaignParcelPmtilesLayer
+            map={map.current}
+            campaignId={campaignId}
+            mapLoaded={mapLoaded}
+            visible={mapViewMode === 'parcels' && hasParcelPmtilesScope && parcels.length === 0 && !campaign?.territory_boundary}
+            parcels={parcels}
+            parcelStatusByExternalId={parcelStatusByExternalId}
+            statusFilters={statusFilters}
+            campaignBoundary={(campaign?.territory_boundary as GeoJSON.Polygon | null | undefined) ?? null}
+            campaignBbox={campaignBbox}
+            styleKey={resolvedMapStyle.key}
+            onParcelClick={(parcelId, options) => {
+              handleMapTargetClick({ buildingId: null, addressId: null, parcelId }, options);
             }}
           />
           {/* Location Card - floating card when building is clicked */}

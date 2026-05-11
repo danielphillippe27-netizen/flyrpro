@@ -5,6 +5,7 @@ type CampaignSnapshotRow = {
   bucket: string;
   prefix: string | null;
   buildings_key: string | null;
+  addresses_key?: string | null;
   buildings_url: string | null;
   metadata_key: string | null;
   buildings_count: number | null;
@@ -73,9 +74,7 @@ export function resolvePmtilesKey(snapshot: CampaignSnapshotRow): string | null 
     return snapshot.buildings_key;
   }
 
-  const prefix = stringMetric(snapshot.tile_metrics, 'diamond_prefix') || snapshot.prefix;
-  if (!prefix) return null;
-  return `${prefix.replace(/\/+$/, '')}/buildings.pmtiles`;
+  return null;
 }
 
 export function resolveCampaignMapArtifact(

@@ -110,6 +110,7 @@ export async function GET(
         
         // Use campaign_id from qr_code if available, otherwise use from address
         const campaignId = qrCode.campaign_id || address?.campaign_id || null;
+        const scannedAt = new Date().toISOString();
 
         // Insert scan record
         const { error: scanError } = await supabase
@@ -120,17 +121,27 @@ export async function GET(
             user_agent: userAgent,
             ip_address: ipAddress,
             referrer: referrer,
-            scanned_at: new Date().toISOString(),
+            scanned_at: scannedAt,
           });
 
         if (scanError) {
           console.error('Error recording QR scan:', scanError);
-        } else if (address && isFirstScan) {
+        } else {
+          const { error: incrementScanError } = await supabase.rpc('increment_scan', {
+            row_id: qrCode.address_id,
+          });
+
+          if (incrementScanError) {
+            console.error('Error incrementing address scan counter:', incrementScanError);
+          }
+        }
+
+        if (!scanError && address && isFirstScan) {
           const { error: outcomeError } = await supabase.rpc('record_public_qr_scan_outcome', {
             p_campaign_address_id: qrCode.address_id,
             p_status: 'delivered',
             p_notes: 'public qr scan',
-            p_occurred_at: new Date().toISOString(),
+            p_occurred_at: scannedAt,
           });
 
           if (outcomeError) {
@@ -172,6 +183,5 @@ export async function GET(
     );
   }
 }
-
 
 

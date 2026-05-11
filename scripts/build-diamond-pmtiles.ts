@@ -99,6 +99,7 @@ const args = process.argv.slice(2);
 const campaignId = args.find((arg) => !arg.startsWith('--'));
 const dryRun = args.includes('--dry-run');
 const keepWorkdir = args.includes('--keep-workdir');
+const BUILDING_TILE_BUFFER_UNITS = Number(process.env.BUILDING_TILE_BUFFER_UNITS ?? 8);
 const minzoom = Number(readFlag('minzoom') ?? '13');
 const maxzoom = Number(readFlag('maxzoom') ?? '18');
 const MAX_NEARBY_BUILDING_METERS = Number(readFlag('max-nearby-meters') ?? '55');
@@ -1117,6 +1118,10 @@ async function runTippecanoe(options: {
     String(options.minzoom),
     '--maximum-zoom',
     String(options.maxzoom),
+    // Keep extruded building footprints from being clipped at tile edges.
+    '--buffer',
+    String(BUILDING_TILE_BUFFER_UNITS),
+    '--no-clipping',
     '--drop-densest-as-needed',
     '--extend-zooms-if-still-dropping',
     '--named-layer',

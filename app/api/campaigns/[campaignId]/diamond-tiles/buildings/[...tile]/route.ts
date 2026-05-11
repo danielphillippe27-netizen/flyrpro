@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { PMTiles } from 'pmtiles';
+import type { PMTiles } from 'pmtiles';
 import { createAdminClient } from '@/lib/supabase/server';
-import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
-import { ensureCampaignAccess } from '@/app/api/campaigns/_utils/access';
+import {
+  ensureCachedCampaignAccess,
+  getCachedCampaignSnapshot,
+  getCachedPmtilesArchive,
+  resolveCachedTileUser,
+} from '@/app/api/campaigns/_utils/tile-cache';
 import {
   type CampaignSnapshotRow,
   resolveArtifactUrl,
@@ -21,6 +25,13 @@ function parseTile(tile: string[]) {
   const y = Number(yClean);
   if (![z, x, y].every(Number.isInteger)) return null;
   return { z, x, y };
+}
+
+function appendUrlVersion(url: string, version: string | null) {
+  if (!version) return url;
+
+  const separator = url.includes('?') ? '&' : '?';
+  return `${url}${separator}v=${encodeURIComponent(version)}`;
 }
 
 export async function GET(
@@ -50,10 +61,7 @@ export async function GET(
   }
 
   const authStartedAt = Date.now();
-  const requestUser = await resolveUserFromRequest(request, {
-    allowQueryToken: true,
-    queryTokenParamNames: ['access_token', 'token'],
-  });
+  const requestUser = await resolveCachedTileUser(request);
   mark('authMs', authStartedAt);
   if (!requestUser) {
     logTiming(401);
@@ -62,7 +70,7 @@ export async function GET(
 
   const supabase = createAdminClient();
   const accessStartedAt = Date.now();
-  const allowed = await ensureCampaignAccess(supabase, campaignId, requestUser.id);
+  const allowed = await ensureCachedCampaignAccess(supabase, campaignId, requestUser.id);
   mark('accessMs', accessStartedAt);
   if (!allowed) {
     logTiming(404, { reason: 'access_denied' });
@@ -70,27 +78,27 @@ export async function GET(
   }
 
   const snapshotStartedAt = Date.now();
-  const { data: snapshot, error: snapshotError } = await supabase
-    .from('campaign_snapshots')
-    .select('bucket, prefix, buildings_key, buildings_url, metadata_key, buildings_count, created_at, tile_metrics')
-    .eq('campaign_id', campaignId)
-    .maybeSingle();
-  mark('snapshotLookupMs', snapshotStartedAt);
-
-  if (snapshotError) {
+  let snapshot: CampaignSnapshotRow | null;
+  try {
+    snapshot = await getCachedCampaignSnapshot(supabase, campaignId);
+  } catch (snapshotError) {
     logTiming(500, { reason: 'snapshot_error' });
     return NextResponse.json(
-      { error: 'Failed to load campaign geometry snapshot', details: snapshotError.message },
+      {
+        error: 'Failed to load campaign geometry snapshot',
+        details: snapshotError instanceof Error ? snapshotError.message : String(snapshotError),
+      },
       { status: 500 }
     );
   }
+  mark('snapshotLookupMs', snapshotStartedAt);
 
   if (!snapshot) {
     logTiming(404, { reason: 'snapshot_missing' });
     return NextResponse.json({ error: 'No geometry artifact snapshot exists for this campaign' }, { status: 404 });
   }
 
-  const snapshotRow = snapshot as CampaignSnapshotRow;
+  const snapshotRow = snapshot;
   const pmtilesKey = resolvePmtilesKey(snapshotRow);
   if (!pmtilesKey) {
     logTiming(404, { reason: 'pmtiles_key_missing' });
@@ -103,7 +111,7 @@ export async function GET(
   let result: Awaited<ReturnType<PMTiles['getZxy']>>;
   try {
     const getZxyStartedAt = Date.now();
-    const archive = new PMTiles(pmtilesUrl);
+    const archive = getCachedPmtilesArchive(appendUrlVersion(pmtilesUrl, request.nextUrl.searchParams.get('v')));
     result = await archive.getZxy(parsedTile.z, parsedTile.x, parsedTile.y);
     mark('pmtilesGetZxyMs', getZxyStartedAt);
   } catch (error) {

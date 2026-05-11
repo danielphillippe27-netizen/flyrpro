@@ -6,8 +6,11 @@ export const FARM_TOUCH_INTERVAL_OPTIONS: Array<{ value: FarmTouchInterval; labe
 ];
 
 export const FARM_TOUCH_TYPE_OPTIONS: Array<{ value: FarmTouchType; label: string }> = [
+  { value: 'phone_call', label: 'Phone call' },
   { value: 'doorknock', label: 'Doorknock' },
   { value: 'flyer', label: 'Flyer' },
+  { value: 'social_ad', label: 'Social media ad' },
+  { value: 'event', label: 'Event' },
   { value: 'canada_post', label: 'Canada Post' },
   { value: 'pop_by', label: 'Pop by' },
   { value: 'letter', label: 'Letter' },
@@ -34,7 +37,6 @@ export function normalizeFarmTouchTypes(value?: string[] | null): FarmTouchType[
   return value
     .map((type) => {
       if (type === 'mail') return 'letter';
-      if (type === 'event') return 'pop_by';
       return type;
     })
     .filter((type): type is FarmTouchType => TOUCH_TYPE_VALUES.has(type as FarmTouchType));
@@ -71,6 +73,7 @@ export function formatFarmGoal(
 }
 
 export function getFarmTouchCount(farm: Pick<Farm, 'touches_per_interval' | 'frequency'>): number {
+  void farm;
   return 1;
 }
 

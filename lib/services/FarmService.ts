@@ -57,6 +57,7 @@ function withFarmProgress<T extends Farm>(farm: T): T {
     goal_target: farm.goal_target ?? farm.touches_per_interval ?? farm.frequency ?? 1,
     cycle_completion_window_days: farm.cycle_completion_window_days ?? null,
     touch_types: farm.touch_types ?? [],
+    include_social_ads_in_spend: farm.include_social_ads_in_spend ?? false,
     home_limit: farm.home_limit ?? 5000,
     address_count: farm.address_count ?? 0,
   };
@@ -70,12 +71,12 @@ function normalizeFarmTouchModeValue(
   if (value === 'flyer_drop') return 'flyer';
   if (value === 'mail') return 'letter';
   if (value === 'letters') return 'letter';
-  if (value === 'event') return 'pop_by';
+  if (value === 'event') return 'event';
   return value as FarmTouch['mode'];
 }
 
 function resolveFarmTouchMode(touch: LegacyFarmTouchRow): FarmTouch['mode'] {
-  if (touch.mode && touch.mode !== 'canvassing') {
+  if (touch.mode) {
     return normalizeFarmTouchModeValue(touch.mode);
   }
   if (touch.type) {
@@ -100,6 +101,12 @@ function getDefaultFarmTouchTitle(mode: FarmSessionMode): string {
       return 'Pop by session';
     case 'letter':
       return 'Letter session';
+    case 'phone_call':
+      return 'Phone call session';
+    case 'social_ad':
+      return 'Social media ad session';
+    case 'event':
+      return 'Event session';
     case 'doorknock':
     default:
       return 'Doorknock session';
@@ -111,7 +118,11 @@ function getLegacyFarmTouchType(mode: FarmSessionMode): 'door_knock' | 'flyer' |
     case 'doorknock':
       return 'door_knock';
     case 'pop_by':
+    case 'phone_call':
+    case 'event':
       return 'event';
+    case 'social_ad':
+      return 'flyer';
     case 'flyer':
     case 'canada_post':
     case 'letter':
@@ -204,6 +215,7 @@ export class FarmService {
       cycle_completion_window_days: payload.cycle_completion_window_days ?? null,
       touch_types: payload.touch_types ?? [],
       annual_budget_cents: payload.annual_budget_cents ?? null,
+      include_social_ads_in_spend: payload.include_social_ads_in_spend ?? false,
       area_label: payload.area_label ?? null,
       home_limit: payload.home_limit ?? 5000,
       address_count: payload.address_count ?? 0,
@@ -221,6 +233,7 @@ export class FarmService {
       'cycle_completion_window_days',
       'touch_types',
       'annual_budget_cents',
+      'include_social_ads_in_spend',
       'home_limit',
       'address_count',
     ] as const;
@@ -272,6 +285,7 @@ export class FarmService {
       'cycle_completion_window_days',
       'touch_types',
       'annual_budget_cents',
+      'include_social_ads_in_spend',
     ] as const;
 
     let { error } = await this.client.from('farms').update(fallbackUpdates).eq('id', id);
@@ -291,7 +305,7 @@ export class FarmService {
 
   static async fetchAddresses(farmId: string): Promise<FarmAddress[]> {
     try {
-      const rows = await fetchAllInPages((from, to) =>
+      const rows = await fetchAllInPages(async (from, to) =>
         this.client
           .from('farm_addresses')
           .select('*')
@@ -497,13 +511,14 @@ export class FarmTouchService {
       ) {
         throw new Error(formatError(error));
       }
-      await this.updateTouch(touchId, {
+      const fallbackUpdates: Partial<FarmTouch> & { completed?: boolean; completed_at?: string } = {
         status: 'completed',
         completed_date: completedAt,
         completed: true,
         completed_at: completedAt,
         notes: options?.notes,
-      });
+      };
+      await this.updateTouch(touchId, fallbackUpdates);
     }
   }
 }

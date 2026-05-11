@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
@@ -21,12 +21,12 @@ import { PaywallGuard } from '@/components/PaywallGuard';
 import { MissingQRModal } from '@/components/modals/MissingQRModal';
 import type { CampaignV2, CampaignAddress, CampaignContact } from '@/types/database';
 import type { CampaignRoadMetadata } from '@/types/campaign-roads';
-import { Users, MapPin, Search, Plus, Pencil, Trash2 } from 'lucide-react';
+import { Users, MapPin, Search, Plus, Pencil, Trash2, Paperclip, FileText, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { createClient } from '@/lib/supabase/client';
 import { useWorkspace } from '@/lib/workspace-context';
 import { ActivityPageView } from '@/components/activity/ActivityPageView';
-import { AssignedRoutesView } from '@/components/routes/AssignedRoutesView';
+import { CampaignAssignmentView } from '@/components/campaigns/CampaignAssignmentView';
 import { FinancePanel } from '@/components/finance/FinancePanel';
 import {
   buildLegacyCampaignText,
@@ -34,13 +34,6 @@ import {
   parseLegacyCampaignText,
 } from '@/lib/campaignLegacyFields';
 
-const FLYER_ALLOWED_TYPES = [
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-  'image/gif',
-  'application/pdf',
-] as const;
 const FLYER_MAX_SIZE_MB = 10;
 
 const MapPanelSkeleton = () => (
@@ -55,18 +48,6 @@ const CampaignDetailMapView = dynamic(
   { ssr: false, loading: () => <MapPanelSkeleton /> }
 );
 
-const OptimizedRouteView = dynamic(
-  () =>
-    import('@/components/campaigns/OptimizedRouteView').then((m) => m.OptimizedRouteView),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="rounded-xl border border-border bg-card p-8 text-center text-sm text-muted-foreground">
-        Loading route…
-      </div>
-    ),
-  }
-);
 import {
   Dialog,
   DialogContent,
@@ -76,10 +57,109 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 
 type CampaignWithLegacyDescription = CampaignV2 & {
   description?: string | null;
 };
+
+// Keep this prefix compatible with the farm notes timeline because farm notes are stored on campaigns.
+const CAMPAIGN_NOTE_TIMELINE_PREFIX = '__FLYR_FARM_NOTE_TIMELINE_V1__';
+
+type CampaignNoteAttachment = {
+  name: string;
+  url: string;
+  type: 'pdf';
+};
+
+type CampaignNoteEntry = {
+  id: string;
+  body: string;
+  createdAt: string;
+  attachment?: CampaignNoteAttachment;
+};
+
+type CampaignNoteTimeline = {
+  entries: CampaignNoteEntry[];
+};
+
+function isCampaignNotePlaceholder(value: string): boolean {
+  return /^\[farm:[0-9a-f-]+\]$/i.test(value.trim());
+}
+
+function isCampaignNoteAttachment(value: unknown): value is CampaignNoteAttachment {
+  const candidate = value as CampaignNoteAttachment | null;
+  return (
+    Boolean(candidate) &&
+    candidate?.type === 'pdf' &&
+    typeof candidate.name === 'string' &&
+    typeof candidate.url === 'string'
+  );
+}
+
+function parseCampaignNoteTimeline(value: string | null | undefined, legacyCreatedAt?: string | null): CampaignNoteTimeline {
+  const raw = value?.trim();
+  if (!raw || isCampaignNotePlaceholder(raw)) return { entries: [] };
+
+  if (!raw.startsWith(CAMPAIGN_NOTE_TIMELINE_PREFIX)) {
+    return {
+      entries: [
+        {
+          id: 'legacy-note',
+          body: raw,
+          createdAt: legacyCreatedAt ?? new Date(0).toISOString(),
+        },
+      ],
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(raw.slice(CAMPAIGN_NOTE_TIMELINE_PREFIX.length)) as { entries?: unknown };
+    const entries = Array.isArray(parsed.entries)
+      ? parsed.entries
+          .map((entry): CampaignNoteEntry | null => {
+            const candidate = entry as Partial<CampaignNoteEntry> | null;
+            if (
+              !candidate ||
+              typeof candidate.id !== 'string' ||
+              typeof candidate.createdAt !== 'string' ||
+              typeof candidate.body !== 'string'
+            ) {
+              return null;
+            }
+
+            return {
+              id: candidate.id,
+              body: candidate.body,
+              createdAt: candidate.createdAt,
+              attachment: isCampaignNoteAttachment(candidate.attachment) ? candidate.attachment : undefined,
+            };
+          })
+          .filter((entry): entry is CampaignNoteEntry => entry !== null)
+      : [];
+
+    return { entries };
+  } catch {
+    return { entries: [] };
+  }
+}
+
+function buildCampaignNoteTimeline(entries: CampaignNoteEntry[]): string {
+  if (entries.length === 0) return '';
+  return `${CAMPAIGN_NOTE_TIMELINE_PREFIX}${JSON.stringify({ entries })}`;
+}
+
+function formatCampaignNoteTimestamp(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return 'Timestamp unavailable';
+  return parsed.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
 
 function formatSupabaseError(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) return error.message;
@@ -408,7 +488,7 @@ function CampaignContactsList({
 export default function CampaignDetailPage() {
   const params = useParams();
   const campaignId = params.campaignId as string;
-  const { currentWorkspaceId, membershipsByWorkspaceId } = useWorkspace();
+  const { currentWorkspaceId } = useWorkspace();
 
   const [campaign, setCampaign] = useState<CampaignV2 | null>(null);
   const [addresses, setAddresses] = useState<CampaignAddress[]>([]);
@@ -430,22 +510,31 @@ export default function CampaignDetailPage() {
   const [destinationUrl, setDestinationUrl] = useState('');
   const [isSavingUrl, setIsSavingUrl] = useState(false);
   const [notes, setNotes] = useState('');
+  const [campaignNoteDraft, setCampaignNoteDraft] = useState('');
+  const [campaignNotePdf, setCampaignNotePdf] = useState<File | null>(null);
+  const [campaignNotePdfInputKey, setCampaignNotePdfInputKey] = useState(0);
   const [isSavingNotes, setIsSavingNotes] = useState(false);
-  const [notesDirty, setNotesDirty] = useState(false);
   const [basicQrBase64, setBasicQrBase64] = useState<string | null>(null);
   const [generatingBasicQr, setGeneratingBasicQr] = useState(false);
-  const [scripts, setScripts] = useState('');
-  const [scriptsDirty, setScriptsDirty] = useState(false);
-  const [isSavingScripts, setIsSavingScripts] = useState(false);
-  const [uploadingFlyer, setUploadingFlyer] = useState(false);
   const [qrScanEventsCount, setQrScanEventsCount] = useState<number | null>(null);
   const [roadMetadata, setRoadMetadata] = useState<CampaignRoadMetadata | null>(null);
-  const currentRole = currentWorkspaceId ? membershipsByWorkspaceId[currentWorkspaceId] : null;
-  const isMemberOnlyView = currentRole === 'member';
   const legacyCampaignText = parseLegacyCampaignText(
     (campaign as CampaignWithLegacyDescription | null)?.description
   );
   const currentFlyerUrl = campaign?.flyer_url ?? legacyCampaignText.flyerUrl ?? null;
+  const currentScripts = campaign?.scripts ?? legacyCampaignText.scripts ?? undefined;
+  const campaignNoteEntries = useMemo(
+    () => parseCampaignNoteTimeline(notes, campaign?.created_at).entries,
+    [campaign?.created_at, notes]
+  );
+  const sortedCampaignNoteEntries = useMemo(
+    () =>
+      [...campaignNoteEntries].sort(
+        (left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
+      ),
+    [campaignNoteEntries]
+  );
+  const canAddCampaignNote = Boolean(campaignNoteDraft.trim() || campaignNotePdf);
 
   const loadData = useCallback(async () => {
     try {
@@ -531,14 +620,6 @@ export default function CampaignDetailPage() {
     setNotes(legacyCampaignText.notes ?? '');
   }, [campaign?.notes, legacyCampaignText.notes]);
 
-  useEffect(() => {
-    if (campaign?.scripts !== undefined) {
-      setScripts(campaign.scripts ?? '');
-      return;
-    }
-    setScripts(legacyCampaignText.scripts ?? '');
-  }, [campaign?.scripts, legacyCampaignText.scripts]);
-
   const saveLegacyCampaignText = useCallback(
     async (updates: { notes?: string; scripts?: string; flyerUrl?: string }) => {
       const supabase = createClient();
@@ -547,100 +628,15 @@ export default function CampaignDetailPage() {
         .update({
           description: buildLegacyCampaignText({
             notes: updates.notes ?? notes,
-            scripts: updates.scripts ?? scripts,
+            scripts: updates.scripts ?? currentScripts,
             flyerUrl: updates.flyerUrl ?? currentFlyerUrl ?? undefined,
           }),
         })
         .eq('id', campaignId);
       if (error) throw error;
     },
-    [campaignId, currentFlyerUrl, notes, scripts]
+    [campaignId, currentFlyerUrl, currentScripts, notes]
   );
-
-  const handleSaveScripts = async () => {
-    if (!campaignId) return;
-    setIsSavingScripts(true);
-    try {
-      const supabase = createClient();
-      const { error } = await supabase
-        .from('campaigns')
-        .update({ scripts: scripts || null })
-        .eq('id', campaignId);
-      if (error) {
-        if (isMissingCampaignColumnError(error, 'scripts')) {
-          await saveLegacyCampaignText({ scripts });
-        } else {
-          throw error;
-        }
-      }
-      setScriptsDirty(false);
-      await loadData();
-    } catch (e) {
-      console.error('Error saving scripts:', e);
-      alert(formatSupabaseError(e, 'Failed to save scripts'));
-    } finally {
-      setIsSavingScripts(false);
-    }
-  };
-
-  const handleFlyerUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !campaignId) return;
-    setUploadingFlyer(true);
-    try {
-      if (!FLYER_ALLOWED_TYPES.includes(file.type as (typeof FLYER_ALLOWED_TYPES)[number])) {
-        alert('Invalid file type. Use image (JPEG, PNG, WebP, GIF) or PDF.');
-        return;
-      }
-      if (file.size > FLYER_MAX_SIZE_MB * 1024 * 1024) {
-        alert(`File too large. Maximum size is ${FLYER_MAX_SIZE_MB}MB.`);
-        return;
-      }
-
-      // Upload from the browser so the file goes straight to Supabase Storage. Server-side
-      // upload from the API route can fail with undici/socket errors against the storage CDN.
-      const supabase = createClient();
-      const rawExt =
-        file.type === 'application/pdf'
-          ? 'pdf'
-          : (file.name.split('.').pop() || '').replace(/[^a-zA-Z0-9]/g, '') || 'jpg';
-      const safeExt = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'pdf'].includes(rawExt.toLowerCase())
-        ? rawExt.toLowerCase()
-        : 'jpg';
-      const path = `campaign-flyers/${campaignId}/${crypto.randomUUID()}.${safeExt}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from('flyers')
-        .upload(path, file, {
-          contentType: file.type,
-          upsert: false,
-        });
-      if (uploadError) throw new Error(uploadError.message || 'Upload failed');
-
-      const { data: urlData } = supabase.storage.from('flyers').getPublicUrl(path);
-      const flyerUrl = urlData.publicUrl;
-
-      const { error: updateError } = await supabase
-        .from('campaigns')
-        .update({ flyer_url: flyerUrl })
-        .eq('id', campaignId);
-      if (updateError) {
-        if (isMissingCampaignColumnError(updateError, 'flyer_url')) {
-          await saveLegacyCampaignText({ flyerUrl });
-        } else {
-          throw updateError;
-        }
-      }
-
-      await loadData();
-    } catch (err) {
-      console.error('Flyer upload:', err);
-      alert(err instanceof Error ? err.message : 'Failed to upload flyer');
-    } finally {
-      setUploadingFlyer(false);
-      e.target.value = '';
-    }
-  };
 
   const handleGenerateQRs = async (trackable: boolean = true) => {
     setGenerating(true);
@@ -741,23 +737,63 @@ export default function CampaignDetailPage() {
     }
   };
 
-  const handleSaveNotes = async () => {
+  const handleAddCampaignNote = async () => {
     if (!campaignId) return;
+
+    const noteBody = campaignNoteDraft.trim();
+    const attachmentFile = campaignNotePdf;
+    if (!noteBody && !attachmentFile) return;
+
     setIsSavingNotes(true);
     try {
       const supabase = createClient();
+      let attachment: CampaignNoteAttachment | undefined;
+
+      if (attachmentFile) {
+        if (attachmentFile.type !== 'application/pdf') {
+          throw new Error('Invalid file type. Use a PDF.');
+        }
+        if (attachmentFile.size > FLYER_MAX_SIZE_MB * 1024 * 1024) {
+          throw new Error(`File too large. Maximum size is ${FLYER_MAX_SIZE_MB}MB.`);
+        }
+
+        const path = `campaign-note-attachments/${campaignId}/${crypto.randomUUID()}.pdf`;
+        const { error: uploadError } = await supabase.storage.from('flyers').upload(path, attachmentFile, {
+          contentType: attachmentFile.type,
+          upsert: false,
+        });
+        if (uploadError) throw uploadError;
+
+        const { data: urlData } = supabase.storage.from('flyers').getPublicUrl(path);
+        attachment = {
+          name: attachmentFile.name,
+          url: urlData.publicUrl,
+          type: 'pdf',
+        };
+      }
+
+      const nextEntry: CampaignNoteEntry = {
+        id: crypto.randomUUID(),
+        body: noteBody,
+        createdAt: new Date().toISOString(),
+        attachment,
+      };
+      const nextNotes = buildCampaignNoteTimeline([...campaignNoteEntries, nextEntry]);
       const { error } = await supabase
         .from('campaigns')
-        .update({ notes: notes || null })
+        .update({ notes: nextNotes || null })
         .eq('id', campaignId);
       if (error) {
         if (isMissingCampaignColumnError(error, 'notes')) {
-          await saveLegacyCampaignText({ notes });
+          await saveLegacyCampaignText({ notes: nextNotes });
         } else {
           throw error;
         }
       }
-      setNotesDirty(false);
+      setNotes(nextNotes);
+      setCampaignNoteDraft('');
+      setCampaignNotePdf(null);
+      setCampaignNotePdfInputKey((value) => value + 1);
       await loadData();
     } catch (e) {
       console.error('Error saving notes:', e);
@@ -1010,7 +1046,7 @@ export default function CampaignDetailPage() {
             <TabsTrigger value="contacts">Contacts</TabsTrigger>
             <TabsTrigger value="qr">QR Codes</TabsTrigger>
             <TabsTrigger value="finance">Finance</TabsTrigger>
-            <TabsTrigger value="routes">Routes</TabsTrigger>
+            <TabsTrigger value="assignments">Assignments</TabsTrigger>
             <TabsTrigger value="notes">Notes</TabsTrigger>
           </TabsList>
 
@@ -1217,101 +1253,114 @@ export default function CampaignDetailPage() {
             />
           </TabsContent>
 
-          <TabsContent value="routes" className="mt-4">
-            {isMemberOnlyView ? (
-              <AssignedRoutesView campaignId={campaignId} embedded />
-            ) : (
-              <OptimizedRouteView 
-                campaignId={campaignId} 
-                campaignName={campaign?.name ?? undefined}
-                addresses={addresses} 
-              />
-            )}
+          <TabsContent value="assignments" className="mt-4">
+            <CampaignAssignmentView
+              campaignId={campaignId}
+              campaignName={campaign?.name ?? undefined}
+              addresses={addresses}
+            />
           </TabsContent>
 
           <TabsContent value="notes" className="mt-4 space-y-4">
             <div className="bg-card p-4 rounded-xl border border-border">
               <h2 className="text-sm font-semibold text-foreground mb-3">Campaign notes</h2>
-              <p className="text-xs text-muted-foreground mb-2">
-                Free-form notes for this campaign (territory, goals, follow-ups, etc.).
-              </p>
-              <textarea
-                className="w-full min-h-[200px] rounded-md border border-input bg-background px-3 py-2 text-sm font-mono resize-y"
-                placeholder="Add notes..."
-                value={notes}
-                onChange={(e) => {
-                  setNotes(e.target.value);
-                  setNotesDirty(true);
-                }}
+              <Textarea
+                className="min-h-[120px] resize-y"
+                placeholder="Write a note..."
+                value={campaignNoteDraft}
+                onChange={(event) => setCampaignNoteDraft(event.target.value)}
               />
-              <div className="mt-3 flex justify-end">
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <label className="inline-flex cursor-pointer items-center">
+                    <input
+                      key={campaignNotePdfInputKey}
+                      type="file"
+                      accept="application/pdf"
+                      className="sr-only"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0] ?? null;
+                        if (file && file.type !== 'application/pdf') {
+                          alert('Invalid file type. Use a PDF.');
+                          setCampaignNotePdf(null);
+                          setCampaignNotePdfInputKey((value) => value + 1);
+                          return;
+                        }
+                        setCampaignNotePdf(file);
+                      }}
+                      disabled={isSavingNotes}
+                    />
+                    <span className="inline-flex h-8 items-center justify-center gap-2 rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent hover:text-accent-foreground">
+                      <Paperclip className="h-4 w-4" />
+                      Add PDF
+                    </span>
+                  </label>
+                  {campaignNotePdf ? (
+                    <div className="flex min-w-0 items-center gap-2 rounded-md border border-border bg-background px-2 py-1 text-xs text-muted-foreground">
+                      <FileText className="h-3.5 w-3.5 shrink-0" />
+                      <span className="max-w-[220px] truncate">{campaignNotePdf.name}</span>
+                      <button
+                        type="button"
+                        className="rounded-sm p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                        aria-label="Remove PDF"
+                        onClick={() => {
+                          setCampaignNotePdf(null);
+                          setCampaignNotePdfInputKey((value) => value + 1);
+                        }}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
                 <Button
                   type="button"
                   size="sm"
-                  onClick={handleSaveNotes}
-                  disabled={!notesDirty || isSavingNotes}
+                  onClick={handleAddCampaignNote}
+                  disabled={!canAddCampaignNote || isSavingNotes}
                 >
-                  {isSavingNotes ? 'Saving...' : 'Save notes'}
+                  <Plus className="h-4 w-4" />
+                  {isSavingNotes ? 'Saving...' : 'Add note'}
                 </Button>
               </div>
             </div>
 
-            <div className="bg-card p-4 rounded-xl border border-border">
-              <h2 className="text-sm font-semibold text-foreground mb-3">Scripts</h2>
-              <p className="text-xs text-muted-foreground mb-2">
-                Script or dialogue to use when door-knocking or talking to leads.
-              </p>
-              <textarea
-                className="w-full min-h-[160px] rounded-md border border-input bg-background px-3 py-2 text-sm font-mono resize-y"
-                placeholder="Add scripts..."
-                value={scripts}
-                onChange={(e) => {
-                  setScripts(e.target.value);
-                  setScriptsDirty(true);
-                }}
-              />
-              <div className="mt-3 flex justify-end">
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={handleSaveScripts}
-                  disabled={!scriptsDirty || isSavingScripts}
-                >
-                  {isSavingScripts ? 'Saving...' : 'Save scripts'}
-                </Button>
+            {sortedCampaignNoteEntries.length > 0 ? (
+              <div className="space-y-0">
+                {sortedCampaignNoteEntries.map((entry, index) => (
+                  <div key={entry.id} className="relative pl-7 pb-5 last:pb-0">
+                    {index < sortedCampaignNoteEntries.length - 1 ? (
+                      <span className="absolute left-[7px] top-5 h-[calc(100%-1.25rem)] w-px bg-border" />
+                    ) : null}
+                    <span className="absolute left-0 top-1.5 h-3.5 w-3.5 rounded-full border border-primary bg-background" />
+                    <div className="rounded-lg border border-border bg-card p-4">
+                      <time className="font-mono text-xs text-muted-foreground">
+                        {formatCampaignNoteTimestamp(entry.createdAt)}
+                      </time>
+                      {entry.body ? (
+                        <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-foreground">{entry.body}</p>
+                      ) : null}
+                      {entry.attachment ? (
+                        <a
+                          href={entry.attachment.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-3 inline-flex max-w-full items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm text-primary hover:bg-accent hover:text-accent-foreground"
+                        >
+                          <FileText className="h-4 w-4 shrink-0" />
+                          <span className="truncate">{entry.attachment.name}</span>
+                        </a>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
               </div>
-            </div>
+            ) : (
+              <div className="rounded-lg border border-dashed border-border bg-card/60 p-6 text-sm text-muted-foreground">
+                No notes yet.
+              </div>
+            )}
 
-            <div className="bg-card p-4 rounded-xl border border-border">
-              <h2 className="text-sm font-semibold text-foreground mb-3">Flyer used</h2>
-              <p className="text-xs text-muted-foreground mb-3">
-                Upload a photo or PDF of the flyer you used for this campaign.
-              </p>
-              <div className="flex flex-wrap items-center gap-3">
-                <label className="cursor-pointer inline-block">
-                  <input
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp,image/gif,application/pdf"
-                    className="sr-only"
-                    onChange={handleFlyerUpload}
-                    disabled={uploadingFlyer}
-                  />
-                  <span className="inline-flex items-center justify-center rounded-md text-sm font-medium border border-input bg-background px-3 py-2 hover:bg-accent hover:text-accent-foreground h-9">
-                    {uploadingFlyer ? 'Uploading...' : 'Choose photo or PDF'}
-                  </span>
-                </label>
-                {currentFlyerUrl && (
-                  <a
-                    href={currentFlyerUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm text-primary hover:underline"
-                  >
-                    View current flyer
-                  </a>
-                )}
-              </div>
-            </div>
           </TabsContent>
         </Tabs>
       </main>

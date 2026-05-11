@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Calculator, DollarSign, Package, ReceiptText, Wallet } from 'lucide-react';
+import { BarChart3, Calculator, DollarSign, Package, ReceiptText, Wallet } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -29,6 +29,10 @@ type UserProfileRow = {
   user_id: string;
   first_name?: string | null;
   last_name?: string | null;
+};
+
+type FarmMetaAdSpendRow = {
+  spend: number | string | null;
 };
 
 const CATEGORY_OPTIONS: Array<{ value: FinanceEntryCategory; label: string }> = [
@@ -84,6 +88,7 @@ export function FinancePanel({
   addresses,
 }: FinancePanelProps) {
   const [entries, setEntries] = useState<FinanceEntry[]>([]);
+  const [metaAdSpendCents, setMetaAdSpendCents] = useState(0);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [profileNames, setProfileNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -139,8 +144,29 @@ export function FinancePanel({
         farmId: targetType === 'farm' ? targetId : null,
       });
       setEntries(data);
+
+      if (targetType === 'farm') {
+        const supabase = createClient();
+        const { data: metaRows, error: metaSpendError } = await supabase
+          .from('farm_meta_ad_daily_metrics')
+          .select('spend')
+          .eq('farm_id', targetId);
+
+        if (metaSpendError) {
+          setMetaAdSpendCents(0);
+        } else {
+          const syncedSpendCents = ((metaRows ?? []) as FarmMetaAdSpendRow[]).reduce(
+            (sum, row) => sum + Math.round(Number(row.spend || 0) * 100),
+            0
+          );
+          setMetaAdSpendCents(syncedSpendCents);
+        }
+      } else {
+        setMetaAdSpendCents(0);
+      }
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Failed to load finance entries');
+      setMetaAdSpendCents(0);
     } finally {
       setLoading(false);
     }
@@ -196,10 +222,12 @@ export function FinancePanel({
     run();
   }, [entries]);
 
-  const totalSpendCents = useMemo(
+  const manualSpendCents = useMemo(
     () => entries.reduce((sum, entry) => sum + Number(entry.total_cost_cents || 0), 0),
     [entries]
   );
+
+  const totalSpendCents = manualSpendCents + metaAdSpendCents;
 
   const postalSpendCents = useMemo(
     () =>
@@ -225,16 +253,16 @@ export function FinancePanel({
   const categoryTotals = useMemo(() => {
     const totals = new Map<FinanceEntryCategory, number>();
     for (const entry of entries) {
-      totals.set(
-        entry.category,
-        (totals.get(entry.category) ?? 0) + Number(entry.total_cost_cents || 0)
-      );
+      totals.set(entry.category, (totals.get(entry.category) ?? 0) + Number(entry.total_cost_cents || 0));
+    }
+    if (metaAdSpendCents > 0) {
+      totals.set('ads', (totals.get('ads') ?? 0) + metaAdSpendCents);
     }
     return CATEGORY_OPTIONS.map((option) => ({
       ...option,
       total_cents: totals.get(option.value) ?? 0,
     })).filter((option) => option.total_cents > 0);
-  }, [entries]);
+  }, [entries, metaAdSpendCents]);
 
   const postalDropTotalCents = parseCurrencyToCents(postalTotalCost);
   const postalAllocatedCostCents =
@@ -376,7 +404,7 @@ export function FinancePanel({
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
@@ -386,9 +414,25 @@ export function FinancePanel({
           </CardHeader>
           <CardContent>
             <div className="text-3xl font-semibold">{formatCurrencyFromCents(totalSpendCents)}</div>
-            <p className="text-sm text-muted-foreground">{entries.length} saved finance entries</p>
+            <p className="text-sm text-muted-foreground">
+              {entries.length} saved entries{metaAdSpendCents > 0 ? ' + synced Meta Ads' : ''}
+            </p>
           </CardContent>
         </Card>
+        {targetType === 'farm' ? (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                <BarChart3 className="w-4 h-4" />
+                Meta Ads Spend
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-semibold">{formatCurrencyFromCents(metaAdSpendCents)}</div>
+              <p className="text-sm text-muted-foreground">Synced from linked Meta campaigns</p>
+            </CardContent>
+          </Card>
+        ) : null}
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
@@ -696,7 +740,8 @@ export function FinancePanel({
           <div>
             <CardTitle>Finance Entries</CardTitle>
             <p className="text-sm text-muted-foreground mt-1">
-              Saved spend for this {targetType}, including postal drops and other operating costs.
+              Saved spend for this {targetType}, including postal drops, other operating costs,
+              {targetType === 'farm' ? ' and synced Meta Ads.' : ' and manual ad spend.'}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">

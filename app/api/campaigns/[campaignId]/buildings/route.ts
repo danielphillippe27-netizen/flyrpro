@@ -1,15 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
+import { getCachedPmtilesArchive } from '@/app/api/campaigns/_utils/tile-cache';
 import { getCampaignBuildingStatus } from '@/lib/campaignStats';
 import { displayAddressText, resolveHouseNumberLabel } from '@/lib/map/addressPresentation';
 import { fetchAllInPages } from '@/lib/supabase/fetchAllInPages';
 import {
   type CampaignSnapshotRow,
   resolveFallbackGeoJSONKey,
+  resolveArtifactUrl,
+  resolvePmtilesKey,
 } from '@/lib/diamond/geometry';
+import { VectorTile } from '@mapbox/vector-tile';
+import Pbf from 'pbf';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { gunzipSync } from 'zlib';
+import type { PostgrestError } from '@supabase/supabase-js';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -35,19 +41,34 @@ type FeatureCollectionLike = {
   type?: unknown;
   features?: Array<{
     id?: unknown;
-    geometry?: { type?: unknown };
-    properties?: {
-      id?: unknown;
-      building_id?: unknown;
-      gers_id?: unknown;
-      source?: unknown;
-      feature_type?: unknown;
-      feature_status?: unknown;
-      area_sqm?: unknown;
-      building_type?: unknown;
-    };
+    geometry?: GeoJSON.Geometry | null;
+    properties?: Record<string, unknown>;
   }>;
 };
+
+type CampaignBuildingStatus = ReturnType<typeof getCampaignBuildingStatus>;
+const CAMPAIGN_BUILDING_STATUS_RANK: Record<CampaignBuildingStatus, number> = {
+  not_visited: 0,
+  visited: 1,
+  no_answer: 2,
+  do_not_knock: 3,
+  hot: 4,
+  lead: 5,
+  hot_lead: 6,
+};
+
+function asPagePromise<T>(
+  query: unknown
+): Promise<{ data: T[] | null; error: PostgrestError | null }> {
+  return query as Promise<{ data: T[] | null; error: PostgrestError | null }>;
+}
+
+function getBuildingStatusForCampaignAddress(address: CampaignAddressRow): CampaignBuildingStatus {
+  return getCampaignBuildingStatus({
+    address_status: address.address_status ?? undefined,
+    visited: Boolean(address.visited),
+  });
+}
 
 function hasPolygonFeatures(featureCollection: unknown): boolean {
   if (!featureCollection || typeof featureCollection !== 'object') return false;
@@ -98,6 +119,239 @@ function filterAddressPointFallbackFeatures(
 
 function allowDirectDbPolygonFallback(): boolean {
   return false;
+}
+
+function parseBbox(value: unknown): [number, number, number, number] | null {
+  if (!Array.isArray(value) || value.length !== 4) return null;
+  const bbox = value.map((entry) => Number(entry));
+  if (!bbox.every((entry) => Number.isFinite(entry))) return null;
+  return bbox as [number, number, number, number];
+}
+
+function lonLatToTile(lon: number, lat: number, z: number) {
+  const n = 2 ** z;
+  const x = Math.floor(((lon + 180) / 360) * n);
+  const latRad = (lat * Math.PI) / 180;
+  const y = Math.floor(((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n);
+  return { x, y };
+}
+
+function tileRangesForBbox(bbox: [number, number, number, number], maxZoom: number) {
+  const [minLon, minLat, maxLon, maxLat] = bbox;
+  for (let z = Math.min(maxZoom, 18); z >= 12; z -= 1) {
+    const nw = lonLatToTile(minLon, maxLat, z);
+    const se = lonLatToTile(maxLon, minLat, z);
+    const minX = Math.min(nw.x, se.x);
+    const maxX = Math.max(nw.x, se.x);
+    const minY = Math.min(nw.y, se.y);
+    const maxY = Math.max(nw.y, se.y);
+    const tileCount = (maxX - minX + 1) * (maxY - minY + 1);
+    if (tileCount <= 64 || z === 12) {
+      return { z, minX, maxX, minY, maxY };
+    }
+  }
+  return null;
+}
+
+function flattenPositions(geometry: GeoJSON.Geometry | null | undefined): Array<[number, number]> {
+  if (!geometry) return [];
+  if (geometry.type === 'Point') return [geometry.coordinates as [number, number]];
+  if (geometry.type === 'MultiPoint' || geometry.type === 'LineString') {
+    return geometry.coordinates as Array<[number, number]>;
+  }
+  if (geometry.type === 'MultiLineString' || geometry.type === 'Polygon') {
+    return geometry.coordinates.flat() as Array<[number, number]>;
+  }
+  if (geometry.type === 'MultiPolygon') {
+    return geometry.coordinates.flat(2) as Array<[number, number]>;
+  }
+  return [];
+}
+
+function geometryCenter(geometry: GeoJSON.Geometry | null | undefined): [number, number] | null {
+  const positions = flattenPositions(geometry).filter(
+    (position) => Number.isFinite(position[0]) && Number.isFinite(position[1])
+  );
+  if (positions.length === 0) return null;
+  let minLon = Infinity;
+  let minLat = Infinity;
+  let maxLon = -Infinity;
+  let maxLat = -Infinity;
+  for (const [lon, lat] of positions) {
+    minLon = Math.min(minLon, lon);
+    minLat = Math.min(minLat, lat);
+    maxLon = Math.max(maxLon, lon);
+    maxLat = Math.max(maxLat, lat);
+  }
+  return [(minLon + maxLon) / 2, (minLat + maxLat) / 2];
+}
+
+function pointInBbox(point: [number, number], bbox: [number, number, number, number]) {
+  const [lon, lat] = point;
+  const [minLon, minLat, maxLon, maxLat] = bbox;
+  return lon >= minLon && lon <= maxLon && lat >= minLat && lat <= maxLat;
+}
+
+function geometryIntersectsBbox(
+  geometry: GeoJSON.Geometry | null | undefined,
+  bbox: [number, number, number, number]
+): boolean {
+  return flattenPositions(geometry).some((position) => pointInBbox(position, bbox));
+}
+
+function pointOnSegment(
+  point: [number, number],
+  start: [number, number],
+  end: [number, number]
+): boolean {
+  const [px, py] = point;
+  const [x1, y1] = start;
+  const [x2, y2] = end;
+  const cross = (px - x1) * (y2 - y1) - (py - y1) * (x2 - x1);
+  if (Math.abs(cross) > 1e-12) return false;
+
+  return (
+    px >= Math.min(x1, x2) - 1e-12 &&
+    px <= Math.max(x1, x2) + 1e-12 &&
+    py >= Math.min(y1, y2) - 1e-12 &&
+    py <= Math.max(y1, y2) + 1e-12
+  );
+}
+
+function pointInRing(point: [number, number], ring: number[][]): boolean {
+  if (!Array.isArray(ring) || ring.length < 4) return false;
+  const [x, y] = point;
+  let inside = false;
+
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
+    const current = ring[i];
+    const previous = ring[j];
+    if (!Array.isArray(current) || !Array.isArray(previous)) continue;
+
+    const xi = Number(current[0]);
+    const yi = Number(current[1]);
+    const xj = Number(previous[0]);
+    const yj = Number(previous[1]);
+    if (![xi, yi, xj, yj].every(Number.isFinite)) continue;
+
+    if (pointOnSegment(point, [xi, yi], [xj, yj])) return true;
+    const intersects = yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi;
+    if (intersects) inside = !inside;
+  }
+
+  return inside;
+}
+
+function pointInPolygon(point: [number, number], polygon: GeoJSON.Polygon): boolean {
+  const [outerRing, ...holes] = polygon.coordinates;
+  if (!pointInRing(point, outerRing)) return false;
+  return !holes.some((hole) => pointInRing(point, hole));
+}
+
+function featureInCampaignBoundary(feature: unknown, boundary: GeoJSON.Polygon): boolean {
+  const geometry = (feature as { geometry?: GeoJSON.Geometry | null } | null)?.geometry;
+  const center = geometryCenter(geometry);
+  if (center && pointInPolygon(center, boundary)) return true;
+  return flattenPositions(geometry).some((position) => pointInPolygon(position, boundary));
+}
+
+function filterCampaignBoundaryFeatures<T extends FeatureCollectionLike | null | undefined>(
+  featureCollection: T,
+  boundary: GeoJSON.Polygon | null
+): T {
+  if (!featureCollection || !boundary || !Array.isArray(featureCollection.features)) {
+    return featureCollection;
+  }
+
+  return {
+    ...featureCollection,
+    features: featureCollection.features.filter((feature) =>
+      featureInCampaignBoundary(feature, boundary)
+    ),
+  } as T;
+}
+
+function normalizeGeoJsonPolygon(value: GeoJSON.Polygon | string | null | undefined): GeoJSON.Polygon | null {
+  if (!value) return null;
+  if (typeof value === 'string') {
+    try {
+      return normalizeGeoJsonPolygon(JSON.parse(value) as GeoJSON.Polygon);
+    } catch {
+      return null;
+    }
+  }
+  return value.type === 'Polygon' && Array.isArray(value.coordinates) ? value : null;
+}
+
+async function fetchScopedPmtilesBuildingFeatures(
+  snapshot: CampaignSnapshotRow,
+  bbox: [number, number, number, number],
+  hiddenBuildingIds: Set<string>,
+  boundary: GeoJSON.Polygon | null
+): Promise<FeatureCollectionLike | null> {
+  const pmtilesKey = resolvePmtilesKey(snapshot);
+  if (!pmtilesKey) return null;
+  const sourceLayers = snapshot.tile_metrics?.source_layers;
+  const sourceLayer =
+    sourceLayers && typeof sourceLayers === 'object' && 'buildings' in sourceLayers
+      ? String((sourceLayers as Record<string, unknown>).buildings || 'buildings')
+      : 'buildings';
+
+  const pmtilesUrl = await resolveArtifactUrl(snapshot, pmtilesKey);
+  const archive = getCachedPmtilesArchive(pmtilesUrl);
+  const header = await archive.getHeader();
+  const range = tileRangesForBbox(bbox, header.maxZoom);
+  if (!range) return null;
+
+  const byBuildingId = new Map<string, NonNullable<FeatureCollectionLike['features']>[number]>();
+  for (let x = range.minX; x <= range.maxX; x += 1) {
+    for (let y = range.minY; y <= range.maxY; y += 1) {
+      const tile = await archive.getZxy(range.z, x, y);
+      if (!tile) continue;
+
+      const vectorTile = new VectorTile(new Pbf(Buffer.from(tile.data)));
+      const layer = vectorTile.layers[sourceLayer] ?? vectorTile.layers.buildings;
+      if (!layer) continue;
+
+      for (let index = 0; index < layer.length; index += 1) {
+        const vectorFeature = layer.feature(index);
+        const feature = vectorFeature.toGeoJSON(x, y, range.z) as GeoJSON.Feature;
+        const properties = (feature.properties ?? {}) as Record<string, unknown>;
+        const buildingId = String(properties.building_id ?? properties.gers_id ?? properties.id ?? '').trim();
+        if (!buildingId || hiddenBuildingIds.has(buildingId) || byBuildingId.has(buildingId)) continue;
+
+        if (!geometryIntersectsBbox(feature.geometry, bbox)) continue;
+        if (boundary && !featureInCampaignBoundary(feature, boundary)) continue;
+
+        byBuildingId.set(buildingId, {
+          ...feature,
+          id: buildingId,
+          properties: {
+            ...properties,
+            id: buildingId,
+            building_id: buildingId,
+            gers_id: buildingId,
+            height: Math.max(Number(properties.height ?? properties.height_m ?? 10), 10),
+            height_m: Math.max(Number(properties.height_m ?? properties.height ?? 10), 10),
+            min_height: Number(properties.min_height ?? 0),
+            source: properties.source ?? 'bedrock_pmtiles',
+            feature_type: 'matched_house',
+            feature_status: 'matched',
+            status: 'not_visited',
+            scans_total: 0,
+            qr_scanned: false,
+          },
+        });
+      }
+    }
+  }
+
+  const features = Array.from(byBuildingId.values());
+  if (features.length === 0) return null;
+  return {
+    type: 'FeatureCollection',
+    features,
+  };
 }
 
 function isPolygonFeature(feature: unknown): boolean {
@@ -155,7 +409,7 @@ function filterHiddenBuildingFeatures(
   };
 }
 
-const MIN_LINKABLE_BUILDING_AREA_SQM = 30;
+const MIN_LINKABLE_BUILDING_AREA_SQM = 40;
 const NON_LINKABLE_BUILDING_TYPES = new Set([
   'shed',
   'garage',
@@ -268,7 +522,8 @@ function filterNonLinkableBuildingFeatures(
 interface CampaignAccessRow {
   owner_id: string;
   workspace_id: string | null;
-  territory_boundary: GeoJSON.Polygon | null;
+  bbox?: unknown;
+  territory_boundary: GeoJSON.Polygon | string | null;
   provision_source: string | null;
 }
 
@@ -548,11 +803,10 @@ function buildCampaignBuildingFallbackFeatureCollection(
     const firstLinkedEntry = linkedEntries.find((entry) => entry.link) ?? linkedEntries[0] ?? null;
     const scansTotal = linkedAddresses.reduce((sum, address) => sum + (address.scans ?? 0), 0);
     const source = getCampaignBuildingSource(building);
-    const statusRank = { not_visited: 0, visited: 1, hot: 2 } as const;
-    const buildingStatus = linkedAddresses.reduce<'not_visited' | 'visited' | 'hot'>(
+    const buildingStatus = linkedAddresses.reduce<CampaignBuildingStatus>(
       (current, address) => {
-        const next = getCampaignBuildingStatus(address);
-        return statusRank[next] > statusRank[current] ? next : current;
+        const next = getBuildingStatusForCampaignAddress(address);
+        return CAMPAIGN_BUILDING_STATUS_RANK[next] > CAMPAIGN_BUILDING_STATUS_RANK[current] ? next : current;
       },
       building.latest_status === 'interested' ? 'visited' : 'not_visited'
     );
@@ -616,11 +870,10 @@ function buildGoldFallbackFeatureCollection(
     const firstAddress = linkedAddresses[0] ?? null;
     const scansTotal = linkedAddresses.reduce((sum, address) => sum + (address.scans ?? 0), 0);
     const isMatched = linkedAddresses.length > 0;
-    const statusRank = { not_visited: 0, visited: 1, hot: 2 } as const;
-    const buildingStatus = linkedAddresses.reduce<'not_visited' | 'visited' | 'hot'>(
+    const buildingStatus = linkedAddresses.reduce<CampaignBuildingStatus>(
       (current, address) => {
-        const next = getCampaignBuildingStatus(address);
-        return statusRank[next] > statusRank[current] ? next : current;
+        const next = getBuildingStatusForCampaignAddress(address);
+        return CAMPAIGN_BUILDING_STATUS_RANK[next] > CAMPAIGN_BUILDING_STATUS_RANK[current] ? next : current;
       },
       'not_visited'
     );
@@ -686,7 +939,7 @@ async function fetchCampaignBuildingRows(
       continue;
     }
 
-    return ((data ?? []) as Array<CampaignBuildingRow & { is_hidden?: boolean | null }>)
+    return ((data ?? []) as unknown as Array<CampaignBuildingRow & { is_hidden?: boolean | null }>)
       .filter((building) => !building.is_hidden)
       .map((building) => {
         const normalized = { ...building };
@@ -725,7 +978,10 @@ async function fetchCampaignBuildingFallbackFeatures(
 
   const [campaignAddresses, buildingLinks] = await Promise.all([
     fetchAllInPages((from, to) =>
-      supabase
+      asPagePromise<CampaignAddressRow & {
+        address_statuses?: { status?: string | null } | Array<{ status?: string | null }> | null;
+      }>(
+        supabase
         .from('campaign_addresses')
         .select(
           'id, formatted, house_number, street_name, building_id, building_gers_id, visited, scans, address_statuses(status)'
@@ -733,14 +989,17 @@ async function fetchCampaignBuildingFallbackFeatures(
         .eq('campaign_id', campaignId)
         .order('id', { ascending: true })
         .range(from, to)
+      )
     ),
     fetchAllInPages((from, to) =>
-      supabase
+      asPagePromise<BuildingAddressLinkRow>(
+        supabase
         .from('building_address_links')
         .select('building_id, address_id, match_type, confidence')
         .eq('campaign_id', campaignId)
         .order('address_id', { ascending: true })
         .range(from, to)
+      )
     ),
   ]).catch((error) => {
     const message = error instanceof Error ? error.message : String(error);
@@ -794,12 +1053,16 @@ async function fetchGoldFallbackFeatures(
 
   try {
     campaignAddresses = await fetchAllInPages((from, to) =>
-      supabase
+      asPagePromise<CampaignAddressRow & {
+        address_statuses?: { status?: string | null } | Array<{ status?: string | null }> | null;
+      }>(
+        supabase
         .from('campaign_addresses')
         .select('id, formatted, house_number, street_name, building_id, visited, scans, address_statuses(status)')
         .eq('campaign_id', campaignId)
         .order('id', { ascending: true })
         .range(from, to)
+      )
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -934,7 +1197,7 @@ export async function GET(
 
     const { data: campaignAccess, error: campaignAccessError } = await supabase
       .from('campaigns')
-      .select('owner_id, workspace_id, territory_boundary, provision_source')
+      .select('owner_id, workspace_id, territory_boundary, bbox, provision_source')
       .eq('id', campaignId)
       .maybeSingle();
 
@@ -966,12 +1229,16 @@ export async function GET(
     );
     const normalizedCampaignFeatures = (campaignFeatures ?? null) as FeatureCollectionLike | null;
     const hiddenBuildingIds = await hiddenBuildingIdsPromise;
-    const visibleCampaignFeatures = filterNonLinkableBuildingFeatures(
-      filterHiddenBuildingFeatures(normalizedCampaignFeatures, hiddenBuildingIds)
+    const campaignBoundary = normalizeGeoJsonPolygon((campaignAccess as CampaignAccessRow).territory_boundary);
+    const visibleCampaignFeatures = filterCampaignBoundaryFeatures(
+      filterNonLinkableBuildingFeatures(
+        filterHiddenBuildingFeatures(normalizedCampaignFeatures, hiddenBuildingIds)
+      ),
+      campaignBoundary
     );
     const visibleFallbackFeatures = filterAddressPointFallbackFeatures(visibleCampaignFeatures);
 
-    if (!featuresError && visibleCampaignFeatures && visibleCampaignFeatures.features?.length > 0) {
+    if (!featuresError && (visibleCampaignFeatures?.features?.length ?? 0) > 0) {
       const hasPolygons = hasPolygonFeatures(visibleCampaignFeatures);
       const hasAddressPointFallbacks = hasAddressPointFallbackFeatures(visibleCampaignFeatures);
 
@@ -1002,7 +1269,34 @@ export async function GET(
       const snapshotRow = snapshot as CampaignSnapshotRow;
       const geojsonKey = resolveFallbackGeoJSONKey(snapshotRow);
 
-      if (geojsonKey && !geojsonKey.endsWith('.pmtiles')) {
+      const pmtilesKey = resolvePmtilesKey(snapshotRow);
+      if (pmtilesKey) {
+        const bbox = parseBbox((campaignAccess as CampaignAccessRow).bbox);
+        if (bbox) {
+          console.log('[API] Building scoped features from PMTiles bbox window', { pmtilesKey });
+          try {
+            const pmtilesFallback = await fetchScopedPmtilesBuildingFeatures(
+              snapshotRow,
+              bbox,
+              hiddenBuildingIds,
+              campaignBoundary
+            );
+            const visiblePmtilesFallback = filterNonLinkableBuildingFeatures(pmtilesFallback);
+            const visiblePmtilesFeatures = (visiblePmtilesFallback as { features?: unknown[] } | null)?.features ?? [];
+            if (visiblePmtilesFeatures.length > 0) {
+              console.log(`[API] Returning ${visiblePmtilesFeatures.length} campaign-scoped PMTiles buildings`);
+              return NextResponse.json(visiblePmtilesFallback);
+            }
+          } catch (pmtilesError) {
+            console.warn(
+              '[API] Scoped PMTiles building fallback failed; continuing to campaign feature fallback:',
+              pmtilesError instanceof Error ? pmtilesError.message : pmtilesError
+            );
+          }
+        } else {
+          console.log('[API] Snapshot has PMTiles but campaign bbox is unavailable');
+        }
+      } else if (geojsonKey && !geojsonKey.endsWith('.pmtiles')) {
         console.log(`[API] Fetching snapshot GeoJSON from S3: ${snapshot.bucket}/${geojsonKey}`);
 
         try {
@@ -1022,8 +1316,11 @@ export async function GET(
           const isGzip = compressedOrPlain[0] === 0x1f && compressedOrPlain[1] === 0x8b;
           const geojsonBuffer = isGzip ? gunzipSync(compressedOrPlain) : compressedOrPlain;
           const geojson = JSON.parse(geojsonBuffer.toString('utf-8'));
-          const visibleGeojson = filterNonLinkableBuildingFeatures(
-            filterHiddenBuildingFeatures(geojson, hiddenBuildingIds)
+          const visibleGeojson = filterCampaignBoundaryFeatures(
+            filterNonLinkableBuildingFeatures(
+              filterHiddenBuildingFeatures(geojson, hiddenBuildingIds)
+            ),
+            campaignBoundary
           );
           const visibleSnapshotFeatures = (visibleGeojson as { features?: unknown[] }).features ?? [];
 
@@ -1044,13 +1341,17 @@ export async function GET(
             snapshotFetchError instanceof Error ? snapshotFetchError.message : snapshotFetchError
           );
         }
-      } else if (snapshot.buildings_key?.endsWith('.pmtiles')) {
-        console.log('[API] Snapshot buildings_key is PMTiles; skipping GeoJSON snapshot fallback');
       }
     } else if (snapshotError) {
       console.warn('[API] Snapshot lookup failed:', snapshotError.message);
     } else {
       console.log('[API] No Diamond snapshot found; returning address points while buildings load');
+    }
+
+    const visibleCampaignFeatureCount = visibleCampaignFeatures?.features?.length ?? 0;
+    if (visibleCampaignFeatureCount > 0 && hasPolygonFeatures(visibleCampaignFeatures)) {
+      console.log(`[API] Returning ${visibleCampaignFeatureCount} campaign-scoped RPC features after artifact fallback failed`);
+      return NextResponse.json(visibleCampaignFeatures);
     }
 
     if (allowDirectDbPolygonFallback()) {
@@ -1059,13 +1360,16 @@ export async function GET(
         ? await fetchGoldFallbackFeatures(
             supabase,
             campaignId,
-            campaignRow?.territory_boundary ?? null
-          )
+            normalizeGeoJsonPolygon(campaignRow?.territory_boundary)
+        )
         : null;
 
       if (goldFallback) {
-        const visibleGoldFallback = filterNonLinkableBuildingFeatures(
-          filterHiddenBuildingFeatures(goldFallback, hiddenBuildingIds)
+        const visibleGoldFallback = filterCampaignBoundaryFeatures(
+          filterNonLinkableBuildingFeatures(
+            filterHiddenBuildingFeatures(goldFallback, hiddenBuildingIds)
+          ),
+          normalizeGeoJsonPolygon(campaignRow?.territory_boundary)
         );
         const visibleGoldFeatures = (visibleGoldFallback as { features?: unknown[] }).features ?? [];
         if (visibleGoldFeatures.length > 0) {
@@ -1083,8 +1387,11 @@ export async function GET(
       );
 
       if (campaignBuildingFallback) {
-        const visibleCampaignBuildingFallback = filterNonLinkableBuildingFeatures(
-          filterHiddenBuildingFeatures(campaignBuildingFallback, hiddenBuildingIds)
+        const visibleCampaignBuildingFallback = filterCampaignBoundaryFeatures(
+          filterNonLinkableBuildingFeatures(
+            filterHiddenBuildingFeatures(campaignBuildingFallback, hiddenBuildingIds)
+          ),
+          campaignBoundary
         );
         const visibleCampaignBuildingFeatures =
           (visibleCampaignBuildingFallback as { features?: unknown[] }).features ?? [];
@@ -1100,8 +1407,9 @@ export async function GET(
       }
     }
 
-    if (visibleFallbackFeatures?.features?.length > 0) {
-      console.log(`[API] Returning ${visibleFallbackFeatures.features.length} address point features while buildings load`);
+    const visibleFallbackFeatureCount = visibleFallbackFeatures?.features?.length ?? 0;
+    if (visibleFallbackFeatureCount > 0) {
+      console.log(`[API] Returning ${visibleFallbackFeatureCount} address point features while buildings load`);
       return NextResponse.json(visibleFallbackFeatures);
     }
 

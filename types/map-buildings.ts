@@ -74,6 +74,10 @@ export interface BuildingProperties {
   address_status?: string | null;
   /** Unique id for Mapbox promoteId (unit id for slices, gers_id for detached). Used for setFeatureState. */
   feature_id?: string;
+  /** Unit slice id when the feature represents a specific address/unit inside a building. */
+  unit_id?: string | null;
+  /** Display label for the unit slice. */
+  unit_number?: string | null;
 }
 
 // GeoJSON Feature with BuildingProperties

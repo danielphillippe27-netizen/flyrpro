@@ -19,15 +19,12 @@ import { displayAddressText, resolveHouseNumberLabel } from '@/lib/map/addressPr
 import {
   appendTileAccessToken,
   fetchCampaignMapManifest,
-  hasDirectWebPmtiles,
   hasRenderablePmtilesBuildings,
-  toPmtilesProtocolUrl,
   type CampaignMapManifest,
 } from '@/lib/map/campaignMapManifest';
-import { ensurePmtilesProtocolRegistered } from '@/lib/map/pmtilesProtocol';
 
 type ManifestBuildingSource = {
-  deliveryMode: 'pmtiles_protocol' | 'static_zxy_cdn' | 'backend_zxy';
+  deliveryMode: 'backend_zxy';
   url: string;
   sourceLayer: string;
   promoteId: string;
@@ -44,6 +41,8 @@ interface MapBuildingsLayerProps {
   addressStateOverrides?: CampaignAddress[];
   hiddenBuildingIds?: string[];
   deletedAddressIds?: string[];
+  campaignBoundary?: GeoJSON.Polygon | null;
+  campaignBbox?: [number, number, number, number] | null;
   statusFilters?: StatusFilters;
   showOrphans?: boolean; // Toggle to show/hide orphan buildings (buildings without address links)
   showAddressLabels?: boolean;
@@ -77,6 +76,18 @@ const FOOTPRINT_SCALE = 1;
 const ADDRESS_LABEL_MIN_ZOOM = 18;
 const POLYGON_GEOMETRY_FILTER: FilterSpecification = ['==', '$type', 'Polygon'];
 const POINT_GEOMETRY_FILTER: FilterSpecification = ['==', '$type', 'Point'];
+const BUILDING_BEFORE_LAYER_IDS = [
+  'campaign-addresses-pmtiles-lead-glow',
+  'campaign-addresses-pmtiles-circle',
+  'campaign-addresses-pmtiles-label',
+  'campaign-point-overlays-circle',
+  'campaign-point-overlays-label',
+  'route-lines',
+  'assigned-routes-lines',
+  'flyr-user-location',
+];
+const PMTILES_EXTRUSION_OPACITY = 0.78;
+const INFERRED_BUILDING_LINK_MAX_DISTANCE_M = 30;
 
 /**
  * Scale a polygon ring toward a centroid by a factor (in place).
@@ -175,6 +186,210 @@ function getAddressCoordinate(address: CampaignAddress): [number, number] | null
   return null;
 }
 
+function pointOnRingSegment(point: [number, number], start: number[], end: number[]): boolean {
+  const [px, py] = point;
+  const [x1, y1] = start;
+  const [x2, y2] = end;
+  if (![px, py, x1, y1, x2, y2].every(Number.isFinite)) return false;
+
+  const cross = (px - x1) * (y2 - y1) - (py - y1) * (x2 - x1);
+  if (Math.abs(cross) > 1e-12) return false;
+
+  return (
+    px >= Math.min(x1, x2) - 1e-12 &&
+    px <= Math.max(x1, x2) + 1e-12 &&
+    py >= Math.min(y1, y2) - 1e-12 &&
+    py <= Math.max(y1, y2) + 1e-12
+  );
+}
+
+function pointInRing(point: [number, number], ring: number[][]): boolean {
+  if (!Array.isArray(ring) || ring.length < 4) return false;
+  const [x, y] = point;
+  let inside = false;
+
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
+    const current = ring[i];
+    const previous = ring[j];
+    if (!Array.isArray(current) || !Array.isArray(previous)) continue;
+    if (pointOnRingSegment(point, previous, current)) return true;
+
+    const xi = Number(current[0]);
+    const yi = Number(current[1]);
+    const xj = Number(previous[0]);
+    const yj = Number(previous[1]);
+    if (![xi, yi, xj, yj].every(Number.isFinite)) continue;
+
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+
+  return inside;
+}
+
+function pointInPolygonGeometry(point: [number, number], polygon: GeoJSON.Polygon): boolean {
+  const [outerRing, ...holes] = polygon.coordinates;
+  if (!pointInRing(point, outerRing)) return false;
+  return !holes.some((hole) => pointInRing(point, hole));
+}
+
+function geometryContainsPoint(geometry: GeoJSON.Geometry | null | undefined, point: [number, number]): boolean {
+  if (!geometry) return false;
+  if (geometry.type === 'Polygon') return pointInPolygonGeometry(point, geometry);
+  if (geometry.type === 'MultiPolygon') {
+    return geometry.coordinates.some((coordinates) =>
+      pointInPolygonGeometry(point, { type: 'Polygon', coordinates })
+    );
+  }
+  return false;
+}
+
+function geometryCenter(geometry: GeoJSON.Geometry | null | undefined): [number, number] | null {
+  if (!geometry) return null;
+  if (geometry.type === 'GeometryCollection') {
+    const centers = geometry.geometries
+      .map((candidate) => geometryCenter(candidate))
+      .filter((center): center is [number, number] => Boolean(center));
+    if (centers.length === 0) return null;
+    const lon = centers.reduce((sum, center) => sum + center[0], 0) / centers.length;
+    const lat = centers.reduce((sum, center) => sum + center[1], 0) / centers.length;
+    return [lon, lat];
+  }
+
+  const positions: Array<[number, number]> = [];
+  const collect = (coordinates: unknown) => {
+    if (!Array.isArray(coordinates)) return;
+    if (
+      coordinates.length >= 2 &&
+      typeof coordinates[0] === 'number' &&
+      typeof coordinates[1] === 'number'
+    ) {
+      positions.push([coordinates[0], coordinates[1]]);
+      return;
+    }
+    coordinates.forEach(collect);
+  };
+
+  collect(geometry.coordinates);
+  const validPositions = positions.filter(([lon, lat]) => Number.isFinite(lon) && Number.isFinite(lat));
+  if (validPositions.length === 0) return null;
+
+  let minLon = Infinity;
+  let minLat = Infinity;
+  let maxLon = -Infinity;
+  let maxLat = -Infinity;
+  for (const [lon, lat] of validPositions) {
+    minLon = Math.min(minLon, lon);
+    minLat = Math.min(minLat, lat);
+    maxLon = Math.max(maxLon, lon);
+    maxLat = Math.max(maxLat, lat);
+  }
+
+  return [(minLon + maxLon) / 2, (minLat + maxLat) / 2];
+}
+
+function distanceMeters(a: [number, number], b: [number, number]): number {
+  const latRad = ((a[1] + b[1]) / 2) * Math.PI / 180;
+  const metersPerDegreeLat = 111_320;
+  const metersPerDegreeLon = Math.max(Math.cos(latRad), 0.01) * 111_320;
+  const dx = (a[0] - b[0]) * metersPerDegreeLon;
+  const dy = (a[1] - b[1]) * metersPerDegreeLat;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function getFeatureIdentifiers(feature: GeoJSON.Feature): string[] {
+  const props = toRecord(feature.properties);
+  return [
+    props.feature_id,
+    props.building_id,
+    props.gers_id,
+    props.id,
+    feature.id,
+  ]
+    .filter((value): value is string | number => typeof value === 'string' || typeof value === 'number')
+    .map((value) => String(value).trim())
+    .filter(Boolean);
+}
+
+function getExplicitAddressBuildingIds(address: CampaignAddress): string[] {
+  return [
+    (address as CampaignAddress & { building_id?: string | null }).building_id,
+    address.building_gers_id,
+    address.gers_id,
+  ]
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .map((value) => value.trim());
+}
+
+function buildInferredAddressAssignments(
+  features: GeoJSON.Feature[],
+  addresses?: CampaignAddress[]
+): Map<string, CampaignAddress[]> {
+  const assignments = new Map<string, CampaignAddress[]>();
+  if (!addresses?.length || features.length === 0) return assignments;
+
+  const candidates = features.flatMap((feature) => {
+    const key = getFeatureIdentifiers(feature)[0];
+    const geometry = feature.geometry;
+    if (!key || (geometry?.type !== 'Polygon' && geometry?.type !== 'MultiPolygon')) return [];
+    return [{
+      key,
+      feature,
+      identifiers: new Set(getFeatureIdentifiers(feature)),
+      center: geometryCenter(geometry),
+    }];
+  });
+
+  const assign = (key: string, address: CampaignAddress) => {
+    const group = assignments.get(key) ?? [];
+    if (!group.some((item) => item.id === address.id)) {
+      group.push(address);
+      assignments.set(key, group);
+    }
+  };
+
+  for (const address of addresses) {
+    const coordinate = getAddressCoordinate(address);
+    if (!coordinate) continue;
+
+    const explicitIds = getExplicitAddressBuildingIds(address);
+    const exactMatch = explicitIds.length
+      ? candidates.find((candidate) => explicitIds.some((id) => candidate.identifiers.has(id)))
+      : undefined;
+    if (exactMatch) {
+      assign(exactMatch.key, address);
+      continue;
+    }
+
+    const containingMatches = candidates.filter((candidate) =>
+      geometryContainsPoint(candidate.feature.geometry, coordinate)
+    );
+    if (containingMatches.length > 0) {
+      const bestContaining = containingMatches
+        .map((candidate) => ({
+          candidate,
+          distance: candidate.center ? distanceMeters(coordinate, candidate.center) : 0,
+        }))
+        .sort((a, b) => a.distance - b.distance)[0]?.candidate;
+      if (bestContaining) assign(bestContaining.key, address);
+      continue;
+    }
+
+    const nearest = candidates
+      .map((candidate) => ({
+        candidate,
+        distance: candidate.center ? distanceMeters(coordinate, candidate.center) : Infinity,
+      }))
+      .filter((match) => match.distance <= INFERRED_BUILDING_LINK_MAX_DISTANCE_M)
+      .sort((a, b) => a.distance - b.distance)[0]?.candidate;
+
+    if (nearest) assign(nearest.key, address);
+  }
+
+  return assignments;
+}
+
 function buildAddressLabelFeatureCollection(
   addresses?: CampaignAddress[]
 ): GeoJSON.FeatureCollection<GeoJSON.Point> {
@@ -208,11 +423,138 @@ function buildAddressLabelFeatureCollection(
 
 function safeGetSource(map: MapboxMap, sourceId: string): boolean {
   try {
-    if (!map.isStyleLoaded()) return false;
     return Boolean(map.getSource(sourceId));
   } catch {
     return false;
   }
+}
+
+function canAddCustomMapLayers(map: MapboxMap): boolean {
+  try {
+    const style = map.getStyle();
+    return Boolean(style && Array.isArray(style.layers) && style.sources);
+  } catch {
+    return false;
+  }
+}
+
+function combineMapFilters(...filters: Array<FilterSpecification | undefined | null>): FilterSpecification {
+  const activeFilters = filters.filter(Boolean) as FilterSpecification[];
+  if (activeFilters.length === 0) return ['all'];
+  if (activeFilters.length === 1) return activeFilters[0];
+  return ['all', ...activeFilters] as FilterSpecification;
+}
+
+function normalizeCampaignBoundaryFilter(
+  boundary: GeoJSON.Polygon | null | undefined
+): GeoJSON.Polygon | undefined {
+  if (!boundary || boundary.type !== 'Polygon' || !Array.isArray(boundary.coordinates)) {
+    return undefined;
+  }
+
+  const coordinates = boundary.coordinates
+    .map((ring) => {
+      const cleanedRing = ring
+        .filter((coordinate): coordinate is [number, number] => {
+          return (
+            Array.isArray(coordinate) &&
+            coordinate.length >= 2 &&
+            Number.isFinite(coordinate[0]) &&
+            Number.isFinite(coordinate[1])
+          );
+        })
+        .map(([lon, lat]) => [lon, lat] as [number, number]);
+
+      if (cleanedRing.length < 3) return [];
+      const first = cleanedRing[0];
+      const last = cleanedRing[cleanedRing.length - 1];
+      if (first[0] !== last[0] || first[1] !== last[1]) {
+        cleanedRing.push([first[0], first[1]]);
+      }
+      return cleanedRing;
+    })
+    .filter((ring) => ring.length >= 4);
+
+  if (coordinates.length === 0) return undefined;
+
+  return {
+    type: 'Polygon',
+    coordinates,
+  };
+}
+
+function bboxToPolygon([west, south, east, north]: [number, number, number, number]): GeoJSON.Polygon {
+  return {
+    type: 'Polygon',
+    coordinates: [[
+      [west, south],
+      [east, south],
+      [east, north],
+      [west, north],
+      [west, south],
+    ]],
+  };
+}
+
+function getCampaignScopedBuildingFilter(addresses?: CampaignAddress[]): FilterSpecification | undefined {
+  if (!addresses?.length) return undefined;
+
+  const buildingIds = new Set<string>();
+
+  for (const address of addresses) {
+    const record = address as CampaignAddress & {
+      address_id?: string | null;
+      building_id?: string | null;
+      source_id?: string | null;
+    };
+
+    for (const value of [
+      record.building_id,
+      record.building_gers_id,
+    ]) {
+      const normalized = String(value ?? '').trim();
+      if (normalized) buildingIds.add(normalized);
+    }
+  }
+
+  const filters: FilterSpecification[] = [];
+  if (buildingIds.size > 0) {
+    const idList = Array.from(buildingIds);
+    filters.push(
+      ['in', ['to-string', ['get', 'building_id']], ['literal', idList]] as FilterSpecification,
+      ['in', ['to-string', ['get', 'gers_id']], ['literal', idList]] as FilterSpecification,
+      ['in', ['to-string', ['get', 'source_id']], ['literal', idList]] as FilterSpecification,
+      ['in', ['to-string', ['get', 'id']], ['literal', idList]] as FilterSpecification
+    );
+  }
+
+  if (filters.length === 0) return undefined;
+  return filters.length === 1 ? filters[0] : ['any', ...filters] as FilterSpecification;
+}
+
+function getCampaignBuildingScopeKey(addresses?: CampaignAddress[]): string {
+  if (!addresses?.length) return 'unscoped';
+
+  const values = new Set<string>();
+  for (const address of addresses) {
+    const record = address as CampaignAddress & {
+      address_id?: string | null;
+      building_id?: string | null;
+      source_id?: string | null;
+    };
+
+    for (const value of [
+      record.id,
+      record.address_id,
+      record.building_id,
+      record.building_gers_id,
+    ]) {
+      const normalized = String(value ?? '').trim();
+      if (normalized) values.add(normalized);
+    }
+  }
+
+  return values.size > 0 ? Array.from(values).sort().join('|') : 'unscoped';
 }
 
 function toRecord(value: unknown): Record<string, unknown> {
@@ -230,47 +572,24 @@ function toManifestBuildingSource(
   manifest: CampaignMapManifest,
   accessToken: string | null
 ): ManifestBuildingSource | null {
-  const sourceLayer = manifest.source_layers?.buildings;
+  const buildingLayer = manifest.layers?.buildings ?? null;
+  const sourceLayer = buildingLayer?.sourceLayer ?? manifest.source_layers?.buildings;
   if (!sourceLayer) return null;
 
-  if (hasDirectWebPmtiles(manifest) && manifest.pmtiles_url) {
-    const pmtilesUrl = toPmtilesProtocolUrl(manifest.pmtiles_url);
-    if (pmtilesUrl && ensurePmtilesProtocolRegistered()) {
-      return {
-        deliveryMode: 'pmtiles_protocol',
-        url: pmtilesUrl,
-        sourceLayer,
-        promoteId: manifest.promote_ids?.buildings ?? 'building_id',
-        minzoom: manifest.minzoom ?? 13,
-        maxzoom: manifest.maxzoom ?? 18,
-        bounds: manifest.bounds ?? undefined,
-      };
-    }
-  }
-
-  if (manifest.static_vector_tile_url_template) {
+  const vectorTileUrlTemplate = buildingLayer?.vectorTileUrlTemplate ?? manifest.vector_tile_url_template;
+  if (vectorTileUrlTemplate) {
     return {
-      deliveryMode: 'static_zxy_cdn',
-      url: manifest.static_vector_tile_url_template,
+      deliveryMode: 'backend_zxy',
+      url: appendTileAccessToken(vectorTileUrlTemplate, accessToken),
       sourceLayer,
-      promoteId: manifest.promote_ids?.buildings ?? 'building_id',
-      minzoom: manifest.minzoom ?? 13,
-      maxzoom: manifest.maxzoom ?? 18,
-      bounds: manifest.bounds ?? undefined,
+      promoteId: buildingLayer?.promoteId ?? manifest.promote_ids?.buildings ?? 'building_id',
+      minzoom: buildingLayer?.minzoom ?? manifest.minzoom ?? 13,
+      maxzoom: buildingLayer?.maxzoom ?? manifest.maxzoom ?? 18,
+      bounds: buildingLayer?.bounds ?? manifest.bounds ?? undefined,
     };
   }
 
-  if (!manifest.vector_tile_url_template) return null;
-
-  return {
-    deliveryMode: 'backend_zxy',
-    url: appendTileAccessToken(manifest.vector_tile_url_template, accessToken),
-    sourceLayer,
-    promoteId: manifest.promote_ids?.buildings ?? 'building_id',
-    minzoom: manifest.minzoom ?? 13,
-    maxzoom: manifest.maxzoom ?? 18,
-    bounds: manifest.bounds ?? undefined,
-  };
+  return null;
 }
 
 function safeRemoveLayer(map: MapboxMap, layerId: string) {
@@ -289,6 +608,16 @@ function safeRemoveSource(map: MapboxMap, sourceId: string) {
   }
 }
 
+function firstExistingLayerId(map: MapboxMap, layerIds: string[]): string | undefined {
+  return layerIds.find((id) => {
+    try {
+      return Boolean(map.getLayer(id));
+    } catch {
+      return false;
+    }
+  });
+}
+
 export function MapBuildingsLayer({
   map,
   campaignId,
@@ -297,6 +626,8 @@ export function MapBuildingsLayer({
   addressStateOverrides,
   hiddenBuildingIds = [],
   deletedAddressIds = [],
+  campaignBoundary = null,
+  campaignBbox = null,
   statusFilters = defaultStatusFilters,
   showOrphans = true,
   showAddressLabels = true,
@@ -331,6 +662,7 @@ export function MapBuildingsLayer({
   const onBuildingClickRef = useRef(onBuildingClick);
   const onRenderStateChangeRef = useRef(onRenderStateChange);
   const isFetchingRef = useRef(isFetching);
+  const emptyFallbackRetryRef = useRef<number | null>(null);
 
   useEffect(() => {
     onBuildingClickRef.current = onBuildingClick;
@@ -441,6 +773,16 @@ export function MapBuildingsLayer({
     return undefined;
   };
 
+  const getScopedGeometryFilter = (
+    geometryFilter: FilterSpecification,
+    filterExpr?: FilterSpecification
+  ): FilterSpecification => {
+    // Campaign building GeoJSON is already server-scoped. Avoid Mapbox `within`
+    // here because PostGIS boundaries may arrive as WKB and vector-tile clipping
+    // can make otherwise valid features disappear.
+    return combineMapFilters(geometryFilter, filterExpr);
+  };
+
   // Generate unified color expression based on status priority
   // Priority: QR_SCANNED > LEADS > CONVERSATIONS > DO_NOT_KNOCK > NO_ONE_HOME > TOUCHED > UNTOUCHED
   // Uses ['feature-state', ...] for real-time updates via setFeatureState(),
@@ -548,32 +890,76 @@ export function MapBuildingsLayer({
     if (!isMountedRef.current || !campaignId) return;
 
     setIsFetching(true);
-    const campaignDataKey = `${campaignId}:${refreshKey}`;
+    const campaignDataKey = `${campaignId}:${refreshKey}:${getCampaignBuildingScopeKey(addressStateOverrides)}`;
 
     try {
-      const { manifest, accessToken } = await fetchCampaignMapManifest(campaignId);
-      if (hasRenderablePmtilesBuildings(manifest)) {
-        const nextSource = toManifestBuildingSource(manifest!, accessToken);
-        if (nextSource) {
-          campaignDataLoadedRef.current = campaignDataKey;
-          setFeatures(null);
-          setManifestSource(nextSource);
-          return;
+      const response = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/buildings`, {
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        throw new Error(`Campaign buildings request failed with status ${response.status}`);
+      }
+
+      const campaignFeatures = await response.json() as BuildingFeatureCollection;
+      const normalizedCampaignFeatures =
+        campaignFeatures?.type === 'FeatureCollection' && Array.isArray(campaignFeatures.features)
+          ? campaignFeatures
+          : ({ type: 'FeatureCollection', features: [] } as BuildingFeatureCollection);
+      const campaignFeatureCount = normalizedCampaignFeatures.features.length;
+
+      campaignDataLoadedRef.current = campaignFeatureCount > 0 ? campaignDataKey : null;
+      setManifestSource(null);
+      setFeatures(normalizedCampaignFeatures);
+
+      if (campaignFeatureCount === 0 && isMountedRef.current) {
+        if (emptyFallbackRetryRef.current) {
+          window.clearTimeout(emptyFallbackRetryRef.current);
+        }
+        emptyFallbackRetryRef.current = window.setTimeout(() => {
+          emptyFallbackRetryRef.current = null;
+          if (isMountedRef.current) {
+            void fetchCampaignData();
+          }
+        }, 3000);
+      }
+    } catch (err) {
+      console.error('[MapBuildingsLayer] Error in fetchCampaignData:', err);
+      if (!campaignBoundary && !campaignBbox) {
+        try {
+          const { manifest, accessToken } = await fetchCampaignMapManifest(campaignId);
+          if (hasRenderablePmtilesBuildings(manifest)) {
+            const nextSource = toManifestBuildingSource(manifest!, accessToken);
+            if (nextSource) {
+              campaignDataLoadedRef.current = campaignDataKey;
+              setFeatures(null);
+              setManifestSource(nextSource);
+              return;
+            }
+          }
+        } catch (manifestError) {
+          console.error('[MapBuildingsLayer] Manifest fallback failed:', manifestError);
         }
       }
 
-      console.warn('[MapBuildingsLayer] PMTiles building layer unavailable.');
-      campaignDataLoadedRef.current = campaignDataKey;
+      campaignDataLoadedRef.current = null;
       setManifestSource(null);
       setFeatures({ type: 'FeatureCollection', features: [] } as BuildingFeatureCollection);
-    } catch (err) {
-      console.error('[MapBuildingsLayer] Error in fetchCampaignData:', err);
     } finally {
       if (isMountedRef.current) {
         setIsFetching(false);
       }
     }
-  }, [campaignId, refreshKey]);
+  }, [campaignId, refreshKey, addressStateOverrides, campaignBoundary, campaignBbox]);
+
+  useEffect(() => {
+    return () => {
+      if (emptyFallbackRetryRef.current) {
+        window.clearTimeout(emptyFallbackRetryRef.current);
+        emptyFallbackRetryRef.current = null;
+      }
+    };
+  }, []);
 
   // Precompute scaled geometry once per fetch — never inside the render/update effect.
   useEffect(() => {
@@ -593,6 +979,8 @@ export function MapBuildingsLayer({
         .map((value) => String(value ?? '').trim())
         .filter(Boolean)
     );
+
+    const inferredAddressAssignments = buildInferredAddressAssignments(features.features, addressStateOverrides);
 
     normalizedFeaturesRef.current = {
       type: 'FeatureCollection',
@@ -629,27 +1017,59 @@ export function MapBuildingsLayer({
           scaleFootprint(scaledGeom, FOOTPRINT_SCALE);
         }
 
+        const featureKey = String(fid ?? f.id ?? '').trim();
+        const inferredAddresses = featureKey ? inferredAddressAssignments.get(featureKey) ?? [] : [];
+        const primaryInferredAddress = inferredAddresses.length === 1 ? inferredAddresses[0] : null;
+        const inferredScansTotal = inferredAddresses.reduce((sum, address) => sum + Number(address.scans ?? 0), 0);
+        const statusRank = { not_visited: 0, visited: 1, no_answer: 2, do_not_knock: 3, hot: 4, lead: 5, hot_lead: 6 } as const;
+        const inferredStatus = inferredAddresses.reduce<ReturnType<typeof getCampaignBuildingStatus> | null>(
+          (current, address) => {
+            const next = getCampaignBuildingStatus(address);
+            if (!current) return next;
+            return statusRank[next] > statusRank[current] ? next : current;
+          },
+          null
+        );
+        const existingAddressCount = Number(props.address_count ?? 0);
+
         return [{
           ...f,
           geometry: (scaledGeom ?? geom) as GeoJSON.Polygon,
           properties: {
             ...props,
-            address_text: displayAddressText({
-              formatted: props.address_text,
-              house_number: props.house_number,
-              street_name: props.street_name,
-            }),
-            house_number: resolveHouseNumberLabel({
-              house_number: props.house_number,
-              formatted: props.address_text,
-            }),
+            address_count: Math.max(existingAddressCount, inferredAddresses.length),
+            address_id: props.address_id ?? primaryInferredAddress?.id ?? null,
+            address_text: props.address_text
+              ? displayAddressText({
+                  formatted: props.address_text,
+                  house_number: props.house_number,
+                  street_name: props.street_name,
+                })
+              : primaryInferredAddress
+                ? displayAddressText(primaryInferredAddress)
+                : null,
+            house_number: props.house_number
+              ? resolveHouseNumberLabel({
+                  house_number: props.house_number,
+                  formatted: props.address_text,
+                })
+              : primaryInferredAddress
+                ? resolveHouseNumberLabel(primaryInferredAddress)
+                : null,
+            street_name: props.street_name ?? primaryInferredAddress?.street_name ?? null,
+            address_status: props.address_status ?? primaryInferredAddress?.address_status ?? null,
+            feature_status: props.feature_status ?? (inferredAddresses.length > 0 ? 'matched' : undefined),
+            match_method: props.match_method ?? (inferredAddresses.length > 0 ? 'visual_inferred' : undefined),
+            status: props.status ?? inferredStatus ?? 'not_visited',
+            scans_total: Math.max(Number(props.scans_total ?? 0), inferredScansTotal),
+            qr_scanned: Boolean(props.qr_scanned) || inferredScansTotal > 0,
             feature_id: fid ?? f.id,
           },
         }];
       }),
     } as BuildingFeatureCollection;
     lastSetDataRef.current = null;
-  }, [deletedAddressIds, features, hiddenBuildingIds]);
+  }, [addressStateOverrides, deletedAddressIds, features, hiddenBuildingIds]);
 
   // EXPLORATION MODE: Fetch buildings in viewport bounding box (when no campaignId)
   const fetchBuildingsInViewport = useCallback(async (bounds: { ne: [number, number]; sw: [number, number] }) => {
@@ -824,7 +1244,7 @@ export function MapBuildingsLayer({
     }
     
     // Only fetch if we haven't already loaded this campaign's data
-    const campaignDataKey = `${campaignId}:${refreshKey}`;
+    const campaignDataKey = `${campaignId}:${refreshKey}:${getCampaignBuildingScopeKey(addressStateOverrides)}`;
     if (campaignDataLoadedRef.current === campaignDataKey) {
       return;
     }
@@ -861,7 +1281,7 @@ export function MapBuildingsLayer({
     return () => {
       map.off('zoomend', onZoomChanged);
     };
-  }, [map, campaignId, fetchCampaignData, onZoomChanged, refreshKey]);
+  }, [map, campaignId, fetchCampaignData, onZoomChanged, refreshKey, addressStateOverrides]);
 
   // EXPLORATION MODE: Set up viewport event listeners (only when no campaignId)
   useEffect(() => {
@@ -955,59 +1375,102 @@ export function MapBuildingsLayer({
   useEffect(() => {
     if (!map || !manifestSource) return;
 
+    const hasExpectedManifestLayers = () =>
+      safeGetSource(map, sourceId) &&
+      Boolean(
+        (() => {
+          try {
+            return map.getLayer(layerId) && map.getLayer(leadGlowLayerId);
+          } catch {
+            return false;
+          }
+        })()
+      );
+
     const addManifestLayers = () => {
-      if (!map.isStyleLoaded()) return;
+      if (!canAddCustomMapLayers(map)) return;
       cleanupRenderedLayers();
 
-      const vectorSource: mapboxgl.VectorSourceSpecification & { promoteId?: Record<string, string> } = {
+      const vectorSource: mapboxgl.VectorSourceSpecification & {
+        buffer?: number;
+        promoteId?: Record<string, string>;
+      } = {
         type: 'vector',
         minzoom: manifestSource.minzoom,
         maxzoom: manifestSource.maxzoom,
+        buffer: 128,
         promoteId: {
           [manifestSource.sourceLayer]: manifestSource.promoteId,
         },
       };
-      if (manifestSource.deliveryMode === 'pmtiles_protocol') {
-        vectorSource.url = manifestSource.url;
-      } else {
-        vectorSource.tiles = [manifestSource.url];
-      }
+      vectorSource.tiles = [manifestSource.url];
       if (manifestSource.bounds) vectorSource.bounds = manifestSource.bounds;
 
       map.addSource(sourceId, vectorSource);
-      const filterExpr = getFilterExpression();
+      const normalizedBoundary = normalizeCampaignBoundaryFilter(campaignBoundary);
+      const bboxBoundary = campaignBbox ? bboxToPolygon(campaignBbox) : null;
+      const campaignScopeFilter =
+        getCampaignScopedBuildingFilter(addressStateOverrides) ??
+        (bboxBoundary
+          ? (['within', bboxBoundary] as FilterSpecification)
+          : normalizedBoundary
+            ? (['within', normalizedBoundary] as FilterSpecification)
+            : undefined);
+      const buildingFilter = getScopedGeometryFilter(
+        ['==', ['geometry-type'], 'Polygon'] as FilterSpecification,
+        campaignScopeFilter
+      );
+      const beforeLayerId = firstExistingLayerId(map, BUILDING_BEFORE_LAYER_IDS);
+      const addBuildingLayer = (layer: mapboxgl.AnyLayer) => {
+        if (beforeLayerId) {
+          map.addLayer(layer, beforeLayerId);
+        } else {
+          map.addLayer(layer);
+        }
+      };
 
-      map.addLayer({
+      const footprintLayer: FillExtrusionLayerSpecification = {
         id: layerId,
         type: 'fill-extrusion',
         source: sourceId,
         'source-layer': manifestSource.sourceLayer,
         minzoom: manifestSource.minzoom,
-        filter: filterExpr ? ['all', POLYGON_GEOMETRY_FILTER, filterExpr] : POLYGON_GEOMETRY_FILTER,
+        filter: buildingFilter,
         paint: {
-          'fill-extrusion-color': getFootprintFillColor(),
-          'fill-extrusion-vertical-gradient': true,
-          'fill-extrusion-height': ['coalesce', ['get', 'height'], ['get', 'height_m'], ['get', 'render_height'], 10] as ExpressionSpecification,
+          'fill-extrusion-color': NEUTRAL_FOOTPRINT_COLOR,
+          'fill-extrusion-opacity': PMTILES_EXTRUSION_OPACITY,
+          'fill-extrusion-height': [
+            'coalesce',
+            ['get', 'height'],
+            ['get', 'height_m'],
+            ['get', 'render_height'],
+            8,
+          ] as ExpressionSpecification,
           'fill-extrusion-base': ['coalesce', ['get', 'min_height'], 0] as ExpressionSpecification,
-          'fill-extrusion-opacity': getFootprintFillOpacity(),
-          'fill-extrusion-emissive-strength': 0.85,
+          'fill-extrusion-vertical-gradient': true,
+          'fill-extrusion-emissive-strength': 0.65,
         },
-      });
+      };
 
-      map.addLayer({
+      addBuildingLayer(footprintLayer);
+
+      addBuildingLayer({
         id: leadGlowLayerId,
         type: 'line',
         source: sourceId,
         'source-layer': manifestSource.sourceLayer,
         minzoom: manifestSource.minzoom,
-        filter: filterExpr ? ['all', POLYGON_GEOMETRY_FILTER, filterExpr] : POLYGON_GEOMETRY_FILTER,
+        filter: buildingFilter,
         paint: {
-          'line-color': MAP_STATUS_CONFIG.LEADS.color,
-          'line-width': 7,
-          'line-opacity': getLeadGlowOpacityExpression(),
-          'line-blur': 5,
+          'line-color': '#111827',
+          'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.25, 16, 0.7, 18, 1],
+          'line-opacity': 0,
         },
       });
+
+      if (!hasExpectedManifestLayers()) {
+        throw new Error('Building source/layers did not attach.');
+      }
 
       try {
         map.setLight({
@@ -1052,14 +1515,42 @@ export function MapBuildingsLayer({
 
     let cleanupHandlers: (() => void) | undefined;
     let cancelled = false;
-    const onStyleLoad = () => {
-      if (!cancelled) cleanupHandlers = addManifestLayers();
+    let retryIntervalId: number | undefined;
+    const clearRetry = () => {
+      map.off('style.load', tryAddManifestLayers);
+      map.off('styledata', tryAddManifestLayers);
+      map.off('load', tryAddManifestLayers);
+      map.off('idle', tryAddManifestLayers);
+      if (retryIntervalId !== undefined) {
+        window.clearInterval(retryIntervalId);
+        retryIntervalId = undefined;
+      }
+    };
+    const tryAddManifestLayers = () => {
+      if (cancelled) return;
+      if (hasExpectedManifestLayers()) {
+        clearRetry();
+        return;
+      }
+      if (cleanupHandlers || !canAddCustomMapLayers(map)) return;
+      try {
+        cleanupHandlers = addManifestLayers();
+        if (cleanupHandlers && hasExpectedManifestLayers()) clearRetry();
+      } catch (error) {
+        cleanupHandlers?.();
+        cleanupHandlers = undefined;
+        cleanupRenderedLayers();
+        console.warn('[MapBuildingsLayer] Custom building layer attach deferred:', error);
+      }
     };
 
-    if (map.isStyleLoaded()) {
-      cleanupHandlers = addManifestLayers();
-    } else {
-      map.once('style.load', onStyleLoad);
+    tryAddManifestLayers();
+    if (!cleanupHandlers) {
+      map.on('style.load', tryAddManifestLayers);
+      map.on('styledata', tryAddManifestLayers);
+      map.on('load', tryAddManifestLayers);
+      map.on('idle', tryAddManifestLayers);
+      retryIntervalId = window.setInterval(tryAddManifestLayers, 150);
     }
 
     const reportRenderState = () => {
@@ -1090,14 +1581,14 @@ export function MapBuildingsLayer({
 
     return () => {
       cancelled = true;
-      map.off('style.load', onStyleLoad);
+      clearRetry();
       cleanupHandlers?.();
       map.off('idle', reportRenderState);
       map.off('moveend', reportRenderState);
       map.off('zoomend', reportRenderState);
       cleanupRenderedLayers();
     };
-  }, [map, manifestSource, cleanupRenderedLayers, sourceId, layerId, leadGlowLayerId]);
+  }, [map, manifestSource, cleanupRenderedLayers, sourceId, layerId, leadGlowLayerId, addressStateOverrides, campaignBoundary, campaignBbox]);
 
   useEffect(() => {
     if (!map || !manifestSource || !campaignId || !addressStateOverrides?.length) return;
@@ -1291,7 +1782,7 @@ export function MapBuildingsLayer({
             type: 'fill-extrusion',
             source: sourceId,
             minzoom: 12,
-            filter: filterExpr ? ['all', polygonFilter, filterExpr] : polygonFilter,
+            filter: getScopedGeometryFilter(polygonFilter, filterExpr),
             paint: {
               'fill-extrusion-color': getFootprintFillColor(),
               'fill-extrusion-vertical-gradient': true,
@@ -1311,7 +1802,7 @@ export function MapBuildingsLayer({
               type: 'line',
               source: sourceId,
               minzoom: 12,
-              filter: filterExpr ? ['all', polygonFilter, filterExpr] : polygonFilter,
+              filter: getScopedGeometryFilter(polygonFilter, filterExpr),
               paint: {
                 'line-color': MAP_STATUS_CONFIG.LEADS.color,
                 'line-width': 7,
@@ -1329,9 +1820,7 @@ export function MapBuildingsLayer({
               type: 'circle' as const,
               source: sourceId,
               minzoom: 12,
-              filter: filterExpr
-                ? ['all', ['==', ['geometry-type'], 'Point'], filterExpr]
-                : ['==', ['geometry-type'], 'Point'],
+              filter: getScopedGeometryFilter(POINT_GEOMETRY_FILTER, filterExpr),
               paint: {
                 'circle-radius': 14,
                 'circle-color': MAP_STATUS_CONFIG.LEADS.color,
@@ -1347,9 +1836,7 @@ export function MapBuildingsLayer({
               type: 'circle',
               source: sourceId,
               minzoom: 12,
-              filter: filterExpr 
-                ? ['all', ['==', ['geometry-type'], 'Point'], filterExpr]
-                : ['==', ['geometry-type'], 'Point'],
+              filter: getScopedGeometryFilter(POINT_GEOMETRY_FILTER, filterExpr),
               paint: {
                 'circle-radius': 5,
                 'circle-color': getFootprintFillColor(),
@@ -1744,6 +2231,7 @@ export function MapBuildingsLayer({
 
   // Update color and filter when statusFilters or campaignId changes
   useEffect(() => {
+    if (manifestSource) return;
     if (!map || !map.getLayer(layerId)) return;
     
     try {
@@ -1751,27 +2239,28 @@ export function MapBuildingsLayer({
       const filterExpr = getFilterExpression();
       map.setPaintProperty(layerId, 'fill-extrusion-color', colorExpr);
       map.setPaintProperty(layerId, 'fill-extrusion-opacity', getFootprintFillOpacity());
-      map.setFilter(layerId, filterExpr ? ['all', POLYGON_GEOMETRY_FILTER, filterExpr] : POLYGON_GEOMETRY_FILTER);
+      map.setFilter(layerId, getScopedGeometryFilter(POLYGON_GEOMETRY_FILTER, filterExpr));
       if (map.getLayer(leadGlowLayerId)) {
         map.setPaintProperty(leadGlowLayerId, 'line-opacity', getLeadGlowOpacityExpression());
-        map.setFilter(leadGlowLayerId, filterExpr ? ['all', POLYGON_GEOMETRY_FILTER, filterExpr] : POLYGON_GEOMETRY_FILTER);
+        map.setFilter(leadGlowLayerId, getScopedGeometryFilter(POLYGON_GEOMETRY_FILTER, filterExpr));
       }
       if (map.getLayer(circleLeadGlowLayerId)) {
         map.setPaintProperty(circleLeadGlowLayerId, 'circle-opacity', getLeadGlowOpacityExpression());
-        map.setFilter(circleLeadGlowLayerId, filterExpr ? ['all', POINT_GEOMETRY_FILTER, filterExpr] : POINT_GEOMETRY_FILTER);
+        map.setFilter(circleLeadGlowLayerId, getScopedGeometryFilter(POINT_GEOMETRY_FILTER, filterExpr));
       }
       if (map.getLayer(circleLayerId)) {
         map.setPaintProperty(circleLayerId, 'circle-color', colorExpr);
         map.setPaintProperty(circleLayerId, 'circle-opacity', getCircleOpacity());
-        map.setFilter(circleLayerId, filterExpr ? ['all', POINT_GEOMETRY_FILTER, filterExpr] : POINT_GEOMETRY_FILTER);
+        map.setFilter(circleLayerId, getScopedGeometryFilter(POINT_GEOMETRY_FILTER, filterExpr));
       }
     } catch (err) {
       console.error('[MapBuildingsLayer] Error updating color/filter:', err);
     }
-  }, [map, statusFilters, campaignId, layerId, showOrphans, footprintStatusColors, circleLayerId]);
+  }, [map, manifestSource, statusFilters, campaignId, layerId, showOrphans, footprintStatusColors, circleLayerId]);
 
   // Update filter when showOrphans changes (toggle visibility of orphan buildings)
   useEffect(() => {
+    if (manifestSource) return;
     if (!map) return;
     
     const updateFilters = () => {
@@ -1779,10 +2268,10 @@ export function MapBuildingsLayer({
       
       try {
         if (map.getLayer(layerId)) {
-          map.setFilter(layerId, filterExpr ? ['all', POLYGON_GEOMETRY_FILTER, filterExpr] : POLYGON_GEOMETRY_FILTER);
+          map.setFilter(layerId, getScopedGeometryFilter(POLYGON_GEOMETRY_FILTER, filterExpr));
         }
         if (map.getLayer(circleLayerId)) {
-          map.setFilter(circleLayerId, filterExpr ? ['all', POINT_GEOMETRY_FILTER, filterExpr] : POINT_GEOMETRY_FILTER);
+          map.setFilter(circleLayerId, getScopedGeometryFilter(POINT_GEOMETRY_FILTER, filterExpr));
         }
       } catch (err) {
         console.error('[MapBuildingsLayer] Error updating filter for showOrphans:', err);
@@ -1799,7 +2288,7 @@ export function MapBuildingsLayer({
     return () => {
       map.off('load', updateFilters);
     };
-  }, [map, showOrphans, campaignId, statusFilters, layerId, circleLayerId]);
+  }, [map, manifestSource, showOrphans, campaignId, statusFilters, layerId, circleLayerId]);
 
   // Re-apply lighting and refresh colors when map style loads (important for dark mode)
   useEffect(() => {
@@ -1816,18 +2305,18 @@ export function MapBuildingsLayer({
         });
 
         // Refresh colors after style change (ensures they're applied correctly)
-        if (map.getLayer(layerId)) {
+        if (!manifestSource && map.getLayer(layerId)) {
           map.setPaintProperty(layerId, 'fill-extrusion-color', getFootprintFillColor());
           map.setPaintProperty(layerId, 'fill-extrusion-opacity', getFootprintFillOpacity());
           map.setPaintProperty(layerId, 'fill-extrusion-vertical-gradient', true);
         }
-        if (map.getLayer(leadGlowLayerId)) {
+        if (!manifestSource && map.getLayer(leadGlowLayerId)) {
           map.setPaintProperty(leadGlowLayerId, 'line-opacity', getLeadGlowOpacityExpression());
         }
-        if (map.getLayer(circleLeadGlowLayerId)) {
+        if (!manifestSource && map.getLayer(circleLeadGlowLayerId)) {
           map.setPaintProperty(circleLeadGlowLayerId, 'circle-opacity', getLeadGlowOpacityExpression());
         }
-        if (map.getLayer(circleLayerId)) {
+        if (!manifestSource && map.getLayer(circleLayerId)) {
           map.setPaintProperty(circleLayerId, 'circle-color', getFootprintFillColor());
           map.setPaintProperty(circleLayerId, 'circle-opacity', getCircleOpacity());
         }
@@ -1847,7 +2336,7 @@ export function MapBuildingsLayer({
     return () => {
       map.off('style.load', applyLightingAndColors);
     };
-  }, [map, layerId, circleLayerId, footprintStatusColors]);
+  }, [map, manifestSource, layerId, circleLayerId, footprintStatusColors]);
 
   // Real-time subscription for building_stats updates
   // When a QR code is scanned, building_stats is updated via trigger

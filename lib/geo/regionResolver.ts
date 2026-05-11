@@ -47,6 +47,11 @@ interface RegionBoundsRow {
 import regionBounds from '../../scripts/regions.json';
 
 // Coarse province/territory bounds for fallback inference when Mapbox is unavailable.
+const NON_US_CANADA_REGION_BOUNDS: Record<string, Bounds> = {
+  NZ: [166.0, -48.5, 179.5, -33.0],
+  AU: [96.0, -44.0, 168.5, -9.0],
+};
+
 const CANADA_REGION_BOUNDS: Record<string, Bounds> = {
   BC: [-139.06, 48.2, -114.03, 60.01],
   AB: [-120.0, 48.9, -109.0, 60.0],
@@ -185,6 +190,7 @@ function inferRegionFromBounds(point: Point): string | null {
     }
   };
 
+  collectMatches(NON_US_CANADA_REGION_BOUNDS);
   collectMatches(CANADA_REGION_BOUNDS);
   collectMatches(US_REGION_BOUNDS);
 
@@ -203,7 +209,7 @@ async function inferRegionFromMapbox(point: Point): Promise<string | null> {
 
   const url =
     `https://api.mapbox.com/geocoding/v5/mapbox.places/${point.lng},${point.lat}.json` +
-    `?types=region,country&country=ca,us&access_token=${token}`;
+    `?types=region,country&country=ca,us,nz,au&access_token=${token}`;
 
   try {
     const response = await fetch(url);
