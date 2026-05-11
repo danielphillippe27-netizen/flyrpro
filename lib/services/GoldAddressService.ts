@@ -16,8 +16,8 @@ const LEGACY_GOLD_RPC_CAP = 2500;
 
 export interface GoldAddressResult {
   source: 'gold' | 'silver' | 'lambda';
-  addresses: any[];
-  buildings: any[];
+  addresses: unknown[];
+  buildings: GoldBuildingRow[];
   counts: {
     gold: number;
     lambda: number;
@@ -27,13 +27,41 @@ export interface GoldAddressResult {
   snapshot?: LambdaSnapshotResponse | null;
 }
 
+export type GoldAddressRow = {
+  id?: string | null;
+  street_number?: string | null;
+  street_name?: string | null;
+  unit?: string | null;
+  city?: string | null;
+  province?: string | null;
+  zip?: string | null;
+  lat?: number | null;
+  lon?: number | null;
+  geom_geojson?: string | null;
+  [key: string]: unknown;
+};
+
+export type GoldBuildingRow = {
+  id: string;
+  source_id?: string;
+  external_id?: string;
+  area_sqm?: number;
+  height_m?: number | null;
+  floors?: number | null;
+  geom_geojson: string;
+  centroid_geojson?: string;
+  building_type?: string;
+  subtype?: string;
+  [key: string]: unknown;
+};
+
 export class GoldAddressService {
   private static applyRpcRange<T>(builder: T, from: number, to: number): T {
     const query = builder as T & { range?: (from: number, to: number) => T };
     return typeof query.range === 'function' ? query.range(from, to) : builder;
   }
 
-  private static parseGoldAddressRows(raw: unknown): any[] {
+  private static parseGoldAddressRows(raw: unknown): GoldAddressRow[] {
     if (!raw) return [];
 
     if (Array.isArray(raw)) return raw;
@@ -55,14 +83,14 @@ export class GoldAddressService {
         return this.parseGoldAddressRows(obj.get_gold_addresses_in_polygon_geojson);
       }
       if ('street_name' in obj || 'street_number' in obj || 'id' in obj) {
-        return [obj];
+        return [obj as GoldAddressRow];
       }
     }
 
     return [];
   }
 
-  private static parseGoldBuildingRows(raw: unknown): any[] {
+  private static parseGoldBuildingRows(raw: unknown): GoldBuildingRow[] {
     if (!raw) return [];
 
     if (Array.isArray(raw)) {
@@ -71,7 +99,9 @@ export class GoldAddressService {
       const first = raw[0] as Record<string, unknown>;
       if ('geom_geojson' in first) return raw;
       if (first?.type === 'Feature') {
-        return raw.map((feature) => this.featureToGoldBuildingRow(feature as Record<string, unknown>)).filter(Boolean);
+        return raw
+          .map((feature) => this.featureToGoldBuildingRow(feature as Record<string, unknown>))
+          .filter((row): row is GoldBuildingRow => Boolean(row));
       }
       return raw;
     }
@@ -94,7 +124,7 @@ export class GoldAddressService {
       if (obj.type === 'FeatureCollection' && Array.isArray(obj.features)) {
         return obj.features
           .map((feature) => this.featureToGoldBuildingRow(feature as Record<string, unknown>))
-          .filter(Boolean);
+          .filter((row): row is GoldBuildingRow => Boolean(row));
       }
 
       if (obj.type === 'Feature') {
@@ -106,21 +136,21 @@ export class GoldAddressService {
     return [];
   }
 
-  private static featureToGoldBuildingRow(feature: Record<string, unknown>): any | null {
+  private static featureToGoldBuildingRow(feature: Record<string, unknown>): GoldBuildingRow | null {
     const geometry = feature.geometry as Record<string, unknown> | undefined;
     if (!geometry) return null;
     const props = (feature.properties as Record<string, unknown> | undefined) ?? {};
     return {
-      id: props.id ?? feature.id ?? null,
-      source_id: props.source_id ?? null,
-      external_id: props.external_id ?? null,
-      area_sqm: props.area_sqm ?? null,
-      height_m: props.height_m ?? null,
-      floors: props.floors ?? null,
+      id: String(props.id ?? feature.id ?? ''),
+      source_id: typeof props.source_id === 'string' ? props.source_id : undefined,
+      external_id: typeof props.external_id === 'string' ? props.external_id : undefined,
+      area_sqm: typeof props.area_sqm === 'number' ? props.area_sqm : undefined,
+      height_m: typeof props.height_m === 'number' ? props.height_m : null,
+      floors: typeof props.floors === 'number' ? props.floors : null,
       geom_geojson: JSON.stringify(geometry),
-      centroid_geojson: props.centroid_geojson ?? null,
-      building_type: props.building_type ?? null,
-      subtype: props.subtype ?? null,
+      centroid_geojson: typeof props.centroid_geojson === 'string' ? props.centroid_geojson : undefined,
+      building_type: typeof props.building_type === 'string' ? props.building_type : undefined,
+      subtype: typeof props.subtype === 'string' ? props.subtype : undefined,
     };
   }
 
@@ -285,9 +315,9 @@ export class GoldAddressService {
     polygonGeoJSON: string,
     province: string | undefined,
     limit: number
-  ): Promise<any[]> {
+  ): Promise<GoldAddressRow[]> {
     const collectPages = async (provinceOverride?: string) => {
-      const rows: any[] = [];
+      const rows: GoldAddressRow[] = [];
 
       for (let from = 0; rows.length < limit; from += GOLD_RPC_PAGE_SIZE) {
         const to = from + Math.min(GOLD_RPC_PAGE_SIZE, limit - rows.length) - 1;
@@ -337,7 +367,7 @@ export class GoldAddressService {
     polygon: GeoJSON.Polygon,
     province?: string,
     limit: number = DEFAULT_GOLD_ADDRESS_LIMIT
-  ): Promise<any[]> {
+  ): Promise<GoldAddressRow[]> {
     const supabase = createAdminClient();
     const polygonGeoJSON = JSON.stringify(polygon);
     
@@ -382,7 +412,7 @@ export class GoldAddressService {
     console.log('[GoldAddressService] Querying Gold Standard table...');
     
     const normalizedRegion = this.normalizeProvince(regionCode);
-    let goldAddresses: any[] = [];
+    let goldAddresses: GoldAddressRow[] = [];
 
     try {
       goldAddresses = await this.fetchGoldAddressesWithLimit(
@@ -465,11 +495,11 @@ export class GoldAddressService {
     // =============================================================================
     // STEP 4: Merge Gold + Lambda (if we had some Gold addresses)
     // =============================================================================
-    let finalAddresses = lambdaAddresses;
+    let finalAddresses: unknown[] = lambdaAddresses;
     
     if (goldCount > 0 && goldAddresses) {
       // Convert Gold addresses to campaign format
-      const goldAsCampaign = goldAddresses.map((addr: any) => ({
+      const goldAsCampaign = goldAddresses.map((addr) => ({
         campaign_id: campaignId,
         formatted: `${addr.street_number} ${addr.street_name}${addr.unit ? ' ' + addr.unit : ''}, ${addr.city}`,
         house_number: addr.street_number,
@@ -484,16 +514,16 @@ export class GoldAddressService {
       }));
       
       // Deduplicate: Prefer Gold over Lambda for same location
-      const addressMap = new Map();
+      const addressMap = new Map<string, unknown>();
       
       // Add Lambda addresses first
-      lambdaAddresses.forEach((addr: any) => {
+      lambdaAddresses.forEach((addr) => {
         const key = `${addr.house_number?.toLowerCase()}|${addr.street_name?.toLowerCase()}`;
         addressMap.set(key, addr);
       });
       
       // Overwrite with Gold addresses (higher priority)
-      goldAsCampaign.forEach((addr: any) => {
+      goldAsCampaign.forEach((addr) => {
         const key = `${addr.house_number?.toLowerCase()}|${addr.street_name?.toLowerCase()}`;
         addressMap.set(key, addr);
       });
@@ -521,7 +551,7 @@ export class GoldAddressService {
    */
   static async getBuildingsForPolygon(
     polygon: GeoJSON.Polygon
-  ): Promise<{ buildings: any[]; source: 'gold' | 'lambda' }> {
+  ): Promise<{ buildings: GoldBuildingRow[]; source: 'gold' | 'lambda' }> {
     const supabase = createAdminClient();
     const polygonGeoJSON = JSON.stringify(polygon);
     

@@ -347,7 +347,7 @@ export class MapBuildingsService {
       house_number?: string;
       street_name?: string;
     }>,
-    client?: SupabaseClient<any>
+    client?: SupabaseClient
   ): Promise<{ inserted: number; errors: number }> {
     let inserted = 0;
     let errors = 0;

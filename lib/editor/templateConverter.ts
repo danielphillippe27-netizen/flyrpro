@@ -4,7 +4,14 @@
  * Converts old FlyerTemplate format to new EditorStateSnapshot format
  */
 
-import type { FlyerTemplate, FlyerElement } from '@/lib/types/flyers';
+import type {
+  FlyerTemplate,
+  FlyerElement,
+  FlyerTextElement,
+  FlyerRectElement,
+  FlyerImageElement,
+  FlyerQRCodeElement,
+} from '@/lib/types/flyers';
 import type { EditorStateSnapshot, EditorElement, TextElement, RectElement, ImageElement, QRElement } from './types';
 import { generateId } from './utils';
 
@@ -70,7 +77,7 @@ function convertFlyerElementToEditorElement(
 
   switch (flyerEl.type) {
     case 'text': {
-      const textEl = flyerEl as any;
+      const textEl = flyerEl as FlyerTextElement;
       const maxWidth = textEl.maxWidth || 400;
       // For center-aligned text, the x coordinate in old format is the center point
       // In new format, x is the left edge, so we need to adjust
@@ -98,7 +105,7 @@ function convertFlyerElementToEditorElement(
     }
 
     case 'rect': {
-      const rectEl = flyerEl as any;
+      const rectEl = flyerEl as FlyerRectElement;
       const element: RectElement = {
         ...baseProps,
         type: 'rect',
@@ -111,7 +118,7 @@ function convertFlyerElementToEditorElement(
     }
 
     case 'image': {
-      const imageEl = flyerEl as any;
+      const imageEl = flyerEl as FlyerImageElement;
       const element: ImageElement = {
         ...baseProps,
         type: 'image',
@@ -124,7 +131,7 @@ function convertFlyerElementToEditorElement(
     }
 
     case 'qrcode': {
-      const qrEl = flyerEl as any;
+      const qrEl = flyerEl as FlyerQRCodeElement;
       const element: QRElement = {
         ...baseProps,
         type: 'qrcode',
@@ -136,7 +143,7 @@ function convertFlyerElementToEditorElement(
     }
 
     default:
-      console.warn(`Unknown element type: ${(flyerEl as any).type}`);
+      console.warn(`Unknown element type: ${(flyerEl as FlyerElement).type}`);
       return null;
   }
 }
@@ -161,9 +168,8 @@ function getElementName(flyerEl: FlyerElement): string {
     return 'Background';
   }
   if (flyerEl.type === 'text') {
-    const textEl = flyerEl as any;
+    const textEl = flyerEl as FlyerTextElement;
     return textEl.text?.substring(0, 20) || 'Text';
   }
   return flyerEl.type.charAt(0).toUpperCase() + flyerEl.type.slice(1);
 }
-

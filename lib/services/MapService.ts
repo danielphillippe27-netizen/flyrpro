@@ -81,7 +81,10 @@ export class MapService {
     
     // PostGIS geometry is returned as GeoJSON string by Supabase
     // Parse it if needed
-    return (data || []).map((building: any) => ({
+    return (data || []).map((building: {
+      geometry: unknown;
+      [key: string]: unknown;
+    }) => ({
       ...building,
       // Geometry might be a string (GeoJSON) or already parsed
       geometry: typeof building.geometry === 'string' 

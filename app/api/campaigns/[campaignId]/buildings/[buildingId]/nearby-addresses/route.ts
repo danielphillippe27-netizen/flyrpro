@@ -104,7 +104,13 @@ export async function GET(
       
       const unlinked = (fallbackData || [])
         .filter(a => !linkedIds.has(a.id))
-        .map((a: any) => ({
+        .map((a: {
+          id: string;
+          formatted: string | null;
+          house_number: string | null;
+          street_name: string | null;
+          geom: string | null;
+        }) => ({
           address_id: a.id,
           formatted: a.formatted,
           house_number: a.house_number,
@@ -121,7 +127,14 @@ export async function GET(
       });
     }
     
-    const addresses: NearbyAddress[] = (data || []).map((row: any) => ({
+    const addresses: NearbyAddress[] = (data || []).map((row: {
+      address_id: string;
+      formatted: string | null;
+      house_number: string | null;
+      street_name: string | null;
+      distance_meters: number;
+      geom: string | null;
+    }) => ({
       address_id: row.address_id,
       formatted: row.formatted,
       house_number: row.house_number,

@@ -556,7 +556,7 @@ export class BuildingService {
       if (fallbackData && fallbackData.length > 0) {
         // Find nearest using Turf.js
         const buildingPoint = turf.point([lon, lat]);
-        let nearest: any = null;
+        let nearest: Feature<LineString> | null = null;
         let minDist = Infinity;
 
         for (const segment of fallbackData) {

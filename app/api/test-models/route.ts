@@ -33,40 +33,45 @@ export async function GET() {
       );
     }
 
-    const data = await response.json();
+    const data = await response.json() as {
+      models?: Array<{
+        name?: string;
+        displayName?: string;
+        description?: string;
+        supportedGenerationMethods?: string[];
+      }>;
+    };
 
     // Filter to only models that support generateContent
-    const generateContentModels = data.models?.filter((model: any) => 
+    const generateContentModels = data.models?.filter((model) =>
       model.supportedGenerationMethods?.includes('generateContent')
     ) || [];
 
     return NextResponse.json({
       totalModels: data.models?.length || 0,
-      generateContentModels: generateContentModels.map((model: any) => ({
+      generateContentModels: generateContentModels.map((model) => ({
         name: model.name,
         displayName: model.displayName,
         description: model.description,
         supportedMethods: model.supportedGenerationMethods,
       })),
-      allModels: data.models?.map((model: any) => ({
+      allModels: data.models?.map((model) => ({
         name: model.name,
         displayName: model.displayName,
         supportedMethods: model.supportedGenerationMethods,
       })) || [],
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error listing models:', error);
     return NextResponse.json(
       { 
         error: 'Failed to list models',
-        message: error?.message 
+        message: error instanceof Error ? error.message : String(error)
       },
       { status: 500 }
     );
   }
 }
-
-
 
 
 

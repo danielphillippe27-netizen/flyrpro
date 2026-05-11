@@ -29,19 +29,19 @@ export async function POST(req: Request) {
     });
 
     return NextResponse.json({ imageUrl }, { status: 200 });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('Flyer image generation error:', err);
     return NextResponse.json(
       {
         error:
-          err?.message ??
-          'Failed to generate flyer image. Please try again in a moment.',
+          err instanceof Error
+            ? err.message
+            : 'Failed to generate flyer image. Please try again in a moment.',
       },
       { status: 500 }
     );
   }
 }
-
 
 
 

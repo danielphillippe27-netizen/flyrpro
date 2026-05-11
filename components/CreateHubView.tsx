@@ -46,7 +46,7 @@ export function CreateHubView({
         <DialogHeader>
           <DialogTitle>Create New</DialogTitle>
           <DialogDescription>
-            Choose what you'd like to create
+            Choose what you&apos;d like to create
           </DialogDescription>
         </DialogHeader>
         

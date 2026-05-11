@@ -2,6 +2,7 @@
 
 import { useRef, useEffect, useState } from 'react';
 import { Stage, Layer, Text, Rect, Image as KonvaImage, Group } from 'react-konva';
+import type Konva from 'konva';
 import type {
   FlyerTemplate,
   FlyerElement,
@@ -19,7 +20,7 @@ interface FlyerEditorCanvasProps {
   selectedElementId: string | null;
   onSelectElement: (id: string) => void;
   onUpdateElement: (updated: FlyerElement) => void;
-  stageRef?: React.RefObject<any>;
+  stageRef?: React.RefObject<Konva.Stage | null>;
 }
 
 /**

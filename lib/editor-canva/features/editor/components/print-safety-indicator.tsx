@@ -15,17 +15,15 @@ interface PrintSafetyIndicatorProps {
  * red "Risk of Cutoff" when content extends into bleed.
  */
 export const PrintSafetyIndicator = ({ editor }: PrintSafetyIndicatorProps) => {
-  if (!editor) return null;
-
-  const canvas = editor.canvas;
-  const workspace = editor.getWorkspace() as fabric.Rect | undefined;
+  const canvas = editor?.canvas ?? null;
+  const workspace = editor?.getWorkspace() as fabric.Rect | undefined;
   const status = usePrintSafety({
     canvas,
     workspace,
-    showBleed: editor.showBleed,
+    showBleed: editor?.showBleed ?? false,
   });
 
-  if (!workspace) return null;
+  if (!editor || !workspace) return null;
 
   if (status === "bleed") {
     return (
@@ -52,4 +50,3 @@ export const PrintSafetyIndicator = ({ editor }: PrintSafetyIndicatorProps) => {
     </div>
   );
 };
-

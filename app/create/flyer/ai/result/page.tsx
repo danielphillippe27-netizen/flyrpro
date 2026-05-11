@@ -74,8 +74,8 @@ export default function AIFlyerResultPage() {
       if (typeof window !== "undefined") {
         sessionStorage.setItem("flyr_ai_result", JSON.stringify(data));
       }
-    } catch (err: any) {
-      setError(err?.message ?? "Failed to revise flyer");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to revise flyer");
     } finally {
       setIsRevising(false);
     }
@@ -114,8 +114,8 @@ export default function AIFlyerResultPage() {
           router.push(`/campaigns/${data.campaignId}/flyers/${data.flyerId}/edit`);
         }, 1500);
       }
-    } catch (err: any) {
-      setError(err?.message ?? "Failed to save flyer");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to save flyer");
     } finally {
       setIsSaving(false);
     }
@@ -132,7 +132,7 @@ export default function AIFlyerResultPage() {
         <div>
           <h1 className="text-3xl font-semibold">Your AI Flyer</h1>
           <p className="text-gray-500">
-            Review your flyer, tweak it with AI, then save or print when you're ready.
+            Review your flyer, tweak it with AI, then save or print when you&apos;re ready.
           </p>
         </div>
 
@@ -144,8 +144,8 @@ export default function AIFlyerResultPage() {
           <CardHeader>
             <CardTitle>Revise with AI</CardTitle>
             <CardDescription>
-              Tell AI how to adjust the design. Example: "Make the price larger, move the QR code
-              to the bottom right, and switch the accent color to red."
+              Tell AI how to adjust the design. Example: &quot;Make the price larger, move the QR code
+              to the bottom right, and switch the accent color to red.&quot;
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -199,4 +199,3 @@ export default function AIFlyerResultPage() {
     </div>
   );
 }
-

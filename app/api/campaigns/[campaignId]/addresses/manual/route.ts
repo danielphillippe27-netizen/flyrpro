@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -13,7 +13,7 @@ function getAuthToken(request: Request): string | null {
 }
 
 async function ensureCampaignAccess(
-  supabase: any,
+  supabase: SupabaseClient,
   campaignId: string,
   userId: string
 ): Promise<boolean> {
@@ -55,7 +55,7 @@ type ResolvedBuilding = {
 };
 
 async function resolveBuilding(
-  supabase: any,
+  supabase: SupabaseClient,
   buildingIdParam: string
 ): Promise<ResolvedBuilding | null> {
   const uuidMatch = buildingIdParam.match(

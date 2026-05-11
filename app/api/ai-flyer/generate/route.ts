@@ -64,12 +64,20 @@ export async function POST(request: NextRequest) {
         },
         { status: 200 }
       );
-    } catch (apiError: any) {
+    } catch (apiError: unknown) {
+      const serviceError = apiError as {
+        message?: string;
+        stack?: string;
+        response?: { data?: unknown } | unknown;
+      };
       // Log detailed error for debugging, including full Gemini error response
       console.error('AI service error:', {
-        message: apiError.message,
-        stack: apiError.stack,
-        response: apiError.response?.data || apiError.response,
+        message: serviceError.message,
+        stack: serviceError.stack,
+        response:
+          serviceError.response && typeof serviceError.response === 'object' && 'data' in serviceError.response
+            ? serviceError.response.data
+            : serviceError.response,
         payload: { ...payload, mediaUrls: payload.mediaUrls?.length || 0 },
         fullError: apiError,
       });
@@ -85,11 +93,11 @@ export async function POST(request: NextRequest) {
         { status: 500 }
       );
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     // Catch-all for unexpected errors
     console.error('AI flyer generation error:', {
-      message: error?.message,
-      stack: error?.stack,
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
       error,
     });
 

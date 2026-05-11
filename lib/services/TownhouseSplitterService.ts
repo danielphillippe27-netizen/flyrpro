@@ -27,7 +27,7 @@ export interface BuildingFeature {
     gers_id: string;
     name?: string | null;
     height?: number | null;
-    [key: string]: any;
+    [key: string]: unknown;
   };
 }
 
@@ -39,6 +39,26 @@ export interface AddressFeature {
   street_name?: string | null;
   formatted?: string | null;
 }
+
+type BuildingAddressLinkRow = {
+  building_id: string;
+  address_id: string;
+  campaign_addresses: {
+    id: string;
+    formatted?: string | null;
+    house_number?: string | null;
+    street_name?: string | null;
+    geom: { coordinates: [number, number] };
+  } | Array<{
+    id: string;
+    formatted?: string | null;
+    house_number?: string | null;
+    street_name?: string | null;
+    geom: { coordinates: [number, number] };
+  }>;
+};
+
+type SplitErrorType = SplitErrorRecord['error_type'];
 
 export interface SplitUnit {
   address_id: string;
@@ -80,7 +100,7 @@ export interface BuildingAnalysis {
 export interface SplitErrorRecord {
   campaign_id: string;
   building_id: string;
-  building_geometry: any;
+  building_geometry: GeoJSON.Geometry;
   error_type: 'validation_failed' | 'geometry_complex' | 'address_mismatch' | 
               'split_failed' | 'self_intersection' | 'insert_failed';
   error_message: string;
@@ -714,7 +734,7 @@ export class TownhouseSplitterService {
   /**
    * Analyze building characteristics
    */
-  private analyzeBuilding(building: BuildingFeature, links: any[]): BuildingAnalysis {
+  private analyzeBuilding(building: BuildingFeature, links: BuildingAddressLinkRow[]): BuildingAnalysis {
     const coords = building.geometry.coordinates[0];
     const n = coords.length - 1;
     
@@ -732,14 +752,19 @@ export class TownhouseSplitterService {
     const heightM = Math.abs(my2 - my1);
     const aspectRatio = Math.max(widthM, heightM) / Math.min(widthM, heightM);
 
-    const addresses: AddressFeature[] = links.map(l => ({
-      id: l.address_id,
-      lon: l.campaign_addresses.geom.coordinates[0],
-      lat: l.campaign_addresses.geom.coordinates[1],
-      house_number: l.campaign_addresses.house_number,
-      street_name: l.campaign_addresses.street_name,
-      formatted: l.campaign_addresses.formatted,
-    }));
+    const addresses: AddressFeature[] = links.map(l => {
+      const campaignAddress = Array.isArray(l.campaign_addresses)
+        ? l.campaign_addresses[0]
+        : l.campaign_addresses;
+      return {
+        id: l.address_id,
+        lon: campaignAddress.geom.coordinates[0],
+        lat: campaignAddress.geom.coordinates[1],
+        house_number: campaignAddress.house_number,
+        street_name: campaignAddress.street_name,
+        formatted: campaignAddress.formatted,
+      };
+    });
 
     const unitCount = addresses.length;
     let classification: BuildingAnalysis['classification'];
@@ -869,7 +894,7 @@ export class TownhouseSplitterService {
       campaign_id: campaignId,
       building_id: analysis.building_id,
       building_geometry: analysis.building.geometry,
-      error_type: (result.error_type as any) || 'split_failed',
+      error_type: (result.error_type ?? 'split_failed') as SplitErrorType,
       error_message: result.error_message || 'Unknown error',
       address_count: analysis.unit_count,
       address_ids: analysis.addresses.map(a => a.id),
@@ -886,8 +911,8 @@ export class TownhouseSplitterService {
   }
 
   // Helper methods
-  private groupLinksByBuilding(links: any[]): Map<string, any[]> {
-    const groups = new Map<string, any[]>();
+  private groupLinksByBuilding(links: BuildingAddressLinkRow[]): Map<string, BuildingAddressLinkRow[]> {
+    const groups = new Map<string, BuildingAddressLinkRow[]>();
     for (const link of links) {
       const existing = groups.get(link.building_id) || [];
       existing.push(link);

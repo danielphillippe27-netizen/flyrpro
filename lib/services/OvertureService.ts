@@ -19,12 +19,14 @@ import {
 // Re-export types for consumers
 export type { OvertureBuilding, OvertureAddress, OvertureTransportation, BoundingBox };
 
+type OverturePolygonInput = Parameters<typeof MotherDuckHttpService.getBuildingsInPolygon>[0];
+
 export class OvertureService {
   /**
    * Get buildings inside a polygon
    * Queries pre-loaded MotherDuck database via HTTP API
    */
-  static async getBuildingsInPolygon(input: any): Promise<OvertureBuilding[]> {
+  static async getBuildingsInPolygon(input: OverturePolygonInput): Promise<OvertureBuilding[]> {
     console.log('[OvertureService] getBuildingsInPolygon via MotherDuck HTTP');
     return MotherDuckHttpService.getBuildingsInPolygon(input);
   }
@@ -33,7 +35,7 @@ export class OvertureService {
    * Get addresses inside a polygon
    * Queries pre-loaded MotherDuck database via HTTP API
    */
-  static async getAddressesInPolygon(input: any): Promise<OvertureAddress[]> {
+  static async getAddressesInPolygon(input: OverturePolygonInput): Promise<OvertureAddress[]> {
     console.log('[OvertureService] getAddressesInPolygon via MotherDuck HTTP');
     return MotherDuckHttpService.getAddressesInPolygon(input);
   }
@@ -42,7 +44,7 @@ export class OvertureService {
    * Get roads inside a polygon
    * Note: Roads are not pre-loaded, returns empty array
    */
-  static async getRoadsInPolygon(input: any): Promise<OvertureTransportation[]> {
+  static async getRoadsInPolygon(input: OverturePolygonInput): Promise<OvertureTransportation[]> {
     console.log('[OvertureService] getRoadsInPolygon via MotherDuck HTTP');
     return MotherDuckHttpService.getRoadsInPolygon(input);
   }
@@ -121,7 +123,14 @@ export class OvertureService {
         return null;
       }
       
-      const data = await res.json();
+      const data = await res.json() as {
+        features?: Array<{
+          address?: string;
+          text?: string;
+          place_name?: string;
+          context?: Array<{ id?: string; text?: string }>;
+        }>;
+      };
       
       if (!data.features?.length) {
         console.log(`[OvertureService] No address found at ${lat}, ${lon}`);
@@ -129,7 +138,7 @@ export class OvertureService {
       }
       
       const feature = data.features[0];
-      const postcode = feature.context?.find((c: any) => c.id?.startsWith('postcode'))?.text || '';
+      const postcode = feature.context?.find((c) => c.id?.startsWith('postcode'))?.text || '';
       
       const result = {
         house_number: feature.address || '',

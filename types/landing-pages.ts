@@ -14,6 +14,6 @@ export interface CreateLandingPagePayload {
   video_url?: string;
   template_id?: string;
   campaign_id?: string;
-  dynamic_data?: Record<string, any>;
+  dynamic_data?: Record<string, unknown>;
 }
 

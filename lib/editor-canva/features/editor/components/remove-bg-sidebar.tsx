@@ -128,7 +128,7 @@ export const RemoveBgSidebar = ({
               <p className="text-xs text-red-500 mt-2">{error}</p>
             )}
             <p className="text-xs text-muted-foreground mt-2">
-              We'll create a new image with a transparent background so you can keep the original.
+              We&apos;ll create a new image with a transparent background so you can keep the original.
             </p>
           </div>
         </ScrollArea>

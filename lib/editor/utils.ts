@@ -4,6 +4,7 @@
  * Math helpers for snapping, alignment, and coordinate calculations.
  */
 
+import { FLYER_PRINT_CONSTANTS_HALF_LETTER } from '@/lib/flyers/printConstants';
 import type { EditorElement, EditorPage } from './types';
 
 export interface SnapGuide {
@@ -72,13 +73,8 @@ export function getPrintSnapPoints(): {
   vertical: number[];
   horizontal: number[];
 } {
-  const {
-    BLEED_INSET,
-    TRIM_WIDTH,
-    TRIM_HEIGHT,
-    SAFE_INSET,
-    SAFE_RECT,
-  } = require('@/lib/flyers/printConstants').FLYER_PRINT_CONSTANTS_HALF_LETTER;
+  const { BLEED_INSET, TRIM_WIDTH, TRIM_HEIGHT, SAFE_INSET, SAFE_RECT } =
+    FLYER_PRINT_CONSTANTS_HALF_LETTER;
 
   // Trim lines (at bleed inset)
   const trimLeft = BLEED_INSET;
@@ -284,6 +280,4 @@ export function alignElements(
 export function generateId(): string {
   return `elem_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 }
-
-
 

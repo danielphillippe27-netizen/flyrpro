@@ -11,6 +11,21 @@ interface MapControlsProps {
   selectedCampaignName?: string | null;
 }
 
+type FullscreenDocument = Document & {
+  webkitFullscreenElement?: Element | null;
+  mozFullScreenElement?: Element | null;
+  msFullscreenElement?: Element | null;
+  webkitExitFullscreen?: () => Promise<void> | void;
+  mozCancelFullScreen?: () => Promise<void> | void;
+  msExitFullscreen?: () => Promise<void> | void;
+};
+
+type FullscreenElement = HTMLElement & {
+  webkitRequestFullscreen?: () => Promise<void> | void;
+  mozRequestFullScreen?: () => Promise<void> | void;
+  msRequestFullscreen?: () => Promise<void> | void;
+};
+
 export function MapControls({ onCampaignSelect, selectedCampaignId, selectedCampaignName }: MapControlsProps) {
   const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -19,9 +34,9 @@ export function MapControls({ onCampaignSelect, selectedCampaignId, selectedCamp
       setIsFullscreen(
         !!(
           document.fullscreenElement ||
-          (document as any).webkitFullscreenElement ||
-          (document as any).mozFullScreenElement ||
-          (document as any).msFullscreenElement
+          (document as FullscreenDocument).webkitFullscreenElement ||
+          (document as FullscreenDocument).mozFullScreenElement ||
+          (document as FullscreenDocument).msFullscreenElement
         )
       );
     };
@@ -41,12 +56,13 @@ export function MapControls({ onCampaignSelect, selectedCampaignId, selectedCamp
 
   const toggleFullscreen = async () => {
     try {
-      const doc = document.documentElement as any;
+      const doc = document.documentElement as FullscreenElement;
+      const fullscreenDocument = document as FullscreenDocument;
       const isFullscreen =
         document.fullscreenElement ||
-        doc.webkitFullscreenElement ||
-        doc.mozFullScreenElement ||
-        doc.msFullscreenElement;
+        fullscreenDocument.webkitFullscreenElement ||
+        fullscreenDocument.mozFullScreenElement ||
+        fullscreenDocument.msFullscreenElement;
 
       if (!isFullscreen) {
         if (doc.requestFullscreen) {
@@ -61,12 +77,12 @@ export function MapControls({ onCampaignSelect, selectedCampaignId, selectedCamp
       } else {
         if (document.exitFullscreen) {
           await document.exitFullscreen();
-        } else if ((document as any).webkitExitFullscreen) {
-          await (document as any).webkitExitFullscreen();
-        } else if ((document as any).mozCancelFullScreen) {
-          await (document as any).mozCancelFullScreen();
-        } else if ((document as any).msExitFullscreen) {
-          await (document as any).msExitFullscreen();
+        } else if (fullscreenDocument.webkitExitFullscreen) {
+          await fullscreenDocument.webkitExitFullscreen();
+        } else if (fullscreenDocument.mozCancelFullScreen) {
+          await fullscreenDocument.mozCancelFullScreen();
+        } else if (fullscreenDocument.msExitFullscreen) {
+          await fullscreenDocument.msExitFullscreen();
         }
       }
     } catch (error) {
@@ -117,4 +133,3 @@ export function MapControls({ onCampaignSelect, selectedCampaignId, selectedCamp
     </>
   );
 }
-

@@ -12,20 +12,41 @@ const WKT_POINT_PATTERNS = [
   /SRID=\d+;POINT\s*\(\s*([-\d.]+)\s+([-\d.]+)\s*\)/i,
 ];
 
-export function parsePointGeometry(address: any): PointGeometry | null {
+type AddressGeometryInput = {
+  geom_json?: unknown;
+  geometry?: unknown;
+  geom?: unknown;
+  coordinate?: { lat?: unknown; lon?: unknown } | null;
+};
+
+function isPointGeometry(value: unknown): value is PointGeometry {
+  if (!value || typeof value !== 'object') return false;
+  const geom = value as { type?: unknown; coordinates?: unknown };
+  return geom.type === 'Point' && Array.isArray(geom.coordinates) && geom.coordinates.length >= 2;
+}
+
+function toPointGeometry(value: unknown): PointGeometry | null {
+  if (isPointGeometry(value)) {
+    const [lon, lat] = value.coordinates;
+    if (typeof lon === 'number' && typeof lat === 'number') {
+      return { type: 'Point', coordinates: [lon, lat] };
+    }
+  }
+  return null;
+}
+
+function parsePointGeometry(address: AddressGeometryInput): PointGeometry | null {
   // NEW: Check for 'geom_json' field first (from Supabase view with ST_AsGeoJSON conversion)
   if (address.geom_json) {
     const geomJson = address.geom_json;
     if (typeof geomJson === 'object' && geomJson !== null) {
-      if (geomJson.type === 'Point' && Array.isArray(geomJson.coordinates) && geomJson.coordinates.length >= 2) {
-        return { type: 'Point', coordinates: [geomJson.coordinates[0], geomJson.coordinates[1]] };
-      }
+      const point = toPointGeometry(geomJson);
+      if (point) return point;
     } else if (typeof geomJson === 'string') {
       try {
         const parsed = JSON.parse(geomJson);
-        if (parsed?.type === 'Point' && Array.isArray(parsed.coordinates) && parsed.coordinates.length >= 2) {
-          return { type: 'Point', coordinates: [parsed.coordinates[0], parsed.coordinates[1]] };
-        }
+        const point = toPointGeometry(parsed);
+        if (point) return point;
       } catch {
         // Ignore parsing errors
       }
@@ -37,15 +58,8 @@ export function parsePointGeometry(address: any): PointGeometry | null {
     if (typeof address.geometry === 'string') {
       try {
         const parsed = JSON.parse(address.geometry);
-        if (parsed?.type === 'Point' && Array.isArray(parsed.coordinates)) {
-          return { type: 'Point', coordinates: [parsed.coordinates[0], parsed.coordinates[1]] };
-        }
-        if (Array.isArray(parsed?.coordinates) && parsed.coordinates.length >= 2) {
-          return { type: 'Point', coordinates: [parsed.coordinates[0], parsed.coordinates[1]] };
-        }
-        if (parsed?.geometry?.coordinates && parsed.geometry.coordinates.length >= 2) {
-          return { type: 'Point', coordinates: [parsed.geometry.coordinates[0], parsed.geometry.coordinates[1]] };
-        }
+        const point = toPointGeometry(parsed) || toPointGeometry(parsed?.geometry);
+        if (point) return point;
       } catch {
         // Try WKT parsing if JSON parse fails
         for (const pattern of WKT_POINT_PATTERNS) {
@@ -60,16 +74,9 @@ export function parsePointGeometry(address: any): PointGeometry | null {
         }
       }
     } else if (typeof address.geometry === 'object') {
-      const geom = address.geometry;
-      if (geom?.type === 'Point' && Array.isArray(geom.coordinates)) {
-        return { type: 'Point', coordinates: [geom.coordinates[0], geom.coordinates[1]] };
-      }
-      if (Array.isArray(geom?.coordinates) && geom.coordinates.length >= 2) {
-        return { type: 'Point', coordinates: [geom.coordinates[0], geom.coordinates[1]] };
-      }
-      if (geom?.geometry?.coordinates && geom.geometry.coordinates.length >= 2) {
-        return { type: 'Point', coordinates: [geom.geometry.coordinates[0], geom.geometry.coordinates[1]] };
-      }
+      const geom = address.geometry as { geometry?: unknown };
+      const point = toPointGeometry(geom) || toPointGeometry(geom.geometry);
+      if (point) return point;
     }
   }
 
@@ -107,15 +114,8 @@ export function parsePointGeometry(address: any): PointGeometry | null {
       
       try {
         const parsed = JSON.parse(address.geom);
-        if (parsed?.type === 'Point' && Array.isArray(parsed.coordinates)) {
-          return { type: 'Point', coordinates: [parsed.coordinates[0], parsed.coordinates[1]] };
-        }
-        if (Array.isArray(parsed?.coordinates) && parsed.coordinates.length >= 2) {
-          return { type: 'Point', coordinates: [parsed.coordinates[0], parsed.coordinates[1]] };
-        }
-        if (parsed?.geometry?.coordinates && parsed.geometry.coordinates.length >= 2) {
-          return { type: 'Point', coordinates: [parsed.geometry.coordinates[0], parsed.geometry.coordinates[1]] };
-        }
+        const point = toPointGeometry(parsed) || toPointGeometry(parsed?.geometry);
+        if (point) return point;
       } catch {
         for (const pattern of WKT_POINT_PATTERNS) {
           const match = address.geom.match(pattern);
@@ -129,21 +129,18 @@ export function parsePointGeometry(address: any): PointGeometry | null {
         }
       }
     } else if (typeof address.geom === 'object') {
-      const geom = address.geom;
-      if (geom?.type === 'Point' && Array.isArray(geom.coordinates)) {
-        return { type: 'Point', coordinates: [geom.coordinates[0], geom.coordinates[1]] };
-      }
-      if (Array.isArray(geom?.coordinates) && geom.coordinates.length >= 2) {
-        return { type: 'Point', coordinates: [geom.coordinates[0], geom.coordinates[1]] };
-      }
-      if (geom?.geometry?.coordinates && geom.geometry.coordinates.length >= 2) {
-        return { type: 'Point', coordinates: [geom.geometry.coordinates[0], geom.geometry.coordinates[1]] };
-      }
+      const geom = address.geom as { geometry?: unknown };
+      const point = toPointGeometry(geom) || toPointGeometry(geom.geometry);
+      if (point) return point;
     }
   }
 
   // FALLBACK: Check for coordinate object
-  if (address.coordinate) {
+  if (
+    address.coordinate &&
+    typeof address.coordinate.lon === 'number' &&
+    typeof address.coordinate.lat === 'number'
+  ) {
     return {
       type: 'Point',
       coordinates: [address.coordinate.lon, address.coordinate.lat],

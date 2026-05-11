@@ -129,7 +129,7 @@ function AIFlyerContent() {
 
       const data: GenerateResponse = await response.json();
       setDesigns(data.designs ?? []);
-    } catch (err: any) {
+    } catch (err: unknown) {
       const errorMessage =
         err instanceof Error
           ? err.message
@@ -218,9 +218,9 @@ Campaign Details:
 
       const data = await res.json();
       setFlyerImageUrl(data.imageUrl);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('AI flyer image error:', err);
-      setImageError(err?.message ?? 'Failed to generate flyer image');
+      setImageError(err instanceof Error ? err.message : 'Failed to generate flyer image');
     } finally {
       setIsGeneratingImage(false);
     }
@@ -467,7 +467,7 @@ Campaign Details:
             {qrEnabled && (
               <>
                 <p className="text-sm text-muted-foreground">
-                  We'll automatically place the QR code in a clean spot on the design.
+                  We&apos;ll automatically place the QR code in a clean spot on the design.
                 </p>
                 <div>
                   <Label htmlFor="qr-destination">QR destination type</Label>
