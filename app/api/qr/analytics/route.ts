@@ -43,12 +43,11 @@ export async function POST(request: NextRequest) {
       { error: 'campaignId or qrCodeIds is required' },
       { status: 400 }
     );
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error fetching QR analytics:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to fetch QR analytics' },
+      { error: error instanceof Error ? error.message : 'Failed to fetch QR analytics' },
       { status: 500 }
     );
   }
 }
-

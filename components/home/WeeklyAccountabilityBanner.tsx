@@ -44,6 +44,7 @@ export function WeeklyAccountabilityBanner() {
   }
 
   async function markPosted() {
+    if (!post) return;
     setBusy(true);
     try {
       await fetch('/api/accountability-card/share', {
@@ -58,6 +59,7 @@ export function WeeklyAccountabilityBanner() {
   }
 
   async function handleDownload() {
+    if (!post) return;
     setBusy(true);
     try {
       const response = await fetch(post.card_public_url);

@@ -6,6 +6,15 @@ interface UseAutoResizeProps {
   container: HTMLDivElement | null;
 }
 
+type ScaleToFitTarget = {
+  width: number;
+  height: number;
+};
+
+const findScaleToFit = (fabric.util as unknown as {
+  findScaleToFit: (source: fabric.Object, destination: ScaleToFitTarget) => number;
+}).findScaleToFit;
+
 export const useAutoResize = ({ canvas, container }: UseAutoResizeProps) => {
   const autoZoom = useCallback(() => {
     if (!canvas || !container) return;
@@ -28,8 +37,7 @@ export const useAutoResize = ({ canvas, container }: UseAutoResizeProps) => {
       return;
     }
 
-    // @ts-ignore
-    const scale = fabric.util.findScaleToFit(localWorkspace, {
+    const scale = findScaleToFit(localWorkspace, {
       width: width,
       height: height,
     });

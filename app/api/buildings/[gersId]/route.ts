@@ -78,9 +78,9 @@ export async function GET(
     let normalizedGersId: string;
     try {
       normalizedGersId = validateGersId(gersId, 'GERS ID');
-    } catch (error: any) {
+    } catch (error: unknown) {
       return NextResponse.json(
-        { error: 'Invalid GERS ID format', message: error.message },
+        { error: 'Invalid GERS ID format', message: error instanceof Error ? error.message : String(error) },
         { status: 400 }
       );
     }
@@ -153,7 +153,12 @@ export async function GET(
     // If multiple addresses found (same GERS ID in different campaigns),
     // return the first one, or all if no campaign filter was applied
     const address = addresses[0];
-    const campaign = address.campaigns as any;
+    const campaign = address.campaigns as {
+      title?: string | null;
+      name?: string | null;
+      status?: string | null;
+      subscription_tier?: string | null;
+    } | null;
 
     // Build response; only include real scan data for Pro/Team users
     const response = {

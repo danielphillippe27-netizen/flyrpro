@@ -170,7 +170,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     const element = state.elements[id];
     if (!element) return;
     
-    const updated = { ...element, ...partial };
+    const updated = { ...element, ...partial } as EditorElement;
     set({
       elements: {
         ...state.elements,
@@ -586,6 +586,5 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     set(getInitialEditorState());
   },
 }));
-
 
 

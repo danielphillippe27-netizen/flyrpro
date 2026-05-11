@@ -226,7 +226,7 @@ export async function resolveWorkspaceIdForUser(
   const supabaseAny = supabase as any;
 
   if (requestedWorkspaceId) {
-    const { data: membership, error } = await supabase
+    const { data: membership, error } = await supabaseAny
       .from('workspace_members')
       .select('workspace_id')
       .eq('user_id', userId)
@@ -263,7 +263,7 @@ export async function resolveWorkspaceIdForUser(
     }
   }
 
-  const { data: fallbackMembership, error: fallbackError } = await supabase
+  const { data: fallbackMembership, error: fallbackError } = await supabaseAny
     .from('workspace_members')
     .select('workspace_id, role, created_at')
     .eq('user_id', userId)

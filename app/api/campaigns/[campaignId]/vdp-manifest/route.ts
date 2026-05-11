@@ -55,7 +55,7 @@ export async function GET(
     }
 
     // Verify ownership
-    const ownerId = campaign.owner_id || (campaign as any).user_id;
+    const ownerId = campaign.owner_id || (campaign as { user_id?: string | null }).user_id;
     if (ownerId !== user.id) {
       return NextResponse.json(
         { error: 'Forbidden', message: 'You do not have access to this campaign' },
@@ -71,6 +71,7 @@ export async function GET(
       .from('campaign_addresses')
       .select(`
         id,
+        address,
         formatted,
         postal_code,
         qr_png_url,

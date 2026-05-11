@@ -487,7 +487,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!lowConfidence && aiJson.follow_up_at) {
+    const followUpAt = aiJson.follow_up_at;
+    if (!lowConfidence && followUpAt) {
       const taskTitle =
         aiJson.follow_up?.task_title?.trim() ||
         `Follow up: ${aiJson.summary.slice(0, 80)}`;
@@ -503,8 +504,8 @@ export async function POST(request: NextRequest) {
               personId,
               name: taskTitle,
               type: 'Follow Up',
-              dueDate: aiJson.follow_up_at.slice(0, 10),
-              dueDateTime: aiJson.follow_up_at,
+              dueDate: followUpAt.slice(0, 10),
+              dueDateTime: followUpAt,
               ...(currentUserId != null ? { assignedUserId: currentUserId } : {}),
             }),
           });
@@ -535,11 +536,12 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (!lowConfidence && aiJson.appointment?.start_at && aiJson.appointment?.end_at) {
+    const appointment = aiJson.appointment;
+    if (!lowConfidence && appointment?.start_at && appointment.end_at) {
       const appointmentDescriptionParts = [
         normalizedNote,
-        aiJson.appointment.invitee_email
-          ? `Requested external invitee email: ${aiJson.appointment.invitee_email}`
+        appointment.invitee_email
+          ? `Requested external invitee email: ${appointment.invitee_email}`
           : null,
       ].filter((value): value is string => Boolean(value));
 
@@ -552,10 +554,10 @@ export async function POST(request: NextRequest) {
               ...fubAuth!.headers,
             },
             body: JSON.stringify({
-              title: aiJson.appointment?.title || 'Appointment',
-              start: aiJson.appointment.start_at,
-              end: aiJson.appointment.end_at,
-              ...(aiJson.appointment.location ? { location: aiJson.appointment.location } : {}),
+              title: appointment.title || 'Appointment',
+              start: appointment.start_at,
+              end: appointment.end_at,
+              ...(appointment.location ? { location: appointment.location } : {}),
               ...(appointmentDescriptionParts.length
                 ? { description: appointmentDescriptionParts.join('\n\n') }
                 : {}),

@@ -13,7 +13,7 @@ interface UploadButtonProps {
   content?: {
     button?: string;
   };
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export const UploadButton = ({ 
@@ -43,7 +43,7 @@ export const UploadButton = ({
 interface UploadDropzoneProps {
   endpoint?: string;
   onClientUploadComplete?: (res: Array<{ url: string }>) => void;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export const UploadDropzone = ({ 

@@ -72,16 +72,16 @@ export async function POST(req: NextRequest) {
     const publicUrl = await uploadBackgroundRemovedImage(processedImageBlob);
 
     return NextResponse.json({ url: publicUrl }, { status: 200 });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('Background remover error:', err);
     return NextResponse.json(
       {
         error:
-          err?.message ??
-          'Failed to remove background. Please try again in a moment.',
+          err instanceof Error
+            ? err.message
+            : 'Failed to remove background. Please try again in a moment.',
       },
       { status: 500 }
     );
   }
 }
-

@@ -69,12 +69,11 @@ export async function POST(request: NextRequest) {
     const qrCode = await QRCodeService.createQRCodeWithDestination(supabase, args);
 
     return NextResponse.json({ data: qrCode }, { status: 201 });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error creating QR code:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to create QR code' },
+      { error: error instanceof Error ? error.message : 'Failed to create QR code' },
       { status: 500 }
     );
   }
 }
-

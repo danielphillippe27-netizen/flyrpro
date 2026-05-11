@@ -7,6 +7,7 @@ import postgres from "postgres";
 
 let dbInstance: ReturnType<typeof drizzle> | null = null;
 let client: ReturnType<typeof postgres> | null = null;
+type EditorDb = ReturnType<typeof drizzle>;
 
 function getDb() {
   const connectionString = process.env.DATABASE_URL;
@@ -16,7 +17,7 @@ function getDb() {
     // This allows the build to succeed even without DATABASE_URL
     if (typeof window === 'undefined') {
       // Server-side: create a minimal proxy that throws helpful errors at runtime
-      return new Proxy({} as any, {
+      return new Proxy({} as EditorDb, {
         get() {
           throw new Error(
             'DATABASE_URL must be set. Get it from Supabase Dashboard > Settings > Database > Connection string (URI)'
@@ -25,7 +26,7 @@ function getDb() {
       });
     }
     // Client-side: should never happen, but return empty object
-    return {} as any;
+    return {} as EditorDb;
   }
 
   // Lazy initialization - only create connection when actually needed

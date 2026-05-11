@@ -45,7 +45,7 @@ type RawBuildingFeature = {
 };
 
 export class BuildingAdapter {
-  private static filterRenderableRows<T extends Record<string, unknown>>(rows: T[], source: 'Gold' | 'Lambda'): T[] {
+  private static filterRenderableRows<T extends GoldBuildingRow>(rows: T[], source: 'Gold' | 'Lambda'): T[] {
     const filtered = filterLinkableBuildingFootprints(rows);
     const removed = rows.length - filtered.length;
     if (removed > 0) {
@@ -88,9 +88,9 @@ export class BuildingAdapter {
     const renderableRows = this.filterRenderableRows(rows, 'Gold');
     return {
       type: 'FeatureCollection',
-      features: renderableRows.map((row) => ({
+      features: renderableRows.map((row): StandardBuildingFeature => ({
         type: 'Feature',
-        geometry: JSON.parse(row.geom_geojson),
+        geometry: JSON.parse(row.geom_geojson) as GeoJSON.Polygon | GeoJSON.MultiPolygon,
         properties: {
           gers_id: row.id,
           external_id: row.external_id || row.source_id,
@@ -124,14 +124,24 @@ export class BuildingAdapter {
       const raw = feature as RawBuildingFeature;
       if (!raw.geometry || !['Polygon', 'MultiPolygon'].includes(String(raw.geometry.type))) return [];
       const properties = raw.properties ?? {};
+      const area = typeof properties.area === 'number'
+        ? properties.area
+        : typeof properties.area_sqm === 'number'
+          ? properties.area_sqm
+          : undefined;
+      const externalId = typeof properties.external_id === 'string'
+        ? properties.external_id
+        : typeof properties.id === 'string'
+          ? properties.id
+          : undefined;
       return [{
         type: 'Feature' as const,
         geometry: raw.geometry,
         properties: {
           gers_id: String(properties.gers_id || properties.id || properties.external_id || ''),
-          external_id: properties.external_id || properties.id,
-          area: properties.area || properties.area_sqm,
-          height: properties.height || null,
+          ...(externalId ? { external_id: externalId } : {}),
+          ...(area !== undefined ? { area } : {}),
+          height: typeof properties.height === 'number' ? properties.height : null,
           layer: 'building',
           ...properties, // Preserve any additional properties
         },

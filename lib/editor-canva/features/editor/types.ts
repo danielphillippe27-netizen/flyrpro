@@ -109,6 +109,8 @@ export type ActiveTool =
   | "layers"
   | "uploads"
   | "background"
+  | "ai"
+  | "draw"
   | "icons"
   | "qr";
 
@@ -213,6 +215,7 @@ export type BuildEditorProps = {
 };
 
 export interface Editor {
+  save: (skip?: boolean) => void;
   savePng: () => void;
   saveJpg: () => void;
   saveSvg: () => void;

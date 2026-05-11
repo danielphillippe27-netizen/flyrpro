@@ -7,7 +7,7 @@ export interface CanonicalCampaignAddress {
   campaign_id: string;
   formatted: string;
   postal_code?: string | null;
-  source: 'closest_home' | 'import_list' | 'map' | 'same_street';
+  source: 'closest_home' | 'import_list' | 'map' | 'overture' | 'same_street';
   seq: number;
   visited?: boolean;
   geom: string; // WKT format: 'POINT(lng lat)'

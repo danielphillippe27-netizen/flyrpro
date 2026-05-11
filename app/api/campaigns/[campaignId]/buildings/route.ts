@@ -311,6 +311,19 @@ interface BuildingAddressLinkRow {
   confidence: number | null;
 }
 
+type FallbackBuildingStatus = 'not_visited' | 'visited' | 'hot';
+
+function getFallbackBuildingStatus(address: CampaignAddressRow): FallbackBuildingStatus {
+  const status = getCampaignBuildingStatus({
+    address_status: address.address_status ?? undefined,
+    visited: address.visited ?? false,
+  });
+
+  if (status === 'hot') return 'hot';
+  if (status === 'visited') return 'visited';
+  return 'not_visited';
+}
+
 async function fetchHiddenBuildingIds(
   supabase: ReturnType<typeof createAdminClient>,
   campaignId: string
@@ -549,9 +562,9 @@ function buildCampaignBuildingFallbackFeatureCollection(
     const scansTotal = linkedAddresses.reduce((sum, address) => sum + (address.scans ?? 0), 0);
     const source = getCampaignBuildingSource(building);
     const statusRank = { not_visited: 0, visited: 1, hot: 2 } as const;
-    const buildingStatus = linkedAddresses.reduce<'not_visited' | 'visited' | 'hot'>(
+    const buildingStatus = linkedAddresses.reduce<FallbackBuildingStatus>(
       (current, address) => {
-        const next = getCampaignBuildingStatus(address);
+        const next = getFallbackBuildingStatus(address);
         return statusRank[next] > statusRank[current] ? next : current;
       },
       building.latest_status === 'interested' ? 'visited' : 'not_visited'
@@ -617,9 +630,9 @@ function buildGoldFallbackFeatureCollection(
     const scansTotal = linkedAddresses.reduce((sum, address) => sum + (address.scans ?? 0), 0);
     const isMatched = linkedAddresses.length > 0;
     const statusRank = { not_visited: 0, visited: 1, hot: 2 } as const;
-    const buildingStatus = linkedAddresses.reduce<'not_visited' | 'visited' | 'hot'>(
+    const buildingStatus = linkedAddresses.reduce<FallbackBuildingStatus>(
       (current, address) => {
-        const next = getCampaignBuildingStatus(address);
+        const next = getFallbackBuildingStatus(address);
         return statusRank[next] > statusRank[current] ? next : current;
       },
       'not_visited'
@@ -686,7 +699,7 @@ async function fetchCampaignBuildingRows(
       continue;
     }
 
-    return ((data ?? []) as Array<CampaignBuildingRow & { is_hidden?: boolean | null }>)
+    return ((data ?? []) as unknown as Array<CampaignBuildingRow & { is_hidden?: boolean | null }>)
       .filter((building) => !building.is_hidden)
       .map((building) => {
         const normalized = { ...building };
@@ -724,8 +737,8 @@ async function fetchCampaignBuildingFallbackFeatures(
   }
 
   const [campaignAddresses, buildingLinks] = await Promise.all([
-    fetchAllInPages((from, to) =>
-      supabase
+    fetchAllInPages(async (from, to) =>
+      await supabase
         .from('campaign_addresses')
         .select(
           'id, formatted, house_number, street_name, building_id, building_gers_id, visited, scans, address_statuses(status)'
@@ -734,8 +747,8 @@ async function fetchCampaignBuildingFallbackFeatures(
         .order('id', { ascending: true })
         .range(from, to)
     ),
-    fetchAllInPages((from, to) =>
-      supabase
+    fetchAllInPages(async (from, to) =>
+      await supabase
         .from('building_address_links')
         .select('building_id, address_id, match_type, confidence')
         .eq('campaign_id', campaignId)
@@ -793,8 +806,8 @@ async function fetchGoldFallbackFeatures(
   > = [];
 
   try {
-    campaignAddresses = await fetchAllInPages((from, to) =>
-      supabase
+    campaignAddresses = await fetchAllInPages(async (from, to) =>
+      await supabase
         .from('campaign_addresses')
         .select('id, formatted, house_number, street_name, building_id, visited, scans, address_statuses(status)')
         .eq('campaign_id', campaignId)
@@ -971,7 +984,7 @@ export async function GET(
     );
     const visibleFallbackFeatures = filterAddressPointFallbackFeatures(visibleCampaignFeatures);
 
-    if (!featuresError && visibleCampaignFeatures && visibleCampaignFeatures.features?.length > 0) {
+    if (!featuresError && visibleCampaignFeatures && (visibleCampaignFeatures.features?.length ?? 0) > 0) {
       const hasPolygons = hasPolygonFeatures(visibleCampaignFeatures);
       const hasAddressPointFallbacks = hasAddressPointFallbackFeatures(visibleCampaignFeatures);
 
@@ -1100,8 +1113,9 @@ export async function GET(
       }
     }
 
-    if (visibleFallbackFeatures?.features?.length > 0) {
-      console.log(`[API] Returning ${visibleFallbackFeatures.features.length} address point features while buildings load`);
+    const visibleFallbackFeatureCount = visibleFallbackFeatures?.features?.length ?? 0;
+    if (visibleFallbackFeatureCount > 0 && visibleFallbackFeatures) {
+      console.log(`[API] Returning ${visibleFallbackFeatureCount} address point features while buildings load`);
       return NextResponse.json(visibleFallbackFeatures);
     }
 

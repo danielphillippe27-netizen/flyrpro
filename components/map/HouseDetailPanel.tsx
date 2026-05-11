@@ -74,7 +74,10 @@ export function HouseDetailPanel({
   const mapOutcomeToBuildingStatus = (
     address: { address_status?: string | null; visited?: boolean | null }
   ): BuildingStatus => {
-    const status = getCampaignAddressMapStatus(address);
+    const status = getCampaignAddressMapStatus({
+      address_status: address.address_status ?? undefined,
+      visited: address.visited ?? false,
+    });
     switch (status) {
       case 'do_not_knock':
         return 'dnc';
@@ -164,6 +167,8 @@ export function HouseDetailPanel({
             formatted: string;
             house_number: string | null;
             street_name: string | null;
+            visited?: boolean | null;
+            address_status?: string | null;
             match_type?: string | null;
             confidence?: number | null;
           }) => ({

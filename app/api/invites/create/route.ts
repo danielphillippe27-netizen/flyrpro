@@ -334,7 +334,7 @@ export async function POST(request: NextRequest) {
       Date.now() + DEFAULT_INVITE_TTL_DAYS * 24 * 60 * 60 * 1000
     ).toISOString();
 
-    let storedCampaignId = campaign.id;
+    let storedCampaignId: string | null = campaign.id;
     let storedSessionId = activeSession?.id ?? null;
     const fallbackTargetMessage = buildInviteTargetMessage({
       campaignId: campaign.id,

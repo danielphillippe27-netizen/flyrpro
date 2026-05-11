@@ -183,8 +183,9 @@ async function checkObjectExists(s3Key: string): Promise<boolean> {
       })
     );
     return true;
-  } catch (error: any) {
-    if (error.name === 'NotFound' || error.$metadata?.httpStatusCode === 404) {
+  } catch (error: unknown) {
+    const s3Error = error as { name?: string; $metadata?: { httpStatusCode?: number } };
+    if (s3Error.name === 'NotFound' || s3Error.$metadata?.httpStatusCode === 404) {
       return false;
     }
     throw error;
@@ -421,8 +422,9 @@ async function processRow(
       qrBuffer, // Include buffer for ZIP
       qrBase64, // Include base64 for CSV
     };
-  } catch (error: any) {
-    console.error(`[CanvaQR] [${rowNum}] Error:`, error.message);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[CanvaQR] [${rowNum}] Error:`, message);
     return {
       row: rowNum,
       filename: generateFilename(row, index),
@@ -430,7 +432,7 @@ async function processRow(
       publicUrl: '',
       encodedUrl: '',
       status: 'failed',
-      error: error.message,
+      error: message,
     };
   }
 }
@@ -791,7 +793,10 @@ export async function POST(request: NextRequest) {
     // ---------------------------------------------------------------------
     // 7. RETURN ZIP DOWNLOAD
     // ---------------------------------------------------------------------
-    return new NextResponse(zipBuffer, {
+    const responseBody = new Uint8Array(zipBuffer.length);
+    responseBody.set(zipBuffer);
+
+    return new NextResponse(responseBody, {
       status: 200,
       headers: {
         'Content-Type': 'application/zip',
@@ -803,10 +808,11 @@ export async function POST(request: NextRequest) {
       },
     });
 
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
     console.error('[CanvaQR] Fatal error:', error);
     return NextResponse.json(
-      { error: error.message || 'Internal server error' },
+      { error: message || 'Internal server error' },
       { status: 500 }
     );
   }

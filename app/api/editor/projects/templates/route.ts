@@ -20,9 +20,10 @@ export async function GET(request: NextRequest) {
         .orderBy(asc(editorProjects.isPro), desc(editorProjects.updatedAt));
 
       return NextResponse.json({ data: templates });
-    } catch (dbError: any) {
+    } catch (dbError: unknown) {
+      const message = dbError instanceof Error ? dbError.message : String(dbError);
       // If database is not configured, return empty array
-      if (dbError.message?.includes('DATABASE_URL') || dbError.message?.includes('must be set')) {
+      if (message.includes('DATABASE_URL') || message.includes('must be set')) {
         console.warn('Database not configured, returning empty templates list');
         return NextResponse.json({ data: [] });
       }
@@ -33,4 +34,3 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
-

@@ -20,13 +20,11 @@ const supabaseFunctionsBaseUrl = supabaseHost ? `https://${supabaseHost}/functio
 
 const nextConfig = {
   eslint: {
-    // TODO: Re-enable once TypeScript errors are resolved.
-    // Current error count: 343 (as of May 2026). See KNOWN_ISSUES.md.
+    //TODO: disable these in future for production server, for now just manually test before pushing new code
     ignoreDuringBuilds: true,
   },
   typescript: {
-    // TODO: Re-enable once TypeScript errors are resolved.
-    // Current error count: 343 (as of May 2026). See KNOWN_ISSUES.md.
+    //TODO: disable these in future for production server, for now just manually test before pushing new code
     ignoreBuildErrors: true,
   },
   images: {

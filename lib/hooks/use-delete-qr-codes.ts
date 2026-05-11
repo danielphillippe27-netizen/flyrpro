@@ -52,8 +52,8 @@ export function useDeleteQRCodes() {
 
       setResult(data);
       return data;
-    } catch (err: any) {
-      const message = err.message || 'Failed to delete QR codes';
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to delete QR codes';
       setError(message);
       return null;
     } finally {

@@ -128,7 +128,15 @@ export async function GET(
     full_refresh: !since,
     cursor_was_invalid: cursorWasInvalid,
     changed: rows
-      .map((row) => ({
+      .map((row): {
+        address_id: string | null;
+        status: string;
+        assigned_user_id: string | null;
+        updated_at: string | null;
+        version: number | null;
+        notes: string | null;
+        last_touch_at: string | null;
+      } => ({
         address_id: row.campaign_address_id ?? row.address_id ?? null,
         status: row.status ?? 'none',
         assigned_user_id: row.assigned_user_id ?? null,

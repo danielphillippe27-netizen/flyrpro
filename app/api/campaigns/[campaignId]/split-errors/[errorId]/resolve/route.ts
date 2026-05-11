@@ -12,9 +12,9 @@ export const dynamic = 'force-dynamic';
  */
 export async function POST(
   request: NextRequest,
-  { params }: { params: { campaignId: string; errorId: string } }
+  { params }: { params: Promise<{ campaignId: string; errorId: string }> }
 ) {
-  const { campaignId, errorId } = params;
+  const { campaignId, errorId } = await params;
   
   console.log(`[API] POST /campaigns/${campaignId}/split-errors/${errorId}/resolve`);
   

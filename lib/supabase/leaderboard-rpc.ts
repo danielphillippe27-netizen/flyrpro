@@ -1,10 +1,10 @@
 import type { PostgrestError } from '@supabase/supabase-js';
 
-type LeaderboardRpcClient = {
+export type LeaderboardRpcClient = {
   rpc: (
-    fn: 'get_leaderboard',
+    fn: string,
     args: Record<string, unknown>
-  ) => Promise<{ data: unknown; error: PostgrestError | null }>;
+  ) => PromiseLike<{ data: unknown; error: PostgrestError | null }>;
 };
 
 type GetLeaderboardRpcArgs = {

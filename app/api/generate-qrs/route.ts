@@ -117,7 +117,7 @@ export async function POST(request: NextRequest) {
 
         // Generate a print-ready QR image (QR + address label beneath).
         const baseQrPng = await QRCode.toBuffer(trackingUrl, {
-          type: 'image/png',
+          type: 'png',
           width: 512,
           margin: 2,
         });

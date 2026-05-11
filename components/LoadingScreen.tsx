@@ -55,7 +55,7 @@ export function LoadingScreen({
       muted
       playsInline
       className="object-contain"
-      style={variant === 'inline' ? { width: 560, height: 560 } : { maxWidth: 280, maxHeight: 280 }}
+      style={{ maxWidth: 280, maxHeight: 280 }}
       aria-hidden
     />
   ) : animationData ? (

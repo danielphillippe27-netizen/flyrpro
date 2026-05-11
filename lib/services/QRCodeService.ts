@@ -78,7 +78,7 @@ export class QRCodeService {
     slug?: string;
     qrUrl: string;
     qrImage?: string;
-    metadata?: Record<string, any>;
+    metadata?: Record<string, unknown>;
   }): Promise<QRCode> {
     const { data, error } = await this.client
       .from('qr_codes')
@@ -153,7 +153,13 @@ export class QRCodeService {
       slug?: string;
     }
   ): Promise<QRCode> {
-    const updateData: any = {
+    const updateData: {
+      landing_page_id: string;
+      variant?: 'A' | 'B';
+      slug?: string;
+      qr_url?: string;
+      qr_variant?: 'A' | 'B';
+    } = {
       landing_page_id: landingPageId,
     };
 
@@ -399,4 +405,3 @@ export class QRCodeService {
     }));
   }
 }
-

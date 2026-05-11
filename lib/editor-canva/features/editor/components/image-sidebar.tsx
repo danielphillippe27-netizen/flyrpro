@@ -18,6 +18,22 @@ interface ImageSidebarProps {
   onChangeActiveTool: (tool: ActiveTool) => void;
 }
 
+type ImageResult = {
+  id: string;
+  urls: {
+    regular: string;
+    small?: string;
+    thumb?: string;
+  };
+  alt_description?: string | null;
+  links: {
+    html: string;
+  };
+  user: {
+    name: string;
+  };
+};
+
 export const ImageSidebar = ({ editor, activeTool, onChangeActiveTool }: ImageSidebarProps) => {
   const { data, isLoading, isError } = useGetImages();
 
@@ -63,7 +79,7 @@ export const ImageSidebar = ({ editor, activeTool, onChangeActiveTool }: ImageSi
         <div className="p-4">
           <div className="grid grid-cols-2 gap-4">
             {data &&
-              data.map((image) => {
+              data.map((image: ImageResult) => {
                 return (
                   <button
                     onClick={() => editor?.addImage(image.urls.regular)}

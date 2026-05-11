@@ -2,7 +2,7 @@
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import type { Map } from 'mapbox-gl';
+import type { Map as MapboxMap } from 'mapbox-gl';
 import mapboxgl from 'mapbox-gl';
 import * as turf from '@turf/turf';
 import type { BuildingModelPoint } from '@/lib/services/MapService';
@@ -35,13 +35,13 @@ export class ThreeHouseLayer {
   private renderer: THREE.WebGLRenderer | null = null;
   private baseModel: THREE.Group | null = null;
   private baseModelSize: THREE.Vector3 | null = null; // Store the model's native bounding box size
-  private models: Map<string, ModelRecord>;
+  private models: globalThis.Map<string, ModelRecord>;
   private features: BuildingModelPoint[];
   private glbUrl: string;
   private lodUrl?: string;
   private useLOD: boolean;
   private loader: GLTFLoader;
-  private map: Map | null = null;
+  private map: MapboxMap | null = null;
   private onModelLoad?: () => void;
   private loadInterval: NodeJS.Timeout | null = null;
   private lodModel: THREE.Group | null = null;
@@ -249,7 +249,7 @@ export class ThreeHouseLayer {
     console.log(`Populating ${this.features.length} models...`);
 
     // Clear existing models
-    this.models.forEach((record) => {
+    this.models.forEach((record: ModelRecord) => {
       this.scene.remove(record.object);
     });
     this.models.clear();
@@ -258,6 +258,7 @@ export class ThreeHouseLayer {
     this.features.forEach((feature, index) => {
       try {
       const id = feature.properties.address_id;
+      if (!id) return;
         
         if (index < 3) {
         }
@@ -711,7 +712,7 @@ export class ThreeHouseLayer {
     }
   }
 
-  onAdd(map: Map, gl: WebGLRenderingContext) {
+  onAdd(map: MapboxMap, gl: WebGLRenderingContext) {
     console.log('ThreeHouseLayer.onAdd called');
     this.map = map;
 
@@ -861,10 +862,10 @@ export class ThreeHouseLayer {
     }
 
     // Clean up models
-    this.models.forEach((record) => {
+    this.models.forEach((record: ModelRecord) => {
       this.scene.remove(record.object);
       // Dispose of geometries and materials
-      record.object.traverse((node) => {
+      record.object.traverse((node: THREE.Object3D) => {
         if (node instanceof THREE.Mesh) {
           if (node.geometry) node.geometry.dispose();
           if (node.material) {
@@ -960,7 +961,7 @@ export class ThreeHouseLayer {
     }
 
     // Update color
-    record.object.traverse((node) => {
+    record.object.traverse((node: THREE.Object3D) => {
       if (node instanceof THREE.Mesh && node.material) {
         if (Array.isArray(node.material)) {
           node.material.forEach((m) => {

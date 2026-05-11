@@ -36,6 +36,24 @@ import { useBleedOverlay } from "@/lib/editor-canva/features/editor/hooks/use-bl
 import { useSnapToTrim } from "@/lib/editor-canva/features/editor/hooks/use-snap-to-trim";
 import { FLYER_PRINT_CONSTANTS_HALF_LETTER } from "@/lib/flyers/printConstants";
 
+type CenterableCanvas = fabric.Canvas & {
+  _centerObject: (object: fabric.Object, center: fabric.Point) => void;
+};
+
+type EditableTextObject = fabric.Object & {
+  get(property: "fontSize"): number | undefined;
+  get(property: "textAlign"): string | undefined;
+  get(property: "underline"): boolean | undefined;
+  get(property: "linethrough"): boolean | undefined;
+  get(property: "fontStyle"): string | undefined;
+  get(property: "fontWeight"): number | string | undefined;
+  get(property: "fontFamily"): string | undefined;
+};
+
+function setTextObjectProps(object: fabric.Object, props: Record<string, unknown>) {
+  object.set(props as unknown as Partial<fabric.Object>);
+}
+
 const buildEditor = ({
   save,
   undo,
@@ -210,8 +228,7 @@ const buildEditor = ({
 
     if (!center) return;
 
-    // @ts-ignore
-    canvas._centerObject(object, center);
+    (canvas as CenterableCanvas)._centerObject(object, center);
   };
 
   const addToCanvas = (object: fabric.Object) => {
@@ -221,6 +238,7 @@ const buildEditor = ({
   };
 
   return {
+    save,
     savePng,
     saveJpg,
     saveSvg,
@@ -357,9 +375,7 @@ const buildEditor = ({
     changeFontSize: (value: number) => {
       canvas.getActiveObjects().forEach((object) => {
         if (isTextType(object.type)) {
-          // @ts-ignore
-          // Faulty TS library, fontSize exists.
-          object.set({ fontSize: value });
+          setTextObjectProps(object, { fontSize: value });
         }
       });
       canvas.renderAll();
@@ -371,18 +387,14 @@ const buildEditor = ({
         return FONT_SIZE;
       }
 
-      // @ts-ignore
-      // Faulty TS library, fontSize exists.
-      const value = selectedObject.get("fontSize") || FONT_SIZE;
+      const value = (selectedObject as EditableTextObject).get("fontSize") || FONT_SIZE;
 
       return value;
     },
     changeTextAlign: (value: string) => {
       canvas.getActiveObjects().forEach((object) => {
         if (isTextType(object.type)) {
-          // @ts-ignore
-          // Faulty TS library, textAlign exists.
-          object.set({ textAlign: value });
+          setTextObjectProps(object, { textAlign: value });
         }
       });
       canvas.renderAll();
@@ -394,18 +406,14 @@ const buildEditor = ({
         return "left";
       }
 
-      // @ts-ignore
-      // Faulty TS library, textAlign exists.
-      const value = selectedObject.get("textAlign") || "left";
+      const value = (selectedObject as EditableTextObject).get("textAlign") || "left";
 
       return value;
     },
     changeFontUnderline: (value: boolean) => {
       canvas.getActiveObjects().forEach((object) => {
         if (isTextType(object.type)) {
-          // @ts-ignore
-          // Faulty TS library, underline exists.
-          object.set({ underline: value });
+          setTextObjectProps(object, { underline: value });
         }
       });
       canvas.renderAll();
@@ -417,18 +425,14 @@ const buildEditor = ({
         return false;
       }
 
-      // @ts-ignore
-      // Faulty TS library, underline exists.
-      const value = selectedObject.get("underline") || false;
+      const value = (selectedObject as EditableTextObject).get("underline") || false;
 
       return value;
     },
     changeFontLinethrough: (value: boolean) => {
       canvas.getActiveObjects().forEach((object) => {
         if (isTextType(object.type)) {
-          // @ts-ignore
-          // Faulty TS library, linethrough exists.
-          object.set({ linethrough: value });
+          setTextObjectProps(object, { linethrough: value });
         }
       });
       canvas.renderAll();
@@ -440,18 +444,14 @@ const buildEditor = ({
         return false;
       }
 
-      // @ts-ignore
-      // Faulty TS library, linethrough exists.
-      const value = selectedObject.get("linethrough") || false;
+      const value = (selectedObject as EditableTextObject).get("linethrough") || false;
 
       return value;
     },
     changeFontStyle: (value: string) => {
       canvas.getActiveObjects().forEach((object) => {
         if (isTextType(object.type)) {
-          // @ts-ignore
-          // Faulty TS library, fontStyle exists.
-          object.set({ fontStyle: value });
+          setTextObjectProps(object, { fontStyle: value });
         }
       });
       canvas.renderAll();
@@ -463,18 +463,14 @@ const buildEditor = ({
         return "normal";
       }
 
-      // @ts-ignore
-      // Faulty TS library, fontStyle exists.
-      const value = selectedObject.get("fontStyle") || "normal";
+      const value = (selectedObject as EditableTextObject).get("fontStyle") || "normal";
 
       return value;
     },
     changeFontWeight: (value: number) => {
       canvas.getActiveObjects().forEach((object) => {
         if (isTextType(object.type)) {
-          // @ts-ignore
-          // Faulty TS library, fontWeight exists.
-          object.set({ fontWeight: value });
+          setTextObjectProps(object, { fontWeight: value });
         }
       });
       canvas.renderAll();
@@ -508,9 +504,7 @@ const buildEditor = ({
       setFontFamily(value);
       canvas.getActiveObjects().forEach((object) => {
         if (isTextType(object.type)) {
-          // @ts-ignore
-          // Faulty TS library, fontFamily exists.
-          object.set({ fontFamily: value });
+          setTextObjectProps(object, { fontFamily: value });
         }
       });
       canvas.renderAll();
@@ -647,11 +641,9 @@ const buildEditor = ({
         return FONT_WEIGHT;
       }
 
-      // @ts-ignore
-      // Faulty TS library, fontWeight exists.
-      const value = selectedObject.get("fontWeight") || FONT_WEIGHT;
+      const value = (selectedObject as EditableTextObject).get("fontWeight") || FONT_WEIGHT;
 
-      return value;
+      return typeof value === "number" ? value : Number(value) || FONT_WEIGHT;
     },
     getActiveFontFamily: () => {
       const selectedObject = selectedObjects[0];
@@ -660,9 +652,7 @@ const buildEditor = ({
         return fontFamily;
       }
 
-      // @ts-ignore
-      // Faulty TS library, fontFamily exists.
-      const value = selectedObject.get("fontFamily") || fontFamily;
+      const value = (selectedObject as EditableTextObject).get("fontFamily") || fontFamily;
 
       return value;
     },

@@ -30,7 +30,7 @@ export default function CreatePage() {
       <header className="bg-white border-b sticky top-0 z-10">
         <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-4">
           <h1 className="text-2xl font-bold">Create New</h1>
-          <p className="text-gray-600 mt-1">Choose what you'd like to create</p>
+          <p className="text-gray-600 mt-1">Choose what you&apos;d like to create</p>
         </div>
       </header>
       <main className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-8">

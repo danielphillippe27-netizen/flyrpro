@@ -25,7 +25,7 @@ export function isDialerEnabledForWorkspace(
     return true;
   }
 
-  return Boolean(workspaceId) && allowedWorkspaceIds.includes(workspaceId);
+  return workspaceId != null && workspaceId.length > 0 && allowedWorkspaceIds.includes(workspaceId);
 }
 
 export function canDialerWorkspaceUseSharedDefault(

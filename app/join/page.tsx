@@ -76,7 +76,7 @@ function JoinContent() {
       .then((supabase) => supabase.auth.getUser())
       .then(({ data: { user: u } }) => {
         if (!mounted) return;
-        setUser(u ?? null);
+        setUser(u ? { id: u.id, email: u.email ?? null } : null);
         setAuthChecked(true);
         if (!u) return;
         fetch(`/api/invites/validate?token=${encodeURIComponent(token)}`)

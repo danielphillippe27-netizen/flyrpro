@@ -160,6 +160,15 @@ async function addressContextForIdentifier(
   };
 }
 
+function isValidPolygonGeometry(geometry: unknown): boolean {
+  if (!geometry || typeof geometry !== "object") return false;
+  const candidate = geometry as { type?: unknown; coordinates?: unknown };
+  if (candidate.type !== "Polygon" && candidate.type !== "MultiPolygon") {
+    return false;
+  }
+  return Array.isArray(candidate.coordinates);
+}
+
 export async function DELETE(request: Request, context: RouteContext): Promise<Response> {
   try {
     const token = getAuthToken(request);

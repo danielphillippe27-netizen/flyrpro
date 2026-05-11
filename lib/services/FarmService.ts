@@ -75,7 +75,8 @@ function normalizeFarmTouchModeValue(
 }
 
 function resolveFarmTouchMode(touch: LegacyFarmTouchRow): FarmTouch['mode'] {
-  if (touch.mode && touch.mode !== 'canvassing') {
+  const legacyMode = touch.mode as FarmTouch['mode'] | 'canvassing' | undefined;
+  if (legacyMode && legacyMode !== 'canvassing') {
     return normalizeFarmTouchModeValue(touch.mode);
   }
   if (touch.type) {
@@ -291,8 +292,8 @@ export class FarmService {
 
   static async fetchAddresses(farmId: string): Promise<FarmAddress[]> {
     try {
-      const rows = await fetchAllInPages((from, to) =>
-        this.client
+      const rows = await fetchAllInPages(async (from, to) =>
+        await this.client
           .from('farm_addresses')
           .select('*')
           .eq('farm_id', farmId)
@@ -478,7 +479,7 @@ export class FarmTouchService {
     }
   ): Promise<void> {
     const completedAt = new Date().toISOString();
-    const updates: Partial<FarmTouch> & { completed?: boolean; completed_at?: string } = {
+    const updates: Partial<FarmTouch> & Pick<LegacyFarmTouchRow, 'completed' | 'completed_at'> = {
       status: 'completed',
       completed_date: completedAt,
       last_completed_at: completedAt,
@@ -497,13 +498,14 @@ export class FarmTouchService {
       ) {
         throw new Error(formatError(error));
       }
-      await this.updateTouch(touchId, {
+      const fallbackUpdates: Partial<FarmTouch> & Pick<LegacyFarmTouchRow, 'completed' | 'completed_at'> = {
         status: 'completed',
         completed_date: completedAt,
         completed: true,
         completed_at: completedAt,
         notes: options?.notes,
-      });
+      };
+      await this.updateTouch(touchId, fallbackUpdates);
     }
   }
 }

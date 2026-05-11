@@ -4,7 +4,7 @@
  * Handles undo/redo functionality by storing snapshots of editor state.
  */
 
-import type { EditorState, EditorStateSnapshot } from './types';
+import type { EditorHistory, EditorState, EditorStateSnapshot } from './types';
 
 /**
  * Create a snapshot of the current editor state
@@ -123,7 +123,6 @@ export function getRedoSnapshot(history: EditorHistory): {
 
 // Re-export types for convenience
 export type { EditorHistory, EditorStateSnapshot } from './types';
-
 
 
 

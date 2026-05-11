@@ -245,8 +245,8 @@ export async function POST(request: NextRequest) {
     let supabaseAdmin;
     try {
       supabaseAdmin = createAdminClient();
-    } catch (err: any) {
-      console.error('[generate-address-list] Admin client failed:', err?.message);
+    } catch (err: unknown) {
+      console.error('[generate-address-list] Admin client failed:', err instanceof Error ? err.message : String(err));
       return NextResponse.json(
         { error: 'Server configuration error.' },
         { status: 503 }
@@ -317,7 +317,13 @@ export async function POST(request: NextRequest) {
         );
         
         if (goldAddresses && goldAddresses.length > 0) {
-          const goldFeatures = goldAddresses.map((addr: any) => goldAddressToFeature(addr));
+          const goldFeatures = goldAddresses
+            .filter((addr): addr is typeof addr & { id: string; lat: number; lon: number } =>
+              typeof addr.id === 'string' &&
+              typeof addr.lat === 'number' &&
+              typeof addr.lon === 'number'
+            )
+            .map((addr) => goldAddressToFeature(addr));
           const shouldTopUpFromLambda =
             polygonAddressLimit > LEGACY_GOLD_RPC_CAP && goldAddresses.length >= LEGACY_GOLD_RPC_CAP;
 
@@ -348,18 +354,19 @@ export async function POST(request: NextRequest) {
               console.log(
                 `[generate-address-list] Topped up Gold addresses to ${addressFeatures.length} total features`
               );
-            } catch (lambdaTopUpError: any) {
+            } catch (lambdaTopUpError: unknown) {
+              const message = lambdaTopUpError instanceof Error ? lambdaTopUpError.message : String(lambdaTopUpError);
               console.warn(
                 '[generate-address-list] Lambda top-up failed, continuing with Gold-only results:',
-                lambdaTopUpError?.message || lambdaTopUpError
+                message
               );
             }
           }
         } else {
           console.log('[generate-address-list] No Gold addresses found, falling back to Lambda...');
         }
-      } catch (err: any) {
-        console.warn('[generate-address-list] Gold query failed:', err.message);
+      } catch (err: unknown) {
+        console.warn('[generate-address-list] Gold query failed:', err instanceof Error ? err.message : String(err));
       }
       
       // Fallback to Lambda if Gold is empty
@@ -382,9 +389,9 @@ export async function POST(request: NextRequest) {
           addressFeatures = addressData.features || [];
           console.log(`[generate-address-list] Found ${addressFeatures.length} addresses from Lambda`);
           await storeCampaignSnapshot(supabaseAdmin, campaign_id, snapshot);
-        } catch (err: any) {
+        } catch (err: unknown) {
           console.error('[generate-address-list] Lambda polygon error:', err);
-          const msg = err.message || String(err);
+          const msg = err instanceof Error ? err.message : String(err);
           const is502 = msg.includes('502');
           const userMessage = is502
             ? 'Address service temporarily failed (502). If this persists, the Lambda may be timing out or the Silver address file may be missing—check CloudWatch Logs for flyr-slice-lambda.'
@@ -406,9 +413,10 @@ export async function POST(request: NextRequest) {
           const geocoded = await MapService.geocodeAddress(starting_address);
           if (!geocoded) throw new Error(`Geocoding returned null for: ${starting_address}`);
           coordinates = geocoded;
-        } catch (err: any) {
+        } catch (err: unknown) {
           console.error('Geocoding failed:', err);
-          return NextResponse.json({ error: `Geocoding failed: ${err.message}` }, { status: 400 });
+          const message = err instanceof Error ? err.message : String(err);
+          return NextResponse.json({ error: `Geocoding failed: ${message}` }, { status: 400 });
         }
       }
 
@@ -430,10 +438,11 @@ export async function POST(request: NextRequest) {
         addressFeatures = sortByDistanceAndTake(allFeatures, coordinates.lat, coordinates.lon, count);
         console.log(`[generate-address-list] Found ${addressFeatures.length} nearest addresses`);
         await storeCampaignSnapshot(supabaseAdmin, campaign_id, snapshot);
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error('[generate-address-list] Lambda closest-home error:', err);
+        const message = err instanceof Error ? err.message : String(err);
         return NextResponse.json(
-          { error: `Address data error: ${err.message}` },
+          { error: `Address data error: ${message}` },
           { status: 500 }
         );
       }
@@ -451,7 +460,7 @@ export async function POST(request: NextRequest) {
 
     try {
       const canonicalAddresses: CanonicalCampaignAddress[] = addresses.map((address, index) => {
-        const canonical = mapOvertureToCanonical(address as any, campaign_id, index);
+        const canonical = mapOvertureToCanonical(address, campaign_id, index);
         return {
           ...canonical,
           region: canonical.region || regionCode,
@@ -497,12 +506,12 @@ export async function POST(request: NextRequest) {
         warning: coverageLimitWarning,
         message: `${insertedCount} addresses generated successfully (${source === 'gold' ? 'Gold Standard' : 'Lambda'})`,
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('[generate-address-list] Processing error:', err);
-      return NextResponse.json({ error: err.message }, { status: 500 });
+      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
     }
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('[generate-address-list] Unexpected error:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }

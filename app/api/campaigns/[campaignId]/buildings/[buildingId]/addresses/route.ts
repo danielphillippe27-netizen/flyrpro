@@ -239,7 +239,7 @@ export async function GET(
         console.warn('[API] Error fetching from links table:', linksError.message);
       }
 
-      addresses = chooseLinksForDisplay((links || []) as BuildingLinkRow[]).map((link) => ({
+      addresses = chooseLinksForDisplay((links || []) as unknown as BuildingLinkRow[]).map((link) => ({
         address_id: link.address_id,
         formatted: displayAddressText(link.campaign_addresses) ?? '',
         house_number: resolveHouseNumberLabel(link.campaign_addresses),

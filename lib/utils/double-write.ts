@@ -19,11 +19,12 @@ export const ENABLE_DOUBLE_WRITE = process.env.ENABLE_UUID_DOUBLE_WRITE === 'tru
  * Prepares data for double-write to both text and uuid columns
  * Returns object with both old and new column names
  */
-export function prepareDoubleWrite<T extends Record<string, any>>(
+export function prepareDoubleWrite<T extends Record<string, unknown>>(
   data: T,
   textColumn: 'gers_id' | 'source_id',
-  uuidColumn: `${typeof textColumn}_uuid` = `${textColumn}_uuid` as any
-): T & Partial<Record<typeof uuidColumn, string | null>> {
+  uuidColumn?: `${typeof textColumn}_uuid`
+): T & Partial<Record<`${typeof textColumn}_uuid`, string | null>> {
+  const resolvedUuidColumn = uuidColumn ?? `${textColumn}_uuid` as `${typeof textColumn}_uuid`;
   if (!ENABLE_DOUBLE_WRITE) {
     // During normal operation, only write to text column
     return data;
@@ -32,10 +33,10 @@ export function prepareDoubleWrite<T extends Record<string, any>>(
   // During double-write phase, write to both columns
   const textValue = data[textColumn];
   if (textValue !== undefined && textValue !== null) {
-    const normalized = normalizeGersId(textValue);
+    const normalized = normalizeGersId(String(textValue));
     return {
       ...data,
-      [uuidColumn]: normalized,
+      [resolvedUuidColumn]: normalized,
     };
   }
 
@@ -45,7 +46,7 @@ export function prepareDoubleWrite<T extends Record<string, any>>(
 /**
  * Prepares upsert data with double-write support
  */
-export function prepareUpsertWithDoubleWrite<T extends Record<string, any>>(
+export function prepareUpsertWithDoubleWrite<T extends Record<string, unknown>>(
   data: T | T[],
   textColumn: 'gers_id' | 'source_id'
 ): (T & Partial<Record<`${typeof textColumn}_uuid`, string | null>>)[] {

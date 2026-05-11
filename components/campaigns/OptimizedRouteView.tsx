@@ -20,20 +20,20 @@ interface OptimizedRouteViewProps {
   campaignName?: string;
   addresses: Array<{
     id: string;
-    formatted?: string;
-    house_number?: string;
+    formatted?: string | null;
+    house_number?: string | null;
     street_number?: string | number;
-    street_name?: string;
-    gers_id?: string;
-    building_id?: string;
-    geom?: { coordinates: [number, number] } | string;
-    geom_json?: { coordinates?: [number, number] };
+    street_name?: string | null;
+    gers_id?: string | null;
+    building_id?: string | null;
+    geom?: { coordinates?: [number, number] } | string;
+    geom_json?: { coordinates?: [number, number] } | unknown;
     coordinate?: { lat: number; lon: number };
-    cluster_id?: number;
-    sequence?: number;
+    cluster_id?: number | null;
+    sequence?: number | null;
     seq?: number;
-    walk_time_sec?: number;
-    distance_m?: number;
+    walk_time_sec?: number | null;
+    distance_m?: number | null;
   }>;
   onAddressesUpdate?: (addresses: OptimizedRouteViewProps['addresses']) => void;
 }
@@ -536,7 +536,7 @@ function isValidCoord(lat: number | undefined, lon: number | undefined): boolean
 
 function getAddressCoords(addr: {
   geom?: { coordinates?: [number, number] } | string;
-  geom_json?: { coordinates?: [number, number] };
+  geom_json?: { coordinates?: [number, number] } | unknown;
   coordinate?: { lat: number; lon: number };
 }): { lat: number; lon: number } | null {
   const fromCoords = (coords: [number, number] | undefined) => {
@@ -546,7 +546,11 @@ function getAddressCoords(addr: {
     return isValidCoord(lat, lon) ? { lat, lon } : null;
   };
   // geom_json from ST_AsGeoJSON is the most reliable source
-  if (addr.geom_json?.coordinates) return fromCoords(addr.geom_json.coordinates);
+  const geomJson = addr.geom_json;
+  if (geomJson && typeof geomJson === 'object' && 'coordinates' in geomJson) {
+    const coords = (geomJson as { coordinates?: [number, number] }).coordinates;
+    if (coords) return fromCoords(coords);
+  }
   const g = addr.geom;
   if (g && typeof g === 'object') {
     const withCoords = g as { coordinates?: [number, number] };
@@ -649,8 +653,8 @@ export function OptimizedRouteView({ campaignId, campaignName, addresses }: Opti
         street_name: addr.street_name || '',
         lat: coords.lat,
         lon: coords.lon,
-        gers_id: addr.gers_id,
-        building_id: addr.building_id,
+        gers_id: addr.gers_id ?? undefined,
+        building_id: addr.building_id ?? undefined,
       });
     }
     list.sort((a, b) => a.sequence - b.sequence);
@@ -807,8 +811,8 @@ export function OptimizedRouteView({ campaignId, campaignName, addresses }: Opti
     setSelectedAddressIds((current) => Array.from(new Set([...current, ...selectedInBox])));
   }, [orderedAddresses]);
 
-  const coloredBuildingFeatures = useMemo(() => {
-    if (!campaignBuildings?.features?.length) return [] as GeoJSON.Feature[];
+  const coloredBuildingFeatures = useMemo<GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>[]>(() => {
+    if (!campaignBuildings?.features?.length) return [];
 
     const visibleAddressIds = new Set<string>();
     const visibleBuildingIds = new Set<string>();

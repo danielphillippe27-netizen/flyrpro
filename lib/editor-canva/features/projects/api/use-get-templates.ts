@@ -1,10 +1,19 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { client } from "@/lib/editor-canva/lib/hono";
-import { InferRequestType, InferResponseType } from "hono";
 
-export type ResponseType = InferResponseType<typeof client.api.projects.templates.$get, 200>;
-type RequestType = InferRequestType<typeof client.api.projects.templates.$get>["query"];
+type Template = {
+  id: string;
+  name: string | null;
+  thumbnailUrl: string | null;
+  json: string;
+  width: number;
+  height: number;
+  isPro: boolean;
+};
+
+export type ResponseType = { data: Template[] };
+type RequestType = { page: string; limit: string };
 
 export const useGetTemplates = (apiQuery: RequestType) => {
   const query = useQuery({

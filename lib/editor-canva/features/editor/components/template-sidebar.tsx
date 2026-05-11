@@ -84,7 +84,7 @@ export const TemplateSidebar = ({
       <ScrollArea>
         <div className="p-4">
           <div className="grid grid-cols-2 gap-4">
-            {data && data.map((template) => {
+            {data && data.map((template: ResponseType["data"][0]) => {
               return (
                 <button
                   style={{ 

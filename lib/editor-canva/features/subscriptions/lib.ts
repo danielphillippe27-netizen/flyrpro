@@ -1,9 +1,12 @@
-import { subscriptions } from "@/lib/editor-db/schema";
-
 const DAY_IN_MS = 86_400_000;
 
+type Subscription = {
+  priceId?: string | null;
+  currentPeriodEnd?: Date | null;
+} | null;
+
 export const checkIsActive = (
-  subscription: typeof subscriptions.$inferSelect,
+  subscription: Subscription,
 ) => {
   let active = false;
 
