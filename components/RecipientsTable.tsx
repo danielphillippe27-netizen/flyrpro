@@ -237,6 +237,14 @@ export function RecipientsTable({ recipients, campaignId, onRefresh }: Recipient
                           {loading === recipient.id ? 'Updating...' : 'Mark Attempted'}
                         </Button>
                       )}
+                      {/*
+                        TODO: This button never renders because qr_png_url is always passed
+                        as null from the campaign page (app/(main)/campaigns/[campaignId]/page.tsx).
+                        generate-qrs writes qr_code_base64 and purl, not qr_png_url.
+                        Future fix: either pass purl as a prop and link to it here,
+                        or implement a proper QR download button that uses qr_code_base64.
+                        See QR_SYSTEM.md Section 6 for full context.
+                      */}
                       {recipient.qr_png_url && (
                         <Button
                           size="sm"
