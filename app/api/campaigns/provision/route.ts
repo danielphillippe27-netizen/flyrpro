@@ -25,6 +25,23 @@ import { isParcelRegionSupported } from '@/lib/geo/parcelRegions';
 import { triggerDiamondBuild } from '@/lib/diamond/buildTrigger';
 import { triggerWhiteGoldBuild } from '@/lib/white-gold/buildTrigger';
 
+// Maps province/state codes to bedrock provision source values.
+// The old 'lambda' source is now 'diamond' (CloudFront/S3 tile pipeline).
+// The old 'gold'/'silver' sources are now regional bedrock values.
+// See MIGRATIONS.md and Daniel's schema update for full context.
+const CANADA_REGION_CODES = new Set([
+  'BC','AB','SK','MB','ON','QC','NB','NS','PE','NL','YT','NT','NU'
+]);
+
+function regionCodeToProvisionSource(
+  regionCode: string
+): 'bedrock_ca' | 'bedrock_us' | 'bedrock_au' | 'bedrock_nz' {
+  if (CANADA_REGION_CODES.has(regionCode.toUpperCase())) return 'bedrock_ca';
+  // Default to bedrock_us for US states and unknown regions.
+  // bedrock_au and bedrock_nz are not yet used in the provision flow.
+  return 'bedrock_us';
+}
+
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -34,7 +51,7 @@ interface ProvisionRequest {
   geometry_tier?: 'diamond' | 'white_gold' | 'standard';
 }
 
-type ProvisionSource = 'gold' | 'silver' | 'lambda';
+type ProvisionSource = 'diamond' | 'bedrock_ca' | 'bedrock_us' | 'bedrock_au' | 'bedrock_nz';
 type SnapshotTileMetrics = NonNullable<NonNullable<LambdaSnapshotResponse['metadata']>['tile_metrics']>;
 
 type ExistingSnapshotRow = {
@@ -496,8 +513,9 @@ async function runCampaignPostProcessing(params: {
   source: ProvisionSource;
   snapshot: LambdaSnapshotResponse | null;
   insertedCount: number;
+  deferBedrockDiamondTopUp?: boolean;
 }) {
-  const { campaignId, polygon, regionCode, source, snapshot, insertedCount } = params;
+  const { campaignId, polygon, regionCode, source, snapshot, insertedCount, deferBedrockDiamondTopUp = false } = params;
   const supabase = createAdminClient();
 
   await updateCampaignProvision(supabase, campaignId, {
@@ -508,7 +526,7 @@ async function runCampaignPostProcessing(params: {
     let effectiveSnapshot = snapshot;
     let effectiveInsertedCount = insertedCount;
 
-    if (source === 'silver' && !effectiveSnapshot) {
+    if (deferBedrockDiamondTopUp && !effectiveSnapshot) {
       console.log('[Provision] Silver seeded from Gold; generating Lambda snapshot + address top-up in background...');
 
       effectiveSnapshot = await TileLambdaService.generateSnapshots(
@@ -560,7 +578,7 @@ async function runCampaignPostProcessing(params: {
     }
 
     const goldBuildings =
-      source === 'gold'
+      source !== 'diamond'
         ? (await GoldAddressService.getBuildingsForPolygon(polygon)).buildings
         : null;
 
@@ -703,7 +721,7 @@ async function runCampaignPostProcessing(params: {
               }))
             : undefined,
         resetExisting: true,
-        persistenceMode: source === 'gold' ? 'gold' : 'silver',
+        persistenceMode: source !== 'diamond' && !deferBedrockDiamondTopUp ? 'gold' : 'silver',
       }
     );
 
@@ -884,7 +902,7 @@ export async function POST(request: NextRequest) {
     });
 
     const result = await retryWithBackoff(async () => {
-      let addressSource: ProvisionSource = 'lambda';
+      let addressSource: ProvisionSource = 'diamond';
       let snapshot: LambdaSnapshotResponse | null = null;
       let addressesToInsert: StandardCampaignAddress[] = [];
       let deferSilverLambdaTopUp = false;
@@ -902,7 +920,7 @@ export async function POST(request: NextRequest) {
       const existingSnapshot = (existingSnapshotRow ?? null) as ExistingSnapshotRow | null;
 
       if (existingSnapshot && isSnapshotReusable(existingSnapshot)) {
-        addressSource = 'lambda';
+        addressSource = 'diamond';
         snapshot = snapshotRowToLambdaSnapshot(campaignId!, existingSnapshot);
         console.log('[Provision] Reusing snapshot from campaign_snapshots (skip Lambda generation)');
       } else {
@@ -916,14 +934,14 @@ export async function POST(request: NextRequest) {
           console.log(`[Provision] Gold query returned ${goldRows.length} address rows`);
 
           if (goldRows.length >= GOLD_SUCCESS_THRESHOLD) {
-            addressSource = 'gold';
+            addressSource = regionCodeToProvisionSource(regionCode);
             addressesToInsert = AddressAdapter.normalizeArray(
               goldRows,
               campaignId!,
               regionCode
             );
           } else if (goldRows.length > 0) {
-            addressSource = 'silver';
+            addressSource = regionCodeToProvisionSource(regionCode);
             deferSilverLambdaTopUp = true;
             addressesToInsert = AddressAdapter.normalizeArray(
               goldRows,
@@ -933,8 +951,8 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        if (addressSource === 'lambda') {
-          addressSource = 'lambda';
+        if (addressSource === 'diamond') {
+          addressSource = 'diamond';
           snapshot = await TileLambdaService.generateSnapshots(
             polygon as GeoJSON.Polygon,
             regionCode,
@@ -973,7 +991,7 @@ export async function POST(request: NextRequest) {
       });
 
       if (finalAddressCount === 0) {
-        if (addressSource === 'gold' || deferSilverLambdaTopUp) {
+        if (addressSource !== 'diamond' || deferSilverLambdaTopUp) {
           if (addressesToInsert.length === 0) {
             const fullGoldAddresses = await GoldAddressService.fetchAddressesInPolygon(
               polygon as GeoJSON.Polygon,
@@ -1078,6 +1096,7 @@ export async function POST(request: NextRequest) {
           source: addressSource,
           snapshot,
           insertedCount: finalAddressCount,
+          deferBedrockDiamondTopUp: deferSilverLambdaTopUp,
         });
       });
 
@@ -1125,9 +1144,9 @@ export async function POST(request: NextRequest) {
         warning: snapshot?.warning ?? null,
         message:
           `${allowGoldProvision
-            ? addressSource === 'gold'
+            ? addressSource !== 'diamond' && !deferSilverLambdaTopUp
               ? 'Gold'
-              : addressSource === 'silver'
+              : addressSource !== 'diamond' && deferSilverLambdaTopUp
                 ? 'Gold-seeded Silver'
                 : 'Diamond-seeded Lambda'
             : 'Diamond/White Gold'} campaign is map-ready: ` +

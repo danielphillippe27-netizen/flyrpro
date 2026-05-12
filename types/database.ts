@@ -181,7 +181,7 @@ export type CampaignType = 'flyer' | 'door_knock' | 'event' | 'survey' | 'gift' 
 export type AddressSource = 'closest_home' | 'import_list' | 'map' | 'same_street';
 export type CampaignStatus = 'draft' | 'active' | 'completed' | 'paused';
 export type CampaignProvisionStatus = 'pending' | 'ready' | 'failed';
-export type CampaignProvisionSource = 'gold' | 'silver' | 'lambda';
+export type CampaignProvisionSource = 'diamond' | 'bedrock_ca' | 'bedrock_us' | 'bedrock_au' | 'bedrock_nz';
 export type CampaignProvisionPhase =
   | 'created'
   | 'source_probed'
