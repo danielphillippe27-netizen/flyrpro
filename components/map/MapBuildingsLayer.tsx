@@ -1039,14 +1039,44 @@ export function MapBuildingsLayer({
         map.getCanvas().style.cursor = '';
       };
 
-      map.on('click', layerId, clickHandler);
-      map.on('mouseenter', layerId, enterHandler);
-      map.on('mouseleave', layerId, leaveHandler);
+      // Use map-level handlers so Mapbox does not run layer-scoped
+      // queryRenderedFeatures internally during style transitions.
+      const mapClickHandler = (event: mapboxgl.MapMouseEvent) => {
+        try {
+          if (!map.isStyleLoaded() || !map.getLayer(layerId)) return;
+          const features = map.queryRenderedFeatures(event.point, {
+            layers: [layerId],
+          });
+          if (features.length > 0) clickHandler(Object.assign(event, { features }));
+        } catch {
+          return;
+        }
+      };
+      const mapMouseMoveHandler = (event: mapboxgl.MapMouseEvent) => {
+        try {
+          if (!map.isStyleLoaded() || !map.getLayer(layerId)) {
+            leaveHandler();
+            return;
+          }
+          const features = map.queryRenderedFeatures(event.point, {
+            layers: [layerId],
+          });
+          if (features.length > 0) {
+            enterHandler();
+          } else {
+            leaveHandler();
+          }
+        } catch {
+          leaveHandler();
+        }
+      };
+
+      map.on('click', mapClickHandler);
+      map.on('mousemove', mapMouseMoveHandler);
 
       return () => {
-        map.off('click', layerId, clickHandler);
-        map.off('mouseenter', layerId, enterHandler);
-        map.off('mouseleave', layerId, leaveHandler);
+        map.off('click', mapClickHandler);
+        map.off('mousemove', mapMouseMoveHandler);
       };
     };
 
@@ -1189,6 +1219,8 @@ export function MapBuildingsLayer({
     if (!map) {
       return;
     }
+
+    let cleanupLayerInteractionHandlers: (() => void) | undefined;
 
     // Define the update logic as a function we can call or defer
     const updateLayers = () => {
@@ -1620,31 +1652,55 @@ export function MapBuildingsLayer({
           }
         };
 
-        map.on('click', layerId, clickHandler);
+        cleanupLayerInteractionHandlers?.();
 
-        // Change cursor on hover
-        map.on('mouseenter', layerId, () => {
-          if (map.getCanvas()) {
-            map.getCanvas().style.cursor = 'pointer';
+        const getInteractiveLayers = () => {
+          const layers: string[] = [];
+          try {
+            if (!map.isStyleLoaded()) return layers;
+            if (map.getLayer(layerId)) layers.push(layerId);
+            if (map.getLayer(circleLayerId)) layers.push(circleLayerId);
+          } catch {
+            return [];
           }
-        });
+          return layers;
+        };
 
-        map.on('mouseleave', layerId, () => {
-          if (map.getCanvas()) {
+        // Use map-level handlers so Mapbox does not run layer-scoped
+        // queryRenderedFeatures internally during style transitions.
+        const mapClickHandler = (event: mapboxgl.MapMouseEvent) => {
+          try {
+            const layers = getInteractiveLayers();
+            if (layers.length === 0) return;
+            const features = map.queryRenderedFeatures(event.point, { layers });
+            if (features.length > 0) void clickHandler(Object.assign(event, { features }));
+          } catch {
+            return;
+          }
+        };
+
+        // Use map-level mousemove so hover does not depend on Mapbox's
+        // layer-scoped mouseenter/mouseleave dispatch during style transitions.
+        const mapMouseMoveHandler = (event: mapboxgl.MapMouseEvent) => {
+          try {
+            const layers = getInteractiveLayers();
+            if (layers.length === 0) {
+              map.getCanvas().style.cursor = '';
+              return;
+            }
+            const features = map.queryRenderedFeatures(event.point, { layers });
+            map.getCanvas().style.cursor = features.length > 0 ? 'pointer' : '';
+          } catch {
             map.getCanvas().style.cursor = '';
           }
-        });
+        };
 
-        // Also register click + cursor handlers on the circle layer (Point features)
-        if (map.getLayer(circleLayerId)) {
-          map.on('click', circleLayerId, clickHandler);
-          map.on('mouseenter', circleLayerId, () => {
-            if (map.getCanvas()) map.getCanvas().style.cursor = 'pointer';
-          });
-          map.on('mouseleave', circleLayerId, () => {
-            if (map.getCanvas()) map.getCanvas().style.cursor = '';
-          });
-        }
+        map.on('click', mapClickHandler);
+        map.on('mousemove', mapMouseMoveHandler);
+        cleanupLayerInteractionHandlers = () => {
+          map.off('click', mapClickHandler);
+          map.off('mousemove', mapMouseMoveHandler);
+        };
 
         if (map.getLayer(addressLabelLayerId)) {
           map.moveLayer(addressLabelLayerId);
@@ -1739,6 +1795,7 @@ export function MapBuildingsLayer({
     return () => {
       map.off('idle', onIdle);
       map.off('style.load', onStyleLoad);
+      cleanupLayerInteractionHandlers?.();
     };
   }, [map, features, zoomLevel, onBuildingClick, statusFilters, campaignId, supabase, onAddToCRM, showOrphans, showAddressLabels, footprintStatusColors, addressStateOverrides]);
 

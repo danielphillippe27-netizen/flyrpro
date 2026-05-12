@@ -1245,6 +1245,20 @@ export function CampaignDetailMapView({
       }
     };
 
+    // Use a map-level click handler so Mapbox does not run layer-scoped
+    // queryRenderedFeatures internally during style transitions.
+    const onPointOverlayMapClick = (e: mapboxgl.MapMouseEvent) => {
+      try {
+        if (!mapInstance.isStyleLoaded() || !mapInstance.getLayer(pointOverlayCircleLayerId)) return;
+        const features = mapInstance.queryRenderedFeatures(e.point, {
+          layers: [pointOverlayCircleLayerId],
+        });
+        if (features.length > 0) onPointOverlayClick(Object.assign(e, { features }));
+      } catch {
+        return;
+      }
+    };
+
     if (pointOverlays.length === 0) {
       removePointOverlayLayers();
       return;
@@ -1256,11 +1270,11 @@ export function CampaignDetailMapView({
       mapInstance.once('style.load', addPointOverlayLayers);
     }
 
-    mapInstance.off('click', pointOverlayCircleLayerId, onPointOverlayClick);
-    mapInstance.on('click', pointOverlayCircleLayerId, onPointOverlayClick);
+    mapInstance.off('click', onPointOverlayMapClick);
+    mapInstance.on('click', onPointOverlayMapClick);
 
     return () => {
-      mapInstance.off('click', pointOverlayCircleLayerId, onPointOverlayClick);
+      mapInstance.off('click', onPointOverlayMapClick);
       removePointOverlayLayers();
     };
   }, [handleMapTargetClick, mapLoaded, pointOverlays, resolvedMapStyle.key]);
@@ -1728,18 +1742,44 @@ export function CampaignDetailMapView({
       }
     };
 
-    const setParcelCursor = () => {
-      m.getCanvas().style.cursor = 'pointer';
+    // Use a map-level click handler so Mapbox does not run layer-scoped
+    // queryRenderedFeatures internally during style transitions.
+    const onParcelMapClick = (e: mapboxgl.MapMouseEvent) => {
+      try {
+        if (!m.isStyleLoaded() || !m.getLayer(PARCEL_FILL_LAYER)) return;
+        const features = m.queryRenderedFeatures(e.point, {
+          layers: [PARCEL_FILL_LAYER],
+        });
+        if (features.length > 0) onParcelClick(Object.assign(e, { features }));
+      } catch {
+        return;
+      }
     };
 
-    const clearParcelCursor = () => {
-      m.getCanvas().style.cursor = '';
+    // Replace layer-scoped mouseenter/mouseleave with a map-level
+    // mousemove handler. Layer-scoped hover events cause Mapbox to
+    // internally call queryRenderedFeatures on every mousemove, which
+    // throws during style transitions when the layer registry is
+    // temporarily unavailable. A map-level mousemove with explicit
+    // isStyleLoaded() and try/catch guards avoids this entirely.
+    const onParcelMouseMove = (e: mapboxgl.MapMouseEvent) => {
+      try {
+        if (!m.isStyleLoaded() || !m.getLayer(PARCEL_FILL_LAYER)) {
+          m.getCanvas().style.cursor = '';
+          return;
+        }
+        const features = m.queryRenderedFeatures(e.point, {
+          layers: [PARCEL_FILL_LAYER],
+        });
+        m.getCanvas().style.cursor = features.length > 0 ? 'pointer' : '';
+      } catch {
+        m.getCanvas().style.cursor = '';
+      }
     };
 
     if (!showParcels) {
-      m.off('click', PARCEL_FILL_LAYER, onParcelClick);
-      m.off('mouseenter', PARCEL_FILL_LAYER, setParcelCursor);
-      m.off('mouseleave', PARCEL_FILL_LAYER, clearParcelCursor);
+      m.off('click', onParcelMapClick);
+      m.off('mousemove', onParcelMouseMove);
       removeParcelsLayer();
       return;
     }
@@ -1750,17 +1790,14 @@ export function CampaignDetailMapView({
       m.once('style.load', addParcelsLayer);
     }
 
-    m.off('click', PARCEL_FILL_LAYER, onParcelClick);
-    m.off('mouseenter', PARCEL_FILL_LAYER, setParcelCursor);
-    m.off('mouseleave', PARCEL_FILL_LAYER, clearParcelCursor);
-    m.on('click', PARCEL_FILL_LAYER, onParcelClick);
-    m.on('mouseenter', PARCEL_FILL_LAYER, setParcelCursor);
-    m.on('mouseleave', PARCEL_FILL_LAYER, clearParcelCursor);
+    m.off('click', onParcelMapClick);
+    m.off('mousemove', onParcelMouseMove);
+    m.on('click', onParcelMapClick);
+    m.on('mousemove', onParcelMouseMove);
 
     return () => {
-      m.off('click', PARCEL_FILL_LAYER, onParcelClick);
-      m.off('mouseenter', PARCEL_FILL_LAYER, setParcelCursor);
-      m.off('mouseleave', PARCEL_FILL_LAYER, clearParcelCursor);
+      m.off('click', onParcelMapClick);
+      m.off('mousemove', onParcelMouseMove);
       removeParcelsLayer();
     };
   }, [
