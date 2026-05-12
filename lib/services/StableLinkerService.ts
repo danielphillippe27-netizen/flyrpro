@@ -134,6 +134,38 @@ interface SpatialJoinOptions {
   persistenceMode?: 'silver' | 'gold';
 }
 
+export interface StableManualLinkResult {
+  linkedAddressIds: string[];
+  unitCount: number;
+}
+
+export interface StableManualUnlinkResult {
+  linkedAddressIds: string[];
+  unitCount: number;
+  deletedAddressId?: string;
+}
+
+type ManualLinkRpcData = {
+  linked_address_ids?: unknown;
+  unit_count?: unknown;
+  deleted_address_id?: unknown;
+};
+
+type ManualLinkRpcResult = {
+  data: ManualLinkRpcData | null;
+  error: { message: string } | null;
+};
+
+type ManualLinkRpc = (
+  functionName: string,
+  args: Record<string, unknown>
+) => Promise<ManualLinkRpcResult>;
+
+function manualLinkRpc(client: SupabaseClient): ManualLinkRpc | null {
+  const rpc = (client as SupabaseClient & { rpc?: unknown }).rpc;
+  return typeof rpc === 'function' ? (rpc.bind(client) as ManualLinkRpc) : null;
+}
+
 // Address from database
 interface CampaignAddress {
   id: string;
@@ -1445,6 +1477,374 @@ export class StableLinkerService {
     }
 
     console.log(`[StableLinker] Saved ${validMatches.length} matches`);
+  }
+
+  /**
+   * Persist one user-confirmed address/building assignment through the stable linker path.
+   * This is intentionally scoped to one address so edit-mode fixes do not rerun the full
+   * campaign join or overwrite other manual corrections.
+   */
+  async assignAddressToBuilding(input: {
+    campaignId: string;
+    addressId: string;
+    buildingRowId: string;
+    buildingPublicId: string;
+    coordinate?: [number, number];
+    assignedBy?: string;
+  }): Promise<StableManualLinkResult> {
+    const { campaignId, addressId, buildingRowId, buildingPublicId, coordinate, assignedBy } = input;
+
+    const rpc = manualLinkRpc(this.supabase);
+    if (rpc) {
+      const { data, error } = await rpc('assign_address_to_building_manual', {
+        p_campaign_id: campaignId,
+        p_address_id: addressId,
+        p_building_row_id: buildingRowId,
+        p_building_public_id: buildingPublicId,
+        p_lon: coordinate?.[0] ?? null,
+        p_lat: coordinate?.[1] ?? null,
+        p_assigned_by: assignedBy ?? null,
+      });
+      if (!error && data) {
+        const rpcLinkedAddressIds = Array.isArray(data.linked_address_ids) ? data.linked_address_ids.map(String) : [];
+        const linkedAddressIds = await this.loadRemainingBuildingAddressIds(
+          campaignId,
+          buildingPublicId,
+          buildingRowId,
+          rpcLinkedAddressIds
+        );
+        return {
+          linkedAddressIds,
+          unitCount: Math.max(Number(data.unit_count ?? 0), linkedAddressIds.length, 1),
+        };
+      }
+      if (error) {
+        console.warn('[StableLinker] assign_address_to_building_manual RPC unavailable or failed, falling back:', error.message);
+      }
+    }
+
+    const { data: previousLinks } = await this.supabase
+      .from('building_address_links')
+      .select('building_id')
+      .eq('campaign_id', campaignId)
+      .eq('address_id', addressId);
+
+    const previousBuildingIds = Array.from(
+      new Set(
+        ((previousLinks ?? []) as Array<{ building_id: string }>)
+          .map((row) => row.building_id)
+          .filter(Boolean)
+      )
+    );
+
+    const { error: linkError } = await this.supabase
+      .from('building_address_links')
+      .upsert({
+        campaign_id: campaignId,
+        building_id: buildingRowId,
+        address_id: addressId,
+        match_type: 'manual',
+        confidence: 1,
+        distance_meters: 0,
+        street_match_score: 1,
+        is_multi_unit: false,
+        unit_count: 1,
+        unit_arrangement: 'single',
+      }, { onConflict: 'campaign_id,address_id' });
+
+    if (linkError) {
+      throw new Error(`Failed to create stable manual link: ${linkError.message}`);
+    }
+
+    await this.supabase
+      .from('address_orphans')
+      .update({
+        status: 'assigned',
+        assigned_building_id: buildingRowId,
+        assigned_by: assignedBy ?? null,
+        assigned_at: new Date().toISOString(),
+      })
+      .eq('campaign_id', campaignId)
+      .eq('address_id', addressId);
+
+    const linkTableAddressIds = await this.syncBuildingUnitCounts(campaignId, buildingRowId);
+    const linkedAddressIds = await this.loadRemainingBuildingAddressIds(
+      campaignId,
+      buildingPublicId,
+      buildingRowId,
+      linkTableAddressIds
+    );
+    for (const previousBuildingId of previousBuildingIds) {
+      if (previousBuildingId === buildingRowId) continue;
+      await this.syncBuildingUnitCounts(campaignId, previousBuildingId);
+    }
+
+    const addressUpdate: Record<string, unknown> = {
+      building_id: buildingRowId,
+      building_gers_id: buildingPublicId,
+      match_source: 'manual',
+      confidence: 1,
+    };
+    if (coordinate) {
+      addressUpdate.geom = JSON.stringify({ type: 'Point', coordinates: coordinate });
+    }
+
+    const { error: addressError } = await this.supabase
+      .from('campaign_addresses')
+      .update(addressUpdate)
+      .eq('campaign_id', campaignId)
+      .eq('id', addressId);
+
+    if (addressError) {
+      throw new Error(`Failed to sync linked address: ${addressError.message}`);
+    }
+
+    return {
+      linkedAddressIds,
+      unitCount: Math.max(linkedAddressIds.length, 1),
+    };
+  }
+
+  async assignAddressToGoldBuilding(input: {
+    campaignId: string;
+    addressId: string;
+    buildingPublicId: string;
+    coordinate?: [number, number];
+    assignedBy?: string;
+  }): Promise<StableManualLinkResult> {
+    const { campaignId, addressId, buildingPublicId, coordinate, assignedBy } = input;
+
+    const addressUpdate: Record<string, unknown> = {
+      building_id: buildingPublicId,
+      building_gers_id: buildingPublicId,
+      match_source: 'manual',
+      confidence: 1,
+    };
+    if (coordinate) {
+      addressUpdate.geom = JSON.stringify({ type: 'Point', coordinates: coordinate });
+    }
+
+    const { error: addressError } = await this.supabase
+      .from('campaign_addresses')
+      .update(addressUpdate)
+      .eq('campaign_id', campaignId)
+      .eq('id', addressId);
+
+    if (addressError) {
+      throw new Error(`Failed to sync Gold linked address: ${addressError.message}`);
+    }
+
+    await this.supabase
+      .from('address_orphans')
+      .update({
+        status: 'assigned',
+        assigned_building_id: buildingPublicId,
+        assigned_by: assignedBy ?? null,
+        assigned_at: new Date().toISOString(),
+      })
+      .eq('campaign_id', campaignId)
+      .eq('address_id', addressId);
+
+    const linkedAddressIds = await this.loadRemainingBuildingAddressIds(
+      campaignId,
+      buildingPublicId,
+      null,
+      [addressId]
+    );
+
+    return {
+      linkedAddressIds,
+      unitCount: Math.max(linkedAddressIds.length, 1),
+    };
+  }
+
+  async unassignAddressFromBuilding(input: {
+    campaignId: string;
+    addressId: string;
+    buildingRowId: string | null;
+    buildingPublicId: string;
+    deleteManualAddress?: boolean;
+  }): Promise<StableManualUnlinkResult> {
+    const { campaignId, addressId, buildingRowId, buildingPublicId, deleteManualAddress } = input;
+
+    const rpc = manualLinkRpc(this.supabase);
+    if (rpc && buildingRowId) {
+      const { data, error } = await rpc('unassign_address_from_building_manual', {
+        p_campaign_id: campaignId,
+        p_address_id: addressId,
+        p_building_row_id: buildingRowId,
+        p_building_public_id: buildingPublicId,
+        p_delete_manual_address: deleteManualAddress === true,
+      });
+      if (!error && data) {
+        const rpcLinkedAddressIds = Array.isArray(data.linked_address_ids) ? data.linked_address_ids.map(String) : [];
+        const linkedAddressIds = await this.loadRemainingBuildingAddressIds(
+          campaignId,
+          buildingPublicId,
+          buildingRowId,
+          rpcLinkedAddressIds
+        );
+        return {
+          linkedAddressIds,
+          unitCount: Math.max(Number(data.unit_count ?? 0), linkedAddressIds.length, 1),
+          deletedAddressId: data.deleted_address_id ? String(data.deleted_address_id) : undefined,
+        };
+      }
+      if (error) {
+        console.warn('[StableLinker] unassign_address_from_building_manual RPC unavailable or failed, falling back:', error.message);
+      }
+    }
+
+    if (buildingRowId) {
+      const { error: deleteError } = await this.supabase
+        .from('building_address_links')
+        .delete()
+        .eq('building_id', buildingRowId)
+        .eq('address_id', addressId)
+        .eq('campaign_id', campaignId);
+
+      if (deleteError) {
+        throw new Error(`Failed to unlink address: ${deleteError.message}`);
+      }
+    }
+
+    if (deleteManualAddress) {
+      const { error: deleteAddressError } = await this.supabase
+        .from('campaign_addresses')
+        .delete()
+        .eq('campaign_id', campaignId)
+        .eq('id', addressId)
+        .eq('source', 'manual');
+
+      if (deleteAddressError) {
+        throw new Error(`Failed to delete manual address: ${deleteAddressError.message}`);
+      }
+    } else {
+      const { error: addressError } = await this.supabase
+        .from('campaign_addresses')
+        .update({
+          building_id: null,
+          building_gers_id: null,
+          match_source: null,
+          confidence: null,
+        })
+        .eq('campaign_id', campaignId)
+        .eq('id', addressId);
+
+      if (addressError) {
+        throw new Error(`Failed to clear linked address: ${addressError.message}`);
+      }
+
+      await this.supabase
+        .from('address_orphans')
+        .update({
+          status: 'pending_review',
+          assigned_building_id: null,
+          assigned_by: null,
+          assigned_at: null,
+        })
+        .eq('campaign_id', campaignId)
+        .eq('address_id', addressId);
+    }
+
+    const linkTableAddressIds = buildingRowId
+      ? await this.syncBuildingUnitCounts(campaignId, buildingRowId)
+      : [];
+    const linkedAddressIds = await this.loadRemainingBuildingAddressIds(
+      campaignId,
+      buildingPublicId,
+      buildingRowId,
+      linkTableAddressIds
+    );
+
+    return {
+      linkedAddressIds,
+      unitCount: Math.max(linkedAddressIds.length, 1),
+      deletedAddressId: deleteManualAddress ? addressId : undefined,
+    };
+  }
+
+  private async syncBuildingUnitCounts(
+    campaignId: string,
+    buildingId: string
+  ): Promise<string[]> {
+    const { data: rows, error: rowsError } = await this.supabase
+      .from('building_address_links')
+      .select('address_id')
+      .eq('campaign_id', campaignId)
+      .eq('building_id', buildingId);
+
+    if (rowsError) {
+      throw new Error(`Failed to load building links: ${rowsError.message}`);
+    }
+
+    const linkedAddressIds = Array.from(
+      new Set(((rows ?? []) as Array<{ address_id: string }>).map((row) => row.address_id).filter(Boolean))
+    );
+    const unitCount = Math.max(linkedAddressIds.length, 1);
+
+    if (linkedAddressIds.length > 0) {
+      const { error: updateError } = await this.supabase
+        .from('building_address_links')
+        .update({
+          is_multi_unit: unitCount > 1,
+          unit_count: unitCount,
+          unit_arrangement: unitCount > 1 ? 'horizontal' : 'single',
+        })
+        .eq('campaign_id', campaignId)
+        .eq('building_id', buildingId);
+
+      if (updateError) {
+        throw new Error(`Failed to sync building unit count: ${updateError.message}`);
+      }
+    }
+
+    return linkedAddressIds;
+  }
+
+  private async loadRemainingBuildingAddressIds(
+    campaignId: string,
+    buildingPublicId: string,
+    buildingRowId: string | null,
+    seedAddressIds: string[] = []
+  ): Promise<string[]> {
+    const identifiers = new Set(
+      [buildingPublicId, buildingRowId]
+        .filter((value): value is string => Boolean(value))
+        .map((value) => value.toLowerCase())
+    );
+    const seen = new Set<string>();
+    const linkedAddressIds: string[] = [];
+
+    for (const addressId of seedAddressIds) {
+      const key = String(addressId).toLowerCase();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      linkedAddressIds.push(String(addressId));
+    }
+
+    const { data, error } = await this.supabase
+      .from('campaign_addresses')
+      .select('id, building_id, building_gers_id')
+      .eq('campaign_id', campaignId);
+
+    if (error) {
+      throw new Error(`Failed to load remaining linked addresses: ${error.message}`);
+    }
+
+    for (const row of (data ?? []) as Array<{ id: string; building_id: string | null; building_gers_id: string | null }>) {
+      const rowIdentifiers = [row.building_id, row.building_gers_id]
+        .filter((value): value is string => Boolean(value))
+        .map((value) => value.toLowerCase());
+      if (!rowIdentifiers.some((identifier) => identifiers.has(identifier))) continue;
+
+      const key = String(row.id).toLowerCase();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      linkedAddressIds.push(String(row.id));
+    }
+
+    return linkedAddressIds;
   }
 
   private toGoldMatchSource(

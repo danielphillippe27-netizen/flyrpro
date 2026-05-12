@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { compareAddressesForDisplay, displayAddressText, resolveHouseNumberLabel } from '@/lib/map/addressPresentation';
+import { StableLinkerService } from '@/lib/services/StableLinkerService';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -54,10 +55,48 @@ type GoldAddressRow = {
 
 type AuthorizedContext = {
   supabase: ReturnType<typeof createAdminClient>;
+  userId: string;
+};
+
+type ResolvedBuilding = {
+  rowId: string | null;
+  publicId: string;
 };
 
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+async function resolveBuilding(
+  supabase: ReturnType<typeof createAdminClient>,
+  campaignId: string,
+  buildingIdParam: string
+): Promise<ResolvedBuilding | null> {
+  const buildingQuery = supabase
+    .from('buildings')
+    .select('id, gers_id')
+    .eq('campaign_id', campaignId)
+    .limit(1);
+
+  const { data: row, error } = isUuid(buildingIdParam)
+    ? await buildingQuery.or(`id.eq.${buildingIdParam},gers_id.eq.${buildingIdParam}`).maybeSingle()
+    : await buildingQuery.eq('gers_id', buildingIdParam).maybeSingle();
+
+  if (!error && row) {
+    return {
+      rowId: row.id,
+      publicId: row.gers_id ?? row.id,
+    };
+  }
+
+  if (!isUuid(buildingIdParam)) return null;
+  const { data: goldRow } = await supabase
+    .from('ref_buildings_gold')
+    .select('id')
+    .eq('id', buildingIdParam)
+    .maybeSingle();
+
+  return goldRow ? { rowId: null, publicId: String(goldRow.id) } : null;
 }
 
 function chooseLinksForDisplay(links: BuildingLinkRow[]): BuildingLinkRow[] {
@@ -159,6 +198,7 @@ async function resolveAuthorizedContext(
   return {
     context: {
       supabase,
+      userId: requestUser.id,
     },
   };
 }
@@ -382,7 +422,7 @@ export async function POST(
   try {
     const auth = await resolveAuthorizedContext(request, campaignId);
     if (auth.error) return auth.error;
-    const { supabase } = auth.context!;
+    const { supabase, userId } = auth.context!;
     
     const body = await request.json();
     const { address_id, unit_label } = body;
@@ -394,50 +434,46 @@ export async function POST(
       );
     }
     
-    // Check if address is already linked to a different building
-    const { data: existingLink } = await supabase
-      .from('building_address_links')
-      .select('building_id, confidence')
-      .eq('campaign_id', campaignId)
-      .eq('address_id', address_id)
-      .maybeSingle();
-    
-    if (existingLink && existingLink.building_id !== buildingId) {
-      // If existing link has high confidence, warn user
-      if (existingLink.confidence >= 0.85) {
-        return NextResponse.json({
-          success: false,
-          warning: 'address_already_linked',
-          message: `Address is already linked to building ${existingLink.building_id} with high confidence (${existingLink.confidence.toFixed(2)})`,
-          existing_building_id: existingLink.building_id,
-          existing_confidence: existingLink.confidence,
-        }, { status: 409 });
-      }
+    const resolvedBuilding = await resolveBuilding(supabase, campaignId, buildingId);
+    if (!resolvedBuilding) {
+      return NextResponse.json({ error: 'Building not found' }, { status: 404 });
     }
-    
-    // Upsert the link
-    const { error: upsertError } = await supabase
-      .from('building_address_links')
-      .upsert({
-        campaign_id: campaignId,
-        building_id: buildingId,
-        address_id: address_id,
-        match_type: 'manual',
-        confidence: 1.0,
-        modified_at: new Date().toISOString(),
-      }, {
-        onConflict: 'campaign_id,address_id',
-      });
-    
-    if (upsertError) {
-      throw new Error(`Failed to link address: ${upsertError.message}`);
-    }
+
+    const longitude = typeof body.longitude === 'number' && Number.isFinite(body.longitude)
+      ? body.longitude
+      : null;
+    const latitude = typeof body.latitude === 'number' && Number.isFinite(body.latitude)
+      ? body.latitude
+      : null;
+    const coordinate = longitude !== null && latitude !== null
+      ? [longitude, latitude] as [number, number]
+      : undefined;
+
+    const linker = new StableLinkerService(supabase);
+    const stableLink = resolvedBuilding.rowId
+      ? await linker.assignAddressToBuilding({
+          campaignId,
+          addressId: address_id,
+          buildingRowId: resolvedBuilding.rowId,
+          buildingPublicId: resolvedBuilding.publicId,
+          coordinate,
+          assignedBy: userId,
+        })
+      : await linker.assignAddressToGoldBuilding({
+          campaignId,
+          addressId: address_id,
+          buildingPublicId: resolvedBuilding.publicId,
+          coordinate,
+          assignedBy: userId,
+        });
     
     return NextResponse.json({
       success: true,
       message: 'Address linked successfully',
-      building_id: buildingId,
+      building_id: resolvedBuilding.publicId,
       address_id,
+      linked_address_ids: stableLink.linkedAddressIds,
+      unit_count: stableLink.unitCount,
       unit_label: unit_label || null,
     });
     

@@ -207,6 +207,7 @@ export type CampaignProvisionPhase =
   | 'failed';
 export type ParcelEnrichmentStatus = 'not_started' | 'queued' | 'processing' | 'ready' | 'failed' | 'skipped';
 export type LinkQualityStatus = 'unknown' | 'healthy' | 'degraded' | 'repairing' | 'failed';
+export type CampaignDataQuality = 'strong' | 'usable' | 'weak';
 
 export interface CampaignV2 {
   id: string;
@@ -240,6 +241,10 @@ export interface CampaignV2 {
   link_quality_reason?: string | null;
   link_quality_checked_at?: string | null;
   link_quality_metrics?: Record<string, unknown> | null;
+  coverage_score?: number | null;
+  data_quality?: CampaignDataQuality | null;
+  standard_mode_recommended?: boolean | null;
+  data_quality_reason?: string | null;
   seed_query?: string;
   description?: string;
   video_url?: string; // Optional video URL to redirect to when QR code is scanned
