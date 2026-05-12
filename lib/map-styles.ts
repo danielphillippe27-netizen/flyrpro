@@ -33,13 +33,13 @@ export const MAP_STYLE_PRESET_META: Record<
 };
 
 const STANDARD_V12_STYLES: Record<Theme, string> = {
-  light: process.env.NEXT_PUBLIC_MAPBOX_STYLE_ID_STANDARD_LIGHT ?? '',
-  dark: process.env.NEXT_PUBLIC_MAPBOX_STYLE_ID_STANDARD_DARK ?? '',
+  light: process.env.NEXT_PUBLIC_MAPBOX_STYLE_ID_STANDARD_LIGHT || 'mapbox://styles/mapbox/streets-v12',
+  dark: process.env.NEXT_PUBLIC_MAPBOX_STYLE_ID_STANDARD_DARK || 'mapbox://styles/mapbox/dark-v11',
 };
 
 const STANDARD_V11_STYLES: Record<Theme, string> = {
-  light: process.env.NEXT_PUBLIC_MAPBOX_STYLE_ID_LEGACY_LIGHT ?? '',
-  dark: process.env.NEXT_PUBLIC_MAPBOX_STYLE_ID_LEGACY_DARK ?? '',
+  light: process.env.NEXT_PUBLIC_MAPBOX_STYLE_ID_LEGACY_LIGHT || 'mapbox://styles/mapbox/streets-v12',
+  dark: process.env.NEXT_PUBLIC_MAPBOX_STYLE_ID_LEGACY_DARK || 'mapbox://styles/mapbox/dark-v11',
 };
 
 const strippedStyleCache = new Map<string, Record<string, unknown>>();

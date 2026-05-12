@@ -1012,6 +1012,14 @@ export function CampaignDetailMapView({
       if (mapInstance) {
         removeMapboxMapWhenSafe(mapInstance);
       }
+      // Synchronously clear any remaining Mapbox DOM from the container.
+      // removeMapboxMapWhenSafe may defer map.remove() if the map is not
+      // yet loaded. If the effect re-runs before removal completes, a new
+      // map would initialize into a dirty container, breaking interactivity.
+      // Clearing the container here ensures the next map always starts clean.
+      if (mapContainer.current) {
+        mapContainer.current.innerHTML = '';
+      }
       if (initAttemptedRef.current) {
         initAttemptedRef.current = false;
         setMapLoaded(false);
