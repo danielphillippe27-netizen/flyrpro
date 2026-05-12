@@ -3,6 +3,7 @@
  *
  * Run with: npx tsx lib/services/__tests__/StableLinkerService.test.ts
  */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { DataIntegrityError, StableLinkerService } from '../StableLinkerService';
 import { ParcelEnrichmentService } from '../ParcelEnrichmentService';
@@ -272,6 +273,36 @@ async function run() {
     const match = (service as any).matchAddressToBuilding(address, [building], new Set(), preparedParcels);
     assertEqual(match.matchType, 'parcel_verified');
     assertEqual(match.buildingId, 'building-3');
+  });
+
+  test('Parcel bridge outranks point-on-surface for offset detached-home address points', () => {
+    const service = new StableLinkerService({} as any);
+    const parcelBuilding = makeBuilding(
+      'parcel-main-home',
+      rectangle(-79.00965, 43.01002, -79.00950, 43.01016),
+      { primaryStreet: 'Cedar Court' }
+    );
+    const boundaryNeighbor = makeBuilding(
+      'boundary-neighbor',
+      rectangle(-79.01000, 43.01000, -79.00980, 43.01020),
+      { primaryStreet: 'Cedar Court' }
+    );
+    const parcel = makeParcel(
+      'parcel-main',
+      rectangle(-79.00982, 43.00995, -79.00945, 43.01022)
+    );
+    const preparedParcels = (service as any).prepareParcelBridge([parcel], [parcelBuilding, boundaryNeighbor]);
+    const address = makeAddress('302', -79.00980, 43.01010, 'Cedar Court');
+
+    const match = (service as any).matchAddressToBuilding(
+      address,
+      [parcelBuilding, boundaryNeighbor],
+      new Set(),
+      preparedParcels
+    );
+
+    assertEqual(match.matchType, 'parcel_verified');
+    assertEqual(match.buildingId, 'parcel-main-home');
   });
 
   test('Parcel source selection: locality-specific dataset beats region-wide fallback', () => {

@@ -7,13 +7,13 @@ import type { StandardCampaignAddress } from '@/lib/services/AddressAdapter';
 type Bounds = [number, number, number, number];
 type SnapshotTileMetrics = NonNullable<NonNullable<LambdaSnapshotResponse['metadata']>['tile_metrics']>;
 
-export type BedrockProvisionSource = 'bedrock_ca' | 'bedrock_us';
+export type BedrockProvisionSource = 'bedrock_ca' | 'bedrock_us' | 'bedrock_za';
 
 type BedrockCountryConfig = {
-  country: 'canada' | 'usa';
-  countryCode: 'CA' | 'US';
+  country: 'canada' | 'usa' | 'south-africa';
+  countryCode: 'CA' | 'US' | 'ZA';
   provisionSource: BedrockProvisionSource;
-  envPrefix: 'BEDROCK_CA' | 'BEDROCK_US';
+  envPrefix: 'BEDROCK_CA' | 'BEDROCK_US' | 'BEDROCK_ZA';
   defaultSource: string;
   overtureRelease: string;
 };
@@ -67,6 +67,167 @@ type BedrockScanResult = {
 const DEFAULT_BUCKET = 'flyr-pro-addresses-2025';
 const REGION = process.env.AWS_REGION || process.env.AWS_S3_BUCKET_REGION || 'us-east-2';
 const WEB_MERCATOR_MAX_LAT = 85.05112878;
+const USA_ADDRESS_REGIONS = new Set([
+  'AK',
+  'AL',
+  'AR',
+  'AZ',
+  'CA',
+  'CO',
+  'CT',
+  'DC',
+  'DE',
+  'FL',
+  'GA',
+  'HI',
+  'IA',
+  'ID',
+  'IL',
+  'IN',
+  'KS',
+  'KY',
+  'LA',
+  'MA',
+  'MD',
+  'ME',
+  'MI',
+  'MN',
+  'MO',
+  'MS',
+  'MT',
+  'NC',
+  'ND',
+  'NE',
+  'NH',
+  'NJ',
+  'NM',
+  'NV',
+  'NY',
+  'OH',
+  'OK',
+  'OR',
+  'PA',
+  'PR',
+  'RI',
+  'SC',
+  'SD',
+  'TN',
+  'TX',
+  'UT',
+  'VA',
+  'VI',
+  'VT',
+  'WA',
+  'WI',
+  'WV',
+  'WY',
+]);
+const USA_BUILDING_REGIONS = new Set([
+  'AK',
+  'AL',
+  'AR',
+  'AZ',
+  'CA',
+  'CO',
+  'CT',
+  'DC',
+  'DE',
+  'FL',
+  'GA',
+  'HI',
+  'IA',
+  'ID',
+  'IL',
+  'IN',
+  'KS',
+  'KY',
+  'LA',
+  'MA',
+  'MD',
+  'ME',
+  'MI',
+  'MN',
+  'MO',
+  'MS',
+  'MT',
+  'NC',
+  'ND',
+  'NE',
+  'NH',
+  'NJ',
+  'NM',
+  'NV',
+  'NY',
+  'OH',
+  'OK',
+  'OR',
+  'PA',
+  'RI',
+  'SC',
+  'SD',
+  'TN',
+  'TX',
+  'UT',
+  'VA',
+  'VT',
+  'WA',
+  'WI',
+  'WV',
+  'WY',
+]);
+const USA_PARCEL_REGIONS = new Set([
+  'AK',
+  'AL',
+  'AR',
+  'AZ',
+  'CA',
+  'CO',
+  'CT',
+  'DC',
+  'DE',
+  'FL',
+  'GA',
+  'HI',
+  'IA',
+  'ID',
+  'IL',
+  'IN',
+  'KS',
+  'KY',
+  'LA',
+  'MA',
+  'MD',
+  'ME',
+  'MI',
+  'MN',
+  'MO',
+  'MS',
+  'MT',
+  'NC',
+  'ND',
+  'NE',
+  'NH',
+  'NJ',
+  'NM',
+  'NV',
+  'NY',
+  'OH',
+  'OK',
+  'OR',
+  'PA',
+  'RI',
+  'SC',
+  'SD',
+  'TN',
+  'TX',
+  'UT',
+  'VA',
+  'VT',
+  'WA',
+  'WI',
+  'WV',
+  'WY',
+]);
 
 let s3Client: S3Client | null = null;
 let resolvedAwsCredentials:
@@ -125,16 +286,47 @@ function layerKey(config: BedrockCountryConfig, layer: 'addresses' | 'buildings'
   return `${prefix(config)}/${layer}/${filename}`;
 }
 
-function layerUrl(config: BedrockCountryConfig, layer: 'addresses' | 'buildings' | 'parcels', filename: string) {
-  const cdnBase =
+function cdnBase(config: BedrockCountryConfig) {
+  return (
     env(config, 'CDN_BASE_URL') ||
     process.env.CLOUDFRONT_GEOMETRY_BASE_URL ||
     process.env.NEXT_PUBLIC_GEOMETRY_CDN_BASE_URL ||
-    '';
-  if (cdnBase.trim()) {
-    return `${cdnBase.replace(/\/+$/, '')}/${layerKey(config, layer, filename)}`;
+    ''
+  ).trim();
+}
+
+function cdnUrl(config: BedrockCountryConfig, key: string): string | null {
+  const base = cdnBase(config);
+  return base ? `${base.replace(/\/+$/, '')}/${key.replace(/^\/+/, '')}` : null;
+}
+
+function layerUrl(config: BedrockCountryConfig, layer: 'addresses' | 'buildings' | 'parcels', filename: string) {
+  const cdn = cdnUrl(config, layerKey(config, layer, filename));
+  if (cdn) {
+    return cdn;
   }
   return `s3://${bucket(config)}/${layerKey(config, layer, filename)}`;
+}
+
+function usaParcelPmtilesKey(config: BedrockCountryConfig, regionCode?: string | null) {
+  if (config.country !== 'usa') return layerKey(config, 'parcels', 'parcels.pmtiles');
+  const state = regionCode?.trim().toUpperCase();
+  if (!state || !USA_PARCEL_REGIONS.has(state)) return null;
+  return `${prefix(config)}/parcels/pmtiles_by_state/state=${state}/parcels.pmtiles`;
+}
+
+function usaAddressPmtilesKey(config: BedrockCountryConfig, regionCode?: string | null) {
+  if (config.country !== 'usa') return layerKey(config, 'addresses', 'addresses.pmtiles');
+  const state = regionCode?.trim().toUpperCase();
+  if (!state || !USA_ADDRESS_REGIONS.has(state)) return null;
+  return `${prefix(config)}/addresses/pmtiles_by_state/state=${state}/addresses.pmtiles`;
+}
+
+function usaBuildingPmtilesKey(config: BedrockCountryConfig, regionCode?: string | null) {
+  if (config.country !== 'usa') return layerKey(config, 'buildings', 'buildings.pmtiles');
+  const state = regionCode?.trim().toUpperCase();
+  if (!state || !USA_BUILDING_REGIONS.has(state)) return null;
+  return `${prefix(config)}/buildings/pmtiles_by_state/state=${state}/buildings.pmtiles`;
 }
 
 function sqlString(value: string) {
@@ -165,6 +357,18 @@ function tileSeamPadding(manifest: ParquetManifest, tileZ: number) {
 }
 
 async function s3Text(config: BedrockCountryConfig, s3Key: string) {
+  const cdn = cdnUrl(config, s3Key);
+  if (cdn) {
+    const response = await fetch(cdn, { cache: 'no-store' });
+    if (response.ok) {
+      return response.text();
+    }
+    console.warn('[BedrockCountryService] CDN manifest fetch failed; falling back to S3', {
+      key: s3Key,
+      status: response.status,
+    });
+  }
+
   const response = await getS3Client().send(new GetObjectCommand({ Bucket: bucket(config), Key: s3Key }));
   const body = response.Body;
   if (!body || typeof body !== 'object' || !('transformToString' in body)) {
@@ -178,6 +382,11 @@ async function readManifest(config: BedrockCountryConfig): Promise<ParquetManife
 }
 
 function parquetPathsForTiles(config: BedrockCountryConfig, manifest: ParquetManifest, bbox: Bounds, regionCode?: string | null) {
+  const parquetPathFor = (relative: string) => {
+    const key = layerKey(config, 'addresses', relative);
+    return `s3://${bucket(config)}/${key}`;
+  };
+
   if (manifest.partitioning?.scheme === 'state') {
     const state = regionCode?.trim().toUpperCase();
     const available = new Set((manifest.state_counts ?? []).map((entry) => entry.state.toUpperCase()));
@@ -186,7 +395,7 @@ function parquetPathsForTiles(config: BedrockCountryConfig, manifest: ParquetMan
     }
     const relative = `parquet/state=${state}/*.parquet`;
     return {
-      paths: [`s3://${bucket(config)}/${layerKey(config, 'addresses', relative)}`],
+      paths: [parquetPathFor(relative)],
       tileZ: 0,
       partitioning: 'state',
     };
@@ -212,14 +421,14 @@ function parquetPathsForTiles(config: BedrockCountryConfig, manifest: ParquetMan
     for (let y = minY; y <= maxY; y += 1) {
       if (available.size > 0 && !available.has(`${tileZ}/${x}/${y}`)) continue;
       const relative = `parquet/tile_z=${tileZ}/tile_x=${x}/tile_y=${y}/*.parquet`;
-      paths.push(`s3://${bucket(config)}/${layerKey(config, 'addresses', relative)}`);
+      paths.push(parquetPathFor(relative));
     }
   }
 
   return { paths, tileZ, partitioning: 'web_mercator_xyz', tilePadding: padding };
 }
 
-async function duckDbAll(sql: string, usesS3: boolean): Promise<BedrockParquetRow[]> {
+async function duckDbAll(sql: string, usesRemoteFiles: boolean): Promise<BedrockParquetRow[]> {
   const duckdbModule = await import('duckdb');
   const duckdb = (duckdbModule.default ?? duckdbModule) as typeof duckdbModule;
   const db = new duckdb.Database(':memory:');
@@ -232,16 +441,18 @@ async function duckDbAll(sql: string, usesS3: boolean): Promise<BedrockParquetRo
     });
 
   try {
-    if (usesS3) {
+    if (usesRemoteFiles) {
       await all('INSTALL httpfs');
       await all('LOAD httpfs');
-      await all(`SET s3_region=${sqlString(REGION)}`);
-      const credentials = await getAwsCredentials();
-      if (credentials?.accessKeyId && credentials.secretAccessKey) {
-        await all(`SET s3_access_key_id=${sqlString(credentials.accessKeyId)}`);
-        await all(`SET s3_secret_access_key=${sqlString(credentials.secretAccessKey)}`);
-        if (credentials.sessionToken) {
-          await all(`SET s3_session_token=${sqlString(credentials.sessionToken)}`);
+      if (sql.includes('s3://')) {
+        await all(`SET s3_region=${sqlString(REGION)}`);
+        const credentials = await getAwsCredentials();
+        if (credentials?.accessKeyId && credentials.secretAccessKey) {
+          await all(`SET s3_access_key_id=${sqlString(credentials.accessKeyId)}`);
+          await all(`SET s3_secret_access_key=${sqlString(credentials.secretAccessKey)}`);
+          if (credentials.sessionToken) {
+            await all(`SET s3_session_token=${sqlString(credentials.sessionToken)}`);
+          }
         }
       }
     }
@@ -347,7 +558,7 @@ export class BedrockCountryService {
         WHERE longitude BETWEEN ${sqlNumber(bbox[0])} AND ${sqlNumber(bbox[2])}
           AND latitude BETWEEN ${sqlNumber(bbox[1])} AND ${sqlNumber(bbox[3])}
       `,
-      paths.some((path) => path.startsWith('s3://'))
+      paths.some((path) => path.startsWith('s3://') || /^https?:\/\//i.test(path))
     );
     const queryMs = Date.now() - queryStartedAt;
 
@@ -395,7 +606,7 @@ export class BedrockCountryService {
     return {
       addresses,
       metrics: { addresses: metric },
-      snapshot: this.snapshotForCampaign(options.campaignId, addresses.length, metric, manifest),
+      snapshot: this.snapshotForCampaign(options.campaignId, addresses.length, metric, manifest, options.regionCode),
     };
   }
 
@@ -403,8 +614,14 @@ export class BedrockCountryService {
     campaignId: string,
     addressCount: number,
     scanMetric: BedrockScanResult,
-    manifest: ParquetManifest
+    manifest: ParquetManifest,
+    regionCode?: string | null
   ): LambdaSnapshotResponse {
+    const buildingPmtilesKey = usaBuildingPmtilesKey(this.config, regionCode);
+    const snapshotBuildingKey = buildingPmtilesKey ?? layerKey(this.config, 'buildings', 'buildings.pmtiles');
+    const addressPmtilesKey = usaAddressPmtilesKey(this.config, regionCode);
+    const snapshotAddressKey = addressPmtilesKey ?? layerKey(this.config, 'addresses', 'addresses.pmtiles');
+    const parcelPmtilesKey = usaParcelPmtilesKey(this.config, regionCode);
     const tileMetrics = {
       artifact_type: 'diamond',
       diamond_mode: true,
@@ -413,17 +630,20 @@ export class BedrockCountryService {
       bedrock_country_code: this.config.countryCode,
       bedrock_version: env(this.config, 'VERSION') || 'current',
       geometry_provider: 'pmtiles',
-      pmtiles_key: layerKey(this.config, 'buildings', 'buildings.pmtiles'),
+      pmtiles_key: buildingPmtilesKey,
       tilejson_key: layerKey(this.config, 'buildings', 'buildings.json'),
+      buildings_pmtiles_index_key: `${prefix(this.config)}/buildings/pmtiles-index.json`,
       buildings_geojson_key: layerKey(this.config, 'buildings', 'buildings.ndjson.gz'),
-      addresses_pmtiles_key: layerKey(this.config, 'addresses', 'addresses.pmtiles'),
+      addresses_pmtiles_key: addressPmtilesKey,
       addresses_tilejson_key: layerKey(this.config, 'addresses', 'addresses.json'),
       addresses_geojson_key: layerKey(this.config, 'addresses', 'addresses.ndjson.gz'),
       addresses_parquet_prefix: layerKey(this.config, 'addresses', 'parquet'),
       addresses_parquet_manifest_key: layerKey(this.config, 'addresses', 'parquet-manifest.json'),
-      parcels_pmtiles_key: layerKey(this.config, 'parcels', 'parcels.pmtiles'),
-      parcels_tilejson_key: layerKey(this.config, 'parcels', 'parcels.json'),
-      parcels_geojson_key: layerKey(this.config, 'parcels', 'parcels.ndjson.gz'),
+      addresses_pmtiles_index_key: `${prefix(this.config)}/addresses/pmtiles-index.json`,
+      parcels_pmtiles_key: parcelPmtilesKey,
+      parcels_tilejson_key: parcelPmtilesKey?.replace(/\.pmtiles$/i, '.json') ?? null,
+      parcels_geojson_key: null,
+      parcels_pmtiles_index_key: `${prefix(this.config)}/parcels/pmtiles-index.json`,
       addresses_parquet_partitioning: {
         scheme: manifest.partitioning?.scheme ?? 'web_mercator_xyz',
         tile_z: manifest.partitioning?.tile_z ?? 12,
@@ -474,13 +694,13 @@ export class BedrockCountryService {
         roads: 0,
       },
       s3_keys: {
-        buildings: layerKey(this.config, 'buildings', 'buildings.pmtiles'),
-        addresses: layerKey(this.config, 'addresses', 'addresses.pmtiles'),
+        buildings: snapshotBuildingKey,
+        addresses: snapshotAddressKey,
         metadata: `${prefix(this.config)}/bedrock-${this.config.country}.json`,
       },
       urls: {
-        buildings: layerUrl(this.config, 'buildings', 'buildings.pmtiles'),
-        addresses: layerUrl(this.config, 'addresses', 'addresses.pmtiles'),
+        buildings: cdnUrl(this.config, snapshotBuildingKey) ?? `s3://${bucket(this.config)}/${snapshotBuildingKey}`,
+        addresses: cdnUrl(this.config, snapshotAddressKey) ?? `s3://${bucket(this.config)}/${snapshotAddressKey}`,
         metadata: `s3://${bucket(this.config)}/${prefix(this.config)}/bedrock-${this.config.country}.json`,
       },
       metadata: {
@@ -509,4 +729,13 @@ export const BEDROCK_US_CONFIG: BedrockCountryConfig = {
   envPrefix: 'BEDROCK_US',
   defaultSource: 'Overture Maps Addresses',
   overtureRelease: 'bedrock-us-overture',
+};
+
+export const BEDROCK_SOUTH_AFRICA_CONFIG: BedrockCountryConfig = {
+  country: 'south-africa',
+  countryCode: 'ZA',
+  provisionSource: 'bedrock_za',
+  envPrefix: 'BEDROCK_ZA',
+  defaultSource: 'OpenStreetMap Addresses',
+  overtureRelease: 'bedrock-za-osm',
 };

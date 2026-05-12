@@ -9,7 +9,7 @@ import type { LambdaSnapshotResponse } from '@/lib/services/TileLambdaService';
 type Bounds = [number, number, number, number];
 type SnapshotTileMetrics = NonNullable<NonNullable<LambdaSnapshotResponse['metadata']>['tile_metrics']>;
 
-type DiamondCountry = 'canada' | 'usa';
+type DiamondCountry = 'canada' | 'usa' | 'south-africa';
 
 type DiamondLayerManifest = {
   diamond_mode?: boolean;
@@ -137,6 +137,17 @@ const US_STATES = new Set([
   'WY',
   'DC',
 ]);
+const SOUTH_AFRICA_REGIONS = new Set([
+  'EC',
+  'FS',
+  'GP',
+  'KZN',
+  'LP',
+  'MP',
+  'NC',
+  'NW',
+  'WC',
+]);
 
 let s3Client: S3Client | null = null;
 const candidateCache = new Map<string, Promise<DiamondCandidate[]>>();
@@ -203,6 +214,7 @@ function normalizeCountry(regionCode: string | null | undefined): DiamondCountry
   if (!region) return null;
   if (CANADA_REGIONS.has(region)) return 'canada';
   if (US_STATES.has(region)) return 'usa';
+  if (SOUTH_AFRICA_REGIONS.has(region)) return 'south-africa';
   return null;
 }
 

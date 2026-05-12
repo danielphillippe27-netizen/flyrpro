@@ -21,6 +21,7 @@ import {
   FLYR_PARTNER_FREE_FOREVER_REFERRAL_CODE,
   isFlyrPartnerFreeForeverOffer,
 } from '@/components/offers/partnerOfferUtils';
+import { normalizeCountryCode } from '@/lib/countries';
 
 const INDUSTRIES = [
   'Real Estate',
@@ -61,6 +62,7 @@ export async function POST(request: NextRequest) {
     const {
       firstName,
       lastName,
+      countryCode,
       workspaceName,
       industry,
       referralCode,
@@ -72,6 +74,7 @@ export async function POST(request: NextRequest) {
     } = body as {
       firstName?: string;
       lastName?: string;
+      countryCode?: string;
       workspaceName?: string;
       industry?: string;
       referralCode?: string | null;
@@ -85,7 +88,9 @@ export async function POST(request: NextRequest) {
 
     const admin = createAdminClient();
 
-    if (firstName !== undefined || lastName !== undefined) {
+    const normalizedCountryCode = normalizeCountryCode(countryCode);
+
+    if (firstName !== undefined || lastName !== undefined || countryCode !== undefined) {
       const normalizedFirstName =
         typeof firstName === 'string' ? firstName.trim() || null : undefined;
       const normalizedLastName =
@@ -96,6 +101,9 @@ export async function POST(request: NextRequest) {
       }
       if (normalizedLastName !== undefined) {
         profileUpdates.last_name = normalizedLastName;
+      }
+      if (countryCode !== undefined) {
+        profileUpdates.country_code = normalizedCountryCode;
       }
 
       const { data: updatedProfiles, error: profileError } = await admin
@@ -138,6 +146,7 @@ export async function POST(request: NextRequest) {
         .update({
           ...(normalizedFirstName !== undefined ? { first_name: normalizedFirstName } : {}),
           ...(normalizedLastName !== undefined ? { last_name: normalizedLastName } : {}),
+          ...(countryCode !== undefined ? { country_code: normalizedCountryCode } : {}),
           full_name: fullName,
           updated_at: new Date().toISOString(),
         })

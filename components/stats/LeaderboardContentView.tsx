@@ -17,6 +17,7 @@ type TeamLeaderboardRow = {
   user_id: string;
   display_name: string;
   avatar_url?: string | null;
+  country_code?: string | null;
   doors_knocked: number;
   conversations: number;
   total_duration_seconds?: number;
@@ -75,6 +76,7 @@ function mapTeamRows(rows: TeamLeaderboardRow[]): LeaderboardEntry[] {
     user_email: '',
     name: row.display_name,
     avatar_url: row.avatar_url ?? null,
+    country_code: row.country_code ?? null,
     doorknocks: Number(row.doors_knocked) || 0,
     conversations: Number(row.conversations) || 0,
     leads: 0,

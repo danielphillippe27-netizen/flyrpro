@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useWorkspace } from '@/lib/workspace-context';
+import { COUNTRY_OPTIONS, countryCodeToFlag } from '@/lib/countries';
 
 type BrokerageSuggestion = { id: string; name: string };
 
@@ -68,6 +69,7 @@ export function ProfileEditDialog({
 
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
+  const [countryCode, setCountryCode] = useState('');
   const [industry, setIndustry] = useState('');
   const [brokerageName, setBrokerageName] = useState('');
   const [brokerageId, setBrokerageId] = useState<string | null>(null);
@@ -122,6 +124,7 @@ export function ProfileEditDialog({
         if (profileData) {
           setFirstName(profileData.first_name ?? '');
           setLastName(profileData.last_name ?? '');
+          setCountryCode(profileData.country_code ?? '');
           setIndustry(profileData.industry ?? '');
           setBrokerageName(profileData.brokerage_name ?? '');
           setQuote(profileData.quote ?? '');
@@ -234,6 +237,7 @@ export function ProfileEditDialog({
         body: JSON.stringify({
           first_name: firstName.trim() || null,
           last_name: lastName.trim() || null,
+          country_code: countryCode || null,
           industry: industry.trim() || null,
           brokerage_name: brokerageName.trim() || null,
           quote: quote.trim().slice(0, 500) || null,
@@ -266,6 +270,8 @@ export function ProfileEditDialog({
   };
 
   const displayName = [firstName, lastName].filter(Boolean).join(' ') || 'Profile';
+  const countryFlag = countryCodeToFlag(countryCode);
+  const countryName = COUNTRY_OPTIONS.find((country) => country.code === countryCode)?.name;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -302,7 +308,7 @@ export function ProfileEditDialog({
                   />
                 ) : (
                   <span>
-                    {initialsFromName(displayName)}
+                    {countryFlag || initialsFromName(displayName)}
                   </span>
                 )}
                 <span className="absolute inset-0 flex items-center justify-center rounded-full bg-black/40 opacity-0 transition hover:opacity-100">
@@ -319,6 +325,11 @@ export function ProfileEditDialog({
               <span className="text-muted-foreground text-xs">
                 {uploadingAvatar ? 'Uploading…' : 'Click to change photo'}
               </span>
+              {countryFlag && countryName ? (
+                <span className="text-sm font-medium text-foreground">
+                  {countryFlag} {countryName}
+                </span>
+              ) : null}
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -340,6 +351,22 @@ export function ProfileEditDialog({
                   placeholder="Last name"
                 />
               </div>
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="profile-country">Country</Label>
+              <Select value={countryCode || undefined} onValueChange={setCountryCode}>
+                <SelectTrigger id="profile-country" className="w-full">
+                  <SelectValue placeholder="Select country" />
+                </SelectTrigger>
+                <SelectContent>
+                  {COUNTRY_OPTIONS.map((country) => (
+                    <SelectItem key={country.code} value={country.code}>
+                      {country.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="grid gap-2">

@@ -8,6 +8,7 @@ type TeamLeaderboardRow = {
   user_id: string;
   display_name: string;
   avatar_url?: string | null;
+  country_code?: string | null;
   doors_knocked: number;
   conversations: number;
   leads: number;
@@ -69,6 +70,9 @@ export async function GET(request: NextRequest) {
       display_name: String((row as Record<string, unknown>).name ?? 'Member'),
       avatar_url: typeof (row as Record<string, unknown>).avatar_url === 'string'
         ? String((row as Record<string, unknown>).avatar_url)
+        : null,
+      country_code: typeof (row as Record<string, unknown>).country_code === 'string'
+        ? String((row as Record<string, unknown>).country_code)
         : null,
       doors_knocked: toNumber((row as Record<string, unknown>).doorknocks),
       conversations: toNumber((row as Record<string, unknown>).conversations),

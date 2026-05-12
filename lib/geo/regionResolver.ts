@@ -50,7 +50,18 @@ import regionBounds from '../../scripts/regions.json';
 const NON_US_CANADA_REGION_BOUNDS: Record<string, Bounds> = {
   NZ: [166.0, -48.5, 179.5, -33.0],
   AU: [96.0, -44.0, 168.5, -9.0],
+  ZA: [16.4, -35.0, 33.1, -22.0],
+  EC: [22.7, -34.4, 30.2, -30.0],
+  FS: [24.0, -30.8, 29.8, -26.6],
+  GP: [27.1, -26.9, 29.1, -25.1],
+  KZN: [28.5, -31.2, 32.9, -26.8],
+  LP: [26.4, -25.6, 32.0, -22.1],
+  MP: [28.4, -27.5, 32.0, -24.6],
+  NC: [16.4, -32.9, 25.9, -24.7],
+  NW: [22.6, -28.1, 28.3, -24.6],
+  WC: [17.7, -35.0, 24.3, -30.3],
 };
+const SOUTH_AFRICA_REGION_CODES = new Set(['EC', 'FS', 'GP', 'KZN', 'LP', 'MP', 'NC', 'NW', 'WC']);
 
 const CANADA_REGION_BOUNDS: Record<string, Bounds> = {
   BC: [-139.06, 48.2, -114.03, 60.01],
@@ -209,7 +220,7 @@ async function inferRegionFromMapbox(point: Point): Promise<string | null> {
 
   const url =
     `https://api.mapbox.com/geocoding/v5/mapbox.places/${point.lng},${point.lat}.json` +
-    `?types=region,country&country=ca,us,nz,au&access_token=${token}`;
+    `?types=region,country&country=ca,us,nz,au,za&access_token=${token}`;
 
   try {
     const response = await fetch(url);
@@ -217,19 +228,20 @@ async function inferRegionFromMapbox(point: Point): Promise<string | null> {
 
     const data = (await response.json()) as MapboxReverseResponse;
     const features = Array.isArray(data.features) ? data.features : [];
+    const candidateCodes: string[] = [];
 
     for (const feature of features) {
       const featureCode = parseShortCode(feature.short_code) ?? parseRegionName(feature.text);
-      if (featureCode) return featureCode;
+      if (featureCode) candidateCodes.push(featureCode);
 
       if (!Array.isArray(feature.context)) continue;
       for (const ctx of feature.context) {
         const ctxCode = parseShortCode(ctx.short_code) ?? parseRegionName(ctx.text);
-        if (ctxCode) return ctxCode;
+        if (ctxCode) candidateCodes.push(ctxCode);
       }
     }
 
-    return null;
+    return candidateCodes.find((code) => SOUTH_AFRICA_REGION_CODES.has(code)) ?? candidateCodes[0] ?? null;
   } catch {
     return null;
   }

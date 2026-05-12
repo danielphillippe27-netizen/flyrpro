@@ -195,7 +195,7 @@ export type CampaignType =
 export type AddressSource = 'closest_home' | 'import_list' | 'map' | 'same_street';
 export type CampaignStatus = 'draft' | 'active' | 'completed' | 'paused';
 export type CampaignProvisionStatus = 'pending' | 'ready' | 'failed';
-export type CampaignProvisionSource = 'diamond' | 'bedrock_nz' | 'bedrock_au' | 'bedrock_ca' | 'bedrock_us';
+export type CampaignProvisionSource = 'diamond' | 'bedrock_nz' | 'bedrock_au' | 'bedrock_ca' | 'bedrock_us' | 'bedrock_za';
 export type CampaignProvisionPhase =
   | 'created'
   | 'source_probed'
@@ -889,6 +889,7 @@ export interface LeaderboardEntry {
   user_email: string;
   name: string;
   avatar_url: string | null;
+  country_code?: string | null;
   brokerage?: string | null;
   doorknocks: number;
   conversations: number;

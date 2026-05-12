@@ -33,6 +33,7 @@ export class LeaderboardService {
         user_email: '',
         name: String(row.name ?? 'User'),
         avatar_url: row.avatar_url ? String(row.avatar_url) : null,
+        country_code: row.country_code ? String(row.country_code) : null,
         brokerage: row.brokerage ? String(row.brokerage) : null,
         doorknocks: Number(row.doorknocks) || 0,
         conversations: Number(row.conversations) || 0,

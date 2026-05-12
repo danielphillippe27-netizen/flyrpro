@@ -19,11 +19,13 @@ import { useWorkspace } from '@/lib/workspace-context';
 import { getClientAsync } from '@/lib/supabase/client';
 import { ProfileEditDialog } from '@/components/profile/ProfileEditDialog';
 import { useMainLayoutNav } from '@/components/layout/MainLayoutNavContext';
+import { countryCodeToFlag } from '@/lib/countries';
 
 type UserProfileLite = {
   email: string | null;
   fullName: string | null;
   avatarUrl: string | null;
+  countryCode: string | null;
 };
 
 type AccessStatePayload = {
@@ -47,6 +49,7 @@ export default function AppTopHeader() {
     email: null,
     fullName: null,
     avatarUrl: null,
+    countryCode: null,
   });
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState('');
@@ -100,6 +103,7 @@ export default function AppTopHeader() {
                   ((typeof user.user_metadata?.avatar_url === 'string' && user.user_metadata.avatar_url) ||
                   (typeof user.user_metadata?.picture === 'string' && user.user_metadata.picture) ||
                   null),
+                countryCode: data.country_code ?? null,
               });
               return;
             }
@@ -115,6 +119,7 @@ export default function AppTopHeader() {
               email: user.email ?? null,
               fullName,
               avatarUrl,
+              countryCode: null,
             });
           })
           .catch(() => {});
@@ -146,6 +151,7 @@ export default function AppTopHeader() {
                   ((typeof user.user_metadata?.avatar_url === 'string' && user.user_metadata.avatar_url) ||
                   (typeof user.user_metadata?.picture === 'string' && user.user_metadata.picture) ||
                   null),
+                countryCode: data.country_code ?? null,
               });
               return;
             }
@@ -161,6 +167,7 @@ export default function AppTopHeader() {
               email: user.email ?? null,
               fullName,
               avatarUrl,
+              countryCode: null,
             });
           })
           .catch(() => {
@@ -177,6 +184,7 @@ export default function AppTopHeader() {
               email: user.email ?? null,
               fullName,
               avatarUrl,
+              countryCode: null,
             });
           });
       })
@@ -192,6 +200,7 @@ export default function AppTopHeader() {
     return membershipsByWorkspaceId[currentWorkspace.id] ?? null;
   }, [currentWorkspace, membershipsByWorkspaceId]);
   const isTrialBadge = Boolean(planBadgeLabel && /trial/i.test(planBadgeLabel));
+  const profileFlag = countryCodeToFlag(profile.countryCode);
 
   const sendFeedback = async () => {
     const trimmed = feedbackMessage.trim();
@@ -321,7 +330,7 @@ export default function AppTopHeader() {
             <button
               type="button"
               onClick={() => setProfileEditOpen(true)}
-              className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-muted text-xs font-semibold text-foreground transition hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+              className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border bg-muted text-xs font-semibold text-foreground transition hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
               title={profile.fullName ?? profile.email ?? 'Edit profile'}
               aria-label="Edit profile"
             >
@@ -330,12 +339,17 @@ export default function AppTopHeader() {
                 <img
                   src={profile.avatarUrl}
                   alt="Profile"
-                  className="h-full w-full object-cover"
+                  className="h-full w-full rounded-full object-cover"
                   referrerPolicy="no-referrer"
                 />
               ) : (
                 <span>{initialsFromName(profile.fullName ?? profile.email)}</span>
               )}
+              {profileFlag ? (
+                <span className="absolute -bottom-1 -right-1 rounded-full bg-background text-[13px] leading-none">
+                  {profileFlag}
+                </span>
+              ) : null}
             </button>
           </div>
         </div>

@@ -16,6 +16,7 @@ import {
 import { User, Users, Building2, Plus, Minus } from 'lucide-react';
 import { ExclusiveOfferArcadeEmbed } from '@/components/landing/ExclusiveOfferArcadeEmbed';
 import { getClientAsync } from '@/lib/supabase/client';
+import { COUNTRY_OPTIONS } from '@/lib/countries';
 
 type BrokerageSuggestion = { id: string; name: string };
 
@@ -199,6 +200,7 @@ function OnboardingContent() {
 
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
+  const [countryCode, setCountryCode] = useState('');
   const [workEmail, setWorkEmail] = useState('');
   const [accountPassword, setAccountPassword] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
@@ -256,6 +258,7 @@ function OnboardingContent() {
           const parsed = JSON.parse(storedDraft) as {
             firstName?: unknown;
             lastName?: unknown;
+            countryCode?: unknown;
             workEmail?: unknown;
           };
           if (typeof parsed.firstName === 'string' && parsed.firstName.trim()) {
@@ -263,6 +266,9 @@ function OnboardingContent() {
           }
           if (typeof parsed.lastName === 'string' && parsed.lastName.trim()) {
             setLastName((current) => current || parsed.lastName.trim());
+          }
+          if (typeof parsed.countryCode === 'string' && parsed.countryCode.trim()) {
+            setCountryCode((current) => current || parsed.countryCode.trim().toUpperCase());
           }
           if (typeof parsed.workEmail === 'string' && parsed.workEmail.trim()) {
             setWorkEmail((current) => current || parsed.workEmail.trim().toLowerCase());
@@ -332,6 +338,7 @@ function OnboardingContent() {
   const canStep1 =
     firstName.trim().length > 0 &&
     lastName.trim().length > 0 &&
+    countryCode.length > 0 &&
     (!isExclusivePartnerOnboarding ||
       hasAuthenticatedExclusiveSession ||
       (normalizedWorkEmail.length > 0 && accountPassword.trim().length >= 6));
@@ -345,10 +352,11 @@ function OnboardingContent() {
       JSON.stringify({
         firstName: firstName.trim(),
         lastName: lastName.trim(),
+        countryCode,
         workEmail: normalizedWorkEmail,
       })
     );
-  }, [firstName, isExclusivePartnerOnboarding, lastName, normalizedWorkEmail]);
+  }, [countryCode, firstName, isExclusivePartnerOnboarding, lastName, normalizedWorkEmail]);
 
   const buildExclusiveAuthCallbackURL = useCallback(() => {
     const callbackUrl = new URL('/auth/callback', window.location.origin);
@@ -421,6 +429,7 @@ function OnboardingContent() {
         body: JSON.stringify({
           firstName: firstName.trim(),
           lastName: lastName.trim(),
+          countryCode,
           workspaceName: workspaceName.trim(),
           industry: industry.trim(),
           referralCode:
@@ -541,6 +550,7 @@ function OnboardingContent() {
           data: {
             first_name: firstName.trim() || undefined,
             last_name: lastName.trim() || undefined,
+            country_code: countryCode || undefined,
           },
         },
       });
@@ -571,6 +581,7 @@ function OnboardingContent() {
     hasAuthenticatedExclusiveSession,
     isExclusivePartnerOnboarding,
     lastName,
+    countryCode,
     challenge30FromUrl,
     legacyPartnerExclusiveLayout,
     onboardingEntryPath,
@@ -737,6 +748,24 @@ function OnboardingContent() {
                   }
                 }}
               />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="countryCode" className="text-base text-white">Country</Label>
+              <select
+                id="countryCode"
+                value={countryCode}
+                onChange={(event) => setCountryCode(event.target.value)}
+                className="h-16 w-full rounded-md border border-zinc-600 bg-[#2a2a2a] px-3 text-2xl text-white outline-none focus:border-white focus:ring-2 focus:ring-white/40"
+              >
+                <option value="" disabled>
+                  Select your country
+                </option>
+                {COUNTRY_OPTIONS.map((country) => (
+                  <option key={country.code} value={country.code}>
+                    {country.label}
+                  </option>
+                ))}
+              </select>
             </div>
             {isExclusivePartnerOnboarding ? (
               <>

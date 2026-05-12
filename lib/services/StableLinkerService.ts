@@ -7,8 +7,8 @@
  * 
  * Implements 5-Tier Matching Hierarchy:
  * - Tier 1: Direct Containment + Street Verification (Confidence 1.0)
- * - Tier 2: Point-on-Surface (Confidence 0.9)
- * - Tier 3: Parcel Bridge (Confidence 0.95)
+ * - Tier 2: Parcel Bridge (Confidence 0.95)
+ * - Tier 3: Point-on-Surface (Confidence 0.9)
  * - Tier 4: Proximity + Semantic Match (Confidence 0.8)
  * - Tier 5: Fallback Nearest Valid (Confidence 0.5)
  */
@@ -460,33 +460,8 @@ export class StableLinkerService {
       );
     }
 
-    // Density guard: if > 100 candidates within 100m, only allow containment (avoid memory/spurious matches)
-    const candidateCount = this.countCandidatesWithin(addressCoords, buildings, 100);
-    if (candidateCount > 100) {
-      console.warn(`[StableLinker] density_warning addressId=${address.id} candidateCount=${candidateCount} using containment-only`);
-      const orphanResult = this.createMatchResult(address, null, 'orphan', 0, 0, 0);
-      return [orphanResult, { densityWarning: true }];
-    }
-
-    // TIER 2: Point-on-Surface + street (may throw on tie)
-    const pointOnSurfaceBuilding = this.pickBestPointOnSurfaceOrThrow(address.id, addressCoords, buildings);
-    if (pointOnSurfaceBuilding) {
-      const streetScore = this.calculateStreetMatchScore(
-        address.street_name ?? '',
-        this.getBuildingStreet(pointOnSurfaceBuilding) ?? ''
-      );
-      const verified = streetScore >= 0.8;
-      return this.createMatchResult(
-        address,
-        pointOnSurfaceBuilding,
-        'point_on_surface',
-        verified ? 0.9 : 0.85,
-        0,
-        streetScore
-      );
-    }
-
-    // TIER 3: Parcel bridge; if address and building share a parcel, treat that as a hard container.
+    // TIER 2: Parcel bridge. For detached homes, parcel evidence beats boundary/proximity
+    // heuristics because address points often land on driveways, lawns, or road edges.
     const parcelBridgeBuilding = this.pickBestParcelBridgedBuildingOrThrow(
       address.id,
       addressCoords,
@@ -504,6 +479,33 @@ export class StableLinkerService {
         'parcel_verified',
         0.95,
         parcelBridgeBuilding.distance,
+        streetScore
+      );
+    }
+
+    // Density guard: if > 100 candidates within 100m, only allow containment or parcel
+    // evidence (avoid memory/spurious point-on-surface/proximity guesses).
+    const candidateCount = this.countCandidatesWithin(addressCoords, buildings, 100);
+    if (candidateCount > 100) {
+      console.warn(`[StableLinker] density_warning addressId=${address.id} candidateCount=${candidateCount} using containment-or-parcel-only`);
+      const orphanResult = this.createMatchResult(address, null, 'orphan', 0, 0, 0);
+      return [orphanResult, { densityWarning: true }];
+    }
+
+    // TIER 3: Point-on-Surface + street (may throw on tie)
+    const pointOnSurfaceBuilding = this.pickBestPointOnSurfaceOrThrow(address.id, addressCoords, buildings);
+    if (pointOnSurfaceBuilding) {
+      const streetScore = this.calculateStreetMatchScore(
+        address.street_name ?? '',
+        this.getBuildingStreet(pointOnSurfaceBuilding) ?? ''
+      );
+      const verified = streetScore >= 0.8;
+      return this.createMatchResult(
+        address,
+        pointOnSurfaceBuilding,
+        'point_on_surface',
+        verified ? 0.9 : 0.85,
+        0,
         streetScore
       );
     }
@@ -919,11 +921,55 @@ export class StableLinkerService {
       return null;
     }
 
-    return this.pickBestProximityOrThrow(
+    return this.pickBestParcelCandidateOrThrow(
       addressId,
       Array.from(candidateMap.values()),
       0.95
     );
+  }
+
+  /**
+   * Pick the best same-parcel building candidate. Same-parcel evidence is stronger
+   * than raw distance, so prefer semantic street match first, then the main/largest
+   * structure on the parcel, then distance as a tie-breaker.
+   */
+  private pickBestParcelCandidateOrThrow(
+    addressId: string,
+    candidates: Array<{ building: BuildingFeature; distance: number; area?: number; streetScore?: number }>,
+    score: number
+  ): { building: BuildingFeature; distance: number } | null {
+    if (candidates.length === 0) return null;
+    const withArea = candidates.map(c => ({
+      ...c,
+      area: c.area ?? this.calculateBuildingArea(c.building),
+      streetScore: c.streetScore ?? 0,
+    }));
+    withArea.sort((a, b) => {
+      if (b.streetScore !== a.streetScore) return b.streetScore - a.streetScore;
+      if (b.area !== a.area) return b.area - a.area;
+      return a.distance - b.distance;
+    });
+
+    const first = withArea[0];
+    if (withArea.length === 1) {
+      return { building: first.building, distance: first.distance };
+    }
+
+    const second = withArea[1];
+    const streetTie = first.streetScore === second.streetScore;
+    const areaTie = first.area <= 2 * second.area && second.area <= 2 * first.area;
+    const distTie = Math.abs(first.distance - second.distance) < 0.5;
+
+    if (streetTie && areaTie && distTie) {
+      throw new DataIntegrityError(
+        addressId,
+        [first.building.properties.gers_id, second.building.properties.gers_id],
+        score,
+        `Parcel tie: address ${addressId} has multiple same-parcel building candidates`
+      );
+    }
+
+    return { building: first.building, distance: first.distance };
   }
 
   /**

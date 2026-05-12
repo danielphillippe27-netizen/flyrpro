@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/server';
+import { normalizeCountryCode } from '@/lib/countries';
 
 /**
  * GET /api/profile — current user's profile (user_profiles + email from auth).
@@ -21,7 +22,7 @@ export async function GET() {
     const { data: profile, error: profileError } = await supabase
       .from('user_profiles')
       .select(
-        'first_name, last_name, industry, brokerage_name, quote, avatar_url, is_founder'
+        'first_name, last_name, country_code, industry, brokerage_name, quote, avatar_url, is_founder'
       )
       .eq('user_id', user.id)
       .maybeSingle();
@@ -50,6 +51,7 @@ export async function GET() {
       email: user.email ?? null,
       first_name: profile?.first_name ?? null,
       last_name: profile?.last_name ?? null,
+      country_code: profile?.country_code ?? null,
       full_name: fullName,
       industry: profile?.industry ?? null,
       brokerage_name: profile?.brokerage_name ?? null,
@@ -86,6 +88,7 @@ export async function PATCH(request: NextRequest) {
       first_name,
       last_name,
       industry,
+      country_code,
       brokerage_name,
       quote,
       avatar_url,
@@ -96,6 +99,7 @@ export async function PATCH(request: NextRequest) {
       first_name?: string | null;
       last_name?: string | null;
       industry?: string | null;
+      country_code?: string | null;
       brokerage_name?: string | null;
       quote?: string | null;
       avatar_url?: string | null;
@@ -132,6 +136,9 @@ export async function PATCH(request: NextRequest) {
       updates.industry =
         typeof industry === 'string' ? industry.trim().slice(0, 100) || null : null;
     }
+    if (country_code !== undefined) {
+      updates.country_code = normalizeCountryCode(country_code);
+    }
     if (brokerage_name !== undefined) {
       updates.brokerage_name =
         typeof brokerage_name === 'string'
@@ -167,26 +174,29 @@ export async function PATCH(request: NextRequest) {
       }
 
       // Mirror name fields into public.profiles so list/admin views stay consistent.
-      if (first_name !== undefined || last_name !== undefined) {
+      if (first_name !== undefined || last_name !== undefined || country_code !== undefined) {
         const normalizedFirstName =
           typeof first_name === 'string' ? first_name.trim() || null : null;
         const normalizedLastName =
           typeof last_name === 'string' ? last_name.trim() || null : null;
+        const normalizedCountryCode = normalizeCountryCode(country_code);
         const fullName =
           [normalizedFirstName, normalizedLastName]
             .filter((part): part is string => typeof part === 'string' && part.length > 0)
             .join(' ')
             .trim() || null;
+        const mirrorUpdates = {
+          ...(first_name !== undefined ? { first_name: normalizedFirstName } : {}),
+          ...(last_name !== undefined ? { last_name: normalizedLastName } : {}),
+          ...(country_code !== undefined ? { country_code: normalizedCountryCode } : {}),
+          ...(first_name !== undefined || last_name !== undefined ? { full_name: fullName } : {}),
+          updated_at: new Date().toISOString(),
+        };
 
         const admin = createAdminClient();
         const { error: mirrorProfileError } = await admin
           .from('profiles')
-          .update({
-            ...(first_name !== undefined ? { first_name: normalizedFirstName } : {}),
-            ...(last_name !== undefined ? { last_name: normalizedLastName } : {}),
-            full_name: fullName,
-            updated_at: new Date().toISOString(),
-          })
+          .update(mirrorUpdates)
           .eq('id', user.id);
 
         if (mirrorProfileError) {

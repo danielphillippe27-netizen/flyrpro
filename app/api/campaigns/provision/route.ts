@@ -13,6 +13,7 @@ import type { StandardCampaignAddress } from '@/lib/services/AddressAdapter';
 import { BedrockNzService, type BedrockNzLinkGeometry } from '@/lib/services/BedrockNzService';
 import { BedrockAustraliaService } from '@/lib/services/BedrockAustraliaService';
 import { BedrockCanadaService } from '@/lib/services/BedrockCanadaService';
+import { BedrockSouthAfricaService } from '@/lib/services/BedrockSouthAfricaService';
 import { BedrockUsService } from '@/lib/services/BedrockUsService';
 import { DiamondMunicipalService } from '@/lib/services/DiamondMunicipalService';
 import { resolveCampaignRegion } from '@/lib/geo/regionResolver';
@@ -36,7 +37,7 @@ interface ProvisionRequest {
   campaign_id: string;
 }
 
-type ProvisionSource = 'diamond' | 'bedrock_nz' | 'bedrock_au' | 'bedrock_ca' | 'bedrock_us';
+type ProvisionSource = 'diamond' | 'bedrock_nz' | 'bedrock_au' | 'bedrock_ca' | 'bedrock_us' | 'bedrock_za';
 
 type ExistingCampaignAddressSignatureRow = {
   formatted: string | null;
@@ -654,6 +655,30 @@ async function resolveDiamondThenBedrock(options: {
     };
   }
 
+  if (BedrockSouthAfricaService.isSouthAfricaRegion(regionCode)) {
+    const bedrockResult = await BedrockSouthAfricaService.provisionCampaign({
+      campaignId,
+      polygon,
+      addressLimit: 10000,
+      regionCode,
+    });
+    console.log('[Provision] BEDROCK South Africa S3 polygon scan complete:', {
+      campaignId,
+      addresses: bedrockResult.addresses.length,
+      touchedTiles: bedrockResult.metrics.addresses.touchedTiles,
+      timings: {
+        addresses: bedrockResult.metrics.addresses.seconds,
+        addressesBreakdown: bedrockResult.metrics.addresses.timings,
+      },
+    });
+    return {
+      addressSource: 'bedrock_za',
+      snapshot: bedrockResult.snapshot,
+      addressesToInsert: addressesForInitialHydration(bedrockResult.addresses),
+      bedrockLinkGeometry: null,
+    };
+  }
+
   if (BedrockUsService.isUsRegion(regionCode)) {
     const bedrockResult = await BedrockUsService.provisionCampaign({
       campaignId,
@@ -749,7 +774,10 @@ async function runCampaignPostProcessing(params: {
       waypointCount: number;
     } | null = null;
 
-    if (effectiveInsertedCount >= 2) {
+    const skipRouteOptimization = process.env.SKIP_PROVISION_ROUTE_OPTIMIZATION === '1';
+    if (skipRouteOptimization) {
+      console.log('[Provision] Stage 1: Route optimization skipped by SKIP_PROVISION_ROUTE_OPTIMIZATION.');
+    } else if (effectiveInsertedCount >= 2) {
       console.log('[Provision] Stage 1: Building route for ALL addresses (Street-Block-Sweep-Snake)...');
       try {
         const addressesForRoute = await fetchAllInPages<{

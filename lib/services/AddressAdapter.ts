@@ -52,7 +52,7 @@ export interface StandardCampaignAddress {
   lat?: number;
   lon?: number;
   geom: string; // GeoJSON string for PostGIS
-  source: 'diamond' | 'gold' | 'lambda' | 'bedrock_nz' | 'bedrock_au' | 'bedrock_ca' | 'bedrock_us';
+  source: 'diamond' | 'gold' | 'lambda' | 'bedrock_nz' | 'bedrock_au' | 'bedrock_ca' | 'bedrock_us' | 'bedrock_za';
   gers_id?: string | null;
 }
 
@@ -167,7 +167,8 @@ export class AddressAdapter {
       addr.source === 'bedrock_nz' ||
       addr.source === 'bedrock_au' ||
       addr.source === 'bedrock_ca' ||
-      addr.source === 'bedrock_us'
+      addr.source === 'bedrock_us' ||
+      addr.source === 'bedrock_za'
         ? addr.source
         : 'lambda';
 

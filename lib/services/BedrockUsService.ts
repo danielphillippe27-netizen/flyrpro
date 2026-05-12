@@ -39,6 +39,7 @@ const US_REGIONS = new Set([
   'OK',
   'OR',
   'PA',
+  'PR',
   'RI',
   'SC',
   'SD',
@@ -52,6 +53,7 @@ const US_REGIONS = new Set([
   'WI',
   'WY',
   'DC',
+  'VI',
 ]);
 
 const service = new BedrockCountryService(BEDROCK_US_CONFIG);
@@ -64,4 +66,3 @@ export class BedrockUsService {
 
   static provisionCampaign = service.provisionCampaign.bind(service);
 }
-

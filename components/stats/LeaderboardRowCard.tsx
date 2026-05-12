@@ -4,6 +4,7 @@ import Image from 'next/image';
 import { ChevronRight, Crown } from 'lucide-react';
 import type { LeaderboardEntry, LeaderboardSortBy } from '@/types/database';
 import { cn } from '@/lib/utils';
+import { countryCodeToFlag } from '@/lib/countries';
 
 function getInitials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -51,6 +52,7 @@ export function LeaderboardRowCard({
   const displayName = entry.name || 'User';
   const value = getDisplayValue(entry, sortBy);
   const subtitle = getSubtitle(entry, sortBy);
+  const countryFlag = countryCodeToFlag(entry.country_code);
 
   return (
     <div
@@ -88,7 +90,10 @@ export function LeaderboardRowCard({
       </div>
 
       <div className="min-w-0 flex-1">
-        <p className="truncate text-[1.05rem] font-semibold text-foreground">{displayName}</p>
+        <p className="truncate text-[1.05rem] font-semibold text-foreground">
+          {displayName}
+          {countryFlag ? <span className="ml-2 align-baseline">{countryFlag}</span> : null}
+        </p>
         <p className="truncate text-[13px] text-muted-foreground">{subtitle}</p>
       </div>
 
