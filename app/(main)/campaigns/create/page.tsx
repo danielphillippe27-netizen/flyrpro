@@ -89,6 +89,11 @@ export default function CreateCampaignPage() {
   const add2DBuildingsLayer = (m: mapboxgl.Map) => {
     const buildingLayerId = '2d-buildings';
     if (m.getLayer(buildingLayerId)) return; // already added
+    // Only add the composite building overlay for Mapbox styles that
+    // include the composite source. Custom styles (PMTiles, external
+    // tilesets) do not have composite and will throw if we attempt
+    // to add a layer from it.
+    if (!m.getSource('composite')) return;
     const buildingFill = isDark ? '#111111' : '#c8c1b2';
     const buildingOutline = isDark ? '#0a0a0a' : '#b5ad9d';
 
