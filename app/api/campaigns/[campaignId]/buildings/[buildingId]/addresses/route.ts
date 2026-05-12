@@ -516,23 +516,28 @@ export async function DELETE(
       );
     }
     
-    // Delete the link
-    const { error: deleteError } = await supabase
-      .from('building_address_links')
-      .delete()
-      .eq('campaign_id', campaignId)
-      .eq('building_id', buildingId)
-      .eq('address_id', address_id);
-    
-    if (deleteError) {
-      throw new Error(`Failed to unlink address: ${deleteError.message}`);
+    const resolvedBuilding = await resolveBuilding(supabase, campaignId, buildingId);
+    if (!resolvedBuilding) {
+      return NextResponse.json({ error: 'Building not found' }, { status: 404 });
     }
+
+    const deleteManualAddress = searchParams.get('mode') === 'delete_manual';
+    const result = await new StableLinkerService(supabase).unassignAddressFromBuilding({
+      campaignId,
+      addressId: address_id,
+      buildingRowId: resolvedBuilding.rowId,
+      buildingPublicId: resolvedBuilding.publicId,
+      deleteManualAddress,
+    });
     
     return NextResponse.json({
       success: true,
       message: 'Address unlinked successfully',
-      building_id: buildingId,
+      building_id: resolvedBuilding.publicId,
       address_id,
+      deleted: deleteManualAddress,
+      linked_address_ids: result.linkedAddressIds,
+      unit_count: result.unitCount,
     });
     
   } catch (error) {
