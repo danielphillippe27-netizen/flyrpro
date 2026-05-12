@@ -1744,7 +1744,14 @@ export function MapBuildingsLayer({
 
   // Update color and filter when statusFilters or campaignId changes
   useEffect(() => {
-    if (!map || !map.getLayer(layerId)) return;
+    // map.getLayer can throw during style transitions (setStyle clears
+    // the layer registry temporarily). Guard with isStyleLoaded() and
+    // catch any transient Mapbox internal errors.
+    try {
+      if (!map || !map.isStyleLoaded() || !map.getLayer(layerId)) return;
+    } catch {
+      return;
+    }
     
     try {
       const colorExpr = getFootprintFillColor();
