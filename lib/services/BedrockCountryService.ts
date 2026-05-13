@@ -388,11 +388,28 @@ function parquetPathsForTiles(config: BedrockCountryConfig, manifest: ParquetMan
   };
 
   if (manifest.partitioning?.scheme === 'state') {
-    const state = regionCode?.trim().toUpperCase();
+    const normalizedRegion = regionCode?.trim().toUpperCase();
     const available = new Set((manifest.state_counts ?? []).map((entry) => entry.state.toUpperCase()));
-    if (!state || (available.size > 0 && !available.has(state))) {
+    const candidates = [
+      normalizedRegion,
+      config.country === 'south-africa' && normalizedRegion !== config.countryCode ? config.countryCode : null,
+    ].filter((candidate): candidate is string => Boolean(candidate));
+    const state = available.size > 0
+      ? candidates.find((candidate) => available.has(candidate))
+      : candidates[0];
+
+    if (!state) {
       return { paths: [], tileZ: 0, partitioning: 'state' };
     }
+
+    if (normalizedRegion && state !== normalizedRegion) {
+      console.warn('[BedrockCountryService] Falling back to country-level state partition', {
+        country: config.country,
+        requestedRegion: normalizedRegion,
+        partition: state,
+      });
+    }
+
     const relative = `parquet/state=${state}/*.parquet`;
     return {
       paths: [parquetPathFor(relative)],
@@ -442,6 +459,8 @@ async function duckDbAll(sql: string, usesRemoteFiles: boolean): Promise<Bedrock
 
   try {
     if (usesRemoteFiles) {
+      await all("SET home_directory='/tmp'");
+      await all("SET extension_directory='/tmp/duckdb_extensions'");
       await all('INSTALL httpfs');
       await all('LOAD httpfs');
       if (sql.includes('s3://')) {

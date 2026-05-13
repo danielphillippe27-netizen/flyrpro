@@ -9,7 +9,7 @@ import type { LambdaSnapshotResponse } from '@/lib/services/TileLambdaService';
 type Bounds = [number, number, number, number];
 type SnapshotTileMetrics = NonNullable<NonNullable<LambdaSnapshotResponse['metadata']>['tile_metrics']>;
 
-type DiamondCountry = 'canada' | 'usa' | 'south-africa';
+type DiamondCountry = 'canada' | 'usa' | 'south-africa' | 'new-zealand' | 'australia';
 
 type DiamondLayerManifest = {
   diamond_mode?: boolean;
@@ -147,7 +147,9 @@ const SOUTH_AFRICA_REGIONS = new Set([
   'NC',
   'NW',
   'WC',
+  'ZA',
 ]);
+const SOUTH_AFRICA_PROVINCES = ['EC', 'FS', 'GP', 'KZN', 'LP', 'MP', 'NC', 'NW', 'WC'];
 
 let s3Client: S3Client | null = null;
 const candidateCache = new Map<string, Promise<DiamondCandidate[]>>();
@@ -212,10 +214,19 @@ function number(value: unknown) {
 function normalizeCountry(regionCode: string | null | undefined): DiamondCountry | null {
   const region = regionCode?.trim().toUpperCase();
   if (!region) return null;
+  if (region === 'NZ') return 'new-zealand';
+  if (region === 'AU') return 'australia';
   if (CANADA_REGIONS.has(region)) return 'canada';
   if (US_STATES.has(region)) return 'usa';
   if (SOUTH_AFRICA_REGIONS.has(region)) return 'south-africa';
   return null;
+}
+
+function diamondRegionCandidates(country: DiamondCountry, region: string) {
+  if (country === 'south-africa' && region === 'ZA') {
+    return SOUTH_AFRICA_PROVINCES;
+  }
+  return [region];
 }
 
 function boundsIntersect(a: Bounds, b: Bounds) {
@@ -650,7 +661,10 @@ export class DiamondMunicipalService {
     if (!country) return null;
 
     const bbox = turf.bbox(options.polygon) as Bounds;
-    const candidates = await listMunicipalCandidates(country, normalizedRegion);
+    const regions = diamondRegionCandidates(country, normalizedRegion);
+    const candidates = (await Promise.all(
+      regions.map((region) => listMunicipalCandidates(country, region))
+    )).flat().sort((a, b) => a.area - b.area);
     const candidate = candidates.find((entry) => {
       const addressBounds = entry.addressManifest.bounds;
       const buildingBounds = entry.buildingManifest.bounds;
@@ -662,7 +676,9 @@ export class DiamondMunicipalService {
       );
     });
     if (!candidate) return null;
-    const parcelCandidates = await listParcelCandidates(country, normalizedRegion);
+    const parcelCandidates = (await Promise.all(
+      regions.map((region) => listParcelCandidates(country, region))
+    )).flat().sort((a, b) => a.area - b.area);
     const parcelCandidate = parcelCandidates.find((entry) => {
       const parcelBounds = entry.parcelManifest.bounds;
       return Boolean(parcelBounds && boundsIntersect(parcelBounds, bbox));
@@ -672,7 +688,7 @@ export class DiamondMunicipalService {
       campaignId: options.campaignId,
       polygon: options.polygon,
       addressManifest: candidate.addressManifest,
-      regionCode: normalizedRegion,
+      regionCode: candidate.region.toUpperCase(),
       addressLimit: options.addressLimit,
     });
 

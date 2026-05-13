@@ -415,6 +415,8 @@ async function duckDbAll(sql: string, usesS3: boolean): Promise<BedrockParquetRo
 
   try {
     if (usesS3) {
+      await all("SET home_directory='/tmp'");
+      await all("SET extension_directory='/tmp/duckdb_extensions'");
       await all('INSTALL httpfs');
       await all('LOAD httpfs');
       await all(`SET s3_region=${sqlString(REGION)}`);

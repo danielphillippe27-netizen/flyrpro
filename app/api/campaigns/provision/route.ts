@@ -84,6 +84,11 @@ function isConnectionError(error: Error): boolean {
   );
 }
 
+function provisionFailureReason(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.trim().slice(0, 500) || 'Provisioning failed';
+}
+
 async function retryWithBackoff<T>(
   fn: () => Promise<T>,
   maxAttempts: number = 3,
@@ -1199,6 +1204,7 @@ export async function POST(request: NextRequest) {
         });
       } catch (error) {
         console.error('[Provision] Background provisioning error:', error);
+        const failureReason = provisionFailureReason(error);
 
         try {
           const supabase = createAdminClient();
@@ -1207,6 +1213,9 @@ export async function POST(request: NextRequest) {
             .update({
               provision_status: 'failed',
               provision_phase: 'failed',
+              link_quality_status: 'failed',
+              link_quality_reason: failureReason,
+              data_quality_reason: failureReason,
             })
             .eq('id', campaignId!);
         } catch (updateError) {
@@ -1225,6 +1234,7 @@ export async function POST(request: NextRequest) {
     console.error('[Provision] Error:', error);
 
     if (campaignId) {
+      const failureReason = provisionFailureReason(error);
       try {
         const supabase = createAdminClient();
         await supabase
@@ -1232,6 +1242,9 @@ export async function POST(request: NextRequest) {
           .update({
             provision_status: 'failed',
             provision_phase: 'failed',
+            link_quality_status: 'failed',
+            link_quality_reason: failureReason,
+            data_quality_reason: failureReason,
           })
           .eq('id', campaignId);
       } catch (updateError) {

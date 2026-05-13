@@ -290,9 +290,12 @@ export async function resolveCampaignRegion(
   }
 
   const mapboxRegion = await inferRegionFromMapbox(centroid);
-  const bboxRegion = mapboxRegion ? null : inferRegionFromBounds(centroid);
-  const inferredRegion = mapboxRegion ?? bboxRegion;
-  const inferredSource: RegionSource = mapboxRegion ? 'mapbox' : 'bbox';
+  const bboxRegion = !mapboxRegion || mapboxRegion === 'ZA' ? inferRegionFromBounds(centroid) : null;
+  const inferredRegion =
+    mapboxRegion === 'ZA' && bboxRegion && SOUTH_AFRICA_REGION_CODES.has(bboxRegion)
+      ? bboxRegion
+      : mapboxRegion ?? bboxRegion;
+  const inferredSource: RegionSource = inferredRegion === mapboxRegion ? 'mapbox' : 'bbox';
 
   if (!currentRegion) {
     return {
