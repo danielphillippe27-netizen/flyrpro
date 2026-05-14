@@ -161,6 +161,11 @@ type ManualLinkRpc = (
   args: Record<string, unknown>
 ) => Promise<ManualLinkRpcResult>;
 
+const DENSITY_GUARD_RADIUS_METERS = 100;
+const PROXIMITY_MATCH_RADIUS_METERS = 75;
+const FALLBACK_MATCH_RADIUS_METERS = 125;
+const NEAREST_BUILDING_CANDIDATE_LIMIT = 10;
+
 function manualLinkRpc(client: SupabaseClient): ManualLinkRpc | null {
   const rpc = (client as SupabaseClient & { rpc?: unknown }).rpc;
   return typeof rpc === 'function' ? (rpc.bind(client) as ManualLinkRpc) : null;
@@ -474,21 +479,16 @@ export class StableLinkerService {
   ): MatchResult | [MatchResult, { densityWarning: true }] {
     const addressCoords = address.geom.coordinates;
 
-    // TIER 1: Direct Containment + street verification (may throw on tie)
+    // TIER 1: Direct containment (may throw on tie)
     const containingBuilding = this.pickBestContainingOrThrow(address.id, addressCoords, buildings);
     if (containingBuilding) {
-      const streetScore = this.calculateStreetMatchScore(
-        address.street_name ?? '',
-        this.getBuildingStreet(containingBuilding) ?? ''
-      );
-      const verified = streetScore >= 0.8;
       return this.createMatchResult(
         address,
         containingBuilding,
-        verified ? 'containment_verified' : 'containment_suspect',
-        verified ? 1.0 : 0.85,
+        'containment_verified',
+        1.0,
         0,
-        streetScore
+        0
       );
     }
 
@@ -497,82 +497,62 @@ export class StableLinkerService {
     const parcelBridgeBuilding = this.pickBestParcelBridgedBuildingOrThrow(
       address.id,
       addressCoords,
-      address.street_name ?? '',
       parcels
     );
     if (parcelBridgeBuilding) {
-      const streetScore = this.calculateStreetMatchScore(
-        address.street_name ?? '',
-        this.getBuildingStreet(parcelBridgeBuilding.building) ?? ''
-      );
       return this.createMatchResult(
         address,
         parcelBridgeBuilding.building,
         'parcel_verified',
         0.95,
         parcelBridgeBuilding.distance,
-        streetScore
+        0
       );
     }
 
-    // Density guard: if > 100 candidates within 100m, only allow containment or parcel
+    // Density guard: if > 100 candidates nearby, only allow containment or parcel
     // evidence (avoid memory/spurious point-on-surface/proximity guesses).
-    const candidateCount = this.countCandidatesWithin(addressCoords, buildings, 100);
+    const candidateCount = this.countCandidatesWithin(addressCoords, buildings, DENSITY_GUARD_RADIUS_METERS);
     if (candidateCount > 100) {
       console.warn(`[StableLinker] density_warning addressId=${address.id} candidateCount=${candidateCount} using containment-or-parcel-only`);
       const orphanResult = this.createMatchResult(address, null, 'orphan', 0, 0, 0);
       return [orphanResult, { densityWarning: true }];
     }
 
-    // TIER 3: Point-on-Surface + street (may throw on tie)
+    // TIER 3: Point-on-surface / boundary handling (may throw on tie)
     const pointOnSurfaceBuilding = this.pickBestPointOnSurfaceOrThrow(address.id, addressCoords, buildings);
     if (pointOnSurfaceBuilding) {
-      const streetScore = this.calculateStreetMatchScore(
-        address.street_name ?? '',
-        this.getBuildingStreet(pointOnSurfaceBuilding) ?? ''
-      );
-      const verified = streetScore >= 0.8;
       return this.createMatchResult(
         address,
         pointOnSurfaceBuilding,
         'point_on_surface',
-        verified ? 0.9 : 0.85,
+        0.9,
         0,
-        streetScore
+        0
       );
     }
 
-    // TIER 4: Proximity within 50m; prefer street match, then area, then distance.
+    // TIER 4: Proximity within the nearby match radius; prefer closest footprint distance, then area.
     // Proximity alone should not assign multiple detached addresses to the same
     // footprint; true multi-unit matches should be proven by containment, surface,
     // or parcel evidence above.
-    const nearestMatches = this.findNearestBuildings(addressCoords, buildings, 10);
-    const within50 = nearestMatches.filter(c => c.distance <= 50);
-    if (within50.length > 0) {
-      const withStreet = within50.map(c => ({
+    const nearestMatches = this.findNearestBuildings(addressCoords, buildings, NEAREST_BUILDING_CANDIDATE_LIMIT);
+    const nearbyMatches = nearestMatches.filter(c => c.distance <= PROXIMITY_MATCH_RADIUS_METERS);
+    if (nearbyMatches.length > 0) {
+      const spatialCandidates = nearbyMatches.map(c => ({
         ...c,
         area: this.calculateBuildingArea(c.building),
-        streetScore: this.calculateStreetMatchScore(
-          address.street_name ?? '',
-          this.getBuildingStreet(c.building) ?? ''
-        ),
       }));
-      withStreet.sort((a, b) => {
-        if (b.streetScore !== a.streetScore) return b.streetScore - a.streetScore;
+      spatialCandidates.sort((a, b) => {
         if (Math.abs(a.distance - b.distance) >= 0.5) return a.distance - b.distance;
         return b.area - a.area;
       });
-      const best = this.pickBestProximityOrThrow(address.id, withStreet, 0.7);
+      const best = this.pickBestProximityOrThrow(address.id, spatialCandidates, 0.7);
       if (best) {
-        const streetScore = this.calculateStreetMatchScore(
-          address.street_name ?? '',
-          this.getBuildingStreet(best.building) ?? ''
-        );
-        const verified = streetScore >= 0.8;
         if (matchedBuildingIds.has(best.building.properties.gers_id)) {
           const unusedFallback = this.pickBestProximityOrThrow(
             address.id,
-            withStreet.filter(c => !matchedBuildingIds.has(c.building.properties.gers_id)),
+            spatialCandidates.filter(c => !matchedBuildingIds.has(c.building.properties.gers_id)),
             0.5
           );
           if (!unusedFallback) {
@@ -590,20 +570,20 @@ export class StableLinkerService {
         return this.createMatchResult(
           address,
           best.building,
-          verified ? 'proximity_verified' : 'proximity_fallback',
-          verified ? Math.max(0.7, 0.9 - best.distance * 0.01) : Math.max(0.5, 0.7 - best.distance * 0.01),
+          'proximity_verified',
+          Math.max(0.7, 0.9 - best.distance * 0.01),
           best.distance,
-          streetScore
+          0
         );
       }
     }
 
-    // TIER 5: Fallback (nearest within 100m, not already matched); no street requirement
-    const within100 = nearestMatches.filter(
-      c => c.distance <= 100 && !matchedBuildingIds.has(c.building.properties.gers_id)
+    // TIER 5: Fallback (nearest within relaxed radius, not already matched); no street requirement
+    const fallbackMatches = nearestMatches.filter(
+      c => c.distance <= FALLBACK_MATCH_RADIUS_METERS && !matchedBuildingIds.has(c.building.properties.gers_id)
     );
-    if (within100.length > 0) {
-      const best = this.pickBestProximityOrThrow(address.id, within100, 0.5);
+    if (fallbackMatches.length > 0) {
+      const best = this.pickBestProximityOrThrow(address.id, fallbackMatches, 0.5);
       if (best) {
         return this.createMatchResult(
           address,
@@ -862,7 +842,8 @@ export class StableLinkerService {
   }
 
   /**
-   * Find K nearest buildings (by centroid distance)
+   * Find K nearest buildings by footprint distance, so address points just
+   * outside a building boundary still auto-link.
    */
   private findNearestBuildings(
     point: [number, number],
@@ -870,8 +851,7 @@ export class StableLinkerService {
     k: number
   ): Array<{ building: BuildingFeature; distance: number }> {
     const distances = buildings.map(building => {
-      const centroid = this.calculateBuildingCentroid(building);
-      const distance = this.calculateDistance(point, centroid);
+      const distance = this.calculatePointToBuildingDistance(point, building);
       return { building, distance };
     });
 
@@ -915,7 +895,6 @@ export class StableLinkerService {
   private pickBestParcelBridgedBuildingOrThrow(
     addressId: string,
     point: [number, number],
-    addressStreet: string,
     parcels: PreparedParcelFeature[]
   ): { building: BuildingFeature; distance: number } | null {
     if (parcels.length === 0) return null;
@@ -924,7 +903,6 @@ export class StableLinkerService {
       building: BuildingFeature;
       distance: number;
       area: number;
-      streetScore: number;
     }>();
 
     for (const parcel of parcels) {
@@ -932,10 +910,6 @@ export class StableLinkerService {
       if (!this.isPointInMultiPolygon(point, parcel.geometry.coordinates)) continue;
 
       for (const candidate of parcel.buildingCandidates) {
-        const streetScore = this.calculateStreetMatchScore(
-          addressStreet,
-          this.getBuildingStreet(candidate.building) ?? ''
-        );
         const distance = this.calculateDistance(point, candidate.centroid);
         const existing = candidateMap.get(candidate.building.properties.gers_id);
         if (!existing || distance < existing.distance) {
@@ -943,7 +917,6 @@ export class StableLinkerService {
             building: candidate.building,
             distance,
             area: candidate.area,
-            streetScore,
           });
         }
       }
@@ -962,22 +935,20 @@ export class StableLinkerService {
 
   /**
    * Pick the best same-parcel building candidate. Same-parcel evidence is stronger
-   * than raw distance, so prefer semantic street match first, then the main/largest
-   * structure on the parcel, then distance as a tie-breaker.
+   * than raw distance, so prefer the main/largest structure on the parcel,
+   * then distance as a tie-breaker.
    */
   private pickBestParcelCandidateOrThrow(
     addressId: string,
-    candidates: Array<{ building: BuildingFeature; distance: number; area?: number; streetScore?: number }>,
+    candidates: Array<{ building: BuildingFeature; distance: number; area?: number }>,
     score: number
   ): { building: BuildingFeature; distance: number } | null {
     if (candidates.length === 0) return null;
     const withArea = candidates.map(c => ({
       ...c,
       area: c.area ?? this.calculateBuildingArea(c.building),
-      streetScore: c.streetScore ?? 0,
     }));
     withArea.sort((a, b) => {
-      if (b.streetScore !== a.streetScore) return b.streetScore - a.streetScore;
       if (b.area !== a.area) return b.area - a.area;
       return a.distance - b.distance;
     });
@@ -988,11 +959,10 @@ export class StableLinkerService {
     }
 
     const second = withArea[1];
-    const streetTie = first.streetScore === second.streetScore;
     const areaTie = first.area <= 2 * second.area && second.area <= 2 * first.area;
     const distTie = Math.abs(first.distance - second.distance) < 0.5;
 
-    if (streetTie && areaTie && distTie) {
+    if (areaTie && distTie) {
       throw new DataIntegrityError(
         addressId,
         [first.building.properties.gers_id, second.building.properties.gers_id],
@@ -1005,11 +975,11 @@ export class StableLinkerService {
   }
 
   /**
-   * Pick best proximity candidate (by optional streetScore, then distance, then area) or throw DataIntegrityError if tie.
+   * Pick best proximity candidate by distance, then area; throw DataIntegrityError if tie.
    */
   private pickBestProximityOrThrow(
     addressId: string,
-    candidates: Array<{ building: BuildingFeature; distance: number; area?: number; streetScore?: number }>,
+    candidates: Array<{ building: BuildingFeature; distance: number; area?: number }>,
     score: number
   ): { building: BuildingFeature; distance: number } | null {
     if (candidates.length === 0) return null;
@@ -1018,9 +988,6 @@ export class StableLinkerService {
       area: c.area ?? this.calculateBuildingArea(c.building),
     }));
     withArea.sort((a, b) => {
-      if (a.streetScore != null && b.streetScore != null && b.streetScore !== a.streetScore) {
-        return b.streetScore - a.streetScore;
-      }
       if (Math.abs(a.distance - b.distance) >= 0.5) return a.distance - b.distance;
       return b.area - a.area;
     });
@@ -1068,6 +1035,64 @@ export class StableLinkerService {
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     
     return R * c;
+  }
+
+  private calculatePointToBuildingDistance(point: [number, number], building: BuildingFeature): number {
+    if (this.isPointInBuilding(point, building) || this.isPointOnBuildingBoundary(point, building)) {
+      return 0;
+    }
+
+    const polygons = building.geometry.type === 'Polygon'
+      ? [building.geometry.coordinates as number[][][]]
+      : building.geometry.coordinates as number[][][][];
+
+    let minDistance = Infinity;
+    for (const polygon of polygons) {
+      for (const ring of polygon) {
+        for (let i = 0; i < ring.length - 1; i += 1) {
+          const distance = this.pointToLineSegmentDistanceMeters(point, ring[i], ring[i + 1]);
+          if (distance < minDistance) {
+            minDistance = distance;
+          }
+        }
+      }
+    }
+
+    return Number.isFinite(minDistance) ? minDistance : Infinity;
+  }
+
+  private pointToLineSegmentDistanceMeters(
+    point: [number, number],
+    lineStart: [number, number],
+    lineEnd: [number, number]
+  ): number {
+    const [px, py] = this.projectToLocalMeters(point, point);
+    const [x1, y1] = this.projectToLocalMeters(lineStart, point);
+    const [x2, y2] = this.projectToLocalMeters(lineEnd, point);
+
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const lengthSq = dx * dx + dy * dy;
+    if (lengthSq === 0) {
+      return Math.sqrt((px - x1) ** 2 + (py - y1) ** 2);
+    }
+
+    const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / lengthSq));
+    const projX = x1 + t * dx;
+    const projY = y1 + t * dy;
+    return Math.sqrt((px - projX) ** 2 + (py - projY) ** 2);
+  }
+
+  private projectToLocalMeters(
+    coordinate: [number, number],
+    origin: [number, number]
+  ): [number, number] {
+    const metersPerDegreeLat = 111320;
+    const metersPerDegreeLon = metersPerDegreeLat * Math.cos(origin[1] * Math.PI / 180);
+    return [
+      (coordinate[0] - origin[0]) * metersPerDegreeLon,
+      (coordinate[1] - origin[1]) * metersPerDegreeLat,
+    ];
   }
 
   /**
@@ -1198,58 +1223,6 @@ export class StableLinkerService {
   }
 
   /**
-   * Get building street for semantic match (primary_street | street_name | name)
-   */
-  private getBuildingStreet(building: BuildingFeature): string | null {
-    const p = building.properties;
-    return p.primary_street ?? p.street_name ?? p.name ?? null;
-  }
-
-  /**
-   * Normalize street name for comparison
-   */
-  private normalizeStreetName(street: string): string {
-    return street
-      .toLowerCase()
-      .replace(/\bst\b/g, 'street')
-      .replace(/\bave\b/g, 'avenue')
-      .replace(/\bave\.?\b/g, 'avenue')
-      .replace(/\bdr\b/g, 'drive')
-      .replace(/\bblvd\b/g, 'boulevard')
-      .replace(/\bblvd\.?\b/g, 'boulevard')
-      .replace(/\broad\b/g, 'road')
-      .replace(/\bhwy\b/g, 'highway')
-      .replace(/\bhwy\.?\b/g, 'highway')
-      .replace(/[^a-z0-9]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-  }
-
-  /**
-   * Calculate street name match score (0-1)
-   */
-  private calculateStreetMatchScore(addrStreet: string, bldgStreet: string): number {
-    if (!addrStreet || !bldgStreet) return 0;
-    if (addrStreet === bldgStreet) return 1;
-    
-    const addr = this.normalizeStreetName(addrStreet);
-    const bldg = this.normalizeStreetName(bldgStreet);
-    
-    if (addr === bldg) return 1;
-    
-    // Simple word overlap score
-    const addrWords = new Set(addr.split(' '));
-    const bldgWords = bldg.split(' ');
-    
-    let matches = 0;
-    for (const word of bldgWords) {
-      if (addrWords.has(word)) matches++;
-    }
-    
-    return matches / Math.max(addrWords.size, bldgWords.length);
-  }
-
-  /**
    * Create match result object
    */
   private createMatchResult(
@@ -1361,7 +1334,7 @@ export class StableLinkerService {
       return {
         buildingId: n.building.properties.gers_id,
         distance: n.distance,
-        streetScore: 1.0, // Always 1.0 when no street matching
+        streetScore: 0,
         confidence: Math.min(confidence, 0.8),
         area,
       };
@@ -1376,7 +1349,7 @@ export class StableLinkerService {
       nearestBuildingId: nearestBuilding?.building.properties.gers_id || null,
       nearestDistance: nearestBuilding?.distance || null,
       nearestBuildingStreet: nearestBuilding?.building.properties.name || null,
-      streetMatchScore: 1.0,
+      streetMatchScore: 0,
       suggestedBuildings: suggestions,
       status: 'pending_review',
       suggestedStreet: address.street_name ?? null,
@@ -1934,9 +1907,7 @@ export class StableLinkerService {
       proximityMatches.length > 0
         ? proximityMatches.reduce((sum, m) => sum + m.distanceMeters, 0) / proximityMatches.length
         : 0;
-    const streetMismatchCount = validMatches.filter(
-      m => m.matchType === 'containment_suspect' || (m.matchType === 'proximity_fallback' && m.streetMatchScore > 0 && m.streetMatchScore < 0.8)
-    ).length;
+    const streetMismatchCount = 0;
 
     const summary: SpatialJoinSummary = {
       matched: validMatches.length,

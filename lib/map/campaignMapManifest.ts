@@ -1,6 +1,12 @@
 import { createClient } from '@/lib/supabase/client';
 
 export type CampaignMapManifest = {
+  status?: 'pending' | 'ready' | 'partial' | 'failed';
+  provider?: 'diamond' | 'bedrock';
+  country?: string | null;
+  countryCode?: string | null;
+  regionCode?: string | null;
+  issues?: string[];
   artifact_type?: 'diamond' | 'white_gold' | 'basic';
   geometry_provider?: string | null;
   geometry_delivery_mode?: string | null;
@@ -23,6 +29,8 @@ export type CampaignMapManifest = {
   address_vector_tile_url_template?: string | null;
   vector_tile_url_template?: string | null;
   static_vector_tile_url_template?: string | null;
+  building_bounds_buffer_meters?: number | null;
+  buildings_render_mode?: 'vector_tiles' | 'geojson' | null;
   parcel_pmtiles_key?: string | null;
   parcel_tilejson_key?: string | null;
   parcel_pmtiles_url?: string | null;
@@ -52,6 +60,8 @@ export type CampaignMapManifest = {
   bounds?: [number, number, number, number] | null;
   layers?: {
     buildings?: {
+      kind?: 'pmtiles' | 'geojson' | 'ndjson_gzip';
+      s3Key?: string | null;
       url?: string | null;
       vectorTileUrlTemplate?: string | null;
       sourceLayer?: string | null;
@@ -59,8 +69,12 @@ export type CampaignMapManifest = {
       minzoom?: number | null;
       maxzoom?: number | null;
       bounds?: [number, number, number, number] | null;
+      boundsBufferMeters?: number | null;
+      tileBuffer?: number | null;
     } | null;
     addresses?: {
+      kind?: 'pmtiles' | 'geojson' | 'ndjson_gzip';
+      s3Key?: string | null;
       url?: string | null;
       vectorTileUrlTemplate?: string | null;
       sourceLayer?: string | null;
@@ -70,6 +84,8 @@ export type CampaignMapManifest = {
       bounds?: [number, number, number, number] | null;
     } | null;
     parcels?: {
+      kind?: 'pmtiles' | 'geojson' | 'ndjson_gzip';
+      s3Key?: string | null;
       url?: string | null;
       vectorTileUrlTemplate?: string | null;
       sourceLayer?: string | null;
@@ -102,6 +118,7 @@ export function isPmtilesGeometryProvider(provider: string | null | undefined): 
 
 export function hasRenderablePmtilesBuildings(manifest: CampaignMapManifest | null): boolean {
   if (!manifest) return false;
+  if (manifest.buildings_render_mode === 'geojson') return false;
 
   return Boolean(
     isPmtilesGeometryProvider(manifest.geometry_provider) &&
@@ -114,6 +131,7 @@ export function hasRenderablePmtilesBuildings(manifest: CampaignMapManifest | nu
 
 export function hasRenderablePmtilesAddresses(manifest: CampaignMapManifest | null): boolean {
   if (!manifest) return false;
+  if (manifest.buildings_render_mode === 'geojson') return false;
 
   const layer = manifest.layers?.addresses;
   const hasSeparateAddressTiles = Boolean(
@@ -166,7 +184,7 @@ export async function fetchCampaignMapManifest(campaignId: string): Promise<Camp
   if (existingRequest) return existingRequest;
 
   const request = (async () => {
-    const response = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/diamond-manifest`, {
+    const response = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/map-geojson`, {
       headers: {
         Accept: 'application/json',
         ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),

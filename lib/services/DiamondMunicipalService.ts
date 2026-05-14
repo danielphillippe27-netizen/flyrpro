@@ -26,6 +26,8 @@ type DiamondLayerManifest = {
   minzoom?: number;
   maxzoom?: number;
   feature_count?: number;
+  building_bounds_buffer_meters?: number;
+  tile_buffer?: number;
 };
 
 type DiamondAddressFeature = {
@@ -150,6 +152,7 @@ const SOUTH_AFRICA_REGIONS = new Set([
   'ZA',
 ]);
 const SOUTH_AFRICA_PROVINCES = ['EC', 'FS', 'GP', 'KZN', 'LP', 'MP', 'NC', 'NW', 'WC'];
+const DIAMOND_BUILDING_BOUNDS_BUFFER_METERS = 128;
 
 let s3Client: S3Client | null = null;
 const candidateCache = new Map<string, Promise<DiamondCandidate[]>>();
@@ -379,11 +382,21 @@ async function listParcelCandidates(country: DiamondCountry, region: string) {
   return cached;
 }
 
+type DiamondCampaignAddress = StandardCampaignAddress & {
+  diamondAddressType?: string | null;
+  diamondCivicKey?: string | null;
+  diamondUnit?: string | null;
+};
+
+function normalizedAddressKeyPart(value: string | null | undefined): string {
+  return typeof value === 'string' ? value.trim().toUpperCase().replace(/\s+/g, ' ') : '';
+}
+
 function normalizeDiamondAddress(
   campaignId: string,
   feature: DiamondAddressFeature,
   fallbackRegion: string
-): StandardCampaignAddress | null {
+): DiamondCampaignAddress | null {
   const coordinates = feature.geometry?.coordinates;
   if (!Array.isArray(coordinates) || coordinates.length < 2) return null;
   const lon = number(coordinates[0]);
@@ -395,11 +408,15 @@ function normalizeDiamondAddress(
   const houseNumber = text(props.house_number) ?? text(props.street_number);
   const streetName = text(props.street_name);
   const locality = text(props.locality) ?? text(props.city) ?? text(props.municipality);
+  const unit = text(props.unit);
+  const addressType = text(props.address_type)?.toUpperCase() ?? null;
   const formatted =
     text(props.full_address) ??
     text(props.formatted) ??
     text(props.label) ??
     [houseNumber, streetName, locality].filter(Boolean).join(' ');
+  const region = (text(props.province) ?? text(props.region) ?? fallbackRegion).toUpperCase();
+  const postalCode = text(props.postal_code) ?? text(props.zip);
 
   return {
     campaign_id: campaignId,
@@ -407,15 +424,63 @@ function normalizeDiamondAddress(
     house_number: houseNumber,
     street_name: streetName,
     locality,
-    region: (text(props.province) ?? text(props.region) ?? fallbackRegion).toUpperCase(),
-    postal_code: text(props.postal_code) ?? text(props.zip),
+    region,
+    postal_code: postalCode,
     coordinate: { lat, lon },
     lat,
     lon,
     geom: JSON.stringify({ type: 'Point', coordinates: [lon, lat] }),
     source: 'diamond',
     gers_id: addressId ?? null,
+    diamondAddressType: addressType,
+    diamondCivicKey: [
+      normalizedAddressKeyPart(houseNumber),
+      normalizedAddressKeyPart(streetName),
+      normalizedAddressKeyPart(locality),
+      normalizedAddressKeyPart(region),
+      normalizedAddressKeyPart(postalCode),
+    ].join('|'),
+    diamondUnit: unit,
   };
+}
+
+function removeUnlabeledSuiteDuplicates(
+  addresses: DiamondCampaignAddress[]
+): StandardCampaignAddress[] {
+  const byCivicKey = new Map<string, DiamondCampaignAddress[]>();
+
+  for (const address of addresses) {
+    const key = address.diamondCivicKey;
+    if (!key || key === '||||') {
+      const group = byCivicKey.get(address.gers_id ?? address.formatted) ?? [];
+      group.push(address);
+      byCivicKey.set(address.gers_id ?? address.formatted, group);
+      continue;
+    }
+
+    const group = byCivicKey.get(key) ?? [];
+    group.push(address);
+    byCivicKey.set(key, group);
+  }
+
+  return Array.from(byCivicKey.values()).flatMap((group) => {
+    const hasParcelOrNonSuite = group.some((address) => address.diamondAddressType !== 'SUITE');
+
+    if (hasParcelOrNonSuite) {
+      return group.filter((address) => address.diamondAddressType !== 'SUITE' || Boolean(address.diamondUnit));
+    }
+
+    const suitesWithUnits = group.filter((address) => address.diamondAddressType === 'SUITE' && Boolean(address.diamondUnit));
+    if (suitesWithUnits.length > 0) return suitesWithUnits;
+
+    return group.slice(0, 1);
+  }).map((address) => {
+    const standardAddress: DiamondCampaignAddress = { ...address };
+    delete standardAddress.diamondAddressType;
+    delete standardAddress.diamondCivicKey;
+    delete standardAddress.diamondUnit;
+    return standardAddress;
+  });
 }
 
 const WEB_MERCATOR_MAX_LAT = 85.05112878;
@@ -476,8 +541,8 @@ async function loadScopedAddressesFromPmtiles(options: {
   );
   if (!range) return { addresses: [], scanned: 0, bboxCandidates: 0, touchedTiles: 0 };
 
-  const addresses: StandardCampaignAddress[] = [];
-  const byAddressId = new Map<string, StandardCampaignAddress>();
+  const addresses: DiamondCampaignAddress[] = [];
+  const byAddressId = new Map<string, DiamondCampaignAddress>();
   let bboxCandidates = 0;
   let scanned = 0;
   let touchedTiles = 0;
@@ -512,14 +577,19 @@ async function loadScopedAddressesFromPmtiles(options: {
           addresses.push(normalized);
         }
         if (options.addressLimit && addresses.length >= options.addressLimit) {
-          return { addresses, scanned, bboxCandidates, touchedTiles };
+          return {
+            addresses: removeUnlabeledSuiteDuplicates(addresses),
+            scanned,
+            bboxCandidates,
+            touchedTiles,
+          };
         }
       }
     }
   }
 
   return {
-    addresses,
+    addresses: removeUnlabeledSuiteDuplicates(addresses),
     scanned,
     bboxCandidates,
     touchedTiles,
@@ -554,6 +624,9 @@ function snapshotForCampaign(options: {
   const country = candidate.country;
   const municipality = candidate.municipality;
   const prefix = `diamond/${country}/${region}/${municipality}`;
+  const buildingBoundsBufferMeters =
+    number(candidate.buildingManifest.building_bounds_buffer_meters) ??
+    DIAMOND_BUILDING_BOUNDS_BUFFER_METERS;
 
   const tileMetrics = {
     artifact_type: 'diamond',
@@ -562,6 +635,8 @@ function snapshotForCampaign(options: {
     municipal_diamond_layer: 1,
     fallback_layer: 'bedrock',
     geometry_provider: 'pmtiles',
+    building_bounds_buffer_meters: buildingBoundsBufferMeters,
+    tile_buffer: number(candidate.buildingManifest.tile_buffer) ?? 128,
     diamond_country: country,
     diamond_region: region,
     diamond_municipality: municipality,

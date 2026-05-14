@@ -936,6 +936,17 @@ export const useEditor = ({
         cornerStrokeColor: "#3b82f6",
       });
 
+      const hiddenTextareaContainer =
+        initialCanvas.upperCanvasEl?.parentElement ?? initialContainer;
+      const iTextPrototype = fabric.IText.prototype as typeof fabric.IText.prototype & {
+        hiddenTextareaContainer?: HTMLElement;
+      };
+      const textboxPrototype = fabric.Textbox.prototype as typeof fabric.Textbox.prototype & {
+        hiddenTextareaContainer?: HTMLElement;
+      };
+      iTextPrototype.hiddenTextareaContainer = hiddenTextareaContainer;
+      textboxPrototype.hiddenTextareaContainer = hiddenTextareaContainer;
+
       const initialWorkspace = new fabric.Rect({
         width: initialWidth.current,
         height: initialHeight.current,

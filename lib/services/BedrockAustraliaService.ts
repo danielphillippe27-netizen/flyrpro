@@ -2,6 +2,7 @@ import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import * as turf from '@turf/turf';
 import type { LambdaSnapshotResponse } from '@/lib/services/TileLambdaService';
 import type { StandardCampaignAddress } from '@/lib/services/AddressAdapter';
+import { duckDbRuntimeSetupStatements } from '@/lib/services/duckdbRuntime';
 
 type Bounds = [number, number, number, number];
 type SnapshotTileMetrics = NonNullable<NonNullable<LambdaSnapshotResponse['metadata']>['tile_metrics']>;
@@ -44,6 +45,7 @@ type BedrockAustraliaRow = Record<string, unknown> & {
 
 const DEFAULT_BUCKET = 'flyr-pro-addresses-2025';
 const DEFAULT_ADDRESS_PREFIX = 'bedrock/australia/current/addresses';
+const DEFAULT_BUILDING_PREFIX = 'bedrock/australia/buildings/national';
 const REGION = process.env.AWS_REGION || process.env.AWS_S3_BUCKET_REGION || 'us-east-2';
 const WEB_MERCATOR_MAX_LAT = 85.05112878;
 
@@ -73,20 +75,32 @@ function addressPrefix() {
   return (process.env.BEDROCK_AU_ADDRESS_PREFIX || DEFAULT_ADDRESS_PREFIX).replace(/^\/+|\/+$/g, '');
 }
 
+function buildingPrefix() {
+  return (process.env.BEDROCK_AU_BUILDING_PREFIX || DEFAULT_BUILDING_PREFIX).replace(/^\/+|\/+$/g, '');
+}
+
 function key(filename: string) {
   return `${addressPrefix()}/${filename}`;
 }
 
-function cdnUrl(filename: string) {
+function buildingKey(filename: string) {
+  return `${buildingPrefix()}/${filename}`;
+}
+
+function cdnUrlForKey(s3Key: string) {
   const cdnBase =
     process.env.BEDROCK_AU_CDN_BASE_URL ||
     process.env.CLOUDFRONT_GEOMETRY_BASE_URL ||
     process.env.NEXT_PUBLIC_GEOMETRY_CDN_BASE_URL ||
     '';
   if (cdnBase.trim()) {
-    return `${cdnBase.replace(/\/+$/, '')}/${key(filename)}`;
+    return `${cdnBase.replace(/\/+$/, '')}/${s3Key}`;
   }
-  return `s3://${bucket()}/${key(filename)}`;
+  return `s3://${bucket()}/${s3Key}`;
+}
+
+function cdnUrl(filename: string) {
+  return cdnUrlForKey(key(filename));
 }
 
 function sqlString(value: string) {
@@ -165,8 +179,9 @@ async function duckDbAll(sql: string, usesS3: boolean): Promise<BedrockAustralia
 
   try {
     if (usesS3) {
-      await all("SET home_directory='/tmp'");
-      await all("SET extension_directory='/tmp/duckdb_extensions'");
+      for (const statement of duckDbRuntimeSetupStatements()) {
+        await all(statement);
+      }
       await all('INSTALL httpfs');
       await all('LOAD httpfs');
       await all(`SET s3_region=${sqlString(REGION)}`);
@@ -285,7 +300,12 @@ export class BedrockAustraliaService {
       bedrock_country: 'australia',
       bedrock_country_code: 'AU',
       bedrock_version: process.env.BEDROCK_AU_VERSION || 'current',
-      geometry_provider: 'pmtiles_addresses',
+      geometry_provider: 'pmtiles',
+      pmtiles_key: buildingKey('buildings.pmtiles'),
+      tilejson_key: buildingKey('buildings.json'),
+      buildings_geojson_key: buildingKey('buildings.geojson.gz'),
+      buildings_parquet_key: buildingKey('parquet/buildings.spatial.parquet'),
+      buildings_parquet_manifest_key: buildingKey('parquet/buildings.spatial.json'),
       addresses_pmtiles_key: key('addresses.pmtiles'),
       addresses_tilejson_key: key('addresses.json'),
       addresses_geojson_key: key('addresses.ndjson.gz'),
@@ -298,13 +318,16 @@ export class BedrockAustraliaService {
         path_template: 'tile_z={tile_z}/tile_x={tile_x}/tile_y={tile_y}/*.parquet',
       },
       source_layers: {
+        buildings: 'buildings',
         addresses: 'addresses',
       },
       promote_ids: {
+        buildings: 'building_id',
         addresses: 'address_detail_pid',
       },
       join_key: 'address_detail_pid',
       sources: {
+        buildings: 'Microsoft GlobalML Building Footprints',
         addresses: 'G-NAF',
       },
       address_minzoom: 8,
@@ -325,12 +348,12 @@ export class BedrockAustraliaService {
         roads: 0,
       },
       s3_keys: {
-        buildings: '',
+        buildings: buildingKey('buildings.pmtiles'),
         addresses: key('addresses.pmtiles'),
         metadata: key('bedrock-manifest.json'),
       },
       urls: {
-        buildings: '',
+        buildings: cdnUrlForKey(buildingKey('buildings.pmtiles')),
         addresses: cdnUrl('addresses.pmtiles'),
         metadata: `s3://${bucket()}/${key('bedrock-manifest.json')}`,
       },

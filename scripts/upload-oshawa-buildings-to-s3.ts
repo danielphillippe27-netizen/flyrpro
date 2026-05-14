@@ -55,7 +55,8 @@ const dryRun = args.includes('--dry-run');
 const keepWorkdir = args.includes('--keep-workdir');
 const minzoom = Number(readFlag('minzoom') ?? '13');
 const maxzoom = Number(readFlag('maxzoom') ?? '18');
-const BUILDING_TILE_BUFFER_UNITS = Number(process.env.BUILDING_TILE_BUFFER_UNITS ?? 8);
+const BUILDING_TILE_BUFFER_UNITS = Number(process.env.BUILDING_TILE_BUFFER_UNITS ?? 127);
+const BUILDING_BOUNDS_BUFFER_METERS = Number(process.env.BUILDING_BOUNDS_BUFFER_METERS ?? 128);
 const paddingMeters = Number(readFlag('padding-meters') ?? '80');
 const maxAddressBuildingMeters = Number(readFlag('max-address-building-meters') ?? '55');
 
@@ -537,6 +538,8 @@ async function upsertCampaignSnapshot(options: {
     map_status: 'ready',
     diamond_mode: true,
     geometry_provider: 'pmtiles_zxy',
+    building_bounds_buffer_meters: BUILDING_BOUNDS_BUFFER_METERS,
+    tile_buffer: BUILDING_TILE_BUFFER_UNITS,
     geometry_version: options.geometryVersion,
     pmtiles_key: options.pmtilesKey,
     pmtiles_version: options.geometryVersion,

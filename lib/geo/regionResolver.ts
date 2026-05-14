@@ -1,5 +1,5 @@
 type RegionSource = 'campaign' | 'mapbox' | 'bbox' | 'default';
-type RegionReason = 'missing' | 'legacy_on_default' | null;
+type RegionReason = 'missing' | 'legacy_on_default' | 'region_mismatch' | null;
 
 interface Point {
   lng: number;
@@ -50,6 +50,7 @@ import regionBounds from '../../scripts/regions.json';
 const NON_US_CANADA_REGION_BOUNDS: Record<string, Bounds> = {
   NZ: [166.0, -48.5, 179.5, -33.0],
   AU: [96.0, -44.0, 168.5, -9.0],
+  GB: [-6.5, 49.8, 1.9, 58.8],
   ZA: [16.4, -35.0, 33.1, -22.0],
   EC: [22.7, -34.4, 30.2, -30.0],
   FS: [24.0, -30.8, 29.8, -26.6],
@@ -214,13 +215,30 @@ function inferRegionFromBounds(point: Point): string | null {
   return matches[0].region;
 }
 
+function shouldOverrideCurrentRegionFromBounds(currentRegion: string, inferredRegion: string | null, point: Point) {
+  // Coarse NY/ON bounding boxes overlap across Lake Ontario. For north-shore
+  // Ontario polygons, prefer ON even if an older client wrote NY first.
+  if (
+    currentRegion === 'NY' &&
+    inferredRegion === 'ON' &&
+    point.lng >= -79.9 &&
+    point.lng <= -76.0 &&
+    point.lat >= 43.55 &&
+    point.lat <= 44.25
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 async function inferRegionFromMapbox(point: Point): Promise<string | null> {
   const token = process.env.MAPBOX_TOKEN || process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
   if (!token) return null;
 
   const url =
     `https://api.mapbox.com/geocoding/v5/mapbox.places/${point.lng},${point.lat}.json` +
-    `?types=region,country&country=ca,us,nz,au,za&access_token=${token}`;
+    `?types=region,country&country=ca,us,nz,au,za,gb&access_token=${token}`;
 
   try {
     const response = await fetch(url);
@@ -241,7 +259,11 @@ async function inferRegionFromMapbox(point: Point): Promise<string | null> {
       }
     }
 
-    return candidateCodes.find((code) => SOUTH_AFRICA_REGION_CODES.has(code)) ?? candidateCodes[0] ?? null;
+    return (
+      candidateCodes.find((code) => SOUTH_AFRICA_REGION_CODES.has(code)) ??
+      candidateCodes.find((code) => code !== 'CA' && code !== 'US') ??
+      null
+    );
   } catch {
     return null;
   }
@@ -267,17 +289,6 @@ export async function resolveCampaignRegion(
 ): Promise<ResolveCampaignRegionResult> {
   const currentRegion = normalizeRegionCode(input.currentRegion);
 
-  // Keep explicit non-default regions and avoid unnecessary lookups.
-  if (currentRegion && currentRegion !== 'ON') {
-    return {
-      regionCode: currentRegion,
-      source: 'campaign',
-      shouldPersist: false,
-      reason: null,
-      centroid: null,
-    };
-  }
-
   const centroid = getCentroid(input.polygon, input.bbox);
   if (!centroid) {
     return {
@@ -296,6 +307,36 @@ export async function resolveCampaignRegion(
       ? bboxRegion
       : mapboxRegion ?? bboxRegion;
   const inferredSource: RegionSource = inferredRegion === mapboxRegion ? 'mapbox' : 'bbox';
+
+  if (currentRegion && currentRegion !== 'ON') {
+    if (mapboxRegion && mapboxRegion !== currentRegion) {
+      return {
+        regionCode: inferredRegion ?? mapboxRegion,
+        source: inferredSource,
+        shouldPersist: true,
+        reason: 'region_mismatch',
+        centroid,
+      };
+    }
+
+    if (shouldOverrideCurrentRegionFromBounds(currentRegion, inferredRegion, centroid)) {
+      return {
+        regionCode: inferredRegion!,
+        source: 'bbox',
+        shouldPersist: true,
+        reason: 'region_mismatch',
+        centroid,
+      };
+    }
+
+    return {
+      regionCode: currentRegion,
+      source: 'campaign',
+      shouldPersist: false,
+      reason: null,
+      centroid,
+    };
+  }
 
   if (!currentRegion) {
     return {

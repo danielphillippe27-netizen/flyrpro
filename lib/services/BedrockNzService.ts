@@ -2,6 +2,7 @@ import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import * as turf from '@turf/turf';
 import type { LambdaSnapshotResponse } from '@/lib/services/TileLambdaService';
 import type { StandardCampaignAddress } from '@/lib/services/AddressAdapter';
+import { duckDbRuntimeSetupStatements } from '@/lib/services/duckdbRuntime';
 
 type BedrockLayer = 'addresses' | 'buildings' | 'parcels';
 type Bounds = [number, number, number, number];
@@ -415,8 +416,9 @@ async function duckDbAll(sql: string, usesS3: boolean): Promise<BedrockParquetRo
 
   try {
     if (usesS3) {
-      await all("SET home_directory='/tmp'");
-      await all("SET extension_directory='/tmp/duckdb_extensions'");
+      for (const statement of duckDbRuntimeSetupStatements()) {
+        await all(statement);
+      }
       await all('INSTALL httpfs');
       await all('LOAD httpfs');
       await all(`SET s3_region=${sqlString(REGION)}`);

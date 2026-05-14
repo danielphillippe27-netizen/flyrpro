@@ -99,7 +99,11 @@ const args = process.argv.slice(2);
 const campaignId = args.find((arg) => !arg.startsWith('--'));
 const dryRun = args.includes('--dry-run');
 const keepWorkdir = args.includes('--keep-workdir');
-const BUILDING_TILE_BUFFER_UNITS = Number(process.env.BUILDING_TILE_BUFFER_UNITS ?? 8);
+const BUILDING_TILE_BUFFER_UNITS = Number(process.env.BUILDING_TILE_BUFFER_UNITS ?? 127);
+const BUILDING_BOUNDS_BUFFER_METERS = Number(process.env.BUILDING_BOUNDS_BUFFER_METERS ?? 128);
+const SNAPSHOT_BUILDING_PADDING_METERS = Number(
+  readFlag('padding-meters') ?? process.env.DIAMOND_BUILD_PADDING_METERS ?? '80'
+);
 const minzoom = Number(readFlag('minzoom') ?? '13');
 const maxzoom = Number(readFlag('maxzoom') ?? '18');
 const MAX_NEARBY_BUILDING_METERS = Number(readFlag('max-nearby-meters') ?? '55');
@@ -305,7 +309,7 @@ async function exportBuildingFeatures(
       return dbFallback;
     }
     console.warn('   Falling back to existing static buildings GeoJSON snapshot.');
-    return exportBuildingFeaturesFromSnapshot(snapshot);
+    return exportBuildingFeaturesFromSnapshot(snapshot, campaign);
   }
 
   const collection = normalizeFeatureCollection(data);
@@ -323,7 +327,7 @@ async function exportBuildingFeatures(
       return dbFallback;
     }
     console.warn('   Falling back to existing static buildings GeoJSON snapshot.');
-    return exportBuildingFeaturesFromSnapshot(snapshot);
+    return exportBuildingFeaturesFromSnapshot(snapshot, campaign);
   }
 
   return { type: 'FeatureCollection', features };
@@ -659,7 +663,7 @@ async function exportAddressFeatures(id: string): Promise<FeatureCollection> {
 
 function buildAddressCircleFeatures(addresses: FeatureCollection): FeatureCollection {
   const features = addresses.features
-    .map((address) => {
+    .map((address): Feature | null => {
       if (address.geometry?.type !== 'Point' || !Array.isArray(address.geometry.coordinates)) return null;
       const point = pointFromLonLat(
         Number(address.geometry.coordinates[0]),
@@ -1110,6 +1114,7 @@ async function runTippecanoe(options: {
   maxzoom: number;
 }) {
   const tippecanoe = process.env.TIPPECANOE_BIN || 'tippecanoe';
+  const tippecanoeTempDir = process.env.TIPPECANOE_TEMP_DIR || process.env.TMPDIR;
   const commandArgs = [
     '--force',
     '--output',
@@ -1131,6 +1136,10 @@ async function runTippecanoe(options: {
     '--named-layer',
     `address_circles:${options.addressCirclesPath}`,
   ];
+
+  if (tippecanoeTempDir) {
+    commandArgs.splice(1, 0, '--temporary-directory', tippecanoeTempDir);
+  }
 
   if (options.parcelsPath && existsSync(options.parcelsPath)) {
     commandArgs.push('--named-layer', `parcels:${options.parcelsPath}`);
@@ -1298,6 +1307,8 @@ async function upsertCampaignSnapshot(options: {
     map_status: 'ready',
     diamond_mode: true,
     geometry_provider: 'pmtiles_zxy',
+    building_bounds_buffer_meters: BUILDING_BOUNDS_BUFFER_METERS,
+    tile_buffer: BUILDING_TILE_BUFFER_UNITS,
     geometry_version: options.geometryVersion,
     pmtiles_key: options.pmtilesKey,
     pmtiles_version: options.geometryVersion,

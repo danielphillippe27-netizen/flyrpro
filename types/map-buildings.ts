@@ -72,6 +72,8 @@ export interface BuildingProperties {
   address_text?: string | null;
   /** Canonical address-level status when available. */
   address_status?: string | null;
+  /** Number of campaign addresses linked to this footprint. */
+  address_count?: number | null;
   /** Unique id for Mapbox promoteId (unit id for slices, gers_id for detached). Used for setFeatureState. */
   feature_id?: string;
   /** Unit slice id when the feature represents a specific address/unit inside a building. */

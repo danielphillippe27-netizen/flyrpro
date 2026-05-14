@@ -428,6 +428,87 @@ async function run() {
     assertEqual(match.buildingId, 'detached-b');
   });
 
+  test('Nearby same-street address: relaxed proximity links up to 75m', () => {
+    const service = new StableLinkerService({} as any);
+    const building = makeBuilding(
+      'nearby-home',
+      rectangle(-79.01010, 43.01000, -79.00990, 43.01020),
+      { primaryStreet: 'Maple Street' }
+    );
+    const address = makeAddress('600', -79.00920, 43.01010, 'Maple Street');
+
+    const match = (service as any).matchAddressToBuilding(
+      address,
+      [building],
+      new Set(),
+      []
+    );
+
+    assertEqual(match.matchType, 'proximity_verified');
+    assertEqual(match.buildingId, 'nearby-home');
+  });
+
+  test('Right-outside footprint address: footprint distance links even when centroid is far', () => {
+    const service = new StableLinkerService({} as any);
+    const building = makeBuilding(
+      'wide-building',
+      rectangle(-79.03400, 43.03000, -79.03000, 43.03100),
+      { primaryStreet: 'Long Hall Road' }
+    );
+    const address = makeAddress('601', -79.02994, 43.03050, 'Long Hall Road');
+
+    const match = (service as any).matchAddressToBuilding(
+      address,
+      [building],
+      new Set(),
+      []
+    );
+
+    assertEqual(match.matchType, 'proximity_verified');
+    assertEqual(match.buildingId, 'wide-building');
+    assertTrue(match.distanceMeters < 10, 'Expected footprint distance under 10m');
+  });
+
+  test('Right-outside footprint address: no street metadata still links by geometry', () => {
+    const service = new StableLinkerService({} as any);
+    const building = makeBuilding(
+      'no-street-building',
+      rectangle(-79.04020, 43.04000, -79.04000, 43.04020)
+    );
+    const address = makeAddress('601b', -79.03994, 43.04010, '');
+
+    const match = (service as any).matchAddressToBuilding(
+      address,
+      [building],
+      new Set(),
+      []
+    );
+
+    assertEqual(match.matchType, 'proximity_verified');
+    assertEqual(match.buildingId, 'no-street-building');
+    assertTrue(match.distanceMeters < 10, 'Expected footprint distance under 10m');
+    assertTrue(match.confidence >= 0.8, 'Expected high confidence from geometry alone');
+  });
+
+  test('Nearby fallback address: relaxed fallback links unused buildings up to 125m', () => {
+    const service = new StableLinkerService({} as any);
+    const building = makeBuilding(
+      'fallback-home',
+      rectangle(-79.02010, 43.02000, -79.01990, 43.02020)
+    );
+    const address = makeAddress('602', -79.01860, 43.02010, 'Fallback Road');
+
+    const match = (service as any).matchAddressToBuilding(
+      address,
+      [building],
+      new Set(),
+      []
+    );
+
+    assertEqual(match.matchType, 'proximity_fallback');
+    assertEqual(match.buildingId, 'fallback-home');
+  });
+
   test('Detached fallback: weak proximity becomes orphan when every candidate is already matched', () => {
     const service = new StableLinkerService({} as any);
     const alreadyMatched = makeBuilding(

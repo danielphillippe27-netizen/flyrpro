@@ -12,6 +12,7 @@ import type { CampaignAddress, CampaignV2, CampaignParcel } from '@/types/databa
 import { MapBuildingsLayer, type MapBuildingsRenderState } from '@/components/map/MapBuildingsLayer';
 import { CampaignAddressPmtilesLayer } from '@/components/map/CampaignAddressPmtilesLayer';
 import { CampaignParcelPmtilesLayer } from '@/components/map/CampaignParcelPmtilesLayer';
+import type { BuildingFeatureCollection } from '@/types/map-buildings';
 import { MapInfoButton } from '@/components/map/MapInfoButton';
 import { LocationCard } from '@/components/map/LocationCard';
 import { CreateContactDialog } from '@/components/crm/CreateContactDialog';
@@ -23,7 +24,6 @@ import { useTheme } from '@/lib/theme-provider';
 import { useMapStyle } from '@/lib/map-style-provider';
 import { useWorkspace } from '@/lib/workspace-context';
 import { getMapboxToken, removeMapboxMapWhenSafe } from '@/lib/mapbox';
-import { fetchCampaignMapManifest, hasRenderablePmtilesParcels } from '@/lib/map/campaignMapManifest';
 import { applyPresetVisualTweaks, applyResolvedMapStyle, getResolvedMapInitOptions, hideBaseBuildingLayers, resolveMapStyle } from '@/lib/map-styles';
 import {
   DEFAULT_STATUS_FILTERS,
@@ -94,6 +94,116 @@ export type MapPointOverlay = {
   color?: string;
   label?: string | null;
 };
+
+type GenericFeatureCollection<G extends GeoJSON.Geometry = GeoJSON.Geometry> = GeoJSON.FeatureCollection<G, Record<string, unknown>>;
+
+type CampaignMapBundle = {
+  campaign_id?: string;
+  status?: string;
+  phase?: string;
+  source?: string;
+  region?: string | null;
+  map_ready?: boolean;
+  addresses?: GenericFeatureCollection<GeoJSON.Point>;
+  buildings?: BuildingFeatureCollection;
+  parcels?: GenericFeatureCollection<GeoJSON.Polygon | GeoJSON.MultiPolygon>;
+  roads?: GenericFeatureCollection<GeoJSON.LineString | GeoJSON.MultiLineString>;
+  counts?: {
+    addresses?: number;
+    buildings?: number;
+    parcels?: number;
+    roads?: number;
+  };
+  updated_at?: string;
+};
+
+function isFeatureCollection<G extends GeoJSON.Geometry>(
+  value: unknown
+): value is GenericFeatureCollection<G> {
+  const collection = value as { type?: unknown; features?: unknown };
+  return collection?.type === 'FeatureCollection' && Array.isArray(collection.features);
+}
+
+function getStringProperty(properties: Record<string, unknown>, keys: string[]): string | null {
+  for (const key of keys) {
+    const value = properties[key];
+    if (typeof value === 'string' || typeof value === 'number') {
+      const normalized = String(value).trim();
+      if (normalized) return normalized;
+    }
+  }
+  return null;
+}
+
+function mapBundleAddressesToCampaignAddresses(
+  campaignId: string,
+  collection?: GenericFeatureCollection<GeoJSON.Point>
+): CampaignAddress[] {
+  if (!isFeatureCollection<GeoJSON.Point>(collection)) return [];
+
+  return collection.features.flatMap((feature, index) => {
+    if (feature.geometry?.type !== 'Point') return [];
+    const [lon, lat] = feature.geometry.coordinates;
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) return [];
+    const properties = feature.properties ?? {};
+    const id = getStringProperty(properties, ['id', 'address_id']) ?? String(feature.id ?? `bundle-address-${index}`);
+    const formatted =
+      getStringProperty(properties, ['formatted', 'address', 'display_address', 'full_address']) ??
+      [getStringProperty(properties, ['house_number']), getStringProperty(properties, ['street_name'])]
+        .filter(Boolean)
+        .join(' ');
+
+    return [{
+      id,
+      campaign_id: campaignId,
+      address: formatted || id,
+      formatted: formatted || undefined,
+      postal_code: getStringProperty(properties, ['postal_code']) ?? undefined,
+      source: 'map',
+      source_id: getStringProperty(properties, ['source_id', 'gers_id']),
+      gers_id: getStringProperty(properties, ['gers_id']) ?? undefined,
+      building_id: getStringProperty(properties, ['building_id', 'building_gers_id']),
+      building_gers_id: getStringProperty(properties, ['building_gers_id']) ?? undefined,
+      coordinate: { lon, lat },
+      geom: JSON.stringify(feature.geometry),
+      created_at: new Date().toISOString(),
+      street_name: getStringProperty(properties, ['street_name']) ?? undefined,
+      house_number: getStringProperty(properties, ['house_number']) ?? undefined,
+      locality: getStringProperty(properties, ['locality']) ?? undefined,
+      address_status: getStringProperty(properties, ['address_status', 'status']) ?? undefined,
+    } satisfies CampaignAddress];
+  });
+}
+
+function mapBundleParcelsToCampaignParcels(
+  campaignId: string,
+  collection?: GenericFeatureCollection<GeoJSON.Polygon | GeoJSON.MultiPolygon>
+): CampaignParcel[] {
+  if (!isFeatureCollection<GeoJSON.Polygon | GeoJSON.MultiPolygon>(collection)) return [];
+
+  return collection.features.flatMap((feature, index) => {
+    if (feature.geometry?.type !== 'Polygon' && feature.geometry?.type !== 'MultiPolygon') return [];
+    const properties = feature.properties ?? {};
+    const externalId = getStringProperty(properties, [
+      'external_id',
+      'parcel_id',
+      'PARCELID',
+      'gisid',
+      'roll_number',
+      'id',
+    ]);
+    const id = getStringProperty(properties, ['id', 'parcel_row_id']) ?? externalId ?? String(feature.id ?? `bundle-parcel-${index}`);
+
+    return [{
+      id,
+      campaign_id: campaignId,
+      external_id: externalId ?? undefined,
+      geom: JSON.stringify(feature.geometry),
+      properties,
+      created_at: new Date().toISOString(),
+    } satisfies CampaignParcel];
+  });
+}
 
 /** Safe getLayer: avoid "getOwnLayer of undefined" during style transition or when map is hidden (e.g. tab switch). */
 function safeGetLayer(m: mapboxgl.Map, layerId: string): boolean {
@@ -357,6 +467,7 @@ export function CampaignDetailMapView({
   // Boundary: Snap to Roads and Raw vs Snapped toggle
   const [snapping, setSnapping] = useState(false);
   const [parcels, setParcels] = useState<CampaignParcel[]>([]);
+  const [mapBundle, setMapBundle] = useState<CampaignMapBundle | null>(null);
   const [pmtilesParcelsReady, setPmtilesParcelsReady] = useState(false);
   const [parcelFetchSuppressed, setParcelFetchSuppressed] = useState(false);
   const parcelFetchFailureCountRef = useRef(0);
@@ -400,6 +511,11 @@ export function CampaignDetailMapView({
       addresses.filter((address) => !optimisticallyDeletedAddressIds.includes(address.id)),
     [addresses, optimisticallyDeletedAddressIds]
   );
+  const bundleAddresses = useMemo(
+    () => mapBundleAddressesToCampaignAddresses(campaignId, mapBundle?.addresses),
+    [campaignId, mapBundle?.addresses]
+  );
+  const mapAddresses = visibleAddresses.length > 0 ? visibleAddresses : bundleAddresses;
   const visibleAddressesRef = useRef(visibleAddresses);
   const mapProvisionRefreshKey = [
     campaign?.provision_status ?? '',
@@ -407,13 +523,13 @@ export function CampaignDetailMapView({
     campaign?.map_mode ?? '',
     campaign?.map_ready_at ?? '',
     campaign?.optimized_at ?? '',
-    visibleAddresses.length,
+    mapAddresses.length,
   ].join(':');
   const lastMapProvisionRefreshKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
-    visibleAddressesRef.current = visibleAddresses;
-  }, [visibleAddresses]);
+    visibleAddressesRef.current = mapAddresses;
+  }, [mapAddresses]);
 
   useEffect(() => {
     if (!campaignId || !mapLoaded) return;
@@ -525,9 +641,64 @@ export function CampaignDetailMapView({
     setOptimisticallyHiddenBuildingIds([]);
     setOptimisticallyDeletedAddressIds([]);
     setMapViewMode(initialMapViewMode);
+    setParcels([]);
+    setMapBundle(null);
     setParcelFetchSuppressed(false);
     parcelFetchFailureCountRef.current = 0;
   }, [campaignId, initialMapViewMode]);
+
+  useEffect(() => {
+    if (!campaignId) {
+      setMapBundle(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadMapBundle = async () => {
+      try {
+        const response = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/map-bundle`, {
+          credentials: 'include',
+        });
+        if (!response.ok) {
+          throw new Error(`Campaign map bundle request failed with status ${response.status}`);
+        }
+
+        const bundle = await response.json() as CampaignMapBundle;
+        if (cancelled) return;
+
+        setMapBundle(bundle);
+
+        const parcelRows = mapBundleParcelsToCampaignParcels(campaignId, bundle.parcels);
+        if (parcelRows.length > 0) {
+          parcelFetchFailureCountRef.current = 0;
+          setParcels(parcelRows);
+          setParcelFetchSuppressed(true);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.warn('[CampaignDetailMapView] Failed to load campaign map bundle:', error);
+        }
+      }
+    };
+
+    void loadMapBundle();
+
+    if (parcelsProcessing) {
+      const interval = window.setInterval(() => {
+        void loadMapBundle();
+      }, 5000);
+
+      return () => {
+        cancelled = true;
+        window.clearInterval(interval);
+      };
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [campaignId, mapProvisionRefreshKey, parcelsProcessing]);
 
   useEffect(() => {
     if (!parcelsReady && mapViewMode === 'parcels') {
@@ -536,25 +707,7 @@ export function CampaignDetailMapView({
   }, [mapViewMode, parcelsReady]);
 
   useEffect(() => {
-    let cancelled = false;
-
-    const loadParcelManifest = async () => {
-      if (!campaignId) {
-        setPmtilesParcelsReady(false);
-        return;
-      }
-
-      const { manifest } = await fetchCampaignMapManifest(campaignId);
-      if (!cancelled) {
-        setPmtilesParcelsReady(hasRenderablePmtilesParcels(manifest));
-      }
-    };
-
-    void loadParcelManifest();
-
-    return () => {
-      cancelled = true;
-    };
+    setPmtilesParcelsReady(false);
   }, [campaignId]);
 
   // Fetch parcels for this campaign
@@ -1156,7 +1309,7 @@ export function CampaignDetailMapView({
 
     if (!boundsFittedRef.current) {
       const bounds = new mapboxgl.LngLatBounds();
-      visibleAddresses
+      mapAddresses
         .map(addr => getAddressCoordinate(addr))
         .filter((coord): coord is { lon: number; lat: number } => coord !== null)
         .forEach((coord) => {
@@ -1224,10 +1377,10 @@ export function CampaignDetailMapView({
       }
     }
     // Buildings are handled by MapBuildingsLayer component which provides fill extrusions.
-  }, [campaign?.bbox, campaign?.territory_boundary, mapLoaded, mapViewMode, visibleAddresses]);
+  }, [campaign?.bbox, campaign?.territory_boundary, mapLoaded, mapViewMode, mapAddresses]);
 
   const preparedAddressPoints = useMemo<PreparedAddressPoint[]>(() => {
-    return visibleAddresses
+    return mapAddresses
       .map((address) => {
         const coordinate = getAddressCoordinate(address);
         if (!coordinate) return null;
@@ -1244,7 +1397,7 @@ export function CampaignDetailMapView({
         };
       })
       .filter((value): value is PreparedAddressPoint => value !== null);
-  }, [visibleAddresses]);
+  }, [mapAddresses]);
 
   const parcelStatusByExternalId = useMemo<Record<string, MapStatusKey>>(() => {
     const statusByExternalId: Record<string, MapStatusKey> = {};
@@ -2051,11 +2204,12 @@ export function CampaignDetailMapView({
               campaignId={campaignId}
               campaignType={campaign?.type ?? null}
               refreshKey={mapRefreshKey}
-              addressStateOverrides={visibleAddresses}
+              addressStateOverrides={mapAddresses}
               hiddenBuildingIds={optimisticallyHiddenBuildingIds}
               deletedAddressIds={optimisticallyDeletedAddressIds}
               campaignBoundary={(campaign?.territory_boundary as GeoJSON.Polygon | null | undefined) ?? null}
               campaignBbox={campaignBbox}
+              buildingFeatures={mapBundle?.buildings ?? null}
               statusFilters={statusFilters}
               showAddressLabels={true}
               onBuildingClick={handleBuildingClick}
@@ -2067,7 +2221,7 @@ export function CampaignDetailMapView({
             campaignId={campaignId}
             mapLoaded={mapLoaded}
             visible={mapViewMode === 'addresses'}
-            addresses={visibleAddresses}
+            addresses={mapAddresses}
             campaignType={campaign?.type ?? null}
             statusFilters={statusFilters}
             deletedAddressIds={optimisticallyDeletedAddressIds}
@@ -2082,7 +2236,7 @@ export function CampaignDetailMapView({
             map={map.current}
             campaignId={campaignId}
             mapLoaded={mapLoaded}
-            visible={mapViewMode === 'parcels' && hasParcelPmtilesScope && parcels.length === 0 && !campaign?.territory_boundary}
+            visible={mapViewMode === 'parcels' && pmtilesParcelsReady && parcels.length === 0}
             parcels={parcels}
             parcelStatusByExternalId={parcelStatusByExternalId}
             statusFilters={statusFilters}

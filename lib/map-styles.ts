@@ -3,7 +3,7 @@
 import mapboxgl from 'mapbox-gl';
 import type { Theme } from '@/lib/theme-provider';
 
-export type MapStylePreset = 'standard' | 'whiteOut' | 'blackOps';
+export type MapStylePreset = 'standard' | 'whiteOut' | 'blackOps' | 'satellite';
 export type MapStyleVersion = 'v11' | 'v12';
 
 type MapStyleConfig = Record<string, unknown>;
@@ -29,6 +29,10 @@ export const MAP_STYLE_PRESET_META: Record<
   blackOps: {
     label: 'Black Out',
     description: 'Dark stripped-back basemap that keeps campaign houses readable without Standard footprint outlines.',
+  },
+  satellite: {
+    label: 'Satellite',
+    description: 'Satellite imagery with street labels for checking real-world context.',
   },
 };
 
@@ -60,6 +64,13 @@ export function resolveMapStyle(
     return {
       key: 'blackOps:classic:dark',
       style: 'mapbox://styles/mapbox/dark-v11',
+    };
+  }
+
+  if (preset === 'satellite') {
+    return {
+      key: 'satellite:streets:v12',
+      style: 'mapbox://styles/mapbox/satellite-streets-v12',
     };
   }
 

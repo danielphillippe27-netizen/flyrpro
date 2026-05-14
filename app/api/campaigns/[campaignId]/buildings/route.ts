@@ -5,6 +5,7 @@ import { getCachedPmtilesArchive } from '@/app/api/campaigns/_utils/tile-cache';
 import { getCampaignBuildingStatus } from '@/lib/campaignStats';
 import { displayAddressText, resolveHouseNumberLabel } from '@/lib/map/addressPresentation';
 import { fetchAllInPages } from '@/lib/supabase/fetchAllInPages';
+import * as turf from '@turf/turf';
 import {
   type CampaignSnapshotRow,
   resolveFallbackGeoJSONKey,
@@ -28,7 +29,23 @@ type FeatureCollectionLike = {
   }>;
 };
 
+type PolygonalBuildingFeature = GeoJSON.Feature<
+  GeoJSON.Polygon | GeoJSON.MultiPolygon,
+  Record<string, unknown>
+>;
+
 type CampaignBuildingStatus = ReturnType<typeof getCampaignBuildingStatus>;
+const PMTILES_TILE_RANGE_PADDING = 1;
+const PMTILES_TILE_FETCH_CONCURRENCY = 12;
+const PMTILES_SCOPED_TILE_LIMIT = Math.max(
+  64,
+  Number.isFinite(Number(process.env.PMTILES_SCOPED_TILE_LIMIT))
+    ? Number(process.env.PMTILES_SCOPED_TILE_LIMIT)
+    : 2048
+);
+const WEB_MERCATOR_MAX_LAT = 85.05112878;
+const BUILDINGS_RESPONSE_CACHE_TTL_MS = 30_000;
+const BUILDINGS_RESPONSE_CACHE_MAX_ENTRIES = 64;
 const CAMPAIGN_BUILDING_STATUS_RANK: Record<CampaignBuildingStatus, number> = {
   not_visited: 0,
   visited: 1,
@@ -38,6 +55,95 @@ const CAMPAIGN_BUILDING_STATUS_RANK: Record<CampaignBuildingStatus, number> = {
   lead: 5,
   hot_lead: 6,
 };
+
+const buildingsResponseCache = new Map<string, { expiresAt: number; value: FeatureCollectionLike }>();
+const buildingsResponseInflight = new Map<string, Promise<FeatureCollectionLike | null>>();
+
+function getFeatureCount(featureCollection: FeatureCollectionLike | null | undefined): number {
+  return Array.isArray(featureCollection?.features) ? featureCollection.features.length : 0;
+}
+
+function getCachedBuildingsResponse(cacheKey: string): FeatureCollectionLike | null {
+  const cached = buildingsResponseCache.get(cacheKey);
+  if (!cached) return null;
+  if (cached.expiresAt <= Date.now()) {
+    buildingsResponseCache.delete(cacheKey);
+    return null;
+  }
+  return cached.value;
+}
+
+function setCachedBuildingsResponse(cacheKey: string, value: FeatureCollectionLike) {
+  buildingsResponseCache.set(cacheKey, {
+    expiresAt: Date.now() + BUILDINGS_RESPONSE_CACHE_TTL_MS,
+    value,
+  });
+
+  if (buildingsResponseCache.size > BUILDINGS_RESPONSE_CACHE_MAX_ENTRIES) {
+    const oldestKey = buildingsResponseCache.keys().next().value as string | undefined;
+    if (oldestKey) buildingsResponseCache.delete(oldestKey);
+  }
+}
+
+async function loadCachedBuildingsResponse(
+  cacheKey: string,
+  loader: () => Promise<FeatureCollectionLike | null>
+): Promise<FeatureCollectionLike | null> {
+  const cached = getCachedBuildingsResponse(cacheKey);
+  if (cached) return cached;
+
+  const existing = buildingsResponseInflight.get(cacheKey);
+  if (existing) return existing;
+
+  const promise = loader()
+    .then((value) => {
+      if (getFeatureCount(value) > 0) {
+        setCachedBuildingsResponse(cacheKey, value as FeatureCollectionLike);
+      }
+      return value;
+    })
+    .finally(() => {
+      buildingsResponseInflight.delete(cacheKey);
+    });
+
+  buildingsResponseInflight.set(cacheKey, promise);
+  return promise;
+}
+
+function stableCachePart(value: unknown): string {
+  return JSON.stringify(value ?? null);
+}
+
+function snapshotBuildingsCacheKey(params: {
+  campaignId: string;
+  snapshot: CampaignSnapshotRow;
+  bbox: [number, number, number, number] | null;
+  hiddenBuildingIds: Set<string>;
+  boundary: GeoJSON.Polygon | null;
+}) {
+  const hiddenIds = Array.from(params.hiddenBuildingIds).sort().join(',');
+  return [
+    'buildings',
+    params.campaignId,
+    params.snapshot.bucket,
+    params.snapshot.buildings_key ?? '',
+    params.snapshot.buildings_url ?? '',
+    params.snapshot.metadata_key ?? '',
+    params.snapshot.created_at ?? '',
+    stableCachePart(params.snapshot.tile_metrics),
+    stableCachePart(params.bbox),
+    stableCachePart(params.boundary),
+    hiddenIds,
+  ].join('|');
+}
+
+function buildingsJsonResponse(value: FeatureCollectionLike) {
+  return NextResponse.json(value, {
+    headers: {
+      'Cache-Control': 'private, max-age=30, stale-while-revalidate=60',
+    },
+  });
+}
 
 function asPagePromise<T>(
   query: unknown
@@ -170,12 +276,30 @@ function parseBbox(value: unknown): [number, number, number, number] | null {
   return bbox as [number, number, number, number];
 }
 
+function bboxFromPolygon(polygon: GeoJSON.Polygon | null): [number, number, number, number] | null {
+  if (!polygon?.coordinates?.length) return null;
+  const points = polygon.coordinates.flatMap((ring) => ring);
+  const lons = points.map((point) => Number(point?.[0])).filter(Number.isFinite);
+  const lats = points.map((point) => Number(point?.[1])).filter(Number.isFinite);
+  if (lons.length === 0 || lats.length === 0) return null;
+  return [
+    Math.min(...lons),
+    Math.min(...lats),
+    Math.max(...lons),
+    Math.max(...lats),
+  ];
+}
+
 function lonLatToTile(lon: number, lat: number, z: number) {
   const n = 2 ** z;
   const x = Math.floor(((lon + 180) / 360) * n);
-  const latRad = (lat * Math.PI) / 180;
+  const clampedLat = Math.max(Math.min(lat, WEB_MERCATOR_MAX_LAT), -WEB_MERCATOR_MAX_LAT);
+  const latRad = (clampedLat * Math.PI) / 180;
   const y = Math.floor(((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n);
-  return { x, y };
+  return {
+    x: Math.max(0, Math.min(n - 1, x)),
+    y: Math.max(0, Math.min(n - 1, y)),
+  };
 }
 
 function tileRangesForBbox(bbox: [number, number, number, number], maxZoom: number) {
@@ -188,11 +312,34 @@ function tileRangesForBbox(bbox: [number, number, number, number], maxZoom: numb
     const minY = Math.min(nw.y, se.y);
     const maxY = Math.max(nw.y, se.y);
     const tileCount = (maxX - minX + 1) * (maxY - minY + 1);
-    if (tileCount <= 64 || z === 12) {
-      return { z, minX, maxX, minY, maxY };
+    if (tileCount <= PMTILES_SCOPED_TILE_LIMIT || z === 12) {
+      const maxTile = 2 ** z - 1;
+      return {
+        z,
+        minX: Math.max(0, minX - PMTILES_TILE_RANGE_PADDING),
+        maxX: Math.min(maxTile, maxX + PMTILES_TILE_RANGE_PADDING),
+        minY: Math.max(0, minY - PMTILES_TILE_RANGE_PADDING),
+        maxY: Math.min(maxTile, maxY + PMTILES_TILE_RANGE_PADDING),
+      };
     }
   }
   return null;
+}
+
+async function forEachWithConcurrency<T>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<void>
+) {
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (cursor < items.length) {
+      const item = items[cursor];
+      cursor += 1;
+      await worker(item);
+    }
+  });
+  await Promise.all(workers);
 }
 
 function flattenPositions(geometry: GeoJSON.Geometry | null | undefined): Array<[number, number]> {
@@ -228,17 +375,39 @@ function geometryCenter(geometry: GeoJSON.Geometry | null | undefined): [number,
   return [(minLon + maxLon) / 2, (minLat + maxLat) / 2];
 }
 
-function pointInBbox(point: [number, number], bbox: [number, number, number, number]) {
-  const [lon, lat] = point;
-  const [minLon, minLat, maxLon, maxLat] = bbox;
-  return lon >= minLon && lon <= maxLon && lat >= minLat && lat <= maxLat;
+function geometryBounds(geometry: GeoJSON.Geometry | null | undefined): [number, number, number, number] | null {
+  const positions = flattenPositions(geometry).filter(
+    (position) => Number.isFinite(position[0]) && Number.isFinite(position[1])
+  );
+  if (positions.length === 0) return null;
+
+  let minLon = Infinity;
+  let minLat = Infinity;
+  let maxLon = -Infinity;
+  let maxLat = -Infinity;
+  for (const [lon, lat] of positions) {
+    minLon = Math.min(minLon, lon);
+    minLat = Math.min(minLat, lat);
+    maxLon = Math.max(maxLon, lon);
+    maxLat = Math.max(maxLat, lat);
+  }
+
+  return [minLon, minLat, maxLon, maxLat];
+}
+
+function bboxesIntersect(
+  a: [number, number, number, number],
+  b: [number, number, number, number]
+) {
+  return a[0] <= b[2] && a[2] >= b[0] && a[1] <= b[3] && a[3] >= b[1];
 }
 
 function geometryIntersectsBbox(
   geometry: GeoJSON.Geometry | null | undefined,
   bbox: [number, number, number, number]
 ): boolean {
-  return flattenPositions(geometry).some((position) => pointInBbox(position, bbox));
+  const bounds = geometryBounds(geometry);
+  return Boolean(bounds && bboxesIntersect(bounds, bbox));
 }
 
 function pointOnSegment(
@@ -292,6 +461,16 @@ function pointInPolygon(point: [number, number], polygon: GeoJSON.Polygon): bool
 
 function featureInCampaignBoundary(feature: unknown, boundary: GeoJSON.Polygon): boolean {
   const geometry = (feature as { geometry?: GeoJSON.Geometry | null } | null)?.geometry;
+  try {
+    return turf.booleanIntersects(
+      feature as GeoJSON.Feature<GeoJSON.Geometry>,
+      turf.feature(boundary)
+    );
+  } catch {
+    // Fall back to cheap checks if a malformed municipal feature cannot be
+    // evaluated by Turf.
+  }
+
   const center = geometryCenter(geometry);
   if (center && pointInPolygon(center, boundary)) return true;
   return flattenPositions(geometry).some((position) => pointInPolygon(position, boundary));
@@ -311,6 +490,47 @@ function filterCampaignBoundaryFeatures<T extends FeatureCollectionLike | null |
       featureInCampaignBoundary(feature, boundary)
     ),
   } as T;
+}
+
+function mergeBuildingFragments(buildingId: string, fragments: PolygonalBuildingFeature[]): PolygonalBuildingFeature {
+  const [first] = fragments;
+  if (!first) throw new Error(`Cannot merge empty building fragment set for ${buildingId}`);
+  if (fragments.length === 1) return first;
+
+  try {
+    const merged = turf.union(
+      turf.featureCollection(fragments.map((fragment) => turf.feature(fragment.geometry)))
+    );
+    if (merged?.geometry) {
+      return {
+        ...first,
+        id: buildingId,
+        geometry: merged.geometry,
+        properties: first.properties,
+      };
+    }
+  } catch (error) {
+    console.warn('[API] Failed to merge clipped building tile fragments:', {
+      buildingId,
+      fragments: fragments.length,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  const polygons = fragments.flatMap((fragment) =>
+    fragment.geometry.type === 'Polygon'
+      ? [fragment.geometry.coordinates]
+      : fragment.geometry.coordinates
+  );
+
+  return {
+    ...first,
+    id: buildingId,
+    geometry: polygons.length === 1
+      ? { type: 'Polygon', coordinates: polygons[0] }
+      : { type: 'MultiPolygon', coordinates: polygons },
+    properties: first.properties,
+  };
 }
 
 function normalizeGeoJsonPolygon(value: GeoJSON.Polygon | string | null | undefined): GeoJSON.Polygon | null {
@@ -345,50 +565,65 @@ async function fetchScopedPmtilesBuildingFeatures(
   const range = tileRangesForBbox(bbox, header.maxZoom);
   if (!range) return null;
 
-  const byBuildingId = new Map<string, NonNullable<FeatureCollectionLike['features']>[number]>();
+  const byBuildingId = new Map<string, PolygonalBuildingFeature[]>();
+  const tileCoords: Array<{ x: number; y: number }> = [];
   for (let x = range.minX; x <= range.maxX; x += 1) {
     for (let y = range.minY; y <= range.maxY; y += 1) {
-      const tile = await archive.getZxy(range.z, x, y);
-      if (!tile) continue;
-
-      const vectorTile = new VectorTile(new Pbf(Buffer.from(tile.data)));
-      const layer = vectorTile.layers[sourceLayer] ?? vectorTile.layers.buildings;
-      if (!layer) continue;
-
-      for (let index = 0; index < layer.length; index += 1) {
-        const vectorFeature = layer.feature(index);
-        const feature = vectorFeature.toGeoJSON(x, y, range.z) as GeoJSON.Feature;
-        const properties = (feature.properties ?? {}) as Record<string, unknown>;
-        const buildingId = String(properties.building_id ?? properties.gers_id ?? properties.id ?? '').trim();
-        if (!buildingId || hiddenBuildingIds.has(buildingId) || byBuildingId.has(buildingId)) continue;
-
-        if (!geometryIntersectsBbox(feature.geometry, bbox)) continue;
-        if (boundary && !featureInCampaignBoundary(feature, boundary)) continue;
-
-        byBuildingId.set(buildingId, {
-          ...feature,
-          id: buildingId,
-          properties: {
-            ...properties,
-            id: buildingId,
-            building_id: buildingId,
-            gers_id: buildingId,
-            height: Math.max(Number(properties.height ?? properties.height_m ?? 10), 10),
-            height_m: Math.max(Number(properties.height_m ?? properties.height ?? 10), 10),
-            min_height: Number(properties.min_height ?? 0),
-            source: properties.source ?? 'bedrock_pmtiles',
-            feature_type: 'matched_house',
-            feature_status: 'matched',
-            status: 'not_visited',
-            scans_total: 0,
-            qr_scanned: false,
-          },
-        });
-      }
+      tileCoords.push({ x, y });
     }
   }
 
-  const features = Array.from(byBuildingId.values());
+  await forEachWithConcurrency(tileCoords, PMTILES_TILE_FETCH_CONCURRENCY, async ({ x, y }) => {
+    const tile = await archive.getZxy(range.z, x, y);
+    if (!tile) return;
+
+    const vectorTile = new VectorTile(new Pbf(Buffer.from(tile.data)));
+    const layer = vectorTile.layers[sourceLayer] ?? vectorTile.layers.buildings;
+    if (!layer) return;
+
+    for (let index = 0; index < layer.length; index += 1) {
+      const vectorFeature = layer.feature(index);
+      const feature = vectorFeature.toGeoJSON(x, y, range.z) as GeoJSON.Feature;
+      if (feature.geometry?.type !== 'Polygon' && feature.geometry?.type !== 'MultiPolygon') continue;
+      const properties = (feature.properties ?? {}) as Record<string, unknown>;
+      const buildingId = String(properties.building_id ?? properties.gers_id ?? properties.id ?? '').trim();
+      if (!buildingId || hiddenBuildingIds.has(buildingId)) continue;
+
+      if (!geometryIntersectsBbox(feature.geometry, bbox)) continue;
+      if (boundary && !featureInCampaignBoundary(feature, boundary)) continue;
+
+      const normalizedFeature: PolygonalBuildingFeature = {
+        ...feature,
+        id: buildingId,
+        geometry: feature.geometry,
+        properties: {
+          ...properties,
+          id: buildingId,
+          building_id: buildingId,
+          gers_id: buildingId,
+          height: Math.max(Number(properties.height ?? properties.height_m ?? 10), 10),
+          height_m: Math.max(Number(properties.height_m ?? properties.height ?? 10), 10),
+          min_height: Number(properties.min_height ?? 0),
+          source: properties.source ?? 'bedrock_pmtiles',
+          feature_type: 'matched_house',
+          feature_status: 'matched',
+          status: 'not_visited',
+          scans_total: 0,
+          qr_scanned: false,
+        },
+      };
+      const fragments = byBuildingId.get(buildingId);
+      if (fragments) {
+        fragments.push(normalizedFeature);
+      } else {
+        byBuildingId.set(buildingId, [normalizedFeature]);
+      }
+    }
+  });
+
+  const features = Array.from(byBuildingId.entries()).map(([buildingId, fragments]) =>
+    mergeBuildingFragments(buildingId, fragments)
+  );
   if (features.length === 0) return null;
   return {
     type: 'FeatureCollection',
@@ -559,6 +794,26 @@ function filterNonLinkableBuildingFeatures(
     ...featureCollection,
     features: featureCollection.features.filter(isLinkableBuildingFeature),
   };
+}
+
+async function loadVisibleSnapshotGeojsonBuildings(params: {
+  snapshot: CampaignSnapshotRow;
+  geojsonKey: string | null;
+  hiddenBuildingIds: Set<string>;
+  campaignBoundary: GeoJSON.Polygon | null;
+}): Promise<FeatureCollectionLike | null> {
+  const { snapshot, geojsonKey, hiddenBuildingIds, campaignBoundary } = params;
+  if (!geojsonKey || geojsonKey.endsWith('.pmtiles')) return null;
+
+  console.log(`[API] Fetching snapshot GeoJSON artifact fallback: ${snapshot.bucket}/${geojsonKey}`);
+
+  const geojson = await fetchSnapshotGeoJSONArtifact(snapshot, geojsonKey);
+  return filterCampaignBoundaryFeatures(
+    filterNonLinkableBuildingFeatures(
+      filterHiddenBuildingFeatures(geojson, hiddenBuildingIds)
+    ),
+    campaignBoundary
+  ) as FeatureCollectionLike;
 }
 
 interface CampaignAccessRow {
@@ -1227,6 +1482,7 @@ export async function GET(
   const { campaignId } = await params;
   
   console.log(`[API] GET /campaigns/${campaignId}/buildings`);
+  const requestStartedAt = Date.now();
   
   try {
     const requestUser = await resolveUserFromRequest(request);
@@ -1260,18 +1516,131 @@ export async function GET(
     if (!allowed) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
-    
+
+    const hiddenBuildingIds = await hiddenBuildingIdsPromise;
+    const campaignBoundary = normalizeGeoJsonPolygon((campaignAccess as CampaignAccessRow).territory_boundary);
+
+    console.log('[API] Trying buildings from S3 snapshot');
+
+    const { data: snapshot, error: snapshotError } = await supabase
+      .from('campaign_snapshots')
+      .select('bucket, prefix, buildings_key, buildings_url, metadata_key, buildings_count, created_at, tile_metrics')
+      .eq('campaign_id', campaignId)
+      .maybeSingle();
+
+    if (!snapshotError && snapshot?.bucket) {
+      const snapshotRow = snapshot as CampaignSnapshotRow;
+      const geojsonKey = resolveFallbackGeoJSONKey(snapshotRow);
+      const bbox = parseBbox((campaignAccess as CampaignAccessRow).bbox) ?? bboxFromPolygon(campaignBoundary);
+      const cacheKey = snapshotBuildingsCacheKey({
+        campaignId,
+        snapshot: snapshotRow,
+        bbox,
+        hiddenBuildingIds,
+        boundary: campaignBoundary,
+      });
+
+      const snapshotBuildings = await loadCachedBuildingsResponse(cacheKey, async () => {
+        const pmtilesKey = resolvePmtilesKey(snapshotRow);
+
+        let pmtilesCandidate: FeatureCollectionLike | null = null;
+        if (pmtilesKey) {
+          if (bbox) {
+            console.log('[API] Building scoped features from PMTiles bbox window', { pmtilesKey });
+            try {
+              const pmtilesFallback = await fetchScopedPmtilesBuildingFeatures(
+                snapshotRow,
+                bbox,
+                hiddenBuildingIds,
+                campaignBoundary
+              );
+              const visiblePmtilesFallback = filterNonLinkableBuildingFeatures(pmtilesFallback);
+              const visiblePmtilesFeatures = (visiblePmtilesFallback as { features?: unknown[] } | null)?.features ?? [];
+              if (visiblePmtilesFeatures.length > 0) {
+                pmtilesCandidate = visiblePmtilesFallback as FeatureCollectionLike;
+              }
+            } catch (pmtilesError) {
+              console.warn(
+                '[API] Scoped PMTiles building fallback failed; continuing to campaign feature fallback:',
+                pmtilesError instanceof Error ? pmtilesError.message : pmtilesError
+              );
+            }
+          } else {
+            console.log('[API] Snapshot has PMTiles but campaign bbox is unavailable');
+          }
+        }
+
+        const hasScopedPmtilesSource = Boolean(pmtilesKey && bbox);
+        const pmtilesCount = getFeatureCount(pmtilesCandidate);
+        const expectedSnapshotCount = Number(snapshotRow.buildings_count ?? 0);
+        const shouldCheckGeojson = !pmtilesCandidate && !hasScopedPmtilesSource;
+
+        if (pmtilesCandidate && expectedSnapshotCount > pmtilesCount) {
+          console.log('[API] Using scoped PMTiles buildings without city artifact comparison', {
+            pmtiles: pmtilesCount,
+            snapshotCount: expectedSnapshotCount,
+          });
+        } else if (!pmtilesCandidate && hasScopedPmtilesSource) {
+          console.warn('[API] Scoped PMTiles produced no buildings; skipping city-wide GeoJSON fallback');
+        }
+
+        if (shouldCheckGeojson) {
+          try {
+            const visibleGeojson = await loadVisibleSnapshotGeojsonBuildings({
+              snapshot: snapshotRow,
+              geojsonKey,
+              hiddenBuildingIds,
+              campaignBoundary,
+            });
+            const visibleSnapshotFeatures = (visibleGeojson as { features?: unknown[] } | null)?.features ?? [];
+
+            if (visibleSnapshotFeatures.length > pmtilesCount) {
+              if (pmtilesCount > 0) {
+                console.warn('[API] PMTiles scoped extraction returned fewer buildings than GeoJSON artifact', {
+                  pmtiles: pmtilesCount,
+                  geojson: visibleSnapshotFeatures.length,
+                  expected: expectedSnapshotCount || null,
+                });
+              }
+              return visibleGeojson as FeatureCollectionLike;
+            }
+          } catch (snapshotFetchError) {
+            console.warn(
+              '[API] Snapshot GeoJSON fallback fetch failed; continuing to direct DB fallbacks:',
+              snapshotFetchError instanceof Error ? snapshotFetchError.message : snapshotFetchError
+            );
+          }
+        }
+
+        if (pmtilesCandidate) {
+          return pmtilesCandidate;
+        }
+
+        return null;
+      });
+
+      const snapshotBuildingCount = getFeatureCount(snapshotBuildings);
+      if (snapshotBuildingCount > 0 && snapshotBuildings) {
+        console.log(
+          `[API] Returning ${snapshotBuildingCount} campaign-scoped snapshot buildings in ${Date.now() - requestStartedAt}ms`
+        );
+        return buildingsJsonResponse(snapshotBuildings);
+      }
+    } else if (snapshotError) {
+      console.warn('[API] Snapshot lookup failed:', snapshotError.message);
+    } else {
+      console.log('[API] No Diamond snapshot found; returning address points while buildings load');
+    }
+
     // Use the RPC for immediate address points only while Diamond builds.
     // Building polygons are served from the Diamond snapshot, not direct Gold/Silver DB fallbacks.
     console.log('[API] Fetching campaign features via rpc_get_campaign_full_features');
-    
+
     const { data: campaignFeatures, error: featuresError } = await supabase.rpc(
       'rpc_get_campaign_full_features',
       { p_campaign_id: campaignId }
     );
     const normalizedCampaignFeatures = (campaignFeatures ?? null) as FeatureCollectionLike | null;
-    const hiddenBuildingIds = await hiddenBuildingIdsPromise;
-    const campaignBoundary = normalizeGeoJsonPolygon((campaignAccess as CampaignAccessRow).territory_boundary);
     const visibleCampaignFeatures = filterCampaignBoundaryFeatures(
       filterNonLinkableBuildingFeatures(
         filterHiddenBuildingFeatures(normalizedCampaignFeatures, hiddenBuildingIds)
@@ -1297,84 +1666,6 @@ export async function GET(
       console.error('[API] Feature RPC error:', featuresError.message);
     } else {
       console.log('[API] No linked features from RPC');
-    }
-
-    console.log('[API] Trying buildings from S3 snapshot');
-    
-    const { data: snapshot, error: snapshotError } = await supabase
-      .from('campaign_snapshots')
-      .select('bucket, prefix, buildings_key, buildings_url, metadata_key, buildings_count, created_at, tile_metrics')
-      .eq('campaign_id', campaignId)
-      .maybeSingle();
-    
-    if (!snapshotError && snapshot?.bucket) {
-      const snapshotRow = snapshot as CampaignSnapshotRow;
-      const geojsonKey = resolveFallbackGeoJSONKey(snapshotRow);
-
-      const pmtilesKey = resolvePmtilesKey(snapshotRow);
-      if (pmtilesKey) {
-        const bbox = parseBbox((campaignAccess as CampaignAccessRow).bbox);
-        if (bbox) {
-          console.log('[API] Building scoped features from PMTiles bbox window', { pmtilesKey });
-          try {
-            const pmtilesFallback = await fetchScopedPmtilesBuildingFeatures(
-              snapshotRow,
-              bbox,
-              hiddenBuildingIds,
-              campaignBoundary
-            );
-            const visiblePmtilesFallback = filterNonLinkableBuildingFeatures(pmtilesFallback);
-            const visiblePmtilesFeatures = (visiblePmtilesFallback as { features?: unknown[] } | null)?.features ?? [];
-            if (visiblePmtilesFeatures.length > 0) {
-              console.log(`[API] Returning ${visiblePmtilesFeatures.length} campaign-scoped PMTiles buildings`);
-              return NextResponse.json(visiblePmtilesFallback);
-            }
-          } catch (pmtilesError) {
-            console.warn(
-              '[API] Scoped PMTiles building fallback failed; continuing to campaign feature fallback:',
-              pmtilesError instanceof Error ? pmtilesError.message : pmtilesError
-            );
-          }
-        } else {
-          console.log('[API] Snapshot has PMTiles but campaign bbox is unavailable');
-        }
-      }
-
-      if (geojsonKey && !geojsonKey.endsWith('.pmtiles')) {
-        console.log(`[API] Fetching snapshot GeoJSON artifact fallback: ${snapshot.bucket}/${geojsonKey}`);
-
-        try {
-          const geojson = await fetchSnapshotGeoJSONArtifact(snapshotRow, geojsonKey);
-          const visibleGeojson = filterCampaignBoundaryFeatures(
-            filterNonLinkableBuildingFeatures(
-              filterHiddenBuildingFeatures(geojson, hiddenBuildingIds)
-            ),
-            campaignBoundary
-          );
-          const visibleSnapshotFeatures = (visibleGeojson as { features?: unknown[] }).features ?? [];
-
-          if (visibleSnapshotFeatures.length > 0) {
-            console.log(`[API] Returning ${visibleSnapshotFeatures.length} snapshot GeoJSON fallback buildings`);
-            return NextResponse.json(visibleGeojson);
-          }
-
-          if (visibleFallbackFeatures?.features?.length) {
-            console.log(
-              `[API] Snapshot GeoJSON fallback buildings all filtered out; returning ${visibleFallbackFeatures.features.length} point features`
-            );
-            return NextResponse.json(visibleFallbackFeatures);
-          }
-        } catch (snapshotFetchError) {
-          console.warn(
-            '[API] Snapshot GeoJSON fallback fetch failed; continuing to direct DB fallbacks:',
-            snapshotFetchError instanceof Error ? snapshotFetchError.message : snapshotFetchError
-          );
-        }
-      }
-    } else if (snapshotError) {
-      console.warn('[API] Snapshot lookup failed:', snapshotError.message);
-    } else {
-      console.log('[API] No Diamond snapshot found; returning address points while buildings load');
     }
 
     const visibleCampaignFeatureCount = visibleCampaignFeatures?.features?.length ?? 0;

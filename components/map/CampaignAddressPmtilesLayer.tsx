@@ -5,6 +5,22 @@ import mapboxgl from 'mapbox-gl';
 import type { CampaignAddress, CampaignType } from '@/types/database';
 import { getCampaignAddressMapStatus } from '@/lib/campaignStats';
 import type { StatusFilters } from '@/lib/constants/mapStatus';
+import {
+  appendTileAccessToken,
+  fetchCampaignMapManifest,
+  hasRenderablePmtilesAddresses,
+  type CampaignMapManifest,
+} from '@/lib/map/campaignMapManifest';
+
+type ManifestAddressSource = {
+  deliveryMode: 'backend_zxy';
+  url: string;
+  sourceLayer: string;
+  promoteId: string;
+  minzoom: number;
+  maxzoom: number;
+  bounds?: [number, number, number, number];
+};
 
 type CampaignAddressPmtilesLayerProps = {
   map: mapboxgl.Map;
@@ -26,6 +42,8 @@ type CampaignAddressPmtilesLayerProps = {
     }
   ) => void;
 };
+
+type AddressApiFeature = GeoJSON.Feature<GeoJSON.Point, Record<string, unknown>>;
 
 const SOURCE_ID = 'campaign-addresses-pmtiles-source';
 const GLOW_LAYER_ID = 'campaign-addresses-pmtiles-lead-glow';
@@ -77,6 +95,11 @@ function cleanupAddressLayers(map: mapboxgl.Map) {
   safeRemoveSource(map, SOURCE_ID);
 }
 
+function campaignBoundaryWithinFilter(boundary?: GeoJSON.Polygon | null): mapboxgl.Expression | undefined {
+  if (!boundary?.coordinates?.[0]?.length) return undefined;
+  return ['within', boundary] as unknown as mapboxgl.Expression;
+}
+
 function canAddCustomMapLayers(map: mapboxgl.Map): boolean {
   try {
     const style = map.getStyle();
@@ -84,6 +107,28 @@ function canAddCustomMapLayers(map: mapboxgl.Map): boolean {
   } catch {
     return false;
   }
+}
+
+function toManifestAddressSource(
+  manifest: CampaignMapManifest,
+  accessToken: string | null
+): ManifestAddressSource | null {
+  const layer = manifest.layers?.addresses;
+  const sourceLayer = layer?.sourceLayer ?? manifest.address_source_layer ?? manifest.source_layers?.address_circles ?? manifest.source_layers?.addresses;
+  if (!sourceLayer) return null;
+
+  const vectorTileUrlTemplate = layer?.vectorTileUrlTemplate ?? manifest.address_vector_tile_url_template;
+  if (!vectorTileUrlTemplate) return null;
+
+  return {
+    deliveryMode: 'backend_zxy',
+    url: appendTileAccessToken(vectorTileUrlTemplate, accessToken),
+    sourceLayer,
+    promoteId: layer?.promoteId ?? manifest.address_promote_id ?? manifest.promote_ids?.address_circles ?? manifest.promote_ids?.addresses ?? 'address_id',
+    minzoom: layer?.minzoom ?? manifest.address_minzoom ?? 10,
+    maxzoom: layer?.maxzoom ?? manifest.address_maxzoom ?? 16,
+    bounds: layer?.bounds ?? manifest.address_bounds ?? manifest.bounds ?? undefined,
+  };
 }
 
 function getStatusState(address: CampaignAddress) {
@@ -182,6 +227,56 @@ function stringIdentifier(value: unknown): string | null {
   return normalized || null;
 }
 
+function stringProperty(properties: Record<string, unknown>, key: string): string | undefined {
+  const value = properties[key];
+  if (typeof value !== 'string' && typeof value !== 'number') return undefined;
+  const normalized = String(value).trim();
+  return normalized || undefined;
+}
+
+function addressFeatureToCampaignAddress(
+  feature: AddressApiFeature,
+  campaignId: string
+): CampaignAddress | null {
+  if (feature.geometry?.type !== 'Point') return null;
+  const [lon, lat] = feature.geometry.coordinates;
+  if (!Number.isFinite(lon) || !Number.isFinite(lat)) return null;
+
+  const properties = feature.properties ?? {};
+  const id =
+    stringProperty(properties, 'id') ??
+    stringProperty(properties, 'address_id') ??
+    stringProperty(properties, 'address_detail_pid') ??
+    (typeof feature.id === 'string' || typeof feature.id === 'number' ? String(feature.id) : undefined) ??
+    `${lon},${lat}`;
+  const formatted =
+    stringProperty(properties, 'formatted') ??
+    stringProperty(properties, 'address') ??
+    stringProperty(properties, 'full_address') ??
+    '';
+
+  return {
+    id,
+    campaign_id: campaignId,
+    address: formatted,
+    formatted,
+    postal_code: stringProperty(properties, 'postal_code') ?? stringProperty(properties, 'postcode'),
+    source: 'map',
+    source_id: stringProperty(properties, 'source_id') ?? stringProperty(properties, 'gers_id') ?? id,
+    gers_id: stringProperty(properties, 'gers_id'),
+    building_id: stringProperty(properties, 'building_id'),
+    building_gers_id: stringProperty(properties, 'building_gers_id'),
+    house_number: stringProperty(properties, 'house_number') ?? stringProperty(properties, 'number'),
+    street_name: stringProperty(properties, 'street_name') ?? stringProperty(properties, 'street'),
+    locality: stringProperty(properties, 'locality') ?? stringProperty(properties, 'city'),
+    region: stringProperty(properties, 'region'),
+    coordinate: { lon, lat },
+    created_at: new Date(0).toISOString(),
+    visited: Boolean(properties.visited),
+    scans: Number(properties.scans_total ?? properties.scans ?? 0),
+  };
+}
+
 function makeCirclePolygon(
   center: { lon: number; lat: number },
   radiusMeters: number,
@@ -272,18 +367,21 @@ export function CampaignAddressPmtilesLayer({
   visible,
   addresses,
   deletedAddressIds = [],
+  campaignBoundary,
   styleKey,
   onAddressClick,
 }: CampaignAddressPmtilesLayerProps) {
-  const [manifestSource, setManifestSource] = useState<null | undefined>(undefined);
+  const [manifestSource, setManifestSource] = useState<ManifestAddressSource | null | undefined>(undefined);
+  const [apiFallbackAddresses, setApiFallbackAddresses] = useState<CampaignAddress[]>([]);
   const onAddressClickRef = useRef(onAddressClick);
+  const renderAddresses = addresses.length > 0 ? addresses : apiFallbackAddresses;
   const deletedAddressSet = useMemo(
     () => new Set(deletedAddressIds.map((id) => String(id ?? '').trim()).filter(Boolean)),
     [deletedAddressIds]
   );
   const campaignAddressIds = useMemo(() => {
     const ids = new Set<string>();
-    for (const address of addresses) {
+    for (const address of renderAddresses) {
       [
         address.id,
         address.source_id,
@@ -296,7 +394,13 @@ export function CampaignAddressPmtilesLayer({
       });
     }
     return ids;
-  }, [addresses]);
+  }, [renderAddresses]);
+
+  useEffect(() => {
+    if (addresses.length > 0) {
+      setApiFallbackAddresses([]);
+    }
+  }, [addresses.length]);
 
   useEffect(() => {
     onAddressClickRef.current = onAddressClick;
@@ -308,7 +412,9 @@ export function CampaignAddressPmtilesLayer({
   };
 
   const getCampaignScopeFilter = (): mapboxgl.Expression => {
-    if (campaignAddressIds.size === 0) return NO_FEATURES_FILTER;
+    if (campaignAddressIds.size === 0) {
+      return (manifestSource ? campaignBoundaryWithinFilter(campaignBoundary) : undefined) ?? NO_FEATURES_FILTER;
+    }
     return ['in', ADDRESS_ID_EXPRESSION, ['literal', Array.from(campaignAddressIds)]] as mapboxgl.Expression;
   };
 
@@ -327,12 +433,20 @@ export function CampaignAddressPmtilesLayer({
     let cancelled = false;
 
     const loadManifest = async () => {
-      if (!campaignId || !visible) {
+      if (!campaignId || !visible || addresses.length > 0) {
         setManifestSource(null);
         return;
       }
 
-      if (!cancelled) setManifestSource(null);
+      const { manifest, accessToken } = await fetchCampaignMapManifest(campaignId);
+      if (cancelled) return;
+
+      if (!hasRenderablePmtilesAddresses(manifest)) {
+        setManifestSource(null);
+        return;
+      }
+
+      setManifestSource(toManifestAddressSource(manifest!, accessToken));
     };
 
     void loadManifest();
@@ -341,6 +455,46 @@ export function CampaignAddressPmtilesLayer({
       cancelled = true;
     };
   }, [campaignId, visible, addresses.length]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadApiFallbackAddresses = async () => {
+      if (!campaignId || !visible || manifestSource !== null || addresses.length > 0) {
+        if (!cancelled && addresses.length > 0) setApiFallbackAddresses([]);
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/addresses`, {
+          credentials: 'same-origin',
+        });
+        if (!response.ok) return;
+        const payload = await response.json();
+        const features: AddressApiFeature[] = Array.isArray(payload)
+          ? payload
+          : Array.isArray(payload?.features)
+            ? payload.features
+            : [];
+        const fallbackAddresses = features
+          .map((feature) => addressFeatureToCampaignAddress(feature, campaignId))
+          .filter((address): address is CampaignAddress => Boolean(address));
+        if (!cancelled) {
+          setApiFallbackAddresses(fallbackAddresses);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.warn('[CampaignAddressPmtilesLayer] Failed to load address GeoJSON fallback:', error);
+        }
+      }
+    };
+
+    void loadApiFallbackAddresses();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [campaignId, visible, manifestSource, addresses.length]);
 
   useEffect(() => {
     if (!map || !mapLoaded || !visible) {
@@ -360,7 +514,7 @@ export function CampaignAddressPmtilesLayer({
       if (!canAddCustomMapLayers(map)) return;
       cleanupAddressLayers(map);
 
-      const geojson = buildFallbackAddressFeatureCollection(addresses, deletedAddressSet);
+      const geojson = buildFallbackAddressFeatureCollection(renderAddresses, deletedAddressSet);
       if (geojson.features.length === 0) return;
 
       map.addSource(SOURCE_ID, {
@@ -444,6 +598,122 @@ export function CampaignAddressPmtilesLayer({
       };
     };
 
+    const addManifestAddressLayers = (source: ManifestAddressSource) => {
+      if (!canAddCustomMapLayers(map)) return;
+      cleanupAddressLayers(map);
+
+      const vectorSource: mapboxgl.VectorSourceSpecification & {
+        buffer?: number;
+        promoteId?: Record<string, string>;
+      } = {
+        type: 'vector',
+        minzoom: source.minzoom,
+        maxzoom: source.maxzoom,
+        buffer: 128,
+        promoteId: {
+          [source.sourceLayer]: source.promoteId,
+        },
+        tiles: [source.url],
+      };
+      if (source.bounds) vectorSource.bounds = source.bounds;
+
+      map.addSource(SOURCE_ID, vectorSource);
+
+      map.addLayer({
+        id: CIRCLE_LAYER_ID,
+        type: 'fill-extrusion',
+        source: SOURCE_ID,
+        'source-layer': source.sourceLayer,
+        minzoom: source.minzoom,
+        filter: getLayerFilter('Polygon'),
+        paint: {
+          'fill-extrusion-color': ADDRESS_CYLINDER_COLOR,
+          'fill-extrusion-opacity': 0.96,
+          'fill-extrusion-height': ADDRESS_CYLINDER_HEIGHT_METERS,
+          'fill-extrusion-base': 0,
+          'fill-extrusion-vertical-gradient': true,
+          'fill-extrusion-emissive-strength': 0.45,
+        },
+      } as mapboxgl.AnyLayer);
+
+      map.addLayer({
+        id: GLOW_LAYER_ID,
+        type: 'circle',
+        source: SOURCE_ID,
+        'source-layer': source.sourceLayer,
+        minzoom: source.minzoom,
+        filter: getLayerFilter('Point'),
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 2.5, 17, 5],
+          'circle-color': ADDRESS_CYLINDER_COLOR,
+          'circle-opacity': 0.88,
+          'circle-stroke-width': 1,
+          'circle-stroke-color': '#111827',
+        },
+      } as mapboxgl.AnyLayer);
+
+      map.addLayer({
+        id: LABEL_LAYER_ID,
+        type: 'symbol',
+        source: SOURCE_ID,
+        'source-layer': source.sourceLayer,
+        minzoom: ADDRESS_LABEL_MIN_ZOOM,
+        filter: ['in', ['geometry-type'], ['literal', ['Point', 'Polygon']]] as mapboxgl.Expression,
+        layout: {
+          'text-field': ADDRESS_LABEL_EXPRESSION,
+          'text-size': ['interpolate', ['linear'], ['zoom'], ADDRESS_LABEL_MIN_ZOOM, 10, 22, 13],
+          'text-font': ['DIN Offc Pro Medium', 'Arial Unicode MS Regular'],
+          'text-anchor': 'center',
+          'text-pitch-alignment': 'map',
+          'text-rotation-alignment': 'map',
+          'text-allow-overlap': true,
+          'text-ignore-placement': true,
+          'symbol-placement': 'point',
+          'symbol-z-order': 'auto',
+        },
+        paint: {
+          'text-color': '#f9fafb',
+          'text-opacity': 0.95,
+          'text-halo-color': '#111827',
+          'text-halo-width': 1.5,
+        },
+      } as mapboxgl.AnyLayer);
+
+      const clickHandler = (event: mapboxgl.MapLayerMouseEvent) => {
+        const feature = event.features?.[0];
+        const props = feature?.properties ?? {};
+        const addressId = String(props.address_id ?? props.address_detail_pid ?? props.id ?? '').trim();
+        if (!addressId) return;
+        const buildingId = String(props.building_id ?? props.building_gers_id ?? props.gers_id ?? '').trim() || null;
+        const originalEvent = event.originalEvent as MouseEvent | undefined;
+        onAddressClickRef.current?.(addressId, buildingId, {
+          additive: Boolean(originalEvent?.metaKey || originalEvent?.ctrlKey),
+        });
+      };
+      const enterHandler = () => {
+        map.getCanvas().style.cursor = 'pointer';
+      };
+      const leaveHandler = () => {
+        map.getCanvas().style.cursor = '';
+      };
+
+      map.on('click', CIRCLE_LAYER_ID, clickHandler);
+      map.on('click', GLOW_LAYER_ID, clickHandler);
+      map.on('mouseenter', CIRCLE_LAYER_ID, enterHandler);
+      map.on('mouseenter', GLOW_LAYER_ID, enterHandler);
+      map.on('mouseleave', CIRCLE_LAYER_ID, leaveHandler);
+      map.on('mouseleave', GLOW_LAYER_ID, leaveHandler);
+
+      return () => {
+        map.off('click', CIRCLE_LAYER_ID, clickHandler);
+        map.off('click', GLOW_LAYER_ID, clickHandler);
+        map.off('mouseenter', CIRCLE_LAYER_ID, enterHandler);
+        map.off('mouseenter', GLOW_LAYER_ID, enterHandler);
+        map.off('mouseleave', CIRCLE_LAYER_ID, leaveHandler);
+        map.off('mouseleave', GLOW_LAYER_ID, leaveHandler);
+      };
+    };
+
     let cleanupHandlers: (() => void) | undefined;
     let cancelled = false;
     let retryIntervalId: number | undefined;
@@ -465,7 +735,9 @@ export function CampaignAddressPmtilesLayer({
       }
       if (cleanupHandlers || !canAddCustomMapLayers(map)) return;
       try {
-        cleanupHandlers = addLocalCylinderLayers();
+        cleanupHandlers = manifestSource
+          ? addManifestAddressLayers(manifestSource)
+          : addLocalCylinderLayers();
         if (cleanupHandlers && hasExpectedAddressLayers()) clearRetry();
       } catch (error) {
         cleanupHandlers?.();
@@ -492,7 +764,7 @@ export function CampaignAddressPmtilesLayer({
     };
   // Layer creation is keyed to the map/style/source; paint and filter changes are refreshed below to avoid full layer teardown.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [map, mapLoaded, visible, manifestSource, styleKey, addresses, deletedAddressSet, campaignAddressIds]);
+  }, [map, mapLoaded, visible, manifestSource, styleKey, renderAddresses, deletedAddressSet, campaignAddressIds]);
 
   useEffect(() => {
     if (!map || !visible) return;
@@ -502,7 +774,7 @@ export function CampaignAddressPmtilesLayer({
       try {
         const source = map.getSource(SOURCE_ID) as mapboxgl.GeoJSONSource | undefined;
         if (source) {
-          source.setData(buildFallbackAddressFeatureCollection(addresses, deletedAddressSet));
+          source.setData(buildFallbackAddressFeatureCollection(renderAddresses, deletedAddressSet));
         }
         if (map.getLayer(GLOW_LAYER_ID)) {
           map.setFilter(GLOW_LAYER_ID, getLayerFilter('Polygon'));
@@ -520,7 +792,7 @@ export function CampaignAddressPmtilesLayer({
       return;
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [map, manifestSource, visible, deletedAddressSet, addresses, campaignAddressIds]);
+  }, [map, manifestSource, visible, deletedAddressSet, renderAddresses, campaignAddressIds]);
 
   return null;
 }

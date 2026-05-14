@@ -1,4 +1,4 @@
-import { PMTiles } from 'pmtiles';
+import { FetchSource, PMTiles, type RangeResponse } from 'pmtiles';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { NextRequest } from 'next/server';
 import { resolveUserFromRequest, type RequestUser } from '@/app/api/_utils/request-user';
@@ -19,6 +19,20 @@ const authCache = new Map<string, CacheEntry<RequestUser | null>>();
 const accessCache = new Map<string, CacheEntry<boolean>>();
 const snapshotCache = new Map<string, CacheEntry<CampaignSnapshotRow | null>>();
 const archiveCache = new Map<string, PMTiles>();
+
+class EtagTolerantFetchSource extends FetchSource {
+  async getBytes(
+    offset: number,
+    length: number,
+    signal?: AbortSignal
+  ): Promise<RangeResponse> {
+    const response = await super.getBytes(offset, length, signal, undefined);
+    return {
+      ...response,
+      etag: undefined,
+    };
+  }
+}
 
 function getCached<T>(cache: Map<string, CacheEntry<T>>, key: string): T | undefined {
   const entry = cache.get(key);
@@ -104,7 +118,7 @@ export function getCachedPmtilesArchive(url: string) {
   const cached = archiveCache.get(url);
   if (cached) return cached;
 
-  const archive = new PMTiles(url);
+  const archive = new PMTiles(new EtagTolerantFetchSource(url));
   archiveCache.set(url, archive);
 
   if (archiveCache.size > MAX_ARCHIVES) {

@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { HeadObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { ensureCampaignAccess } from '@/app/api/campaigns/_utils/access';
@@ -14,22 +13,21 @@ import {
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-let s3Client: S3Client | null = null;
+type Bounds = [number, number, number, number];
 
-function getS3Client() {
-  if (!s3Client) {
-    s3Client = new S3Client({
-      region: process.env.AWS_REGION || 'us-east-2',
-      credentials: process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY
-        ? {
-            accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-            secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-          }
-        : undefined,
-    });
-  }
+const ZA_BUILDING_BOUNDS_BUFFER_METERS = 128;
+const METERS_PER_DEGREE_LATITUDE = 111_320;
+const WEB_MERCATOR_MAX_LAT = 85.05112878;
 
-  return s3Client;
+function withManifestHeaders(init: ResponseInit = {}) {
+  const headers = new Headers(init.headers);
+  headers.set('Cache-Control', 'no-store');
+
+  return { ...init, headers };
+}
+
+function manifestJson<T>(body: T, init?: ResponseInit) {
+  return NextResponse.json(body, withManifestHeaders(init));
 }
 
 function apiBaseUrl(request: NextRequest) {
@@ -89,20 +87,47 @@ function numberMetric(metrics: Record<string, unknown> | null | undefined, key: 
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-async function currentObjectVersion(bucket: string, key: string) {
-  try {
-    const response = await getS3Client().send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
-    const etag = response.ETag?.replace(/^"|"$/g, '');
-    const updatedAt = response.LastModified?.getTime();
-    return [etag, updatedAt].filter(Boolean).join(':') || null;
-  } catch (error) {
-    console.warn('[DiamondManifest] Failed to read artifact version:', {
-      bucket,
-      key,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return null;
-  }
+function normalizeBounds(value: unknown): Bounds | null {
+  if (!Array.isArray(value) || value.length !== 4) return null;
+  const bounds = value.map((entry) => Number(entry));
+  if (!bounds.every(Number.isFinite)) return null;
+  if (bounds[0] > bounds[2] || bounds[1] > bounds[3]) return null;
+  return bounds as Bounds;
+}
+
+function isSouthAfricaSnapshot(snapshot: CampaignSnapshotRow) {
+  const countryCode = stringMetric(snapshot.tile_metrics, 'bedrock_country_code')?.toUpperCase();
+  const bedrockCountry = stringMetric(snapshot.tile_metrics, 'bedrock_country')?.toLowerCase();
+  const diamondCountry = stringMetric(snapshot.tile_metrics, 'diamond_country')?.toLowerCase();
+  return (
+    countryCode === 'ZA' ||
+    bedrockCountry === 'south-africa' ||
+    diamondCountry === 'south-africa'
+  );
+}
+
+function buildingBoundsBufferMeters(snapshot: CampaignSnapshotRow) {
+  const configured =
+    numberMetric(snapshot.tile_metrics, 'building_bounds_buffer_meters') ??
+    numberMetric(snapshot.tile_metrics, 'tile_bounds_buffer_meters');
+  if (configured != null) return Math.max(0, configured);
+  return isSouthAfricaSnapshot(snapshot) ? ZA_BUILDING_BOUNDS_BUFFER_METERS : 0;
+}
+
+function expandBounds(bounds: Bounds, bufferMeters: number): Bounds {
+  if (bufferMeters <= 0) return bounds;
+
+  const midLat = (bounds[1] + bounds[3]) / 2;
+  const latDelta = bufferMeters / METERS_PER_DEGREE_LATITUDE;
+  const lonScale = Math.max(Math.cos((midLat * Math.PI) / 180), 0.01);
+  const lonDelta = bufferMeters / (METERS_PER_DEGREE_LATITUDE * lonScale);
+
+  return [
+    Math.max(-180, bounds[0] - lonDelta),
+    Math.max(-WEB_MERCATOR_MAX_LAT, bounds[1] - latDelta),
+    Math.min(180, bounds[2] + lonDelta),
+    Math.min(WEB_MERCATOR_MAX_LAT, bounds[3] + latDelta),
+  ];
 }
 
 function deliveryModeResponse() {
@@ -165,13 +190,13 @@ export async function GET(
   const { campaignId } = await params;
   const requestUser = await resolveUserFromRequest(request);
   if (!requestUser) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    return manifestJson({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const supabase = createAdminClient();
   const allowed = await ensureCampaignAccess(supabase, campaignId, requestUser.id);
   if (!allowed) {
-    return NextResponse.json({ error: 'Campaign not found or access denied' }, { status: 404 });
+    return manifestJson({ error: 'Campaign not found or access denied' }, { status: 404 });
   }
 
   const { data: campaign, error: campaignError } = await supabase
@@ -181,7 +206,7 @@ export async function GET(
     .maybeSingle();
 
   if (campaignError || !campaign) {
-    return NextResponse.json({ error: 'Campaign not found' }, { status: 404 });
+    return manifestJson({ error: 'Campaign not found' }, { status: 404 });
   }
 
   const { data: snapshot, error: snapshotError } = await supabase
@@ -191,7 +216,7 @@ export async function GET(
     .maybeSingle();
 
   if (snapshotError) {
-    return NextResponse.json(
+    return manifestJson(
       { error: 'Failed to load campaign geometry snapshot', details: snapshotError.message },
       { status: 500 }
     );
@@ -210,7 +235,7 @@ export async function GET(
     null;
 
   if (!snapshotRow || (artifact.geometryProvider === 'address_points' && !basicAddressPmtilesKey) || (!artifact.pmtilesKey && !basicAddressPmtilesKey)) {
-    return NextResponse.json({
+    return manifestJson({
       campaign_id: campaignId,
       map_status: artifact.mapStatus,
       artifact_type: 'basic',
@@ -274,7 +299,7 @@ export async function GET(
     const addressVectorTileUrlTemplate =
       `${baseUrl}/api/campaigns/${campaignId}/address-tiles/{z}/{x}/{y}.mvt?v=${addressTileCacheKey}`;
 
-    return NextResponse.json({
+    return manifestJson({
       campaign_id: campaignId,
       map_status: artifact.mapStatus,
       artifact_type: 'diamond',
@@ -360,7 +385,7 @@ export async function GET(
 
   const pmtilesKey = artifact.pmtilesKey;
   if (!pmtilesKey) {
-    return NextResponse.json({ error: 'No PMTiles artifact exists for this campaign' }, { status: 404 });
+    return manifestJson({ error: 'No PMTiles artifact exists for this campaign' }, { status: 404 });
   }
 
   const geometryUrl = null;
@@ -370,7 +395,9 @@ export async function GET(
   const sources = objectMetric(snapshotRow.tile_metrics, 'sources');
   const minzoom = numberMetric(snapshotRow.tile_metrics, 'minzoom') ?? 13;
   const maxzoom = numberMetric(snapshotRow.tile_metrics, 'maxzoom') ?? 18;
-  const bounds = snapshotRow.tile_metrics?.bounds;
+  const bounds = normalizeBounds(snapshotRow.tile_metrics?.bounds) ?? normalizeBounds((campaign as { bbox?: unknown }).bbox);
+  const buildingBoundsBuffer = buildingBoundsBufferMeters(snapshotRow);
+  const buildingBounds = bounds ? expandBounds(bounds, buildingBoundsBuffer) : null;
   const geometryVersion = resolveGeometryVersion(snapshotRow);
   const geometryEtag = resolveGeometryEtag(snapshotRow);
   const tilejsonUrl = null;
@@ -383,12 +410,9 @@ export async function GET(
     null;
   const addressPmtilesUrl = null;
   const addressTilejsonUrl = null;
-  const currentGeometryObjectVersion = await currentObjectVersion(snapshotRow.bucket, pmtilesKey);
-  const currentGeometryCacheKey =
-    currentGeometryObjectVersion ?? String(geometryEtag ?? geometryVersion ?? pmtilesKey);
-  const tileCacheKey = encodeURIComponent(currentGeometryCacheKey);
-  const backendVectorTileUrlTemplate =
-    `${baseUrl}/api/campaigns/${campaignId}/diamond-tiles/buildings/{z}/{x}/{y}.mvt?v=${tileCacheKey}`;
+  // Building PMTiles artifacts are municipality/country artifacts. Do not expose
+  // them as the campaign building render source; /buildings returns geometry
+  // clipped to the campaign bbox and drawn territory.
   const addressTileCacheKey = addressPmtilesKey
     ? encodeURIComponent(`${geometryEtag ?? geometryVersion ?? 'address'}:${addressPmtilesKey}`)
     : null;
@@ -411,7 +435,7 @@ export async function GET(
     stringMetric(promoteIds, 'addresses') ??
     (addressPmtilesKey ? 'address_id' : null);
 
-  return NextResponse.json({
+  return manifestJson({
     campaign_id: campaignId,
     map_status: artifact.mapStatus,
     artifact_type: artifactType,
@@ -430,8 +454,10 @@ export async function GET(
     address_minzoom: numberMetric(snapshotRow.tile_metrics, 'address_minzoom') ?? (addressPmtilesKey ? 10 : null),
     address_maxzoom: numberMetric(snapshotRow.tile_metrics, 'address_maxzoom') ?? (addressPmtilesKey ? 16 : null),
     geometry_etag: geometryEtag,
+    building_bounds_buffer_meters: buildingBoundsBuffer,
+    buildings_render_mode: 'geojson',
     tilejson_url: tilejsonUrl,
-    vector_tile_url_template: backendVectorTileUrlTemplate,
+    vector_tile_url_template: null,
     parcel_pmtiles_key: parcelTiles?.pmtilesKey ?? null,
     parcel_tilejson_key: parcelTiles?.tilejsonKey ?? null,
     parcel_pmtiles_url: parcelPmtilesUrl,
@@ -452,12 +478,14 @@ export async function GET(
     layers: {
       buildings: {
         url: null,
-        vectorTileUrlTemplate: backendVectorTileUrlTemplate,
+        vectorTileUrlTemplate: null,
         sourceLayer: stringMetric(sourceLayers, 'buildings') ?? 'buildings',
         promoteId: stringMetric(promoteIds, 'buildings') ?? 'building_id',
         minzoom,
         maxzoom,
-        bounds: Array.isArray(bounds) ? bounds : (campaign as { bbox?: unknown }).bbox ?? null,
+        bounds: buildingBounds,
+        boundsBufferMeters: buildingBoundsBuffer,
+        tileBuffer: 128,
       },
       addresses: addressPmtilesKey
         ? {
@@ -467,7 +495,7 @@ export async function GET(
             promoteId: renderAddressPromoteId ?? 'address_id',
             minzoom: numberMetric(snapshotRow.tile_metrics, 'address_minzoom') ?? 10,
             maxzoom: numberMetric(snapshotRow.tile_metrics, 'address_maxzoom') ?? 16,
-            bounds: Array.isArray(bounds) ? bounds : (campaign as { bbox?: unknown }).bbox ?? null,
+            bounds,
           }
         : null,
       parcels: parcelTiles
@@ -478,7 +506,7 @@ export async function GET(
             promoteId: parcelTiles.promoteId,
             minzoom: parcelTiles.minzoom,
             maxzoom: parcelTiles.maxzoom,
-            bounds: Array.isArray(bounds) ? bounds : (campaign as { bbox?: unknown }).bbox ?? null,
+            bounds,
           }
         : null,
     },
@@ -491,7 +519,7 @@ export async function GET(
     },
     join_key: stringMetric(snapshotRow.tile_metrics, 'join_key') ?? 'address_id',
     primary_state_layer: 'buildings',
-    bounds: Array.isArray(bounds) ? bounds : (campaign as { bbox?: unknown }).bbox ?? null,
+    bounds: buildingBounds ?? bounds,
     minzoom,
     maxzoom,
     sources: {

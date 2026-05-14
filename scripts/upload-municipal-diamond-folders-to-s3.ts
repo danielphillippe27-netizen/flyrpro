@@ -68,7 +68,8 @@ const cleanOnly = args.includes('--clean-only');
 const uploadConcurrency = Number(readFlag('upload-concurrency') ?? '4');
 const wantedRegions = new Set((readFlag('regions') ?? 'on,ab,fl').split(',').map((item) => item.trim().toLowerCase()).filter(Boolean));
 const onlySources = new Set((readFlag('only') ?? '').split(',').map((item) => item.trim()).filter(Boolean));
-const BUILDING_TILE_BUFFER_UNITS = Number(process.env.BUILDING_TILE_BUFFER_UNITS ?? 8);
+const BUILDING_TILE_BUFFER_UNITS = Number(process.env.BUILDING_TILE_BUFFER_UNITS ?? 127);
+const BUILDING_BOUNDS_BUFFER_METERS = Number(process.env.BUILDING_BOUNDS_BUFFER_METERS ?? 128);
 const limit = Number(readFlag('limit') ?? '0');
 const outputRoot = path.resolve(readFlag('output-root') ?? '../municipal_data/diamond');
 const cleanRoot = path.resolve(readFlag('clean-root') ?? '../municipal_data/clean');
@@ -84,6 +85,7 @@ const bucket =
   'flyr-pro-addresses-2025';
 const awsRegion = process.env.AWS_S3_BUCKET_REGION || process.env.AWS_REGION || 'us-east-2';
 const tippecanoe = readFlag('tippecanoe-bin') ?? process.env.TIPPECANOE_BIN ?? 'tippecanoe';
+const tippecanoeTempDir = readFlag('tippecanoe-temp-dir') ?? process.env.TIPPECANOE_TEMP_DIR ?? process.env.TMPDIR;
 const skippedSources: string[] = [];
 
 const s3 = new S3Client({
@@ -660,6 +662,10 @@ async function runTippecanoe(source: SourceLayer, geojsonPath: string, outputPat
     `${source.layer}:${geojsonPath}`,
   ];
 
+  if (tippecanoeTempDir) {
+    commandArgs.splice(2, 0, '--temporary-directory', tippecanoeTempDir);
+  }
+
   if (source.layer === 'buildings' || source.layer === 'parcels') {
     const dropArgIndex = commandArgs.indexOf('--drop-densest-as-needed');
     commandArgs.splice(
@@ -710,6 +716,8 @@ function buildManifest(options: {
     arcgis_url: source.arcgisUrl ?? null,
     arcgis_url_file: source.arcgisUrl ? `s3://${bucket}/${s3Prefix}/arcgis-url.txt` : null,
     geometry_content_type: 'application/vnd.pmtiles',
+    building_bounds_buffer_meters: source.layer === 'buildings' ? BUILDING_BOUNDS_BUFFER_METERS : undefined,
+    tile_buffer: source.layer === 'buildings' || source.layer === 'parcels' ? BUILDING_TILE_BUFFER_UNITS : undefined,
     source_layer: source.layer,
     promote_id: promoteIdForLayer(source.layer),
     join_key: promoteIdForLayer(source.layer),
@@ -1082,7 +1090,7 @@ function emptyBounds() {
   };
 }
 
-function extendBounds(bounds: ReturnType<typeof emptyBounds>, geometry: GeoJSON.Geometry) {
+function extendBounds(bounds: ReturnType<typeof emptyBounds>, geometry: Geometry) {
   visitPositions(geometry.coordinates, ([lon, lat]) => {
     bounds.minLon = Math.min(bounds.minLon, lon);
     bounds.minLat = Math.min(bounds.minLat, lat);

@@ -195,7 +195,7 @@ export type CampaignType =
 export type AddressSource = 'closest_home' | 'import_list' | 'map' | 'same_street';
 export type CampaignStatus = 'draft' | 'active' | 'completed' | 'paused';
 export type CampaignProvisionStatus = 'pending' | 'ready' | 'failed';
-export type CampaignProvisionSource = 'diamond' | 'bedrock_nz' | 'bedrock_au' | 'bedrock_ca' | 'bedrock_us' | 'bedrock_za';
+export type CampaignProvisionSource = 'diamond' | 'bedrock_nz' | 'bedrock_au' | 'bedrock_ca' | 'bedrock_us' | 'bedrock_za' | 'bedrock_uk';
 export type CampaignProvisionPhase =
   | 'created'
   | 'source_probed'

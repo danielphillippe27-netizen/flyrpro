@@ -100,6 +100,15 @@ export class BuildingAdapter {
           : 0;
         console.log(`[BuildingAdapter] Using ${featureCount} pre-fetched CloudFront/S3 buildings`);
       } else {
+        if (!snapshot.urls.buildings) {
+          console.log('[BuildingAdapter] No building URL available; using empty building collection');
+          return {
+            buildings: { type: 'FeatureCollection', features: [] },
+            overtureRelease: snapshot.metadata?.overture_release || '2026-01-21.0',
+            source: 'static_geometry',
+          };
+        }
+
         if (this.isPmtilesUrl(snapshot.urls.buildings)) {
           console.log('[BuildingAdapter] Skipping direct PMTiles building fetch; scoped GeoJSON extraction handles PMTiles snapshots');
           return {

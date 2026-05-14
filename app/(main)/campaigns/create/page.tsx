@@ -47,7 +47,7 @@ type ProvisionPhase =
   | 'failed'
   | null;
 
-type ProvisionSource = 'diamond' | 'bedrock_nz' | 'bedrock_au' | 'bedrock_ca' | 'bedrock_us' | null;
+type ProvisionSource = 'diamond' | 'bedrock_nz' | 'bedrock_au' | 'bedrock_ca' | 'bedrock_us' | 'bedrock_za' | 'bedrock_uk' | null;
 
 type CampaignProvisionState = {
   provision_status: ProvisionStatus;
@@ -60,13 +60,16 @@ type CampaignProvisionState = {
 function isCampaignFullyReady(state: CampaignProvisionState | null) {
   if (!state || state.provision_status !== 'ready') return false;
   if (state.provision_phase === 'optimized' || Boolean(state.optimized_at)) return true;
-  return state.provision_phase === 'map_ready' && Boolean(state.map_ready_at);
+  return Boolean(state.map_ready_at);
 }
 
 function provisionPhaseLabel(state: CampaignProvisionState | null) {
   if (!state) return 'Step 2/5: Starting map build';
-  if (state.provision_status === 'failed' || state.provision_phase === 'failed') {
+  if (state.provision_status === 'failed') {
     return 'Map build failed';
+  }
+  if (state.provision_status === 'ready' && state.provision_phase === 'failed' && state.map_ready_at) {
+    return 'Step 5/5: Map ready';
   }
 
   switch (state.provision_phase) {
@@ -158,10 +161,10 @@ export default function CreateCampaignPage() {
   }, [router]);
 
   useEffect(() => {
-    if (detailsSaved && createdCampaignId && setupComplete) {
+    if (detailsSaved && createdCampaignId) {
       goToCreatedCampaign(createdCampaignId);
     }
-  }, [detailsSaved, createdCampaignId, setupComplete, goToCreatedCampaign]);
+  }, [detailsSaved, createdCampaignId, goToCreatedCampaign]);
 
   useEffect(() => {
     if (!createdCampaignId || setupComplete || provisionFailed) return;
@@ -186,7 +189,7 @@ export default function CreateCampaignPage() {
       const state = (data ?? null) as CampaignProvisionState | null;
       setProvisionProgress(provisionPhaseLabel(state));
 
-      if (state?.provision_status === 'failed' || state?.provision_phase === 'failed') {
+      if (state?.provision_status === 'failed') {
         setProvisioning(false);
         setProvisionFailed('Campaign map build failed. Try a larger polygon or retry provisioning.');
         return;
@@ -714,9 +717,7 @@ export default function CreateCampaignPage() {
       }
 
       setDetailsSaved(true);
-      if (setupComplete) {
-        goToCreatedCampaign(createdCampaignId);
-      }
+      goToCreatedCampaign(createdCampaignId);
     } catch (error: unknown) {
       console.error('Error updating campaign details:', error);
       alert(error instanceof Error ? error.message : 'Failed to update campaign details');

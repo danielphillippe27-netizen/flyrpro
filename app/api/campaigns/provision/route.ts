@@ -14,6 +14,7 @@ import { BedrockNzService, type BedrockNzLinkGeometry } from '@/lib/services/Bed
 import { BedrockAustraliaService } from '@/lib/services/BedrockAustraliaService';
 import { BedrockCanadaService } from '@/lib/services/BedrockCanadaService';
 import { BedrockSouthAfricaService } from '@/lib/services/BedrockSouthAfricaService';
+import { BedrockUkService } from '@/lib/services/BedrockUkService';
 import { BedrockUsService } from '@/lib/services/BedrockUsService';
 import { DiamondMunicipalService } from '@/lib/services/DiamondMunicipalService';
 import { resolveCampaignRegion } from '@/lib/geo/regionResolver';
@@ -32,12 +33,13 @@ import { isParcelRegionSupported } from '@/lib/geo/parcelRegions';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 300;
 
 interface ProvisionRequest {
   campaign_id: string;
 }
 
-type ProvisionSource = 'diamond' | 'bedrock_nz' | 'bedrock_au' | 'bedrock_ca' | 'bedrock_us' | 'bedrock_za';
+type ProvisionSource = 'diamond' | 'bedrock_nz' | 'bedrock_au' | 'bedrock_ca' | 'bedrock_us' | 'bedrock_za' | 'bedrock_uk';
 
 type ExistingCampaignAddressSignatureRow = {
   formatted: string | null;
@@ -53,6 +55,7 @@ type ExistingCampaignAddressSignatureRow = {
 const DEFAULT_STATIC_GEOMETRY_ADDRESS_HYDRATION_LIMIT = 2000;
 const FALLBACK_INSERT_BATCH_SIZE = 500;
 const BULK_ADDRESS_RPC = 'add_campaign_addresses';
+const DEFAULT_SOURCE_RESOLUTION_TIMEOUT_MS = 240_000;
 
 class ProvisionError extends Error {
   constructor(message: string, readonly status: number = 500) {
@@ -63,6 +66,34 @@ class ProvisionError extends Error {
 
 function dbProvisionSource(source: ProvisionSource): ProvisionSource {
   return source;
+}
+
+function sourceResolutionTimeoutMs() {
+  const raw = process.env.PROVISION_SOURCE_RESOLUTION_TIMEOUT_MS;
+  const parsed = raw ? Number(raw) : NaN;
+  return Number.isFinite(parsed) && parsed > 0
+    ? Math.floor(parsed)
+    : DEFAULT_SOURCE_RESOLUTION_TIMEOUT_MS;
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string
+): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
 }
 
 function staticGeometryAddressHydrationLimit() {
@@ -333,6 +364,84 @@ function lambdaSnapshotToCampaignSnapshotRow(snapshot: LambdaSnapshotResponse): 
   };
 }
 
+function featureCollectionCount(value: unknown): number {
+  if (!value || typeof value !== 'object') return 0;
+  const features = (value as { features?: unknown }).features;
+  return Array.isArray(features) ? features.length : 0;
+}
+
+function snapshotWithScopedBuildingCount(
+  snapshot: LambdaSnapshotResponse,
+  scopedBuildingCount: number | null
+): LambdaSnapshotResponse {
+  if (scopedBuildingCount == null) return snapshot;
+
+  const tileMetrics = snapshot.metadata?.tile_metrics &&
+    typeof snapshot.metadata.tile_metrics === 'object'
+      ? snapshot.metadata.tile_metrics as Record<string, unknown>
+      : {};
+
+  return {
+    ...snapshot,
+    counts: {
+      ...snapshot.counts,
+      buildings: scopedBuildingCount,
+    },
+    metadata: {
+      elapsed_ms: snapshot.metadata?.elapsed_ms ?? 0,
+      snapshot_size_bytes: snapshot.metadata?.snapshot_size_bytes ?? 0,
+      overture_release: snapshot.metadata?.overture_release,
+      tile_metrics: {
+        ...tileMetrics,
+        artifact_buildings_count: snapshot.counts.buildings,
+        campaign_buildings_count: scopedBuildingCount,
+        campaign_geometry_scope: 'territory_boundary',
+      } as NonNullable<LambdaSnapshotResponse['metadata']>['tile_metrics'],
+    } as LambdaSnapshotResponse['metadata'],
+  };
+}
+
+async function countScopedStaticPmtilesBuildings(params: {
+  campaignId: string;
+  snapshot: LambdaSnapshotResponse | null;
+  polygon: GeoJSON.Polygon;
+}): Promise<number | null> {
+  const { campaignId, snapshot, polygon } = params;
+  if (!snapshot || !snapshotHasStaticPmtilesGeometry(snapshot)) return null;
+
+  const bbox = bboxFromPolygon(polygon);
+  if (!bbox) return null;
+
+  try {
+    const scopedBuildings = await fetchScopedPmtilesBuildingFeatures(
+      lambdaSnapshotToCampaignSnapshotRow(snapshot),
+      bbox,
+      new Set(),
+      polygon
+    );
+    const scopedBuildingCount = featureCollectionCount(scopedBuildings);
+    console.log('[Provision] Campaign-scoped PMTiles building count resolved', {
+      campaignId,
+      scopedBuildings: scopedBuildingCount,
+      artifactBuildings: snapshot.counts.buildings,
+    });
+    return scopedBuildingCount;
+  } catch (error) {
+    console.warn('[Provision] Failed to resolve campaign-scoped PMTiles building count:', {
+      campaignId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
+function apiBaseUrl(request: NextRequest) {
+  const configured = request.nextUrl.origin.replace(/\/+$/, '');
+  return configured === 'https://flyrpro.app'
+    ? 'https://www.flyrpro.app'
+    : configured;
+}
+
 async function countCampaignAddresses(
   supabase: ReturnType<typeof createAdminClient>,
   campaignId: string
@@ -551,6 +660,10 @@ async function resolveDiamondThenBedrock(options: {
   const { campaignId, polygon, regionCode } = options;
 
   if (DiamondMunicipalService.isSupportedRegion(regionCode)) {
+    console.log('[Provision] Source probe: checking Diamond municipal S3...', {
+      campaignId,
+      regionCode,
+    });
     const diamondResult = await DiamondMunicipalService.provisionCampaign({
       campaignId,
       polygon,
@@ -588,6 +701,10 @@ async function resolveDiamondThenBedrock(options: {
   }
 
   if (BedrockNzService.isNzRegion(regionCode)) {
+    console.log('[Provision] Source probe: checking Bedrock NZ S3...', {
+      campaignId,
+      regionCode,
+    });
     const bedrockResult = await BedrockNzService.provisionCampaign({
       campaignId,
       polygon,
@@ -615,6 +732,10 @@ async function resolveDiamondThenBedrock(options: {
   }
 
   if (BedrockAustraliaService.isAustraliaRegion(regionCode)) {
+    console.log('[Provision] Source probe: checking Bedrock Australia S3...', {
+      campaignId,
+      regionCode,
+    });
     const bedrockResult = await BedrockAustraliaService.provisionCampaign({
       campaignId,
       polygon,
@@ -637,6 +758,10 @@ async function resolveDiamondThenBedrock(options: {
   }
 
   if (BedrockCanadaService.isCanadaRegion(regionCode)) {
+    console.log('[Provision] Source probe: checking Bedrock Canada S3...', {
+      campaignId,
+      regionCode,
+    });
     const bedrockResult = await BedrockCanadaService.provisionCampaign({
       campaignId,
       polygon,
@@ -661,6 +786,10 @@ async function resolveDiamondThenBedrock(options: {
   }
 
   if (BedrockSouthAfricaService.isSouthAfricaRegion(regionCode)) {
+    console.log('[Provision] Source probe: checking Bedrock South Africa S3...', {
+      campaignId,
+      regionCode,
+    });
     const bedrockResult = await BedrockSouthAfricaService.provisionCampaign({
       campaignId,
       polygon,
@@ -684,7 +813,39 @@ async function resolveDiamondThenBedrock(options: {
     };
   }
 
+  if (BedrockUkService.isUkRegion(regionCode)) {
+    console.log('[Provision] Source probe: checking Bedrock UK S3...', {
+      campaignId,
+      regionCode,
+    });
+    const bedrockResult = await BedrockUkService.provisionCampaign({
+      campaignId,
+      polygon,
+      addressLimit: 10000,
+      regionCode,
+    });
+    console.log('[Provision] BEDROCK UK S3 polygon scan complete:', {
+      campaignId,
+      addresses: bedrockResult.addresses.length,
+      touchedTiles: bedrockResult.metrics.addresses.touchedTiles,
+      timings: {
+        addresses: bedrockResult.metrics.addresses.seconds,
+        addressesBreakdown: bedrockResult.metrics.addresses.timings,
+      },
+    });
+    return {
+      addressSource: 'bedrock_uk',
+      snapshot: bedrockResult.snapshot,
+      addressesToInsert: addressesForInitialHydration(bedrockResult.addresses),
+      bedrockLinkGeometry: null,
+    };
+  }
+
   if (BedrockUsService.isUsRegion(regionCode)) {
+    console.log('[Provision] Source probe: checking Bedrock US S3...', {
+      campaignId,
+      regionCode,
+    });
     const bedrockResult = await BedrockUsService.provisionCampaign({
       campaignId,
       polygon,
@@ -771,6 +932,7 @@ async function runCampaignPostProcessing(params: {
 
     const { buildings: normalizedBuildingsGeoJSON, overtureRelease } =
       await BuildingAdapter.fetchAndNormalize(effectiveSnapshot, preFetchedBuildingsGeo);
+    const normalizedBuildingCount = normalizedBuildingsGeoJSON.features.length;
 
     let optimizedPathGeometry: GeoJSON.LineString | null = null;
     let optimizedPathInfo: {
@@ -880,6 +1042,25 @@ async function runCampaignPostProcessing(params: {
       }
     }
 
+    if (normalizedBuildingCount === 0) {
+      await updateCampaignProvision(supabase, campaignId, {
+        provision_phase: 'optimized',
+        optimized_at: new Date().toISOString(),
+        has_parcels: false,
+        building_link_confidence: 0,
+        map_mode: 'standard_pins',
+        link_quality_status: 'unknown',
+        link_quality_reason: null,
+        data_quality_reason: null,
+      });
+
+      console.log('[Provision] Background post-processing complete without building linking:', {
+        campaignId,
+        addresses: effectiveInsertedCount,
+      });
+      return;
+    }
+
     console.log('[Provision] Spatial linker: Running canonical TypeScript spatial join...');
     let spatialJoinSummary = {
       matched: 0,
@@ -983,8 +1164,12 @@ async function runCampaignPostProcessing(params: {
     });
   } catch (error) {
     console.error('[Provision] Deferred post-processing failed:', error);
+    const failureReason = provisionFailureReason(error);
     await updateCampaignProvision(supabase, campaignId, {
-      provision_phase: 'failed',
+      provision_phase: 'map_ready',
+      link_quality_status: 'failed',
+      link_quality_reason: `Post-processing failed: ${failureReason}`,
+      data_quality_reason: `Post-processing failed: ${failureReason}`,
     }).catch((updateError) => {
       console.error('[Provision] Failed to persist deferred failure state:', updateError);
     });
@@ -1083,20 +1268,62 @@ export async function POST(request: NextRequest) {
       link_quality_metrics: {},
     });
 
-    after(async () => {
+    if (BedrockUkService.isUkRegion(regionCode)) {
       try {
-        await retryWithBackoff(async () => {
+        const staticSnapshot = await BedrockUkService.staticSnapshotForCampaign(campaignId, regionCode);
+        await upsertSnapshotMetadata(supabase, campaignId, staticSnapshot);
+        await updateCampaignProvision(supabase, campaignId, {
+          provision_status: 'ready',
+          provision_phase: 'map_ready',
+          provision_source: 'bedrock_uk',
+          provisioned_at: readyAt,
+          map_ready_at: readyAt,
+          has_parcels: false,
+          building_link_confidence: 0,
+          map_mode: 'standard_pins',
+          parcel_enrichment_status: 'skipped',
+        });
+        console.log('[Provision] BEDROCK UK static PMTiles snapshot published before address scan:', {
+          campaignId,
+          buildings: staticSnapshot.s3_keys.buildings,
+          addresses: staticSnapshot.s3_keys.addresses,
+        });
+      } catch (staticSnapshotError) {
+        console.warn(
+          '[Provision] Failed to publish early UK PMTiles snapshot; continuing with full provision:',
+          staticSnapshotError instanceof Error ? staticSnapshotError.message : staticSnapshotError
+        );
+      }
+    }
+
+    const result = await retryWithBackoff(async () => {
+          const sourceTimeoutMs = sourceResolutionTimeoutMs();
+          console.log('[Provision] Map-ready provision worker started.', {
+            campaignId,
+            regionCode,
+            sourceTimeoutMs,
+          });
+          await updateCampaignProvision(supabase, campaignId!, {
+            provision_phase: 'source_probed',
+          });
+
           const existingAddressCount = await countCampaignAddresses(supabase, campaignId!);
+          const resolvedProvision = await withTimeout(
+            resolveDiamondThenBedrock({
+              campaignId: campaignId!,
+              polygon: polygon as GeoJSON.Polygon,
+              regionCode,
+            }),
+            sourceTimeoutMs,
+            `Provision source resolution exceeded ${Math.round(sourceTimeoutMs / 1000)}s before Diamond/Bedrock returned. Check S3/DuckDB/httpfs runtime logs.`
+          );
           const {
             addressSource,
-            snapshot,
+            snapshot: rawSnapshot,
             addressesToInsert: resolvedAddresses,
             bedrockLinkGeometry,
-          } = await resolveDiamondThenBedrock({
-            campaignId: campaignId!,
-            polygon: polygon as GeoJSON.Polygon,
-            regionCode,
-          });
+          } = resolvedProvision;
+          let snapshot = rawSnapshot;
           let addressesToInsert = resolvedAddresses;
 
           await updateCampaignProvision(supabase, campaignId!, {
@@ -1130,6 +1357,13 @@ export async function POST(request: NextRequest) {
             });
           }
 
+          const scopedBuildingCount = await countScopedStaticPmtilesBuildings({
+            campaignId: campaignId!,
+            snapshot,
+            polygon: polygon as GeoJSON.Polygon,
+          });
+          snapshot = snapshot ? snapshotWithScopedBuildingCount(snapshot, scopedBuildingCount) : snapshot;
+
           await upsertSnapshotMetadata(supabase, campaignId!, snapshot);
 
           const linkedAddressCount = 0;
@@ -1156,14 +1390,16 @@ export async function POST(request: NextRequest) {
           });
 
           console.log('[Provision] Static S3 geometry is map-ready; no legacy Gold/Lambda/White Gold fallbacks will run.');
-          await runCampaignPostProcessing({
-            campaignId: campaignId!,
-            polygon: polygon as GeoJSON.Polygon,
-            regionCode,
-            source: addressSource,
-            snapshot,
-            insertedCount: finalAddressCount,
-            bedrockLinkGeometry,
+          after(async () => {
+            await runCampaignPostProcessing({
+              campaignId: campaignId!,
+              polygon: polygon as GeoJSON.Polygon,
+              regionCode,
+              source: addressSource,
+              snapshot,
+              insertedCount: finalAddressCount,
+              bedrockLinkGeometry,
+            });
           });
 
           return {
@@ -1187,7 +1423,7 @@ export async function POST(request: NextRequest) {
             postprocess_deferred: true,
             parcel_enrichment_status: parcelEnrichmentStatus,
             map_layers: {
-              buildings: snapshot.urls.buildings,
+              buildings: `${apiBaseUrl(request)}/api/campaigns/${encodeURIComponent(campaignId!)}/buildings`,
             },
             snapshot_metadata: {
               bucket: snapshot.bucket,
@@ -1201,35 +1437,9 @@ export async function POST(request: NextRequest) {
               `${finalAddressCount} leads loaded. ` +
               `route optimization, building linking, townhouse splitting, and parcel enrichment will continue in the background.`,
           };
-        });
-      } catch (error) {
-        console.error('[Provision] Background provisioning error:', error);
-        const failureReason = provisionFailureReason(error);
-
-        try {
-          const supabase = createAdminClient();
-          await supabase
-            .from('campaigns')
-            .update({
-              provision_status: 'failed',
-              provision_phase: 'failed',
-              link_quality_status: 'failed',
-              link_quality_reason: failureReason,
-              data_quality_reason: failureReason,
-            })
-            .eq('id', campaignId!);
-        } catch (updateError) {
-          console.error('[Provision] Failed to update failed background provision state:', updateError);
-        }
-      }
     });
 
-    return NextResponse.json({
-      accepted: true,
-      campaign_id: campaignId,
-      provision_status: 'pending',
-      provision_phase: 'created',
-    });
+    return NextResponse.json(result);
   } catch (error) {
     console.error('[Provision] Error:', error);
 

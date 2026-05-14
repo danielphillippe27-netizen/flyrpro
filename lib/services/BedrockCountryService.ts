@@ -3,19 +3,22 @@ import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import * as turf from '@turf/turf';
 import type { LambdaSnapshotResponse } from '@/lib/services/TileLambdaService';
 import type { StandardCampaignAddress } from '@/lib/services/AddressAdapter';
+import { duckDbRuntimeSetupStatements } from '@/lib/services/duckdbRuntime';
 
 type Bounds = [number, number, number, number];
 type SnapshotTileMetrics = NonNullable<NonNullable<LambdaSnapshotResponse['metadata']>['tile_metrics']>;
 
-export type BedrockProvisionSource = 'bedrock_ca' | 'bedrock_us' | 'bedrock_za';
+export type BedrockProvisionSource = 'bedrock_ca' | 'bedrock_us' | 'bedrock_za' | 'bedrock_uk';
 
 type BedrockCountryConfig = {
-  country: 'canada' | 'usa' | 'south-africa';
-  countryCode: 'CA' | 'US' | 'ZA';
+  country: 'canada' | 'usa' | 'south-africa' | 'uk';
+  countryCode: 'CA' | 'US' | 'ZA' | 'GB';
   provisionSource: BedrockProvisionSource;
-  envPrefix: 'BEDROCK_CA' | 'BEDROCK_US' | 'BEDROCK_ZA';
+  envPrefix: 'BEDROCK_CA' | 'BEDROCK_US' | 'BEDROCK_ZA' | 'BEDROCK_UK';
   defaultSource: string;
   overtureRelease: string;
+  buildingBoundsBufferMeters?: number;
+  parcelsPmtiles?: boolean;
 };
 
 type ParquetManifest = {
@@ -29,6 +32,8 @@ type ParquetManifest = {
 type BedrockParquetRow = Record<string, unknown> & {
   address_id?: string;
   gers_id?: string;
+  source_id?: string;
+  uprn?: string;
   full_address?: string;
   formatted?: string;
   house_number?: string;
@@ -63,6 +68,26 @@ type BedrockScanResult = {
     totalMs: number;
   };
 };
+
+function emptyBedrockScanMetric(manifest: ParquetManifest): BedrockScanResult {
+  return {
+    hits: 0,
+    scanned: 0,
+    bboxCandidates: 0,
+    seconds: 0,
+    queryEngine: 'duckdb_parquet',
+    touchedTiles: 0,
+    partitioning: manifest.partitioning?.scheme,
+    tilePadding: 0,
+    timings: {
+      manifestMs: 0,
+      partitionMs: 0,
+      queryMs: 0,
+      filterMs: 0,
+      totalMs: 0,
+    },
+  };
+}
 
 const DEFAULT_BUCKET = 'flyr-pro-addresses-2025';
 const REGION = process.env.AWS_REGION || process.env.AWS_S3_BUCKET_REGION || 'us-east-2';
@@ -300,15 +325,8 @@ function cdnUrl(config: BedrockCountryConfig, key: string): string | null {
   return base ? `${base.replace(/\/+$/, '')}/${key.replace(/^\/+/, '')}` : null;
 }
 
-function layerUrl(config: BedrockCountryConfig, layer: 'addresses' | 'buildings' | 'parcels', filename: string) {
-  const cdn = cdnUrl(config, layerKey(config, layer, filename));
-  if (cdn) {
-    return cdn;
-  }
-  return `s3://${bucket(config)}/${layerKey(config, layer, filename)}`;
-}
-
 function usaParcelPmtilesKey(config: BedrockCountryConfig, regionCode?: string | null) {
+  if (!config.parcelsPmtiles) return null;
   if (config.country !== 'usa') return layerKey(config, 'parcels', 'parcels.pmtiles');
   const state = regionCode?.trim().toUpperCase();
   if (!state || !USA_PARCEL_REGIONS.has(state)) return null;
@@ -459,8 +477,9 @@ async function duckDbAll(sql: string, usesRemoteFiles: boolean): Promise<Bedrock
 
   try {
     if (usesRemoteFiles) {
-      await all("SET home_directory='/tmp'");
-      await all("SET extension_directory='/tmp/duckdb_extensions'");
+      for (const statement of duckDbRuntimeSetupStatements()) {
+        await all(statement);
+      }
       await all('INSTALL httpfs');
       await all('LOAD httpfs');
       if (sql.includes('s3://')) {
@@ -494,6 +513,22 @@ function text(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
+function fallbackAddressLabel(config: BedrockCountryConfig, row: BedrockParquetRow, props: Record<string, unknown>, addressId?: string) {
+  const sourceId = text(row.source_id) ?? text(props.source_id);
+  const uprn = text(row.uprn) ?? text(props.uprn);
+  const stableId = sourceId ?? uprn ?? addressId ?? text(row.gers_id);
+
+  if (config.country === 'uk' && stableId) {
+    return `UPRN ${stableId.replace(/^os-open-uprn:gb:/i, '')}`;
+  }
+
+  if (stableId) {
+    return `${config.defaultSource} ${stableId}`;
+  }
+
+  return 'Address point';
+}
+
 function normalizeAddress(config: BedrockCountryConfig, campaignId: string, row: BedrockParquetRow): StandardCampaignAddress | null {
   const lon = Number(row.longitude);
   const lat = Number(row.latitude);
@@ -512,7 +547,8 @@ function normalizeAddress(config: BedrockCountryConfig, campaignId: string, row:
     text(row.full_address) ??
     text(row.formatted) ??
     text(props.full_address) ??
-    [houseNumber, streetName, locality].filter(Boolean).join(' ');
+    ([houseNumber, streetName, locality].filter(Boolean).join(' ') ||
+      fallbackAddressLabel(config, row, props, addressId));
 
   return {
     campaign_id: campaignId,
@@ -629,6 +665,14 @@ export class BedrockCountryService {
     };
   }
 
+  async staticSnapshotForCampaign(
+    campaignId: string,
+    regionCode?: string | null
+  ): Promise<LambdaSnapshotResponse> {
+    const manifest = await readManifest(this.config);
+    return this.snapshotForCampaign(campaignId, 0, emptyBedrockScanMetric(manifest), manifest, regionCode);
+  }
+
   snapshotForCampaign(
     campaignId: string,
     addressCount: number,
@@ -649,6 +693,7 @@ export class BedrockCountryService {
       bedrock_country_code: this.config.countryCode,
       bedrock_version: env(this.config, 'VERSION') || 'current',
       geometry_provider: 'pmtiles',
+      building_bounds_buffer_meters: this.config.buildingBoundsBufferMeters ?? 0,
       pmtiles_key: buildingPmtilesKey,
       tilejson_key: layerKey(this.config, 'buildings', 'buildings.json'),
       buildings_pmtiles_index_key: `${prefix(this.config)}/buildings/pmtiles-index.json`,
@@ -748,6 +793,7 @@ export const BEDROCK_US_CONFIG: BedrockCountryConfig = {
   envPrefix: 'BEDROCK_US',
   defaultSource: 'Overture Maps Addresses',
   overtureRelease: 'bedrock-us-overture',
+  parcelsPmtiles: true,
 };
 
 export const BEDROCK_SOUTH_AFRICA_CONFIG: BedrockCountryConfig = {
@@ -757,4 +803,14 @@ export const BEDROCK_SOUTH_AFRICA_CONFIG: BedrockCountryConfig = {
   envPrefix: 'BEDROCK_ZA',
   defaultSource: 'OpenStreetMap Addresses',
   overtureRelease: 'bedrock-za-osm',
+  buildingBoundsBufferMeters: 128,
+};
+
+export const BEDROCK_UK_CONFIG: BedrockCountryConfig = {
+  country: 'uk',
+  countryCode: 'GB',
+  provisionSource: 'bedrock_uk',
+  envPrefix: 'BEDROCK_UK',
+  defaultSource: 'OS Open UPRN',
+  overtureRelease: 'bedrock-uk-os-open-uprn-overture',
 };
