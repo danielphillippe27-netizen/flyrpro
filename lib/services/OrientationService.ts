@@ -11,6 +11,8 @@ export interface OrientationResult {
   error?: string;
 }
 
+type AddressWithExtractedStreet = CampaignAddress & { extractedStreetName: string };
+
 export class OrientationService {
   private static readonly MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || '';
   private static readonly MAPBOX_BASE_URL = 'https://api.mapbox.com';
@@ -69,13 +71,13 @@ export class OrientationService {
    * Group addresses by street name (primary) or proximity (fallback)
    */
   private static groupAddressesByStreet(
-    addresses: Array<CampaignAddress & { extractedStreetName: string }>
-  ): Array<Array<CampaignAddress & { extractedStreetName: string }>> {
-    const groups: Array<Array<CampaignAddress & { extractedStreetName: string }>> = [];
+    addresses: AddressWithExtractedStreet[]
+  ): AddressWithExtractedStreet[][] {
+    const groups: AddressWithExtractedStreet[][] = [];
     const processed = new Set<string>();
 
     // Primary: Group by street name
-    const streetGroups = new Map<string, Array<CampaignAddress & { extractedStreetName: string }>>();
+    const streetGroups = new Map<string, AddressWithExtractedStreet[]>();
 
     for (const addr of addresses) {
       const streetName = addr.extractedStreetName || addr.street_name;
@@ -111,10 +113,10 @@ export class OrientationService {
    * Group addresses by proximity using Turf.js
    */
   private static groupByProximity(
-    addresses: Array<CampaignAddress & { extractedStreetName: string }>,
+    addresses: AddressWithExtractedStreet[],
     thresholdMeters: number
-  ): Array<Array<CampaignAddress & { extractedStreetName: string }>> {
-    const groups: Array<Array<CampaignAddress & { extractedStreetName: string }>> = [];
+  ): AddressWithExtractedStreet[][] {
+    const groups: AddressWithExtractedStreet[][] = [];
     const processed = new Set<string>();
 
     for (const addr of addresses) {
@@ -123,7 +125,7 @@ export class OrientationService {
       const coord = this.getCoordinate(addr);
       if (!coord) continue;
 
-      const group: Array<CampaignAddress & { extractedStreetName: string }> = [addr];
+      const group: AddressWithExtractedStreet[] = [addr];
       processed.add(addr.id);
 
       // Find nearby addresses
@@ -157,12 +159,12 @@ export class OrientationService {
    * Process a group of addresses using Mapbox Map Matching API
    */
   private static async processAddressGroup(
-    group: Array<CampaignAddress & { extractedStreetName: string }>
+    group: AddressWithExtractedStreet[]
   ): Promise<OrientationResult[]> {
     const results: OrientationResult[] = [];
 
     // Get coordinates for all addresses in group
-    const coordinates: Array<{ coord: [number, number]; address: CampaignAddress }> = [];
+    const coordinates: Array<{ coord: [number, number]; address: AddressWithExtractedStreet }> = [];
     for (const addr of group) {
       const coord = this.getCoordinate(addr);
       if (coord) {
@@ -454,5 +456,4 @@ export class OrientationService {
     return null;
   }
 }
-
 

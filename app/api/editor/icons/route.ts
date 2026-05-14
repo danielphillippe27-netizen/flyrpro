@@ -96,32 +96,27 @@ export async function GET(request: NextRequest) {
     }
 
     // Transform the response to a simpler format with null checks
-    const icons = data.data
-      .filter((icon) => {
-        // Only include icons that have all required fields
-        return (
-          icon &&
-          icon.id &&
-          icon.attributes &&
-          icon.attributes.files &&
-          icon.attributes.files.preview &&
-          icon.attributes.files.preview.url &&
-          icon.attributes.files.download &&
-          icon.attributes.files.download.url
-        );
-      })
-      .map((icon) => ({
+    const icons = data.data.flatMap((icon) => {
+      const previewUrl = icon.attributes?.files?.preview?.url;
+      const downloadUrl = icon.attributes?.files?.download?.url;
+
+      if (!icon.id || !previewUrl || !downloadUrl) {
+        return [];
+      }
+
+      return [{
         id: icon.id,
         name: icon.attributes?.name || "Untitled Icon",
         description: icon.attributes?.description || "",
-        previewUrl: icon.attributes.files.preview.url,
-        downloadUrl: icon.attributes.files.download.url,
+        previewUrl,
+        downloadUrl,
         tags: icon.attributes?.tags || [],
         premium: icon.attributes?.premium || false,
         vector: icon.attributes?.vector || false,
         downloads: icon.attributes?.downloads || 0,
         link: icon.links?.self || "",
-      }));
+      }];
+    });
 
     return NextResponse.json({
       data: icons,
@@ -132,15 +127,14 @@ export async function GET(request: NextRequest) {
         last_page: data.meta?.last_page || 1,
       },
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error fetching Freepik icons:", error);
     return NextResponse.json(
       {
         error: "Failed to fetch icons",
-        detail: error?.message || "An unexpected error occurred",
+        detail: error instanceof Error ? error.message : "An unexpected error occurred",
       },
       { status: 500 }
     );
   }
 }
-

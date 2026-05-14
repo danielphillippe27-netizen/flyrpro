@@ -25,7 +25,7 @@ export interface MotherDuckQueryResult {
   success: boolean;
   columns?: string[];
   columnTypes?: string[];
-  rows?: any[][];
+  rows?: unknown[][];
   rowCount?: number;
   error?: string;
   errorType?: string;
@@ -33,8 +33,8 @@ export interface MotherDuckQueryResult {
 
 export interface OvertureBuilding {
   gers_id: string;
-  geometry: any;
-  centroid: any;
+  geometry: GeometryLike;
+  centroid: { type: 'Point'; coordinates: number[] };
   height?: number;
   house_name?: string;
   addr_housenumber?: string;
@@ -46,7 +46,7 @@ export interface OvertureBuilding {
 
 export interface OvertureAddress {
   gers_id: string;
-  geometry: any;
+  geometry: { type: 'Point'; coordinates: number[] };
   house_number?: string;
   street?: string;
   unit?: string;
@@ -60,7 +60,7 @@ export interface OvertureAddress {
 
 export interface OvertureTransportation {
   gers_id: string;
-  geometry: any;
+  geometry: GeometryLike;
   class: string;
 }
 
@@ -69,6 +69,37 @@ export interface BoundingBox {
   south: number;
   east: number;
   north: number;
+}
+
+type QueryRow = Record<string, unknown>;
+type GeometryLike = {
+  type?: string;
+  coordinates?: unknown;
+};
+type JsonRpcResponse = {
+  error?: { message?: string } | unknown;
+  result?: unknown;
+};
+type McpContentItem = {
+  type?: string;
+  text?: string;
+};
+type McpToolResult = MotherDuckQueryResult | {
+  content?: McpContentItem[];
+};
+type PolygonLike = {
+  type?: string;
+  coordinates?: number[][][] | number[][][][];
+  features?: Array<{ geometry?: PolygonLike }>;
+  geometry?: PolygonLike;
+};
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
 }
 
 export class MotherDuckHttpService {
@@ -102,7 +133,7 @@ export class MotherDuckHttpService {
    * NOTE: We use 'my_db' as database context and fully qualified table names (overture_na.X)
    * for cross-database queries. This matches how the MotherDuck UI works.
    */
-  static async executeQuery(sql: string, _database?: string): Promise<any[]> {
+  static async executeQuery(sql: string, _database?: string): Promise<QueryRow[]> {
     if (!this.MOTHERDUCK_TOKEN) {
       throw new Error('MOTHERDUCK_TOKEN is required for HTTP API');
     }
@@ -147,24 +178,25 @@ export class MotherDuckHttpService {
       // Check content type to determine response format
       const contentType = response.headers.get('content-type') || '';
       
-      let jsonRpcResponse: any;
+      let jsonRpcResponse: JsonRpcResponse;
       
       if (contentType.includes('text/event-stream')) {
         // Handle SSE response - read until we get the JSON-RPC response
         jsonRpcResponse = await this.parseSSEResponse(response);
       } else {
         // Standard JSON response
-        jsonRpcResponse = await response.json();
+        jsonRpcResponse = await response.json() as JsonRpcResponse;
       }
       
       // Handle JSON-RPC error response
       if (jsonRpcResponse.error) {
-        throw new Error(`MCP RPC Error: ${jsonRpcResponse.error.message || JSON.stringify(jsonRpcResponse.error)}`);
+        const rpcError = jsonRpcResponse.error as { message?: string };
+        throw new Error(`MCP RPC Error: ${rpcError.message || JSON.stringify(jsonRpcResponse.error)}`);
       }
 
       // Extract the result from JSON-RPC response
       // The result contains the MCP tool response
-      const result = jsonRpcResponse.result;
+      const result = jsonRpcResponse.result as McpToolResult | string | undefined;
       
       if (!result) {
         console.warn('[MotherDuckHttp] Empty result from MCP API');
@@ -183,9 +215,9 @@ export class MotherDuckHttpService {
           console.warn('[MotherDuckHttp] Could not parse result as JSON:', result);
           return [];
         }
-      } else if (result.content && Array.isArray(result.content)) {
+      } else if (typeof result === 'object' && result && 'content' in result && Array.isArray(result.content)) {
         // MCP tool response format: { content: [{ type: 'text', text: '...' }] }
-        const textContent = result.content.find((c: any) => c.type === 'text');
+        const textContent = result.content.find((c) => c.type === 'text');
         if (textContent?.text) {
           try {
             queryResult = JSON.parse(textContent.text);
@@ -213,23 +245,24 @@ export class MotherDuckHttpService {
       }
 
       return queryResult.rows.map((row) => {
-        const obj: any = {};
+        const obj: QueryRow = {};
         queryResult.columns!.forEach((col, idx) => {
           obj[col] = row[idx];
         });
         return obj;
       });
 
-    } catch (error: any) {
-      console.error('[MotherDuckHttp] Query execution failed:', error.message);
-      throw new Error(`MotherDuck HTTP Query Failed: ${error.message}`);
+    } catch (error: unknown) {
+      const message = getErrorMessage(error);
+      console.error('[MotherDuckHttp] Query execution failed:', message);
+      throw new Error(`MotherDuck HTTP Query Failed: ${message}`);
     }
   }
 
   /**
    * Parse SSE (Server-Sent Events) response to extract JSON-RPC result
    */
-  private static async parseSSEResponse(response: Response): Promise<any> {
+  private static async parseSSEResponse(response: Response): Promise<JsonRpcResponse> {
     const text = await response.text();
     const lines = text.split('\n');
     
@@ -245,7 +278,7 @@ export class MotherDuckHttpService {
     }
     
     try {
-      return JSON.parse(lastData);
+      return JSON.parse(lastData) as JsonRpcResponse;
     } catch {
       throw new Error(`Failed to parse SSE data: ${lastData.substring(0, 100)}`);
     }
@@ -257,14 +290,14 @@ export class MotherDuckHttpService {
    * Queries pre-loaded data in overture_flyr.buildings table.
    * Run load-overture-to-motherduck.ts first to populate the table.
    */
-  static async getBuildingsInPolygon(input: any): Promise<OvertureBuilding[]> {
+  static async getBuildingsInPolygon(input: PolygonLike): Promise<OvertureBuilding[]> {
     console.log('[MotherDuckHttp] Fetching buildings from overture_flyr database...');
 
     // Parse polygon from various input formats
     let polygon = input;
-    if (input.type === 'FeatureCollection' && input.features?.length > 0) {
-      polygon = input.features[0].geometry;
-    } else if (input.type === 'Feature') {
+    if (input.type === 'FeatureCollection' && input.features?.length) {
+      polygon = input.features[0]?.geometry ?? input;
+    } else if (input.type === 'Feature' && input.geometry) {
       polygon = input.geometry;
     }
 
@@ -300,10 +333,11 @@ LIMIT ${this.ROW_LIMIT};
       const filtered = this.filterBuildingsByPolygon(processed, polygon);
       console.log(`[MotherDuckHttp] After polygon filter: ${filtered.length} buildings inside polygon`);
       return filtered;
-    } catch (error: any) {
-      console.error('[MotherDuckHttp] Buildings query error:', error.message);
+    } catch (error: unknown) {
+      const message = getErrorMessage(error);
+      console.error('[MotherDuckHttp] Buildings query error:', message);
       // Provide helpful error if table doesn't exist
-      if (error.message.includes('does not exist') || error.message.includes('not found')) {
+      if (message.includes('does not exist') || message.includes('not found')) {
         throw new Error(
           'MotherDuck database not initialized. Please run: npx tsx scripts/load-overture-to-motherduck.ts'
         );
@@ -315,7 +349,7 @@ LIMIT ${this.ROW_LIMIT};
   /**
    * Filter buildings by checking if their centroid is inside the polygon
    */
-  private static filterBuildingsByPolygon(buildings: OvertureBuilding[], polygon: any): OvertureBuilding[] {
+  private static filterBuildingsByPolygon(buildings: OvertureBuilding[], polygon: PolygonLike): OvertureBuilding[] {
     return buildings.filter(building => {
       const centroid = building.centroid;
       if (!centroid?.coordinates) return false;
@@ -331,14 +365,14 @@ LIMIT ${this.ROW_LIMIT};
    * Queries pre-loaded data in overture_flyr.addresses table.
    * Run load-overture-to-motherduck.ts first to populate the table.
    */
-  static async getAddressesInPolygon(input: any): Promise<OvertureAddress[]> {
+  static async getAddressesInPolygon(input: PolygonLike): Promise<OvertureAddress[]> {
     console.log('[MotherDuckHttp] Fetching addresses from overture_flyr database...');
 
     // Parse polygon from various input formats
     let polygon = input;
-    if (input.type === 'FeatureCollection' && input.features?.length > 0) {
-      polygon = input.features[0].geometry;
-    } else if (input.type === 'Feature') {
+    if (input.type === 'FeatureCollection' && input.features?.length) {
+      polygon = input.features[0]?.geometry ?? input;
+    } else if (input.type === 'Feature' && input.geometry) {
       polygon = input.geometry;
     }
 
@@ -388,10 +422,11 @@ LIMIT ${this.ROW_LIMIT};
       }
       
       return filtered;
-    } catch (error: any) {
-      console.error('[MotherDuckHttp] Addresses query error:', error.message);
+    } catch (error: unknown) {
+      const message = getErrorMessage(error);
+      console.error('[MotherDuckHttp] Addresses query error:', message);
       // Provide helpful error if table doesn't exist
-      if (error.message.includes('does not exist') || error.message.includes('not found')) {
+      if (message.includes('does not exist') || message.includes('not found')) {
         throw new Error(
           'MotherDuck database not initialized. Please run: npx tsx scripts/load-overture-to-motherduck.ts'
         );
@@ -403,7 +438,7 @@ LIMIT ${this.ROW_LIMIT};
   /**
    * Filter addresses by checking if their point is inside the polygon
    */
-  private static filterAddressesByPolygon(addresses: OvertureAddress[], polygon: any): OvertureAddress[] {
+  private static filterAddressesByPolygon(addresses: OvertureAddress[], polygon: PolygonLike): OvertureAddress[] {
     return addresses.filter(address => {
       const geometry = address.geometry;
       if (!geometry?.coordinates) return false;
@@ -419,14 +454,14 @@ LIMIT ${this.ROW_LIMIT};
    * Queries pre-loaded data in overture_na.roads table.
    * Run load-overture-to-motherduck.ts first to populate the table.
    */
-  static async getRoadsInPolygon(input: any): Promise<OvertureTransportation[]> {
+  static async getRoadsInPolygon(input: PolygonLike): Promise<OvertureTransportation[]> {
     console.log('[MotherDuckHttp] Fetching roads from overture_na database...');
 
     // Parse polygon from various input formats
     let polygon = input;
-    if (input.type === 'FeatureCollection' && input.features?.length > 0) {
-      polygon = input.features[0].geometry;
-    } else if (input.type === 'Feature') {
+    if (input.type === 'FeatureCollection' && input.features?.length) {
+      polygon = input.features[0]?.geometry ?? input;
+    } else if (input.type === 'Feature' && input.geometry) {
       polygon = input.geometry;
     }
 
@@ -461,10 +496,11 @@ LIMIT ${this.ROW_LIMIT};
       // For roads, we don't filter by polygon (they're lines, not points)
       // The bbox filter is sufficient for most use cases
       return processed;
-    } catch (error: any) {
-      console.error('[MotherDuckHttp] Roads query error:', error.message);
+    } catch (error: unknown) {
+      const message = getErrorMessage(error);
+      console.error('[MotherDuckHttp] Roads query error:', message);
       // Provide helpful error if table doesn't exist
-      if (error.message.includes('does not exist') || error.message.includes('not found')) {
+      if (message.includes('does not exist') || message.includes('not found')) {
         console.warn(
           '[MotherDuckHttp] Roads table not found. Run: npx tsx scripts/load-overture-to-motherduck.ts'
         );
@@ -477,21 +513,25 @@ LIMIT ${this.ROW_LIMIT};
   /**
    * Check if a point is inside a polygon using ray casting algorithm
    */
-  private static pointInPolygon(point: [number, number], polygon: any): boolean {
+  private static pointInPolygon(point: [number, number], polygon: PolygonLike): boolean {
     const [x, y] = point;
     
     // Get the coordinates array (handle both Polygon and MultiPolygon)
     let rings: number[][][];
     if (polygon.type === 'MultiPolygon') {
+      const multiCoordinates = polygon.coordinates as number[][][][] | undefined;
+      if (!multiCoordinates) return false;
       // For MultiPolygon, check if point is in any of the polygons
-      for (const poly of polygon.coordinates) {
+      for (const poly of multiCoordinates) {
         if (this.pointInRings([x, y], poly)) {
           return true;
         }
       }
       return false;
     } else if (polygon.type === 'Polygon') {
-      rings = polygon.coordinates;
+      const polygonCoordinates = polygon.coordinates as number[][][] | undefined;
+      if (!polygonCoordinates) return false;
+      rings = polygonCoordinates;
     } else {
       return false;
     }
@@ -542,15 +582,15 @@ LIMIT ${this.ROW_LIMIT};
   /**
    * Calculate bounding box from polygon coordinates
    */
-  private static calculateBBox(polygon: any): BoundingBox {
+  private static calculateBBox(polygon: PolygonLike): BoundingBox {
     let minX = 180, minY = 90, maxX = -180, maxY = -90;
     
     const coordinates = polygon.type === 'MultiPolygon'
-      ? polygon.coordinates.flat(1)
-      : polygon.coordinates;
+      ? (polygon.coordinates as number[][][][] | undefined)?.flat(1)
+      : polygon.coordinates as number[][][] | undefined;
 
     if (coordinates && coordinates.length > 0) {
-      coordinates[0].forEach((coord: number[]) => {
+      coordinates[0]?.forEach((coord: number[]) => {
         const [lng, lat] = coord;
         if (lng < minX) minX = lng;
         if (lng > maxX) maxX = lng;
@@ -571,9 +611,9 @@ LIMIT ${this.ROW_LIMIT};
   /**
    * Process building results into OvertureBuilding array
    */
-  private static processBuildingResults(results: any[]): OvertureBuilding[] {
-    return results.map((row: any) => {
-      let geometry = row.geometry;
+  private static processBuildingResults(results: QueryRow[]): OvertureBuilding[] {
+    return results.map((row) => {
+      let geometry: GeometryLike = row.geometry as GeometryLike;
       if (typeof geometry === 'string') {
         try {
           geometry = JSON.parse(geometry);
@@ -583,28 +623,38 @@ LIMIT ${this.ROW_LIMIT};
       }
 
       // Calculate centroid from geometry
-      let centroid: any = { type: 'Point', coordinates: [0, 0] };
-      if (geometry?.type === 'Polygon' && geometry.coordinates?.[0]) {
-        const coords = geometry.coordinates[0];
+      let centroid: { type: 'Point'; coordinates: number[] } = { type: 'Point', coordinates: [0, 0] };
+      if (geometry?.type === 'Polygon' && Array.isArray(geometry.coordinates)) {
+        const coords = (geometry.coordinates as number[][][])[0];
         const avgLon = coords.reduce((sum: number, c: number[]) => sum + c[0], 0) / coords.length;
         const avgLat = coords.reduce((sum: number, c: number[]) => sum + c[1], 0) / coords.length;
         centroid = { type: 'Point', coordinates: [avgLon, avgLat] };
-      } else if (geometry?.type === 'MultiPolygon' && geometry.coordinates?.[0]?.[0]) {
-        const coords = geometry.coordinates[0][0];
+      } else if (geometry?.type === 'MultiPolygon' && Array.isArray(geometry.coordinates)) {
+        const coords = (geometry.coordinates as number[][][][])[0]?.[0];
+        if (!coords) return {
+          gers_id: asString(row.gers_id) || asString(row.id) || '',
+          geometry,
+          centroid,
+          height: typeof row.height === 'number' ? row.height : undefined,
+          house_name: asString(row.house_name),
+          addr_housenumber: asString(row.addr_housenumber),
+          addr_street: asString(row.addr_street),
+          addr_unit: asString(row.addr_unit),
+        };
         const avgLon = coords.reduce((sum: number, c: number[]) => sum + c[0], 0) / coords.length;
         const avgLat = coords.reduce((sum: number, c: number[]) => sum + c[1], 0) / coords.length;
         centroid = { type: 'Point', coordinates: [avgLon, avgLat] };
       }
 
       return {
-        gers_id: row.gers_id || row.id || '',
+        gers_id: asString(row.gers_id) || asString(row.id) || '',
         geometry,
         centroid,
-        height: row.height,
-        house_name: row.house_name,
-        addr_housenumber: row.addr_housenumber,
-        addr_street: row.addr_street,
-        addr_unit: row.addr_unit,
+        height: typeof row.height === 'number' ? row.height : undefined,
+        house_name: asString(row.house_name),
+        addr_housenumber: asString(row.addr_housenumber),
+        addr_street: asString(row.addr_street),
+        addr_unit: asString(row.addr_unit),
       };
     });
   }
@@ -612,9 +662,9 @@ LIMIT ${this.ROW_LIMIT};
   /**
    * Process address results into OvertureAddress array
    */
-  private static processAddressResults(results: any[]): OvertureAddress[] {
-    return results.map((row: any) => {
-      let geometry = row.geometry;
+  private static processAddressResults(results: QueryRow[]): OvertureAddress[] {
+    return results.map((row) => {
+      let geometry: GeometryLike = row.geometry as GeometryLike;
       if (typeof geometry === 'string') {
         try {
           geometry = JSON.parse(geometry);
@@ -624,7 +674,7 @@ LIMIT ${this.ROW_LIMIT};
       }
 
       // If geometry is still missing but we have lat/lng, construct it
-      if ((!geometry || geometry.type !== 'Point') && row.latitude && row.longitude) {
+      if ((!geometry || geometry.type !== 'Point') && typeof row.latitude === 'number' && typeof row.longitude === 'number') {
         geometry = { type: 'Point', coordinates: [row.longitude, row.latitude] };
       }
 
@@ -632,27 +682,27 @@ LIMIT ${this.ROW_LIMIT};
         geometry = { type: 'Point', coordinates: [0, 0] };
       }
 
-      const houseNumber = row.house_number?.trim() || undefined;
-      const street = row.street_name?.trim() || row.street?.trim() || undefined;
-      const postcode = row.postal_code?.trim() || row.postcode?.trim() || undefined;
-      const locality = row.locality?.trim() || undefined;
-      const region = row.region?.trim() || undefined;
-      const unit = row.unit?.trim() || undefined;
+      const houseNumber = asString(row.house_number)?.trim() || undefined;
+      const street = asString(row.street_name)?.trim() || asString(row.street)?.trim() || undefined;
+      const postcode = asString(row.postal_code)?.trim() || asString(row.postcode)?.trim() || undefined;
+      const locality = asString(row.locality)?.trim() || undefined;
+      const region = asString(row.region)?.trim() || undefined;
+      const unit = asString(row.unit)?.trim() || undefined;
 
-      const formatted = row.formatted?.trim() || 
+      const formatted = asString(row.formatted)?.trim() ||
         [houseNumber, street, unit, locality, region, postcode].filter(Boolean).join(' ').trim() || 
         undefined;
 
       return {
-        gers_id: row.gers_id || row.id || '',
-        geometry,
+        gers_id: asString(row.gers_id) || asString(row.id) || '',
+        geometry: geometry as { type: 'Point'; coordinates: number[] },
         house_number: houseNumber,
         street,
         unit,
         locality,
         postcode,
         region,
-        country: row.country?.trim() || undefined,
+        country: asString(row.country)?.trim() || undefined,
         building_gers_id: undefined,
         formatted,
       };
@@ -662,9 +712,9 @@ LIMIT ${this.ROW_LIMIT};
   /**
    * Process transportation results into OvertureTransportation array
    */
-  private static processTransportationResults(results: any[]): OvertureTransportation[] {
-    return results.map((row: any) => {
-      let geometry = row.geometry;
+  private static processTransportationResults(results: QueryRow[]): OvertureTransportation[] {
+    return results.map((row) => {
+      let geometry: GeometryLike = row.geometry as GeometryLike;
       if (typeof geometry === 'string') {
         try {
           geometry = JSON.parse(geometry);
@@ -674,9 +724,9 @@ LIMIT ${this.ROW_LIMIT};
       }
 
       return {
-        gers_id: row.gers_id || row.id || '',
+        gers_id: asString(row.gers_id) || asString(row.id) || '',
         geometry,
-        class: row.class || 'unknown',
+        class: asString(row.class) || 'unknown',
       };
     });
   }

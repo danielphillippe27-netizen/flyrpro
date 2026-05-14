@@ -176,7 +176,7 @@ async function fetchSyntheticSessionEventsFromSessions(
 
     const result = await query;
     if (!result.error) {
-      data = (result.data ?? []) as Array<Record<string, unknown>>;
+      data = (result.data ?? []) as unknown as Array<Record<string, unknown>>;
       break;
     }
 
@@ -989,11 +989,11 @@ export async function GET(request: NextRequest) {
       const fullResult = await runEventsQueryWithFallbacks(true, false);
       if (fullResult.error) {
         const fallbackResult = await runEventsQueryWithFallbacks(false, false);
-        rows = ((fallbackResult.data ?? []) as SessionEventRow[]).filter((row) =>
+        rows = ((fallbackResult.data ?? []) as unknown as SessionEventRow[]).filter((row) =>
           scopedUserIdSet.has(row.user_id)
         );
       } else {
-        rows = ((fullResult.data ?? []) as SessionEventRow[]).filter((row) =>
+        rows = ((fullResult.data ?? []) as unknown as SessionEventRow[]).filter((row) =>
           scopedUserIdSet.has(row.user_id)
         );
       }
@@ -1059,7 +1059,7 @@ export async function GET(request: NextRequest) {
         console.error('[activity] Failed to load events:', result.error);
         return NextResponse.json({ error: result.error.message }, { status: 500 });
       }
-      rows = ((result.data ?? []) as SessionEventRow[]).filter((row) => workspaceUserIds.has(row.user_id));
+      rows = ((result.data ?? []) as unknown as SessionEventRow[]).filter((row) => workspaceUserIds.has(row.user_id));
       rows = rows.filter((row) => scopedUserIdSet.has(row.user_id));
       if (scopedCampaignId) {
         const sessionIdsKnock = Array.from(

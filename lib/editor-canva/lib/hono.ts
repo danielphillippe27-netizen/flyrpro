@@ -3,6 +3,8 @@
 
 const API_BASE = '/api/editor';
 
+type JsonPayload = Record<string, unknown>;
+
 export const client = {
   api: {
     projects: {
@@ -11,7 +13,7 @@ export const client = {
           const res = await fetch(`${API_BASE}/projects/${param.id}`);
           return res;
         },
-        $patch: async ({ param, json }: { param: { id: string }; json: any }) => {
+        $patch: async ({ param, json }: { param: { id: string }; json: JsonPayload }) => {
           const res = await fetch(`${API_BASE}/projects/${param.id}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
@@ -19,15 +21,29 @@ export const client = {
           });
           return res;
         },
+        $delete: async ({ param }: { param: { id: string } }) => {
+          const res = await fetch(`${API_BASE}/projects/${param.id}`, {
+            method: 'DELETE',
+          });
+          return res;
+        },
+        duplicate: {
+          $post: async ({ param }: { param: { id: string } }) => {
+            const res = await fetch(`${API_BASE}/projects/${param.id}/duplicate`, {
+              method: 'POST',
+            });
+            return res;
+          },
+        },
       },
-      $get: async ({ query }: { query?: { page?: number; limit?: number } }) => {
+      $get: async ({ query }: { query?: { page?: number | string; limit?: number | string } }) => {
         const params = new URLSearchParams();
         if (query?.page) params.set('page', query.page.toString());
         if (query?.limit) params.set('limit', query.limit.toString());
         const res = await fetch(`${API_BASE}/projects?${params}`);
         return res;
       },
-      $post: async ({ json }: { json: any }) => {
+      $post: async ({ json }: { json: JsonPayload }) => {
         const res = await fetch(`${API_BASE}/projects`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -36,7 +52,7 @@ export const client = {
         return res;
       },
       templates: {
-        $get: async ({ query }: { query: { page: number; limit: number } }) => {
+        $get: async ({ query }: { query: { page: number | string; limit: number | string } }) => {
           const params = new URLSearchParams();
           params.set('page', query.page.toString());
           params.set('limit', query.limit.toString());
@@ -47,7 +63,7 @@ export const client = {
     },
     ai: {
       'generate-image': {
-        $post: async ({ json }: { json: any }) => {
+        $post: async ({ json }: { json: JsonPayload }) => {
           const res = await fetch(`${API_BASE}/ai/generate-image`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -57,7 +73,7 @@ export const client = {
         },
       },
       'remove-bg': {
-        $post: async ({ json }: { json: any }) => {
+        $post: async ({ json }: { json: JsonPayload }) => {
           const res = await fetch(`${API_BASE}/ai/remove-bg`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -68,6 +84,14 @@ export const client = {
       },
     },
     subscriptions: {
+      checkout: {
+        $post: async () => {
+          const res = await fetch(`${API_BASE}/subscriptions/checkout`, {
+            method: 'POST',
+          });
+          return res;
+        },
+      },
       current: {
         $get: async () => {
           const res = await fetch(`${API_BASE}/subscriptions/current`);
@@ -93,5 +117,21 @@ export const client = {
         return res;
       },
     },
+    images: {
+      $get: async () => {
+        const res = await fetch(`${API_BASE}/images`);
+        return res;
+      },
+    },
+    users: {
+      $post: async ({ json }: { json: JsonPayload }) => {
+        const res = await fetch(`${API_BASE}/users`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(json),
+        });
+        return res;
+      },
+    },
   },
-} as any;
+};

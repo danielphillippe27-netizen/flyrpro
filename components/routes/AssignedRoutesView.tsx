@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { useRouter } from 'next/navigation';
 import mapboxgl from 'mapbox-gl';
+import type { ExpressionSpecification } from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -546,7 +547,7 @@ export function AssignedRoutesView({
     return { matchedFootprints, fallbackPoints, cylinderFeatures };
   }, [campaignBuildings, detailByAssignmentId, filteredAssignments]);
 
-  const footprintColorExpression = useMemo(() => {
+  const footprintColorExpression = useMemo<ExpressionSpecification>(() => {
     const getAddressStatus = () => ['coalesce', ['get', 'address_status'], 'none'];
     const getStatus = () => ['coalesce', ['get', 'status'], 'not_visited'];
     const getQrScanned = () => ['coalesce', ['get', 'qr_scanned'], false];
@@ -590,7 +591,7 @@ export function AssignedRoutesView({
       isTouched,
       MAP_STATUS_CONFIG.TOUCHED.color,
       MAP_STATUS_CONFIG.UNTOUCHED.color,
-    ];
+    ] as ExpressionSpecification;
   }, []);
 
   const drawMap = useCallback((mapInstance: mapboxgl.Map) => {

@@ -1,27 +1,23 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useParams, useSearchParams } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import {
+  Activity,
   BarChart3,
   CalendarDays,
   CheckCircle2,
   Clock3,
   DollarSign,
-  FileText,
   Home,
   ListTodo,
   Mailbox,
-  Megaphone,
   MapPinned,
-  Paperclip,
   PlayCircle,
-  Plus,
   Search,
   Settings2,
   TrendingUp,
   Users,
-  X,
 } from 'lucide-react';
 import { FarmService, FarmTouchService, FarmLeadService, FarmTouchOutcomeService } from '@/lib/services/FarmService';
 import { CampaignsService } from '@/lib/services/CampaignsService';
@@ -54,9 +50,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
+import { Progress } from '@/components/ui/progress';
 import { FarmTouchTypePicker } from '@/components/farms/FarmTouchTypePicker';
 import { FarmMapView } from '@/components/farms/FarmMapView';
-import { FarmMetaAdsPanel } from '@/components/farms/FarmMetaAdsPanel';
 import { FinancePanel } from '@/components/finance/FinancePanel';
 import { CreateContactDialog } from '@/components/crm/CreateContactDialog';
 import { PaywallGuard } from '@/components/PaywallGuard';
@@ -73,7 +69,7 @@ import {
   normalizeFarmTouchTypes,
 } from '@/lib/farms/config';
 import { buildFarmDashboardAnalytics } from '@/lib/farms/analytics';
-import { formatDateInput } from '@/lib/farms/plan';
+import { buildCadenceTouchPlan, formatDateInput } from '@/lib/farms/plan';
 import {
   buildLegacyCampaignText,
   isMissingCampaignColumnErrorMessage,
@@ -87,7 +83,7 @@ const MODE_LABELS: Record<FarmSessionMode, string> = {
   pop_by: 'Pop by',
   letter: 'Letter',
   phone_call: 'Phone call',
-  social_ad: 'Social media ad',
+  social_ad: 'Social ad',
   event: 'Event',
 };
 
@@ -98,106 +94,24 @@ type ActivityItem =
 
 type DashboardScope = 'current_cycle' | 'all_time';
 type MapLayerScope = 'all_time' | 'cycle';
+type PlannerTouchDraft = {
+  slotId: string;
+  touchId: string | null;
+  sequenceNumber: number;
+  cycleNumber: number;
+  suggestedDate: string;
+  scheduledDate: string;
+  mode: FarmSessionMode;
+  title: string;
+  notes: string;
+  homesTarget: string;
+};
+
+type PlannerTouchSlot = PlannerTouchDraft;
+
 type CampaignWithLegacyDescription = CampaignV2 & {
   description?: string | null;
 };
-
-const FARM_NOTE_TIMELINE_PREFIX = '__FLYR_FARM_NOTE_TIMELINE_V1__';
-
-type FarmNoteAttachment = {
-  name: string;
-  url: string;
-  type: 'pdf';
-};
-
-type FarmNoteEntry = {
-  id: string;
-  body: string;
-  createdAt: string;
-  attachment?: FarmNoteAttachment;
-};
-
-type FarmNoteTimeline = {
-  entries: FarmNoteEntry[];
-};
-
-function isFarmNotePlaceholder(value: string): boolean {
-  return /^\[farm:[0-9a-f-]+\]$/i.test(value.trim());
-}
-
-function isFarmNoteAttachment(value: unknown): value is FarmNoteAttachment {
-  const candidate = value as FarmNoteAttachment | null;
-  return (
-    Boolean(candidate) &&
-    candidate?.type === 'pdf' &&
-    typeof candidate.name === 'string' &&
-    typeof candidate.url === 'string'
-  );
-}
-
-function parseFarmNoteTimeline(value: string | null | undefined, legacyCreatedAt?: string | null): FarmNoteTimeline {
-  const raw = value?.trim();
-  if (!raw || isFarmNotePlaceholder(raw)) return { entries: [] };
-
-  if (!raw.startsWith(FARM_NOTE_TIMELINE_PREFIX)) {
-    return {
-      entries: [
-        {
-          id: 'legacy-note',
-          body: raw,
-          createdAt: legacyCreatedAt ?? new Date(0).toISOString(),
-        },
-      ],
-    };
-  }
-
-  try {
-    const parsed = JSON.parse(raw.slice(FARM_NOTE_TIMELINE_PREFIX.length)) as { entries?: unknown };
-    const entries = Array.isArray(parsed.entries)
-      ? parsed.entries
-          .map((entry): FarmNoteEntry | null => {
-            const candidate = entry as Partial<FarmNoteEntry> | null;
-            if (
-              !candidate ||
-              typeof candidate.id !== 'string' ||
-              typeof candidate.createdAt !== 'string' ||
-              typeof candidate.body !== 'string'
-            ) {
-              return null;
-            }
-
-            return {
-              id: candidate.id,
-              body: candidate.body,
-              createdAt: candidate.createdAt,
-              attachment: isFarmNoteAttachment(candidate.attachment) ? candidate.attachment : undefined,
-            };
-          })
-          .filter((entry): entry is FarmNoteEntry => entry !== null)
-      : [];
-
-    return { entries };
-  } catch {
-    return { entries: [] };
-  }
-}
-
-function buildFarmNoteTimeline(entries: FarmNoteEntry[]): string {
-  if (entries.length === 0) return '';
-  return `${FARM_NOTE_TIMELINE_PREFIX}${JSON.stringify({ entries })}`;
-}
-
-function formatFarmNoteTimestamp(value: string): string {
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return 'Timestamp unavailable';
-  return parsed.toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
-}
 
 function formatPercentage(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return '0%';
@@ -316,7 +230,6 @@ function isMissingCampaignColumnError(error: unknown, column: 'notes' | 'scripts
 
 export default function FarmPage() {
   const params = useParams();
-  const searchParams = useSearchParams();
   const farmId = params.id as string;
   const { currentWorkspaceId } = useWorkspace();
   const [farm, setFarm] = useState<Farm | null>(null);
@@ -349,6 +262,8 @@ export default function FarmPage() {
   const [completeNotes, setCompleteNotes] = useState('');
   const [homesReached, setHomesReached] = useState('');
   const [saving, setSaving] = useState(false);
+  const [savingPlan, setSavingPlan] = useState(false);
+  const [planDrafts, setPlanDrafts] = useState<PlannerTouchDraft[]>([]);
   const [savingConfig, setSavingConfig] = useState(false);
   const [mapTabVersion, setMapTabVersion] = useState(0);
   const [configName, setConfigName] = useState('');
@@ -372,11 +287,12 @@ export default function FarmPage() {
   const [destinationUrl, setDestinationUrl] = useState('');
   const [isSavingUrl, setIsSavingUrl] = useState(false);
   const [farmCampaignNotes, setFarmCampaignNotes] = useState('');
-  const [farmNoteDraft, setFarmNoteDraft] = useState('');
-  const [farmNotePdf, setFarmNotePdf] = useState<File | null>(null);
-  const [farmNotePdfInputKey, setFarmNotePdfInputKey] = useState(0);
   const [isSavingCampaignNotes, setIsSavingCampaignNotes] = useState(false);
+  const [campaignNotesDirty, setCampaignNotesDirty] = useState(false);
   const [farmScripts, setFarmScripts] = useState('');
+  const [scriptsDirty, setScriptsDirty] = useState(false);
+  const [isSavingScripts, setIsSavingScripts] = useState(false);
+  const [uploadingFlyer, setUploadingFlyer] = useState(false);
   const [showPaywall, setShowPaywall] = useState(false);
   const [showMissingQRModal, setShowMissingQRModal] = useState(false);
   const [missingQRFlyerId, setMissingQRFlyerId] = useState<string | null>(null);
@@ -388,18 +304,6 @@ export default function FarmPage() {
     (linkedCampaign as CampaignWithLegacyDescription | null)?.description
   );
   const currentFlyerUrl = linkedCampaign?.flyer_url ?? legacyCampaignText.flyerUrl ?? null;
-  const farmNoteTimeline = useMemo(
-    () => parseFarmNoteTimeline(farmCampaignNotes, linkedCampaign?.created_at ?? farm?.created_at),
-    [farm?.created_at, farmCampaignNotes, linkedCampaign?.created_at]
-  );
-  const sortedFarmNoteEntries = useMemo(
-    () =>
-      [...farmNoteTimeline.entries].sort(
-        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      ),
-    [farmNoteTimeline.entries]
-  );
-  const canAddFarmNote = farmNoteDraft.trim().length > 0 || farmNotePdf !== null;
 
   const loadData = useCallback(async (resolvedUserId?: string | null) => {
     try {
@@ -494,12 +398,6 @@ export default function FarmPage() {
     }
   }, [activeTab]);
 
-  useEffect(() => {
-    if (searchParams.get('tab') === 'social-ads') {
-      setActiveTab('social-ads');
-    }
-  }, [searchParams]);
-
   const analytics = useMemo(
     () =>
       buildFarmDashboardAnalytics({
@@ -531,18 +429,6 @@ export default function FarmPage() {
         ? resolvedTouches
         : resolvedTouches.filter((touch) => String(touch.resolvedCycleNumber) === selectedCycleFilter),
     [resolvedTouches, selectedCycleFilter]
-  );
-  const completedActivityTouches = useMemo(
-    () =>
-      filteredTouches.filter((touch) => touch.status === 'completed' || Boolean(touch.completed_date)),
-    [filteredTouches]
-  );
-  const plannedSessionTouches = useMemo(
-    () =>
-      resolvedTouches
-        .filter((touch) => touch.status !== 'completed' && !touch.completed_date)
-        .sort((left, right) => new Date(left.scheduled_date).getTime() - new Date(right.scheduled_date).getTime()),
-    [resolvedTouches]
   );
 
   useEffect(() => {
@@ -584,6 +470,7 @@ export default function FarmPage() {
     } else {
       setFarmCampaignNotes(legacyCampaignText.notes ?? '');
     }
+    setCampaignNotesDirty(false);
   }, [legacyCampaignText.notes, linkedCampaign?.notes]);
 
   useEffect(() => {
@@ -592,6 +479,7 @@ export default function FarmPage() {
     } else {
       setFarmScripts(legacyCampaignText.scripts ?? '');
     }
+    setScriptsDirty(false);
   }, [legacyCampaignText.scripts, linkedCampaign?.scripts]);
 
   const saveLegacyCampaignText = useCallback(
@@ -615,30 +503,65 @@ export default function FarmPage() {
 
   const activityItems = useMemo<ActivityItem[]>(() => {
     const allowedTouchIds =
-      selectedCycleFilter === 'all' ? null : new Set(completedActivityTouches.map((touch) => touch.id));
-    const sessionItems: ActivityItem[] = completedActivityTouches.map((touch) => ({
-      id: `${touch.id}:completed`,
-      type: 'session',
-      timestamp: touch.completed_date ?? touch.effectiveDate ?? touch.scheduled_date,
-      title: `${MODE_LABELS[touch.mode ?? 'doorknock']} session completed`,
-      description:
-        touch.homes_reached != null
-          ? `${touch.homes_reached} homes reached`
-          : touch.notes || 'Completed without a recorded home count.',
-      touchId: touch.id,
+      selectedCycleFilter === 'all' ? null : new Set(filteredTouches.map((touch) => touch.id));
+    const sessionItems: ActivityItem[] = resolvedTouches.flatMap((touch) => {
+      const items: ActivityItem[] = [
+        {
+          id: `${touch.id}:scheduled`,
+          type: 'session',
+          timestamp: touch.scheduled_date,
+          title: `${MODE_LABELS[touch.mode ?? 'doorknock']} session scheduled`,
+          description: touch.title || 'Session added to this farm.',
+          touchId: touch.id,
+        },
+      ];
+
+      if (touch.completed_date) {
+        items.push({
+          id: `${touch.id}:completed`,
+          type: 'session',
+          timestamp: touch.completed_date,
+          title: `${MODE_LABELS[touch.mode ?? 'doorknock']} session completed`,
+          description:
+            touch.homes_reached != null
+              ? `${touch.homes_reached} homes reached`
+              : touch.notes || 'Completed without a recorded home count.',
+          touchId: touch.id,
+        });
+      }
+
+      return items;
+    });
+
+    const leadItems: ActivityItem[] = leads.map((lead) => ({
+      id: lead.id,
+      type: 'lead',
+      timestamp: lead.created_at,
+      title: lead.name || 'New lead captured',
+      description: `Source: ${lead.lead_source}`,
+      touchId: lead.touch_id ?? null,
     }));
 
-    return sessionItems
+    const contactItems: ActivityItem[] = contacts.map((contact) => ({
+      id: contact.id,
+      type: 'contact',
+      timestamp: contact.created_at,
+      title: contact.full_name || 'New contact created',
+      description: contact.address || 'CRM contact linked to this farm.',
+      touchId: null,
+    }));
+
+    return [...sessionItems, ...leadItems, ...contactItems]
       .filter((item) => (allowedTouchIds ? (item.touchId ? allowedTouchIds.has(item.touchId) : false) : true))
       .filter((item) => selectedTouchFilter === 'all' || item.touchId === selectedTouchFilter)
       .sort((left, right) => new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime());
-  }, [completedActivityTouches, selectedCycleFilter, selectedTouchFilter]);
+  }, [contacts, filteredTouches, leads, resolvedTouches, selectedCycleFilter, selectedTouchFilter]);
 
   useEffect(() => {
     if (selectedTouchFilter === 'all') return;
-    if (completedActivityTouches.some((touch) => touch.id === selectedTouchFilter)) return;
+    if (filteredTouches.some((touch) => touch.id === selectedTouchFilter)) return;
     setSelectedTouchFilter('all');
-  }, [completedActivityTouches, selectedTouchFilter]);
+  }, [filteredTouches, selectedTouchFilter]);
 
   useEffect(() => {
     if (resolvedTouches.length === 0) {
@@ -774,6 +697,47 @@ export default function FarmPage() {
           : 'No completion window set',
     };
   }, [farm, kpis, resolvedTouches]);
+
+  const defaultPlannedHomesTarget = useMemo(() => {
+    if (!farm || getFarmGoalType(farm) !== 'homes_per_cycle') return '';
+    return String(getFarmGoalTarget(farm));
+  }, [farm]);
+
+  const plannerSlots = useMemo<PlannerTouchSlot[]>(() => {
+    if (!farm) return [];
+
+    const generatedDates = buildCadenceTouchPlan(farm, 12);
+    const scheduledTouches = resolvedTouches
+      .filter((touch) => touch.status === 'scheduled')
+      .sort(
+        (left, right) =>
+          new Date(left.scheduled_date).getTime() - new Date(right.scheduled_date).getTime()
+      );
+
+    return generatedDates.map((slot, index) => {
+      const touch = scheduledTouches[index] ?? null;
+
+      return {
+        slotId: touch?.id ?? `planned-${slot.sequenceNumber}`,
+        touchId: touch?.id ?? null,
+        sequenceNumber: slot.sequenceNumber,
+        cycleNumber: touch?.resolvedCycleNumber ?? slot.cycleNumber,
+        suggestedDate: slot.suggestedDate,
+        scheduledDate: touch ? formatDateInput(touch.scheduled_date) : slot.suggestedDate,
+        mode: touch?.mode ?? 'doorknock',
+        title: touch?.title ?? '',
+        notes: touch?.notes ?? '',
+        homesTarget:
+          typeof touch?.homes_target === 'number'
+            ? String(touch.homes_target)
+            : defaultPlannedHomesTarget,
+      };
+    });
+  }, [defaultPlannedHomesTarget, farm, resolvedTouches]);
+
+  useEffect(() => {
+    setPlanDrafts(plannerSlots);
+  }, [plannerSlots]);
 
   const homesWithContacts = useMemo(() => {
     const farmAddressIdByCampaignAddressId = new Map<string, string>();
@@ -940,52 +904,7 @@ export default function FarmPage() {
       }
 
       setLinkedCampaignId(nextCampaignId);
-      let postCreateWarning: string | null = null;
-
-      try {
-        const provisionResponse = await fetch('/api/campaigns/provision', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            campaign_id: nextCampaignId,
-          }),
-        });
-
-        if (!provisionResponse.ok) {
-          const payload = await provisionResponse.json().catch(() => null);
-          throw new Error(payload?.error || 'Linked campaign provisioning failed');
-        }
-      } catch (error) {
-        postCreateWarning =
-          error instanceof Error
-            ? error.message
-            : 'Linked campaign was created, but provisioning did not finish.';
-      }
-
-      try {
-        const syncResponse = await fetch(`/api/farms/${farm.id}/sync-addresses`, {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-        });
-
-        if (!syncResponse.ok) {
-          const payload = await syncResponse.json().catch(() => null);
-          throw new Error(payload?.error || 'Farm home sync failed');
-        }
-      } catch (error) {
-        postCreateWarning =
-          postCreateWarning ??
-          (error instanceof Error
-            ? error.message
-            : 'Linked campaign was created, but farm homes did not sync.');
-      }
-
       await loadData(userId);
-      if (postCreateWarning) {
-        alert(postCreateWarning);
-      }
       return nextCampaignId;
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Failed to create linked campaign');
@@ -1018,85 +937,129 @@ export default function FarmPage() {
     }
   }, [destinationUrl, handleCreateLinkedCampaign, linkedCampaignId, loadData, userId]);
 
-  const handleAddFarmNote = useCallback(async () => {
+  const handleSaveCampaignNotes = useCallback(async () => {
     const campaignId = linkedCampaignId ?? (await handleCreateLinkedCampaign());
     if (!campaignId) return;
 
-    const noteBody = farmNoteDraft.trim();
-    const attachmentFile = farmNotePdf;
-    if (!noteBody && !attachmentFile) return;
-
     setIsSavingCampaignNotes(true);
     try {
-      let attachment: FarmNoteAttachment | undefined;
       const supabase = createClient();
-
-      if (attachmentFile) {
-        if (attachmentFile.type !== 'application/pdf') {
-          throw new Error('Invalid file type. Use a PDF.');
-        }
-        if (attachmentFile.size > 10 * 1024 * 1024) {
-          throw new Error('File too large. Maximum size is 10MB.');
-        }
-
-        const path = `farm-note-attachments/${campaignId}/${crypto.randomUUID()}.pdf`;
-        const { error: uploadError } = await supabase.storage.from('flyers').upload(path, attachmentFile, {
-          contentType: attachmentFile.type,
-          upsert: false,
-        });
-        if (uploadError) throw uploadError;
-
-        const { data: urlData } = supabase.storage.from('flyers').getPublicUrl(path);
-        attachment = {
-          name: attachmentFile.name,
-          url: urlData.publicUrl,
-          type: 'pdf',
-        };
-      }
-
-      const existingEntries = parseFarmNoteTimeline(
-        farmCampaignNotes,
-        linkedCampaign?.created_at ?? farm?.created_at
-      ).entries;
-      const nextEntry: FarmNoteEntry = {
-        id: crypto.randomUUID(),
-        body: noteBody,
-        createdAt: new Date().toISOString(),
-        attachment,
-      };
-      const nextNotes = buildFarmNoteTimeline([...existingEntries, nextEntry]);
-      const { error } = await supabase.from('campaigns').update({ notes: nextNotes || null }).eq('id', campaignId);
+      const { error } = await supabase
+        .from('campaigns')
+        .update({ notes: farmCampaignNotes || null })
+        .eq('id', campaignId);
 
       if (error) {
         if (isMissingCampaignColumnError(error, 'notes')) {
-          await saveLegacyCampaignText(campaignId, { notes: nextNotes });
+          await saveLegacyCampaignText(campaignId, { notes: farmCampaignNotes });
         } else {
           throw error;
         }
       }
 
-      setFarmCampaignNotes(nextNotes);
-      setFarmNoteDraft('');
-      setFarmNotePdf(null);
-      setFarmNotePdfInputKey((value) => value + 1);
+      setCampaignNotesDirty(false);
       await loadData(userId);
     } catch (error) {
       alert(formatSupabaseError(error, 'Failed to save farm notes'));
     } finally {
       setIsSavingCampaignNotes(false);
     }
-  }, [
-    farm?.created_at,
-    farmCampaignNotes,
-    farmNoteDraft,
-    farmNotePdf,
-    handleCreateLinkedCampaign,
-    linkedCampaign?.created_at,
-    linkedCampaignId,
-    loadData,
-    saveLegacyCampaignText,
-    userId,
-  ]);
+  }, [farmCampaignNotes, handleCreateLinkedCampaign, linkedCampaignId, loadData, saveLegacyCampaignText, userId]);
+
+  const handleSaveScripts = useCallback(async () => {
+    const campaignId = linkedCampaignId ?? (await handleCreateLinkedCampaign());
+    if (!campaignId) return;
+
+    setIsSavingScripts(true);
+    try {
+      const supabase = createClient();
+      const { error } = await supabase
+        .from('campaigns')
+        .update({ scripts: farmScripts || null })
+        .eq('id', campaignId);
+
+      if (error) {
+        if (isMissingCampaignColumnError(error, 'scripts')) {
+          await saveLegacyCampaignText(campaignId, { scripts: farmScripts });
+        } else {
+          throw error;
+        }
+      }
+
+      setScriptsDirty(false);
+      await loadData(userId);
+    } catch (error) {
+      alert(formatSupabaseError(error, 'Failed to save scripts'));
+    } finally {
+      setIsSavingScripts(false);
+    }
+  }, [farmScripts, handleCreateLinkedCampaign, linkedCampaignId, loadData, saveLegacyCampaignText, userId]);
+
+  const handleFlyerUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const campaignId = linkedCampaignId ?? (await handleCreateLinkedCampaign());
+    if (!campaignId) {
+      event.target.value = '';
+      return;
+    }
+
+    const allowedTypes = new Set([
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'image/gif',
+      'application/pdf',
+    ]);
+
+    setUploadingFlyer(true);
+    try {
+      if (!allowedTypes.has(file.type)) {
+        throw new Error('Invalid file type. Use image (JPEG, PNG, WebP, GIF) or PDF.');
+      }
+      if (file.size > 10 * 1024 * 1024) {
+        throw new Error('File too large. Maximum size is 10MB.');
+      }
+
+      const supabase = createClient();
+      const rawExt =
+        file.type === 'application/pdf'
+          ? 'pdf'
+          : (file.name.split('.').pop() || '').replace(/[^a-zA-Z0-9]/g, '') || 'jpg';
+      const safeExt = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'pdf'].includes(rawExt.toLowerCase())
+        ? rawExt.toLowerCase()
+        : 'jpg';
+      const path = `campaign-flyers/${campaignId}/${crypto.randomUUID()}.${safeExt}`;
+
+      const { error: uploadError } = await supabase.storage.from('flyers').upload(path, file, {
+        contentType: file.type,
+        upsert: false,
+      });
+      if (uploadError) throw uploadError;
+
+      const { data: urlData } = supabase.storage.from('flyers').getPublicUrl(path);
+      const { error: updateError } = await supabase
+        .from('campaigns')
+        .update({ flyer_url: urlData.publicUrl })
+        .eq('id', campaignId);
+
+      if (updateError) {
+        if (isMissingCampaignColumnError(updateError, 'flyer_url')) {
+          await saveLegacyCampaignText(campaignId, { flyerUrl: urlData.publicUrl });
+        } else {
+          throw updateError;
+        }
+      }
+
+      await loadData(userId);
+    } catch (error) {
+      alert(formatSupabaseError(error, 'Failed to upload flyer'));
+    } finally {
+      setUploadingFlyer(false);
+      event.target.value = '';
+    }
+  }, [handleCreateLinkedCampaign, linkedCampaignId, loadData, saveLegacyCampaignText, userId]);
 
   const handleGenerateBasicQr = useCallback(async () => {
     const campaignId = linkedCampaignId ?? (await handleCreateLinkedCampaign());
@@ -1273,6 +1236,75 @@ export default function FarmPage() {
     }
   };
 
+  const handlePlanDraftChange = useCallback(
+    (slotId: string, field: keyof Omit<PlannerTouchDraft, 'slotId' | 'touchId' | 'sequenceNumber' | 'cycleNumber' | 'suggestedDate'>, value: string) => {
+      setPlanDrafts((current) =>
+        current.map((draft) => (draft.slotId === slotId ? { ...draft, [field]: value } : draft))
+      );
+    },
+    []
+  );
+
+  const handleResetPlan = useCallback(() => {
+    setPlanDrafts(plannerSlots);
+  }, [plannerSlots]);
+
+  const handleSavePlan = useCallback(async () => {
+    if (!farm) return;
+
+    const invalidDraft = planDrafts.find((draft) => !draft.scheduledDate);
+    if (invalidDraft) {
+      alert(`Please choose a date for cycle ${invalidDraft.cycleNumber}.`);
+      return;
+    }
+
+    setSavingPlan(true);
+    try {
+      for (const draft of planDrafts) {
+        const scheduledDate = new Date(`${draft.scheduledDate}T12:00:00`);
+        if (Number.isNaN(scheduledDate.getTime())) {
+          throw new Error(`Cycle ${draft.cycleNumber} has an invalid date.`);
+        }
+
+        const scheduledDateIso = scheduledDate.toISOString();
+        const homesTargetValue = draft.homesTarget.trim() ? Number(draft.homesTarget) : null;
+        if (homesTargetValue != null && (!Number.isFinite(homesTargetValue) || homesTargetValue < 0)) {
+          throw new Error(`Cycle ${draft.cycleNumber} has an invalid target homes value.`);
+        }
+        const sharedPayload = {
+          mode: draft.mode,
+          title: draft.title.trim() || null,
+          scheduled_date: scheduledDateIso,
+          notes: draft.notes.trim() || undefined,
+          homes_target: homesTargetValue,
+        } satisfies Partial<FarmTouch>;
+
+        if (draft.touchId) {
+          await FarmTouchService.updateTouch(draft.touchId, sharedPayload);
+          continue;
+        }
+
+        await FarmTouchService.createSession({
+          farmId: farm.id,
+          workspaceId: farm.workspace_id ?? currentWorkspaceId,
+          cycleNumber: draft.cycleNumber,
+          mode: draft.mode,
+          title: draft.title.trim() || undefined,
+          scheduledDate: scheduledDateIso,
+          notes: draft.notes.trim() || undefined,
+          homesTarget: homesTargetValue,
+        });
+      }
+
+      await loadData(userId);
+    } catch (error) {
+      console.error('Save farm plan:', error);
+      alert(error instanceof Error ? error.message : 'Failed to save cycle plan');
+    } finally {
+      setSavingPlan(false);
+    }
+  }, [currentWorkspaceId, farm, loadData, planDrafts, userId]);
+
   const handleStartSession = async (touch: FarmTouch) => {
     try {
       await FarmTouchService.startTouch(touch.id);
@@ -1426,7 +1458,6 @@ export default function FarmPage() {
           <TabsTrigger value="homes">Homes</TabsTrigger>
           <TabsTrigger value="leads">Contacts</TabsTrigger>
           <TabsTrigger value="finance">Finance</TabsTrigger>
-          <TabsTrigger value="social-ads">Meta Ads</TabsTrigger>
           <TabsTrigger value="qr">QR Codes</TabsTrigger>
           <TabsTrigger value="notes">Notes</TabsTrigger>
           <TabsTrigger value="configure">Settings</TabsTrigger>
@@ -1644,6 +1675,19 @@ export default function FarmPage() {
             </div>
           </div>
 
+          <div className="bg-card p-4 rounded-xl border border-border space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold text-foreground">Coverage Progress</h2>
+                <p className="text-sm text-muted-foreground">
+                  {overviewSnapshot.coverageCount.toLocaleString()} / {kpis.totalHomes.toLocaleString()} homes visited in {overviewSnapshot.label.toLowerCase()}
+                </p>
+              </div>
+              <p className="text-sm font-medium text-foreground">{formatPercentage(overviewSnapshot.coverageRate)}</p>
+            </div>
+            <Progress value={overviewSnapshot.coverageRate * 100} />
+          </div>
+
         </TabsContent>
 
         <TabsContent value="plan" className="mt-4 space-y-4">
@@ -1667,58 +1711,113 @@ export default function FarmPage() {
             </div>
           </div>
 
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base">
-                <ListTodo className="w-4 h-4" />
-                Planned sessions
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {plannedSessionTouches.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No planned sessions waiting to be completed.</p>
+          <div className="bg-card rounded-2xl border border-border p-5">
+            <div className="flex flex-col gap-3 border-b border-border pb-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="space-y-1">
+                <h2 className="text-lg font-semibold text-foreground">Next 12 Cycles</h2>
+                <p className="text-sm text-muted-foreground">
+                  Generated from the farm start date and cadence settings. Edit each cycle&apos;s touch type, date, title, notes, and target homes before saving.
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Cadence: {formatFarmCadence(farm)}. Start date: {formatDateLabel(farm.start_date)}. Goal: {planningSummary.goal}.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" onClick={handleResetPlan} disabled={savingPlan}>
+                  Reset dates
+                </Button>
+                <Button onClick={handleSavePlan} disabled={savingPlan || planDrafts.length === 0}>
+                  {savingPlan ? 'Saving plan...' : 'Save 12-cycle plan'}
+                </Button>
+              </div>
+            </div>
+
+            <div className="mt-4 space-y-4">
+              {planDrafts.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Set a valid farm start date to generate the cycle plan.</p>
               ) : (
-                plannedSessionTouches.map((touch) => (
-                  <div key={touch.id} className="rounded-xl border border-border p-4 space-y-3">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div className="space-y-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="font-medium">{touch.title || MODE_LABELS[touch.mode ?? 'doorknock']}</p>
-                          <Badge variant="secondary">Cycle {touch.resolvedCycleNumber}</Badge>
-                          <Badge variant="outline">{MODE_LABELS[touch.mode ?? 'doorknock']}</Badge>
-                          <Badge variant={touch.status === 'in_progress' ? 'default' : 'outline'}>
-                            {touch.status.replace('_', ' ')}
-                          </Badge>
-                        </div>
-                        <p className="text-sm text-muted-foreground">
-                          Scheduled {new Date(touch.scheduled_date).toLocaleString()}
+                planDrafts.map((draft) => (
+                  <div key={draft.slotId} className="rounded-xl border border-border bg-muted/20 p-4 space-y-4">
+                    <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">Cycle {draft.cycleNumber}</p>
+                        <p className="text-xs text-muted-foreground">
+                          Cycle {draft.cycleNumber} • Suggested date {formatDateLabel(draft.suggestedDate)}
                         </p>
-                        {touch.notes ? (
-                          <p className="text-sm text-muted-foreground">{touch.notes}</p>
-                        ) : null}
                       </div>
-                      <div className="flex flex-wrap gap-2">
-                        {touch.status === 'scheduled' ? (
-                          <Button variant="outline" size="sm" onClick={() => void handleStartSession(touch)}>
-                            <PlayCircle className="w-4 h-4 mr-2" />
-                            Start
-                          </Button>
-                        ) : null}
-                        <Button size="sm" onClick={() => handleOpenComplete(touch)}>
-                          <CheckCircle2 className="w-4 h-4 mr-2" />
-                          Complete
-                        </Button>
+                      <Badge variant={draft.touchId ? 'secondary' : 'outline'}>
+                        {draft.touchId ? 'Scheduled cycle' : 'New planned cycle'}
+                      </Badge>
+                    </div>
+
+                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                      <div className="space-y-2">
+                        <Label htmlFor={`plan-date-${draft.sequenceNumber}`}>Date</Label>
+                        <Input
+                          id={`plan-date-${draft.sequenceNumber}`}
+                          type="date"
+                          value={draft.scheduledDate}
+                          onChange={(event) => handlePlanDraftChange(draft.slotId, 'scheduledDate', event.target.value)}
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Touch type</Label>
+                        <Select
+                          value={draft.mode}
+                          onValueChange={(value) => handlePlanDraftChange(draft.slotId, 'mode', value)}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="doorknock">Doorknock</SelectItem>
+                            <SelectItem value="flyer">Flyer</SelectItem>
+                            <SelectItem value="canada_post">Canada Post</SelectItem>
+                            <SelectItem value="pop_by">Pop by</SelectItem>
+                            <SelectItem value="letter">Letter</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor={`plan-title-${draft.sequenceNumber}`}>Title</Label>
+                        <Input
+                          id={`plan-title-${draft.sequenceNumber}`}
+                          value={draft.title}
+                          onChange={(event) => handlePlanDraftChange(draft.slotId, 'title', event.target.value)}
+                          placeholder={`Cycle ${draft.cycleNumber}`}
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor={`plan-target-${draft.sequenceNumber}`}>Target homes</Label>
+                        <Input
+                          id={`plan-target-${draft.sequenceNumber}`}
+                          type="number"
+                          min="0"
+                          value={draft.homesTarget}
+                          onChange={(event) => handlePlanDraftChange(draft.slotId, 'homesTarget', event.target.value)}
+                          placeholder={defaultPlannedHomesTarget || 'Optional'}
+                        />
                       </div>
                     </div>
-                    <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
-                      <span>Target: {touch.homes_target ?? '—'}</span>
-                      <span>Reached: {touch.homes_reached ?? '—'}</span>
+
+                    <div className="space-y-2">
+                      <Label htmlFor={`plan-notes-${draft.sequenceNumber}`}>Notes</Label>
+                      <Textarea
+                        id={`plan-notes-${draft.sequenceNumber}`}
+                        value={draft.notes}
+                        onChange={(event) => handlePlanDraftChange(draft.slotId, 'notes', event.target.value)}
+                        rows={3}
+                        placeholder="Add a quick note for this cycle."
+                      />
                     </div>
                   </div>
                 ))
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         </TabsContent>
 
         <TabsContent value="map" className="mt-4">
@@ -1792,7 +1891,6 @@ export default function FarmPage() {
               key={`${farm.id}:${mapTabVersion}:${mapLayerScope}:${selectedMapCycleNumber}`}
               farm={farm}
               addresses={addresses}
-              campaignAddresses={linkedCampaignAddresses}
               linkedCampaignId={linkedCampaignId}
               linkedCampaign={linkedCampaign}
               layerScope={mapLayerScope}
@@ -1834,7 +1932,7 @@ export default function FarmPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All sessions</SelectItem>
-                      {completedActivityTouches.map((touch) => (
+                      {filteredTouches.map((touch) => (
                         <SelectItem key={touch.id} value={touch.id}>
                           {touch.title || MODE_LABELS[touch.mode ?? 'doorknock']} • Cycle {touch.resolvedCycleNumber}
                         </SelectItem>
@@ -1843,10 +1941,14 @@ export default function FarmPage() {
                   </Select>
                 </div>
               </div>
+              <Button onClick={() => setSessionDialogOpen(true)}>
+                <PlayCircle className="w-4 h-4 mr-2" />
+                New Session
+              </Button>
             </div>
             <div className="space-y-3">
               {activityItems.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No completed sessions yet for this selection.</p>
+                <p className="text-sm text-muted-foreground">No farm activity yet for this selection.</p>
               ) : (
                 activityItems.map((item) => (
                   <div key={item.id} className="rounded-xl border border-border p-4">
@@ -1867,14 +1969,14 @@ export default function FarmPage() {
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-base">
                 <ListTodo className="w-4 h-4" />
-                Completed sessions
+                Sessions
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              {completedActivityTouches.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No completed sessions yet for this selection.</p>
+              {filteredTouches.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No sessions created yet for this selection.</p>
               ) : (
-                completedActivityTouches.map((touch) => (
+                filteredTouches.map((touch) => (
                   <div key={touch.id} className="rounded-xl border border-border p-4 space-y-3">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="space-y-1">
@@ -1894,6 +1996,16 @@ export default function FarmPage() {
                         ) : null}
                       </div>
                       <div className="flex flex-wrap gap-2">
+                        {touch.status === 'scheduled' ? (
+                          <Button variant="outline" size="sm" onClick={() => handleStartSession(touch)}>
+                            Start
+                          </Button>
+                        ) : null}
+                        {touch.status !== 'completed' ? (
+                          <Button size="sm" onClick={() => handleOpenComplete(touch)}>
+                            Complete
+                          </Button>
+                        ) : null}
                         <Button
                           variant="ghost"
                           size="sm"
@@ -2053,26 +2165,6 @@ export default function FarmPage() {
             targetId={farm.id}
             workspaceId={farm.workspace_id ?? currentWorkspaceId}
             addresses={addresses}
-          />
-        </TabsContent>
-
-        <TabsContent value="social-ads" className="mt-4 space-y-4">
-          <div className="rounded-2xl border border-border bg-card p-5">
-            <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <h2 className="flex items-center gap-2 text-lg font-semibold text-foreground">
-                  <Megaphone className="h-4 w-4" />
-                  Meta Ads
-                </h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Read-only Meta campaign analytics for Facebook and Instagram ads linked to this farm.
-                </p>
-              </div>
-            </div>
-          </div>
-          <FarmMetaAdsPanel
-            farmId={farm.id}
-            workspaceId={farm.workspace_id ?? currentWorkspaceId}
           />
         </TabsContent>
 
@@ -2242,11 +2334,11 @@ export default function FarmPage() {
 
         <TabsContent value="notes" className="mt-4 space-y-4">
           {!linkedCampaignId ? (
-            <div className="rounded-lg border border-border bg-card p-6 space-y-3">
+            <div className="rounded-xl border border-border bg-card p-6 space-y-3">
               <div>
                 <h2 className="text-sm font-semibold text-foreground">Linked campaign required</h2>
                 <p className="text-sm text-muted-foreground mt-1">
-                  Farm notes are saved on the farm&apos;s linked campaign.
+                  Farm notes, scripts, and flyer assets are saved on the farm&apos;s linked campaign so the print and QR setup stay together.
                 </p>
               </div>
               <Button onClick={() => void handleCreateLinkedCampaign()} disabled={creatingLinkedCampaign}>
@@ -2255,104 +2347,88 @@ export default function FarmPage() {
             </div>
           ) : (
             <>
-              <div className="rounded-lg border border-border bg-card p-4">
+              <div className="rounded-xl border border-border bg-card p-4">
                 <h2 className="mb-3 text-sm font-semibold text-foreground">Farm notes</h2>
+                <p className="mb-2 text-xs text-muted-foreground">
+                  Free-form notes for this farm&apos;s linked campaign (territory, goals, follow-ups, and print context).
+                </p>
                 <Textarea
-                  className="min-h-[120px] resize-y"
-                  placeholder="Write a note..."
-                  value={farmNoteDraft}
-                  onChange={(event) => setFarmNoteDraft(event.target.value)}
+                  className="min-h-[200px] resize-y font-mono"
+                  placeholder="Add notes..."
+                  value={farmCampaignNotes}
+                  onChange={(event) => {
+                    setFarmCampaignNotes(event.target.value);
+                    setCampaignNotesDirty(true);
+                  }}
                 />
-                <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex min-w-0 flex-wrap items-center gap-2">
-                    <label className="inline-flex cursor-pointer items-center">
-                      <input
-                        key={farmNotePdfInputKey}
-                        type="file"
-                        accept="application/pdf"
-                        className="sr-only"
-                        onChange={(event) => {
-                          const file = event.target.files?.[0] ?? null;
-                          if (file && file.type !== 'application/pdf') {
-                            alert('Invalid file type. Use a PDF.');
-                            setFarmNotePdf(null);
-                            setFarmNotePdfInputKey((value) => value + 1);
-                            return;
-                          }
-                          setFarmNotePdf(file);
-                        }}
-                        disabled={isSavingCampaignNotes}
-                      />
-                      <span className="inline-flex h-8 items-center justify-center gap-2 rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent hover:text-accent-foreground">
-                        <Paperclip className="h-4 w-4" />
-                        Add PDF
-                      </span>
-                    </label>
-                    {farmNotePdf ? (
-                      <div className="flex min-w-0 items-center gap-2 rounded-md border border-border bg-background px-2 py-1 text-xs text-muted-foreground">
-                        <FileText className="h-3.5 w-3.5 shrink-0" />
-                        <span className="max-w-[220px] truncate">{farmNotePdf.name}</span>
-                        <button
-                          type="button"
-                          className="rounded-sm p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-                          aria-label="Remove PDF"
-                          onClick={() => {
-                            setFarmNotePdf(null);
-                            setFarmNotePdfInputKey((value) => value + 1);
-                          }}
-                        >
-                          <X className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
+                <div className="mt-3 flex justify-end">
                   <Button
                     type="button"
                     size="sm"
-                    onClick={() => void handleAddFarmNote()}
-                    disabled={!canAddFarmNote || isSavingCampaignNotes}
+                    onClick={() => void handleSaveCampaignNotes()}
+                    disabled={!campaignNotesDirty || isSavingCampaignNotes}
                   >
-                    <Plus className="h-4 w-4" />
-                    {isSavingCampaignNotes ? 'Saving...' : 'Add note'}
+                    {isSavingCampaignNotes ? 'Saving...' : 'Save notes'}
                   </Button>
                 </div>
               </div>
 
-              {sortedFarmNoteEntries.length > 0 ? (
-                <div className="space-y-0">
-                  {sortedFarmNoteEntries.map((entry, index) => (
-                    <div key={entry.id} className="relative pl-7 pb-5 last:pb-0">
-                      {index < sortedFarmNoteEntries.length - 1 ? (
-                        <span className="absolute left-[7px] top-5 h-[calc(100%-1.25rem)] w-px bg-border" />
-                      ) : null}
-                      <span className="absolute left-0 top-1.5 h-3.5 w-3.5 rounded-full border border-primary bg-background" />
-                      <div className="rounded-lg border border-border bg-card p-4">
-                        <time className="font-mono text-xs text-muted-foreground">
-                          {formatFarmNoteTimestamp(entry.createdAt)}
-                        </time>
-                        {entry.body ? (
-                          <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-foreground">{entry.body}</p>
-                        ) : null}
-                        {entry.attachment ? (
-                          <a
-                            href={entry.attachment.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="mt-3 inline-flex max-w-full items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm text-primary hover:bg-accent hover:text-accent-foreground"
-                          >
-                            <FileText className="h-4 w-4 shrink-0" />
-                            <span className="truncate">{entry.attachment.name}</span>
-                          </a>
-                        ) : null}
-                      </div>
-                    </div>
-                  ))}
+              <div className="rounded-xl border border-border bg-card p-4">
+                <h2 className="mb-3 text-sm font-semibold text-foreground">Scripts</h2>
+                <p className="mb-2 text-xs text-muted-foreground">
+                  Script or dialogue to use when working this farm or talking to leads.
+                </p>
+                <Textarea
+                  className="min-h-[160px] resize-y font-mono"
+                  placeholder="Add scripts..."
+                  value={farmScripts}
+                  onChange={(event) => {
+                    setFarmScripts(event.target.value);
+                    setScriptsDirty(true);
+                  }}
+                />
+                <div className="mt-3 flex justify-end">
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => void handleSaveScripts()}
+                    disabled={!scriptsDirty || isSavingScripts}
+                  >
+                    {isSavingScripts ? 'Saving...' : 'Save scripts'}
+                  </Button>
                 </div>
-              ) : (
-                <div className="rounded-lg border border-dashed border-border bg-card/60 p-6 text-sm text-muted-foreground">
-                  No notes yet.
+              </div>
+
+              <div className="rounded-xl border border-border bg-card p-4">
+                <h2 className="mb-3 text-sm font-semibold text-foreground">Flyer used</h2>
+                <p className="mb-3 text-xs text-muted-foreground">
+                  Upload a photo or PDF of the flyer used for this farm.
+                </p>
+                <div className="flex flex-wrap items-center gap-3">
+                  <label className="inline-block cursor-pointer">
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/gif,application/pdf"
+                      className="sr-only"
+                      onChange={(event) => void handleFlyerUpload(event)}
+                      disabled={uploadingFlyer}
+                    />
+                    <span className="inline-flex h-9 items-center justify-center rounded-md border border-input bg-background px-3 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground">
+                      {uploadingFlyer ? 'Uploading...' : 'Choose photo or PDF'}
+                    </span>
+                  </label>
+                  {currentFlyerUrl ? (
+                    <a
+                      href={currentFlyerUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm text-primary hover:underline"
+                    >
+                      View current flyer
+                    </a>
+                  ) : null}
                 </div>
-              )}
+              </div>
             </>
           )}
         </TabsContent>
@@ -2622,9 +2698,6 @@ export default function FarmPage() {
                   <SelectItem value="canada_post">Canada Post</SelectItem>
                   <SelectItem value="pop_by">Pop by</SelectItem>
                   <SelectItem value="letter">Letter</SelectItem>
-                  <SelectItem value="phone_call">Phone call</SelectItem>
-                  <SelectItem value="social_ad">Social media ad</SelectItem>
-                  <SelectItem value="event">Event</SelectItem>
                 </SelectContent>
               </Select>
             </div>

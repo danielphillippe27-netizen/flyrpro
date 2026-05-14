@@ -5,11 +5,9 @@ import {
   timestamp,
   pgTable,
   text,
-  primaryKey,
   integer,
   uuid,
 } from "drizzle-orm/pg-core"
-import type { AdapterAccountType } from "next-auth/adapters"
  
 // Editor projects table - stores canvas designs
 export const editorProjects = pgTable("editor_project", {
@@ -37,4 +35,3 @@ export const editorProjectsRelations = relations(editorProjects, ({ one }) => ({
 }));
 
 export const editorProjectsInsertSchema = createInsertSchema(editorProjects);
-

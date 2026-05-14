@@ -19,6 +19,10 @@ const eslintConfig = [
       "out/**",
       "build/**",
       "next-env.d.ts",
+      "kimi-cli/**",
+      "scripts/**",
+      "web/dist/**",
+      "supabase/functions/**",
     ],
   },
 ];

@@ -98,14 +98,13 @@ export class ExperimentsService {
 
     return {
       variantA: {
-        scans: (scansA as any)?.count || 0,
+        scans: (scansA as { count?: number } | null)?.count || 0,
         conversions: 0, // Implement conversion tracking
       },
       variantB: {
-        scans: (scansB as any)?.count || 0,
+        scans: (scansB as { count?: number } | null)?.count || 0,
         conversions: 0,
       },
     };
   }
 }
-

@@ -168,7 +168,7 @@ const NEAREST_BUILDING_CANDIDATE_LIMIT = 10;
 
 function manualLinkRpc(client: SupabaseClient): ManualLinkRpc | null {
   const rpc = (client as SupabaseClient & { rpc?: unknown }).rpc;
-  return typeof rpc === 'function' ? (rpc.bind(client) as ManualLinkRpc) : null;
+  return typeof rpc === 'function' ? (rpc.bind(client) as unknown as ManualLinkRpc) : null;
 }
 
 // Address from database
@@ -1050,7 +1050,9 @@ export class StableLinkerService {
     for (const polygon of polygons) {
       for (const ring of polygon) {
         for (let i = 0; i < ring.length - 1; i += 1) {
-          const distance = this.pointToLineSegmentDistanceMeters(point, ring[i], ring[i + 1]);
+          const lineStart = ring[i] as [number, number];
+          const lineEnd = ring[i + 1] as [number, number];
+          const distance = this.pointToLineSegmentDistanceMeters(point, lineStart, lineEnd);
           if (distance < minDistance) {
             minDistance = distance;
           }

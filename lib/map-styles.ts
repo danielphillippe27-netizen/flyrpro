@@ -6,7 +6,7 @@ import type { Theme } from '@/lib/theme-provider';
 export type MapStylePreset = 'standard' | 'whiteOut' | 'blackOps' | 'satellite';
 export type MapStyleVersion = 'v11' | 'v12';
 
-type MapStyleConfig = Record<string, unknown>;
+type MapStyleConfig = mapboxgl.MapboxOptions['config'];
 
 export type ResolvedMapStyle = {
   key: string;
@@ -37,13 +37,13 @@ export const MAP_STYLE_PRESET_META: Record<
 };
 
 const STANDARD_V12_STYLES: Record<Theme, string> = {
-  light: 'mapbox://styles/fliper27/cml6z0dhg002301qo9xxc08k4',
-  dark: 'mapbox://styles/fliper27/cml6zc5pq002801qo4lh13o19',
+  light: process.env.NEXT_PUBLIC_MAPBOX_STYLE_ID_STANDARD_LIGHT || 'mapbox://styles/mapbox/streets-v12',
+  dark: process.env.NEXT_PUBLIC_MAPBOX_STYLE_ID_STANDARD_DARK || 'mapbox://styles/mapbox/dark-v11',
 };
 
 const STANDARD_V11_STYLES: Record<Theme, string> = {
-  light: 'mapbox://styles/mapbox/streets-v11',
-  dark: 'mapbox://styles/mapbox/dark-v11',
+  light: process.env.NEXT_PUBLIC_MAPBOX_STYLE_ID_LEGACY_LIGHT || 'mapbox://styles/mapbox/streets-v12',
+  dark: process.env.NEXT_PUBLIC_MAPBOX_STYLE_ID_LEGACY_DARK || 'mapbox://styles/mapbox/dark-v11',
 };
 
 const strippedStyleCache = new Map<string, Record<string, unknown>>();
@@ -56,14 +56,14 @@ export function resolveMapStyle(
   if (preset === 'whiteOut') {
     return {
       key: 'whiteOut:classic:light',
-      style: 'mapbox://styles/mapbox/light-v11',
+      style: process.env.NEXT_PUBLIC_MAPBOX_STYLE_ID_WHITEOUT ?? '',
     };
   }
 
   if (preset === 'blackOps') {
     return {
       key: 'blackOps:classic:dark',
-      style: 'mapbox://styles/mapbox/dark-v11',
+      style: process.env.NEXT_PUBLIC_MAPBOX_STYLE_ID_BLACKOUT ?? '',
     };
   }
 
@@ -172,10 +172,18 @@ export function applyResolvedMapStyle(
   map: mapboxgl.Map,
   resolvedStyle: ResolvedMapStyle,
 ) {
+  const setStyleOptions = resolvedStyle.config
+    ? {
+        config: resolvedStyle.config,
+        localFontFamily: undefined,
+        localIdeographFontFamily: undefined,
+      }
+    : undefined;
+
   void resolveStylePayload(resolvedStyle)
     .then((stylePayload) => {
-      if (typeof stylePayload === 'string' && resolvedStyle.config) {
-        map.setStyle(stylePayload, { config: resolvedStyle.config });
+      if (typeof stylePayload === 'string' && setStyleOptions) {
+        map.setStyle(stylePayload, setStyleOptions);
         return;
       }
 
@@ -183,8 +191,8 @@ export function applyResolvedMapStyle(
     })
     .catch((error) => {
       console.error('Failed to apply resolved map style:', error);
-      if (resolvedStyle.config) {
-        map.setStyle(resolvedStyle.style, { config: resolvedStyle.config });
+      if (setStyleOptions) {
+        map.setStyle(resolvedStyle.style, setStyleOptions);
         return;
       }
       map.setStyle(resolvedStyle.style);

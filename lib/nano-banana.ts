@@ -147,8 +147,8 @@ export async function generateFlyerDesigns(
       // Try to parse JSON from response
       const jsonMatch = text.match(/\[[\s\S]*\]/);
       if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-        descriptions = parsed.map((item: any) => item.description || JSON.stringify(item));
+        const parsed = JSON.parse(jsonMatch[0]) as Array<{ description?: string }>;
+        descriptions = parsed.map((item) => item.description || JSON.stringify(item));
       } else {
         // Fallback: split by common patterns
         const lines = text.split(/\n+/).filter((line: string) => line.trim().length > 20);

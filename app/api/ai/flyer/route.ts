@@ -153,11 +153,13 @@ Return one template object following the FlyerTemplate interface. Generate a uni
       );
     }
 
-    const data = await res.json();
+    const data = await res.json() as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
     const rawText =
       data.candidates?.[0]?.content?.parts?.[0]?.text ??
       data.candidates?.[0]?.content?.parts
-        ?.map((p: any) => p.text)
+        ?.map((p) => p.text)
         .join("\n");
 
     if (!rawText) {
@@ -208,12 +210,11 @@ Return one template object following the FlyerTemplate interface. Generate a uni
     }
 
     return NextResponse.json({ template, listing });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("AI flyer route error", err);
     return NextResponse.json(
-      { error: "Server error", detail: err?.message },
+      { error: "Server error", detail: err instanceof Error ? err.message : String(err) },
       { status: 500 }
     );
   }
 }
-

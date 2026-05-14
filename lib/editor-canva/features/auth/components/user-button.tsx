@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { CreditCard, Crown, Loader, LogOut } from "lucide-react";
+import type { User } from "@supabase/supabase-js";
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 
@@ -24,7 +25,7 @@ export const UserButton = () => {
   const { shouldBlock, triggerPaywall, isLoading } = usePaywall();
   const mutation = useBilling();
   const router = useRouter();
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {

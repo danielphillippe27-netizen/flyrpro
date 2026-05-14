@@ -1,9 +1,11 @@
-import { InferResponseType } from "hono";
 import { useInfiniteQuery } from "@tanstack/react-query";
 
 import { client } from "@/lib/editor-canva/lib/hono";
 
-export type ResponseType = InferResponseType<typeof client.api.projects["$get"], 200>;
+export type ResponseType = {
+  data: unknown[];
+  nextPage?: number | null;
+};
 
 export const useGetProjects = () => {
   const query = useInfiniteQuery<ResponseType, Error>({

@@ -7,6 +7,7 @@ import {
 } from '@/app/lib/billing/apple-products';
 import { updateWorkspaceSubscriptionForUser } from '@/app/lib/billing/stripe-subscription-sync';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
+import type { Entitlement } from '@/types/database';
 
 /**
  * POST /api/billing/apple/verify
@@ -58,7 +59,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    let existing;
+    let existing: Entitlement;
     try {
       existing = await getEntitlementForUser(userId);
     } catch {

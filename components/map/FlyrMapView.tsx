@@ -138,7 +138,7 @@ export function FlyrMapView() {
         const mapInitOptions = await getResolvedMapInitOptions(resolvedMapStyle);
         if (cancelled || !mapContainer.current || map.current) return;
 
-        map.current = new mapboxgl.Map({
+        const mapInstance = new mapboxgl.Map({
           container: mapContainer.current,
           ...mapInitOptions,
           center: [-79.3832, 43.6532], // Toronto default
@@ -146,21 +146,20 @@ export function FlyrMapView() {
           pitch: 0,
           bearing: 0,
         });
+        map.current = mapInstance;
 
-        map.current.on('load', () => {
+        mapInstance.on('load', () => {
           setMapLoaded(true);
           
           // Clean up problematic layers and hide building layers
           const cleanupLayers = () => {
-            if (!map.current) return;
-            
             try {
-              const style = map.current.getStyle();
+              const style = mapInstance.getStyle();
               if (style && style.layers) {
-                applyPresetVisualTweaks(map.current, resolvedMapStyle, {
+                applyPresetVisualTweaks(mapInstance, resolvedMapStyle, {
                   preserveLayerPrefixes: ['map-buildings-', 'campaign-', 'route-', 'assigned-routes-', 'flyr-', 'gl-draw-'],
                 });
-                hideBaseBuildingLayers(map.current, {
+                hideBaseBuildingLayers(mapInstance, {
                   preserveLayerPrefixes: ['map-buildings-'],
                 });
                 style.layers.forEach((layer) => {
@@ -170,7 +169,7 @@ export function FlyrMapView() {
                     layer.id.includes('road_label')
                   )) {
                     try {
-                      map.current.removeLayer(layer.id);
+                      mapInstance.removeLayer(layer.id);
                     } catch (err) {
                       // Layer might not exist or already removed
                     }
@@ -190,7 +189,7 @@ export function FlyrMapView() {
           }, 50);
         });
 
-        map.current.on('error', (e) => {
+        mapInstance.on('error', (e) => {
           // Log full error details for debugging
           const errorDetails = {
             error: e.error,
@@ -245,20 +244,23 @@ export function FlyrMapView() {
         });
 
         // Also listen for style loading errors
-        map.current.on('style.loading', () => {
+        mapInstance.on('style.loading', () => {
           console.log('Mapbox style loading...');
         });
 
-        map.current.on('style.error', (e) => {
+        mapInstance.on('style.error', (e) => {
+          const eventError = (e as { error?: Error }).error;
           console.error('Mapbox style error:', e);
-          setError(`Style loading error: ${e.error?.message || 'Failed to load map style'}`);
+          setError(`Style loading error: ${eventError?.message || 'Failed to load map style'}`);
         });
 
         // Handle data loading errors
-        map.current.on('data', (e) => {
-          if (e.dataType === 'error') {
+        mapInstance.on('data', (e) => {
+          const dataEvent = e as { dataType?: string; error?: Error };
+          if (dataEvent.dataType === 'error') {
+            const eventError = dataEvent.error;
             console.error('Mapbox data error:', e);
-            setError(`Data loading error: ${e.error?.message || 'Failed to load map data'}`);
+            setError(`Data loading error: ${eventError?.message || 'Failed to load map data'}`);
           }
         });
       } catch (err) {
@@ -332,28 +334,28 @@ export function FlyrMapView() {
   // Sync map style with the selected map preset.
   useEffect(() => {
     if (!map.current || !mapLoaded) return;
+    const mapInstance = map.current;
     try {
-      applyResolvedMapStyle(map.current, resolvedMapStyle);
+      applyResolvedMapStyle(mapInstance, resolvedMapStyle);
     } catch (err) {
       console.error('Error setting map style:', err);
       setError(`Failed to load map style: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     const cleanupLayers = () => {
-      if (!map.current) return;
       try {
-        const style = map.current.getStyle();
+        const style = mapInstance.getStyle();
         if (style?.layers) {
-          applyPresetVisualTweaks(map.current, resolvedMapStyle, {
+          applyPresetVisualTweaks(mapInstance, resolvedMapStyle, {
             preserveLayerPrefixes: ['map-buildings-', 'campaign-', 'route-', 'assigned-routes-', 'flyr-', 'gl-draw-'],
           });
-          hideBaseBuildingLayers(map.current, {
+          hideBaseBuildingLayers(mapInstance, {
             preserveLayerPrefixes: ['map-buildings-'],
           });
           style.layers.forEach((layer) => {
             if (layer.id && (layer.id.includes('road-label') || layer.id.includes('road_label'))) {
               try {
-                map.current.removeLayer(layer.id);
+                mapInstance.removeLayer(layer.id);
               } catch {}
             }
           });
@@ -361,7 +363,7 @@ export function FlyrMapView() {
       } catch {}
     };
 
-    map.current.once('style.load', () => {
+    mapInstance.once('style.load', () => {
       cleanupLayers();
     });
   }, [mapLoaded, resolvedMapStyle]);
@@ -505,8 +507,9 @@ export function FlyrMapView() {
             return { lon: parseFloat(wktMatch[1]), lat: parseFloat(wktMatch[2]) };
           }
           // If it's already an object with coordinates
-          if (typeof address.geom === 'object' && address.geom.coordinates) {
-            const coords = address.geom.coordinates;
+          const rawGeom: unknown = address.geom;
+          if (rawGeom && typeof rawGeom === 'object' && 'coordinates' in rawGeom) {
+            const coords = (rawGeom as { coordinates?: unknown }).coordinates;
             if (Array.isArray(coords) && coords.length >= 2) {
               return { lon: coords[0], lat: coords[1] };
             }

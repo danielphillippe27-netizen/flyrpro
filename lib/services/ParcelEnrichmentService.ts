@@ -794,8 +794,8 @@ export class ParcelEnrichmentService {
     unsupportedLocalities: string[];
     localityCounts: Array<{ source_id: SupportedParcelSourceId; count: number }>;
   }> {
-    const rows = await fetchAllInPages((from, to) =>
-      this.supabase
+    const rows = await fetchAllInPages(async (from, to) =>
+      await this.supabase
         .from('campaign_addresses')
         .select('locality')
         .eq('campaign_id', campaignId)
@@ -989,8 +989,8 @@ export class ParcelEnrichmentService {
   }
 
   private async refreshMultiUnitFlags(campaignId: string): Promise<boolean> {
-    const links = await fetchAllInPages((from, to) =>
-      this.supabase
+    const links = await fetchAllInPages(async (from, to) =>
+      await this.supabase
         .from('building_address_links')
         .select('id, building_id')
         .eq('campaign_id', campaignId)
@@ -1051,8 +1051,8 @@ export class ParcelEnrichmentService {
   }
 
   private async loadCampaignBuildings(campaignId: string): Promise<{ features: SnapshotBuildingFeature[] }> {
-    const rows = await fetchAllInPages((from, to) =>
-      this.supabase
+    const rows = await fetchAllInPages(async (from, to) =>
+      await this.supabase
         .from('buildings')
         .select('id, gers_id, geom, height, house_name, addr_street')
         .eq('campaign_id', campaignId)

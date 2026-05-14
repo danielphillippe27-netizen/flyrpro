@@ -274,6 +274,9 @@ export function TeamMembersTab(props: TeamMembersTabProps) {
           (entitlement && 'error' in entitlement && entitlement.error) || 'Failed to load billing details'
         );
       }
+      if (!entitlement || 'error' in entitlement) {
+        throw new Error('Failed to load billing details');
+      }
 
       const requestedSeatDelta = Math.trunc(seatDelta);
       if (!Number.isFinite(requestedSeatDelta) || requestedSeatDelta === 0) {

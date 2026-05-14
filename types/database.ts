@@ -272,7 +272,7 @@ export interface CampaignAddress {
   postal_code?: string;
   source: AddressSource;
   source_id?: string | null;
-  gers_id?: string; // Overture GERS ID or other source identifier - UUID v4 format (128-bit)
+  gers_id?: string | null; // Overture GERS ID or other source identifier - UUID v4 format (128-bit)
   building_id?: string | null;
   seq?: number; // Sequence number for ordering
   visited?: boolean;
@@ -293,10 +293,10 @@ export interface CampaignAddress {
   house_number?: string; // House/unit number from Overture address data
   locality?: string; // Town/City from Overture address data
   region?: string; // Province/State from Overture address data
-  building_gers_id?: string; // Parent building GERS ID from Overture (parent_id) for handshake optimization
+  building_gers_id?: string | null; // Parent building GERS ID from Overture (parent_id) for handshake optimization
   // Scan tracking fields
   scans?: number; // Total number of times this address QR code has been scanned
-  last_scanned_at?: string; // Timestamp of the most recent QR code scan
+  last_scanned_at?: string | null; // Timestamp of the most recent QR code scan
   // QR code fields
   qr_code_base64?: string; // Base64-encoded QR code image (data URL format)
   purl?: string; // Tracking URL for QR code scans (e.g., /api/scan?id={address_id})
@@ -961,6 +961,7 @@ export interface Building {
   centroid: string; // PostGIS Point geometry (GeoJSON string)
   latest_status: BuildingStatus; // Cached status from trigger
   is_hidden: boolean;
+  source?: string;
   // Overture metadata (optional, stored in JSONB or separate columns)
   height?: number; // Building height in meters
   house_name?: string; // Building name from Overture

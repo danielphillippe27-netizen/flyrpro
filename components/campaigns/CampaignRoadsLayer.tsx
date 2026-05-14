@@ -115,16 +115,18 @@ export function CampaignRoadsLayer({
 
     const fetchAndApply = () => {
       const supabase = createClient();
-      supabase
-        .rpc('rpc_get_campaign_roads_v2', { p_campaign_id: campaignId })
-        .then(({ data }) => {
+      void (async () => {
+        try {
+          const { data } = await supabase.rpc('rpc_get_campaign_roads_v2', { p_campaign_id: campaignId });
           if (cancelled || !data) return;
           const fc = data as GeoJSON.FeatureCollection;
           if (!fc.features?.length) return;
           if (m.isStyleLoaded()) addRoadsLayer(fc);
           else m.once('style.load', () => addRoadsLayer(fc));
-        })
-        .catch(() => {});
+        } catch {
+          // Ignore transient campaign roads load failures.
+        }
+      })();
     };
 
     const onStyleLoad = () => {

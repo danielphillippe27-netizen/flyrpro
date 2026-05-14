@@ -587,14 +587,47 @@ export function CampaignAddressPmtilesLayer({
         map.getCanvas().style.cursor = '';
       };
 
-      map.on('click', CIRCLE_LAYER_ID, clickHandler);
-      map.on('mouseenter', CIRCLE_LAYER_ID, enterHandler);
-      map.on('mouseleave', CIRCLE_LAYER_ID, leaveHandler);
+      // Use map-level handlers so Mapbox does not run layer-scoped
+      // queryRenderedFeatures internally during style transitions.
+      const mapClickHandler = (event: mapboxgl.MapMouseEvent) => {
+        try {
+          if (!map.isStyleLoaded() || !map.getLayer(CIRCLE_LAYER_ID)) return;
+          const features = map.queryRenderedFeatures(event.point, {
+            layers: [CIRCLE_LAYER_ID],
+          });
+          if (features.length > 0) clickHandler(Object.assign(event, { features }));
+        } catch {
+          return;
+        }
+      };
+
+      // Use map-level mousemove so hover does not depend on Mapbox's
+      // layer-scoped mouseenter/mouseleave dispatch during style transitions.
+      const mapMouseMoveHandler = (event: mapboxgl.MapMouseEvent) => {
+        try {
+          if (!map.isStyleLoaded() || !map.getLayer(CIRCLE_LAYER_ID)) {
+            leaveHandler();
+            return;
+          }
+          const features = map.queryRenderedFeatures(event.point, {
+            layers: [CIRCLE_LAYER_ID],
+          });
+          if (features.length > 0) {
+            enterHandler();
+          } else {
+            leaveHandler();
+          }
+        } catch {
+          leaveHandler();
+        }
+      };
+
+      map.on('click', mapClickHandler);
+      map.on('mousemove', mapMouseMoveHandler);
 
       return () => {
-        map.off('click', CIRCLE_LAYER_ID, clickHandler);
-        map.off('mouseenter', CIRCLE_LAYER_ID, enterHandler);
-        map.off('mouseleave', CIRCLE_LAYER_ID, leaveHandler);
+        map.off('click', mapClickHandler);
+        map.off('mousemove', mapMouseMoveHandler);
       };
     };
 

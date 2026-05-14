@@ -162,8 +162,8 @@ export class CampaignsService {
 
   static async fetchAddresses(campaignId: string): Promise<CampaignAddress[]> {
     try {
-      const data = await fetchAllInPages((from, to) =>
-        this.client
+      const data = await fetchAllInPages(async (from, to) =>
+        await this.client
           .from('campaign_addresses_geojson')
           .select('*, qr_code_base64') // Explicitly include qr_code_base64
           .eq('campaign_id', campaignId)
@@ -171,16 +171,16 @@ export class CampaignsService {
           .order('id', { ascending: true })
           .range(from, to)
       );
-      const baseState = await fetchAllInPages((from, to) =>
-        this.client
+      const baseState = await fetchAllInPages(async (from, to) =>
+        await this.client
           .from('campaign_addresses')
           .select('id, building_id, building_gers_id, gers_id, source_id, visited, scans, last_scanned_at')
           .eq('campaign_id', campaignId)
           .order('id', { ascending: true })
           .range(from, to)
       );
-      const statusRows = await fetchAllInPages((from, to) =>
-        this.client
+      const statusRows = await fetchAllInPages(async (from, to) =>
+        await this.client
           .from('address_statuses')
           .select('campaign_address_id, status, updated_at')
           .eq('campaign_id', campaignId)
@@ -214,11 +214,15 @@ export class CampaignsService {
 
       return ((data || []) as Array<CampaignAddress & { building_id?: string | null }>).map((row) => {
         const state = stateById.get(row.id);
-        return {
+        const merged: CampaignAddress = {
           ...row,
           ...(state ?? {}),
-          address_status: statusByAddressId.get(row.id) ?? row.address_status,
         };
+        const addressStatus = statusByAddressId.get(row.id) ?? row.address_status;
+        if (addressStatus !== undefined) {
+          merged.address_status = addressStatus;
+        }
+        return merged;
       });
     } catch (error) {
       console.error('Error fetching addresses, returning empty array:', formatError(error));
@@ -460,6 +464,7 @@ export class CampaignsService {
 
     return {
       addresses: totalAddresses,
+      contacts: stats?.contacts || 0,
       contacted: contactedCount,
       visited: visitedCount,
       scanned: scannedCount,

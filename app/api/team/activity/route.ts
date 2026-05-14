@@ -634,7 +634,7 @@ async function fetchEventTableRows(
 
     if (!error) {
       const allowedUsers = new Set(workspaceUserIds);
-      return ((data ?? []) as SessionEventRow[])
+      return ((data ?? []) as unknown as SessionEventRow[])
         .filter((row) => {
           if (!allowedUsers.has(row.user_id)) return false;
           return memberId ? row.user_id === memberId : true;
@@ -751,7 +751,7 @@ async function fetchSyntheticSessionEvents(
 
     const { data, error } = await query;
     if (!error) {
-      rows = (data ?? []) as Array<Record<string, unknown>>;
+      rows = (data ?? []) as unknown as Array<Record<string, unknown>>;
       break;
     }
 

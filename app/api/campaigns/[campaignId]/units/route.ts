@@ -129,7 +129,12 @@ export async function POST(
     }
     
     // Update unit
-    const updates: any = {};
+    const updates: {
+      status?: string;
+      visited_at?: string;
+      visited_by?: string;
+      notes?: string;
+    } = {};
     
     if (status) {
       updates.status = status;

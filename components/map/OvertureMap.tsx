@@ -75,7 +75,7 @@ export function OvertureMap() {
       const mapInitOptions = await getResolvedMapInitOptions(resolvedMapStyle);
       if (cancelled || !mapContainer.current || map.current) return;
 
-      map.current = new mapboxgl.Map({
+      const mapInstance = new mapboxgl.Map({
         container: mapContainer.current,
         ...mapInitOptions,
         center: [-78.688, 43.914], // Bowmanville, ON
@@ -83,18 +83,19 @@ export function OvertureMap() {
         pitch: 45,
         bearing: 0,
       });
+      map.current = mapInstance;
 
-      map.current.on('load', () => {
+      mapInstance.on('load', () => {
         setMapLoaded(true);
         
         // Hide standard building extrusion layers to prevent z-fighting
         try {
-          const style = map.current?.getStyle();
+          const style = mapInstance.getStyle();
           if (style && style.layers) {
-            applyPresetVisualTweaks(map.current, resolvedMapStyle, {
+            applyPresetVisualTweaks(mapInstance, resolvedMapStyle, {
               preserveLayerPrefixes: ['overture-'],
             });
-            hideBaseBuildingLayers(map.current);
+            hideBaseBuildingLayers(mapInstance);
           }
         } catch (err) {
           console.warn('Error hiding building layers:', err);
@@ -105,7 +106,7 @@ export function OvertureMap() {
       });
 
       // Handle errors
-      map.current.on('error', (e) => {
+      mapInstance.on('error', (e) => {
         console.error('Mapbox error:', e);
         setError('Failed to load map');
       });
@@ -126,16 +127,17 @@ export function OvertureMap() {
   // Sync map style with the selected map preset.
   useEffect(() => {
     if (!map.current || !mapLoaded) return;
+    const mapInstance = map.current;
     try {
-      applyResolvedMapStyle(map.current, resolvedMapStyle);
-      map.current.once('style.load', () => {
+      applyResolvedMapStyle(mapInstance, resolvedMapStyle);
+      mapInstance.once('style.load', () => {
         try {
-          const style = map.current?.getStyle();
+          const style = mapInstance.getStyle();
           if (style?.layers) {
-            applyPresetVisualTweaks(map.current, resolvedMapStyle, {
+            applyPresetVisualTweaks(mapInstance, resolvedMapStyle, {
               preserveLayerPrefixes: ['overture-'],
             });
-            hideBaseBuildingLayers(map.current);
+            hideBaseBuildingLayers(mapInstance);
           }
         } catch {}
         loadBuildings();

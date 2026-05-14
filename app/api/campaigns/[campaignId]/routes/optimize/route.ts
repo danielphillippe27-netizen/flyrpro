@@ -47,8 +47,8 @@ export async function GET(
 
     let addresses;
     try {
-      addresses = await fetchAllInPages((from, to) =>
-        supabase
+      addresses = await fetchAllInPages(async (from, to) =>
+        await supabase
           .from('campaign_addresses')
           .select('id, formatted, house_number, street_name, geom, cluster_id, sequence, walk_time_sec, distance_m')
           .eq('campaign_id', campaignId)
@@ -165,8 +165,8 @@ export async function POST(
 
     let addresses;
     try {
-      addresses = await fetchAllInPages((from, to) =>
-        supabase
+      addresses = await fetchAllInPages(async (from, to) =>
+        await supabase
           .from('campaign_addresses')
           .select('id, formatted, house_number, street_number, street_name, geom')
           .eq('campaign_id', campaignId)

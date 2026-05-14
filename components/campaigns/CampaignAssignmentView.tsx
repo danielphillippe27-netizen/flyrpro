@@ -68,7 +68,9 @@ function getAddressCoords(address: CampaignAddress): { lat: number; lon: number 
   if (typeof address.geom === 'string' && address.geom.trim().startsWith('{')) {
     try {
       const parsed = JSON.parse(address.geom) as { coordinates?: [number, number] };
-      const [lon, lat] = parsed.coordinates ?? [];
+      const coordinates = parsed.coordinates;
+      if (!coordinates) return null;
+      const [lon, lat] = coordinates;
       if (Number.isFinite(lat) && Number.isFinite(lon)) return { lat, lon };
     } catch {
       return null;

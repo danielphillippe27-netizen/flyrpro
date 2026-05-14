@@ -435,7 +435,7 @@ export async function GET(request: Request) {
 
     if (!contactsRes.error && Array.isArray(contactsRes.data)) {
       const contactSummary = summarizeContacts(
-        contactsRes.data as ContactMetricRow[],
+        contactsRes.data as unknown as ContactMetricRow[],
         startOfWeek,
         metricsPeriodEnd
       );

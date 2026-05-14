@@ -93,7 +93,7 @@ async function fetchLeadCandidateRows(
       .eq('user_id', userId),
   ]);
 
-  let contacts = initialContacts;
+  let contacts: LeadCandidateRow[] | null = initialContacts;
   let contactsError = initialContactsError;
 
   if (contactsError && isMissingContactsColumn(contactsError, 'appointment_at')) {

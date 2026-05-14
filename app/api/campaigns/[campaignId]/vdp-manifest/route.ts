@@ -21,6 +21,15 @@ export async function GET(
   { params }: { params: Promise<{ campaignId: string }> }
 ) {
   try {
+    /*
+     * Generates the VDP CSV that printers use to merge address data and QR URLs
+     * into print templates. Web-generated campaigns store QR images in
+     * campaign_addresses.qr_code_base64 and the encoded scan URL in purl; the
+     * qr_codes table is not populated by generate-qrs. This route now filters
+     * on the active base64 QR field and uses purl as qr_url so the CSV matches
+     * the printed QR image exactly. See QR_SYSTEM.md for the full context and
+     * future slug-based Model B migration.
+     */
     const { campaignId } = await params;
 
     if (!campaignId) {
@@ -55,7 +64,7 @@ export async function GET(
     }
 
     // Verify ownership
-    const ownerId = campaign.owner_id || (campaign as any).user_id;
+    const ownerId = campaign.owner_id || (campaign as { user_id?: string | null }).user_id;
     if (ownerId !== user.id) {
       return NextResponse.json(
         { error: 'Forbidden', message: 'You do not have access to this campaign' },
@@ -66,18 +75,19 @@ export async function GET(
     const adminSupabase = createAdminClient();
 
     // Fetch addresses with QR codes
-    // Include both qr_png_url (legacy) and check for qr_codes table entries (modern)
     const { data: addresses, error: addressesError } = await adminSupabase
       .from('campaign_addresses')
       .select(`
         id,
+        address,
         formatted,
         postal_code,
         qr_png_url,
+        purl,
         seq
       `)
       .eq('campaign_id', campaignId)
-      .not('qr_png_url', 'is', null)
+      .not('qr_code_base64', 'is', null)
       .order('seq', { ascending: true, nullsFirst: false })
       .order('id', { ascending: true });
 
@@ -95,18 +105,6 @@ export async function GET(
         { status: 404 }
       );
     }
-
-    // Fetch QR codes from qr_codes table for addresses that have them (modern system)
-    const addressIds = addresses.map((a) => a.id);
-    const { data: qrCodes } = await adminSupabase
-      .from('qr_codes')
-      .select('id, slug, qr_url, address_id')
-      .in('address_id', addressIds);
-
-    // Create a map of address_id -> qr_code for quick lookup
-    const qrCodeMap = new Map(
-      (qrCodes || []).map((qc) => [qc.address_id, qc])
-    );
 
     // Parse address components from formatted address
     const parseAddress = (formatted: string) => {
@@ -148,20 +146,18 @@ export async function GET(
     // Generate CSV rows
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_BASE_URL || 'https://flyrpro.app';
     const rows = addresses.map((address, index) => {
-      const qrCode = qrCodeMap.get(address.id);
-      
-      // Use short slug URL if available, otherwise construct from qr_png_url or use legacy URL
-      let qrUrl: string;
-      if (qrCode?.qr_url) {
-        // Modern system: use short slug URL
-        qrUrl = qrCode.qr_url;
-      } else if (qrCode?.slug) {
-        // Has slug but no qr_url, construct it
-        qrUrl = `${baseUrl}/q/${qrCode.slug}`;
-      } else {
-        // Legacy system: construct URL from address ID
-        qrUrl = `${baseUrl}/api/open?addressId=${address.id}`;
-      }
+      // qr_url for the CSV: use the purl column which contains the exact
+      // URL already encoded in the printed QR image (/api/scan?id={address_id}).
+      // This ensures the URL in the CSV and the URL in the QR code are always
+      // identical and consistent.
+      //
+      // Note: We intentionally do not use the qr_codes table here. The qr_codes
+      // table is empty for web-generated campaigns (generate-qrs does not insert
+      // there). A future migration to slug-based URLs (/q/{slug}) will update
+      // this when a staging environment is available. See QR_SYSTEM.md Section 8
+      // for the full fix specification.
+      const qrUrl = address.purl
+        || `${baseUrl}/api/scan?id=${address.id}`;
 
       const addressParts = parseAddress(address.formatted || address.address || '');
       const referenceId = `REF-${String(index + 1).padStart(6, '0')}`;

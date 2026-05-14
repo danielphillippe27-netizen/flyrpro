@@ -264,8 +264,14 @@ export const LayersSidebar = ({
       .reverse()
       .map((obj, index) => {
         const type = obj.type || 'unknown';
-        const name = (obj as any).name || `${type} ${index + 1}`;
-        const id = obj.name || `layer-${obj.uid || index}`;
+        const objectWithLayerData = obj as fabric.Object & {
+          lockMovementX?: boolean;
+          lockMovementY?: boolean;
+          name?: string;
+          uid?: string;
+        };
+        const name = objectWithLayerData.name || `${type} ${index + 1}`;
+        const id = objectWithLayerData.name || `layer-${objectWithLayerData.uid || index}`;
         
         return {
           id,
@@ -273,14 +279,17 @@ export const LayersSidebar = ({
           name,
           type,
           isVisible: obj.visible !== false,
-          isLocked: obj.selectable === false || (obj as any).lockMovementX || (obj as any).lockMovementY,
+          isLocked: obj.selectable === false || Boolean(objectWithLayerData.lockMovementX) || Boolean(objectWithLayerData.lockMovementY),
         };
       });
   }, [editor?.canvas, editor?.selectedObjects, refreshKey]);
 
   const selectedObjectIds = useMemo(() => {
     if (!editor?.selectedObjects) return [];
-    return editor.selectedObjects.map((obj) => obj.name || `layer-${obj.uid || ''}`).filter(Boolean);
+    return editor.selectedObjects.map((obj) => {
+      const objectWithLayerData = obj as fabric.Object & { name?: string; uid?: string };
+      return objectWithLayerData.name || `layer-${objectWithLayerData.uid || ''}`;
+    }).filter(Boolean);
   }, [editor?.selectedObjects, refreshKey]);
 
   const handleDragEnd = (event: DragEndEvent) => {
@@ -361,7 +370,7 @@ export const LayersSidebar = ({
 
   const renameLayer = (layer: LayerItem, name: string) => {
     if (!editor?.canvas) return;
-    (layer.object as any).name = name;
+    (layer.object as fabric.Object & { name?: string }).name = name;
     editor.save();
   };
 
@@ -414,4 +423,3 @@ export const LayersSidebar = ({
     </aside>
   );
 };
-

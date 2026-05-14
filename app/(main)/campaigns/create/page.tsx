@@ -1,11 +1,10 @@
 'use client';
 
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { createClient } from '@/lib/supabase/client';
 import { useTheme } from '@/lib/theme-provider';
 import { useWorkspace } from '@/lib/workspace-context';
@@ -19,78 +18,9 @@ import { AddressAutocomplete } from '@/components/address/AddressAutocomplete';
 import { MapInfoButton } from '@/components/map/MapInfoButton';
 import { UserLocationLayer } from '@/components/map/UserLocationLayer';
 import type { AddressSuggestion } from '@/lib/services/MapboxAutocompleteService';
-import { Satellite, Map, Trash2, Pencil, Search } from 'lucide-react';
+import { Satellite, Map, Trash2, Pencil } from 'lucide-react';
 import * as turf from '@turf/turf';
 import Lottie from 'lottie-react';
-import type { CampaignType } from '@/types/database';
-
-const CAMPAIGN_TYPE_OPTIONS: Array<{ value: CampaignType; label: string }> = [
-  { value: 'just_sold', label: 'Just Sold' },
-  { value: 'just_listed', label: 'Just Listed' },
-  { value: 'open_house', label: 'Open House' },
-  { value: 'coming_soon', label: 'Coming Soon' },
-  { value: 'market_update', label: 'Market Update' },
-  { value: 'prospecting', label: 'Prospecting' },
-  { value: 'pop_by', label: 'Pop by' },
-  { value: 'other', label: 'Other' },
-];
-
-type ProvisionStatus = 'pending' | 'ready' | 'failed' | null;
-type ProvisionPhase =
-  | 'created'
-  | 'source_probed'
-  | 'addresses_loading'
-  | 'addresses_ready'
-  | 'map_ready'
-  | 'optimizing'
-  | 'optimized'
-  | 'failed'
-  | null;
-
-type ProvisionSource = 'diamond' | 'bedrock_nz' | 'bedrock_au' | 'bedrock_ca' | 'bedrock_us' | 'bedrock_za' | 'bedrock_uk' | null;
-
-type CampaignProvisionState = {
-  provision_status: ProvisionStatus;
-  provision_phase: ProvisionPhase;
-  provision_source: ProvisionSource;
-  map_ready_at: string | null;
-  optimized_at: string | null;
-};
-
-function isCampaignFullyReady(state: CampaignProvisionState | null) {
-  if (!state || state.provision_status !== 'ready') return false;
-  if (state.provision_phase === 'optimized' || Boolean(state.optimized_at)) return true;
-  return Boolean(state.map_ready_at);
-}
-
-function provisionPhaseLabel(state: CampaignProvisionState | null) {
-  if (!state) return 'Step 2/5: Starting map build';
-  if (state.provision_status === 'failed') {
-    return 'Map build failed';
-  }
-  if (state.provision_status === 'ready' && state.provision_phase === 'failed' && state.map_ready_at) {
-    return 'Step 5/5: Map ready';
-  }
-
-  switch (state.provision_phase) {
-    case 'created':
-      return 'Step 2/5: Starting map build';
-    case 'source_probed':
-      return 'Step 3/5: Finding best data source';
-    case 'addresses_loading':
-      return 'Step 3/5: Loading addresses';
-    case 'addresses_ready':
-      return 'Step 4/5: Preparing map geometry';
-    case 'map_ready':
-      return 'Step 5/5: Map ready';
-    case 'optimizing':
-      return 'Step 5/5: Optimizing campaign map';
-    case 'optimized':
-      return 'Step 5/5: Campaign ready';
-    default:
-      return 'Step 2/5: Building campaign map';
-  }
-}
 
 export default function CreateCampaignPage() {
   const router = useRouter();
@@ -101,26 +31,19 @@ export default function CreateCampaignPage() {
     [theme],
   );
   const [name, setName] = useState('');
-  const [campaignType, setCampaignType] = useState<CampaignType>('just_sold');
-  const [createdCampaignId, setCreatedCampaignId] = useState<string | null>(null);
-  const [detailsSaving, setDetailsSaving] = useState(false);
-  const [detailsSaved, setDetailsSaved] = useState(false);
-  const [setupComplete, setSetupComplete] = useState(false);
   const [loading, setLoading] = useState(false);
   const [provisioning, setProvisioning] = useState(false);
   const [provisionProgress, setProvisionProgress] = useState<string>('');
-  const [provisionFailed, setProvisionFailed] = useState<string | null>(null);
+  const [generatingAddresses, setGeneratingAddresses] = useState(false);
   const [loadingAnimationData, setLoadingAnimationData] = useState<object | null>(null);
+  const [addressCount, setAddressCount] = useState<number | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [isSatellite, setIsSatellite] = useState(false);
-  const [isDrawingActive, setIsDrawingActive] = useState(true);
   const [mapSearchQuery, setMapSearchQuery] = useState('');
-  const [searchOpen, setSearchOpen] = useState(false);
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const drawRef = useRef<MapboxDraw | null>(null);
-  const hasNavigatedToCampaignRef = useRef(false);
   const boundaryLayerIdsRef = useRef<string[]>([]);
   const appliedBaseStyleKeyRef = useRef<string | null>(null);
   const hasCenteredOnUserLocationRef = useRef(false);
@@ -150,70 +73,15 @@ export default function CreateCampaignPage() {
     };
   }, [lottieSrc]);
 
-  const currentStepText = loading
-        ? 'Step 1/5: Saving territory'
-        : provisionProgress || 'Step 2/5: Starting map build';
-
-  const goToCreatedCampaign = useCallback((campaignId: string) => {
-    if (hasNavigatedToCampaignRef.current) return;
-    hasNavigatedToCampaignRef.current = true;
-    router.push(`/campaigns/${campaignId}`);
-  }, [router]);
-
-  useEffect(() => {
-    if (detailsSaved && createdCampaignId) {
-      goToCreatedCampaign(createdCampaignId);
-    }
-  }, [detailsSaved, createdCampaignId, goToCreatedCampaign]);
-
-  useEffect(() => {
-    if (!createdCampaignId || setupComplete || provisionFailed) return;
-
-    let cancelled = false;
-    const supabase = createClient();
-
-    const pollCampaignReady = async () => {
-      const { data, error } = await supabase
-        .from('campaigns')
-        .select('provision_status, provision_phase, provision_source, map_ready_at, optimized_at')
-        .eq('id', createdCampaignId)
-        .maybeSingle();
-
-      if (cancelled) return;
-
-      if (error) {
-        console.warn('Unable to poll campaign provisioning status:', error.message);
-        return;
-      }
-
-      const state = (data ?? null) as CampaignProvisionState | null;
-      setProvisionProgress(provisionPhaseLabel(state));
-
-      if (state?.provision_status === 'failed') {
-        setProvisioning(false);
-        setProvisionFailed('Campaign map build failed. Try a larger polygon or retry provisioning.');
-        return;
-      }
-
-      if (isCampaignFullyReady(state)) {
-        setProvisioning(false);
-        setProvisionProgress('Step 5/5: Campaign ready');
-        setSetupComplete(true);
-      } else {
-        setProvisioning(true);
-      }
-    };
-
-    void pollCampaignReady();
-    const intervalId = window.setInterval(() => {
-      void pollCampaignReady();
-    }, 2000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(intervalId);
-    };
-  }, [createdCampaignId, provisionFailed, setupComplete]);
+  const currentStepText = generatingAddresses
+        ? 'Step 3/5: Fetching addresses'
+        : provisionProgress.includes('Scanning')
+          ? 'Step 4/5: Fetching buildings'
+          : provisionProgress.includes('Matching') || provisionProgress.includes('Linking')
+            ? 'Step 4/5: Linking addresses to buildings'
+            : provisionProgress.includes('Finalizing')
+              ? 'Step 5/5: Preparing optimized route'
+              : 'Step 5/5: Finishing setup';
 
   /** Add residential-only 2D building footprints from Mapbox vector tiles.
    *  Hides built-in style buildings and renders residential buildings as near-black at 80% opacity.
@@ -221,6 +89,11 @@ export default function CreateCampaignPage() {
   const add2DBuildingsLayer = (m: mapboxgl.Map) => {
     const buildingLayerId = '2d-buildings';
     if (m.getLayer(buildingLayerId)) return; // already added
+    // Only add the composite building overlay for Mapbox styles that
+    // include the composite source. Custom styles (PMTiles, external
+    // tilesets) do not have composite and will throw if we attempt
+    // to add a layer from it.
+    if (!m.getSource('composite')) return;
     const buildingFill = isDark ? '#111111' : '#c8c1b2';
     const buildingOutline = isDark ? '#0a0a0a' : '#b5ad9d';
 
@@ -289,7 +162,7 @@ export default function CreateCampaignPage() {
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
       style: resolvedMapStyle.style,
-      config: resolvedMapStyle.config as mapboxgl.MapboxOptions['config'],
+      config: resolvedMapStyle.config,
       center: [-79.35, 43.65], // Default to Toronto area
       zoom: 15,
     });
@@ -475,7 +348,7 @@ export default function CreateCampaignPage() {
 
       // Restore saved features
       const savedFeatures = savedFeaturesRef.current;
-      if (savedFeatures && (savedFeatures.features?.length ?? 0) > 0) {
+      if ((savedFeatures?.features?.length ?? 0) > 0 && savedFeatures) {
         newDraw.set(savedFeatures);
         newDraw.changeMode('simple_select');
       } else {
@@ -520,27 +393,6 @@ export default function CreateCampaignPage() {
     };
   }, [mapLoaded]);
 
-  useEffect(() => {
-    if (!mapLoaded || !map.current) return;
-
-    const mapInstance = map.current;
-    const updateDrawingState = () => {
-      const getMode = (drawRef.current as unknown as { getMode?: () => string } | null)?.getMode;
-      setIsDrawingActive(getMode?.() === 'draw_polygon');
-    };
-
-    mapInstance.on('draw.modechange', updateDrawingState);
-    mapInstance.on('draw.create', updateDrawingState);
-    mapInstance.on('draw.delete', updateDrawingState);
-    updateDrawingState();
-
-    return () => {
-      mapInstance.off('draw.modechange', updateDrawingState);
-      mapInstance.off('draw.create', updateDrawingState);
-      mapInstance.off('draw.delete', updateDrawingState);
-    };
-  }, [mapLoaded]);
-
   const toggleSatelliteView = () => {
     setIsSatellite(!isSatellite);
   };
@@ -549,14 +401,12 @@ export default function CreateCampaignPage() {
     if (drawRef.current) {
       drawRef.current.deleteAll();
       drawRef.current.changeMode('draw_polygon');
-      setIsDrawingActive(true);
     }
   };
 
   const startDrawing = () => {
     if (drawRef.current) {
       drawRef.current.changeMode('draw_polygon');
-      setIsDrawingActive(true);
     }
   };
 
@@ -568,7 +418,6 @@ export default function CreateCampaignPage() {
       zoom: 18,
       duration: 1500, // Smooth animation
     });
-    setSearchOpen(false);
   };
 
   const handleSubmit = async (e?: React.FormEvent | React.MouseEvent) => {
@@ -586,7 +435,8 @@ export default function CreateCampaignPage() {
 
     // Find the first completed Polygon feature (skip points, lines, or incomplete geometries)
     const polygonFeature = features.features.find(
-      (f) => f.geometry?.type === 'Polygon' && f.geometry.coordinates?.[0]?.length >= 3
+      (feature): feature is GeoJSON.Feature<GeoJSON.Polygon> =>
+        feature.geometry?.type === 'Polygon' && feature.geometry.coordinates[0]?.length >= 3
     );
     if (!polygonFeature) {
       alert('Please draw a territory boundary on the map. Double-click to finish your shape.');
@@ -620,10 +470,6 @@ export default function CreateCampaignPage() {
     }
 
     setLoading(true);
-    setDetailsSaved(false);
-    setSetupComplete(false);
-    setProvisionFailed(null);
-    setProvisionProgress('Step 1/5: Saving territory');
     try {
       // Create campaign server-side so generate-address-list and provision find it in Supabase
       const createRes = await fetch('/api/campaigns', {
@@ -631,8 +477,8 @@ export default function CreateCampaignPage() {
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: 'Untitled Campaign',
-          type: campaignType,
+          name,
+          type: 'flyer',
           address_source: 'map',
           workspace_id: currentWorkspaceId ?? undefined,
           bbox,
@@ -645,35 +491,62 @@ export default function CreateCampaignPage() {
       }
       const campaign = await createRes.json();
       console.log('Campaign created:', campaign?.id, campaign?.name);
-      setCreatedCampaignId(campaign.id);
-      setLoading(false);
-      setProvisioning(Boolean(polygon));
-      setProvisionProgress(polygon ? 'Step 2/5: Starting map build' : 'Step 5/5: Campaign ready');
-      setSetupComplete(!polygon);
 
       if (polygon) {
-        void fetch('/api/campaigns/provision', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            campaign_id: campaign.id,
-          }),
-        }).then(async (provisionResponse) => {
-          if (!provisionResponse.ok) {
-            const error = await provisionResponse.json().catch(() => ({}));
-            console.error('Provisioning queue error:', error);
-            return;
+        setProvisioning(true);
+        setProvisionProgress('Scanning 3D Shapes...');
+        try {
+          const progressInterval = setInterval(() => {
+            setProvisionProgress((prev) => {
+              if (prev === 'Scanning 3D Shapes...') return 'Matching Addresses...';
+              if (prev === 'Matching Addresses...') return 'Finalizing Mission Territory...';
+              return prev;
+            });
+          }, 2000);
+
+          try {
+            const provisionResponse = await fetch('/api/campaigns/provision', {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                campaign_id: campaign.id,
+              }),
+            });
+
+            clearInterval(progressInterval);
+            setProvisionProgress('Finalizing Mission Territory...');
+
+            if (!provisionResponse.ok) {
+              const error = await provisionResponse.json().catch(() => ({}));
+              console.error('Provisioning error:', error);
+              alert(`Campaign created but provisioning failed: ${error.error || 'Unknown error'}`);
+            } else {
+              const result = await provisionResponse.json();
+              const { addresses_saved = 0, buildings_saved = 0, links_created = 0 } = result;
+              setAddressCount(addresses_saved);
+              console.log(`Staged provision: ${addresses_saved} addresses, ${buildings_saved} buildings, ${links_created} links`);
+              if (result.warning) {
+                alert(result.warning);
+              }
+              if (links_created < addresses_saved) {
+                setProvisionProgress(`Linking: ${links_created} / ${addresses_saved} addresses...`);
+              }
+              await new Promise(resolve => setTimeout(resolve, 800));
+            }
+          } finally {
+            clearInterval(progressInterval);
           }
-          console.log('Campaign provisioning accepted:', campaign.id);
-          setProvisionProgress('Step 2/5: Map build queued');
-        }).catch((provisionError) => {
-          console.error('Error starting background provisioning:', provisionError);
+        } catch (provisionError) {
+          console.error('Error provisioning campaign:', provisionError);
+          alert('Campaign created but provisioning failed. You can provision later.');
+        } finally {
           setProvisioning(false);
-          setProvisionFailed('Campaign was saved, but map build did not start.');
-        });
+          setProvisionProgress('');
+        }
       }
 
+      router.push(`/campaigns/${campaign.id}`);
     } catch (error: unknown) {
       console.error('Error creating campaign:', error);
       // Extract meaningful error message
@@ -689,114 +562,63 @@ export default function CreateCampaignPage() {
     }
   };
 
-  const handleCampaignDetailsSubmit = async (e?: React.FormEvent | React.MouseEvent) => {
-    e?.preventDefault();
-    if (!createdCampaignId) return;
-
-    const trimmedName = name.trim();
-    if (!trimmedName) {
-      alert('Please name your campaign');
-      return;
-    }
-
-    setDetailsSaving(true);
-    try {
-      const response = await fetch(`/api/campaigns/${createdCampaignId}`, {
-        method: 'PATCH',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: trimmedName,
-          type: campaignType,
-        }),
-      });
-
-      if (!response.ok) {
-        const error = await response.json().catch(() => ({}));
-        throw new Error(error.error || `Failed to update campaign (${response.status})`);
-      }
-
-      setDetailsSaved(true);
-      goToCreatedCampaign(createdCampaignId);
-    } catch (error: unknown) {
-      console.error('Error updating campaign details:', error);
-      alert(error instanceof Error ? error.message : 'Failed to update campaign details');
-    } finally {
-      setDetailsSaving(false);
-    }
-  };
-
-  const showCampaignDetailsCard = Boolean(createdCampaignId && !detailsSaved);
-  const showGeneratingStatus = provisioning || Boolean(createdCampaignId && detailsSaved && !setupComplete);
-
   return (
-    <div className="flex h-full min-h-0 bg-gray-50 dark:bg-background overflow-hidden">
-      {showCampaignDetailsCard && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/45 px-4 backdrop-blur-md">
-          <form
-            onSubmit={handleCampaignDetailsSubmit}
-            className="relative z-[60] w-full max-w-md rounded-lg border border-border bg-card p-6 text-card-foreground shadow-2xl"
-          >
-            <div className="space-y-1">
-              <h2 className="text-lg font-semibold text-foreground">Campaign Details</h2>
-              <p className="text-sm text-muted-foreground">
-                Name the campaign and choose the type.
-              </p>
-            </div>
+    <div className="h-screen flex flex-col bg-gray-50 dark:bg-background overflow-hidden">
+      {/* Compact Header Toolbar – matches app header styling */}
+      <div className="flex-shrink-0 bg-white dark:bg-card border-b border-border px-4 py-3">
+        <div className="flex items-center gap-4 flex-wrap">
+          {/* Campaign Name */}
+          <div className="flex items-center gap-2 flex-1 min-w-48">
+            <Label htmlFor="name" className="text-sm font-medium text-foreground whitespace-nowrap">Name</Label>
+            <Input
+              id="name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+              placeholder="Campaign Name"
+              className="flex-1 min-w-0 bg-gray-200 dark:bg-neutral-600"
+            />
+          </div>
 
-            <div className="mt-6 space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="name">Campaign name</Label>
-                <Input
-                  id="name"
-                  value={name}
-                  onChange={(e) => {
-                    setName(e.target.value);
-                    setDetailsSaved(false);
-                  }}
-                  required
-                  autoFocus
-                  placeholder="Campaign Name"
-                  className="bg-gray-100 dark:bg-neutral-800"
-                  disabled={detailsSaving}
-                />
-              </div>
+          {/* Address Search */}
+          <div className="flex items-center gap-2 flex-1 min-w-64">
+            <Label className="text-sm font-medium text-foreground whitespace-nowrap">Search</Label>
+            <AddressAutocomplete
+              value={mapSearchQuery}
+              onChange={setMapSearchQuery}
+              onSelect={handleMapSearchSelect}
+              placeholder="Jump to address..."
+              className="flex-1"
+              inputClassName="bg-gray-200 dark:bg-neutral-600"
+            />
+          </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="campaign-type">Type</Label>
-                <Select
-                  value={campaignType}
-                  onValueChange={(value) => {
-                    setCampaignType(value as CampaignType);
-                    setDetailsSaved(false);
-                  }}
-                  disabled={detailsSaving}
-                >
-                  <SelectTrigger id="campaign-type" className="w-full bg-gray-100 dark:bg-neutral-800">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="z-[80]">
-                    {CAMPAIGN_TYPE_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="mt-6 flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => router.back()} disabled={detailsSaving}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={detailsSaving || !name.trim()}>
-                {detailsSaving ? 'Saving...' : setupComplete ? 'Save & Open' : 'Save & Build Map'}
-              </Button>
-            </div>
-          </form>
+          {/* Action Buttons */}
+          <div className="flex items-center gap-2 ml-auto">
+            <Button type="button" variant="outline" size="sm" className="bg-gray-200 dark:bg-neutral-600 dark:border-neutral-500 dark:hover:bg-neutral-500" onClick={() => router.back()} disabled={loading || provisioning || generatingAddresses}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={loading || provisioning || generatingAddresses || !name}
+              onClick={handleSubmit}
+            >
+              {loading ? 'Creating...' : generatingAddresses ? 'Finding...' : provisioning ? 'Provisioning...' : 'Create Campaign'}
+            </Button>
+          </div>
         </div>
-      )}
+
+        {/* Helper text row */}
+        <p className="text-xs text-muted-foreground mt-2">
+          Draw a polygon on the map to define your campaign territory. Use the search to jump to a location.
+        </p>
+        {addressCount !== null && (
+          <p className="text-xs font-medium text-green-600 dark:text-green-400 mt-2">
+            {addressCount} addresses loaded
+          </p>
+        )}
+      </div>
 
       {/* Full-screen Map */}
       <div className="flex-1 relative">
@@ -823,43 +645,7 @@ export default function CreateCampaignPage() {
         {/* Map Controls - Google Maps style floating buttons */}
         {mapLoaded && (
           <div className="absolute top-4 right-4 flex flex-col gap-3 z-10">
-            {!createdCampaignId ? (
-              <Button
-                type="button"
-                size="lg"
-                className="h-14 justify-start gap-3 rounded-xl border border-red-600 bg-red-500 px-6 text-base font-semibold text-white shadow-lg transition-all duration-200 hover:bg-red-600 hover:shadow-xl"
-                disabled={loading || provisioning}
-                onClick={handleSubmit}
-              >
-                {loading ? 'Saving Territory...' : 'Create Territory'}
-              </Button>
-            ) : null}
-
-            <button
-              type="button"
-              onClick={() => setSearchOpen((current) => !current)}
-              className="flex items-center gap-2 px-4 py-2.5 bg-card rounded-lg shadow-lg hover:shadow-xl hover:bg-muted/50 transition-all duration-200 text-sm font-medium text-foreground border border-border"
-            >
-              <Search className="w-5 h-5" />
-              <span>Search</span>
-            </button>
-
-            {searchOpen ? (
-              <div className="w-[min(24rem,calc(100vw-7rem))] rounded-2xl border border-border bg-card/95 backdrop-blur-sm shadow-lg p-4 space-y-2">
-                <AddressAutocomplete
-                  value={mapSearchQuery}
-                  onChange={setMapSearchQuery}
-                  onSelect={handleMapSearchSelect}
-                  placeholder="Jump to address..."
-                  className="flex-1"
-                  inputClassName="bg-background"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Search for an address, then draw the campaign boundary.
-                </p>
-              </div>
-            ) : null}
-
+            {/* Satellite Toggle */}
             <button
               type="button"
               onClick={toggleSatelliteView}
@@ -877,40 +663,32 @@ export default function CreateCampaignPage() {
                 </>
               )}
             </button>
-            
-            {!createdCampaignId && (
-              <>
-                {/* Draw Button */}
-                <button
-                  type="button"
-                  onClick={startDrawing}
-                  className={`flex items-center gap-2 px-4 py-2.5 rounded-lg shadow-lg hover:shadow-xl transition-all duration-200 text-sm font-medium border ${
-                    isDrawingActive
-                      ? 'bg-black text-white hover:bg-neutral-900 border-black dark:bg-white dark:text-black dark:hover:bg-neutral-100 dark:border-white'
-                      : 'bg-card text-foreground hover:bg-muted/50 border-border'
-                  }`}
-                >
-                  <Pencil className="w-5 h-5" />
-                  <span>Draw</span>
-                </button>
 
-                {/* Clear Drawing Button */}
-                <button
-                  type="button"
-                  onClick={clearDrawing}
-                  className="flex items-center gap-2 px-4 py-2.5 bg-card rounded-lg shadow-lg hover:shadow-xl hover:bg-muted/50 transition-all duration-200 text-sm font-medium text-foreground border border-border"
-                >
-                  <Trash2 className="w-5 h-5" />
-                  <span>Clear</span>
-                </button>
-              </>
-            )}
+            {/* Draw Button */}
+            <button
+              type="button"
+              onClick={startDrawing}
+              className="flex items-center gap-2 px-4 py-2.5 bg-red-500 text-white rounded-lg shadow-lg hover:shadow-xl hover:bg-red-600 transition-all duration-200 text-sm font-medium border border-red-600"
+            >
+              <Pencil className="w-5 h-5" />
+              <span>Draw</span>
+            </button>
+            
+            {/* Clear Drawing Button */}
+            <button
+              type="button"
+              onClick={clearDrawing}
+              className="flex items-center gap-2 px-4 py-2.5 bg-card rounded-lg shadow-lg hover:shadow-xl hover:bg-muted/50 transition-all duration-200 text-sm font-medium text-foreground border border-border"
+            >
+              <Trash2 className="w-5 h-5" />
+              <span>Clear</span>
+            </button>
 
           </div>
         )}
 
         {/* Draw instructions overlay */}
-        {mapLoaded && !createdCampaignId && (
+        {mapLoaded && (
           <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-card rounded-full px-5 py-2.5 shadow-lg border border-border z-10">
             <p className="text-sm text-foreground whitespace-nowrap">
               <span className="font-semibold">Click</span> to draw • <span className="font-semibold">Double-click</span> to finish
@@ -919,11 +697,11 @@ export default function CreateCampaignPage() {
         )}
       </div>
 
-      {/* Background setup status */}
-      {showGeneratingStatus && (
-        <div className="fixed bottom-6 right-6 z-[70] pointer-events-none">
-          <div className="flex w-[min(380px,calc(100vw-3rem))] items-center gap-4 rounded-xl border border-border bg-card/95 px-5 py-4 text-left shadow-2xl backdrop-blur">
-            <div className="h-20 w-20 shrink-0 flex items-center justify-center">
+      {/* Loading Modal */}
+      {(provisioning || generatingAddresses) && (
+        <div className="fixed inset-0 bg-black/35 backdrop-blur-[1px] flex items-center justify-center z-50">
+          <div className="max-w-lg w-full mx-4 text-center">
+            <div className="h-80 w-full flex items-center justify-center">
               {loadingAnimationData ? (
                 <Lottie
                   animationData={loadingAnimationData}
@@ -932,19 +710,17 @@ export default function CreateCampaignPage() {
                   rendererSettings={{ preserveAspectRatio: 'xMidYMid meet' }}
                 />
               ) : (
-                <div className="animate-spin rounded-full h-14 w-14 border-b-2 border-primary"></div>
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
               )}
             </div>
-            <div className="min-w-0">
-              <h3 className="text-base font-semibold text-foreground">
-                {provisionFailed ? 'Campaign needs attention' : 'Generating Campaign'}
+            <div className="pt-3">
+              <h3 className="text-lg font-semibold text-white mb-3">
+                Generating Campaign
               </h3>
-              <p className="mt-1 text-sm font-medium text-foreground">
-                {provisionFailed ?? currentStepText}
-              </p>
-              {!provisionFailed ? (
-                <p className="mt-1 text-sm text-muted-foreground">Opening when the map is ready...</p>
-              ) : null}
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-white/95">{currentStepText}</p>
+                <p className="text-sm text-white/90">Syncing property data...</p>
+              </div>
             </div>
           </div>
         </div>

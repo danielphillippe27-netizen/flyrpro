@@ -5,7 +5,7 @@ import type { MinimalSupabaseClient } from '@/app/api/_utils/workspace';
 export type PostAuthRedirect =
   | { redirect: 'login'; path: '/login' }
   | { redirect: 'join'; path: string }
-  | { redirect: 'onboarding'; path: '/onboarding' }
+  | { redirect: 'onboarding'; path: string }
   | { redirect: 'subscribe'; path: '/subscribe' }
   | { redirect: 'contact-owner'; path: '/subscribe?reason=member-inactive' }
   | { redirect: 'dashboard'; path: string };
@@ -65,7 +65,7 @@ export async function getPostAuthRedirectForUserId(
   const inviteToken = options.inviteToken?.trim() || extractInviteTokenFromNext(next);
 
   if (shouldBypassWorkspaceGate(next)) {
-    return { redirect: 'dashboard', path: next };
+    return { redirect: 'dashboard', path: next ?? '/home' };
   }
 
   if (inviteToken) {

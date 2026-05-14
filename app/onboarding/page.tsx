@@ -261,17 +261,21 @@ function OnboardingContent() {
             countryCode?: unknown;
             workEmail?: unknown;
           };
-          if (typeof parsed.firstName === 'string' && parsed.firstName.trim()) {
-            setFirstName((current) => current || parsed.firstName.trim());
+          const firstName = typeof parsed.firstName === 'string' ? parsed.firstName.trim() : '';
+          const lastName = typeof parsed.lastName === 'string' ? parsed.lastName.trim() : '';
+          const workEmail = typeof parsed.workEmail === 'string' ? parsed.workEmail.trim() : '';
+          if (firstName) {
+            setFirstName((current) => current || firstName);
           }
-          if (typeof parsed.lastName === 'string' && parsed.lastName.trim()) {
-            setLastName((current) => current || parsed.lastName.trim());
+          if (lastName) {
+            setLastName((current) => current || lastName);
           }
-          if (typeof parsed.countryCode === 'string' && parsed.countryCode.trim()) {
-            setCountryCode((current) => current || parsed.countryCode.trim().toUpperCase());
+          const countryCode = typeof parsed.countryCode === 'string' ? parsed.countryCode.trim() : '';
+          if (countryCode) {
+            setCountryCode((current) => current || countryCode.toUpperCase());
           }
-          if (typeof parsed.workEmail === 'string' && parsed.workEmail.trim()) {
-            setWorkEmail((current) => current || parsed.workEmail.trim().toLowerCase());
+          if (workEmail) {
+            setWorkEmail((current) => current || workEmail.toLowerCase());
           }
         }
       } catch {

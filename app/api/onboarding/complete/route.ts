@@ -384,7 +384,7 @@ export async function POST(request: NextRequest) {
     const normalizedTeamInviteEmails = normalizeEmailArray(teamMemberEmails);
     const inviteResults: Array<{ email: string; sent: boolean; error?: string }> = [];
     if (normalizedTeamInviteEmails.length > 0) {
-      const workspaceName =
+      const inviteWorkspaceName =
         (typeof updates.name === 'string' && updates.name.trim()) ||
         (typeof workspaceName === 'string' && workspaceName.trim()) ||
         'your workspace';
@@ -476,7 +476,7 @@ export async function POST(request: NextRequest) {
           await sendWorkspaceInviteEmail({
             to: email,
             joinUrl: buildJoinUrl(request, inviteToken),
-            workspaceName,
+            workspaceName: inviteWorkspaceName,
             role: 'member',
             inviterEmail: requestUser.email,
             expiresAt,

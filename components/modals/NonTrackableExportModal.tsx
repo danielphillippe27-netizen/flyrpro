@@ -26,7 +26,7 @@ export function NonTrackableExportModal({ open, onClose, onConfirm }: NonTrackab
         <DialogHeader>
           <DialogTitle>Export as non-trackable flyer?</DialogTitle>
           <DialogDescription className="pt-2">
-            This flyer will not include QR tracking. You won't see scans, address attribution, or performance analytics for this batch in your dashboard.
+            This flyer will not include QR tracking. You won&apos;t see scans, address attribution, or performance analytics for this batch in your dashboard.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
@@ -41,7 +41,6 @@ export function NonTrackableExportModal({ open, onClose, onConfirm }: NonTrackab
     </Dialog>
   );
 }
-
 
 
 

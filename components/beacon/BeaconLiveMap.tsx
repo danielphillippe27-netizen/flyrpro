@@ -9,7 +9,7 @@ import { LocationMarker } from '@/components/map/LocationMarker';
 
 const DEFAULT_CENTER: [number, number] = [-79.3832, 43.6532];
 const DEFAULT_ZOOM = 14;
-const MAP_STYLE = 'mapbox://styles/mapbox/streets-v12';
+const MAP_STYLE = process.env.NEXT_PUBLIC_MAPBOX_STYLE_ID;
 
 type Props = {
   payload: PublicBeaconPayload;
@@ -81,7 +81,7 @@ export function BeaconLiveMap({ payload }: Props) {
     if (!mapContainerRef.current || mapRef.current) return;
 
     const token = getMapboxToken();
-    if (!token) {
+    if (!token || !MAP_STYLE) {
       setMapError('Map unavailable right now.');
       return;
     }

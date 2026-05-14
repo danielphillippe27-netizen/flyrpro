@@ -271,6 +271,13 @@ export function buildBlockSegments(addresses: BlockAddress[]): BlockSegment[] {
         { lat: 0, lon: 0 }
       );
 
+      const bbox: [number, number, number, number] = [
+        Math.min(...lons),
+        Math.min(...lats),
+        Math.max(...lons),
+        Math.max(...lats),
+      ];
+
       return {
         id: key,
         streetName,
@@ -278,12 +285,7 @@ export function buildBlockSegments(addresses: BlockAddress[]): BlockSegment[] {
         blockStart: blockRaw === 'na' ? null : Number(blockRaw),
         addressIds,
         centroid,
-        bbox: [
-          Math.min(...lons),
-          Math.min(...lats),
-          Math.max(...lons),
-          Math.max(...lats),
-        ],
+        bbox,
         weight: segmentAddresses.length,
       };
     })

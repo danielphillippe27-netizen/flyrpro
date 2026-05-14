@@ -1,11 +1,9 @@
 import { toast } from "sonner";
 import { useMutation } from "@tanstack/react-query";
-import { InferRequestType, InferResponseType } from "hono";
-
 import { client } from "@/lib/editor-canva/lib/hono";
 
-type ResponseType = InferResponseType<typeof client.api.users["$post"]>;
-type RequestType = InferRequestType<typeof client.api.users["$post"]>["json"];
+type ResponseType = unknown;
+type RequestType = Record<string, unknown>;
 
 export const useSignUp = () => {
   const mutation = useMutation<

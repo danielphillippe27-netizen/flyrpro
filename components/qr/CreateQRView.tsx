@@ -16,6 +16,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { QRDestinationType } from '@/lib/services/QRCodeService';
 
+type QRSource = 'campaign' | 'farm' | 'address';
+
 export function CreateQRView({
   open,
   onClose,
@@ -23,7 +25,7 @@ export function CreateQRView({
   open: boolean;
   onClose: () => void;
 }) {
-  const [source, setSource] = useState<'campaign' | 'farm' | 'address'>('campaign');
+  const [source, setSource] = useState<QRSource>('campaign');
   const [campaignId, setCampaignId] = useState('');
   const [addressId, setAddressId] = useState('');
   const [destinationType, setDestinationType] = useState<QRDestinationType>('landingPage');
@@ -83,9 +85,9 @@ export function CreateQRView({
       const { data } = await response.json();
       console.log('QR code created:', data);
       onClose();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error creating QR code:', error);
-      setError(error.message || 'Failed to create QR code');
+      setError(error instanceof Error ? error.message : 'Failed to create QR code');
     } finally {
       setLoading(false);
     }
@@ -104,7 +106,7 @@ export function CreateQRView({
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
               <Label htmlFor="source">Source</Label>
-              <Select value={source} onValueChange={(v) => setSource(v as any)}>
+              <Select value={source} onValueChange={(v) => setSource(v as QRSource)}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -211,4 +213,3 @@ export function CreateQRView({
     </Dialog>
   );
 }
-

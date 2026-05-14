@@ -396,7 +396,7 @@ function snapshotWithScopedBuildingCount(
         artifact_buildings_count: snapshot.counts.buildings,
         campaign_buildings_count: scopedBuildingCount,
         campaign_geometry_scope: 'territory_boundary',
-      } as NonNullable<LambdaSnapshotResponse['metadata']>['tile_metrics'],
+      } as unknown as NonNullable<LambdaSnapshotResponse['metadata']>['tile_metrics'],
     } as LambdaSnapshotResponse['metadata'],
   };
 }
