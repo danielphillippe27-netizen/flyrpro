@@ -263,7 +263,7 @@ async function fetchPmtilesAddressFeatures(campaignId: string) {
   return Array.from(byId.values());
 }
 
-export function parsePointGeometry(address: Record<string, unknown>): PointGeometry | null {
+function parsePointGeometry(address: Record<string, unknown>): PointGeometry | null {
   // NEW: Check for 'geom_json' field first (from Supabase view with ST_AsGeoJSON conversion)
   if (address.geom_json) {
     const geomJson = address.geom_json;

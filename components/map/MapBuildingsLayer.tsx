@@ -1115,40 +1115,26 @@ export function MapBuildingsLayer({
 
     // Remove layers if zoomed out too far
     if (zoom < 12) {
-      if (map.getLayer(layerId)) {
-        try {
+      // map.getLayer can throw while Mapbox is rebuilding the style layer registry.
+      try {
+        if (!map.isStyleLoaded()) return;
+        if (map.getLayer(layerId)) {
           map.removeLayer(layerId);
-        } catch (err) {
-          // Layer might not exist
         }
-      }
-      if (map.getLayer(leadGlowLayerId)) {
-        try {
+        if (map.getLayer(leadGlowLayerId)) {
           map.removeLayer(leadGlowLayerId);
-        } catch (err) {
-          // Layer might not exist
         }
-      }
-      if (map.getLayer(circleLayerId)) {
-        try {
+        if (map.getLayer(circleLayerId)) {
           map.removeLayer(circleLayerId);
-        } catch (err) {
-          // Layer might not exist
         }
-      }
-      if (map.getLayer(circleLeadGlowLayerId)) {
-        try {
+        if (map.getLayer(circleLeadGlowLayerId)) {
           map.removeLayer(circleLeadGlowLayerId);
-        } catch (err) {
-          // Layer might not exist
         }
-      }
-      if (map.getLayer(shadowLayerId)) {
-        try {
+        if (map.getLayer(shadowLayerId)) {
           map.removeLayer(shadowLayerId);
-        } catch (err) {
-          // Layer might not exist
         }
+      } catch {
+        return;
       }
     }
   }, [map, circleLayerId]);
@@ -1164,40 +1150,26 @@ export function MapBuildingsLayer({
     // Only fetch if zoomed in enough (zoom >= 12 for better visibility)
     if (zoom < 12) {
       // Remove layers if zoomed out too far
-      if (map.getLayer(layerId)) {
-        try {
+      // map.getLayer can throw while Mapbox is rebuilding the style layer registry.
+      try {
+        if (!map.isStyleLoaded()) return;
+        if (map.getLayer(layerId)) {
           map.removeLayer(layerId);
-        } catch (err) {
-          // Layer might not exist
         }
-      }
-      if (map.getLayer(leadGlowLayerId)) {
-        try {
+        if (map.getLayer(leadGlowLayerId)) {
           map.removeLayer(leadGlowLayerId);
-        } catch (err) {
-          // Layer might not exist
         }
-      }
-      if (map.getLayer(circleLayerId)) {
-        try {
+        if (map.getLayer(circleLayerId)) {
           map.removeLayer(circleLayerId);
-        } catch (err) {
-          // Layer might not exist
         }
-      }
-      if (map.getLayer(circleLeadGlowLayerId)) {
-        try {
+        if (map.getLayer(circleLeadGlowLayerId)) {
           map.removeLayer(circleLeadGlowLayerId);
-        } catch (err) {
-          // Layer might not exist
         }
-      }
-      if (map.getLayer(shadowLayerId)) {
-        try {
+        if (map.getLayer(shadowLayerId)) {
           map.removeLayer(shadowLayerId);
-        } catch (err) {
-          // Layer might not exist
         }
+      } catch {
+        return;
       }
       return;
     }
@@ -1778,8 +1750,17 @@ export function MapBuildingsLayer({
         }
       }
 
+      // map.getLayer can throw during style transitions even after an earlier style-loaded check.
+      let hasBuildingLayer = false;
+      try {
+        if (!map.isStyleLoaded()) return;
+        hasBuildingLayer = Boolean(map.getLayer(layerId));
+      } catch {
+        return;
+      }
+
       // Add or update fill-extrusion layer (for Polygon/MultiPolygon geometries)
-      if (!map.getLayer(layerId)) {
+      if (!hasBuildingLayer) {
         try {
           // NOTE: Shadow layer removed to fix "dark square" visual artifact
           // The 3D fill-extrusion with proper lighting provides sufficient visual depth
