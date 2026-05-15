@@ -237,23 +237,18 @@ export function RecipientsTable({ recipients, campaignId, onRefresh }: Recipient
                           {loading === recipient.id ? 'Updating...' : 'Mark Attempted'}
                         </Button>
                       )}
-                      {/*
-                        TODO: This button never renders because qr_png_url is always passed
-                        as null from the campaign page (app/(main)/campaigns/[campaignId]/page.tsx).
-                        generate-qrs writes qr_code_base64 and purl, not qr_png_url.
-                        Future fix: either pass purl as a prop and link to it here,
-                        or implement a proper QR download button that uses qr_code_base64.
-                        See QR_SYSTEM.md Section 6 for full context.
-                      */}
-                      {recipient.qr_png_url && (
+                      {recipient.qr_code_base64 && (
                         <Button
                           size="sm"
                           variant="link"
-                          asChild
+                          onClick={() => {
+                            const base64Data = recipient.qr_code_base64?.replace(/^data:image\/\w+;base64,/, '');
+                            if (base64Data) {
+                              window.open(`data:image/png;base64,${base64Data}`, '_blank', 'noopener,noreferrer');
+                            }
+                          }}
                         >
-                          <a href={recipient.qr_png_url} target="_blank" rel="noopener noreferrer">
-                            View QR
-                          </a>
+                          View QR
                         </Button>
                       )}
                     </TableCell>
