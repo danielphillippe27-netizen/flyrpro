@@ -7,9 +7,9 @@ if [ -z "$CAMPAIGN_ID" ]; then
   exit 1
 fi
 
-# Supabase credentials from .env.local
-SUPABASE_URL="https://kfnsnwqylsdsbgnwgxva.supabase.co"
-SUPABASE_SERVICE_ROLE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtmbnNud3F5bHNkc2JnbndneHZhIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MDkyNjczMSwiZXhwIjoyMDc2NTAyNzMxfQ.DCCPBeHISbRcz4Z-tSaGvjszB-un0vvp45avmv9YPas"
+# Set these in your environment or .env before running
+SUPABASE_URL="${SUPABASE_URL:?SUPABASE_URL is required}"
+SUPABASE_SERVICE_ROLE_KEY="${SUPABASE_SERVICE_ROLE_KEY:?SUPABASE_SERVICE_ROLE_KEY is required}"
 
 # Output directory
 EXPORT_DIR="./blender-exports/${CAMPAIGN_ID}"

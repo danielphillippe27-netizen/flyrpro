@@ -242,6 +242,139 @@ Three different scan handlers exist depending on which URL was encoded in the QR
 - Building map visualizes scan density from `building_stats`
 - Team dashboard aggregates from `session_events` and `sessions`
 
+### Current provisioning pipeline — Diamond and Bedrock
+
+The current campaign provisioning path is no longer the old lambda/gold/silver
+mental model. `POST /api/campaigns/provision` now tries a static geometry pipeline
+first and records the result in `campaigns.provision_source`.
+
+The flow is:
+1. Resolve the campaign region from the requested polygon.
+2. Try `DiamondMunicipalService` first. Diamond reads municipal PMTiles manifests
+   from S3/CloudFront, chooses the smallest municipal address/building manifest that
+   intersects the campaign bbox, extracts scoped addresses from PMTiles, and creates
+   a campaign snapshot with address, building, and optional parcel tile metadata.
+3. If Diamond cannot serve the region, fall back to regional Bedrock services:
+   `BedrockCanadaService`, `BedrockUsService`, `BedrockAustraliaService`,
+   `BedrockNzService`, `BedrockSouthAfricaService`, and `BedrockUkService`.
+   These services read Parquet/PMTiles artifacts, filter addresses to the campaign
+   polygon, and create snapshot metadata pointing at the static address/building/
+   parcel layers.
+4. Insert `campaign_addresses` from the selected source and mark the campaign
+   `map_ready` as soon as the static PMTiles artifacts can render.
+5. Defer heavier post-processing with `after(...)`: building extraction, spatial
+   linking, optional parcel-assisted matching, route optimization, and townhouse
+   splitting.
+6. Run `StableLinkerService` against normalized building features and optional
+   Bedrock parcel geometry, then run `TownhouseSplitterService` for multi-unit
+   building handling.
+
+The important operational change is that Diamond/Bedrock campaigns are map-ready
+before the legacy building RPC path completes. `rpc_get_campaign_map_bundle` now
+skips `rpc_get_campaign_full_features` for Diamond/Bedrock campaigns so Bedrock
+campaigns do not time out on the legacy Gold building scan. Buildings and parcels
+render from PMTiles artifacts through the frontend fallback path instead.
+
+### `provision_source` values
+
+`campaigns.provision_source` is the source label for the address and map artifact
+pipeline used by a campaign.
+
+| Value | Meaning |
+|-------|---------|
+| `diamond` | Municipal Diamond PMTiles source. Preferred when a municipality-specific address/building manifest covers the campaign polygon. |
+| `bedrock_ca` | Bedrock Canada source using national/regional static artifacts. |
+| `bedrock_us` | Bedrock United States source using regional static artifacts. |
+| `bedrock_au` | Bedrock Australia source using G-NAF address artifacts and national building artifacts. |
+| `bedrock_nz` | Bedrock New Zealand source using LINZ address, building, and primary parcel artifacts. |
+| `bedrock_za` | Bedrock South Africa source using regional static artifacts. |
+| `bedrock_uk` | Bedrock UK source using OS/Open UPRN/Overture-derived static artifacts. |
+
+Legacy values `gold`, `silver`, and `lambda` are no longer valid for new campaign
+provisioning. Older code comments may still mention Gold/Silver as historical names
+for the building/linking persistence path; do not reintroduce those values into the
+database enum/check constraint.
+
+### Campaign data quality grading
+
+Provisioning writes data-quality fields on `campaigns` so the UI can distinguish a
+map that is ready but still has incomplete linking from one that has strong building
+coverage. `CampaignProvisionQuality.ts` centralizes the default response shape:
+
+- `coverage_score` — integer coverage score from building/address link assessment
+- `data_quality` — `strong`, `usable`, or `weak`
+- `standard_mode_recommended` — true when the campaign should default to standard
+  pin mode instead of a building-heavy map
+- `data_quality_reason` — human-readable reason such as "building-address linking pending"
+
+`CampaignLinkQualityService` computes the final assessment after spatial linking.
+Pending Diamond/Bedrock campaigns intentionally start as weak/pending and improve
+after background post-processing finishes.
+
+### PMTiles map layer architecture
+
+Diamond/Bedrock snapshots contain static geometry artifact metadata. The frontend
+reads that metadata through the campaign map manifest and renders PMTiles-backed
+layers instead of relying only on database-returned GeoJSON.
+
+`CampaignAddressPmtilesLayer` renders address points from the address PMTiles layer.
+`CampaignParcelPmtilesLayer` renders parcel polygons from a backend ZXY tile template
+when the manifest includes parcel layer metadata. It builds a vector source from the
+manifest URL, applies a campaign scope filter from the campaign bbox/boundary or known
+parcel IDs, colors parcels by status, and maps clicked parcel feature IDs back to
+campaign parcel rows. This is separate from the older `MapBuildingsLayer`, which still
+supports database/RPC building reads and legacy building interactions.
+
+The parcel API route `GET /api/campaigns/[campaignId]/parcels` can also extract scoped
+parcel rows from PMTiles. It returns `[]` when the campaign has no snapshot, no bbox,
+no parcel artifact, or temporarily inaccessible parcel tiles.
+
+### Meta Ads integration
+
+The Meta integration is read-only tracking for farm social ads. It does not create or
+mutate Meta campaigns. The web app uses OAuth to obtain an `ads_read` token, stores the
+encrypted token in `meta_connections`, discovers ad accounts into `meta_ad_accounts`,
+links selected Meta campaigns to farms in `farm_meta_campaign_links`, and syncs daily
+metrics into `farm_meta_ad_daily_metrics`.
+
+Primary routes:
+- `GET /api/meta/oauth/start` — validates farm/workspace access and redirects to Meta
+- `GET /api/meta/oauth/callback` — exchanges the code, stores the encrypted token,
+  and upserts discovered ad accounts
+- `GET /api/meta/connection` — returns public connection state for the current user
+- `GET /api/meta/ad-accounts` — lists/upserts ad accounts from Meta
+- `GET /api/meta/campaigns?adAccountId=...` — lists Meta campaigns for selection
+- `GET /api/meta/ads?campaignId=...` — reads ad creatives plus seven-day metrics
+- `DELETE /api/meta/disconnect` — removes the stored connection and marks linked
+  farm campaigns disconnected
+- `GET/POST /api/farms/[farmId]/meta-campaign-links` — lists or creates farm-to-Meta
+  campaign links
+- `POST /api/farms/[farmId]/meta-sync` — syncs insight rows for active links
+
+The nightly/manual sync path logs results to `meta_sync_logs` and updates
+`last_synced_at` on `farm_meta_campaign_links`.
+
+### Campaign assignments
+
+Campaign assignments split campaign homes across workspace members for team execution.
+They are stored in:
+
+- `campaign_assignments` — one row per assignee, including mode, goal, zone, status,
+  due date, notes, and assignee/assigner IDs
+- `campaign_assignment_homes` — ordered campaign address rows for zone-based assignment
+
+The API surface is:
+- `GET /api/campaign-assignments?workspaceId=...` — workspace-level active assignment
+  list, scoped by role
+- `GET /api/campaigns/[campaignId]/assignments` — campaign-specific assignments with
+  assignee display names and assigned homes
+- `POST /api/campaigns/[campaignId]/assignments` — cancels current active assignments,
+  creates `zone_split` or `whole_team` assignments, inserts zone homes when applicable,
+  and sends in-app/email notifications
+
+Route managers can manage and view all assignments. Non-manager workspace members only
+see assignments addressed to their own user ID.
+
 ---
 
 ## 6. The QR system

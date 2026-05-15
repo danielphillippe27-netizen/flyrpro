@@ -64,6 +64,8 @@ tags:
     description: Building data and management
   - name: campaigns
     description: Campaign CRUD, provisioning, addresses, buildings, routes
+  - name: campaign-assignments
+    description: Campaign assignment read and write APIs for team routing
   - name: canva
     description: Canva-style QR and flyer generation
   - name: challenges
@@ -98,6 +100,8 @@ tags:
     description: Lead CRM sync
   - name: mapbox
     description: Mapbox tilequery proxy
+  - name: meta
+    description: Meta Ads OAuth, account discovery, campaign reads, and farm attribution sync
   - name: onboarding
     description: Onboarding completion
   - name: open
@@ -1109,6 +1113,45 @@ paths:
         "200":
           description: Address list
 
+  /api/campaign-assignments:
+    get:
+      tags: [campaign-assignments]
+      summary: List active campaign assignments for a workspace
+      description: |
+        Returns active (`assigned` or `in_progress`) campaign assignments in a workspace.
+        Route managers see all assignments; regular members only see assignments for
+        the authenticated user. Each row includes a lightweight campaign summary.
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: workspaceId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Active campaign assignments
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  assignments:
+                    type: array
+                    items:
+                      type: object
+                  role:
+                    type: string
+        "400":
+          description: workspaceId is required
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+
   /api/addresses-same-street:
     post:
       tags: [campaigns]
@@ -1208,6 +1251,114 @@ paths:
       responses:
         "200":
           description: Address removed
+
+  /api/campaigns/{campaignId}/assignments:
+    get:
+      tags: [campaign-assignments]
+      summary: Get campaign assignments
+      description: |
+        Returns assignment rows for a campaign, including assignee display names and
+        assigned home sequences. Managers see all active assignments; assigned users
+        only see their own assignments.
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Campaign assignments
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  campaign:
+                    type: object
+                  assignments:
+                    type: array
+                    items:
+                      type: object
+                  role:
+                    type: string
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: Campaign not found
+    post:
+      tags: [campaign-assignments]
+      summary: Create campaign assignments
+      description: |
+        Cancels existing active assignments for the campaign, creates new assignments
+        in `zone_split` or `whole_team` mode, optionally assigns ordered homes, and
+        sends in-app/email notifications to assigned members.
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workspaceId, mode, memberIds]
+              properties:
+                workspaceId:
+                  type: string
+                  format: uuid
+                mode:
+                  type: string
+                  enum: [zone_split, whole_team]
+                memberIds:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                dueAt:
+                  type: string
+                  format: date-time
+                  nullable: true
+                notes:
+                  type: string
+                  nullable: true
+                zoneAssignments:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      userId:
+                        type: string
+                        format: uuid
+                      addressIds:
+                        type: array
+                        items:
+                          type: string
+                          format: uuid
+      responses:
+        "200":
+          description: Created assignments and warnings
+        "400":
+          description: Invalid assignment request
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: Campaign not found in workspace
 
   /api/campaigns/{campaignId}/buildings:
     get:
@@ -1581,6 +1732,56 @@ paths:
           description: Unauthorized
         "404":
           description: Campaign or parcel PMTiles artifact not found
+
+  /api/campaigns/{campaignId}/parcels:
+    get:
+      tags: [campaigns]
+      summary: Get scoped campaign parcels
+      description: |
+        Extracts campaign-scoped residential parcels from the campaign PMTiles snapshot.
+        Returns an empty array when no snapshot, bbox, parcel artifact, or accessible
+        parcel tile exists. Access-denied parcel artifacts are temporarily cached and
+        suppressed to avoid repeated failed tile reads.
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Campaign parcel rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    campaign_id:
+                      type: string
+                      format: uuid
+                    external_id:
+                      type: string
+                    geom:
+                      type: string
+                    properties:
+                      type: object
+                    created_at:
+                      type: string
+                      format: date-time
+        "401":
+          description: Unauthorized
+        "404":
+          description: Campaign not found or access denied
+        "500":
+          description: Failed to extract campaign parcels
 
   /api/campaigns/{campaignId}/matches:
     get:
@@ -2122,6 +2323,164 @@ paths:
         "200":
           description: Editor subscription
 
+  # ── META ADS ────────────────────────────────────────────────
+  /api/meta/oauth/start:
+    get:
+      tags: [meta]
+      summary: Start Meta Ads OAuth
+      description: |
+        Validates the authenticated user and optional farm/workspace access, creates
+        a signed OAuth state, and redirects to Meta's authorization URL.
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: farmId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: workspaceId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "302":
+          description: Redirect to Meta OAuth
+        "401":
+          description: Unauthorized
+        "403":
+          description: Access denied
+        "404":
+          description: Farm not found
+
+  /api/meta/oauth/callback:
+    get:
+      tags: [meta]
+      summary: Complete Meta Ads OAuth
+      description: |
+        Handles Meta's OAuth callback, exchanges the authorization code for a token,
+        stores the encrypted Meta access token, upserts known ad accounts, and redirects
+        back to the farm social ads tab with a connection status.
+      x-status: working
+      parameters:
+        - name: code
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: error
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "302":
+          description: Redirect to farm or farms page with Meta connection status
+
+  /api/meta/connection:
+    get:
+      tags: [meta]
+      summary: Get current Meta Ads connection
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Public Meta connection state
+        "401":
+          description: Unauthorized
+
+  /api/meta/ad-accounts:
+    get:
+      tags: [meta]
+      summary: List Meta ad accounts
+      description: Fetches Meta ad accounts with the stored token and upserts them into `meta_ad_accounts`.
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Meta ad accounts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ad_accounts:
+                    type: array
+                    items:
+                      type: object
+        "401":
+          description: Unauthorized or Meta connection missing
+
+  /api/meta/campaigns:
+    get:
+      tags: [meta]
+      summary: List Meta campaigns for an ad account
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: adAccountId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Meta campaigns
+        "400":
+          description: adAccountId is required
+        "401":
+          description: Unauthorized or Meta connection missing
+
+  /api/meta/ads:
+    get:
+      tags: [meta]
+      summary: List Meta ads and recent metrics for a campaign
+      description: Returns ads for the Meta campaign plus a seven-day spend, impression, reach, click, and lead summary.
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: campaignId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Meta ads, metrics summary, and metric window
+        "400":
+          description: campaignId is required
+        "401":
+          description: Unauthorized or Meta connection missing
+
+  /api/meta/disconnect:
+    delete:
+      tags: [meta]
+      summary: Disconnect Meta Ads
+      description: Marks farm campaign links disconnected for the user's Meta connection and deletes the stored connection.
+      x-status: working
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Meta Ads disconnected
+        "401":
+          description: Unauthorized
+        "500":
+          description: Failed to disconnect Meta Ads
+
   # ── FARMS ────────────────────────────────────────────────────
   /api/farms:
     post:
@@ -2130,9 +2489,127 @@ paths:
       x-status: working
       security:
         - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, polygon]
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                  nullable: true
+                polygon:
+                  type: string
+                  description: JSON-encoded GeoJSON Polygon
+                workspace_id:
+                  type: string
+                  format: uuid
+                start_date:
+                  type: string
+                  format: date
+                end_date:
+                  type: string
+                  format: date
+                touches_interval:
+                  type: string
+                  enum: [month, year]
+                goal_type:
+                  type: string
+                goal_target:
+                  type: number
+                touch_types:
+                  type: array
+                  items:
+                    type: string
+                annual_budget_cents:
+                  type: integer
+                include_social_ads_in_spend:
+                  type: boolean
+                home_limit:
+                  type: integer
       responses:
         "200":
           description: Created farm
+        "400":
+          description: name and polygon are required
+        "401":
+          description: Unauthorized
+
+  /api/farms/{farmId}:
+    patch:
+      tags: [farms]
+      summary: Update farm
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: farmId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                  nullable: true
+                start_date:
+                  type: string
+                  format: date
+                end_date:
+                  type: string
+                  format: date
+                touches_per_interval:
+                  type: number
+                  nullable: true
+                touches_interval:
+                  type: string
+                  enum: [month, year]
+                  nullable: true
+                goal_type:
+                  type: string
+                  nullable: true
+                goal_target:
+                  type: number
+                  nullable: true
+                cycle_completion_window_days:
+                  type: number
+                  nullable: true
+                touch_types:
+                  type: array
+                  items:
+                    type: string
+                  nullable: true
+                annual_budget_cents:
+                  type: integer
+                  nullable: true
+                include_social_ads_in_spend:
+                  type: boolean
+                  nullable: true
+      responses:
+        "200":
+          description: Updated farm
+        "400":
+          description: Farm name is required
+        "401":
+          description: Unauthorized
+        "403":
+          description: Access denied
+        "404":
+          description: Farm not found
 
   /api/farms/{farmId}/campaign:
     get:
@@ -2201,6 +2678,92 @@ paths:
       responses:
         "200":
           description: Addresses synced
+
+  /api/farms/{farmId}/meta-campaign-links:
+    get:
+      tags: [farms, meta]
+      summary: Get Meta campaign links for a farm
+      description: Returns linked Meta campaigns for a farm plus aggregated daily metrics.
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: farmId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Meta campaign links and metrics summary
+        "401":
+          description: Unauthorized
+        "403":
+          description: Access denied
+    post:
+      tags: [farms, meta]
+      summary: Link a Meta campaign to a farm
+      description: Upserts a farm-to-Meta campaign link after verifying the selected Meta ad account belongs to the authenticated user.
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: farmId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [meta_ad_account_id, meta_campaign_id]
+              properties:
+                meta_ad_account_id:
+                  type: string
+                meta_campaign_id:
+                  type: string
+                meta_campaign_name:
+                  type: string
+                  nullable: true
+      responses:
+        "200":
+          description: Linked Meta campaign
+        "400":
+          description: Required Meta campaign fields missing or ad account not selected
+        "401":
+          description: Unauthorized or Meta connection missing
+        "403":
+          description: Access denied
+
+  /api/farms/{farmId}/meta-sync:
+    post:
+      tags: [farms, meta]
+      summary: Sync Meta metrics for linked farm campaigns
+      description: Pulls Meta campaign insight rows for all active links on the farm and writes daily metrics plus sync logs.
+      x-status: working
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: farmId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Sync result
+        "400":
+          description: No active Meta campaign links
+        "401":
+          description: Unauthorized or Meta Ads not connected
+        "403":
+          description: Access denied
 
   /api/farms/generate-address-list:
     post:
