@@ -13,8 +13,7 @@ import {
   Undo2,
   Crop,
   Square,
-  Menu,
-  Maximize2
+  Menu
 } from "lucide-react";
 
 import { UserButton } from "@/lib/editor-canva/features/auth/components/user-button";

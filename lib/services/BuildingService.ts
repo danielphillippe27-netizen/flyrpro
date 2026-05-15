@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/client';
 import type { Building, BuildingInteraction, BuildingStatus } from '@/types/database';
 import * as turf from '@turf/turf';
-import type { Feature, LineString, MultiPolygon, Point, Polygon } from 'geojson';
+import type { Feature, LineString, Point } from 'geojson';
 
 export interface HouseOrientation {
   houseBearing: number; // Bearing from centroid to nearest point on road (0-360)

@@ -2,10 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { 
-  Minimize, 
   ZoomIn, 
   ZoomOut, 
-  Grid3x3, 
   Maximize, 
   HelpCircle,
   LayoutGrid

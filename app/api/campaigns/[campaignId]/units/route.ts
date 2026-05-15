@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
-import { TownhouseSplitterService } from '@/lib/services/TownhouseSplitterService';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

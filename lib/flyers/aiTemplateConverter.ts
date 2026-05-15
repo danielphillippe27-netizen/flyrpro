@@ -4,7 +4,7 @@
  * Converts AI-generated FlyerTemplate to database FlyerData format
  */
 
-import type { FlyerTemplate, FlyerElement } from '@/types/flyer';
+import type { FlyerTemplate } from '@/types/flyer';
 import type { FlyerData, FlyerElement as DbFlyerElement } from '@/lib/flyers/types';
 import { generateId } from '@/lib/editor/utils';
 
@@ -104,4 +104,3 @@ export function convertAITemplateToFlyerData(
     elements,
   };
 }
-

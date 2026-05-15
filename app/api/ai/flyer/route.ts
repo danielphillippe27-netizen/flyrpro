@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { FlyerTemplate, FlyerListingData } from "@/types/flyer";
+import { FlyerTemplate } from "@/types/flyer";
 
 const GEMINI_MODEL = "gemini-2.5-flash";
 

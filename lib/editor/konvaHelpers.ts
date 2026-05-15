@@ -4,7 +4,6 @@
  * Utilities for working with Konva objects, hit detection, and coordinate conversion.
  */
 
-import type Konva from 'konva';
 import type { EditorElement } from './types';
 
 /**
@@ -128,7 +127,6 @@ export function isInputElement(target: EventTarget | null): boolean {
   
   return isInput || isContentEditable;
 }
-
 
 
 
