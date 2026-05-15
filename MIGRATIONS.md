@@ -34,8 +34,8 @@ and only defines four things:
 - `user_profiles`
 - Storage bucket policies for `qr` and `flyers`
 
-The actual production database has been built through 240 migration files spanning
-January 2025 to April 2026, plus migrations applied from the iOS repo
+The actual production database has been built through 257 migration files spanning
+January 2025 to May 2026, plus migrations applied from the iOS repo
 (`FLYR/supabase/migrations/`). Neither repo's migration history is complete on its own.
 
 **Critical tables with no `CREATE TABLE` in this repo:**
@@ -57,9 +57,9 @@ state needs to be created — see Section 9.
 
 ## 2. Migration inventory
 
-**Total migration files:** 240  
+**Total migration files:** 257  
 **Earliest:** `20250117000000_add_full_unique_constraint_campaign_addresses.sql`  
-**Latest:** `20260428173000_filter_sheds_from_campaign_feature_reads.sql`  
+**Latest:** `20260514120000_skip_building_rpc_for_bedrock_campaigns.sql`  
 **One non-timestamped file:** `create_flyers_table.sql` — treat as applied, do not re-run.
 
 The migrations fall into these functional groups:
@@ -107,6 +107,21 @@ of these are iOS-coupled — the iOS app renders the map directly from this data
 - `20260421103000_add_twilio_power_dialer.sql` — Twilio voice dialer schema
 - `20260419110000_create_ambassador_applications.sql` — ambassador program
 - `20260427111500_workspace_dialer_addon_and_numbers.sql` — dialer add-on
+
+### Bedrock/Diamond and Meta migrations added in May 2026
+
+| Migration | Date | Description | Tables / objects affected | DROP statements or destructive operations |
+|-----------|------|-------------|---------------------------|-------------------------------------------|
+| `20260429120000_add_campaign_data_quality_grade.sql` | 2026-04-29 | Adds campaign link-quality and data-quality grading fields, backfills grades from existing link/building confidence values, and documents the new columns. | `campaigns` | No DROP statements. Runs a non-destructive `UPDATE` backfill on existing campaign rows. |
+| `20260506183000_meta_ads_readonly_tracking.sql` | 2026-05-06 | Adds read-only Meta Ads tracking tables, indexes, RLS policies, and updated-at triggers for farm campaign attribution metrics. | `meta_connections`, `meta_ad_accounts`, `farm_meta_campaign_links`, `farm_meta_ad_daily_metrics`; references `farms` and `auth.users` | Uses `DROP TRIGGER IF EXISTS` before recreating triggers on the new Meta tables. No DROP TABLE or DROP COLUMN. |
+| `20260506190000_meta_ads_nightly_sync_fields.sql` | 2026-05-06 | Adds nightly sync metadata for Meta campaign links and a sync log table with RLS and indexes. | `farm_meta_campaign_links`, `meta_sync_logs` | No DROP statements. |
+| `20260508000000_add_real_estate_campaign_types.sql` | 2026-05-08 | Expands allowed `campaigns.type` values for real estate campaign workflows. | `campaigns` | Drops and recreates `campaigns_type_check`; no table or column drops. |
+| `20260508120000_campaign_assignments.sql` | 2026-05-08 | Creates campaign assignment and assignment-home tables, indexes, timestamp trigger, RLS policies, and adds assignments to realtime publication. | `campaign_assignments`, `campaign_assignment_homes`; references `campaigns`, `workspaces`, `campaign_addresses`, and `auth.users` | Uses `DROP TRIGGER IF EXISTS` and `DROP POLICY IF EXISTS` before recreating trigger/policies. No DROP TABLE or DROP COLUMN. |
+| `20260508133000_expand_farm_wizard_touch_types.sql` | 2026-05-08 | Adds farm social-ad spend flag and expands/normalizes farm touch types and farm touch modes for the farm wizard. | `farms`, `farm_touches` | Drops and recreates touch-type check constraints. Runs data-normalizing `UPDATE`s that map legacy touch/mode values to the new allowed set. |
+| `20260509113000_add_bedrock_provision_sources.sql` | 2026-05-09 | Temporarily expands `campaigns.provision_source` to include Bedrock regional sources alongside legacy gold/silver/lambda values. | `campaigns` | Drops and recreates `campaigns_provision_source_check`; no table or column drops. |
+| `20260510000000_restrict_campaign_provision_sources_to_diamond_bedrock.sql` | 2026-05-10 | Replaces legacy provision-source values with the Diamond/Bedrock source set and documents the new source semantics. | `campaigns` | Drops and recreates `campaigns_provision_source_check`. Updates existing `gold`, `silver`, and `lambda` values to `NULL`, which is a destructive normalization of legacy source labels. |
+| `20260511140000_add_country_flags_to_profiles_and_leaderboard.sql` | 2026-05-11 | Adds country-code fields to profile tables and recreates `get_leaderboard` so leaderboard rows can include a country code. | `user_profiles`, `profiles`, `leaderboard_rollups`, `challenge_participants`; reads `auth.users`; function `get_leaderboard` | Uses `DROP FUNCTION IF EXISTS public.get_leaderboard(...)` before recreating it with a new return shape. No table or column drops. |
+| `20260514120000_skip_building_rpc_for_bedrock_campaigns.sql` | 2026-05-14 | Replaces `rpc_get_campaign_map_bundle` so Diamond/Bedrock campaigns skip the legacy Gold building RPC and rely on PMTiles/frontend fallback buildings instead. | Function `rpc_get_campaign_map_bundle`; reads `campaigns`, `campaign_addresses`, `campaign_parcels`; conditionally calls building/parcels/roads RPCs | No DROP statements. Uses `CREATE OR REPLACE FUNCTION`; does not alter `rpc_get_campaign_full_features`. |
 
 ---
 
