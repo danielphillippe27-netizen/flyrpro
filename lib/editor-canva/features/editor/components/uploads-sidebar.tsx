@@ -4,7 +4,6 @@ import Image from "next/image";
 import { AlertTriangle, Loader, Upload } from "lucide-react";
 
 import { ActiveTool, Editor } from "@/lib/editor-canva/features/editor/types";
-import { ToolSidebarClose } from "@/lib/editor-canva/features/editor/components/tool-sidebar-close";
 import { ToolSidebarHeader } from "@/lib/editor-canva/features/editor/components/tool-sidebar-header";
 
 import { useGetImages } from "@/lib/editor-canva/features/images/api/use-get-images";
@@ -113,5 +112,4 @@ export const UploadsSidebar = ({ editor, activeTool, onChangeActiveTool }: Uploa
     </aside>
   );
 };
-
 

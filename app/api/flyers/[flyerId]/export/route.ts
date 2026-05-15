@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createAdminClient } from '@/lib/supabase/server';
 
 /**
  * Export Flyer API Route
@@ -61,7 +60,6 @@ export async function POST(
     );
   }
 }
-
 
 
 

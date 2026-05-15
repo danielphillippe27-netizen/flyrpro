@@ -7,7 +7,6 @@ import { ActiveTool, Editor } from "@/lib/editor-canva/features/editor/types";
 import { ToolSidebarClose } from "@/lib/editor-canva/features/editor/components/tool-sidebar-close";
 import { ToolSidebarHeader } from "@/lib/editor-canva/features/editor/components/tool-sidebar-header";
 import { cn } from "@/lib/editor-canva/lib/utils";
-import { Button } from "@/lib/editor-canva/components/ui/button";
 import { ScrollArea } from "@/lib/editor-canva/components/ui/scroll-area";
 import {
   DndContext,
@@ -19,7 +18,6 @@ import {
   DragEndEvent,
 } from '@dnd-kit/core';
 import {
-  arrayMove,
   SortableContext,
   sortableKeyboardCoordinates,
   useSortable,

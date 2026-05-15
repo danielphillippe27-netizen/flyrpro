@@ -9,7 +9,6 @@ import type {
   EditorState,
   EditorElement,
   EditorPage,
-  EditorStateSnapshot,
 } from './types';
 import {
   createSnapshot,
@@ -586,5 +585,4 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     set(getInitialEditorState());
   },
 }));
-
 

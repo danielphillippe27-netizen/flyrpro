@@ -10,7 +10,6 @@ import {
   Navigation, 
   Clock, 
   Footprints, 
-  MapPin, 
   ChevronDown, 
   ChevronUp,
   Route,

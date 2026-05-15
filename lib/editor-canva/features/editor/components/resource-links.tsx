@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, Circle, Loader2, Megaphone, Globe, QrCode } from "lucide-react";
+import { CheckCircle2, Loader2, Megaphone, Globe, QrCode } from "lucide-react";
 import { Button } from "@/lib/editor-canva/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/lib/editor-canva/components/ui/tooltip";
 import { cn } from "@/lib/editor-canva/lib/utils";
@@ -165,4 +165,3 @@ export const ResourceLinks = ({ projectId }: ResourceLinksProps) => {
     </TooltipProvider>
   );
 };
-

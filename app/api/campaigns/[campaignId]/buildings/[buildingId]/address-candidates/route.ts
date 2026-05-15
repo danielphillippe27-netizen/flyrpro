@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { getSupabaseUrl } from "@/lib/supabase/env";
 
@@ -203,7 +203,7 @@ function round(value: number, places = 1): number {
   return Math.round(value * factor) / factor;
 }
 
-async function ensureCampaignAccess(supabase: any, campaignId: string, userId: string): Promise<boolean> {
+async function ensureCampaignAccess(supabase: SupabaseClient, campaignId: string, userId: string): Promise<boolean> {
   const { data: campaign, error } = await supabase
     .from("campaigns")
     .select("id, owner_id, workspace_id")
@@ -231,7 +231,7 @@ async function ensureCampaignAccess(supabase: any, campaignId: string, userId: s
   return Boolean(campaignMember);
 }
 
-async function resolveBuilding(supabase: any, campaignId: string, buildingIdParam: string): Promise<ResolvedBuilding | null> {
+async function resolveBuilding(supabase: SupabaseClient, campaignId: string, buildingIdParam: string): Promise<ResolvedBuilding | null> {
   const buildingQuery = supabase
     .from("buildings")
     .select("id, gers_id, geom, addr_street, house_name")
@@ -260,7 +260,7 @@ async function resolveBuilding(supabase: any, campaignId: string, buildingIdPara
     .eq("id", buildingIdParam)
     .maybeSingle();
   const geometry = goldRow ? parseGeometry(goldRow.geom) : null;
-  return geometry ? {
+  return goldRow && geometry ? {
     rowId: null,
     publicId: goldRow.id,
     geometry,

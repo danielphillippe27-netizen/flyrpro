@@ -4,7 +4,6 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { Map as MapboxMap } from 'mapbox-gl';
 import mapboxgl from 'mapbox-gl';
-import * as turf from '@turf/turf';
 import type { BuildingModelPoint } from '@/lib/services/MapService';
 import { MapService } from '@/lib/services/MapService';
 import type { BuildingStatus } from '@/types/database';

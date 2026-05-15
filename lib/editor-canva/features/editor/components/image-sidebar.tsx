@@ -1,6 +1,5 @@
-import Image from "next/image";
 import Link from "next/link";
-import { AlertTriangle, Loader, Upload } from "lucide-react";
+import { AlertTriangle, Loader } from "lucide-react";
 
 import { ActiveTool, Editor } from "@/lib/editor-canva/features/editor/types";
 import { ToolSidebarClose } from "@/lib/editor-canva/features/editor/components/tool-sidebar-close";
