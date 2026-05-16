@@ -13,15 +13,24 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
+import {
+  CreateTerritoryCta,
+  TerritoryDrawHint,
+  TerritoryNamingSheet,
+  showMapControlsForPhase,
+} from '@/components/territory/TerritoryCreateFlow';
+import { getDrawnPolygon } from '@/lib/territory/create-polygon';
+import {
+  applyDrawModeForPhase,
+  clearTerritoryDrawing,
+  useTerritoryCreatePhase,
+} from '@/lib/territory/use-territory-create-phase';
 import { createClient } from '@/lib/supabase/client';
 import { useTheme } from '@/lib/theme-provider';
 import { useMapStyle } from '@/lib/map-style-provider';
 import { useWorkspace } from '@/lib/workspace-context';
 import { getMapboxToken } from '@/lib/mapbox';
 import { applyPresetVisualTweaks, applyResolvedMapStyle, hideBaseBuildingLayers, resolveMapStyle } from '@/lib/map-styles';
-import { handleWheelScrollContainer } from '@/lib/scrollContainer';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import MapboxDraw from '@mapbox/mapbox-gl-draw';
@@ -34,9 +43,7 @@ import { CircleAlert, Map, Pencil, Satellite, Search, Trash2, TriangleAlert } fr
 import * as turf from '@turf/turf';
 import Lottie from 'lottie-react';
 import { FarmTouchService } from '@/lib/services/FarmService';
-import { FARM_TOUCH_INTERVAL_OPTIONS } from '@/lib/farms/config';
 import { buildCadenceTouchPlan } from '@/lib/farms/plan';
-import { FarmTouchTypePicker } from '@/components/farms/FarmTouchTypePicker';
 import type { FarmTouchInterval, FarmTouchType } from '@/types/database';
 
 const DEFAULT_HOME_LIMIT = 5000;
@@ -81,8 +88,10 @@ export default function CreateFarmPage() {
     () => resolveMapStyle(mapPreset, theme, 'v11'),
     [mapPreset, theme],
   );
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
+  const [farmName, setFarmName] = useState('');
+  const [campaignName, setCampaignName] = useState('');
+  const description =
+    'Repeat this area for doorknocks, flyers, Canada Post, pop-bys, or letters.';
   const [startDate, setStartDate] = useState(() => formatDateInput(new Date()));
   const [touchesPerInterval, setTouchesPerInterval] = useState(DEFAULT_TOUCHES_PER_INTERVAL);
   const [touchesInterval, setTouchesInterval] = useState<FarmTouchInterval>('month');
@@ -104,7 +113,6 @@ export default function CreateFarmPage() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [feedbackDialog, setFeedbackDialog] = useState<CreateFarmDialogState | null>(null);
   const mapContainer = useRef<HTMLDivElement>(null);
-  const formScrollRef = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const drawRef = useRef<MapboxDraw | null>(null);
   const boundaryLayerIdsRef = useRef<string[]>([]);
@@ -116,6 +124,8 @@ export default function CreateFarmPage() {
     () => (isDark ? '/loading/white.json' : '/loading/black.json'),
     [isDark]
   );
+  const { phase, setPhase, startCreating } = useTerritoryCreatePhase({ map, mapLoaded });
+  const isBusy = loading || provisioning || generatingAddresses || syncingFarm;
 
   const currentStepText = syncingFarm
     ? 'Step 5/5: Syncing farm homes'
@@ -146,14 +156,6 @@ export default function CreateFarmPage() {
       cancelled = true;
     };
   }, [lottieSrc]);
-
-  useEffect(() => {
-    const el = formScrollRef.current;
-    if (!el) return;
-    const handler = (e: WheelEvent) => handleWheelScrollContainer(e, el);
-    el.addEventListener('wheel', handler, { passive: false });
-    return () => el.removeEventListener('wheel', handler);
-  }, []);
 
   useEffect(() => {
     return () => {
@@ -278,7 +280,7 @@ export default function CreateFarmPage() {
     const draw = new MapboxDraw({
       displayControlsDefault: false,
       controls: {},
-      defaultMode: 'draw_polygon',
+      defaultMode: 'simple_select',
       styles: [
         {
           id: 'gl-draw-polygon-fill',
@@ -415,7 +417,7 @@ export default function CreateFarmPage() {
       const newDraw = new MapboxDraw({
         displayControlsDefault: false,
         controls: {},
-        defaultMode: 'draw_polygon',
+        defaultMode: 'simple_select',
         styles: [
           { id: 'gl-draw-polygon-fill', type: 'fill', filter: ['all', ['==', '$type', 'Polygon'], ['!=', 'mode', 'static']], paint: { 'fill-color': '#ef4444', 'fill-outline-color': '#ef4444', 'fill-opacity': 0.15 } },
           { id: 'gl-draw-polygon-stroke-active', type: 'line', filter: ['all', ['==', '$type', 'Polygon'], ['!=', 'mode', 'static']], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#ef4444', 'line-width': 3 } },
@@ -431,14 +433,19 @@ export default function CreateFarmPage() {
       drawRef.current = newDraw;
 
       const savedFeatures = savedFeaturesRef.current;
-      if ((savedFeatures?.features?.length ?? 0) > 0 && savedFeatures) {
+      const hasSavedFeatures = (savedFeatures?.features?.length ?? 0) > 0;
+      if (hasSavedFeatures && savedFeatures) {
         newDraw.set(savedFeatures);
-        newDraw.changeMode('simple_select');
-      } else {
-        newDraw.changeMode('draw_polygon');
       }
+      applyDrawModeForPhase(newDraw, phase, hasSavedFeatures);
     });
-  }, [isSatellite, mapLoaded, resolvedMapStyle]);
+  }, [isSatellite, mapLoaded, phase, resolvedMapStyle]);
+
+  useEffect(() => {
+    if (!mapLoaded || !drawRef.current) return;
+    const hasSavedFeatures = (drawRef.current.getAll()?.features?.length ?? 0) > 0;
+    applyDrawModeForPhase(drawRef.current, phase, hasSavedFeatures);
+  }, [mapLoaded, phase]);
 
   useEffect(() => {
     if (!mapLoaded || !map.current || !mapContainer.current) return;
@@ -477,17 +484,25 @@ export default function CreateFarmPage() {
     setIsSatellite(!isSatellite);
   };
 
+  const handleStartCreating = () => {
+    drawRef.current?.deleteAll();
+    savedFeaturesRef.current = null;
+    startCreating();
+    drawRef.current?.changeMode('draw_polygon');
+  };
+
   const clearDrawing = () => {
-    if (drawRef.current) {
-      drawRef.current.deleteAll();
-      drawRef.current.changeMode('draw_polygon');
-    }
+    const nextPhase = clearTerritoryDrawing(drawRef.current, phase);
+    setPhase(nextPhase);
   };
 
   const startDrawing = () => {
-    if (drawRef.current) {
-      drawRef.current.changeMode('draw_polygon');
-    }
+    drawRef.current?.changeMode('draw_polygon');
+  };
+
+  const handleNamingBack = () => {
+    setPhase('drawing');
+    drawRef.current?.changeMode('simple_select');
   };
 
   const handleMapSearchSelect = (suggestion: AddressSuggestion) => {
@@ -504,7 +519,7 @@ export default function CreateFarmPage() {
   const handleSubmit = async (e?: React.FormEvent | React.MouseEvent) => {
     e?.preventDefault();
     if (!userId) return;
-    if (!name.trim()) return;
+    if (!farmName.trim() || !campaignName.trim()) return;
     if (!startDate) {
       await showFeedbackDialog({
         title: 'Start date required',
@@ -538,23 +553,8 @@ export default function CreateFarmPage() {
       return;
     }
 
-    let polygon: { type: 'Polygon'; coordinates: number[][][] } | null = null;
-    let bbox: number[] | undefined;
-    const features = drawRef.current?.getAll();
-    if (!features || features.features.length === 0) {
-      await showFeedbackDialog({
-        title: 'Draw a boundary',
-        description: 'Draw a territory boundary on the map before creating this farm.',
-        tone: 'warning',
-      });
-      return;
-    }
-
-    const polygonFeature = features.features.find(
-      (feature): feature is GeoJSON.Feature<GeoJSON.Polygon> =>
-        feature.geometry?.type === 'Polygon' && feature.geometry.coordinates[0]?.length >= 3
-    );
-    if (!polygonFeature) {
+    const polygon = getDrawnPolygon(drawRef.current);
+    if (!polygon) {
       await showFeedbackDialog({
         title: 'Finish the boundary',
         description: 'Double-click to finish your shape, then try creating the farm again.',
@@ -562,26 +562,8 @@ export default function CreateFarmPage() {
       });
       return;
     }
-    polygon = polygonFeature.geometry as { type: 'Polygon'; coordinates: number[][][] };
 
-    const ring = polygon.coordinates[0];
-    if (!ring || ring.length < 3) {
-      await showFeedbackDialog({
-        title: 'Boundary is too small',
-        description: 'Draw a proper territory with at least 3 corners.',
-        tone: 'warning',
-      });
-      return;
-    }
-
-    const first = ring[0];
-    const last = ring[ring.length - 1];
-    if (first[0] !== last[0] || first[1] !== last[1]) {
-      polygon = {
-        ...polygon,
-        coordinates: [[...ring, [first[0], first[1]]]],
-      };
-    }
+    let bbox: number[] | undefined;
 
     try {
       const turfPolygon = turf.polygon(polygon.coordinates);
@@ -598,7 +580,8 @@ export default function CreateFarmPage() {
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: name.trim(),
+          name: farmName.trim(),
+          campaign_name: campaignName.trim(),
           description: description.trim() || undefined,
           polygon: JSON.stringify(polygon),
           start_date: startDate,
@@ -737,192 +720,9 @@ export default function CreateFarmPage() {
   };
 
   return (
-    <div className="flex h-full min-h-0 bg-gray-50 dark:bg-background overflow-hidden">
-      <div className="w-full max-w-[360px] xl:max-w-[400px] shrink-0 min-h-0 border-r border-border bg-card">
-        <div className="flex h-full min-h-0 flex-col">
-          <div ref={formScrollRef} className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-5">
-            <div className="space-y-1">
-              <p className="text-sm text-muted-foreground">Farm</p>
-              <h1 className="text-2xl font-semibold text-foreground truncate">
-                {name.trim() || 'New Farm'}
-              </h1>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="name">Farm name</Label>
-              <Input
-                id="name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-                placeholder="Downtown Repeat Farm"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="description">Description</Label>
-              <Textarea
-                id="description"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Repeat this area for doorknocks, flyers, Canada Post, pop-bys, or letters."
-                rows={4}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="startDate">Start date</Label>
-              <Input
-                id="startDate"
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-              />
-            </div>
-
-            <div className="space-y-3 rounded-2xl border border-border bg-muted/30 p-4">
-              <div className="space-y-1">
-                <p className="font-medium text-foreground">Touch plan</p>
-                <p className="text-sm text-muted-foreground">
-                  Each cycle is one planned pass through the farm. Set how many homes that pass should cover.
-                </p>
-              </div>
-              <div className="grid grid-cols-[minmax(0,1fr),150px] gap-3">
-                <div className="space-y-2">
-                  <Label htmlFor="touchesPerInterval"># of homes</Label>
-                  <Input
-                    id="touchesPerInterval"
-                    type="number"
-                    min="1"
-                    value={touchesPerInterval < 1 ? '' : String(touchesPerInterval)}
-                    onChange={(e) => {
-                      if (e.target.value === '') {
-                        setTouchesPerInterval(0);
-                        return;
-                      }
-
-                      const parsed = parseInt(e.target.value, 10);
-                      setTouchesPerInterval(Number.isFinite(parsed) ? Math.max(1, parsed) : 0);
-                    }}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Cadence</Label>
-                  <Select
-                    value={touchesInterval}
-                    onValueChange={(value) => setTouchesInterval(value as FarmTouchInterval)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {FARM_TOUCH_INTERVAL_OPTIONS.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-3 rounded-2xl border border-border bg-muted/30 p-4">
-              <div className="space-y-1">
-                <p className="font-medium text-foreground">Type of touches</p>
-                <p className="text-sm text-muted-foreground">
-                  Choose the touch types you expect to run in this farm.
-                </p>
-              </div>
-              <FarmTouchTypePicker value={touchTypes} onChange={setTouchTypes} />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="annualBudget">Budget for year</Label>
-              <Input
-                id="annualBudget"
-                type="number"
-                min="0"
-                step="0.01"
-                value={annualBudget}
-                onChange={(e) => setAnnualBudget(e.target.value)}
-                placeholder="Optional"
-              />
-            </div>
-
-            <div className="rounded-2xl border border-border bg-muted/30 p-4 space-y-2 text-sm">
-              <p className="font-medium text-foreground">Farm home limit</p>
-              <p className="text-muted-foreground">
-                Each farm can include up to{' '}
-                <span className="font-semibold text-foreground">
-                  {DEFAULT_HOME_LIMIT.toLocaleString()}
-                </span>{' '}
-                homes.
-              </p>
-              {generatedHomes !== null ? (
-                <p className="text-muted-foreground">
-                  Last generated: {generatedHomes.toLocaleString()} homes.
-                </p>
-              ) : null}
-            </div>
-
-            <div className="rounded-2xl border border-border bg-muted/30 p-4 space-y-2 text-sm">
-              <p className="font-medium text-foreground">Draw a reusable farm area</p>
-              <p className="text-muted-foreground">
-                Use the map to outline the neighborhood once, then revisit it through repeatable
-                farm sessions.
-              </p>
-              <p className="text-muted-foreground">
-                Modes are chosen per session later, including Canada Post runs.
-              </p>
-              {addressCount !== null ? (
-                <p className="font-medium text-green-600 dark:text-green-400">
-                  {addressCount} homes loaded
-                </p>
-              ) : null}
-            </div>
-          </div>
-
-          <div className="shrink-0 border-t border-border px-4 py-4 bg-card">
-            <div className="flex gap-3">
-              <Button
-                type="button"
-                variant="outline"
-                className="flex-1"
-                onClick={() => router.back()}
-                disabled={loading || provisioning || generatingAddresses || syncingFarm}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                className="flex-1"
-                disabled={
-                  loading ||
-                  provisioning ||
-                  generatingAddresses ||
-                  syncingFarm ||
-                  !name.trim()
-                }
-                onClick={handleSubmit}
-              >
-                {loading
-                  ? 'Creating...'
-                  : generatingAddresses
-                      ? 'Finding...'
-                      : provisioning
-                        ? 'Provisioning...'
-                        : syncingFarm
-                          ? 'Syncing...'
-                          : 'Create Farm'}
-              </Button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="flex-1 relative">
-        <div ref={mapContainer} className="absolute inset-0 w-full h-full" />
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-gray-50 dark:bg-background">
+      <div className="relative min-h-0 flex-1">
+        <div ref={mapContainer} className="absolute inset-0 h-full w-full" />
         <MapInfoButton show={mapLoaded} />
         {mapLoaded && map.current && (
           <UserLocationLayer
@@ -954,19 +754,23 @@ export default function CreateFarmPage() {
           </div>
         ) : null}
 
-        {mapLoaded && (
-          <div className="absolute top-4 right-4 flex flex-col gap-3 z-10">
+        {phase === 'idle' && mapLoaded ? (
+          <CreateTerritoryCta onClick={handleStartCreating} disabled={isBusy} />
+        ) : null}
+
+        {mapLoaded && showMapControlsForPhase(phase) ? (
+          <div className="absolute top-4 right-4 z-10 flex flex-col gap-3">
             <button
               type="button"
               onClick={() => setSearchOpen((current) => !current)}
-              className="flex items-center gap-2 px-4 py-2.5 bg-card rounded-lg shadow-lg hover:shadow-xl hover:bg-muted/50 transition-all duration-200 text-sm font-medium text-foreground border border-border"
+              className="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2.5 text-sm font-medium text-foreground shadow-lg transition-all duration-200 hover:bg-muted/50 hover:shadow-xl"
             >
-              <Search className="w-5 h-5" />
+              <Search className="h-5 w-5" />
               <span>Search</span>
             </button>
 
             {searchOpen ? (
-              <div className="w-[min(24rem,calc(100vw-7rem))] rounded-2xl border border-border bg-card/95 backdrop-blur-sm shadow-lg p-4 space-y-2">
+              <div className="w-[min(24rem,calc(100vw-7rem))] space-y-2 rounded-2xl border border-border bg-card/95 p-4 shadow-lg backdrop-blur-sm">
                 <AddressAutocomplete
                   value={mapSearchQuery}
                   onChange={setMapSearchQuery}
@@ -984,48 +788,76 @@ export default function CreateFarmPage() {
             <button
               type="button"
               onClick={toggleSatelliteView}
-              className="flex items-center gap-2 px-4 py-2.5 bg-card rounded-lg shadow-lg hover:shadow-xl hover:bg-muted/50 transition-all duration-200 text-sm font-medium text-foreground border border-border"
+              className="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2.5 text-sm font-medium text-foreground shadow-lg transition-all duration-200 hover:bg-muted/50 hover:shadow-xl"
             >
               {isSatellite ? (
                 <>
-                  <Map className="w-5 h-5" />
+                  <Map className="h-5 w-5" />
                   <span>Map</span>
                 </>
               ) : (
                 <>
-                  <Satellite className="w-5 h-5" />
+                  <Satellite className="h-5 w-5" />
                   <span>Satellite</span>
                 </>
               )}
             </button>
 
-            <button
-              type="button"
-              onClick={startDrawing}
-              className="flex items-center gap-2 px-4 py-2.5 bg-red-500 text-white rounded-lg shadow-lg hover:shadow-xl hover:bg-red-600 transition-all duration-200 text-sm font-medium border border-red-600"
-            >
-              <Pencil className="w-5 h-5" />
-              <span>Draw</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={clearDrawing}
-              className="flex items-center gap-2 px-4 py-2.5 bg-card rounded-lg shadow-lg hover:shadow-xl hover:bg-muted/50 transition-all duration-200 text-sm font-medium text-foreground border border-border"
-            >
-              <Trash2 className="w-5 h-5" />
-              <span>Clear</span>
-            </button>
+            {phase === 'drawing' ? (
+              <>
+                <button
+                  type="button"
+                  onClick={startDrawing}
+                  className="flex items-center gap-2 rounded-lg border border-red-600 bg-red-500 px-4 py-2.5 text-sm font-medium text-white shadow-lg transition-all duration-200 hover:bg-red-600 hover:shadow-xl"
+                >
+                  <Pencil className="h-5 w-5" />
+                  <span>Draw</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={clearDrawing}
+                  className="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2.5 text-sm font-medium text-foreground shadow-lg transition-all duration-200 hover:bg-muted/50 hover:shadow-xl"
+                >
+                  <Trash2 className="h-5 w-5" />
+                  <span>Clear</span>
+                </button>
+              </>
+            ) : null}
           </div>
-        )}
+        ) : null}
 
-        {mapLoaded && (
-          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-card rounded-full px-5 py-2.5 shadow-lg border border-border z-10">
-            <p className="text-sm text-foreground whitespace-nowrap">
-              <span className="font-semibold">Click</span> to draw • <span className="font-semibold">Double-click</span> to finish
-            </p>
+        <TerritoryDrawHint visible={mapLoaded && phase === 'drawing'} />
+
+        <TerritoryNamingSheet
+          open={phase === 'naming'}
+          title="Name your campaign and farm"
+          description="Your territory is drawn. Name the linked campaign and the farm you will revisit."
+          onCancel={handleNamingBack}
+          onSubmit={() => void handleSubmit()}
+          submitLabel="Create Farm"
+          submitDisabled={!campaignName.trim() || !farmName.trim()}
+          isSubmitting={isBusy}
+        >
+          <div className="space-y-2">
+            <Label htmlFor="campaign-name">Campaign name</Label>
+            <Input
+              id="campaign-name"
+              value={campaignName}
+              onChange={(e) => setCampaignName(e.target.value)}
+              placeholder="Spring door knock"
+              autoFocus
+            />
           </div>
-        )}
+          <div className="space-y-2">
+            <Label htmlFor="farm-name">Farm name</Label>
+            <Input
+              id="farm-name"
+              value={farmName}
+              onChange={(e) => setFarmName(e.target.value)}
+              placeholder="Downtown Repeat Farm"
+            />
+          </div>
+        </TerritoryNamingSheet>
       </div>
 
       <Dialog open={!!feedbackDialog} onOpenChange={(open) => !open && dismissFeedbackDialog()}>
@@ -1072,9 +904,9 @@ export default function CreateFarmPage() {
       </Dialog>
 
       {(provisioning || generatingAddresses || syncingFarm) && (
-        <div className="fixed inset-0 bg-black/35 backdrop-blur-[1px] flex items-center justify-center z-50">
-          <div className="max-w-lg w-full mx-4 text-center">
-            <div className="h-80 w-full flex items-center justify-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 backdrop-blur-[1px]">
+          <div className="mx-4 w-full max-w-lg text-center">
+            <div className="flex h-80 w-full items-center justify-center">
               {loadingAnimationData ? (
                 <Lottie
                   animationData={loadingAnimationData}
@@ -1083,13 +915,11 @@ export default function CreateFarmPage() {
                   rendererSettings={{ preserveAspectRatio: 'xMidYMid meet' }}
                 />
               ) : (
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+                <div className="h-12 w-12 animate-spin rounded-full border-b-2 border-primary" />
               )}
             </div>
             <div className="pt-3">
-              <h3 className="text-lg font-semibold text-white mb-3">
-                Generating Farm
-              </h3>
+              <h3 className="mb-3 text-lg font-semibold text-white">Generating Farm</h3>
               <div className="space-y-2">
                 <p className="text-sm font-medium text-white/95">{currentStepText}</p>
                 <p className="text-sm text-white/90">Syncing property data...</p>

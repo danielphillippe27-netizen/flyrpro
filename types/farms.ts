@@ -30,6 +30,7 @@ export {
 
 export interface CreateFarmPayload {
   name: string;
+  campaign_name?: string;
   description?: string;
   polygon?: string; // GeoJSON
   start_date: string;
