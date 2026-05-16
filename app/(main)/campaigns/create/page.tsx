@@ -2,9 +2,20 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  CreateTerritoryCta,
+  TerritoryDrawHint,
+  TerritoryNamingSheet,
+  showMapControlsForPhase,
+} from '@/components/territory/TerritoryCreateFlow';
+import { getDrawnPolygon } from '@/lib/territory/create-polygon';
+import {
+  applyDrawModeForPhase,
+  clearTerritoryDrawing,
+  useTerritoryCreatePhase,
+} from '@/lib/territory/use-territory-create-phase';
 import { createClient } from '@/lib/supabase/client';
 import { useTheme } from '@/lib/theme-provider';
 import { useWorkspace } from '@/lib/workspace-context';
@@ -18,7 +29,7 @@ import { AddressAutocomplete } from '@/components/address/AddressAutocomplete';
 import { MapInfoButton } from '@/components/map/MapInfoButton';
 import { UserLocationLayer } from '@/components/map/UserLocationLayer';
 import type { AddressSuggestion } from '@/lib/services/MapboxAutocompleteService';
-import { Satellite, Map, Trash2, Pencil } from 'lucide-react';
+import { Satellite, Map, Trash2, Pencil, Search } from 'lucide-react';
 import * as turf from '@turf/turf';
 import Lottie from 'lottie-react';
 
@@ -41,6 +52,7 @@ export default function CreateCampaignPage() {
   const [mapLoaded, setMapLoaded] = useState(false);
   const [isSatellite, setIsSatellite] = useState(false);
   const [mapSearchQuery, setMapSearchQuery] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const drawRef = useRef<MapboxDraw | null>(null);
@@ -52,6 +64,8 @@ export default function CreateCampaignPage() {
     () => (isDark ? '/loading/white.json' : '/loading/black.json'),
     [isDark]
   );
+  const { phase, setPhase, startCreating } = useTerritoryCreatePhase({ map, mapLoaded });
+  const isBusy = loading || provisioning || generatingAddresses;
 
   useEffect(() => {
     const supabase = createClient();
@@ -179,7 +193,7 @@ export default function CreateCampaignPage() {
     const draw = new MapboxDraw({
       displayControlsDefault: false,
       controls: {}, // Hide all default controls to avoid duplicates
-      defaultMode: 'draw_polygon',
+      defaultMode: 'simple_select',
       styles: [
         // Polygon fill
         {
@@ -331,7 +345,7 @@ export default function CreateCampaignPage() {
       const newDraw = new MapboxDraw({
         displayControlsDefault: false,
         controls: {},
-        defaultMode: 'draw_polygon',
+        defaultMode: 'simple_select',
         styles: [
           { id: 'gl-draw-polygon-fill', type: 'fill', filter: ['all', ['==', '$type', 'Polygon'], ['!=', 'mode', 'static']], paint: { 'fill-color': '#ef4444', 'fill-outline-color': '#ef4444', 'fill-opacity': 0.15 } },
           { id: 'gl-draw-polygon-stroke-active', type: 'line', filter: ['all', ['==', '$type', 'Polygon'], ['!=', 'mode', 'static']], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#ef4444', 'line-width': 3 } },
@@ -348,14 +362,19 @@ export default function CreateCampaignPage() {
 
       // Restore saved features
       const savedFeatures = savedFeaturesRef.current;
-      if ((savedFeatures?.features?.length ?? 0) > 0 && savedFeatures) {
+      const hasSavedFeatures = (savedFeatures?.features?.length ?? 0) > 0;
+      if (hasSavedFeatures && savedFeatures) {
         newDraw.set(savedFeatures);
-        newDraw.changeMode('simple_select');
-      } else {
-        newDraw.changeMode('draw_polygon');
       }
+      applyDrawModeForPhase(newDraw, phase, hasSavedFeatures);
     });
-  }, [isSatellite, mapLoaded, resolvedMapStyle]);
+  }, [isSatellite, mapLoaded, phase, resolvedMapStyle]);
+
+  useEffect(() => {
+    if (!mapLoaded || !drawRef.current) return;
+    const hasSavedFeatures = (drawRef.current.getAll()?.features?.length ?? 0) > 0;
+    applyDrawModeForPhase(drawRef.current, phase, hasSavedFeatures);
+  }, [mapLoaded, phase]);
 
   // Keep map fully sized when surrounding layout (e.g. campaign sidebar) collapses/expands.
   useEffect(() => {
@@ -397,17 +416,25 @@ export default function CreateCampaignPage() {
     setIsSatellite(!isSatellite);
   };
 
+  const handleStartCreating = () => {
+    drawRef.current?.deleteAll();
+    savedFeaturesRef.current = null;
+    startCreating();
+    drawRef.current?.changeMode('draw_polygon');
+  };
+
   const clearDrawing = () => {
-    if (drawRef.current) {
-      drawRef.current.deleteAll();
-      drawRef.current.changeMode('draw_polygon');
-    }
+    const nextPhase = clearTerritoryDrawing(drawRef.current, phase);
+    setPhase(nextPhase);
   };
 
   const startDrawing = () => {
-    if (drawRef.current) {
-      drawRef.current.changeMode('draw_polygon');
-    }
+    drawRef.current?.changeMode('draw_polygon');
+  };
+
+  const handleNamingBack = () => {
+    setPhase('drawing');
+    drawRef.current?.changeMode('simple_select');
   };
 
   const handleMapSearchSelect = (suggestion: AddressSuggestion) => {
@@ -423,42 +450,18 @@ export default function CreateCampaignPage() {
   const handleSubmit = async (e?: React.FormEvent | React.MouseEvent) => {
     e?.preventDefault();
     if (!userId) return;
-
-    // Get drawn polygon (map territory only)
-    let polygon: { type: 'Polygon'; coordinates: number[][][] } | null = null;
-    let bbox: number[] | undefined = undefined;
-    const features = drawRef.current?.getAll();
-    if (!features || features.features.length === 0) {
-      alert('Please draw a territory boundary on the map');
+    if (!name.trim()) {
+      alert('Enter a campaign name to continue.');
       return;
     }
 
-    // Find the first completed Polygon feature (skip points, lines, or incomplete geometries)
-    const polygonFeature = features.features.find(
-      (feature): feature is GeoJSON.Feature<GeoJSON.Polygon> =>
-        feature.geometry?.type === 'Polygon' && feature.geometry.coordinates[0]?.length >= 3
-    );
-    if (!polygonFeature) {
+    const polygon = getDrawnPolygon(drawRef.current);
+    if (!polygon) {
       alert('Please draw a territory boundary on the map. Double-click to finish your shape.');
       return;
     }
-    polygon = polygonFeature.geometry as { type: 'Polygon'; coordinates: number[][][] };
 
-    // Ensure valid polygon (GeoJSON closed ring = at least 4 positions for 3 unique corners)
-    const ring = polygon.coordinates[0];
-    if (!ring || ring.length < 3) {
-      alert('Please draw a proper territory with at least 3 corners. The shape you drew has too few points.');
-      return;
-    }
-    // Close the ring if unclosed (first and last must be equal per GeoJSON spec)
-    const first = ring[0];
-    const last = ring[ring.length - 1];
-    if (first[0] !== last[0] || first[1] !== last[1]) {
-      polygon = {
-        ...polygon,
-        coordinates: [[...ring, [first[0], first[1]]]],
-      };
-    }
+    let bbox: number[] | undefined;
 
     // Calculate bbox from polygon using turf
     try {
@@ -563,66 +566,9 @@ export default function CreateCampaignPage() {
   };
 
   return (
-    <div className="h-screen flex flex-col bg-gray-50 dark:bg-background overflow-hidden">
-      {/* Compact Header Toolbar – matches app header styling */}
-      <div className="flex-shrink-0 bg-white dark:bg-card border-b border-border px-4 py-3">
-        <div className="flex items-center gap-4 flex-wrap">
-          {/* Campaign Name */}
-          <div className="flex items-center gap-2 flex-1 min-w-48">
-            <Label htmlFor="name" className="text-sm font-medium text-foreground whitespace-nowrap">Name</Label>
-            <Input
-              id="name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-              placeholder="Campaign Name"
-              className="flex-1 min-w-0 bg-gray-200 dark:bg-neutral-600"
-            />
-          </div>
-
-          {/* Address Search */}
-          <div className="flex items-center gap-2 flex-1 min-w-64">
-            <Label className="text-sm font-medium text-foreground whitespace-nowrap">Search</Label>
-            <AddressAutocomplete
-              value={mapSearchQuery}
-              onChange={setMapSearchQuery}
-              onSelect={handleMapSearchSelect}
-              placeholder="Jump to address..."
-              className="flex-1"
-              inputClassName="bg-gray-200 dark:bg-neutral-600"
-            />
-          </div>
-
-          {/* Action Buttons */}
-          <div className="flex items-center gap-2 ml-auto">
-            <Button type="button" variant="outline" size="sm" className="bg-gray-200 dark:bg-neutral-600 dark:border-neutral-500 dark:hover:bg-neutral-500" onClick={() => router.back()} disabled={loading || provisioning || generatingAddresses}>
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              disabled={loading || provisioning || generatingAddresses || !name}
-              onClick={handleSubmit}
-            >
-              {loading ? 'Creating...' : generatingAddresses ? 'Finding...' : provisioning ? 'Provisioning...' : 'Create Campaign'}
-            </Button>
-          </div>
-        </div>
-
-        {/* Helper text row */}
-        <p className="text-xs text-muted-foreground mt-2">
-          Draw a polygon on the map to define your campaign territory. Use the search to jump to a location.
-        </p>
-        {addressCount !== null && (
-          <p className="text-xs font-medium text-green-600 dark:text-green-400 mt-2">
-            {addressCount} addresses loaded
-          </p>
-        )}
-      </div>
-
-      {/* Full-screen Map */}
-      <div className="flex-1 relative">
-        <div ref={mapContainer} className="absolute inset-0 w-full h-full" />
+    <div className="h-full min-h-0 flex flex-col bg-gray-50 dark:bg-background overflow-hidden">
+      <div className="relative min-h-0 flex-1">
+        <div ref={mapContainer} className="absolute inset-0 h-full w-full" />
         <MapInfoButton show={mapLoaded} />
         {mapLoaded && map.current && (
           <UserLocationLayer
@@ -630,74 +576,112 @@ export default function CreateCampaignPage() {
             mapLoaded={mapLoaded}
             showUserLocation={true}
             onLocationFound={(lng, lat) => {
-              // Only center on user location once when first opening create campaign
               if (!hasCenteredOnUserLocationRef.current) {
                 hasCenteredOnUserLocationRef.current = true;
                 map.current?.flyTo({ center: [lng, lat], zoom: 15, duration: 800 });
               }
             }}
-            onLocationError={() => {
-              // Keep default Toronto center if geolocation denied or fails
-            }}
+            onLocationError={() => {}}
           />
         )}
 
-        {/* Map Controls - Google Maps style floating buttons */}
-        {mapLoaded && (
-          <div className="absolute top-4 right-4 flex flex-col gap-3 z-10">
-            {/* Satellite Toggle */}
+        {phase === 'idle' && mapLoaded ? (
+          <CreateTerritoryCta onClick={handleStartCreating} disabled={isBusy} />
+        ) : null}
+
+        {mapLoaded && showMapControlsForPhase(phase) ? (
+          <div className="absolute top-4 right-4 z-10 flex flex-col gap-3">
+            <button
+              type="button"
+              onClick={() => setSearchOpen((current) => !current)}
+              className="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2.5 text-sm font-medium text-foreground shadow-lg transition-all duration-200 hover:bg-muted/50 hover:shadow-xl"
+            >
+              <Search className="h-5 w-5" />
+              <span>Search</span>
+            </button>
+
+            {searchOpen ? (
+              <div className="w-[min(24rem,calc(100vw-7rem))] space-y-2 rounded-2xl border border-border bg-card/95 p-4 shadow-lg backdrop-blur-sm">
+                <AddressAutocomplete
+                  value={mapSearchQuery}
+                  onChange={setMapSearchQuery}
+                  onSelect={(suggestion) => {
+                    handleMapSearchSelect(suggestion);
+                    setSearchOpen(false);
+                  }}
+                  placeholder="Jump to address..."
+                  className="flex-1"
+                  inputClassName="bg-background"
+                />
+              </div>
+            ) : null}
+
             <button
               type="button"
               onClick={toggleSatelliteView}
-              className="flex items-center gap-2 px-4 py-2.5 bg-card rounded-lg shadow-lg hover:shadow-xl hover:bg-muted/50 transition-all duration-200 text-sm font-medium text-foreground border border-border"
+              className="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2.5 text-sm font-medium text-foreground shadow-lg transition-all duration-200 hover:bg-muted/50 hover:shadow-xl"
             >
               {isSatellite ? (
                 <>
-                  <Map className="w-5 h-5" />
+                  <Map className="h-5 w-5" />
                   <span>Map</span>
                 </>
               ) : (
                 <>
-                  <Satellite className="w-5 h-5" />
+                  <Satellite className="h-5 w-5" />
                   <span>Satellite</span>
                 </>
               )}
             </button>
 
-            {/* Draw Button */}
-            <button
-              type="button"
-              onClick={startDrawing}
-              className="flex items-center gap-2 px-4 py-2.5 bg-red-500 text-white rounded-lg shadow-lg hover:shadow-xl hover:bg-red-600 transition-all duration-200 text-sm font-medium border border-red-600"
-            >
-              <Pencil className="w-5 h-5" />
-              <span>Draw</span>
-            </button>
-            
-            {/* Clear Drawing Button */}
-            <button
-              type="button"
-              onClick={clearDrawing}
-              className="flex items-center gap-2 px-4 py-2.5 bg-card rounded-lg shadow-lg hover:shadow-xl hover:bg-muted/50 transition-all duration-200 text-sm font-medium text-foreground border border-border"
-            >
-              <Trash2 className="w-5 h-5" />
-              <span>Clear</span>
-            </button>
-
+            {phase === 'drawing' ? (
+              <>
+                <button
+                  type="button"
+                  onClick={startDrawing}
+                  className="flex items-center gap-2 rounded-lg border border-red-600 bg-red-500 px-4 py-2.5 text-sm font-medium text-white shadow-lg transition-all duration-200 hover:bg-red-600 hover:shadow-xl"
+                >
+                  <Pencil className="h-5 w-5" />
+                  <span>Draw</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={clearDrawing}
+                  className="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2.5 text-sm font-medium text-foreground shadow-lg transition-all duration-200 hover:bg-muted/50 hover:shadow-xl"
+                >
+                  <Trash2 className="h-5 w-5" />
+                  <span>Clear</span>
+                </button>
+              </>
+            ) : null}
           </div>
-        )}
+        ) : null}
 
-        {/* Draw instructions overlay */}
-        {mapLoaded && (
-          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-card rounded-full px-5 py-2.5 shadow-lg border border-border z-10">
-            <p className="text-sm text-foreground whitespace-nowrap">
-              <span className="font-semibold">Click</span> to draw • <span className="font-semibold">Double-click</span> to finish
-            </p>
+        <TerritoryDrawHint visible={mapLoaded && phase === 'drawing'} />
+
+        <TerritoryNamingSheet
+          open={phase === 'naming'}
+          title="Name your campaign"
+          description="Your territory is drawn. Add a name to finish creating this campaign."
+          onCancel={handleNamingBack}
+          onSubmit={() => void handleSubmit()}
+          submitLabel="Create Campaign"
+          submitDisabled={!name.trim()}
+          isSubmitting={isBusy}
+        >
+          <div className="space-y-2">
+            <Label htmlFor="campaign-name">Campaign name</Label>
+            <Input
+              id="campaign-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Spring flyer drop"
+              autoFocus
+            />
           </div>
-        )}
+        </TerritoryNamingSheet>
       </div>
 
-      {/* Loading Modal */}
       {(provisioning || generatingAddresses) && (
         <div className="fixed inset-0 bg-black/35 backdrop-blur-[1px] flex items-center justify-center z-50">
           <div className="max-w-lg w-full mx-4 text-center">

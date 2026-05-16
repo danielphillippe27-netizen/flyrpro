@@ -39,7 +39,7 @@ function useCampaignHeaderTitle() {
     };
   }, [campaignId]);
 
-  if (pathname === '/campaigns/create') return 'New Campaign';
+  if (pathname === '/campaigns/create') return 'Create';
   if (campaignId && campaignName) return campaignName;
   if (campaignId) return 'Campaign';
   return 'Campaign';

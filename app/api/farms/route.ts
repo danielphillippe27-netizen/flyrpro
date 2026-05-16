@@ -168,13 +168,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const linkedCampaignName = body.campaign_name?.trim() || body.name.trim();
+
     const { data: campaign, error: campaignError } = await admin
       .from('campaigns')
       .insert({
         owner_id: user.id,
         workspace_id: targetWorkspaceId,
-        name: body.name.trim(),
-        title: body.name.trim(),
+        name: linkedCampaignName,
+        title: linkedCampaignName,
         description: buildFarmCampaignDescription(farm.id, body.description),
         type: 'flyer',
         address_source: 'map',

@@ -39,7 +39,7 @@ function useFarmHeaderTitle() {
     };
   }, [farmId]);
 
-  if (pathname === '/farms/create') return 'New Farm';
+  if (pathname === '/farms/create') return 'Create';
   if (farmId && farmName) return farmName;
   if (farmId) return 'Farm';
   return 'Farm';
