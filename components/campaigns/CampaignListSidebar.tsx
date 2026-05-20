@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils';
 import { getClientAsync } from '@/lib/supabase/client';
 import { useWorkspace } from '@/lib/workspace-context';
 import { handleWheelScrollContainer } from '@/lib/scrollContainer';
+import { getIndustryCopy } from '@/lib/industry-copy';
 import {
   Dialog,
   DialogContent,
@@ -41,7 +42,8 @@ export function CampaignListSidebar({
 }: CampaignListSidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const { currentWorkspaceId } = useWorkspace();
+  const { currentWorkspace, currentWorkspaceId } = useWorkspace();
+  const copy = getIndustryCopy(currentWorkspace?.industry);
   const [campaigns, setCampaigns] = useState<CampaignV2[]>([]);
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
@@ -141,7 +143,7 @@ export function CampaignListSidebar({
           <div className="relative flex-1 min-w-0">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
             <Input
-              placeholder="Search campaigns..."
+              placeholder={copy.campaigns.searchPlaceholder}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-8 h-8 text-xs bg-background border-border"
@@ -177,7 +179,8 @@ export function CampaignListSidebar({
               activeId={activeId}
               loading={loading}
               userId={userId}
-              emptyMessage={byStatus.active.length === 0 ? 'No active campaigns' : 'No matches'}
+              emptyMessage={byStatus.active.length === 0 ? copy.campaigns.noActive : 'No matches'}
+              copy={copy}
               onDeleteCampaign={handleDeleteCampaign}
             />
           </TabsContent>
@@ -190,7 +193,8 @@ export function CampaignListSidebar({
               activeId={activeId}
               loading={loading}
               userId={userId}
-              emptyMessage={byStatus.completed.length === 0 ? 'No completed campaigns' : 'No matches'}
+              emptyMessage={byStatus.completed.length === 0 ? copy.campaigns.noCompleted : 'No matches'}
+              copy={copy}
               onDeleteCampaign={handleDeleteCampaign}
             />
           </TabsContent>
@@ -206,6 +210,7 @@ function CampaignList({
   loading,
   userId,
   emptyMessage,
+  copy,
   onDeleteCampaign,
 }: {
   campaigns: CampaignV2[];
@@ -213,6 +218,7 @@ function CampaignList({
   loading: boolean;
   userId: string | null;
   emptyMessage: string;
+  copy: ReturnType<typeof getIndustryCopy>;
   onDeleteCampaign: (id: string) => Promise<void>;
 }) {
   const [deleteTarget, setDeleteTarget] = useState<CampaignV2 | null>(null);
@@ -246,7 +252,7 @@ function CampaignList({
       {loading ? (
         <div className="px-3 py-4 text-sm text-muted-foreground">Loading...</div>
       ) : !userId ? (
-        <div className="px-3 py-4 text-sm text-muted-foreground">Sign in to view campaigns</div>
+        <div className="px-3 py-4 text-sm text-muted-foreground">{copy.campaigns.signIn}</div>
       ) : (
         <ul className="pb-2">
           {campaigns.map((campaign) => {
@@ -265,7 +271,7 @@ function CampaignList({
                     href={`/campaigns/${campaign.id}`}
                     className="truncate min-w-0 flex-1"
                   >
-                    {campaign.name || 'Unnamed Campaign'}
+                    {campaign.name || copy.campaigns.unnamed}
                   </Link>
                   <Button
                     variant="ghost"
@@ -275,7 +281,7 @@ function CampaignList({
                       e.preventDefault();
                       setDeleteTarget(campaign);
                     }}
-                    aria-label={`Delete ${campaign.name || 'campaign'}`}
+                    aria-label={`Delete ${campaign.name || copy.nouns.campaign}`}
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </Button>
@@ -292,9 +298,9 @@ function CampaignList({
       <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Delete campaign</DialogTitle>
+            <DialogTitle>{copy.campaigns.deleteTitle}</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete &quot;{deleteTarget?.name || 'Unnamed Campaign'}&quot;? This cannot be undone.
+              Are you sure you want to delete &quot;{deleteTarget?.name || copy.campaigns.deleteDescriptionFallback}&quot;? This cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-0">

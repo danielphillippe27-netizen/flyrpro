@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { WorkspaceProvider } from '@/lib/workspace-context';
+import { WorkspaceProvider, useWorkspace } from '@/lib/workspace-context';
 import AppTopHeader from '@/components/layout/AppTopHeader';
 import { MainLayoutNavProvider, useMainLayoutNav } from '@/components/layout/MainLayoutNavContext';
 import { MainRouteGuard } from '@/components/guard/MainRouteGuard';
@@ -13,6 +13,7 @@ import { Home, Trophy, Users, Settings, Target, Gauge, Plug, MessageCircle, Acti
 import { cn } from '@/lib/utils';
 import type { DashboardAccessLevel } from '@/app/api/_utils/workspace';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { getIndustryCopy } from '@/lib/industry-copy';
 
 const SIDEBAR_COLLAPSED_W = 48;   // 3rem – icons only
 const SIDEBAR_EXPANDED_W = 160;   // 10rem – icons + labels
@@ -87,6 +88,9 @@ function MainNavItems({
   onNavigate?: () => void;
 }) {
   const showLabels = variant === 'drawer' || sidebarExpanded;
+  const { currentWorkspace } = useWorkspace();
+  const copy = getIndustryCopy(currentWorkspace?.industry);
+  const createCampaignLabel = copy.actions.createCampaign;
 
   return (
     <>
@@ -97,8 +101,8 @@ function MainNavItems({
           'flex items-center gap-2 py-2.5 rounded-md w-full transition-opacity hover:opacity-90 min-h-[42px]',
           variant === 'drawer' ? 'px-3 justify-start' : sidebarExpanded ? 'px-2.5 justify-start' : 'justify-center px-0'
         )}
-        title="Create campaign"
-        aria-label="Create campaign"
+        title={createCampaignLabel}
+        aria-label={createCampaignLabel}
       >
         <span className="flex items-center justify-center w-8 h-8 rounded-md bg-red-500 text-white shrink-0">
           <Plus className="w-4 h-4" strokeWidth={2.5} />
@@ -114,6 +118,7 @@ function MainNavItems({
       </Link>
       {tabs.map((tab) => {
         const Icon = tab.icon;
+        const label = copy.navLabels[tab.href] ?? tab.label;
         const isSettings = tab.href === '/settings';
         const pinMemberSettingsToBottom = accessLevel === 'member' && isSettings;
         const isActive = tabIsActive(tab, pathname);
@@ -131,8 +136,8 @@ function MainNavItems({
                 ? 'text-primary bg-primary/10'
                 : 'text-gray-500 hover:text-gray-700 dark:text-sidebar-foreground/80 dark:hover:text-sidebar-foreground hover:bg-muted/50'
             )}
-            title={tab.label}
-            aria-label={tab.label}
+            title={label}
+            aria-label={label}
             aria-current={isActive ? 'page' : undefined}
           >
             <Icon className="w-[18px] h-[18px] shrink-0" />
@@ -142,7 +147,7 @@ function MainNavItems({
                 showLabels ? 'opacity-100' : 'opacity-0 w-0 sr-only'
               )}
             >
-              {tab.label}
+              {label}
             </span>
           </Link>
         );

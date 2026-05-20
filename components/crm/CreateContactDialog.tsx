@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ContactsService } from '@/lib/services/ContactsService';
+import { getIndustryCopy, type IndustryCopy } from '@/lib/industry-copy';
 import type { ContactStatus } from '@/types/database';
 
 type ContactFormData = {
@@ -42,6 +43,7 @@ interface CreateContactDialogProps {
   initialCampaignId?: string;
   initialFarmId?: string;
   initialNotes?: string;
+  copy?: IndustryCopy;
 }
 
 export function CreateContactDialog({
@@ -56,7 +58,9 @@ export function CreateContactDialog({
   initialCampaignId,
   initialFarmId,
   initialNotes,
+  copy: industryCopy,
 }: CreateContactDialogProps) {
+  const copy = industryCopy ?? getIndustryCopy(null);
   const [loading, setLoading] = useState(false);
   const [primaryContact, setPrimaryContact] = useState<ContactFormData>(emptyContactFormData);
   const [showSecondContact, setShowSecondContact] = useState(false);
@@ -191,10 +195,8 @@ export function CreateContactDialog({
         portalContainer={portalContainer}
       >
         <DialogHeader>
-          <DialogTitle>Add New Contact</DialogTitle>
-          <DialogDescription>
-            Add a new lead
-          </DialogDescription>
+          <DialogTitle>{copy.contactDialog.title}</DialogTitle>
+          <DialogDescription>{copy.contactDialog.description}</DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -262,13 +264,13 @@ export function CreateContactDialog({
                 }}
                 disabled={loading}
               >
-                {showSecondContact ? 'Remove 2nd Contact' : 'Add 2nd Contact'}
+                {showSecondContact ? copy.contactDialog.removeSecondContact : copy.contactDialog.addSecondContact}
               </Button>
             </div>
 
             {showSecondContact && (
               <div className="space-y-4 rounded-lg border border-gray-200 p-4 dark:border-zinc-800">
-                <p className="text-sm font-medium text-gray-900 dark:text-white">2nd Contact</p>
+                <p className="text-sm font-medium text-gray-900 dark:text-white">{copy.contactDialog.secondContact}</p>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <Label htmlFor="second_first_name">
@@ -361,7 +363,7 @@ export function CreateContactDialog({
                 id="source"
                 value={formData.source}
                 onChange={(e) => setFormData({ ...formData, source: e.target.value })}
-                placeholder="Referral, Open house, Website..."
+                placeholder={copy.contactDialog.sourcePlaceholder}
                 disabled={loading}
               />
             </div>
@@ -371,7 +373,7 @@ export function CreateContactDialog({
                 id="tags"
                 value={formData.tags}
                 onChange={(e) => setFormData({ ...formData, tags: e.target.value })}
-                placeholder="Buyer, Seller, Investor"
+                placeholder={copy.contactDialog.tagsPlaceholder}
                 disabled={loading}
               />
             </div>
@@ -383,7 +385,7 @@ export function CreateContactDialog({
               id="notes"
               value={formData.notes}
               onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-              placeholder="Additional notes about this contact..."
+              placeholder={copy.contactDialog.notesPlaceholder}
               disabled={loading}
               rows={3}
             />
@@ -414,7 +416,7 @@ export function CreateContactDialog({
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              <Label htmlFor="appointment_at">Appointment</Label>
+              <Label htmlFor="appointment_at">{copy.contactDialog.appointmentLabel}</Label>
               <Input
                 id="appointment_at"
                 type="datetime-local"
@@ -435,7 +437,7 @@ export function CreateContactDialog({
               Cancel
             </Button>
             <Button type="submit" disabled={loading || !primaryContact.first_name.trim()}>
-              {loading ? 'Creating...' : showSecondContact ? 'Create Contacts' : 'Create Contact'}
+              {loading ? copy.contactDialog.submitting : showSecondContact ? copy.contactDialog.submitMultiple : copy.contactDialog.submitSingle}
             </Button>
           </div>
         </form>

@@ -8,6 +8,7 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { useWorkspace } from '@/lib/workspace-context';
+import { getIndustryCopy } from '@/lib/industry-copy';
 
 interface CampaignsListViewProps {
   userId: string | null;
@@ -15,7 +16,8 @@ interface CampaignsListViewProps {
 }
 
 export function CampaignsListView({ userId, onCampaignSelect }: CampaignsListViewProps) {
-  const { currentWorkspaceId } = useWorkspace();
+  const { currentWorkspace, currentWorkspaceId } = useWorkspace();
+  const copy = getIndustryCopy(currentWorkspace?.industry);
   const [campaigns, setCampaigns] = useState<CampaignV2[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -40,13 +42,13 @@ export function CampaignsListView({ userId, onCampaignSelect }: CampaignsListVie
   }, [userId, currentWorkspaceId]);
 
   if (loading) {
-    return <div className="text-center py-8 text-gray-600 dark:text-gray-400">Loading campaigns...</div>;
+    return <div className="text-center py-8 text-gray-600 dark:text-gray-400">Loading {copy.nouns.campaignPlural}...</div>;
   }
 
   if (!userId) {
     return (
       <div className="text-center py-12">
-        <p className="text-gray-600 dark:text-gray-400 mb-4">Please sign in to view campaigns</p>
+        <p className="text-gray-600 dark:text-gray-400 mb-4">{copy.campaigns.signIn}</p>
         <Link href="/login" className="text-red-600 dark:text-red-500 hover:underline text-sm">
           Sign in
         </Link>
@@ -57,8 +59,8 @@ export function CampaignsListView({ userId, onCampaignSelect }: CampaignsListVie
   if (campaigns.length === 0) {
     return (
       <div className="text-center py-12">
-        <p className="text-gray-600 dark:text-gray-400 mb-4">No campaigns yet</p>
-        <p className="text-sm text-gray-500 dark:text-gray-500">Create your first campaign to get started</p>
+        <p className="text-gray-600 dark:text-gray-400 mb-4">{copy.home.recentCampaignsEmpty}</p>
+        <p className="text-sm text-gray-500 dark:text-gray-500">Create your first {copy.nouns.campaign} to get started</p>
       </div>
     );
   }
@@ -81,7 +83,7 @@ export function CampaignsListView({ userId, onCampaignSelect }: CampaignsListVie
         >
           <Card className="p-4 hover:shadow-md transition-shadow cursor-pointer">
             <div className="flex items-start justify-between mb-2">
-              <h3 className="font-semibold text-lg">{campaign.name || 'Unnamed Campaign'}</h3>
+              <h3 className="font-semibold text-lg">{campaign.name || copy.campaigns.unnamed}</h3>
               <Badge variant={campaign.status === 'active' ? 'default' : 'secondary'}>
                 {campaign.status || 'draft'}
               </Badge>
@@ -110,4 +112,3 @@ export function CampaignsListView({ userId, onCampaignSelect }: CampaignsListVie
     </div>
   );
 }
-

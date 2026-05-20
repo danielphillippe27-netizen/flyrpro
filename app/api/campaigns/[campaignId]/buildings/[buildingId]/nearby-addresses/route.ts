@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
+import { normalizeBuildingRouteId } from '@/app/api/campaigns/_utils/resolve-campaign-building';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -28,9 +29,10 @@ interface NearbyAddress {
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ campaignId: string; buildingId: string }> }
+  { params }: { params: Promise<{ campaignId: string; buildingId: string | string[] }> }
 ) {
-  const { campaignId, buildingId } = await params;
+  const { campaignId, buildingId: buildingIdParam } = await params;
+  const buildingId = normalizeBuildingRouteId(buildingIdParam);
   
   console.log(`[API] GET /campaigns/${campaignId}/buildings/${buildingId}/nearby-addresses`);
   

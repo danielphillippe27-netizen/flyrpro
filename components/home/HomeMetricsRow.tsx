@@ -3,12 +3,14 @@
 import type { ComponentType } from 'react';
 import { CalendarCheck, DoorOpen, MessageSquare, Users } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import type { IndustryCopy } from '@/lib/industry-copy';
 
 type HomeMetricsRowProps = {
   doors: number;
   convos: number;
   leads: number;
   appointments: number;
+  copy: IndustryCopy;
 };
 
 type MetricCardProps = {
@@ -34,13 +36,17 @@ function MetricCard({ icon: Icon, label, value }: MetricCardProps) {
   );
 }
 
-export function HomeMetricsRow({ doors, convos, leads, appointments }: HomeMetricsRowProps) {
+function sentenceCase(value: string): string {
+  return value ? `${value[0].toUpperCase()}${value.slice(1)}` : value;
+}
+
+export function HomeMetricsRow({ doors, convos, leads, appointments, copy }: HomeMetricsRowProps) {
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <MetricCard icon={DoorOpen} label="Doors" value={doors} />
       <MetricCard icon={MessageSquare} label="Convos" value={convos} />
-      <MetricCard icon={Users} label="Leads" value={leads} />
-      <MetricCard icon={CalendarCheck} label="Appointments" value={appointments} />
+      <MetricCard icon={Users} label={sentenceCase(copy.nouns.leadPlural)} value={leads} />
+      <MetricCard icon={CalendarCheck} label={sentenceCase(copy.nouns.appointmentPlural)} value={appointments} />
     </div>
   );
 }

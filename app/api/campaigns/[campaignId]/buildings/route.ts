@@ -43,7 +43,14 @@ const PMTILES_SCOPED_TILE_LIMIT = Math.max(
     ? Number(process.env.PMTILES_SCOPED_TILE_LIMIT)
     : 2048
 );
+const PMTILES_EXPANDED_BBOX_RETRY_METERS = Math.max(
+  0,
+  Number.isFinite(Number(process.env.PMTILES_EXPANDED_BBOX_RETRY_METERS))
+    ? Number(process.env.PMTILES_EXPANDED_BBOX_RETRY_METERS)
+    : 75
+);
 const WEB_MERCATOR_MAX_LAT = 85.05112878;
+const METERS_PER_DEGREE_LATITUDE = 111_320;
 const BUILDINGS_RESPONSE_CACHE_TTL_MS = 30_000;
 const BUILDINGS_RESPONSE_CACHE_MAX_ENTRIES = 64;
 const CAMPAIGN_BUILDING_STATUS_RANK: Record<CampaignBuildingStatus, number> = {
@@ -273,7 +280,27 @@ function parseBbox(value: unknown): [number, number, number, number] | null {
   if (!Array.isArray(value) || value.length !== 4) return null;
   const bbox = value.map((entry) => Number(entry));
   if (!bbox.every((entry) => Number.isFinite(entry))) return null;
+  if (bbox[0] > bbox[2] || bbox[1] > bbox[3]) return null;
   return bbox as [number, number, number, number];
+}
+
+function expandBboxMeters(
+  bbox: [number, number, number, number],
+  meters: number
+): [number, number, number, number] {
+  if (meters <= 0) return bbox;
+
+  const midLat = (bbox[1] + bbox[3]) / 2;
+  const latDelta = meters / METERS_PER_DEGREE_LATITUDE;
+  const lonScale = Math.max(Math.cos((midLat * Math.PI) / 180), 0.01);
+  const lonDelta = meters / (METERS_PER_DEGREE_LATITUDE * lonScale);
+
+  return [
+    Math.max(-180, bbox[0] - lonDelta),
+    Math.max(-WEB_MERCATOR_MAX_LAT, bbox[1] - latDelta),
+    Math.min(180, bbox[2] + lonDelta),
+    Math.min(WEB_MERCATOR_MAX_LAT, bbox[3] + latDelta),
+  ];
 }
 
 function bboxFromPolygon(polygon: GeoJSON.Polygon | null): [number, number, number, number] | null {
@@ -629,6 +656,31 @@ async function fetchScopedPmtilesBuildingFeatures(
     type: 'FeatureCollection',
     features,
   };
+}
+
+async function fetchVisibleScopedPmtilesBuildings(params: {
+  snapshot: CampaignSnapshotRow;
+  bbox: [number, number, number, number];
+  hiddenBuildingIds: Set<string>;
+  boundary: GeoJSON.Polygon | null;
+  attempt: string;
+}): Promise<FeatureCollectionLike | null> {
+  const scoped = await fetchScopedPmtilesBuildingFeatures(
+    params.snapshot,
+    params.bbox,
+    params.hiddenBuildingIds,
+    params.boundary
+  );
+  const visible = filterNonLinkableBuildingFeatures(scoped) as FeatureCollectionLike | null;
+  const visibleCount = getFeatureCount(visible);
+  console.log('[API] Scoped PMTiles extraction result', {
+    attempt: params.attempt,
+    visible: visibleCount,
+    raw: getFeatureCount(scoped),
+    hasBoundary: Boolean(params.boundary),
+  });
+
+  return visibleCount > 0 ? visible : null;
 }
 
 function isPolygonFeature(feature: unknown): boolean {
@@ -1548,16 +1600,36 @@ export async function GET(
           if (bbox) {
             console.log('[API] Building scoped features from PMTiles bbox window', { pmtilesKey });
             try {
-              const pmtilesFallback = await fetchScopedPmtilesBuildingFeatures(
-                snapshotRow,
+              pmtilesCandidate = await fetchVisibleScopedPmtilesBuildings({
+                snapshot: snapshotRow,
                 bbox,
                 hiddenBuildingIds,
-                campaignBoundary
-              );
-              const visiblePmtilesFallback = filterNonLinkableBuildingFeatures(pmtilesFallback);
-              const visiblePmtilesFeatures = (visiblePmtilesFallback as { features?: unknown[] } | null)?.features ?? [];
-              if (visiblePmtilesFeatures.length > 0) {
-                pmtilesCandidate = visiblePmtilesFallback as FeatureCollectionLike;
+                boundary: campaignBoundary,
+                attempt: 'strict_boundary',
+              });
+
+              if (!pmtilesCandidate && campaignBoundary) {
+                console.warn('[API] Strict PMTiles boundary scope returned no buildings; retrying bbox-only extraction');
+                pmtilesCandidate = await fetchVisibleScopedPmtilesBuildings({
+                  snapshot: snapshotRow,
+                  bbox,
+                  hiddenBuildingIds,
+                  boundary: null,
+                  attempt: 'bbox_only',
+                });
+              }
+
+              if (!pmtilesCandidate && PMTILES_EXPANDED_BBOX_RETRY_METERS > 0) {
+                console.warn('[API] PMTiles bbox extraction returned no buildings; retrying expanded bbox', {
+                  meters: PMTILES_EXPANDED_BBOX_RETRY_METERS,
+                });
+                pmtilesCandidate = await fetchVisibleScopedPmtilesBuildings({
+                  snapshot: snapshotRow,
+                  bbox: expandBboxMeters(bbox, PMTILES_EXPANDED_BBOX_RETRY_METERS),
+                  hiddenBuildingIds,
+                  boundary: null,
+                  attempt: 'expanded_bbox',
+                });
               }
             } catch (pmtilesError) {
               console.warn(

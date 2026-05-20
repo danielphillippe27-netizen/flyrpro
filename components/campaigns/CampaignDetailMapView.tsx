@@ -47,7 +47,42 @@ const BOUNDARY_LAYER_RAW_LINE = 'campaign-boundary-raw-line';
 const BOUNDARY_LAYER_SNAPPED_FILL = 'campaign-boundary-snapped-fill';
 const BOUNDARY_LAYER_SNAPPED_LINE = 'campaign-boundary-snapped-line';
 const SHOW_CAMPAIGN_BOUNDARY_OVERLAY = false;
+const SHOW_PARCEL_VIEW = false;
 const CUSTOM_BUILDING_LAYER_PREFIXES = ['map-buildings-', 'campaign-parcels'];
+const RESIDENTIAL_ONLY_PRESERVE_LAYER_PREFIXES = [
+  'map-buildings-',
+  'campaign-',
+  'route-',
+  'assigned-routes-',
+  'flyr-',
+  'gl-draw-',
+];
+const RESIDENTIAL_ONLY_BASE_LAYER_TOKENS = [
+  'admin',
+  'aeroway',
+  'airport',
+  'boundary',
+  'bridge',
+  'ferry',
+  'highway',
+  'landcover',
+  'landuse',
+  'motorway',
+  'natural',
+  'park',
+  'path',
+  'place-label',
+  'poi',
+  'rail',
+  'road',
+  'settlement',
+  'street',
+  'terrain',
+  'transit',
+  'tunnel',
+  'water',
+  'waterway',
+];
 
 type FlyrMapDebugWindow = Window & {
   __flyrMapInitDebug?: Record<string, unknown>;
@@ -227,6 +262,64 @@ function safeGetSource(m: mapboxgl.Map, sourceId: string): boolean {
 
 function isCustomBuildingLayer(layerId: string): boolean {
   return CUSTOM_BUILDING_LAYER_PREFIXES.some((prefix) => layerId.startsWith(prefix));
+}
+
+function shouldHideResidentialOnlyBaseLayer(layer: mapboxgl.AnyLayer): boolean {
+  if (RESIDENTIAL_ONLY_PRESERVE_LAYER_PREFIXES.some((prefix) => layer.id.startsWith(prefix))) {
+    return false;
+  }
+  if (layer.type === 'background') return false;
+
+  const layerId = layer.id.toLowerCase();
+  const sourceLayer =
+    typeof (layer as { 'source-layer'?: unknown })['source-layer'] === 'string'
+      ? String((layer as { 'source-layer'?: unknown })['source-layer']).toLowerCase()
+      : '';
+  const combined = `${layerId} ${sourceLayer}`;
+
+  if (combined.includes('building') || combined.includes('structure')) {
+    return false;
+  }
+
+  return RESIDENTIAL_ONLY_BASE_LAYER_TOKENS.some((token) => combined.includes(token));
+}
+
+function hideResidentialOnlyBaseExtras(mapInstance: mapboxgl.Map) {
+  const style = mapInstance.getStyle();
+  if (!style?.layers) return;
+
+  for (const layer of style.layers) {
+    if (!shouldHideResidentialOnlyBaseLayer(layer)) continue;
+
+    try {
+      mapInstance.setLayoutProperty(layer.id, 'visibility', 'none');
+      continue;
+    } catch {
+      // Fall through to paint-property suppression below.
+    }
+
+    try {
+      if (layer.type === 'line') {
+        mapInstance.setPaintProperty(layer.id, 'line-opacity', 0);
+      } else if (layer.type === 'fill') {
+        mapInstance.setPaintProperty(layer.id, 'fill-opacity', 0);
+      } else if (layer.type === 'fill-extrusion') {
+        mapInstance.setPaintProperty(layer.id, 'fill-extrusion-opacity', 0);
+      } else if (layer.type === 'circle') {
+        mapInstance.setPaintProperty(layer.id, 'circle-opacity', 0);
+        mapInstance.setPaintProperty(layer.id, 'circle-stroke-opacity', 0);
+      } else if (layer.type === 'symbol') {
+        mapInstance.setPaintProperty(layer.id, 'text-opacity', 0);
+        mapInstance.setPaintProperty(layer.id, 'icon-opacity', 0);
+      } else if (layer.type === 'raster') {
+        mapInstance.setPaintProperty(layer.id, 'raster-opacity', 0);
+      } else if (layer.type === 'hillshade') {
+        mapInstance.setPaintProperty(layer.id, 'hillshade-exaggeration', 0);
+      }
+    } catch {
+      // Ignore base style layers that do not expose the matching paint property.
+    }
+  }
 }
 
 function getAddressCoordinate(address: CampaignAddress): { lon: number; lat: number } | null {
@@ -462,8 +555,11 @@ export function CampaignDetailMapView({
   const [selectedAddressText, setSelectedAddressText] = useState<string | undefined>(undefined);
   const [selectedContactNotes, setSelectedContactNotes] = useState<string | undefined>(undefined);
 
-  // Map view: 3D buildings vs 3D address points vs parcel polygons
-  const [mapViewMode, setMapViewMode] = useState<MapViewMode>(initialMapViewMode);
+  const resolvedInitialMapViewMode = initialMapViewMode === 'parcels' && !SHOW_PARCEL_VIEW
+    ? 'buildings'
+    : initialMapViewMode;
+  // Map view: residential buildings by default, with address points available as a focused overlay.
+  const [mapViewMode, setMapViewMode] = useState<MapViewMode>(resolvedInitialMapViewMode);
   // Boundary: Snap to Roads and Raw vs Snapped toggle
   const [snapping, setSnapping] = useState(false);
   const [parcels, setParcels] = useState<CampaignParcel[]>([]);
@@ -473,9 +569,9 @@ export function CampaignDetailMapView({
   const parcelFetchFailureCountRef = useRef(0);
   const parcelEnrichmentStatus = campaign?.parcel_enrichment_status ?? 'not_started';
   const hasParcelPmtilesScope = parcels.length > 0 || Boolean(campaign?.territory_boundary);
-  const parcelsReady = parcels.length > 0 || (pmtilesParcelsReady && hasParcelPmtilesScope);
+  const parcelsReady = SHOW_PARCEL_VIEW && (parcels.length > 0 || (pmtilesParcelsReady && hasParcelPmtilesScope));
   const parcelsProcessing = parcelEnrichmentStatus === 'queued' || parcelEnrichmentStatus === 'processing';
-  const showGeojsonParcels = mapViewMode === 'parcels' && parcels.length > 0;
+  const showGeojsonParcels = SHOW_PARCEL_VIEW && mapViewMode === 'parcels' && parcels.length > 0;
   const parcelStrokeColor = theme === 'dark' ? '#ffffff' : '#000000';
   const parcelFillOpacity = theme === 'dark' ? 0.12 : 0.1;
   const parcelLineOpacity = theme === 'dark' ? 0.38 : 0.28;
@@ -640,12 +736,12 @@ export function CampaignDetailMapView({
     setMapRefreshKey(0);
     setOptimisticallyHiddenBuildingIds([]);
     setOptimisticallyDeletedAddressIds([]);
-    setMapViewMode(initialMapViewMode);
+    setMapViewMode(resolvedInitialMapViewMode);
     setParcels([]);
     setMapBundle(null);
     setParcelFetchSuppressed(false);
     parcelFetchFailureCountRef.current = 0;
-  }, [campaignId, initialMapViewMode]);
+  }, [campaignId, resolvedInitialMapViewMode]);
 
   useEffect(() => {
     if (!campaignId) {
@@ -669,11 +765,13 @@ export function CampaignDetailMapView({
 
         setMapBundle(bundle);
 
-        const parcelRows = mapBundleParcelsToCampaignParcels(campaignId, bundle.parcels);
-        if (parcelRows.length > 0) {
-          parcelFetchFailureCountRef.current = 0;
-          setParcels(parcelRows);
-          setParcelFetchSuppressed(true);
+        if (SHOW_PARCEL_VIEW) {
+          const parcelRows = mapBundleParcelsToCampaignParcels(campaignId, bundle.parcels);
+          if (parcelRows.length > 0) {
+            parcelFetchFailureCountRef.current = 0;
+            setParcels(parcelRows);
+            setParcelFetchSuppressed(true);
+          }
         }
       } catch (error) {
         if (!cancelled) {
@@ -701,7 +799,7 @@ export function CampaignDetailMapView({
   }, [campaignId, mapProvisionRefreshKey, parcelsProcessing]);
 
   useEffect(() => {
-    if (!parcelsReady && mapViewMode === 'parcels') {
+    if ((!SHOW_PARCEL_VIEW || !parcelsReady) && mapViewMode === 'parcels') {
       setMapViewMode('buildings');
     }
   }, [mapViewMode, parcelsReady]);
@@ -712,7 +810,7 @@ export function CampaignDetailMapView({
 
   // Fetch parcels for this campaign
   useEffect(() => {
-    if (!campaignId || parcelFetchSuppressed) return;
+    if (!SHOW_PARCEL_VIEW || !campaignId || parcelFetchSuppressed) return;
 
     let cancelled = false;
     const maxParcelFetchFailures = 3;
@@ -1171,6 +1269,7 @@ export function CampaignDetailMapView({
               hideBaseBuildingLayers(map.current, {
                 preserveLayerPrefixes: CUSTOM_BUILDING_LAYER_PREFIXES,
               });
+              hideResidentialOnlyBaseExtras(map.current);
               style.layers.forEach((layer) => {
                 // Remove layers that reference non-existent source layers
                 if (layer.id && (
@@ -1621,6 +1720,7 @@ export function CampaignDetailMapView({
           hideBaseBuildingLayers(map.current, {
             preserveLayerPrefixes: CUSTOM_BUILDING_LAYER_PREFIXES,
           });
+          hideResidentialOnlyBaseExtras(map.current);
           style.layers.forEach((layer) => {
             try {
               if (layer.id && (layer.id.includes('road-label') || layer.id.includes('road_label'))) {
@@ -2180,7 +2280,7 @@ export function CampaignDetailMapView({
                 >
                   Addresses
                 </button>
-                {parcelsReady ? (
+                {SHOW_PARCEL_VIEW && parcelsReady ? (
                   <button
                     type="button"
                     onClick={() => setMapViewMode('parcels')}
@@ -2256,7 +2356,8 @@ export function CampaignDetailMapView({
               campaignBbox={campaignBbox}
               buildingFeatures={mapBundle?.buildings ?? null}
               statusFilters={statusFilters}
-              showAddressLabels={true}
+              showAddressLabels={false}
+              footprintStatusColors={false}
               onBuildingClick={handleBuildingClick}
               onRenderStateChange={handleBuildingsRenderStateChange}
             />
@@ -2281,7 +2382,7 @@ export function CampaignDetailMapView({
             map={map.current}
             campaignId={campaignId}
             mapLoaded={mapLoaded}
-            visible={mapViewMode === 'parcels' && pmtilesParcelsReady && parcels.length === 0}
+            visible={SHOW_PARCEL_VIEW && mapViewMode === 'parcels' && pmtilesParcelsReady && parcels.length === 0}
             parcels={parcels}
             parcelStatusByExternalId={parcelStatusByExternalId}
             statusFilters={statusFilters}

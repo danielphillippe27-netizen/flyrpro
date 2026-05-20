@@ -25,6 +25,7 @@ import type { CampaignV2, Contact, Farm, UserStats } from '@/types/database';
 import type { SmartListCriteria, WorkspaceSmartList } from '@/types/smart-lists';
 import { createClient } from '@/lib/supabase/client';
 import { useWorkspace } from '@/lib/workspace-context';
+import { getIndustryCopy, type IndustryCopy } from '@/lib/industry-copy';
 
 type TeamMemberOption = {
   user_id: string;
@@ -71,32 +72,32 @@ function farmListId(farmId: string): string {
   return `farm:${farmId}`;
 }
 
-function buildAllLeadsList(): SmartListOption {
+function buildAllLeadsList(copy: IndustryCopy): SmartListOption {
   return {
     id: ALL_LEADS_LIST_ID,
-    name: 'All Leads',
+    name: copy.leads.allListName,
     kind: 'all',
-    description: 'Everything in your current workspace lead list.',
+    description: copy.leads.allListDescription,
   };
 }
 
-function buildCampaignListOption(campaign: CampaignV2): SmartListOption {
+function buildCampaignListOption(campaign: CampaignV2, copy: IndustryCopy): SmartListOption {
   return {
     id: campaignListId(campaign.id),
     name: campaign.name?.trim() || 'Untitled Campaign',
     kind: 'campaign',
-    description: 'Campaign list',
+    description: copy.leads.campaignListDescription,
     isCustom: true,
     criteria: buildListCriteria('campaign', { campaignIds: [campaign.id] }),
   };
 }
 
-function buildFarmListOption(farm: Farm): SmartListOption {
+function buildFarmListOption(farm: Farm, copy: IndustryCopy): SmartListOption {
   return {
     id: farmListId(farm.id),
     name: farm.name?.trim() || 'Untitled Farm',
     kind: 'farm',
-    description: 'Farm list',
+    description: copy.leads.farmListDescription,
     isCustom: true,
     criteria: buildListCriteria('farm', { farmIds: [farm.id] }),
   };
@@ -104,7 +105,8 @@ function buildFarmListOption(farm: Farm): SmartListOption {
 
 export function ContactsHubView() {
   const router = useRouter();
-  const { currentWorkspaceId, membershipsByWorkspaceId } = useWorkspace();
+  const { currentWorkspace, currentWorkspaceId, membershipsByWorkspaceId } = useWorkspace();
+  const copy = getIndustryCopy(currentWorkspace?.industry);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [campaigns, setCampaigns] = useState<CampaignV2[]>([]);
   const [farms, setFarms] = useState<Farm[]>([]);
@@ -236,22 +238,22 @@ export function ContactsHubView() {
     return statsByUserId[selectedMemberId] ?? null;
   }, [selectedMemberId, statsByUserId]);
 
-  const allLeadsList = useMemo(() => buildAllLeadsList(), []);
+  const allLeadsList = useMemo(() => buildAllLeadsList(copy), [copy]);
 
   const campaignLists = useMemo(
     () =>
       [...campaigns]
         .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
-        .map((campaign) => buildCampaignListOption(campaign)),
-    [campaigns]
+        .map((campaign) => buildCampaignListOption(campaign, copy)),
+    [campaigns, copy]
   );
 
   const farmLists = useMemo(
     () =>
       [...farms]
         .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
-        .map((farm) => buildFarmListOption(farm)),
-    [farms]
+        .map((farm) => buildFarmListOption(farm, copy)),
+    [copy, farms]
   );
 
   const customLists = useMemo(
@@ -429,6 +431,7 @@ export function ContactsHubView() {
         onDeleteList={handleDeleteList}
         canManageCustomLists={false}
         busy={loading}
+        copy={copy}
       />
 
       <div className="min-w-0 flex-1 space-y-6">
@@ -438,13 +441,13 @@ export function ContactsHubView() {
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-2xl font-semibold text-foreground">{selectedList.name}</h2>
                 <Badge variant="secondary" className="rounded-full">
-                  {visibleContacts.length} leads
+                  {visibleContacts.length} {visibleContacts.length === 1 ? copy.nouns.lead : copy.nouns.leadPlural}
                 </Badge>
               </div>
               <p className="max-w-2xl text-sm text-muted-foreground">
                 {selectedList.id === ALL_LEADS_LIST_ID
-                  ? 'Browse all leads in this workspace, then export or send the right list to the dialer.'
-                  : `Working from the ${selectedList.name} list. Export it or send this group straight to the dialer.`}
+                  ? copy.leads.selectedAllDescription
+                  : copy.leads.selectedListDescription(selectedList.name)}
               </p>
             </div>
 
@@ -467,7 +470,7 @@ export function ContactsHubView() {
 
               <Button variant="outline" onClick={handleExportContacts} disabled={loading || visibleContacts.length === 0}>
                 <Download className="mr-2 h-4 w-4" />
-                Export Contacts
+                {copy.actions.exportContacts}
               </Button>
               <Button
                 variant="outline"
@@ -475,15 +478,15 @@ export function ContactsHubView() {
                 disabled={loading || selectedContactIds.length === 0}
               >
                 <Phone className="mr-2 h-4 w-4" />
-                {selectedContactIds.length > 0 ? `Send ${selectedContactIds.length} to Dialer` : 'Send to Dialer'}
+                {selectedContactIds.length > 0 ? `Send ${selectedContactIds.length} to Dialer` : copy.actions.sendToDialer}
               </Button>
               <Button variant="outline" onClick={() => setImportDialogOpen(true)}>
                 <Upload className="mr-2 h-4 w-4" />
-                Import CSV
+                {copy.actions.importLeads}
               </Button>
               <Button onClick={handleCreateContact} className="bg-primary text-primary-foreground hover:bg-primary/90">
                 <Plus className="mr-2 h-4 w-4" />
-                Add Contact
+                {copy.actions.addContact}
               </Button>
             </div>
           </div>
@@ -499,6 +502,7 @@ export function ContactsHubView() {
           allVisibleSelected={visibleContacts.length > 0 && selectedVisibleCount === visibleContacts.length}
           onToggleContactSelection={handleToggleContactSelection}
           onToggleSelectAll={handleToggleSelectAll}
+          copy={copy}
         />
       </div>
 
@@ -509,6 +513,7 @@ export function ContactsHubView() {
           onSuccess={handleContactCreated}
           userId={userId}
           workspaceId={currentWorkspaceId ?? undefined}
+          copy={copy}
         />
       )}
 
@@ -525,6 +530,7 @@ export function ContactsHubView() {
           }
         }}
         workspaceId={currentWorkspaceId ?? undefined}
+        copy={copy}
       />
     </div>
   );

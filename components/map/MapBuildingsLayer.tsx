@@ -515,11 +515,31 @@ function getCampaignBuildingScopeKey(addresses?: CampaignAddress[]): string {
 }
 
 function getProvidedBuildingFeaturesKey(features?: BuildingFeatureCollection | null): string {
-  if (!features) return 'fetch';
-  const count = Array.isArray(features.features) ? features.features.length : 0;
-  const first = features.features?.[0]?.id ?? features.features?.[0]?.properties?.id ?? '';
-  const last = features.features?.[count - 1]?.id ?? features.features?.[count - 1]?.properties?.id ?? '';
+  const renderableFeatures = getRenderableProvidedBuildingFeatures(features);
+  if (!renderableFeatures) return 'fetch';
+  const count = renderableFeatures.features.length;
+  const first = renderableFeatures.features[0]?.id ?? renderableFeatures.features[0]?.properties?.id ?? '';
+  const last = renderableFeatures.features[count - 1]?.id ?? renderableFeatures.features[count - 1]?.properties?.id ?? '';
   return `provided:${count}:${String(first)}:${String(last)}`;
+}
+
+function getRenderableProvidedBuildingFeatures(
+  features?: BuildingFeatureCollection | null
+): BuildingFeatureCollection | null {
+  if (!features || features.type !== 'FeatureCollection' || !Array.isArray(features.features)) {
+    return null;
+  }
+
+  const buildingFeatures = features.features.filter((feature) => {
+    const type = feature.geometry?.type;
+    return type === 'Polygon' || type === 'MultiPolygon';
+  });
+
+  if (buildingFeatures.length === 0) return null;
+  return {
+    ...features,
+    features: buildingFeatures,
+  } as BuildingFeatureCollection;
 }
 
 function toRecord(value: unknown): Record<string, unknown> {
@@ -865,22 +885,12 @@ export function MapBuildingsLayer({
     const campaignDataKey = `${campaignId}:${refreshKey}:${getCampaignBuildingScopeKey(addressStateOverrides)}:${getProvidedBuildingFeaturesKey(buildingFeatures)}`;
 
     try {
-      if (buildingFeatures?.type === 'FeatureCollection' && Array.isArray(buildingFeatures.features)) {
+      const providedBuildingFeatures = getRenderableProvidedBuildingFeatures(buildingFeatures);
+      if (providedBuildingFeatures) {
         campaignDataLoadedRef.current = campaignDataKey;
         setManifestSource(null);
-        setFeatures(buildingFeatures);
+        setFeatures(providedBuildingFeatures);
         return;
-      }
-
-      const { manifest, accessToken } = await fetchCampaignMapManifest(campaignId);
-      if (hasRenderablePmtilesBuildings(manifest)) {
-        const nextSource = toManifestBuildingSource(manifest!, accessToken);
-        if (nextSource) {
-          campaignDataLoadedRef.current = campaignDataKey;
-          setFeatures(null);
-          setManifestSource(nextSource);
-          return;
-        }
       }
 
       const response = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/buildings`, {
@@ -1369,7 +1379,9 @@ export function MapBuildingsLayer({
       if (manifestSource.bounds) vectorSource.bounds = manifestSource.bounds;
 
       map.addSource(sourceId, vectorSource);
-      const campaignScopeFilter = getCampaignScopedBuildingFilter(addressStateOverrides);
+      const campaignScopeFilter =
+        campaignBoundaryWithinFilter(campaignBoundary) ??
+        getCampaignScopedBuildingFilter(addressStateOverrides);
       const buildingFilter = getScopedGeometryFilter(
         ['==', ['geometry-type'], 'Polygon'] as FilterSpecification,
         campaignScopeFilter
@@ -1930,7 +1942,7 @@ export function MapBuildingsLayer({
           
           console.log('[MapBuildingsLayer] Building clicked, raw props:', props);
           
-          const gersId = props.gers_id || props.id;
+          const gersId = props.gers_id || props.building_id || props.id;
           
           // UNIT MODE: If this is a unit slice, pass address_id to show specific unit
           if (props.unit_id && props.address_id && onBuildingClick) {
@@ -2210,6 +2222,61 @@ export function MapBuildingsLayer({
           if (map.getLayer(addressLabelLayerId)) {
             map.setLayoutProperty(addressLabelLayerId, 'visibility', showAddressLabels ? 'visible' : 'none');
           }
+          cleanupLayerInteractionHandlers?.();
+
+          const getInteractiveLayers = () => {
+            const layers: string[] = [];
+            try {
+              if (!map.isStyleLoaded()) return layers;
+              if (map.getLayer(layerId)) layers.push(layerId);
+              if (map.getLayer(circleLayerId)) layers.push(circleLayerId);
+            } catch {
+              return [];
+            }
+            return layers;
+          };
+
+          const handleExistingLayerClick = (event: mapboxgl.MapMouseEvent) => {
+            try {
+              const layers = getInteractiveLayers();
+              if (layers.length === 0) return;
+              const features = map.queryRenderedFeatures(event.point, { layers });
+              const props = features[0]?.properties as BuildingProperties | undefined;
+              if (!props || !onBuildingClick) return;
+
+              const buildingId = String(props.gers_id ?? props.building_id ?? props.id ?? '').trim();
+              if (!buildingId) return;
+
+              const addressId = String(props.address_id ?? '').trim() || undefined;
+              const originalEvent = event.originalEvent as MouseEvent | undefined;
+              onBuildingClick(buildingId, addressId, {
+                additive: Boolean(originalEvent?.metaKey || originalEvent?.ctrlKey),
+              });
+            } catch {
+              return;
+            }
+          };
+
+          const handleExistingLayerMouseMove = (event: mapboxgl.MapMouseEvent) => {
+            try {
+              const layers = getInteractiveLayers();
+              if (layers.length === 0) {
+                map.getCanvas().style.cursor = '';
+                return;
+              }
+              const features = map.queryRenderedFeatures(event.point, { layers });
+              map.getCanvas().style.cursor = features.length > 0 ? 'pointer' : '';
+            } catch {
+              map.getCanvas().style.cursor = '';
+            }
+          };
+
+          map.on('click', handleExistingLayerClick);
+          map.on('mousemove', handleExistingLayerMouseMove);
+          cleanupLayerInteractionHandlers = () => {
+            map.off('click', handleExistingLayerClick);
+            map.off('mousemove', handleExistingLayerMouseMove);
+          };
         } catch (err) {
           console.error('Error updating layer paint properties:', err);
         }

@@ -8,9 +8,11 @@ import type { TerritoryCreatePhase } from '@/lib/territory/use-territory-create-
 export function CreateTerritoryCta({
   onClick,
   disabled,
+  label = 'Create campaign',
 }: {
   onClick: () => void;
   disabled?: boolean;
+  label?: string;
 }) {
   return (
     <div className="absolute top-5 left-1/2 z-20 w-full max-w-md -translate-x-1/2 px-4 pointer-events-none">
@@ -22,7 +24,7 @@ export function CreateTerritoryCta({
         className="pointer-events-auto h-14 w-full rounded-2xl text-base font-semibold shadow-xl"
       >
         <Plus className="mr-2 size-5" />
-        Create campaign
+        {label}
       </Button>
     </div>
   );

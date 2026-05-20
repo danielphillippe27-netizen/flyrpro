@@ -3,11 +3,14 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { getClientAsync } from '@/lib/supabase/client';
+import { useWorkspace } from '@/lib/workspace-context';
+import { getIndustryCopy } from '@/lib/industry-copy';
 import { Target } from 'lucide-react';
 
 export default function CampaignsPage() {
   const router = useRouter();
-  const [userId, setUserId] = useState<string | null>(null);
+  const { currentWorkspace } = useWorkspace();
+  const copy = getIndustryCopy(currentWorkspace?.industry);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
 
   useEffect(() => {
@@ -24,11 +27,9 @@ export default function CampaignsPage() {
 
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user) {
-          setUserId(session.user.id);
           setIsCheckingAuth(false);
           authSubscription = supabase.auth.onAuthStateChange((event, s) => {
-            if (s?.user) setUserId(s.user.id);
-            else if (event === 'SIGNED_OUT' && !hasRedirected) {
+            if (!s?.user && event === 'SIGNED_OUT' && !hasRedirected) {
               hasRedirected = true;
               router.push('/login');
             }
@@ -38,11 +39,9 @@ export default function CampaignsPage() {
 
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
-          setUserId(user.id);
           setIsCheckingAuth(false);
           authSubscription = supabase.auth.onAuthStateChange((event, s) => {
-            if (s?.user) setUserId(s.user.id);
-            else if (event === 'SIGNED_OUT' && !hasRedirected) {
+            if (!s?.user && event === 'SIGNED_OUT' && !hasRedirected) {
               hasRedirected = true;
               router.push('/login');
             }
@@ -83,9 +82,9 @@ export default function CampaignsPage() {
   return (
     <div className="flex flex-col items-center justify-center h-full min-h-[320px] px-6 text-center">
       <Target className="w-12 h-12 text-muted-foreground mb-4" />
-      <h2 className="text-lg font-semibold text-foreground mb-1">Select a campaign</h2>
+      <h2 className="text-lg font-semibold text-foreground mb-1">{copy.campaigns.selectTitle}</h2>
       <p className="text-sm text-muted-foreground max-w-sm">
-        Choose a campaign from the list or create a new one to get started.
+        {copy.campaigns.selectDescription}
       </p>
     </div>
   );

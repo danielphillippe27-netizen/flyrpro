@@ -24,6 +24,7 @@ export type Workspace = {
   owner_id: string | null;
   created_at: string;
   updated_at: string;
+  industry: string | null;
   /** Canonical brokerage (when set during onboarding). */
   brokerage_id: string | null;
   /** Free-text brokerage name when no template match. */
@@ -63,6 +64,7 @@ type WorkspaceRow = {
   owner_id: string | null;
   created_at: string;
   updated_at: string;
+  industry: string | null;
   brokerage_id: string | null;
   brokerage_name: string | null;
 };
@@ -72,6 +74,7 @@ type AccessStateRow = {
   workspaceId?: string | null;
   workspace_id?: string | null;
   workspaceName?: string | null;
+  industry?: string | null;
   role?: WorkspaceRole | null;
   memberCount?: number | null;
 };
@@ -122,6 +125,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             owner_id: null,
             created_at: new Date(0).toISOString(),
             updated_at: new Date().toISOString(),
+            industry: typeof data.industry === 'string' ? data.industry : null,
             brokerage_id: null,
             brokerage_name: null,
           },
@@ -190,7 +194,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         const [workspaceResult, membersResult, preferenceResult] = await Promise.all([
           supabase
             .from('workspaces')
-            .select('id, name, owner_id, created_at, updated_at, brokerage_id, brokerage_name')
+            .select('id, name, owner_id, created_at, updated_at, industry, brokerage_id, brokerage_name')
             .in('id', workspaceIds)
             .order('created_at', { ascending: true }),
           supabase
@@ -298,6 +302,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 owner_id: null,
                 created_at: new Date(0).toISOString(),
                 updated_at: new Date().toISOString(),
+                industry: typeof data.industry === 'string' ? data.industry : null,
                 brokerage_id: null,
                 brokerage_name: null,
               },

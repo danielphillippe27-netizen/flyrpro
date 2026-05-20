@@ -3,11 +3,12 @@ import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { ensureCampaignAccess } from '@/app/api/campaigns/_utils/access';
 import { deleteBuildingDeep } from '@/app/api/campaigns/_utils/location-delete';
+import { normalizeBuildingRouteId } from '@/app/api/campaigns/_utils/resolve-campaign-building';
 
 type RouteContext = {
   params: Promise<{
     campaignId: string;
-    buildingId: string;
+    buildingId: string | string[];
   }>;
 };
 
@@ -18,7 +19,8 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { campaignId, buildingId } = await context.params;
+    const { campaignId, buildingId: buildingIdParam } = await context.params;
+    const buildingId = normalizeBuildingRouteId(buildingIdParam);
     const admin = createAdminClient();
     const canAccess = await ensureCampaignAccess(admin, campaignId, user.id);
     if (!canAccess) {

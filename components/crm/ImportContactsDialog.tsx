@@ -12,12 +12,14 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SmartListsService } from '@/lib/services/SmartListsService';
+import { getIndustryCopy, type IndustryCopy } from '@/lib/industry-copy';
 
 type ImportContactsDialogProps = {
   open: boolean;
   onClose: () => void;
   onSuccess: (result?: ImportResult) => void;
   workspaceId?: string;
+  copy?: IndustryCopy;
 };
 
 type ImportResult = {
@@ -36,7 +38,9 @@ export function ImportContactsDialog({
   onClose,
   onSuccess,
   workspaceId,
+  copy: industryCopy,
 }: ImportContactsDialogProps) {
+  const copy = industryCopy ?? getIndustryCopy(null);
   const [loading, setLoading] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [listName, setListName] = useState('');
@@ -171,10 +175,8 @@ export function ImportContactsDialog({
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="sm:max-w-[620px]">
         <DialogHeader>
-          <DialogTitle>Import Leads from CSV</DialogTitle>
-          <DialogDescription>
-            Upload a CSV and we&apos;ll create leads in this workspace. Common lead headers are mapped automatically.
-          </DialogDescription>
+          <DialogTitle>{copy.importDialog.title}</DialogTitle>
+          <DialogDescription>{copy.importDialog.description}</DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -195,11 +197,11 @@ export function ImportContactsDialog({
               id="lead-import-list-name"
               value={listName}
               onChange={(event) => setListName(event.target.value)}
-              placeholder="Spring open house import"
+              placeholder={copy.importDialog.listNamePlaceholder}
               disabled={loading}
             />
             <p className="text-xs text-muted-foreground">
-              Optional. We&apos;ll create a list from this import so you can filter these leads later.
+              {copy.importDialog.helper}
             </p>
           </div>
 

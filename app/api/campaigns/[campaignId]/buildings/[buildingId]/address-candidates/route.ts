@@ -1,11 +1,16 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { getSupabaseUrl } from "@/lib/supabase/env";
+import {
+  buildingIdentifierCandidates,
+  isUuid as isBuildingUuid,
+  normalizeBuildingRouteId,
+} from "@/app/api/campaigns/_utils/resolve-campaign-building";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type RouteContext = { params: Promise<{ campaignId: string; buildingId: string }> };
+type RouteContext = { params: Promise<{ campaignId: string; buildingId: string | string[] }> };
 type Point = [number, number];
 
 type BuildingGeometry = {
@@ -41,10 +46,6 @@ type LinkRow = {
 function getAuthToken(request: Request): string | null {
   const authHeader = request.headers.get("authorization");
   return authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
-}
-
-function isUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 }
 
 function finiteQueryNumber(url: URL, name: string): number | null {
@@ -232,40 +233,50 @@ async function ensureCampaignAccess(supabase: SupabaseClient, campaignId: string
 }
 
 async function resolveBuilding(supabase: SupabaseClient, campaignId: string, buildingIdParam: string): Promise<ResolvedBuilding | null> {
-  const buildingQuery = supabase
-    .from("buildings")
-    .select("id, gers_id, geom, addr_street, house_name")
-    .eq("campaign_id", campaignId)
-    .limit(1);
-  const builder = isUuid(buildingIdParam)
-    ? buildingQuery.or(`id.eq.${buildingIdParam},gers_id.eq.${buildingIdParam}`)
-    : buildingQuery.eq("gers_id", buildingIdParam);
-  const { data: row } = await builder.maybeSingle();
-  if (row) {
-    const geometry = parseGeometry(row.geom);
+  const candidates = buildingIdentifierCandidates(buildingIdParam);
+
+  for (const candidate of candidates) {
+    const buildingQuery = supabase
+      .from("buildings")
+      .select("id, gers_id, geom, addr_street, house_name")
+      .eq("campaign_id", campaignId)
+      .limit(1);
+    const builder = isBuildingUuid(candidate)
+      ? buildingQuery.or(`id.eq.${candidate},gers_id.eq.${candidate}`)
+      : buildingQuery.eq("gers_id", candidate);
+    const { data: row } = await builder.maybeSingle();
+    if (row) {
+      const geometry = parseGeometry(row.geom);
+      if (geometry) {
+        return {
+          rowId: row.id,
+          publicId: row.gers_id ?? row.id,
+          geometry,
+          streetName: row.addr_street ?? row.house_name ?? null,
+        };
+      }
+    }
+  }
+
+  for (const candidate of candidates) {
+    if (!isBuildingUuid(candidate)) continue;
+    const { data: goldRow } = await supabase
+      .from("ref_buildings_gold")
+      .select("id, geom, primary_street_name")
+      .eq("id", candidate)
+      .maybeSingle();
+    const geometry = goldRow ? parseGeometry(goldRow.geom) : null;
     if (geometry) {
       return {
-        rowId: row.id,
-        publicId: row.gers_id ?? row.id,
+        rowId: null,
+        publicId: goldRow.id,
         geometry,
-        streetName: row.addr_street ?? row.house_name ?? null,
+        streetName: goldRow.primary_street_name ?? null,
       };
     }
   }
 
-  if (!isUuid(buildingIdParam)) return null;
-  const { data: goldRow } = await supabase
-    .from("ref_buildings_gold")
-    .select("id, geom, primary_street_name")
-    .eq("id", buildingIdParam)
-    .maybeSingle();
-  const geometry = goldRow ? parseGeometry(goldRow.geom) : null;
-  return goldRow && geometry ? {
-    rowId: null,
-    publicId: goldRow.id,
-    geometry,
-    streetName: goldRow.primary_street_name ?? null,
-  } : null;
+  return null;
 }
 
 async function reverseCandidatePayload(point: { lat: number; lng: number }): Promise<Record<string, unknown> | null> {
@@ -318,7 +329,8 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     const token = getAuthToken(request);
     if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const { campaignId, buildingId } = await context.params;
+    const { campaignId, buildingId: buildingIdParam } = await context.params;
+    const buildingId = normalizeBuildingRouteId(buildingIdParam);
     const url = new URL(request.url);
     const radiusMeters = Math.min(Math.max(Number(url.searchParams.get("radius_m") ?? 60), 1), 120);
     const maxLimit = radiusMeters > 60 ? 20 : 15;

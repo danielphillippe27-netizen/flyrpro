@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
 
     const { data: workspace } = await admin
       .from('workspaces')
-      .select('id, name, subscription_status, trial_ends_at, max_seats')
+      .select('id, name, industry, subscription_status, trial_ends_at, max_seats')
       .eq('id', access.workspaceId)
       .single();
 
@@ -82,6 +82,7 @@ export async function GET(request: NextRequest) {
       workspaceId: workspace.id,
       workspace_id: workspace.id,
       workspaceName: workspace.name,
+      industry: workspace.industry ?? null,
       maxSeats: workspace.max_seats ?? 1,
       hasAccess,
       subscriptionStatus: status,

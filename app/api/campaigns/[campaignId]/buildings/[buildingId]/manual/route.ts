@@ -1,11 +1,12 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
+import { normalizeBuildingRouteId } from "@/app/api/campaigns/_utils/resolve-campaign-building";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
-type RouteContext = { params: Promise<{ campaignId: string; buildingId: string }> };
+type RouteContext = { params: Promise<{ campaignId: string; buildingId: string | string[] }> };
 
 function getAuthToken(request: Request): string | null {
   const authHeader = request.headers.get("authorization");
@@ -176,7 +177,8 @@ export async function DELETE(request: Request, context: RouteContext): Promise<R
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { campaignId, buildingId } = await context.params;
+    const { campaignId, buildingId: buildingIdParam } = await context.params;
+    const buildingId = normalizeBuildingRouteId(buildingIdParam);
     const supabaseAnon = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     const {
       data: { user },
@@ -269,7 +271,8 @@ export async function PATCH(request: Request, context: RouteContext): Promise<Re
       );
     }
 
-    const { campaignId, buildingId } = await context.params;
+    const { campaignId, buildingId: buildingIdParam } = await context.params;
+    const buildingId = normalizeBuildingRouteId(buildingIdParam);
     const supabaseAnon = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     const {
       data: { user },

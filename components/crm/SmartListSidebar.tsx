@@ -16,6 +16,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { handleWheelScrollContainer } from '@/lib/scrollContainer';
+import { getIndustryCopy, type IndustryCopy } from '@/lib/industry-copy';
 import type { SmartListBaseKind, SmartListCriteria } from '@/types/smart-lists';
 import type { SmartListOption } from './smart-list-utils';
 
@@ -35,6 +36,7 @@ interface SmartListSidebarProps {
   onDeleteList: (listId: string) => Promise<void>;
   canManageCustomLists?: boolean;
   busy?: boolean;
+  copy?: IndustryCopy;
 }
 
 function smartListIcon(kind: SmartListOption['kind']) {
@@ -120,7 +122,9 @@ export function SmartListSidebar({
   onDeleteList,
   canManageCustomLists = true,
   busy = false,
+  copy: industryCopy,
 }: SmartListSidebarProps) {
+  const copy = industryCopy ?? getIndustryCopy(null);
   const [search, setSearch] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [name, setName] = useState('');
@@ -206,7 +210,9 @@ export function SmartListSidebar({
           <div className="flex items-center justify-between gap-3">
             <div>
               <p className="text-sm font-semibold text-foreground">Lists</p>
-              <p className="text-xs text-muted-foreground">Browse leads from imports, campaigns, farms, and saved views.</p>
+              <p className="text-xs text-muted-foreground">
+                Browse {copy.nouns.leadPlural} from imports, {copy.nouns.campaignPlural}, {copy.nouns.farmPlural}, and saved views.
+              </p>
             </div>
             {canManageCustomLists ? (
               <Button
@@ -259,8 +265,8 @@ export function SmartListSidebar({
             {filteredCustomLists.length === 0 ? (
               <div className="rounded-xl border border-dashed border-border bg-muted/30 px-4 py-5 text-sm text-muted-foreground">
                 {canManageCustomLists
-                  ? 'Create a saved list to keep a reusable lead segment handy.'
-                  : 'Imported and saved lists will show up here.'}
+                  ? copy.leads.importedSavedEmptyManage
+                  : copy.leads.importedSavedEmpty}
               </div>
             ) : (
               <ul className="space-y-2">
@@ -280,7 +286,9 @@ export function SmartListSidebar({
           {campaignLists.length > 0 ? (
             <section>
               <div className="mb-2 flex items-center justify-between px-1">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Campaigns</p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                  {copy.nouns.campaignPlural}
+                </p>
                 <span className="text-xs text-muted-foreground">{campaignLists.length}</span>
               </div>
               <ul className="space-y-2">
@@ -299,7 +307,9 @@ export function SmartListSidebar({
           {farmLists.length > 0 ? (
             <section>
               <div className="mb-2 flex items-center justify-between px-1">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Farms</p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                  {copy.nouns.farmPlural}
+                </p>
                 <span className="text-xs text-muted-foreground">{farmLists.length}</span>
               </div>
               <ul className="space-y-2">
@@ -336,7 +346,7 @@ export function SmartListSidebar({
           <DialogHeader>
             <DialogTitle>New Saved List</DialogTitle>
             <DialogDescription>
-              Save a reusable lead view when you want to keep a segment around outside of imports, campaigns, or farms.
+              {copy.leads.newSavedListDescription}
             </DialogDescription>
           </DialogHeader>
 
@@ -349,19 +359,19 @@ export function SmartListSidebar({
                 id="smart-list-name"
                 value={name}
                 onChange={(event) => setName(event.target.value)}
-                placeholder="Spring networking follow-up"
+                placeholder={copy.leads.listNamePlaceholder}
               />
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">Base lead type</label>
+              <label className="text-sm font-medium text-foreground">{copy.leads.baseKindLabel}</label>
               <Select value={baseKind} onValueChange={(value) => setBaseKind(value as SmartListBaseKind)}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Choose a lead type" />
+                  <SelectValue placeholder={copy.leads.baseKindPlaceholder} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="campaign">Campaign</SelectItem>
-                  <SelectItem value="farm">Farm</SelectItem>
+                  <SelectItem value="campaign">{copy.nouns.campaign}</SelectItem>
+                  <SelectItem value="farm">{copy.nouns.farm}</SelectItem>
                   <SelectItem value="networking">Networking</SelectItem>
                   <SelectItem value="custom">Custom</SelectItem>
                 </SelectContent>
@@ -376,7 +386,7 @@ export function SmartListSidebar({
                 id="smart-list-source"
                 value={source}
                 onChange={(event) => setSource(event.target.value)}
-                placeholder="Google Maps, referral, open house"
+                placeholder={copy.leads.sourcePlaceholder}
               />
             </div>
 
@@ -388,7 +398,7 @@ export function SmartListSidebar({
                 id="smart-list-tags"
                 value={tags}
                 onChange={(event) => setTags(event.target.value)}
-                placeholder="vip, listing, sphere"
+                placeholder={copy.leads.tagsPlaceholder}
               />
               <p className="text-xs text-muted-foreground">Separate multiple tags with commas.</p>
             </div>

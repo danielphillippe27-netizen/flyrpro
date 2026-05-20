@@ -174,7 +174,7 @@ export async function resolveArtifactUrl(snapshot: CampaignSnapshotRow, key: str
     return joinUrl(cdnBaseUrl, key);
   }
 
-  if (key === snapshot.buildings_key && snapshot.buildings_url && !key.endsWith('.pmtiles')) {
+  if (key === snapshot.buildings_key && snapshot.buildings_url) {
     return snapshot.buildings_url;
   }
 

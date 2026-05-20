@@ -2,6 +2,7 @@
 
 import type { Contact } from '@/types/database';
 import type { UserStats } from '@/types/database';
+import type { IndustryCopy } from '@/lib/industry-copy';
 import { StatCard } from '@/components/stats/StatCard';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -69,6 +70,7 @@ export function LeadsTableView({
   allVisibleSelected,
   onToggleContactSelection,
   onToggleSelectAll,
+  copy,
 }: {
   contacts: Contact[];
   userStats: UserStats | null;
@@ -79,6 +81,7 @@ export function LeadsTableView({
   allVisibleSelected: boolean;
   onToggleContactSelection: (contactId: string, checked: boolean) => void;
   onToggleSelectAll: (checked: boolean) => void;
+  copy: IndustryCopy;
 }) {
   const toPercent = (numerator: number, denominator: number): number | null => {
     if (denominator <= 0) return null;
@@ -103,18 +106,18 @@ export function LeadsTableView({
     <div className="space-y-6">
       {/* Metric cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label="Total leads" value={loading ? '…' : totalLeads} />
-        <StatCard label="New leads this week" value={loading ? '…' : newThisWeek} />
-        <StatCard label="Conversation-to-lead rate" value={loading ? '…' : conversationToLeadRate} />
+        <StatCard label={copy.leads.totalLabel} value={loading ? '…' : totalLeads} />
+        <StatCard label={copy.leads.newThisWeekLabel} value={loading ? '…' : newThisWeek} />
+        <StatCard label={copy.leads.conversionRateLabel} value={loading ? '…' : conversationToLeadRate} />
         <StatCard label="Knock-to-conversation rate" value={loading ? '…' : knockToConversationRate} />
       </div>
 
       {/* Table */}
       <div className="rounded-xl border border-border overflow-hidden bg-card">
         {loading ? (
-          <div className="p-8 text-center text-muted-foreground">Loading leads…</div>
+          <div className="p-8 text-center text-muted-foreground">{copy.leads.loading}</div>
         ) : contacts.length === 0 ? (
-          <div className="p-8 text-center text-muted-foreground">No leads match your filters.</div>
+          <div className="p-8 text-center text-muted-foreground">{copy.leads.empty}</div>
         ) : (
           <Table>
             <TableHeader>
@@ -122,7 +125,7 @@ export function LeadsTableView({
                 <TableHead className="w-12">
                   <input
                     type="checkbox"
-                    aria-label="Select all visible leads"
+                    aria-label={copy.leads.selectAllAria}
                     checked={allVisibleSelected}
                     onChange={(event) => onToggleSelectAll(event.target.checked)}
                     className="h-4 w-4 rounded border-border align-middle"

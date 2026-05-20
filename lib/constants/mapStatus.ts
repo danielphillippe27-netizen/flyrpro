@@ -3,7 +3,7 @@
 
 // ----- Building / session map (building_stats) -----
 // Table: building_stats, Column: status
-// Flyer mode: red = unvisited, green = visited.
+// Flyer mode: grey = unvisited, green = visited.
 // Door-knock mode: slate = unvisited, coral = no answer, green = conversation,
 // blue = lead, gold = hot lead / appointment / follow-up,
 // purple = QR scan, black = do not knock.
@@ -72,7 +72,7 @@ export const MAP_STATUS_CONFIG: Record<MapStatusKey, MapStatusConfig> = {
 } as const;
 
 export const FLYER_MODE_STATUS_COLORS = {
-  unvisited: MAP_STATUS_CONFIG.UNTOUCHED.color,
+  unvisited: '#6b7280',
   visited: '#22c55e',
 } as const;
 

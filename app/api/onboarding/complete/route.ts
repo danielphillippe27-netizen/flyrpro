@@ -25,12 +25,16 @@ import { normalizeCountryCode } from '@/lib/countries';
 
 const INDUSTRIES = [
   'Real Estate',
-  'Logistics',
-  'Sales',
-  'Pest Control',
-  'HVAC',
-  'Insurance',
   'Solar',
+  'Roofing & Exteriors',
+  'Financing',
+  'Home Health Care',
+  'HVAC & Plumbing',
+  'Insurance',
+  'Landscaping & Snow',
+  'Pest Control',
+  'Political / Canvassing',
+  'Pool Service',
   'Other',
 ] as const;
 

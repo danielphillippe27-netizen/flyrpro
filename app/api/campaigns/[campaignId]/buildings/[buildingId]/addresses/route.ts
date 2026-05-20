@@ -3,6 +3,10 @@ import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { compareAddressesForDisplay, displayAddressText, resolveHouseNumberLabel } from '@/lib/map/addressPresentation';
 import { StableLinkerService } from '@/lib/services/StableLinkerService';
+import {
+  normalizeBuildingRouteId,
+  resolveCampaignBuilding,
+} from '@/app/api/campaigns/_utils/resolve-campaign-building';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -58,45 +62,8 @@ type AuthorizedContext = {
   userId: string;
 };
 
-type ResolvedBuilding = {
-  rowId: string | null;
-  publicId: string;
-};
-
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-}
-
-async function resolveBuilding(
-  supabase: ReturnType<typeof createAdminClient>,
-  campaignId: string,
-  buildingIdParam: string
-): Promise<ResolvedBuilding | null> {
-  const buildingQuery = supabase
-    .from('buildings')
-    .select('id, gers_id')
-    .eq('campaign_id', campaignId)
-    .limit(1);
-
-  const { data: row, error } = isUuid(buildingIdParam)
-    ? await buildingQuery.or(`id.eq.${buildingIdParam},gers_id.eq.${buildingIdParam}`).maybeSingle()
-    : await buildingQuery.eq('gers_id', buildingIdParam).maybeSingle();
-
-  if (!error && row) {
-    return {
-      rowId: row.id,
-      publicId: row.gers_id ?? row.id,
-    };
-  }
-
-  if (!isUuid(buildingIdParam)) return null;
-  const { data: goldRow } = await supabase
-    .from('ref_buildings_gold')
-    .select('id')
-    .eq('id', buildingIdParam)
-    .maybeSingle();
-
-  return goldRow ? { rowId: null, publicId: String(goldRow.id) } : null;
 }
 
 function chooseLinksForDisplay(links: BuildingLinkRow[]): BuildingLinkRow[] {
@@ -211,9 +178,10 @@ async function resolveAuthorizedContext(
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ campaignId: string; buildingId: string }> }
+  { params }: { params: Promise<{ campaignId: string; buildingId: string | string[] }> }
 ) {
-  const { campaignId, buildingId } = await params;
+  const { campaignId, buildingId: buildingIdParam } = await params;
+  const buildingId = normalizeBuildingRouteId(buildingIdParam);
   
   console.log(`[API] GET /campaigns/${campaignId}/buildings/${buildingId}/addresses`);
   
@@ -413,9 +381,10 @@ export async function GET(
  */
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ campaignId: string; buildingId: string }> }
+  { params }: { params: Promise<{ campaignId: string; buildingId: string | string[] }> }
 ) {
-  const { campaignId, buildingId } = await params;
+  const { campaignId, buildingId: buildingIdParam } = await params;
+  const buildingId = normalizeBuildingRouteId(buildingIdParam);
   
   console.log(`[API] POST /campaigns/${campaignId}/buildings/${buildingId}/addresses`);
   
@@ -434,7 +403,7 @@ export async function POST(
       );
     }
     
-    const resolvedBuilding = await resolveBuilding(supabase, campaignId, buildingId);
+    const resolvedBuilding = await resolveCampaignBuilding(supabase, campaignId, buildingId);
     if (!resolvedBuilding) {
       return NextResponse.json({ error: 'Building not found' }, { status: 404 });
     }
@@ -494,9 +463,10 @@ export async function POST(
  */
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: Promise<{ campaignId: string; buildingId: string }> }
+  { params }: { params: Promise<{ campaignId: string; buildingId: string | string[] }> }
 ) {
-  const { campaignId, buildingId } = await params;
+  const { campaignId, buildingId: buildingIdParam } = await params;
+  const buildingId = normalizeBuildingRouteId(buildingIdParam);
   
   console.log(`[API] DELETE /campaigns/${campaignId}/buildings/${buildingId}/addresses`);
   
@@ -516,7 +486,7 @@ export async function DELETE(
       );
     }
     
-    const resolvedBuilding = await resolveBuilding(supabase, campaignId, buildingId);
+    const resolvedBuilding = await resolveCampaignBuilding(supabase, campaignId, buildingId);
     if (!resolvedBuilding) {
       return NextResponse.json({ error: 'Building not found' }, { status: 404 });
     }

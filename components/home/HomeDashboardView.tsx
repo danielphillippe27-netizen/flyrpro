@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent } from '@/components/ui/card';
 import { useWorkspace } from '@/lib/workspace-context';
+import { getIndustryCopy } from '@/lib/industry-copy';
 
 function DashboardSkeleton() {
   return (
@@ -47,7 +48,8 @@ type HomeDashboardViewProps = {
 };
 
 export function HomeDashboardView({ disableGoalEditing = false }: HomeDashboardViewProps) {
-  const { currentWorkspaceId } = useWorkspace();
+  const { currentWorkspace, currentWorkspaceId } = useWorkspace();
+  const copy = getIndustryCopy(currentWorkspace?.industry);
   const [data, setData] = useState<HomeDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -127,6 +129,7 @@ export function HomeDashboardView({ disableGoalEditing = false }: HomeDashboardV
         convos={metrics.convos}
         leads={metrics.leads}
         appointments={metrics.appointments}
+        copy={copy}
       />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -149,7 +152,7 @@ export function HomeDashboardView({ disableGoalEditing = false }: HomeDashboardV
         </div>
       </div>
 
-      <RecentSnapshot recentCampaigns={recentCampaigns} />
+      <RecentSnapshot recentCampaigns={recentCampaigns} copy={copy} />
     </div>
   );
 }
