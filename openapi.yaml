@@ -1384,6 +1384,199 @@ paths:
         "200":
           description: Campaign buildings
 
+  /api/campaigns/{campaignId}/buildings/{buildingId}:
+    delete:
+      tags: [campaigns]
+      summary: Delete a campaign building
+      description: Deletes a campaign building and any associated building/address links.
+      x-status: working
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: buildingId
+          in: path
+          required: true
+          description: Building row id, GERS id, or encoded snapshot building identifier.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Building deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted:
+                    type: boolean
+                    example: true
+                  building_id:
+                    type: string
+                  deleted_address_ids:
+                    type: array
+                    items:
+                      type: string
+                  deleted_building_row:
+                    type: boolean
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: Building not found
+
+  /api/campaigns/{campaignId}/buildings/{buildingId}/address-candidates:
+    get:
+      tags: [campaigns]
+      summary: Get candidate addresses for a building
+      description: |
+        Returns nearby unlinked campaign addresses ranked for manual building assignment.
+        If no trusted official candidate is found, the response may include a synthetic
+        Mapbox reverse-geocode candidate.
+      x-status: working
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: buildingId
+          in: path
+          required: true
+          description: Building row id, GERS id, or encoded snapshot building identifier.
+          schema:
+            type: string
+        - name: radius_m
+          in: query
+          required: false
+          description: Search radius in meters, clamped between 1 and 120.
+          schema:
+            type: number
+            default: 60
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of official candidates to return.
+          schema:
+            type: integer
+            default: 15
+        - name: force_reverse_geocode
+          in: query
+          required: false
+          description: Include a Mapbox reverse-geocode candidate even when a trusted official candidate exists.
+          schema:
+            type: boolean
+            default: false
+        - name: seed_lat
+          in: query
+          required: false
+          schema:
+            type: number
+        - name: seed_lng
+          in: query
+          required: false
+          schema:
+            type: number
+      responses:
+        "200":
+          description: Candidate addresses for the building
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  building_id:
+                    type: string
+                  radius_meters:
+                    type: number
+                  trust_decision:
+                    type: object
+                    properties:
+                      used_reverse_geocode:
+                        type: boolean
+                      reason:
+                        type: string
+                      nearest_candidate_distance_m:
+                        type: number
+                        nullable: true
+                      nearest_candidate_rejected_reason:
+                        type: string
+                        nullable: true
+                  candidates:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        candidate_type:
+                          type: string
+                          enum: [official, reverse_geocode]
+                        is_synthetic:
+                          type: boolean
+                        formatted:
+                          type: string
+                          nullable: true
+                        formatted_address:
+                          type: string
+                          nullable: true
+                        house_number:
+                          type: string
+                          nullable: true
+                        street_name:
+                          type: string
+                          nullable: true
+                        street:
+                          type: string
+                          nullable: true
+                        source:
+                          type: string
+                          nullable: true
+                        coordinate:
+                          type: object
+                          properties:
+                            longitude:
+                              type: number
+                            latitude:
+                              type: number
+                        distance_meters:
+                          type: number
+                        score:
+                          type: number
+                        reason:
+                          type: string
+                          nullable: true
+                        candidate_reason:
+                          type: string
+                          nullable: true
+                        confidence_label:
+                          type: string
+                        requires_confirmation:
+                          type: boolean
+                        trusted:
+                          type: boolean
+                        rejected_reason:
+                          type: string
+                          nullable: true
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: Building not found
+        "500":
+          description: Failed to fetch address candidates
+
   /api/campaigns/{campaignId}/buildings/manual:
     post:
       tags: [campaigns]
@@ -2499,6 +2692,9 @@ paths:
               properties:
                 name:
                   type: string
+                campaign_name:
+                  type: string
+                  description: Optional name for the campaign linked to this farm. Defaults to name when omitted.
                 description:
                   type: string
                   nullable: true
