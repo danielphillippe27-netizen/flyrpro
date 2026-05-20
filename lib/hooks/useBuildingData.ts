@@ -183,9 +183,13 @@ export function useBuildingData(
         }
 
         let addressIds = (linkRows || []).map((r: { address_id: string }) => r.address_id).filter(Boolean);
+        const isBedrock = /^(bedrock_|diamond:)/.test(gersId ?? '');
+        if (isBedrock && addressIds.length === 0) {
+          console.log('[useBuildingData] Skipping Gold direct fallbacks for Bedrock/Diamond ID:', gersId);
+        }
 
         // If no links found, try Gold path: campaign_addresses.building_id
-        if (addressIds.length === 0) {
+        if (!isBedrock && addressIds.length === 0) {
           console.log('[useBuildingData] No links found, trying Gold path for building:', gersId);
           const { data: goldAddresses, error: goldError } = await supabase
             .from('campaign_addresses')
@@ -203,7 +207,7 @@ export function useBuildingData(
 
         // Final fallback: gersId might BE a campaign_addresses.id itself
         // (happens when features come from address-point fallback where id = campaign_addresses.id)
-        if (addressIds.length === 0) {
+        if (!isBedrock && addressIds.length === 0) {
           console.log('[useBuildingData] Trying direct address lookup for id:', gersId);
           const { data: directAddress, error: directError } = await supabase
             .from('campaign_addresses')
