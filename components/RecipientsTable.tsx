@@ -242,8 +242,9 @@ export function RecipientsTable({ recipients, campaignId, onRefresh }: Recipient
                           size="sm"
                           variant="link"
                           onClick={() => {
+                            const base64 = recipient.qr_code_base64!.replace(/\s/g, '');
                             const blob = new Blob(
-                              [Uint8Array.from(atob(recipient.qr_code_base64!), c => c.charCodeAt(0))],
+                              [Uint8Array.from(atob(base64), c => c.charCodeAt(0))],
                               { type: 'image/png' }
                             );
                             const url = URL.createObjectURL(blob);
