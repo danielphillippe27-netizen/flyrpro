@@ -82,7 +82,6 @@ export async function GET(
         address,
         formatted,
         postal_code,
-        qr_png_url,
         purl,
         seq
       `)
