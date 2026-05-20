@@ -242,10 +242,12 @@ export function RecipientsTable({ recipients, campaignId, onRefresh }: Recipient
                           size="sm"
                           variant="link"
                           onClick={() => {
-                            const base64Data = recipient.qr_code_base64?.replace(/^data:image\/\w+;base64,/, '');
-                            if (base64Data) {
-                              window.open(`data:image/png;base64,${base64Data}`, '_blank', 'noopener,noreferrer');
-                            }
+                            const blob = new Blob(
+                              [Uint8Array.from(atob(recipient.qr_code_base64!), c => c.charCodeAt(0))],
+                              { type: 'image/png' }
+                            );
+                            const url = URL.createObjectURL(blob);
+                            window.open(url, '_blank');
                           }}
                         >
                           View QR
