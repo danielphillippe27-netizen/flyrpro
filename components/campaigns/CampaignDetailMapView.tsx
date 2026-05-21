@@ -1282,6 +1282,8 @@ export function CampaignDetailMapView({
           ...(mapInitOptions as Pick<mapboxgl.MapOptions, 'style' | 'config'>),
           center: getInitialCenter(),
           zoom: 12,
+          pitch: 45,
+          bearing: -12,
         });
         mapInitTimeoutRef.current = setTimeout(() => {
           if (!mapLoaded) {
@@ -1527,16 +1529,18 @@ export function CampaignDetailMapView({
             },
             maxZoom: 15,
             duration: 1000,
+            pitch: 45,
+            bearing: -12,
           });
 
           map.current.once('moveend', () => {
             if (!map.current) return;
-            if (map.current.getZoom() < 12) {
-              map.current.easeTo({
-                zoom: 12,
-                duration: 300,
-              });
-            }
+            map.current.easeTo({
+              zoom: Math.max(map.current.getZoom(), 12),
+              pitch: 45,
+              bearing: -12,
+              duration: 300,
+            });
           });
         }, 200);
       }
@@ -1792,9 +1796,22 @@ export function CampaignDetailMapView({
       } catch {}
     };
 
-    map.current.once('style.load', () => {
+    const cleanupOnStyleReady = () => {
       cleanupLayers();
-    });
+      window.setTimeout(cleanupLayers, 250);
+      window.setTimeout(cleanupLayers, 1000);
+    };
+
+    cleanupOnStyleReady();
+    map.current.on('style.load', cleanupOnStyleReady);
+    map.current.on('styledata', cleanupOnStyleReady);
+    map.current.on('idle', cleanupLayers);
+
+    return () => {
+      map.current?.off('style.load', cleanupOnStyleReady);
+      map.current?.off('styledata', cleanupOnStyleReady);
+      map.current?.off('idle', cleanupLayers);
+    };
   }, [mapLoaded, resolvedMapStyle]);
 
   useEffect(() => {
