@@ -82,8 +82,11 @@ export function useBuildingData(
   const [buildingExists, setBuildingExists] = useState(false);
   const [addressLinked, setAddressLinked] = useState(false);
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (signal?: AbortSignal) => {
+    const isAborted = () => signal?.aborted === true;
+
     if (!gersId || !campaignId) {
+      setIsLoading(false);
       setAddress(null);
       setAddresses([]);
       setResidents([]);
@@ -137,6 +140,7 @@ export function useBuildingData(
           .eq('id', preferredAddressId)
           .eq('campaign_id', campaignId)
           .maybeSingle();
+        if (isAborted()) return;
         if (!preferredErr && preferredRow) {
           resolvedAddress = preferredRow;
           setBuildingExists(true);
@@ -146,10 +150,12 @@ export function useBuildingData(
       try {
         const response = await fetch(
           `/api/campaigns/${encodeURIComponent(campaignId)}/buildings/${encodeURIComponent(gersId)}/addresses`,
-          { cache: 'no-store' }
+          { cache: 'no-store', signal }
         );
+        if (isAborted()) return;
         if (response.ok) {
           const payload = await response.json();
+          if (isAborted()) return;
           const apiAddresses = Array.isArray(payload?.addresses)
             ? (payload.addresses as ApiBuildingAddress[])
             : [];
@@ -165,6 +171,7 @@ export function useBuildingData(
           }
         }
       } catch (apiError) {
+        if (apiError instanceof DOMException && apiError.name === 'AbortError') return;
         console.warn('[useBuildingData] Building-address API lookup failed:', apiError);
       }
 
@@ -177,6 +184,7 @@ export function useBuildingData(
           .select('address_id')
           .eq('campaign_id', campaignId)
           .eq('building_id', gersId);
+        if (isAborted()) return;
 
         if (linkError) {
           console.error('[useBuildingData] Link query error:', linkError);
@@ -196,6 +204,7 @@ export function useBuildingData(
             .select('id')
             .eq('campaign_id', campaignId)
             .eq('building_id', gersId);
+          if (isAborted()) return;
 
           if (goldError) {
             console.error('[useBuildingData] Gold query error:', goldError);
@@ -215,6 +224,7 @@ export function useBuildingData(
             .eq('campaign_id', campaignId)
             .eq('id', gersId)
             .maybeSingle();
+          if (isAborted()) return;
 
           if (!directError && directAddress) {
             console.log('[useBuildingData] Found direct address match:', directAddress.id);
@@ -233,6 +243,7 @@ export function useBuildingData(
             .select('id, house_number, street_name, formatted, gers_id')
             .eq('campaign_id', campaignId)
             .in('id', addressIds);
+          if (isAborted()) return;
 
           if (addrError) {
             console.error('[useBuildingData] Address fetch error:', addrError);
@@ -260,6 +271,7 @@ export function useBuildingData(
           .select('*')
           .eq('address_id', primary.id)
           .order('created_at', { ascending: false });
+        if (isAborted()) return;
         if (contactsError) setResidents([]);
         else setResidents((contactsData || []) as Contact[]);
       } else {
@@ -272,6 +284,7 @@ export function useBuildingData(
             .eq('campaign_id', campaignId)
             .eq('gers_id', gersId)
             .maybeSingle();
+          if (isAborted()) return;
           
           if (!addressError && addressData) {
             resolvedAddress = addressData;
@@ -283,6 +296,7 @@ export function useBuildingData(
               .eq('campaign_id', campaignId)
               .eq('id', gersId)
               .maybeSingle();
+            if (isAborted()) return;
             if (directData) resolvedAddress = directData;
           }
           if (resolvedAddress) setBuildingExists(true);
@@ -298,6 +312,7 @@ export function useBuildingData(
             .select('*')
             .eq('address_id', resolvedAddress.id)
             .order('created_at', { ascending: false });
+          if (isAborted()) return;
           if (contactsError) setResidents([]);
           else setResidents((contactsData || []) as Contact[]);
         } else {
@@ -309,16 +324,24 @@ export function useBuildingData(
         }
       }
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
+      if (isAborted()) return;
       console.error('Error in useBuildingData:', err);
       setError(err instanceof Error ? err : new Error('Failed to fetch building data'));
     } finally {
-      setIsLoading(false);
+      if (!isAborted()) {
+        setIsLoading(false);
+      }
     }
   }, [gersId, campaignId, preferredAddressId]);
 
   // Fetch data when gersId or campaignId changes
   useEffect(() => {
-    fetchData();
+    const controller = new AbortController();
+    void fetchData(controller.signal);
+    return () => {
+      controller.abort();
+    };
   }, [fetchData]);
 
   // Note: Realtime subscriptions disabled - replication not available
