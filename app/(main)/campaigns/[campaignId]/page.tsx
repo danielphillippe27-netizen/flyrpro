@@ -571,7 +571,11 @@ export default function CampaignDetailPage() {
       }
     } catch (error) {
       console.error('Error loading campaign:', error);
-      setLoadError(true);
+      if ((error as { code?: string } | null)?.code === 'PGRST116') {
+        setCampaign(null);
+      } else {
+        setLoadError(true);
+      }
     } finally {
       setLoading(false);
     }
