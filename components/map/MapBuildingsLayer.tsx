@@ -683,6 +683,7 @@ export function MapBuildingsLayer({
   // This eliminates the JSON.parse deep-clone + scaleFootprint call from the hot update path.
   const normalizedFeaturesRef = useRef<BuildingFeatureCollection | null>(null);
   const lastSetDataRef = useRef<BuildingFeatureCollection | null>(null);
+  const renderedGeojsonKeyRef = useRef<string | null>(null);
   const onBuildingClickRef = useRef(onBuildingClick);
   const onRenderStateChangeRef = useRef(onRenderStateChange);
   const isFetchingRef = useRef(isFetching);
@@ -701,6 +702,16 @@ export function MapBuildingsLayer({
   useEffect(() => {
     isFetchingRef.current = isFetching;
   }, [isFetching]);
+
+  useEffect(() => {
+    setBuildingsDebug({
+      mounted: true,
+      campaignId,
+      hasMap: Boolean(map),
+      mapStyleLoaded: Boolean(map?.isStyleLoaded()),
+      featureCountAtMount: features?.features.length ?? 0,
+    });
+  }, [campaignId, features, map]);
 
   useEffect(() => {
     if (!map || !campaignId || !features?.features?.length || !addressStateOverrides?.length) return;
@@ -1054,6 +1065,7 @@ export function MapBuildingsLayer({
     if (!features) {
       normalizedFeaturesRef.current = null;
       lastSetDataRef.current = null;
+      renderedGeojsonKeyRef.current = null;
       return;
     }
 
@@ -1801,12 +1813,36 @@ export function MapBuildingsLayer({
         return;
       }
 
-      const source = map.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined;
-      const labelSource = map.getSource(addressLabelSourceId) as mapboxgl.GeoJSONSource | undefined;
       const addressLabelFeatures = buildAddressLabelFeatureCollection(addressStateOverrides);
 
       // Use precomputed geometry — no clone/rescale on this path.
       const normalizedFeatures = normalizedFeaturesRef.current;
+
+      const geojsonKey = normalizedFeatures
+        ? JSON.stringify({
+            campaignId,
+            count: normalizedFeatures.features.length,
+            bbox: getFeatureCollectionBbox(normalizedFeatures.features),
+            first:
+              normalizedFeatures.features[0]?.properties?.gers_id ??
+              normalizedFeatures.features[0]?.properties?.building_id ??
+              normalizedFeatures.features[0]?.id ??
+              null,
+          })
+        : null;
+
+      if (
+        normalizedFeatures?.features.length &&
+        geojsonKey &&
+        renderedGeojsonKeyRef.current !== geojsonKey
+      ) {
+        cleanupRenderedLayers();
+        renderedGeojsonKeyRef.current = geojsonKey;
+        lastSetDataRef.current = null;
+      }
+
+      let source = map.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined;
+      let labelSource = map.getSource(addressLabelSourceId) as mapboxgl.GeoJSONSource | undefined;
 
       // Only call setData if geometry actually changed.
       if (source && normalizedFeatures && normalizedFeatures !== lastSetDataRef.current) {
@@ -1821,6 +1857,32 @@ export function MapBuildingsLayer({
       if (!normalizedFeatures || normalizedFeatures.features.length === 0) {
         return;
       }
+
+      const verifyRenderedBuildingsOnIdle = () => {
+        try {
+          map.once('idle', () => {
+            let renderedFeatureCount = 0;
+            try {
+              renderedFeatureCount = map.queryRenderedFeatures({
+                layers: [surfaceLayerId, layerId, outlineLayerId, circleLayerId],
+              }).length;
+            } catch {
+              renderedFeatureCount = 0;
+            }
+
+            setBuildingsDebug({
+              renderedFeatureCount,
+              sourceAttached: Boolean(map.getSource(sourceId)),
+              surfaceLayerAttached: Boolean(map.getLayer(surfaceLayerId)),
+              extrusionLayerAttached: Boolean(map.getLayer(layerId)),
+              outlineLayerAttached: Boolean(map.getLayer(outlineLayerId)),
+              circleLayerAttached: Boolean(map.getLayer(circleLayerId)),
+            });
+          });
+        } catch {
+          // Best-effort render verification only.
+        }
+      };
       
       // Remove any existing route layers/sources that might conflict with buildings
       // This prevents z-fighting and rendering issues
@@ -1855,8 +1917,15 @@ export function MapBuildingsLayer({
             tolerance: 0.5,
           });
           lastSetDataRef.current = normalizedFeatures;
+          source = map.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined;
         } catch (err) {
           console.error('Error adding source:', err);
+          setBuildingsDebug({
+            renderMode: 'geojson-source',
+            sourceAddError: err instanceof Error ? err.message : String(err),
+            normalizedFeatureCount: normalizedFeatures.features.length,
+            normalizedFeatureBbox: getFeatureCollectionBbox(normalizedFeatures.features),
+          });
           return;
         }
       }
@@ -1868,6 +1937,7 @@ export function MapBuildingsLayer({
             data: addressLabelFeatures,
             promoteId: 'feature_id',
           });
+          labelSource = map.getSource(addressLabelSourceId) as mapboxgl.GeoJSONSource | undefined;
         } catch (err) {
           console.error('Error adding address label source:', err);
         }
@@ -2033,6 +2103,7 @@ export function MapBuildingsLayer({
           }
           forceBuildingLayerVisibility();
           map.triggerRepaint();
+          verifyRenderedBuildingsOnIdle();
 
           setBuildingsDebug({
             renderMode: 'geojson-source',
@@ -2426,6 +2497,7 @@ export function MapBuildingsLayer({
           }
           forceBuildingLayerVisibility();
           map.triggerRepaint();
+          verifyRenderedBuildingsOnIdle();
           setBuildingsDebug({
             renderMode: 'geojson-source',
             sourceId,
@@ -2886,5 +2958,5 @@ export function MapBuildingsLayer({
     };
   }, [map]);
 
-  return null; // This component doesn't render anything directly
+  return null;
 }
