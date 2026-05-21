@@ -43,6 +43,31 @@ and browser memory usage.
 An invalid domain in the URL constructor fails every address in the loop 
 but the route still returns success: true with count: 0.
 
+### Assignment notifications not deduplicated
+Repeated campaign assignment creation inserts repeated notification rows.
+No idempotency guard or dedup check exists in the assignments route.
+
+### notifications table has no FK on user_id
+The notifications table enforces workspace_id via FK but not user_id.
+The DB does not prevent notifications being created for non-existent users.
+
+### map-bundle: NULL provision_source skips Gold RPC silently
+In rpc_get_campaign_map_bundle, the building block is guarded by
+provision_source NOT IN (...). In PL/pgSQL, NULL NOT IN (...) evaluates
+to null, not true, so a never-provisioned campaign (provision_source = null)
+silently skips the Gold RPC and returns empty buildings with no error.
+
+### bundle.parcels unguarded if parcel view enabled
+In CampaignDetailMapView.tsx, bundle.parcels is accessed directly after
+response.json() without null/shape validation. SHOW_PARCEL_VIEW is
+currently false so this path is inactive, but enabling it could throw
+if the API returns null or a non-object.
+
+### useBuildingData: no dedup on repeated fallback queries
+If multiple fallback paths in useBuildingData return overlapping address
+IDs, the final address list may contain duplicates. No dedup step exists
+after the fallback chain resolves.
+
 ---
 
 ## Needs owner decision
@@ -68,6 +93,13 @@ Action: Daniel to confirm expected visibility behavior.
 Contact status resets after navigation in local dev. Needs 
 production verification before investigating further.
 
+### campaign territory_boundary not validated as valid Polygon
+The provision route checks if (!polygon) but does not validate that
+territory_boundary is actually a valid GeoJSON Polygon before passing
+it to Turf/PMTiles logic. A malformed non-null territory can pass
+validation and cause a cryptic failure inside Turf.
+Action: add explicit GeoJSON Polygon validation at the route boundary.
+
 ---
 
 ## Notes
@@ -75,3 +107,10 @@ production verification before investigating further.
 - Map initial center: fixed in PR 19 for campaigns with bbox/territory_boundary.
 - Notification insert schema mismatch (message vs body): fixed in PR 19.
 - View QR blank tab: fixed in PR 17/19.
+- isConnectionError timeout retry bug: fixed in PR 20. withTimeout()
+  rejection message 'exceeded' was not matched by the old check for
+  'timeout'. Timeout errors were never retried.
+- Building ID double-encoding bug: fixed in PR 20. IDs were only decoded
+  once, leaving double-encoded Bedrock IDs unresolved.
+- generate-qrs auth hole: fixed in PR 20. Route had no workspace check.
+- useBuildingData AbortController: fixed in PR 20.
