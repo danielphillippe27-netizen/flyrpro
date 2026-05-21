@@ -804,9 +804,10 @@ export function MapBuildingsLayer({
     filterExpr?: FilterSpecification
   ): FilterSpecification => {
     if (!manifestSource) {
-      // Campaign building GeoJSON is already server-scoped and prefiltered to polygons.
-      // Keep this path unfiltered so a Mapbox filter expression cannot hide the source.
-      return filterExpr ?? ['all'];
+      // Campaign building GeoJSON is already server-scoped. Still keep the
+      // layer geometry filter so Mapbox gets a valid polygon/point filter
+      // instead of a bare ["all"] expression that can fail during addLayer.
+      return filterExpr ? combineMapFilters(geometryFilter, filterExpr) : geometryFilter;
     }
 
     const pmtilesScope = filterExpr ?? campaignBoundaryWithinFilter(campaignBoundary);
@@ -901,6 +902,17 @@ export function MapBuildingsLayer({
     footprintStatusColors ? 1 : NEUTRAL_EXTRUSION_OPACITY;
   const getCircleOpacity = (): number =>
     footprintStatusColors ? 0.9 : NEUTRAL_CIRCLE_OPACITY;
+  const forceBuildingLayerVisibility = () => {
+    for (const id of [surfaceLayerId, layerId, leadGlowLayerId, outlineLayerId, circleLeadGlowLayerId, circleLayerId]) {
+      try {
+        if (map?.getLayer(id)) {
+          map.setLayoutProperty(id, 'visibility', 'visible');
+        }
+      } catch {
+        // Mapbox can transiently reject layer reads during style swaps.
+      }
+    }
+  };
 
   // Track if campaign data has been loaded (for "fetch once, render forever" pattern)
   const campaignDataLoadedRef = useRef<string | null>(null);
@@ -2019,6 +2031,8 @@ export function MapBuildingsLayer({
           if (map.getLayer(addressLabelLayerId)) {
             map.setLayoutProperty(addressLabelLayerId, 'visibility', showAddressLabels ? 'visible' : 'none');
           }
+          forceBuildingLayerVisibility();
+          map.triggerRepaint();
 
           setBuildingsDebug({
             renderMode: 'geojson-source',
@@ -2410,6 +2424,8 @@ export function MapBuildingsLayer({
           if (map.getLayer(addressLabelLayerId)) {
             map.setLayoutProperty(addressLabelLayerId, 'visibility', showAddressLabels ? 'visible' : 'none');
           }
+          forceBuildingLayerVisibility();
+          map.triggerRepaint();
           setBuildingsDebug({
             renderMode: 'geojson-source',
             sourceId,
