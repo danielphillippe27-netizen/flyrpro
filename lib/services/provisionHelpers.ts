@@ -1,6 +1,18 @@
 import type { StandardCampaignAddress } from '@/lib/services/AddressAdapter';
 import type { LambdaSnapshotResponse } from '@/lib/services/TileLambdaService';
 
+type StaticGeometrySnapshot = {
+  buildings_key?: string | null;
+  addresses_key?: string | null;
+  s3_keys?: {
+    buildings?: string | null;
+    addresses?: string | null;
+  };
+  metadata?: {
+    tile_metrics?: Record<string, unknown> | null;
+  } | null;
+};
+
 export function normalizeAddressFragment(value: string | null | undefined): string {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
 }
@@ -102,13 +114,13 @@ export function stringTileMetric(
 }
 
 export function snapshotHasStaticPmtilesGeometry(
-  snapshot: LambdaSnapshotResponse | null | undefined
+  snapshot: (LambdaSnapshotResponse | StaticGeometrySnapshot) | null | undefined
 ): boolean {
   if (!snapshot) return false;
 
   const metrics = snapshot.metadata?.tile_metrics;
-  const buildingsKey = snapshot.s3_keys.buildings;
-  const addressesKey = snapshot.s3_keys.addresses;
+  const buildingsKey = 'buildings_key' in snapshot ? snapshot.buildings_key : snapshot.s3_keys?.buildings;
+  const addressesKey = 'addresses_key' in snapshot ? snapshot.addresses_key : snapshot.s3_keys?.addresses;
 
   return [
     buildingsKey,
@@ -150,8 +162,12 @@ export function featureCollectionCount(value: unknown): number {
   return Array.isArray(features) ? features.length : 0;
 }
 
-export function isConnectionError(error: Error): boolean {
+export function isConnectionError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+
   return (
+    error.message.includes('fetch failed') ||
+    error.message.includes('ECONNRESET') ||
     error.message.includes('closed') ||
     error.message.includes('Connection Error') ||
     error.message.includes('established') ||
