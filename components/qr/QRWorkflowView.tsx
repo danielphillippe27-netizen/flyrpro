@@ -13,6 +13,7 @@ import { createClient } from '@/lib/supabase/client';
 export function QRWorkflowView() {
   const [qrCodes, setQRCodes] = useState<QRCode[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
 
@@ -27,11 +28,13 @@ export function QRWorkflowView() {
   }, []);
 
   const loadQRCodes = async () => {
+    setLoadError(false);
     try {
       const data = await QRCodeService.fetchQRCodes();
       setQRCodes(data);
     } catch (error) {
       console.error('Error loading QR codes:', error);
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -64,6 +67,22 @@ export function QRWorkflowView() {
         </TabsList>
 
         <TabsContent value="codes" className="mt-6">
+          {loadError && qrCodes.length === 0 && (
+            <div className="mb-4 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-sm font-medium text-destructive">Could not load QR codes.</p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    void loadQRCodes();
+                  }}
+                >
+                  Retry
+                </Button>
+              </div>
+            </div>
+          )}
           {qrCodes.length === 0 ? (
             <div className="text-center py-12 bg-white rounded-lg border">
               <QrCode className="w-12 h-12 mx-auto mb-4 text-gray-400" />
@@ -117,4 +136,3 @@ export function QRWorkflowView() {
     </div>
   );
 }
-

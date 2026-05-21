@@ -37,48 +37,68 @@ function SettingsPageContent() {
   const [user, setUser] = useState<SupabaseUser | null>(null);
   const [entitlement, setEntitlement] = useState<EntitlementSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [entitlementError, setEntitlementError] = useState(false);
   const [upgradeLoading, setUpgradeLoading] = useState(false);
   const [portalLoading, setPortalLoading] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
 
   useEffect(() => {
     const loadUserData = async () => {
-      const supabase = createClient();
-      
-      // Get user
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      if (authUser) {
-        setUser(authUser);
-        
-        // Get user profile
-        const { data: userProfile } = await supabase
-          .from('user_profiles')
-          .select('pro_active, stripe_customer_id, weekly_door_goal, weekly_sessions_goal, weekly_minutes_goal')
-          .eq('user_id', authUser.id)
-          .single();
-        
-        if (userProfile) {
-        } else {
-          // Create profile if it doesn't exist
-          const { data: newProfile } = await supabase
+      setLoadError(false);
+      setEntitlementError(false);
+
+      try {
+        const supabase = createClient();
+
+        // Get user
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (authUser) {
+          setUser(authUser);
+
+          // Get user profile
+          const { data: userProfile } = await supabase
             .from('user_profiles')
-            .insert({ user_id: authUser.id, pro_active: false })
-            .select()
+            .select('pro_active, stripe_customer_id, weekly_door_goal, weekly_sessions_goal, weekly_minutes_goal')
+            .eq('user_id', authUser.id)
             .single();
-          if (newProfile) {
-            void newProfile;
+
+          if (userProfile) {
+          } else {
+            // Create profile if it doesn't exist
+            const { data: newProfile } = await supabase
+              .from('user_profiles')
+              .insert({ user_id: authUser.id, pro_active: false })
+              .select()
+              .single();
+            if (newProfile) {
+              void newProfile;
+            }
           }
+
+          try {
+            const entRes = await fetch('/api/billing/entitlement', { credentials: 'include' });
+            if (entRes.ok) {
+              const entData = await entRes.json();
+              setEntitlement(entData);
+            } else {
+              setEntitlement(null);
+              setEntitlementError(true);
+            }
+          } catch (error) {
+            console.error('Error loading entitlement:', error);
+            setEntitlement(null);
+            setEntitlementError(true);
+          }
+        } else {
+          router.push('/login');
         }
-        const entRes = await fetch('/api/billing/entitlement', { credentials: 'include' });
-        if (entRes.ok) {
-          const entData = await entRes.json();
-          setEntitlement(entData);
-        }
-      } else {
-        router.push('/login');
+      } catch (error) {
+        console.error('Error loading account settings:', error);
+        setLoadError(true);
+      } finally {
+        setLoading(false);
       }
-      
-      setLoading(false);
     };
 
     loadUserData();
@@ -161,6 +181,12 @@ function SettingsPageContent() {
       
       <main className="mx-auto w-full max-w-4xl px-4 sm:px-6 lg:px-8 py-6">
         <div className="space-y-6">
+          {loadError && (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm font-medium text-destructive">
+              Could not load account settings. Please refresh the page.
+            </div>
+          )}
+
           {/* Account Section */}
           <Card>
             <CardHeader>
@@ -211,20 +237,24 @@ function SettingsPageContent() {
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
                     <p className="text-base font-medium dark:text-white">Plan</p>
-                    {entitlement?.is_active && (entitlement.plan === 'pro' || entitlement.plan === 'team') ? (
+                    {entitlementError ? (
+                      <Badge variant="outline">Unavailable</Badge>
+                    ) : entitlement?.is_active && (entitlement.plan === 'pro' || entitlement.plan === 'team') ? (
                       <Badge className="bg-green-500 hover:bg-green-600">Pro</Badge>
                     ) : (
                       <Badge variant="outline">Free</Badge>
                     )}
                   </div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">
-                    {entitlement?.is_active
+                    {entitlementError
+                      ? 'Could not load plan details.'
+                      : entitlement?.is_active
                       ? 'You have access to all Pro features'
                       : 'Upgrade to Pro for unlimited QR codes and advanced features'}
                   </p>
                 </div>
                 <div className="flex gap-2">
-                  {!entitlement?.is_active && (
+                  {!entitlementError && !entitlement?.is_active && (
                     <Button onClick={handleUpgrade} size="sm" disabled={upgradeLoading}>
                       {upgradeLoading ? 'Redirecting…' : 'Upgrade to Pro'}
                     </Button>
