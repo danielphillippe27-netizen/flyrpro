@@ -607,6 +607,19 @@ function firstExistingLayerId(map: MapboxMap, layerIds: string[]): string | unde
   });
 }
 
+function ensure3dBuildingCamera(map: MapboxMap) {
+  try {
+    if (map.getPitch() >= 35) return;
+    map.easeTo({
+      pitch: 45,
+      duration: 500,
+      essential: true,
+    });
+  } catch {
+    // Camera changes are best-effort; the layer should still render without them.
+  }
+}
+
 export function MapBuildingsLayer({
   map,
   campaignId,
@@ -857,7 +870,7 @@ export function MapBuildingsLayer({
 
   /** Neutral footprint when not using status colors (visible on map, not loud red/salmon). */
   const NEUTRAL_FOOTPRINT_COLOR = '#6b7280';
-  const NEUTRAL_EXTRUSION_OPACITY = 0.55;
+  const NEUTRAL_EXTRUSION_OPACITY = 0.82;
   const NEUTRAL_CIRCLE_OPACITY = 0.88;
   const getFootprintFillColor = (): string | ExpressionSpecification =>
     footprintStatusColors ? getColorExpression() : NEUTRAL_FOOTPRINT_COLOR;
@@ -903,8 +916,14 @@ export function MapBuildingsLayer({
         return;
       }
 
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token ?? null;
       const response = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/buildings`, {
         credentials: 'include',
+        headers: {
+          Accept: 'application/json',
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        },
       });
 
       if (!response.ok) {
@@ -1178,7 +1197,7 @@ export function MapBuildingsLayer({
         return;
       }
     }
-  }, [map, circleLayerId]);
+  }, [map, circleLayerId, circleLeadGlowLayerId, leadGlowLayerId, layerId, shadowLayerId]);
 
   // EXPLORATION MODE ONLY: Handle viewport changes (pan/zoom)
   // Campaign mode doesn't use this - data is already fully loaded
@@ -1480,6 +1499,7 @@ export function MapBuildingsLayer({
           intensity: 0.6,
           position: [1.15, 210, 30],
         });
+        ensure3dBuildingCamera(map);
       } catch (error) {
         console.warn('[MapBuildingsLayer] Error setting PMTiles map lighting:', error);
       }
@@ -1816,7 +1836,7 @@ export function MapBuildingsLayer({
 
           // Filter for polygon features only
           const polygonFilter: FilterSpecification = POLYGON_GEOMETRY_FILTER;
-          const buildingHeightExpression = ['coalesce', ['get', 'height'], ['get', 'height_m'], 14] as ExpressionSpecification;
+          const buildingHeightExpression = ['max', ['coalesce', ['get', 'height'], ['get', 'height_m'], 18], 18] as ExpressionSpecification;
           
           // Add the main building layer
           // Add without beforeId to place at end (on top of everything, including labels)
@@ -1937,6 +1957,7 @@ export function MapBuildingsLayer({
             intensity: 0.6, // Increased intensity for better visibility on dark backgrounds
             position: [1.15, 210, 30]
           });
+          ensure3dBuildingCamera(map);
         } catch (lightErr) {
           console.warn('[MapBuildingsLayer] Error setting map lighting:', lightErr);
         }

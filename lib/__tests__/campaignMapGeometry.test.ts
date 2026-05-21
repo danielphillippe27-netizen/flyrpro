@@ -139,9 +139,13 @@ test('omits missing US Bedrock buildings while keeping addresses partial', async
     stateCursor: 'cursor',
   });
 
-  assertEqual(result.status, 'partial');
-  assertEqual(result.layers.buildings, undefined);
-  assertEqual(result.buildings_render_mode, null);
+  assertEqual(result.status, 'ready');
+  assertEqual(result.layers.buildings?.kind, 'geojson');
+  assertEqual(
+    result.layers.buildings?.url,
+    'https://www.flyrpro.app/api/campaigns/campaign-1/buildings'
+  );
+  assertEqual(result.buildings_render_mode, 'geojson');
   assertTrue(result.layers.addresses);
   assertTrue(result.layers.parcels);
 });

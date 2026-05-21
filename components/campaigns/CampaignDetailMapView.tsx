@@ -260,10 +260,6 @@ function safeGetSource(m: mapboxgl.Map, sourceId: string): boolean {
   }
 }
 
-function isCustomBuildingLayer(layerId: string): boolean {
-  return CUSTOM_BUILDING_LAYER_PREFIXES.some((prefix) => layerId.startsWith(prefix));
-}
-
 function shouldHideResidentialOnlyBaseLayer(layer: mapboxgl.AnyLayer): boolean {
   if (RESIDENTIAL_ONLY_PRESERVE_LAYER_PREFIXES.some((prefix) => layer.id.startsWith(prefix))) {
     return false;

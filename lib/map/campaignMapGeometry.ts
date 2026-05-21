@@ -334,6 +334,7 @@ export async function buildCampaignMapGeometry(
         ? null
         : buildingPmtilesKey
       : buildingGeojsonKey;
+  const hasScopedBuildingArtifact = Boolean(buildingPmtilesKey || buildingGeojsonKey);
 
   const addressPmtilesKey =
     stringMetric(metrics, 'addresses_pmtiles_key') ??
@@ -403,9 +404,18 @@ export async function buildCampaignMapGeometry(
     }),
   ]);
 
-  const scopedBuildings = buildings
+  const scopedBuildings = hasScopedBuildingArtifact
     ? {
-        ...buildings,
+        ...(buildings ?? {
+          kind: 'geojson' as const,
+          url: scopedBuildingsUrl,
+          s3Key: buildingPmtilesKey ?? buildingGeojsonKey ?? '',
+          sourceLayer: buildingSourceLayer,
+          promoteId: buildingPromoteId,
+          minzoom,
+          maxzoom,
+          bounds,
+        }),
         kind: 'geojson' as const,
         url: scopedBuildingsUrl,
         tilejsonUrl: null,
@@ -431,7 +441,9 @@ export async function buildCampaignMapGeometry(
   const issues: string[] = [];
   if (!hasBuildings) issues.push('buildings_layer_unavailable');
   if (!hasAddresses) issues.push('addresses_layer_unavailable');
-  if (buildingPmtilesKey && !usableBuildingKey) issues.push('bedrock_us_buildings_pmtiles_missing');
+  if (buildingPmtilesKey && !usableBuildingKey && !hasScopedBuildingArtifact) {
+    issues.push('bedrock_us_buildings_pmtiles_missing');
+  }
 
   const addressCircleLayer = addressSourceLayer;
   const geometryProvider =
