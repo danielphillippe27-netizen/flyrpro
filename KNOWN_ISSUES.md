@@ -1,55 +1,64 @@
 # Known Issues
 
-This file documents known technical debt and deferred fixes found during smoke testing on 2026-05-20.
+Technical debt and deferred fixes. Updated 2026-05-20 after smoke testing.
 
 ---
 
-## Deferred fixes
+## Deferred fixes (require engineering work)
 
 ### Sidebar stale after campaign/farm creation
-
-The campaign and farm sidebars fetch once on mount and do not refetch after a new campaign or farm is created. Users may need to refresh before the new item appears in the sidebar.
-
-Complexity: medium.
+Campaign and farm sidebars fetch once on mount and do not refetch after 
+creation. Users must refresh to see the new item in the sidebar.
+Complexity: medium. No iOS coupling.
 
 ### Contact status shows "Not Visited" after save
-
-The outcome RPC writes to `address_statuses`, but does not update `contacts.status`. This needs a product decision on how door-knock outcomes should map to contact statuses.
-
-iOS-coupled tables are involved.
+The outcome RPC writes to address_statuses but does not update 
+contacts.status. Needs a product decision on how door-knock outcomes 
+map to contact statuses before fixing.
+iOS-coupled tables involved: campaign_addresses, address_statuses, 
+contacts, session_events.
 
 ### Add contact form scroll bug
+The add contact form portals into the map shell context and scroll 
+is constrained when the form opens near the top of the viewport. 
+Needs portal or positioning fix.
 
-The add contact form can be constrained because it portals into the map shell context. This needs a portal or positioning fix so the form scrolls reliably.
+### QR generation has no true progress indicator
+The generate QRs button shows a static progress message while 
+generating. An unused qr_generation_jobs table/route exists but 
+is not wired up. True async progress requires streaming or polling 
+integration.
+Complexity: medium to large.
 
 ---
 
 ## Needs owner decision
 
-### `accountability_posts` table missing in production
+### accountability_posts table missing in production
+Migration 20260408233000_challenge_badges_streaks_share_cards.sql 
+has not been applied to production. The dashboard accountability 
+card widget returns 500 on every load.
+Action: Daniel to apply the migration.
 
-Migration `20260408233000_challenge_badges_streaks_share_cards.sql` appears not to be applied in production. The dashboard route returns 500 when loading the latest accountability card.
-
-Owner decision: apply the migration to fix.
-
-### Buildings/Addresses map toggle
-
-The campaign detail map defaults to the Buildings view, so addresses are hidden until the user clicks Addresses. This is confusing for new users.
-
-Owner decision: choose the default map state.
-
-### Map auto-centers to current location on campaign detail
-
-This PR fixes the initial center for campaigns with `bbox` or `territory_boundary`, but existing campaigns without `bbox` may still default to Toronto.
-
-Owner decision: decide whether to backfill missing campaign bounds.
+### Buildings/Addresses map toggle default
+Campaign detail map defaults to Buildings tab — addresses are hidden 
+until the user clicks Addresses. Confusing for new users who expect 
+to see their campaign addresses on load.
+Action: Daniel to decide default map state.
 
 ### Meta ads panel not visible
-
-The Meta ads panel is likely gated behind Meta OAuth connection.
-
-Owner decision: confirm expected visibility before changing the UI.
+Meta ads tab does not appear on farm detail pages. Likely gated 
+behind Meta OAuth connection.
+Action: Daniel to confirm expected visibility behavior.
 
 ### Contact save may not persist in local dev
+Contact status resets after navigation in local dev. Needs 
+production verification before investigating further.
 
-Status can reset after navigation in local dev. This needs production verification before deeper changes.
+---
+
+## Notes
+- QR ZIP campaign_id filter: confirmed already present, not a bug.
+- Map initial center: fixed in PR 19 for campaigns with bbox/territory_boundary.
+- Notification insert schema mismatch (message vs body): fixed in PR 19.
+- View QR blank tab: fixed in PR 17/19.
