@@ -1070,6 +1070,13 @@ export function MapBuildingsLayer({
         }
 
         const featureKey = String(fid ?? f.id ?? '').trim();
+        const stableBuildingId = String(
+          props.gers_id ??
+            props.building_id ??
+            props.id ??
+            f.id ??
+            featureKey
+        ).trim();
         const inferredAddresses = featureKey ? inferredAddressAssignments.get(featureKey) ?? [] : [];
         const primaryInferredAddress = inferredAddresses.length === 1 ? inferredAddresses[0] : null;
         const inferredScansTotal = inferredAddresses.reduce((sum, address) => sum + Number(address.scans ?? 0), 0);
@@ -1115,7 +1122,9 @@ export function MapBuildingsLayer({
             status: props.status ?? inferredStatus ?? 'not_visited',
             scans_total: Math.max(Number(props.scans_total ?? 0), inferredScansTotal),
             qr_scanned: Boolean(props.qr_scanned) || inferredScansTotal > 0,
-            feature_id: fid ?? f.id,
+            gers_id: props.gers_id ?? stableBuildingId,
+            building_id: props.building_id ?? stableBuildingId,
+            feature_id: props.feature_id ?? stableBuildingId,
           },
         }];
       }),
@@ -1799,8 +1808,8 @@ export function MapBuildingsLayer({
             type: 'geojson',
             data: normalizedFeatures,
             // promoteId enables setFeatureState() for real-time color updates
-            // Use feature_id (unique per feature: unit id or gers_id for detached)
-            promoteId: 'feature_id',
+            // Match iOS: use the stable building identifier directly.
+            promoteId: 'gers_id',
             // Buffer extends tile loading 512px beyond viewport edge
             // This prevents edge-clipping when panning in campaign mode
             buffer: 512,
@@ -2584,8 +2593,7 @@ export function MapBuildingsLayer({
             });
             
             // Use setFeatureState for instant color update (no full re-render)
-            // Features use promoteId: 'feature_id' (unit id or gers_id for detached). building_stats is keyed by gers_id.
-            // So we update every feature whose gers_id matches (one for detached, multiple for unit slices).
+            // Features use promoteId: 'gers_id'. building_stats is keyed by gers_id.
             if (updatedGersId) {
               try {
                 const featureState = { 
@@ -2599,7 +2607,7 @@ export function MapBuildingsLayer({
                   (f: GeoJSON.Feature) => getStringRecordValue(toRecord(f.properties), 'gers_id') === updatedGersId
                 ) ?? [];
                 const ids = featuresToUpdate
-                  .map((f: GeoJSON.Feature) => getStringRecordValue(toRecord(f.properties), 'feature_id'))
+                  .map((f: GeoJSON.Feature) => getStringRecordValue(toRecord(f.properties), 'gers_id'))
                   .filter((id): id is string => Boolean(id));
                 if (ids.length === 0) {
                   // Fallback: treat gers_id as feature id (detached or legacy data without feature_id)

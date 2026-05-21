@@ -755,8 +755,15 @@ export function CampaignDetailMapView({
 
     const loadMapBundle = async () => {
       try {
+        const supabase = createClient();
+        const { data: sessionData } = await supabase.auth.getSession();
+        const accessToken = sessionData.session?.access_token ?? null;
         const response = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/map-bundle`, {
           credentials: 'include',
+          headers: {
+            Accept: 'application/json',
+            ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+          },
         });
         if (!response.ok) {
           throw new Error(`Campaign map bundle request failed with status ${response.status}`);
