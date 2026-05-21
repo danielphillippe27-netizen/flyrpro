@@ -673,8 +673,15 @@ export function MapBuildingsLayer({
   const circleLeadGlowLayerId = 'map-buildings-lead-glow-points';
   const addressLabelSourceId = 'map-address-centroid-label-source';
   const addressLabelLayerId = 'map-address-centroid-labels';
-  const supabase = createClient();
+  const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null);
   const useCanonicalAddressState = Boolean(addressStateOverrides?.length);
+
+  const getSupabase = useCallback(() => {
+    if (!supabaseRef.current) {
+      supabaseRef.current = createClient();
+    }
+    return supabaseRef.current;
+  }, []);
   
   // Debounce fetching to prevent spamming Supabase during rapid panning
   const fetchTimeout = useRef<NodeJS.Timeout | undefined>(undefined);
@@ -955,6 +962,7 @@ export function MapBuildingsLayer({
     }
 
     try {
+      const supabase = getSupabase();
       const { data: sessionData } = await supabase.auth.getSession();
       const accessToken = sessionData.session?.access_token ?? null;
       const response = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/buildings`, {
@@ -1049,7 +1057,7 @@ export function MapBuildingsLayer({
         setIsFetching(false);
       }
     }
-  }, [campaignId, refreshKey, addressStateOverrides, campaignBoundary, campaignBbox]);
+  }, [campaignId, refreshKey, addressStateOverrides, campaignBoundary, campaignBbox, getSupabase]);
 
   useEffect(() => {
     return () => {
@@ -1186,6 +1194,7 @@ export function MapBuildingsLayer({
 
 
     try {
+      const supabase = getSupabase();
       const rpcParams = {
         min_lon: bounds.sw[0],
         min_lat: bounds.sw[1],
@@ -1221,7 +1230,7 @@ export function MapBuildingsLayer({
     } catch (err) {
       console.error('[MapBuildingsLayer] Error fetching buildings:', err);
     }
-  }, [supabase]);
+  }, [getSupabase]);
 
   // Handle zoom changes (for layer visibility control)
   // In campaign mode: just track zoom for layer visibility (data already loaded)
@@ -1807,10 +1816,24 @@ export function MapBuildingsLayer({
     let cleanupLayerInteractionHandlers: (() => void) | undefined;
 
     // Define the update logic as a function we can call or defer
-    const updateLayers = () => {
+    const updateLayers = (): boolean => {
+      const normalizedFeatureCount = normalizedFeaturesRef.current?.features.length ?? 0;
+      setBuildingsDebug({
+        renderMode: 'geojson-source',
+        attachAttempt: true,
+        styleLoaded: (() => {
+          try {
+            return map.isStyleLoaded();
+          } catch {
+            return false;
+          }
+        })(),
+        normalizedFeatureCount,
+      });
+
       // Check if style is loaded - we need this to add layers
       if (!map.isStyleLoaded()) {
-        return;
+        return false;
       }
 
       const addressLabelFeatures = buildAddressLabelFeatureCollection(addressStateOverrides);
@@ -1850,13 +1873,20 @@ export function MapBuildingsLayer({
         lastSetDataRef.current = normalizedFeatures;
       }
 
-      if (labelSource) {
+      if (showAddressLabels && labelSource) {
         labelSource.setData(addressLabelFeatures);
       }
 
       if (!normalizedFeatures || normalizedFeatures.features.length === 0) {
-        return;
+        return false;
       }
+
+      setBuildingsDebug({
+        renderMode: 'geojson-source',
+        attachStage: 'normalized-features-ready',
+        normalizedFeatureCount: normalizedFeatures.features.length,
+        normalizedFeatureBbox: getFeatureCollectionBbox(normalizedFeatures.features),
+      });
 
       const verifyRenderedBuildingsOnIdle = () => {
         try {
@@ -1890,20 +1920,41 @@ export function MapBuildingsLayer({
       const routeSources = ['route-source', 'route-source-inter', 'route-points-source', 'block-stops-source'];
       
       routeLayers.forEach(id => {
-        if (map.getLayer(id)) {
-          try { map.removeLayer(id); } catch (e) {}
+        try {
+          if (map.getLayer(id)) {
+            map.removeLayer(id);
+          }
+        } catch {
+          // Ignore transient style-registry errors while the map is settling.
         }
       });
       
       routeSources.forEach(id => {
-        if (map.getSource(id)) {
-          try { map.removeSource(id); } catch (e) {}
+        try {
+          if (map.getSource(id)) {
+            map.removeSource(id);
+          }
+        } catch {
+          // Ignore transient style-registry errors while the map is settling.
         }
+      });
+
+      setBuildingsDebug({
+        renderMode: 'geojson-source',
+        attachStage: 'route-cleanup-complete',
+        sourceAlreadyAttached: Boolean(source),
+        labelSourceAlreadyAttached: Boolean(labelSource),
+        normalizedFeatureCount: normalizedFeatures.features.length,
       });
 
       // Create source if it doesn't exist yet (source update already handled above)
       if (!source) {
         try {
+          setBuildingsDebug({
+            renderMode: 'geojson-source',
+            attachStage: 'adding-source',
+            normalizedFeatureCount: normalizedFeatures.features.length,
+          });
           map.addSource(sourceId, {
             type: 'geojson',
             data: normalizedFeatures,
@@ -1918,6 +1969,12 @@ export function MapBuildingsLayer({
           });
           lastSetDataRef.current = normalizedFeatures;
           source = map.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined;
+          setBuildingsDebug({
+            renderMode: 'geojson-source',
+            attachStage: 'source-ready',
+            sourceAttached: Boolean(source),
+            normalizedFeatureCount: normalizedFeatures.features.length,
+          });
         } catch (err) {
           console.error('Error adding source:', err);
           setBuildingsDebug({
@@ -1926,11 +1983,11 @@ export function MapBuildingsLayer({
             normalizedFeatureCount: normalizedFeatures.features.length,
             normalizedFeatureBbox: getFeatureCollectionBbox(normalizedFeatures.features),
           });
-          return;
+          return false;
         }
       }
 
-      if (!labelSource) {
+      if (showAddressLabels && !labelSource) {
         try {
           map.addSource(addressLabelSourceId, {
             type: 'geojson',
@@ -1943,18 +2000,54 @@ export function MapBuildingsLayer({
         }
       }
 
+      setBuildingsDebug({
+        renderMode: 'geojson-source',
+        attachStage: 'label-source-ready',
+        sourceAttached: Boolean(map.getSource(sourceId)),
+        labelSourceAttached: Boolean(map.getSource(addressLabelSourceId)),
+        normalizedFeatureCount: normalizedFeatures.features.length,
+      });
+
       // map.getLayer can throw during style transitions even after an earlier style-loaded check.
       let hasBuildingLayer = false;
       try {
-        if (!map.isStyleLoaded()) return;
+        const styleLoadedBeforeLayerCheck = map.isStyleLoaded();
+        setBuildingsDebug({
+          renderMode: 'geojson-source',
+          attachStage: 'before-layer-check',
+          styleLoadedBeforeLayerCheck,
+          sourceAttached: Boolean(map.getSource(sourceId)),
+          normalizedFeatureCount: normalizedFeatures.features.length,
+        });
+        if (!styleLoadedBeforeLayerCheck) return false;
         hasBuildingLayer = Boolean(map.getLayer(layerId));
-      } catch {
-        return;
+        setBuildingsDebug({
+          renderMode: 'geojson-source',
+          attachStage: 'layer-check-complete',
+          hasBuildingLayer,
+          sourceAttached: Boolean(map.getSource(sourceId)),
+          normalizedFeatureCount: normalizedFeatures.features.length,
+        });
+      } catch (err) {
+        setBuildingsDebug({
+          renderMode: 'geojson-source',
+          attachStage: 'layer-check-error',
+          layerCheckError: err instanceof Error ? err.message : String(err),
+          sourceAttached: true,
+          normalizedFeatureCount: normalizedFeatures.features.length,
+        });
+        return false;
       }
 
       // Add or update fill-extrusion layer (for Polygon/MultiPolygon geometries)
       if (!hasBuildingLayer) {
         try {
+          setBuildingsDebug({
+            renderMode: 'geojson-source',
+            attachStage: 'adding-layers',
+            sourceAttached: Boolean(map.getSource(sourceId)),
+            normalizedFeatureCount: normalizedFeatures.features.length,
+          });
           // NOTE: Shadow layer removed to fix "dark square" visual artifact
           // The 3D fill-extrusion with proper lighting provides sufficient visual depth
           const filterExpr = getFilterExpression();
@@ -2198,6 +2291,7 @@ export function MapBuildingsLayer({
 
           // Fetch contacts by GERS ID
           try {
+            const supabase = getSupabase();
             const { data: contacts, error } = await supabase
               .from('contacts')
               .select('full_name, phone, email, status, notes')
@@ -2400,6 +2494,13 @@ export function MapBuildingsLayer({
         }
         } catch (err) {
           console.error('Error adding fill-extrusion layer:', err);
+          setBuildingsDebug({
+            renderMode: 'geojson-source',
+            layerAddError: err instanceof Error ? err.message : String(err),
+            normalizedFeatureCount: normalizedFeatures.features.length,
+            normalizedFeatureBbox: getFeatureCollectionBbox(normalizedFeatures.features),
+          });
+          return false;
         }
       } else {
         // Update paint properties for existing layer to ensure opacity is correct
@@ -2569,42 +2670,42 @@ export function MapBuildingsLayer({
           };
         } catch (err) {
           console.error('Error updating layer paint properties:', err);
+          setBuildingsDebug({
+            renderMode: 'geojson-source',
+            layerUpdateError: err instanceof Error ? err.message : String(err),
+            normalizedFeatureCount: normalizedFeatures.features.length,
+          });
+          return false;
         }
       }
+      return Boolean(map.getSource(sourceId) && (map.getLayer(layerId) || map.getLayer(surfaceLayerId)));
     }; // End of updateLayers function
 
-    // Always attempt to run updateLayers - it will handle style loading state internally
-    // If style isn't loaded yet, we also set up an idle listener as backup
-    const styleLoaded = map.isStyleLoaded();
-    
-    // Wrapper for idle listener so we can remove it
-    const onIdle = () => {
-      updateLayers();
+    let retryIntervalId: number | null = null;
+    const tryUpdateLayers = () => {
+      if (updateLayers() && retryIntervalId !== null) {
+        window.clearInterval(retryIntervalId);
+        retryIntervalId = null;
+      }
     };
-    
-    // Wrapper for style.load listener
-    const onStyleLoad = () => {
-      updateLayers();
-    };
-    
-    if (styleLoaded) {
-      // Style is ready - run immediately
-      updateLayers();
-    } else {
-      // Style not ready - set up idle listener as backup
-      map.once('idle', onIdle);
-    }
-    
-    // Also listen for style.load to handle style changes (e.g., switching map themes)
-    map.on('style.load', onStyleLoad);
+
+    tryUpdateLayers();
+    map.on('idle', tryUpdateLayers);
+    map.on('style.load', tryUpdateLayers);
+    map.on('styledata', tryUpdateLayers);
+    retryIntervalId = window.setInterval(tryUpdateLayers, 200);
 
     // Cleanup listeners
     return () => {
-      map.off('idle', onIdle);
-      map.off('style.load', onStyleLoad);
+      map.off('idle', tryUpdateLayers);
+      map.off('style.load', tryUpdateLayers);
+      map.off('styledata', tryUpdateLayers);
+      if (retryIntervalId !== null) {
+        window.clearInterval(retryIntervalId);
+      }
       cleanupLayerInteractionHandlers?.();
     };
-  }, [map, features, zoomLevel, onBuildingClick, statusFilters, campaignId, supabase, onAddToCRM, showOrphans, showAddressLabels, footprintStatusColors, addressStateOverrides]);
+  }, [map, features, zoomLevel, onBuildingClick, statusFilters, campaignId, getSupabase, onAddToCRM, showOrphans, showAddressLabels, footprintStatusColors, addressStateOverrides]);
 
   // Update color and filter when statusFilters or campaignId changes
   useEffect(() => {
@@ -2755,6 +2856,7 @@ export function MapBuildingsLayer({
 
     console.log('[MapBuildingsLayer] Setting up real-time subscription for building_stats, campaignId:', campaignId);
 
+    const supabase = getSupabase();
     const channel = supabase
       .channel(`building-stats-realtime-${campaignId}`)
       .on(
@@ -2827,7 +2929,7 @@ export function MapBuildingsLayer({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [map, campaignId, supabase, useCanonicalAddressState]);
+  }, [map, campaignId, getSupabase, useCanonicalAddressState]);
 
   // Real-time subscription for scan_events (direct scan tracking)
   // This is a fallback in case building_stats trigger fails or realtime isn't enabled
@@ -2836,6 +2938,7 @@ export function MapBuildingsLayer({
 
     console.log('[MapBuildingsLayer] Setting up real-time subscription for scan_events, campaignId:', campaignId);
 
+    const supabase = getSupabase();
     const channel = supabase
       .channel(`scan-events-realtime-${campaignId}`)
       .on(
@@ -2897,12 +3000,13 @@ export function MapBuildingsLayer({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [map, campaignId, supabase, useCanonicalAddressState]);
+  }, [map, campaignId, getSupabase, useCanonicalAddressState]);
 
   // Real-time subscription for building_address_links (stable linker: map snaps grey → red as links are added)
   useEffect(() => {
     if (!map || !campaignId) return;
 
+    const supabase = getSupabase();
     const channel = supabase
       .channel(`building-links-realtime-${campaignId}`)
       .on(
@@ -2926,7 +3030,7 @@ export function MapBuildingsLayer({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [map, campaignId, supabase, fetchCampaignData]);
+  }, [map, campaignId, getSupabase, fetchCampaignData]);
 
   // Cleanup on unmount
   useEffect(() => {
