@@ -1225,6 +1225,32 @@ export function CampaignDetailMapView({
               return [coordinate.lon, coordinate.lat];
             }
           }
+
+          const bbox = campaign?.bbox;
+          if (
+            Array.isArray(bbox) &&
+            bbox.length === 4 &&
+            bbox.every((value) => typeof value === 'number' && Number.isFinite(value))
+          ) {
+            return [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2];
+          }
+
+          const boundary = campaign?.territory_boundary as GeoJSON.Polygon | null | undefined;
+          const ring = boundary?.coordinates?.[0] ?? [];
+          if (ring.length > 0) {
+            const bounds = new mapboxgl.LngLatBounds();
+            for (const coordinate of ring) {
+              const [lon, lat] = coordinate;
+              if (Number.isFinite(lon) && Number.isFinite(lat)) {
+                bounds.extend([lon, lat]);
+              }
+            }
+            if (!bounds.isEmpty()) {
+              const center = bounds.getCenter();
+              return [center.lng, center.lat];
+            }
+          }
+
           return [-79.3832, 43.6532]; // Toronto default
         };
 

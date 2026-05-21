@@ -1704,46 +1704,57 @@ export async function GET(
       console.log('[API] No Diamond snapshot found; returning address points while buildings load');
     }
 
-    // Use the RPC for immediate address points only while Diamond builds.
-    // Building polygons are served from the Diamond snapshot, not direct Gold/Silver DB fallbacks.
-    console.log('[API] Fetching campaign features via rpc_get_campaign_full_features');
+    const BEDROCK_DIAMOND_SOURCES = [
+      'diamond','bedrock_ca','bedrock_us','bedrock_au',
+      'bedrock_nz','bedrock_za','bedrock_uk'
+    ];
+    let visibleFallbackFeatures: FeatureCollectionLike | null = null;
 
-    const { data: campaignFeatures, error: featuresError } = await supabase.rpc(
-      'rpc_get_campaign_full_features',
-      { p_campaign_id: campaignId }
-    );
-    const normalizedCampaignFeatures = (campaignFeatures ?? null) as FeatureCollectionLike | null;
-    const visibleCampaignFeatures = filterCampaignBoundaryFeatures(
-      filterNonLinkableBuildingFeatures(
-        filterHiddenBuildingFeatures(normalizedCampaignFeatures, hiddenBuildingIds)
-      ),
-      campaignBoundary
-    );
-    const visibleFallbackFeatures = filterAddressPointFallbackFeatures(visibleCampaignFeatures);
-
-    if (!featuresError && (visibleCampaignFeatures?.features?.length ?? 0) > 0) {
-      const hasPolygons = hasPolygonFeatures(visibleCampaignFeatures);
-      const hasAddressPointFallbacks = hasAddressPointFallbackFeatures(visibleCampaignFeatures);
-
-      if (hasPolygons) {
-        console.log(
-          hasAddressPointFallbacks
-            ? '[API] RPC returned mixed polygons + address points; holding polygons for Diamond snapshot path'
-            : '[API] RPC returned polygons; holding polygons for Diamond snapshot path'
-        );
-      } else {
-        console.log('[API] RPC returned point-only features; showing addresses while buildings load');
-      }
-    } else if (featuresError) {
-      console.error('[API] Feature RPC error:', featuresError.message);
+    if (BEDROCK_DIAMOND_SOURCES.includes(campaignAccess.provision_source ?? '')) {
+      console.log('[API] Skipping Gold RPC fallback for Bedrock/Diamond campaign');
     } else {
-      console.log('[API] No linked features from RPC');
-    }
+      // Use the RPC for immediate address points only while Diamond builds.
+      // Building polygons are served from the Diamond snapshot, not direct Gold/Silver DB fallbacks.
+      console.log('[API] Fetching campaign features via rpc_get_campaign_full_features');
 
-    const visibleCampaignFeatureCount = visibleCampaignFeatures?.features?.length ?? 0;
-    if (visibleCampaignFeatureCount > 0 && hasPolygonFeatures(visibleCampaignFeatures)) {
-      console.log(`[API] Returning ${visibleCampaignFeatureCount} campaign-scoped RPC features after artifact fallback failed`);
-      return NextResponse.json(visibleCampaignFeatures);
+      const { data: campaignFeatures, error: featuresError } = await supabase.rpc(
+        'rpc_get_campaign_full_features',
+        { p_campaign_id: campaignId }
+      );
+      const normalizedCampaignFeatures = (campaignFeatures ?? null) as FeatureCollectionLike | null;
+      const visibleCampaignFeatures = filterCampaignBoundaryFeatures(
+        filterNonLinkableBuildingFeatures(
+          filterHiddenBuildingFeatures(normalizedCampaignFeatures, hiddenBuildingIds)
+        ),
+        campaignBoundary
+      );
+      visibleFallbackFeatures = filterAddressPointFallbackFeatures(visibleCampaignFeatures);
+
+      if (!featuresError && (visibleCampaignFeatures?.features?.length ?? 0) > 0) {
+        const hasPolygons = hasPolygonFeatures(visibleCampaignFeatures);
+        const hasAddressPointFallbacks = hasAddressPointFallbackFeatures(visibleCampaignFeatures);
+
+        if (hasPolygons) {
+          console.log(
+            hasAddressPointFallbacks
+              ? '[API] RPC returned mixed polygons + address points; holding polygons for Diamond snapshot path'
+              : '[API] RPC returned polygons; holding polygons for Diamond snapshot path'
+          );
+        } else {
+          console.log('[API] RPC returned point-only features; showing addresses while buildings load');
+        }
+      } else if (featuresError) {
+        console.error('[API] Feature RPC error:', featuresError.message);
+      } else {
+        console.log('[API] No linked features from RPC');
+      }
+
+      const visibleCampaignFeatureCount = visibleCampaignFeatures?.features?.length ?? 0;
+      if (visibleCampaignFeatureCount > 0 && hasPolygonFeatures(visibleCampaignFeatures)) {
+        console.log(`[API] Returning ${visibleCampaignFeatureCount} campaign-scoped RPC features after artifact fallback failed`);
+        return NextResponse.json(visibleCampaignFeatures);
+      }
+
     }
 
     if (allowDirectDbPolygonFallback()) {

@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useState, useCallback, useEffect, useRef } from 'react';
+import { Suspense, useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,7 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { User, Users, Building2, Plus, Minus } from 'lucide-react';
+import { Check, ChevronDown, User, Users, Building2, Plus, Minus } from 'lucide-react';
 import { ExclusiveOfferArcadeEmbed } from '@/components/landing/ExclusiveOfferArcadeEmbed';
 import { getClientAsync } from '@/lib/supabase/client';
 import { COUNTRY_OPTIONS } from '@/lib/countries';
@@ -201,6 +201,8 @@ function OnboardingContent() {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [countryCode, setCountryCode] = useState('');
+  const [countrySearchOpen, setCountrySearchOpen] = useState(false);
+  const [countrySearchQuery, setCountrySearchQuery] = useState('');
   const [workEmail, setWorkEmail] = useState('');
   const [accountPassword, setAccountPassword] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
@@ -348,6 +350,14 @@ function OnboardingContent() {
       (normalizedWorkEmail.length > 0 && accountPassword.trim().length >= 6));
   const canStep3 =
     workspaceName.trim().length > 0 && industry.length > 0;
+  const selectedCountry = COUNTRY_OPTIONS.find((country) => country.code === countryCode);
+  const filteredCountries = useMemo(() => {
+    const query = countrySearchQuery.trim().toLowerCase();
+    if (!query) return COUNTRY_OPTIONS;
+    return COUNTRY_OPTIONS.filter((country) =>
+      `${country.label} ${country.name} ${country.code}`.toLowerCase().includes(query)
+    );
+  }, [countrySearchQuery]);
 
   const persistExclusiveAuthDraft = useCallback(() => {
     if (!isExclusivePartnerOnboarding || typeof window === 'undefined') return;
@@ -755,21 +765,52 @@ function OnboardingContent() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="countryCode" className="text-base text-white">Country</Label>
-              <select
-                id="countryCode"
-                value={countryCode}
-                onChange={(event) => setCountryCode(event.target.value)}
-                className="h-16 w-full rounded-md border border-zinc-600 bg-[#2a2a2a] px-3 text-2xl text-white outline-none focus:border-white focus:ring-2 focus:ring-white/40"
-              >
-                <option value="" disabled>
-                  Select your country
-                </option>
-                {COUNTRY_OPTIONS.map((country) => (
-                  <option key={country.code} value={country.code}>
-                    {country.label}
-                  </option>
-                ))}
-              </select>
+              <div className="relative">
+                <button
+                  id="countryCode"
+                  type="button"
+                  onClick={() => setCountrySearchOpen((open) => !open)}
+                  className="flex h-16 w-full items-center justify-between rounded-md border border-zinc-600 bg-[#2a2a2a] px-3 text-left text-2xl text-white outline-none focus:border-white focus:ring-2 focus:ring-white/40"
+                  aria-haspopup="listbox"
+                  aria-expanded={countrySearchOpen}
+                >
+                  <span>{selectedCountry?.label ?? 'Select your country'}</span>
+                  <ChevronDown className="h-5 w-5 text-zinc-400" />
+                </button>
+                {countrySearchOpen ? (
+                  <div className="absolute z-50 mt-2 w-full overflow-hidden rounded-md border border-zinc-600 bg-[#1f1f1f] shadow-xl">
+                    <Input
+                      value={countrySearchQuery}
+                      onChange={(event) => setCountrySearchQuery(event.target.value)}
+                      placeholder="Search countries..."
+                      className="h-12 rounded-none border-0 border-b border-zinc-700 bg-[#2a2a2a] text-white placeholder:text-zinc-500 focus-visible:ring-0"
+                    />
+                    <div className="max-h-64 overflow-y-auto" role="listbox" aria-label="Countries">
+                      {filteredCountries.length > 0 ? (
+                        filteredCountries.map((country) => (
+                          <button
+                            key={country.code}
+                            type="button"
+                            role="option"
+                            aria-selected={country.code === countryCode}
+                            onClick={() => {
+                              setCountryCode(country.code);
+                              setCountrySearchOpen(false);
+                              setCountrySearchQuery('');
+                            }}
+                            className="flex w-full items-center justify-between px-3 py-3 text-left text-base text-white hover:bg-white/10"
+                          >
+                            <span>{country.label}</span>
+                            {country.code === countryCode ? <Check className="h-4 w-4" /> : null}
+                          </button>
+                        ))
+                      ) : (
+                        <p className="px-3 py-3 text-sm text-zinc-400">No countries found.</p>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
             </div>
             {isExclusivePartnerOnboarding ? (
               <>
