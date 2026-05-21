@@ -520,12 +520,14 @@ export function CampaignDetailMapView({
   const { isFullscreen: isMapFullscreen, toggle: toggleMapFullscreen } = useFullscreen(mapShellRef);
   const [statusFilters, setStatusFilters] = useState<StatusFilters>(DEFAULT_STATUS_FILTERS);
   const [mapLoaded, setMapLoaded] = useState(false);
+  const [mapInitFailed, setMapInitFailed] = useState(false);
   const [loadingAnimationData, setLoadingAnimationData] = useState<object | null>(null);
   const [buildingsRenderState, setBuildingsRenderState] = useState<MapBuildingsRenderState>({
     isFetching: false,
     hasData: false,
     hasVisibleFeatures: false,
     hasBuildingPolygons: false,
+    buildingsUnavailable: false,
     featureCount: 0,
     visibleFeatureCount: 0,
     zoomLevel: 15,
@@ -533,6 +535,8 @@ export function CampaignDetailMapView({
   const [showBuildingPendingOverlay, setShowBuildingPendingOverlay] = useState(false);
   const boundsFittedRef = useRef(false);
   const initAttemptedRef = useRef(false);
+  const mapInitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const retryCountRef = useRef(0);
   const hasRenderedBuildingsRef = useRef(false);
   
   // Location Card state
@@ -592,6 +596,7 @@ export function CampaignDetailMapView({
         previous.hasData === state.hasData &&
         previous.hasVisibleFeatures === state.hasVisibleFeatures &&
         previous.hasBuildingPolygons === state.hasBuildingPolygons &&
+        previous.buildingsUnavailable === state.buildingsUnavailable &&
         previous.featureCount === state.featureCount &&
         previous.visibleFeatureCount === state.visibleFeatureCount &&
         previous.zoomLevel === state.zoomLevel
@@ -722,6 +727,7 @@ export function CampaignDetailMapView({
       hasData: false,
       hasVisibleFeatures: false,
       hasBuildingPolygons: false,
+      buildingsUnavailable: false,
       featureCount: 0,
       visibleFeatureCount: 0,
       zoomLevel: 15,
@@ -1172,11 +1178,19 @@ export function CampaignDetailMapView({
 
   useEffect(() => {
     if (map.current || initAttemptedRef.current) return;
+    setMapInitFailed(false);
+    retryCountRef.current = 0;
     let cancelled = false;
     let retryFrameId: number | null = null;
     let resizeTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
     const scheduleRetry = () => {
+      retryCountRef.current += 1;
+      if (retryCountRef.current > 60) {
+        console.error('[CampaignDetailMapView] Map container not ready after max retries');
+        setMapInitFailed(true);
+        return;
+      }
       retryFrameId = requestAnimationFrame(() => {
         void checkAndInit();
       });
@@ -1266,6 +1280,12 @@ export function CampaignDetailMapView({
           center: getInitialCenter(),
           zoom: 12,
         });
+        mapInitTimeoutRef.current = setTimeout(() => {
+          if (!mapLoaded) {
+            console.error('[CampaignDetailMapView] Map load timed out after 15s');
+            setMapInitFailed(true);
+          }
+        }, 15000);
         setFlyrMapInitDebug({ stage: 'map_created' });
       } catch (error) {
         console.error('[CampaignDetailMapView] Failed to initialize Mapbox map:', error);
@@ -1279,7 +1299,12 @@ export function CampaignDetailMapView({
       }
 
       map.current.on('load', () => {
+        if (mapInitTimeoutRef.current) {
+          clearTimeout(mapInitTimeoutRef.current);
+          mapInitTimeoutRef.current = null;
+        }
         setFlyrMapInitDebug({ stage: 'map_loaded' });
+        setMapInitFailed(false);
         setMapLoaded(true);
         
         // Clean up problematic layers and hide building layers
@@ -1380,6 +1405,10 @@ export function CampaignDetailMapView({
       }
       if (resizeTimeoutId !== null) {
         clearTimeout(resizeTimeoutId);
+      }
+      if (mapInitTimeoutRef.current) {
+        clearTimeout(mapInitTimeoutRef.current);
+        mapInitTimeoutRef.current = null;
       }
       const mapInstance = map.current;
       map.current = null;
@@ -2198,6 +2227,7 @@ export function CampaignDetailMapView({
     mapViewMode === 'buildings' &&
     anyStatusFilterActive &&
     !hasRenderedBuildingsRef.current &&
+    !buildingsRenderState.buildingsUnavailable &&
     (buildingsRenderState.isFetching ||
       (buildingsRenderState.hasData &&
         buildingsRenderState.zoomLevel >= 12 &&
@@ -2234,6 +2264,21 @@ export function CampaignDetailMapView({
       className={`relative h-full w-full ${isMapFullscreen ? 'bg-background' : ''}`}
     >
       <div ref={mapContainer} className="h-full w-full" />
+      {mapInitFailed ? (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-background p-6">
+          <div className="max-w-sm rounded-lg border border-border bg-card p-5 text-center shadow-lg">
+            <p className="text-sm font-semibold text-foreground">Map could not be loaded.</p>
+            <p className="mt-1 text-sm text-muted-foreground">Please refresh the page.</p>
+            <Button
+              className="mt-4"
+              size="sm"
+              onClick={() => window.location.reload()}
+            >
+              Refresh
+            </Button>
+          </div>
+        </div>
+      ) : null}
       {map.current && mapLoaded && (
         <>
           <MapInfoButton
@@ -2341,7 +2386,13 @@ export function CampaignDetailMapView({
               </button>
             </div>
           </div>
-          {showBuildingPendingOverlay && buildingPendingOverlay ? (
+          {buildingsRenderState.buildingsUnavailable && mapViewMode === 'buildings' ? (
+            <div className="pointer-events-none absolute bottom-4 left-4 z-20">
+              <div className="rounded-md border border-border bg-background/90 px-3 py-2 text-xs text-muted-foreground shadow-sm backdrop-blur-sm">
+                Building data unavailable
+              </div>
+            </div>
+          ) : showBuildingPendingOverlay && buildingPendingOverlay ? (
             <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center p-4">
               <div className="w-full max-w-sm rounded-lg border border-border bg-background/92 p-4 shadow-lg backdrop-blur-sm">
                 <div className="flex items-center gap-4">

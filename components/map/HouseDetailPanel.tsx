@@ -21,6 +21,7 @@ import {
 import { BuildingService } from '@/lib/services/BuildingService';
 import { getCampaignAddressMapStatus } from '@/lib/campaignStats';
 import { createClient } from '@/lib/supabase/client';
+import { retryWithBackoff } from '@/lib/utils/retryWithBackoff';
 import type { Building, BuildingInteraction, BuildingStatus } from '@/types/database';
 import { Trash2, EyeOff } from 'lucide-react';
 
@@ -52,6 +53,7 @@ export function HouseDetailPanel({
     confidence: number;
   }>>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const [saving, setSaving] = useState(false);
   const [newStatus, setNewStatus] = useState<BuildingStatus>('default');
   const [newNotes, setNewNotes] = useState('');
@@ -117,6 +119,8 @@ export function HouseDetailPanel({
     } else {
       setBuilding(null);
       setInteractions([]);
+      setLinkedAddresses([]);
+      setLoadError(false);
       setNewStatus('default');
       setNewNotes('');
     }
@@ -126,6 +130,7 @@ export function HouseDetailPanel({
     if (!buildingId) return;
 
     setLoading(true);
+    setLoadError(false);
     console.log('[HouseDetailPanel] Loading building:', buildingId, 'campaign:', campaignId);
     
     try {
@@ -136,6 +141,8 @@ export function HouseDetailPanel({
       
       if (!buildingData) {
         console.error('Building not found for GERS ID:', buildingId);
+        setBuilding(null);
+        setLoadError(true);
         return;
       }
 
@@ -157,9 +164,23 @@ export function HouseDetailPanel({
       console.log('[HouseDetailPanel] Building source:', buildingData.source, 'campaignId:', campaignId);
 
       if (campaignId) {
-        const response = await fetch(`/api/campaigns/${campaignId}/buildings/${buildingId}/addresses`, {
-          credentials: 'include',
-        });
+        const response = await retryWithBackoff(
+          async () => {
+            const addressResponse = await fetch(`/api/campaigns/${campaignId}/buildings/${buildingId}/addresses`, {
+              credentials: 'include',
+            });
+            if (addressResponse.status >= 500) {
+              throw addressResponse;
+            }
+            return addressResponse;
+          },
+          {
+            shouldRetry: (error) => {
+              console.log('[HouseDetailPanel] Retrying...');
+              return error instanceof Response ? error.status >= 500 : true;
+            },
+          }
+        );
         if (response.ok) {
           const result = await response.json();
           addressData = (result.addresses || []).map((address: {
@@ -193,6 +214,8 @@ export function HouseDetailPanel({
       setNewStatus(deriveCurrentBuildingStatus(addressData));
     } catch (error) {
       console.error('Error loading building data:', error);
+      setBuilding(null);
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -301,7 +324,7 @@ export function HouseDetailPanel({
     }
   };
 
-  if (!building && !loading) {
+  if (!buildingId && !loading) {
     return null;
   }
 
@@ -319,6 +342,20 @@ export function HouseDetailPanel({
 
         {loading ? (
           <div className="mt-6 text-center text-muted-foreground">Loading...</div>
+        ) : loadError && !building ? (
+          <div className="mt-6 rounded-lg border border-destructive/30 bg-destructive/5 p-4">
+            <p className="text-sm font-medium text-destructive">Could not load building data.</p>
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-3"
+              onClick={() => {
+                void loadBuildingData();
+              }}
+            >
+              Retry
+            </Button>
+          </div>
         ) : building ? (
           <div className="mt-6 space-y-6">
             {/* Building Info */}

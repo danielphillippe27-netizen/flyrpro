@@ -114,6 +114,7 @@ export function ContactsHubView() {
   const [selectedContactIds, setSelectedContactIds] = useState<string[]>([]);
   const [statsByUserId, setStatsByUserId] = useState<Record<string, UserStats>>({});
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
@@ -140,6 +141,7 @@ export function ContactsHubView() {
 
     try {
       setLoading(true);
+      setLoadError(false);
       const [contactsData, members, campaignsData, farmsData, smartListsData] = await Promise.all([
         ContactsService.fetchContacts(currentUserId, currentWorkspaceId),
         loadTeamMembers(),
@@ -176,8 +178,10 @@ export function ContactsHubView() {
           return acc;
         }, {})
       );
+      setLoadError(false);
     } catch (error) {
       console.error('Error loading contacts or stats:', error);
+      setLoadError(true);
       setContacts([]);
       setCampaigns([]);
       setFarms([]);
@@ -491,6 +495,24 @@ export function ContactsHubView() {
             </div>
           </div>
         </section>
+
+        {loadError && contacts.length === 0 && (
+          <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm font-medium text-destructive">Could not load contacts.</p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  if (userId) void loadLeadData(userId);
+                }}
+                disabled={!userId || loading}
+              >
+                Retry
+              </Button>
+            </div>
+          </div>
+        )}
 
         <LeadsTableView
           contacts={visibleContacts}
