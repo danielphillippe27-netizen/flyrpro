@@ -648,6 +648,7 @@ export function MapBuildingsLayer({
   const layerId = 'map-buildings-extrusion';
   const shadowLayerId = 'map-buildings-shadow';
   const leadGlowLayerId = 'map-buildings-lead-glow';
+  const outlineLayerId = 'map-buildings-outline';
   const circleLayerId = 'map-buildings-extrusion-points';
   const circleLeadGlowLayerId = 'map-buildings-lead-glow-points';
   const addressLabelSourceId = 'map-address-centroid-label-source';
@@ -887,12 +888,13 @@ export function MapBuildingsLayer({
     safeRemoveLayer(map, addressLabelLayerId);
     safeRemoveLayer(map, circleLayerId);
     safeRemoveLayer(map, circleLeadGlowLayerId);
+    safeRemoveLayer(map, outlineLayerId);
     safeRemoveLayer(map, leadGlowLayerId);
     safeRemoveLayer(map, layerId);
     safeRemoveLayer(map, shadowLayerId);
     safeRemoveSource(map, addressLabelSourceId);
     safeRemoveSource(map, sourceId);
-  }, [map, addressLabelLayerId, circleLayerId, circleLeadGlowLayerId, leadGlowLayerId, layerId, shadowLayerId, addressLabelSourceId, sourceId]);
+  }, [map, addressLabelLayerId, circleLayerId, circleLeadGlowLayerId, outlineLayerId, leadGlowLayerId, layerId, shadowLayerId, addressLabelSourceId, sourceId]);
 
   // CAMPAIGN MODE: Fetch ALL campaign features once (no viewport filtering)
   // This enables "fetch once, render forever" for buttery smooth pan/zoom
@@ -1184,6 +1186,9 @@ export function MapBuildingsLayer({
         if (map.getLayer(leadGlowLayerId)) {
           map.removeLayer(leadGlowLayerId);
         }
+        if (map.getLayer(outlineLayerId)) {
+          map.removeLayer(outlineLayerId);
+        }
         if (map.getLayer(circleLayerId)) {
           map.removeLayer(circleLayerId);
         }
@@ -1197,7 +1202,7 @@ export function MapBuildingsLayer({
         return;
       }
     }
-  }, [map, circleLayerId, circleLeadGlowLayerId, leadGlowLayerId, layerId, shadowLayerId]);
+  }, [map, circleLayerId, circleLeadGlowLayerId, outlineLayerId, leadGlowLayerId, layerId, shadowLayerId]);
 
   // EXPLORATION MODE ONLY: Handle viewport changes (pan/zoom)
   // Campaign mode doesn't use this - data is already fully loaded
@@ -1218,6 +1223,9 @@ export function MapBuildingsLayer({
         }
         if (map.getLayer(leadGlowLayerId)) {
           map.removeLayer(leadGlowLayerId);
+        }
+        if (map.getLayer(outlineLayerId)) {
+          map.removeLayer(outlineLayerId);
         }
         if (map.getLayer(circleLayerId)) {
           map.removeLayer(circleLayerId);
@@ -1352,7 +1360,7 @@ export function MapBuildingsLayer({
       if (map && map.isStyleLoaded() && zoomLevel >= 12) {
         try {
           visibleFeatureCount = map.queryRenderedFeatures({
-            layers: [layerId, circleLayerId],
+            layers: [layerId, outlineLayerId, circleLayerId],
           }).length;
         } catch {
           visibleFeatureCount = 0;
@@ -1396,7 +1404,7 @@ export function MapBuildingsLayer({
       map.off('style.load', scheduleReport);
       if (frameId !== null) cancelAnimationFrame(frameId);
     };
-  }, [circleLayerId, features, isFetching, layerId, map, onRenderStateChange, zoomLevel]);
+  }, [circleLayerId, features, isFetching, layerId, outlineLayerId, map, onRenderStateChange, zoomLevel]);
 
   useEffect(() => {
     if (!map || !manifestSource) return;
@@ -1848,7 +1856,7 @@ export function MapBuildingsLayer({
             filter: getScopedGeometryFilter(polygonFilter, filterExpr),
             paint: {
               'fill-extrusion-color': getFootprintFillColor(),
-              'fill-extrusion-vertical-gradient': true,
+              'fill-extrusion-vertical-gradient': false,
               'fill-extrusion-height': buildingHeightExpression,
               'fill-extrusion-base': 0,
               'fill-extrusion-opacity': getFootprintFillOpacity(),
@@ -1874,6 +1882,22 @@ export function MapBuildingsLayer({
               },
             };
             map.addLayer(leadGlowLayerConfig);
+          }
+
+          if (!map.getLayer(outlineLayerId)) {
+            const outlineLayerConfig: LineLayerSpecification = {
+              id: outlineLayerId,
+              type: 'line',
+              source: sourceId,
+              minzoom: 12,
+              filter: getScopedGeometryFilter(polygonFilter, filterExpr),
+              paint: {
+                'line-color': footprintStatusColors ? '#f9fafb' : '#d1d5db',
+                'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.8, 16, 1.25, 19, 2] as ExpressionSpecification,
+                'line-opacity': footprintStatusColors ? 0.5 : 0.95,
+              },
+            };
+            map.addLayer(outlineLayerConfig);
           }
           
           // Add circle layer for Point geometries (addresses without building polygons)
@@ -2178,6 +2202,7 @@ export function MapBuildingsLayer({
           try {
             if (!map.isStyleLoaded()) return layers;
             if (map.getLayer(layerId)) layers.push(layerId);
+            if (map.getLayer(outlineLayerId)) layers.push(outlineLayerId);
             if (map.getLayer(circleLayerId)) layers.push(circleLayerId);
           } catch {
             return [];
@@ -2230,9 +2255,28 @@ export function MapBuildingsLayer({
       } else {
         // Update paint properties for existing layer to ensure opacity is correct
         try {
+          const filterExpr = getFilterExpression();
+          if (!map.getLayer(outlineLayerId) && map.getSource(sourceId)) {
+            map.addLayer({
+              id: outlineLayerId,
+              type: 'line',
+              source: sourceId,
+              minzoom: 12,
+              filter: getScopedGeometryFilter(POLYGON_GEOMETRY_FILTER, filterExpr),
+              paint: {
+                'line-color': footprintStatusColors ? '#f9fafb' : '#d1d5db',
+                'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.8, 16, 1.25, 19, 2] as ExpressionSpecification,
+                'line-opacity': footprintStatusColors ? 0.5 : 0.95,
+              },
+            });
+          }
           map.setPaintProperty(layerId, 'fill-extrusion-opacity', getFootprintFillOpacity());
           map.setPaintProperty(layerId, 'fill-extrusion-color', getFootprintFillColor());
-          map.setPaintProperty(layerId, 'fill-extrusion-vertical-gradient', true);
+          map.setPaintProperty(layerId, 'fill-extrusion-vertical-gradient', false);
+          if (map.getLayer(outlineLayerId)) {
+            map.setPaintProperty(outlineLayerId, 'line-color', footprintStatusColors ? '#f9fafb' : '#d1d5db');
+            map.setPaintProperty(outlineLayerId, 'line-opacity', footprintStatusColors ? 0.5 : 0.95);
+          }
 
           if (map.getLayer(layerId)) {
             try {
@@ -2286,6 +2330,7 @@ export function MapBuildingsLayer({
             try {
               if (!map.isStyleLoaded()) return layers;
               if (map.getLayer(layerId)) layers.push(layerId);
+              if (map.getLayer(outlineLayerId)) layers.push(outlineLayerId);
               if (map.getLayer(circleLayerId)) layers.push(circleLayerId);
             } catch {
               return [];
@@ -2395,6 +2440,11 @@ export function MapBuildingsLayer({
         map.setPaintProperty(leadGlowLayerId, 'line-opacity', getLeadGlowOpacityExpression());
         map.setFilter(leadGlowLayerId, getScopedGeometryFilter(POLYGON_GEOMETRY_FILTER, filterExpr));
       }
+      if (map.getLayer(outlineLayerId)) {
+        map.setPaintProperty(outlineLayerId, 'line-color', footprintStatusColors ? '#f9fafb' : '#d1d5db');
+        map.setPaintProperty(outlineLayerId, 'line-opacity', footprintStatusColors ? 0.5 : 0.95);
+        map.setFilter(outlineLayerId, getScopedGeometryFilter(POLYGON_GEOMETRY_FILTER, filterExpr));
+      }
       if (map.getLayer(circleLeadGlowLayerId)) {
         map.setPaintProperty(circleLeadGlowLayerId, 'circle-opacity', getLeadGlowOpacityExpression());
         map.setFilter(circleLeadGlowLayerId, getScopedGeometryFilter(POINT_GEOMETRY_FILTER, filterExpr));
@@ -2407,7 +2457,7 @@ export function MapBuildingsLayer({
     } catch (err) {
       console.error('[MapBuildingsLayer] Error updating color/filter:', err);
     }
-  }, [map, manifestSource, statusFilters, campaignId, layerId, showOrphans, footprintStatusColors, circleLayerId]);
+  }, [map, manifestSource, statusFilters, campaignId, layerId, outlineLayerId, showOrphans, footprintStatusColors, circleLayerId]);
 
   // Update filter when showOrphans changes (toggle visibility of orphan buildings)
   useEffect(() => {
@@ -2420,6 +2470,9 @@ export function MapBuildingsLayer({
       try {
         if (map.getLayer(layerId)) {
           map.setFilter(layerId, getScopedGeometryFilter(POLYGON_GEOMETRY_FILTER, filterExpr));
+        }
+        if (map.getLayer(outlineLayerId)) {
+          map.setFilter(outlineLayerId, getScopedGeometryFilter(POLYGON_GEOMETRY_FILTER, filterExpr));
         }
         if (map.getLayer(circleLayerId)) {
           map.setFilter(circleLayerId, getScopedGeometryFilter(POINT_GEOMETRY_FILTER, filterExpr));
@@ -2439,7 +2492,7 @@ export function MapBuildingsLayer({
     return () => {
       map.off('load', updateFilters);
     };
-  }, [map, manifestSource, showOrphans, campaignId, statusFilters, layerId, circleLayerId]);
+  }, [map, manifestSource, showOrphans, campaignId, statusFilters, layerId, outlineLayerId, circleLayerId]);
 
   // Re-apply lighting and refresh colors when map style loads (important for dark mode)
   useEffect(() => {
@@ -2459,7 +2512,11 @@ export function MapBuildingsLayer({
         if (!manifestSource && map.getLayer(layerId)) {
           map.setPaintProperty(layerId, 'fill-extrusion-color', getFootprintFillColor());
           map.setPaintProperty(layerId, 'fill-extrusion-opacity', getFootprintFillOpacity());
-          map.setPaintProperty(layerId, 'fill-extrusion-vertical-gradient', true);
+          map.setPaintProperty(layerId, 'fill-extrusion-vertical-gradient', false);
+        }
+        if (!manifestSource && map.getLayer(outlineLayerId)) {
+          map.setPaintProperty(outlineLayerId, 'line-color', footprintStatusColors ? '#f9fafb' : '#d1d5db');
+          map.setPaintProperty(outlineLayerId, 'line-opacity', footprintStatusColors ? 0.5 : 0.95);
         }
         if (!manifestSource && map.getLayer(leadGlowLayerId)) {
           map.setPaintProperty(leadGlowLayerId, 'line-opacity', getLeadGlowOpacityExpression());
@@ -2487,7 +2544,7 @@ export function MapBuildingsLayer({
     return () => {
       map.off('style.load', applyLightingAndColors);
     };
-  }, [map, manifestSource, layerId, circleLayerId, footprintStatusColors]);
+  }, [map, manifestSource, layerId, outlineLayerId, circleLayerId, footprintStatusColors]);
 
   // Real-time subscription for building_stats updates
   // When a QR code is scanned, building_stats is updated via trigger
