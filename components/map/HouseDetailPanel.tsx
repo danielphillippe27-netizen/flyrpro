@@ -21,6 +21,7 @@ import {
 import { BuildingService } from '@/lib/services/BuildingService';
 import { getCampaignAddressMapStatus } from '@/lib/campaignStats';
 import { createClient } from '@/lib/supabase/client';
+import { retryWithBackoff } from '@/lib/utils/retryWithBackoff';
 import type { Building, BuildingInteraction, BuildingStatus } from '@/types/database';
 import { Trash2, EyeOff } from 'lucide-react';
 
@@ -163,9 +164,23 @@ export function HouseDetailPanel({
       console.log('[HouseDetailPanel] Building source:', buildingData.source, 'campaignId:', campaignId);
 
       if (campaignId) {
-        const response = await fetch(`/api/campaigns/${campaignId}/buildings/${buildingId}/addresses`, {
-          credentials: 'include',
-        });
+        const response = await retryWithBackoff(
+          async () => {
+            const addressResponse = await fetch(`/api/campaigns/${campaignId}/buildings/${buildingId}/addresses`, {
+              credentials: 'include',
+            });
+            if (addressResponse.status >= 500) {
+              throw addressResponse;
+            }
+            return addressResponse;
+          },
+          {
+            shouldRetry: (error) => {
+              console.log('[HouseDetailPanel] Retrying...');
+              return error instanceof Response ? error.status >= 500 : true;
+            },
+          }
+        );
         if (response.ok) {
           const result = await response.json();
           addressData = (result.addresses || []).map((address: {

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTheme } from '@/lib/theme-provider';
 import { createClient } from '@/lib/supabase/client';
+import { retryWithBackoff } from '@/lib/utils/retryWithBackoff';
 import {
   Moon, 
   Sun, 
@@ -77,7 +78,13 @@ function SettingsPageContent() {
           }
 
           try {
-            const entRes = await fetch('/api/billing/entitlement', { credentials: 'include' });
+            const entRes = await retryWithBackoff(async () => {
+              const response = await fetch('/api/billing/entitlement', { credentials: 'include' });
+              if (response.status >= 500) {
+                throw response;
+              }
+              return response;
+            });
             if (entRes.ok) {
               const entData = await entRes.json();
               setEntitlement(entData);
