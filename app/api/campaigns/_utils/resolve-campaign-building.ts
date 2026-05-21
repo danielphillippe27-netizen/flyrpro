@@ -14,6 +14,20 @@ export function isUuid(value: string): boolean {
   return UUID_RE.test(value);
 }
 
+function decodeRoutePart(value: string): string {
+  let current = value;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const decoded = decodeURIComponent(current);
+      if (decoded === current) return current;
+      current = decoded;
+    } catch {
+      return current;
+    }
+  }
+  return current;
+}
+
 /** Decode dynamic route params; rejoin segments when Overture ids were split on `/`. */
 export function normalizeBuildingRouteId(input: string | string[]): string {
   if (Array.isArray(input)) {
@@ -22,18 +36,21 @@ export function normalizeBuildingRouteId(input: string | string[]): string {
       input[0]?.toLowerCase() === 'overture' &&
       input[1]?.toLowerCase() === 'building'
     ) {
-      return `overture:building:${input.slice(2).map((part) => decodeURIComponent(part)).join(':')}`;
+      const rest = input
+        .slice(2)
+        .map((part) => decodeRoutePart(part))
+        .filter((part) => part.trim().length > 0);
+      return rest.length > 0 ? `overture:building:${rest.join(':')}` : '';
     }
-    return input.map((part) => decodeURIComponent(part)).join('/');
+    const parts = input
+      .map((part) => decodeRoutePart(part))
+      .filter((part) => part.trim().length > 0);
+    return parts.length > 0 ? parts.join('/') : '';
   }
 
   const trimmed = input.trim();
   if (!trimmed) return trimmed;
-  try {
-    return decodeURIComponent(trimmed);
-  } catch {
-    return trimmed;
-  }
+  return decodeRoutePart(trimmed);
 }
 
 /** All identifiers to try when resolving a map building id (e.g. overture:building:{uuid}). */

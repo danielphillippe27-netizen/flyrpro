@@ -30,6 +30,18 @@ import {
   CampaignMapModeService,
 } from '@/lib/services/CampaignMapModeService';
 import { isParcelRegionSupported } from '@/lib/geo/parcelRegions';
+import {
+  bboxFromPolygon,
+  buildAddressIdentity,
+  deduplicateAddressesByProvisionKey,
+  featureCollectionCount,
+  filterAddressesAgainstExisting,
+  isConnectionError,
+  isUniqueConstraintError,
+  provisionFailureReason,
+  shouldFailZeroAddressProvision,
+  snapshotHasStaticPmtilesGeometry,
+} from '@/lib/services/provisionHelpers';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -106,20 +118,6 @@ function staticGeometryAddressHydrationLimit() {
     : DEFAULT_STATIC_GEOMETRY_ADDRESS_HYDRATION_LIMIT;
 }
 
-function isConnectionError(error: Error): boolean {
-  return (
-    error.message.includes('closed') ||
-    error.message.includes('Connection Error') ||
-    error.message.includes('established') ||
-    error.message.includes('timeout')
-  );
-}
-
-function provisionFailureReason(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.trim().slice(0, 500) || 'Provisioning failed';
-}
-
 async function retryWithBackoff<T>(
   fn: () => Promise<T>,
   maxAttempts: number = 3,
@@ -168,79 +166,6 @@ function deduplicateAddresses(addresses: StandardCampaignAddress[]): StandardCam
   );
 }
 
-function normalizeAddressFragment(value: string | null | undefined): string {
-  return typeof value === 'string' ? value.trim().toLowerCase() : '';
-}
-
-function normalizeSource(value: string | null | undefined): string {
-  const normalized = normalizeAddressFragment(value);
-  return normalized || 'unknown';
-}
-
-function normalizeExternalAddressId(value: string | null | undefined): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-function externalAddressId(address: { gers_id?: string | null; source_id?: string | null }): string {
-  return normalizeExternalAddressId(address.gers_id ?? address.source_id);
-}
-
-function buildAddressSignature(address: {
-  formatted?: string | null;
-  house_number?: string | null;
-  street_name?: string | null;
-  locality?: string | null;
-  postal_code?: string | null;
-}): string {
-  const houseNumber = normalizeAddressFragment(address.house_number);
-  const streetName = normalizeAddressFragment(address.street_name);
-  const locality = normalizeAddressFragment(address.locality);
-  const postalCode = normalizeAddressFragment(address.postal_code);
-
-  if (houseNumber || streetName || locality) {
-    return `${houseNumber}|${streetName}|${locality}`;
-  }
-
-  const formatted = normalizeAddressFragment(address.formatted);
-  return `${formatted}|${postalCode}`;
-}
-
-function buildAddressIdentity(address: {
-  campaign_id: string;
-  formatted?: string | null;
-  house_number?: string | null;
-  street_name?: string | null;
-  locality?: string | null;
-  postal_code?: string | null;
-  source?: string | null;
-  source_id?: string | null;
-  gers_id?: string | null;
-}): string {
-  const source = normalizeSource(address.source);
-  const externalId = externalAddressId(address);
-  if (externalId) {
-    return `${address.campaign_id}|${source}|external|${externalId}`;
-  }
-
-  return `${address.campaign_id}|${source}|address|${buildAddressSignature(address)}`;
-}
-
-function deduplicateAddressesByProvisionKey(
-  addresses: StandardCampaignAddress[]
-): StandardCampaignAddress[] {
-  const deduped = new Map<string, StandardCampaignAddress>();
-
-  for (const address of addresses) {
-    const externalId = externalAddressId(address);
-    deduped.set(buildAddressIdentity(address), {
-      ...address,
-      gers_id: externalId || null,
-    });
-  }
-
-  return [...deduped.values()];
-}
-
 async function fetchCampaignAddressSignatures(
   supabase: ReturnType<typeof createAdminClient>,
   campaignId: string
@@ -271,85 +196,6 @@ async function fetchCampaignAddressSignatures(
   );
 }
 
-function filterAddressesAgainstExisting(
-  addresses: StandardCampaignAddress[],
-  existingSignatures: Set<string>
-): StandardCampaignAddress[] {
-  const accepted: StandardCampaignAddress[] = [];
-  const seenThisBatch = new Set<string>();
-
-  for (const address of addresses) {
-    const signature = buildAddressIdentity(address);
-    if (existingSignatures.has(signature) || seenThisBatch.has(signature)) {
-      continue;
-    }
-    seenThisBatch.add(signature);
-    accepted.push(address);
-  }
-
-  return accepted;
-}
-
-function isUniqueConstraintError(error: { message?: string; code?: string; details?: string } | null): boolean {
-  if (!error) {
-    return false;
-  }
-
-  const text = `${error.message ?? ''} ${error.details ?? ''}`.toLowerCase();
-  return error.code === '23505' || text.includes('unique') || text.includes('constraint') || text.includes('conflict');
-}
-
-function stringTileMetric(
-  metrics: Record<string, unknown> | null | undefined,
-  key: string
-): string | null {
-  const value = metrics?.[key];
-  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
-}
-
-function snapshotHasStaticPmtilesGeometry(
-  snapshot: LambdaSnapshotResponse | null | undefined
-): boolean {
-  if (!snapshot) return false;
-
-  const metrics = snapshot.metadata?.tile_metrics;
-  const buildingsKey = snapshot.s3_keys.buildings;
-  const addressesKey = snapshot.s3_keys.addresses;
-
-  return [
-    buildingsKey,
-    addressesKey,
-    stringTileMetric(metrics, 'pmtiles_key'),
-    stringTileMetric(metrics, 'addresses_pmtiles_key'),
-    stringTileMetric(metrics, 'parcels_pmtiles_key'),
-  ].some((key) => typeof key === 'string' && key.toLowerCase().endsWith('.pmtiles'));
-}
-
-function bboxFromPolygon(polygon: GeoJSON.Polygon): [number, number, number, number] | null {
-  const positions = polygon.coordinates.flat().filter(
-    (position): position is [number, number] =>
-      Array.isArray(position) &&
-      typeof position[0] === 'number' &&
-      typeof position[1] === 'number' &&
-      Number.isFinite(position[0]) &&
-      Number.isFinite(position[1])
-  );
-  if (positions.length === 0) return null;
-
-  let minLon = Infinity;
-  let minLat = Infinity;
-  let maxLon = -Infinity;
-  let maxLat = -Infinity;
-  for (const [lon, lat] of positions) {
-    minLon = Math.min(minLon, lon);
-    minLat = Math.min(minLat, lat);
-    maxLon = Math.max(maxLon, lon);
-    maxLat = Math.max(maxLat, lat);
-  }
-
-  return [minLon, minLat, maxLon, maxLat];
-}
-
 function lambdaSnapshotToCampaignSnapshotRow(snapshot: LambdaSnapshotResponse): CampaignSnapshotRow {
   return {
     bucket: snapshot.bucket,
@@ -362,12 +208,6 @@ function lambdaSnapshotToCampaignSnapshotRow(snapshot: LambdaSnapshotResponse): 
     created_at: null,
     tile_metrics: (snapshot.metadata?.tile_metrics ?? null) as Record<string, unknown> | null,
   };
-}
-
-function featureCollectionCount(value: unknown): number {
-  if (!value || typeof value !== 'object') return 0;
-  const features = (value as { features?: unknown }).features;
-  return Array.isArray(features) ? features.length : 0;
 }
 
 function snapshotWithScopedBuildingCount(
@@ -1343,7 +1183,7 @@ export async function POST(request: NextRequest) {
           }
 
           const hasStaticGeometry = snapshotHasStaticPmtilesGeometry(snapshot);
-          if (!hasResolvedAddresses && !hasStaticGeometry) {
+          if (shouldFailZeroAddressProvision({ hasResolvedAddresses, hasStaticGeometry })) {
             throw new ProvisionError(
               'Provisioning did not find any addresses in this territory. Try a larger polygon or a nearby area.',
               422
