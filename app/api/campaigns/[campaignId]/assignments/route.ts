@@ -356,10 +356,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const campaignUrl = `${request.nextUrl.origin}/campaigns/${campaignId}`;
 
     const notificationRows = createdAssignments.map((assignment) => ({
+      workspace_id: campaignRow.workspace_id,
       user_id: assignment.assigned_to_user_id,
       type: 'campaign_assigned',
       title: 'Campaign assigned',
-      message:
+      body:
         assignment.mode === 'zone_split'
           ? `${campaignName}: your zone has ${assignment.goal_homes} homes.`
           : `${campaignName}: your house goal is ${assignment.goal_homes}.`,

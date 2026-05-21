@@ -1168,6 +1168,11 @@ export default function CampaignDetailPage() {
                 >
                   {generating ? 'Generating...' : 'Generate QR Codes'}
                 </Button>
+                {generating ? (
+                  <p className="text-xs text-muted-foreground">
+                    Generating QR codes, this may take up to 30 seconds...
+                  </p>
+                ) : null}
               </div>
             </div>
 
