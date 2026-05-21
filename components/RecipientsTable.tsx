@@ -242,16 +242,21 @@ export function RecipientsTable({ recipients, campaignId, onRefresh }: Recipient
                           size="sm"
                           variant="link"
                           onClick={() => {
-                            const raw = recipient.qr_code_base64!;
-                            const base64 = raw.startsWith('data:')
-                              ? raw.split(',')[1]
-                              : raw.replace(/\s/g, '');
-                            const blob = new Blob(
-                              [Uint8Array.from(atob(base64), c => c.charCodeAt(0))],
-                              { type: 'image/png' }
-                            );
-                            const url = URL.createObjectURL(blob);
-                            window.open(url, '_blank');
+                            try {
+                              const raw = recipient.qr_code_base64!;
+                              const base64 = raw.startsWith('data:')
+                                ? raw.split(',')[1]
+                                : raw.replace(/\s/g, '');
+                              const blob = new Blob(
+                                [Uint8Array.from(atob(base64), c => c.charCodeAt(0))],
+                                { type: 'image/png' }
+                              );
+                              const url = URL.createObjectURL(blob);
+                              window.open(url, '_blank');
+                            } catch (error) {
+                              console.error('Could not open QR code:', error);
+                              alert('Could not open QR code. The image data may be corrupted.');
+                            }
                           }}
                         >
                           View QR

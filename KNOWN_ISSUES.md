@@ -30,6 +30,19 @@ is not wired up. True async progress requires streaming or polling
 integration.
 Complexity: medium to large.
 
+### QR generation has no concurrent generation guard
+Two simultaneous generate-qrs calls for the same campaign race row-by-row.
+The final QR data is whichever request writes last.
+
+### Large QR payload risk
+QR PNGs are stored as base64 in campaign_addresses and passed through 
+the campaign page. Large campaigns can significantly inflate payload size 
+and browser memory usage.
+
+### generate-qrs invalid domain handling
+An invalid domain in the URL constructor fails every address in the loop 
+but the route still returns success: true with count: 0.
+
 ---
 
 ## Needs owner decision

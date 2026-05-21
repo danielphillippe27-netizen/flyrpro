@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import QRCode from 'qrcode';
-import { createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient, getSupabaseServerClient } from '@/lib/supabase/server';
+import { ensureCampaignAccess } from '@/app/api/campaigns/_utils/access';
 import { createPrintableQrPng, formatAddressLabel } from '@/lib/utils/qr-print';
 
 function isLocalhostUrl(url: string): boolean {
@@ -28,8 +29,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing campaignId in request body' }, { status: 400 });
     }
 
+    const authClient = await getSupabaseServerClient();
+    const { data: { user } } = await authClient.auth.getUser();
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     // Initialize Supabase Admin Client
     const supabase = createAdminClient();
+
+    const hasAccess = await ensureCampaignAccess(supabase, campaignId, user.id);
+    if (!hasAccess) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
 
     // ---------------------------------------------------------
     // 2. FETCH ADDRESSES
