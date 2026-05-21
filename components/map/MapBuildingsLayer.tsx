@@ -45,7 +45,6 @@ interface MapBuildingsLayerProps {
   deletedAddressIds?: string[];
   campaignBoundary?: GeoJSON.Polygon | null;
   campaignBbox?: [number, number, number, number] | null;
-  buildingFeatures?: BuildingFeatureCollection | null;
   statusFilters?: StatusFilters;
   showOrphans?: boolean; // Toggle to show/hide orphan buildings (buildings without address links)
   showAddressLabels?: boolean;
@@ -525,34 +524,6 @@ function getCampaignBuildingScopeKey(addresses?: CampaignAddress[]): string {
   return values.size > 0 ? Array.from(values).sort().join('|') : 'unscoped';
 }
 
-function getProvidedBuildingFeaturesKey(features?: BuildingFeatureCollection | null): string {
-  const renderableFeatures = getRenderableProvidedBuildingFeatures(features);
-  if (!renderableFeatures) return 'fetch';
-  const count = renderableFeatures.features.length;
-  const first = renderableFeatures.features[0]?.id ?? renderableFeatures.features[0]?.properties?.id ?? '';
-  const last = renderableFeatures.features[count - 1]?.id ?? renderableFeatures.features[count - 1]?.properties?.id ?? '';
-  return `provided:${count}:${String(first)}:${String(last)}`;
-}
-
-function getRenderableProvidedBuildingFeatures(
-  features?: BuildingFeatureCollection | null
-): BuildingFeatureCollection | null {
-  if (!features || features.type !== 'FeatureCollection' || !Array.isArray(features.features)) {
-    return null;
-  }
-
-  const buildingFeatures = features.features.filter((feature) => {
-    const type = feature.geometry?.type;
-    return type === 'Polygon' || type === 'MultiPolygon';
-  });
-
-  if (buildingFeatures.length === 0) return null;
-  return {
-    ...features,
-    features: buildingFeatures,
-  } as BuildingFeatureCollection;
-}
-
 function toRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? value as Record<string, unknown> : {};
 }
@@ -637,6 +608,38 @@ function setBuildingsDebug(debug: Record<string, unknown>) {
   };
 }
 
+function getFeatureCollectionBbox(features: GeoJSON.Feature[]): [number, number, number, number] | null {
+  let minLon = Infinity;
+  let minLat = Infinity;
+  let maxLon = -Infinity;
+  let maxLat = -Infinity;
+
+  const collect = (coordinates: unknown) => {
+    if (!Array.isArray(coordinates)) return;
+    if (
+      coordinates.length >= 2 &&
+      typeof coordinates[0] === 'number' &&
+      typeof coordinates[1] === 'number'
+    ) {
+      minLon = Math.min(minLon, coordinates[0]);
+      minLat = Math.min(minLat, coordinates[1]);
+      maxLon = Math.max(maxLon, coordinates[0]);
+      maxLat = Math.max(maxLat, coordinates[1]);
+      return;
+    }
+    coordinates.forEach(collect);
+  };
+
+  features.forEach((feature) => {
+    const geometry = feature.geometry;
+    if (!geometry || geometry.type === 'GeometryCollection') return;
+    collect(geometry.coordinates);
+  });
+  return [minLon, minLat, maxLon, maxLat].every(Number.isFinite)
+    ? [minLon, minLat, maxLon, maxLat]
+    : null;
+}
+
 export function MapBuildingsLayer({
   map,
   campaignId,
@@ -647,7 +650,6 @@ export function MapBuildingsLayer({
   deletedAddressIds = [],
   campaignBoundary = null,
   campaignBbox = null,
-  buildingFeatures,
   statusFilters = defaultStatusFilters,
   showOrphans = true,
   showAddressLabels = true,
@@ -802,8 +804,9 @@ export function MapBuildingsLayer({
     filterExpr?: FilterSpecification
   ): FilterSpecification => {
     if (!manifestSource) {
-      // Campaign building GeoJSON is already server-scoped.
-      return combineMapFilters(geometryFilter, filterExpr);
+      // Campaign building GeoJSON is already server-scoped and prefiltered to polygons.
+      // Keep this path unfiltered so a Mapbox filter expression cannot hide the source.
+      return filterExpr ?? ['all'];
     }
 
     const pmtilesScope = filterExpr ?? campaignBoundaryWithinFilter(campaignBoundary);
@@ -922,32 +925,13 @@ export function MapBuildingsLayer({
     if (!isMountedRef.current || !campaignId) return;
 
     setIsFetching(true);
-    const campaignDataKey = `${campaignId}:${refreshKey}:${getCampaignBuildingScopeKey(addressStateOverrides)}:${getProvidedBuildingFeaturesKey(buildingFeatures)}`;
+    const campaignDataKey = `${campaignId}:${refreshKey}:${getCampaignBuildingScopeKey(addressStateOverrides)}`;
     if (emptyFallbackRetryKeyRef.current !== campaignDataKey) {
       emptyFallbackRetryKeyRef.current = campaignDataKey;
       emptyFallbackRetryCountRef.current = 0;
     }
 
     try {
-      const providedBuildingFeatures = getRenderableProvidedBuildingFeatures(buildingFeatures);
-      if (providedBuildingFeatures) {
-        setBuildingsDebug({
-          source: 'campaign-map-bundle-geojson',
-          campaignId,
-          featureCount: providedBuildingFeatures.features.length,
-          firstFeatureId:
-            providedBuildingFeatures.features[0]?.properties?.gers_id ??
-            providedBuildingFeatures.features[0]?.properties?.building_id ??
-            providedBuildingFeatures.features[0]?.id ??
-            null,
-        });
-        campaignDataLoadedRef.current = campaignDataKey;
-        emptyFallbackRetryCountRef.current = 0;
-        setManifestSource(null);
-        setFeatures(providedBuildingFeatures);
-        return;
-      }
-
       const { data: sessionData } = await supabase.auth.getSession();
       const accessToken = sessionData.session?.access_token ?? null;
       const response = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/buildings`, {
@@ -1042,7 +1026,7 @@ export function MapBuildingsLayer({
         setIsFetching(false);
       }
     }
-  }, [campaignId, refreshKey, addressStateOverrides, buildingFeatures, campaignBoundary, campaignBbox]);
+  }, [campaignId, refreshKey, addressStateOverrides, campaignBoundary, campaignBbox]);
 
   useEffect(() => {
     return () => {
@@ -1329,7 +1313,7 @@ export function MapBuildingsLayer({
     }
     
     // Only fetch if we haven't already loaded this campaign's data
-    const campaignDataKey = `${campaignId}:${refreshKey}:${getCampaignBuildingScopeKey(addressStateOverrides)}:${getProvidedBuildingFeaturesKey(buildingFeatures)}`;
+    const campaignDataKey = `${campaignId}:${refreshKey}:${getCampaignBuildingScopeKey(addressStateOverrides)}`;
     if (campaignDataLoadedRef.current === campaignDataKey) {
       return;
     }
@@ -1366,7 +1350,7 @@ export function MapBuildingsLayer({
     return () => {
       map.off('zoomend', onZoomChanged);
     };
-  }, [map, campaignId, fetchCampaignData, onZoomChanged, refreshKey, addressStateOverrides, buildingFeatures]);
+  }, [map, campaignId, fetchCampaignData, onZoomChanged, refreshKey, addressStateOverrides]);
 
   // EXPLORATION MODE: Set up viewport event listeners (only when no campaignId)
   useEffect(() => {
@@ -2044,6 +2028,7 @@ export function MapBuildingsLayer({
             extrusionLayerAttached: Boolean(map.getLayer(layerId)),
             outlineLayerAttached: Boolean(map.getLayer(outlineLayerId)),
             normalizedFeatureCount: normalizedFeatures.features.length,
+            normalizedFeatureBbox: getFeatureCollectionBbox(normalizedFeatures.features),
             pitch: map.getPitch(),
             zoom: map.getZoom(),
           });
@@ -2433,6 +2418,7 @@ export function MapBuildingsLayer({
             extrusionLayerAttached: Boolean(map.getLayer(layerId)),
             outlineLayerAttached: Boolean(map.getLayer(outlineLayerId)),
             normalizedFeatureCount: normalizedFeatures.features.length,
+            normalizedFeatureBbox: getFeatureCollectionBbox(normalizedFeatures.features),
             pitch: map.getPitch(),
             zoom: map.getZoom(),
           });

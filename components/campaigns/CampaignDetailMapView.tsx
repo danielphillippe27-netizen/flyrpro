@@ -2447,7 +2447,6 @@ export function CampaignDetailMapView({
               deletedAddressIds={optimisticallyDeletedAddressIds}
               campaignBoundary={(campaign?.territory_boundary as GeoJSON.Polygon | null | undefined) ?? null}
               campaignBbox={campaignBbox}
-              buildingFeatures={mapBundle?.buildings ?? null}
               statusFilters={statusFilters}
               showAddressLabels={false}
               footprintStatusColors={false}
