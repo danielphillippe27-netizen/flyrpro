@@ -1325,7 +1325,6 @@ export function CampaignDetailMapView({
               hideBaseBuildingLayers(map.current, {
                 preserveLayerPrefixes: CUSTOM_BUILDING_LAYER_PREFIXES,
               });
-              hideResidentialOnlyBaseExtras(map.current);
               style.layers.forEach((layer) => {
                 // Remove layers that reference non-existent source layers
                 if (layer.id && (
@@ -1782,7 +1781,6 @@ export function CampaignDetailMapView({
           hideBaseBuildingLayers(map.current, {
             preserveLayerPrefixes: CUSTOM_BUILDING_LAYER_PREFIXES,
           });
-          hideResidentialOnlyBaseExtras(map.current);
           style.layers.forEach((layer) => {
             try {
               if (layer.id && (layer.id.includes('road-label') || layer.id.includes('road_label'))) {
@@ -1805,12 +1803,10 @@ export function CampaignDetailMapView({
     cleanupOnStyleReady();
     map.current.on('style.load', cleanupOnStyleReady);
     map.current.on('styledata', cleanupOnStyleReady);
-    map.current.on('idle', cleanupLayers);
 
     return () => {
       map.current?.off('style.load', cleanupOnStyleReady);
       map.current?.off('styledata', cleanupOnStyleReady);
-      map.current?.off('idle', cleanupLayers);
     };
   }, [mapLoaded, resolvedMapStyle]);
 

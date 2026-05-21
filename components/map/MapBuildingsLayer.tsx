@@ -627,6 +627,15 @@ function ensure3dBuildingCamera(map: MapboxMap) {
   }
 }
 
+function setBuildingsDebug(debug: Record<string, unknown>) {
+  if (typeof window === 'undefined') return;
+  (window as Window & { __flyrBuildingsDebug?: Record<string, unknown> }).__flyrBuildingsDebug = {
+    ...(window as Window & { __flyrBuildingsDebug?: Record<string, unknown> }).__flyrBuildingsDebug,
+    ...debug,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
 export function MapBuildingsLayer({
   map,
   campaignId,
@@ -921,6 +930,16 @@ export function MapBuildingsLayer({
     try {
       const providedBuildingFeatures = getRenderableProvidedBuildingFeatures(buildingFeatures);
       if (providedBuildingFeatures) {
+        setBuildingsDebug({
+          source: 'campaign-map-bundle-geojson',
+          campaignId,
+          featureCount: providedBuildingFeatures.features.length,
+          firstFeatureId:
+            providedBuildingFeatures.features[0]?.properties?.gers_id ??
+            providedBuildingFeatures.features[0]?.properties?.building_id ??
+            providedBuildingFeatures.features[0]?.id ??
+            null,
+        });
         campaignDataLoadedRef.current = campaignDataKey;
         emptyFallbackRetryCountRef.current = 0;
         setManifestSource(null);
@@ -948,6 +967,16 @@ export function MapBuildingsLayer({
           ? campaignFeatures
           : ({ type: 'FeatureCollection', features: [] } as BuildingFeatureCollection);
       const campaignFeatureCount = normalizedCampaignFeatures.features.length;
+      setBuildingsDebug({
+        source: 'campaign-buildings-api-geojson',
+        campaignId,
+        featureCount: campaignFeatureCount,
+        firstFeatureId:
+          normalizedCampaignFeatures.features[0]?.properties?.gers_id ??
+          normalizedCampaignFeatures.features[0]?.properties?.building_id ??
+          normalizedCampaignFeatures.features[0]?.id ??
+          null,
+      });
 
       campaignDataLoadedRef.current = campaignFeatureCount > 0 ? campaignDataKey : null;
       if (campaignFeatureCount > 0) {
@@ -2010,6 +2039,18 @@ export function MapBuildingsLayer({
             map.setLayoutProperty(addressLabelLayerId, 'visibility', showAddressLabels ? 'visible' : 'none');
           }
 
+          setBuildingsDebug({
+            renderMode: 'geojson-source',
+            sourceId,
+            sourceAttached: Boolean(map.getSource(sourceId)),
+            surfaceLayerAttached: Boolean(map.getLayer(surfaceLayerId)),
+            extrusionLayerAttached: Boolean(map.getLayer(layerId)),
+            outlineLayerAttached: Boolean(map.getLayer(outlineLayerId)),
+            normalizedFeatureCount: normalizedFeatures.features.length,
+            pitch: map.getPitch(),
+            zoom: map.getZoom(),
+          });
+
         // Outline layer removed to eliminate dark shadow effect underneath buildings
 
         // Set map lighting for 3D depth visualization
@@ -2387,6 +2428,17 @@ export function MapBuildingsLayer({
           if (map.getLayer(addressLabelLayerId)) {
             map.setLayoutProperty(addressLabelLayerId, 'visibility', showAddressLabels ? 'visible' : 'none');
           }
+          setBuildingsDebug({
+            renderMode: 'geojson-source',
+            sourceId,
+            sourceAttached: Boolean(map.getSource(sourceId)),
+            surfaceLayerAttached: Boolean(map.getLayer(surfaceLayerId)),
+            extrusionLayerAttached: Boolean(map.getLayer(layerId)),
+            outlineLayerAttached: Boolean(map.getLayer(outlineLayerId)),
+            normalizedFeatureCount: normalizedFeatures.features.length,
+            pitch: map.getPitch(),
+            zoom: map.getZoom(),
+          });
           cleanupLayerInteractionHandlers?.();
 
           const getInteractiveLayers = () => {
