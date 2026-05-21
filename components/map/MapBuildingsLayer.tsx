@@ -80,6 +80,7 @@ const FOOTPRINT_SCALE = 1;
 const EMPTY_BUILDINGS_MAX_RETRIES = 5;
 const EMPTY_BUILDINGS_RETRY_BASE_DELAY_MS = 3000;
 const ADDRESS_LABEL_MIN_ZOOM = 18;
+const CAMPAIGN_BUILDING_MIN_ZOOM = 0;
 const POLYGON_GEOMETRY_FILTER: FilterSpecification = [
   'match',
   ['geometry-type'],
@@ -1224,7 +1225,7 @@ export function MapBuildingsLayer({
     setZoomLevel(zoom);
 
     // Remove layers if zoomed out too far
-    if (zoom < 12) {
+    if (!campaignId && zoom < 12) {
       // map.getLayer can throw while Mapbox is rebuilding the style layer registry.
       try {
         if (!map.isStyleLoaded()) return;
@@ -1253,7 +1254,7 @@ export function MapBuildingsLayer({
         return;
       }
     }
-  }, [map, circleLayerId, circleLeadGlowLayerId, outlineLayerId, leadGlowLayerId, layerId, surfaceLayerId, shadowLayerId]);
+  }, [map, campaignId, circleLayerId, circleLeadGlowLayerId, outlineLayerId, leadGlowLayerId, layerId, surfaceLayerId, shadowLayerId]);
 
   // EXPLORATION MODE ONLY: Handle viewport changes (pan/zoom)
   // Campaign mode doesn't use this - data is already fully loaded
@@ -1411,7 +1412,7 @@ export function MapBuildingsLayer({
       );
       let visibleFeatureCount = 0;
 
-      if (map && map.isStyleLoaded() && zoomLevel >= 12) {
+      if (map && map.isStyleLoaded()) {
         try {
           visibleFeatureCount = map.queryRenderedFeatures({
             layers: [surfaceLayerId, layerId, outlineLayerId, circleLayerId],
@@ -1825,10 +1826,6 @@ export function MapBuildingsLayer({
         return;
       }
       
-      if (zoomLevel < 12) {
-        return;
-      }
-
       // Remove any existing route layers/sources that might conflict with buildings
       // This prevents z-fighting and rendering issues
       const routeLayers = ['route-lines', 'route-lines-inter', 'route-lines-glow', 'route-points', 'route-labels', 'route-start', 'block-stops', 'block-stop-labels'];
@@ -1905,7 +1902,7 @@ export function MapBuildingsLayer({
               id: surfaceLayerId,
               type: 'fill',
               source: sourceId,
-              minzoom: 12,
+              minzoom: CAMPAIGN_BUILDING_MIN_ZOOM,
               filter: getScopedGeometryFilter(polygonFilter, filterExpr),
               paint: {
                 'fill-color': getFootprintFillColor(),
@@ -1921,7 +1918,7 @@ export function MapBuildingsLayer({
             id: layerId,
             type: 'fill-extrusion',
             source: sourceId,
-            minzoom: 12,
+            minzoom: CAMPAIGN_BUILDING_MIN_ZOOM,
             filter: getScopedGeometryFilter(polygonFilter, filterExpr),
             paint: {
               'fill-extrusion-color': getFootprintFillColor(),
@@ -1941,7 +1938,7 @@ export function MapBuildingsLayer({
               id: leadGlowLayerId,
               type: 'line',
               source: sourceId,
-              minzoom: 12,
+              minzoom: CAMPAIGN_BUILDING_MIN_ZOOM,
               filter: getScopedGeometryFilter(polygonFilter, filterExpr),
               paint: {
                 'line-color': MAP_STATUS_CONFIG.LEADS.color,
@@ -1958,7 +1955,7 @@ export function MapBuildingsLayer({
               id: outlineLayerId,
               type: 'line',
               source: sourceId,
-              minzoom: 12,
+              minzoom: CAMPAIGN_BUILDING_MIN_ZOOM,
               filter: getScopedGeometryFilter(polygonFilter, filterExpr),
               paint: {
                 'line-color': footprintStatusColors ? '#f9fafb' : '#f8fafc',
@@ -1975,7 +1972,7 @@ export function MapBuildingsLayer({
               id: circleLeadGlowLayerId,
               type: 'circle' as const,
               source: sourceId,
-              minzoom: 12,
+              minzoom: CAMPAIGN_BUILDING_MIN_ZOOM,
               filter: getScopedGeometryFilter(POINT_GEOMETRY_FILTER, filterExpr),
               paint: {
                 'circle-radius': 14,
@@ -1991,7 +1988,7 @@ export function MapBuildingsLayer({
               id: circleLayerId,
               type: 'circle',
               source: sourceId,
-              minzoom: 12,
+              minzoom: CAMPAIGN_BUILDING_MIN_ZOOM,
               filter: getScopedGeometryFilter(POINT_GEOMETRY_FILTER, filterExpr),
               paint: {
                 'circle-radius': 5,
@@ -2343,7 +2340,7 @@ export function MapBuildingsLayer({
               id: surfaceLayerId,
               type: 'fill',
               source: sourceId,
-              minzoom: 12,
+              minzoom: CAMPAIGN_BUILDING_MIN_ZOOM,
               filter: getScopedGeometryFilter(POLYGON_GEOMETRY_FILTER, filterExpr),
               paint: {
                 'fill-color': getFootprintFillColor(),
@@ -2356,7 +2353,7 @@ export function MapBuildingsLayer({
               id: outlineLayerId,
               type: 'line',
               source: sourceId,
-              minzoom: 12,
+              minzoom: CAMPAIGN_BUILDING_MIN_ZOOM,
               filter: getScopedGeometryFilter(POLYGON_GEOMETRY_FILTER, filterExpr),
               paint: {
                 'line-color': footprintStatusColors ? '#f9fafb' : '#f8fafc',
