@@ -503,6 +503,7 @@ export default function CampaignDetailPage() {
   });
   const [contacts, setContacts] = useState<CampaignContact[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [showPaywall, setShowPaywall] = useState(false);
   const [showMissingQRModal, setShowMissingQRModal] = useState(false);
@@ -537,6 +538,7 @@ export default function CampaignDetailPage() {
   const canAddCampaignNote = Boolean(campaignNoteDraft.trim() || campaignNotePdf);
 
   const loadData = useCallback(async () => {
+    setLoadError(false);
     try {
       const supabase = createClient();
       const [campaignData, addressesData, contactsData, scanEventsRes, roadMetaRes] = await Promise.all([
@@ -569,6 +571,7 @@ export default function CampaignDetailPage() {
       }
     } catch (error) {
       console.error('Error loading campaign:', error);
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -866,6 +869,23 @@ export default function CampaignDetailPage() {
     return (
       <div className="flex items-center justify-center min-h-[320px]">
         <LoadingScreen variant="inline" />
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[320px] px-6 text-center">
+        <h2 className="text-lg font-semibold text-foreground mb-2">Failed to load campaign</h2>
+        <p className="text-sm text-muted-foreground mb-4">
+          There was a problem loading this campaign. Please try again.
+        </p>
+        <div className="flex flex-wrap items-center justify-center gap-3">
+          <Button onClick={loadData}>Try again</Button>
+          <Button asChild variant="outline">
+            <Link href="/campaigns">Back to campaigns</Link>
+          </Button>
+        </div>
       </div>
     );
   }

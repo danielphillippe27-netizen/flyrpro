@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import {
   BarChart3,
@@ -242,6 +243,7 @@ export default function FarmPage() {
   const [financeEntries, setFinanceEntries] = useState<FinanceEntry[]>([]);
   const [touchOutcomes, setTouchOutcomes] = useState<FarmTouchAddress[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('overview');
   const [overviewScope, setOverviewScope] = useState<DashboardScope>('current_cycle');
@@ -305,6 +307,7 @@ export default function FarmPage() {
   const currentFlyerUrl = linkedCampaign?.flyer_url ?? legacyCampaignText.flyerUrl ?? null;
 
   const loadData = useCallback(async (resolvedUserId?: string | null) => {
+    setLoadError(false);
     try {
       const [farmData, addressData, touchData, leadData, contactData, financeData, outcomeData, linkedCampaignResponse] = await Promise.all([
         FarmService.fetchFarm(farmId),
@@ -362,6 +365,7 @@ export default function FarmPage() {
       }
     } catch (error) {
       console.error('Error loading farm:', error);
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -1439,6 +1443,23 @@ export default function FarmPage() {
 
   if (loading) {
     return <div className="h-full flex items-center justify-center text-muted-foreground">Loading farm...</div>;
+  }
+
+  if (loadError) {
+    return (
+      <div className="flex h-full min-h-[320px] flex-col items-center justify-center px-6 text-center">
+        <h2 className="mb-2 text-lg font-semibold text-foreground">Failed to load farm</h2>
+        <p className="mb-4 text-sm text-muted-foreground">
+          There was a problem loading this farm. Please try again.
+        </p>
+        <div className="flex flex-wrap items-center justify-center gap-3">
+          <Button onClick={() => void loadData(userId)}>Try again</Button>
+          <Button asChild variant="outline">
+            <Link href="/farms">Back to farms</Link>
+          </Button>
+        </div>
+      </div>
+    );
   }
 
   if (!farm) {

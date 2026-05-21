@@ -39,6 +39,7 @@ export function FarmListSidebar({
   const { currentWorkspaceId } = useWorkspace();
   const [farms, setFarms] = useState<Farm[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [statusTab, setStatusTab] = useState<StatusTab>('active');
@@ -58,29 +59,33 @@ export function FarmListSidebar({
     [pathname, router]
   );
 
-  useEffect(() => {
-    const run = async () => {
-      try {
-        const supabase = await getClientAsync();
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-        const id = session?.user?.id ?? null;
-        setUserId(id);
-        if (!id) {
-          setLoading(false);
-          return;
-        }
-        const data = await FarmService.fetchFarms(id, currentWorkspaceId);
-        setFarms(data);
-      } catch (error) {
-        console.error('FarmListSidebar load:', error);
-      } finally {
+  const loadFarms = useCallback(async () => {
+    setLoading(true);
+    setLoadError(false);
+    try {
+      const supabase = await getClientAsync();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const id = session?.user?.id ?? null;
+      setUserId(id);
+      if (!id) {
         setLoading(false);
+        return;
       }
-    };
-    run();
+      const data = await FarmService.fetchFarms(id, currentWorkspaceId);
+      setFarms(data);
+    } catch (error) {
+      console.error('FarmListSidebar load:', error);
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
   }, [currentWorkspaceId]);
+
+  useEffect(() => {
+    void loadFarms();
+  }, [loadFarms]);
 
   const byStatus = useMemo(() => {
     const active = farms.filter(isActiveFarm);
@@ -152,6 +157,16 @@ export function FarmListSidebar({
             <Plus className="w-3.5 h-3.5" />
           </Button>
         </div>
+        {loadError && !loading && farms.length === 0 ? (
+          <div className="mt-3 rounded-md border border-destructive/30 bg-destructive/10 p-2 text-xs text-destructive">
+            <div className="flex items-center justify-between gap-2">
+              <span>Could not load farms.</span>
+              <Button size="sm" variant="outline" onClick={() => void loadFarms()}>
+                Retry
+              </Button>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <div className="flex-1 flex flex-col min-h-0 px-2 pt-2">

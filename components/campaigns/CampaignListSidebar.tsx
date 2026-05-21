@@ -46,6 +46,7 @@ export function CampaignListSidebar({
   const copy = getIndustryCopy(currentWorkspace?.industry);
   const [campaigns, setCampaigns] = useState<CampaignV2[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [statusTab, setStatusTab] = useState<StatusTab>('active');
@@ -65,27 +66,31 @@ export function CampaignListSidebar({
     [pathname, router]
   );
 
-  useEffect(() => {
-    const run = async () => {
-      try {
-        const supabase = await getClientAsync();
-        const { data: { session } } = await supabase.auth.getSession();
-        const id = session?.user?.id ?? null;
-        setUserId(id);
-        if (!id) {
-          setLoading(false);
-          return;
-        }
-        const data = await CampaignsService.fetchCampaignsV2(id, currentWorkspaceId);
-        setCampaigns(data);
-      } catch (e) {
-        console.error('CampaignListSidebar load:', e);
-      } finally {
+  const loadCampaigns = useCallback(async () => {
+    setLoading(true);
+    setLoadError(false);
+    try {
+      const supabase = await getClientAsync();
+      const { data: { session } } = await supabase.auth.getSession();
+      const id = session?.user?.id ?? null;
+      setUserId(id);
+      if (!id) {
         setLoading(false);
+        return;
       }
-    };
-    run();
+      const data = await CampaignsService.fetchCampaignsV2(id, currentWorkspaceId);
+      setCampaigns(data);
+    } catch (e) {
+      console.error('CampaignListSidebar load:', e);
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
   }, [currentWorkspaceId]);
+
+  useEffect(() => {
+    void loadCampaigns();
+  }, [loadCampaigns]);
 
   const byStatus = useMemo(() => {
     const active = campaigns.filter((c) => ACTIVE_STATUSES.includes(c.status));
@@ -158,6 +163,16 @@ export function CampaignListSidebar({
             <Plus className="w-3.5 h-3.5" />
           </Button>
         </div>
+        {loadError && !loading && campaigns.length === 0 ? (
+          <div className="mt-3 rounded-md border border-destructive/30 bg-destructive/10 p-2 text-xs text-destructive">
+            <div className="flex items-center justify-between gap-2">
+              <span>Could not load campaigns.</span>
+              <Button size="sm" variant="outline" onClick={() => void loadCampaigns()}>
+                Retry
+              </Button>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <div className="flex-1 flex flex-col min-h-0 px-2 pt-2">
