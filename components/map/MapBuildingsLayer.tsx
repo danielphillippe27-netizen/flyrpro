@@ -99,7 +99,6 @@ const BUILDING_BEFORE_LAYER_IDS = [
   'assigned-routes-lines',
   'flyr-user-location',
 ];
-const PMTILES_EXTRUSION_OPACITY = 0.78;
 const INFERRED_BUILDING_LINK_MAX_DISTANCE_M = 30;
 
 /**
@@ -909,17 +908,28 @@ export function MapBuildingsLayer({
     return ['case', ['all', isLead, statusFilters.LEADS], 0.82, 0] as ExpressionSpecification;
   };
 
-  /** Neutral footprint when not using status colors (visible on map, not loud red/salmon). */
-  const NEUTRAL_FOOTPRINT_COLOR = '#d1d5db';
-  const NEUTRAL_EXTRUSION_OPACITY = 0.98;
-  const NEUTRAL_SURFACE_OPACITY = 0.5;
+  /** Neutral footprint when not using status colors; keep it visually aligned with address cylinders. */
+  const NEUTRAL_FOOTPRINT_COLOR = '#6b7280';
+  const NEUTRAL_OUTLINE_COLOR = '#111827';
+  const NEUTRAL_EXTRUSION_OPACITY = 0.96;
+  const NEUTRAL_SURFACE_OPACITY = 0.2;
   const NEUTRAL_CIRCLE_OPACITY = 0.88;
+  const NEUTRAL_OUTLINE_OPACITY = 0.58;
+  const NEUTRAL_EXTRUSION_EMISSIVE_STRENGTH = 0.45;
   const getFootprintFillColor = (): string | ExpressionSpecification =>
     footprintStatusColors ? getColorExpression() : NEUTRAL_FOOTPRINT_COLOR;
   const getFootprintFillOpacity = (): number =>
     footprintStatusColors ? 1 : NEUTRAL_EXTRUSION_OPACITY;
   const getCircleOpacity = (): number =>
     footprintStatusColors ? 0.9 : NEUTRAL_CIRCLE_OPACITY;
+  const getFootprintOutlineColor = (): string =>
+    footprintStatusColors ? '#f9fafb' : NEUTRAL_OUTLINE_COLOR;
+  const getFootprintOutlineOpacity = (): number =>
+    footprintStatusColors ? 0.72 : NEUTRAL_OUTLINE_OPACITY;
+  const getFootprintVerticalGradient = (): boolean =>
+    !footprintStatusColors;
+  const getFootprintEmissiveStrength = (): number =>
+    footprintStatusColors ? 0.85 : NEUTRAL_EXTRUSION_EMISSIVE_STRENGTH;
   const forceBuildingLayerVisibility = () => {
     for (const id of [surfaceLayerId, layerId, leadGlowLayerId, outlineLayerId, circleLeadGlowLayerId, circleLayerId]) {
       try {
@@ -1538,7 +1548,7 @@ export function MapBuildingsLayer({
         filter: buildingFilter,
         paint: {
           'fill-extrusion-color': NEUTRAL_FOOTPRINT_COLOR,
-          'fill-extrusion-opacity': PMTILES_EXTRUSION_OPACITY,
+          'fill-extrusion-opacity': NEUTRAL_EXTRUSION_OPACITY,
           'fill-extrusion-height': [
             'coalesce',
             ['get', 'height'],
@@ -1548,7 +1558,7 @@ export function MapBuildingsLayer({
           ] as ExpressionSpecification,
           'fill-extrusion-base': ['coalesce', ['get', 'min_height'], 0] as ExpressionSpecification,
           'fill-extrusion-vertical-gradient': true,
-          'fill-extrusion-emissive-strength': 0.65,
+          'fill-extrusion-emissive-strength': NEUTRAL_EXTRUSION_EMISSIVE_STRENGTH,
         },
       };
 
@@ -1575,8 +1585,8 @@ export function MapBuildingsLayer({
       try {
         map.setLight({
           anchor: 'map',
-          color: 'white',
-          intensity: 0.6,
+          color: '#d1d5db',
+          intensity: 0.35,
           position: [1.15, 210, 30],
         });
         ensure3dBuildingCamera(map);
@@ -2081,11 +2091,11 @@ export function MapBuildingsLayer({
             filter: getScopedGeometryFilter(polygonFilter, filterExpr),
             paint: {
               'fill-extrusion-color': getFootprintFillColor(),
-              'fill-extrusion-vertical-gradient': false,
+              'fill-extrusion-vertical-gradient': getFootprintVerticalGradient(),
               'fill-extrusion-height': buildingHeightExpression,
               'fill-extrusion-base': 0,
               'fill-extrusion-opacity': getFootprintFillOpacity(),
-              'fill-extrusion-emissive-strength': 0.85,
+              'fill-extrusion-emissive-strength': getFootprintEmissiveStrength(),
             },
           };
           
@@ -2117,9 +2127,9 @@ export function MapBuildingsLayer({
               minzoom: CAMPAIGN_BUILDING_MIN_ZOOM,
               filter: getScopedGeometryFilter(polygonFilter, filterExpr),
               paint: {
-                'line-color': footprintStatusColors ? '#f9fafb' : '#f8fafc',
-                'line-width': ['interpolate', ['linear'], ['zoom'], 12, 1.05, 16, 1.65, 19, 2.35] as ExpressionSpecification,
-                'line-opacity': footprintStatusColors ? 0.72 : 1,
+                'line-color': getFootprintOutlineColor(),
+                'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.7, 16, 1, 19, 1.3] as ExpressionSpecification,
+                'line-opacity': getFootprintOutlineOpacity(),
               },
             };
             map.addLayer(outlineLayerConfig);
@@ -2154,7 +2164,7 @@ export function MapBuildingsLayer({
                 'circle-color': getFootprintFillColor(),
                 'circle-opacity': getCircleOpacity(),
                 'circle-stroke-width': 1.5,
-                'circle-stroke-color': '#ffffff',
+                'circle-stroke-color': footprintStatusColors ? '#ffffff' : NEUTRAL_OUTLINE_COLOR,
               },
             };
             map.addLayer(circleLayerConfig);
@@ -2218,8 +2228,8 @@ export function MapBuildingsLayer({
         try {
           map.setLight({
             anchor: 'map',
-            color: 'white',
-            intensity: 0.6, // Increased intensity for better visibility on dark backgrounds
+            color: '#d1d5db',
+            intensity: 0.35,
             position: [1.15, 210, 30]
           });
           ensure3dBuildingCamera(map);
@@ -2527,9 +2537,9 @@ export function MapBuildingsLayer({
               minzoom: CAMPAIGN_BUILDING_MIN_ZOOM,
               filter: getScopedGeometryFilter(POLYGON_GEOMETRY_FILTER, filterExpr),
               paint: {
-                'line-color': footprintStatusColors ? '#f9fafb' : '#f8fafc',
-                'line-width': ['interpolate', ['linear'], ['zoom'], 12, 1.05, 16, 1.65, 19, 2.35] as ExpressionSpecification,
-                'line-opacity': footprintStatusColors ? 0.72 : 1,
+                'line-color': getFootprintOutlineColor(),
+                'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.7, 16, 1, 19, 1.3] as ExpressionSpecification,
+                'line-opacity': getFootprintOutlineOpacity(),
               },
             });
           }
@@ -2539,10 +2549,11 @@ export function MapBuildingsLayer({
           }
           map.setPaintProperty(layerId, 'fill-extrusion-opacity', getFootprintFillOpacity());
           map.setPaintProperty(layerId, 'fill-extrusion-color', getFootprintFillColor());
-          map.setPaintProperty(layerId, 'fill-extrusion-vertical-gradient', false);
+          map.setPaintProperty(layerId, 'fill-extrusion-vertical-gradient', getFootprintVerticalGradient());
+          map.setPaintProperty(layerId, 'fill-extrusion-emissive-strength', getFootprintEmissiveStrength());
           if (map.getLayer(outlineLayerId)) {
-            map.setPaintProperty(outlineLayerId, 'line-color', footprintStatusColors ? '#f9fafb' : '#f8fafc');
-            map.setPaintProperty(outlineLayerId, 'line-opacity', footprintStatusColors ? 0.72 : 1);
+            map.setPaintProperty(outlineLayerId, 'line-color', getFootprintOutlineColor());
+            map.setPaintProperty(outlineLayerId, 'line-opacity', getFootprintOutlineOpacity());
           }
 
           if (map.getLayer(layerId)) {
@@ -2724,6 +2735,8 @@ export function MapBuildingsLayer({
       const filterExpr = getFilterExpression();
       map.setPaintProperty(layerId, 'fill-extrusion-color', colorExpr);
       map.setPaintProperty(layerId, 'fill-extrusion-opacity', getFootprintFillOpacity());
+      map.setPaintProperty(layerId, 'fill-extrusion-vertical-gradient', getFootprintVerticalGradient());
+      map.setPaintProperty(layerId, 'fill-extrusion-emissive-strength', getFootprintEmissiveStrength());
       map.setFilter(layerId, getScopedGeometryFilter(POLYGON_GEOMETRY_FILTER, filterExpr));
       if (map.getLayer(surfaceLayerId)) {
         map.setPaintProperty(surfaceLayerId, 'fill-color', colorExpr);
@@ -2735,8 +2748,8 @@ export function MapBuildingsLayer({
         map.setFilter(leadGlowLayerId, getScopedGeometryFilter(POLYGON_GEOMETRY_FILTER, filterExpr));
       }
       if (map.getLayer(outlineLayerId)) {
-        map.setPaintProperty(outlineLayerId, 'line-color', footprintStatusColors ? '#f9fafb' : '#f8fafc');
-        map.setPaintProperty(outlineLayerId, 'line-opacity', footprintStatusColors ? 0.72 : 1);
+        map.setPaintProperty(outlineLayerId, 'line-color', getFootprintOutlineColor());
+        map.setPaintProperty(outlineLayerId, 'line-opacity', getFootprintOutlineOpacity());
         map.setFilter(outlineLayerId, getScopedGeometryFilter(POLYGON_GEOMETRY_FILTER, filterExpr));
       }
       if (map.getLayer(circleLeadGlowLayerId)) {
@@ -2746,6 +2759,7 @@ export function MapBuildingsLayer({
       if (map.getLayer(circleLayerId)) {
         map.setPaintProperty(circleLayerId, 'circle-color', colorExpr);
         map.setPaintProperty(circleLayerId, 'circle-opacity', getCircleOpacity());
+        map.setPaintProperty(circleLayerId, 'circle-stroke-color', footprintStatusColors ? '#ffffff' : NEUTRAL_OUTLINE_COLOR);
         map.setFilter(circleLayerId, getScopedGeometryFilter(POINT_GEOMETRY_FILTER, filterExpr));
       }
     } catch (err) {
@@ -2800,8 +2814,8 @@ export function MapBuildingsLayer({
         // Apply lighting for 3D depth
         map.setLight({
           anchor: 'map', // Use 'map' anchor to avoid viewport anchor warnings
-          color: 'white',
-          intensity: 0.6, // Increased intensity for better visibility on dark backgrounds
+          color: '#d1d5db',
+          intensity: 0.35,
           position: [1.15, 210, 30]
         });
 
@@ -2809,15 +2823,16 @@ export function MapBuildingsLayer({
         if (!manifestSource && map.getLayer(layerId)) {
           map.setPaintProperty(layerId, 'fill-extrusion-color', getFootprintFillColor());
           map.setPaintProperty(layerId, 'fill-extrusion-opacity', getFootprintFillOpacity());
-          map.setPaintProperty(layerId, 'fill-extrusion-vertical-gradient', false);
+          map.setPaintProperty(layerId, 'fill-extrusion-vertical-gradient', getFootprintVerticalGradient());
+          map.setPaintProperty(layerId, 'fill-extrusion-emissive-strength', getFootprintEmissiveStrength());
         }
         if (!manifestSource && map.getLayer(surfaceLayerId)) {
           map.setPaintProperty(surfaceLayerId, 'fill-color', getFootprintFillColor());
           map.setPaintProperty(surfaceLayerId, 'fill-opacity', footprintStatusColors ? 0.3 : NEUTRAL_SURFACE_OPACITY);
         }
         if (!manifestSource && map.getLayer(outlineLayerId)) {
-          map.setPaintProperty(outlineLayerId, 'line-color', footprintStatusColors ? '#f9fafb' : '#f8fafc');
-          map.setPaintProperty(outlineLayerId, 'line-opacity', footprintStatusColors ? 0.72 : 1);
+          map.setPaintProperty(outlineLayerId, 'line-color', getFootprintOutlineColor());
+          map.setPaintProperty(outlineLayerId, 'line-opacity', getFootprintOutlineOpacity());
         }
         if (!manifestSource && map.getLayer(leadGlowLayerId)) {
           map.setPaintProperty(leadGlowLayerId, 'line-opacity', getLeadGlowOpacityExpression());
@@ -2828,6 +2843,7 @@ export function MapBuildingsLayer({
         if (!manifestSource && map.getLayer(circleLayerId)) {
           map.setPaintProperty(circleLayerId, 'circle-color', getFootprintFillColor());
           map.setPaintProperty(circleLayerId, 'circle-opacity', getCircleOpacity());
+          map.setPaintProperty(circleLayerId, 'circle-stroke-color', footprintStatusColors ? '#ffffff' : NEUTRAL_OUTLINE_COLOR);
         }
       } catch (err) {
         console.warn('[MapBuildingsLayer] Error applying lighting/colors:', err);
