@@ -79,8 +79,8 @@ const FOOTPRINT_SCALE = 1;
 const EMPTY_BUILDINGS_MAX_RETRIES = 5;
 const EMPTY_BUILDINGS_RETRY_BASE_DELAY_MS = 3000;
 const ADDRESS_LABEL_MIN_ZOOM = 18;
-const POLYGON_GEOMETRY_FILTER: FilterSpecification = ['==', '$type', 'Polygon'];
-const POINT_GEOMETRY_FILTER: FilterSpecification = ['==', '$type', 'Point'];
+const POLYGON_GEOMETRY_FILTER: FilterSpecification = ['==', ['geometry-type'], 'Polygon'];
+const POINT_GEOMETRY_FILTER: FilterSpecification = ['==', ['geometry-type'], 'Point'];
 const NO_FEATURES_FILTER: FilterSpecification = ['==', ['literal', 1], 0] as FilterSpecification;
 const BUILDING_BEFORE_LAYER_IDS = [
   'campaign-addresses-pmtiles-lead-glow',
@@ -869,8 +869,8 @@ export function MapBuildingsLayer({
   };
 
   /** Neutral footprint when not using status colors (visible on map, not loud red/salmon). */
-  const NEUTRAL_FOOTPRINT_COLOR = '#6b7280';
-  const NEUTRAL_EXTRUSION_OPACITY = 0.82;
+  const NEUTRAL_FOOTPRINT_COLOR = '#9ca3af';
+  const NEUTRAL_EXTRUSION_OPACITY = 0.92;
   const NEUTRAL_CIRCLE_OPACITY = 0.88;
   const getFootprintFillColor = (): string | ExpressionSpecification =>
     footprintStatusColors ? getColorExpression() : NEUTRAL_FOOTPRINT_COLOR;
