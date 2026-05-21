@@ -66,6 +66,7 @@ export type MapBuildingsRenderState = {
   hasData: boolean;
   hasVisibleFeatures: boolean;
   hasBuildingPolygons: boolean;
+  buildingsUnavailable: boolean;
   featureCount: number;
   visibleFeatureCount: number;
   zoomLevel: number;
@@ -75,6 +76,8 @@ const defaultStatusFilters: StatusFilters = DEFAULT_STATUS_FILTERS;
 
 /** Scale factor for building footprints (1 = unchanged, <1 = skinnier). */
 const FOOTPRINT_SCALE = 1;
+const EMPTY_BUILDINGS_MAX_RETRIES = 5;
+const EMPTY_BUILDINGS_RETRY_BASE_DELAY_MS = 3000;
 const ADDRESS_LABEL_MIN_ZOOM = 18;
 const POLYGON_GEOMETRY_FILTER: FilterSpecification = ['==', '$type', 'Polygon'];
 const POINT_GEOMETRY_FILTER: FilterSpecification = ['==', '$type', 'Point'];
@@ -650,6 +653,8 @@ export function MapBuildingsLayer({
   const onRenderStateChangeRef = useRef(onRenderStateChange);
   const isFetchingRef = useRef(isFetching);
   const emptyFallbackRetryRef = useRef<number | null>(null);
+  const emptyFallbackRetryCountRef = useRef(0);
+  const emptyFallbackRetryKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     onBuildingClickRef.current = onBuildingClick;
@@ -883,11 +888,16 @@ export function MapBuildingsLayer({
 
     setIsFetching(true);
     const campaignDataKey = `${campaignId}:${refreshKey}:${getCampaignBuildingScopeKey(addressStateOverrides)}:${getProvidedBuildingFeaturesKey(buildingFeatures)}`;
+    if (emptyFallbackRetryKeyRef.current !== campaignDataKey) {
+      emptyFallbackRetryKeyRef.current = campaignDataKey;
+      emptyFallbackRetryCountRef.current = 0;
+    }
 
     try {
       const providedBuildingFeatures = getRenderableProvidedBuildingFeatures(buildingFeatures);
       if (providedBuildingFeatures) {
         campaignDataLoadedRef.current = campaignDataKey;
+        emptyFallbackRetryCountRef.current = 0;
         setManifestSource(null);
         setFeatures(providedBuildingFeatures);
         return;
@@ -909,19 +919,39 @@ export function MapBuildingsLayer({
       const campaignFeatureCount = normalizedCampaignFeatures.features.length;
 
       campaignDataLoadedRef.current = campaignFeatureCount > 0 ? campaignDataKey : null;
+      if (campaignFeatureCount > 0) {
+        emptyFallbackRetryCountRef.current = 0;
+      }
       setManifestSource(null);
       setFeatures(normalizedCampaignFeatures);
 
       if (campaignFeatureCount === 0 && isMountedRef.current) {
+        if (emptyFallbackRetryCountRef.current >= EMPTY_BUILDINGS_MAX_RETRIES) {
+          console.log('[MapBuildingsLayer] Max retries exhausted, buildings not available');
+          onRenderStateChangeRef.current?.({
+            isFetching: false,
+            hasData: false,
+            hasVisibleFeatures: false,
+            hasBuildingPolygons: false,
+            buildingsUnavailable: true,
+            featureCount: 0,
+            visibleFeatureCount: 0,
+            zoomLevel,
+          });
+          return;
+        }
         if (emptyFallbackRetryRef.current) {
           window.clearTimeout(emptyFallbackRetryRef.current);
         }
+        const retryDelay =
+          EMPTY_BUILDINGS_RETRY_BASE_DELAY_MS * Math.pow(2, emptyFallbackRetryCountRef.current);
+        emptyFallbackRetryCountRef.current += 1;
         emptyFallbackRetryRef.current = window.setTimeout(() => {
           emptyFallbackRetryRef.current = null;
           if (isMountedRef.current) {
             void fetchCampaignData();
           }
-        }, 3000);
+        }, retryDelay);
       }
     } catch (err) {
       console.error('[MapBuildingsLayer] Error in fetchCampaignData:', err);
@@ -932,6 +962,7 @@ export function MapBuildingsLayer({
             const nextSource = toManifestBuildingSource(manifest!, accessToken);
             if (nextSource) {
               campaignDataLoadedRef.current = campaignDataKey;
+              emptyFallbackRetryCountRef.current = 0;
               setFeatures(null);
               setManifestSource(nextSource);
               return;
@@ -1314,6 +1345,10 @@ export function MapBuildingsLayer({
         hasData: featureCount > 0,
         hasVisibleFeatures: visibleFeatureCount > 0,
         hasBuildingPolygons,
+        buildingsUnavailable:
+          emptyFallbackRetryCountRef.current >= EMPTY_BUILDINGS_MAX_RETRIES &&
+          featureCount === 0 &&
+          Boolean(campaignId),
         featureCount,
         visibleFeatureCount,
         zoomLevel,
@@ -1565,6 +1600,7 @@ export function MapBuildingsLayer({
         hasData: true,
         hasVisibleFeatures: visibleFeatureCount > 0,
         hasBuildingPolygons: true,
+        buildingsUnavailable: false,
         featureCount: visibleFeatureCount,
         visibleFeatureCount,
         zoomLevel: map.getZoom(),

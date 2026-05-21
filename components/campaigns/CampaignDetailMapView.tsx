@@ -526,6 +526,7 @@ export function CampaignDetailMapView({
     hasData: false,
     hasVisibleFeatures: false,
     hasBuildingPolygons: false,
+    buildingsUnavailable: false,
     featureCount: 0,
     visibleFeatureCount: 0,
     zoomLevel: 15,
@@ -592,6 +593,7 @@ export function CampaignDetailMapView({
         previous.hasData === state.hasData &&
         previous.hasVisibleFeatures === state.hasVisibleFeatures &&
         previous.hasBuildingPolygons === state.hasBuildingPolygons &&
+        previous.buildingsUnavailable === state.buildingsUnavailable &&
         previous.featureCount === state.featureCount &&
         previous.visibleFeatureCount === state.visibleFeatureCount &&
         previous.zoomLevel === state.zoomLevel
@@ -722,6 +724,7 @@ export function CampaignDetailMapView({
       hasData: false,
       hasVisibleFeatures: false,
       hasBuildingPolygons: false,
+      buildingsUnavailable: false,
       featureCount: 0,
       visibleFeatureCount: 0,
       zoomLevel: 15,
@@ -2198,6 +2201,7 @@ export function CampaignDetailMapView({
     mapViewMode === 'buildings' &&
     anyStatusFilterActive &&
     !hasRenderedBuildingsRef.current &&
+    !buildingsRenderState.buildingsUnavailable &&
     (buildingsRenderState.isFetching ||
       (buildingsRenderState.hasData &&
         buildingsRenderState.zoomLevel >= 12 &&
@@ -2341,7 +2345,13 @@ export function CampaignDetailMapView({
               </button>
             </div>
           </div>
-          {showBuildingPendingOverlay && buildingPendingOverlay ? (
+          {buildingsRenderState.buildingsUnavailable && mapViewMode === 'buildings' ? (
+            <div className="pointer-events-none absolute bottom-4 left-4 z-20">
+              <div className="rounded-md border border-border bg-background/90 px-3 py-2 text-xs text-muted-foreground shadow-sm backdrop-blur-sm">
+                Building data unavailable
+              </div>
+            </div>
+          ) : showBuildingPendingOverlay && buildingPendingOverlay ? (
             <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center p-4">
               <div className="w-full max-w-sm rounded-lg border border-border bg-background/92 p-4 shadow-lg backdrop-blur-sm">
                 <div className="flex items-center gap-4">
