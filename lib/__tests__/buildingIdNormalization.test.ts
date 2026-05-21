@@ -24,13 +24,13 @@ assert.equal(
   overtureId
 );
 
-// BUG: double-encoded Bedrock IDs are decoded only once, so they still miss
-// the colon-delimited Bedrock ID format and produce DB candidates that miss.
+// FIXED: double-encoded Bedrock IDs decode until stable, so the
+// colon-delimited Bedrock ID format is restored before candidate generation.
 assert.equal(
   normalizeBuildingRouteId('bedrock_ca%253Anar%253Ae8ea84c7'),
-  'bedrock_ca%3Anar%3Ae8ea84c7'
+  'bedrock_ca:nar:e8ea84c7'
 );
-assert.notEqual(
+assert.equal(
   normalizeBuildingRouteId('bedrock_ca%253Anar%253Ae8ea84c7'),
   'bedrock_ca:nar:e8ea84c7'
 );
@@ -48,9 +48,10 @@ assert.equal(buildingIdentifierCandidates('bedrock_ca:nar:')[0], 'bedrock_ca:nar
 
 assert.equal(normalizeBuildingRouteId(''), '');
 
-// BUG: an array of empty route segments normalizes to "//" instead of empty,
-// creating a garbage DB candidate.
-assert.equal(normalizeBuildingRouteId(['', '', '']), '//');
+// FIXED: empty route segments are filtered out instead of becoming garbage
+// DB candidates like "//" or "overture:building:".
+assert.equal(normalizeBuildingRouteId(['', '', '']), '');
+assert.equal(normalizeBuildingRouteId(['overture', 'building', '']), '');
 assert.equal(normalizeBuildingRouteId(['bedrock_ca:nar:uuid']), 'bedrock_ca:nar:uuid');
 
 assert.deepEqual(buildingIdentifierCandidates(bedrockId), [bedrockId, bedrockUuid]);
@@ -58,12 +59,12 @@ assert.deepEqual(buildingIdentifierCandidates(overtureId), [overtureId, overture
 assert.deepEqual(buildingIdentifierCandidates('bedrock_ca:nar:not-a-uuid'), [
   'bedrock_ca:nar:not-a-uuid',
 ]);
-assert.deepEqual(buildingIdentifierCandidates('bedrock_ca%3Anar%3Ae8ea84c7'), [
-  'bedrock_ca%3Anar%3Ae8ea84c7',
+assert.deepEqual(buildingIdentifierCandidates(normalizeBuildingRouteId('bedrock_ca%253Anar%253Ae8ea84c7')), [
+  'bedrock_ca:nar:e8ea84c7',
 ]);
 assert.equal(
-  buildingIdentifierCandidates('bedrock_ca%3Anar%3Ae8ea84c7').includes('bedrock_ca:nar:e8ea84c7'),
-  false
+  buildingIdentifierCandidates(normalizeBuildingRouteId('bedrock_ca%253Anar%253Ae8ea84c7')).includes('bedrock_ca:nar:e8ea84c7'),
+  true
 );
 
 console.log('buildingIdNormalization tests passed');
