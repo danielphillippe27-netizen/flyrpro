@@ -265,8 +265,9 @@ async function resolveBuilding(supabase: SupabaseClient, campaignId: string, bui
       .select("id, geom, primary_street_name")
       .eq("id", candidate)
       .maybeSingle();
-    const geometry = goldRow ? parseGeometry(goldRow.geom) : null;
-    if (goldRow && geometry) {
+    if (goldRow) {
+      const geometry = parseGeometry(goldRow.geom);
+      if (!geometry) continue;
       return {
         rowId: null,
         publicId: goldRow.id,

@@ -70,8 +70,8 @@ const TOOL_FILTER_ITEMS: Array<{ key: MapStatusKey; label: string }> = [
   { key: 'QR_SCANNED', label: 'QR codes scanned' },
   { key: 'LEADS', label: 'Leads' },
   { key: 'CONVERSATIONS', label: 'Conversations' },
-  { key: 'TOUCHED', label: 'Visited homes' },
-  { key: 'NO_ONE_HOME', label: 'Attempted' },
+  { key: 'TOUCHED', label: 'Attempted' },
+  { key: 'NO_ONE_HOME', label: 'No answer' },
   { key: 'DO_NOT_KNOCK', label: 'Do not knock' },
   { key: 'UNTOUCHED', label: 'Unvisited' },
 ];
@@ -104,7 +104,7 @@ export function MapInfoSheet({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="sm:max-w-[460px] w-[460px] rounded-2xl p-5"
+        className="max-h-[calc(100vh-3rem)] w-[min(94vw,860px)] overflow-y-auto rounded-2xl p-5 sm:max-w-[860px]"
         portalContainer={portalContainer}
       >
         <DialogHeader className="text-left pb-1.5 border-b border-border/60">
@@ -166,13 +166,13 @@ export function MapInfoSheet({
                 Toggle which campaign activity is visible on the map.
               </p>
             </div>
-            <ul className="space-y-1.5">
+            <ul className="grid gap-2 sm:grid-cols-2">
               {TOOL_FILTER_ITEMS.map(({ key, label }) => {
                 const config = MAP_STATUS_CONFIG[key];
                 return (
                   <li
                     key={key}
-                    className="flex items-center justify-between rounded-lg border border-border/70 bg-muted/30 px-2.5 py-2"
+                    className="flex min-h-10 items-center justify-between gap-3 rounded-lg border border-border/70 bg-muted/30 px-2.5 py-2"
                   >
                     <div className="flex items-center gap-2 min-w-0">
                       <span
@@ -203,27 +203,27 @@ export function MapInfoSheet({
 
         <section className="space-y-2 border-t border-border/60 pt-3">
           <h3 className="text-xs font-semibold text-foreground">Read me</h3>
-          {/* Drawing Tip */}
-          <div className="rounded-lg border border-red-500/30 bg-red-500/5 px-3 py-2.5">
-            <div className="flex items-start gap-2">
-              <Crosshair className="h-4 w-4 shrink-0 text-red-500 mt-0.5" />
-              <div>
-                <p className="text-xs font-semibold text-foreground">Drawing tip</p>
-                <p className="text-[11px] text-muted-foreground leading-snug mt-0.5">
-                  When creating a campaign, be precise to the road lines and intersections so you have clean campaigns and optimized routes.
-                </p>
+          <div className="grid gap-3 lg:grid-cols-[1.15fr_1.35fr_1fr]">
+            {/* Drawing Tip */}
+            <div className="rounded-lg border border-red-500/30 bg-red-500/5 px-3 py-2.5">
+              <div className="flex items-start gap-2">
+                <Crosshair className="h-4 w-4 shrink-0 text-red-500 mt-0.5" />
+                <div>
+                  <p className="text-xs font-semibold text-foreground">Drawing tip</p>
+                  <p className="text-[11px] text-muted-foreground leading-snug mt-0.5">
+                    Keep campaign boundaries tight to road lines and intersections for cleaner routes.
+                  </p>
+                </div>
               </div>
             </div>
-          </div>
 
-          <div className="grid grid-cols-2 gap-x-6 gap-y-3">
             {/* Map Gestures - web controls */}
-            <section>
+            <section className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2.5">
               <h3 className="text-xs font-semibold text-foreground mb-1.5 flex items-center gap-1.5">
                 <MousePointer2 className="w-3.5 h-3.5" />
                 Map gestures
               </h3>
-              <ul className="space-y-1">
+              <ul className="grid gap-x-3 gap-y-1.5 sm:grid-cols-2 lg:grid-cols-1">
                 {WEB_MAP_GESTURES.map(({ icon: Icon, label, description }) => (
                   <li key={label} className="flex items-start gap-2">
                     <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-muted">
@@ -239,7 +239,7 @@ export function MapInfoSheet({
             </section>
 
             {/* Homes legend */}
-            <section>
+            <section className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2.5">
               <h3 className="text-xs font-semibold text-foreground mb-1.5">Homes</h3>
               <ul className="space-y-1">
                 {MAP_STATUS_PRIORITY.map((key) => {

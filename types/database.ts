@@ -305,7 +305,7 @@ export interface CampaignAddress {
   sequence?: number | null; // Stop sequence within cluster route
   walk_time_sec?: number | null; // Walking time from depot to this stop
   distance_m?: number | null; // Walking distance from depot to this stop
-  // Address map status (from address_statuses): none | no_answer | delivered | talked | appointment | do_not_knock | future_seller | hot_lead
+  // Address map status (from address_statuses): none | no_answer | delivered | talked | lead | appointment | follow_up | do_not_knock | future_seller | hot_lead
   address_status?: string;
 }
 
@@ -503,7 +503,12 @@ export type FarmAddressOutcomeStatus =
   | 'no_answer'
   | 'delivered'
   | 'talked'
+  | 'lead'
+  | 'interested'
   | 'appointment'
+  | 'follow_up'
+  | 'appointment_set'
+  | 'callback_requested'
   | 'do_not_knock'
   | 'future_seller'
   | 'hot_lead';

@@ -15,6 +15,7 @@ export const dynamic = 'force-dynamic';
 type PushLeadBody = HubSpotLeadPayload & {
   campaignId?: string | null;
   campaign_id?: string | null;
+  workspaceId?: string | null;
   createdAt?: string | null;
   created_at?: string | null;
 };
@@ -52,6 +53,7 @@ function normalizeLead(body: PushLeadBody): PushLeadBody {
           }
         : undefined,
     campaignId: cleaned(body.campaignId) ?? cleaned(body.campaign_id),
+    workspaceId: cleaned(body.workspaceId),
     createdAt: cleaned(body.createdAt) ?? cleaned(body.created_at),
   };
 }
@@ -59,9 +61,10 @@ function normalizeLead(body: PushLeadBody): PushLeadBody {
 async function resolveTargetWorkspaceId(
   supabase: ReturnType<typeof createAdminClient>,
   userId: string,
-  campaignId?: string
+  campaignId?: string,
+  workspaceId?: string
 ): Promise<{ workspaceId: string | null; error?: string; status?: number }> {
-  let requestedWorkspaceId: string | null = null;
+  let requestedWorkspaceId: string | null = workspaceId ?? null;
 
   if (campaignId) {
     const { data: campaignRow } = await supabase
@@ -167,7 +170,8 @@ export async function POST(request: NextRequest) {
     const workspaceResolution = await resolveTargetWorkspaceId(
       supabase,
       requestUser.id,
-      lead.campaignId ?? undefined
+      lead.campaignId ?? undefined,
+      lead.workspaceId ?? undefined
     );
 
     if (!workspaceResolution.workspaceId) {

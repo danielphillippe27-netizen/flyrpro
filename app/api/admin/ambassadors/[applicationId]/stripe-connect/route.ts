@@ -8,6 +8,7 @@ import {
   isMissingAmbassadorSchemaError,
   syncAmbassadorStripePromotionCode,
 } from '@/app/lib/billing/ambassador-program';
+import { sendAmbassadorStripeOnboardingEmail } from '@/lib/email/resend';
 
 const stripeConnectPayloadSchema = z.object({
   referralCode: z.string().trim().max(20).optional().or(z.literal('')),
@@ -170,8 +171,8 @@ export async function POST(
 
     const accountLink = await stripe.accountLinks.create({
       account: accountId,
-      refresh_url: `${request.nextUrl.origin}/admin`,
-      return_url: `${request.nextUrl.origin}/admin`,
+      refresh_url: `${request.nextUrl.origin}/ambassador?stripeOnboarding=refresh`,
+      return_url: `${request.nextUrl.origin}/ambassador?stripeOnboarding=complete`,
       type: 'account_onboarding',
     });
 
@@ -208,11 +209,30 @@ export async function POST(
       return NextResponse.json({ error: updateError.message }, { status: 500 });
     }
 
+    let onboardingEmailSent = false;
+    let onboardingEmailWarning: string | null = null;
+    try {
+      await sendAmbassadorStripeOnboardingEmail({
+        to: application.email,
+        fullName: application.full_name,
+        onboardingUrl: accountLink.url,
+        referralCode,
+      });
+      onboardingEmailSent = true;
+    } catch (emailError) {
+      onboardingEmailWarning =
+        emailError instanceof Error
+          ? emailError.message
+          : 'Stripe onboarding link was created, but email was not sent.';
+    }
+
     return NextResponse.json({
       ok: true,
       accountId,
       referralCode,
       onboardingUrl: accountLink.url,
+      onboardingEmailSent,
+      onboardingEmailWarning,
       chargesEnabled: account.charges_enabled ?? false,
       payoutsEnabled: account.payouts_enabled ?? false,
       detailsSubmitted: account.details_submitted ?? false,

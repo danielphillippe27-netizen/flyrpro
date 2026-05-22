@@ -3,9 +3,8 @@
 
 // ----- Building / session map (building_stats) -----
 // Table: building_stats, Column: status
-// Flyer mode: grey = unvisited, green = visited.
-// Door-knock mode: slate = unvisited, coral = no answer, green = conversation,
-// blue = lead, gold = hot lead / appointment / follow-up,
+// Campaign map: slate = unvisited, coral = attempted, green = talked to person,
+// blue = lead, gold = appointment / follow-up,
 // purple = QR scan, black = do not knock.
 
 export type MapStatusKey =
@@ -36,7 +35,7 @@ export const MAP_STATUS_CONFIG: Record<MapStatusKey, MapStatusConfig> = {
   },
   CONVERSATIONS: {
     key: 'CONVERSATIONS',
-    label: 'Conversation',
+    label: 'Talked to person',
     color: '#22c55e',
   },
   LEADS: {
@@ -46,13 +45,13 @@ export const MAP_STATUS_CONFIG: Record<MapStatusKey, MapStatusConfig> = {
   },
   HOT_LEADS: {
     key: 'HOT_LEADS',
-    label: 'Hot lead',
+    label: 'Appointment / follow-up',
     color: '#facc15',
   },
   TOUCHED: {
     key: 'TOUCHED',
-    label: 'Visited',
-    color: '#22c55e',
+    label: 'Attempted',
+    color: '#f87171',
   },
   NO_ONE_HOME: {
     key: 'NO_ONE_HOME',
@@ -71,11 +70,6 @@ export const MAP_STATUS_CONFIG: Record<MapStatusKey, MapStatusConfig> = {
   },
 } as const;
 
-export const FLYER_MODE_STATUS_COLORS = {
-  unvisited: '#6b7280',
-  visited: '#22c55e',
-} as const;
-
 // ----- Address map (address_statuses) -----
 // Table: address_statuses, Column: status
 // Door-knock address colors follow the shared campaign map palette.
@@ -88,6 +82,9 @@ export type AddressStatusValue =
   | 'lead'
   | 'interested'
   | 'appointment'
+  | 'follow_up'
+  | 'appointment_set'
+  | 'callback_requested'
   | 'do_not_knock'
   | 'future_seller'
   | 'hot_lead';
@@ -96,13 +93,16 @@ export type AddressStatusValue =
 export const ADDRESS_STATUS_LABELS: Record<AddressStatusValue, string> = {
   none: 'None',
   no_answer: 'Attempted',
-  delivered: 'Delivered',
-  talked: 'Talked',
+  delivered: 'Attempted',
+  talked: 'Talked to person',
   lead: 'Lead',
   interested: 'Lead',
   appointment: 'Appointment',
+  follow_up: 'Follow up',
+  appointment_set: 'Appointment',
+  callback_requested: 'Follow up',
   do_not_knock: 'Do not knock',
-  future_seller: 'Future seller',
+  future_seller: 'Follow up',
   hot_lead: 'Lead',
 };
 
@@ -116,6 +116,9 @@ export const ADDRESS_STATUS_COLORS: Record<string, string> = {
   lead: MAP_STATUS_CONFIG.LEADS.color,
   interested: MAP_STATUS_CONFIG.LEADS.color,
   appointment: MAP_STATUS_CONFIG.HOT_LEADS.color,
+  follow_up: MAP_STATUS_CONFIG.HOT_LEADS.color,
+  appointment_set: MAP_STATUS_CONFIG.HOT_LEADS.color,
+  callback_requested: MAP_STATUS_CONFIG.HOT_LEADS.color,
   do_not_knock: MAP_STATUS_CONFIG.DO_NOT_KNOCK.color,
   future_seller: MAP_STATUS_CONFIG.HOT_LEADS.color,
   hot_lead: MAP_STATUS_CONFIG.LEADS.color,
@@ -132,9 +135,9 @@ export function isAddressStatusBlue(status: string | undefined | null): boolean 
   return status === 'lead' || status === 'interested' || status === 'hot_lead';
 }
 
-/** True if address status should show as green (delivered). */
+/** True if address status should show as green (talked to person). */
 export function isAddressStatusGreen(status: string | undefined | null): boolean {
-  return status === 'delivered';
+  return status === 'talked';
 }
 
 /**

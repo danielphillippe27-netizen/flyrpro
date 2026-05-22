@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseServerClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/server';
 
 /**
  * GET /api/brokerages/search?q=...&limit=20
@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
       Math.max(1, parseInt(searchParams.get('limit') ?? '20', 10) || 20)
     );
 
-    const supabase = await getSupabaseServerClient();
+    const supabase = createAdminClient();
     const { data, error } = await supabase.rpc('search_brokerages', {
       query: q,
       max_results: limit,

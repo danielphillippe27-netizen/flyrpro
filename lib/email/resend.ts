@@ -115,6 +115,127 @@ export type WorkspaceInviteEmailInput = {
   subjectPrefix?: string | null;
 };
 
+export type AmbassadorStripeOnboardingEmailInput = {
+  to: string;
+  fullName: string;
+  onboardingUrl: string;
+  referralCode: string | null;
+};
+
+function getAmbassadorMailerConfigError(): string | null {
+  if (!getEnv('RESEND_API_KEY')) {
+    return 'Stripe onboarding link was created, but email was not sent because the Resend API key is not configured on the server.';
+  }
+
+  const from = getInviteFromEmail();
+  const address = extractEmailAddress(from);
+  if (!address) {
+    return 'Stripe onboarding link was created, but email was not sent. Set RESEND_FROM_EMAIL to a sender on your verified domain.';
+  }
+
+  const domain = address.split('@')[1]?.trim().toLowerCase();
+  if (!domain) {
+    return 'Stripe onboarding link was created, but email was not sent because the sender address is invalid.';
+  }
+
+  if (PERSONAL_INBOX_DOMAINS.has(domain)) {
+    return `Stripe onboarding link was created, but email was not sent. Resend cannot send from personal inboxes (${address}).`;
+  }
+
+  return null;
+}
+
+export async function sendAmbassadorStripeOnboardingEmail(
+  input: AmbassadorStripeOnboardingEmailInput
+): Promise<{ id: string | null }> {
+  const apiKey = getEnv('RESEND_API_KEY');
+  const from = getInviteFromEmail();
+  const configError = getAmbassadorMailerConfigError();
+
+  if (configError || !apiKey || !from) {
+    throw new Error(configError ?? 'Ambassador onboarding email is not configured.');
+  }
+
+  const firstName = input.fullName.trim().split(/\s+/)[0] || 'there';
+  const escapedFirstName = escapeHtml(firstName);
+  const escapedOnboardingUrl = escapeHtml(input.onboardingUrl);
+  const referralLine = input.referralCode
+    ? `Your ambassador referral code is ${input.referralCode}.`
+    : 'Your ambassador referral code will be shared separately.';
+  const text = [
+    'Complete your FLYR ambassador payout setup',
+    '',
+    `Hi ${firstName},`,
+    '',
+    'Your FLYR ambassador application has been approved.',
+    'Please complete Stripe onboarding so Stripe can securely collect your payout and identity details.',
+    referralLine,
+    '',
+    `Complete Stripe onboarding: ${input.onboardingUrl}`,
+    '',
+    'This link may expire after it is opened. If it stops working, reply and we will send a fresh one.',
+  ].join('\n');
+
+  const html = `
+    <div style="margin:0;padding:32px 18px;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#0f172a;">
+      <div style="max-width:580px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:14px;overflow:hidden;">
+        <div style="padding:28px 30px 18px;border-bottom:1px solid #e2e8f0;">
+          <div style="font-size:28px;line-height:1;font-weight:800;color:#111827;">FLYR</div>
+          <h1 style="margin:14px 0 0;font-size:24px;line-height:1.25;color:#111827;font-weight:700;">Ambassador payout setup</h1>
+        </div>
+        <div style="padding:28px 30px;">
+          <p style="margin:0 0 16px;font-size:15px;line-height:1.65;color:#334155;">Hi ${escapedFirstName},</p>
+          <p style="margin:0 0 16px;font-size:15px;line-height:1.65;color:#334155;">Your FLYR ambassador application has been approved.</p>
+          <p style="margin:0 0 22px;font-size:15px;line-height:1.65;color:#334155;">Please complete Stripe onboarding so Stripe can securely collect your payout and identity details.</p>
+          <p style="margin:0 0 24px;">
+            <a href="${escapedOnboardingUrl}" style="display:inline-block;background:#111827;color:#ffffff;text-decoration:none;padding:13px 20px;border-radius:10px;font-size:15px;font-weight:700;">
+              Complete Stripe onboarding
+            </a>
+          </p>
+          <p style="margin:0 0 16px;font-size:13px;line-height:1.6;color:#64748b;">${escapeHtml(referralLine)}</p>
+          <p style="margin:0;font-size:12px;line-height:1.6;color:#64748b;word-break:break-all;">
+            If the button does not work, use this link: <a href="${escapedOnboardingUrl}" style="color:#334155;text-decoration:underline;">${escapedOnboardingUrl}</a>
+          </p>
+        </div>
+      </div>
+    </div>
+  `.trim();
+
+  const resend = new Resend(apiKey);
+  const replyTo = getInviteReplyToEmail();
+  const { data, error } = await resend.emails.send({
+    from,
+    to: input.to,
+    subject: 'Complete your FLYR ambassador payout setup',
+    html,
+    text,
+    ...(replyTo ? { replyTo } : {}),
+  });
+
+  if (error) {
+    const message = error.message.trim() || 'Resend email request failed';
+    if (/only send testing emails|verify a domain at resend\.com\/domains/i.test(message)) {
+      throw new Error(
+        'Stripe onboarding link was created, but email was not sent. Resend test mode only delivers to your account email.'
+      );
+    }
+
+    if (error.statusCode === 403) {
+      throw new Error(
+        message
+          ? `${message} Use a sender address on a domain you have verified in Resend.`
+          : 'Resend rejected the ambassador onboarding email. Use a sender on a verified domain in Resend.'
+      );
+    }
+
+    throw new Error(message);
+  }
+
+  return {
+    id: typeof data?.id === 'string' ? data.id : null,
+  };
+}
+
 export async function sendWorkspaceInviteEmail(input: WorkspaceInviteEmailInput): Promise<{ id: string | null }> {
   const apiKey = getEnv('RESEND_API_KEY');
   const from = getInviteFromEmail();

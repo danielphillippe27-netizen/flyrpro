@@ -14,7 +14,7 @@ import { createClient } from '@/lib/supabase/client';
 import type { BuildingFeatureCollection, BuildingProperties, GetBuildingsInBboxParams } from '@/types/map-buildings';
 import type { CampaignAddress, CampaignType } from '@/types/database';
 import { getCampaignBuildingStatus } from '@/lib/campaignStats';
-import { DEFAULT_STATUS_FILTERS, FLYER_MODE_STATUS_COLORS, MAP_STATUS_CONFIG, type StatusFilters } from '@/lib/constants/mapStatus';
+import { DEFAULT_STATUS_FILTERS, MAP_STATUS_CONFIG, type StatusFilters } from '@/lib/constants/mapStatus';
 import { displayAddressText, resolveHouseNumberLabel } from '@/lib/map/addressPresentation';
 import {
   appendTileAccessToken,
@@ -641,7 +641,6 @@ function getFeatureCollectionBbox(features: GeoJSON.Feature[]): [number, number,
 export function MapBuildingsLayer({
   map,
   campaignId,
-  campaignType,
   refreshKey = 0,
   addressStateOverrides,
   hiddenBuildingIds = [],
@@ -656,7 +655,6 @@ export function MapBuildingsLayer({
   onAddToCRM,
   onRenderStateChange,
 }: MapBuildingsLayerProps) {
-  const isFlyerMode = campaignType === 'flyer';
   const [features, setFeatures] = useState<BuildingFeatureCollection | null>(null);
   const [manifestSource, setManifestSource] = useState<ManifestBuildingSource | null>(null);
   const [isFetching, setIsFetching] = useState(false);
@@ -842,23 +840,12 @@ export function MapBuildingsLayer({
     const getAddressStatus = () => ['coalesce', ['feature-state', 'address_status'], ['get', 'address_status'], 'none'];
     const getScansTotal = () => ['coalesce', ['feature-state', 'scans_total'], ['get', 'scans_total'], 0];
     const getQrScanned = () => ['coalesce', ['feature-state', 'qr_scanned'], ['get', 'qr_scanned'], false];
-    if (isFlyerMode) {
-      const isVisited = [
-        'any',
-        ['==', getStatusValue(), 'visited'],
-        ['==', getStatusValue(), 'hot'],
-        ['==', getStatusValue(), 'lead'],
-        ['==', getStatusValue(), 'hot_lead'],
-        ['==', getStatusValue(), 'no_answer'],
-        ['==', getStatusValue(), 'do_not_knock'],
-        ['!=', getAddressStatus(), 'none'],
-        ['==', getQrScanned(), true],
-        ['>', getScansTotal(), 0],
-      ];
-      return ['case', isVisited, FLYER_MODE_STATUS_COLORS.visited, FLYER_MODE_STATUS_COLORS.unvisited] as ExpressionSpecification;
-    }
     const isQrScanned = ['any', ['==', getQrScanned(), true], ['>', getScansTotal(), 0]];
-    const isHotLead = ['any', ['==', getStatusValue(), 'hot_lead'], ['in', getAddressStatus(), ['literal', ['appointment', 'future_seller']]]];
+    const isHotLead = [
+      'any',
+      ['==', getStatusValue(), 'hot_lead'],
+      ['in', getAddressStatus(), ['literal', ['appointment', 'follow_up', 'appointment_set', 'callback_requested', 'future_seller']]],
+    ];
     const isLead = ['any', ['==', getStatusValue(), 'lead'], ['in', getAddressStatus(), ['literal', ['lead', 'interested', 'hot_lead']]]];
     const isConversation = ['any', ['==', getStatusValue(), 'hot'], ['==', getAddressStatus(), 'talked']];
     const isDoNotKnock = ['any', ['==', getStatusValue(), 'do_not_knock'], ['==', getAddressStatus(), 'do_not_knock']];
@@ -899,7 +886,6 @@ export function MapBuildingsLayer({
   };
 
   const getLeadGlowOpacityExpression = (): ExpressionSpecification => {
-    if (isFlyerMode) return ['case', false, 0, 0] as ExpressionSpecification;
     const getStatusValue = () => ['coalesce', ['feature-state', 'status'], ['get', 'status'], 'not_visited'];
     const getAddressStatus = () => ['coalesce', ['feature-state', 'address_status'], ['get', 'address_status'], 'none'];
     const isLead = ['any', ['==', getStatusValue(), 'lead'], ['in', getAddressStatus(), ['literal', ['lead', 'interested', 'hot_lead']]]];
@@ -1539,8 +1525,8 @@ export function MapBuildingsLayer({
         minzoom: manifestSource.minzoom,
         filter: buildingFilter,
         paint: {
-          'fill-extrusion-color': NEUTRAL_FOOTPRINT_COLOR,
-          'fill-extrusion-opacity': NEUTRAL_EXTRUSION_OPACITY,
+          'fill-extrusion-color': getFootprintFillColor(),
+          'fill-extrusion-opacity': getFootprintFillOpacity(),
           'fill-extrusion-height': [
             'coalesce',
             ['get', 'height'],
@@ -1549,8 +1535,8 @@ export function MapBuildingsLayer({
             8,
           ] as ExpressionSpecification,
           'fill-extrusion-base': ['coalesce', ['get', 'min_height'], 0] as ExpressionSpecification,
-          'fill-extrusion-vertical-gradient': false,
-          'fill-extrusion-emissive-strength': NEUTRAL_EXTRUSION_EMISSIVE_STRENGTH,
+          'fill-extrusion-vertical-gradient': getFootprintVerticalGradient(),
+          'fill-extrusion-emissive-strength': getFootprintEmissiveStrength(),
         },
       };
 
@@ -1566,7 +1552,7 @@ export function MapBuildingsLayer({
         paint: {
           'line-color': '#111827',
           'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.25, 16, 0.7, 18, 1],
-          'line-opacity': 0,
+          'line-opacity': getLeadGlowOpacityExpression(),
         },
       });
 
@@ -1722,7 +1708,7 @@ export function MapBuildingsLayer({
       map.off('zoomend', reportRenderState);
       cleanupRenderedLayers();
     };
-  }, [map, manifestSource, cleanupRenderedLayers, sourceId, layerId, leadGlowLayerId, addressStateOverrides, campaignBoundary, campaignBbox]);
+  }, [map, manifestSource, cleanupRenderedLayers, sourceId, layerId, leadGlowLayerId, addressStateOverrides, campaignBoundary, campaignBbox, statusFilters, footprintStatusColors]);
 
   useEffect(() => {
     if (!map || !manifestSource || !campaignId || !addressStateOverrides?.length) return;
@@ -2643,7 +2629,6 @@ export function MapBuildingsLayer({
 
   // Update color and filter when statusFilters or campaignId changes
   useEffect(() => {
-    if (manifestSource) return;
     // map.getLayer can throw during style transitions (setStyle clears
     // the layer registry temporarily). Guard with isStyleLoaded() and
     // catch any transient Mapbox internal errors.
@@ -2660,6 +2645,20 @@ export function MapBuildingsLayer({
       map.setPaintProperty(layerId, 'fill-extrusion-opacity', getFootprintFillOpacity());
       map.setPaintProperty(layerId, 'fill-extrusion-vertical-gradient', getFootprintVerticalGradient());
       map.setPaintProperty(layerId, 'fill-extrusion-emissive-strength', getFootprintEmissiveStrength());
+      if (manifestSource) {
+        const manifestPolygonFilter = ['==', ['geometry-type'], 'Polygon'] as FilterSpecification;
+        const campaignScopeFilter =
+          campaignBoundaryWithinFilter(campaignBoundary) ??
+          getCampaignScopedBuildingFilter(addressStateOverrides);
+        const manifestScopedFilter = getScopedGeometryFilter(manifestPolygonFilter, campaignScopeFilter);
+        map.setFilter(layerId, manifestScopedFilter);
+        if (map.getLayer(leadGlowLayerId)) {
+          map.setPaintProperty(leadGlowLayerId, 'line-opacity', getLeadGlowOpacityExpression());
+          map.setFilter(leadGlowLayerId, manifestScopedFilter);
+        }
+        return;
+      }
+
       map.setFilter(layerId, getScopedGeometryFilter(POLYGON_GEOMETRY_FILTER, filterExpr));
       safeRemoveLayer(map, surfaceLayerId);
       if (map.getLayer(leadGlowLayerId)) {
@@ -2680,7 +2679,7 @@ export function MapBuildingsLayer({
     } catch (err) {
       console.error('[MapBuildingsLayer] Error updating color/filter:', err);
     }
-  }, [map, manifestSource, statusFilters, campaignId, layerId, surfaceLayerId, outlineLayerId, showOrphans, footprintStatusColors, circleLayerId]);
+  }, [map, manifestSource, statusFilters, campaignId, layerId, surfaceLayerId, outlineLayerId, showOrphans, footprintStatusColors, circleLayerId, campaignBoundary, addressStateOverrides, leadGlowLayerId]);
 
   // Update filter when showOrphans changes (toggle visibility of orphan buildings)
   useEffect(() => {
@@ -2731,7 +2730,7 @@ export function MapBuildingsLayer({
         });
 
         // Refresh colors after style change (ensures they're applied correctly)
-        if (!manifestSource && map.getLayer(layerId)) {
+        if (map.getLayer(layerId)) {
           map.setPaintProperty(layerId, 'fill-extrusion-color', getFootprintFillColor());
           map.setPaintProperty(layerId, 'fill-extrusion-opacity', getFootprintFillOpacity());
           map.setPaintProperty(layerId, 'fill-extrusion-vertical-gradient', getFootprintVerticalGradient());
@@ -2739,7 +2738,7 @@ export function MapBuildingsLayer({
         }
         if (!manifestSource) safeRemoveLayer(map, surfaceLayerId);
         if (!manifestSource) safeRemoveLayer(map, outlineLayerId);
-        if (!manifestSource && map.getLayer(leadGlowLayerId)) {
+        if (map.getLayer(leadGlowLayerId)) {
           map.setPaintProperty(leadGlowLayerId, 'line-opacity', getLeadGlowOpacityExpression());
         }
         if (!manifestSource && map.getLayer(circleLeadGlowLayerId)) {
@@ -2766,7 +2765,7 @@ export function MapBuildingsLayer({
     return () => {
       map.off('style.load', applyLightingAndColors);
     };
-  }, [map, manifestSource, layerId, surfaceLayerId, outlineLayerId, circleLayerId, footprintStatusColors]);
+  }, [map, manifestSource, layerId, surfaceLayerId, outlineLayerId, circleLayerId, footprintStatusColors, statusFilters]);
 
   // Real-time subscription for building_stats updates
   // When a QR code is scanned, building_stats is updated via trigger

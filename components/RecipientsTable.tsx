@@ -127,21 +127,24 @@ export function RecipientsTable({ recipients, campaignId, onRefresh }: Recipient
       case 'qr_scanned':
         return 'bg-violet-500/15 text-violet-800 dark:text-violet-200 border border-violet-500/30';
       case 'no_answer':
-        return 'bg-red-500/15 text-red-800 dark:text-red-200 border border-red-500/30';
       case 'delivered':
-        return 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-200 border border-emerald-500/25';
+        return 'bg-red-500/15 text-red-800 dark:text-red-200 border border-red-500/30';
       case 'talked':
         return 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-200 border border-emerald-500/25';
       case 'do_not_knock':
         return 'bg-black text-white border border-black';
       case 'appointment':
+      case 'follow_up':
+      case 'appointment_set':
+      case 'callback_requested':
       case 'future_seller':
-      case 'hot_lead':
         return 'bg-yellow-400/20 text-yellow-900 dark:text-yellow-200 border border-yellow-400/40';
+      case 'hot_lead':
+        return 'bg-blue-500/15 text-blue-800 dark:text-blue-200 border border-blue-500/30';
       case 'sent':
         return 'bg-red-200 dark:bg-red-900/30 text-red-800 dark:text-red-300';
       case 'scanned':
-        return 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-200 border border-emerald-500/25';
+        return 'bg-violet-500/15 text-violet-800 dark:text-violet-200 border border-violet-500/30';
       default:
         return 'bg-muted text-foreground border border-border';
     }

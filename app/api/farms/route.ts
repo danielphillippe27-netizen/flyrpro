@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as turf from '@turf/turf';
-import { createAdminClient, getSupabaseServerClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/server';
+import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { resolveWorkspaceIdForUser } from '@/app/api/_utils/workspace';
 import type { MinimalSupabaseClient } from '@/app/api/_utils/workspace';
 import { resolveCampaignRegion } from '@/lib/geo/regionResolver';
@@ -35,12 +36,126 @@ function parseFarmPolygon(rawPolygon: string | undefined): GeoJSON.Polygon | nul
   return null;
 }
 
+async function workspaceIdsForUser(admin: ReturnType<typeof createAdminClient>, userId: string) {
+  const workspaceIds = new Set<string>();
+
+  const { data: memberships } = await admin
+    .from('workspace_members')
+    .select('workspace_id')
+    .eq('user_id', userId);
+  for (const membership of memberships ?? []) {
+    const workspaceId = (membership as { workspace_id?: string | null }).workspace_id;
+    if (workspaceId) workspaceIds.add(workspaceId);
+  }
+
+  const { data: ownedWorkspaces } = await admin
+    .from('workspaces')
+    .select('id')
+    .eq('owner_id', userId);
+  for (const workspace of ownedWorkspaces ?? []) {
+    const workspaceId = (workspace as { id?: string | null }).id;
+    if (workspaceId) workspaceIds.add(workspaceId);
+  }
+
+  return [...workspaceIds];
+}
+
+export async function GET(request: NextRequest) {
+  const requestUser = await resolveUserFromRequest(request);
+  if (!requestUser) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const admin = createAdminClient();
+  let workspaceIds = await workspaceIdsForUser(admin, requestUser.id);
+  const requestedWorkspaceId = request.nextUrl.searchParams.get('workspaceId')?.trim() || null;
+  if (requestedWorkspaceId) {
+    const workspace = await resolveWorkspaceIdForUser(
+      admin as unknown as MinimalSupabaseClient,
+      requestUser.id,
+      requestedWorkspaceId
+    );
+    if (!workspace.workspaceId) {
+      return NextResponse.json(
+        { error: workspace.error ?? 'Workspace not found' },
+        { status: workspace.status ?? 400 }
+      );
+    }
+    workspaceIds = [workspace.workspaceId];
+  }
+  const farmRows = new Map<string, {
+    id: string;
+    name?: string | null;
+    phase?: string | null;
+    status?: string | null;
+    is_active?: boolean | null;
+    address_count?: number | null;
+    updated_at?: string | null;
+    start_date?: string | null;
+    end_date?: string | null;
+    touches_per_interval?: number | null;
+    touches_interval?: string | null;
+    goal_type?: string | null;
+    goal_target?: number | null;
+  }>();
+  const farmSelect = 'id, name, phase, status, is_active, address_count, updated_at, start_date, end_date, touches_per_interval, touches_interval, goal_type, goal_target';
+
+  if (!requestedWorkspaceId) {
+    const { data: ownedFarms, error: ownedError } = await admin
+      .from('farms')
+      .select(farmSelect)
+      .eq('owner_id', requestUser.id)
+      .order('updated_at', { ascending: false })
+      .limit(100);
+    if (ownedError) {
+      return NextResponse.json({ error: formatApiError(ownedError) }, { status: 500 });
+    }
+    for (const farm of ownedFarms ?? []) {
+      farmRows.set(farm.id, farm);
+    }
+  }
+
+  if (workspaceIds.length > 0) {
+    const { data: workspaceFarms, error: workspaceError } = await admin
+      .from('farms')
+      .select(farmSelect)
+      .in('workspace_id', workspaceIds)
+      .order('updated_at', { ascending: false })
+      .limit(100);
+    if (workspaceError) {
+      return NextResponse.json({ error: formatApiError(workspaceError) }, { status: 500 });
+    }
+    for (const farm of workspaceFarms ?? []) {
+      farmRows.set(farm.id, farm);
+    }
+  }
+
+  const rows = [...farmRows.values()].sort((a, b) => {
+    const aTime = Date.parse(a.updated_at ?? '');
+    const bTime = Date.parse(b.updated_at ?? '');
+    return (Number.isNaN(bTime) ? 0 : bTime) - (Number.isNaN(aTime) ? 0 : aTime);
+  });
+
+  return NextResponse.json(
+    rows.map((farm) => ({
+      id: farm.id,
+      name: farm.name || 'Untitled Farm',
+      phase: farm.phase || farm.status || (farm.is_active ? 'active' : 'prospecting'),
+      addressCount: farm.address_count ?? 0,
+      startDate: farm.start_date ?? null,
+      endDate: farm.end_date ?? null,
+      touchesPerInterval: farm.touches_per_interval ?? null,
+      touchesInterval: farm.touches_interval ?? null,
+      goalType: farm.goal_type ?? null,
+      goalTarget: farm.goal_target ?? null,
+    }))
+  );
+}
+
 export async function POST(request: NextRequest) {
   try {
-    const authClient = await getSupabaseServerClient();
-    const { data: { user }, error: authError } = await authClient.auth.getUser();
-
-    if (authError || !user) {
+    const requestUser = await resolveUserFromRequest(request);
+    if (!requestUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -64,14 +179,14 @@ export async function POST(request: NextRequest) {
     if (targetWorkspaceId) {
       const resolution = await resolveWorkspaceIdForUser(
         admin as unknown as MinimalSupabaseClient,
-        user.id,
+        requestUser.id,
         targetWorkspaceId
       );
 
       if (!resolution.workspaceId) {
         const fallbackResolution = await resolveWorkspaceIdForUser(
           admin as unknown as MinimalSupabaseClient,
-          user.id,
+          requestUser.id,
           null
         );
         if (!fallbackResolution.workspaceId) {
@@ -87,7 +202,7 @@ export async function POST(request: NextRequest) {
     } else {
       const fallbackResolution = await resolveWorkspaceIdForUser(
         admin as unknown as MinimalSupabaseClient,
-        user.id,
+        requestUser.id,
         null
       );
       if (!fallbackResolution.workspaceId) {
@@ -106,7 +221,7 @@ export async function POST(request: NextRequest) {
     });
 
     const basePayload: Record<string, unknown> = {
-      owner_id: user.id,
+      owner_id: requestUser.id,
       workspace_id: targetWorkspaceId,
       name: body.name.trim(),
       description: body.description?.trim() || null,
@@ -173,7 +288,7 @@ export async function POST(request: NextRequest) {
     const { data: campaign, error: campaignError } = await admin
       .from('campaigns')
       .insert({
-        owner_id: user.id,
+        owner_id: requestUser.id,
         workspace_id: targetWorkspaceId,
         name: linkedCampaignName,
         title: linkedCampaignName,

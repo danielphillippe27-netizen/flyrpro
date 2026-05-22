@@ -9,7 +9,7 @@ import AppTopHeader from '@/components/layout/AppTopHeader';
 import { MainLayoutNavProvider, useMainLayoutNav } from '@/components/layout/MainLayoutNavContext';
 import { MainRouteGuard } from '@/components/guard/MainRouteGuard';
 import { FarmIcon } from '@/components/icons/FarmIcon';
-import { Home, Trophy, Users, Settings, Target, Gauge, Plug, MessageCircle, Activity, CalendarCheck, CornerDownRight, Plus, Link2, UserRoundPlus } from 'lucide-react';
+import { Home, Trophy, Users, Settings, Target, Gauge, Plug, MessageCircle, Activity, CalendarCheck, CornerDownRight, Plus, Link2, UserRoundPlus, BriefcaseBusiness, PhoneCall, ListChecks, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { DashboardAccessLevel } from '@/app/api/_utils/workspace';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
@@ -34,14 +34,25 @@ const baseTabs = [
 const supportTab = { href: '/support', icon: MessageCircle, label: 'Support' };
 const offersTab = { href: '/offers', icon: Link2, label: 'Offers' };
 const ambassadorsTab = { href: '/ambassadors', icon: UserRoundPlus, label: 'Ambassadors' };
+const salespeopleTab = { href: '/salespeople', icon: BriefcaseBusiness, label: 'Salespeople' };
 const settingsTab = { href: '/settings', icon: Settings, label: 'Settings' };
+const salespersonWorkspaceTabs = [
+  { href: '/home', icon: Home, label: 'Home' },
+  { href: '/dialer', icon: PhoneCall, label: 'Dialer' },
+  { href: '/list', icon: ListChecks, label: 'List' },
+  { href: '/leads', icon: Users, label: 'Leads' },
+  offersTab,
+  { href: '/stats', icon: Gauge, label: 'Performance' },
+  { href: '/scraper', icon: Search, label: 'Scraper' },
+  settingsTab,
+];
 const founderTabs = [
-  ...baseTabs.filter((tab) => ['/home', '/campaigns', '/farms'].includes(tab.href)),
+  ...baseTabs.filter((tab) => ['/home'].includes(tab.href)),
   offersTab,
   ambassadorsTab,
+  salespeopleTab,
   ...baseTabs.filter((tab) => ['/activity', '/leads', '/follow-up', '/appointments'].includes(tab.href)),
   settingsTab,
-  ...baseTabs.filter((tab) => ['/stats'].includes(tab.href)),
   supportTab,
 ];
 const memberTabs = baseTabs.filter((tab) =>
@@ -267,6 +278,7 @@ export default function MainLayoutClient({
   }, []);
 
   const tabs: TabDef[] = (() => {
+    if (accessLevel === 'salesperson') return salespersonWorkspaceTabs;
     if (accessLevel === 'member') return [...memberTabs, settingsTab];
     if (accessLevel === 'founder') {
       return founderTabs;

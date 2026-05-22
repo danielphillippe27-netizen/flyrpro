@@ -86,9 +86,8 @@ export class ThreeHouseLayer {
         return '#475569';
       case 'not_home':
       case 'no_answer':
-        return '#f87171';
       case 'visited':
-        return '#22c55e';
+        return '#f87171';
       case 'hot':
         return '#22c55e';
       case 'lead':

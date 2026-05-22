@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireFounderApi } from '@/app/api/admin/_utils/founder';
+import { requireOfferAccessApi } from '@/app/api/admin/offers/_lib/access';
 
 type Params = {
   params: Promise<{ offerId: string }>;
@@ -7,7 +7,7 @@ type Params = {
 
 export async function POST(_request: NextRequest, { params }: Params) {
   try {
-    const auth = await requireFounderApi();
+    const auth = await requireOfferAccessApi();
     if (!auth.ok) {
       return NextResponse.json({ error: auth.error }, { status: auth.status });
     }
@@ -17,13 +17,18 @@ export async function POST(_request: NextRequest, { params }: Params) {
       return NextResponse.json({ error: 'Offer id is required' }, { status: 400 });
     }
 
-    const { data, error } = await auth.admin
+    let query = auth.admin
       .from('partner_offers')
       .update({ revoked_at: new Date().toISOString() })
       .eq('id', offerId)
       .is('revoked_at', null)
-      .select('id')
-      .maybeSingle();
+      .select('id');
+
+    if (!auth.isFounder) {
+      query = query.eq('created_by', auth.user.id);
+    }
+
+    const { data, error } = await query.maybeSingle();
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });

@@ -1,9 +1,10 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
+import { deleteCampaignAddressDeep } from "@/app/api/campaigns/_utils/location-delete";
+import { createAdminClient } from "@/lib/supabase/server";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
 type RouteContext = { params: Promise<{ campaignId: string; addressId: string }> };
 
@@ -66,7 +67,7 @@ export async function DELETE(request: Request, context: RouteContext): Promise<R
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    const supabase = createAdminClient();
     const canAccess = await ensureCampaignAccess(supabase, campaignId, user.id);
     if (!canAccess) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -89,18 +90,16 @@ export async function DELETE(request: Request, context: RouteContext): Promise<R
       );
     }
 
-    const { error: deleteError } = await supabase
-      .from("campaign_addresses")
-      .delete()
-      .eq("campaign_id", campaignId)
-      .eq("id", addressId)
-      .eq("source", "manual");
-
-    if (deleteError) {
-      console.error("[manual-address] delete error:", deleteError);
+    const result = await deleteCampaignAddressDeep(supabase, campaignId, addressId, {
+      requireManualSource: true,
+    });
+    if (!result.found) {
+      return NextResponse.json({ error: "Address not found" }, { status: 404 });
+    }
+    if (result.rejectedReason === "not_manual") {
       return NextResponse.json(
-        { error: "Failed to delete manual address" },
-        { status: 500 }
+        { error: "Only manual addresses can be deleted from tools" },
+        { status: 409 }
       );
     }
 

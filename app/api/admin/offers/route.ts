@@ -1,6 +1,5 @@
 import { randomBytes } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
-import { requireFounderApi } from '@/app/api/admin/_utils/founder';
 import { getPartnerOfferMailerConfigError } from '@/lib/email/partnerOffers';
 import {
   PARTNER_OFFER_SELECT,
@@ -9,6 +8,7 @@ import {
 } from '@/lib/offers/partnerOfferRecord';
 import { resolveUniquePartnerOfferSlug } from '@/lib/offers/partnerOfferSlug';
 import { sendOfferEmailForRow } from '@/app/api/admin/offers/_lib/sendOfferEmail';
+import { requireOfferAccessApi } from '@/app/api/admin/offers/_lib/access';
 
 function parseOptionalString(value: unknown, maxLen: number): string | null {
   if (typeof value !== 'string') return null;
@@ -38,17 +38,21 @@ function parseOptionalEmail(value: unknown): string | null {
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = await requireFounderApi();
+    const auth = await requireOfferAccessApi();
     if (!auth.ok) {
       return NextResponse.json({ error: auth.error }, { status: auth.status });
     }
 
-    const { data, error } = await auth.admin
+    let query = auth.admin
       .from('partner_offers')
       .select(PARTNER_OFFER_SELECT)
-      .eq('is_draft', false)
-      .order('created_at', { ascending: false })
-      .limit(100);
+      .eq('is_draft', false);
+
+    if (!auth.isFounder) {
+      query = query.eq('created_by', auth.user.id);
+    }
+
+    const { data, error } = await query.order('created_at', { ascending: false }).limit(100);
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
@@ -65,7 +69,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const auth = await requireFounderApi();
+    const auth = await requireOfferAccessApi();
     if (!auth.ok) {
       return NextResponse.json({ error: auth.error }, { status: auth.status });
     }

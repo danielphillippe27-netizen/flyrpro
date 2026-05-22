@@ -1,20 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createAdminClient, getSupabaseServerClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/server';
+import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { asUuid, canManageRoutes, getWorkspaceRole } from '@/app/api/routes/_lib';
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   context: { params: Promise<{ assignmentId: string }> }
 ) {
   try {
-    const supabase = await getSupabaseServerClient();
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
-    if (userError || !user) {
+    const requestUser = await resolveUserFromRequest(request);
+    if (!requestUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    const androidFormat = request.nextUrl.searchParams.get('format') === 'android';
 
     const { assignmentId: rawAssignmentId } = await context.params;
     const assignmentId = asUuid(rawAssignmentId);
@@ -35,11 +33,11 @@ export async function GET(
       return NextResponse.json({ error: 'Assignment not found' }, { status: 404 });
     }
 
-    const role = await getWorkspaceRole(assignment.workspace_id, user.id);
+    const role = await getWorkspaceRole(assignment.workspace_id, requestUser.id);
     if (!role) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
-    if (!canManageRoutes(role) && assignment.assigned_to_user_id !== user.id) {
+    if (!canManageRoutes(role) && assignment.assigned_to_user_id !== requestUser.id) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
@@ -94,6 +92,32 @@ export async function GET(
             : null,
         }));
       }
+    }
+
+    if (androidFormat) {
+      return NextResponse.json({
+        id: assignment.id,
+        campaignId: routePlan.campaign_id ?? null,
+        title: routePlan.name ?? 'Route',
+        stopCount: stopsWithVisited.length,
+        status: assignment.status ?? 'pending',
+        stops: stopsWithVisited.flatMap((stop) => {
+          const latitude = typeof stop.lat === 'number' ? stop.lat : null;
+          const longitude = typeof stop.lng === 'number' ? stop.lng : null;
+          if (latitude == null || longitude == null) return [];
+          return [{
+            id: stop.id,
+            addressId: stop.address_id ?? null,
+            addressIds: stop.address_id ? [stop.address_id] : [],
+            buildingId: stop.building_id ?? stop.gers_id ?? null,
+            label: stop.display_address ?? 'Address',
+            latitude,
+            longitude,
+            visited: Boolean(stop.visited),
+            status: Boolean(stop.visited) ? 'delivered' : null,
+          }];
+        }),
+      });
     }
 
     return NextResponse.json({

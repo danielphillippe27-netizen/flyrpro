@@ -16,6 +16,7 @@ import {
   normalizeAmbassadorReferralCodeInput,
   resolveApprovedAmbassadorReferralCode,
 } from '@/app/lib/billing/ambassador-program';
+import { resolveActiveSalespersonReferralCode } from '@/app/lib/billing/salespeople';
 import { sendWorkspaceInviteEmail } from '@/lib/email/resend';
 import {
   FLYR_PARTNER_FREE_FOREVER_REFERRAL_CODE,
@@ -87,6 +88,7 @@ export async function POST(request: NextRequest) {
       brokerage?: string;
       brokerageId?: string;
       partnerOfferToken?: string;
+      salespersonInviteToken?: string;
       teamMemberEmails?: string[];
     };
 
@@ -159,6 +161,176 @@ export async function POST(request: NextRequest) {
       if (mirrorProfileError) {
         console.warn('Onboarding: failed to mirror names into profiles', mirrorProfileError);
       }
+    }
+
+    const salespersonInviteToken =
+      typeof body?.salespersonInviteToken === 'string' && body.salespersonInviteToken.trim()
+        ? body.salespersonInviteToken.trim()
+        : null;
+
+    if (salespersonInviteToken) {
+      const { data: salesperson, error: salespersonError } = await admin
+        .from('salespeople')
+        .select(
+          'id, full_name, email, status, referral_code, founder_user_id, workspace_id, invite_token, approved_at, onboarding_completed_at'
+        )
+        .eq('invite_token', salespersonInviteToken)
+        .maybeSingle();
+
+      if (salespersonError) {
+        return NextResponse.json(
+          { error: 'Failed to validate salesperson invite' },
+          { status: 500 }
+        );
+      }
+
+      if (!salesperson || salesperson.status !== 'active') {
+        return NextResponse.json(
+          { error: 'This salesperson invite is invalid or inactive.' },
+          { status: 400 }
+        );
+      }
+
+      const inviteEmail =
+        typeof salesperson.email === 'string' ? salesperson.email.trim().toLowerCase() : '';
+      const userEmail = requestUser.email?.trim().toLowerCase() ?? '';
+      if (!inviteEmail || !userEmail || inviteEmail !== userEmail) {
+        return NextResponse.json(
+          { error: `This salesperson invite was sent to ${salesperson.email}. Sign in with that email to continue.` },
+          { status: 403 }
+        );
+      }
+
+      const founderUserId =
+        typeof salesperson.founder_user_id === 'string' && salesperson.founder_user_id
+          ? salesperson.founder_user_id
+          : null;
+      if (!founderUserId) {
+        return NextResponse.json(
+          { error: 'This salesperson invite is missing a founder owner. Create a fresh invite.' },
+          { status: 400 }
+        );
+      }
+
+      const nowIso = new Date().toISOString();
+      const salespersonWorkspaceName = `FLYR / Salespeople / ${salesperson.full_name}`;
+      let salespersonWorkspaceId =
+        typeof salesperson.workspace_id === 'string' && salesperson.workspace_id
+          ? salesperson.workspace_id
+          : null;
+
+      if (!salespersonWorkspaceId) {
+        const { data: createdWorkspace, error: createWorkspaceError } = await admin
+          .from('workspaces')
+          .insert({
+            name: salespersonWorkspaceName,
+            owner_id: founderUserId,
+            industry: typeof industry === 'string' && industry.trim() ? industry.trim() : 'Real Estate',
+            subscription_status: 'active',
+            max_seats: 1,
+            onboarding_completed_at: nowIso,
+            referral_code_used:
+              typeof salesperson.referral_code === 'string' && salesperson.referral_code.trim()
+                ? salesperson.referral_code.trim().toUpperCase()
+                : null,
+          })
+          .select('id')
+          .single();
+
+        if (createWorkspaceError || !createdWorkspace?.id) {
+          console.error('Salesperson onboarding: failed to create workspace', createWorkspaceError);
+          return NextResponse.json(
+            { error: 'Failed to create salesperson workspace. Please try again.' },
+            { status: 500 }
+          );
+        }
+
+        salespersonWorkspaceId = createdWorkspace.id;
+      } else {
+        const { error: updateWorkspaceError } = await admin
+          .from('workspaces')
+          .update({
+            name: salespersonWorkspaceName,
+            owner_id: founderUserId,
+            industry: typeof industry === 'string' && industry.trim() ? industry.trim() : 'Real Estate',
+            subscription_status: 'active',
+            max_seats: 1,
+            onboarding_completed_at: nowIso,
+            updated_at: nowIso,
+          })
+          .eq('id', salespersonWorkspaceId);
+
+        if (updateWorkspaceError) {
+          return NextResponse.json(
+            { error: 'Failed to update salesperson workspace. Please try again.' },
+            { status: 500 }
+          );
+        }
+      }
+
+      const { error: founderMembershipError } = await admin
+        .from('workspace_members')
+        .upsert(
+          {
+            workspace_id: salespersonWorkspaceId,
+            user_id: founderUserId,
+            role: 'owner',
+            updated_at: nowIso,
+          },
+          { onConflict: 'workspace_id,user_id' }
+        );
+
+      if (founderMembershipError) {
+        return NextResponse.json(
+          { error: 'Failed to grant founder access to salesperson workspace.' },
+          { status: 500 }
+        );
+      }
+
+      const { error: salespersonMembershipError } = await admin
+        .from('workspace_members')
+        .upsert(
+          {
+            workspace_id: salespersonWorkspaceId,
+            user_id: userId,
+            role: 'member',
+            updated_at: nowIso,
+          },
+          { onConflict: 'workspace_id,user_id' }
+        );
+
+      if (salespersonMembershipError) {
+        return NextResponse.json(
+          { error: 'Failed to grant salesperson workspace access.' },
+          { status: 500 }
+        );
+      }
+
+      await admin
+        .from('user_profiles')
+        .upsert({ user_id: userId, current_workspace_id: salespersonWorkspaceId });
+
+      const { error: salespersonUpdateError } = await admin
+        .from('salespeople')
+        .update({
+          workspace_id: salespersonWorkspaceId,
+          onboarding_completed_at: nowIso,
+          approved_at: salesperson.approved_at ?? nowIso,
+        })
+        .eq('id', salesperson.id);
+
+      if (salespersonUpdateError) {
+        return NextResponse.json(
+          { error: 'Salesperson workspace was created, but the salesperson record could not be updated.' },
+          { status: 500 }
+        );
+      }
+
+      return NextResponse.json({
+        success: true,
+        redirect: '/home',
+        workspaceId: salespersonWorkspaceId,
+      });
     }
 
     // Use admin client so we always find an existing owner workspace (avoids RLS/race creating duplicates)
@@ -299,12 +471,12 @@ export async function POST(request: NextRequest) {
           : null);
 
       if (normalizedReferralCode && !partnerOfferReferralCode) {
-        const ambassadorReferral = await resolveApprovedAmbassadorReferralCode(
-          admin,
-          normalizedReferralCode
-        );
+        const [salespersonReferral, ambassadorReferral] = await Promise.all([
+          resolveActiveSalespersonReferralCode(admin, normalizedReferralCode),
+          resolveApprovedAmbassadorReferralCode(admin, normalizedReferralCode),
+        ]);
 
-        if (ambassadorReferral?.referralStats?.isAtLimit) {
+        if (!salespersonReferral && ambassadorReferral?.referralStats?.isAtLimit) {
           return NextResponse.json(
             {
               error:

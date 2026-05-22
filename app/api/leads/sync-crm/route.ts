@@ -49,6 +49,18 @@ type ContactRow = {
   notes: string | null;
 };
 
+function normalizeRequestedProvider(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const provider = value.trim().toLowerCase().replace(/[_\s-]+/g, '');
+  if (!provider) return null;
+  if (provider === 'fub' || provider === 'followupboss') return 'followupboss';
+  if (provider === 'boldtrail' || provider === 'kvcore') return 'boldtrail';
+  if (provider === 'hubspot') return 'hubspot';
+  if (provider === 'monday' || provider === 'mondaycom') return 'monday';
+  if (provider === 'zapier') return 'zapier';
+  return provider;
+}
+
 /**
  * POST /api/leads/sync-crm
  * Syncs the current user's leads/contacts to connected CRMs.
@@ -63,9 +75,11 @@ export async function POST(request: NextRequest) {
     const supabase = createAdminClient();
 
     let workspaceId: string | null = null;
+    let requestedProvider: string | null = null;
     try {
       const body = await request.json();
       workspaceId = body?.workspaceId ?? null;
+      requestedProvider = normalizeRequestedProvider(body?.provider ?? body?.providerId ?? body?.targetProvider);
     } catch {
       // no-op: body may be empty
     }
@@ -96,15 +110,20 @@ export async function POST(request: NextRequest) {
       .eq('provider', 'monday')
       .maybeSingle();
 
-    const hasFub = (connections ?? []).some((connection) => isFubConnectionProvider(connection.provider));
-    const hasBoldTrail = (connections ?? []).some((connection) => connection.provider === 'boldtrail');
-    const hasHubSpot = (connections ?? []).some((connection) => connection.provider === 'hubspot');
-    const hasZapier = (connections ?? []).some((connection) => connection.provider === 'zapier');
-    const hasMonday = !!mondayIntegration?.access_token;
+    const wantsProvider = (provider: string) => !requestedProvider || requestedProvider === provider;
+    const hasFub = wantsProvider('followupboss') && (connections ?? []).some((connection) => isFubConnectionProvider(connection.provider));
+    const hasBoldTrail = wantsProvider('boldtrail') && (connections ?? []).some((connection) => connection.provider === 'boldtrail');
+    const hasHubSpot = wantsProvider('hubspot') && (connections ?? []).some((connection) => connection.provider === 'hubspot');
+    const hasZapier = wantsProvider('zapier') && (connections ?? []).some((connection) => connection.provider === 'zapier');
+    const hasMonday = wantsProvider('monday') && !!mondayIntegration?.access_token;
 
     if (!hasFub && !hasBoldTrail && !hasHubSpot && !hasZapier && !hasMonday) {
       return NextResponse.json(
-        { error: 'No CRM connected. Connect a CRM in Settings → Integrations first.' },
+        {
+          error: requestedProvider
+            ? `${requestedProvider} is not connected. Connect it in Settings → Integrations first.`
+            : 'No CRM connected. Connect a CRM in Settings → Integrations first.',
+        },
         { status: 400 }
       );
     }
@@ -143,6 +162,7 @@ export async function POST(request: NextRequest) {
 
     for (const conn of connections ?? []) {
       const provider = conn.provider as string;
+      if (!hasFub) continue;
       if (!isFubConnectionProvider(provider)) continue;
 
       const detailsKey = 'followupboss';

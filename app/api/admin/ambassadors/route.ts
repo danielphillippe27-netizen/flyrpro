@@ -2,9 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import type { PostgrestError } from '@supabase/supabase-js';
 import { requireFounderApi } from '@/app/api/admin/_utils/founder';
 import {
+  ensureAmbassadorReferralCode,
   getAmbassadorReferralCodeStats,
   isMissingAmbassadorSchemaError,
+  syncAmbassadorStripePromotionCode,
 } from '@/app/lib/billing/ambassador-program';
+import { z } from 'zod';
 
 type AmbassadorApplicationRow = {
   id: string;
@@ -137,6 +140,70 @@ const LEGACY_SELECT_FIELDS = `
   commission_rate_bps,
   commission_duration_months
 `;
+
+const referralCodeMaxUsesSchema = z.preprocess((value) => {
+  if (value === '' || value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) ? parsed : value;
+  }
+  return value;
+}, z.union([z.number().int().min(1).max(10000), z.null()]).optional());
+
+const commissionRateBpsSchema = z.preprocess((value) => {
+  if (value === '' || value === undefined) return undefined;
+  if (value === null) return undefined;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) ? parsed : value;
+  }
+  return value;
+}, z.number().int().min(1).max(10000).optional());
+
+const commissionDurationMonthsSchema = z.preprocess((value) => {
+  if (value === '' || value === undefined) return undefined;
+  if (value === null) return undefined;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) ? parsed : value;
+  }
+  return value;
+}, z.number().int().min(1).max(36).optional());
+
+const manualAmbassadorSchema = z.object({
+  fullName: z.string().trim().min(2).max(120),
+  email: z.string().trim().email().max(200),
+  phone: z.string().trim().max(40).optional().or(z.literal('')),
+  city: z.string().trim().max(120).optional().or(z.literal('')),
+  primaryNiche: z.string().trim().min(2).max(120),
+  primaryPlatform: z.string().trim().min(2).max(40),
+  audienceSize: z.string().trim().max(80).optional().or(z.literal('')),
+  instagramHandle: z.string().trim().max(80).optional().or(z.literal('')),
+  tiktokHandle: z.string().trim().max(80).optional().or(z.literal('')),
+  youtubeHandle: z.string().trim().max(120).optional().or(z.literal('')),
+  websiteUrl: z.string().trim().url().max(300).optional().or(z.literal('')),
+  audienceSummary: z.string().trim().max(500).optional().or(z.literal('')),
+  whyFlyr: z.string().trim().min(2).max(1500),
+  promotionPlan: z.string().trim().max(1000).optional().or(z.literal('')),
+  status: z.enum(['applied', 'approved']).default('approved'),
+  reviewNotes: z.string().trim().max(2000).optional().or(z.literal('')),
+  referralCode: z.string().trim().max(20).optional().or(z.literal('')),
+  referralCodeMaxUses: referralCodeMaxUsesSchema,
+  commissionRateBps: commissionRateBpsSchema,
+  commissionDurationMonths: commissionDurationMonthsSchema,
+});
+
+function normalizeOptional(value?: string): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
 
 function parseLimit(value: string | null, fallback: number, max: number): number {
   const parsed = Number(value ?? fallback);
@@ -531,5 +598,142 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error('[api/admin/ambassadors] GET error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const auth = await requireFounderApi();
+    if (!auth.ok) {
+      return NextResponse.json({ error: auth.error }, { status: auth.status });
+    }
+
+    const body = await request.json().catch(() => null);
+    const parsed = manualAmbassadorSchema.safeParse(body);
+    if (!parsed.success) {
+      const firstIssue = parsed.error.issues[0];
+      return NextResponse.json(
+        { error: firstIssue?.message ?? 'Invalid ambassador payload.' },
+        { status: 400 }
+      );
+    }
+
+    const payload = parsed.data;
+    const now = new Date().toISOString();
+    const { data, error } = await auth.admin
+      .from('ambassador_applications')
+      .insert({
+        full_name: payload.fullName.trim(),
+        email: payload.email.trim().toLowerCase(),
+        phone: normalizeOptional(payload.phone),
+        city: normalizeOptional(payload.city),
+        primary_niche: payload.primaryNiche.trim(),
+        primary_platform: payload.primaryPlatform.trim(),
+        audience_size: normalizeOptional(payload.audienceSize),
+        instagram_handle: normalizeOptional(payload.instagramHandle),
+        tiktok_handle: normalizeOptional(payload.tiktokHandle),
+        youtube_handle: normalizeOptional(payload.youtubeHandle),
+        website_url: normalizeOptional(payload.websiteUrl),
+        audience_summary: normalizeOptional(payload.audienceSummary),
+        why_flyr: payload.whyFlyr.trim(),
+        promotion_plan: normalizeOptional(payload.promotionPlan),
+        status: payload.status,
+        review_notes: normalizeOptional(payload.reviewNotes),
+        approved_at: payload.status === 'approved' ? now : null,
+        referral_code_max_uses:
+          payload.referralCodeMaxUses === undefined ? null : payload.referralCodeMaxUses,
+        commission_rate_bps: payload.commissionRateBps ?? 2500,
+        commission_duration_months: payload.commissionDurationMonths ?? 12,
+      })
+      .select(
+        'id, full_name, status, referral_code, referral_code_max_uses, stripe_promotion_code_id, commission_rate_bps, commission_duration_months'
+      )
+      .single();
+
+    if (error) {
+      if (isMissingAmbassadorSchemaError(error.message)) {
+        return NextResponse.json(
+          {
+            error:
+              'Ambassador storage is not ready yet. Run the latest ambassador migration first.',
+          },
+          { status: 500 }
+        );
+      }
+
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    const shouldEnsureReferralCode = payload.status === 'approved' || !!payload.referralCode;
+    const referralCode = shouldEnsureReferralCode
+      ? await ensureAmbassadorReferralCode(auth.admin, {
+          applicationId: data.id,
+          fullName: data.full_name,
+          existingReferralCode: data.referral_code,
+          preferredReferralCode: payload.referralCode,
+        })
+      : data.referral_code;
+
+    let stripePromotionCodeId = data.stripe_promotion_code_id;
+    let stripePromotionCodeWarning: string | null = null;
+    if (referralCode && payload.status === 'approved') {
+      const syncResult = await syncAmbassadorStripePromotionCode({
+        applicationId: data.id,
+        referralCode,
+        referralCodeMaxUses:
+          payload.referralCodeMaxUses !== undefined
+            ? payload.referralCodeMaxUses
+            : data.referral_code_max_uses,
+        existingPromotionCodeId: stripePromotionCodeId,
+      });
+
+      stripePromotionCodeId = syncResult.promotionCodeId;
+      stripePromotionCodeWarning = syncResult.skippedReason;
+
+      if (syncResult.promotionCodeId !== data.stripe_promotion_code_id) {
+        const { error: promoUpdateError } = await auth.admin
+          .from('ambassador_applications')
+          .update({
+            stripe_promotion_code_id: syncResult.promotionCodeId,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', data.id);
+
+        if (promoUpdateError) {
+          if (isMissingAmbassadorSchemaError(promoUpdateError.message)) {
+            return NextResponse.json(
+              {
+                error:
+                  'Ambassador referral settings are not ready yet. Run the latest ambassador migration first.',
+              },
+              { status: 500 }
+            );
+          }
+
+          return NextResponse.json({ error: promoUpdateError.message }, { status: 500 });
+        }
+      }
+    }
+
+    return NextResponse.json({
+      ok: true,
+      application: {
+        id: data.id,
+        status: data.status,
+        referralCode,
+        referralCodeMaxUses:
+          payload.referralCodeMaxUses !== undefined
+            ? payload.referralCodeMaxUses
+            : data.referral_code_max_uses,
+        stripePromotionCodeId,
+        commissionRateBps: data.commission_rate_bps,
+        commissionDurationMonths: data.commission_duration_months,
+      },
+      stripePromotionCodeWarning,
+    });
+  } catch (error) {
+    console.error('[api/admin/ambassadors] POST error:', error);
+    const message = error instanceof Error ? error.message : 'Internal server error';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
