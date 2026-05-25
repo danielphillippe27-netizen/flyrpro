@@ -77,6 +77,17 @@ export async function getPostAuthRedirectForUserId(
     admin as unknown as MinimalSupabaseClient,
     userId
   );
+  const { data: authUserData } = await admin.auth.admin.getUserById(userId);
+  const normalizedEmail = authUserData.user?.email?.trim().toLowerCase() ?? null;
+  const salespersonLookup = normalizedEmail
+    ? await admin
+        .from('salespeople')
+        .select('id')
+        .eq('email', normalizedEmail)
+        .eq('status', 'active')
+        .maybeSingle()
+    : { data: null, error: null };
+  const isSalesperson = !!salespersonLookup.data && !salespersonLookup.error;
   const founderPath = next && next !== '/home' ? next : '/admin';
   if (!access.workspaceId) {
     if (access.isFounder) {
@@ -108,6 +119,10 @@ export async function getPostAuthRedirectForUserId(
 
   if (access.level === 'founder') {
     return { redirect: 'dashboard', path: founderPath };
+  }
+
+  if (isSalesperson) {
+    return { redirect: 'dashboard', path: next || '/home' };
   }
 
   if (access.role === 'owner' && !onboardingComplete) {

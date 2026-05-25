@@ -1,5 +1,6 @@
-import { NextResponse } from 'next/server';
-import { createAdminClient, getSupabaseServerClient } from '@/lib/supabase/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { createAdminClient } from '@/lib/supabase/server';
+import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { resolveDashboardAccessLevel, type MinimalSupabaseClient } from '@/app/api/_utils/workspace';
 import {
   mapTemplateRow,
@@ -9,21 +10,18 @@ import {
   type ChallengeTemplateRow,
 } from '@/app/api/challenges/_lib';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const auth = await getSupabaseServerClient();
-    const {
-      data: { user },
-      error: userError,
-    } = await auth.auth.getUser();
-    if (userError || !user) {
+    const requestUser = await resolveUserFromRequest(request);
+    if (!requestUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    const androidFormat = request.nextUrl.searchParams.get('format') === 'android';
 
     const admin = createAdminClient();
     const access = await resolveDashboardAccessLevel(
       admin as unknown as MinimalSupabaseClient,
-      user.id
+      requestUser.id
     );
     const workspaceId = access.workspaceId;
 
@@ -56,7 +54,7 @@ export async function GET() {
       }
     }
 
-    const joinAtIso = user.created_at;
+    const joinAtIso = new Date().toISOString();
 
     const global = await Promise.all(
       ((globalRows ?? []) as ChallengeTemplateRow[]).map(async (row) => {
@@ -87,9 +85,9 @@ export async function GET() {
             p_limit: 500,
           });
           const entries = mapRpcLeaderboard(lb as never);
-          const mine = entries.find((e) => e.userId === user.id);
+          const mine = entries.find((e) => e.userId === requestUser.id);
           const inst = buildRollingViewerInstance({
-            userId: user.id,
+            userId: requestUser.id,
             joinAtIso,
             durationDays: row.duration_days,
             challengeWindowScore: mine?.score ?? 0,
@@ -108,6 +106,17 @@ export async function GET() {
       ...mapTemplateRow(row, 0),
       viewerSummaryLine: null as string | null,
     }));
+
+    if (androidFormat) {
+      return NextResponse.json(
+        [...global, ...team].map((challenge) => ({
+          id: challenge.id,
+          title: challenge.title,
+          progress: Math.round(Number((challenge as { viewerInstance?: { currentScore?: number | null } }).viewerInstance?.currentScore ?? 0) || 0),
+          goal: Number(challenge.durationDays ?? 0) || 0,
+        }))
+      );
+    }
 
     return NextResponse.json({ global, team });
   } catch (e) {

@@ -391,7 +391,7 @@ function getParcelAddressStatusKey(address: CampaignAddress): MapStatusKey {
   if (hasQrScan) return 'QR_SCANNED';
 
   const status = getCampaignAddressMapStatus(address);
-  if (['appointment', 'future_seller', 'hot_lead'].includes(status)) {
+  if (['appointment', 'follow_up', 'appointment_set', 'callback_requested', 'future_seller'].includes(status)) {
     return 'HOT_LEADS';
   }
   if (status === 'talked') {
@@ -2449,7 +2449,7 @@ export function CampaignDetailMapView({
               campaignBbox={campaignBbox}
               statusFilters={statusFilters}
               showAddressLabels={false}
-              footprintStatusColors={false}
+              footprintStatusColors
               onBuildingClick={handleBuildingClick}
               onRenderStateChange={handleBuildingsRenderStateChange}
             />

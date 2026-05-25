@@ -14,10 +14,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
-  CreateTerritoryCta,
   TerritoryDrawHint,
-  TerritoryNamingSheet,
-  showMapControlsForPhase,
 } from '@/components/territory/TerritoryCreateFlow';
 import { getDrawnPolygon } from '@/lib/territory/create-polygon';
 import {
@@ -110,7 +107,6 @@ export default function CreateFarmPage() {
   const [mapError, setMapError] = useState<string | null>(null);
   const [isSatellite, setIsSatellite] = useState(false);
   const [mapSearchQuery, setMapSearchQuery] = useState('');
-  const [searchOpen, setSearchOpen] = useState(false);
   const [feedbackDialog, setFeedbackDialog] = useState<CreateFarmDialogState | null>(null);
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
@@ -491,13 +487,42 @@ export default function CreateFarmPage() {
     drawRef.current?.changeMode('draw_polygon');
   };
 
+  const handlePrimaryCreateAction = async () => {
+    if (phase === 'idle') {
+      handleStartCreating();
+      return;
+    }
+
+    if (phase === 'drawing') {
+      const polygon = getDrawnPolygon(drawRef.current);
+      if (!polygon) {
+        await showFeedbackDialog({
+          title: 'Finish the boundary',
+          description: 'Double-click to finish your shape, then try creating the farm again.',
+          tone: 'warning',
+        });
+        return;
+      }
+      setPhase('naming');
+      drawRef.current?.changeMode('simple_select');
+      return;
+    }
+
+    void handleSubmit();
+  };
+
   const clearDrawing = () => {
     const nextPhase = clearTerritoryDrawing(drawRef.current, phase);
     setPhase(nextPhase);
   };
 
   const startDrawing = () => {
+    if (phase === 'idle') {
+      handleStartCreating();
+      return;
+    }
     drawRef.current?.changeMode('draw_polygon');
+    setPhase('drawing');
   };
 
   const handleNamingBack = () => {
@@ -513,7 +538,6 @@ export default function CreateFarmPage() {
       zoom: 18,
       duration: 1500,
     });
-    setSearchOpen(false);
   };
 
   const handleSubmit = async (e?: React.FormEvent | React.MouseEvent) => {
@@ -754,110 +778,101 @@ export default function CreateFarmPage() {
           </div>
         ) : null}
 
-        {phase === 'idle' && mapLoaded ? (
-          <CreateTerritoryCta onClick={handleStartCreating} disabled={isBusy} />
-        ) : null}
+        {mapLoaded ? (
+          <div className="absolute right-5 top-5 z-20 w-[min(22rem,calc(100vw-2.5rem))] overflow-hidden rounded-2xl border border-white/10 bg-background/92 shadow-2xl backdrop-blur-md">
+            <div className="space-y-4 p-4">
+              <button
+                type="button"
+                disabled={isBusy}
+                onClick={() => void handlePrimaryCreateAction()}
+                className="flex h-16 w-full items-center justify-center gap-3 rounded-2xl bg-red-500 px-5 text-lg font-semibold text-white shadow-xl transition hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <span className="text-2xl leading-none">+</span>
+                <span>{isBusy ? 'Creating...' : 'Create farm'}</span>
+              </button>
 
-        {mapLoaded && showMapControlsForPhase(phase) ? (
-          <div className="absolute top-4 right-4 z-10 flex flex-col gap-3">
-            <button
-              type="button"
-              onClick={() => setSearchOpen((current) => !current)}
-              className="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2.5 text-sm font-medium text-foreground shadow-lg transition-all duration-200 hover:bg-muted/50 hover:shadow-xl"
-            >
-              <Search className="h-5 w-5" />
-              <span>Search</span>
-            </button>
+              {phase === 'naming' ? (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="campaign-name">Campaign name</Label>
+                    <Input
+                      id="campaign-name"
+                      value={campaignName}
+                      onChange={(e) => setCampaignName(e.target.value)}
+                      placeholder="Spring door knock"
+                      autoFocus
+                      className="h-11 bg-background"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="farm-name">Farm name</Label>
+                    <Input
+                      id="farm-name"
+                      value={farmName}
+                      onChange={(e) => setFarmName(e.target.value)}
+                      placeholder="Downtown Repeat Farm"
+                      className="h-11 bg-background"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleNamingBack}
+                    disabled={isBusy}
+                    className="text-sm font-medium text-muted-foreground transition hover:text-foreground disabled:opacity-60"
+                  >
+                    Back to drawing
+                  </button>
+                </div>
+              ) : null}
 
-            {searchOpen ? (
-              <div className="w-[min(24rem,calc(100vw-7rem))] space-y-2 rounded-2xl border border-border bg-card/95 p-4 shadow-lg backdrop-blur-sm">
+              <div className="space-y-2">
+                <Label htmlFor="farm-map-search" className="flex items-center gap-2">
+                  <Search className="h-4 w-4" />
+                  Search address
+                </Label>
                 <AddressAutocomplete
                   value={mapSearchQuery}
                   onChange={setMapSearchQuery}
                   onSelect={handleMapSearchSelect}
-                  placeholder="Jump to address..."
+                  placeholder="Search an address..."
                   className="flex-1"
-                  inputClassName="bg-background"
+                  inputClassName="h-11 bg-background"
                 />
-                <p className="text-xs text-muted-foreground">
-                  Search for an address, then draw the farm boundary.
-                </p>
               </div>
-            ) : null}
 
-            <button
-              type="button"
-              onClick={toggleSatelliteView}
-              className="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2.5 text-sm font-medium text-foreground shadow-lg transition-all duration-200 hover:bg-muted/50 hover:shadow-xl"
-            >
-              {isSatellite ? (
-                <>
-                  <Map className="h-5 w-5" />
-                  <span>Map</span>
-                </>
-              ) : (
-                <>
-                  <Satellite className="h-5 w-5" />
-                  <span>Satellite</span>
-                </>
-              )}
-            </button>
-
-            {phase === 'drawing' ? (
-              <>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={toggleSatelliteView}
+                  className="flex h-11 items-center justify-center gap-2 rounded-xl border border-border bg-card px-3 text-sm font-medium text-foreground transition hover:bg-muted/50"
+                >
+                  {isSatellite ? <Map className="h-5 w-5" /> : <Satellite className="h-5 w-5" />}
+                  <span>{isSatellite ? 'Map' : 'Satellite'}</span>
+                </button>
                 <button
                   type="button"
                   onClick={startDrawing}
-                  className="flex items-center gap-2 rounded-lg border border-red-600 bg-red-500 px-4 py-2.5 text-sm font-medium text-white shadow-lg transition-all duration-200 hover:bg-red-600 hover:shadow-xl"
+                  className="flex h-11 items-center justify-center gap-2 rounded-xl border border-red-600 bg-red-500 px-3 text-sm font-medium text-white transition hover:bg-red-600"
                 >
                   <Pencil className="h-5 w-5" />
                   <span>Draw</span>
                 </button>
-                <button
-                  type="button"
-                  onClick={clearDrawing}
-                  className="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2.5 text-sm font-medium text-foreground shadow-lg transition-all duration-200 hover:bg-muted/50 hover:shadow-xl"
-                >
-                  <Trash2 className="h-5 w-5" />
-                  <span>Clear</span>
-                </button>
-              </>
-            ) : null}
+              </div>
+
+              <button
+                type="button"
+                onClick={clearDrawing}
+                disabled={phase === 'idle'}
+                className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-border bg-card px-3 text-sm font-medium text-foreground transition hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Trash2 className="h-5 w-5" />
+                <span>Clear boundary</span>
+              </button>
+            </div>
           </div>
         ) : null}
 
         <TerritoryDrawHint visible={mapLoaded && phase === 'drawing'} />
-
-        <TerritoryNamingSheet
-          open={phase === 'naming'}
-          title="Name your campaign and farm"
-          description="Your territory is drawn. Name the linked campaign and the farm you will revisit."
-          onCancel={handleNamingBack}
-          onSubmit={() => void handleSubmit()}
-          submitLabel="Create Farm"
-          submitDisabled={!campaignName.trim() || !farmName.trim()}
-          isSubmitting={isBusy}
-        >
-          <div className="space-y-2">
-            <Label htmlFor="campaign-name">Campaign name</Label>
-            <Input
-              id="campaign-name"
-              value={campaignName}
-              onChange={(e) => setCampaignName(e.target.value)}
-              placeholder="Spring door knock"
-              autoFocus
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="farm-name">Farm name</Label>
-            <Input
-              id="farm-name"
-              value={farmName}
-              onChange={(e) => setFarmName(e.target.value)}
-              placeholder="Downtown Repeat Farm"
-            />
-          </div>
-        </TerritoryNamingSheet>
       </div>
 
       <Dialog open={!!feedbackDialog} onOpenChange={(open) => !open && dismissFeedbackDialog()}>

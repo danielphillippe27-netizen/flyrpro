@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createAdminClient, getSupabaseServerClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/server';
+import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { resolveWorkspaceIdForUser } from '@/app/api/_utils/workspace';
 import { resolveCampaignRegion } from '@/lib/geo/regionResolver';
 import type { MinimalSupabaseClient } from '@/app/api/_utils/workspace';
@@ -40,13 +41,109 @@ function isCampaignTypeConstraintError(error: unknown): boolean {
 
 interface CreateCampaignBody {
   name: string;
+  description?: string;
   type: string;
   address_source: string;
   region?: string;
   workspace_id?: string;
   seed_query?: string;
+  tags?: string;
   bbox?: number[];
   territory_boundary?: { type: 'Polygon'; coordinates: number[][][] };
+}
+
+async function workspaceIdsForUser(admin: ReturnType<typeof createAdminClient>, userId: string) {
+  const workspaceIds = new Set<string>();
+
+  const { data: memberships } = await admin
+    .from('workspace_members')
+    .select('workspace_id')
+    .eq('user_id', userId);
+  for (const membership of memberships ?? []) {
+    const workspaceId = (membership as { workspace_id?: string | null }).workspace_id;
+    if (workspaceId) workspaceIds.add(workspaceId);
+  }
+
+  const { data: ownedWorkspaces } = await admin
+    .from('workspaces')
+    .select('id')
+    .eq('owner_id', userId);
+  for (const workspace of ownedWorkspaces ?? []) {
+    const workspaceId = (workspace as { id?: string | null }).id;
+    if (workspaceId) workspaceIds.add(workspaceId);
+  }
+
+  return [...workspaceIds];
+}
+
+export async function GET(request: NextRequest) {
+  const requestUser = await resolveUserFromRequest(request);
+  if (!requestUser) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const admin = createAdminClient();
+  let workspaceIds = await workspaceIdsForUser(admin, requestUser.id);
+  const requestedWorkspaceId = request.nextUrl.searchParams.get('workspaceId')?.trim() || null;
+  if (requestedWorkspaceId) {
+    const workspace = await resolveWorkspaceIdForUser(
+      admin as unknown as MinimalSupabaseClient,
+      requestUser.id,
+      requestedWorkspaceId
+    );
+    if (!workspace.workspaceId) {
+      return NextResponse.json(
+        { error: workspace.error ?? 'Workspace not found' },
+        { status: workspace.status ?? 400 }
+      );
+    }
+    workspaceIds = [workspace.workspaceId];
+  }
+  const campaignRows = new Map<string, { id: string; name?: string | null; title?: string | null; status?: string | null; provision_status?: string | null; updated_at?: string | null }>();
+
+  if (!requestedWorkspaceId) {
+    const { data: ownedCampaigns, error: ownedError } = await admin
+      .from('campaigns')
+      .select('id, name, title, status, provision_status, updated_at')
+      .eq('owner_id', requestUser.id)
+      .order('updated_at', { ascending: false })
+      .limit(100);
+    if (ownedError) {
+      return NextResponse.json({ error: ownedError.message }, { status: 500 });
+    }
+    for (const campaign of ownedCampaigns ?? []) {
+      campaignRows.set(campaign.id, campaign);
+    }
+  }
+
+  if (workspaceIds.length > 0) {
+    const { data: workspaceCampaigns, error: workspaceError } = await admin
+      .from('campaigns')
+      .select('id, name, title, status, provision_status, updated_at')
+      .in('workspace_id', workspaceIds)
+      .order('updated_at', { ascending: false })
+      .limit(100);
+    if (workspaceError) {
+      return NextResponse.json({ error: workspaceError.message }, { status: 500 });
+    }
+    for (const campaign of workspaceCampaigns ?? []) {
+      campaignRows.set(campaign.id, campaign);
+    }
+  }
+
+  const rows = [...campaignRows.values()].sort((a, b) => {
+    const aTime = Date.parse(a.updated_at ?? '');
+    const bTime = Date.parse(b.updated_at ?? '');
+    return (Number.isNaN(bTime) ? 0 : bTime) - (Number.isNaN(aTime) ? 0 : aTime);
+  });
+
+  return NextResponse.json(
+    rows.map((campaign) => ({
+      id: campaign.id,
+      name: campaign.title || campaign.name || 'Untitled Campaign',
+      status: campaign.status || campaign.provision_status || 'draft',
+    }))
+  );
 }
 
 /**
@@ -55,16 +152,14 @@ interface CreateCampaignBody {
  */
 export async function POST(request: NextRequest) {
   try {
-    const authClient = await getSupabaseServerClient();
-    const { data: { user }, error: authError } = await authClient.auth.getUser();
-
-    if (authError || !user) {
+    const requestUser = await resolveUserFromRequest(request);
+    if (!requestUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const admin = createAdminClient();
     const body: CreateCampaignBody = await request.json();
-    const { name, type, address_source, region, workspace_id, seed_query, bbox, territory_boundary } = body;
+    const { name, description, type, address_source, region, workspace_id, seed_query, tags, bbox, territory_boundary } = body;
     const normalizedType = typeof type === 'string' ? type.trim() : type;
 
     if (!name || !type || !address_source) {
@@ -90,14 +185,14 @@ export async function POST(request: NextRequest) {
     if (targetWorkspaceId) {
       const resolution = await resolveWorkspaceIdForUser(
         admin as unknown as MinimalSupabaseClient,
-        user.id,
+        requestUser.id,
         targetWorkspaceId
       );
 
       if (!resolution.workspaceId) {
         const fallbackResolution = await resolveWorkspaceIdForUser(
           admin as unknown as MinimalSupabaseClient,
-          user.id,
+          requestUser.id,
           null
         );
         if (!fallbackResolution.workspaceId) {
@@ -112,7 +207,7 @@ export async function POST(request: NextRequest) {
           );
         }
         console.warn('[POST /api/campaigns] Provided workspace_id is not accessible; falling back to primary workspace', {
-          user_id: user.id,
+          user_id: requestUser.id,
           requested_workspace_id: targetWorkspaceId,
           fallback_workspace_id: fallbackResolution.workspaceId,
         });
@@ -123,7 +218,7 @@ export async function POST(request: NextRequest) {
     } else {
       const fallbackResolution = await resolveWorkspaceIdForUser(
         admin as unknown as MinimalSupabaseClient,
-        user.id,
+        requestUser.id,
         null
       );
       if (!fallbackResolution.workspaceId) {
@@ -150,15 +245,19 @@ export async function POST(request: NextRequest) {
     }
 
     const insertPayload = {
-      owner_id: user.id,
+      owner_id: requestUser.id,
       workspace_id: targetWorkspaceId,
       name,
       title: name,
-      description: '',
+      description:
+        typeof description === 'string' && description.trim()
+          ? description.trim()
+          : 'Campaign created from polygon',
       type: normalizedType,
       address_source,
       region: regionResolution.regionCode,
       seed_query: seed_query ?? null,
+      tags: typeof tags === 'string' && tags.trim() ? tags.trim() : null,
       bbox: bbox ?? null,
       territory_boundary: territory_boundary ?? null,
       total_flyers: 0,

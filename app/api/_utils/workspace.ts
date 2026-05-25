@@ -9,6 +9,7 @@ export type WorkspaceRole = 'owner' | 'admin' | 'member';
 export type TeamDashboardMode = 'team_owner' | 'default';
 export type DashboardAccessLevel =
   | 'founder'
+  | 'salesperson'
   | 'team_leader'
   | 'member'
   | 'solo_owner'

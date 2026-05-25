@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import QRCode from 'qrcode';
-import { requireFounderApi } from '@/app/api/admin/_utils/founder';
 import {
   PARTNER_OFFER_SELECT,
   type PartnerOfferRow,
   toClientPartnerOffer,
 } from '@/lib/offers/partnerOfferRecord';
+import { requireOfferAccessApi } from '@/app/api/admin/offers/_lib/access';
 
 function isLocalhostUrl(url: string): boolean {
   try {
@@ -24,7 +24,7 @@ type Params = { params: Promise<{ offerId: string }> };
  */
 export async function POST(request: NextRequest, { params }: Params) {
   try {
-    const auth = await requireFounderApi();
+    const auth = await requireOfferAccessApi();
     if (!auth.ok) {
       return NextResponse.json({ error: auth.error }, { status: auth.status });
     }
@@ -45,11 +45,16 @@ export async function POST(request: NextRequest, { params }: Params) {
 
     const origin = safeBaseUrl.replace(/\/$/, '');
 
-    const { data, error } = await auth.admin
+    let query = auth.admin
       .from('partner_offers')
       .select(PARTNER_OFFER_SELECT)
-      .eq('id', offerId)
-      .maybeSingle();
+      .eq('id', offerId);
+
+    if (!auth.isFounder) {
+      query = query.eq('created_by', auth.user.id);
+    }
+
+    const { data, error } = await query.maybeSingle();
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });

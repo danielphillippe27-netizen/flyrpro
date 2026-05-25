@@ -12,7 +12,7 @@ import { handleWheelScrollContainer } from '@/lib/scrollContainer';
 const OFFER_SIDEBAR_COLLAPSED_KEY = 'flyr-offer-sidebar-collapsed';
 const SIDEBAR_WIDTH = 280;
 
-function OffersFounderGuard({ children }: { children: React.ReactNode }) {
+function OffersAccessGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [ok, setOk] = useState<boolean | null>(null);
 
@@ -22,7 +22,7 @@ function OffersFounderGuard({ children }: { children: React.ReactNode }) {
       .then((r) => r.json())
       .then((d) => {
         if (cancelled) return;
-        if (d?.accessLevel === 'founder') setOk(true);
+        if (d?.accessLevel === 'founder' || d?.accessLevel === 'salesperson') setOk(true);
         else {
           setOk(false);
           router.replace('/home');
@@ -119,7 +119,7 @@ export default function OffersLayout({ children }: { children: React.ReactNode }
   }, []);
 
   return (
-    <OffersFounderGuard>
+    <OffersAccessGuard>
       <div className="flex flex-1 h-full min-h-0 w-full overflow-hidden">
         <div className="hidden md:flex shrink-0">
           <OfferListSidebar
@@ -170,6 +170,6 @@ export default function OffersLayout({ children }: { children: React.ReactNode }
           </div>
         </div>
       </div>
-    </OffersFounderGuard>
+    </OffersAccessGuard>
   );
 }

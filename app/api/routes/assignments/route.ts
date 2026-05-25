@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createAdminClient, getSupabaseServerClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/server';
+import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
+import { resolveWorkspaceIdForUser } from '@/app/api/_utils/workspace';
+import type { MinimalSupabaseClient } from '@/app/api/_utils/workspace';
 import { asUuid, canManageRoutes, getWorkspaceRole } from '@/app/api/routes/_lib';
 
 type AssignmentRow = {
@@ -63,27 +66,28 @@ function getDisplayName(profile: ProfileRow | undefined, fallbackId: string): st
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = await getSupabaseServerClient();
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
-    if (userError || !user) {
+    const requestUser = await resolveUserFromRequest(request);
+    if (!requestUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const workspaceId = asUuid(request.nextUrl.searchParams.get('workspaceId'));
+    const admin = createAdminClient();
+    const requestedWorkspaceId = asUuid(request.nextUrl.searchParams.get('workspaceId'));
+    const workspaceResolution = requestedWorkspaceId
+      ? { workspaceId: requestedWorkspaceId }
+      : await resolveWorkspaceIdForUser(admin as unknown as MinimalSupabaseClient, requestUser.id, null);
+    const workspaceId = workspaceResolution.workspaceId;
     const campaignId = asUuid(request.nextUrl.searchParams.get('campaignId'));
+    const androidFormat = request.nextUrl.searchParams.get('format') === 'android';
     if (!workspaceId) {
       return NextResponse.json({ error: 'workspaceId is required' }, { status: 400 });
     }
 
-    const role = await getWorkspaceRole(workspaceId, user.id);
+    const role = await getWorkspaceRole(workspaceId, requestUser.id);
     if (!role) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const admin = createAdminClient();
     let query = admin
       .from('route_assignments')
       .select(
@@ -94,7 +98,7 @@ export async function GET(request: NextRequest) {
       .limit(300);
 
     if (!canManageRoutes(role)) {
-      query = query.eq('assigned_to_user_id', user.id);
+      query = query.eq('assigned_to_user_id', requestUser.id);
     }
 
     const initialAssignmentResult = await query;
@@ -114,7 +118,7 @@ export async function GET(request: NextRequest) {
         .limit(300);
 
       if (!canManageRoutes(role)) {
-        fallbackQuery = fallbackQuery.eq('assigned_to_user_id', user.id);
+        fallbackQuery = fallbackQuery.eq('assigned_to_user_id', requestUser.id);
       }
 
       const fallback = await fallbackQuery;
@@ -197,6 +201,18 @@ export async function GET(request: NextRequest) {
         },
       };
     });
+
+    if (androidFormat) {
+      return NextResponse.json(
+        payload.map((assignment) => ({
+          id: assignment.id,
+          campaignId: assignment.route_plan?.campaign_id ?? null,
+          title: assignment.route_plan?.name ?? 'Route',
+          stopCount: assignment.route_plan?.total_stops ?? 0,
+          status: assignment.status,
+        }))
+      );
+    }
 
     return NextResponse.json({ assignments: payload, role });
   } catch (error) {

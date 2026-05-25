@@ -35,6 +35,17 @@ export async function ensureCampaignAccess(
     return true;
   }
 
+  const { data: campaignMember } = await supabase
+    .from('campaign_members')
+    .select('user_id')
+    .eq('campaign_id', campaignId)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (campaignMember) {
+    return true;
+  }
+
   const { data: workspace } = await supabase
     .from('workspaces')
     .select('owner_id')

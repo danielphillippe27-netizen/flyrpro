@@ -9,6 +9,10 @@ import {
 } from '@/app/lib/billing/stripe-subscription-sync';
 import { getStripeWebhookSecret } from '@/app/lib/billing/stripe-env';
 import { recordAmbassadorCommissionForInvoice } from '@/app/lib/billing/ambassador-program';
+import {
+  isMissingSalespeopleSchemaError,
+  recordSalespersonCommissionForInvoice,
+} from '@/app/lib/billing/salespeople';
 import { markWorkspacePowerDialerAddonInactiveForUser } from '@/app/lib/billing/workspace-addons';
 
 const secret = getStripeWebhookSecret();
@@ -69,6 +73,26 @@ async function syncAmbassadorStripeAccount(
 
   if (error) {
     console.warn('[stripe webhook] failed syncing ambassador connect account', error);
+  }
+}
+
+async function syncSalespersonStripeAccount(
+  supabase: ReturnType<typeof createAdminClient>,
+  account: Stripe.Account
+): Promise<void> {
+  const { error } = await supabase
+    .from('salespeople')
+    .update({
+      stripe_onboarding_completed: account.details_submitted ?? false,
+      stripe_details_submitted: account.details_submitted ?? false,
+      stripe_charges_enabled: account.charges_enabled ?? false,
+      stripe_payouts_enabled: account.payouts_enabled ?? false,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('stripe_connect_account_id', account.id);
+
+  if (error && !isMissingSalespeopleSchemaError(error.message)) {
+    console.warn('[stripe webhook] failed syncing salesperson connect account', error);
   }
 }
 
@@ -150,7 +174,10 @@ export async function POST(request: NextRequest) {
 
       case 'account.updated': {
         const account = event.data.object as Stripe.Account;
-        await syncAmbassadorStripeAccount(supabase, account);
+        await Promise.all([
+          syncAmbassadorStripeAccount(supabase, account),
+          syncSalespersonStripeAccount(supabase, account),
+        ]);
         break;
       }
 
@@ -178,12 +205,22 @@ export async function POST(request: NextRequest) {
                 row.user_id,
                 subscription
               );
-              await recordAmbassadorCommissionForInvoice(
+              const recordedSalespersonCommission =
+                await recordSalespersonCommissionForInvoice(
+                  supabase,
+                  row.user_id,
+                  subscription,
+                  invoice
+                );
+
+              if (!recordedSalespersonCommission) {
+                await recordAmbassadorCommissionForInvoice(
                 supabase,
                 row.user_id,
                 subscription,
                 invoice
-              );
+                );
+              }
             }
           }
         }

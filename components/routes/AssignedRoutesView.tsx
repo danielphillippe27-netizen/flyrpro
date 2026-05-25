@@ -560,17 +560,18 @@ export function AssignedRoutesView({
     ];
     const isHotLead = [
       'any',
-      ['in', getAddressStatus(), ['literal', ['appointment', 'future_seller', 'hot_lead']]],
+      ['in', getAddressStatus(), ['literal', ['appointment', 'follow_up', 'appointment_set', 'callback_requested', 'future_seller']]],
       ['==', getStatus(), 'hot_lead'],
     ];
     const isLead = [
       'any',
       ['==', getStatus(), 'lead'],
+      ['in', getAddressStatus(), ['literal', ['lead', 'interested', 'hot_lead']]],
     ];
     const isDoNotKnock = ['any', ['==', getAddressStatus(), 'do_not_knock'], ['==', getStatus(), 'do_not_knock']];
     const isNoOneHome = [
       'any',
-      ['in', getAddressStatus(), ['literal', ['no_answer', 'not_home']]],
+      ['in', getAddressStatus(), ['literal', ['no_answer', 'not_home', 'attempted']]],
       ['==', getStatus(), 'no_answer'],
     ];
     const isTouched = ['any', ['==', getAddressStatus(), 'delivered'], ['==', getStatus(), 'visited']];

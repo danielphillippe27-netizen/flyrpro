@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireFounderApi } from '@/app/api/admin/_utils/founder';
 import {
   PARTNER_OFFER_SELECT,
   type PartnerOfferRow,
   toClientPartnerOffer,
 } from '@/lib/offers/partnerOfferRecord';
 import { resolveUniquePartnerOfferSlug } from '@/lib/offers/partnerOfferSlug';
+import { requireOfferAccessApi } from '@/app/api/admin/offers/_lib/access';
 
 function parseOptionalString(value: unknown, maxLen: number): string | null {
   if (typeof value !== 'string') return null;
@@ -39,7 +39,7 @@ type Params = {
 
 export async function GET(request: NextRequest, { params }: Params) {
   try {
-    const auth = await requireFounderApi();
+    const auth = await requireOfferAccessApi();
     if (!auth.ok) {
       return NextResponse.json({ error: auth.error }, { status: auth.status });
     }
@@ -49,11 +49,16 @@ export async function GET(request: NextRequest, { params }: Params) {
       return NextResponse.json({ error: 'Offer id is required' }, { status: 400 });
     }
 
-    const { data, error } = await auth.admin
+    let query = auth.admin
       .from('partner_offers')
       .select(PARTNER_OFFER_SELECT)
-      .eq('id', offerId)
-      .maybeSingle();
+      .eq('id', offerId);
+
+    if (!auth.isFounder) {
+      query = query.eq('created_by', auth.user.id);
+    }
+
+    const { data, error } = await query.maybeSingle();
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
@@ -72,7 +77,7 @@ export async function GET(request: NextRequest, { params }: Params) {
 
 export async function PATCH(request: NextRequest, { params }: Params) {
   try {
-    const auth = await requireFounderApi();
+    const auth = await requireOfferAccessApi();
     if (!auth.ok) {
       return NextResponse.json({ error: auth.error }, { status: auth.status });
     }
@@ -153,12 +158,17 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       }
     }
 
-    const { data, error } = await auth.admin
+    let updateQuery = auth.admin
       .from('partner_offers')
       .update(updates)
       .eq('id', offerId)
-      .select(PARTNER_OFFER_SELECT)
-      .maybeSingle();
+      .select(PARTNER_OFFER_SELECT);
+
+    if (!auth.isFounder) {
+      updateQuery = updateQuery.eq('created_by', auth.user.id);
+    }
+
+    const { data, error } = await updateQuery.maybeSingle();
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });

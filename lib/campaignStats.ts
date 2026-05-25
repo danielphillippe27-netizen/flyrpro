@@ -10,6 +10,9 @@ const VISITED_STATUSES = new Set([
   'lead',
   'interested',
   'appointment',
+  'follow_up',
+  'appointment_set',
+  'callback_requested',
   'do_not_knock',
   'future_seller',
   'hot_lead',
@@ -20,7 +23,7 @@ const CONTACTED_STATUSES = new Set([
 ]);
 
 const LEAD_STATUSES = new Set(['lead', 'interested', 'hot_lead']);
-const HOT_LEAD_STATUSES = new Set(['appointment', 'future_seller']);
+const HOT_LEAD_STATUSES = new Set(['appointment', 'follow_up', 'appointment_set', 'callback_requested', 'future_seller']);
 
 function normalizeStatus(status?: string | null): string {
   return (status ?? '').trim().toLowerCase();
@@ -39,13 +42,16 @@ const ADDRESS_OUTCOME_LABELS: Record<string, string> = {
   not_home: 'Attempted',
   attempted: 'Attempted',
   no_answer: 'Attempted',
-  delivered: 'Visited',
-  talked: 'Conversation',
+  delivered: 'Attempted',
+  talked: 'Talked to person',
   lead: 'Lead',
   interested: 'Lead',
   appointment: 'Appointment',
+  follow_up: 'Follow up',
+  appointment_set: 'Appointment',
+  callback_requested: 'Follow up',
   do_not_knock: 'Do not knock',
-  future_seller: 'Future seller',
+  future_seller: 'Follow up',
   hot_lead: 'Lead',
   qr_scanned: 'QR scanned',
 };

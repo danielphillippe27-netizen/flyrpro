@@ -104,7 +104,11 @@ export async function GET(request: NextRequest) {
       dialerNumberStatus = dialerSettings?.number_status ?? null;
     }
 
-    const snapshot: EntitlementSnapshot & { upgrade_price_id?: string } = {
+    const snapshot: EntitlementSnapshot & {
+      upgrade_price_id?: string;
+      canUsePro: boolean;
+      reason: string | null;
+    } = {
       plan:
         workspaceAccess && entitlement.plan === 'free'
           ? 'pro'
@@ -136,6 +140,8 @@ export async function GET(request: NextRequest) {
       dialer_number: dialerNumber,
       dialer_number_status: (dialerNumberStatus as EntitlementSnapshot['dialer_number_status']) ?? null,
       dialer_uses_shared_default: !dialerNumber,
+      canUsePro: entitlement.is_active || workspaceAccess,
+      reason: entitlement.is_active || workspaceAccess ? null : 'inactive',
     };
     const defaultPriceId = getDefaultUpgradePriceId();
     if (defaultPriceId) {

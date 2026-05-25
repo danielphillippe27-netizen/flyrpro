@@ -16,9 +16,44 @@ export async function GET(request: NextRequest) {
     }
 
     const admin = createAdminClient();
+    const normalizedEmail = requestUser.email?.trim().toLowerCase() ?? null;
+    const salespersonLookup = normalizedEmail
+      ? await admin
+          .from('salespeople')
+          .select('id, full_name, email, status')
+          .eq('email', normalizedEmail)
+          .eq('status', 'active')
+          .maybeSingle()
+      : { data: null, error: null };
+    const isSalesperson = !!salespersonLookup.data && !salespersonLookup.error;
+    const requestedWorkspaceId = request.nextUrl.searchParams.get('workspaceId')?.trim() || null;
+    const { data: membershipRows } = await admin
+      .from('workspace_members')
+      .select('workspace_id, role, created_at')
+      .eq('user_id', requestUser.id)
+      .order('created_at', { ascending: true });
+    const workspaceIds = Array.from(
+      new Set((membershipRows ?? []).map((row) => row.workspace_id).filter(Boolean))
+    );
+    const { data: workspaceRows } = workspaceIds.length
+      ? await admin
+          .from('workspaces')
+          .select('id, name, industry')
+          .in('id', workspaceIds)
+      : { data: [] };
+    const workspaceOptions = (workspaceRows ?? []).map((workspace) => {
+      const membership = (membershipRows ?? []).find((row) => row.workspace_id === workspace.id);
+      return {
+        id: workspace.id,
+        name: workspace.name,
+        industry: workspace.industry ?? null,
+        role: membership?.role ?? null,
+      };
+    });
     const access = await resolveDashboardAccessLevel(
       admin as unknown as MinimalSupabaseClient,
-      requestUser.id
+      requestUser.id,
+      requestedWorkspaceId
     );
     if (!access.workspaceId) {
       return NextResponse.json({
@@ -30,8 +65,11 @@ export async function GET(request: NextRequest) {
         hasAccess: access.isFounder,
         reason: 'no_workspace',
         isFounder: access.isFounder,
-        accessLevel: access.level,
+        isSalesperson,
+        salesperson: salespersonLookup.data ?? null,
+        accessLevel: isSalesperson ? 'salesperson' : access.level,
         memberCount: access.memberCount,
+        workspaces: workspaceOptions,
       });
     }
 
@@ -53,6 +91,7 @@ export async function GET(request: NextRequest) {
         isFounder: access.isFounder,
         accessLevel: access.level,
         memberCount: access.memberCount,
+        workspaces: workspaceOptions,
       });
     }
 
@@ -90,8 +129,11 @@ export async function GET(request: NextRequest) {
       trialDaysRemaining,
       planBadgeLabel,
       isFounder: access.isFounder,
-      accessLevel: access.level,
+      isSalesperson,
+      salesperson: salespersonLookup.data ?? null,
+      accessLevel: isSalesperson && !access.isFounder ? 'salesperson' : access.level,
       memberCount: access.memberCount,
+      workspaces: workspaceOptions,
       reason:
         access.level === 'member' && !hasAccess
           ? 'member-inactive'

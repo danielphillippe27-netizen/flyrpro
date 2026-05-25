@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createAdminClient, getSupabaseServerClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/server';
 import { fetchAllInPages } from '@/lib/supabase/fetchAllInPages';
+import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import {
   formatApiError,
   resolveBackingCampaignId,
@@ -36,13 +37,8 @@ export async function POST(
   try {
     const { farmId } = await context.params;
 
-    const authClient = await getSupabaseServerClient();
-    const {
-      data: { user },
-      error: authError,
-    } = await authClient.auth.getUser();
-
-    if (authError || !user) {
+    const requestUser = await resolveUserFromRequest(request);
+    if (!requestUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -52,7 +48,7 @@ export async function POST(
       return NextResponse.json({ error: 'Farm not found' }, { status: 404 });
     }
 
-    const canAccess = await userCanAccessFarm(admin, user.id, farm);
+    const canAccess = await userCanAccessFarm(admin, requestUser.id, farm);
     if (!canAccess) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }

@@ -2,8 +2,213 @@ import { createAdminClient } from '@/lib/supabase/server';
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
+type DeleteCampaignAddressOptions = {
+  requireManualSource?: boolean;
+};
+
+type DeleteCampaignAddressResult = {
+  found: boolean;
+  addressId: string;
+  rejectedReason?: 'not_manual';
+};
+
 export function uniqueNonEmpty(values: Array<string | null | undefined>) {
   return Array.from(new Set(values.map((value) => value?.trim()).filter(Boolean) as string[]));
+}
+
+async function ensureMutation(label: string, mutation: PromiseLike<{ error: { message: string } | null }>) {
+  const { error } = await mutation;
+  if (error) {
+    throw new Error(`${label}: ${error.message}`);
+  }
+}
+
+async function deleteAddressDependents(
+  admin: AdminClient,
+  campaignId: string,
+  addressId: string
+) {
+  // Delete strict child rows first, then null optional references that should
+  // survive without a campaign address.
+  await ensureMutation(
+    'Failed to delete address statuses',
+    admin
+      .from('address_statuses')
+      .delete()
+      .eq('campaign_id', campaignId)
+      .eq('campaign_address_id', addressId)
+  );
+  await ensureMutation(
+    'Failed to delete campaign home events',
+    admin
+      .from('campaign_home_events')
+      .delete()
+      .eq('campaign_id', campaignId)
+      .eq('campaign_address_id', addressId)
+  );
+  await ensureMutation(
+    'Failed to delete building address links',
+    admin
+      .from('building_address_links')
+      .delete()
+      .eq('campaign_id', campaignId)
+      .eq('address_id', addressId)
+  );
+  await ensureMutation(
+    'Failed to delete address content',
+    admin
+      .from('address_content')
+      .delete()
+      .eq('address_id', addressId)
+  );
+  await ensureMutation(
+    'Failed to delete address orphan records',
+    admin
+      .from('address_orphans')
+      .delete()
+      .eq('campaign_id', campaignId)
+      .eq('address_id', addressId)
+  );
+  await ensureMutation(
+    'Failed to delete building slices',
+    admin
+      .from('building_slices')
+      .delete()
+      .eq('campaign_id', campaignId)
+      .eq('address_id', addressId)
+  );
+  await ensureMutation(
+    'Failed to delete building touches',
+    admin
+      .from('building_touches')
+      .delete()
+      .eq('campaign_id', campaignId)
+      .eq('address_id', addressId)
+  );
+  await ensureMutation(
+    'Failed to delete building units',
+    admin
+      .from('building_units')
+      .delete()
+      .eq('campaign_id', campaignId)
+      .eq('address_id', addressId)
+  );
+  await ensureMutation(
+    'Failed to delete campaign assignment homes',
+    admin
+      .from('campaign_assignment_homes')
+      .delete()
+      .eq('campaign_address_id', addressId)
+  );
+  await ensureMutation(
+    'Failed to delete session events',
+    admin
+      .from('session_events')
+      .delete()
+      .eq('address_id', addressId)
+  );
+
+  await ensureMutation(
+    'Failed to unlink contacts',
+    admin
+      .from('contacts')
+      .update({ address_id: null })
+      .eq('campaign_id', campaignId)
+      .eq('address_id', addressId)
+  );
+  await ensureMutation(
+    'Failed to unlink landing pages',
+    admin
+      .from('landing_pages')
+      .update({ address_id: null })
+      .eq('campaign_id', campaignId)
+      .eq('address_id', addressId)
+  );
+  await ensureMutation(
+    'Failed to unlink QR codes',
+    admin
+      .from('qr_codes')
+      .update({ address_id: null })
+      .eq('campaign_id', campaignId)
+      .eq('address_id', addressId)
+  );
+  await ensureMutation(
+    'Failed to unlink QR code scans',
+    admin
+      .from('qr_code_scans')
+      .update({ address_id: null })
+      .eq('address_id', addressId)
+  );
+  await ensureMutation(
+    'Failed to unlink scan events',
+    admin
+      .from('scan_events')
+      .update({ address_id: null })
+      .eq('campaign_id', campaignId)
+      .eq('address_id', addressId)
+  );
+  await ensureMutation(
+    'Failed to unlink route stops',
+    admin
+      .from('route_stops')
+      .update({ address_id: null })
+      .eq('address_id', addressId)
+  );
+  await ensureMutation(
+    'Failed to unlink buildings',
+    admin
+      .from('buildings')
+      .update({ address_id: null })
+      .eq('campaign_id', campaignId)
+      .eq('address_id', addressId)
+  );
+  await ensureMutation(
+    'Failed to unlink map buildings',
+    admin
+      .from('map_buildings')
+      .update({ address_id: null })
+      .eq('campaign_id', campaignId)
+      .eq('address_id', addressId)
+  );
+}
+
+export async function deleteCampaignAddressDeep(
+  admin: AdminClient,
+  campaignId: string,
+  addressId: string,
+  options: DeleteCampaignAddressOptions = {}
+): Promise<DeleteCampaignAddressResult> {
+  const { data: address, error: addressError } = await admin
+    .from('campaign_addresses')
+    .select('id, source')
+    .eq('campaign_id', campaignId)
+    .eq('id', addressId)
+    .maybeSingle();
+
+  if (addressError) {
+    throw new Error(addressError.message);
+  }
+
+  if (!address) {
+    return { found: false, addressId };
+  }
+
+  if (options.requireManualSource && (address as { source?: string | null }).source !== 'manual') {
+    return { found: true, addressId, rejectedReason: 'not_manual' };
+  }
+
+  await deleteAddressDependents(admin, campaignId, addressId);
+
+  await ensureMutation(
+    'Failed to delete campaign address',
+    admin
+      .from('campaign_addresses')
+      .delete()
+      .eq('campaign_id', campaignId)
+      .eq('id', addressId)
+  );
+
+  return { found: true, addressId };
 }
 
 export async function resolveBuildingRow(
@@ -149,16 +354,8 @@ export async function deleteBuildingDeep(
     };
   }
 
-  if (linkedAddressIds.length > 0) {
-    const { error: addressDeleteError } = await admin
-      .from('campaign_addresses')
-      .delete()
-      .eq('campaign_id', campaignId)
-      .in('id', linkedAddressIds);
-
-    if (addressDeleteError) {
-      throw new Error(addressDeleteError.message);
-    }
+  for (const linkedAddressId of linkedAddressIds) {
+    await deleteCampaignAddressDeep(admin, campaignId, linkedAddressId);
   }
 
   if (buildingIdentifiers.length > 0) {
@@ -220,32 +417,7 @@ export async function deleteAddressIfExists(
   campaignId: string,
   addressId: string
 ) {
-  const { data: address, error: addressError } = await admin
-    .from('campaign_addresses')
-    .select('id')
-    .eq('campaign_id', campaignId)
-    .eq('id', addressId)
-    .maybeSingle();
-
-  if (addressError) {
-    throw new Error(addressError.message);
-  }
-
-  if (!address) {
-    return { found: false, addressId };
-  }
-
-  const { error: deleteError } = await admin
-    .from('campaign_addresses')
-    .delete()
-    .eq('campaign_id', campaignId)
-    .eq('id', addressId);
-
-  if (deleteError) {
-    throw new Error(deleteError.message);
-  }
-
-  return { found: true, addressId };
+  return deleteCampaignAddressDeep(admin, campaignId, addressId);
 }
 
 export async function deleteParcelIfExists(

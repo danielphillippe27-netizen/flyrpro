@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { signIn } from "next-auth/react";
 import { FaGithub } from "react-icons/fa";
 import { FcGoogle } from "react-icons/fc";
 import { Loader2, TriangleAlert } from "lucide-react";
@@ -13,6 +12,7 @@ import { Input } from "@/lib/editor-canva/components/ui/input";
 import { Button } from "@/lib/editor-canva/components/ui/button";
 import { Separator } from "@/lib/editor-canva/components/ui/separator";
 import { Card, CardTitle, CardHeader, CardContent, CardDescription } from "@/lib/editor-canva/components/ui/card";
+import { signIn } from "@/lib/editor-canva/features/auth/utils/sign-in";
 
 export const SignUpCard = () => {
   const [loading, setLoading] = useState(false);

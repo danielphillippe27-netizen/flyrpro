@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
+import { ensureCampaignAccess } from '@/app/api/campaigns/_utils/access';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -41,6 +42,53 @@ type RouteContext = {
   }>;
 };
 
+export async function GET(request: NextRequest, context: RouteContext) {
+  try {
+    const user = await resolveUserFromRequest(request);
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const { campaignId } = await context.params;
+    if (!campaignId) {
+      return NextResponse.json({ error: 'Campaign id is required' }, { status: 400 });
+    }
+
+    const admin = createAdminClient();
+    const hasAccess = await ensureCampaignAccess(admin, campaignId, user.id);
+    if (!hasAccess) {
+      return NextResponse.json({ error: 'Campaign not found or access denied' }, { status: 404 });
+    }
+
+    const { data: campaign, error } = await admin
+      .from('campaigns')
+      .select('id, name, title, status, type, provision_status, provision_phase, provision_source, updated_at')
+      .eq('id', campaignId)
+      .single();
+
+    if (error || !campaign) {
+      return NextResponse.json({ error: error?.message ?? 'Campaign not found' }, { status: 404 });
+    }
+
+    return NextResponse.json({
+      id: campaign.id,
+      name: campaign.title || campaign.name || 'Untitled Campaign',
+      status: campaign.status || campaign.provision_status || 'draft',
+      type: campaign.type ?? null,
+      provision_status: campaign.provision_status ?? null,
+      provision_phase: campaign.provision_phase ?? null,
+      provision_source: campaign.provision_source ?? null,
+      updated_at: campaign.updated_at ?? null,
+    });
+  } catch (err) {
+    console.error('[GET /api/campaigns/[campaignId]] Unhandled error:', err);
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Unknown server error' },
+      { status: 500 }
+    );
+  }
+}
+
 export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
     const user = await resolveUserFromRequest(request);
@@ -55,6 +103,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
     const body = (await request.json().catch(() => ({}))) as {
       name?: unknown;
+      description?: unknown;
       type?: unknown;
     };
 
@@ -66,6 +115,10 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       }
       updates.name = trimmedName;
       updates.title = trimmedName;
+    }
+
+    if (typeof body.description === 'string') {
+      updates.description = body.description.trim();
     }
 
     if (typeof body.type === 'string') {

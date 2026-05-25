@@ -29,7 +29,7 @@ Why this is the right fit:
 1. Creator applies on the homepage.
 2. Founder reviews the application and approves the creator.
 3. Founder calls `POST /api/admin/ambassadors/:applicationId/stripe-connect`.
-4. The returned `onboardingUrl` is sent to the creator.
+4. FLYR emails the returned `onboardingUrl` to the creator when email is configured, and copies it for the founder as a manual fallback.
 5. After the creator finishes onboarding, Stripe marks the connected account ready for payouts.
 6. Each month, FLYR calculates earned commission and sends transfers to approved connected accounts.
 

@@ -1684,16 +1684,16 @@ export class StableLinkerService {
     }
 
     if (deleteManualAddress) {
-      const { error: deleteAddressError } = await this.supabase
-        .from('campaign_addresses')
-        .delete()
-        .eq('campaign_id', campaignId)
-        .eq('id', addressId)
-        .eq('source', 'manual');
-
-      if (deleteAddressError) {
-        throw new Error(`Failed to delete manual address: ${deleteAddressError.message}`);
-      }
+      await this.deleteCampaignAddressDependents(campaignId, addressId);
+      await this.expectMutation(
+        'Failed to delete manual address',
+        this.supabase
+          .from('campaign_addresses')
+          .delete()
+          .eq('campaign_id', campaignId)
+          .eq('id', addressId)
+          .eq('source', 'manual')
+      );
     } else {
       const { error: addressError } = await this.supabase
         .from('campaign_addresses')
@@ -1737,6 +1737,161 @@ export class StableLinkerService {
       unitCount: Math.max(linkedAddressIds.length, 1),
       deletedAddressId: deleteManualAddress ? addressId : undefined,
     };
+  }
+
+  private async expectMutation(
+    label: string,
+    mutation: PromiseLike<{ error: { message: string } | null }>
+  ): Promise<void> {
+    const { error } = await mutation;
+    if (error) {
+      throw new Error(`${label}: ${error.message}`);
+    }
+  }
+
+  private async deleteCampaignAddressDependents(
+    campaignId: string,
+    addressId: string
+  ): Promise<void> {
+    await this.expectMutation(
+      'Failed to delete address statuses',
+      this.supabase
+        .from('address_statuses')
+        .delete()
+        .eq('campaign_id', campaignId)
+        .eq('campaign_address_id', addressId)
+    );
+    await this.expectMutation(
+      'Failed to delete campaign home events',
+      this.supabase
+        .from('campaign_home_events')
+        .delete()
+        .eq('campaign_id', campaignId)
+        .eq('campaign_address_id', addressId)
+    );
+    await this.expectMutation(
+      'Failed to delete building address links',
+      this.supabase
+        .from('building_address_links')
+        .delete()
+        .eq('campaign_id', campaignId)
+        .eq('address_id', addressId)
+    );
+    await this.expectMutation(
+      'Failed to delete address content',
+      this.supabase
+        .from('address_content')
+        .delete()
+        .eq('address_id', addressId)
+    );
+    await this.expectMutation(
+      'Failed to delete address orphan records',
+      this.supabase
+        .from('address_orphans')
+        .delete()
+        .eq('campaign_id', campaignId)
+        .eq('address_id', addressId)
+    );
+    await this.expectMutation(
+      'Failed to delete building slices',
+      this.supabase
+        .from('building_slices')
+        .delete()
+        .eq('campaign_id', campaignId)
+        .eq('address_id', addressId)
+    );
+    await this.expectMutation(
+      'Failed to delete building touches',
+      this.supabase
+        .from('building_touches')
+        .delete()
+        .eq('campaign_id', campaignId)
+        .eq('address_id', addressId)
+    );
+    await this.expectMutation(
+      'Failed to delete building units',
+      this.supabase
+        .from('building_units')
+        .delete()
+        .eq('campaign_id', campaignId)
+        .eq('address_id', addressId)
+    );
+    await this.expectMutation(
+      'Failed to delete campaign assignment homes',
+      this.supabase
+        .from('campaign_assignment_homes')
+        .delete()
+        .eq('campaign_address_id', addressId)
+    );
+    await this.expectMutation(
+      'Failed to delete session events',
+      this.supabase
+        .from('session_events')
+        .delete()
+        .eq('address_id', addressId)
+    );
+    await this.expectMutation(
+      'Failed to unlink contacts',
+      this.supabase
+        .from('contacts')
+        .update({ address_id: null })
+        .eq('campaign_id', campaignId)
+        .eq('address_id', addressId)
+    );
+    await this.expectMutation(
+      'Failed to unlink landing pages',
+      this.supabase
+        .from('landing_pages')
+        .update({ address_id: null })
+        .eq('campaign_id', campaignId)
+        .eq('address_id', addressId)
+    );
+    await this.expectMutation(
+      'Failed to unlink QR codes',
+      this.supabase
+        .from('qr_codes')
+        .update({ address_id: null })
+        .eq('campaign_id', campaignId)
+        .eq('address_id', addressId)
+    );
+    await this.expectMutation(
+      'Failed to unlink QR code scans',
+      this.supabase
+        .from('qr_code_scans')
+        .update({ address_id: null })
+        .eq('address_id', addressId)
+    );
+    await this.expectMutation(
+      'Failed to unlink scan events',
+      this.supabase
+        .from('scan_events')
+        .update({ address_id: null })
+        .eq('campaign_id', campaignId)
+        .eq('address_id', addressId)
+    );
+    await this.expectMutation(
+      'Failed to unlink route stops',
+      this.supabase
+        .from('route_stops')
+        .update({ address_id: null })
+        .eq('address_id', addressId)
+    );
+    await this.expectMutation(
+      'Failed to unlink buildings',
+      this.supabase
+        .from('buildings')
+        .update({ address_id: null })
+        .eq('campaign_id', campaignId)
+        .eq('address_id', addressId)
+    );
+    await this.expectMutation(
+      'Failed to unlink map buildings',
+      this.supabase
+        .from('map_buildings')
+        .update({ address_id: null })
+        .eq('campaign_id', campaignId)
+        .eq('address_id', addressId)
+    );
   }
 
   private async syncBuildingUnitCounts(

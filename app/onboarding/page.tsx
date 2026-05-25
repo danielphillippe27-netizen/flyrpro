@@ -19,6 +19,15 @@ import { getClientAsync } from '@/lib/supabase/client';
 import { COUNTRY_OPTIONS } from '@/lib/countries';
 
 type BrokerageSuggestion = { id: string; name: string };
+type SalespersonInviteHint = {
+  valid?: boolean;
+  fullName?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+  email?: string | null;
+  workspaceName?: string | null;
+  completed?: boolean;
+};
 
 const INDUSTRIES_TOP = ['Real Estate', 'Solar', 'Roofing & Exteriors'];
 
@@ -116,6 +125,7 @@ function OnboardingContent() {
   const searchParams = useSearchParams();
   const offerType = searchParams.get('offer');
   const partnerOfferToken = searchParams.get('partnerOfferToken');
+  const salespersonInviteToken = searchParams.get('salespersonInvite');
   const partnerExclusiveParam = searchParams.get('partnerExclusive');
   const challenge30FromUrl = searchParams.get('challenge30') === '1';
   const isExclusivePartnerOnboarding =
@@ -128,6 +138,9 @@ function OnboardingContent() {
   const [hintChallenge30, setHintChallenge30] = useState<boolean | null>(null);
   const isIgOnboardingPath = pathname === '/onboarding/ig';
   const onboardingEntryPath = isIgOnboardingPath ? '/onboarding/ig' : '/onboarding';
+  const isSalespersonOnboarding =
+    typeof salespersonInviteToken === 'string' && salespersonInviteToken.trim().length > 0;
+  const requiresOnboardingAuth = isExclusivePartnerOnboarding || isSalespersonOnboarding;
 
   useEffect(() => {
     if (!isExclusivePartnerOnboarding) {
@@ -224,6 +237,33 @@ function OnboardingContent() {
   const [seats, setSeats] = useState(TEAM_MIN_SEATS);
   const [teamInviteEmails, setTeamInviteEmails] = useState<string[]>(['']);
 
+  useEffect(() => {
+    if (!isSalespersonOnboarding || !salespersonInviteToken?.trim()) return;
+
+    let cancelled = false;
+    fetch(`/api/salesperson-invites/validate?token=${encodeURIComponent(salespersonInviteToken.trim())}`)
+      .then((response) => response.json().catch(() => ({} as SalespersonInviteHint)))
+      .then((payload: SalespersonInviteHint) => {
+        if (cancelled || !payload?.valid) return;
+        if (payload.firstName) setFirstName((current) => current || payload.firstName || '');
+        if (payload.lastName) setLastName((current) => current || payload.lastName || '');
+        if (payload.email) setWorkEmail(payload.email.trim().toLowerCase());
+        if (payload.workspaceName) setWorkspaceName(payload.workspaceName);
+        setUseCase('solo');
+        setSeats(SOLO_SEATS);
+        setIndustry((current) => current || 'Real Estate');
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setError('This salesperson invite is invalid or expired.');
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isSalespersonOnboarding, salespersonInviteToken]);
+
   // When arriving from app handoff (Continue on web), skip name step and start at team/workspace.
   useEffect(() => {
     if (searchParams.get('from_handoff') === '1') {
@@ -248,7 +288,7 @@ function OnboardingContent() {
   }, [isExclusivePartnerTeamLayout]);
 
   useEffect(() => {
-    if (!isExclusivePartnerOnboarding) {
+    if (!requiresOnboardingAuth) {
       setAuthenticatedEmail(null);
       return;
     }
@@ -308,10 +348,10 @@ function OnboardingContent() {
     return () => {
       cancelled = true;
     };
-  }, [isExclusivePartnerOnboarding]);
+  }, [requiresOnboardingAuth]);
 
   useEffect(() => {
-    if (!isExclusivePartnerOnboarding) return;
+    if (!requiresOnboardingAuth) return;
 
     const error = searchParams.get('error');
     const errorDescription = searchParams.get('error_description') || '';
@@ -334,10 +374,10 @@ function OnboardingContent() {
     if (error === 'auth_failed' || error === 'callback_error') {
       setAuthError('Sign-in failed. Please try again.');
     }
-  }, [isExclusivePartnerOnboarding, searchParams]);
+  }, [requiresOnboardingAuth, searchParams]);
 
   const normalizedWorkEmail = workEmail.trim().toLowerCase();
-  const hasAuthenticatedExclusiveSession =
+  const hasAuthenticatedOnboardingSession =
     !!authenticatedEmail &&
     !!normalizedWorkEmail &&
     authenticatedEmail === normalizedWorkEmail;
@@ -345,8 +385,8 @@ function OnboardingContent() {
     firstName.trim().length > 0 &&
     lastName.trim().length > 0 &&
     countryCode.length > 0 &&
-    (!isExclusivePartnerOnboarding ||
-      hasAuthenticatedExclusiveSession ||
+    (!requiresOnboardingAuth ||
+      hasAuthenticatedOnboardingSession ||
       (normalizedWorkEmail.length > 0 && accountPassword.trim().length >= 6));
   const canStep3 =
     workspaceName.trim().length > 0 && industry.length > 0;
@@ -360,7 +400,7 @@ function OnboardingContent() {
   }, [countrySearchQuery]);
 
   const persistExclusiveAuthDraft = useCallback(() => {
-    if (!isExclusivePartnerOnboarding || typeof window === 'undefined') return;
+    if (!requiresOnboardingAuth || typeof window === 'undefined') return;
     window.localStorage.setItem(
       EXCLUSIVE_ONBOARDING_AUTH_DRAFT_KEY,
       JSON.stringify({
@@ -370,7 +410,7 @@ function OnboardingContent() {
         workEmail: normalizedWorkEmail,
       })
     );
-  }, [countryCode, firstName, isExclusivePartnerOnboarding, lastName, normalizedWorkEmail]);
+  }, [countryCode, firstName, requiresOnboardingAuth, lastName, normalizedWorkEmail]);
 
   const buildExclusiveAuthCallbackURL = useCallback(() => {
     const callbackUrl = new URL('/auth/callback', window.location.origin);
@@ -459,6 +499,7 @@ function OnboardingContent() {
               ? Math.max(TEAM_MIN_SEATS, seats)
               : SOLO_SEATS,
           partnerOfferToken: isExclusivePartnerOnboarding ? partnerOfferToken : undefined,
+          salespersonInviteToken: isSalespersonOnboarding ? salespersonInviteToken : undefined,
           teamMemberEmails: isExclusivePartnerTeamLayout ? normalizedInviteEmails : undefined,
         }),
       });
@@ -490,10 +531,10 @@ function OnboardingContent() {
   }, [router]);
 
   const ensureExclusiveAuth = useCallback(async (): Promise<boolean> => {
-    if (!isExclusivePartnerOnboarding) return true;
+    if (!requiresOnboardingAuth) return true;
     const normalizedEmail = normalizedWorkEmail;
     if (!normalizedEmail || accountPassword.trim().length < 6) {
-      if (hasAuthenticatedExclusiveSession) {
+      if (hasAuthenticatedOnboardingSession) {
         return true;
       }
       setAuthError('Enter a valid work email and a password (6+ characters), or continue with Google or Apple.');
@@ -540,17 +581,20 @@ function OnboardingContent() {
         return false;
       }
 
-      const nextQs = new URLSearchParams({
-        offer: 'exclusive30',
-        partnerOfferToken: partnerOfferToken ?? '',
-      });
-      if (partnerExclusiveParam === 'team' || partnerExclusiveParam === 'solo') {
-        nextQs.set('partnerExclusive', partnerExclusiveParam);
-      } else if (legacyPartnerExclusiveLayout === 'team' || legacyPartnerExclusiveLayout === 'solo') {
-        nextQs.set('partnerExclusive', legacyPartnerExclusiveLayout);
-      }
-      if (challenge30FromUrl) {
-        nextQs.set('challenge30', '1');
+      const nextQs = new URLSearchParams();
+      if (isSalespersonOnboarding && salespersonInviteToken) {
+        nextQs.set('salespersonInvite', salespersonInviteToken);
+      } else {
+        nextQs.set('offer', 'exclusive30');
+        nextQs.set('partnerOfferToken', partnerOfferToken ?? '');
+        if (partnerExclusiveParam === 'team' || partnerExclusiveParam === 'solo') {
+          nextQs.set('partnerExclusive', partnerExclusiveParam);
+        } else if (legacyPartnerExclusiveLayout === 'team' || legacyPartnerExclusiveLayout === 'solo') {
+          nextQs.set('partnerExclusive', legacyPartnerExclusiveLayout);
+        }
+        if (challenge30FromUrl) {
+          nextQs.set('challenge30', '1');
+        }
       }
       const onboardingNext = `${onboardingEntryPath}?${nextQs.toString()}`;
       const callbackUrl = new URL('/auth/callback', window.location.origin);
@@ -592,8 +636,9 @@ function OnboardingContent() {
   }, [
     accountPassword,
     firstName,
-    hasAuthenticatedExclusiveSession,
-    isExclusivePartnerOnboarding,
+    hasAuthenticatedOnboardingSession,
+    requiresOnboardingAuth,
+    isSalespersonOnboarding,
     lastName,
     countryCode,
     challenge30FromUrl,
@@ -601,6 +646,7 @@ function OnboardingContent() {
     onboardingEntryPath,
     partnerExclusiveParam,
     partnerOfferToken,
+    salespersonInviteToken,
     normalizedWorkEmail,
   ]);
 
@@ -702,20 +748,26 @@ function OnboardingContent() {
           )}
         </div>
 
-        {isExclusivePartnerOnboarding && step === 1 ? (
+        {(isExclusivePartnerOnboarding || isSalespersonOnboarding) && step === 1 ? (
           <div className="rounded-xl border border-red-500/40 bg-red-500/10 p-4">
             <p className="text-center text-xs font-semibold uppercase tracking-wider text-red-300">
-              {isExclusivePartnerTeamLayout ? 'Exclusive Team Onboarding' : 'Exclusive offer'}
+              {isSalespersonOnboarding
+                ? 'Salesperson onboarding'
+                : isExclusivePartnerTeamLayout
+                  ? 'Exclusive Team Onboarding'
+                  : 'Exclusive offer'}
             </p>
             <p className="mt-1 text-center text-lg font-semibold text-white">
-              30-day exclusive offer unlocked
+              {isSalespersonOnboarding ? 'Set up your FLYR sales workspace' : '30-day exclusive offer unlocked'}
             </p>
             <p className="mt-1 text-center text-sm text-zinc-300">
-              {hideExclusiveStep1Demo
+              {isSalespersonOnboarding
+                ? 'Create your account with the invited email. Your workspace will be nested under FLYR / Salespeople.'
+                : hideExclusiveStep1Demo
                 ? 'Finish onboarding to activate your 30-day trial.'
                 : 'Finish onboarding to activate your 30-day trial and watch the demo if you haven&apos;t already.'}
             </p>
-            {!hideExclusiveStep1Demo ? (
+            {!isSalespersonOnboarding && !hideExclusiveStep1Demo ? (
               <div className="mt-4 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900">
                 <ExclusiveOfferArcadeEmbed demo={onboardingDemo} />
               </div>
@@ -812,7 +864,7 @@ function OnboardingContent() {
                 ) : null}
               </div>
             </div>
-            {isExclusivePartnerOnboarding ? (
+            {requiresOnboardingAuth ? (
               <>
                 <div className="space-y-2">
                   <Label htmlFor="workEmail" className="text-base text-white">Work email</Label>
@@ -836,7 +888,7 @@ function OnboardingContent() {
                     className="h-16 text-2xl md:text-2xl text-white placeholder:text-gray-500 bg-[#2a2a2a] border-zinc-600 focus-visible:border-white focus-visible:ring-2 focus-visible:ring-white/40"
                   />
                 </div>
-                {hasAuthenticatedExclusiveSession ? (
+                {hasAuthenticatedOnboardingSession ? (
                   <p className="text-xs text-emerald-300">
                     Signed in as {authenticatedEmail}. Continue onboarding below, or choose another sign-in option.
                   </p>
@@ -1231,7 +1283,7 @@ function OnboardingContent() {
             <Button
               type="button"
               onClick={async () => {
-                if (step === 1 && isExclusivePartnerOnboarding) {
+                if (step === 1 && requiresOnboardingAuth) {
                   if (!canStep1) return;
                   const authReady = await ensureExclusiveAuth();
                   if (!authReady) return;
@@ -1262,7 +1314,9 @@ function OnboardingContent() {
             >
               {loading
                 ? 'Saving…'
-                : isExclusivePartnerOnboarding
+                : isSalespersonOnboarding
+                  ? 'Enter salesperson workspace'
+                  : isExclusivePartnerOnboarding
                   ? 'Activate 30-day exclusive access'
                   : 'Continue for 14-day free trial'}
             </Button>

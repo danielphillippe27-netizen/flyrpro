@@ -25,6 +25,7 @@ interface LeadData {
   source?: string;
   sourceUrl?: string;
   campaignId?: string;
+  workspaceId?: string;
   metadata?: Record<string, unknown>;
   task?: {
     title?: string;
@@ -94,7 +95,7 @@ export async function POST(request: NextRequest) {
     const userId = requestUser.id;
     const supabase = createAdminClient();
 
-    let targetWorkspaceId: string | null = null;
+    let targetWorkspaceId: string | null = leadData.workspaceId?.trim() || null;
     if (leadData.campaignId) {
       const { data: campaignRow } = await supabase
         .from('campaigns')

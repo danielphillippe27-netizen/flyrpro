@@ -7,6 +7,9 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Textarea } from '@/components/ui/textarea';
 import { Loader2, MessageCircle, AlertTriangle, Bug, DollarSign, UserRoundPlus, CheckCircle2, Copy } from 'lucide-react';
 import { FounderGlobalChallengesSection } from '@/components/challenges/FounderGlobalChallengesSection';
 
@@ -167,6 +170,29 @@ type AmbassadorSettingsDraft = {
   commissionDurationMonths: string;
 };
 
+type ManualAmbassadorDraft = {
+  fullName: string;
+  email: string;
+  phone: string;
+  city: string;
+  primaryNiche: string;
+  primaryPlatform: string;
+  audienceSize: string;
+  instagramHandle: string;
+  tiktokHandle: string;
+  youtubeHandle: string;
+  websiteUrl: string;
+  audienceSummary: string;
+  whyFlyr: string;
+  promotionPlan: string;
+  referralCode: string;
+  referralCodeMaxUses: string;
+  commissionRatePercent: string;
+  commissionDurationMonths: string;
+};
+
+type AmbassadorProgramTab = 'dashboard' | 'applications' | 'manual';
+
 type AmbassadorCurrencyTotal = {
   currency: string;
   amountCents: number;
@@ -321,12 +347,6 @@ async function copyTextToClipboard(value: string): Promise<boolean> {
   }
 }
 
-function openUrlInCurrentTab(url: string): boolean {
-  if (!url || typeof window === 'undefined') return false;
-  window.location.assign(url);
-  return true;
-}
-
 function buildAmbassadorShareUrl(referralCode: string): string {
   if (typeof window === 'undefined') {
     return `/onboarding?referralCode=${encodeURIComponent(referralCode)}`;
@@ -334,6 +354,27 @@ function buildAmbassadorShareUrl(referralCode: string): string {
 
   return `${window.location.origin}/onboarding?referralCode=${encodeURIComponent(referralCode)}`;
 }
+
+const emptyManualAmbassadorDraft: ManualAmbassadorDraft = {
+  fullName: '',
+  email: '',
+  phone: '',
+  city: '',
+  primaryNiche: '',
+  primaryPlatform: 'Instagram',
+  audienceSize: '',
+  instagramHandle: '',
+  tiktokHandle: '',
+  youtubeHandle: '',
+  websiteUrl: '',
+  audienceSummary: '',
+  whyFlyr: 'Manually added by founder.',
+  promotionPlan: '',
+  referralCode: '',
+  referralCodeMaxUses: '',
+  commissionRatePercent: '25',
+  commissionDurationMonths: '12',
+};
 
 export function FounderDashboard({
   mode = 'full',
@@ -351,6 +392,12 @@ export function FounderDashboard({
   const [ambassadorDrafts, setAmbassadorDrafts] = useState<
     Record<string, AmbassadorSettingsDraft>
   >({});
+  const [manualAmbassadorDraft, setManualAmbassadorDraft] = useState<ManualAmbassadorDraft>(
+    emptyManualAmbassadorDraft
+  );
+  const [manualAmbassadorSubmitting, setManualAmbassadorSubmitting] = useState(false);
+  const [ambassadorProgramTab, setAmbassadorProgramTab] =
+    useState<AmbassadorProgramTab>('dashboard');
 
   const loadSupport = useCallback(async () => {
     const payload = await readJson<SupportInboxPayload>('/api/admin/inbox/support');
@@ -378,13 +425,17 @@ export function FounderDashboard({
     setError(null);
     setLoading(true);
     try {
-      await Promise.all([loadSupport(), loadFeedback(), loadSummary(), loadAmbassadors()]);
+      if (mode === 'ambassadors') {
+        await loadAmbassadors();
+      } else {
+        await Promise.all([loadSupport(), loadFeedback(), loadSummary(), loadAmbassadors()]);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load founder dashboard');
     } finally {
       setLoading(false);
     }
-  }, [loadAmbassadors, loadFeedback, loadSummary, loadSupport]);
+  }, [loadAmbassadors, loadFeedback, loadSummary, loadSupport, mode]);
 
   useEffect(() => {
     void loadAll();
@@ -410,6 +461,8 @@ export function FounderDashboard({
   }, [ambassadors]);
 
   useEffect(() => {
+    if (mode === 'ambassadors') return;
+
     const supabase = createClient();
     const channel = supabase
       .channel('founder-dashboard-realtime')
@@ -440,7 +493,7 @@ export function FounderDashboard({
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [loadFeedback, loadSupport]);
+  }, [loadFeedback, loadSupport, mode]);
 
   const setActionLoading = useCallback((applicationId: string, label: string | null) => {
     setAmbassadorActionState((current) => {
@@ -491,6 +544,7 @@ export function FounderDashboard({
       setActionLoading(applicationId, 'stripe');
       setAmbassadorStatusMessage(null);
       try {
+        const application = ambassadors?.applications.find((item) => item.id === applicationId);
         const draft = ambassadorDrafts[applicationId];
         const trimmedMaxUses = draft?.referralCodeMaxUses?.trim() ?? '';
         const trimmedCommissionRate = draft?.commissionRatePercent?.trim() ?? '';
@@ -524,20 +578,27 @@ export function FounderDashboard({
           ? await copyTextToClipboard(onboardingUrl)
           : false;
         await loadAmbassadors();
-        const openedOnboardingUrl = onboardingUrl
-          ? openUrlInCurrentTab(onboardingUrl)
-          : false;
+        const applicantLabel = application?.email ?? 'the applicant';
+        const onboardingEmailSent = payload.onboardingEmailSent === true;
         const approvalMessage = onboardingUrl
-          ? copiedOnboardingUrl
-            ? 'Approved. Opening Stripe onboarding and copied the link to your clipboard.'
-            : openedOnboardingUrl
-              ? 'Approved. Opening Stripe onboarding now.'
-              : 'Approved and Stripe onboarding link created.'
+          ? onboardingEmailSent
+            ? copiedOnboardingUrl
+              ? `Approved. Stripe onboarding email sent to ${applicantLabel}. Link copied too.`
+              : `Approved. Stripe onboarding email sent to ${applicantLabel}.`
+            : copiedOnboardingUrl
+              ? `Approved. Email was not sent, so the applicant Stripe onboarding link was copied. Send it to ${applicantLabel}.`
+              : `Approved. Could not copy automatically. Send this Stripe onboarding link to ${applicantLabel}: ${onboardingUrl}`
           : 'Approved and Stripe onboarding link created.';
+        const warnings = [
+          typeof payload.onboardingEmailWarning === 'string'
+            ? payload.onboardingEmailWarning
+            : null,
+          typeof payload.stripePromotionCodeWarning === 'string'
+            ? payload.stripePromotionCodeWarning
+            : null,
+        ].filter(Boolean);
         setAmbassadorStatusMessage(
-          payload.stripePromotionCodeWarning
-            ? `${approvalMessage} ${payload.stripePromotionCodeWarning}`
-            : approvalMessage
+          warnings.length ? `${approvalMessage} ${warnings.join(' ')}` : approvalMessage
         );
       } catch (e) {
         setAmbassadorStatusMessage(
@@ -547,7 +608,7 @@ export function FounderDashboard({
         setActionLoading(applicationId, null);
       }
     },
-    [ambassadorDrafts, loadAmbassadors, setActionLoading]
+    [ambassadorDrafts, ambassadors?.applications, loadAmbassadors, setActionLoading]
   );
 
   const handleAmbassadorDraftChange = useCallback(
@@ -566,6 +627,66 @@ export function FounderDashboard({
     },
     []
   );
+
+  const handleManualAmbassadorDraftChange = useCallback(
+    (field: keyof ManualAmbassadorDraft, value: string) => {
+      setManualAmbassadorDraft((current) => ({
+        ...current,
+        [field]: value,
+      }));
+    },
+    []
+  );
+
+  const handleCreateManualAmbassador = useCallback(async () => {
+    setManualAmbassadorSubmitting(true);
+    setAmbassadorStatusMessage(null);
+    try {
+      const trimmedMaxUses = manualAmbassadorDraft.referralCodeMaxUses.trim();
+      const trimmedCommissionRate = manualAmbassadorDraft.commissionRatePercent.trim();
+      const trimmedCommissionDuration = manualAmbassadorDraft.commissionDurationMonths.trim();
+      const response = await fetch('/api/admin/ambassadors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          ...manualAmbassadorDraft,
+          status: 'approved',
+          referralCode: manualAmbassadorDraft.referralCode.trim() || undefined,
+          referralCodeMaxUses: trimmedMaxUses ? Number(trimmedMaxUses) : null,
+          commissionRateBps: trimmedCommissionRate
+            ? Math.round(Number(trimmedCommissionRate) * 100)
+            : undefined,
+          commissionDurationMonths: trimmedCommissionDuration
+            ? Number(trimmedCommissionDuration)
+            : undefined,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || 'Failed to add ambassador.');
+      }
+
+      await loadAmbassadors();
+      setManualAmbassadorDraft(emptyManualAmbassadorDraft);
+      const referralCode =
+        typeof payload.application?.referralCode === 'string'
+          ? payload.application.referralCode
+          : null;
+      const message = referralCode
+        ? `Ambassador added with code ${referralCode}.`
+        : 'Ambassador added.';
+      setAmbassadorStatusMessage(
+        payload.stripePromotionCodeWarning
+          ? `${message} ${payload.stripePromotionCodeWarning}`
+          : message
+      );
+    } catch (e) {
+      setAmbassadorStatusMessage(e instanceof Error ? e.message : 'Failed to add ambassador.');
+    } finally {
+      setManualAmbassadorSubmitting(false);
+    }
+  }, [loadAmbassadors, manualAmbassadorDraft]);
 
   const handleSaveAmbassadorSettings = useCallback(
     async (applicationId: string) => {
@@ -748,6 +869,726 @@ export function FounderDashboard({
       .slice(0, 20);
   }, [support, feedback]);
 
+  const ambassadorKpiCards = (
+    <div className="grid gap-3 md:grid-cols-3">
+      <div className="rounded-md border p-3">
+        <div className="text-muted-foreground text-sm">Awaiting review</div>
+        <div className="font-semibold text-lg">{ambassadors?.kpis.applied ?? 0}</div>
+      </div>
+      <div className="rounded-md border p-3">
+        <div className="text-muted-foreground text-sm">Approved</div>
+        <div className="font-semibold text-lg">{ambassadors?.kpis.approved ?? 0}</div>
+      </div>
+      <div className="rounded-md border p-3">
+        <div className="text-muted-foreground text-sm">Payouts ready</div>
+        <div className="font-semibold text-lg">{ambassadors?.kpis.payoutsReady ?? 0}</div>
+      </div>
+    </div>
+  );
+
+  const ambassadorSetupNotice = ambassadors?.setupRequired ? (
+    <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+      Ambassador storage is not ready yet. Run the migration for
+      <span className="font-medium"> ambassador_applications </span>
+      before using this inbox.
+    </div>
+  ) : null;
+
+  const ambassadorStatusNotice = ambassadorStatusMessage ? (
+    <div className="rounded-md border p-3 text-sm">{ambassadorStatusMessage}</div>
+  ) : null;
+
+  const ambassadorDashboardActions = (
+    <div className="grid gap-3 md:grid-cols-2">
+      <div className="rounded-md border p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <div className="text-sm font-medium">Applications</div>
+            <div className="mt-1 text-sm text-muted-foreground">
+              {ambassadors?.applications.length ?? 0} ambassadors loaded,{' '}
+              {ambassadors?.kpis.applied ?? 0} awaiting review.
+            </div>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setAmbassadorProgramTab('applications')}
+          >
+            Open applications
+          </Button>
+        </div>
+      </div>
+      <div className="rounded-md border p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <div className="text-sm font-medium">Manual Add</div>
+            <div className="mt-1 text-sm text-muted-foreground">
+              Add an approved ambassador directly with a referral code and commission settings.
+            </div>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setAmbassadorProgramTab('manual')}
+          >
+            Add manually
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const ambassadorApplicationCards = ambassadors?.applications.length ? (
+    <div className="space-y-3">
+      {ambassadors.applications.map((application) => {
+        const loadingState = ambassadorActionState[application.id];
+        const draft = ambassadorDrafts[application.id] ?? {
+          referralCode: application.referralCode ?? '',
+          referralCodeMaxUses:
+            application.referralCodeMaxUses != null
+              ? String(application.referralCodeMaxUses)
+              : '',
+          commissionRatePercent: String(application.commissionRateBps / 100),
+          commissionDurationMonths: String(application.commissionDurationMonths),
+        };
+        const handles = [
+          application.instagramHandle,
+          application.tiktokHandle,
+          application.youtubeHandle,
+        ].filter(Boolean);
+        const shareUrl = application.referralCode
+          ? buildAmbassadorShareUrl(application.referralCode)
+          : null;
+
+        return (
+          <div key={application.id} className="rounded-md border p-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div className="min-w-0 space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="font-medium text-sm">{application.fullName}</div>
+                  <Badge
+                    variant={
+                      application.status === 'approved'
+                        ? 'default'
+                        : application.status === 'rejected'
+                          ? 'destructive'
+                          : 'secondary'
+                    }
+                  >
+                    {application.status}
+                  </Badge>
+                  {application.stripePayoutsEnabled ? (
+                    <Badge variant="outline" className="gap-1">
+                      <CheckCircle2 className="h-3 w-3" />
+                      payouts ready
+                    </Badge>
+                  ) : null}
+                  {application.stripeConnectAccountId ? (
+                    <Badge variant="outline" className="gap-1">
+                      <Copy className="h-3 w-3" />
+                      Stripe linked
+                    </Badge>
+                  ) : null}
+                </div>
+                <div className="text-xs text-muted-foreground flex flex-wrap gap-x-3 gap-y-1">
+                  <span>{application.email}</span>
+                  <span>{application.primaryNiche}</span>
+                  <span>{application.primaryPlatform}</span>
+                  {application.city ? <span>{application.city}</span> : null}
+                  {application.audienceSize ? <span>{application.audienceSize}</span> : null}
+                </div>
+                <div className="text-xs text-muted-foreground flex flex-wrap gap-x-3 gap-y-1">
+                  {application.referralCode ? (
+                    <span>Code {application.referralCode}</span>
+                  ) : (
+                    <span>Code will generate on approval</span>
+                  )}
+                  <span>
+                    {application.referralCodeUseCount} use
+                    {application.referralCodeUseCount === 1 ? '' : 's'}
+                  </span>
+                  <span>
+                    {application.referralCodeMaxUses != null
+                      ? `${application.referralCodeRemainingUses ?? 0} left of ${application.referralCodeMaxUses}`
+                      : 'No referral limit'}
+                  </span>
+                  <span>
+                    {formatCommissionRate(application.commissionRateBps)} for{' '}
+                    {application.commissionDurationMonths} months
+                  </span>
+                </div>
+                {shareUrl ? (
+                  <div className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground break-all">
+                    Share link: {shareUrl}
+                  </div>
+                ) : null}
+                <div className="grid gap-2 pt-1 md:grid-cols-[minmax(0,1.2fr)_minmax(160px,0.7fr)_minmax(130px,0.55fr)_minmax(130px,0.55fr)_auto]">
+                  <Input
+                    value={draft.referralCode}
+                    onChange={(event) =>
+                      handleAmbassadorDraftChange(
+                        application.id,
+                        'referralCode',
+                        event.target.value
+                      )
+                    }
+                    placeholder="Custom referral code"
+                    disabled={!!loadingState}
+                  />
+                  <Input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={draft.referralCodeMaxUses}
+                    onChange={(event) =>
+                      handleAmbassadorDraftChange(
+                        application.id,
+                        'referralCodeMaxUses',
+                        event.target.value
+                      )
+                    }
+                    placeholder="No limit"
+                    disabled={!!loadingState}
+                  />
+                  <Input
+                    type="number"
+                    min={1}
+                    max={100}
+                    step="0.5"
+                    value={draft.commissionRatePercent}
+                    onChange={(event) =>
+                      handleAmbassadorDraftChange(
+                        application.id,
+                        'commissionRatePercent',
+                        event.target.value
+                      )
+                    }
+                    placeholder="25"
+                    disabled={!!loadingState}
+                  />
+                  <Input
+                    type="number"
+                    min={1}
+                    max={36}
+                    step={1}
+                    value={draft.commissionDurationMonths}
+                    onChange={(event) =>
+                      handleAmbassadorDraftChange(
+                        application.id,
+                        'commissionDurationMonths',
+                        event.target.value
+                      )
+                    }
+                    placeholder="12"
+                    disabled={!!loadingState}
+                  />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void handleSaveAmbassadorSettings(application.id)}
+                    disabled={!!loadingState}
+                  >
+                    {loadingState === 'save' ? 'Saving...' : 'Save settings'}
+                  </Button>
+                </div>
+                <div className="text-[11px] text-muted-foreground">
+                  Commission % and duration are saved per ambassador before payout tracking starts.
+                </div>
+                {application.stripePromotionCodeId ? (
+                  <div className="text-[11px] text-muted-foreground">
+                    Stripe promo code synced
+                  </div>
+                ) : null}
+                {handles.length ? (
+                  <div className="text-xs text-muted-foreground flex flex-wrap gap-x-3 gap-y-1">
+                    {handles.map((handle) => (
+                      <span key={handle}>{handle}</span>
+                    ))}
+                  </div>
+                ) : null}
+                <div className="text-sm text-muted-foreground line-clamp-2">
+                  {application.whyFlyr}
+                </div>
+                {application.promotionPlan ? (
+                  <div className="text-xs text-muted-foreground line-clamp-2">
+                    Promotion plan: {application.promotionPlan}
+                  </div>
+                ) : null}
+                <div className="text-xs text-muted-foreground">
+                  Applied {formatDateTime(application.createdAt)}
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2 lg:justify-end">
+                <Button
+                  size="sm"
+                  onClick={() => void handleApproveAndCreateStripeLink(application.id)}
+                  disabled={loadingState === 'stripe' || !!loadingState}
+                >
+                  {loadingState === 'stripe'
+                    ? 'Creating applicant link...'
+                    : application.stripeConnectAccountId
+                      ? 'Copy applicant Stripe link'
+                      : 'Approve + copy Stripe link'}
+                </Button>
+                {application.referralCode ? (
+                  <>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        void handleCopyAmbassadorShareLink(
+                          application.referralCode ?? '',
+                          application.fullName
+                        )
+                      }
+                      disabled={!!loadingState}
+                    >
+                      Copy share link
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        void handleCopyToClipboard(
+                          application.referralCode ?? '',
+                          `${application.fullName}'s referral code`
+                        )
+                      }
+                      disabled={!!loadingState}
+                    >
+                      Copy code
+                    </Button>
+                  </>
+                ) : null}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    void handleAmbassadorStatusUpdate(application.id, 'paused', 'pause')
+                  }
+                  disabled={!!loadingState}
+                >
+                  Pause
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    void handleAmbassadorStatusUpdate(application.id, 'rejected', 'reject')
+                  }
+                  disabled={!!loadingState}
+                >
+                  Reject
+                </Button>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  ) : ambassadors?.setupRequired ? null : (
+    <div className="text-sm text-muted-foreground">No ambassador applications yet.</div>
+  );
+
+  const ambassadorPayoutSummary = (
+    <div className="grid gap-3 md:grid-cols-3">
+      <div className="rounded-md border p-3">
+        <div className="text-muted-foreground text-sm">Ready to pay</div>
+        <div className="font-semibold text-lg">
+          {formatCurrencyTotals(ambassadors?.payoutQueue.readyTotals ?? [])}
+        </div>
+        <div className="text-xs text-muted-foreground mt-1">
+          {ambassadors?.payoutQueue.readyCommissionCount ?? 0} open commission items
+        </div>
+      </div>
+      <div className="rounded-md border p-3">
+        <div className="text-muted-foreground text-sm">Waiting on Stripe setup</div>
+        <div className="font-semibold text-lg">
+          {formatCurrencyTotals(ambassadors?.payoutQueue.pendingSetupTotals ?? [])}
+        </div>
+        <div className="text-xs text-muted-foreground mt-1">
+          {ambassadors?.payoutQueue.pendingSetupCommissionCount ?? 0} items blocked on payouts
+        </div>
+      </div>
+      <div className="rounded-md border p-3">
+        <div className="text-muted-foreground text-sm">Payout-ready ambassadors</div>
+        <div className="font-semibold text-lg">
+          {ambassadors?.payoutQueue.readyByAmbassador.length ?? 0}
+        </div>
+        <div className="text-xs text-muted-foreground mt-1">
+          Ambassadors with Stripe enabled and unpaid commission balance
+        </div>
+      </div>
+    </div>
+  );
+
+  const ambassadorPayoutBalances = ambassadors?.payoutQueue.readyByAmbassador.length ? (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2 text-sm font-medium">
+        <DollarSign className="h-4 w-4" />
+        Payout-ready balances
+      </div>
+      {ambassadors.payoutQueue.readyByAmbassador.map((entry) => (
+        <div key={`${entry.ambassadorApplicationId}-${entry.currency}`} className="rounded-md border p-3">
+          <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+            <div>
+              <div className="font-medium text-sm">{entry.fullName}</div>
+              <div className="text-xs text-muted-foreground">
+                {entry.email} {entry.referralCode ? `· Code ${entry.referralCode}` : ''}
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="font-semibold text-sm">
+                {formatAmount(entry.totalCommissionCents, entry.currency)}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {entry.openCommissionCount} items · revenue{' '}
+                {formatAmount(entry.totalRevenueCents, entry.currency)}
+              </div>
+            </div>
+          </div>
+          <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-xs text-muted-foreground">
+              Oldest unpaid commission {formatDateTime(entry.oldestEarnedAt)}
+            </div>
+            <Button
+              size="sm"
+              onClick={() =>
+                void handleAmbassadorPayout(entry.ambassadorApplicationId, entry.currency)
+              }
+              disabled={
+                ambassadorActionState[entry.ambassadorApplicationId] === 'payout' ||
+                !!ambassadorActionState[entry.ambassadorApplicationId]
+              }
+            >
+              {ambassadorActionState[entry.ambassadorApplicationId] === 'payout'
+                ? 'Paying...'
+                : 'Pay now'}
+            </Button>
+          </div>
+        </div>
+      ))}
+    </div>
+  ) : null;
+
+  const ambassadorRecentCommissions = ambassadors?.payoutQueue.recentCommissions.length ? (
+    <div className="space-y-3">
+      <div className="text-sm font-medium">Recent commission activity</div>
+      {ambassadors.payoutQueue.recentCommissions.map((commission) => (
+        <div key={commission.id} className="rounded-md border p-3">
+          <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+            <div>
+              <div className="font-medium text-sm">{commission.ambassadorName}</div>
+              <div className="text-xs text-muted-foreground">
+                {commission.referralCode ? `Code ${commission.referralCode} · ` : ''}
+                Invoice {commission.stripeInvoiceId}
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="font-semibold text-sm">
+                {formatAmount(commission.commissionAmountCents, commission.currency)}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                on {formatAmount(commission.revenueAmountCents, commission.currency)} at{' '}
+                {formatCommissionRate(commission.commissionRateBps)}
+              </div>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 mt-2 text-xs text-muted-foreground">
+            <Badge variant={commission.status === 'paid' ? 'default' : 'secondary'}>
+              {commission.status}
+            </Badge>
+            {!commission.payoutsEnabled && commission.status === 'pending' ? (
+              <Badge variant="outline">waiting on Stripe setup</Badge>
+            ) : null}
+            <span>{formatDateTime(commission.earnedAt)}</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  ) : null;
+
+  const ambassadorPayoutHistory = ambassadors?.payoutQueue.payoutHistory.length ? (
+    <div className="space-y-3">
+      <div className="text-sm font-medium">Recent payout history</div>
+      {ambassadors.payoutQueue.payoutHistory.map((batch) => (
+        <div key={batch.id} className="rounded-md border p-3">
+          <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+            <div>
+              <div className="font-medium text-sm">{batch.ambassadorName}</div>
+              <div className="text-xs text-muted-foreground">
+                {batch.ambassadorEmail}
+                {batch.referralCode ? ` · Code ${batch.referralCode}` : ''}
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="font-semibold text-sm">
+                {formatAmount(batch.totalCommissionCents, batch.currency)}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {batch.paidAt
+                  ? `Paid ${formatDateTime(batch.paidAt)}`
+                  : `Created ${formatDateTime(batch.createdAt)}`}
+              </div>
+            </div>
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <Badge
+              variant={
+                batch.status === 'paid'
+                  ? 'default'
+                  : batch.status === 'failed'
+                    ? 'destructive'
+                    : 'secondary'
+              }
+            >
+              {batch.status}
+            </Badge>
+            {batch.stripeTransferId ? <span>Transfer {batch.stripeTransferId}</span> : null}
+            {batch.failureReason ? <span>{batch.failureReason}</span> : null}
+          </div>
+        </div>
+      ))}
+    </div>
+  ) : null;
+
+  const manualAmbassadorForm = (
+    <div className="space-y-4">
+      <div className="grid gap-3 md:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label htmlFor="manual-ambassador-name">Full name</Label>
+          <Input
+            id="manual-ambassador-name"
+            value={manualAmbassadorDraft.fullName}
+            onChange={(event) =>
+              handleManualAmbassadorDraftChange('fullName', event.target.value)
+            }
+            disabled={manualAmbassadorSubmitting}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="manual-ambassador-email">Email</Label>
+          <Input
+            id="manual-ambassador-email"
+            type="email"
+            value={manualAmbassadorDraft.email}
+            onChange={(event) =>
+              handleManualAmbassadorDraftChange('email', event.target.value)
+            }
+            disabled={manualAmbassadorSubmitting}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="manual-ambassador-phone">Phone</Label>
+          <Input
+            id="manual-ambassador-phone"
+            value={manualAmbassadorDraft.phone}
+            onChange={(event) =>
+              handleManualAmbassadorDraftChange('phone', event.target.value)
+            }
+            disabled={manualAmbassadorSubmitting}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="manual-ambassador-city">City / market</Label>
+          <Input
+            id="manual-ambassador-city"
+            value={manualAmbassadorDraft.city}
+            onChange={(event) =>
+              handleManualAmbassadorDraftChange('city', event.target.value)
+            }
+            disabled={manualAmbassadorSubmitting}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="manual-ambassador-niche">Primary niche</Label>
+          <Input
+            id="manual-ambassador-niche"
+            value={manualAmbassadorDraft.primaryNiche}
+            onChange={(event) =>
+              handleManualAmbassadorDraftChange('primaryNiche', event.target.value)
+            }
+            disabled={manualAmbassadorSubmitting}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="manual-ambassador-platform">Primary platform</Label>
+          <Input
+            id="manual-ambassador-platform"
+            value={manualAmbassadorDraft.primaryPlatform}
+            onChange={(event) =>
+              handleManualAmbassadorDraftChange('primaryPlatform', event.target.value)
+            }
+            disabled={manualAmbassadorSubmitting}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="manual-ambassador-audience">Audience size</Label>
+          <Input
+            id="manual-ambassador-audience"
+            value={manualAmbassadorDraft.audienceSize}
+            onChange={(event) =>
+              handleManualAmbassadorDraftChange('audienceSize', event.target.value)
+            }
+            disabled={manualAmbassadorSubmitting}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="manual-ambassador-instagram">Instagram</Label>
+          <Input
+            id="manual-ambassador-instagram"
+            value={manualAmbassadorDraft.instagramHandle}
+            onChange={(event) =>
+              handleManualAmbassadorDraftChange('instagramHandle', event.target.value)
+            }
+            disabled={manualAmbassadorSubmitting}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="manual-ambassador-tiktok">TikTok</Label>
+          <Input
+            id="manual-ambassador-tiktok"
+            value={manualAmbassadorDraft.tiktokHandle}
+            onChange={(event) =>
+              handleManualAmbassadorDraftChange('tiktokHandle', event.target.value)
+            }
+            disabled={manualAmbassadorSubmitting}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="manual-ambassador-youtube">YouTube / podcast</Label>
+          <Input
+            id="manual-ambassador-youtube"
+            value={manualAmbassadorDraft.youtubeHandle}
+            onChange={(event) =>
+              handleManualAmbassadorDraftChange('youtubeHandle', event.target.value)
+            }
+            disabled={manualAmbassadorSubmitting}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="manual-ambassador-website">Website</Label>
+          <Input
+            id="manual-ambassador-website"
+            value={manualAmbassadorDraft.websiteUrl}
+            onChange={(event) =>
+              handleManualAmbassadorDraftChange('websiteUrl', event.target.value)
+            }
+            disabled={manualAmbassadorSubmitting}
+          />
+        </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="manual-ambassador-code">Referral code</Label>
+            <Input
+              id="manual-ambassador-code"
+              value={manualAmbassadorDraft.referralCode}
+              onChange={(event) =>
+                handleManualAmbassadorDraftChange('referralCode', event.target.value)
+              }
+              placeholder="Auto-generate"
+              disabled={manualAmbassadorSubmitting}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="manual-ambassador-limit">Use limit</Label>
+            <Input
+              id="manual-ambassador-limit"
+              type="number"
+              min={1}
+              step={1}
+              value={manualAmbassadorDraft.referralCodeMaxUses}
+              onChange={(event) =>
+                handleManualAmbassadorDraftChange('referralCodeMaxUses', event.target.value)
+              }
+              placeholder="No limit"
+              disabled={manualAmbassadorSubmitting}
+            />
+          </div>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="manual-ambassador-rate">Commission %</Label>
+            <Input
+              id="manual-ambassador-rate"
+              type="number"
+              min={1}
+              max={100}
+              step="0.5"
+              value={manualAmbassadorDraft.commissionRatePercent}
+              onChange={(event) =>
+                handleManualAmbassadorDraftChange('commissionRatePercent', event.target.value)
+              }
+              disabled={manualAmbassadorSubmitting}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="manual-ambassador-duration">Duration months</Label>
+            <Input
+              id="manual-ambassador-duration"
+              type="number"
+              min={1}
+              max={36}
+              step={1}
+              value={manualAmbassadorDraft.commissionDurationMonths}
+              onChange={(event) =>
+                handleManualAmbassadorDraftChange(
+                  'commissionDurationMonths',
+                  event.target.value
+                )
+              }
+              disabled={manualAmbassadorSubmitting}
+            />
+          </div>
+        </div>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label htmlFor="manual-ambassador-summary">Audience summary</Label>
+          <Textarea
+            id="manual-ambassador-summary"
+            value={manualAmbassadorDraft.audienceSummary}
+            onChange={(event) =>
+              handleManualAmbassadorDraftChange('audienceSummary', event.target.value)
+            }
+            disabled={manualAmbassadorSubmitting}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="manual-ambassador-why">Why FLYR</Label>
+          <Textarea
+            id="manual-ambassador-why"
+            value={manualAmbassadorDraft.whyFlyr}
+            onChange={(event) =>
+              handleManualAmbassadorDraftChange('whyFlyr', event.target.value)
+            }
+            disabled={manualAmbassadorSubmitting}
+          />
+        </div>
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="manual-ambassador-plan">Promotion plan</Label>
+        <Textarea
+          id="manual-ambassador-plan"
+          value={manualAmbassadorDraft.promotionPlan}
+          onChange={(event) =>
+            handleManualAmbassadorDraftChange('promotionPlan', event.target.value)
+          }
+          disabled={manualAmbassadorSubmitting}
+        />
+      </div>
+      <div className="flex justify-end">
+        <Button
+          onClick={() => void handleCreateManualAmbassador()}
+          disabled={manualAmbassadorSubmitting}
+        >
+          {manualAmbassadorSubmitting ? 'Adding...' : 'Add ambassador'}
+        </Button>
+      </div>
+    </div>
+  );
+
   if (loading) {
     return (
       <div className="p-6 max-w-7xl mx-auto">
@@ -776,398 +1617,72 @@ export function FounderDashboard({
           </div>
         </header>
 
-        {error ? (
-          <Card className="border-destructive/40">
-            <CardContent className="pt-6 text-sm text-destructive">{error}</CardContent>
-          </Card>
-        ) : null}
+        <Tabs
+          value={ambassadorProgramTab}
+          onValueChange={(value) => setAmbassadorProgramTab(value as AmbassadorProgramTab)}
+          className="space-y-4"
+        >
+          <TabsList className="gap-1 bg-transparent p-0">
+            <TabsTrigger
+              value="dashboard"
+              className="operator-surface border border-transparent bg-transparent px-4 data-[state=active]:border-border data-[state=active]:bg-card data-[state=active]:shadow-none focus-visible:ring-0"
+            >
+              Dashboard
+            </TabsTrigger>
+            <TabsTrigger
+              value="applications"
+              className="operator-surface border border-transparent bg-transparent px-4 data-[state=active]:border-border data-[state=active]:bg-card data-[state=active]:shadow-none focus-visible:ring-0"
+            >
+              Applications
+            </TabsTrigger>
+            <TabsTrigger
+              value="manual"
+              className="operator-surface border border-transparent bg-transparent px-4 data-[state=active]:border-border data-[state=active]:bg-card data-[state=active]:shadow-none focus-visible:ring-0"
+            >
+              Manual Add
+            </TabsTrigger>
+          </TabsList>
 
-        <section>
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <UserRoundPlus className="h-4 w-4" />
-                Ambassador Applications
-              </CardTitle>
-              <CardDescription>
-                Review creator applications, finish Stripe onboarding, and manage share links and payouts.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-3 md:grid-cols-3">
-                <div className="rounded-md border p-3">
-                  <div className="text-muted-foreground text-sm">Awaiting review</div>
-                  <div className="font-semibold text-lg">{ambassadors?.kpis.applied ?? 0}</div>
-                </div>
-                <div className="rounded-md border p-3">
-                  <div className="text-muted-foreground text-sm">Approved</div>
-                  <div className="font-semibold text-lg">{ambassadors?.kpis.approved ?? 0}</div>
-                </div>
-                <div className="rounded-md border p-3">
-                  <div className="text-muted-foreground text-sm">Payouts ready</div>
-                  <div className="font-semibold text-lg">{ambassadors?.kpis.payoutsReady ?? 0}</div>
-                </div>
-              </div>
+          {error ? (
+            <Card className="border-destructive/40">
+              <CardContent className="pt-6 text-sm text-destructive">{error}</CardContent>
+            </Card>
+          ) : null}
 
-              {ambassadors?.setupRequired ? (
-                <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-                  Ambassador storage is not ready yet. Run the migration for
-                  <span className="font-medium"> ambassador_applications </span>
-                  before using this inbox.
-                </div>
-              ) : null}
+          <section>
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <UserRoundPlus className="h-4 w-4" />
+                  Ambassador Program
+                </CardTitle>
+                <CardDescription>
+                  Review creator applications, send applicant Stripe onboarding links, and manage share links and payouts.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {ambassadorKpiCards}
+                {ambassadorSetupNotice}
+                {ambassadorStatusNotice}
 
-              {ambassadorStatusMessage ? (
-                <div className="rounded-md border p-3 text-sm">{ambassadorStatusMessage}</div>
-              ) : null}
+                <TabsContent value="dashboard" className="mt-0 space-y-4">
+                  {ambassadorDashboardActions}
+                  {ambassadorPayoutSummary}
+                  {ambassadorPayoutBalances}
+                  {ambassadorRecentCommissions}
+                  {ambassadorPayoutHistory}
+                </TabsContent>
+                <TabsContent value="applications" className="mt-0 space-y-4">
+                  {ambassadorApplicationCards}
+                </TabsContent>
+                <TabsContent value="manual" className="mt-0 space-y-4">
+                  {manualAmbassadorForm}
+                </TabsContent>
 
-              {ambassadors?.applications.length ? (
-                <div className="space-y-3">
-                  {ambassadors.applications.map((application) => {
-                    const loadingState = ambassadorActionState[application.id];
-                    const draft = ambassadorDrafts[application.id] ?? {
-                      referralCode: application.referralCode ?? '',
-                      referralCodeMaxUses:
-                        application.referralCodeMaxUses != null
-                          ? String(application.referralCodeMaxUses)
-                          : '',
-                      commissionRatePercent: String(application.commissionRateBps / 100),
-                      commissionDurationMonths: String(application.commissionDurationMonths),
-                    };
-                    const handles = [
-                      application.instagramHandle,
-                      application.tiktokHandle,
-                      application.youtubeHandle,
-                    ].filter(Boolean);
-                    const shareUrl = application.referralCode
-                      ? buildAmbassadorShareUrl(application.referralCode)
-                      : null;
-
-                    return (
-                      <div key={application.id} className="rounded-md border p-4">
-                        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                          <div className="min-w-0 space-y-2">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <div className="font-medium text-sm">
-                                {application.fullName}
-                              </div>
-                              <Badge
-                                variant={
-                                  application.status === 'approved'
-                                    ? 'default'
-                                    : application.status === 'rejected'
-                                      ? 'destructive'
-                                      : 'secondary'
-                                }
-                              >
-                                {application.status}
-                              </Badge>
-                              {application.stripePayoutsEnabled ? (
-                                <Badge variant="outline" className="gap-1">
-                                  <CheckCircle2 className="h-3 w-3" />
-                                  payouts ready
-                                </Badge>
-                              ) : null}
-                              {application.stripeConnectAccountId ? (
-                                <Badge variant="outline" className="gap-1">
-                                  <Copy className="h-3 w-3" />
-                                  Stripe linked
-                                </Badge>
-                              ) : null}
-                            </div>
-                            <div className="text-xs text-muted-foreground flex flex-wrap gap-x-3 gap-y-1">
-                              <span>{application.email}</span>
-                              <span>{application.primaryNiche}</span>
-                              <span>{application.primaryPlatform}</span>
-                              {application.city ? <span>{application.city}</span> : null}
-                              {application.audienceSize ? <span>{application.audienceSize}</span> : null}
-                            </div>
-                            <div className="text-xs text-muted-foreground flex flex-wrap gap-x-3 gap-y-1">
-                              {application.referralCode ? (
-                                <span>Code {application.referralCode}</span>
-                              ) : (
-                                <span>Code will generate on approval</span>
-                              )}
-                              <span>
-                                {application.referralCodeUseCount} use
-                                {application.referralCodeUseCount === 1 ? '' : 's'}
-                              </span>
-                              <span>
-                                {application.referralCodeMaxUses != null
-                                  ? `${application.referralCodeRemainingUses ?? 0} left of ${application.referralCodeMaxUses}`
-                                  : 'No referral limit'}
-                              </span>
-                              <span>
-                                {formatCommissionRate(application.commissionRateBps)} for{' '}
-                                {application.commissionDurationMonths} months
-                              </span>
-                            </div>
-                            {shareUrl ? (
-                              <div className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground break-all">
-                                Share link: {shareUrl}
-                              </div>
-                            ) : null}
-                            <div className="grid gap-2 pt-1 md:grid-cols-[minmax(0,1.2fr)_minmax(160px,0.7fr)_minmax(130px,0.55fr)_minmax(130px,0.55fr)_auto]">
-                              <Input
-                                value={draft.referralCode}
-                                onChange={(event) =>
-                                  handleAmbassadorDraftChange(
-                                    application.id,
-                                    'referralCode',
-                                    event.target.value
-                                  )
-                                }
-                                placeholder="Custom referral code"
-                                disabled={!!loadingState}
-                              />
-                              <Input
-                                type="number"
-                                min={1}
-                                step={1}
-                                value={draft.referralCodeMaxUses}
-                                onChange={(event) =>
-                                  handleAmbassadorDraftChange(
-                                    application.id,
-                                    'referralCodeMaxUses',
-                                    event.target.value
-                                  )
-                                }
-                                placeholder="No limit"
-                                disabled={!!loadingState}
-                              />
-                              <Input
-                                type="number"
-                                min={1}
-                                max={100}
-                                step="0.5"
-                                value={draft.commissionRatePercent}
-                                onChange={(event) =>
-                                  handleAmbassadorDraftChange(
-                                    application.id,
-                                    'commissionRatePercent',
-                                    event.target.value
-                                  )
-                                }
-                                placeholder="25"
-                                disabled={!!loadingState}
-                              />
-                              <Input
-                                type="number"
-                                min={1}
-                                max={36}
-                                step={1}
-                                value={draft.commissionDurationMonths}
-                                onChange={(event) =>
-                                  handleAmbassadorDraftChange(
-                                    application.id,
-                                    'commissionDurationMonths',
-                                    event.target.value
-                                  )
-                                }
-                                placeholder="12"
-                                disabled={!!loadingState}
-                              />
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => void handleSaveAmbassadorSettings(application.id)}
-                                disabled={!!loadingState}
-                              >
-                                {loadingState === 'save' ? 'Saving...' : 'Save settings'}
-                              </Button>
-                            </div>
-                            <div className="text-[11px] text-muted-foreground">
-                              Commission % and duration are saved per ambassador before payout tracking starts.
-                            </div>
-                            {application.stripePromotionCodeId ? (
-                              <div className="text-[11px] text-muted-foreground">
-                                Stripe promo code synced
-                              </div>
-                            ) : null}
-                            {handles.length ? (
-                              <div className="text-xs text-muted-foreground flex flex-wrap gap-x-3 gap-y-1">
-                                {handles.map((handle) => (
-                                  <span key={handle}>{handle}</span>
-                                ))}
-                              </div>
-                            ) : null}
-                            <div className="text-sm text-muted-foreground line-clamp-2">
-                              {application.whyFlyr}
-                            </div>
-                            {application.promotionPlan ? (
-                              <div className="text-xs text-muted-foreground line-clamp-2">
-                                Promotion plan: {application.promotionPlan}
-                              </div>
-                            ) : null}
-                            <div className="text-xs text-muted-foreground">
-                              Applied {formatDateTime(application.createdAt)}
-                            </div>
-                          </div>
-
-                          <div className="flex flex-wrap gap-2 lg:justify-end">
-                            <Button
-                              size="sm"
-                              onClick={() => void handleApproveAndCreateStripeLink(application.id)}
-                              disabled={loadingState === 'stripe' || !!loadingState}
-                            >
-                              {loadingState === 'stripe'
-                                ? 'Creating Stripe link...'
-                                : application.stripeConnectAccountId
-                                  ? 'Copy Stripe link'
-                                  : 'Approve + Stripe'}
-                            </Button>
-                            {application.referralCode ? (
-                              <>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() =>
-                                    void handleCopyAmbassadorShareLink(
-                                      application.referralCode ?? '',
-                                      application.fullName
-                                    )
-                                  }
-                                  disabled={!!loadingState}
-                                >
-                                  Copy share link
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() =>
-                                    void handleCopyToClipboard(
-                                      application.referralCode ?? '',
-                                      `${application.fullName}'s referral code`
-                                    )
-                                  }
-                                  disabled={!!loadingState}
-                                >
-                                  Copy code
-                                </Button>
-                              </>
-                            ) : null}
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() =>
-                                void handleAmbassadorStatusUpdate(
-                                  application.id,
-                                  'paused',
-                                  'pause'
-                                )
-                              }
-                              disabled={!!loadingState}
-                            >
-                              Pause
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() =>
-                                void handleAmbassadorStatusUpdate(
-                                  application.id,
-                                  'rejected',
-                                  'reject'
-                                )
-                              }
-                              disabled={!!loadingState}
-                            >
-                              Reject
-                            </Button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : ambassadors?.setupRequired ? null : (
-                <div className="text-sm text-muted-foreground">No ambassador applications yet.</div>
-              )}
-
-              <div className="grid gap-3 border-t pt-4 md:grid-cols-3">
-                <div className="rounded-md border p-3">
-                  <div className="text-muted-foreground text-sm">Ready to pay</div>
-                  <div className="font-semibold text-lg">
-                    {formatCurrencyTotals(ambassadors?.payoutQueue.readyTotals ?? [])}
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-1">
-                    {ambassadors?.payoutQueue.readyCommissionCount ?? 0} open commission items
-                  </div>
-                </div>
-                <div className="rounded-md border p-3">
-                  <div className="text-muted-foreground text-sm">Waiting on Stripe setup</div>
-                  <div className="font-semibold text-lg">
-                    {formatCurrencyTotals(ambassadors?.payoutQueue.pendingSetupTotals ?? [])}
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-1">
-                    {ambassadors?.payoutQueue.pendingSetupCommissionCount ?? 0} items blocked on payouts
-                  </div>
-                </div>
-                <div className="rounded-md border p-3">
-                  <div className="text-muted-foreground text-sm">Payout-ready ambassadors</div>
-                  <div className="font-semibold text-lg">
-                    {ambassadors?.payoutQueue.readyByAmbassador.length ?? 0}
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-1">
-                    Ambassadors with Stripe enabled and unpaid commission balance
-                  </div>
-                </div>
-              </div>
-
-              {ambassadors?.payoutQueue.readyByAmbassador.length ? (
-                <div className="space-y-3 border-t pt-4">
-                  <div className="flex items-center gap-2 text-sm font-medium">
-                    <DollarSign className="h-4 w-4" />
-                    Payout-ready balances
-                  </div>
-                  {ambassadors.payoutQueue.readyByAmbassador.map((entry) => (
-                    <div key={`${entry.ambassadorApplicationId}-${entry.currency}`} className="rounded-md border p-3">
-                      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                        <div>
-                          <div className="font-medium text-sm">{entry.fullName}</div>
-                          <div className="text-xs text-muted-foreground">
-                            {entry.email} {entry.referralCode ? `· Code ${entry.referralCode}` : ''}
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <div className="font-semibold text-sm">
-                            {formatAmount(entry.totalCommissionCents, entry.currency)}
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            {entry.openCommissionCount} items · revenue{' '}
-                            {formatAmount(entry.totalRevenueCents, entry.currency)}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="text-xs text-muted-foreground">
-                          Oldest unpaid commission {formatDateTime(entry.oldestEarnedAt)}
-                        </div>
-                        <Button
-                          size="sm"
-                          onClick={() =>
-                            void handleAmbassadorPayout(
-                              entry.ambassadorApplicationId,
-                              entry.currency
-                            )
-                          }
-                          disabled={
-                            ambassadorActionState[entry.ambassadorApplicationId] === 'payout' ||
-                            !!ambassadorActionState[entry.ambassadorApplicationId]
-                          }
-                        >
-                          {ambassadorActionState[entry.ambassadorApplicationId] === 'payout'
-                            ? 'Paying...'
-                            : 'Pay now'}
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-            </CardContent>
-          </Card>
-        </section>
+              </CardContent>
+            </Card>
+          </section>
+        </Tabs>
       </div>
     );
   }
@@ -1249,7 +1764,7 @@ export function FounderDashboard({
               Ambassador Applications
             </CardTitle>
             <CardDescription>
-              Review creator applications and approve them into Stripe onboarding in one click.
+              Review creator applications and copy Stripe onboarding links for applicants in one click.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -1470,10 +1985,10 @@ export function FounderDashboard({
                             disabled={loadingState === 'stripe' || !!loadingState}
                           >
                             {loadingState === 'stripe'
-                              ? 'Creating Stripe link...'
+                              ? 'Creating applicant link...'
                               : application.stripeConnectAccountId
-                                ? 'Copy Stripe link'
-                                : 'Approve + Stripe'}
+                                ? 'Copy applicant Stripe link'
+                                : 'Approve + copy Stripe link'}
                           </Button>
                           {application.referralCode ? (
                             <>

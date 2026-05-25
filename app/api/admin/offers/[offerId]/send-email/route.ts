@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireFounderApi } from '@/app/api/admin/_utils/founder';
 import { getPartnerOfferMailerConfigError } from '@/lib/email/partnerOffers';
 import {
   PARTNER_OFFER_SELECT,
@@ -7,6 +6,7 @@ import {
   toClientPartnerOffer,
 } from '@/lib/offers/partnerOfferRecord';
 import { sendOfferEmailForRow } from '@/app/api/admin/offers/_lib/sendOfferEmail';
+import { requireOfferAccessApi } from '@/app/api/admin/offers/_lib/access';
 
 type Params = {
   params: Promise<{ offerId: string }>;
@@ -14,7 +14,7 @@ type Params = {
 
 export async function POST(request: NextRequest, { params }: Params) {
   try {
-    const auth = await requireFounderApi();
+    const auth = await requireOfferAccessApi();
     if (!auth.ok) {
       return NextResponse.json({ error: auth.error }, { status: auth.status });
     }
@@ -26,11 +26,16 @@ export async function POST(request: NextRequest, { params }: Params) {
 
     const configError = getPartnerOfferMailerConfigError();
     if (configError) {
-      const { data } = await auth.admin
+      let configQuery = auth.admin
         .from('partner_offers')
         .select(PARTNER_OFFER_SELECT)
-        .eq('id', offerId)
-        .maybeSingle();
+        .eq('id', offerId);
+
+      if (!auth.isFounder) {
+        configQuery = configQuery.eq('created_by', auth.user.id);
+      }
+
+      const { data } = await configQuery.maybeSingle();
 
       return NextResponse.json(
         {
@@ -41,11 +46,16 @@ export async function POST(request: NextRequest, { params }: Params) {
       );
     }
 
-    const { data, error } = await auth.admin
+    let query = auth.admin
       .from('partner_offers')
       .select(PARTNER_OFFER_SELECT)
-      .eq('id', offerId)
-      .maybeSingle();
+      .eq('id', offerId);
+
+    if (!auth.isFounder) {
+      query = query.eq('created_by', auth.user.id);
+    }
+
+    const { data, error } = await query.maybeSingle();
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });

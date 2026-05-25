@@ -24,6 +24,16 @@ import { getHubSpotAuthForUserWorkspace } from '@/app/api/integrations/hubspot/_
 import { HubSpotAPIClient } from '@/app/api/integrations/hubspot/_lib/client';
 import { getZapierWebhookUrlForWorkspace } from '@/app/api/integrations/zapier/_lib/auth';
 import { ZapierWebhookClient } from '@/app/api/integrations/zapier/_lib/client';
+import {
+  CONTRACTOR_PROVIDER_IDS,
+  normalizeIntegrationProvider,
+} from '@/lib/integrations/catalog';
+import {
+  getContractorAuthForWorkspace,
+  getContractorDisplayName,
+  pushContractorLead,
+  type ContractorProviderId,
+} from '@/app/api/integrations/_lib/contractor-providers';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -49,6 +59,11 @@ type ContactRow = {
   notes: string | null;
 };
 
+function normalizeRequestedProvider(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  return normalizeIntegrationProvider(value);
+}
+
 /**
  * POST /api/leads/sync-crm
  * Syncs the current user's leads/contacts to connected CRMs.
@@ -63,9 +78,11 @@ export async function POST(request: NextRequest) {
     const supabase = createAdminClient();
 
     let workspaceId: string | null = null;
+    let requestedProvider: string | null = null;
     try {
       const body = await request.json();
       workspaceId = body?.workspaceId ?? null;
+      requestedProvider = normalizeRequestedProvider(body?.provider ?? body?.providerId ?? body?.targetProvider);
     } catch {
       // no-op: body may be empty
     }
@@ -96,15 +113,24 @@ export async function POST(request: NextRequest) {
       .eq('provider', 'monday')
       .maybeSingle();
 
-    const hasFub = (connections ?? []).some((connection) => isFubConnectionProvider(connection.provider));
-    const hasBoldTrail = (connections ?? []).some((connection) => connection.provider === 'boldtrail');
-    const hasHubSpot = (connections ?? []).some((connection) => connection.provider === 'hubspot');
-    const hasZapier = (connections ?? []).some((connection) => connection.provider === 'zapier');
-    const hasMonday = !!mondayIntegration?.access_token;
+    const wantsProvider = (provider: string) => !requestedProvider || requestedProvider === provider;
+    const hasFub = wantsProvider('followupboss') && (connections ?? []).some((connection) => isFubConnectionProvider(connection.provider));
+    const hasBoldTrail = wantsProvider('boldtrail') && (connections ?? []).some((connection) => connection.provider === 'boldtrail');
+    const hasHubSpot = wantsProvider('hubspot') && (connections ?? []).some((connection) => connection.provider === 'hubspot');
+    const hasZapier = wantsProvider('zapier') && (connections ?? []).some((connection) => connection.provider === 'zapier');
+    const hasMonday = wantsProvider('monday') && !!mondayIntegration?.access_token;
+    const contractorProviders = CONTRACTOR_PROVIDER_IDS.filter((provider) =>
+      wantsProvider(provider) &&
+      (connections ?? []).some((connection) => connection.provider === provider)
+    ) as ContractorProviderId[];
 
-    if (!hasFub && !hasBoldTrail && !hasHubSpot && !hasZapier && !hasMonday) {
+    if (!hasFub && !hasBoldTrail && !hasHubSpot && !hasZapier && !hasMonday && contractorProviders.length === 0) {
       return NextResponse.json(
-        { error: 'No CRM connected. Connect a CRM in Settings → Integrations first.' },
+        {
+          error: requestedProvider
+            ? `${requestedProvider} is not connected. Connect it in Settings → Integrations first.`
+            : 'No CRM connected. Connect a CRM in Settings → Integrations first.',
+        },
         { status: 400 }
       );
     }
@@ -139,10 +165,17 @@ export async function POST(request: NextRequest) {
       hubspot: 'HubSpot',
       monday: 'Monday.com',
       zapier: 'Zapier',
+      jobnimbus: 'JobNimbus',
+      companycam: 'CompanyCam',
+      jobber: 'Jobber',
+      acculynx: 'AccuLynx',
+      sumoquote: 'SumoQuote',
+      rooflink: 'RoofLink',
     };
 
     for (const conn of connections ?? []) {
       const provider = conn.provider as string;
+      if (!hasFub) continue;
       if (!isFubConnectionProvider(provider)) continue;
 
       const detailsKey = 'followupboss';
@@ -401,6 +434,56 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    for (const provider of contractorProviders) {
+      let synced = 0;
+      let failed = 0;
+
+      try {
+        for (const contact of list) {
+          if (!contact.email && !contact.phone && !contact.address) {
+            failed++;
+            continue;
+          }
+
+          try {
+            await syncContactToContractor(supabase, userId, targetWorkspaceId, provider, contact);
+            synced++;
+          } catch (error) {
+            failed++;
+            console.error(`[leads/sync-crm] ${provider} sync failed for contact`, contact.id, error);
+          }
+        }
+
+        details[provider] = { synced, failed };
+
+        await supabase
+          .from('crm_connections')
+          .update({
+            last_push_at: new Date().toISOString(),
+            status: 'connected',
+            last_error: failed > 0 ? `One or more ${getContractorDisplayName(provider)} syncs failed.` : null,
+          })
+          .eq('workspace_id', targetWorkspaceId)
+          .eq('provider', provider);
+      } catch (error) {
+        console.error(`[leads/sync-crm] ${provider} setup failed`, error);
+        details[provider] = {
+          synced: 0,
+          failed: list.length,
+          error: error instanceof Error ? error.message : `${getContractorDisplayName(provider)} sync setup failed`,
+        };
+
+        await supabase
+          .from('crm_connections')
+          .update({
+            updated_at: new Date().toISOString(),
+            last_error: error instanceof Error ? error.message : `${getContractorDisplayName(provider)} sync setup failed`,
+          })
+          .eq('workspace_id', targetWorkspaceId)
+          .eq('provider', provider);
+      }
+    }
+
     const parts: string[] = [];
     for (const [provider, d] of Object.entries(details)) {
       const label = providerNames[provider] ?? provider;
@@ -621,6 +704,44 @@ async function syncContactToHubSpot(
   await upsertHubSpotLink(supabase, userId, contact.id, result.contactId);
 }
 
+async function syncContactToContractor(
+  supabase: ReturnType<typeof createAdminClient>,
+  userId: string,
+  workspaceId: string,
+  provider: ContractorProviderId,
+  contact: ContactRow
+) {
+  const auth = await getContractorAuthForWorkspace(supabase, userId, workspaceId, provider);
+  if (!auth) {
+    throw new Error(`${getContractorDisplayName(provider)} auth not found`);
+  }
+
+  const existingRemoteId = await findExistingContractorObjectId(supabase, userId, contact.id, provider);
+  if (existingRemoteId) {
+    return;
+  }
+
+  const result = await pushContractorLead(provider, auth, {
+    id: contact.id,
+    name: contact.full_name,
+    email: contact.email,
+    phone: contact.phone,
+    address: contact.address,
+    notes: contact.notes,
+    source: 'FLYR',
+    campaignId: contact.campaign_id,
+  });
+
+  await upsertContractorLink(
+    supabase,
+    userId,
+    contact.id,
+    provider,
+    result.remoteObjectId,
+    result.remoteObjectType
+  );
+}
+
 async function findExistingMondayItemId(
   supabase: ReturnType<typeof createAdminClient>,
   userId: string,
@@ -670,6 +791,27 @@ async function findExistingHubSpotContactId(
     .select('remote_object_id')
     .eq('user_id', userId)
     .eq('crm_type', 'hubspot')
+    .eq('flyr_lead_id', leadId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data?.remote_object_id ? String(data.remote_object_id) : null;
+}
+
+async function findExistingContractorObjectId(
+  supabase: ReturnType<typeof createAdminClient>,
+  userId: string,
+  leadId: string,
+  provider: ContractorProviderId
+) {
+  const { data, error } = await supabase
+    .from('crm_object_links')
+    .select('remote_object_id')
+    .eq('user_id', userId)
+    .eq('crm_type', provider)
     .eq('flyr_lead_id', leadId)
     .maybeSingle();
 
@@ -822,6 +964,57 @@ async function upsertHubSpotLink(
     .insert({
       user_id: userId,
       crm_type: 'hubspot',
+      flyr_lead_id: leadId,
+      ...payload,
+    });
+
+  if (error) throw error;
+}
+
+async function upsertContractorLink(
+  supabase: ReturnType<typeof createAdminClient>,
+  userId: string,
+  leadId: string,
+  provider: ContractorProviderId,
+  remoteObjectId: string,
+  remoteObjectType: string
+) {
+  const { data: existing, error: existingError } = await supabase
+    .from('crm_object_links')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('crm_type', provider)
+    .eq('flyr_lead_id', leadId)
+    .maybeSingle();
+
+  if (existingError) {
+    throw existingError;
+  }
+
+  const payload = {
+    remote_object_id: remoteObjectId,
+    remote_object_type: remoteObjectType,
+    remote_metadata: {
+      provider,
+    },
+    fub_person_id: null,
+  };
+
+  if (existing?.id) {
+    const { error } = await supabase
+      .from('crm_object_links')
+      .update(payload)
+      .eq('id', existing.id);
+
+    if (error) throw error;
+    return;
+  }
+
+  const { error } = await supabase
+    .from('crm_object_links')
+    .insert({
+      user_id: userId,
+      crm_type: provider,
       flyr_lead_id: leadId,
       ...payload,
     });
