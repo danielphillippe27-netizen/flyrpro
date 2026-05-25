@@ -524,6 +524,7 @@ export function ContactsHubView() {
           allVisibleSelected={visibleContacts.length > 0 && selectedVisibleCount === visibleContacts.length}
           onToggleContactSelection={handleToggleContactSelection}
           onToggleSelectAll={handleToggleSelectAll}
+          hasActiveFilter={selectedMemberId !== 'all' || selectedList.id !== ALL_LEADS_LIST_ID}
           copy={copy}
         />
       </div>

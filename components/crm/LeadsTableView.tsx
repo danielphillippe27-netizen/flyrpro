@@ -70,6 +70,7 @@ export function LeadsTableView({
   allVisibleSelected,
   onToggleContactSelection,
   onToggleSelectAll,
+  hasActiveFilter,
   copy,
 }: {
   contacts: Contact[];
@@ -81,6 +82,7 @@ export function LeadsTableView({
   allVisibleSelected: boolean;
   onToggleContactSelection: (contactId: string, checked: boolean) => void;
   onToggleSelectAll: (checked: boolean) => void;
+  hasActiveFilter: boolean;
   copy: IndustryCopy;
 }) {
   const toPercent = (numerator: number, denominator: number): number | null => {
@@ -117,7 +119,9 @@ export function LeadsTableView({
         {loading ? (
           <div className="p-8 text-center text-muted-foreground">{copy.leads.loading}</div>
         ) : contacts.length === 0 ? (
-          <div className="p-8 text-center text-muted-foreground">{copy.leads.empty}</div>
+          <div className="p-8 text-center text-muted-foreground">
+            {hasActiveFilter ? copy.leads.empty : 'No leads yet. Add a contact or import a list to get started.'}
+          </div>
         ) : (
           <Table>
             <TableHeader>

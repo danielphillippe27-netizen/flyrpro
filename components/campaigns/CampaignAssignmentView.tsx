@@ -541,7 +541,13 @@ export function CampaignAssignmentView({ campaignId, campaignName, addresses }: 
             ))}
           </CardContent>
         </Card>
-      ) : null}
+      ) : (
+        <Card>
+          <CardContent className="p-4 text-sm text-muted-foreground">
+            No assignments yet. Use the form above to assign this campaign to a team member.
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
