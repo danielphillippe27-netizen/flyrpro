@@ -42,6 +42,32 @@ const MapPanelSkeleton = () => (
   </div>
 );
 
+const SectionLoadingSkeleton = ({ label }: { label: string }) => (
+  <div className="space-y-3" aria-label={label}>
+    <div className="h-4 w-32 animate-pulse rounded bg-muted" />
+    <div className="space-y-2">
+      <div className="h-10 animate-pulse rounded-md bg-muted/70" />
+      <div className="h-10 animate-pulse rounded-md bg-muted/50" />
+      <div className="h-10 animate-pulse rounded-md bg-muted/40" />
+    </div>
+  </div>
+);
+
+const InlineSectionError = ({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) => (
+  <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm">
+    <p className="text-destructive">{message}</p>
+    <Button type="button" size="sm" variant="outline" className="mt-3" onClick={onRetry}>
+      Retry
+    </Button>
+  </div>
+);
+
 const CampaignDetailMapView = dynamic(
   () =>
     import('@/components/campaigns/CampaignDetailMapView').then((m) => m.CampaignDetailMapView),
@@ -492,18 +518,17 @@ export default function CampaignDetailPage() {
 
   const [campaign, setCampaign] = useState<CampaignV2 | null>(null);
   const [addresses, setAddresses] = useState<CampaignAddress[]>([]);
-  const [campaignStats, setCampaignStats] = useState<CampaignStats>({
-    addresses: 0,
-    contacts: 0,
-    contacted: 0,
-    visited: 0,
-    scanned: 0,
-    scan_rate: 0,
-    progress_pct: 0,
-  });
   const [contacts, setContacts] = useState<CampaignContact[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  const [addressesLoading, setAddressesLoading] = useState(false);
+  const [contactsLoading, setContactsLoading] = useState(false);
+  const [scanEventsLoading, setScanEventsLoading] = useState(false);
+  const [roadMetadataLoading, setRoadMetadataLoading] = useState(false);
+  const [addressesError, setAddressesError] = useState(false);
+  const [contactsError, setContactsError] = useState(false);
+  const [scanEventsError, setScanEventsError] = useState(false);
+  const [roadMetadataError, setRoadMetadataError] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [showPaywall, setShowPaywall] = useState(false);
   const [showMissingQRModal, setShowMissingQRModal] = useState(false);
@@ -519,6 +544,10 @@ export default function CampaignDetailPage() {
   const [generatingBasicQr, setGeneratingBasicQr] = useState(false);
   const [qrScanEventsCount, setQrScanEventsCount] = useState<number | null>(null);
   const [roadMetadata, setRoadMetadata] = useState<CampaignRoadMetadata | null>(null);
+  const campaignStats: CampaignStats = useMemo(
+    () => deriveCampaignStats(addresses, contacts),
+    [addresses, contacts]
+  );
   const legacyCampaignText = parseLegacyCampaignText(
     (campaign as CampaignWithLegacyDescription | null)?.description
   );
@@ -537,38 +566,107 @@ export default function CampaignDetailPage() {
   );
   const canAddCampaignNote = Boolean(campaignNoteDraft.trim() || campaignNotePdf);
 
+  const loadSecondaryData = useCallback(async () => {
+    const supabase = createClient();
+
+    setAddressesLoading(true);
+    setContactsLoading(true);
+    setScanEventsLoading(true);
+    setRoadMetadataLoading(true);
+    setAddressesError(false);
+    setContactsError(false);
+    setScanEventsError(false);
+    setRoadMetadataError(false);
+
+    const addressesRequest = CampaignsService.fetchAddresses(campaignId)
+      .then((addressesData) => {
+        setAddresses(addressesData);
+      })
+      .catch((error) => {
+        console.error('Error loading campaign addresses:', error);
+        setAddressesError(true);
+        setAddresses([]);
+      })
+      .finally(() => {
+        setAddressesLoading(false);
+      });
+
+    const contactsRequest = CampaignsService.fetchCampaignContacts(campaignId)
+      .then((contactsData) => {
+        setContacts(contactsData);
+      })
+      .catch((error) => {
+        console.error('Error loading campaign contacts:', error);
+        setContactsError(true);
+        setContacts([]);
+      })
+      .finally(() => {
+        setContactsLoading(false);
+      });
+
+    const scanEventsRequest = (async () => {
+      try {
+        const scanEventsRes = await supabase
+          .from('scan_events')
+          .select('id', { count: 'exact', head: true })
+          .eq('campaign_id', campaignId);
+        if (scanEventsRes.error) {
+          console.warn('Unable to fetch scan_events count:', scanEventsRes.error.message);
+          setScanEventsError(true);
+          setQrScanEventsCount(null);
+          return;
+        }
+        setQrScanEventsCount(scanEventsRes.count ?? 0);
+      } catch (error) {
+        console.error('Error loading scan_events count:', error);
+        setScanEventsError(true);
+        setQrScanEventsCount(null);
+      } finally {
+        setScanEventsLoading(false);
+      }
+    })();
+
+    const roadMetadataRequest = (async () => {
+      try {
+        const roadMetaRes = await supabase.rpc('rpc_get_campaign_road_metadata', { p_campaign_id: campaignId });
+        if (!roadMetaRes.error && roadMetaRes.data) {
+          setRoadMetadata(roadMetaRes.data as CampaignRoadMetadata);
+          return;
+        }
+        if (roadMetaRes.error) {
+          console.warn('Unable to fetch road metadata:', roadMetaRes.error.message);
+          setRoadMetadataError(true);
+        }
+        setRoadMetadata(null);
+      } catch (error) {
+        console.error('Error loading road metadata:', error);
+        setRoadMetadataError(true);
+        setRoadMetadata(null);
+      } finally {
+        setRoadMetadataLoading(false);
+      }
+    })();
+
+    await Promise.allSettled([
+      addressesRequest,
+      contactsRequest,
+      scanEventsRequest,
+      roadMetadataRequest,
+    ]);
+  }, [campaignId]);
+
   const loadData = useCallback(async () => {
     setLoadError(false);
     try {
-      const supabase = createClient();
-      const [campaignData, addressesData, contactsData, scanEventsRes, roadMetaRes] = await Promise.all([
-        CampaignsService.fetchCampaign(campaignId),
-        CampaignsService.fetchAddresses(campaignId),
-        CampaignsService.fetchCampaignContacts(campaignId),
-        supabase
-          .from('scan_events')
-          .select('id', { count: 'exact', head: true })
-          .eq('campaign_id', campaignId),
-        supabase.rpc('rpc_get_campaign_road_metadata', { p_campaign_id: campaignId }),
-      ]);
-      if (!campaignData) return;
-
-      if (!roadMetaRes.error && roadMetaRes.data) {
-        setRoadMetadata(roadMetaRes.data as CampaignRoadMetadata);
-      } else {
-        setRoadMetadata(null);
+      const campaignData = await CampaignsService.fetchCampaign(campaignId);
+      if (!campaignData) {
+        setLoading(false);
+        return;
       }
 
       setCampaign(campaignData);
-      setAddresses(addressesData);
-      setContacts(contactsData);
-      setCampaignStats(deriveCampaignStats(addressesData, contactsData));
-      if (scanEventsRes.error) {
-        console.warn('Unable to fetch scan_events count:', scanEventsRes.error.message);
-        setQrScanEventsCount(null);
-      } else {
-        setQrScanEventsCount(scanEventsRes.count ?? 0);
-      }
+      setLoading(false);
+      void loadSecondaryData();
     } catch (error) {
       console.error('Error loading campaign:', error);
       if ((error as { code?: string } | null)?.code === 'PGRST116') {
@@ -576,10 +674,9 @@ export default function CampaignDetailPage() {
       } else {
         setLoadError(true);
       }
-    } finally {
       setLoading(false);
     }
-  }, [campaignId]);
+  }, [campaignId, loadSecondaryData]);
 
   useEffect(() => {
     loadData();
@@ -1075,6 +1172,14 @@ export default function CampaignDetailPage() {
           </TabsList>
 
           <TabsContent value="map" className="mt-4 space-y-4">
+            {roadMetadataLoading ? (
+              <p className="text-xs text-muted-foreground">Loading road metadata…</p>
+            ) : roadMetadataError ? (
+              <InlineSectionError
+                message="Could not load road metadata."
+                onRetry={() => void loadSecondaryData()}
+              />
+            ) : null}
             <div className="bg-card rounded-xl border border-border overflow-hidden" style={{ height: '560px' }}>
               <CampaignDetailMapView
                 campaignId={campaignId}
@@ -1116,12 +1221,34 @@ export default function CampaignDetailPage() {
           <TabsContent value="addresses" className="mt-4">
             <div className="bg-card p-4 rounded-xl border border-border">
               <h2 className="text-sm font-semibold text-foreground mb-3">Addresses</h2>
-              <RecipientsTable recipients={formattedRecipients} campaignId={campaignId} onRefresh={loadData} />
+              {addressesLoading ? (
+                <SectionLoadingSkeleton label="Loading addresses" />
+              ) : addressesError ? (
+                <InlineSectionError
+                  message="Could not load addresses."
+                  onRetry={() => void loadSecondaryData()}
+                />
+              ) : (
+                <RecipientsTable recipients={formattedRecipients} campaignId={campaignId} onRefresh={loadData} />
+              )}
             </div>
           </TabsContent>
 
           <TabsContent value="contacts" className="mt-4">
-            <CampaignContactsList contacts={contacts} campaignId={campaignId} onRefresh={loadData} />
+            {contactsLoading ? (
+              <div className="bg-card p-4 rounded-xl border border-border">
+                <SectionLoadingSkeleton label="Loading contacts" />
+              </div>
+            ) : contactsError ? (
+              <div className="bg-card p-4 rounded-xl border border-border">
+                <InlineSectionError
+                  message="Could not load contacts."
+                  onRetry={() => void loadSecondaryData()}
+                />
+              </div>
+            ) : (
+              <CampaignContactsList contacts={contacts} campaignId={campaignId} onRefresh={loadData} />
+            )}
           </TabsContent>
 
           <TabsContent value="qr" className="mt-4 space-y-4">
@@ -1188,7 +1315,7 @@ export default function CampaignDetailPage() {
               <div className="flex flex-wrap gap-3">
                 <Button
                   onClick={() => handleGenerateQRs(true)}
-                  disabled={generating || formattedRecipients.length === 0}
+                  disabled={generating || addressesLoading || formattedRecipients.length === 0}
                 >
                   {generating ? 'Generating...' : 'Generate QR Codes'}
                 </Button>
@@ -1215,6 +1342,16 @@ export default function CampaignDetailPage() {
               <p className="text-[11px] text-muted-foreground mb-3">
                 Basic QR scans count toward total scans, not homes scanned.
               </p>
+              {scanEventsLoading ? (
+                <p className="mb-3 text-xs text-muted-foreground">Loading scan totals…</p>
+              ) : scanEventsError ? (
+                <div className="mb-3">
+                  <InlineSectionError
+                    message="Could not load scan totals."
+                    onRetry={() => void loadSecondaryData()}
+                  />
+                </div>
+              ) : null}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="rounded-lg border border-border bg-background p-3">
                   <p className="text-xs text-muted-foreground">Homes in campaign</p>
