@@ -484,6 +484,7 @@ export function CampaignDetailMapView({
   addresses,
   campaign,
   onSnapComplete,
+  onContactCreated,
   renderLocationCardExtra,
   buildingPendingOverlay,
   pointOverlays = [],
@@ -493,6 +494,7 @@ export function CampaignDetailMapView({
   addresses: CampaignAddress[];
   campaign?: CampaignV2 | null;
   onSnapComplete?: () => void;
+  onContactCreated?: () => void;
   renderLocationCardExtra?: (args: {
     selectedBuildingId: string;
     selectedAddressId?: string | null;
@@ -1177,6 +1179,7 @@ export function CampaignDetailMapView({
       setSelectedBuildingId(null);
       setTimeout(() => setSelectedBuildingId(currentId), 100);
     }
+    onContactCreated?.();
   };
 
   useEffect(() => {

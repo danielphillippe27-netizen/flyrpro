@@ -1186,6 +1186,7 @@ export default function CampaignDetailPage() {
                 addresses={addresses}
                 campaign={campaign}
                 onSnapComplete={loadData}
+                onContactCreated={loadSecondaryData}
                 buildingPendingOverlay={{
                   title: 'Buildings loading',
                   description: 'Addresses are ready. Building footprints will appear when Diamond finishes.',
