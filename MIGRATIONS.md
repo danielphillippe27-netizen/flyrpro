@@ -34,7 +34,7 @@ and only defines four things:
 - `user_profiles`
 - Storage bucket policies for `qr` and `flyers`
 
-The actual production database has been built through 257 migration files spanning
+The actual production database has been built through 263 migration files spanning
 January 2025 to May 2026, plus migrations applied from the iOS repo
 (`FLYR/supabase/migrations/`). Neither repo's migration history is complete on its own.
 
@@ -57,9 +57,9 @@ state needs to be created — see Section 9.
 
 ## 2. Migration inventory
 
-**Total migration files:** 257  
+**Total migration files:** 263  
 **Earliest:** `20250117000000_add_full_unique_constraint_campaign_addresses.sql`  
-**Latest:** `20260514120000_skip_building_rpc_for_bedrock_campaigns.sql`  
+**Latest:** `20260525000000_add_contractor_crm_integrations.sql`  
 **One non-timestamped file:** `create_flyers_table.sql` — treat as applied, do not re-run.
 
 The migrations fall into these functional groups:
@@ -122,6 +122,12 @@ of these are iOS-coupled — the iOS app renders the map directly from this data
 | `20260510000000_restrict_campaign_provision_sources_to_diamond_bedrock.sql` | 2026-05-10 | Replaces legacy provision-source values with the Diamond/Bedrock source set and documents the new source semantics. | `campaigns` | Drops and recreates `campaigns_provision_source_check`. Updates existing `gold`, `silver`, and `lambda` values to `NULL`, which is a destructive normalization of legacy source labels. |
 | `20260511140000_add_country_flags_to_profiles_and_leaderboard.sql` | 2026-05-11 | Adds country-code fields to profile tables and recreates `get_leaderboard` so leaderboard rows can include a country code. | `user_profiles`, `profiles`, `leaderboard_rollups`, `challenge_participants`; reads `auth.users`; function `get_leaderboard` | Uses `DROP FUNCTION IF EXISTS public.get_leaderboard(...)` before recreating it with a new return shape. No table or column drops. |
 | `20260514120000_skip_building_rpc_for_bedrock_campaigns.sql` | 2026-05-14 | Replaces `rpc_get_campaign_map_bundle` so Diamond/Bedrock campaigns skip the legacy Gold building RPC and rely on PMTiles/frontend fallback buildings instead. | Function `rpc_get_campaign_map_bundle`; reads `campaigns`, `campaign_addresses`, `campaign_parcels`; conditionally calls building/parcels/roads RPCs | No DROP statements. Uses `CREATE OR REPLACE FUNCTION`; does not alter `rpc_get_campaign_full_features`. |
+| `20260521131000_live_session_codes_and_participants.sql` | 2026-05-21 | Adds live session participant tracking, share/join codes, RLS policies, and `is_session_participant` helper for collaborative campaign sessions. | `session_participants`, `live_session_codes`; references `sessions`, `campaigns`, `workspace_invites`, `workspaces`, and `auth.users`; function `is_session_participant` | Uses `DROP POLICY IF EXISTS` before recreating RLS policies on the new `session_participants` table. No DROP TABLE or DROP COLUMN. |
+| `20260522170000_create_salespeople.sql` | 2026-05-22 | Creates salesperson admin table with commission settings, Stripe Connect fields, indexes, RLS, and updated-at trigger. | `salespeople`; function/trigger `salespeople_set_updated_at` | Uses `DROP TRIGGER IF EXISTS` before recreating the trigger. No DROP TABLE or DROP COLUMN. |
+| `20260522173000_seed_salesperson_workspace.sql` | 2026-05-22 | Seeds salesperson records for two specific email addresses, creates or updates a Salesperson Workspace, and attaches matching auth users to that workspace. | `salespeople`, `workspaces`, `user_profiles`, `workspace_members`; reads `auth.users` | No DROP statements. Performs data-seeding `INSERT`/`UPDATE` operations for named users/workspace. |
+| `20260522180000_salesperson_commissions_and_payouts.sql` | 2026-05-22 | Adds commission duration to salespeople and creates salesperson referral, commission, payout batch, and payout batch item tables with indexes, RLS, FK wiring, and updated-at triggers. | `salespeople`, `salesperson_referrals`, `salesperson_commissions`, `salesperson_payout_batches`, `salesperson_payout_batch_items`; references `workspaces` and `auth.users` | Drops and recreates `salespeople_commission_duration_months_check`; uses `DROP TRIGGER IF EXISTS` before recreating triggers. No table or column drops. |
+| `20260522190000_salesperson_invites_and_workspaces.sql` | 2026-05-22 | Adds salesperson invite/workspace ownership fields, backfills invite tokens and founder user links, and adds lookup indexes. | `salespeople`; reads `user_profiles` | No DROP statements. Runs backfill `UPDATE`s for invite tokens and founder assignment. |
+| `20260525000000_add_contractor_crm_integrations.sql` | 2026-05-25 | Expands allowed CRM object link provider values for contractor/home-service CRM integrations. | `crm_object_links` | Drops and recreates `crm_object_links_crm_type_check`. No table or column drops. |
 
 ---
 
