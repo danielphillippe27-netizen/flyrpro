@@ -35,11 +35,6 @@ type ContactMetricRow = {
   updated_at: string | null;
 };
 
-type LifetimeSessionTotalsRow = {
-  doors_hit: number | string | null;
-  conversations: number | string | null;
-};
-
 function isMissingRelation(error: unknown, relation: string): boolean {
   if (!error || typeof error !== 'object' || !('message' in error) || typeof error.message !== 'string') {
     return false;
@@ -85,23 +80,33 @@ async function getLifetimeSessionTotals(
   supabase: ReturnType<typeof createAdminClient>,
   userId: string
 ): Promise<{ doors_hit: number; conversations: number } | null> {
-  const { data, error } = await supabase
-    .from('sessions')
-    .select('doors_hit.sum(), conversations.sum()')
-    .eq('user_id', userId)
-    .maybeSingle();
+  const [doorsResult, convsResult] = await Promise.all([
+    supabase
+      .from('sessions')
+      .select('doors_hit')
+      .eq('user_id', userId)
+      .not('end_time', 'is', null),
+    supabase
+      .from('sessions')
+      .select('conversations')
+      .eq('user_id', userId)
+      .not('end_time', 'is', null),
+  ]);
 
-  if (error) {
+  if (doorsResult.error || convsResult.error) {
+    const error = doorsResult.error ?? convsResult.error;
     if (isMissingRelation(error, 'sessions')) {
       return null;
     }
-    throw new Error(error.message || 'Failed to load session totals');
+    throw new Error(error?.message || 'Failed to load session totals');
   }
 
-  const totals = data as LifetimeSessionTotalsRow | null;
+  const doorRows = (doorsResult.data ?? []) as Array<{ doors_hit?: number | null }>;
+  const conversationRows = (convsResult.data ?? []) as Array<{ conversations?: number | null }>;
+
   return {
-    doors_hit: Number(totals?.doors_hit ?? 0) || 0,
-    conversations: Number(totals?.conversations ?? 0) || 0,
+    doors_hit: doorRows.reduce((total, row) => total + (Number(row.doors_hit ?? 0) || 0), 0),
+    conversations: conversationRows.reduce((total, row) => total + (Number(row.conversations ?? 0) || 0), 0),
   };
 }
 
