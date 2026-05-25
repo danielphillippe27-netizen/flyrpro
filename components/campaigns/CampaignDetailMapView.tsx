@@ -2537,7 +2537,6 @@ export function CampaignDetailMapView({
           onSuccess={handleContactCreated}
           userId={userId}
           workspaceId={currentWorkspaceId ?? undefined}
-          portalContainer={mapShellRef.current}
           initialAddress={selectedAddressText}
           initialAddressId={selectedAddressId}
           initialCampaignId={campaignId}

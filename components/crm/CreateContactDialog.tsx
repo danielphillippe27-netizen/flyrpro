@@ -347,7 +347,7 @@ export function CreateContactDialog({
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent portalContainer={portalContainer}>
+              <SelectContent>
                 <SelectItem value="new">New</SelectItem>
                 <SelectItem value="hot">Hot</SelectItem>
                 <SelectItem value="warm">Warm</SelectItem>
