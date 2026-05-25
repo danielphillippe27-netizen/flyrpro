@@ -25,6 +25,13 @@ import { getHubSpotAuthForUserWorkspace } from '@/app/api/integrations/hubspot/_
 import { HubSpotAPIClient } from '@/app/api/integrations/hubspot/_lib/client';
 import { getZapierWebhookUrlForWorkspace } from '@/app/api/integrations/zapier/_lib/auth';
 import { ZapierWebhookClient } from '@/app/api/integrations/zapier/_lib/client';
+import { CONTRACTOR_PROVIDER_IDS } from '@/lib/integrations/catalog';
+import {
+  getContractorAuthForWorkspace,
+  getContractorDisplayName,
+  pushContractorLead,
+  type ContractorProviderId,
+} from '@/app/api/integrations/_lib/contractor-providers';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -96,8 +103,11 @@ export async function POST(request: NextRequest) {
     const hasHubSpot = (connections ?? []).some((connection) => connection.provider === 'hubspot');
     const hasZapier = (connections ?? []).some((connection) => connection.provider === 'zapier');
     const hasMonday = !!mondayIntegration?.access_token;
+    const contractorProviders = CONTRACTOR_PROVIDER_IDS.filter((provider) =>
+      (connections ?? []).some((connection) => connection.provider === provider)
+    ) as ContractorProviderId[];
 
-    if (!hasFub && !hasBoldTrail && !hasHubSpot && !hasZapier && !hasMonday) {
+    if (!hasFub && !hasBoldTrail && !hasHubSpot && !hasZapier && !hasMonday && contractorProviders.length === 0) {
       return NextResponse.json(
         { error: 'No CRM connected. Connect a CRM in Settings → Integrations first.' },
         { status: 400 }
@@ -381,6 +391,42 @@ export async function POST(request: NextRequest) {
           .eq('workspace_id', targetWorkspaceId)
           .eq('provider', 'zapier');
         details.zapier = { success: false, error: message };
+      }
+    }
+
+    for (const provider of contractorProviders) {
+      try {
+        const auth = await getContractorAuthForWorkspace(supabase, userId, targetWorkspaceId, provider);
+        if (!auth) {
+          throw new Error(`${getContractorDisplayName(provider)} auth not found`);
+        }
+        await pushContractorLead(provider, auth, {
+          ...testLead,
+          campaignId: null,
+          createdAt: new Date().toISOString(),
+        });
+
+        await supabase
+          .from('crm_connections')
+          .update({
+            last_push_at: new Date().toISOString(),
+            status: 'connected',
+            last_error: null,
+          })
+          .eq('workspace_id', targetWorkspaceId)
+          .eq('provider', provider);
+
+        details[provider] = { success: true };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : `${getContractorDisplayName(provider)} test lead failed`;
+        await supabase
+          .from('crm_connections')
+          .update({
+            last_error: message,
+          })
+          .eq('workspace_id', targetWorkspaceId)
+          .eq('provider', provider);
+        details[provider] = { success: false, error: message };
       }
     }
 

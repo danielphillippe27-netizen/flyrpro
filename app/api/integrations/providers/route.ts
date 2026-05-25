@@ -2,22 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { resolveWorkspaceIdForUser, type MinimalSupabaseClient } from '@/app/api/_utils/workspace';
 import { createAdminClient } from '@/lib/supabase/server';
+import { getIntegrationsForIndustry, normalizeIntegrationProvider } from '@/lib/integrations/catalog';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const providers = [
-  { id: 'followupboss', displayName: 'Follow Up Boss' },
-  { id: 'boldtrail', displayName: 'BoldTrail / kvCORE' },
-  { id: 'hubspot', displayName: 'HubSpot' },
-  { id: 'monday', displayName: 'monday.com' },
-  { id: 'zapier', displayName: 'Zapier' },
-];
-
 function normalizedProvider(provider: string | null | undefined) {
-  if (provider === 'fub') return 'followupboss';
-  if (provider === 'kvcore') return 'boldtrail';
-  return provider ?? '';
+  return normalizeIntegrationProvider(provider) ?? provider ?? '';
 }
 
 export async function GET(request: NextRequest) {
@@ -34,6 +25,7 @@ export async function GET(request: NextRequest) {
     .eq('user_id', requestUser.id);
 
   let workspaceIds: string[] = [];
+  let industry: string | null = null;
   if (requestedWorkspaceId) {
     const workspace = await resolveWorkspaceIdForUser(
       admin as unknown as MinimalSupabaseClient,
@@ -47,12 +39,27 @@ export async function GET(request: NextRequest) {
       );
     }
     workspaceIds = [workspace.workspaceId];
+    const { data: workspaceRow } = await admin
+      .from('workspaces')
+      .select('industry')
+      .eq('id', workspace.workspaceId)
+      .maybeSingle();
+    industry = workspaceRow?.industry ?? null;
   } else {
     const { data: memberships } = await admin
       .from('workspace_members')
       .select('workspace_id')
       .eq('user_id', requestUser.id);
     workspaceIds = (memberships ?? []).map((row) => row.workspace_id).filter(Boolean);
+    const firstWorkspaceId = workspaceIds[0];
+    if (firstWorkspaceId) {
+      const { data: workspaceRow } = await admin
+        .from('workspaces')
+        .select('industry')
+        .eq('id', firstWorkspaceId)
+        .maybeSingle();
+      industry = workspaceRow?.industry ?? null;
+    }
   }
 
   const { data: crmConnections } = workspaceIds.length > 0
@@ -69,8 +76,9 @@ export async function GET(request: NextRequest) {
   ]);
 
   return NextResponse.json(
-    providers.map((provider) => ({
-      ...provider,
+    getIntegrationsForIndustry(industry).map((provider) => ({
+      id: provider.id,
+      displayName: provider.displayName,
       connected: connected.has(provider.id),
     }))
   );

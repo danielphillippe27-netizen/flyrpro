@@ -16,7 +16,9 @@ import {
   KeyRound,
   Eye,
   EyeOff,
-  Clipboard
+  Clipboard,
+  Building2,
+  Wrench
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -25,6 +27,12 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useWorkspace } from '@/lib/workspace-context';
+import {
+  CONTRACTOR_INTEGRATIONS,
+  isRealEstateIndustry,
+  type IntegrationCatalogEntry,
+  type IntegrationProviderId,
+} from '@/lib/integrations/catalog';
 
 interface ConnectionStatus {
   connected: boolean;
@@ -53,11 +61,19 @@ interface MondayBoard {
   workspaceName?: string | null;
 }
 
+type IntegrationGroup = 'real_estate' | 'trades';
+
 export default function IntegrationsPage() {
   const integrationLogoContainerClass = 'w-10 h-10 rounded-lg flex items-center justify-center';
   const integrationLogoIconClass = 'w-5 h-5';
   const router = useRouter();
-  const { currentWorkspaceId } = useWorkspace();
+  const { currentWorkspaceId, currentWorkspace } = useWorkspace();
+  const defaultIntegrationGroup: IntegrationGroup =
+    !currentWorkspace?.industry || isRealEstateIndustry(currentWorkspace.industry)
+      ? 'real_estate'
+      : 'trades';
+  const [integrationGroup, setIntegrationGroup] = useState<IntegrationGroup>(defaultIntegrationGroup);
+  const isRealEstate = integrationGroup === 'real_estate';
   const [loading, setLoading] = useState(true);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus | null>(null);
   const [isStartingOAuth, setIsStartingOAuth] = useState(false);
@@ -97,6 +113,16 @@ export default function IntegrationsPage() {
   const [isLoadingMondayBoards, setIsLoadingMondayBoards] = useState(false);
   const [isSavingMondayBoard, setIsSavingMondayBoard] = useState(false);
   const [isDisconnectingMonday, setIsDisconnectingMonday] = useState(false);
+  const [contractorStatuses, setContractorStatuses] = useState<Record<string, ConnectionStatus>>({});
+  const [contractorDialogProvider, setContractorDialogProvider] = useState<IntegrationProviderId | null>(null);
+  const [contractorToken, setContractorToken] = useState('');
+  const [showContractorToken, setShowContractorToken] = useState(false);
+  const [isTestingContractor, setIsTestingContractor] = useState(false);
+  const [isSavingContractor, setIsSavingContractor] = useState(false);
+  const [isDisconnectingContractor, setIsDisconnectingContractor] = useState(false);
+  const [contractorDialogMessage, setContractorDialogMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [lastContractorTestedToken, setLastContractorTestedToken] = useState<string | null>(null);
+  const [lastContractorTestSucceeded, setLastContractorTestSucceeded] = useState(false);
   const trimmedBoldTrailToken = boldTrailToken.trim();
   const hasStoredBoldTrailToken = !!boldTrailStatus?.connected;
   const canSaveBoldTrail =
@@ -109,6 +135,23 @@ export default function IntegrationsPage() {
     !!trimmedZapierWebhookUrl &&
     lastZapierTestSucceeded &&
     lastZapierTestedWebhookUrl === trimmedZapierWebhookUrl;
+  const activeContractorProvider = CONTRACTOR_INTEGRATIONS.find(
+    (provider) => provider.id === contractorDialogProvider
+  );
+  const activeContractorStatus = contractorDialogProvider
+    ? contractorStatuses[contractorDialogProvider] ?? null
+    : null;
+  const trimmedContractorToken = contractorToken.trim();
+  const hasStoredContractorToken = !!activeContractorStatus?.connected;
+  const canSaveContractor =
+    !!activeContractorProvider &&
+    !!trimmedContractorToken &&
+    lastContractorTestSucceeded &&
+    lastContractorTestedToken === `${activeContractorProvider.id}:${trimmedContractorToken}`;
+
+  useEffect(() => {
+    setIntegrationGroup(defaultIntegrationGroup);
+  }, [currentWorkspaceId, defaultIntegrationGroup]);
 
   useEffect(() => {
     const loadData = async () => {
@@ -117,13 +160,17 @@ export default function IntegrationsPage() {
       // Get user
       const { data: { user: authUser } } = await supabase.auth.getUser();
       if (authUser) {
-        await Promise.all([
-          loadConnectionStatus(currentWorkspaceId ?? undefined),
-          loadBoldTrailStatus(currentWorkspaceId ?? undefined),
-          loadHubSpotStatus(currentWorkspaceId ?? undefined),
-          loadZapierStatus(currentWorkspaceId ?? undefined),
-          loadMondayStatus(),
-        ]);
+        if (isRealEstate) {
+          await Promise.all([
+            loadConnectionStatus(currentWorkspaceId ?? undefined),
+            loadBoldTrailStatus(currentWorkspaceId ?? undefined),
+            loadHubSpotStatus(currentWorkspaceId ?? undefined),
+            loadZapierStatus(currentWorkspaceId ?? undefined),
+            loadMondayStatus(),
+          ]);
+        } else {
+          await loadContractorStatuses(currentWorkspaceId ?? undefined);
+        }
       } else {
         router.push('/login');
       }
@@ -132,7 +179,7 @@ export default function IntegrationsPage() {
     };
 
     loadData();
-  }, [router, currentWorkspaceId]);
+  }, [router, currentWorkspaceId, isRealEstate]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -140,6 +187,9 @@ export default function IntegrationsPage() {
     const hubspot = params.get('hubspot');
     const monday = params.get('monday');
     const callbackMessage = params.get('message');
+    const contractorCallback = CONTRACTOR_INTEGRATIONS.find(
+      (provider) => params.get(provider.id) === 'connected' || params.get(provider.id) === 'error'
+    );
     if (fub === 'connected') {
       setMessage({ type: 'success', text: callbackMessage || 'Follow Up Boss connected successfully.' });
       window.history.replaceState({}, '', '/settings/integrations');
@@ -161,6 +211,18 @@ export default function IntegrationsPage() {
     } else if (monday === 'error') {
       setMessage({ type: 'error', text: callbackMessage || 'Monday OAuth connection failed.' });
       window.history.replaceState({}, '', '/settings/integrations');
+    } else if (contractorCallback) {
+      const status = params.get(contractorCallback.id);
+      setMessage({
+        type: status === 'connected' ? 'success' : 'error',
+        text:
+          callbackMessage ||
+          (status === 'connected'
+            ? `${contractorCallback.displayName} connected successfully.`
+            : `${contractorCallback.displayName} OAuth connection failed.`),
+      });
+      window.history.replaceState({}, '', '/settings/integrations');
+      loadContractorStatuses(currentWorkspaceId ?? undefined);
     }
   }, [currentWorkspaceId]);
 
@@ -226,6 +288,24 @@ export default function IntegrationsPage() {
     } catch (error) {
       console.error('Error loading HubSpot status:', error);
     }
+  };
+
+  const loadContractorStatuses = async (workspaceId?: string) => {
+    const qs = workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : '';
+    const entries = await Promise.all(
+      CONTRACTOR_INTEGRATIONS.map(async (provider) => {
+        try {
+          const response = await fetch(`/api/integrations/${provider.id}/status${qs}`);
+          if (!response.ok) return [provider.id, { connected: false, status: 'disconnected' }] as const;
+          const data = (await response.json()) as ConnectionStatus;
+          return [provider.id, data] as const;
+        } catch (error) {
+          console.error(`Error loading ${provider.displayName} status:`, error);
+          return [provider.id, { connected: false, status: 'disconnected' }] as const;
+        }
+      })
+    );
+    setContractorStatuses(Object.fromEntries(entries));
   };
 
   const handleStartOAuth = async () => {
@@ -841,6 +921,160 @@ export default function IntegrationsPage() {
     }
   };
 
+  const resetContractorDialog = () => {
+    setContractorDialogMessage(null);
+    setContractorToken('');
+    setShowContractorToken(false);
+    setLastContractorTestedToken(null);
+    setLastContractorTestSucceeded(false);
+  };
+
+  const handleOpenContractorDialog = (provider: IntegrationCatalogEntry) => {
+    setContractorDialogProvider(provider.id);
+    resetContractorDialog();
+  };
+
+  const handleStartContractorOAuth = async (provider: IntegrationCatalogEntry) => {
+    setMessage(null);
+    try {
+      const params = new URLSearchParams({ platform: 'web' });
+      if (currentWorkspaceId) params.set('workspaceId', currentWorkspaceId);
+      const response = await fetch(`/api/integrations/${provider.id}/oauth/start?${params.toString()}`);
+      const data = await response.json();
+      if (response.ok && data.authorizeUrl) {
+        window.location.assign(String(data.authorizeUrl));
+      } else {
+        setMessage({ type: 'error', text: data.error || `Failed to start ${provider.displayName} OAuth flow.` });
+      }
+    } catch {
+      setMessage({ type: 'error', text: 'Network error. Please try again.' });
+    }
+  };
+
+  const handleTestContractor = async () => {
+    if (!activeContractorProvider || (!trimmedContractorToken && !hasStoredContractorToken)) return;
+    setIsTestingContractor(true);
+    setContractorDialogMessage(null);
+
+    try {
+      const response = await fetch(`/api/integrations/${activeContractorProvider.id}/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspaceId: currentWorkspaceId,
+          apiKey: trimmedContractorToken || undefined,
+        }),
+      });
+      const data = await response.json();
+      const tokenKey = `${activeContractorProvider.id}:${trimmedContractorToken}`;
+      setLastContractorTestedToken(tokenKey);
+      if (response.ok) {
+        setLastContractorTestSucceeded(true);
+        setContractorDialogMessage({
+          type: 'success',
+          text: data.message || 'Connection successful',
+        });
+        await loadContractorStatuses(currentWorkspaceId ?? undefined);
+      } else {
+        setLastContractorTestSucceeded(false);
+        setContractorDialogMessage({
+          type: 'error',
+          text: data.error || 'Connection test failed',
+        });
+      }
+    } catch {
+      if (activeContractorProvider) {
+        setLastContractorTestedToken(`${activeContractorProvider.id}:${trimmedContractorToken}`);
+      }
+      setLastContractorTestSucceeded(false);
+      setContractorDialogMessage({ type: 'error', text: 'Network error. Please try again.' });
+    } finally {
+      setIsTestingContractor(false);
+    }
+  };
+
+  const handleSaveContractor = async () => {
+    if (!activeContractorProvider || !canSaveContractor) return;
+    setIsSavingContractor(true);
+    setContractorDialogMessage(null);
+
+    try {
+      const response = await fetch(`/api/integrations/${activeContractorProvider.id}/connect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspaceId: currentWorkspaceId,
+          apiKey: trimmedContractorToken,
+        }),
+      });
+      const data = await response.json();
+      if (response.ok) {
+        setMessage({
+          type: 'success',
+          text: data.message || `${activeContractorProvider.displayName} connected successfully.`,
+        });
+        setContractorDialogProvider(null);
+        resetContractorDialog();
+        await loadContractorStatuses(currentWorkspaceId ?? undefined);
+      } else {
+        setContractorDialogMessage({
+          type: 'error',
+          text: data.error || `Failed to save ${activeContractorProvider.displayName} credentials.`,
+        });
+      }
+    } catch {
+      setContractorDialogMessage({ type: 'error', text: 'Network error. Please try again.' });
+    } finally {
+      setIsSavingContractor(false);
+    }
+  };
+
+  const handleDisconnectContractor = async () => {
+    if (!activeContractorProvider) return;
+    if (!confirm(`Are you sure you want to disconnect from ${activeContractorProvider.displayName}?`)) return;
+    setIsDisconnectingContractor(true);
+    setContractorDialogMessage(null);
+
+    try {
+      const response = await fetch(`/api/integrations/${activeContractorProvider.id}/disconnect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspaceId: currentWorkspaceId }),
+      });
+      const data = await response.json();
+      if (response.ok) {
+        setMessage({
+          type: 'success',
+          text: data.message || `${activeContractorProvider.displayName} disconnected successfully.`,
+        });
+        setContractorDialogProvider(null);
+        resetContractorDialog();
+        await loadContractorStatuses(currentWorkspaceId ?? undefined);
+      } else {
+        setContractorDialogMessage({
+          type: 'error',
+          text: data.error || `Failed to disconnect ${activeContractorProvider.displayName}.`,
+        });
+      }
+    } catch {
+      setContractorDialogMessage({ type: 'error', text: 'Network error. Please try again.' });
+    } finally {
+      setIsDisconnectingContractor(false);
+    }
+  };
+
+  const handlePasteContractorToken = async () => {
+    try {
+      const clipboardValue = await navigator.clipboard.readText();
+      setContractorToken(clipboardValue.trim());
+    } catch {
+      setContractorDialogMessage({
+        type: 'error',
+        text: 'Clipboard access is not available in this browser.',
+      });
+    }
+  };
+
   const handleSendBottomTestLead = async () => {
     setIsSendingBottomTestLead(true);
     setMessage(null);
@@ -865,6 +1099,7 @@ export default function IntegrationsPage() {
           loadHubSpotStatus(currentWorkspaceId ?? undefined),
           loadZapierStatus(currentWorkspaceId ?? undefined),
           loadMondayStatus(),
+          loadContractorStatuses(currentWorkspaceId ?? undefined),
         ]);
       } else {
         setMessage({
@@ -913,6 +1148,36 @@ export default function IntegrationsPage() {
       
       <main className="mx-auto w-full max-w-4xl px-4 sm:px-6 lg:px-8 py-6">
         <div className="space-y-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="inline-flex w-full rounded-lg border border-border bg-card p-1 sm:w-auto">
+              <Button
+                type="button"
+                variant={integrationGroup === 'real_estate' ? 'default' : 'ghost'}
+                onClick={() => setIntegrationGroup('real_estate')}
+                aria-pressed={integrationGroup === 'real_estate'}
+                className="h-10 flex-1 gap-2 rounded-md sm:flex-none"
+              >
+                <Building2 className="w-4 h-4" />
+                Real Estate
+              </Button>
+              <Button
+                type="button"
+                variant={integrationGroup === 'trades' ? 'default' : 'ghost'}
+                onClick={() => setIntegrationGroup('trades')}
+                aria-pressed={integrationGroup === 'trades'}
+                className="h-10 flex-1 gap-2 rounded-md sm:flex-none"
+              >
+                <Wrench className="w-4 h-4" />
+                Trades
+              </Button>
+            </div>
+            {currentWorkspace?.industry && (
+              <Badge variant="outline" className="w-fit">
+                Workspace: {currentWorkspace.industry}
+              </Badge>
+            )}
+          </div>
+
           {message && (
             <div className={`p-4 rounded-lg flex items-start gap-3 ${
               message.type === 'success'
@@ -928,6 +1193,7 @@ export default function IntegrationsPage() {
             </div>
           )}
 
+          {isRealEstate ? (
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
           {/* Follow Up Boss Integration */}
           <Card>
@@ -1572,6 +1838,128 @@ export default function IntegrationsPage() {
             </CardHeader>
           </Card>
           </div>
+          ) : (
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+            {CONTRACTOR_INTEGRATIONS.map((provider) => {
+              const status = contractorStatuses[provider.id];
+              const connected = !!status?.connected;
+              const supportsOAuth = provider.authModes.includes('oauth');
+              const supportsApiKey = provider.authModes.includes('api_key');
+              const accentClasses: Record<string, string> = {
+                blue: 'bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-200',
+                emerald: 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-200',
+                orange: 'bg-orange-100 dark:bg-orange-950 text-orange-700 dark:text-orange-200',
+                yellow: 'bg-yellow-100 dark:bg-yellow-950 text-yellow-700 dark:text-yellow-200',
+                slate: 'bg-slate-100 dark:bg-slate-900 text-slate-700 dark:text-slate-200',
+                cyan: 'bg-cyan-100 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-200',
+                violet: 'bg-violet-100 dark:bg-violet-950 text-violet-700 dark:text-violet-200',
+                rose: 'bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-200',
+              };
+
+              return (
+                <Card key={provider.id}>
+                  <CardHeader>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <div className={`${integrationLogoContainerClass} ${accentClasses[provider.accent]}`}>
+                          <Plug className={integrationLogoIconClass} />
+                        </div>
+                        <div>
+                          <CardTitle>{provider.displayName}</CardTitle>
+                          <CardDescription>{provider.description}</CardDescription>
+                        </div>
+                      </div>
+                      {connected ? (
+                        <Badge className="bg-green-500 hover:bg-green-600 gap-1">
+                          <CheckCircle2 className="w-3 h-3" />
+                          Connected
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline">Not Connected</Badge>
+                      )}
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-5">
+                    {connected ? (
+                      <div className="space-y-5">
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between py-3 border-b border-gray-200 dark:border-gray-700">
+                            <div>
+                              <p className="text-sm font-medium dark:text-white">Connection Status</p>
+                              <p className="text-xs text-gray-500 dark:text-gray-400">
+                                Last tested: {status.lastTestedAt ? new Date(status.lastTestedAt).toLocaleString() : 'Never'}
+                              </p>
+                            </div>
+                            <Badge variant={status.status === 'connected' ? 'default' : 'destructive'}>
+                              {status.status}
+                            </Badge>
+                          </div>
+                          {status.lastPushAt && (
+                            <div className="flex items-center justify-between py-3 border-b border-gray-200 dark:border-gray-700">
+                              <div>
+                                <p className="text-sm font-medium dark:text-white">Last Lead Push</p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400">
+                                  {new Date(status.lastPushAt).toLocaleString()}
+                                </p>
+                              </div>
+                            </div>
+                          )}
+                          {status.lastError && (
+                            <div className="py-3 border-b border-gray-200 dark:border-gray-700">
+                              <p className="text-sm font-medium text-red-600 dark:text-red-400">Last Error</p>
+                              <p className="text-xs text-red-500 dark:text-red-400">{status.lastError}</p>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex flex-wrap gap-3">
+                          <Button
+                            variant="outline"
+                            onClick={() => handleOpenContractorDialog(provider)}
+                            className="gap-2"
+                          >
+                            <KeyRound className="w-4 h-4" />
+                            Manage
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4 text-sm text-gray-600 dark:text-gray-300 space-y-1">
+                          <p>1. Connect with OAuth when available, or paste a vendor API key</p>
+                          <p>2. FLYR validates the credential from the backend</p>
+                          <p>3. Leads sync one-way from FLYR into {provider.displayName}</p>
+                        </div>
+
+                        <div className="flex flex-col gap-3">
+                          {supportsOAuth && (
+                            <Button
+                              onClick={() => handleStartContractorOAuth(provider)}
+                              className="w-full gap-2"
+                            >
+                              <Plug className="w-4 h-4" />
+                              Connect {provider.displayName}
+                            </Button>
+                          )}
+                          {supportsApiKey && (
+                            <Button
+                              variant={supportsOAuth ? 'outline' : 'default'}
+                              onClick={() => handleOpenContractorDialog(provider)}
+                              className="w-full gap-2"
+                            >
+                              <KeyRound className="w-4 h-4" />
+                              {supportsOAuth ? 'Use API Key Instead' : `Connect ${provider.displayName}`}
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+          )}
 
           <Card>
             <CardHeader>
@@ -1589,7 +1977,7 @@ export default function IntegrationsPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4 text-sm text-gray-600 dark:text-gray-300">
-                The test lead will go to every connected CRM for this workspace, including BoldTrail, Follow Up Boss, HubSpot, Zapier, and Monday.com when available.
+                The test lead will go to every connected CRM for this workspace, including the Real Estate and contractor integrations shown above.
               </div>
 
               <Button
@@ -1856,6 +2244,140 @@ export default function IntegrationsPage() {
             >
               <XCircle className="w-4 h-4" />
               {isDisconnectingBoldTrail ? 'Disconnecting...' : 'Disconnect BoldTrail'}
+            </Button>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!contractorDialogProvider}
+        onOpenChange={(open) => {
+          if (!open) {
+            setContractorDialogProvider(null);
+            resetContractorDialog();
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>{activeContractorProvider?.displayName ?? 'Integration'}</DialogTitle>
+            <DialogDescription>
+              Test the credential first, then save it for secure outbound lead sync.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {hasStoredContractorToken && (
+              <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-200">
+                A credential is already saved for this workspace.
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label htmlFor="contractor-token">
+                {activeContractorProvider?.tokenLabel ?? 'API Key'}
+              </Label>
+              <div className="flex gap-2">
+                <Input
+                  id="contractor-token"
+                  type={showContractorToken ? 'text' : 'password'}
+                  value={contractorToken}
+                  onChange={(event) => setContractorToken(event.target.value)}
+                  placeholder={activeContractorProvider?.tokenPlaceholder ?? 'Paste your API key'}
+                  autoComplete="off"
+                  disabled={isTestingContractor || isSavingContractor || isDisconnectingContractor}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowContractorToken((value) => !value)}
+                  disabled={isTestingContractor || isSavingContractor || isDisconnectingContractor}
+                >
+                  {showContractorToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handlePasteContractorToken}
+                  disabled={isTestingContractor || isSavingContractor || isDisconnectingContractor}
+                  className="gap-2"
+                >
+                  <Clipboard className="w-4 h-4" />
+                  Paste
+                </Button>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4 text-sm text-gray-600 dark:text-gray-300 space-y-1">
+              <p className="font-medium text-gray-900 dark:text-white">V1 sync scope</p>
+              <p>1. Secure backend credential validation and storage</p>
+              <p>2. One-way FLYR lead push into {activeContractorProvider?.displayName ?? 'this provider'}</p>
+              <p>3. Remote IDs stored so later syncs do not duplicate known leads</p>
+            </div>
+
+            {contractorDialogMessage && (
+              <div className={`rounded-lg border px-3 py-2 text-sm ${
+                contractorDialogMessage.type === 'success'
+                  ? 'border-green-200 bg-green-50 text-green-700 dark:border-green-900 dark:bg-green-950/30 dark:text-green-300'
+                  : 'border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300'
+              }`}>
+                {contractorDialogMessage.text}
+              </div>
+            )}
+
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              The raw credential never comes back to the client after you save it.
+            </p>
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setContractorDialogProvider(null);
+                resetContractorDialog();
+              }}
+              disabled={isTestingContractor || isSavingContractor || isDisconnectingContractor}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleTestContractor}
+              disabled={
+                isTestingContractor ||
+                isSavingContractor ||
+                isDisconnectingContractor ||
+                (!trimmedContractorToken && !hasStoredContractorToken)
+              }
+              className="gap-2"
+            >
+              <RefreshCw className={`w-4 h-4 ${isTestingContractor ? 'animate-spin' : ''}`} />
+              {isTestingContractor ? 'Testing...' : trimmedContractorToken ? 'Test Connection' : 'Test Saved Credential'}
+            </Button>
+            <Button
+              type="button"
+              onClick={handleSaveContractor}
+              disabled={!canSaveContractor || isTestingContractor || isSavingContractor || isDisconnectingContractor}
+              className="gap-2"
+            >
+              <KeyRound className="w-4 h-4" />
+              {isSavingContractor ? 'Saving...' : hasStoredContractorToken ? 'Save Replacement' : 'Save'}
+            </Button>
+          </DialogFooter>
+
+          {hasStoredContractorToken && (
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={handleDisconnectContractor}
+              disabled={isTestingContractor || isSavingContractor || isDisconnectingContractor}
+              className="w-full gap-2"
+            >
+              <XCircle className="w-4 h-4" />
+              {isDisconnectingContractor ? 'Disconnecting...' : `Disconnect ${activeContractorProvider?.displayName ?? ''}`}
             </Button>
           )}
         </DialogContent>
