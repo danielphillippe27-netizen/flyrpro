@@ -132,6 +132,19 @@ Greenlit. Needs scoping — actions, permissions, UI surfaces.
 ### Audit log for destructive actions
 Greenlit. Needs scoping — which actions, where stored, who can view.
 
+### Address status manual override on web
+Address status in the Addresses tab (address_statuses table) is currently
+only updated by the iOS field app during active door knocking sessions.
+The web app has no way to manually set a canvassing outcome for an address.
+
+The "Status" field in the Add Contact dialog is a separate CRM classification
+(contacts.status: new/hot/warm/cold) — it does not affect the Addresses tab
+status.
+
+Adding a manual override on the web requires coordination with Daniel to ensure
+the web route doesn't conflict with iOS session behavior or create unexpected
+data state.
+
 ---
 
 ## Notes
