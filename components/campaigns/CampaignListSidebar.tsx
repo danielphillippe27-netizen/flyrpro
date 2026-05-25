@@ -90,6 +90,10 @@ export function CampaignListSidebar({
 
   useEffect(() => {
     void loadCampaigns();
+    window.addEventListener('flyr-campaigns-refresh', loadCampaigns);
+    return () => {
+      window.removeEventListener('flyr-campaigns-refresh', loadCampaigns);
+    };
   }, [loadCampaigns]);
 
   const byStatus = useMemo(() => {

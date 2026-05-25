@@ -730,6 +730,7 @@ export default function CreateFarmPage() {
       }
 
       router.push(`/farms/${farm.id}`);
+      window.dispatchEvent(new CustomEvent('flyr-farms-refresh'));
     } catch (error) {
       console.error('Error creating farm:', error);
       await showFeedbackDialog({

@@ -85,6 +85,10 @@ export function FarmListSidebar({
 
   useEffect(() => {
     void loadFarms();
+    window.addEventListener('flyr-farms-refresh', loadFarms);
+    return () => {
+      window.removeEventListener('flyr-farms-refresh', loadFarms);
+    };
   }, [loadFarms]);
 
   const byStatus = useMemo(() => {
