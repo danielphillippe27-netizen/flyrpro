@@ -35,6 +35,11 @@ type ContactMetricRow = {
   updated_at: string | null;
 };
 
+type LifetimeSessionTotalsRow = {
+  doors_hit: number | string | null;
+  conversations: number | string | null;
+};
+
 function isMissingRelation(error: unknown, relation: string): boolean {
   if (!error || typeof error !== 'object' || !('message' in error) || typeof error.message !== 'string') {
     return false;
@@ -76,82 +81,28 @@ function getStartOfWeekUTC(): string {
   return monday.toISOString();
 }
 
-async function getLifetimeDoorsFromSessions(
+async function getLifetimeSessionTotals(
   supabase: ReturnType<typeof createAdminClient>,
   userId: string
-): Promise<number | null> {
-  const pageSize = 1000;
-  let from = 0;
-  let totalDoors = 0;
+): Promise<{ doors_hit: number; conversations: number } | null> {
+  const { data, error } = await supabase
+    .from('sessions')
+    .select('doors_hit.sum(), conversations.sum()')
+    .eq('user_id', userId)
+    .maybeSingle();
 
-  while (true) {
-    const { data, error } = await supabase
-      .from('sessions')
-      .select('doors_hit')
-      .eq('user_id', userId)
-      .order('start_time', { ascending: false })
-      .range(from, from + pageSize - 1);
-
-    if (error) {
-      if (isMissingRelation(error, 'sessions')) {
-        return null;
-      }
-      throw new Error(error.message || 'Failed to load session totals');
+  if (error) {
+    if (isMissingRelation(error, 'sessions')) {
+      return null;
     }
-
-    const rows = (data ?? []) as Array<{ doors_hit?: number | null }>;
-
-    for (const row of rows) {
-      totalDoors += Number(row.doors_hit ?? 0) || 0;
-    }
-
-    if (rows.length < pageSize) {
-      break;
-    }
-
-    from += pageSize;
+    throw new Error(error.message || 'Failed to load session totals');
   }
 
-  return totalDoors;
-}
-
-async function getLifetimeConversationsFromSessions(
-  supabase: ReturnType<typeof createAdminClient>,
-  userId: string
-): Promise<number | null> {
-  const pageSize = 1000;
-  let from = 0;
-  let totalConversations = 0;
-
-  while (true) {
-    const { data, error } = await supabase
-      .from('sessions')
-      .select('conversations')
-      .eq('user_id', userId)
-      .order('start_time', { ascending: false })
-      .range(from, from + pageSize - 1);
-
-    if (error) {
-      if (isMissingRelation(error, 'sessions')) {
-        return null;
-      }
-      throw new Error(error.message || 'Failed to load conversation totals');
-    }
-
-    const rows = (data ?? []) as Array<{ conversations?: number | null }>;
-
-    for (const row of rows) {
-      totalConversations += Number(row.conversations ?? 0) || 0;
-    }
-
-    if (rows.length < pageSize) {
-      break;
-    }
-
-    from += pageSize;
-  }
-
-  return totalConversations;
+  const totals = data as LifetimeSessionTotalsRow | null;
+  return {
+    doors_hit: Number(totals?.doors_hit ?? 0) || 0,
+    conversations: Number(totals?.conversations ?? 0) || 0,
+  };
 }
 
 function contactSignature(row: ContactMetricRow): string {
@@ -257,7 +208,7 @@ export async function GET(request: Request) {
     const [userStatsRes, profileRes, campaignsRes, weekSessionsRes, appointmentsRes, contactsRes] = await Promise.all([
       supabase
         .from('user_stats')
-        .select('doors_knocked, time_tracked, day_streak')
+        .select('doors_knocked, time_tracked, day_streak, conversations')
         .eq('user_id', userId)
         .maybeSingle(),
       supabase
@@ -307,17 +258,18 @@ export async function GET(request: Request) {
     let doorsAllTime = userStats?.doors_knocked ?? 0;
     const totalMinutesAllTime = userStats?.time_tracked ?? 0;
     const dayStreak = userStats?.day_streak ?? 0;
-    let conversationsAllTime = 0;
+    let conversationsAllTime = userStats?.conversations ?? 0;
 
-    if (doorsAllTime <= 0) {
-      const sessionDoors = await getLifetimeDoorsFromSessions(supabase, userId);
-      if (sessionDoors !== null) {
-        doorsAllTime = sessionDoors;
+    if (doorsAllTime <= 0 || conversationsAllTime <= 0) {
+      const sessionTotals = await getLifetimeSessionTotals(supabase, userId);
+      if (sessionTotals !== null) {
+        if (doorsAllTime <= 0) {
+          doorsAllTime = sessionTotals.doors_hit;
+        }
+        if (conversationsAllTime <= 0) {
+          conversationsAllTime = sessionTotals.conversations;
+        }
       }
-    }
-    const sessionConversations = await getLifetimeConversationsFromSessions(supabase, userId);
-    if (sessionConversations !== null) {
-      conversationsAllTime = sessionConversations;
     }
 
     let weeklyDoorGoal = profile?.weekly_door_goal ?? 100;
