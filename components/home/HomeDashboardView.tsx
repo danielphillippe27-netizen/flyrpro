@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { fetchHomeDashboard, type HomeDashboardData } from '@/lib/home-dashboard';
 import { HomeHeaderRow } from './HomeHeaderRow';
 import { WeeklyGoalsCard } from './WeeklyGoalsCard';
@@ -53,12 +53,17 @@ export function HomeDashboardView({ disableGoalEditing = false }: HomeDashboardV
   const [data, setData] = useState<HomeDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const loadedWorkspaceIdRef = useRef<string | null>(null);
 
   const load = useCallback(async () => {
+    if (!currentWorkspaceId) return;
+    if (loadedWorkspaceIdRef.current === currentWorkspaceId) return;
+
     setLoading(true);
     setError(null);
     try {
       const res = await fetchHomeDashboard(currentWorkspaceId);
+      loadedWorkspaceIdRef.current = currentWorkspaceId;
       setData(res);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load');

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Target } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -31,6 +31,7 @@ export function MyCampaignAssignmentsCard() {
   const [assignments, setAssignments] = useState<AssignmentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
+  const loadedWorkspaceIdRef = useRef<string | null>(null);
 
   const loadAssignments = useCallback(async () => {
     if (!currentWorkspaceId) {
@@ -38,6 +39,7 @@ export function MyCampaignAssignmentsCard() {
       setLoading(false);
       return;
     }
+    if (loadedWorkspaceIdRef.current === currentWorkspaceId) return;
 
     setLoading(true);
     try {
@@ -53,6 +55,7 @@ export function MyCampaignAssignmentsCard() {
         setAssignments([]);
         return;
       }
+      loadedWorkspaceIdRef.current = currentWorkspaceId;
       setAssignments(Array.isArray(payload?.assignments) ? payload.assignments : []);
     } catch {
       setMessage('Failed to load campaign assignments.');

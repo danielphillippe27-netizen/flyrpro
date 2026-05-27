@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -101,6 +102,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [planBadgeLabel, setPlanBadgeLabel] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const initialLoadDoneRef = useRef(false);
+  const currentAuthUserIdRef = useRef<string | null>(null);
 
   const refreshWorkspaces = useCallback(async () => {
     setIsLoading(true);
@@ -140,6 +143,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             : 'member';
         const userId = typeof data.userId === 'string' && data.userId ? data.userId : null;
 
+        currentAuthUserIdRef.current = userId;
         setCurrentUserId(userId);
         setWorkspaces([
           {
@@ -184,11 +188,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         setWorkspaces([]);
         setMemberships([]);
         setMemberCountByWorkspaceId({});
+        currentAuthUserIdRef.current = null;
         setCurrentUserId(null);
         setCurrentWorkspaceIdState(null);
         setIsLoading(false);
         return;
       }
+      currentAuthUserIdRef.current = user.id;
       setCurrentUserId(user.id);
 
       const { data: membershipRows, error: membershipError } = await supabase
@@ -315,6 +321,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 ? data.role
                 : 'member';
             const userId = typeof data.userId === 'string' && data.userId ? data.userId : null;
+            currentAuthUserIdRef.current = userId;
             setCurrentUserId(userId);
             setWorkspaces([
               {
@@ -349,6 +356,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setWorkspaces([]);
       setMemberships([]);
       setMemberCountByWorkspaceId({});
+      currentAuthUserIdRef.current = null;
       setCurrentUserId(null);
       setCurrentWorkspaceIdState(null);
     } finally {
@@ -380,7 +388,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, [currentUserId, refreshWorkspaces]);
 
   useEffect(() => {
-    refreshWorkspaces();
+    void refreshWorkspaces().finally(() => {
+      initialLoadDoneRef.current = true;
+    });
   }, [refreshWorkspaces]);
 
   useEffect(() => {
@@ -391,8 +401,23 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       .then((supabase) => {
         const {
           data: { subscription },
-        } = supabase.auth.onAuthStateChange(() => {
-          if (!isCancelled) void refreshWorkspaces();
+        } = supabase.auth.onAuthStateChange((event, session) => {
+          if (isCancelled || event === 'INITIAL_SESSION' || !initialLoadDoneRef.current) {
+            return;
+          }
+
+          const nextUserId = session?.user?.id ?? null;
+          if (event === 'SIGNED_OUT') {
+            if (currentAuthUserIdRef.current === null) return;
+            currentAuthUserIdRef.current = null;
+            void refreshWorkspaces();
+            return;
+          }
+
+          if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && nextUserId !== currentAuthUserIdRef.current) {
+            currentAuthUserIdRef.current = nextUserId;
+            void refreshWorkspaces();
+          }
         });
         unsubscribe = () => subscription.unsubscribe();
       })
