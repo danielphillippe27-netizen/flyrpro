@@ -6,6 +6,13 @@ import { getSupabaseAnonKey, getSupabaseUrl } from '@/lib/supabase/env';
 let loggedConfigError = false;
 
 export async function middleware(req: NextRequest) {
+  if (process.env.NODE_ENV === 'production' && req.nextUrl.hostname === 'www.flyrpro.app') {
+    const canonicalUrl = req.nextUrl.clone();
+    canonicalUrl.protocol = 'https:';
+    canonicalUrl.hostname = 'flyrpro.app';
+    return NextResponse.redirect(canonicalUrl, 301);
+  }
+
   const res = NextResponse.next();
   
   try {

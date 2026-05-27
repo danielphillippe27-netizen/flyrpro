@@ -573,6 +573,7 @@ export default function CreateCampaignPage() {
       }
 
       router.push(`/campaigns/${campaign.id}`);
+      window.dispatchEvent(new CustomEvent('flyr-campaigns-refresh'));
     } catch (error: unknown) {
       console.error('Error creating campaign:', error);
       // Extract meaningful error message

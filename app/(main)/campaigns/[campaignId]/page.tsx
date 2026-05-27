@@ -1128,6 +1128,7 @@ export default function CampaignDetailPage() {
       contacts: matchedContacts,
     };
   });
+  const hasGeneratedAdvancedQr = formattedRecipients.some((recipient) => Boolean(recipient.qr_code_base64));
   const linkQualityBanner = getLinkQualityBanner(campaign);
 
   return (
@@ -1186,6 +1187,7 @@ export default function CampaignDetailPage() {
                 addresses={addresses}
                 campaign={campaign}
                 onSnapComplete={loadData}
+                onContactCreated={loadSecondaryData}
                 buildingPendingOverlay={{
                   title: 'Buildings loading',
                   description: 'Addresses are ready. Building footprints will appear when Diamond finishes.',
@@ -1312,6 +1314,15 @@ export default function CampaignDetailPage() {
               <p className="text-xs text-muted-foreground mb-3">
                 Unique QR codes for every home in the campaign. Scans are tied to addresses and each PNG includes the home address for print matching.
               </p>
+              {!addressesLoading && formattedRecipients.length === 0 ? (
+                <p className="mb-3 text-xs text-muted-foreground">
+                  Add addresses to this campaign before generating QR codes.
+                </p>
+              ) : !addressesLoading && !hasGeneratedAdvancedQr ? (
+                <p className="mb-3 text-xs text-muted-foreground">
+                  QR codes have not been generated yet.
+                </p>
+              ) : null}
               <div className="flex flex-wrap gap-3">
                 <Button
                   onClick={() => handleGenerateQRs(true)}

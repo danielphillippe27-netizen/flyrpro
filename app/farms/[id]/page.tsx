@@ -2145,7 +2145,9 @@ export default function FarmPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               {leads.length === 0 && contacts.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No farm-linked leads or contacts yet.</p>
+                <p className="text-sm text-muted-foreground">
+                  No contacts linked to this farm yet. Contacts are created when field agents interact with addresses during sessions, or you can add them manually from the Contacts page.
+                </p>
               ) : null}
 
               {leads.length > 0 ? (

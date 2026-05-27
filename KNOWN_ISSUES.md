@@ -34,11 +34,6 @@ Complexity: medium to large.
 Two simultaneous generate-qrs calls for the same campaign race row-by-row.
 The final QR data is whichever request writes last.
 
-### Large QR payload risk
-QR PNGs are stored as base64 in campaign_addresses and passed through 
-the campaign page. Large campaigns can significantly inflate payload size 
-and browser memory usage.
-
 ### generate-qrs invalid domain handling
 An invalid domain in the URL constructor fails every address in the loop 
 but the route still returns success: true with count: 0.
@@ -68,6 +63,36 @@ If multiple fallback paths in useBuildingData return overlapping address
 IDs, the final address list may contain duplicates. No dedup step exists
 after the fallback chain resolves.
 
+### resolveDashboardAccessLevel sequential auth gate
+Home page server component makes 4-5 sequential Supabase round trips in
+resolveDashboardAccessLevel() before rendering anything. Parallelizing
+would yield ~300-500ms improvement. Requires careful testing — touches
+auth gate.
+
+### MapBuildingsLayer unguarded source/layer reads
+Lines ~1869, 1870, 2615 have map.getLayer()/map.getSource() reads without
+local try/catch. Not in event handlers so crash risk is low, but weaker
+than the hardened pattern. Do not touch while Daniel is actively working
+on this file.
+
+### fetchAddresses() waterfall
+CampaignsService.fetchAddresses() performs sequential paginated reads
+against three tables. Main remaining bottleneck on campaign detail for
+large campaigns. Consider parallelizing or combining into a single query.
+
+### No client-side caching
+No SWR, React Query, or Next.js cache anywhere. Every navigation refetches
+all data from scratch. High-value target for back-navigation performance.
+
+### Campaign detail entirely client-side
+All data fetching via useEffect with no server prefetch. Converting campaign
+row fetch to server component would improve Time to First Byte.
+
+### Large QR base64 payload
+QR PNGs stored as base64 inline in campaign page payload. For large
+campaigns this inflates memory and API response size significantly.
+Consider S3 URLs instead.
+
 ---
 
 ## Needs owner decision
@@ -84,21 +109,41 @@ until the user clicks Addresses. Confusing for new users who expect
 to see their campaign addresses on load.
 Action: Daniel to decide default map state.
 
-### Meta ads panel not visible
-Meta ads tab does not appear on farm detail pages. Likely gated 
-behind Meta OAuth connection.
-Action: Daniel to confirm expected visibility behavior.
-
-### Contact save may not persist in local dev
-Contact status resets after navigation in local dev. Needs 
-production verification before investigating further.
-
 ### campaign territory_boundary not validated as valid Polygon
 The provision route checks if (!polygon) but does not validate that
 territory_boundary is actually a valid GeoJSON Polygon before passing
 it to Turf/PMTiles logic. A malformed non-null territory can pass
 validation and cause a cryptic failure inside Turf.
 Action: add explicit GeoJSON Polygon validation at the route boundary.
+
+### Nav cleanup (decided — pending implementation)
+- Remove flyer editor from nav (export 501, persistence TODO-backed)
+- Remove partner offers from nav
+- Remove landing pages create link (routes to non-existent page)
+- Enforce canonical domain flyrpro.app via middleware redirect
+
+### Farms removal
+Daniel handling. Campaign features that were farm-only need to be absorbed
+into campaigns. Do not touch farm-related code until Daniel is done.
+
+### Team leader / field agent mod actions
+Greenlit. Needs scoping — actions, permissions, UI surfaces.
+
+### Audit log for destructive actions
+Greenlit. Needs scoping — which actions, where stored, who can view.
+
+### Address status manual override on web
+Address status in the Addresses tab (address_statuses table) is currently
+only updated by the iOS field app during active door knocking sessions.
+The web app has no way to manually set a canvassing outcome for an address.
+
+The "Status" field in the Add Contact dialog is a separate CRM classification
+(contacts.status: new/hot/warm/cold) — it does not affect the Addresses tab
+status.
+
+Adding a manual override on the web requires coordination with Daniel to ensure
+the web route doesn't conflict with iOS session behavior or create unexpected
+data state.
 
 ---
 
@@ -114,3 +159,14 @@ Action: add explicit GeoJSON Polygon validation at the route boundary.
   once, leaving double-encoded Bedrock IDs unresolved.
 - generate-qrs auth hole: fixed in PR 20. Route had no workspace check.
 - useBuildingData AbortController: fixed in PR 20.
+- Meta ads panel not visible: resolved. Farms are being removed, so this
+  farm detail visibility issue is moot.
+- Contact save may not persist in local dev: resolved. address_statuses is
+  the source of truth per Daniel.
+- GeoJSON audit 2026-05-21: Daniel's 12 commits audited, no conflicts
+  with our fixes, retry cap preserved, no new layer-scoped listeners,
+  minor unguarded reads at lines ~1869/1870/2615 noted.
+- Dashboard perf PR 23: 37% faster (1214ms → 762ms). Remaining bottleneck
+  is sequential server auth gate.
+- Campaign detail perf PR 23: progressive rendering implemented, shell
+  renders after campaign fetch, addresses/contacts lazy-load in parallel.

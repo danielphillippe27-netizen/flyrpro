@@ -79,6 +79,37 @@ Some web calls also bridge into cookie auth. `FLYR/Services/OvertureAddressServi
 | `/api/routes/assignments/status` | POST | `FLYR/Features/Routes/Services/RouteAssignmentsAPI.swift:119` | Updates assignment status. |
 | `/api/share-card` | GET | `FLYR/Features/Challenges/Services/ChallengeService.swift:217` | Fetches challenge share-card image. |
 
+### 3.1 New web routes touching iOS-coupled tables
+
+These routes were added in Daniel's salespeople/live-sessions/contractor CRM checkpoint.
+They may not all be called by the current iOS app yet, but they read or write tables
+that iOS also uses directly. Treat them as shared-data routes.
+
+| Route | Method | Tables touched | iOS coupling risk | Notes |
+|---|---:|---|---|---|
+| `/api/contacts` | GET | `contacts` | Medium | Lists up to 200 contacts scoped by workspace or user. Response maps DB names into `fullName`, `email`, `phone`, and `tags`. |
+| `/api/contacts` | POST | `contacts` | High | Inserts a contact with `user_id`, optional `workspace_id`, `full_name`, `email`, `phone`, and `status = 'new'`. `contacts` is directly read/written by iOS. |
+| `/api/leads` | GET | `contacts` | Medium | Reads campaign/workspace-scoped leads from `contacts` and maps them to lead fields. Has fallback for older schemas missing enriched columns. |
+| `/api/leads/upsert` | POST | `contacts`, `contact_activities` | High | Inserts a contact/lead with campaign/address/building/session linkage when provided, then optionally inserts note/meeting rows into `contact_activities`. |
+| `/api/qr-codes` | GET | `qr_codes` | Medium | Lists QR rows owned by the authenticated user via metadata filters. iOS writes and reads `qr_codes` directly. |
+| `/api/qr-codes` | POST | `qr_codes` | High | Inserts generic direct-link QR rows with generated `slug`, `/q/{slug}` URL, `direct_url`, and owner/workspace metadata. Do not change `qr_codes` shape without iOS coordination. |
+| `/api/sessions/start` | POST | `campaigns`, `workspace_members`, `campaign_members`, `sessions`, `session_participants` | High | Starts an active session row, resolving workspace access from workspace/campaign membership, and upserts the host into `session_participants` for campaign sessions. `sessions` is iOS-critical. |
+| `/api/sessions/update` | POST | `campaigns`, `workspace_members`, `campaign_members`, `session_participants`, `sessions`, `route_assignments`, `farm_touches` | High | Updates active sessions or creates/completes session rows, writes route assignment completion progress, and marks farm touches complete. Touches multiple field-session tables used by iOS. |
+| `/api/live-sessions/codes/create` | POST | `sessions`, `campaigns`, `live_session_codes` | Medium | Host-only route that revokes existing active codes for a session and inserts a new hashed join code. Depends on `sessions` and `campaigns` consistency. |
+| `/api/live-sessions/codes/join` | POST | `live_session_codes`, `sessions`, `campaigns`, `campaign_members`, `session_participants` | High | Validates a join code, may upsert `campaign_members`, upserts the joining user into `session_participants`, and updates `live_session_codes.last_used_at`. |
+| `/api/live-sessions/presence` | GET | `campaign_presence` | Medium | Reads fresh participant locations for a campaign after campaign access validation. Presence is web-owned but campaign access is shared. |
+| `/api/live-sessions/presence` | POST | `campaign_presence`, `session_participants` | Medium | Upserts campaign presence and updates participant heartbeat fields. Coordinate with iOS if native live-session presence is added. |
+
+### 3.2 Existing iOS-coupled routes changed in Daniel's latest commit
+
+| Route | Method | Tables/RPCs touched | iOS coupling risk | Change note |
+|---|---:|---|---|---|
+| `/api/campaigns/{campaignId}/addresses/{addressId}` | DELETE | `campaign_addresses` via `deleteAddressIfExists` helper | High | Direct delete was replaced with a shared location-delete helper that can clean related location data. Request/response contract remains `deleted: true, address_id`. |
+| `/api/campaigns/{campaignId}/addresses/{addressId}/manual` | DELETE | `campaign_addresses` via `deleteCampaignAddressDeep` helper | High | Manual address delete now validates `source = 'manual'` and uses deep-delete helper with `requireManualSource`. Non-manual rows return 409. |
+| `/api/campaigns/{campaignId}/state` | GET | `address_statuses`, `campaign_assignments`, `campaign_assignment_homes` | High | Adds assigned-to-me scoping and cursor-based state payload for address statuses. iOS depends on address status semantics. |
+| `/api/campaigns/{campaignId}/state` | POST | `record_campaign_address_outcome`, `upsert_address_status`, `farm_addresses` | High | Writes canonical address outcomes through RPC with fallback to `upsert_address_status`; optionally syncs farm address visit/outcome fields. |
+| `/api/campaigns/provision` | POST | `campaigns`, `building_address_links`, post-processing/linker pipeline | High | Adds optional wait flags (`wait_for_linker`, `wait_for_postprocess`, `require_linked_homes`) that run post-processing before response, counts building links, and repairs missing `provision_source`. Existing default background behavior is preserved when flags are absent. |
+
 ## 4. Database tables read or written by iOS directly
 
 | Table | Operations | iOS caller (file:line) | Web dev constraint |
