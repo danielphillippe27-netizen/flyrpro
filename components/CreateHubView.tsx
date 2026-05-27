@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { FarmIcon } from '@/components/icons/FarmIcon';
-import { Megaphone, QrCode, FileText, FileImage } from 'lucide-react';
+import { Megaphone, QrCode } from 'lucide-react';
 
 export function CreateHubView({
   open,
@@ -21,9 +21,7 @@ export function CreateHubView({
 }) {
   const router = useRouter();
 
-  const handleCreate = (
-    type: 'campaign' | 'farm' | 'qr' | 'landing-page' | 'flyer'
-  ) => {
+  const handleCreate = (type: 'campaign' | 'farm' | 'qr') => {
     onClose();
     if (type === 'campaign') {
       router.push('/campaigns/create');
@@ -31,11 +29,6 @@ export function CreateHubView({
       router.push('/farms/create');
     } else if (type === 'qr') {
       router.push('/qr');
-    } else if (type === 'landing-page') {
-      // TODO: Create landing page creation route
-      router.push('/landing-pages/create');
-    } else if (type === 'flyer') {
-      router.push('/editor');
     }
   };
 
@@ -83,34 +76,6 @@ export function CreateHubView({
 
           {/* Right Column */}
           <div className="space-y-4">
-            <Button
-              variant="outline"
-              className="h-auto p-6 flex flex-col items-start w-full"
-              onClick={() => handleCreate('flyer')}
-            >
-              <div className="flex items-center gap-3 mb-2">
-                <FileImage className="w-6 h-6" />
-                <span className="text-lg font-semibold">Flyer</span>
-              </div>
-              <p className="text-sm text-gray-600 text-left">
-                Design and customize flyer templates for print
-              </p>
-            </Button>
-
-            <Button
-              variant="outline"
-              className="h-auto p-6 flex flex-col items-start w-full"
-              onClick={() => handleCreate('landing-page')}
-            >
-              <div className="flex items-center gap-3 mb-2">
-                <FileText className="w-6 h-6" />
-                <span className="text-lg font-semibold">Landing Page</span>
-              </div>
-              <p className="text-sm text-gray-600 text-left">
-                Create a custom landing page for your campaigns
-              </p>
-            </Button>
-
             <Button
               variant="outline"
               className="h-auto p-6 flex flex-col items-start w-full"

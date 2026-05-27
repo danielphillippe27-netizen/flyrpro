@@ -41,14 +41,12 @@ const salespersonWorkspaceTabs = [
   { href: '/dialer', icon: PhoneCall, label: 'Dialer' },
   { href: '/list', icon: ListChecks, label: 'List' },
   { href: '/leads', icon: Users, label: 'Leads' },
-  offersTab,
   { href: '/stats', icon: Gauge, label: 'Performance' },
   { href: '/scraper', icon: Search, label: 'Scraper' },
   settingsTab,
 ];
 const founderTabs = [
   ...baseTabs.filter((tab) => ['/home'].includes(tab.href)),
-  offersTab,
   ambassadorsTab,
   salespeopleTab,
   ...baseTabs.filter((tab) => ['/activity', '/leads', '/follow-up', '/appointments'].includes(tab.href)),
