@@ -62,11 +62,12 @@ export function HomeDashboardView({ disableGoalEditing = false }: HomeDashboardV
 
     setLoading(true);
     setError(null);
+    fetchedWorkspaceIds.add(currentWorkspaceId);
     try {
       const res = await fetchHomeDashboard(currentWorkspaceId);
-      fetchedWorkspaceIds.add(currentWorkspaceId);
       setData(res);
     } catch (e) {
+      fetchedWorkspaceIds.delete(currentWorkspaceId);
       setError(e instanceof Error ? e.message : 'Failed to load');
     } finally {
       setLoading(false);
