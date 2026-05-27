@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 import { getClientAsync } from '@/lib/supabase/client';
+import type { DashboardAccessLevel } from '@/app/api/_utils/workspace';
 
 const CURRENT_WORKSPACE_STORAGE_KEY = 'flyr.currentWorkspaceId';
 function workspaceStorageKeyForUser(userId: string): string {
@@ -44,6 +45,9 @@ type WorkspaceContextValue = {
   memberCountByWorkspaceId: Record<string, number>;
   currentWorkspace: Workspace | null;
   currentWorkspaceId: string | null;
+  accessLevel: DashboardAccessLevel | null;
+  isFounder: boolean;
+  planBadgeLabel: string | null;
   isLoading: boolean;
   error: string | null;
   setCurrentWorkspaceId: (workspaceId: string) => void;
@@ -77,6 +81,9 @@ type AccessStateRow = {
   industry?: string | null;
   role?: WorkspaceRole | null;
   memberCount?: number | null;
+  accessLevel?: DashboardAccessLevel | null;
+  isFounder?: boolean | null;
+  planBadgeLabel?: string | null;
 };
 
 type WorkspacePreferenceRow = {
@@ -89,18 +96,34 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [memberCountByWorkspaceId, setMemberCountByWorkspaceId] = useState<Record<string, number>>({});
   const [currentWorkspaceId, setCurrentWorkspaceIdState] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [accessLevel, setAccessLevel] = useState<DashboardAccessLevel | null>(null);
+  const [isFounder, setIsFounder] = useState(false);
+  const [planBadgeLabel, setPlanBadgeLabel] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const refreshWorkspaces = useCallback(async () => {
     setIsLoading(true);
     setError(null);
+    setAccessLevel(null);
+    setIsFounder(false);
+    setPlanBadgeLabel(null);
+
+    const accessStatePromise = fetch('/api/access/state', { credentials: 'include' })
+      .then((response) => (response.ok ? response.json() as Promise<AccessStateRow> : null))
+      .catch(() => null);
+
+    const applyAccessState = (data: AccessStateRow | null) => {
+      setAccessLevel(typeof data?.accessLevel === 'string' ? data.accessLevel : null);
+      setIsFounder(data?.isFounder === true);
+      setPlanBadgeLabel(typeof data?.planBadgeLabel === 'string' ? data.planBadgeLabel : null);
+    };
 
     try {
       const hydrateFromAccessState = async (): Promise<boolean> => {
-        const response = await fetch('/api/access/state', { credentials: 'include' });
-        if (!response.ok) return false;
-        const data = (await response.json()) as AccessStateRow;
+        const data = await accessStatePromise;
+        applyAccessState(data);
+        if (!data) return false;
         const workspaceId =
           (typeof data.workspaceId === 'string' && data.workspaceId) ||
           (typeof data.workspace_id === 'string' && data.workspace_id) ||
@@ -276,11 +299,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           window.localStorage.removeItem(namespacedKey);
         }
       }
+      applyAccessState(await accessStatePromise);
     } catch (err) {
       try {
-        const response = await fetch('/api/access/state', { credentials: 'include' });
-        if (response.ok) {
-          const data = (await response.json()) as AccessStateRow;
+        const data = await accessStatePromise;
+        applyAccessState(data);
+        if (data) {
           const workspaceId =
             (typeof data.workspaceId === 'string' && data.workspaceId) ||
             (typeof data.workspace_id === 'string' && data.workspace_id) ||
@@ -400,6 +424,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       memberCountByWorkspaceId,
       currentWorkspace,
       currentWorkspaceId,
+      accessLevel,
+      isFounder,
+      planBadgeLabel,
       isLoading,
       error,
       setCurrentWorkspaceId,
@@ -411,6 +438,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       memberCountByWorkspaceId,
       currentWorkspace,
       currentWorkspaceId,
+      accessLevel,
+      isFounder,
+      planBadgeLabel,
       isLoading,
       error,
       setCurrentWorkspaceId,
