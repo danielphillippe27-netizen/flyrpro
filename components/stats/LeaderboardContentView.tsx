@@ -36,12 +36,14 @@ const SCOPES: { value: LeaderboardScope; label: string }[] = [
 ];
 
 function getMetricValue(
-  entry: Pick<LeaderboardEntry, 'doorknocks' | 'conversations' | 'distance'>,
+  entry: Pick<LeaderboardEntry, 'doorknocks' | 'conversations' | 'leads' | 'distance'>,
   sortBy: LeaderboardSortBy
 ): number {
   switch (sortBy) {
     case 'conversations':
       return entry.conversations;
+    case 'leads':
+      return entry.leads;
     case 'distance':
       return entry.distance;
     case 'doorknocks':
@@ -50,23 +52,60 @@ function getMetricValue(
   }
 }
 
+function getPendingMetricValue(entry: LeaderboardEntry, sortBy: LeaderboardSortBy): number {
+  return entry.pending ? getMetricValue(entry.pending, sortBy) : 0;
+}
+
 function sortLeaderboardEntries(
   entries: LeaderboardEntry[],
   sortBy: LeaderboardSortBy
 ): LeaderboardEntry[] {
   return [...entries]
     .sort((left, right) => {
+      if ((right.rank > 0 ? 1 : 0) !== (left.rank > 0 ? 1 : 0)) {
+        return (right.rank > 0 ? 1 : 0) - (left.rank > 0 ? 1 : 0);
+      }
       const delta = getMetricValue(right, sortBy) - getMetricValue(left, sortBy);
       if (delta !== 0) return delta;
+      const pendingDelta = getPendingMetricValue(right, sortBy) - getPendingMetricValue(left, sortBy);
+      if (pendingDelta !== 0) return pendingDelta;
       if (right.conversations !== left.conversations) {
         return right.conversations - left.conversations;
       }
       return left.name.localeCompare(right.name);
-    })
-    .map((entry, index) => ({
-      ...entry,
-      rank: index + 1,
-    }));
+    });
+}
+
+function normalizeLeaderboardName(name: string): string {
+  return name.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
+}
+
+function dedupeAndRankLeaderboardEntries(
+  entries: LeaderboardEntry[],
+  sortBy: LeaderboardSortBy
+): LeaderboardEntry[] {
+  const seenNames = new Set<string>();
+  const deduped: LeaderboardEntry[] = [];
+
+  for (const entry of sortLeaderboardEntries(entries, sortBy)) {
+    const nameKey = normalizeLeaderboardName(entry.name);
+    const key = nameKey || entry.user_id || entry.id;
+
+    if (seenNames.has(key)) {
+      continue;
+    }
+
+    seenNames.add(key);
+    deduped.push(entry);
+  }
+
+  let nextRank = 1;
+  return deduped.map((entry) => {
+    if (entry.rank <= 0) {
+      return { ...entry, rank: 0 };
+    }
+    return { ...entry, rank: nextRank++ };
+  });
 }
 
 function mapTeamRows(rows: TeamLeaderboardRow[]): LeaderboardEntry[] {
@@ -81,7 +120,8 @@ function mapTeamRows(rows: TeamLeaderboardRow[]): LeaderboardEntry[] {
     conversations: Number(row.conversations) || 0,
     leads: 0,
     distance: (Number(row.distance_meters) || 0) / 1000,
-    rank: 0,
+    rank: 1,
+    pending: { doorknocks: 0, conversations: 0, leads: 0, distance: 0 },
     updated_at: row.last_active_at ?? undefined,
   }));
 }
@@ -139,14 +179,14 @@ export function LeaderboardContentView() {
           throw new Error(payload?.error ?? 'Could not load team leaderboard.');
         }
 
-        const teamEntries = sortLeaderboardEntries(mapTeamRows(payload?.rows ?? []), sortBy);
+        const teamEntries = dedupeAndRankLeaderboardEntries(mapTeamRows(payload?.rows ?? []), sortBy);
         setEntries(teamEntries);
         setTeamNotice(payload?.diagnostics?.message ?? null);
         return;
       }
 
       const data = await LeaderboardService.fetchLeaderboard(sortBy, 100, 0, 'all_time');
-      setEntries(sortLeaderboardEntries(data, sortBy));
+      setEntries(dedupeAndRankLeaderboardEntries(data, sortBy));
       setTeamNotice(null);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

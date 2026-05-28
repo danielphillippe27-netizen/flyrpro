@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import type {
   CircleLayerSpecification,
   ExpressionSpecification,
@@ -14,7 +14,7 @@ import { createClient } from '@/lib/supabase/client';
 import type { BuildingFeatureCollection, BuildingProperties, GetBuildingsInBboxParams } from '@/types/map-buildings';
 import type { CampaignAddress, CampaignType } from '@/types/database';
 import { getCampaignBuildingStatus } from '@/lib/campaignStats';
-import { DEFAULT_STATUS_FILTERS, MAP_STATUS_CONFIG, type StatusFilters } from '@/lib/constants/mapStatus';
+import { DEFAULT_STATUS_FILTERS, MAP_STATUS_CONFIG, getMapUntouchedColor, type StatusFilters } from '@/lib/constants/mapStatus';
 import { displayAddressText, resolveHouseNumberLabel } from '@/lib/map/addressPresentation';
 import {
   appendTileAccessToken,
@@ -45,10 +45,12 @@ interface MapBuildingsLayerProps {
   campaignBoundary?: GeoJSON.Polygon | null;
   campaignBbox?: [number, number, number, number] | null;
   statusFilters?: StatusFilters;
+  assignmentColorByAddressId?: Record<string, string>;
   showOrphans?: boolean; // Toggle to show/hide orphan buildings (buildings without address links)
   showAddressLabels?: boolean;
   /** When false, footprints use a neutral gray (not status colors); roads unchanged. Default true. */
   footprintStatusColors?: boolean;
+  isDarkMap?: boolean;
   onBuildingClick?: (
     buildingId: string,
     addressId?: string,
@@ -648,9 +650,11 @@ export function MapBuildingsLayer({
   campaignBoundary = null,
   campaignBbox = null,
   statusFilters = defaultStatusFilters,
+  assignmentColorByAddressId,
   showOrphans = true,
   showAddressLabels = true,
   footprintStatusColors = true,
+  isDarkMap = false,
   onBuildingClick,
   onAddToCRM,
   onRenderStateChange,
@@ -669,8 +673,30 @@ export function MapBuildingsLayer({
   const circleLeadGlowLayerId = 'map-buildings-lead-glow-points';
   const addressLabelSourceId = 'map-address-centroid-label-source';
   const addressLabelLayerId = 'map-address-centroid-labels';
+  const untouchedBuildingColor = getMapUntouchedColor(isDarkMap);
   const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null);
   const useCanonicalAddressState = Boolean(addressStateOverrides?.length);
+  const assignmentColorByBuildingId = useMemo(() => {
+    const colors = new Map<string, string>();
+    if (!addressStateOverrides?.length || !assignmentColorByAddressId) return colors;
+
+    for (const address of addressStateOverrides) {
+      const color = assignmentColorByAddressId[address.id];
+      if (!color) continue;
+
+      [
+        address.building_id,
+        address.building_gers_id,
+        address.gers_id,
+        address.source_id,
+      ].forEach((value) => {
+        const normalized = String(value ?? '').trim();
+        if (normalized) colors.set(normalized, color);
+      });
+    }
+
+    return colors;
+  }, [addressStateOverrides, assignmentColorByAddressId]);
 
   const getSupabase = useCallback(() => {
     if (!supabaseRef.current) {
@@ -729,13 +755,19 @@ export function MapBuildingsLayer({
           status: getCampaignBuildingStatus(address),
           scans_total: Number(address.scans ?? 0),
           qr_scanned: Number(address.scans ?? 0) > 0 || Boolean(address.last_scanned_at),
+          assignment_color: assignmentColorByAddressId?.[address.id],
         },
       ])
     );
 
     const buildingStateById = new Map<
       string,
-      { status: 'not_visited' | 'visited' | 'hot' | 'lead' | 'hot_lead' | 'no_answer' | 'do_not_knock'; scans_total: number; qr_scanned: boolean }
+      {
+        status: 'not_visited' | 'visited' | 'hot' | 'lead' | 'hot_lead' | 'no_answer' | 'do_not_knock';
+        scans_total: number;
+        qr_scanned: boolean;
+        assignment_color?: string;
+      }
     >();
 
     const statusRank = { not_visited: 0, visited: 1, no_answer: 2, do_not_knock: 3, hot: 4, lead: 5, hot_lead: 6 } as const;
@@ -751,6 +783,7 @@ export function MapBuildingsLayer({
         status: getCampaignBuildingStatus(address),
         scans_total: Number(address.scans ?? 0),
         qr_scanned: Number(address.scans ?? 0) > 0 || Boolean(address.last_scanned_at),
+        assignment_color: assignmentColorByAddressId?.[address.id],
       };
       const currentState = buildingStateById.get(buildingId);
 
@@ -766,6 +799,7 @@ export function MapBuildingsLayer({
             : currentState.status,
         scans_total: currentState.scans_total + nextState.scans_total,
         qr_scanned: currentState.qr_scanned || nextState.qr_scanned,
+        assignment_color: currentState.assignment_color ?? nextState.assignment_color,
       });
     }
 
@@ -784,15 +818,25 @@ export function MapBuildingsLayer({
         const featureId = props.feature_id ?? props.gers_id ?? feature.id ?? props.id;
         if (!featureId) continue;
 
+        const assignmentColor =
+          (props.address_id && assignmentColorByAddressId?.[props.address_id]) ||
+          (props.building_id && assignmentColorByBuildingId.get(String(props.building_id))) ||
+          (props.gers_id && assignmentColorByBuildingId.get(String(props.gers_id))) ||
+          undefined;
         const featureState =
           (props.address_id ? addressStateById.get(props.address_id) : undefined) ??
           (props.building_id ? buildingStateById.get(props.building_id) : undefined) ??
           (props.gers_id ? buildingStateById.get(props.gers_id) : undefined);
 
-        if (!featureState) continue;
+        const nextFeatureState = featureState || assignmentColor ? {
+          ...(featureState ?? {}),
+          ...(assignmentColor ? { assignment_color: assignmentColor } : {}),
+        } : null;
+
+        if (!nextFeatureState) continue;
 
         try {
-          map.setFeatureState({ source: sourceId, id: featureId }, featureState);
+          map.setFeatureState({ source: sourceId, id: featureId }, nextFeatureState);
         } catch (error) {
           console.warn('[MapBuildingsLayer] Failed to apply canonical address state override:', error);
         }
@@ -805,7 +849,7 @@ export function MapBuildingsLayer({
       cancelled = true;
       if (frameId !== null) cancelAnimationFrame(frameId);
     };
-  }, [map, campaignId, features, addressStateOverrides]);
+  }, [map, campaignId, features, addressStateOverrides, assignmentColorByAddressId, assignmentColorByBuildingId]);
 
   // Status toggles now control color emphasis (not visibility).
   // Non-selected statuses render as neutral gray baseline.
@@ -836,6 +880,7 @@ export function MapBuildingsLayer({
   // with fallback to ['get', ...] for initial data from properties
   const getColorExpression = (): ExpressionSpecification => {
     // Helper expressions - check feature-state first (real-time), then source properties (initial load)
+    const getAssignmentColor = () => ['coalesce', ['feature-state', 'assignment_color'], ['get', 'assignment_color'], ''];
     const getStatusValue = () => ['coalesce', ['feature-state', 'status'], ['get', 'status'], 'not_visited'];
     const getAddressStatus = () => ['coalesce', ['feature-state', 'address_status'], ['get', 'address_status'], 'none'];
     const getScansTotal = () => ['coalesce', ['feature-state', 'scans_total'], ['get', 'scans_total'], 0];
@@ -855,6 +900,9 @@ export function MapBuildingsLayer({
     
     return [
       'case',
+      ['!=', getAssignmentColor(), ''],
+      getAssignmentColor(),
+
       // QR_SCANNED (highest priority)
       ['all', isQrScanned, statusFilters.QR_SCANNED],
       MAP_STATUS_CONFIG.QR_SCANNED.color,
@@ -878,7 +926,7 @@ export function MapBuildingsLayer({
       MAP_STATUS_CONFIG.TOUCHED.color,
       
       ['all', isUntouched, statusFilters.UNTOUCHED],
-      MAP_STATUS_CONFIG.UNTOUCHED.color,
+      untouchedBuildingColor,
 
       // Baseline when no toggle applies
       NEUTRAL_FOOTPRINT_COLOR,
@@ -1134,6 +1182,10 @@ export function MapBuildingsLayer({
           null
         );
         const existingAddressCount = Number(props.address_count ?? 0);
+        const assignmentColor =
+          (featureAddressId && assignmentColorByAddressId?.[featureAddressId]) ||
+          (primaryInferredAddress?.id && assignmentColorByAddressId?.[primaryInferredAddress.id]) ||
+          buildingIdentifiers.map((identifier) => assignmentColorByBuildingId.get(identifier)).find(Boolean);
 
         return [{
           ...f,
@@ -1166,6 +1218,7 @@ export function MapBuildingsLayer({
             status: props.status ?? inferredStatus ?? 'not_visited',
             scans_total: Math.max(Number(props.scans_total ?? 0), inferredScansTotal),
             qr_scanned: Boolean(props.qr_scanned) || inferredScansTotal > 0,
+            assignment_color: getStringRecordValue(propsRecord, 'assignment_color') ?? assignmentColor ?? undefined,
             gers_id: props.gers_id ?? stableBuildingId,
             building_id: props.building_id ?? stableBuildingId,
             feature_id: props.feature_id ?? stableBuildingId,
@@ -1174,7 +1227,7 @@ export function MapBuildingsLayer({
       }),
     } as BuildingFeatureCollection;
     lastSetDataRef.current = null;
-  }, [addressStateOverrides, deletedAddressIds, features, hiddenBuildingIds]);
+  }, [addressStateOverrides, assignmentColorByAddressId, assignmentColorByBuildingId, deletedAddressIds, features, hiddenBuildingIds]);
 
   // EXPLORATION MODE: Fetch buildings in viewport bounding box (when no campaignId)
   const fetchBuildingsInViewport = useCallback(async (bounds: { ne: [number, number]; sw: [number, number] }) => {
@@ -1563,7 +1616,7 @@ export function MapBuildingsLayer({
       try {
         map.setLight({
           anchor: 'map',
-          color: '#d1d5db',
+          color: '#cfd8e3',
           intensity: 0.35,
           position: [1.15, 210, 30],
         });
@@ -1708,7 +1761,7 @@ export function MapBuildingsLayer({
       map.off('zoomend', reportRenderState);
       cleanupRenderedLayers();
     };
-  }, [map, manifestSource, cleanupRenderedLayers, sourceId, layerId, leadGlowLayerId, addressStateOverrides, campaignBoundary, campaignBbox, statusFilters, footprintStatusColors]);
+  }, [map, manifestSource, cleanupRenderedLayers, sourceId, layerId, leadGlowLayerId, addressStateOverrides, campaignBoundary, campaignBbox, statusFilters, footprintStatusColors, isDarkMap, assignmentColorByAddressId]);
 
   useEffect(() => {
     if (!map || !manifestSource || !campaignId || !addressStateOverrides?.length) return;
@@ -1717,11 +1770,21 @@ export function MapBuildingsLayer({
     const statusRank = { not_visited: 0, visited: 1, no_answer: 2, do_not_knock: 3, hot: 4, lead: 5, hot_lead: 6 } as const;
     const buildingStateById = new Map<
       string,
-      { status: 'not_visited' | 'visited' | 'hot' | 'lead' | 'hot_lead' | 'no_answer' | 'do_not_knock'; scans_total: number; qr_scanned: boolean }
+      {
+        status: 'not_visited' | 'visited' | 'hot' | 'lead' | 'hot_lead' | 'no_answer' | 'do_not_knock';
+        scans_total: number;
+        qr_scanned: boolean;
+        assignment_color?: string;
+      }
     >();
     const addressStateById = new Map<
       string,
-      { status: 'not_visited' | 'visited' | 'hot' | 'lead' | 'hot_lead' | 'no_answer' | 'do_not_knock'; scans_total: number; qr_scanned: boolean }
+      {
+        status: 'not_visited' | 'visited' | 'hot' | 'lead' | 'hot_lead' | 'no_answer' | 'do_not_knock';
+        scans_total: number;
+        qr_scanned: boolean;
+        assignment_color?: string;
+      }
     >();
 
     for (const address of addressStateOverrides) {
@@ -1729,6 +1792,7 @@ export function MapBuildingsLayer({
         status: getCampaignBuildingStatus(address),
         scans_total: Number(address.scans ?? 0),
         qr_scanned: Number(address.scans ?? 0) > 0 || Boolean(address.last_scanned_at),
+        assignment_color: assignmentColorByAddressId?.[address.id],
       });
 
       const buildingId =
@@ -1741,6 +1805,7 @@ export function MapBuildingsLayer({
         status: getCampaignBuildingStatus(address),
         scans_total: Number(address.scans ?? 0),
         qr_scanned: Number(address.scans ?? 0) > 0 || Boolean(address.last_scanned_at),
+        assignment_color: assignmentColorByAddressId?.[address.id],
       };
       const currentState = buildingStateById.get(buildingId);
       if (!currentState) {
@@ -1754,6 +1819,7 @@ export function MapBuildingsLayer({
             : currentState.status,
         scans_total: currentState.scans_total + nextState.scans_total,
         qr_scanned: currentState.qr_scanned || nextState.qr_scanned,
+        assignment_color: currentState.assignment_color ?? nextState.assignment_color,
       });
     }
 
@@ -1791,7 +1857,7 @@ export function MapBuildingsLayer({
     return () => {
       if (frameId !== null) cancelAnimationFrame(frameId);
     };
-  }, [map, manifestSource, campaignId, addressStateOverrides, sourceId]);
+  }, [map, manifestSource, campaignId, addressStateOverrides, sourceId, assignmentColorByAddressId]);
 
   // Update Mapbox source and layer when features change
   useEffect(() => {
@@ -2179,7 +2245,7 @@ export function MapBuildingsLayer({
         try {
           map.setLight({
             anchor: 'map',
-            color: '#d1d5db',
+            color: '#cfd8e3',
             intensity: 0.35,
             position: [1.15, 210, 30]
           });
@@ -2625,7 +2691,7 @@ export function MapBuildingsLayer({
       }
       cleanupLayerInteractionHandlers?.();
     };
-  }, [map, features, zoomLevel, onBuildingClick, statusFilters, campaignId, getSupabase, onAddToCRM, showOrphans, showAddressLabels, footprintStatusColors, addressStateOverrides]);
+  }, [map, features, zoomLevel, onBuildingClick, statusFilters, campaignId, getSupabase, onAddToCRM, showOrphans, showAddressLabels, footprintStatusColors, addressStateOverrides, isDarkMap, assignmentColorByAddressId]);
 
   // Update color and filter when statusFilters or campaignId changes
   useEffect(() => {
@@ -2679,7 +2745,7 @@ export function MapBuildingsLayer({
     } catch (err) {
       console.error('[MapBuildingsLayer] Error updating color/filter:', err);
     }
-  }, [map, manifestSource, statusFilters, campaignId, layerId, surfaceLayerId, outlineLayerId, showOrphans, footprintStatusColors, circleLayerId, campaignBoundary, addressStateOverrides, leadGlowLayerId]);
+  }, [map, manifestSource, statusFilters, campaignId, layerId, surfaceLayerId, outlineLayerId, showOrphans, footprintStatusColors, circleLayerId, campaignBoundary, addressStateOverrides, leadGlowLayerId, isDarkMap, assignmentColorByAddressId]);
 
   // Update filter when showOrphans changes (toggle visibility of orphan buildings)
   useEffect(() => {
@@ -2724,7 +2790,7 @@ export function MapBuildingsLayer({
         // Apply lighting for 3D depth
         map.setLight({
           anchor: 'map', // Use 'map' anchor to avoid viewport anchor warnings
-          color: '#d1d5db',
+          color: '#cfd8e3',
           intensity: 0.35,
           position: [1.15, 210, 30]
         });
@@ -2765,7 +2831,7 @@ export function MapBuildingsLayer({
     return () => {
       map.off('style.load', applyLightingAndColors);
     };
-  }, [map, manifestSource, layerId, surfaceLayerId, outlineLayerId, circleLayerId, footprintStatusColors, statusFilters]);
+  }, [map, manifestSource, layerId, surfaceLayerId, outlineLayerId, circleLayerId, footprintStatusColors, statusFilters, isDarkMap]);
 
   // Real-time subscription for building_stats updates
   // When a QR code is scanned, building_stats is updated via trigger

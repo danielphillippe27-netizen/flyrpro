@@ -28,6 +28,11 @@ type SalespersonInviteHint = {
   workspaceName?: string | null;
   completed?: boolean;
 };
+type ReferralValidation = {
+  referralCode: string;
+  trialDays: number;
+  ambassadorName?: string | null;
+};
 
 const INDUSTRIES_TOP = ['Real Estate', 'Solar', 'Roofing & Exteriors'];
 
@@ -46,7 +51,16 @@ const INDUSTRIES_REST = [
 const SOLO_SEATS = 1;
 const TEAM_MIN_SEATS = 2;
 const MAX_SEATS = 100;
+const FINAL_ONBOARDING_STEP = 6;
 const EXCLUSIVE_ONBOARDING_AUTH_DRAFT_KEY = 'flyr.exclusiveOnboardingAuthDraft';
+
+function normalizeReferralCodeInput(value: string): string {
+  return value
+    .toUpperCase()
+    .replace(/&/g, 'AND')
+    .replace(/[^A-Z0-9]+/g, '')
+    .slice(0, 20);
+}
 
 function LogoutDoorEmblem({ className }: { className?: string }) {
   return (
@@ -202,6 +216,9 @@ function OnboardingContent() {
     isExclusivePartnerOnboarding && resolvedPartnerExclusiveLayout === 'team';
 
   const hideExclusiveStep1Demo = challenge30FromUrl || hintChallenge30 === true;
+  const shouldShowReferralStep =
+    !isSalespersonOnboarding &&
+    !(isExclusivePartnerOnboarding && isExclusivePartnerTeamLayout);
 
   const onboardingDemo =
     isIgOnboardingPath || (isExclusivePartnerOnboarding && resolvedPartnerExclusiveLayout === 'solo')
@@ -234,6 +251,11 @@ function OnboardingContent() {
   const brokerageInputRef = useRef<HTMLInputElement>(null);
   const brokerageListRef = useRef<HTMLDivElement>(null);
   const [referralCode, setReferralCode] = useState('');
+  const [referralValidation, setReferralValidation] = useState<ReferralValidation | null>(null);
+  const [referralValidationLoading, setReferralValidationLoading] = useState(false);
+  const [referralValidationError, setReferralValidationError] = useState<string | null>(null);
+  const [referralSource, setReferralSource] = useState<string | null>(null);
+  const [referralCampaign, setReferralCampaign] = useState<string | null>(null);
   const [seats, setSeats] = useState(TEAM_MIN_SEATS);
   const [teamInviteEmails, setTeamInviteEmails] = useState<string[]>(['']);
 
@@ -276,10 +298,20 @@ function OnboardingContent() {
   useEffect(() => {
     const referralCodeFromUrl =
       searchParams.get('referralCode') ?? searchParams.get('ref') ?? '';
-    const normalizedReferralCode = referralCodeFromUrl.trim().toUpperCase();
-    if (!normalizedReferralCode) return;
-    setReferralCode(normalizedReferralCode);
+    const normalizedReferralCode = normalizeReferralCodeInput(referralCodeFromUrl);
+    if (normalizedReferralCode) {
+      setReferralCode(normalizedReferralCode);
+    }
+    setReferralSource(searchParams.get('source'));
+    setReferralCampaign(searchParams.get('campaign'));
   }, [searchParams]);
+
+  useEffect(() => {
+    const normalized = normalizeReferralCodeInput(referralCode);
+    if (referralValidation?.referralCode === normalized) return;
+    setReferralValidation(null);
+    setReferralValidationError(null);
+  }, [referralCode, referralValidation?.referralCode]);
 
   useEffect(() => {
     if (!isExclusivePartnerTeamLayout) return;
@@ -471,6 +503,61 @@ function OnboardingContent() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [brokerageSuggestionsOpen]);
 
+  const validateReferralStep = useCallback(async (): Promise<boolean> => {
+    const normalizedReferralCode = normalizeReferralCodeInput(referralCode);
+    setReferralValidationError(null);
+
+    if (!normalizedReferralCode) {
+      setReferralCode('');
+      setReferralValidation(null);
+      return true;
+    }
+
+    if (referralValidation?.referralCode === normalizedReferralCode) {
+      return true;
+    }
+
+    setReferralValidationLoading(true);
+    try {
+      const response = await fetch('/api/onboarding/referral-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ referralCode: normalizedReferralCode }),
+      });
+      const payload = await response.json().catch(() => ({}));
+
+      if (response.ok && payload?.valid === true && payload?.referralCode) {
+        const validatedCode = String(payload.referralCode);
+        setReferralCode(validatedCode);
+        setReferralValidation({
+          referralCode: validatedCode,
+          trialDays:
+            typeof payload.trialDays === 'number' && Number.isFinite(payload.trialDays)
+              ? payload.trialDays
+              : 30,
+          ambassadorName:
+            typeof payload.ambassadorName === 'string' ? payload.ambassadorName : null,
+        });
+        return true;
+      }
+
+      setReferralValidation(null);
+      setReferralValidationError(
+        typeof payload?.error === 'string'
+          ? payload.error
+          : 'Enter a valid ambassador referral code, or leave this blank.'
+      );
+      return false;
+    } catch {
+      setReferralValidation(null);
+      setReferralValidationError('Network error validating referral code. Please try again.');
+      return false;
+    } finally {
+      setReferralValidationLoading(false);
+    }
+  }, [referralCode, referralValidation?.referralCode]);
+
   const handleSubmit = async () => {
     setError(null);
     setLoading(true);
@@ -486,10 +573,9 @@ function OnboardingContent() {
           countryCode,
           workspaceName: workspaceName.trim(),
           industry: industry.trim(),
-          referralCode:
-            isExclusivePartnerOnboarding && isExclusivePartnerTeamLayout
-              ? null
-              : referralCode.trim() || null,
+          referralCode: shouldShowReferralStep ? referralCode.trim() || null : null,
+          referralSource,
+          referralCampaign,
           brokerage: brokerage.trim() || undefined,
           brokerageId: brokerageId ?? undefined,
           useCase: isExclusivePartnerTeamLayout ? 'team' : useCase,
@@ -706,14 +792,14 @@ function OnboardingContent() {
     <div className="dark min-h-screen bg-gradient-to-br from-black to-[#262626] flex flex-col items-center justify-center p-6 pb-28 sm:pb-24 relative overflow-x-hidden overflow-y-auto">
       <div className="absolute inset-0 bg-gradient-to-b from-red-950/40 via-transparent to-black/80 pointer-events-none" />
       <div
-        className={`relative w-full min-w-0 space-y-8 rounded-2xl border border-white/15 bg-white/[0.06] p-6 sm:p-10 backdrop-blur-2xl shadow-[0_24px_70px_rgba(0,0,0,0.6),0_10px_30px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.2)] ${step >= 4 ? 'max-w-5xl' : 'max-w-lg'}`}
+        className={`relative w-full min-w-0 space-y-8 rounded-2xl border border-white/15 bg-white/[0.06] p-6 sm:p-10 backdrop-blur-2xl shadow-[0_24px_70px_rgba(0,0,0,0.6),0_10px_30px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.2)] ${step >= 5 ? 'max-w-5xl' : 'max-w-lg'}`}
       >
         <div className="text-center space-y-2">
           <h1
             className={`max-w-full min-w-0 font-bold leading-tight text-white break-words [overflow-wrap:anywhere] ${
-              step === 4
+              step === 5
                 ? 'text-3xl sm:text-4xl md:text-5xl'
-                : step === 5
+                : step === 6
                   ? 'text-4xl'
                   : 'text-3xl'
             }`}
@@ -721,14 +807,15 @@ function OnboardingContent() {
             {step === 1 && 'What should we call you?'}
             {step === 2 && 'How will you use FLYR?'}
             {step === 3 && 'Set up your workspace'}
-            {step === 4 && (
+            {step === 4 && 'Ambassador referral code'}
+            {step === 5 && (
               <>
                 FLYR is revolutionizing
                 <br />
                 Door 2 Door Marketing
               </>
             )}
-            {step === 5 && (
+            {step === 6 && (
               <>
                 You&apos;re one step away from tracking every door
                 <br />
@@ -736,7 +823,7 @@ function OnboardingContent() {
               </>
             )}
           </h1>
-          {(step === 1 || step === 2 || step === 3) && (
+          {(step === 1 || step === 2 || step === 3 || step === 4) && (
             <p className="text-base text-[#AAAAAA]">
               {step === 1 && 'We use this to personalize your experience.'}
               {step === 2 &&
@@ -744,6 +831,7 @@ function OnboardingContent() {
                   ? 'We set this to team mode for your exclusive offer.'
                   : 'Choose solo or invite your team.')}
               {step === 3 && 'Name your business and tell us your industry.'}
+              {step === 4 && 'Enter an ambassador code to unlock your 30-day trial, or skip this step.'}
             </p>
           )}
         </div>
@@ -1153,24 +1241,6 @@ function OnboardingContent() {
                 )}
               </div>
             )}
-            {!(isExclusivePartnerOnboarding && isExclusivePartnerTeamLayout) ? (
-              <div className="space-y-2">
-                <Label htmlFor="referralCode" className="text-base text-white">Referral code (optional)</Label>
-                <Input
-                  id="referralCode"
-                  value={referralCode}
-                  onChange={(e) => setReferralCode(e.target.value)}
-                  placeholder="e.g. Launch2026"
-                  className="h-16 text-2xl md:text-2xl text-white placeholder:text-gray-500 bg-[#2a2a2a] border-zinc-600 focus-visible:border-white focus-visible:ring-2 focus-visible:ring-white/40"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && canStep3) {
-                      e.preventDefault();
-                      setStep(4);
-                    }
-                  }}
-                />
-              </div>
-            ) : null}
             {useCase === 'team' && (
               <div className="space-y-2">
                 <Label className="text-base text-white">Members</Label>
@@ -1211,6 +1281,48 @@ function OnboardingContent() {
         )}
 
         {step === 4 && (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="referralCode" className="text-base text-white">
+                Ambassador code (optional)
+              </Label>
+              <Input
+                id="referralCode"
+                value={referralCode}
+                onChange={(e) => setReferralCode(e.target.value)}
+                placeholder="e.g. LAUNCH2026"
+                className="h-16 text-2xl md:text-2xl uppercase text-white placeholder:normal-case placeholder:text-gray-500 bg-[#2a2a2a] border-zinc-600 focus-visible:border-white focus-visible:ring-2 focus-visible:ring-white/40"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    void (async () => {
+                      if (await validateReferralStep()) setStep(5);
+                    })();
+                  }
+                }}
+                autoComplete="off"
+              />
+            </div>
+            {referralValidation ? (
+              <div className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+                30-day trial unlocked
+                {referralValidation.ambassadorName
+                  ? ` with ${referralValidation.ambassadorName}`
+                  : ''}
+                .
+              </div>
+            ) : (
+              <p className="text-sm leading-6 text-zinc-400">
+                No code? No problem. You can continue without one.
+              </p>
+            )}
+            {referralValidationError ? (
+              <p className="text-sm text-red-400">{referralValidationError}</p>
+            ) : null}
+          </div>
+        )}
+
+        {step === 5 && (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
             {[
               { title: 'Create your campaign', src: '/onboarding-create-campaign.png' },
@@ -1236,7 +1348,7 @@ function OnboardingContent() {
           </div>
         )}
 
-        {step === 5 && (
+        {step === 6 && (
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
             {[
               { title: 'Plan your route', src: '/onboarding-see-rank.svg' },
@@ -1273,13 +1385,15 @@ function OnboardingContent() {
             <Button
               type="button"
               variant="outline"
-              onClick={() => setStep((s) => s - 1)}
+              onClick={() =>
+                setStep((s) => (!shouldShowReferralStep && s === 5 ? 3 : s - 1))
+              }
               className="w-full h-12 text-base border-zinc-600 text-white hover:bg-zinc-800 hover:text-white"
             >
               Back
             </Button>
           )}
-          {step < 5 ? (
+          {step < FINAL_ONBOARDING_STEP ? (
             <Button
               type="button"
               onClick={async () => {
@@ -1288,10 +1402,15 @@ function OnboardingContent() {
                   const authReady = await ensureExclusiveAuth();
                   if (!authReady) return;
                 }
-                setStep((s) => s + 1);
+                if (step === 4) {
+                  const referralReady = await validateReferralStep();
+                  if (!referralReady) return;
+                }
+                setStep((s) => (!shouldShowReferralStep && s === 3 ? 5 : s + 1));
               }}
               disabled={
                 authLoading ||
+                referralValidationLoading ||
                 (step === 1 && !canStep1) ||
                 (step === 3 && !canStep3)
               }
@@ -1301,8 +1420,10 @@ function OnboardingContent() {
                 ? authMode === 'google'
                   ? 'Continuing with Google…'
                   : authMode === 'apple'
-                    ? 'Continuing with Apple…'
-                    : 'Verifying account…'
+                  ? 'Continuing with Apple…'
+                  : 'Verifying account…'
+                : referralValidationLoading && step === 4
+                  ? 'Checking code…'
                 : 'Continue'}
             </Button>
           ) : (
@@ -1316,8 +1437,10 @@ function OnboardingContent() {
                 ? 'Saving…'
                 : isSalespersonOnboarding
                   ? 'Enter salesperson workspace'
-                  : isExclusivePartnerOnboarding
+                : isExclusivePartnerOnboarding
                   ? 'Activate 30-day exclusive access'
+                  : referralValidation
+                    ? 'Continue for 30-day free trial'
                   : 'Continue for 14-day free trial'}
             </Button>
           )}

@@ -313,9 +313,30 @@ async function countCampaignBuildingLinks(
       .range(from, to)
   );
 
+  const directRows = await fetchAllInPages<{
+    id: string;
+    building_id: string | null;
+    building_gers_id: string | null;
+  }>(async (from, to) =>
+    await supabase
+      .from('campaign_addresses')
+      .select('id, building_id, building_gers_id')
+      .eq('campaign_id', campaignId)
+      .range(from, to)
+  );
+
   const linkedAddressIds = new Set(rows.map((row) => row.address_id).filter(Boolean) as string[]);
+  let directOnlyLinks = 0;
+  for (const row of directRows) {
+    if (!row.building_id && !row.building_gers_id) continue;
+    if (!linkedAddressIds.has(row.id)) {
+      directOnlyLinks += 1;
+    }
+    linkedAddressIds.add(row.id);
+  }
+
   return {
-    links: rows.length,
+    links: rows.length + directOnlyLinks,
     linkedAddresses: linkedAddressIds.size,
   };
 }
@@ -745,9 +766,20 @@ async function runCampaignPostProcessing(params: {
   snapshot: LambdaSnapshotResponse | null;
   insertedCount: number;
   bedrockLinkGeometry?: BedrockNzLinkGeometry | null;
+  responseMode?: 'full' | 'linker_ready';
 }) {
-  const { campaignId, polygon, regionCode, source, snapshot, insertedCount, bedrockLinkGeometry } = params;
+  const {
+    campaignId,
+    polygon,
+    regionCode,
+    source,
+    snapshot,
+    insertedCount,
+    bedrockLinkGeometry,
+    responseMode = 'full',
+  } = params;
   const supabase = createAdminClient();
+  const linkerReadyOnly = responseMode === 'linker_ready';
 
   await updateCampaignProvision(supabase, campaignId, {
     provision_phase: 'optimizing',
@@ -803,9 +835,13 @@ async function runCampaignPostProcessing(params: {
       waypointCount: number;
     } | null = null;
 
-    const skipRouteOptimization = process.env.SKIP_PROVISION_ROUTE_OPTIMIZATION === '1';
+    const skipRouteOptimization = linkerReadyOnly || process.env.SKIP_PROVISION_ROUTE_OPTIMIZATION === '1';
     if (skipRouteOptimization) {
-      console.log('[Provision] Stage 1: Route optimization skipped by SKIP_PROVISION_ROUTE_OPTIMIZATION.');
+      console.log(
+        linkerReadyOnly
+          ? '[Provision] Stage 1: Route optimization skipped for wait_for_linker response.'
+          : '[Provision] Stage 1: Route optimization skipped by SKIP_PROVISION_ROUTE_OPTIMIZATION.'
+      );
     } else if (effectiveInsertedCount >= 2) {
       console.log('[Provision] Stage 1: Building route for ALL addresses (Street-Block-Sweep-Snake)...');
       try {
@@ -993,6 +1029,7 @@ async function runCampaignPostProcessing(params: {
     });
 
     if (
+      !linkerReadyOnly &&
       linkQuality.repairRecommended &&
       parcelEnrichment &&
       parcelPreparation &&
@@ -1272,6 +1309,7 @@ export async function POST(request: NextRequest) {
 	              snapshot,
 	              insertedCount: finalAddressCount,
 	              bedrockLinkGeometry,
+	              responseMode: 'linker_ready',
 	            });
 
 	            const [{ data: postProcessCampaign }, linkSummary] = await Promise.all([

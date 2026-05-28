@@ -105,11 +105,11 @@ export default function LeaderboardPage() {
         )}
         {!isLoading && !error && users.length > 0 && (
           <div style={{ marginTop: '8px' }}>
-            {users.map((user, index) => (
+            {users.map((user) => (
               <LeaderboardRow
                 key={user.id}
                 user={user}
-                rank={index + 1}
+                rank={user.rank}
                 metric={metric}
                 timeframe={timeframe}
                 isCurrentUser={user.id === currentUserId}

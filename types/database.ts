@@ -37,7 +37,7 @@ export interface UserProfile {
 }
 
 /** Entitlements: source of truth for plan/status (web + iOS). */
-export type EntitlementPlan = 'free' | 'pro' | 'team';
+export type EntitlementPlan = 'free' | 'pro' | 'team' | 'ambassador';
 export type EntitlementSource = 'none' | 'stripe' | 'apple';
 export type WorkspaceBillingAddonStatus = 'inactive' | 'active' | 'past_due' | 'canceled';
 export type WorkspaceDialerNumberStatus = 'unassigned' | 'active' | 'released';
@@ -75,6 +75,8 @@ export interface EntitlementSnapshot {
   dialer_number?: string | null;
   dialer_number_status?: WorkspaceDialerNumberStatus | null;
   dialer_uses_shared_default?: boolean;
+  isAmbassador?: boolean;
+  planBadgeLabel?: string | null;
 }
 
 export type AmbassadorApplicationStatus = 'applied' | 'approved' | 'rejected' | 'paused';
@@ -893,6 +895,13 @@ export interface UserStats {
 export type LeaderboardSortBy = 'doorknocks' | 'conversations' | 'leads' | 'distance';
 export type LeaderboardTimeframe = 'daily' | 'weekly' | 'monthly' | 'all_time';
 
+export interface MetricSnapshot {
+  doorknocks: number;
+  conversations: number;
+  leads: number;
+  distance: number;
+}
+
 export interface LeaderboardEntry {
   id: string;
   user_id: string;
@@ -906,6 +915,7 @@ export interface LeaderboardEntry {
   leads: number;
   distance: number;
   rank: number;
+  pending?: MetricSnapshot;
   updated_at?: string;
 }
 

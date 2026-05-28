@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import {
+  AMBASSADOR_TRIAL_DAYS,
   PARTNER_EXCLUSIVE_TRIAL_DAYS,
   WORKSPACE_TRIAL_DAYS,
 } from '@/app/lib/billing/workspace-trial';
@@ -14,7 +15,9 @@ import {
 } from '@/app/api/team/_lib/manage';
 import {
   normalizeAmbassadorReferralCodeInput,
-  resolveApprovedAmbassadorReferralCode,
+  upsertAmbassadorReferralAttribution,
+  validateAmbassadorReferralCodeForOnboarding,
+  type ValidAmbassadorReferral,
 } from '@/app/lib/billing/ambassador-program';
 import { resolveActiveSalespersonReferralCode } from '@/app/lib/billing/salespeople';
 import { sendWorkspaceInviteEmail } from '@/lib/email/resend';
@@ -23,6 +26,7 @@ import {
   isFlyrPartnerFreeForeverOffer,
 } from '@/components/offers/partnerOfferUtils';
 import { normalizeCountryCode } from '@/lib/countries';
+import { sanitizeTrackingParam } from '@/app/lib/ambassador/portal';
 
 const INDUSTRIES = [
   'Real Estate',
@@ -71,6 +75,8 @@ export async function POST(request: NextRequest) {
       workspaceName,
       industry,
       referralCode,
+      referralSource,
+      referralCampaign,
       useCase,
       maxSeats,
       brokerage,
@@ -83,6 +89,8 @@ export async function POST(request: NextRequest) {
       workspaceName?: string;
       industry?: string;
       referralCode?: string | null;
+      referralSource?: string | null;
+      referralCampaign?: string | null;
       useCase?: 'solo' | 'team';
       maxSeats?: number;
       brokerage?: string;
@@ -436,24 +444,12 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const trialDays = isValidPartnerExclusiveOffer
-      ? PARTNER_EXCLUSIVE_TRIAL_DAYS
-      : WORKSPACE_TRIAL_DAYS;
-
-    const shouldStartTrial =
-      !onboardingWasComplete &&
-      currentSubscriptionStatus === 'inactive' &&
-      !currentTrialEndsAt;
-    const startedTrialEndsAt = shouldStartTrial
-      ? new Date(
-          Date.now() + trialDays * 24 * 60 * 60 * 1000
-        ).toISOString()
-      : null;
-
     const updates: Record<string, unknown> = {
       updated_at: new Date().toISOString(),
       onboarding_completed_at: new Date().toISOString(),
     };
+    let onboardingAmbassadorReferral: ValidAmbassadorReferral | null = null;
+    let normalizedAmbassadorReferralCode: string | null = null;
 
     if (typeof workspaceName === 'string' && workspaceName.trim()) {
       updates.name = workspaceName.trim();
@@ -471,16 +467,27 @@ export async function POST(request: NextRequest) {
           : null);
 
       if (normalizedReferralCode && !partnerOfferReferralCode) {
-        const [salespersonReferral, ambassadorReferral] = await Promise.all([
+        const [salespersonReferral, ambassadorReferralValidation] = await Promise.all([
           resolveActiveSalespersonReferralCode(admin, normalizedReferralCode),
-          resolveApprovedAmbassadorReferralCode(admin, normalizedReferralCode),
+          validateAmbassadorReferralCodeForOnboarding(admin, normalizedReferralCode),
         ]);
 
-        if (!salespersonReferral && ambassadorReferral?.referralStats?.isAtLimit) {
+        if (!ambassadorReferralValidation.ok && ambassadorReferralValidation.reason === 'maxed') {
           return NextResponse.json(
             {
-              error:
-                'That ambassador referral code has reached its limit. Please ask for a new code.',
+              error: ambassadorReferralValidation.message,
+            },
+            { status: 400 }
+          );
+        }
+
+        if (ambassadorReferralValidation.ok) {
+          onboardingAmbassadorReferral = ambassadorReferralValidation.ambassador;
+          normalizedAmbassadorReferralCode = ambassadorReferralValidation.referralCode;
+        } else if (!salespersonReferral) {
+          return NextResponse.json(
+            {
+              error: ambassadorReferralValidation.message,
             },
             { status: 400 }
           );
@@ -489,6 +496,22 @@ export async function POST(request: NextRequest) {
 
       updates.referral_code_used = normalizedReferralCode;
     }
+
+    const trialDays = onboardingAmbassadorReferral
+      ? AMBASSADOR_TRIAL_DAYS
+      : isValidPartnerExclusiveOffer
+        ? PARTNER_EXCLUSIVE_TRIAL_DAYS
+        : WORKSPACE_TRIAL_DAYS;
+
+    const shouldStartTrial =
+      !onboardingWasComplete &&
+      currentSubscriptionStatus === 'inactive' &&
+      !currentTrialEndsAt;
+    const startedTrialEndsAt = shouldStartTrial
+      ? new Date(
+          Date.now() + trialDays * 24 * 60 * 60 * 1000
+        ).toISOString()
+      : null;
     if (maxSeats !== undefined || useCase !== undefined) {
       const requestedSeats =
         Number.isFinite(maxSeats) && typeof maxSeats === 'number'
@@ -544,6 +567,34 @@ export async function POST(request: NextRequest) {
         { error: 'Failed to update workspace' },
         { status: 500 }
       );
+    }
+
+    if (onboardingAmbassadorReferral && normalizedAmbassadorReferralCode) {
+      try {
+        await upsertAmbassadorReferralAttribution(admin, {
+          ambassador: onboardingAmbassadorReferral,
+          referredUserId: userId,
+          referredWorkspaceId: workspaceId,
+          referralCode: normalizedAmbassadorReferralCode,
+          source:
+            typeof referralSource === 'string'
+              ? sanitizeTrackingParam(referralSource)
+              : null,
+          campaign:
+            typeof referralCampaign === 'string'
+              ? sanitizeTrackingParam(referralCampaign)
+              : null,
+        });
+      } catch (attributionError) {
+        console.error(
+          'Onboarding: failed to persist ambassador referral attribution',
+          attributionError
+        );
+        return NextResponse.json(
+          { error: 'Failed to save ambassador referral attribution' },
+          { status: 500 }
+        );
+      }
     }
 
     const resultingSubscriptionStatus = shouldStartTrial

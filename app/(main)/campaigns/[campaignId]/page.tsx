@@ -1188,7 +1188,7 @@ export default function CampaignDetailPage() {
                 onSnapComplete={loadData}
                 buildingPendingOverlay={{
                   title: 'Buildings loading',
-                  description: 'Addresses are ready. Building footprints will appear when Diamond finishes.',
+                  description: 'Buildings will appear soon. This may take a minute.',
                 }}
               />
             </div>

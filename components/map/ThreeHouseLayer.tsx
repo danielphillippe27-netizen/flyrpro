@@ -6,6 +6,7 @@ import type { Map as MapboxMap } from 'mapbox-gl';
 import mapboxgl from 'mapbox-gl';
 import type { BuildingModelPoint } from '@/lib/services/MapService';
 import { MapService } from '@/lib/services/MapService';
+import { getMapUntouchedColor } from '@/lib/constants/mapStatus';
 import type { BuildingStatus } from '@/types/database';
 
 interface ThreeHouseLayerOptions {
@@ -16,6 +17,7 @@ interface ThreeHouseLayerOptions {
   useLOD?: boolean; // Whether to use LOD based on zoom level
   onMarkerClick?: (addressId: string) => void; // Callback when a marker is clicked
   scannedPropertyIds?: Set<string>; // Set of address IDs that have been scanned
+  isDarkMap?: boolean;
 }
 
 interface ModelRecord {
@@ -52,6 +54,7 @@ export class ThreeHouseLayer {
   private shadowTexture: THREE.Texture | null = null;
   private directionalLight: THREE.DirectionalLight | null = null;
   private scannedPropertyIds: Set<string> = new Set();
+  private isDarkMap: boolean;
 
   private resolveFeatureColor(feature: BuildingModelPoint): string {
     const addressId = feature.properties.address_id;
@@ -83,7 +86,7 @@ export class ThreeHouseLayer {
         return '#000000';
       case 'available':
       case 'not_visited':
-        return '#475569';
+        return getMapUntouchedColor(this.isDarkMap);
       case 'not_home':
       case 'no_answer':
       case 'visited':
@@ -98,7 +101,7 @@ export class ThreeHouseLayer {
         return '#facc15';
       case 'default':
       default:
-        return '#475569';
+        return getMapUntouchedColor(this.isDarkMap);
     }
   }
 
@@ -116,6 +119,7 @@ export class ThreeHouseLayer {
     this.onModelLoad = options.onModelLoad;
     this.onMarkerClick = options.onMarkerClick;
     this.scannedPropertyIds = options.scannedPropertyIds || new Set();
+    this.isDarkMap = options.isDarkMap ?? false;
     this.loader = new GLTFLoader();
     this.raycaster = new THREE.Raycaster();
     this.mouse = new THREE.Vector2();

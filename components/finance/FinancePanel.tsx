@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BarChart3, Calculator, DollarSign, Package, ReceiptText, Wallet } from 'lucide-react';
+import { BarChart3, Calculator, DollarSign, Megaphone, Package, ReceiptText, Wallet } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -65,6 +65,10 @@ function parseCurrencyToCents(value: string): number {
   return Math.round(amount * 100);
 }
 
+function parseNonNegativeInteger(value: string): number {
+  return Math.max(0, Number.parseInt(value || '0', 10) || 0);
+}
+
 function formatCurrencyFromCents(value: number): string {
   return new Intl.NumberFormat('en-CA', {
     style: 'currency',
@@ -93,6 +97,7 @@ export function FinancePanel({
   const [profileNames, setProfileNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [savingPostal, setSavingPostal] = useState(false);
+  const [savingSocialAd, setSavingSocialAd] = useState(false);
   const [savingExpense, setSavingExpense] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -105,6 +110,16 @@ export function FinancePanel({
   const [otherCost, setOtherCost] = useState('0');
   const [postalNotes, setPostalNotes] = useState('');
   const [postalDate, setPostalDate] = useState(new Date().toISOString().slice(0, 10));
+
+  const [socialAdPlatform, setSocialAdPlatform] = useState('Meta');
+  const [socialAdObjective, setSocialAdObjective] = useState('Traffic');
+  const [socialAdCampaignName, setSocialAdCampaignName] = useState('');
+  const [socialAdTotal, setSocialAdTotal] = useState('');
+  const [socialAdImpressions, setSocialAdImpressions] = useState('');
+  const [socialAdClicks, setSocialAdClicks] = useState('');
+  const [socialAdLeads, setSocialAdLeads] = useState('');
+  const [socialAdDate, setSocialAdDate] = useState(new Date().toISOString().slice(0, 10));
+  const [socialAdNotes, setSocialAdNotes] = useState('');
 
   const [expenseCategory, setExpenseCategory] = useState<FinanceEntryCategory>('materials');
   const [expenseDescription, setExpenseDescription] = useState('');
@@ -229,6 +244,16 @@ export function FinancePanel({
 
   const totalSpendCents = manualSpendCents + metaAdSpendCents;
 
+  const manualSocialAdSpendCents = useMemo(
+    () =>
+      entries
+        .filter((entry) => entry.category === 'ads')
+        .reduce((sum, entry) => sum + Number(entry.total_cost_cents || 0), 0),
+    [entries]
+  );
+
+  const totalSocialAdSpendCents = manualSocialAdSpendCents + metaAdSpendCents;
+
   const postalSpendCents = useMemo(
     () =>
       entries
@@ -273,10 +298,15 @@ export function FinancePanel({
   const postalAllocationOverflow = postalAllocatedCostCents > postalDropTotalCents;
 
   const postalCostPerHomeCents = useMemo(() => {
-    const quantity = Math.max(0, Number.parseInt(postalHomeCount || '0', 10) || 0);
+    const quantity = parseNonNegativeInteger(postalHomeCount);
     if (quantity <= 0 || postalDropTotalCents <= 0) return 0;
     return Math.round(postalDropTotalCents / quantity);
   }, [postalDropTotalCents, postalHomeCount]);
+
+  const socialAdTotalCents = parseCurrencyToCents(socialAdTotal);
+  const socialAdLeadCount = parseNonNegativeInteger(socialAdLeads);
+  const socialAdCostPerLeadCents =
+    socialAdLeadCount > 0 && socialAdTotalCents > 0 ? Math.round(socialAdTotalCents / socialAdLeadCount) : 0;
 
   const savePostalDrop = async () => {
     if (!currentUserId) {
@@ -284,7 +314,7 @@ export function FinancePanel({
       return;
     }
 
-    const quantity = Math.max(0, Number.parseInt(postalHomeCount || '0', 10) || 0);
+    const quantity = parseNonNegativeInteger(postalHomeCount);
     if (!postalCode.trim()) {
       setError('Postal code is required for the postal-drop estimator');
       return;
@@ -340,6 +370,69 @@ export function FinancePanel({
       setError(saveError instanceof Error ? saveError.message : 'Failed to save postal-drop entry');
     } finally {
       setSavingPostal(false);
+    }
+  };
+
+  const saveSocialAdSpend = async () => {
+    if (!currentUserId) {
+      setError('You must be signed in to save finance entries');
+      return;
+    }
+
+    if (!socialAdCampaignName.trim()) {
+      setError('Campaign or ad name is required for social ad spend');
+      return;
+    }
+    if (socialAdTotalCents <= 0) {
+      setError('Social ad spend must be greater than zero');
+      return;
+    }
+
+    setSavingSocialAd(true);
+    setError(null);
+    try {
+      const impressions = parseNonNegativeInteger(socialAdImpressions);
+      const clicks = parseNonNegativeInteger(socialAdClicks);
+      const leads = parseNonNegativeInteger(socialAdLeads);
+
+      await FinanceService.createEntry(currentUserId, {
+        workspace_id: workspaceId ?? null,
+        campaign_id: targetType === 'campaign' ? targetId : null,
+        farm_id: targetType === 'farm' ? targetId : null,
+        agent_user_id: currentUserId,
+        category: 'ads',
+        description: `${socialAdPlatform} social ad spend - ${socialAdCampaignName.trim()}`,
+        vendor: socialAdPlatform,
+        quantity: 1,
+        unit_label: 'campaign',
+        unit_cost_cents: socialAdTotalCents,
+        total_cost_cents: socialAdTotalCents,
+        incurred_on: socialAdDate,
+        notes: socialAdNotes || null,
+        metadata: {
+          source: 'manual_social_ad_spend',
+          platform: socialAdPlatform,
+          objective: socialAdObjective,
+          campaign_name: socialAdCampaignName.trim(),
+          impressions,
+          clicks,
+          leads,
+          cost_per_lead_cents: leads > 0 ? Math.round(socialAdTotalCents / leads) : null,
+        },
+      });
+      setSocialAdPlatform('Meta');
+      setSocialAdObjective('Traffic');
+      setSocialAdCampaignName('');
+      setSocialAdTotal('');
+      setSocialAdImpressions('');
+      setSocialAdClicks('');
+      setSocialAdLeads('');
+      setSocialAdNotes('');
+      await loadEntries();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Failed to save social ad spend');
+    } finally {
+      setSavingSocialAd(false);
     }
   };
 
@@ -419,20 +512,22 @@ export function FinancePanel({
             </p>
           </CardContent>
         </Card>
-        {targetType === 'farm' ? (
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                <BarChart3 className="w-4 h-4" />
-                Meta Ads Spend
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-semibold">{formatCurrencyFromCents(metaAdSpendCents)}</div>
-              <p className="text-sm text-muted-foreground">Synced from linked Meta campaigns</p>
-            </CardContent>
-          </Card>
-        ) : null}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+              <Megaphone className="w-4 h-4" />
+              Social Ads Spend
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-semibold">{formatCurrencyFromCents(totalSocialAdSpendCents)}</div>
+            <p className="text-sm text-muted-foreground">
+              {targetType === 'farm' && metaAdSpendCents > 0
+                ? 'Manual ads + synced Meta spend'
+                : 'Meta, Facebook, Instagram, and social ads'}
+            </p>
+          </CardContent>
+        </Card>
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
@@ -479,7 +574,7 @@ export function FinancePanel({
         </div>
       ) : null}
 
-      <div className="grid gap-4 xl:grid-cols-2">
+      <div className="grid gap-4 xl:grid-cols-2 2xl:grid-cols-3">
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2">
@@ -611,6 +706,134 @@ export function FinancePanel({
               <Button onClick={savePostalDrop} disabled={savingPostal}>
                 {savingPostal ? 'Saving...' : 'Save Postal Drop'}
               </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2">
+              <BarChart3 className="w-4 h-4" />
+              Meta / Social Ads
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="space-y-2">
+                <Label>Platform</Label>
+                <Select value={socialAdPlatform} onValueChange={setSocialAdPlatform}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Meta">Meta</SelectItem>
+                    <SelectItem value="Facebook">Facebook</SelectItem>
+                    <SelectItem value="Instagram">Instagram</SelectItem>
+                    <SelectItem value="TikTok">TikTok</SelectItem>
+                    <SelectItem value="LinkedIn">LinkedIn</SelectItem>
+                    <SelectItem value="Other social ads">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Objective</Label>
+                <Select value={socialAdObjective} onValueChange={setSocialAdObjective}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Traffic">Traffic</SelectItem>
+                    <SelectItem value="Leads">Leads</SelectItem>
+                    <SelectItem value="Reach">Reach</SelectItem>
+                    <SelectItem value="Awareness">Awareness</SelectItem>
+                    <SelectItem value="Listing promotion">Listing promotion</SelectItem>
+                    <SelectItem value="Open house">Open house</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="social-ad-date">Date</Label>
+                <Input
+                  id="social-ad-date"
+                  type="date"
+                  value={socialAdDate}
+                  onChange={(event) => setSocialAdDate(event.target.value)}
+                />
+              </div>
+              <div className="space-y-2 sm:col-span-2 xl:col-span-3">
+                <Label htmlFor="social-ad-campaign">Campaign or ad name</Label>
+                <Input
+                  id="social-ad-campaign"
+                  value={socialAdCampaignName}
+                  onChange={(event) => setSocialAdCampaignName(event.target.value)}
+                  placeholder="Meta lead ad, Instagram listing boost, retargeting campaign"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="social-ad-total">Ad spend</Label>
+                <Input
+                  id="social-ad-total"
+                  value={socialAdTotal}
+                  onChange={(event) => setSocialAdTotal(event.target.value)}
+                  placeholder="0.00"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="social-ad-impressions">Impressions</Label>
+                <Input
+                  id="social-ad-impressions"
+                  type="number"
+                  min="0"
+                  value={socialAdImpressions}
+                  onChange={(event) => setSocialAdImpressions(event.target.value)}
+                  placeholder="Optional"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="social-ad-clicks">Clicks</Label>
+                <Input
+                  id="social-ad-clicks"
+                  type="number"
+                  min="0"
+                  value={socialAdClicks}
+                  onChange={(event) => setSocialAdClicks(event.target.value)}
+                  placeholder="Optional"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="social-ad-leads">Leads</Label>
+                <Input
+                  id="social-ad-leads"
+                  type="number"
+                  min="0"
+                  value={socialAdLeads}
+                  onChange={(event) => setSocialAdLeads(event.target.value)}
+                  placeholder="Optional"
+                />
+              </div>
+              <div className="rounded-lg border border-border bg-background p-3 sm:col-span-2">
+                <p className="text-sm font-medium">Cost per lead</p>
+                <p className="text-xs text-muted-foreground">Based on spend and leads entered here.</p>
+                <div className="mt-2 text-2xl font-semibold">{formatCurrencyFromCents(socialAdCostPerLeadCents)}</div>
+              </div>
+            </div>
+
+            <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-end">
+              <div className="space-y-2">
+                <Label htmlFor="social-ad-notes">Notes</Label>
+                <Textarea
+                  id="social-ad-notes"
+                  value={socialAdNotes}
+                  onChange={(event) => setSocialAdNotes(event.target.value)}
+                  placeholder="Audience, creative, link, targeting notes, etc."
+                  className="min-h-[88px]"
+                />
+              </div>
+              <div className="flex justify-end">
+                <Button onClick={saveSocialAdSpend} disabled={savingSocialAd}>
+                  {savingSocialAd ? 'Saving...' : 'Save Social Ad'}
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>

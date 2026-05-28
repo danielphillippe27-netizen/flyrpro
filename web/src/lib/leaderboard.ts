@@ -27,6 +27,10 @@ function rowToSnapshot(row: Record<string, unknown>): MetricSnapshot {
   }
 }
 
+function emptySnapshot(): MetricSnapshot {
+  return { doorknocks: 0, leads: 0, conversations: 0, distance: 0 }
+}
+
 function normalizeRow(row: Record<string, unknown>): LeaderboardUser {
   const id = String(row.user_id ?? row.id ?? '')
   const allTime =
@@ -50,6 +54,11 @@ function normalizeRow(row: Record<string, unknown>): LeaderboardUser {
     id,
     name,
     avatar_url: avatar_url || null,
+    rank: Number(row.rank) || 0,
+    pending:
+      row.pending && typeof row.pending === 'object'
+        ? rowToSnapshot(row.pending as Record<string, unknown>)
+        : emptySnapshot(),
     snapshots,
   }
 }
@@ -68,6 +77,22 @@ export async function fetchLeaderboard(
   })
   if (error) throw new Error(error.message)
   return (Array.isArray(data) ? data : []).map((row) => normalizeRow(row as Record<string, unknown>))
+}
+
+export function getUserPendingValue(
+  user: LeaderboardUser,
+  metric: LeaderboardMetric
+): number {
+  switch (metric) {
+    case 'doorknocks':
+      return user.pending.doorknocks
+    case 'conversations':
+      return user.pending.conversations
+    case 'distance':
+      return user.pending.distance
+    default:
+      return 0
+  }
 }
 
 export function getUserValue(

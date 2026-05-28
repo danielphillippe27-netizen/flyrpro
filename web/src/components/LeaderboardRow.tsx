@@ -1,6 +1,7 @@
 import type { LeaderboardUser, LeaderboardMetric } from '../types/leaderboard'
 import {
   getUserValue,
+  getUserPendingValue,
   formatLeaderboardValue,
   getSubtitle,
 } from '../lib/leaderboard'
@@ -33,12 +34,16 @@ export function LeaderboardRow({
 }: LeaderboardRowProps) {
   const value = getUserValue(user, metric, timeframe)
   const formatted = formatLeaderboardValue(metric, value)
+  const pendingValue = getUserPendingValue(user, metric)
+  const pendingFormatted = formatLeaderboardValue(metric, pendingValue)
   const subtitle = getSubtitle(user)
 
-  const isTopThree = rank <= 3
+  const isTopThree = rank > 0 && rank <= 3
   const rankDisplay =
     rank === 1 ? (
       <span style={{ color: ACCENT }} aria-label="Rank 1">👑</span>
+    ) : rank <= 0 ? (
+      <span style={{ fontSize: '11px', fontWeight: 700, color: ACCENT }}>Live</span>
     ) : (
       <span
         style={{
@@ -126,9 +131,25 @@ export function LeaderboardRow({
           fontWeight: 700,
           color: ACCENT,
           flexShrink: 0,
+          textAlign: 'right',
         }}
       >
-        {formatted}
+        <div>{formatted}</div>
+        {pendingValue > 0 && (
+          <div
+            style={{
+              display: 'inline-block',
+              marginTop: '3px',
+              padding: '2px 6px',
+              borderRadius: '4px',
+              background: 'rgba(255, 79, 79, 0.12)',
+              fontSize: '11px',
+              lineHeight: 1.2,
+            }}
+          >
+            +{pendingFormatted} pending
+          </div>
+        )}
       </div>
     </div>
   )

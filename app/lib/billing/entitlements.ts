@@ -119,7 +119,9 @@ export function mergeEntitlementUpdate(
 export function canUsePro(entitlement: Entitlement): boolean {
   return (
     entitlement.is_active &&
-    (entitlement.plan === 'pro' || entitlement.plan === 'team')
+    (entitlement.plan === 'pro' ||
+      entitlement.plan === 'team' ||
+      entitlement.plan === 'ambassador')
   );
 }
 

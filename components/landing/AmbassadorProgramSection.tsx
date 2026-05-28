@@ -9,6 +9,7 @@ import { Textarea } from '@/components/ui/textarea';
 
 type ApplicationState = {
   fullName: string;
+  username: string;
   email: string;
   phone: string;
   city: string;
@@ -26,6 +27,7 @@ type ApplicationState = {
 
 const INITIAL_STATE: ApplicationState = {
   fullName: '',
+  username: '',
   email: '',
   phone: '',
   city: '',
@@ -43,7 +45,7 @@ const INITIAL_STATE: ApplicationState = {
 
 const PROGRAM_BULLETS = [
   '25% recurring commission for 12 months on paid users you refer',
-  '30-day free trial for your audience with your custom link and code',
+  '14-day free trial for your audience with your custom link and code',
   'Cash bonuses at key milestones for top-performing partners',
   'Monthly payouts with a clear Stripe-based payout path for approved ambassadors',
 ];
@@ -76,6 +78,9 @@ export function AmbassadorProgramSection() {
 
   const validationMessage = useMemo(() => {
     if (!form.fullName.trim()) return 'Please enter your full name.';
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(form.username.trim())) {
+      return 'Choose a username using lowercase letters, numbers, and single hyphens.';
+    }
     if (!form.email.trim()) return 'Please enter your email.';
     if (!form.primaryNiche.trim()) return 'Please enter your primary niche.';
     if (!form.primaryPlatform.trim()) return 'Please choose your primary platform.';
@@ -169,7 +174,7 @@ export function AmbassadorProgramSection() {
               <p className="text-sm font-semibold uppercase tracking-[0.06em] text-zinc-500">
                 Audience Offer
               </p>
-              <p className="mt-3 text-2xl font-black text-zinc-900">30 days free</p>
+              <p className="mt-3 text-2xl font-black text-zinc-900">14 days free</p>
               <p className="mt-2 text-sm text-zinc-600">Custom link and code for every approved partner</p>
             </div>
             <div className="border border-zinc-200 p-5">
@@ -221,6 +226,18 @@ export function AmbassadorProgramSection() {
                 onChange={(event) => handleChange('fullName', event.target.value)}
                 className={INPUT_FIELD_CLASS}
                 placeholder="Your name"
+                required
+              />
+            </div>
+
+            <div className="md:col-span-2">
+              <Label htmlFor="ambassador-username">Username</Label>
+              <Input
+                id="ambassador-username"
+                value={form.username}
+                onChange={(event) => handleChange('username', event.target.value.toLowerCase())}
+                className={INPUT_FIELD_CLASS}
+                placeholder="fliper"
                 required
               />
             </div>

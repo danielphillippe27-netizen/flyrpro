@@ -585,6 +585,7 @@ export function FlyrMapView() {
               addressStateOverrides={campaignAddresses}
               campaignBoundary={(selectedCampaign?.territory_boundary as GeoJSON.Polygon | null | undefined) ?? null}
               statusFilters={statusFilters}
+              isDarkMap={theme === 'dark'}
               onBuildingClick={handleBuildingClick}
               onAddToCRM={handleAddToCRM}
             />

@@ -28,6 +28,7 @@ type FeatureCollectionLike = {
     properties?: Record<string, unknown>;
   }>;
 };
+type FeatureLike = NonNullable<FeatureCollectionLike['features']>[number];
 
 type PolygonalBuildingFeature = GeoJSON.Feature<
   GeoJSON.Polygon | GeoJSON.MultiPolygon,
@@ -422,6 +423,42 @@ function geometryBounds(geometry: GeoJSON.Geometry | null | undefined): [number,
   return [minLon, minLat, maxLon, maxLat];
 }
 
+function normalizeLongitudeNearBbox(lon: number, bbox: [number, number, number, number]): number {
+  if (!Number.isFinite(lon)) return lon;
+  const bboxCenter = (bbox[0] + bbox[2]) / 2;
+  let normalized = lon;
+
+  while (normalized - bboxCenter > 180) normalized -= 360;
+  while (bboxCenter - normalized > 180) normalized += 360;
+
+  return normalized;
+}
+
+function normalizeGeometryLongitudes<T extends GeoJSON.Polygon | GeoJSON.MultiPolygon>(
+  geometry: T,
+  bbox: [number, number, number, number]
+): T {
+  const normalizePosition = (position: number[]) => [
+    normalizeLongitudeNearBbox(Number(position[0]), bbox),
+    Number(position[1]),
+    ...position.slice(2),
+  ];
+
+  if (geometry.type === 'Polygon') {
+    return {
+      ...geometry,
+      coordinates: geometry.coordinates.map((ring) => ring.map(normalizePosition)),
+    } as T;
+  }
+
+  return {
+    ...geometry,
+    coordinates: geometry.coordinates.map((polygon) =>
+      polygon.map((ring) => ring.map(normalizePosition))
+    ),
+  } as T;
+}
+
 function bboxesIntersect(
   a: [number, number, number, number],
   b: [number, number, number, number]
@@ -612,17 +649,19 @@ async function fetchScopedPmtilesBuildingFeatures(
       const vectorFeature = layer.feature(index);
       const feature = vectorFeature.toGeoJSON(x, y, range.z) as GeoJSON.Feature;
       if (feature.geometry?.type !== 'Polygon' && feature.geometry?.type !== 'MultiPolygon') continue;
+      const geometry = normalizeGeometryLongitudes(feature.geometry, bbox);
+      const boundaryFeature = { ...feature, geometry };
       const properties = (feature.properties ?? {}) as Record<string, unknown>;
       const buildingId = String(properties.building_id ?? properties.gers_id ?? properties.id ?? '').trim();
       if (!buildingId || hiddenBuildingIds.has(buildingId)) continue;
 
-      if (!geometryIntersectsBbox(feature.geometry, bbox)) continue;
-      if (boundary && !featureInCampaignBoundary(feature, boundary)) continue;
+      if (!geometryIntersectsBbox(geometry, bbox)) continue;
+      if (boundary && !featureInCampaignBoundary(boundaryFeature, boundary)) continue;
 
       const normalizedFeature: PolygonalBuildingFeature = {
         ...feature,
         id: buildingId,
-        geometry: feature.geometry,
+        geometry,
         properties: {
           ...properties,
           id: buildingId,
@@ -915,6 +954,217 @@ interface BuildingAddressLinkRow {
   confidence: number | null;
 }
 
+interface CampaignBuildingIdentityRow {
+  id: string;
+  gers_id: string | null;
+}
+
+function normalizedFeatureKey(value: unknown): string | null {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function featureBuildingKeys(feature: FeatureLike): string[] {
+  const properties = feature.properties ?? {};
+  return Array.from(
+    new Set(
+      [
+        feature.id,
+        properties.id,
+        properties.gers_id,
+        properties.building_id,
+        properties.building_gers_id,
+      ]
+        .map(normalizedFeatureKey)
+        .filter((value): value is string => Boolean(value))
+    )
+  );
+}
+
+async function decorateBuildingFeaturesWithPersistedLinks(
+  supabase: ReturnType<typeof createAdminClient>,
+  campaignId: string,
+  featureCollection: FeatureCollectionLike
+): Promise<FeatureCollectionLike> {
+  if (!Array.isArray(featureCollection.features) || featureCollection.features.length === 0) {
+    return featureCollection;
+  }
+
+  const [campaignAddresses, buildingLinks, buildingIdentities] = await Promise.all([
+    fetchAllInPages((from, to) =>
+      asPagePromise<CampaignAddressRow & {
+        address_statuses?: { status?: string | null } | Array<{ status?: string | null }> | null;
+      }>(
+        supabase
+          .from('campaign_addresses')
+          .select(
+            'id, formatted, house_number, street_name, building_id, building_gers_id, visited, scans, address_statuses(status)'
+          )
+          .eq('campaign_id', campaignId)
+          .order('id', { ascending: true })
+          .range(from, to)
+      )
+    ),
+    fetchAllInPages((from, to) =>
+      asPagePromise<BuildingAddressLinkRow>(
+        supabase
+          .from('building_address_links')
+          .select('building_id, address_id, match_type, confidence')
+          .eq('campaign_id', campaignId)
+          .order('address_id', { ascending: true })
+          .range(from, to)
+      )
+    ),
+    fetchAllInPages((from, to) =>
+      asPagePromise<CampaignBuildingIdentityRow>(
+        supabase
+          .from('buildings')
+          .select('id, gers_id')
+          .eq('campaign_id', campaignId)
+          .range(from, to)
+      )
+    ),
+  ]).catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn('[API] Failed to decorate snapshot buildings with persisted links:', message);
+    return [null, null, null] as const;
+  });
+
+  if (!campaignAddresses || !buildingLinks || !buildingIdentities) {
+    return featureCollection;
+  }
+
+  const normalizedAddresses = (campaignAddresses as Array<CampaignAddressRow & {
+    address_statuses?: { status?: string | null } | Array<{ status?: string | null }> | null;
+  }>).map((address) => ({
+    ...address,
+    address_status: Array.isArray(address.address_statuses)
+      ? address.address_statuses[0]?.status ?? null
+      : address.address_statuses?.status ?? null,
+  }));
+
+  const addressById = new Map(normalizedAddresses.map((address) => [address.id, address]));
+  const buildingIdentityKeys = new Map<string, Set<string>>();
+  const linkedAddressesByBuildingKey = new Map<
+    string,
+    Map<string, { address: CampaignAddressRow; link?: BuildingAddressLinkRow | null }>
+  >();
+
+  const addIdentityAlias = (key: unknown, alias: unknown) => {
+    const normalizedKey = normalizedFeatureKey(key);
+    const normalizedAlias = normalizedFeatureKey(alias);
+    if (!normalizedKey || !normalizedAlias) return;
+    const group = buildingIdentityKeys.get(normalizedKey) ?? new Set<string>();
+    group.add(normalizedKey);
+    group.add(normalizedAlias);
+    buildingIdentityKeys.set(normalizedKey, group);
+  };
+
+  for (const building of buildingIdentities) {
+    addIdentityAlias(building.id, building.gers_id);
+    addIdentityAlias(building.gers_id, building.id);
+  }
+
+  const addLinkedAddress = (
+    key: unknown,
+    address: CampaignAddressRow | undefined,
+    link?: BuildingAddressLinkRow | null
+  ) => {
+    if (!address) return;
+    const normalizedKey = normalizedFeatureKey(key);
+    if (!normalizedKey) return;
+    const aliases = buildingIdentityKeys.get(normalizedKey) ?? new Set([normalizedKey]);
+    aliases.add(normalizedKey);
+    for (const alias of aliases) {
+      const group = linkedAddressesByBuildingKey.get(alias) ?? new Map();
+      const existing = group.get(address.id);
+      group.set(address.id, {
+        address,
+        link: existing?.link ?? link ?? null,
+      });
+      linkedAddressesByBuildingKey.set(alias, group);
+    }
+  };
+
+  for (const address of normalizedAddresses) {
+    addLinkedAddress(address.building_id, address, null);
+    addLinkedAddress(address.building_gers_id, address, null);
+  }
+
+  for (const link of buildingLinks) {
+    addLinkedAddress(link.building_id, addressById.get(link.address_id), link);
+  }
+
+  let decoratedCount = 0;
+  const features = featureCollection.features.map((feature) => {
+    const linkedEntryMap = new Map<
+      string,
+      { address: CampaignAddressRow; link?: BuildingAddressLinkRow | null }
+    >();
+    for (const key of featureBuildingKeys(feature)) {
+      const entries = linkedAddressesByBuildingKey.get(key);
+      if (!entries) continue;
+      for (const [addressId, entry] of entries) {
+        const existing = linkedEntryMap.get(addressId);
+        linkedEntryMap.set(addressId, {
+          address: entry.address,
+          link: existing?.link ?? entry.link ?? null,
+        });
+      }
+    }
+
+    const linkedEntries = Array.from(linkedEntryMap.values());
+    if (linkedEntries.length === 0) {
+      return feature;
+    }
+
+    decoratedCount += 1;
+    const linkedAddresses = linkedEntries.map((entry) => entry.address);
+    const firstAddress = linkedAddresses[0] ?? null;
+    const firstLinkedEntry = linkedEntries.find((entry) => entry.link) ?? linkedEntries[0] ?? null;
+    const scansTotal = linkedAddresses.reduce((sum, address) => sum + (address.scans ?? 0), 0);
+    const buildingStatus = linkedAddresses.reduce<CampaignBuildingStatus>(
+      (current, address) => {
+        const next = getBuildingStatusForCampaignAddress(address);
+        return CAMPAIGN_BUILDING_STATUS_RANK[next] > CAMPAIGN_BUILDING_STATUS_RANK[current] ? next : current;
+      },
+      'not_visited'
+    );
+
+    return {
+      ...feature,
+      properties: {
+        ...(feature.properties ?? {}),
+        is_linked: true,
+        address_count: linkedAddresses.length,
+        address_id: linkedAddresses.length === 1 ? firstAddress?.id ?? null : null,
+        address_ids: linkedAddresses.map((address) => address.id),
+        address_text: linkedAddresses.length === 1 ? displayAddressText(firstAddress ?? {}) : null,
+        house_number: linkedAddresses.length === 1 ? resolveHouseNumberLabel(firstAddress ?? {}) : null,
+        street_name: linkedAddresses.length === 1 ? firstAddress?.street_name ?? null : null,
+        address_status: linkedAddresses.length === 1 ? firstAddress?.address_status ?? null : null,
+        units_count: Math.max(linkedAddresses.length, Number(feature.properties?.units_count ?? 1), 1),
+        feature_type: linkedAddresses.length > 0 ? 'matched_house' : feature.properties?.feature_type,
+        feature_status: linkedAddresses.length > 0 ? 'matched' : feature.properties?.feature_status,
+        match_method: firstLinkedEntry?.link?.match_type ?? feature.properties?.match_method ?? null,
+        confidence: firstLinkedEntry?.link?.confidence ?? feature.properties?.confidence ?? null,
+        status: buildingStatus,
+        scans_total: scansTotal,
+        qr_scanned: scansTotal > 0,
+      },
+    };
+  });
+
+  if (decoratedCount > 0) {
+    console.log(`[API] Decorated ${decoratedCount} building snapshot features with persisted address links`);
+  }
+
+  return {
+    ...featureCollection,
+    features,
+  };
+}
+
 async function fetchHiddenBuildingIds(
   supabase: ReturnType<typeof createAdminClient>,
   campaignId: string
@@ -1179,6 +1429,7 @@ function buildCampaignBuildingFallbackFeatureCollection(
         min_height: 0,
         is_townhome: false,
         units_count: Math.max(linkedAddresses.length, 1),
+        is_linked: linkedAddresses.length > 0,
         feature_type: source === 'manual' ? 'manual_building' : linkedAddresses.length > 0 ? 'matched_house' : 'orphan',
         feature_status: linkedAddresses.length > 0 ? 'matched' : source === 'manual' ? 'manual' : 'unlinked',
         match_method: firstLinkedEntry?.link?.match_type ?? (linkedAddresses.length > 0 ? source : null),
@@ -1249,6 +1500,7 @@ function buildGoldFallbackFeatureCollection(
         building_type: building.building_type ?? null,
         feature_type: isMatched ? 'matched_house' : 'orphan',
         feature_status: isMatched ? 'matched' : 'orphan_building',
+        is_linked: isMatched,
         status: buildingStatus,
         scans_today: 0,
         scans_total: scansTotal,
@@ -1693,10 +1945,15 @@ export async function GET(
 
       const snapshotBuildingCount = getFeatureCount(snapshotBuildings);
       if (snapshotBuildingCount > 0 && snapshotBuildings) {
+        const decoratedSnapshotBuildings = await decorateBuildingFeaturesWithPersistedLinks(
+          supabase,
+          campaignId,
+          snapshotBuildings
+        );
         console.log(
           `[API] Returning ${snapshotBuildingCount} campaign-scoped snapshot buildings in ${Date.now() - requestStartedAt}ms`
         );
-        return buildingsJsonResponse(snapshotBuildings);
+        return buildingsJsonResponse(decoratedSnapshotBuildings);
       }
     } else if (snapshotError) {
       console.warn('[API] Snapshot lookup failed:', snapshotError.message);

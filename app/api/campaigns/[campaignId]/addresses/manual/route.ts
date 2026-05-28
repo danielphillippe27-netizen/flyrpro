@@ -1,5 +1,9 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
+import {
+  addressIdentitiesMatch,
+  normalizedAddressIdentity,
+} from "../_utils/addressIdentity";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -52,6 +56,19 @@ async function ensureCampaignAccess(
 type ResolvedBuilding = {
   rowId: string;
   publicId: string;
+};
+
+type ManualAddressRow = {
+  id: string;
+  address: string | null;
+  formatted: string | null;
+  house_number: string | null;
+  street_name: string | null;
+  locality: string | null;
+  region: string | null;
+  postal_code: string | null;
+  building_gers_id: string | null;
+  source: string | null;
 };
 
 async function resolveBuilding(
@@ -136,6 +153,72 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         { error: "Linked building not found" },
         { status: 404 }
       );
+    }
+
+    const incomingIdentity = normalizedAddressIdentity({
+      houseNumber: (body as { house_number?: unknown }).house_number,
+      streetName: (body as { street_name?: unknown }).street_name,
+      postalCode: (body as { postal_code?: unknown }).postal_code,
+      formatted,
+    });
+    if (incomingIdentity) {
+      const { data: existingRows, error: existingError } = await supabase
+        .from("campaign_addresses")
+        .select("id,address,formatted,house_number,street_name,locality,region,postal_code,building_gers_id,source")
+        .eq("campaign_id", campaignId);
+
+      if (existingError) {
+        console.error("[manual-address] existing address lookup error:", existingError);
+        return NextResponse.json(
+          { error: "Failed to check existing campaign addresses" },
+          { status: 500 }
+        );
+      }
+
+      const existingAddress = ((existingRows ?? []) as ManualAddressRow[]).find((row) =>
+        addressIdentitiesMatch(
+          incomingIdentity,
+          normalizedAddressIdentity({
+            houseNumber: row.house_number,
+            streetName: row.street_name,
+            postalCode: row.postal_code,
+            formatted: row.formatted ?? row.address,
+          })
+        )
+      );
+
+      if (existingAddress) {
+        if (resolvedBuilding) {
+          const { error: linkError } = await supabase
+            .from("building_address_links")
+            .upsert(
+              {
+                campaign_id: campaignId,
+                building_id: resolvedBuilding.rowId,
+                address_id: existingAddress.id,
+                match_type: "manual",
+                confidence: 1,
+                is_multi_unit: false,
+                unit_count: 1,
+              },
+              { onConflict: "building_id,address_id,campaign_id" }
+            );
+
+          if (linkError) {
+            console.error("[manual-address] existing link error:", linkError);
+            return NextResponse.json(
+              { error: "Existing address found but failed to link it to the building" },
+              { status: 500 }
+            );
+          }
+        }
+
+        return NextResponse.json({
+          address: existingAddress,
+          linked_building_id: resolvedBuilding?.publicId ?? null,
+          reused_existing: true,
+        });
+      }
     }
 
     // Build address insert matching FLYR-PRO schema

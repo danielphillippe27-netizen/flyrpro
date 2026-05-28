@@ -9,7 +9,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { FarmIcon } from '@/components/icons/FarmIcon';
 import { Megaphone, QrCode, FileText, FileImage } from 'lucide-react';
 
 export function CreateHubView({
@@ -22,13 +21,11 @@ export function CreateHubView({
   const router = useRouter();
 
   const handleCreate = (
-    type: 'campaign' | 'farm' | 'qr' | 'landing-page' | 'flyer'
+    type: 'campaign' | 'qr' | 'landing-page' | 'flyer'
   ) => {
     onClose();
     if (type === 'campaign') {
       router.push('/campaigns/create');
-    } else if (type === 'farm') {
-      router.push('/farms/create');
     } else if (type === 'qr') {
       router.push('/qr');
     } else if (type === 'landing-page') {
@@ -66,19 +63,6 @@ export function CreateHubView({
               </p>
             </Button>
 
-            <Button
-              variant="outline"
-              className="h-auto p-6 flex flex-col items-start w-full"
-              onClick={() => handleCreate('farm')}
-            >
-              <div className="flex items-center gap-3 mb-2">
-                <FarmIcon className="w-6 h-6 shrink-0" />
-                <span className="text-lg font-semibold">Farm</span>
-              </div>
-              <p className="text-sm text-gray-600 text-left">
-                Define a territory for repeated touches
-              </p>
-            </Button>
           </div>
 
           {/* Right Column */}

@@ -2450,6 +2450,7 @@ export function CampaignDetailMapView({
               statusFilters={statusFilters}
               showAddressLabels={false}
               footprintStatusColors
+              isDarkMap={theme === 'dark'}
               onBuildingClick={handleBuildingClick}
               onRenderStateChange={handleBuildingsRenderStateChange}
             />

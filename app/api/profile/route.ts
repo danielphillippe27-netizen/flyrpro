@@ -2,29 +2,28 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { normalizeCountryCode } from '@/lib/countries';
+import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 
 /**
  * GET /api/profile — current user's profile (user_profiles + email from auth).
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const authClient = await getSupabaseServerClient();
-    const {
-      data: { user },
-      error: userError,
-    } = await authClient.auth.getUser();
-
-    if (userError || !user) {
+    const requestUser = await resolveUserFromRequest(request);
+    if (!requestUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const supabase = createAdminClient();
+    const {
+      data: { user },
+    } = await supabase.auth.admin.getUserById(requestUser.id);
     const { data: profile, error: profileError } = await supabase
       .from('user_profiles')
       .select(
         'first_name, last_name, country_code, industry, brokerage_name, quote, avatar_url, is_founder'
       )
-      .eq('user_id', user.id)
+      .eq('user_id', requestUser.id)
       .maybeSingle();
 
     if (profileError) {
@@ -38,17 +37,17 @@ export async function GET() {
     const fullName =
       (profile?.first_name || profile?.last_name)
         ? [profile.first_name, profile.last_name].filter(Boolean).join(' ')
-        : (typeof user.user_metadata?.full_name === 'string' && user.user_metadata.full_name) ||
-          (typeof user.user_metadata?.name === 'string' && user.user_metadata.name) ||
+        : (typeof user?.user_metadata?.full_name === 'string' && user.user_metadata.full_name) ||
+          (typeof user?.user_metadata?.name === 'string' && user.user_metadata.name) ||
           null;
     const avatarUrl =
       profile?.avatar_url ??
-      ((typeof user.user_metadata?.avatar_url === 'string' && user.user_metadata.avatar_url) ||
-      (typeof user.user_metadata?.picture === 'string' && user.user_metadata.picture) ||
+      ((typeof user?.user_metadata?.avatar_url === 'string' && user.user_metadata.avatar_url) ||
+      (typeof user?.user_metadata?.picture === 'string' && user.user_metadata.picture) ||
       null);
 
     return NextResponse.json({
-      email: user.email ?? null,
+      email: requestUser.email ?? user?.email ?? null,
       first_name: profile?.first_name ?? null,
       last_name: profile?.last_name ?? null,
       country_code: profile?.country_code ?? null,

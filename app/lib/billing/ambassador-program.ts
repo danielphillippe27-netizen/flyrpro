@@ -23,6 +23,8 @@ type AmbassadorReferralRow = {
   referred_user_id: string;
   referred_workspace_id: string;
   referral_code: string;
+  source: string | null;
+  campaign: string | null;
   stripe_customer_id: string | null;
   stripe_subscription_id: string | null;
   stripe_subscription_status: string | null;
@@ -53,16 +55,34 @@ export type AmbassadorPromotionCodeSyncResult = {
   skippedReason: string | null;
 };
 
-const DEFAULT_COMMISSION_RATE_BPS = 2500;
-const DEFAULT_COMMISSION_DURATION_MONTHS = 12;
+export const DEFAULT_AMBASSADOR_COMMISSION_RATE_BPS = 2500;
+export const DEFAULT_AMBASSADOR_COMMISSION_DURATION_MONTHS = 12;
 const MAX_CUSTOM_REFERRAL_CODE_LENGTH = 20;
 const MIN_CUSTOM_REFERRAL_CODE_LENGTH = 4;
+
+export type ValidAmbassadorReferral = AmbassadorApplicationRow & {
+  referralStats: AmbassadorReferralCodeStats | null;
+};
+
+export type AmbassadorReferralValidationResult =
+  | {
+      ok: true;
+      referralCode: string;
+      ambassador: ValidAmbassadorReferral;
+    }
+  | {
+      ok: false;
+      referralCode: string | null;
+      reason: 'empty' | 'invalid' | 'maxed';
+      message: string;
+    };
 
 export function isMissingAmbassadorSchemaError(message: string | undefined): boolean {
   if (!message) return false;
   const normalized = message.toLowerCase();
   return (
     normalized.includes('could not find the table') ||
+    (normalized.includes('could not find') && normalized.includes('column')) ||
     (normalized.includes('relation') && normalized.includes('does not exist')) ||
     (normalized.includes('column') && normalized.includes('does not exist'))
   );
@@ -291,6 +311,138 @@ export async function resolveApprovedAmbassadorReferralCode(
     ...ambassador,
     referralStats,
   };
+}
+
+export async function validateAmbassadorReferralCodeForOnboarding(
+  admin: SupabaseAdmin,
+  referralCode: string | null | undefined
+): Promise<AmbassadorReferralValidationResult> {
+  const normalizedReferralCode =
+    typeof referralCode === 'string'
+      ? normalizeAmbassadorReferralCodeInput(referralCode)
+      : '';
+
+  if (!normalizedReferralCode) {
+    return {
+      ok: false,
+      referralCode: null,
+      reason: 'empty',
+      message: 'Referral code is optional.',
+    };
+  }
+
+  const ambassador = await resolveApprovedAmbassadorReferralCode(
+    admin,
+    normalizedReferralCode
+  );
+
+  if (!ambassador) {
+    return {
+      ok: false,
+      referralCode: normalizedReferralCode,
+      reason: 'invalid',
+      message: 'Enter a valid ambassador referral code, or leave this blank.',
+    };
+  }
+
+  if (ambassador.referralStats?.isAtLimit) {
+    return {
+      ok: false,
+      referralCode: normalizedReferralCode,
+      reason: 'maxed',
+      message:
+        'That ambassador referral code has reached its limit. Please ask for a new code.',
+    };
+  }
+
+  return {
+    ok: true,
+    referralCode: ambassador.referral_code?.trim().toUpperCase() || normalizedReferralCode,
+    ambassador,
+  };
+}
+
+export async function upsertAmbassadorReferralAttribution(
+  admin: SupabaseAdmin,
+  params: {
+    ambassador: ValidAmbassadorReferral;
+    referredUserId: string;
+    referredWorkspaceId: string;
+    referralCode: string;
+    source?: string | null;
+    campaign?: string | null;
+    stripeCustomerId?: string | null;
+    stripeSubscriptionId?: string | null;
+    stripeSubscriptionStatus?: string | null;
+  }
+): Promise<AmbassadorReferralRow | null> {
+  const nowIso = new Date().toISOString();
+  const referralPayload = {
+    ambassador_application_id: params.ambassador.id,
+    referred_user_id: params.referredUserId,
+    referred_workspace_id: params.referredWorkspaceId,
+    referral_code:
+      params.ambassador.referral_code?.trim().toUpperCase() ||
+      normalizeAmbassadorReferralCodeInput(params.referralCode),
+    source: params.source ?? null,
+    campaign: params.campaign ?? null,
+    stripe_customer_id: params.stripeCustomerId ?? null,
+    stripe_subscription_id: params.stripeSubscriptionId ?? null,
+    stripe_subscription_status: params.stripeSubscriptionStatus ?? null,
+    commission_rate_bps:
+      params.ambassador.commission_rate_bps ?? DEFAULT_AMBASSADOR_COMMISSION_RATE_BPS,
+    commission_duration_months:
+      params.ambassador.commission_duration_months ??
+      DEFAULT_AMBASSADOR_COMMISSION_DURATION_MONTHS,
+    status: 'attributed',
+    updated_at: nowIso,
+  };
+
+  const selectColumns =
+    'id, ambassador_application_id, referred_user_id, referred_workspace_id, referral_code, source, campaign, stripe_customer_id, stripe_subscription_id, stripe_subscription_status, commission_rate_bps, commission_duration_months, first_paid_at, eligible_until, last_paid_at, status';
+
+  const primary = await admin
+    .from('ambassador_referrals')
+    .upsert(referralPayload, { onConflict: 'referred_workspace_id' })
+    .select(selectColumns)
+    .maybeSingle();
+
+  if (!primary.error) {
+    return (primary.data as AmbassadorReferralRow | null) ?? null;
+  }
+
+  if (!isMissingAmbassadorSchemaError(primary.error.message)) {
+    throw new Error(primary.error.message);
+  }
+
+  const legacyReferralPayload: Omit<typeof referralPayload, 'source' | 'campaign'> = {
+    ambassador_application_id: referralPayload.ambassador_application_id,
+    referred_user_id: referralPayload.referred_user_id,
+    referred_workspace_id: referralPayload.referred_workspace_id,
+    referral_code: referralPayload.referral_code,
+    stripe_customer_id: referralPayload.stripe_customer_id,
+    stripe_subscription_id: referralPayload.stripe_subscription_id,
+    stripe_subscription_status: referralPayload.stripe_subscription_status,
+    commission_rate_bps: referralPayload.commission_rate_bps,
+    commission_duration_months: referralPayload.commission_duration_months,
+    status: referralPayload.status,
+    updated_at: referralPayload.updated_at,
+  };
+
+  const legacy = await admin
+    .from('ambassador_referrals')
+    .upsert(legacyReferralPayload, { onConflict: 'referred_workspace_id' })
+    .select(
+      'id, ambassador_application_id, referred_user_id, referred_workspace_id, referral_code, stripe_customer_id, stripe_subscription_id, stripe_subscription_status, commission_rate_bps, commission_duration_months, first_paid_at, eligible_until, last_paid_at, status'
+    )
+    .maybeSingle();
+
+  if (legacy.error) {
+    throw new Error(legacy.error.message);
+  }
+
+  const legacyData = legacy.data as Omit<AmbassadorReferralRow, 'source' | 'campaign'> | null;
+  return legacyData ? { ...legacyData, source: null, campaign: null } : null;
 }
 
 function getAmbassadorPromotionCouponId(): string | null {
@@ -567,9 +719,10 @@ export async function syncAmbassadorReferralForSubscription(
     stripe_customer_id: customerId,
     stripe_subscription_id: subscription.id,
     stripe_subscription_status: subscription.status,
-    commission_rate_bps: ambassador.commission_rate_bps ?? DEFAULT_COMMISSION_RATE_BPS,
+    commission_rate_bps:
+      ambassador.commission_rate_bps ?? DEFAULT_AMBASSADOR_COMMISSION_RATE_BPS,
     commission_duration_months:
-      ambassador.commission_duration_months ?? DEFAULT_COMMISSION_DURATION_MONTHS,
+      ambassador.commission_duration_months ?? DEFAULT_AMBASSADOR_COMMISSION_DURATION_MONTHS,
     status: deriveReferralStatus(subscription.status, null, null),
     updated_at: new Date().toISOString(),
   };

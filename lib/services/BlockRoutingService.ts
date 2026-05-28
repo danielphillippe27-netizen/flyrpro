@@ -637,7 +637,33 @@ export function buildBalancedBlockClusters(
   const segments = buildBlockSegments(blockAddresses);
   if (segments.length === 0) return [];
 
-  return clusterSegmentsIntoAgents(segments, addressById, safeAgentCount, depot, 0, 'balanced');
+  const orderedIds = orderSegmentsByProximity(segments, addressById, depot);
+  const clusters: AgentRouteCluster[] = [];
+  let cursor = 0;
+
+  for (let index = 0; index < safeAgentCount; index += 1) {
+    const remainingAgents = safeAgentCount - index;
+    const remainingHomes = orderedIds.length - cursor;
+    const chunkSize = Math.ceil(remainingHomes / remainingAgents);
+    const chunkIds = orderedIds.slice(cursor, cursor + chunkSize);
+    const chunkIdSet = new Set(chunkIds);
+    cursor += chunkSize;
+
+    clusters.push({
+      agent_id: index + 1,
+      addresses: chunkIds.map((id, sequenceIndex) => {
+        const address = addressById.get(id);
+        if (!address) throw new Error(`buildBalancedBlockClusters: unknown id ${id}`);
+        return {
+          ...address,
+          sequence_index: sequenceIndex,
+        };
+      }),
+      segments: segments.filter((segment) => segment.addressIds.some((id) => chunkIdSet.has(id))),
+    });
+  }
+
+  return clusters;
 }
 
 export function buildNaturalZoneClusters(

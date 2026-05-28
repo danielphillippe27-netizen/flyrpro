@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 
-type Plan = 'free' | 'pro' | 'team';
+type Plan = 'free' | 'pro' | 'team' | 'ambassador';
 type Source = 'none' | 'stripe' | 'apple';
 
 interface EntitlementState {
@@ -33,6 +33,8 @@ interface EntitlementState {
   dialer_number?: string | null;
   dialer_number_status?: 'unassigned' | 'active' | 'released' | null;
   dialer_uses_shared_default?: boolean;
+  isAmbassador?: boolean;
+  planBadgeLabel?: string | null;
 }
 
 export default function BillingPage() {
@@ -212,14 +214,18 @@ export default function BillingPage() {
             <div className="space-y-1">
               <div className="flex items-center gap-2">
                 <p className="text-base font-medium">Plan</p>
-                {entitlement?.is_active && (entitlement.plan === 'pro' || entitlement.plan === 'team') ? (
+                {entitlement?.isAmbassador ? (
+                  <Badge className="bg-red-500 hover:bg-red-600">AMBASSADOR</Badge>
+                ) : entitlement?.is_active && (entitlement.plan === 'pro' || entitlement.plan === 'team') ? (
                   <Badge className="bg-green-500 hover:bg-green-600">Pro</Badge>
                 ) : (
                   <Badge variant="outline">Free</Badge>
                 )}
               </div>
               <p className="text-sm text-muted-foreground">
-                {entitlement?.is_active
+                {entitlement?.isAmbassador
+                  ? 'You have Pro-level access through the FLYR Ambassador Program.'
+                  : entitlement?.is_active
                   ? 'You have access to Pro features.'
                   : 'Upgrade to Pro for more features.'}
               </p>
@@ -237,12 +243,12 @@ export default function BillingPage() {
             </p>
           )}
           <div className="flex flex-wrap gap-2 pt-2">
-            {(!entitlement?.is_active || entitlement.plan === 'free') && entitlement?.upgrade_price_id && (
+            {!entitlement?.isAmbassador && (!entitlement?.is_active || entitlement.plan === 'free') && entitlement?.upgrade_price_id && (
               <Button onClick={handleUpgrade} disabled={checkoutLoading}>
                 {checkoutLoading ? 'Redirecting…' : 'Upgrade to Pro'}
               </Button>
             )}
-            {(!entitlement?.is_active || entitlement.plan === 'free') && !entitlement?.upgrade_price_id && (
+            {!entitlement?.isAmbassador && (!entitlement?.is_active || entitlement.plan === 'free') && !entitlement?.upgrade_price_id && (
               <Button asChild>
                 <Link href="/pricing">Choose a plan</Link>
               </Button>

@@ -257,6 +257,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: result.error.message }, { status: 500 });
   }
 
+  const [statsRefresh, leaderboardRefresh] = await Promise.all([
+    admin.rpc('refresh_user_stats_from_sessions', { p_user_id: requestUser.id }),
+    admin.rpc('refresh_leaderboard_rollups_for_user', { p_user_id: requestUser.id }),
+  ]);
+  if (statsRefresh.error) {
+    console.warn('[api/sessions/update] user stats refresh failed', statsRefresh.error);
+  }
+  if (leaderboardRefresh.error) {
+    console.warn('[api/sessions/update] leaderboard rollup refresh failed', leaderboardRefresh.error);
+  }
+
   if (body.routeAssignmentId) {
     const { error: assignmentError } = await admin
       .from('route_assignments')
