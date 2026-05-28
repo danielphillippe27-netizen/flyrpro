@@ -4,6 +4,8 @@ import { resolveTeamDashboardMode } from '@/app/api/_utils/workspace';
 import type { MinimalSupabaseClient } from '@/app/api/_utils/workspace';
 
 const MERGE_FETCH_LIMIT = 1000;
+const APPOINTMENT_ADDRESS_STATUSES = ['appointment'] as const;
+const FOLLOW_UP_ADDRESS_STATUSES = ['follow_up', 'future_seller', 'callback_requested'] as const;
 
 type TimestampColumn = 'event_time' | 'created_at';
 type EventTable = 'session_events' | 'activity_events';
@@ -80,8 +82,9 @@ function isMissingRelation(error: unknown, table: string): boolean {
   );
 }
 
-async function fetchAppointmentAddressStatusRows(
+async function fetchAddressStatusRows(
   admin: ReturnType<typeof createAdminClient>,
+  statuses: readonly string[],
   start: string,
   end: string,
   limit: number
@@ -92,13 +95,18 @@ async function fetchAppointmentAddressStatusRows(
   const addressIdColumns: AddressStatusForeignKeyColumn[] = ['campaign_address_id', 'address_id'];
 
   for (const addressIdColumn of addressIdColumns) {
-    const result = await admin
+    let query = admin
       .from('address_statuses')
       .select(`${addressIdColumn}, status, created_at, updated_at`)
-      .eq('status', 'appointment')
       .gte('updated_at', start)
       .lte('updated_at', end)
       .limit(limit);
+
+    query = statuses.length === 1
+      ? query.eq('status', statuses[0])
+      : query.in('status', [...statuses]);
+
+    const result = await query;
 
     if (!result.error) {
       return {
@@ -167,6 +175,8 @@ function needsFollowUp(status: string, followUpDateIso: string | null): boolean 
   return (
     normalized === 'follow_up' ||
     normalized === 'follow-up' ||
+    normalized === 'future_seller' ||
+    normalized === 'callback_requested' ||
     normalized === 'not_home' ||
     normalized === 'no_answer' ||
     normalized === 'warm'
@@ -431,6 +441,14 @@ async function fetchContactEvents(
   }
 
   if (!typeFilter || typeFilter === 'followup') {
+    const addressStatusEvents = await fetchAddressStatusFollowUpEvents(
+      admin,
+      workspaceId,
+      workspaceUserIds,
+      memberId,
+      start,
+      end
+    );
     const contactTables: Array<'contacts' | 'field_leads'> = ['contacts', 'field_leads'];
     const rowGroups: Array<Array<Record<string, unknown>>> = [];
     for (const table of contactTables) {
@@ -443,7 +461,7 @@ async function fetchContactEvents(
       if (!rowUserId || !allowedUsers.has(rowUserId)) return false;
       return memberId ? rowUserId === memberId : true;
     });
-    events.push(...normalizeContactEvents(filteredRows, 'followup', start, end));
+    events.push(...addressStatusEvents, ...normalizeContactEvents(filteredRows, 'followup', start, end));
   }
 
   return events.sort((a, b) => {
@@ -456,16 +474,19 @@ async function fetchContactEvents(
   });
 }
 
-async function fetchAddressStatusAppointmentEvents(
+async function fetchAddressStatusEvents(
   admin: ReturnType<typeof createAdminClient>,
   workspaceId: string,
   workspaceUserIds: string[],
   memberId: string | undefined,
   start: string,
-  end: string
+  end: string,
+  eventType: ContactActivityType,
+  statuses: readonly string[]
 ): Promise<DerivedActivityEvent[]> {
-  const { rows: statusRows, addressIdColumn } = await fetchAppointmentAddressStatusRows(
+  const { rows: statusRows, addressIdColumn } = await fetchAddressStatusRows(
     admin,
+    statuses,
     start,
     end,
     MERGE_FETCH_LIMIT
@@ -559,18 +580,20 @@ async function fetchAddressStatusAppointmentEvents(
         .join(' ')
         .trim();
     const campaignName = firstNonEmptyString(campaign.name, campaign.title);
+    const status = firstNonEmptyString(row.status) ?? statuses[0] ?? eventType;
+    const fallbackSummary = eventType === 'followup' ? 'Follow up due' : 'Appointment';
 
     events.push({
-      id: `address-status-appointment-${addressId}`,
+      id: `address-status-${eventType}-${addressId}`,
       user_id: actorUserId ?? workspaceUserIds[0] ?? '',
-      event_type: 'appointment',
+      event_type: eventType,
       event_time: eventTime,
       ref_id: null,
       created_at: toIsoOrNull(row.created_at) ?? eventTime,
       payload: {
-        summary: formattedAddress || 'Appointment',
+        summary: formattedAddress || fallbackSummary,
         address: formattedAddress || '',
-        status: 'appointment',
+        status,
         campaign_address_id: addressId,
         source: 'address_statuses',
       },
@@ -580,6 +603,46 @@ async function fetchAddressStatusAppointmentEvents(
 
   events.sort((a, b) => new Date(b.event_time).getTime() - new Date(a.event_time).getTime());
   return events;
+}
+
+async function fetchAddressStatusAppointmentEvents(
+  admin: ReturnType<typeof createAdminClient>,
+  workspaceId: string,
+  workspaceUserIds: string[],
+  memberId: string | undefined,
+  start: string,
+  end: string
+): Promise<DerivedActivityEvent[]> {
+  return fetchAddressStatusEvents(
+    admin,
+    workspaceId,
+    workspaceUserIds,
+    memberId,
+    start,
+    end,
+    'appointment',
+    APPOINTMENT_ADDRESS_STATUSES
+  );
+}
+
+async function fetchAddressStatusFollowUpEvents(
+  admin: ReturnType<typeof createAdminClient>,
+  workspaceId: string,
+  workspaceUserIds: string[],
+  memberId: string | undefined,
+  start: string,
+  end: string
+): Promise<DerivedActivityEvent[]> {
+  return fetchAddressStatusEvents(
+    admin,
+    workspaceId,
+    workspaceUserIds,
+    memberId,
+    start,
+    end,
+    'followup',
+    FOLLOW_UP_ADDRESS_STATUSES
+  );
 }
 
 async function fetchEventTableRows(

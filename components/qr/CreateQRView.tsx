@@ -16,7 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { QRDestinationType } from '@/lib/services/QRCodeService';
 
-type QRSource = 'campaign' | 'farm' | 'address';
+type QRSource = 'campaign' | 'address';
 
 export function CreateQRView({
   open,
@@ -112,7 +112,6 @@ export function CreateQRView({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="campaign">Campaign</SelectItem>
-                  <SelectItem value="farm">Farm</SelectItem>
                   <SelectItem value="address">Address</SelectItem>
                 </SelectContent>
               </Select>

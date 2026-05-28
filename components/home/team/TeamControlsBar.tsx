@@ -23,6 +23,7 @@ export type TeamControlsBarProps = {
   memberIds: string[];
   onMemberFilterChange: (ids: string[]) => void;
   members: { user_id: string; display_name: string; color?: string }[];
+  showRangeControls?: boolean;
 };
 
 function getRangeForPreset(preset: RangePreset): { start: string; end: string } {
@@ -51,6 +52,7 @@ export function TeamControlsBar({
   memberIds,
   onMemberFilterChange,
   members,
+  showRangeControls = true,
 }: TeamControlsBarProps) {
   const setPreset = (preset: RangePreset) => {
     const { start, end } = getRangeForPreset(preset);
@@ -74,20 +76,24 @@ export function TeamControlsBar({
 
   return (
     <div className="sticky top-0 z-10 bg-gray-50 dark:bg-background pb-3 -mx-1 flex flex-wrap items-center gap-3 border-b border-border/50 mb-4">
-      <span className="text-sm text-muted-foreground">Range:</span>
-      <div className="flex flex-wrap gap-1">
-        {(['today', '7d', '30d', 'year'] as const).map((p) => (
-          <Button
-            key={p}
-            variant={range.preset === p ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setPreset(p)}
-          >
-            {p === 'today' ? 'Today' : p === '7d' ? '7D' : p === '30d' ? '30D' : currentYearLabel}
-          </Button>
-        ))}
-      </div>
-      <span className="text-sm text-muted-foreground ml-2">Members:</span>
+      {showRangeControls ? (
+        <>
+          <span className="text-sm text-muted-foreground">Range:</span>
+          <div className="flex flex-wrap gap-1">
+            {(['today', '7d', '30d', 'year'] as const).map((p) => (
+              <Button
+                key={p}
+                variant={range.preset === p ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setPreset(p)}
+              >
+                {p === 'today' ? 'Today' : p === '7d' ? '7D' : p === '30d' ? '30D' : currentYearLabel}
+              </Button>
+            ))}
+          </div>
+        </>
+      ) : null}
+      <span className={`text-sm text-muted-foreground ${showRangeControls ? 'ml-2' : ''}`}>Members:</span>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="outline" size="sm" className="gap-1">

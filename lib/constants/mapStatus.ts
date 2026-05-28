@@ -23,6 +23,13 @@ export interface MapStatusConfig {
   color: string;
 }
 
+export const LIGHT_MAP_UNTOUCHED_COLOR = '#cfd8e3';
+export const DARK_MAP_UNTOUCHED_COLOR = '#475569';
+
+export function getMapUntouchedColor(isDarkMap: boolean): string {
+  return isDarkMap ? DARK_MAP_UNTOUCHED_COLOR : LIGHT_MAP_UNTOUCHED_COLOR;
+}
+
 /**
  * Building map status config.
  * Priority: QR_SCANNED > HOT_LEADS > LEADS > CONVERSATIONS > DO_NOT_KNOCK > NO_ONE_HOME > TOUCHED > UNTOUCHED.
@@ -66,7 +73,7 @@ export const MAP_STATUS_CONFIG: Record<MapStatusKey, MapStatusConfig> = {
   UNTOUCHED: {
     key: 'UNTOUCHED',
     label: 'Unvisited',
-    color: '#475569',
+    color: DARK_MAP_UNTOUCHED_COLOR,
   },
 } as const;
 

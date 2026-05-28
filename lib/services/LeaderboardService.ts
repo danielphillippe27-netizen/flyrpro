@@ -2,11 +2,26 @@ import { createClient } from '@/lib/supabase/client';
 import { callLeaderboardRpc } from '@/lib/supabase/leaderboard-rpc';
 import type {
   LeaderboardEntry,
+  MetricSnapshot,
   LeaderboardSortBy,
   LeaderboardTimeframe,
   BrokerageLeaderboardEntry,
   BrokerageLeaderboardTimeframe,
 } from '@/types/database';
+
+function parseMetricSnapshot(value: unknown): MetricSnapshot {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return { doorknocks: 0, conversations: 0, leads: 0, distance: 0 };
+  }
+
+  const snapshot = value as Record<string, unknown>;
+  return {
+    doorknocks: Number(snapshot.doorknocks) || 0,
+    conversations: Number(snapshot.conversations) || 0,
+    leads: Number(snapshot.leads) || 0,
+    distance: Number(snapshot.distance) || 0,
+  };
+}
 
 export class LeaderboardService {
   private static client = createClient();
@@ -40,6 +55,7 @@ export class LeaderboardService {
         leads: Number(row.leads) || 0,
         distance: Number(row.distance) || 0,
         rank: Number(row.rank) || 0,
+        pending: parseMetricSnapshot(row.pending),
         updated_at: row.updated_at ? String(row.updated_at) : undefined,
       }));
     }

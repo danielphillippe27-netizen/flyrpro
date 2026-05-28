@@ -1,10 +1,17 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { Loader2, Send, Users } from 'lucide-react';
+import mapboxgl from 'mapbox-gl';
+import 'mapbox-gl/dist/mapbox-gl.css';
+import { Loader2, MapPinned, Send, Users } from 'lucide-react';
 import type { CampaignAddress } from '@/types/database';
+import { MapBuildingsLayer } from '@/components/map/MapBuildingsLayer';
 import { useWorkspace } from '@/lib/workspace-context';
+import { useTheme } from '@/lib/theme-provider';
+import { useMapStyle } from '@/lib/map-style-provider';
+import { getMapboxToken, removeMapboxMapWhenSafe } from '@/lib/mapbox';
+import { getResolvedMapInitOptions, resolveMapStyle } from '@/lib/map-styles';
 import {
   distributeWholeTeamGoals,
   type CampaignAssignmentMode,
@@ -52,6 +59,17 @@ type AssignmentAddress = BuildRouteAddress & {
 };
 
 const COLORS = ['#ef4444', '#22c55e', '#3b82f6', '#8b5cf6', '#d946ef', '#f97316'];
+
+type ZonePreviewMember = {
+  user_id: string;
+  display_name: string;
+  color: string;
+};
+
+type ZonePreviewPoint = {
+  lon: number;
+  lat: number;
+};
 
 function getAddressCoords(address: CampaignAddress): { lat: number; lon: number } | null {
   const coordinate = address.coordinate;
@@ -158,6 +176,180 @@ function formatMode(mode: CampaignAssignmentMode): string {
   return mode === 'zone_split' ? 'Zone split' : 'Whole team';
 }
 
+function CampaignAssignmentZonePreviewMap({
+  campaignId,
+  addresses,
+  members,
+  zones,
+}: {
+  campaignId: string;
+  addresses: CampaignAddress[];
+  members: ZonePreviewMember[];
+  zones: Map<string, AssignmentAddress[]>;
+}) {
+  const { theme } = useTheme();
+  const { preset: mapPreset } = useMapStyle();
+  const resolvedMapStyle = useMemo(
+    () => resolveMapStyle(mapPreset, theme, 'v12'),
+    [mapPreset, theme]
+  );
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<mapboxgl.Map | null>(null);
+  const [mapLoaded, setMapLoaded] = useState(false);
+  const [mapError, setMapError] = useState<string | null>(null);
+  const addressById = useMemo(() => new Map(addresses.map((address) => [address.id, address])), [addresses]);
+
+  const previewPoints = useMemo<ZonePreviewPoint[]>(
+    () =>
+      members.flatMap((member) => {
+        return (zones.get(member.user_id) ?? []).flatMap((address) => {
+          if (!Number.isFinite(address.lon) || !Number.isFinite(address.lat)) return [];
+          if (address.lon === 0 && address.lat === 0) return [];
+          return [{
+            lon: address.lon,
+            lat: address.lat,
+          }];
+        });
+      }),
+    [members, zones]
+  );
+  const assignmentColorByAddressId = useMemo(
+    () =>
+      members.reduce<Record<string, string>>((colors, member) => {
+        (zones.get(member.user_id) ?? []).forEach((address) => {
+          colors[address.id] = member.color;
+        });
+        return colors;
+      }, {}),
+    [members, zones]
+  );
+  const previewAddresses = useMemo(
+    () =>
+      Object.keys(assignmentColorByAddressId)
+        .map((addressId) => addressById.get(addressId))
+        .filter((address): address is CampaignAddress => Boolean(address)),
+    [addressById, assignmentColorByAddressId]
+  );
+
+  const initialPoint = previewPoints[0] ?? null;
+  const initialLon = initialPoint?.lon ?? null;
+  const initialLat = initialPoint?.lat ?? null;
+
+  useEffect(() => {
+    const container = mapContainerRef.current;
+    if (!container || initialLon === null || initialLat === null) return;
+
+    const token = getMapboxToken();
+    if (!token) {
+      setMapError('Mapbox token not configured.');
+      return;
+    }
+
+    let cancelled = false;
+    setMapError(null);
+    setMapLoaded(false);
+    mapboxgl.accessToken = token;
+
+    void getResolvedMapInitOptions(resolvedMapStyle)
+      .then((initOptions) => {
+        if (cancelled || !mapContainerRef.current) return;
+
+        const map = new mapboxgl.Map({
+          container: mapContainerRef.current,
+          ...initOptions,
+          center: [initialLon, initialLat],
+          zoom: 14.5,
+          attributionControl: false,
+          pitchWithRotate: false,
+          dragRotate: false,
+        });
+        mapRef.current = map;
+        map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'bottom-right');
+        map.on('load', () => {
+          if (!cancelled) setMapLoaded(true);
+        });
+        map.on('error', () => {
+          if (!cancelled) setMapError('Map unavailable.');
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setMapError('Map unavailable.');
+      });
+
+    return () => {
+      cancelled = true;
+      setMapLoaded(false);
+      if (mapRef.current) {
+        removeMapboxMapWhenSafe(mapRef.current);
+        mapRef.current = null;
+      }
+    };
+  }, [initialLat, initialLon, resolvedMapStyle]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded || previewPoints.length === 0) return;
+
+    if (previewPoints.length === 1) {
+      map.easeTo({ center: [previewPoints[0].lon, previewPoints[0].lat], zoom: 17, pitch: 45, duration: 450 });
+      return;
+    }
+
+    const bounds = new mapboxgl.LngLatBounds();
+    previewPoints.forEach((point) => bounds.extend([point.lon, point.lat]));
+    if (!bounds.isEmpty()) {
+      map.fitBounds(bounds, {
+        padding: { top: 44, right: 44, bottom: 44, left: 44 },
+        maxZoom: 17,
+        pitch: 45,
+        duration: 450,
+      });
+    }
+  }, [mapLoaded, previewPoints]);
+
+  if (previewPoints.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-border bg-muted/20">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-background/85 px-3 py-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <MapPinned className="h-4 w-4 text-muted-foreground" />
+          <p className="truncate text-sm font-medium text-foreground">Assignment map</p>
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {members.map((member) => (
+            <span key={member.user_id} className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: member.color }} />
+              <span className="max-w-[140px] truncate">{member.display_name}</span>
+            </span>
+          ))}
+        </div>
+      </div>
+      <div className="relative h-[360px] min-h-[320px] w-full">
+        <div ref={mapContainerRef} className="h-full w-full" />
+        {mapRef.current && mapLoaded ? (
+          <MapBuildingsLayer
+            map={mapRef.current}
+            campaignId={campaignId}
+            addressStateOverrides={previewAddresses}
+            assignmentColorByAddressId={assignmentColorByAddressId}
+            showAddressLabels={false}
+            footprintStatusColors
+            isDarkMap={theme === 'dark'}
+          />
+        ) : null}
+        {mapError ? (
+          <div className="absolute inset-0 flex items-center justify-center bg-background/90 p-4 text-center text-sm text-muted-foreground">
+            {mapError}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export function CampaignAssignmentView({ campaignId, campaignName, addresses }: CampaignAssignmentViewProps) {
   const { currentWorkspace, membershipsByWorkspaceId } = useWorkspace();
   const currentWorkspaceId = currentWorkspace?.id ?? null;
@@ -185,6 +377,16 @@ export function CampaignAssignmentView({ campaignId, campaignName, addresses }: 
     () => distributeWholeTeamGoals(addresses.length, selectedMemberIds),
     [addresses.length, selectedMemberIds]
   );
+  const previewZones = useMemo(() => {
+    if (mode === 'zone_split') return zones;
+
+    const wholeTeamZones = new Map<string, AssignmentAddress[]>();
+    const chunks = contiguousSplit(assignmentAddresses, selectedMemberIds.length);
+    selectedMemberIds.forEach((memberId, index) => {
+      wholeTeamZones.set(memberId, chunks[index] ?? []);
+    });
+    return wholeTeamZones;
+  }, [assignmentAddresses, mode, selectedMemberIds, zones]);
 
   const loadAssignments = useCallback(async () => {
     setLoading(true);
@@ -245,7 +447,19 @@ export function CampaignAssignmentView({ campaignId, campaignName, addresses }: 
     };
   }, [canManage, currentWorkspaceId]);
 
-  const selectedMembers = members.filter((member) => selectedMemberIds.includes(member.user_id));
+  const selectedMembers = useMemo(
+    () => members.filter((member) => selectedMemberIds.includes(member.user_id)),
+    [members, selectedMemberIds]
+  );
+  const zonePreviewMembers = useMemo<ZonePreviewMember[]>(
+    () =>
+      selectedMembers.map((member, index) => ({
+        user_id: member.user_id,
+        display_name: member.display_name,
+        color: COLORS[index % COLORS.length],
+      })),
+    [selectedMembers]
+  );
 
   const handleSave = useCallback(async () => {
     if (!currentWorkspaceId) {
@@ -468,6 +682,15 @@ export function CampaignAssignmentView({ campaignId, campaignName, addresses }: 
           <div className="text-xs text-muted-foreground">
             {addresses.length} campaign homes ready for assignment.
           </div>
+
+          {zonePreviewMembers.length > 0 ? (
+            <CampaignAssignmentZonePreviewMap
+              campaignId={campaignId}
+              addresses={addresses}
+              members={zonePreviewMembers}
+              zones={previewZones}
+            />
+          ) : null}
 
           {message ? <p className="text-sm text-muted-foreground">{message}</p> : null}
           {warnings.length > 0 ? (

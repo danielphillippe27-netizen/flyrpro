@@ -17,7 +17,6 @@ import {
   Plug,
   Flag
 } from 'lucide-react';
-import { FarmIcon } from '@/components/icons/FarmIcon';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -30,6 +29,8 @@ interface EntitlementSnapshot {
   source: string;
   current_period_end: string | null;
   upgrade_price_id?: string;
+  isAmbassador?: boolean;
+  planBadgeLabel?: string | null;
 }
 
 function SettingsPageContent() {
@@ -246,6 +247,8 @@ function SettingsPageContent() {
                     <p className="text-base font-medium dark:text-white">Plan</p>
                     {entitlementError ? (
                       <Badge variant="outline">Unavailable</Badge>
+                    ) : entitlement?.isAmbassador ? (
+                      <Badge className="bg-red-500 hover:bg-red-600">AMBASSADOR</Badge>
                     ) : entitlement?.is_active && (entitlement.plan === 'pro' || entitlement.plan === 'team') ? (
                       <Badge className="bg-green-500 hover:bg-green-600">Pro</Badge>
                     ) : (
@@ -255,25 +258,29 @@ function SettingsPageContent() {
                   <p className="text-sm text-gray-500 dark:text-gray-400">
                     {entitlementError
                       ? 'Could not load plan details.'
+                      : entitlement?.isAmbassador
+                      ? 'You have Pro-level access through the FLYR Ambassador Program.'
                       : entitlement?.is_active
                       ? 'You have access to all Pro features'
                       : 'Upgrade to Pro for unlimited QR codes and advanced features'}
                   </p>
                 </div>
                 <div className="flex gap-2">
-                  {!entitlementError && !entitlement?.is_active && (
+                  {!entitlementError && !entitlement?.is_active && !entitlement?.isAmbassador && (
                     <Button onClick={handleUpgrade} size="sm" disabled={upgradeLoading}>
                       {upgradeLoading ? 'Redirecting…' : 'Upgrade to Pro'}
                     </Button>
                   )}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleManageBilling}
-                    disabled={portalLoading}
-                  >
-                    {portalLoading ? 'Opening…' : 'Manage billing'}
-                  </Button>
+                  {!entitlement?.isAmbassador && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleManageBilling}
+                      disabled={portalLoading}
+                    >
+                      {portalLoading ? 'Opening…' : 'Manage billing'}
+                    </Button>
+                  )}
                 </div>
               </div>
             </CardContent>
@@ -307,36 +314,6 @@ function SettingsPageContent() {
                 >
                   <Plug className="w-4 h-4 mr-2" />
                   Manage
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <FarmIcon className="w-5 h-5" />
-                <CardTitle>Farm</CardTitle>
-              </div>
-              <CardDescription>
-                Manage reusable farm areas and repeatable session modes
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-base font-medium dark:text-white mb-1">Farm areas</p>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    Create farm territories, revisit them, and run different session modes.
-                  </p>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => router.push('/farms')}
-                >
-                  <FarmIcon className="w-4 h-4 mr-2" />
-                  Open Farm
                 </Button>
               </div>
             </CardContent>

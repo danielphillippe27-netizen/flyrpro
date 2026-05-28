@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/server';
 import { resolveDashboardAccessLevel } from '@/app/api/_utils/workspace';
 import type { MinimalSupabaseClient } from '@/app/api/_utils/workspace';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
+import { getApprovedAmbassadorByEmail } from '@/app/lib/billing/ambassador-access';
 
 /**
  * GET /api/access/state
@@ -17,6 +18,8 @@ export async function GET(request: NextRequest) {
 
     const admin = createAdminClient();
     const normalizedEmail = requestUser.email?.trim().toLowerCase() ?? null;
+    const approvedAmbassador = await getApprovedAmbassadorByEmail(admin, normalizedEmail);
+    const isAmbassador = !!approvedAmbassador;
     const salespersonLookup = normalizedEmail
       ? await admin
           .from('salespeople')
@@ -62,9 +65,13 @@ export async function GET(request: NextRequest) {
         workspaceId: null,
         workspace_id: null,
         workspaceName: null,
-        hasAccess: access.isFounder,
+        hasAccess: access.isFounder || isAmbassador,
         reason: 'no_workspace',
         isFounder: access.isFounder,
+        isAmbassador,
+        ambassadorApplicationId: approvedAmbassador?.id ?? null,
+        plan: isAmbassador ? 'ambassador' : 'free',
+        planBadgeLabel: isAmbassador ? 'AMBASSADOR' : null,
         isSalesperson,
         salesperson: salespersonLookup.data ?? null,
         accessLevel: isSalesperson ? 'salesperson' : access.level,
@@ -86,9 +93,13 @@ export async function GET(request: NextRequest) {
         workspaceId: access.workspaceId,
         workspace_id: access.workspaceId,
         workspaceName: null,
-        hasAccess: access.isFounder,
+        hasAccess: access.isFounder || isAmbassador,
         reason: 'no_workspace',
         isFounder: access.isFounder,
+        isAmbassador,
+        ambassadorApplicationId: approvedAmbassador?.id ?? null,
+        plan: isAmbassador ? 'ambassador' : 'free',
+        planBadgeLabel: isAmbassador ? 'AMBASSADOR' : null,
         accessLevel: access.level,
         memberCount: access.memberCount,
         workspaces: workspaceOptions,
@@ -102,18 +113,25 @@ export async function GET(request: NextRequest) {
     const subscriptionAccess =
       status === 'active' ||
       (status === 'trialing' && (!trialEnd || trialEnd > new Date()));
-    const hasAccess = subscriptionAccess || access.isFounder;
+    const hasAccess = subscriptionAccess || access.isFounder || isAmbassador;
     const now = Date.now();
     const trialDaysRemaining =
       status === 'trialing' && trialEnd && trialEnd.getTime() > now
         ? Math.max(0, Math.ceil((trialEnd.getTime() - now) / (24 * 60 * 60 * 1000)))
         : null;
     const planBadgeLabel =
-      status === 'active'
+      isAmbassador
+        ? 'AMBASSADOR'
+        : status === 'active'
         ? 'PRO'
         : trialDaysRemaining != null
           ? `${trialDaysRemaining} day trial`
           : null;
+    const plan = isAmbassador
+      ? 'ambassador'
+      : status === 'active' || subscriptionAccess
+        ? 'pro'
+        : 'free';
 
     return NextResponse.json({
       userId: requestUser.id,
@@ -124,11 +142,14 @@ export async function GET(request: NextRequest) {
       industry: workspace.industry ?? null,
       maxSeats: workspace.max_seats ?? 1,
       hasAccess,
+      plan,
       subscriptionStatus: status,
       trialEndsAt: workspace.trial_ends_at ?? null,
       trialDaysRemaining,
       planBadgeLabel,
       isFounder: access.isFounder,
+      isAmbassador,
+      ambassadorApplicationId: approvedAmbassador?.id ?? null,
       isSalesperson,
       salesperson: salespersonLookup.data ?? null,
       accessLevel: isSalesperson && !access.isFounder ? 'salesperson' : access.level,

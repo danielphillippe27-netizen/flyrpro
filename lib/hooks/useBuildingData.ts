@@ -82,8 +82,8 @@ export function useBuildingData(
   const [buildingExists, setBuildingExists] = useState(false);
   const [addressLinked, setAddressLinked] = useState(false);
 
-  const fetchData = useCallback(async (signal?: AbortSignal) => {
-    const isAborted = () => signal?.aborted === true;
+  const fetchData = useCallback(async (signal?: AbortSignal, isCancelled?: () => boolean) => {
+    const isAborted = () => signal?.aborted === true || isCancelled?.() === true;
 
     if (!gersId || !campaignId) {
       setIsLoading(false);
@@ -337,10 +337,13 @@ export function useBuildingData(
 
   // Fetch data when gersId or campaignId changes
   useEffect(() => {
-    const controller = new AbortController();
-    void fetchData(controller.signal);
+    let cancelled = false;
+    void fetchData(undefined, () => cancelled).catch((err) => {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
+      console.error('Error in useBuildingData effect:', err);
+    });
     return () => {
-      controller.abort();
+      cancelled = true;
     };
   }, [fetchData]);
 

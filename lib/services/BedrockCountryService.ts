@@ -66,7 +66,25 @@ type BedrockScanResult = {
     queryMs: number;
     filterMs: number;
     totalMs: number;
+    duckdb_setup_ms?: number;
+    duckdb_extension_ms?: number;
+    duckdb_credentials_ms?: number;
+    duckdb_query_ms?: number;
+    manifest_cache_hit?: boolean;
   };
+};
+
+type ManifestReadResult = {
+  manifest: ParquetManifest;
+  manifestMs: number;
+  cacheHit: boolean;
+};
+
+type DuckDbTimings = {
+  duckdb_setup_ms: number;
+  duckdb_extension_ms: number;
+  duckdb_credentials_ms: number;
+  duckdb_query_ms: number;
 };
 
 function emptyBedrockScanMetric(manifest: ParquetManifest): BedrockScanResult {
@@ -256,8 +274,19 @@ const USA_PARCEL_REGIONS = new Set([
 
 let s3Client: S3Client | null = null;
 let resolvedAwsCredentials:
-  | { accessKeyId: string; secretAccessKey: string; sessionToken?: string }
+  | { accessKeyId: string; secretAccessKey: string; sessionToken?: string; expiresAt?: number }
   | null = null;
+let awsCredentialsPromise:
+  | Promise<{ accessKeyId: string; secretAccessKey: string; sessionToken?: string; expiresAt?: number }>
+  | null = null;
+let duckdbModulePromise: Promise<typeof import('duckdb')> | null = null;
+let httpfsInstallPromise: Promise<void> | null = null;
+let httpfsInstalled = false;
+
+const AWS_CREDENTIAL_CACHE_TTL_MS = 5 * 60 * 1000;
+const AWS_CREDENTIAL_EXPIRY_SKEW_MS = 60 * 1000;
+const MANIFEST_CACHE_TTL_MS = 5 * 60 * 1000;
+const manifestCache = new Map<string, { expiresAt: number; manifest: ParquetManifest }>();
 
 function getS3Client() {
   if (!s3Client) {
@@ -282,17 +311,32 @@ async function getAwsCredentials() {
       accessKeyId: process.env.AWS_ACCESS_KEY_ID,
       secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
       sessionToken: process.env.AWS_SESSION_TOKEN,
+      expiresAt: Date.now() + AWS_CREDENTIAL_CACHE_TTL_MS,
     };
   }
-  if (!resolvedAwsCredentials) {
-    const credentials = await defaultProvider()();
-    resolvedAwsCredentials = {
-      accessKeyId: credentials.accessKeyId,
-      secretAccessKey: credentials.secretAccessKey,
-      sessionToken: credentials.sessionToken,
-    };
+  const now = Date.now();
+  if (resolvedAwsCredentials && (resolvedAwsCredentials.expiresAt ?? 0) > now + AWS_CREDENTIAL_EXPIRY_SKEW_MS) {
+    return resolvedAwsCredentials;
   }
-  return resolvedAwsCredentials;
+  if (!awsCredentialsPromise) {
+    awsCredentialsPromise = defaultProvider()()
+      .then((credentials) => {
+        const expiration = credentials.expiration instanceof Date
+          ? credentials.expiration.getTime()
+          : Date.now() + AWS_CREDENTIAL_CACHE_TTL_MS;
+        resolvedAwsCredentials = {
+          accessKeyId: credentials.accessKeyId,
+          secretAccessKey: credentials.secretAccessKey,
+          sessionToken: credentials.sessionToken,
+          expiresAt: expiration,
+        };
+        return resolvedAwsCredentials;
+      })
+      .finally(() => {
+        awsCredentialsPromise = null;
+      });
+  }
+  return awsCredentialsPromise;
 }
 
 function env(config: BedrockCountryConfig, suffix: string) {
@@ -395,8 +439,39 @@ async function s3Text(config: BedrockCountryConfig, s3Key: string) {
   return (body as { transformToString: () => Promise<string> }).transformToString();
 }
 
-async function readManifest(config: BedrockCountryConfig): Promise<ParquetManifest> {
-  return JSON.parse(await s3Text(config, layerKey(config, 'addresses', 'parquet-manifest.json'))) as ParquetManifest;
+function manifestCacheKey(config: BedrockCountryConfig, s3Key: string) {
+  return `${config.country}:addresses:${s3Key}`;
+}
+
+function cachedManifest(config: BedrockCountryConfig, s3Key: string): ParquetManifest | null {
+  const cacheKey = manifestCacheKey(config, s3Key);
+  const cached = manifestCache.get(cacheKey);
+  if (!cached) return null;
+  if (cached.expiresAt <= Date.now()) {
+    manifestCache.delete(cacheKey);
+    return null;
+  }
+  return cached.manifest;
+}
+
+function setCachedManifest(config: BedrockCountryConfig, s3Key: string, manifest: ParquetManifest) {
+  manifestCache.set(manifestCacheKey(config, s3Key), {
+    expiresAt: Date.now() + MANIFEST_CACHE_TTL_MS,
+    manifest,
+  });
+}
+
+async function readManifest(config: BedrockCountryConfig): Promise<ManifestReadResult> {
+  const startedAt = Date.now();
+  const manifestKey = layerKey(config, 'addresses', 'parquet-manifest.json');
+  const cached = cachedManifest(config, manifestKey);
+  if (cached) {
+    return { manifest: cached, manifestMs: Date.now() - startedAt, cacheHit: true };
+  }
+
+  const manifest = JSON.parse(await s3Text(config, manifestKey)) as ParquetManifest;
+  setCachedManifest(config, manifestKey, manifest);
+  return { manifest, manifestMs: Date.now() - startedAt, cacheHit: false };
 }
 
 function parquetPathsForTiles(config: BedrockCountryConfig, manifest: ParquetManifest, bbox: Bounds, regionCode?: string | null) {
@@ -463,9 +538,20 @@ function parquetPathsForTiles(config: BedrockCountryConfig, manifest: ParquetMan
   return { paths, tileZ, partitioning: 'web_mercator_xyz', tilePadding: padding };
 }
 
-async function duckDbAll(sql: string, usesRemoteFiles: boolean): Promise<BedrockParquetRow[]> {
-  const duckdbModule = await import('duckdb');
-  const duckdb = (duckdbModule.default ?? duckdbModule) as typeof duckdbModule;
+async function loadDuckDbModule() {
+  if (!duckdbModulePromise) {
+    duckdbModulePromise = import('duckdb');
+  }
+  return duckdbModulePromise;
+}
+
+async function duckDbQuery(
+  sql: string,
+  usesRemoteFiles: boolean
+): Promise<{ rows: BedrockParquetRow[]; timings: DuckDbTimings }> {
+  const setupStartedAt = Date.now();
+  const duckdbModule = await loadDuckDbModule();
+  const duckdb = ((duckdbModule as { default?: typeof duckdbModule }).default ?? duckdbModule) as typeof duckdbModule;
   const db = new duckdb.Database(':memory:');
   const all = (statement: string) =>
     new Promise<BedrockParquetRow[]>((resolve, reject) => {
@@ -474,15 +560,34 @@ async function duckDbAll(sql: string, usesRemoteFiles: boolean): Promise<Bedrock
         else resolve(rows);
       });
     });
+  const duckdbSetupMs = Date.now() - setupStartedAt;
+  let duckdbExtensionMs = 0;
+  let duckdbCredentialsMs = 0;
 
   try {
     if (usesRemoteFiles) {
+      const extensionStartedAt = Date.now();
       for (const statement of duckDbRuntimeSetupStatements()) {
         await all(statement);
       }
-      await all('INSTALL httpfs');
+      if (!httpfsInstalled) {
+        if (!httpfsInstallPromise) {
+          httpfsInstallPromise = all('INSTALL httpfs')
+            .then(() => {
+              httpfsInstalled = true;
+            })
+            .catch((error) => {
+              httpfsInstallPromise = null;
+              throw error;
+            });
+        }
+        await httpfsInstallPromise;
+      }
       await all('LOAD httpfs');
+      duckdbExtensionMs = Date.now() - extensionStartedAt;
+
       if (sql.includes('s3://')) {
+        const credentialsStartedAt = Date.now();
         await all(`SET s3_region=${sqlString(REGION)}`);
         const credentials = await getAwsCredentials();
         if (credentials?.accessKeyId && credentials.secretAccessKey) {
@@ -492,9 +597,21 @@ async function duckDbAll(sql: string, usesRemoteFiles: boolean): Promise<Bedrock
             await all(`SET s3_session_token=${sqlString(credentials.sessionToken)}`);
           }
         }
+        duckdbCredentialsMs = Date.now() - credentialsStartedAt;
       }
     }
-    return await all(sql);
+
+    const queryStartedAt = Date.now();
+    const rows = await all(sql);
+    return {
+      rows,
+      timings: {
+        duckdb_setup_ms: duckdbSetupMs,
+        duckdb_extension_ms: duckdbExtensionMs,
+        duckdb_credentials_ms: duckdbCredentialsMs,
+        duckdb_query_ms: Date.now() - queryStartedAt,
+      },
+    };
   } finally {
     db.close();
   }
@@ -583,9 +700,7 @@ export class BedrockCountryService {
     const startedAt = Date.now();
     const bbox = turf.bbox(options.polygon) as Bounds;
 
-    const manifestStartedAt = Date.now();
-    const manifest = await readManifest(this.config);
-    const manifestMs = Date.now() - manifestStartedAt;
+    const { manifest, manifestMs, cacheHit } = await readManifest(this.config);
 
     const partitionStartedAt = Date.now();
     const { paths, partitioning, tilePadding } = parquetPathsForTiles(this.config, manifest, bbox, options.regionCode);
@@ -601,12 +716,13 @@ export class BedrockCountryService {
       touchedTiles: paths.length,
       tilePadding,
       manifestMs,
+      manifestCacheHit: cacheHit,
       partitionMs,
       bbox,
     });
 
     const queryStartedAt = Date.now();
-    const rows = await duckDbAll(
+    const { rows, timings: duckDbTimings } = await duckDbQuery(
       `
         SELECT *
         FROM read_parquet([${paths.map(sqlString).join(',')}], hive_partitioning=1, union_by_name=true)
@@ -647,6 +763,8 @@ export class BedrockCountryService {
         queryMs,
         filterMs,
         totalMs,
+        ...duckDbTimings,
+        manifest_cache_hit: cacheHit,
       },
     };
 
@@ -669,7 +787,7 @@ export class BedrockCountryService {
     campaignId: string,
     regionCode?: string | null
   ): Promise<LambdaSnapshotResponse> {
-    const manifest = await readManifest(this.config);
+    const { manifest } = await readManifest(this.config);
     return this.snapshotForCampaign(campaignId, 0, emptyBedrockScanMetric(manifest), manifest, regionCode);
   }
 

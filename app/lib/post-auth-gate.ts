@@ -1,6 +1,7 @@
 import { createAdminClient, getSupabaseServerClient } from '@/lib/supabase/server';
 import { resolveDashboardAccessLevel } from '@/app/api/_utils/workspace';
 import type { MinimalSupabaseClient } from '@/app/api/_utils/workspace';
+import { getApprovedAmbassadorByEmail } from '@/app/lib/billing/ambassador-access';
 
 export type PostAuthRedirect =
   | { redirect: 'login'; path: '/login' }
@@ -79,6 +80,8 @@ export async function getPostAuthRedirectForUserId(
   );
   const { data: authUserData } = await admin.auth.admin.getUserById(userId);
   const normalizedEmail = authUserData.user?.email?.trim().toLowerCase() ?? null;
+  const approvedAmbassador = await getApprovedAmbassadorByEmail(admin, normalizedEmail);
+  const isAmbassador = !!approvedAmbassador;
   const salespersonLookup = normalizedEmail
     ? await admin
         .from('salespeople')
@@ -115,7 +118,7 @@ export async function getPostAuthRedirectForUserId(
   const hasDashboardAccess =
     subscriptionStatus === 'active' ||
     (subscriptionStatus === 'trialing' && (!trialEndsAt || trialEndsAt > new Date()));
-  const effectiveAccess = hasDashboardAccess || access.isFounder;
+  const effectiveAccess = hasDashboardAccess || access.isFounder || isAmbassador;
 
   if (access.level === 'founder') {
     return { redirect: 'dashboard', path: founderPath };

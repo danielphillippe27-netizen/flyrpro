@@ -10,6 +10,7 @@ import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { createAdminClient } from '@/lib/supabase/server';
 import { getWorkspacePowerDialerAddon } from '@/app/lib/billing/workspace-addons';
 import { normalizePhoneNumber } from '@/lib/dialer/phone';
+import { getApprovedAmbassadorByEmail } from '@/app/lib/billing/ambassador-access';
 
 type WorkspaceBilling = {
   id?: string;
@@ -78,8 +79,12 @@ export async function GET(request: NextRequest) {
     }
 
     const entitlement = await getEntitlementForUser(requestUser.id);
+    const admin = createAdminClient();
+    const approvedAmbassador = await getApprovedAmbassadorByEmail(admin, requestUser.email);
+    const isAmbassador = !!approvedAmbassador;
     const workspace = await resolvePrimaryWorkspaceBilling(requestUser.id);
     const workspaceAccess = workspaceHasAccess(workspace);
+    const effectiveAccess = entitlement.is_active || workspaceAccess || isAmbassador;
     const effectivePeriodEnd =
       entitlement.current_period_end ??
       (workspaceAccess ? workspace?.trial_ends_at ?? null : null);
@@ -90,7 +95,6 @@ export async function GET(request: NextRequest) {
     let dialerNumberStatus: string | null = null;
 
     if (workspaceId) {
-      const admin = createAdminClient();
       const [{ data: dialerSettings }, addon] = await Promise.all([
         admin
           .from('workspace_dialer_settings')
@@ -110,10 +114,12 @@ export async function GET(request: NextRequest) {
       reason: string | null;
     } = {
       plan:
-        workspaceAccess && entitlement.plan === 'free'
+        isAmbassador
+          ? 'ambassador'
+          : workspaceAccess && entitlement.plan === 'free'
           ? 'pro'
           : entitlement.plan,
-      is_active: entitlement.is_active || workspaceAccess,
+      is_active: effectiveAccess,
       source: entitlement.source,
       current_period_end: effectivePeriodEnd,
       dialer_offer: {
@@ -140,10 +146,12 @@ export async function GET(request: NextRequest) {
       dialer_number: dialerNumber,
       dialer_number_status: (dialerNumberStatus as EntitlementSnapshot['dialer_number_status']) ?? null,
       dialer_uses_shared_default: !dialerNumber,
-      canUsePro: entitlement.is_active || workspaceAccess,
-      reason: entitlement.is_active || workspaceAccess ? null : 'inactive',
+      isAmbassador,
+      planBadgeLabel: isAmbassador ? 'AMBASSADOR' : null,
+      canUsePro: effectiveAccess,
+      reason: effectiveAccess ? null : 'inactive',
     };
-    const defaultPriceId = getDefaultUpgradePriceId();
+    const defaultPriceId = isAmbassador ? '' : getDefaultUpgradePriceId();
     if (defaultPriceId) {
       snapshot.upgrade_price_id = defaultPriceId;
     }

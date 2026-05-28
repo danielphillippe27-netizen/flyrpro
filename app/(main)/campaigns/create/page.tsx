@@ -96,7 +96,7 @@ export default function CreateCampaignPage() {
               : 'Step 5/5: Finishing setup';
 
   /** Add residential-only 2D building footprints from Mapbox vector tiles.
-   *  Hides built-in style buildings and renders residential buildings as near-black at 80% opacity.
+   *  Hides built-in style buildings and renders residential buildings with theme-aware slate at 80% opacity.
    *  Works with streets-v11 / dark-v11 / satellite-streets-v12 styles. */
   const add2DBuildingsLayer = (m: mapboxgl.Map) => {
     const buildingLayerId = '2d-buildings';
@@ -106,8 +106,8 @@ export default function CreateCampaignPage() {
     // tilesets) do not have composite and will throw if we attempt
     // to add a layer from it.
     if (!m.getSource('composite')) return;
-    const buildingFill = isDark ? '#111111' : '#c8c1b2';
-    const buildingOutline = isDark ? '#0a0a0a' : '#b5ad9d';
+    const buildingFill = isDark ? '#475569' : '#cfd8e3';
+    const buildingOutline = isDark ? '#334155' : '#94a3b8';
 
     const layers = m.getStyle().layers;
 

@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { createAdminClient } from '@/lib/supabase/server';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { PartnerOfferLanding } from '@/components/landing/PartnerOfferLanding';
+import { PublicAmbassadorLanding } from '@/components/ambassador/PublicAmbassadorLanding';
 import {
   incrementPublicPartnerOfferView,
   isPublicPartnerOfferAvailable,
@@ -10,9 +11,15 @@ import {
 } from '@/lib/offers/publicPartnerOffer';
 import { buildPartnerOfferMetadata } from '@/lib/offers/partnerOfferMetadata';
 import { isPartnerOfferTeamExclusiveOnboarding } from '@/components/offers/partnerOfferUtils';
+import { loadPublicAmbassadorLandingBySlug } from '@/app/lib/ambassador/public-landing';
+import { isMissingAmbassadorSchemaError } from '@/app/lib/billing/ambassador-program';
 
 type Params = {
   params: Promise<{ slug: string }>;
+  searchParams?: Promise<{
+    source?: string;
+    campaign?: string;
+  }>;
 };
 
 export const dynamic = 'force-dynamic';
@@ -24,6 +31,16 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const offer = await loadPublicPartnerOfferByVanitySlug(admin, slug);
 
   if (!offer) {
+    const ambassadorLanding = await loadPublicAmbassadorLandingBySlug(admin, slug);
+    if (ambassadorLanding) {
+      return {
+        title: ambassadorLanding.headline || 'FLYR Partner Offer',
+        description:
+          ambassadorLanding.intro_message ||
+          'Start your 14 day free trial with a FLYR ambassador link.',
+      };
+    }
+
     return {
       title: 'Private Partner Offer',
       robots: {
@@ -42,13 +59,39 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   return buildPartnerOfferMetadata(offer);
 }
 
-export default async function PartnerOfferVanityPage({ params }: Params) {
+export default async function PartnerOfferVanityPage({ params, searchParams }: Params) {
   const { slug } = await params;
+  const query = await searchParams;
   const admin = createAdminClient();
 
   const offer = await loadPublicPartnerOfferByVanitySlug(admin, slug);
   if (!offer) {
-    notFound();
+    const landingPage = await loadPublicAmbassadorLandingBySlug(admin, slug);
+    if (!landingPage) {
+      notFound();
+    }
+
+    await admin
+      .from('ambassador_landing_page_events')
+      .insert({
+        ambassador_application_id: landingPage.ambassador.id,
+        landing_page_id: landingPage.id,
+        slug: landingPage.slug,
+        event_type: 'view',
+      })
+      .then(({ error }) => {
+        if (error && !isMissingAmbassadorSchemaError(error.message)) {
+          console.warn('[ambassador vanity page] view tracking failed', error);
+        }
+      });
+
+    return (
+      <PublicAmbassadorLanding
+        landingPage={landingPage}
+        source={query?.source}
+        campaign={query?.campaign}
+      />
+    );
   }
 
   const isAvailable = isPublicPartnerOfferAvailable(offer);

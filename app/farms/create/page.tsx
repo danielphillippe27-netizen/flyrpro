@@ -187,8 +187,8 @@ export default function CreateFarmPage() {
   const add2DBuildingsLayer = (m: mapboxgl.Map) => {
     const buildingLayerId = '2d-buildings';
     if (m.getLayer(buildingLayerId)) return;
-    const buildingFill = isDark ? '#111111' : '#c8c1b2';
-    const buildingOutline = isDark ? '#0a0a0a' : '#b5ad9d';
+    const buildingFill = isDark ? '#475569' : '#cfd8e3';
+    const buildingOutline = isDark ? '#334155' : '#94a3b8';
 
     const layers = m.getStyle().layers;
 

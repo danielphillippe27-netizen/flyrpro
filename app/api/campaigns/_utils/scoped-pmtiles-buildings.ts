@@ -7,6 +7,7 @@ import {
   resolveArtifactUrl,
   resolvePmtilesKey,
 } from '@/lib/diamond/geometry';
+import { filterLinkableBuildingFootprints } from '@/lib/geo/buildingFootprintFilter';
 
 export type ScopedBuildingFeatureCollection = {
   type: 'FeatureCollection';
@@ -131,6 +132,42 @@ function geometryBounds(geometry: GeoJSON.Geometry | null | undefined): [number,
   }
 
   return [minLon, minLat, maxLon, maxLat];
+}
+
+function normalizeLongitudeNearBbox(lon: number, bbox: [number, number, number, number]): number {
+  if (!Number.isFinite(lon)) return lon;
+  const bboxCenter = (bbox[0] + bbox[2]) / 2;
+  let normalized = lon;
+
+  while (normalized - bboxCenter > 180) normalized -= 360;
+  while (bboxCenter - normalized > 180) normalized += 360;
+
+  return normalized;
+}
+
+function normalizeGeometryLongitudes<T extends GeoJSON.Polygon | GeoJSON.MultiPolygon>(
+  geometry: T,
+  bbox: [number, number, number, number]
+): T {
+  const normalizePosition = (position: number[]) => [
+    normalizeLongitudeNearBbox(Number(position[0]), bbox),
+    Number(position[1]),
+    ...position.slice(2),
+  ];
+
+  if (geometry.type === 'Polygon') {
+    return {
+      ...geometry,
+      coordinates: geometry.coordinates.map((ring) => ring.map(normalizePosition)),
+    } as T;
+  }
+
+  return {
+    ...geometry,
+    coordinates: geometry.coordinates.map((polygon) =>
+      polygon.map((ring) => ring.map(normalizePosition))
+    ),
+  } as T;
 }
 
 function bboxesIntersect(
@@ -294,18 +331,20 @@ export async function fetchScopedPmtilesBuildingFeatures(
       const vectorFeature = layer.feature(index);
       const feature = vectorFeature.toGeoJSON(x, y, range.z) as GeoJSON.Feature;
       if (feature.geometry?.type !== 'Polygon' && feature.geometry?.type !== 'MultiPolygon') continue;
+      const geometry = normalizeGeometryLongitudes(feature.geometry, bbox);
+      const normalizedFeature = { ...feature, geometry };
 
       const properties = (feature.properties ?? {}) as Record<string, unknown>;
       const buildingId = String(properties.building_id ?? properties.gers_id ?? properties.id ?? '').trim();
       if (!buildingId || hiddenBuildingIds.has(buildingId)) continue;
 
-      if (!geometryIntersectsBbox(feature.geometry, bbox)) continue;
-      if (boundary && !featureInCampaignBoundary(feature, boundary)) continue;
+      if (!geometryIntersectsBbox(geometry, bbox)) continue;
+      if (boundary && !featureInCampaignBoundary(normalizedFeature, boundary)) continue;
 
-      const normalizedFeature: PolygonalBuildingFeature = {
+      const normalizedBuildingFeature: PolygonalBuildingFeature = {
         ...feature,
         id: buildingId,
-        geometry: feature.geometry,
+        geometry,
         properties: {
           ...properties,
           id: buildingId,
@@ -324,9 +363,9 @@ export async function fetchScopedPmtilesBuildingFeatures(
       };
       const fragments = byBuildingId.get(buildingId);
       if (fragments) {
-        fragments.push(normalizedFeature);
+        fragments.push(normalizedBuildingFeature);
       } else {
-        byBuildingId.set(buildingId, [normalizedFeature]);
+        byBuildingId.set(buildingId, [normalizedBuildingFeature]);
       }
     }
   });
@@ -334,9 +373,10 @@ export async function fetchScopedPmtilesBuildingFeatures(
   const features = Array.from(byBuildingId.entries()).map(([buildingId, fragments]) =>
     mergeBuildingFragments(buildingId, fragments)
   );
-  if (features.length === 0) return null;
+  const linkableFeatures = filterLinkableBuildingFootprints(features);
+  if (linkableFeatures.length === 0) return null;
   return {
     type: 'FeatureCollection',
-    features,
+    features: linkableFeatures,
   };
 }

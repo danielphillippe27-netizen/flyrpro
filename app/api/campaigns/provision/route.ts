@@ -83,6 +83,16 @@ function dbProvisionSource(source: ProvisionSource): ProvisionSource {
   return source;
 }
 
+function isProvisionSourceConstraintError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const maybeError = error as { code?: string; message?: string; details?: string };
+  const text = `${maybeError.message ?? ''} ${maybeError.details ?? ''}`;
+  return maybeError.code === '23514' && text.includes('campaigns_provision_source_check');
+}
+
 function sourceResolutionTimeoutMs() {
   const raw = process.env.PROVISION_SOURCE_RESOLUTION_TIMEOUT_MS;
   const parsed = raw ? Number(raw) : NaN;
@@ -313,9 +323,30 @@ async function countCampaignBuildingLinks(
       .range(from, to)
   );
 
+  const directRows = await fetchAllInPages<{
+    id: string;
+    building_id: string | null;
+    building_gers_id: string | null;
+  }>(async (from, to) =>
+    await supabase
+      .from('campaign_addresses')
+      .select('id, building_id, building_gers_id')
+      .eq('campaign_id', campaignId)
+      .range(from, to)
+  );
+
   const linkedAddressIds = new Set(rows.map((row) => row.address_id).filter(Boolean) as string[]);
+  let directOnlyLinks = 0;
+  for (const row of directRows) {
+    if (!row.building_id && !row.building_gers_id) continue;
+    if (!linkedAddressIds.has(row.id)) {
+      directOnlyLinks += 1;
+    }
+    linkedAddressIds.add(row.id);
+  }
+
   return {
-    links: rows.length,
+    links: rows.length + directOnlyLinks,
     linkedAddresses: linkedAddressIds.size,
   };
 }
@@ -457,6 +488,34 @@ async function updateCampaignProvision(
     .eq('id', campaignId);
 
   if (error) {
+    if (patch.provision_source && isProvisionSourceConstraintError(error)) {
+      const { provision_source: rejectedProvisionSource, ...retryPatch } = patch;
+
+      console.warn(
+        '[Provision] Database rejected provision_source; retrying provisioning state update without it. Apply the latest campaigns_provision_source_check migration.',
+        {
+          campaignId,
+          provision_source: rejectedProvisionSource,
+          error: error.message,
+        }
+      );
+
+      if (Object.keys(retryPatch).length === 0) {
+        return;
+      }
+
+      const { error: retryError } = await supabase
+        .from('campaigns')
+        .update(retryPatch)
+        .eq('id', campaignId);
+
+      if (!retryError) {
+        return;
+      }
+
+      throw new Error(`Failed to update campaign provisioning state: ${retryError.message}`);
+    }
+
     throw new Error(`Failed to update campaign provisioning state: ${error.message}`);
   }
 }
@@ -745,9 +804,20 @@ async function runCampaignPostProcessing(params: {
   snapshot: LambdaSnapshotResponse | null;
   insertedCount: number;
   bedrockLinkGeometry?: BedrockNzLinkGeometry | null;
+  responseMode?: 'full' | 'linker_ready';
 }) {
-  const { campaignId, polygon, regionCode, source, snapshot, insertedCount, bedrockLinkGeometry } = params;
+  const {
+    campaignId,
+    polygon,
+    regionCode,
+    source,
+    snapshot,
+    insertedCount,
+    bedrockLinkGeometry,
+    responseMode = 'full',
+  } = params;
   const supabase = createAdminClient();
+  const linkerReadyOnly = responseMode === 'linker_ready';
 
   await updateCampaignProvision(supabase, campaignId, {
     provision_phase: 'optimizing',
@@ -803,9 +873,13 @@ async function runCampaignPostProcessing(params: {
       waypointCount: number;
     } | null = null;
 
-    const skipRouteOptimization = process.env.SKIP_PROVISION_ROUTE_OPTIMIZATION === '1';
+    const skipRouteOptimization = linkerReadyOnly || process.env.SKIP_PROVISION_ROUTE_OPTIMIZATION === '1';
     if (skipRouteOptimization) {
-      console.log('[Provision] Stage 1: Route optimization skipped by SKIP_PROVISION_ROUTE_OPTIMIZATION.');
+      console.log(
+        linkerReadyOnly
+          ? '[Provision] Stage 1: Route optimization skipped for wait_for_linker response.'
+          : '[Provision] Stage 1: Route optimization skipped by SKIP_PROVISION_ROUTE_OPTIMIZATION.'
+      );
     } else if (effectiveInsertedCount >= 2) {
       console.log('[Provision] Stage 1: Building route for ALL addresses (Street-Block-Sweep-Snake)...');
       try {
@@ -993,6 +1067,7 @@ async function runCampaignPostProcessing(params: {
     });
 
     if (
+      !linkerReadyOnly &&
       linkQuality.repairRecommended &&
       parcelEnrichment &&
       parcelPreparation &&
@@ -1272,6 +1347,7 @@ export async function POST(request: NextRequest) {
 	              snapshot,
 	              insertedCount: finalAddressCount,
 	              bedrockLinkGeometry,
+	              responseMode: 'linker_ready',
 	            });
 
 	            const [{ data: postProcessCampaign }, linkSummary] = await Promise.all([

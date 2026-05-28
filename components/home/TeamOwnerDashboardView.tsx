@@ -1,13 +1,17 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { TeamControlsBar, type TeamControlsRange } from '@/components/home/team/TeamControlsBar';
 import { TeamActivityTab } from '@/components/home/team/TeamActivityTab';
 import { TeamDashboardTab } from '@/components/home/team/TeamDashboardTab';
+import { TeamReportingTab } from '@/components/home/team/TeamReportingTab';
 import { TeamSettingsTab } from '@/components/home/team/TeamSettingsTab';
 import { MemberDetailDrawer } from '@/components/home/team/MemberDetailDrawer';
 import { useWorkspace } from '@/lib/workspace-context';
+
+const TAB_VALUES = new Set(['summary', 'activity', 'reporting', 'settings']);
 
 function getInitialRange(): TeamControlsRange {
   const end = new Date();
@@ -22,8 +26,13 @@ function getInitialRange(): TeamControlsRange {
 }
 
 export function TeamOwnerDashboardView() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const { currentWorkspaceId } = useWorkspace();
-  const [activeTab, setActiveTab] = useState('summary');
+  const initialTab = searchParams.get('tab');
+  const [activeTab, setActiveTab] = useState(
+    initialTab && TAB_VALUES.has(initialTab) ? initialTab : 'summary'
+  );
   const [range, setRange] = useState<TeamControlsRange>(getInitialRange);
   const [memberIds, setMemberIds] = useState<string[]>([]);
   const [members, setMembers] = useState<{ user_id: string; display_name: string; color?: string }[]>([]);
@@ -56,6 +65,18 @@ export function TeamOwnerDashboardView() {
     fetchMembers();
   }, [fetchMembers]);
 
+  const handleTabChange = (value: string) => {
+    setActiveTab(value);
+    const params = new URLSearchParams(searchParams.toString());
+    if (value === 'summary') {
+      params.delete('tab');
+    } else {
+      params.set('tab', value);
+    }
+    const query = params.toString();
+    router.replace(query ? `/home?${query}` : '/home', { scroll: false });
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-background">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -66,8 +87,9 @@ export function TeamOwnerDashboardView() {
           memberIds={memberIds}
           onMemberFilterChange={setMemberIds}
           members={members}
+          showRangeControls={activeTab !== 'reporting'}
         />
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
           <TabsList className="mb-4 gap-1 bg-transparent p-0">
             <TabsTrigger
               value="summary"
@@ -80,6 +102,12 @@ export function TeamOwnerDashboardView() {
               className="operator-surface border border-transparent bg-transparent px-4 data-[state=active]:border-border data-[state=active]:bg-card data-[state=active]:shadow-none focus-visible:ring-0"
             >
               Activity
+            </TabsTrigger>
+            <TabsTrigger
+              value="reporting"
+              className="operator-surface border border-transparent bg-transparent px-4 data-[state=active]:border-border data-[state=active]:bg-card data-[state=active]:shadow-none focus-visible:ring-0"
+            >
+              Reporting
             </TabsTrigger>
             <TabsTrigger
               value="settings"
@@ -97,6 +125,9 @@ export function TeamOwnerDashboardView() {
           </TabsContent>
           <TabsContent value="activity">
             <TeamActivityTab range={range} memberIds={memberIds} />
+          </TabsContent>
+          <TabsContent value="reporting">
+            <TeamReportingTab memberIds={memberIds} />
           </TabsContent>
           <TabsContent value="settings">
             <TeamSettingsTab

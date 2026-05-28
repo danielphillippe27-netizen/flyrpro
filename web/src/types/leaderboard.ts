@@ -17,6 +17,8 @@ export interface LeaderboardUser {
   id: string
   name: string
   avatar_url: string | null
+  rank: number
+  pending: MetricSnapshot
   snapshots: {
     daily?: MetricSnapshot
     weekly?: MetricSnapshot

@@ -8,8 +8,7 @@ import { WorkspaceProvider, useWorkspace } from '@/lib/workspace-context';
 import AppTopHeader from '@/components/layout/AppTopHeader';
 import { MainLayoutNavProvider, useMainLayoutNav } from '@/components/layout/MainLayoutNavContext';
 import { MainRouteGuard } from '@/components/guard/MainRouteGuard';
-import { FarmIcon } from '@/components/icons/FarmIcon';
-import { Home, Trophy, Users, Settings, Target, Gauge, Plug, MessageCircle, Activity, CalendarCheck, CornerDownRight, Plus, Link2, UserRoundPlus, BriefcaseBusiness, PhoneCall, ListChecks, Search } from 'lucide-react';
+import { Home, Trophy, Users, Settings, Target, Gauge, Plug, MessageCircle, Activity, CalendarCheck, CornerDownRight, Plus, Link2, UserRoundPlus, BriefcaseBusiness, PhoneCall, ListChecks, Search, Handshake } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { DashboardAccessLevel } from '@/app/api/_utils/workspace';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
@@ -21,7 +20,6 @@ const SIDEBAR_EXPANDED_W = 160;   // 10rem – icons + labels
 const baseTabs = [
   { href: '/home', icon: Home, label: 'Home' },
   { href: '/campaigns', icon: Target, label: 'Campaign' },
-  { href: '/farms', icon: FarmIcon, label: 'Farm' },
   { href: '/activity', icon: Activity, label: 'Activity' },
   { href: '/leads', icon: Users, label: 'Leads' },
   { href: '/follow-up', icon: CornerDownRight, label: 'Follow Up' },
@@ -34,6 +32,7 @@ const baseTabs = [
 const supportTab = { href: '/support', icon: MessageCircle, label: 'Support' };
 const offersTab = { href: '/offers', icon: Link2, label: 'Offers' };
 const ambassadorsTab = { href: '/ambassadors', icon: UserRoundPlus, label: 'Ambassadors' };
+const ambassadorPortalTab = { href: '/ambassador-dashboard', icon: Handshake, label: 'Ambassador' };
 const salespeopleTab = { href: '/salespeople', icon: BriefcaseBusiness, label: 'Salespeople' };
 const settingsTab = { href: '/settings', icon: Settings, label: 'Settings' };
 const salespersonWorkspaceTabs = [
@@ -57,7 +56,6 @@ const memberTabs = baseTabs.filter((tab) =>
   [
     '/home',
     '/campaigns',
-    '/farms',
     '/leads',
     '/activity',
     '/appointments',
@@ -68,7 +66,7 @@ const memberTabs = baseTabs.filter((tab) =>
   ].includes(tab.href)
 );
 
-type TabDef = { href: string; icon: LucideIcon | typeof FarmIcon; label: string };
+type TabDef = { href: string; icon: LucideIcon; label: string };
 
 function tabIsActive(tab: TabDef, pathname: string | null): boolean {
   const isIntegrations = tab.href === '/settings/integrations';
@@ -227,7 +225,6 @@ function MainLayoutShell({
             className={cn(
               'flex flex-1 flex-col min-h-0 p-0 m-0',
               pathname?.startsWith('/campaigns') ||
-              pathname?.startsWith('/farms') ||
               pathname?.startsWith('/offers') ||
               pathname?.startsWith('/map')
                 ? 'overflow-hidden'
@@ -238,7 +235,6 @@ function MainLayoutShell({
               className={cn(
                 'flex flex-col min-h-0',
                 pathname?.startsWith('/campaigns') ||
-                pathname?.startsWith('/farms') ||
                 pathname?.startsWith('/offers') ||
                 pathname?.startsWith('/map')
                   ? 'flex-1 flex flex-col overflow-hidden min-h-0 [&>*]:flex-1 [&>*]:min-h-0'
@@ -261,6 +257,7 @@ export default function MainLayoutClient({
 }) {
   const pathname = usePathname();
   const [accessLevel, setAccessLevel] = useState<DashboardAccessLevel | null>(null);
+  const [isAmbassador, setIsAmbassador] = useState(false);
 
   useEffect(() => {
     fetch('/api/access/state', { credentials: 'include' })
@@ -268,20 +265,36 @@ export default function MainLayoutClient({
       .then((data) => {
         if (!data || typeof data.accessLevel !== 'string') {
           setAccessLevel('unassigned');
+          setIsAmbassador(false);
           return;
         }
         setAccessLevel(data.accessLevel as DashboardAccessLevel);
+        setIsAmbassador(data.isAmbassador === true);
       })
-      .catch(() => setAccessLevel('unassigned'));
+      .catch(() => {
+        setAccessLevel('unassigned');
+        setIsAmbassador(false);
+      });
   }, []);
 
   const tabs: TabDef[] = (() => {
-    if (accessLevel === 'salesperson') return salespersonWorkspaceTabs;
-    if (accessLevel === 'member') return [...memberTabs, settingsTab];
+    const withAmbassadorPortal = (items: TabDef[]) => {
+      if (!isAmbassador) return items;
+      const settingsIndex = items.findIndex((tab) => tab.href === '/settings');
+      if (settingsIndex === -1) return [...items, ambassadorPortalTab];
+      return [
+        ...items.slice(0, settingsIndex),
+        ambassadorPortalTab,
+        ...items.slice(settingsIndex),
+      ];
+    };
+
+    if (accessLevel === 'salesperson') return withAmbassadorPortal(salespersonWorkspaceTabs);
+    if (accessLevel === 'member') return withAmbassadorPortal([...memberTabs, settingsTab]);
     if (accessLevel === 'founder') {
-      return founderTabs;
+      return withAmbassadorPortal(founderTabs);
     }
-    return [...baseTabs, settingsTab];
+    return withAmbassadorPortal([...baseTabs, settingsTab]);
   })();
 
   return (

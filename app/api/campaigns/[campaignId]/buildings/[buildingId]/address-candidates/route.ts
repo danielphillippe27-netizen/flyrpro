@@ -376,7 +376,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
 
     const linkedAddressIds = new Set(((linkRows ?? []) as LinkRow[]).map((row) => row.address_id));
     const candidates = ((addressRows ?? []) as AddressRow[])
-      .filter((row) => !linkedAddressIds.has(row.id))
+      .filter((row) => !linkedAddressIds.has(row.id) && !row.building_id && !row.building_gers_id)
       .flatMap((row) => {
         const coordinate = parsePoint(row.geom);
         if (!coordinate) return [];

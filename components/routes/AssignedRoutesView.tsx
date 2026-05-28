@@ -11,7 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
 import { getMapboxToken } from '@/lib/mapbox';
-import { MAP_STATUS_CONFIG } from '@/lib/constants/mapStatus';
+import { MAP_STATUS_CONFIG, getMapUntouchedColor } from '@/lib/constants/mapStatus';
 import { useTheme } from '@/lib/theme-provider';
 import { useMapStyle } from '@/lib/map-style-provider';
 import { applyPresetVisualTweaks, applyResolvedMapStyle, getResolvedMapInitOptions, resolveMapStyle } from '@/lib/map-styles';
@@ -591,9 +591,9 @@ export function AssignedRoutesView({
       MAP_STATUS_CONFIG.NO_ONE_HOME.color,
       isTouched,
       MAP_STATUS_CONFIG.TOUCHED.color,
-      MAP_STATUS_CONFIG.UNTOUCHED.color,
+      getMapUntouchedColor(theme === 'dark'),
     ] as ExpressionSpecification;
-  }, []);
+  }, [theme]);
 
   const drawMap = useCallback((mapInstance: mapboxgl.Map) => {
     ['assigned-routes-footprints', 'assigned-routes-address-points', 'assigned-routes-address-cylinders'].forEach(

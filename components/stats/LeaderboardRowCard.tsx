@@ -20,6 +20,8 @@ function getDisplayValue(entry: LeaderboardEntry, sortBy: LeaderboardSortBy): st
       return String(entry.doorknocks);
     case 'conversations':
       return String(entry.conversations);
+    case 'leads':
+      return String(entry.leads);
     case 'distance':
       return `${entry.distance.toFixed(1)} km`;
     default:
@@ -33,11 +35,33 @@ function getSubtitle(entry: LeaderboardEntry, sortBy: LeaderboardSortBy): string
       return `${entry.doorknocks} doors`;
     case 'conversations':
       return `${entry.conversations} conversations`;
+    case 'leads':
+      return `${entry.leads} leads`;
     case 'distance':
       return `${entry.distance.toFixed(1)} km`;
     default:
       return '—';
   }
+}
+
+function getPendingValue(entry: LeaderboardEntry, sortBy: LeaderboardSortBy): number {
+  if (!entry.pending) return 0;
+  switch (sortBy) {
+    case 'conversations':
+      return entry.pending.conversations;
+    case 'leads':
+      return entry.pending.leads;
+    case 'distance':
+      return entry.pending.distance;
+    case 'doorknocks':
+    default:
+      return entry.pending.doorknocks;
+  }
+}
+
+function formatPendingValue(value: number, sortBy: LeaderboardSortBy): string {
+  const formatted = sortBy === 'distance' ? value.toFixed(1) : String(Math.round(value));
+  return `+${formatted} pending`;
 }
 
 export function LeaderboardRowCard({
@@ -53,6 +77,7 @@ export function LeaderboardRowCard({
   const value = getDisplayValue(entry, sortBy);
   const subtitle = getSubtitle(entry, sortBy);
   const countryFlag = countryCodeToFlag(entry.country_code);
+  const pendingValue = getPendingValue(entry, sortBy);
 
   return (
     <div
@@ -70,6 +95,8 @@ export function LeaderboardRowCard({
           >
             {entry.rank}
           </span>
+        ) : entry.rank <= 0 ? (
+          <span className="text-xs font-semibold text-primary">Live</span>
         ) : (
           <span className="text-base font-semibold text-muted-foreground">{entry.rank}</span>
         )}
@@ -101,6 +128,11 @@ export function LeaderboardRowCard({
         <p className="text-[1.7rem] font-bold leading-none tracking-[-0.02em] text-primary sm:text-[1.9rem]">
           {value}
         </p>
+        {pendingValue > 0 ? (
+          <p className="mt-1 rounded bg-primary/10 px-1.5 py-0.5 text-[11px] font-bold leading-tight text-primary">
+            {formatPendingValue(pendingValue, sortBy)}
+          </p>
+        ) : null}
       </div>
 
       <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
