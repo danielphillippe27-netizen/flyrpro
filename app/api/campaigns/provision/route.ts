@@ -83,6 +83,16 @@ function dbProvisionSource(source: ProvisionSource): ProvisionSource {
   return source;
 }
 
+function isProvisionSourceConstraintError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const maybeError = error as { code?: string; message?: string; details?: string };
+  const text = `${maybeError.message ?? ''} ${maybeError.details ?? ''}`;
+  return maybeError.code === '23514' && text.includes('campaigns_provision_source_check');
+}
+
 function sourceResolutionTimeoutMs() {
   const raw = process.env.PROVISION_SOURCE_RESOLUTION_TIMEOUT_MS;
   const parsed = raw ? Number(raw) : NaN;
@@ -478,6 +488,34 @@ async function updateCampaignProvision(
     .eq('id', campaignId);
 
   if (error) {
+    if (patch.provision_source && isProvisionSourceConstraintError(error)) {
+      const { provision_source: rejectedProvisionSource, ...retryPatch } = patch;
+
+      console.warn(
+        '[Provision] Database rejected provision_source; retrying provisioning state update without it. Apply the latest campaigns_provision_source_check migration.',
+        {
+          campaignId,
+          provision_source: rejectedProvisionSource,
+          error: error.message,
+        }
+      );
+
+      if (Object.keys(retryPatch).length === 0) {
+        return;
+      }
+
+      const { error: retryError } = await supabase
+        .from('campaigns')
+        .update(retryPatch)
+        .eq('id', campaignId);
+
+      if (!retryError) {
+        return;
+      }
+
+      throw new Error(`Failed to update campaign provisioning state: ${retryError.message}`);
+    }
+
     throw new Error(`Failed to update campaign provisioning state: ${error.message}`);
   }
 }
