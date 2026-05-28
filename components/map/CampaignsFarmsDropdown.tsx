@@ -3,9 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { CampaignsListView } from '@/components/home/CampaignsListView';
-import { FarmListView } from '@/components/home/FarmListView';
 import { List } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
@@ -39,22 +37,12 @@ export function CampaignsFarmsDropdown({ onCampaignSelect }: CampaignsFarmsDropd
       </DialogTrigger>
       <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
         <DialogHeader>
-          <DialogTitle>Campaign & Farms</DialogTitle>
+          <DialogTitle>Campaigns</DialogTitle>
         </DialogHeader>
-        <Tabs defaultValue="campaigns" className="flex-1 overflow-hidden flex flex-col min-h-0">
-          <TabsList className="grid w-full grid-cols-2 shrink-0">
-            <TabsTrigger value="campaigns">Campaign</TabsTrigger>
-            <TabsTrigger value="farms">Farms</TabsTrigger>
-          </TabsList>
-          <TabsContent value="campaigns" className="flex-1 overflow-y-auto mt-4 min-h-0">
-            <CampaignsListView userId={userId} onCampaignSelect={handleCampaignSelect} />
-          </TabsContent>
-          <TabsContent value="farms" className="flex-1 overflow-y-auto mt-4 min-h-0">
-            <FarmListView userId={userId} />
-          </TabsContent>
-        </Tabs>
+        <div className="flex-1 overflow-y-auto mt-4 min-h-0">
+          <CampaignsListView userId={userId} onCampaignSelect={handleCampaignSelect} />
+        </div>
       </DialogContent>
     </Dialog>
   );
 }
-
