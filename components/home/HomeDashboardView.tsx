@@ -48,6 +48,7 @@ type HomeDashboardViewProps = {
 };
 
 const dashboardCache = new Map<string, { data: HomeDashboardData; fetchedAt: number }>();
+const inFlightWorkspaceIds = new Set<string>();
 const CACHE_TTL_MS = 30_000;
 
 export function HomeDashboardView({ disableGoalEditing = false }: HomeDashboardViewProps) {
@@ -68,6 +69,9 @@ export function HomeDashboardView({ disableGoalEditing = false }: HomeDashboardV
       return;
     }
 
+    if (inFlightWorkspaceIds.has(currentWorkspaceId)) return;
+    inFlightWorkspaceIds.add(currentWorkspaceId);
+
     setLoading(true);
     setError(null);
     try {
@@ -77,6 +81,7 @@ export function HomeDashboardView({ disableGoalEditing = false }: HomeDashboardV
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load');
     } finally {
+      inFlightWorkspaceIds.delete(currentWorkspaceId);
       setLoading(false);
     }
   }, [currentWorkspaceId]);
