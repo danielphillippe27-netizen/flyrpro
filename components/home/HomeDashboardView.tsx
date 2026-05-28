@@ -47,6 +47,10 @@ type HomeDashboardViewProps = {
   disableGoalEditing?: boolean;
 };
 
+const dashboardCache = new Map<string, { data: HomeDashboardData; fetchedAt: number }>();
+const inFlightWorkspaceIds = new Set<string>();
+const CACHE_TTL_MS = 30_000;
+
 export function HomeDashboardView({ disableGoalEditing = false }: HomeDashboardViewProps) {
   const { currentWorkspace, currentWorkspaceId } = useWorkspace();
   const copy = getIndustryCopy(currentWorkspace?.industry);
@@ -55,14 +59,29 @@ export function HomeDashboardView({ disableGoalEditing = false }: HomeDashboardV
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    if (!currentWorkspaceId) return;
+
+    const cacheKey = currentWorkspaceId;
+    const cached = dashboardCache.get(cacheKey);
+    if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
+      setData(cached.data);
+      setLoading(false);
+      return;
+    }
+
+    if (inFlightWorkspaceIds.has(currentWorkspaceId)) return;
+    inFlightWorkspaceIds.add(currentWorkspaceId);
+
     setLoading(true);
     setError(null);
     try {
       const res = await fetchHomeDashboard(currentWorkspaceId);
+      dashboardCache.set(cacheKey, { data: res, fetchedAt: Date.now() });
       setData(res);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load');
     } finally {
+      inFlightWorkspaceIds.delete(currentWorkspaceId);
       setLoading(false);
     }
   }, [currentWorkspaceId]);

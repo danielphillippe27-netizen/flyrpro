@@ -18,30 +18,33 @@ export async function GET(request: NextRequest) {
 
     const admin = createAdminClient();
     const normalizedEmail = requestUser.email?.trim().toLowerCase() ?? null;
-    const approvedAmbassador = await getApprovedAmbassadorByEmail(admin, normalizedEmail);
+    const [approvedAmbassador, salespersonLookup, membershipResult] = await Promise.all([
+      getApprovedAmbassadorByEmail(admin, normalizedEmail),
+      normalizedEmail
+        ? admin
+            .from('salespeople')
+            .select('id, full_name, email, status')
+            .eq('email', normalizedEmail)
+            .eq('status', 'active')
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+      admin
+        .from('workspace_members')
+        .select('workspace_id, role, created_at')
+        .eq('user_id', requestUser.id)
+        .order('created_at', { ascending: true }),
+    ]);
     const isAmbassador = !!approvedAmbassador;
-    const salespersonLookup = normalizedEmail
-      ? await admin
-          .from('salespeople')
-          .select('id, full_name, email, status')
-          .eq('email', normalizedEmail)
-          .eq('status', 'active')
-          .maybeSingle()
-      : { data: null, error: null };
     const isSalesperson = !!salespersonLookup.data && !salespersonLookup.error;
     const requestedWorkspaceId = request.nextUrl.searchParams.get('workspaceId')?.trim() || null;
-    const { data: membershipRows } = await admin
-      .from('workspace_members')
-      .select('workspace_id, role, created_at')
-      .eq('user_id', requestUser.id)
-      .order('created_at', { ascending: true });
+    const membershipRows = membershipResult.data ?? [];
     const workspaceIds = Array.from(
       new Set((membershipRows ?? []).map((row) => row.workspace_id).filter(Boolean))
     );
     const { data: workspaceRows } = workspaceIds.length
       ? await admin
           .from('workspaces')
-          .select('id, name, industry')
+          .select('id, name, industry, subscription_status, trial_ends_at, max_seats, onboarding_completed_at')
           .in('id', workspaceIds)
       : { data: [] };
     const workspaceOptions = (workspaceRows ?? []).map((workspace) => {
@@ -56,7 +59,11 @@ export async function GET(request: NextRequest) {
     const access = await resolveDashboardAccessLevel(
       admin as unknown as MinimalSupabaseClient,
       requestUser.id,
-      requestedWorkspaceId
+      requestedWorkspaceId,
+      {
+        memberships: membershipRows,
+        workspaces: workspaceRows ?? [],
+      }
     );
     if (!access.workspaceId) {
       return NextResponse.json({
@@ -75,16 +82,13 @@ export async function GET(request: NextRequest) {
         isSalesperson,
         salesperson: salespersonLookup.data ?? null,
         accessLevel: isSalesperson ? 'salesperson' : access.level,
+        onboardingComplete: false,
         memberCount: access.memberCount,
         workspaces: workspaceOptions,
       });
     }
 
-    const { data: workspace } = await admin
-      .from('workspaces')
-      .select('id, name, industry, subscription_status, trial_ends_at, max_seats')
-      .eq('id', access.workspaceId)
-      .single();
+    const workspace = (workspaceRows ?? []).find((row) => row.id === access.workspaceId) ?? null;
 
     if (!workspace) {
       return NextResponse.json({
@@ -101,6 +105,7 @@ export async function GET(request: NextRequest) {
         plan: isAmbassador ? 'ambassador' : 'free',
         planBadgeLabel: isAmbassador ? 'AMBASSADOR' : null,
         accessLevel: access.level,
+        onboardingComplete: false,
         memberCount: access.memberCount,
         workspaces: workspaceOptions,
       });
@@ -153,6 +158,7 @@ export async function GET(request: NextRequest) {
       isSalesperson,
       salesperson: salespersonLookup.data ?? null,
       accessLevel: isSalesperson && !access.isFounder ? 'salesperson' : access.level,
+      onboardingComplete: !!workspace.onboarding_completed_at,
       memberCount: access.memberCount,
       workspaces: workspaceOptions,
       reason:

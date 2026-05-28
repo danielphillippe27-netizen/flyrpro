@@ -28,11 +28,6 @@ type UserProfileLite = {
   countryCode: string | null;
 };
 
-type AccessStatePayload = {
-  isFounder?: boolean;
-  planBadgeLabel?: string | null;
-};
-
 function initialsFromName(nameOrEmail: string | null): string {
   const value = (nameOrEmail ?? '').trim();
   if (!value) return 'U';
@@ -44,7 +39,13 @@ function initialsFromName(nameOrEmail: string | null): string {
 export default function AppTopHeader() {
   const { theme, toggleTheme } = useTheme();
   const { isFullscreen, toggle: toggleFullscreen } = useFullscreen();
-  const { currentWorkspace, membershipsByWorkspaceId, refreshWorkspaces } = useWorkspace();
+  const {
+    currentWorkspace,
+    membershipsByWorkspaceId,
+    refreshWorkspaces,
+    isFounder,
+    planBadgeLabel,
+  } = useWorkspace();
   const [profile, setProfile] = useState<UserProfileLite>({
     email: null,
     fullName: null,
@@ -56,30 +57,8 @@ export default function AppTopHeader() {
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
   const [feedbackSuccess, setFeedbackSuccess] = useState<string | null>(null);
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
-  const [isFounder, setIsFounder] = useState<boolean>(false);
-  const [planBadgeLabel, setPlanBadgeLabel] = useState<string | null>(null);
   const [profileEditOpen, setProfileEditOpen] = useState(false);
   const mainLayoutNav = useMainLayoutNav();
-
-  useEffect(() => {
-    let mounted = true;
-    fetch('/api/access/state', { credentials: 'include' })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (!mounted || !data) return;
-        const payload = data as AccessStatePayload;
-        if (typeof payload.isFounder === 'boolean') {
-          setIsFounder(payload.isFounder);
-        }
-        if (typeof payload.planBadgeLabel === 'string') {
-          setPlanBadgeLabel(payload.planBadgeLabel);
-        } else {
-          setPlanBadgeLabel(null);
-        }
-      })
-      .catch(() => {});
-    return () => { mounted = false; };
-  }, []);
 
   const refreshProfile = useCallback(() => {
     getClientAsync()

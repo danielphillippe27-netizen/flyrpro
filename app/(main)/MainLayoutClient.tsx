@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { WorkspaceProvider, useWorkspace } from '@/lib/workspace-context';
 import AppTopHeader from '@/components/layout/AppTopHeader';
@@ -255,24 +255,29 @@ export default function MainLayoutClient({
 }: {
   children: React.ReactNode;
 }) {
+  return (
+    <WorkspaceProvider>
+      <MainLayoutContent>{children}</MainLayoutContent>
+    </WorkspaceProvider>
+  );
+}
+
+function MainLayoutContent({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   const pathname = usePathname();
-  const [accessLevel, setAccessLevel] = useState<DashboardAccessLevel | null>(null);
+  const { accessLevel } = useWorkspace();
   const [isAmbassador, setIsAmbassador] = useState(false);
 
   useEffect(() => {
     fetch('/api/access/state', { credentials: 'include' })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (!data || typeof data.accessLevel !== 'string') {
-          setAccessLevel('unassigned');
-          setIsAmbassador(false);
-          return;
-        }
-        setAccessLevel(data.accessLevel as DashboardAccessLevel);
-        setIsAmbassador(data.isAmbassador === true);
+        setIsAmbassador(data?.isAmbassador === true);
       })
       .catch(() => {
-        setAccessLevel('unassigned');
         setIsAmbassador(false);
       });
   }, []);
@@ -298,14 +303,12 @@ export default function MainLayoutClient({
   })();
 
   return (
-    <WorkspaceProvider>
-      <MainRouteGuard>
-        <MainLayoutNavProvider>
-          <MainLayoutShell tabs={tabs} pathname={pathname} accessLevel={accessLevel}>
-            {children}
-          </MainLayoutShell>
-        </MainLayoutNavProvider>
-      </MainRouteGuard>
-    </WorkspaceProvider>
+    <MainRouteGuard>
+      <MainLayoutNavProvider>
+        <MainLayoutShell tabs={tabs} pathname={pathname} accessLevel={accessLevel}>
+          {children}
+        </MainLayoutShell>
+      </MainLayoutNavProvider>
+    </MainRouteGuard>
   );
 }
