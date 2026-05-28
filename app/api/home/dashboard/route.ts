@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { unstable_cache } from 'next/cache';
 import { getSupabaseServerClient, createAdminClient } from '@/lib/supabase/server';
 import { resolveWorkspaceIdForUser, type MinimalSupabaseClient } from '@/app/api/_utils/workspace';
 
@@ -34,32 +33,6 @@ type ContactMetricRow = {
   appointment_at?: string | null;
   created_at: string | null;
   updated_at: string | null;
-};
-
-type DashboardPayload = {
-  user: { firstName: string; fullName: string };
-  stats: {
-    doorsAllTime: number;
-    conversationsAllTime: number;
-    totalMinutesAllTime: number;
-    doorsThisWeek: number;
-    minutesThisWeek: number;
-    sessionsThisWeek: number;
-    dayStreak: number;
-  };
-  weeklyGoals: {
-    doors: number;
-    sessions?: number;
-    minutes?: number;
-  };
-  recentCampaigns: { id: string; name: string }[];
-  lastSessionAt: string | null;
-  metrics: {
-    doors: number;
-    convos: number;
-    leads: number;
-    appointments: number;
-  };
 };
 
 function isMissingRelation(error: unknown, relation: string): boolean {
@@ -234,16 +207,6 @@ export async function GET(request: Request) {
       );
     }
     const targetWorkspaceId = workspaceResolution.workspaceId;
-    const { data: membershipData } = await supabase
-      .from('workspace_members')
-      .select('role')
-      .eq('workspace_id', targetWorkspaceId)
-      .eq('user_id', userId)
-      .maybeSingle();
-
-    const membership = (membershipData ?? null) as WorkspaceMembershipRow | null;
-    const getCachedDashboard = unstable_cache(
-      async (): Promise<DashboardPayload> => {
     const startOfWeek = getStartOfWeekUTC();
 
     // Run independent fetches in parallel
@@ -317,6 +280,15 @@ export async function GET(request: Request) {
     let weeklyDoorGoal = profile?.weekly_door_goal ?? 100;
     let weeklySessionsGoal = profile?.weekly_sessions_goal ?? undefined;
     let weeklyMinutesGoal = profile?.weekly_minutes_goal ?? undefined;
+
+    const { data: membershipData } = await supabase
+      .from('workspace_members')
+      .select('role')
+      .eq('workspace_id', targetWorkspaceId)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    const membership = (membershipData ?? null) as WorkspaceMembershipRow | null;
 
     if (membership?.role === 'member') {
       const [{ data: workspaceGoalsData }, { data: workspaceMembersData }] = await Promise.all([
@@ -428,7 +400,7 @@ export async function GET(request: Request) {
       metricAppointments = contactSummary.appointments;
     }
 
-    const body: DashboardPayload = {
+    const body = {
       user: { firstName, fullName },
       stats: {
         doorsAllTime,
@@ -454,13 +426,6 @@ export async function GET(request: Request) {
       },
     };
 
-    return body;
-      },
-      ['home-dashboard', userId, targetWorkspaceId],
-      { revalidate: 30 }
-    );
-
-    const body = await getCachedDashboard();
     return NextResponse.json(body);
   } catch (err) {
     console.error('Home dashboard error:', err);
