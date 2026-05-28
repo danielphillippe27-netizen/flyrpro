@@ -53,6 +53,13 @@ type PrefetchedWorkspaceRow = {
 type ResolveDashboardAccessOptions = {
   memberships?: PrefetchedMembershipRow[];
   workspaces?: PrefetchedWorkspaceRow[];
+  userProfile?: UserProfileAccessRow | null;
+};
+
+type UserProfileAccessRow = {
+  user_id?: string | null;
+  current_workspace_id?: string | null;
+  is_founder?: boolean | null;
 };
 
 function roleRank(role: string | null | undefined): number {
@@ -78,21 +85,20 @@ function classifyDashboardAccessLevel(
   return 'unassigned';
 }
 
-async function checkIsFounder(
+async function getUserProfileAccess(
   supabase: MinimalSupabaseClient,
   userId: string
-): Promise<boolean> {
+): Promise<UserProfileAccessRow | null> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const supabaseAny = supabase as any;
 
-  const { data: founderProfile } = await supabaseAny
+  const { data: profile } = await supabaseAny
     .from('user_profiles')
-    .select('user_id')
+    .select('user_id, current_workspace_id, is_founder')
     .eq('user_id', userId)
-    .eq('is_founder', true)
     .maybeSingle();
 
-  return !!founderProfile?.user_id;
+  return profile ?? null;
 }
 
 export async function resolveDashboardAccessLevel(
@@ -104,15 +110,20 @@ export async function resolveDashboardAccessLevel(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const supabaseAny = supabase as any;
 
-  const [isFounder, resolution] = await Promise.all([
-    checkIsFounder(supabase, userId),
+  const profilePromise = options.userProfile
+    ? Promise.resolve(options.userProfile)
+    : getUserProfileAccess(supabase, userId);
+  const [profile, resolution] = await Promise.all([
+    profilePromise,
     resolveWorkspaceIdForUser(
       supabase,
       userId,
       requestedWorkspaceId,
-      options.memberships
+      options.memberships,
+      profilePromise
     ),
   ]);
+  const isFounder = profile?.is_founder === true;
   if (!resolution.workspaceId) {
     if (isFounder) {
       return {
@@ -272,7 +283,8 @@ export async function resolveWorkspaceIdForUser(
   supabase: MinimalSupabaseClient,
   userId: string,
   requestedWorkspaceId?: string | null,
-  prefetchedMemberships?: PrefetchedMembershipRow[]
+  prefetchedMemberships?: PrefetchedMembershipRow[],
+  prefetchedProfile?: UserProfileAccessRow | null | Promise<UserProfileAccessRow | null>
 ): Promise<{ workspaceId: string | null; error?: string; status?: number }> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const supabaseAny = supabase as any;
@@ -303,11 +315,13 @@ export async function resolveWorkspaceIdForUser(
     return { workspaceId: membership.workspace_id };
   }
 
-  const { data: preferredProfile } = await supabaseAny
-    .from('user_profiles')
-    .select('current_workspace_id')
-    .eq('user_id', userId)
-    .maybeSingle();
+  const preferredProfile = prefetchedProfile !== undefined
+    ? await prefetchedProfile
+    : (await supabaseAny
+        .from('user_profiles')
+        .select('user_id, current_workspace_id, is_founder')
+        .eq('user_id', userId)
+        .maybeSingle()).data;
 
   const preferredWorkspaceId =
     typeof preferredProfile?.current_workspace_id === 'string'
