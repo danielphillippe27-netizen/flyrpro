@@ -75,6 +75,7 @@ export async function GET(request: NextRequest) {
         isSalesperson,
         salesperson: salespersonLookup.data ?? null,
         accessLevel: isSalesperson ? 'salesperson' : access.level,
+        onboardingComplete: false,
         memberCount: access.memberCount,
         workspaces: workspaceOptions,
       });
@@ -82,7 +83,7 @@ export async function GET(request: NextRequest) {
 
     const { data: workspace } = await admin
       .from('workspaces')
-      .select('id, name, industry, subscription_status, trial_ends_at, max_seats')
+      .select('id, name, industry, subscription_status, trial_ends_at, max_seats, onboarding_completed_at')
       .eq('id', access.workspaceId)
       .single();
 
@@ -101,6 +102,7 @@ export async function GET(request: NextRequest) {
         plan: isAmbassador ? 'ambassador' : 'free',
         planBadgeLabel: isAmbassador ? 'AMBASSADOR' : null,
         accessLevel: access.level,
+        onboardingComplete: false,
         memberCount: access.memberCount,
         workspaces: workspaceOptions,
       });
@@ -153,6 +155,7 @@ export async function GET(request: NextRequest) {
       isSalesperson,
       salesperson: salespersonLookup.data ?? null,
       accessLevel: isSalesperson && !access.isFounder ? 'salesperson' : access.level,
+      onboardingComplete: !!workspace.onboarding_completed_at,
       memberCount: access.memberCount,
       workspaces: workspaceOptions,
       reason:

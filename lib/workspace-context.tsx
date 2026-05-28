@@ -49,6 +49,7 @@ type WorkspaceContextValue = {
   accessLevel: DashboardAccessLevel | null;
   isFounder: boolean;
   planBadgeLabel: string | null;
+  redirectPath: string | null;
   isLoading: boolean;
   error: string | null;
   setCurrentWorkspaceId: (workspaceId: string) => void;
@@ -81,15 +82,53 @@ type AccessStateRow = {
   workspaceName?: string | null;
   industry?: string | null;
   role?: WorkspaceRole | null;
+  hasAccess?: boolean | null;
   memberCount?: number | null;
   accessLevel?: DashboardAccessLevel | null;
   isFounder?: boolean | null;
+  isSalesperson?: boolean | null;
   planBadgeLabel?: string | null;
+  onboardingComplete?: boolean | null;
+  unauthorized?: boolean;
 };
 
 type WorkspacePreferenceRow = {
   current_workspace_id?: string | null;
 };
+
+function computeRedirectPath(state: AccessStateRow, pathname: string): string | null {
+  if (pathname.startsWith('/reset-password')) return null;
+
+  const url = new URL(pathname, 'http://localhost');
+  const inviteToken = url.searchParams.get('token');
+  if (pathname.startsWith('/join') && inviteToken) return null;
+
+  const workspaceId = state.workspaceId || state.workspace_id || null;
+  if (!workspaceId) {
+    if (state.isFounder) return '/admin';
+    return '/download-ios?next=/onboarding';
+  }
+
+  if (state.accessLevel === 'founder') return null;
+  if (state.isSalesperson) return null;
+
+  if (!state.onboardingComplete && state.role === 'owner') {
+    return '/download-ios?next=/onboarding';
+  }
+
+  if (state.role === 'member' && !state.hasAccess) {
+    return '/subscribe?reason=member-inactive';
+  }
+
+  if (!state.hasAccess) return '/subscribe';
+
+  return null;
+}
+
+function currentPathWithSearch(): string {
+  if (typeof window === 'undefined') return '/home';
+  return `${window.location.pathname}${window.location.search}`;
+}
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -100,6 +139,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [accessLevel, setAccessLevel] = useState<DashboardAccessLevel | null>(null);
   const [isFounder, setIsFounder] = useState(false);
   const [planBadgeLabel, setPlanBadgeLabel] = useState<string | null>(null);
+  const [redirectPath, setRedirectPath] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const initialLoadDoneRef = useRef(false);
@@ -111,15 +151,28 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setAccessLevel(null);
     setIsFounder(false);
     setPlanBadgeLabel(null);
+    setRedirectPath(null);
 
     const accessStatePromise = fetch('/api/access/state', { credentials: 'include' })
-      .then((response) => (response.ok ? response.json() as Promise<AccessStateRow> : null))
+      .then((response) => {
+        if (response.status === 401) return { unauthorized: true } satisfies AccessStateRow;
+        return response.ok ? response.json() as Promise<AccessStateRow> : null;
+      })
       .catch(() => null);
 
     const applyAccessState = (data: AccessStateRow | null) => {
+      if (data?.unauthorized) {
+        setAccessLevel(null);
+        setIsFounder(false);
+        setPlanBadgeLabel(null);
+        setRedirectPath('/login');
+        return;
+      }
+
       setAccessLevel(typeof data?.accessLevel === 'string' ? data.accessLevel : null);
       setIsFounder(data?.isFounder === true);
       setPlanBadgeLabel(typeof data?.planBadgeLabel === 'string' ? data.planBadgeLabel : null);
+      setRedirectPath(data ? computeRedirectPath(data, currentPathWithSearch()) : null);
     };
 
     try {
@@ -452,6 +505,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       accessLevel,
       isFounder,
       planBadgeLabel,
+      redirectPath,
       isLoading,
       error,
       setCurrentWorkspaceId,
@@ -466,6 +520,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       accessLevel,
       isFounder,
       planBadgeLabel,
+      redirectPath,
       isLoading,
       error,
       setCurrentWorkspaceId,
