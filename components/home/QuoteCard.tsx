@@ -20,6 +20,8 @@ interface QuoteCardProps {
   noCard?: boolean;
 }
 
+const inFlightDailyContent = new Set<string>();
+
 export function QuoteCard({ className, noCard }: QuoteCardProps) {
   const [content, setContent] = useState<DailyContent | null>(null);
   const [loading, setLoading] = useState(true);
@@ -30,6 +32,10 @@ export function QuoteCard({ className, noCard }: QuoteCardProps) {
   }, []);
 
   const fetchDailyContent = async () => {
+    const requestKey = 'daily-content';
+    if (inFlightDailyContent.has(requestKey)) return;
+    inFlightDailyContent.add(requestKey);
+
     try {
       setLoading(true);
       setError(null);
@@ -49,6 +55,7 @@ export function QuoteCard({ className, noCard }: QuoteCardProps) {
       console.error('Error fetching daily content:', err);
       setError('Could not load daily inspiration');
     } finally {
+      inFlightDailyContent.delete(requestKey);
       setLoading(false);
     }
   };

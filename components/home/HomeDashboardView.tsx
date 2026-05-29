@@ -8,7 +8,6 @@ import { HomeMetricsRow } from './HomeMetricsRow';
 import { StatsOverviewCard } from './StatsOverviewCard';
 import { QuoteCard } from './QuoteCard';
 import { RecentSnapshot } from './RecentSnapshot';
-import { WeeklyAccountabilityBanner } from './WeeklyAccountabilityBanner';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent } from '@/components/ui/card';
@@ -139,7 +138,9 @@ export function HomeDashboardView({ disableGoalEditing = false }: HomeDashboardV
         lastSessionAt={lastSessionAt}
       />
 
-      <WeeklyAccountabilityBanner />
+      {/* TODO: Re-enable when accountability_posts migration is applied
+          <WeeklyAccountabilityBanner />
+      */}
 
       <QuoteCard noCard className="min-h-[160px]" />
 
