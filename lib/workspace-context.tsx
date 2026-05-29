@@ -48,6 +48,7 @@ type WorkspaceContextValue = {
   currentWorkspaceId: string | null;
   accessLevel: DashboardAccessLevel | null;
   isFounder: boolean;
+  isAmbassador: boolean;
   planBadgeLabel: string | null;
   redirectPath: string | null;
   isLoading: boolean;
@@ -86,6 +87,7 @@ type AccessStateRow = {
   memberCount?: number | null;
   accessLevel?: DashboardAccessLevel | null;
   isFounder?: boolean | null;
+  isAmbassador?: boolean | null;
   isSalesperson?: boolean | null;
   planBadgeLabel?: string | null;
   onboardingComplete?: boolean | null;
@@ -138,6 +140,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [accessLevel, setAccessLevel] = useState<DashboardAccessLevel | null>(null);
   const [isFounder, setIsFounder] = useState(false);
+  const [isAmbassador, setIsAmbassador] = useState(false);
   const [planBadgeLabel, setPlanBadgeLabel] = useState<string | null>(null);
   const [redirectPath, setRedirectPath] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -150,6 +153,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setError(null);
     setAccessLevel(null);
     setIsFounder(false);
+    setIsAmbassador(false);
     setPlanBadgeLabel(null);
     setRedirectPath(null);
 
@@ -164,6 +168,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       if (data?.unauthorized) {
         setAccessLevel(null);
         setIsFounder(false);
+        setIsAmbassador(false);
         setPlanBadgeLabel(null);
         setRedirectPath('/login');
         return;
@@ -171,6 +176,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
       setAccessLevel(typeof data?.accessLevel === 'string' ? data.accessLevel : null);
       setIsFounder(data?.isFounder === true);
+      setIsAmbassador(data?.isAmbassador === true);
       setPlanBadgeLabel(typeof data?.planBadgeLabel === 'string' ? data.planBadgeLabel : null);
       setRedirectPath(data ? computeRedirectPath(data, currentPathWithSearch()) : null);
     };
@@ -504,6 +510,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       currentWorkspaceId,
       accessLevel,
       isFounder,
+      isAmbassador,
       planBadgeLabel,
       redirectPath,
       isLoading,
@@ -519,6 +526,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       currentWorkspaceId,
       accessLevel,
       isFounder,
+      isAmbassador,
       planBadgeLabel,
       redirectPath,
       isLoading,
