@@ -80,33 +80,23 @@ async function getLifetimeSessionTotals(
   supabase: ReturnType<typeof createAdminClient>,
   userId: string
 ): Promise<{ doors_hit: number; conversations: number } | null> {
-  const [doorsResult, convsResult] = await Promise.all([
-    supabase
-      .from('sessions')
-      .select('doors_hit')
-      .eq('user_id', userId)
-      .not('end_time', 'is', null),
-    supabase
-      .from('sessions')
-      .select('conversations')
-      .eq('user_id', userId)
-      .not('end_time', 'is', null),
-  ]);
+  const { data: totals, error } = await supabase
+    .rpc('get_lifetime_session_totals', { p_user_id: userId });
 
-  if (doorsResult.error || convsResult.error) {
-    const error = doorsResult.error ?? convsResult.error;
+  if (error) {
     if (isMissingRelation(error, 'sessions')) {
       return null;
     }
-    throw new Error(error?.message || 'Failed to load session totals');
+    throw new Error(error.message || 'Failed to load session totals');
   }
 
-  const doorRows = (doorsResult.data ?? []) as Array<{ doors_hit?: number | null }>;
-  const conversationRows = (convsResult.data ?? []) as Array<{ conversations?: number | null }>;
+  const rows = (totals ?? []) as Array<{ doors_hit?: number | string | null; conversations?: number | string | null }>;
+  const row = rows[0];
+  if (!row) return null;
 
   return {
-    doors_hit: doorRows.reduce((total, row) => total + (Number(row.doors_hit ?? 0) || 0), 0),
-    conversations: conversationRows.reduce((total, row) => total + (Number(row.conversations ?? 0) || 0), 0),
+    doors_hit: Number(row.doors_hit ?? 0) || 0,
+    conversations: Number(row.conversations ?? 0) || 0,
   };
 }
 
