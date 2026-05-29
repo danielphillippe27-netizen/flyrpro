@@ -6,10 +6,12 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
 import { getClientAsync } from '@/lib/supabase/client';
+import type { DashboardAccessLevel } from '@/app/api/_utils/workspace';
 
 const CURRENT_WORKSPACE_STORAGE_KEY = 'flyr.currentWorkspaceId';
 function workspaceStorageKeyForUser(userId: string): string {
@@ -44,6 +46,10 @@ type WorkspaceContextValue = {
   memberCountByWorkspaceId: Record<string, number>;
   currentWorkspace: Workspace | null;
   currentWorkspaceId: string | null;
+  accessLevel: DashboardAccessLevel | null;
+  isFounder: boolean;
+  planBadgeLabel: string | null;
+  redirectPath: string | null;
   isLoading: boolean;
   error: string | null;
   setCurrentWorkspaceId: (workspaceId: string) => void;
@@ -76,12 +82,53 @@ type AccessStateRow = {
   workspaceName?: string | null;
   industry?: string | null;
   role?: WorkspaceRole | null;
+  hasAccess?: boolean | null;
   memberCount?: number | null;
+  accessLevel?: DashboardAccessLevel | null;
+  isFounder?: boolean | null;
+  isSalesperson?: boolean | null;
+  planBadgeLabel?: string | null;
+  onboardingComplete?: boolean | null;
+  unauthorized?: boolean;
 };
 
 type WorkspacePreferenceRow = {
   current_workspace_id?: string | null;
 };
+
+function computeRedirectPath(state: AccessStateRow, pathname: string): string | null {
+  if (pathname.startsWith('/reset-password')) return null;
+
+  const url = new URL(pathname, 'http://localhost');
+  const inviteToken = url.searchParams.get('token');
+  if (pathname.startsWith('/join') && inviteToken) return null;
+
+  const workspaceId = state.workspaceId || state.workspace_id || null;
+  if (!workspaceId) {
+    if (state.isFounder) return '/admin';
+    return '/download-ios?next=/onboarding';
+  }
+
+  if (state.accessLevel === 'founder') return null;
+  if (state.isSalesperson) return null;
+
+  if (!state.onboardingComplete && state.role === 'owner') {
+    return '/download-ios?next=/onboarding';
+  }
+
+  if (state.role === 'member' && !state.hasAccess) {
+    return '/subscribe?reason=member-inactive';
+  }
+
+  if (!state.hasAccess) return '/subscribe';
+
+  return null;
+}
+
+function currentPathWithSearch(): string {
+  if (typeof window === 'undefined') return '/home';
+  return `${window.location.pathname}${window.location.search}`;
+}
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -89,18 +136,50 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [memberCountByWorkspaceId, setMemberCountByWorkspaceId] = useState<Record<string, number>>({});
   const [currentWorkspaceId, setCurrentWorkspaceIdState] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [accessLevel, setAccessLevel] = useState<DashboardAccessLevel | null>(null);
+  const [isFounder, setIsFounder] = useState(false);
+  const [planBadgeLabel, setPlanBadgeLabel] = useState<string | null>(null);
+  const [redirectPath, setRedirectPath] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const initialLoadDoneRef = useRef(false);
+  const currentAuthUserIdRef = useRef<string | null>(null);
 
   const refreshWorkspaces = useCallback(async () => {
     setIsLoading(true);
     setError(null);
+    setAccessLevel(null);
+    setIsFounder(false);
+    setPlanBadgeLabel(null);
+    setRedirectPath(null);
+
+    const accessStatePromise = fetch('/api/access/state', { credentials: 'include' })
+      .then((response) => {
+        if (response.status === 401) return { unauthorized: true } satisfies AccessStateRow;
+        return response.ok ? response.json() as Promise<AccessStateRow> : null;
+      })
+      .catch(() => null);
+
+    const applyAccessState = (data: AccessStateRow | null) => {
+      if (data?.unauthorized) {
+        setAccessLevel(null);
+        setIsFounder(false);
+        setPlanBadgeLabel(null);
+        setRedirectPath('/login');
+        return;
+      }
+
+      setAccessLevel(typeof data?.accessLevel === 'string' ? data.accessLevel : null);
+      setIsFounder(data?.isFounder === true);
+      setPlanBadgeLabel(typeof data?.planBadgeLabel === 'string' ? data.planBadgeLabel : null);
+      setRedirectPath(data ? computeRedirectPath(data, currentPathWithSearch()) : null);
+    };
 
     try {
       const hydrateFromAccessState = async (): Promise<boolean> => {
-        const response = await fetch('/api/access/state', { credentials: 'include' });
-        if (!response.ok) return false;
-        const data = (await response.json()) as AccessStateRow;
+        const data = await accessStatePromise;
+        applyAccessState(data);
+        if (!data) return false;
         const workspaceId =
           (typeof data.workspaceId === 'string' && data.workspaceId) ||
           (typeof data.workspace_id === 'string' && data.workspace_id) ||
@@ -117,6 +196,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             : 'member';
         const userId = typeof data.userId === 'string' && data.userId ? data.userId : null;
 
+        currentAuthUserIdRef.current = userId;
         setCurrentUserId(userId);
         setWorkspaces([
           {
@@ -161,11 +241,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         setWorkspaces([]);
         setMemberships([]);
         setMemberCountByWorkspaceId({});
+        currentAuthUserIdRef.current = null;
         setCurrentUserId(null);
         setCurrentWorkspaceIdState(null);
         setIsLoading(false);
         return;
       }
+      currentAuthUserIdRef.current = user.id;
       setCurrentUserId(user.id);
 
       const { data: membershipRows, error: membershipError } = await supabase
@@ -276,11 +358,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           window.localStorage.removeItem(namespacedKey);
         }
       }
+      applyAccessState(await accessStatePromise);
     } catch (err) {
       try {
-        const response = await fetch('/api/access/state', { credentials: 'include' });
-        if (response.ok) {
-          const data = (await response.json()) as AccessStateRow;
+        const data = await accessStatePromise;
+        applyAccessState(data);
+        if (data) {
           const workspaceId =
             (typeof data.workspaceId === 'string' && data.workspaceId) ||
             (typeof data.workspace_id === 'string' && data.workspace_id) ||
@@ -291,6 +374,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 ? data.role
                 : 'member';
             const userId = typeof data.userId === 'string' && data.userId ? data.userId : null;
+            currentAuthUserIdRef.current = userId;
             setCurrentUserId(userId);
             setWorkspaces([
               {
@@ -325,6 +409,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setWorkspaces([]);
       setMemberships([]);
       setMemberCountByWorkspaceId({});
+      currentAuthUserIdRef.current = null;
       setCurrentUserId(null);
       setCurrentWorkspaceIdState(null);
     } finally {
@@ -356,7 +441,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, [currentUserId, refreshWorkspaces]);
 
   useEffect(() => {
-    refreshWorkspaces();
+    void refreshWorkspaces().finally(() => {
+      initialLoadDoneRef.current = true;
+    });
   }, [refreshWorkspaces]);
 
   useEffect(() => {
@@ -367,8 +454,23 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       .then((supabase) => {
         const {
           data: { subscription },
-        } = supabase.auth.onAuthStateChange(() => {
-          if (!isCancelled) void refreshWorkspaces();
+        } = supabase.auth.onAuthStateChange((event, session) => {
+          if (isCancelled || event === 'INITIAL_SESSION' || !initialLoadDoneRef.current) {
+            return;
+          }
+
+          const nextUserId = session?.user?.id ?? null;
+          if (event === 'SIGNED_OUT') {
+            if (currentAuthUserIdRef.current === null) return;
+            currentAuthUserIdRef.current = null;
+            void refreshWorkspaces();
+            return;
+          }
+
+          if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && nextUserId !== currentAuthUserIdRef.current) {
+            currentAuthUserIdRef.current = nextUserId;
+            void refreshWorkspaces();
+          }
         });
         unsubscribe = () => subscription.unsubscribe();
       })
@@ -400,6 +502,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       memberCountByWorkspaceId,
       currentWorkspace,
       currentWorkspaceId,
+      accessLevel,
+      isFounder,
+      planBadgeLabel,
+      redirectPath,
       isLoading,
       error,
       setCurrentWorkspaceId,
@@ -411,6 +517,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       memberCountByWorkspaceId,
       currentWorkspace,
       currentWorkspaceId,
+      accessLevel,
+      isFounder,
+      planBadgeLabel,
+      redirectPath,
       isLoading,
       error,
       setCurrentWorkspaceId,

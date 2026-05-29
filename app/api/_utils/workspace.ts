@@ -39,6 +39,29 @@ export type WorkspaceMembershipResolution = {
   status?: number;
 };
 
+type PrefetchedMembershipRow = {
+  workspace_id: string;
+  role?: string | null;
+  created_at?: string | null;
+};
+
+type PrefetchedWorkspaceRow = {
+  id: string;
+  max_seats?: number | null;
+};
+
+type ResolveDashboardAccessOptions = {
+  memberships?: PrefetchedMembershipRow[];
+  workspaces?: PrefetchedWorkspaceRow[];
+  userProfile?: UserProfileAccessRow | null;
+};
+
+type UserProfileAccessRow = {
+  user_id?: string | null;
+  current_workspace_id?: string | null;
+  is_founder?: boolean | null;
+};
+
 function roleRank(role: string | null | undefined): number {
   if (role === 'owner') return 0;
   if (role === 'admin') return 1;
@@ -62,23 +85,45 @@ function classifyDashboardAccessLevel(
   return 'unassigned';
 }
 
+async function getUserProfileAccess(
+  supabase: MinimalSupabaseClient,
+  userId: string
+): Promise<UserProfileAccessRow | null> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const supabaseAny = supabase as any;
+
+  const { data: profile } = await supabaseAny
+    .from('user_profiles')
+    .select('user_id, current_workspace_id, is_founder')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  return profile ?? null;
+}
+
 export async function resolveDashboardAccessLevel(
   supabase: MinimalSupabaseClient,
   userId: string,
-  requestedWorkspaceId?: string | null
+  requestedWorkspaceId?: string | null,
+  options: ResolveDashboardAccessOptions = {}
 ): Promise<DashboardAccessResolution> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const supabaseAny = supabase as any;
 
-  const { data: founderProfile } = await supabaseAny
-    .from('user_profiles')
-    .select('user_id')
-    .eq('user_id', userId)
-    .eq('is_founder', true)
-    .maybeSingle();
-  const isFounder = !!founderProfile?.user_id;
-
-  const resolution = await resolveWorkspaceIdForUser(supabase, userId, requestedWorkspaceId);
+  const profilePromise = options.userProfile
+    ? Promise.resolve(options.userProfile)
+    : getUserProfileAccess(supabase, userId);
+  const [profile, resolution] = await Promise.all([
+    profilePromise,
+    resolveWorkspaceIdForUser(
+      supabase,
+      userId,
+      requestedWorkspaceId,
+      options.memberships,
+      profilePromise
+    ),
+  ]);
+  const isFounder = profile?.is_founder === true;
   if (!resolution.workspaceId) {
     if (isFounder) {
       return {
@@ -101,24 +146,40 @@ export async function resolveDashboardAccessLevel(
     };
   }
 
-  const { data: membership } = await supabaseAny
-    .from('workspace_members')
-    .select('role')
-    .eq('user_id', userId)
-    .eq('workspace_id', resolution.workspaceId)
-    .maybeSingle();
-  const role = (membership?.role as WorkspaceRole) ?? null;
+  const prefetchedMembership = options.memberships?.find(
+    (row) => row.workspace_id === resolution.workspaceId
+  );
+  const prefetchedWorkspace = options.workspaces?.find(
+    (row) => row.id === resolution.workspaceId
+  );
 
-  const { data: memberRows } = await supabaseAny
-    .from('workspace_members')
-    .select('user_id')
-    .eq('workspace_id', resolution.workspaceId);
+  const [membershipResult, memberRowsResult, workspaceResult] = await Promise.all([
+    prefetchedMembership
+      ? Promise.resolve({ data: { role: prefetchedMembership.role ?? null } })
+      : supabaseAny
+          .from('workspace_members')
+          .select('role')
+          .eq('user_id', userId)
+          .eq('workspace_id', resolution.workspaceId)
+          .maybeSingle(),
+    supabaseAny
+      .from('workspace_members')
+      .select('user_id')
+      .eq('workspace_id', resolution.workspaceId),
+    prefetchedWorkspace
+      ? Promise.resolve({ data: { max_seats: prefetchedWorkspace.max_seats ?? null } })
+      : supabaseAny
+          .from('workspaces')
+          .select('max_seats')
+          .eq('id', resolution.workspaceId)
+          .maybeSingle(),
+  ]);
+
+  const membership = membershipResult.data;
+  const role = (membership?.role as WorkspaceRole) ?? null;
+  const memberRows = memberRowsResult.data;
   const memberCount = Array.isArray(memberRows) ? memberRows.length : 0;
-  const { data: workspace } = await supabaseAny
-    .from('workspaces')
-    .select('max_seats')
-    .eq('id', resolution.workspaceId)
-    .maybeSingle();
+  const workspace = workspaceResult.data;
   const maxSeats =
     typeof workspace?.max_seats === 'number' ? workspace.max_seats : null;
 
@@ -221,12 +282,25 @@ export async function resolveWorkspaceMembershipForUser(
 export async function resolveWorkspaceIdForUser(
   supabase: MinimalSupabaseClient,
   userId: string,
-  requestedWorkspaceId?: string | null
+  requestedWorkspaceId?: string | null,
+  prefetchedMemberships?: PrefetchedMembershipRow[],
+  prefetchedProfile?: UserProfileAccessRow | null | Promise<UserProfileAccessRow | null>
 ): Promise<{ workspaceId: string | null; error?: string; status?: number }> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const supabaseAny = supabase as any;
 
   if (requestedWorkspaceId) {
+    if (prefetchedMemberships) {
+      const membership = prefetchedMemberships.find(
+        (row) => row.workspace_id === requestedWorkspaceId
+      );
+      if (!membership?.workspace_id) {
+        return { workspaceId: null, error: 'You are not a member of the selected workspace', status: 403 };
+      }
+
+      return { workspaceId: membership.workspace_id };
+    }
+
     const { data: membership, error } = await supabaseAny
       .from('workspace_members')
       .select('workspace_id')
@@ -241,42 +315,56 @@ export async function resolveWorkspaceIdForUser(
     return { workspaceId: membership.workspace_id };
   }
 
-  const { data: preferredProfile } = await supabaseAny
-    .from('user_profiles')
-    .select('current_workspace_id')
-    .eq('user_id', userId)
-    .maybeSingle();
+  const preferredProfile = prefetchedProfile !== undefined
+    ? await prefetchedProfile
+    : (await supabaseAny
+        .from('user_profiles')
+        .select('user_id, current_workspace_id, is_founder')
+        .eq('user_id', userId)
+        .maybeSingle()).data;
 
   const preferredWorkspaceId =
     typeof preferredProfile?.current_workspace_id === 'string'
       ? preferredProfile.current_workspace_id
       : null;
   if (preferredWorkspaceId) {
-    const { data: preferredMembership } = await supabaseAny
-      .from('workspace_members')
-      .select('workspace_id')
-      .eq('user_id', userId)
-      .eq('workspace_id', preferredWorkspaceId)
-      .maybeSingle();
+    if (prefetchedMemberships) {
+      const preferredMembership = prefetchedMemberships.find(
+        (row) => row.workspace_id === preferredWorkspaceId
+      );
 
-    if (preferredMembership?.workspace_id) {
-      return { workspaceId: preferredMembership.workspace_id };
+      if (preferredMembership?.workspace_id) {
+        return { workspaceId: preferredMembership.workspace_id };
+      }
+    } else {
+      const { data: preferredMembership } = await supabaseAny
+        .from('workspace_members')
+        .select('workspace_id')
+        .eq('user_id', userId)
+        .eq('workspace_id', preferredWorkspaceId)
+        .maybeSingle();
+
+      if (preferredMembership?.workspace_id) {
+        return { workspaceId: preferredMembership.workspace_id };
+      }
     }
   }
 
-  const { data: fallbackMembership, error: fallbackError } = await supabaseAny
-    .from('workspace_members')
-    .select('workspace_id, role, created_at')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: true });
+  const fallbackResult = prefetchedMemberships
+    ? { data: prefetchedMemberships, error: null }
+    : await supabaseAny
+        .from('workspace_members')
+        .select('workspace_id, role, created_at')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: true });
 
-  const memberships = (fallbackMembership ?? []) as Array<{
+  const memberships = (fallbackResult.data ?? []) as Array<{
     workspace_id: string;
     role?: string | null;
     created_at?: string | null;
   }>;
 
-  if (fallbackError || memberships.length === 0) {
+  if (fallbackResult.error || memberships.length === 0) {
     return { workspaceId: null, error: 'No workspace membership found for this user', status: 400 };
   }
 

@@ -26,6 +26,8 @@ function modeLabel(mode: CampaignAssignmentMode): string {
   return mode === 'zone_split' ? 'Zone' : 'Whole team';
 }
 
+const fetchedWorkspaceIds = new Set<string>();
+
 export function MyCampaignAssignmentsCard() {
   const { currentWorkspaceId } = useWorkspace();
   const [assignments, setAssignments] = useState<AssignmentRow[]>([]);
@@ -38,8 +40,10 @@ export function MyCampaignAssignmentsCard() {
       setLoading(false);
       return;
     }
+    if (fetchedWorkspaceIds.has(currentWorkspaceId)) return;
 
     setLoading(true);
+    fetchedWorkspaceIds.add(currentWorkspaceId);
     try {
       const response = await fetch(
         `/api/campaign-assignments?workspaceId=${encodeURIComponent(currentWorkspaceId)}`,
@@ -49,12 +53,14 @@ export function MyCampaignAssignmentsCard() {
         | { assignments?: AssignmentRow[]; error?: string }
         | null;
       if (!response.ok) {
+        fetchedWorkspaceIds.delete(currentWorkspaceId);
         setMessage(payload?.error ?? 'Failed to load campaign assignments.');
         setAssignments([]);
         return;
       }
       setAssignments(Array.isArray(payload?.assignments) ? payload.assignments : []);
     } catch {
+      fetchedWorkspaceIds.delete(currentWorkspaceId);
       setMessage('Failed to load campaign assignments.');
       setAssignments([]);
     } finally {
