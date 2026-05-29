@@ -159,10 +159,8 @@ export function ContactsHubView() {
           return [] as Farm[];
         }),
         currentWorkspaceId
-          ? SmartListsService.fetchWorkspaceSmartLists(currentWorkspaceId).catch((error) => {
-              console.error('Error loading smart lists:', error);
-              return [] as WorkspaceSmartList[];
-            })
+          ? SmartListsService.fetchWorkspaceSmartLists(currentWorkspaceId)
+              .catch(() => [] as WorkspaceSmartList[])
           : Promise.resolve([] as WorkspaceSmartList[]),
       ]);
 
