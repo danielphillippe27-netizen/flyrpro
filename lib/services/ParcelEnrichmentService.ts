@@ -910,7 +910,7 @@ export class ParcelEnrichmentService {
     const linker = new StableLinkerService(this.supabase);
 
     if (campaignBuildingCount > 0) {
-      console.log('[ParcelEnrichment] Relinking with campaign building store:', {
+      console.log('[ParcelEnrichment] Relinking campaign building store with area-only house filtering:', {
         campaignId,
         campaignBuildingCount,
         hasPolygon: Boolean(polygon),
@@ -921,10 +921,6 @@ export class ParcelEnrichmentService {
         { features: campaignBuildings.features },
         '2026-01-21.0',
         {
-          parcels: parcels.map((parcel) => ({
-            externalId: parcel.externalId,
-            geometry: parcel.geometry,
-          })),
           resetExisting: true,
           persistenceMode: 'gold',
         }
@@ -935,7 +931,7 @@ export class ParcelEnrichmentService {
         gold_linker_ran: true,
         consolidated_linker_ran: true,
         snapshot_linker_ran: false,
-        snapshot_linker_used_parcels: true,
+        snapshot_linker_used_parcels: false,
         campaign_building_count: campaignBuildingCount,
         snapshot_building_count: 0,
       };
@@ -958,7 +954,7 @@ export class ParcelEnrichmentService {
       };
     }
 
-    console.log('[ParcelEnrichment] Relinking with snapshot parcel bridge:', {
+    console.log('[ParcelEnrichment] Relinking snapshot with area-only house filtering:', {
       campaignId,
       campaignBuildingCount,
       snapshotBuildingCount: snapshot.buildingsGeoJSON.features.length,
@@ -969,10 +965,6 @@ export class ParcelEnrichmentService {
       snapshot.buildingsGeoJSON,
       snapshot.overtureRelease,
       {
-        parcels: parcels.map((parcel) => ({
-          externalId: parcel.externalId,
-          geometry: parcel.geometry,
-        })),
         resetExisting: true,
       }
     );
@@ -982,7 +974,7 @@ export class ParcelEnrichmentService {
       gold_linker_ran: false,
       consolidated_linker_ran: true,
       snapshot_linker_ran: true,
-      snapshot_linker_used_parcels: true,
+      snapshot_linker_used_parcels: false,
       campaign_building_count: campaignBuildingCount,
       snapshot_building_count: snapshot.buildingsGeoJSON.features.length,
     };

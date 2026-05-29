@@ -5,7 +5,7 @@
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { DataIntegrityError, StableLinkerService, type MatchResult } from '../StableLinkerService';
+import { StableLinkerService, type MatchResult } from '../StableLinkerService';
 import { ParcelEnrichmentService } from '../ParcelEnrichmentService';
 
 let testsPassed = 0;
@@ -81,16 +81,6 @@ function makeBuilding(
   };
 }
 
-function makeParcel(externalId: string, ring: number[][]) {
-  return {
-    externalId,
-    geometry: {
-      type: 'MultiPolygon' as const,
-      coordinates: [[ring]],
-    },
-  };
-}
-
 function makeAddress(id: string, lon: number, lat: number, streetName: string) {
   return {
     id,
@@ -116,30 +106,18 @@ type SupabaseLike = ConstructorParameters<typeof StableLinkerService>[0];
 type ParcelServiceLike = ConstructorParameters<typeof ParcelEnrichmentService>[0];
 type BuildingFixture = ReturnType<typeof makeBuilding>;
 type AddressFixture = ReturnType<typeof makeAddress>;
-type ParcelFixture = ReturnType<typeof makeParcel>;
 type StableLinkerHarness = {
+  filterValidBuildings(buildings: BuildingFixture[]): BuildingFixture[];
   matchAddressToBuilding(
     address: AddressFixture,
-    buildings: BuildingFixture[],
-    matchedBuildingIds: Set<string>,
-    preparedParcels: unknown[]
-  ): MatchResult;
-  buildTownhouseRowAssignments(
-    addresses: AddressFixture[],
     buildings: BuildingFixture[]
-  ): Map<string, MatchResult>;
-  validateUniqueAddressAssignments(
-    matches: MatchResult[],
-    addressById: Map<string, AddressFixture>,
-    buildingById: Map<string, BuildingFixture>
-  ): { matches: MatchResult[]; orphans: unknown[] };
+  ): MatchResult;
   saveMatches(
     campaignId: string,
     matches: MatchResult[],
     overtureRelease: string,
     persistenceMode: 'silver' | 'gold'
   ): Promise<void>;
-  prepareParcelBridge(parcels: ParcelFixture[], buildings: BuildingFixture[]): unknown[];
   detectMultiUnitBuildings(matches: MatchResult[]): void;
   assignOrphan(orphanId: string, buildingId: string, userId: string): Promise<void>;
 };
@@ -306,44 +284,72 @@ async function run() {
     );
     const address = makeAddress('100', -79.0000, 43.00015, 'Main Street');
 
-    const match = service.matchAddressToBuilding(address, [building], new Set(), []);
+    const match = service.matchAddressToBuilding(address, [building]);
     assertEqual(match.matchType, 'containment_verified');
     assertEqual(match.buildingId, 'building-1');
   });
 
-  test('Gold parcel bridge: address outside footprint still links via shared parcel', () => {
+  test('Gold area-only: address outside footprint links to closest retained building', () => {
     const service = createStableLinkerHarness();
     const building = makeBuilding(
       'building-2',
       rectangle(-79.00020, 43.00000, -79.00005, 43.00018),
       { primaryStreet: 'Oak Avenue' }
     );
-    const parcel = makeParcel('parcel-1', rectangle(-79.00030, 42.99995, -78.99990, 43.00028));
-    const preparedParcels = service.prepareParcelBridge([parcel], [building]);
     const address = makeAddress('200', -78.99998, 43.00016, 'Oak Avenue');
 
-    const match = service.matchAddressToBuilding(address, [building], new Set(), preparedParcels);
-    assertEqual(match.matchType, 'parcel_verified');
+    const match = service.matchAddressToBuilding(address, [building]);
+    assertEqual(match.matchType, 'proximity_verified');
     assertEqual(match.buildingId, 'building-2');
   });
 
-  test('Silver parcel bridge: street_name-only buildings still participate in parcel matching', () => {
+  test('Silver area-only: street metadata is not required for nearby matching', () => {
     const service = createStableLinkerHarness();
     const building = makeBuilding(
       'building-3',
       rectangle(-79.00120, 43.00100, -79.00105, 43.00118),
       { streetName: 'Pine Road' }
     );
-    const parcel = makeParcel('parcel-2', rectangle(-79.00130, 43.00095, -79.00090, 43.00130));
-    const preparedParcels = service.prepareParcelBridge([parcel], [building]);
     const address = makeAddress('300', -79.00098, 43.00110, 'Pine Road');
 
-    const match = service.matchAddressToBuilding(address, [building], new Set(), preparedParcels);
-    assertEqual(match.matchType, 'parcel_verified');
+    const match = service.matchAddressToBuilding(address, [building]);
+    assertEqual(match.matchType, 'proximity_verified');
     assertEqual(match.buildingId, 'building-3');
   });
 
-  test('Parcel bridge outranks point-on-surface for offset detached-home address points', () => {
+  test('Area-only matching includes the old 30m-to-45m distance band', () => {
+    const service = createStableLinkerHarness();
+    const building = makeBuilding(
+      'building-45m-band',
+      rectangle(-79.00620, 43.00600, -79.00600, 43.00620)
+    );
+    const address = makeAddress('304', -79.00558, 43.00610, 'Band Road');
+
+    const match = service.matchAddressToBuilding(address, [building]);
+
+    assertEqual(match.matchType, 'proximity_verified');
+    assertEqual(match.buildingId, 'building-45m-band');
+    assertTrue(match.distanceMeters > 30, 'Expected fixture to sit beyond the old 30m limit');
+    assertTrue(match.distanceMeters <= 45, 'Expected fixture to sit inside the former 45m distance limit');
+  });
+
+  test('Area-only building filter removes footprints under 45sqm and keeps larger footprints', () => {
+    const service = createStableLinkerHarness();
+    const smallBuilding = makeBuilding(
+      'small-building',
+      rectangle(-79.00600, 43.00600, -79.00596, 43.00604)
+    );
+    const largeBuilding = makeBuilding(
+      'large-building',
+      rectangle(-79.00640, 43.00600, -79.00610, 43.00630)
+    );
+
+    const filtered = service.filterValidBuildings([smallBuilding, largeBuilding]);
+
+    assertEqual(filtered.map((building) => building.properties.gers_id), ['large-building']);
+  });
+
+  test('Area-only matching chooses the closest footprint without parcel priority', () => {
     const service = new StableLinkerService({} as any);
     const parcelBuilding = makeBuilding(
       'parcel-main-home',
@@ -355,22 +361,15 @@ async function run() {
       rectangle(-79.01000, 43.01000, -79.00980, 43.01020),
       { primaryStreet: 'Cedar Court' }
     );
-    const parcel = makeParcel(
-      'parcel-main',
-      rectangle(-79.00982, 43.00995, -79.00945, 43.01022)
-    );
-    const preparedParcels = (service as any).prepareParcelBridge([parcel], [parcelBuilding, boundaryNeighbor]);
     const address = makeAddress('302', -79.00980, 43.01010, 'Cedar Court');
 
     const match = (service as any).matchAddressToBuilding(
       address,
-      [parcelBuilding, boundaryNeighbor],
-      new Set(),
-      preparedParcels
+      [parcelBuilding, boundaryNeighbor]
     );
 
-    assertEqual(match.matchType, 'parcel_verified');
-    assertEqual(match.buildingId, 'parcel-main-home');
+    assertEqual(match.matchType, 'containment_verified');
+    assertEqual(match.buildingId, 'boundary-neighbor');
   });
 
   test('Parcel source selection: locality-specific dataset beats region-wide fallback', () => {
@@ -428,115 +427,11 @@ async function run() {
     assertEqual(resolution.unsupportedLocalities, ['vancouver']);
   });
 
-  test('Townhouse row: repeated containing matches can share one proven footprint', () => {
-    const service = createStableLinkerHarness();
-    const building = makeBuilding(
-      'building-row',
-      rectangle(-79.00220, 43.00200, -79.00180, 43.00230),
-      { primaryStreet: 'Rowhouse Lane' }
-    );
-
-    const matchedBuildingIds = new Set<string>();
-    const first = service.matchAddressToBuilding(
-      makeAddress('401', -79.00212, 43.00210, 'Rowhouse Lane'),
-      [building],
-      matchedBuildingIds,
-      []
-    );
-    matchedBuildingIds.add(first.buildingId);
-
-    const second = service.matchAddressToBuilding(
-      makeAddress('403', -79.00200, 43.00215, 'Rowhouse Lane'),
-      [building],
-      matchedBuildingIds,
-      []
-    );
-    const third = service.matchAddressToBuilding(
-      makeAddress('405', -79.00188, 43.00220, 'Rowhouse Lane'),
-      [building],
-      matchedBuildingIds,
-      []
-    );
-
-    assertEqual(first.matchType, 'containment_verified');
-    assertEqual(first.buildingId, 'building-row');
-    assertEqual(second.matchType, 'containment_verified');
-    assertEqual(second.buildingId, 'building-row');
-    assertEqual(third.matchType, 'containment_verified');
-    assertEqual(third.buildingId, 'building-row');
-  });
-
-  test('Townhouse row: same-street homes just outside one footprint preassign together', () => {
-    const service = createStableLinkerHarness();
-    const building = makeBuilding(
-      'carey-row',
-      rectangle(-79.00235, 43.00200, -79.00155, 43.00218),
-      { primaryStreet: 'Carey Lane' }
-    );
-    const addresses = [
-      makeAddress('25', -79.00224, 43.00222, 'Carey Lane'),
-      makeAddress('27', -79.00204, 43.00222, 'Carey Lane'),
-      makeAddress('29', -79.00184, 43.00222, 'Carey Lane'),
-      makeAddress('31', -79.00164, 43.00222, 'Carey Lane'),
-    ];
-
-    const assignments = service.buildTownhouseRowAssignments(addresses, [building]);
-
-    assertEqual(assignments.size, 4);
-    for (const address of addresses) {
-      assertEqual(assignments.get(address.id)?.buildingId, 'carey-row');
-      assertEqual(assignments.get(address.id)?.matchType, 'proximity_verified');
-      assertTrue((assignments.get(address.id)?.confidence ?? 0) >= 0.85);
-    }
-  });
-
-  test('Townhouse row: over-wide seven-home grouping is not auto-promoted', () => {
-    const service = createStableLinkerHarness();
-    const building = makeBuilding(
-      'too-wide-row',
-      rectangle(-79.00300, 43.00300, -79.00140, 43.00318),
-      { primaryStreet: 'Carey Lane' }
-    );
-    const addresses = ['1', '3', '5', '7', '9', '11', '13'].map((house, index) =>
-      makeAddress(house, -79.00288 + index * 0.00022, 43.00322, 'Carey Lane')
-    );
-
-    const assignments = service.buildTownhouseRowAssignments(addresses, [building]);
-
-    assertEqual(assignments.size, 0);
-  });
-
-  test('Assignment validator keeps one detached address per building unless townhouse evidence is approved', () => {
-    const service = createStableLinkerHarness();
-    const building = makeBuilding(
-      'detached-large',
-      rectangle(-79.00400, 43.00400, -79.00300, 43.00425),
-      { primaryStreet: 'Carey Lane' }
-    );
-    const addresses = ['1', '3', '5', '7', '9', '11', '13'].map((house, index) =>
-      makeAddress(house, -79.00390 + index * 0.00012, 43.00410, 'Carey Lane')
-    );
-    const matches = addresses.map((address) =>
-      service.matchAddressToBuilding(address, [building], new Set(), [])
-    );
-
-    const validation = service.validateUniqueAddressAssignments(
-      matches,
-      new Map(addresses.map((address) => [address.id, address])),
-      new Map([[building.properties.gers_id, building]])
-    );
-
-    assertEqual(validation.matches.length, 1);
-    assertEqual(validation.orphans.length, 6);
-  });
-
   await testAsync('Persistence: link upsert failure fails the provision path', async () => {
     const service = createStableLinkerHarness();
     const match = service.matchAddressToBuilding(
       makeAddress('1', -79.00212, 43.00210, 'Carey Lane'),
-      [makeBuilding('building-1', rectangle(-79.00220, 43.00200, -79.00180, 43.00230), { primaryStreet: 'Carey Lane' })],
-      new Set(),
-      []
+      [makeBuilding('building-1', rectangle(-79.00220, 43.00200, -79.00180, 43.00230), { primaryStreet: 'Carey Lane' })]
     );
     const failingSupabase = {
       from(table: string) {
@@ -599,7 +494,7 @@ async function run() {
     assertEqual(state.buildingAddressLinks?.[0].building_id, 'durham_buildings:170090');
   });
 
-  test('Detached fallback: weak proximity does not reuse an already matched building', () => {
+  test('Area-only matching ignores already-matched building state', () => {
     const service = createStableLinkerHarness();
     const alreadyMatched = makeBuilding(
       'detached-a',
@@ -613,16 +508,14 @@ async function run() {
 
     const match = service.matchAddressToBuilding(
       address,
-      [alreadyMatched, unusedNeighbor],
-      new Set(['detached-a']),
-      []
+      [alreadyMatched, unusedNeighbor]
     );
 
     assertEqual(match.matchType, 'proximity_verified');
-    assertEqual(match.buildingId, 'detached-b');
+    assertEqual(match.buildingId, 'detached-a');
   });
 
-  test('Detached fallback: verified proximity does not reuse an already matched building', () => {
+  test('Area-only matching reuses the closest nearby footprint when needed', () => {
     const service = createStableLinkerHarness();
     const alreadyMatched = makeBuilding(
       'detached-a',
@@ -638,16 +531,14 @@ async function run() {
 
     const match = service.matchAddressToBuilding(
       address,
-      [alreadyMatched, unusedNeighbor],
-      new Set(['detached-a']),
-      []
+      [alreadyMatched, unusedNeighbor]
     );
 
     assertEqual(match.matchType, 'proximity_verified');
-    assertEqual(match.buildingId, 'detached-b');
+    assertEqual(match.buildingId, 'detached-a');
   });
 
-  test('Nearby same-street address: loose proximity past 30m becomes orphan', () => {
+  test('Nearby same-street address: distance past 45m still links when footprint is large', () => {
     const service = new StableLinkerService({} as any);
     const building = makeBuilding(
       'nearby-home',
@@ -658,12 +549,12 @@ async function run() {
 
     const match = (service as any).matchAddressToBuilding(
       address,
-      [building],
-      new Set(),
-      []
+      [building]
     );
 
-    assertEqual(match.matchType, 'orphan');
+    assertEqual(match.matchType, 'proximity_verified');
+    assertEqual(match.buildingId, 'nearby-home');
+    assertTrue(match.distanceMeters > 45, 'Expected fixture to sit beyond 45m');
   });
 
   test('Right-outside footprint address: footprint distance links even when centroid is far', () => {
@@ -677,9 +568,7 @@ async function run() {
 
     const match = (service as any).matchAddressToBuilding(
       address,
-      [building],
-      new Set(),
-      []
+      [building]
     );
 
     assertEqual(match.matchType, 'proximity_verified');
@@ -697,9 +586,7 @@ async function run() {
 
     const match = (service as any).matchAddressToBuilding(
       address,
-      [building],
-      new Set(),
-      []
+      [building]
     );
 
     assertEqual(match.matchType, 'proximity_verified');
@@ -708,7 +595,7 @@ async function run() {
     assertTrue(match.confidence >= 0.8, 'Expected high confidence from geometry alone');
   });
 
-  test('Nearby fallback address: relaxed fallback past 45m becomes orphan', () => {
+  test('Nearby fallback address: distance past 45m still links when footprint is large', () => {
     const service = new StableLinkerService({} as any);
     const building = makeBuilding(
       'fallback-home',
@@ -718,15 +605,15 @@ async function run() {
 
     const match = (service as any).matchAddressToBuilding(
       address,
-      [building],
-      new Set(),
-      []
+      [building]
     );
 
-    assertEqual(match.matchType, 'orphan');
+    assertEqual(match.matchType, 'proximity_verified');
+    assertEqual(match.buildingId, 'fallback-home');
+    assertTrue(match.distanceMeters > 45, 'Expected fixture to sit beyond 45m');
   });
 
-  test('Detached fallback: weak proximity becomes orphan when every candidate is already matched', () => {
+  test('Area-only matching still links the closest nearby footprint when already matched', () => {
     const service = createStableLinkerHarness();
     const alreadyMatched = makeBuilding(
       'detached-only',
@@ -736,15 +623,14 @@ async function run() {
 
     const match = service.matchAddressToBuilding(
       address,
-      [alreadyMatched],
-      new Set(['detached-only']),
-      []
+      [alreadyMatched]
     );
 
-    assertEqual(match.matchType, 'orphan');
+    assertEqual(match.matchType, 'proximity_verified');
+    assertEqual(match.buildingId, 'detached-only');
   });
 
-  test('Dense ambiguity: equal-distance buildings raise DataIntegrityError instead of guessing', () => {
+  test('Dense ambiguity: equal-distance retained buildings resolve deterministically', () => {
     const service = createStableLinkerHarness();
     const left = makeBuilding(
       'left',
@@ -758,14 +644,10 @@ async function run() {
     );
     const address = makeAddress('500', -79.00300, 43.00305, 'Queen Street');
 
-    let thrown: unknown = null;
-    try {
-      service.matchAddressToBuilding(address, [left, right], new Set(), []);
-    } catch (error) {
-      thrown = error;
-    }
+    const match = service.matchAddressToBuilding(address, [left, right]);
 
-    assertTrue(thrown instanceof DataIntegrityError, 'Expected DataIntegrityError for ambiguous proximity tie');
+    assertEqual(match.matchType, 'containment_verified');
+    assertEqual(match.buildingId, 'right');
   });
 
   await testAsync('Orphan/manual assignment: manual assign updates orphan state and inserts manual link', async () => {
@@ -785,8 +667,6 @@ async function run() {
 
     const orphanMatch = service.matchAddressToBuilding(
       makeAddress('address-1', -79.1000, 43.1000, 'No Match Road'),
-      [],
-      new Set(),
       []
     );
     assertEqual(orphanMatch.matchType, 'orphan');

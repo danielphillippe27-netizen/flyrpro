@@ -1020,15 +1020,6 @@ async function runCampaignPostProcessing(params: {
       normalizedBuildingsGeoJSON as unknown as { features: StableBuildingFeature[] },
       overtureRelease,
       {
-        parcels:
-          bedrockLinkGeometry?.parcels?.length
-            ? bedrockLinkGeometry.parcels
-            : parcelPreparation?.status === 'ready' && parcelPreparation.parcelCount > 0
-            ? parcelPreparation.parcels.map((parcel) => ({
-                externalId: parcel.externalId,
-                geometry: parcel.geometry,
-              }))
-            : undefined,
         resetExisting: true,
         persistenceMode: source === 'diamond' ? 'gold' : 'silver',
       }

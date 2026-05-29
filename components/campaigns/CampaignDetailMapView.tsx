@@ -25,6 +25,7 @@ import { useMapStyle } from '@/lib/map-style-provider';
 import { useWorkspace } from '@/lib/workspace-context';
 import { getMapboxToken, removeMapboxMapWhenSafe } from '@/lib/mapbox';
 import { applyPresetVisualTweaks, applyResolvedMapStyle, getResolvedMapInitOptions, hideBaseBuildingLayers, resolveMapStyle } from '@/lib/map-styles';
+import { fetchCampaignMapManifest, hasRenderablePmtilesParcels } from '@/lib/map/campaignMapManifest';
 import {
   DEFAULT_STATUS_FILTERS,
   MAP_STATUS_CONFIG,
@@ -47,7 +48,7 @@ const BOUNDARY_LAYER_RAW_LINE = 'campaign-boundary-raw-line';
 const BOUNDARY_LAYER_SNAPPED_FILL = 'campaign-boundary-snapped-fill';
 const BOUNDARY_LAYER_SNAPPED_LINE = 'campaign-boundary-snapped-line';
 const SHOW_CAMPAIGN_BOUNDARY_OVERLAY = false;
-const SHOW_PARCEL_VIEW = false;
+const SHOW_PARCEL_VIEW = true;
 const CUSTOM_BUILDING_LAYER_PREFIXES = ['map-buildings-', 'campaign-parcels'];
 const RESIDENTIAL_ONLY_PRESERVE_LAYER_PREFIXES = [
   'map-buildings-',
@@ -570,7 +571,12 @@ export function CampaignDetailMapView({
   const [parcelFetchSuppressed, setParcelFetchSuppressed] = useState(false);
   const parcelFetchFailureCountRef = useRef(0);
   const parcelEnrichmentStatus = campaign?.parcel_enrichment_status ?? 'not_started';
-  const hasParcelPmtilesScope = parcels.length > 0 || Boolean(campaign?.territory_boundary);
+  const campaignBbox = Array.isArray(campaign?.bbox) &&
+    campaign.bbox.length === 4 &&
+    campaign.bbox.every((value) => typeof value === 'number' && Number.isFinite(value))
+    ? (campaign.bbox as [number, number, number, number])
+    : null;
+  const hasParcelPmtilesScope = parcels.length > 0 || Boolean(campaign?.territory_boundary) || Boolean(campaignBbox);
   const parcelsReady = SHOW_PARCEL_VIEW && (parcels.length > 0 || (pmtilesParcelsReady && hasParcelPmtilesScope));
   const parcelsProcessing = parcelEnrichmentStatus === 'queued' || parcelEnrichmentStatus === 'processing';
   const showGeojsonParcels = SHOW_PARCEL_VIEW && mapViewMode === 'parcels' && parcels.length > 0;
@@ -816,8 +822,32 @@ export function CampaignDetailMapView({
   }, [mapViewMode, parcelsReady]);
 
   useEffect(() => {
+    let cancelled = false;
+
     setPmtilesParcelsReady(false);
-  }, [campaignId]);
+
+    if (!SHOW_PARCEL_VIEW || !campaignId) return;
+
+    const loadParcelAvailability = async () => {
+      try {
+        const { manifest } = await fetchCampaignMapManifest(campaignId);
+        if (!cancelled) {
+          setPmtilesParcelsReady(hasRenderablePmtilesParcels(manifest));
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.warn('[CampaignDetailMapView] Failed to check parcel tile availability:', error);
+          setPmtilesParcelsReady(false);
+        }
+      }
+    };
+
+    void loadParcelAvailability();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [campaignId, mapProvisionRefreshKey]);
 
   // Fetch parcels for this campaign
   useEffect(() => {
@@ -2251,12 +2281,6 @@ export function CampaignDetailMapView({
       (buildingsRenderState.hasData &&
         buildingsRenderState.zoomLevel >= 12 &&
         !buildingsRenderState.hasBuildingPolygons));
-  const campaignBbox = Array.isArray(campaign?.bbox) &&
-    campaign.bbox.length === 4 &&
-    campaign.bbox.every((value) => typeof value === 'number' && Number.isFinite(value))
-    ? (campaign.bbox as [number, number, number, number])
-    : null;
-
   useEffect(() => {
     if (mapViewMode !== 'buildings') {
       setShowBuildingPendingOverlay(false);
@@ -2373,7 +2397,7 @@ export function CampaignDetailMapView({
                 {SHOW_PARCEL_VIEW && parcelsReady ? (
                   <button
                     type="button"
-                    onClick={() => setMapViewMode('parcels')}
+                    onClick={() => setMapViewMode((current) => current === 'parcels' ? 'buildings' : 'parcels')}
                     className={`px-3 py-2 text-sm font-medium transition-colors ${
                       mapViewMode === 'parcels'
                         ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'

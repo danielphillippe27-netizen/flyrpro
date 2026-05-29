@@ -28,7 +28,8 @@
     "stripe:listen": "stripe listen --forward-to localhost:3000/api/billing/stripe/webhook",
     "stripe:listen:test": "node scripts/stripe-listen-test.js",
     "test:ambassador-signup": "npx tsx scripts/test-ambassador-signup.ts",
-    "test:ambassador-payout": "npx tsx scripts/test-ambassador-payout.ts"
+    "test:ambassador-payout": "npx tsx scripts/test-ambassador-payout.ts",
+    "test:campaign-polygon-parity": "npx tsx scripts/campaign-polygon-parity-e2e.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.986.0",

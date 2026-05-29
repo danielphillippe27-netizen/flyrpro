@@ -18,19 +18,6 @@ import { fetchAllInPages } from '@/lib/supabase/fetchAllInPages';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-/** Raised when an address cannot be uniquely assigned to a building due to identical confidence and spatial metrics after tie-breakers. */
-export class DataIntegrityError extends Error {
-  constructor(
-    public readonly addressId: string,
-    public readonly buildingIds: string[],
-    public readonly score: number,
-    message: string
-  ) {
-    super(message);
-    this.name = 'DataIntegrityError';
-  }
-}
-
 // Match result types
 export interface MatchResult {
   addressId: string;
@@ -113,25 +100,7 @@ export interface BuildingFeature {
   };
 }
 
-interface ParcelFeature {
-  externalId: string;
-  geometry: {
-    type: 'MultiPolygon';
-    coordinates: number[][][][];
-  };
-}
-
-interface PreparedParcelFeature extends ParcelFeature {
-  bbox: [number, number, number, number];
-  buildingCandidates: Array<{
-    building: BuildingFeature;
-    centroid: [number, number];
-    area: number;
-  }>;
-}
-
 interface SpatialJoinOptions {
-  parcels?: ParcelFeature[];
   resetExisting?: boolean;
   persistenceMode?: 'silver' | 'gold';
 }
@@ -163,13 +132,7 @@ type ManualLinkRpc = (
   args: Record<string, unknown>
 ) => Promise<ManualLinkRpcResult>;
 
-const DENSITY_GUARD_RADIUS_METERS = 100;
-const PROXIMITY_MATCH_RADIUS_METERS = 30;
-const FALLBACK_MATCH_RADIUS_METERS = 45;
-const TOWNHOUSE_ROW_BUFFER_METERS = 12;
-const TOWNHOUSE_ROW_CONFIDENCE_FLOOR = 0.85;
-const TOWNHOUSE_ROW_COMPETITION_TOLERANCE_METERS = 2;
-const TOWNHOUSE_ROW_MAX_UNITS = 6;
+const MIN_LINKABLE_BUILDING_AREA_SQM = 45;
 const NEAREST_BUILDING_CANDIDATE_LIMIT = 10;
 
 function manualLinkRpc(client: SupabaseClient): ManualLinkRpc | null {
@@ -192,16 +155,6 @@ interface CampaignAddressWithPoint extends Omit<CampaignAddress, 'geom'> {
     type: 'Point';
     coordinates: [number, number];
   };
-}
-
-interface TownhouseRowCandidate {
-  address: CampaignAddressWithPoint;
-  building: BuildingFeature;
-  distanceMeters: number;
-  streetMatchScore: number;
-  confidence: number;
-  projection: number;
-  perpendicularDistance: number;
 }
 
 export class StableLinkerService {
@@ -348,16 +301,9 @@ export class StableLinkerService {
 
       console.log(`[StableLinker] Addresses to match: ${addresses.length}`);
 
-      // 2. Filter valid buildings (exclude sheds, garages)
+      // 2. Filter only small building footprints before matching.
       const validBuildings = this.filterValidBuildings(buildingsGeoJSON.features);
       console.log(`[StableLinker] Valid buildings after filtering: ${validBuildings.length}`);
-
-      const preparedParcels = options.parcels?.length
-        ? this.prepareParcelBridge(options.parcels, validBuildings)
-        : [];
-      if (preparedParcels.length > 0) {
-        console.log(`[StableLinker] Parcel bridge enabled with ${preparedParcels.length} prepared parcels`);
-      }
 
       if (validBuildings.length === 0) {
         console.error('[StableLinker] No valid buildings after filtering!');
@@ -389,60 +335,24 @@ export class StableLinkerService {
         await this.resetCampaignArtifacts(campaignId, options.persistenceMode === 'gold');
       }
 
-      // 3. Run 4-tier matching algorithm
-      let matches: MatchResult[] = [];
+      // 3. Run closest-footprint matching after the area-only building filter.
+      const matches: MatchResult[] = [];
       const orphans: OrphanRecord[] = [];
-      const matchedBuildingIds = new Set<string>();
-      let conflictCount = 0;
-      let densityWarningCount = 0;
-      const addressById = new Map(addresses.map((address) => [address.id, address]));
-      const buildingById = new Map(validBuildings.map((building) => [building.properties.gers_id, building]));
-      const townhouseRowAssignments = this.buildTownhouseRowAssignments(addresses, validBuildings);
-      if (townhouseRowAssignments.size > 0) {
-        console.log(`[StableLinker] Townhouse row prepass assigned ${townhouseRowAssignments.size} addresses`);
-      }
-
+      const conflictCount = 0;
+      const densityWarningCount = 0;
       console.log(`[StableLinker] Starting matching for ${addresses.length} addresses...`);
 
       for (const address of addresses) {
-        try {
-          const raw = townhouseRowAssignments.get(address.id) ?? this.matchAddressToBuilding(
-              address,
-              validBuildings,
-              matchedBuildingIds,
-              preparedParcels
-            );
-          const result: MatchResult = Array.isArray(raw) ? raw[0] : raw;
-          const densityWarning = Array.isArray(raw) && raw[1].densityWarning;
-          if (densityWarning) densityWarningCount++;
+        const result = this.matchAddressToBuilding(address, validBuildings);
 
-          if (result.matchType === 'orphan') {
-            orphans.push(this.createOrphanRecord(address, validBuildings));
-          } else {
-            matches.push(result);
-            matchedBuildingIds.add(result.buildingId);
-          }
-        } catch (err) {
-          if (err instanceof DataIntegrityError) {
-            conflictCount++;
-            console.warn(`[StableLinker] DataIntegrityError: ${err.message} (building_ids: ${err.buildingIds.join(', ')})`);
-            const ambiguousOrphan = this.createAmbiguousOrphanRecord(address, err.buildingIds);
-            orphans.push(ambiguousOrphan);
-          } else {
-            throw err;
-          }
+        if (result.matchType === 'orphan') {
+          orphans.push(this.createOrphanRecord(address, validBuildings));
+        } else {
+          matches.push(result);
         }
       }
 
       console.log(`[StableLinker] Matching complete: ${matches.length} matches, ${orphans.length} orphans, ${conflictCount} conflicts`);
-
-      const validation = this.validateUniqueAddressAssignments(matches, addressById, buildingById);
-      matches = validation.matches;
-      orphans.push(...validation.orphans);
-      conflictCount += validation.orphans.length;
-      if (validation.orphans.length > 0) {
-        console.warn(`[StableLinker] Assignment validator rejected ${validation.orphans.length} duplicate address links`);
-      }
 
       // 4. Detect multi-unit buildings
       this.detectMultiUnitBuildings(matches);
@@ -478,395 +388,49 @@ export class StableLinkerService {
   }
 
   /**
-   * Filter out noise and optionally small outbuildings (gold standard).
-   * - Noise: exclude area < 5 m².
-   * - Shed/outbuilding: exclude area < 40 m² so main building wins when multiple candidates (tie-break by area handles the rest).
+   * Filter out only small building footprints. Automatic linking should not
+   * use parcel, street, type, or distance gates.
    */
   private filterValidBuildings(buildings: BuildingFeature[]): BuildingFeature[] {
-    const filtered = buildings.filter(b => {
-      const area = this.calculateBuildingArea(b);
-      if (area < 5) {
-        return false; // noise_geometry
-      }
-      if (area < 40) {
-        return false; // shed/outbuilding; prefer main building (area tie-break in match)
-      }
-      return true;
+    const filtered = buildings.filter((building) => {
+      const area = this.calculateBuildingArea(building);
+      return area >= MIN_LINKABLE_BUILDING_AREA_SQM;
     });
-    console.log(`[StableLinker] Filtered: ${filtered.length}/${buildings.length} buildings (excluded < 5 m² noise, < 40 m² sheds)`);
+    console.log(
+      `[StableLinker] Filtered: ${filtered.length}/${buildings.length} buildings (excluded < ${MIN_LINKABLE_BUILDING_AREA_SQM} m² only)`
+    );
     return filtered;
   }
 
-  private buildTownhouseRowAssignments(
-    addresses: CampaignAddressWithPoint[],
-    buildings: BuildingFeature[]
-  ): Map<string, MatchResult> {
-    const candidatesByGroup = new Map<string, TownhouseRowCandidate[]>();
-
-    for (const building of buildings) {
-      const buildingStreet = this.normalizeStreetName(
-        building.properties.primary_street ?? building.properties.street_name ?? ''
-      );
-      const axis = this.calculateBuildingLongAxis(building);
-      if (!axis) continue;
-
-      for (const address of addresses) {
-        const addressStreet = this.normalizeStreetName(address.street_name ?? '');
-        if (!addressStreet) continue;
-        if (buildingStreet && !this.normalizedStreetNamesMatch(addressStreet, buildingStreet)) continue;
-
-        const distanceMeters = this.calculatePointToBuildingDistance(address.geom.coordinates, building);
-        if (distanceMeters > TOWNHOUSE_ROW_BUFFER_METERS) continue;
-
-        const nearest = this.findNearestBuildings(address.geom.coordinates, buildings, 2);
-        const closest = nearest[0];
-        if (
-          closest &&
-          closest.building.properties.gers_id !== building.properties.gers_id &&
-          distanceMeters > closest.distance + TOWNHOUSE_ROW_COMPETITION_TOLERANCE_METERS
-        ) {
-          continue;
-        }
-
-        const projection = this.projectAddressOntoAxis(address.geom.coordinates, axis);
-        const confidence = this.calculateTownhouseRowConfidence(distanceMeters, projection.perpendicularDistance);
-        if (confidence < TOWNHOUSE_ROW_CONFIDENCE_FLOOR) continue;
-
-        const key = `${building.properties.gers_id}|${addressStreet}`;
-        const current = candidatesByGroup.get(key) ?? [];
-        current.push({
-          address,
-          building,
-          distanceMeters,
-          streetMatchScore: 1,
-          confidence,
-          projection: projection.alongAxis,
-          perpendicularDistance: projection.perpendicularDistance,
-        });
-        candidatesByGroup.set(key, current);
-      }
-    }
-
-    const candidatesByAddress = new Map<string, TownhouseRowCandidate[]>();
-    for (const group of candidatesByGroup.values()) {
-      const approved = this.approvedTownhouseRowCandidates(group);
-      for (const candidate of approved) {
-        const current = candidatesByAddress.get(candidate.address.id) ?? [];
-        current.push(candidate);
-        candidatesByAddress.set(candidate.address.id, current);
-      }
-    }
-
-    const assignments = new Map<string, MatchResult>();
-    for (const [addressId, candidates] of candidatesByAddress) {
-      candidates.sort((a, b) => {
-        if (Math.abs(b.confidence - a.confidence) >= 0.01) return b.confidence - a.confidence;
-        if (Math.abs(a.distanceMeters - b.distanceMeters) >= 0.5) return a.distanceMeters - b.distanceMeters;
-        return this.calculateBuildingArea(b.building) - this.calculateBuildingArea(a.building);
-      });
-
-      const best = candidates[0];
-      const second = candidates[1];
-      if (!best) continue;
-      if (
-        second &&
-        Math.abs(best.confidence - second.confidence) < 0.01 &&
-        Math.abs(best.distanceMeters - second.distanceMeters) < 0.5
-      ) {
-        continue;
-      }
-
-      assignments.set(
-        addressId,
-        this.createMatchResult(
-          best.address,
-          best.building,
-          best.distanceMeters <= 0.5 ? 'containment_verified' : 'proximity_verified',
-          best.confidence,
-          best.distanceMeters,
-          best.streetMatchScore
-        )
-      );
-    }
-
-    return assignments;
-  }
-
-  private approvedTownhouseRowCandidates(candidates: TownhouseRowCandidate[]): TownhouseRowCandidate[] {
-    const uniqueByAddress = new Map<string, TownhouseRowCandidate>();
-    for (const candidate of candidates) {
-      const existing = uniqueByAddress.get(candidate.address.id);
-      if (!existing || candidate.confidence > existing.confidence) {
-        uniqueByAddress.set(candidate.address.id, candidate);
-      }
-    }
-
-    const unique = Array.from(uniqueByAddress.values());
-    if (unique.length < 2 || unique.length > TOWNHOUSE_ROW_MAX_UNITS) return [];
-
-    const numericHouseNumbers = unique
-      .map((candidate) => this.houseNumberValue(candidate.address.house_number ?? candidate.address.formatted ?? ''))
-      .filter((value): value is number => value != null);
-    if (numericHouseNumbers.length >= 2) {
-      const parities = new Set(numericHouseNumbers.map((value) => Math.abs(value) % 2));
-      if (parities.size > 1) return [];
-    }
-
-    const sorted = unique.sort((a, b) => a.projection - b.projection);
-    const projectionSpread = sorted[sorted.length - 1].projection - sorted[0].projection;
-    if (projectionSpread < (sorted.length === 2 ? 2 : 6)) return [];
-
-    const perpendicularSpread =
-      Math.max(...sorted.map((candidate) => candidate.perpendicularDistance)) -
-      Math.min(...sorted.map((candidate) => candidate.perpendicularDistance));
-    if (perpendicularSpread > TOWNHOUSE_ROW_BUFFER_METERS + 6) return [];
-
-    return sorted;
-  }
-
-  private validateUniqueAddressAssignments(
-    matches: MatchResult[],
-    addressById: Map<string, CampaignAddressWithPoint>,
-    buildingById: Map<string, BuildingFeature>
-  ): { matches: MatchResult[]; orphans: OrphanRecord[] } {
-    const winnersByAddress = new Map<string, MatchResult>();
-    const duplicatesByAddress = new Map<string, MatchResult[]>();
-
-    for (const match of matches) {
-      const current = duplicatesByAddress.get(match.addressId) ?? [];
-      current.push(match);
-      duplicatesByAddress.set(match.addressId, current);
-    }
-
-    const orphans: OrphanRecord[] = [];
-    const rejectedAddressIds = new Set<string>();
-    for (const [addressId, candidates] of duplicatesByAddress) {
-      if (candidates.length === 1) {
-        winnersByAddress.set(addressId, candidates[0]);
-        continue;
-      }
-
-      candidates.sort((a, b) => {
-        if (Math.abs(b.confidence - a.confidence) >= 0.01) return b.confidence - a.confidence;
-        if (Math.abs(a.distanceMeters - b.distanceMeters) >= 0.5) return a.distanceMeters - b.distanceMeters;
-        return b.buildingAreaSqm - a.buildingAreaSqm;
-      });
-
-      const first = candidates[0];
-      const second = candidates[1];
-      if (
-        first &&
-        second &&
-        Math.abs(first.confidence - second.confidence) < 0.01 &&
-        Math.abs(first.distanceMeters - second.distanceMeters) < 0.5
-      ) {
-        const address = addressById.get(addressId);
-        if (address) {
-          orphans.push(this.createAmbiguousOrphanRecord(address, candidates.map((candidate) => candidate.buildingId)));
-        }
-        rejectedAddressIds.add(addressId);
-      } else if (first) {
-        winnersByAddress.set(addressId, first);
-      }
-    }
-
-    const uniqueMatches = Array.from(winnersByAddress.values()).filter(
-      (match) => !rejectedAddressIds.has(match.addressId)
-    );
-    const validBuildingGroups = new Map<string, MatchResult[]>();
-    for (const match of uniqueMatches) {
-      const current = validBuildingGroups.get(match.buildingId) ?? [];
-      current.push(match);
-      validBuildingGroups.set(match.buildingId, current);
-    }
-
-    const finalMatches: MatchResult[] = [];
-    for (const [buildingId, group] of validBuildingGroups) {
-      if (group.length === 1 || this.isApprovedMultiAddressBuildingGroup(group, addressById, buildingById.get(buildingId))) {
-        finalMatches.push(...group);
-        continue;
-      }
-
-      const sorted = [...group].sort((a, b) => {
-        if (Math.abs(b.confidence - a.confidence) >= 0.01) return b.confidence - a.confidence;
-        if (Math.abs(a.distanceMeters - b.distanceMeters) >= 0.5) return a.distanceMeters - b.distanceMeters;
-        return a.addressId.localeCompare(b.addressId);
-      });
-      const keeper = sorted[0];
-      finalMatches.push(keeper);
-      for (const rejected of sorted.slice(1)) {
-        const address = addressById.get(rejected.addressId);
-        if (address) {
-          orphans.push(this.createAmbiguousOrphanRecord(address, [rejected.buildingId]));
-        }
-      }
-    }
-
-    return { matches: finalMatches, orphans };
-  }
-
-  private isApprovedMultiAddressBuildingGroup(
-    group: MatchResult[],
-    addressById: Map<string, CampaignAddressWithPoint>,
-    building?: BuildingFeature
-  ): boolean {
-    if (!building) return false;
-    if (group.length < 2 || group.length > TOWNHOUSE_ROW_MAX_UNITS) return false;
-
-    const axis = this.calculateBuildingLongAxis(building);
-    if (!axis) return false;
-
-    const candidates: TownhouseRowCandidate[] = [];
-    for (const match of group) {
-      const address = addressById.get(match.addressId);
-      if (!address) return false;
-      const distanceMeters = this.calculatePointToBuildingDistance(address.geom.coordinates, building);
-      if (distanceMeters > TOWNHOUSE_ROW_BUFFER_METERS) return false;
-      const projection = this.projectAddressOntoAxis(address.geom.coordinates, axis);
-      candidates.push({
-        address,
-        building,
-        distanceMeters,
-        streetMatchScore: match.streetMatchScore,
-        confidence: match.confidence,
-        projection: projection.alongAxis,
-        perpendicularDistance: projection.perpendicularDistance,
-      });
-    }
-
-    return this.approvedTownhouseRowCandidates(candidates).length === group.length;
-  }
-
   /**
-   * 5-Tier Matching Algorithm (with tie-break; can throw DataIntegrityError).
-   * Returns MatchResult or [MatchResult, { densityWarning: true }] when density guard triggers.
+   * Link to the closest remaining footprint after the area-only building filter.
    */
   private matchAddressToBuilding(
     address: CampaignAddressWithPoint,
-    buildings: BuildingFeature[],
-    matchedBuildingIds: Set<string>,
-    parcels: PreparedParcelFeature[]
-  ): MatchResult | [MatchResult, { densityWarning: true }] {
+    buildings: BuildingFeature[]
+  ): MatchResult {
     const addressCoords = address.geom.coordinates;
-    const unmatchedBuildings = buildings.filter(
-      building => !matchedBuildingIds.has(building.properties.gers_id)
-    );
-
-    // TIER 1: Direct containment (may throw on tie)
-    const containingBuilding = this.pickBestContainingOrThrow(address.id, addressCoords, buildings);
-    if (containingBuilding) {
-      return this.createMatchResult(
-        address,
-        containingBuilding,
-        'containment_verified',
-        1.0,
-        0,
-        0
-      );
-    }
-
-    // TIER 2: Parcel bridge. For detached homes, parcel evidence beats boundary/proximity
-    // heuristics because address points often land on driveways, lawns, or road edges.
-    const parcelBridgeBuilding = this.pickBestParcelBridgedBuildingOrThrow(
-      address.id,
-      addressCoords,
-      parcels
-    );
-    if (parcelBridgeBuilding) {
-      return this.createMatchResult(
-        address,
-        parcelBridgeBuilding.building,
-        'parcel_verified',
-        0.95,
-        parcelBridgeBuilding.distance,
-        0
-      );
-    }
-
-    // Density guard: if > 100 candidates nearby, only allow containment or parcel
-    // evidence (avoid memory/spurious point-on-surface/proximity guesses).
-    const candidateCount = this.countCandidatesWithin(addressCoords, buildings, DENSITY_GUARD_RADIUS_METERS);
-    if (candidateCount > 100) {
-      console.warn(`[StableLinker] density_warning addressId=${address.id} candidateCount=${candidateCount} using containment-or-parcel-only`);
-      const orphanResult = this.createMatchResult(address, null, 'orphan', 0, 0, 0);
-      return [orphanResult, { densityWarning: true }];
-    }
-
-    // TIER 3: Point-on-surface / boundary handling (may throw on tie)
-    const pointOnSurfaceBuilding = this.pickBestPointOnSurfaceOrThrow(address.id, addressCoords, buildings);
-    if (pointOnSurfaceBuilding) {
-      return this.createMatchResult(
-        address,
-        pointOnSurfaceBuilding,
-        'point_on_surface',
-        0.9,
-        0,
-        0
-      );
-    }
-
-    // TIER 4: Proximity within the nearby match radius; prefer closest footprint distance, then area.
-    // Proximity alone should not assign multiple detached addresses to the same
-    // footprint; true multi-unit matches should be proven by containment, surface,
-    // or parcel evidence above.
-    const nearestMatches = this.findNearestBuildings(addressCoords, unmatchedBuildings, NEAREST_BUILDING_CANDIDATE_LIMIT);
-    const nearbyMatches = nearestMatches.filter(c => c.distance <= PROXIMITY_MATCH_RADIUS_METERS);
-    if (nearbyMatches.length > 0) {
-      const spatialCandidates = nearbyMatches.map(c => ({
-        ...c,
-        area: this.calculateBuildingArea(c.building),
-      }));
-      spatialCandidates.sort((a, b) => {
+    const nearestMatches = this.findNearestBuildings(addressCoords, buildings, NEAREST_BUILDING_CANDIDATE_LIMIT)
+      .map((candidate) => ({
+        ...candidate,
+        area: this.calculateBuildingArea(candidate.building),
+      }))
+      .sort((a, b) => {
         if (Math.abs(a.distance - b.distance) >= 0.5) return a.distance - b.distance;
-        return b.area - a.area;
+        if (b.area !== a.area) return b.area - a.area;
+        return a.building.properties.gers_id.localeCompare(b.building.properties.gers_id);
       });
-      const best = this.pickBestProximityOrThrow(address.id, spatialCandidates, 0.7);
-      if (best) {
-        if (matchedBuildingIds.has(best.building.properties.gers_id)) {
-          const unusedFallback = this.pickBestProximityOrThrow(
-            address.id,
-            spatialCandidates.filter(c => !matchedBuildingIds.has(c.building.properties.gers_id)),
-            0.5
-          );
-          if (!unusedFallback) {
-            return this.createMatchResult(address, null, 'orphan', 0, 0, 0);
-          }
-          return this.createMatchResult(
-            address,
-            unusedFallback.building,
-            'proximity_fallback',
-            Math.max(0.5, 0.7 - unusedFallback.distance * 0.01),
-            unusedFallback.distance,
-            0
-          );
-        }
-        return this.createMatchResult(
-          address,
-          best.building,
-          'proximity_verified',
-          Math.max(0.7, 0.9 - best.distance * 0.01),
-          best.distance,
-          0
-        );
-      }
-    }
 
-    // TIER 5: Fallback (nearest within relaxed radius, not already matched); no street requirement
-    const fallbackMatches = nearestMatches.filter(
-      c => c.distance <= FALLBACK_MATCH_RADIUS_METERS && !matchedBuildingIds.has(c.building.properties.gers_id)
-    );
-    if (fallbackMatches.length > 0) {
-      const best = this.pickBestProximityOrThrow(address.id, fallbackMatches, 0.5);
-      if (best) {
-        return this.createMatchResult(
-          address,
-          best.building,
-          'proximity_fallback',
-          Math.max(0.5, 0.7 - best.distance * 0.01),
-          best.distance,
-          0
-        );
-      }
+    const best = nearestMatches[0];
+    if (best) {
+      return this.createMatchResult(
+        address,
+        best.building,
+        best.distance <= 0.5 ? 'containment_verified' : 'proximity_verified',
+        best.distance <= 0.5 ? 1.0 : Math.max(0.7, 0.9 - best.distance * 0.01),
+        best.distance,
+        0
+      );
     }
 
     // ORPHAN: No match found
@@ -994,128 +558,6 @@ export class StableLinkerService {
   }
 
   /**
-   * Find all buildings containing point (for tie-break: prefer largest area)
-   */
-  private findAllContainingBuildings(
-    point: [number, number],
-    buildings: BuildingFeature[]
-  ): BuildingFeature[] {
-    const containing: BuildingFeature[] = [];
-    for (const building of buildings) {
-      if (this.isPointInBuilding(point, building)) {
-        containing.push(building);
-      }
-    }
-    return containing.sort((a, b) => {
-      const areaA = this.calculateBuildingArea(a);
-      const areaB = this.calculateBuildingArea(b);
-      return areaB - areaA; // largest first
-    });
-  }
-
-  /**
-   * Pick best containing building or throw DataIntegrityError if tie (area within 2x).
-   */
-  private pickBestContainingOrThrow(
-    addressId: string,
-    point: [number, number],
-    buildings: BuildingFeature[]
-  ): BuildingFeature | null {
-    const containing = this.findAllContainingBuildings(point, buildings);
-    if (containing.length === 0) return null;
-    if (containing.length === 1) return containing[0];
-    const area0 = this.calculateBuildingArea(containing[0]);
-    const area1 = this.calculateBuildingArea(containing[1]);
-    if (area0 > 2 * area1) return containing[0];
-    throw new DataIntegrityError(
-      addressId,
-      containing.slice(0, 2).map(b => b.properties.gers_id),
-      1.0,
-      `Containment tie: address ${addressId} in multiple buildings (area tier)`
-    );
-  }
-
-  /**
-   * Find building containing point (convenience; returns first/largest from findAllContainingBuildings)
-   */
-  private findContainingBuilding(
-    point: [number, number],
-    buildings: BuildingFeature[]
-  ): BuildingFeature | null {
-    const containing = this.findAllContainingBuildings(point, buildings);
-    return containing.length > 0 ? containing[0] : null;
-  }
-
-  /**
-   * Find all buildings with point on boundary (for tie-break: prefer largest area)
-   */
-  private findAllPointOnSurfaceBuildings(
-    point: [number, number],
-    buildings: BuildingFeature[]
-  ): BuildingFeature[] {
-    const onSurface: BuildingFeature[] = [];
-    for (const building of buildings) {
-      if (this.isPointOnBuildingBoundary(point, building)) {
-        onSurface.push(building);
-      }
-    }
-    return onSurface.sort((a, b) => {
-      const areaA = this.calculateBuildingArea(a);
-      const areaB = this.calculateBuildingArea(b);
-      return areaB - areaA;
-    });
-  }
-
-  /**
-   * Pick best point-on-surface building or throw if tie.
-   */
-  private pickBestPointOnSurfaceOrThrow(
-    addressId: string,
-    point: [number, number],
-    buildings: BuildingFeature[]
-  ): BuildingFeature | null {
-    const onSurface = this.findAllPointOnSurfaceBuildings(point, buildings);
-    if (onSurface.length === 0) return null;
-    if (onSurface.length === 1) return onSurface[0];
-    const area0 = this.calculateBuildingArea(onSurface[0]);
-    const area1 = this.calculateBuildingArea(onSurface[1]);
-    if (area0 > 2 * area1) return onSurface[0];
-    throw new DataIntegrityError(
-      addressId,
-      onSurface.slice(0, 2).map(b => b.properties.gers_id),
-      0.9,
-      `Point-on-surface tie: address ${addressId} on boundary of multiple buildings`
-    );
-  }
-
-  /**
-   * Find building with point on surface (convenience)
-   */
-  private findPointOnSurfaceBuilding(
-    point: [number, number],
-    buildings: BuildingFeature[]
-  ): BuildingFeature | null {
-    const onSurface = this.findAllPointOnSurfaceBuildings(point, buildings);
-    return onSurface.length > 0 ? onSurface[0] : null;
-  }
-
-  /**
-   * Count buildings within radius (meters) of point (for density guard)
-   */
-  private countCandidatesWithin(
-    point: [number, number],
-    buildings: BuildingFeature[],
-    radiusMeters: number
-  ): number {
-    let count = 0;
-    for (const building of buildings) {
-      const centroid = this.calculateBuildingCentroid(building);
-      if (this.calculateDistance(point, centroid) <= radiusMeters) count++;
-    }
-    return count;
-  }
-
-  /**
    * Find K nearest buildings by footprint distance, so address points just
    * outside a building boundary still auto-link.
    */
@@ -1132,185 +574,6 @@ export class StableLinkerService {
     return distances
       .sort((a, b) => a.distance - b.distance)
       .slice(0, k);
-  }
-
-  private prepareParcelBridge(
-    parcels: ParcelFeature[],
-    buildings: BuildingFeature[]
-  ): PreparedParcelFeature[] {
-    const buildingCentroids = buildings.map((building) => ({
-      building,
-      centroid: this.calculateBuildingCentroid(building),
-      area: this.calculateBuildingArea(building),
-    }));
-
-    const prepared: PreparedParcelFeature[] = [];
-    for (const parcel of parcels) {
-      const bbox = this.calculateMultiPolygonBbox(parcel.geometry.coordinates);
-      const buildingCandidates = buildingCentroids.filter(({ centroid }) =>
-        this.pointInBbox(centroid, bbox) &&
-        this.isPointInMultiPolygon(centroid, parcel.geometry.coordinates)
-      );
-
-      if (buildingCandidates.length === 0) {
-        continue;
-      }
-
-      prepared.push({
-        ...parcel,
-        bbox,
-        buildingCandidates,
-      });
-    }
-
-    return prepared;
-  }
-
-  private pickBestParcelBridgedBuildingOrThrow(
-    addressId: string,
-    point: [number, number],
-    parcels: PreparedParcelFeature[],
-    excludedBuildingIds: Set<string> = new Set()
-  ): { building: BuildingFeature; distance: number } | null {
-    if (parcels.length === 0) return null;
-
-    const candidateMap = new Map<string, {
-      building: BuildingFeature;
-      distance: number;
-      area: number;
-    }>();
-
-    for (const parcel of parcels) {
-      if (!this.pointInBbox(point, parcel.bbox)) continue;
-      if (!this.isPointInMultiPolygon(point, parcel.geometry.coordinates)) continue;
-
-      for (const candidate of parcel.buildingCandidates) {
-        if (excludedBuildingIds.has(candidate.building.properties.gers_id)) continue;
-        const distance = this.calculateDistance(point, candidate.centroid);
-        const existing = candidateMap.get(candidate.building.properties.gers_id);
-        if (!existing || distance < existing.distance) {
-          candidateMap.set(candidate.building.properties.gers_id, {
-            building: candidate.building,
-            distance,
-            area: candidate.area,
-          });
-        }
-      }
-    }
-
-    if (candidateMap.size === 0) {
-      return null;
-    }
-
-    return this.pickBestParcelCandidateOrThrow(
-      addressId,
-      Array.from(candidateMap.values()),
-      0.95
-    );
-  }
-
-  /**
-   * Pick the best same-parcel building candidate. Same-parcel evidence is stronger
-   * than raw distance, so prefer the main/largest structure on the parcel,
-   * then distance as a tie-breaker.
-   */
-  private pickBestParcelCandidateOrThrow(
-    addressId: string,
-    candidates: Array<{ building: BuildingFeature; distance: number; area?: number }>,
-    score: number
-  ): { building: BuildingFeature; distance: number } | null {
-    if (candidates.length === 0) return null;
-    const withArea = candidates.map(c => ({
-      ...c,
-      area: c.area ?? this.calculateBuildingArea(c.building),
-    }));
-    withArea.sort((a, b) => {
-      if (b.area !== a.area) return b.area - a.area;
-      return a.distance - b.distance;
-    });
-
-    const first = withArea[0];
-    if (withArea.length === 1) {
-      return { building: first.building, distance: first.distance };
-    }
-
-    const second = withArea[1];
-    const areaTie = first.area <= 2 * second.area && second.area <= 2 * first.area;
-    const distTie = Math.abs(first.distance - second.distance) < 0.5;
-
-    if (areaTie && distTie) {
-      throw new DataIntegrityError(
-        addressId,
-        [first.building.properties.gers_id, second.building.properties.gers_id],
-        score,
-        `Parcel tie: address ${addressId} has multiple same-parcel building candidates`
-      );
-    }
-
-    return { building: first.building, distance: first.distance };
-  }
-
-  /**
-   * Pick best proximity candidate by distance, then area; throw DataIntegrityError if tie.
-   */
-  private pickBestProximityOrThrow(
-    addressId: string,
-    candidates: Array<{ building: BuildingFeature; distance: number; area?: number }>,
-    score: number
-  ): { building: BuildingFeature; distance: number } | null {
-    if (candidates.length === 0) return null;
-    const withArea = candidates.map(c => ({
-      ...c,
-      area: c.area ?? this.calculateBuildingArea(c.building),
-    }));
-    withArea.sort((a, b) => {
-      if (Math.abs(a.distance - b.distance) >= 0.5) return a.distance - b.distance;
-      return b.area - a.area;
-    });
-    const first = withArea[0];
-    if (withArea.length === 1) return { building: first.building, distance: first.distance };
-    const second = withArea[1];
-    const distTie = Math.abs(first.distance - second.distance) < 0.5;
-    const areaTie = first.area <= 2 * second.area && second.area <= 2 * first.area;
-    if (distTie && areaTie) {
-      throw new DataIntegrityError(
-        addressId,
-        [first.building.properties.gers_id, second.building.properties.gers_id],
-        score,
-        `Proximity tie: address ${addressId} equidistant to multiple buildings`
-      );
-    }
-    return { building: first.building, distance: first.distance };
-  }
-
-  /**
-   * Calculate polygon centroid
-   */
-  private calculateCentroid(polygon: number[][]): [number, number] {
-    let sumX = 0, sumY = 0;
-    for (const [x, y] of polygon) {
-      sumX += x;
-      sumY += y;
-    }
-    return [sumX / polygon.length, sumY / polygon.length];
-  }
-
-  /**
-   * Calculate distance between two points (in meters)
-   */
-  private calculateDistance(p1: [number, number], p2: [number, number]): number {
-    const R = 6371000; // Earth radius in meters
-    const lat1 = p1[1] * Math.PI / 180;
-    const lat2 = p2[1] * Math.PI / 180;
-    const deltaLat = (p2[1] - p1[1]) * Math.PI / 180;
-    const deltaLon = (p2[0] - p1[0]) * Math.PI / 180;
-    
-    const a = Math.sin(deltaLat/2) * Math.sin(deltaLat/2) +
-      Math.cos(lat1) * Math.cos(lat2) *
-      Math.sin(deltaLon/2) * Math.sin(deltaLon/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    
-    return R * c;
   }
 
   private calculatePointToBuildingDistance(point: [number, number], building: BuildingFeature): number {
@@ -1395,38 +658,6 @@ export class StableLinkerService {
     return area * metersPerDegreeLat * metersPerDegreeLon;
   }
 
-  private calculateMultiPolygonBbox(
-    coordinates: number[][][][]
-  ): [number, number, number, number] {
-    let minLon = Infinity;
-    let minLat = Infinity;
-    let maxLon = -Infinity;
-    let maxLat = -Infinity;
-
-    for (const polygon of coordinates) {
-      for (const ring of polygon) {
-        for (const [lon, lat] of ring) {
-          minLon = Math.min(minLon, lon);
-          minLat = Math.min(minLat, lat);
-          maxLon = Math.max(maxLon, lon);
-          maxLat = Math.max(maxLat, lat);
-        }
-      }
-    }
-
-    return [minLon, minLat, maxLon, maxLat];
-  }
-
-  private pointInBbox(
-    point: [number, number],
-    bbox: [number, number, number, number]
-  ): boolean {
-    return point[0] >= bbox[0] &&
-      point[0] <= bbox[2] &&
-      point[1] >= bbox[1] &&
-      point[1] <= bbox[3];
-  }
-
   private isPointInMultiPolygon(
     point: [number, number],
     coordinates: number[][][][]
@@ -1475,117 +706,6 @@ export class StableLinkerService {
 
     const polygons = building.geometry.coordinates as number[][][][];
     return polygons.reduce((sum, polygon) => sum + this.calculatePolygonArea(polygon[0] ?? []), 0);
-  }
-
-  private calculateBuildingCentroid(building: BuildingFeature): [number, number] {
-    const rings = this.getPolygonRings(building);
-    return this.calculateCentroid(rings[0] ?? []);
-  }
-
-  private calculateBuildingLongAxis(building: BuildingFeature): {
-    origin: [number, number];
-    axis: [number, number];
-  } | null {
-    const rings = this.getPolygonRings(building);
-    const exterior = rings[0] ?? [];
-    if (exterior.length < 2) return null;
-
-    const origin = this.calculateBuildingCentroid(building);
-    const localPoints = exterior.map((point) => this.projectToLocalMeters(point as [number, number], origin));
-    const usablePoints = localPoints.filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
-    if (usablePoints.length < 2) return null;
-
-    const meanX = usablePoints.reduce((sum, point) => sum + point[0], 0) / usablePoints.length;
-    const meanY = usablePoints.reduce((sum, point) => sum + point[1], 0) / usablePoints.length;
-    let xx = 0;
-    let xy = 0;
-    let yy = 0;
-    for (const [x, y] of usablePoints) {
-      const dx = x - meanX;
-      const dy = y - meanY;
-      xx += dx * dx;
-      xy += dx * dy;
-      yy += dy * dy;
-    }
-
-    const angle = 0.5 * Math.atan2(2 * xy, xx - yy);
-    const axis: [number, number] = [Math.cos(angle), Math.sin(angle)];
-    if (!Number.isFinite(axis[0]) || !Number.isFinite(axis[1])) return null;
-    return { origin, axis };
-  }
-
-  private projectAddressOntoAxis(
-    point: [number, number],
-    frame: { origin: [number, number]; axis: [number, number] }
-  ): { alongAxis: number; perpendicularDistance: number } {
-    const [x, y] = this.projectToLocalMeters(point, frame.origin);
-    const alongAxis = x * frame.axis[0] + y * frame.axis[1];
-    const perpendicularX = x - alongAxis * frame.axis[0];
-    const perpendicularY = y - alongAxis * frame.axis[1];
-    return {
-      alongAxis,
-      perpendicularDistance: Math.sqrt(perpendicularX * perpendicularX + perpendicularY * perpendicularY),
-    };
-  }
-
-  private calculateTownhouseRowConfidence(distanceMeters: number, perpendicularDistance: number): number {
-    return Math.max(
-      0,
-      Math.min(0.98, 0.98 - distanceMeters * 0.006 - Math.max(0, perpendicularDistance - 8) * 0.004)
-    );
-  }
-
-  private normalizeStreetName(value: string): string {
-    return value
-      .trim()
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/\b(street|st|avenue|ave|road|rd|drive|dr|lane|ln|court|ct|boulevard|blvd|place|pl)\b/g, (token) => {
-        switch (token) {
-          case 'street':
-          case 'st':
-            return 'st';
-          case 'avenue':
-          case 'ave':
-            return 'ave';
-          case 'road':
-          case 'rd':
-            return 'rd';
-          case 'drive':
-          case 'dr':
-            return 'dr';
-          case 'lane':
-          case 'ln':
-            return 'ln';
-          case 'court':
-          case 'ct':
-            return 'ct';
-          case 'boulevard':
-          case 'blvd':
-            return 'blvd';
-          case 'place':
-          case 'pl':
-            return 'pl';
-          default:
-            return token;
-        }
-      })
-      .replace(/[^a-z0-9]+/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-  }
-
-  private normalizedStreetNamesMatch(left: string, right: string): boolean {
-    if (!left || !right) return false;
-    return left === right || left.startsWith(`${right} `) || right.startsWith(`${left} `);
-  }
-
-  private houseNumberValue(value: string): number | null {
-    const match = value.match(/\d+/);
-    if (!match) return null;
-    const parsed = Number(match[0]);
-    return Number.isFinite(parsed) ? parsed : null;
   }
 
   private isPointInBuilding(point: [number, number], building: BuildingFeature): boolean {
@@ -1736,33 +856,6 @@ export class StableLinkerService {
       streetMatchScore: 0,
       suggestedBuildings: suggestions,
       status: 'pending_review',
-      suggestedStreet: address.street_name ?? null,
-    };
-  }
-
-  /**
-   * Create orphan record for ambiguous match (DataIntegrityError)
-   */
-  private createAmbiguousOrphanRecord(
-    address: CampaignAddressWithPoint,
-    buildingIds: string[]
-  ): OrphanRecord {
-    return {
-      addressId: address.id,
-      coordinate: address.geom.coordinates,
-      addressStreet: address.street_name || '',
-      nearestBuildingId: buildingIds[0] ?? null,
-      nearestDistance: null,
-      nearestBuildingStreet: null,
-      streetMatchScore: null,
-      suggestedBuildings: buildingIds.map(bid => ({
-        buildingId: bid,
-        distance: 0,
-        streetScore: 0,
-        confidence: 0,
-        area: 0,
-      })),
-      status: 'ambiguous_match',
       suggestedStreet: address.street_name ?? null,
     };
   }

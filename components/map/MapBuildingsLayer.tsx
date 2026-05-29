@@ -100,7 +100,7 @@ const BUILDING_BEFORE_LAYER_IDS = [
   'assigned-routes-lines',
   'flyr-user-location',
 ];
-const INFERRED_BUILDING_LINK_MAX_DISTANCE_M = 30;
+const INFERRED_BUILDING_LINK_MAX_DISTANCE_M = 45;
 
 /**
  * Scale a polygon ring toward a centroid by a factor (in place).

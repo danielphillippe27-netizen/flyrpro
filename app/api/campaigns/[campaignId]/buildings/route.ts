@@ -50,6 +50,12 @@ const PMTILES_EXPANDED_BBOX_RETRY_METERS = Math.max(
     ? Number(process.env.PMTILES_EXPANDED_BBOX_RETRY_METERS)
     : 75
 );
+const PMTILES_BUILDING_DISPLAY_BUFFER_METERS = Math.max(
+  0,
+  Number.isFinite(Number(process.env.PMTILES_BUILDING_DISPLAY_BUFFER_METERS))
+    ? Number(process.env.PMTILES_BUILDING_DISPLAY_BUFFER_METERS)
+    : 150
+);
 const WEB_MERCATOR_MAX_LAT = 85.05112878;
 const METERS_PER_DEGREE_LATITUDE = 111_320;
 const BUILDINGS_RESPONSE_CACHE_TTL_MS = 30_000;
@@ -127,7 +133,7 @@ function snapshotBuildingsCacheKey(params: {
   snapshot: CampaignSnapshotRow;
   bbox: [number, number, number, number] | null;
   hiddenBuildingIds: Set<string>;
-  boundary: GeoJSON.Polygon | null;
+  boundary: GeoJSON.Polygon | GeoJSON.MultiPolygon | null;
 }) {
   const hiddenIds = Array.from(params.hiddenBuildingIds).sort().join(',');
   return [
@@ -523,7 +529,14 @@ function pointInPolygon(point: [number, number], polygon: GeoJSON.Polygon): bool
   return !holes.some((hole) => pointInRing(point, hole));
 }
 
-function featureInCampaignBoundary(feature: unknown, boundary: GeoJSON.Polygon): boolean {
+function pointInBoundary(point: [number, number], boundary: GeoJSON.Polygon | GeoJSON.MultiPolygon): boolean {
+  if (boundary.type === 'Polygon') return pointInPolygon(point, boundary);
+  return boundary.coordinates.some((coordinates) =>
+    pointInPolygon(point, { type: 'Polygon', coordinates })
+  );
+}
+
+function featureInCampaignBoundary(feature: unknown, boundary: GeoJSON.Polygon | GeoJSON.MultiPolygon): boolean {
   const geometry = (feature as { geometry?: GeoJSON.Geometry | null } | null)?.geometry;
   try {
     return turf.booleanIntersects(
@@ -536,13 +549,13 @@ function featureInCampaignBoundary(feature: unknown, boundary: GeoJSON.Polygon):
   }
 
   const center = geometryCenter(geometry);
-  if (center && pointInPolygon(center, boundary)) return true;
-  return flattenPositions(geometry).some((position) => pointInPolygon(position, boundary));
+  if (center && pointInBoundary(center, boundary)) return true;
+  return flattenPositions(geometry).some((position) => pointInBoundary(position, boundary));
 }
 
 function filterCampaignBoundaryFeatures<T extends FeatureCollectionLike | null | undefined>(
   featureCollection: T,
-  boundary: GeoJSON.Polygon | null
+  boundary: GeoJSON.Polygon | GeoJSON.MultiPolygon | null
 ): T {
   if (!featureCollection || !boundary || !Array.isArray(featureCollection.features)) {
     return featureCollection;
@@ -609,11 +622,30 @@ function normalizeGeoJsonPolygon(value: GeoJSON.Polygon | string | null | undefi
   return value.type === 'Polygon' && Array.isArray(value.coordinates) ? value : null;
 }
 
+function bufferCampaignBoundaryMeters(
+  boundary: GeoJSON.Polygon | null,
+  meters: number
+): GeoJSON.Polygon | GeoJSON.MultiPolygon | null {
+  if (!boundary || meters <= 0) return boundary;
+
+  try {
+    const buffered = turf.buffer(turf.feature(boundary), meters, { units: 'meters' });
+    const geometry = buffered?.geometry;
+    return geometry?.type === 'Polygon' || geometry?.type === 'MultiPolygon' ? geometry : boundary;
+  } catch (error) {
+    console.warn('[API] Failed to buffer campaign building display boundary; using strict boundary', {
+      meters,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return boundary;
+  }
+}
+
 async function fetchScopedPmtilesBuildingFeatures(
   snapshot: CampaignSnapshotRow,
   bbox: [number, number, number, number],
   hiddenBuildingIds: Set<string>,
-  boundary: GeoJSON.Polygon | null
+  boundary: GeoJSON.Polygon | GeoJSON.MultiPolygon | null
 ): Promise<FeatureCollectionLike | null> {
   const pmtilesKey = resolvePmtilesKey(snapshot);
   if (!pmtilesKey) return null;
@@ -701,7 +733,7 @@ async function fetchVisibleScopedPmtilesBuildings(params: {
   snapshot: CampaignSnapshotRow;
   bbox: [number, number, number, number];
   hiddenBuildingIds: Set<string>;
-  boundary: GeoJSON.Polygon | null;
+  boundary: GeoJSON.Polygon | GeoJSON.MultiPolygon | null;
   attempt: string;
 }): Promise<FeatureCollectionLike | null> {
   const scoped = await fetchScopedPmtilesBuildingFeatures(
@@ -710,16 +742,17 @@ async function fetchVisibleScopedPmtilesBuildings(params: {
     params.hiddenBuildingIds,
     params.boundary
   );
-  const visible = filterNonLinkableBuildingFeatures(scoped) as FeatureCollectionLike | null;
-  const visibleCount = getFeatureCount(visible);
+  const visibleCount = getFeatureCount(scoped);
   console.log('[API] Scoped PMTiles extraction result', {
     attempt: params.attempt,
     visible: visibleCount,
-    raw: getFeatureCount(scoped),
+    raw: visibleCount,
     hasBoundary: Boolean(params.boundary),
+    displayBufferMeters: PMTILES_BUILDING_DISPLAY_BUFFER_METERS,
+    linkableFilterApplied: false,
   });
 
-  return visibleCount > 0 ? visible : null;
+  return visibleCount > 0 ? scoped : null;
 }
 
 function isPolygonFeature(feature: unknown): boolean {
@@ -777,121 +810,11 @@ function filterHiddenBuildingFeatures(
   };
 }
 
-const MIN_LINKABLE_BUILDING_AREA_SQM = 40;
-const NON_LINKABLE_BUILDING_TYPES = new Set([
-  'shed',
-  'garage',
-  'garages',
-  'carport',
-  'parking',
-  'parking_garage',
-  'outbuilding',
-  'accessory',
-  'ancillary',
-]);
-
-function getFeatureNumericProperty(feature: unknown, key: string): number | null {
-  if (!feature || typeof feature !== 'object') return null;
-  const value = (feature as { properties?: Record<string, unknown> }).properties?.[key];
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string' && value.trim()) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
-}
-
-function getFeatureStringProperty(feature: unknown, key: string): string | null {
-  if (!feature || typeof feature !== 'object') return null;
-  const value = (feature as { properties?: Record<string, unknown> }).properties?.[key];
-  return typeof value === 'string' && value.trim() ? value.trim() : null;
-}
-
-function ringAreaSqm(ring: unknown): number {
-  if (!Array.isArray(ring) || ring.length < 4) return 0;
-
-  const points = ring
-    .map((point) => {
-      if (!Array.isArray(point) || point.length < 2) return null;
-      const lon = Number(point[0]);
-      const lat = Number(point[1]);
-      if (!Number.isFinite(lon) || !Number.isFinite(lat)) return null;
-      return { lon, lat };
-    })
-    .filter((point): point is { lon: number; lat: number } => Boolean(point));
-
-  if (points.length < 4) return 0;
-
-  const avgLatRad = points.reduce((sum, point) => sum + point.lat, 0) / points.length * Math.PI / 180;
-  const metersPerDegreeLat = 111_320;
-  const metersPerDegreeLon = Math.max(Math.cos(avgLatRad), 0.01) * 111_320;
-  let area = 0;
-
-  for (let index = 0; index < points.length; index += 1) {
-    const current = points[index];
-    const next = points[(index + 1) % points.length];
-    area += (current.lon * metersPerDegreeLon) * (next.lat * metersPerDegreeLat);
-    area -= (next.lon * metersPerDegreeLon) * (current.lat * metersPerDegreeLat);
-  }
-
-  return Math.abs(area) / 2;
-}
-
-function polygonAreaSqm(coordinates: unknown): number {
-  if (!Array.isArray(coordinates) || coordinates.length === 0) return 0;
-  const [outer, ...holes] = coordinates;
-  const outerArea = ringAreaSqm(outer);
-  const holeArea = holes.reduce((sum, hole) => sum + ringAreaSqm(hole), 0);
-  return Math.max(outerArea - holeArea, 0);
-}
-
-function featureGeometryAreaSqm(feature: unknown): number | null {
-  if (!feature || typeof feature !== 'object') return null;
-  const geometry = (feature as { geometry?: { type?: unknown; coordinates?: unknown } }).geometry;
-  if (!geometry) return null;
-
-  if (geometry.type === 'Polygon') {
-    return polygonAreaSqm(geometry.coordinates);
-  }
-
-  if (geometry.type === 'MultiPolygon' && Array.isArray(geometry.coordinates)) {
-    return geometry.coordinates.reduce((sum, polygon) => sum + polygonAreaSqm(polygon), 0);
-  }
-
-  return null;
-}
-
-function isLinkableBuildingFeature(feature: unknown): boolean {
-  if (!isPolygonFeature(feature)) return true;
-
-  const source = getFeatureStringProperty(feature, 'source')?.toLowerCase();
-  if (source === 'manual') return true;
-
-  const buildingType = getFeatureStringProperty(feature, 'building_type')?.toLowerCase();
-  if (buildingType && NON_LINKABLE_BUILDING_TYPES.has(buildingType)) return false;
-
-  const area = getFeatureNumericProperty(feature, 'area_sqm') ?? featureGeometryAreaSqm(feature);
-  return area == null || area >= MIN_LINKABLE_BUILDING_AREA_SQM;
-}
-
-function filterNonLinkableBuildingFeatures(
-  featureCollection: FeatureCollectionLike | null | undefined
-): FeatureCollectionLike | null | undefined {
-  if (!featureCollection || !Array.isArray(featureCollection.features)) {
-    return featureCollection;
-  }
-
-  return {
-    ...featureCollection,
-    features: featureCollection.features.filter(isLinkableBuildingFeature),
-  };
-}
-
 async function loadVisibleSnapshotGeojsonBuildings(params: {
   snapshot: CampaignSnapshotRow;
   geojsonKey: string | null;
   hiddenBuildingIds: Set<string>;
-  campaignBoundary: GeoJSON.Polygon | null;
+  campaignBoundary: GeoJSON.Polygon | GeoJSON.MultiPolygon | null;
 }): Promise<FeatureCollectionLike | null> {
   const { snapshot, geojsonKey, hiddenBuildingIds, campaignBoundary } = params;
   if (!geojsonKey || geojsonKey.endsWith('.pmtiles')) return null;
@@ -900,9 +823,7 @@ async function loadVisibleSnapshotGeojsonBuildings(params: {
 
   const geojson = await fetchSnapshotGeoJSONArtifact(snapshot, geojsonKey);
   return filterCampaignBoundaryFeatures(
-    filterNonLinkableBuildingFeatures(
-      filterHiddenBuildingFeatures(geojson, hiddenBuildingIds)
-    ),
+    filterHiddenBuildingFeatures(geojson, hiddenBuildingIds),
     campaignBoundary
   ) as FeatureCollectionLike;
 }
@@ -1836,12 +1757,19 @@ export async function GET(
       const snapshotRow = snapshot as CampaignSnapshotRow;
       const geojsonKey = resolveFallbackGeoJSONKey(snapshotRow);
       const bbox = parseBbox((campaignAccess as CampaignAccessRow).bbox) ?? bboxFromPolygon(campaignBoundary);
+      const displayBbox = bbox
+        ? expandBboxMeters(bbox, PMTILES_BUILDING_DISPLAY_BUFFER_METERS)
+        : null;
+      const displayBoundary = bufferCampaignBoundaryMeters(
+        campaignBoundary,
+        PMTILES_BUILDING_DISPLAY_BUFFER_METERS
+      );
       const cacheKey = snapshotBuildingsCacheKey({
         campaignId,
         snapshot: snapshotRow,
-        bbox,
+        bbox: displayBbox,
         hiddenBuildingIds,
-        boundary: campaignBoundary,
+        boundary: displayBoundary,
       });
 
       const snapshotBuildings = await loadCachedBuildingsResponse(cacheKey, async () => {
@@ -1849,25 +1777,28 @@ export async function GET(
 
         let pmtilesCandidate: FeatureCollectionLike | null = null;
         if (pmtilesKey) {
-          if (bbox) {
-            console.log('[API] Building scoped features from PMTiles bbox window', { pmtilesKey });
+          if (displayBbox) {
+            console.log('[API] Building scoped features from PMTiles display window', {
+              pmtilesKey,
+              displayBufferMeters: PMTILES_BUILDING_DISPLAY_BUFFER_METERS,
+            });
             try {
               pmtilesCandidate = await fetchVisibleScopedPmtilesBuildings({
                 snapshot: snapshotRow,
-                bbox,
+                bbox: displayBbox,
                 hiddenBuildingIds,
-                boundary: campaignBoundary,
-                attempt: 'strict_boundary',
+                boundary: displayBoundary,
+                attempt: 'display_buffer_boundary',
               });
 
-              if (!pmtilesCandidate && campaignBoundary) {
-                console.warn('[API] Strict PMTiles boundary scope returned no buildings; retrying bbox-only extraction');
+              if (!pmtilesCandidate && displayBoundary) {
+                console.warn('[API] Buffered PMTiles boundary scope returned no buildings; retrying display bbox-only extraction');
                 pmtilesCandidate = await fetchVisibleScopedPmtilesBuildings({
                   snapshot: snapshotRow,
-                  bbox,
+                  bbox: displayBbox,
                   hiddenBuildingIds,
                   boundary: null,
-                  attempt: 'bbox_only',
+                  attempt: 'display_bbox_only',
                 });
               }
 
@@ -1877,7 +1808,7 @@ export async function GET(
                 });
                 pmtilesCandidate = await fetchVisibleScopedPmtilesBuildings({
                   snapshot: snapshotRow,
-                  bbox: expandBboxMeters(bbox, PMTILES_EXPANDED_BBOX_RETRY_METERS),
+                  bbox: expandBboxMeters(displayBbox, PMTILES_EXPANDED_BBOX_RETRY_METERS),
                   hiddenBuildingIds,
                   boundary: null,
                   attempt: 'expanded_bbox',
@@ -1894,7 +1825,7 @@ export async function GET(
           }
         }
 
-        const hasScopedPmtilesSource = Boolean(pmtilesKey && bbox);
+        const hasScopedPmtilesSource = Boolean(pmtilesKey && displayBbox);
         const pmtilesCount = getFeatureCount(pmtilesCandidate);
         const expectedSnapshotCount = Number(snapshotRow.buildings_count ?? 0);
         const shouldCheckGeojson = !pmtilesCandidate && !hasScopedPmtilesSource;
@@ -1914,7 +1845,7 @@ export async function GET(
               snapshot: snapshotRow,
               geojsonKey,
               hiddenBuildingIds,
-              campaignBoundary,
+              campaignBoundary: displayBoundary,
             });
             const visibleSnapshotFeatures = (visibleGeojson as { features?: unknown[] } | null)?.features ?? [];
 
@@ -1980,9 +1911,7 @@ export async function GET(
       );
       const normalizedCampaignFeatures = (campaignFeatures ?? null) as FeatureCollectionLike | null;
       const visibleCampaignFeatures = filterCampaignBoundaryFeatures(
-        filterNonLinkableBuildingFeatures(
-          filterHiddenBuildingFeatures(normalizedCampaignFeatures, hiddenBuildingIds)
-        ),
+        filterHiddenBuildingFeatures(normalizedCampaignFeatures, hiddenBuildingIds),
         campaignBoundary
       );
       visibleFallbackFeatures = filterAddressPointFallbackFeatures(visibleCampaignFeatures);
@@ -2026,9 +1955,7 @@ export async function GET(
 
       if (goldFallback) {
         const visibleGoldFallback = filterCampaignBoundaryFeatures(
-          filterNonLinkableBuildingFeatures(
-            filterHiddenBuildingFeatures(goldFallback, hiddenBuildingIds)
-          ),
+          filterHiddenBuildingFeatures(goldFallback, hiddenBuildingIds),
           normalizeGeoJsonPolygon(campaignRow?.territory_boundary)
         );
         const visibleGoldFeatures = (visibleGoldFallback as { features?: unknown[] }).features ?? [];
@@ -2048,9 +1975,7 @@ export async function GET(
 
       if (campaignBuildingFallback) {
         const visibleCampaignBuildingFallback = filterCampaignBoundaryFeatures(
-          filterNonLinkableBuildingFeatures(
-            filterHiddenBuildingFeatures(campaignBuildingFallback, hiddenBuildingIds)
-          ),
+          filterHiddenBuildingFeatures(campaignBuildingFallback, hiddenBuildingIds),
           campaignBoundary
         );
         const visibleCampaignBuildingFeatures =

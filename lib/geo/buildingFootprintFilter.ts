@@ -1,4 +1,4 @@
-export const MIN_LINKABLE_BUILDING_AREA_SQM = 40;
+export const MIN_LINKABLE_BUILDING_AREA_SQM = 45;
 
 export const NON_LINKABLE_BUILDING_TYPES = new Set([
   'shed',
@@ -128,13 +128,6 @@ export function isLinkableBuildingFootprint(
   value: BuildingLike | FeatureLike,
   options: { minAreaSqm?: number; allowManual?: boolean } = {}
 ): boolean {
-  const source = 'properties' in value && value.properties
-    ? value.properties
-    : value as Record<string, unknown>;
-  const sourceType = stringValue(source.source)?.toLowerCase();
-  if (options.allowManual !== false && sourceType === 'manual') return true;
-  if (hasNonLinkableBuildingType(value)) return false;
-
   const area = buildingAreaSqm(value);
   const minAreaSqm = options.minAreaSqm ?? MIN_LINKABLE_BUILDING_AREA_SQM;
   return area == null || area >= minAreaSqm;
