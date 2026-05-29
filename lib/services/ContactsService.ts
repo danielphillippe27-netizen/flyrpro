@@ -25,50 +25,6 @@ type LegacyFieldLead = {
   updated_at?: string | null;
 };
 
-const CONTACTS_LIST_SELECT = [
-  'id',
-  'user_id',
-  'workspace_id',
-  'full_name',
-  'phone',
-  'email',
-  'address',
-  'campaign_id',
-  'farm_id',
-  'status',
-  'source',
-  'last_contacted',
-  'notes',
-  'follow_up_at',
-  'appointment_at',
-  'tags',
-  'created_at',
-  'updated_at',
-].join(', ');
-
-const FIELD_LEADS_LIST_SELECT = [
-  'id',
-  'user_id',
-  'workspace_id',
-  'full_name',
-  'name',
-  'phone',
-  'email',
-  'address',
-  'campaign_id',
-  'farm_id',
-  'status',
-  'source',
-  'notes',
-  'tags',
-  'last_contacted',
-  'reminder_date',
-  'follow_up_at',
-  'appointment_at',
-  'created_at',
-  'updated_at',
-].join(', ');
-
 export class ContactsService {
   private static client = createClient();
 
@@ -146,7 +102,7 @@ export class ContactsService {
   }): Promise<Contact[]> {
     let query = this.client
       .from('contacts')
-      .select(CONTACTS_LIST_SELECT);
+      .select('*');
 
     if (workspaceId) {
       query = query.eq('workspace_id', workspaceId);
@@ -171,7 +127,7 @@ export class ContactsService {
 
     // iOS compatibility: if legacy field_leads still receives writes, merge it so Leads remains populated.
     try {
-      let legacyQuery = this.client.from('field_leads').select(FIELD_LEADS_LIST_SELECT);
+      let legacyQuery = this.client.from('field_leads').select('*');
 
       if (workspaceId) {
         legacyQuery = legacyQuery.eq('workspace_id', workspaceId);
