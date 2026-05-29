@@ -7,7 +7,6 @@ import {
   resolveArtifactUrl,
   resolvePmtilesKey,
 } from '@/lib/diamond/geometry';
-import { filterLinkableBuildingFootprints } from '@/lib/geo/buildingFootprintFilter';
 
 export type ScopedBuildingFeatureCollection = {
   type: 'FeatureCollection';
@@ -373,10 +372,9 @@ export async function fetchScopedPmtilesBuildingFeatures(
   const features = Array.from(byBuildingId.entries()).map(([buildingId, fragments]) =>
     mergeBuildingFragments(buildingId, fragments)
   );
-  const linkableFeatures = filterLinkableBuildingFootprints(features);
-  if (linkableFeatures.length === 0) return null;
+  if (features.length === 0) return null;
   return {
     type: 'FeatureCollection',
-    features: linkableFeatures,
+    features,
   };
 }
