@@ -39,6 +39,7 @@ type TeamRosterResponse = {
 const DIALER_SELECTION_STORAGE_KEY = 'flyr:dialer:selected-contact-ids';
 const LEAD_RECORD_NAV_STORAGE_KEY = 'flyr:leads:record-contact-ids';
 const ALL_LEADS_LIST_ID = 'all';
+const inFlightLeadWorkspaceIds = new Set<string>();
 
 function escapeCsv(value: string | null | undefined): string {
   const safe = value ?? '';
@@ -125,6 +126,10 @@ export function ContactsHubView() {
   const canFilterByMembers = currentRole === 'owner' || currentRole === 'admin';
 
   const loadLeadData = useCallback(async (currentUserId: string) => {
+    const loadKey = currentWorkspaceId ?? `user:${currentUserId}`;
+    if (inFlightLeadWorkspaceIds.has(loadKey)) return;
+    inFlightLeadWorkspaceIds.add(loadKey);
+
     const loadTeamMembers = async (): Promise<TeamMemberOption[]> => {
       if (!canFilterByMembers || !currentWorkspaceId) return [];
 
@@ -189,6 +194,7 @@ export function ContactsHubView() {
       setTeamMembers([]);
       setStatsByUserId({});
     } finally {
+      inFlightLeadWorkspaceIds.delete(loadKey);
       setLoading(false);
     }
   }, [canFilterByMembers, currentWorkspaceId]);

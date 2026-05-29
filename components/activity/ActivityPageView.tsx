@@ -10,6 +10,7 @@ import { Route, Hand, Activity, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const PAGE_SIZE = 25;
+const inFlightActivityKeys = new Set<string>();
 const TYPE_FILTERS = [
   { value: '', label: 'All', icon: Activity },
   { value: 'session_completed', label: 'Sessions', icon: Route },
@@ -214,6 +215,18 @@ export function ActivityPageView({
         setLoading(false);
         return;
       }
+      const requestKey = [
+        currentWorkspaceId,
+        activeTypeFilter || 'all',
+        start,
+        end,
+        selectedMemberId,
+        campaignId ?? '',
+        String(off),
+        append ? 'append' : 'replace',
+      ].join('|');
+      if (inFlightActivityKeys.has(requestKey)) return;
+      inFlightActivityKeys.add(requestKey);
       setLoading(true);
       setError(null);
       try {
@@ -253,6 +266,7 @@ export function ActivityPageView({
         setError(e instanceof Error ? e.message : 'Failed to load activity');
         if (!append) setEvents([]);
       } finally {
+        inFlightActivityKeys.delete(requestKey);
         setLoading(false);
       }
     },

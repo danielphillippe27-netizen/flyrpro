@@ -25,6 +25,50 @@ type LegacyFieldLead = {
   updated_at?: string | null;
 };
 
+const CONTACTS_LIST_SELECT = [
+  'id',
+  'user_id',
+  'workspace_id',
+  'full_name',
+  'phone',
+  'email',
+  'address',
+  'campaign_id',
+  'farm_id',
+  'status',
+  'source',
+  'last_contacted',
+  'notes',
+  'follow_up_at',
+  'appointment_at',
+  'tags',
+  'created_at',
+  'updated_at',
+].join(', ');
+
+const FIELD_LEADS_LIST_SELECT = [
+  'id',
+  'user_id',
+  'workspace_id',
+  'full_name',
+  'name',
+  'phone',
+  'email',
+  'address',
+  'campaign_id',
+  'farm_id',
+  'status',
+  'source',
+  'notes',
+  'tags',
+  'last_contacted',
+  'reminder_date',
+  'follow_up_at',
+  'appointment_at',
+  'created_at',
+  'updated_at',
+].join(', ');
+
 export class ContactsService {
   private static client = createClient();
 
@@ -102,7 +146,7 @@ export class ContactsService {
   }): Promise<Contact[]> {
     let query = this.client
       .from('contacts')
-      .select('*');
+      .select(CONTACTS_LIST_SELECT);
 
     if (workspaceId) {
       query = query.eq('workspace_id', workspaceId);
@@ -120,14 +164,14 @@ export class ContactsService {
       query = query.eq('farm_id', filters.farmId);
     }
 
-    const { data, error } = await query.order('created_at', { ascending: false });
+    const { data, error } = await query.order('created_at', { ascending: false }).limit(500);
 
     if (error) throw error;
-    const contacts = data || [];
+    const contacts = (data ?? []) as unknown as Contact[];
 
     // iOS compatibility: if legacy field_leads still receives writes, merge it so Leads remains populated.
     try {
-      let legacyQuery = this.client.from('field_leads').select('*');
+      let legacyQuery = this.client.from('field_leads').select(FIELD_LEADS_LIST_SELECT);
 
       if (workspaceId) {
         legacyQuery = legacyQuery.eq('workspace_id', workspaceId);
@@ -142,15 +186,15 @@ export class ContactsService {
         legacyQuery = legacyQuery.eq('farm_id', filters.farmId);
       }
 
-      const { data: legacyData, error: legacyError } = await legacyQuery.order('created_at', {
-        ascending: false,
-      });
+      const { data: legacyData, error: legacyError } = await legacyQuery
+        .order('created_at', { ascending: false })
+        .limit(500);
 
       if (legacyError || !legacyData || legacyData.length === 0) {
         return contacts;
       }
 
-      const mappedLegacy = (legacyData as LegacyFieldLead[])
+      const mappedLegacy = (legacyData as unknown as LegacyFieldLead[])
         .map((row) => this.mapLegacyFieldLead(row))
         .filter((row) => (filters?.status ? row.status === filters.status : true));
 
