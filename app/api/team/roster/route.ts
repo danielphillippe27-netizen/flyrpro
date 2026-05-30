@@ -167,7 +167,7 @@ export async function GET(request: NextRequest) {
     }
 
     const nowIso = new Date().toISOString();
-    const [workspaceResult, membersResult, inviteResultSettled, seatUsageSettled] =
+    const [workspaceResult, membersResult, inviteResultSettled] =
       await Promise.allSettled([
         admin
           .from('workspaces')
@@ -176,7 +176,6 @@ export async function GET(request: NextRequest) {
           .single(),
         loadWorkspaceMembers(admin, context.workspaceId),
         listPendingWorkspaceInvites(admin, context.workspaceId, nowIso),
-        getSeatUsage(admin, context.workspaceId),
       ]);
 
     const workspace =
@@ -232,13 +231,14 @@ export async function GET(request: NextRequest) {
         is_current_user: row.user_id === requestUser.id,
       }));
 
-    const seatUsage =
-      seatUsageSettled.status === 'fulfilled'
-        ? seatUsageSettled.value
-        : buildSeatUsageFallback(memberships);
-    if (seatUsageSettled.status === 'rejected') {
-      console.warn('[team/roster] seat usage error; continuing with fallback seat counts', seatUsageSettled.reason);
-    }
+    const seatUsage = await getSeatUsage(admin, context.workspaceId, {
+      maxSeats: workspace?.max_seats ?? null,
+      memberships,
+      pendingInvites: inviteResult.data ?? [],
+    }).catch((error) => {
+      console.warn('[team/roster] seat usage error; continuing with fallback seat counts', error);
+      return buildSeatUsageFallback(memberships);
+    });
 
     const pendingInvites = (inviteResult.data ?? []).map((row) => ({
       id: row.id,

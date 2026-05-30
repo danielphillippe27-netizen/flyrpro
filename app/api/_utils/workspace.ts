@@ -164,7 +164,7 @@ export async function resolveDashboardAccessLevel(
           .maybeSingle(),
     supabaseAny
       .from('workspace_members')
-      .select('user_id')
+      .select('*', { count: 'exact', head: true })
       .eq('workspace_id', resolution.workspaceId),
     prefetchedWorkspace
       ? Promise.resolve({ data: { max_seats: prefetchedWorkspace.max_seats ?? null } })
@@ -177,8 +177,7 @@ export async function resolveDashboardAccessLevel(
 
   const membership = membershipResult.data;
   const role = (membership?.role as WorkspaceRole) ?? null;
-  const memberRows = memberRowsResult.data;
-  const memberCount = Array.isArray(memberRows) ? memberRows.length : 0;
+  const memberCount = typeof memberRowsResult.count === 'number' ? memberRowsResult.count : 0;
   const workspace = workspaceResult.data;
   const maxSeats =
     typeof workspace?.max_seats === 'number' ? workspace.max_seats : null;

@@ -80,6 +80,12 @@ type WorkspaceBillingRow = {
   trial_ends_at: string | null;
 };
 
+type SeatUsagePrefetch = {
+  maxSeats?: number | null;
+  memberships?: Array<{ role: WorkspaceRole | string | null }> | null;
+  pendingInvites?: Array<{ role: PendingInviteRole | string | null }> | null;
+};
+
 function inviteSelectColumns(options?: {
   includeWorkspaceId?: boolean;
   includeLastSentAt?: boolean;
@@ -192,37 +198,50 @@ export async function resolveTeamManagementContext(
 
 export async function getSeatUsage(
   supabase: AdminClient,
-  workspaceId: string
+  workspaceId: string,
+  prefetch: SeatUsagePrefetch = {}
 ): Promise<SeatUsage> {
   const nowIso = new Date().toISOString();
   const [workspaceResult, activeMembershipsResult] =
     await Promise.all([
-      supabase
-        .from('workspaces')
-        .select('max_seats')
-        .eq('id', workspaceId)
-        .maybeSingle(),
-      supabase
-        .from('workspace_members')
-        .select('role')
-        .eq('workspace_id', workspaceId),
+      prefetch.maxSeats !== undefined
+        ? Promise.resolve({ data: { max_seats: prefetch.maxSeats }, error: null })
+        : supabase
+            .from('workspaces')
+            .select('max_seats')
+            .eq('id', workspaceId)
+            .maybeSingle(),
+      prefetch.memberships !== undefined
+        ? Promise.resolve({ data: prefetch.memberships ?? [], error: null })
+        : supabase
+            .from('workspace_members')
+            .select('role')
+            .eq('workspace_id', workspaceId),
     ]);
 
-  let pendingInvitesResult = await supabase
-    .from('workspace_invites')
-    .select('role')
-    .eq('workspace_id', workspaceId)
-    .eq('status', 'pending')
-    .eq('access_scope', 'workspace')
-    .gt('expires_at', nowIso);
-
-  if (isMissingAccessScopeColumnError(pendingInvitesResult.error)) {
+  let pendingInvitesResult: {
+    data: Array<{ role: PendingInviteRole | string | null }> | null;
+    error: unknown;
+  };
+  if (prefetch.pendingInvites !== undefined) {
+    pendingInvitesResult = { data: prefetch.pendingInvites ?? [], error: null };
+  } else {
     pendingInvitesResult = await supabase
       .from('workspace_invites')
       .select('role')
       .eq('workspace_id', workspaceId)
       .eq('status', 'pending')
+      .eq('access_scope', 'workspace')
       .gt('expires_at', nowIso);
+
+    if (isMissingAccessScopeColumnError(pendingInvitesResult.error)) {
+      pendingInvitesResult = await supabase
+        .from('workspace_invites')
+        .select('role')
+        .eq('workspace_id', workspaceId)
+        .eq('status', 'pending')
+        .gt('expires_at', nowIso);
+    }
   }
 
   if (activeMembershipsResult.error) {

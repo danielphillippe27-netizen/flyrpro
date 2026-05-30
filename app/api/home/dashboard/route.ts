@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseServerClient, createAdminClient } from '@/lib/supabase/server';
-import { resolveWorkspaceIdForUser, type MinimalSupabaseClient } from '@/app/api/_utils/workspace';
+import { resolveWorkspaceMembershipForUser, type MinimalSupabaseClient } from '@/app/api/_utils/workspace';
 
 type SessionMetricRow = {
   doors_hit: number | null;
@@ -80,33 +80,23 @@ async function getLifetimeSessionTotals(
   supabase: ReturnType<typeof createAdminClient>,
   userId: string
 ): Promise<{ doors_hit: number; conversations: number } | null> {
-  const [doorsResult, convsResult] = await Promise.all([
-    supabase
-      .from('sessions')
-      .select('doors_hit')
-      .eq('user_id', userId)
-      .not('end_time', 'is', null),
-    supabase
-      .from('sessions')
-      .select('conversations')
-      .eq('user_id', userId)
-      .not('end_time', 'is', null),
-  ]);
+  const { data: totals, error } = await supabase
+    .rpc('get_lifetime_session_totals', { p_user_id: userId });
 
-  if (doorsResult.error || convsResult.error) {
-    const error = doorsResult.error ?? convsResult.error;
+  if (error) {
     if (isMissingRelation(error, 'sessions')) {
       return null;
     }
-    throw new Error(error?.message || 'Failed to load session totals');
+    throw new Error(error.message || 'Failed to load session totals');
   }
 
-  const doorRows = (doorsResult.data ?? []) as Array<{ doors_hit?: number | null }>;
-  const conversationRows = (convsResult.data ?? []) as Array<{ conversations?: number | null }>;
+  const rows = (totals ?? []) as Array<{ doors_hit?: number | string | null; conversations?: number | string | null }>;
+  const row = rows[0];
+  if (!row) return null;
 
   return {
-    doors_hit: doorRows.reduce((total, row) => total + (Number(row.doors_hit ?? 0) || 0), 0),
-    conversations: conversationRows.reduce((total, row) => total + (Number(row.conversations ?? 0) || 0), 0),
+    doors_hit: Number(row.doors_hit ?? 0) || 0,
+    conversations: Number(row.conversations ?? 0) || 0,
   };
 }
 
@@ -160,14 +150,16 @@ function summarizeContacts(rows: ContactMetricRow[], startIso: string, endIso: s
 async function fetchContactMetricsRows(
   supabase: ReturnType<typeof createAdminClient>,
   workspaceId: string,
-  userId: string
+  userId: string,
+  startOfWeek: string
 ) {
   const runQuery = (selectColumns: string) =>
     supabase
       .from('contacts')
       .select(selectColumns)
       .eq('workspace_id', workspaceId)
-      .eq('user_id', userId);
+      .eq('user_id', userId)
+      .gte('created_at', startOfWeek);
 
   const result = await runQuery(
     'full_name, phone, email, address, campaign_id, status, appointment_at, created_at, updated_at'
@@ -195,18 +187,37 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const requestedWorkspaceId = url.searchParams.get('workspaceId');
     const supabase = createAdminClient();
-    const workspaceResolution = await resolveWorkspaceIdForUser(
-      supabase as MinimalSupabaseClient,
-      userId,
-      requestedWorkspaceId
-    );
-    if (!workspaceResolution.workspaceId) {
-      return NextResponse.json(
-        { error: workspaceResolution.error ?? 'Workspace not found' },
-        { status: workspaceResolution.status ?? 400 }
+    let targetWorkspaceId: string;
+    let membership: WorkspaceMembershipRow | null;
+    if (requestedWorkspaceId) {
+      const { data: membershipData } = await supabase
+        .from('workspace_members')
+        .select('role')
+        .eq('workspace_id', requestedWorkspaceId)
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (!membershipData) {
+        return NextResponse.json(
+          { error: 'You are not a member of the selected workspace' },
+          { status: 403 }
+        );
+      }
+      targetWorkspaceId = requestedWorkspaceId;
+      membership = (membershipData ?? null) as WorkspaceMembershipRow | null;
+    } else {
+      const workspaceMembership = await resolveWorkspaceMembershipForUser(
+        supabase as MinimalSupabaseClient,
+        userId
       );
+      if (!workspaceMembership.workspaceId) {
+        return NextResponse.json(
+          { error: workspaceMembership.error ?? 'Workspace not found' },
+          { status: workspaceMembership.status ?? 400 }
+        );
+      }
+      targetWorkspaceId = workspaceMembership.workspaceId;
+      membership = { role: workspaceMembership.role };
     }
-    const targetWorkspaceId = workspaceResolution.workspaceId;
     const startOfWeek = getStartOfWeekUTC();
 
     // Run independent fetches in parallel
@@ -238,7 +249,7 @@ export async function GET(request: Request) {
         .eq('user_id', userId)
         .not('fub_appointment_id', 'is', null)
         .gte('created_at', startOfWeek),
-      fetchContactMetricsRows(supabase, targetWorkspaceId, userId),
+      fetchContactMetricsRows(supabase, targetWorkspaceId, userId, startOfWeek),
     ]);
 
     const userStats = userStatsRes.data;
@@ -280,15 +291,6 @@ export async function GET(request: Request) {
     let weeklyDoorGoal = profile?.weekly_door_goal ?? 100;
     let weeklySessionsGoal = profile?.weekly_sessions_goal ?? undefined;
     let weeklyMinutesGoal = profile?.weekly_minutes_goal ?? undefined;
-
-    const { data: membershipData } = await supabase
-      .from('workspace_members')
-      .select('role')
-      .eq('workspace_id', targetWorkspaceId)
-      .eq('user_id', userId)
-      .maybeSingle();
-
-    const membership = (membershipData ?? null) as WorkspaceMembershipRow | null;
 
     if (membership?.role === 'member') {
       const [{ data: workspaceGoalsData }, { data: workspaceMembersData }] = await Promise.all([

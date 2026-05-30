@@ -120,10 +120,10 @@ export class ContactsService {
       query = query.eq('farm_id', filters.farmId);
     }
 
-    const { data, error } = await query.order('created_at', { ascending: false });
+    const { data, error } = await query.order('created_at', { ascending: false }).limit(500);
 
     if (error) throw error;
-    const contacts = data || [];
+    const contacts = (data ?? []) as unknown as Contact[];
 
     // iOS compatibility: if legacy field_leads still receives writes, merge it so Leads remains populated.
     try {
@@ -142,15 +142,15 @@ export class ContactsService {
         legacyQuery = legacyQuery.eq('farm_id', filters.farmId);
       }
 
-      const { data: legacyData, error: legacyError } = await legacyQuery.order('created_at', {
-        ascending: false,
-      });
+      const { data: legacyData, error: legacyError } = await legacyQuery
+        .order('created_at', { ascending: false })
+        .limit(500);
 
       if (legacyError || !legacyData || legacyData.length === 0) {
         return contacts;
       }
 
-      const mappedLegacy = (legacyData as LegacyFieldLead[])
+      const mappedLegacy = (legacyData as unknown as LegacyFieldLead[])
         .map((row) => this.mapLegacyFieldLead(row))
         .filter((row) => (filters?.status ? row.status === filters.status : true));
 

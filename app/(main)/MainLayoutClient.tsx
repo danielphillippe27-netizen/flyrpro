@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { WorkspaceProvider, useWorkspace } from '@/lib/workspace-context';
 import AppTopHeader from '@/components/layout/AppTopHeader';
@@ -268,19 +268,7 @@ function MainLayoutContent({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const { accessLevel } = useWorkspace();
-  const [isAmbassador, setIsAmbassador] = useState(false);
-
-  useEffect(() => {
-    fetch('/api/access/state', { credentials: 'include' })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        setIsAmbassador(data?.isAmbassador === true);
-      })
-      .catch(() => {
-        setIsAmbassador(false);
-      });
-  }, []);
+  const { accessLevel, isAmbassador } = useWorkspace();
 
   const tabs: TabDef[] = (() => {
     const withAmbassadorPortal = (items: TabDef[]) => {
