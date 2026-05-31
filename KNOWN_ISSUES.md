@@ -145,6 +145,14 @@ Adding a manual override on the web requires coordination with Daniel to ensure
 the web route doesn't conflict with iOS session behavior or create unexpected
 data state.
 
+### Ambassador landing page duplicate key error
+/api/ambassador/links and /api/ambassador/dashboard both call
+getOrCreateAmbassadorLandingPage() which throws on duplicate slug.
+Error: duplicate key value violates unique constraint
+"ambassador_landing_pages_slug_key"
+Both routes return 500 on first load then recover on retry.
+Action: Daniel to fix the upsert logic to handle existing slugs.
+
 ---
 
 ## Notes

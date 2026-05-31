@@ -63,6 +63,8 @@ interface MondayBoard {
 
 type IntegrationGroup = 'real_estate' | 'trades';
 
+const inFlightIntegrations = new Set<string>();
+
 export default function IntegrationsPage() {
   const integrationLogoContainerClass = 'w-10 h-10 rounded-lg flex items-center justify-center';
   const integrationLogoIconClass = 'w-5 h-5';
@@ -155,27 +157,37 @@ export default function IntegrationsPage() {
 
   useEffect(() => {
     const loadData = async () => {
-      const supabase = createClient();
-      
-      // Get user
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      if (authUser) {
-        if (isRealEstate) {
-          await Promise.all([
-            loadConnectionStatus(currentWorkspaceId ?? undefined),
-            loadBoldTrailStatus(currentWorkspaceId ?? undefined),
-            loadHubSpotStatus(currentWorkspaceId ?? undefined),
-            loadZapierStatus(currentWorkspaceId ?? undefined),
-            loadMondayStatus(),
-          ]);
-        } else {
-          await loadContractorStatuses(currentWorkspaceId ?? undefined);
-        }
-      } else {
-        router.push('/login');
+      const requestKey = currentWorkspaceId ?? 'default';
+      if (inFlightIntegrations.has(requestKey)) {
+        setLoading(false);
+        return;
       }
-      
-      setLoading(false);
+      inFlightIntegrations.add(requestKey);
+
+      const supabase = createClient();
+
+      try {
+        // Get user
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (authUser) {
+          if (isRealEstate) {
+            await Promise.all([
+              loadConnectionStatus(currentWorkspaceId ?? undefined),
+              loadBoldTrailStatus(currentWorkspaceId ?? undefined),
+              loadHubSpotStatus(currentWorkspaceId ?? undefined),
+              loadZapierStatus(currentWorkspaceId ?? undefined),
+              loadMondayStatus(),
+            ]);
+          } else {
+            await loadContractorStatuses(currentWorkspaceId ?? undefined);
+          }
+        } else {
+          router.push('/login');
+        }
+      } finally {
+        inFlightIntegrations.delete(requestKey);
+        setLoading(false);
+      }
     };
 
     loadData();
