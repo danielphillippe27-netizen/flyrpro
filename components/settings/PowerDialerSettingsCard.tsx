@@ -33,6 +33,8 @@ type DialerSettingsStatus = {
   } | null;
 };
 
+const inFlightDialerSettingsWorkspaceIds = new Set<string>();
+
 export function PowerDialerSettingsCard() {
   const { currentWorkspaceId } = useWorkspace();
   const [dialerSettingsStatus, setDialerSettingsStatus] = useState<DialerSettingsStatus | null>(null);
@@ -47,6 +49,13 @@ export function PowerDialerSettingsCard() {
     : 'CA$19.99/month';
 
   const loadDialerSettingsStatus = async (workspaceId?: string) => {
+    const requestKey = workspaceId ?? 'default';
+    if (inFlightDialerSettingsWorkspaceIds.has(requestKey)) {
+      setLoading(false);
+      return;
+    }
+    inFlightDialerSettingsWorkspaceIds.add(requestKey);
+
     try {
       const qs = workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : '';
       const response = await fetch(`/api/dialer/settings${qs}`);
@@ -57,6 +66,7 @@ export function PowerDialerSettingsCard() {
     } catch (error) {
       console.error('Error loading dialer settings:', error);
     } finally {
+      inFlightDialerSettingsWorkspaceIds.delete(requestKey);
       setLoading(false);
     }
   };

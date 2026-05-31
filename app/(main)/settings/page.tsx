@@ -33,6 +33,8 @@ interface EntitlementSnapshot {
   planBadgeLabel?: string | null;
 }
 
+const inFlightBillingWorkspaceIds = new Set<string>();
+
 function SettingsPageContent() {
   const { theme, setTheme } = useTheme();
   const router = useRouter();
@@ -79,19 +81,27 @@ function SettingsPageContent() {
           }
 
           try {
-            const entRes = await retryWithBackoff(async () => {
-              const response = await fetch('/api/billing/entitlement', { credentials: 'include' });
-              if (response.status >= 500) {
-                throw response;
+            const entitlementKey = authUser.id;
+            if (!inFlightBillingWorkspaceIds.has(entitlementKey)) {
+              inFlightBillingWorkspaceIds.add(entitlementKey);
+              try {
+                const entRes = await retryWithBackoff(async () => {
+                  const response = await fetch('/api/billing/entitlement', { credentials: 'include' });
+                  if (response.status >= 500) {
+                    throw response;
+                  }
+                  return response;
+                });
+                if (entRes.ok) {
+                  const entData = await entRes.json();
+                  setEntitlement(entData);
+                } else {
+                  setEntitlement(null);
+                  setEntitlementError(true);
+                }
+              } finally {
+                inFlightBillingWorkspaceIds.delete(entitlementKey);
               }
-              return response;
-            });
-            if (entRes.ok) {
-              const entData = await entRes.json();
-              setEntitlement(entData);
-            } else {
-              setEntitlement(null);
-              setEntitlementError(true);
             }
           } catch (error) {
             console.error('Error loading entitlement:', error);
