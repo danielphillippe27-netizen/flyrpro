@@ -3,7 +3,11 @@ import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import * as turf from '@turf/turf';
 import type { LambdaSnapshotResponse } from '@/lib/services/TileLambdaService';
 import type { StandardCampaignAddress } from '@/lib/services/AddressAdapter';
-import { duckDbRuntimeSetupStatements } from '@/lib/services/duckdbRuntime';
+import {
+  fetchScopedPmtilesAddresses,
+  normalizePmtilesAddressFeature,
+} from '@/app/api/campaigns/_utils/scoped-pmtiles-addresses';
+import type { CampaignSnapshotRow } from '@/lib/diamond/geometry';
 
 type Bounds = [number, number, number, number];
 type SnapshotTileMetrics = NonNullable<NonNullable<LambdaSnapshotResponse['metadata']>['tile_metrics']>;
@@ -55,23 +59,17 @@ type BedrockScanResult = {
   hits: number;
   scanned: number;
   bboxCandidates: number;
+  polygonCandidates?: number;
+  normalizedCandidates?: number;
+  canonicalAddresses?: number;
+  dedupedCandidates?: number;
+  addressLimitApplied?: boolean;
   seconds: number;
-  queryEngine: 'duckdb_parquet';
+  queryEngine: string;
   touchedTiles: number;
   partitioning?: string;
   tilePadding?: number;
-  timings: {
-    manifestMs: number;
-    partitionMs: number;
-    queryMs: number;
-    filterMs: number;
-    totalMs: number;
-    duckdb_setup_ms?: number;
-    duckdb_extension_ms?: number;
-    duckdb_credentials_ms?: number;
-    duckdb_query_ms?: number;
-    manifest_cache_hit?: boolean;
-  };
+  timings: Record<string, number | string | boolean | undefined>;
 };
 
 type ManifestReadResult = {
@@ -80,28 +78,22 @@ type ManifestReadResult = {
   cacheHit: boolean;
 };
 
-type DuckDbTimings = {
-  duckdb_setup_ms: number;
-  duckdb_extension_ms: number;
-  duckdb_credentials_ms: number;
-  duckdb_query_ms: number;
-};
-
-function emptyBedrockScanMetric(manifest: ParquetManifest): BedrockScanResult {
+function emptyBedrockScanMetric(config: BedrockCountryConfig): BedrockScanResult {
   return {
     hits: 0,
     scanned: 0,
     bboxCandidates: 0,
+    polygonCandidates: 0,
+    normalizedCandidates: 0,
+    canonicalAddresses: 0,
+    dedupedCandidates: 0,
+    addressLimitApplied: false,
     seconds: 0,
-    queryEngine: 'duckdb_parquet',
+    queryEngine: `${config.provisionSource}_pmtiles`,
     touchedTiles: 0,
-    partitioning: manifest.partitioning?.scheme,
+    partitioning: 'web_mercator_xyz',
     tilePadding: 0,
     timings: {
-      manifestMs: 0,
-      partitionMs: 0,
-      queryMs: 0,
-      filterMs: 0,
       totalMs: 0,
     },
   };
@@ -279,10 +271,6 @@ let resolvedAwsCredentials:
 let awsCredentialsPromise:
   | Promise<{ accessKeyId: string; secretAccessKey: string; sessionToken?: string; expiresAt?: number }>
   | null = null;
-let duckdbModulePromise: Promise<typeof import('duckdb')> | null = null;
-let httpfsInstallPromise: Promise<void> | null = null;
-let httpfsInstalled = false;
-
 const AWS_CREDENTIAL_CACHE_TTL_MS = 5 * 60 * 1000;
 const AWS_CREDENTIAL_EXPIRY_SKEW_MS = 60 * 1000;
 const MANIFEST_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -538,85 +526,6 @@ function parquetPathsForTiles(config: BedrockCountryConfig, manifest: ParquetMan
   return { paths, tileZ, partitioning: 'web_mercator_xyz', tilePadding: padding };
 }
 
-async function loadDuckDbModule() {
-  if (!duckdbModulePromise) {
-    duckdbModulePromise = import('duckdb');
-  }
-  return duckdbModulePromise;
-}
-
-async function duckDbQuery(
-  sql: string,
-  usesRemoteFiles: boolean
-): Promise<{ rows: BedrockParquetRow[]; timings: DuckDbTimings }> {
-  const setupStartedAt = Date.now();
-  const duckdbModule = await loadDuckDbModule();
-  const duckdb = ((duckdbModule as { default?: typeof duckdbModule }).default ?? duckdbModule) as typeof duckdbModule;
-  const db = new duckdb.Database(':memory:');
-  const all = (statement: string) =>
-    new Promise<BedrockParquetRow[]>((resolve, reject) => {
-      db.all(statement, (error: Error | null, rows: BedrockParquetRow[]) => {
-        if (error) reject(error);
-        else resolve(rows);
-      });
-    });
-  const duckdbSetupMs = Date.now() - setupStartedAt;
-  let duckdbExtensionMs = 0;
-  let duckdbCredentialsMs = 0;
-
-  try {
-    if (usesRemoteFiles) {
-      const extensionStartedAt = Date.now();
-      for (const statement of duckDbRuntimeSetupStatements()) {
-        await all(statement);
-      }
-      if (!httpfsInstalled) {
-        if (!httpfsInstallPromise) {
-          httpfsInstallPromise = all('INSTALL httpfs')
-            .then(() => {
-              httpfsInstalled = true;
-            })
-            .catch((error) => {
-              httpfsInstallPromise = null;
-              throw error;
-            });
-        }
-        await httpfsInstallPromise;
-      }
-      await all('LOAD httpfs');
-      duckdbExtensionMs = Date.now() - extensionStartedAt;
-
-      if (sql.includes('s3://')) {
-        const credentialsStartedAt = Date.now();
-        await all(`SET s3_region=${sqlString(REGION)}`);
-        const credentials = await getAwsCredentials();
-        if (credentials?.accessKeyId && credentials.secretAccessKey) {
-          await all(`SET s3_access_key_id=${sqlString(credentials.accessKeyId)}`);
-          await all(`SET s3_secret_access_key=${sqlString(credentials.secretAccessKey)}`);
-          if (credentials.sessionToken) {
-            await all(`SET s3_session_token=${sqlString(credentials.sessionToken)}`);
-          }
-        }
-        duckdbCredentialsMs = Date.now() - credentialsStartedAt;
-      }
-    }
-
-    const queryStartedAt = Date.now();
-    const rows = await all(sql);
-    return {
-      rows,
-      timings: {
-        duckdb_setup_ms: duckdbSetupMs,
-        duckdb_extension_ms: duckdbExtensionMs,
-        duckdb_credentials_ms: duckdbCredentialsMs,
-        duckdb_query_ms: Date.now() - queryStartedAt,
-      },
-    };
-  } finally {
-    db.close();
-  }
-}
-
 function parseProperties(row: BedrockParquetRow) {
   if (typeof row.properties_json !== 'string' || !row.properties_json.trim()) return {};
   try {
@@ -684,6 +593,20 @@ function normalizeAddress(config: BedrockCountryConfig, campaignId: string, row:
   };
 }
 
+function snapshotToCampaignSnapshotRow(snapshot: LambdaSnapshotResponse): CampaignSnapshotRow {
+  return {
+    bucket: snapshot.bucket,
+    prefix: snapshot.prefix,
+    buildings_key: snapshot.s3_keys.buildings,
+    addresses_key: snapshot.s3_keys.addresses,
+    buildings_url: snapshot.urls.buildings,
+    metadata_key: snapshot.s3_keys.metadata,
+    buildings_count: snapshot.counts.buildings,
+    created_at: new Date().toISOString(),
+    tile_metrics: (snapshot.metadata?.tile_metrics ?? null) as Record<string, unknown> | null,
+  };
+}
+
 export class BedrockCountryService {
   constructor(private readonly config: BedrockCountryConfig) {}
 
@@ -697,89 +620,68 @@ export class BedrockCountryService {
     snapshot: LambdaSnapshotResponse;
     metrics: { addresses: BedrockScanResult };
   }> {
-    const startedAt = Date.now();
     const bbox = turf.bbox(options.polygon) as Bounds;
-
-    const { manifest, manifestMs, cacheHit } = await readManifest(this.config);
-
-    const partitionStartedAt = Date.now();
-    const { paths, partitioning, tilePadding } = parquetPathsForTiles(this.config, manifest, bbox, options.regionCode);
-    const partitionMs = Date.now() - partitionStartedAt;
-    if (paths.length === 0) {
-      throw new Error(`BEDROCK ${this.config.country} has no Parquet partitions for this territory`);
+    const snapshot = this.snapshotForCampaign(
+      options.campaignId,
+      0,
+      emptyBedrockScanMetric(this.config),
+      options.regionCode
+    );
+    const addressPmtilesKey = usaAddressPmtilesKey(this.config, options.regionCode);
+    if (!addressPmtilesKey) {
+      throw new Error(`PMTiles address artifact unavailable for BEDROCK ${this.config.country}: missing regional address PMTiles key`);
     }
 
-    console.log(`[BedrockCountryService] ${this.config.country} address scan starting`, {
+    console.log(`[BedrockCountryService] ${this.config.country} PMTiles address scan starting`, {
       campaignId: options.campaignId,
       regionCode: options.regionCode ?? null,
-      partitioning,
-      touchedTiles: paths.length,
-      tilePadding,
-      manifestMs,
-      manifestCacheHit: cacheHit,
-      partitionMs,
       bbox,
+      pmtilesKey: addressPmtilesKey,
     });
 
-    const queryStartedAt = Date.now();
-    const { rows, timings: duckDbTimings } = await duckDbQuery(
-      `
-        SELECT *
-        FROM read_parquet([${paths.map(sqlString).join(',')}], hive_partitioning=1, union_by_name=true)
-        WHERE longitude BETWEEN ${sqlNumber(bbox[0])} AND ${sqlNumber(bbox[2])}
-          AND latitude BETWEEN ${sqlNumber(bbox[1])} AND ${sqlNumber(bbox[3])}
-      `,
-      paths.some((path) => path.startsWith('s3://') || /^https?:\/\//i.test(path))
-    );
-    const queryMs = Date.now() - queryStartedAt;
+    const pmtilesResult = await fetchScopedPmtilesAddresses({
+      campaignId: options.campaignId,
+      snapshot: snapshotToCampaignSnapshotRow(snapshot),
+      bbox,
+      boundary: options.polygon,
+      queryEngine: `${this.config.provisionSource}_pmtiles`,
+      pmtilesKey: addressPmtilesKey,
+      sourceLayer: 'addresses',
+      promoteId: 'address_id',
+      minZoom: 10,
+      addressLimit: options.addressLimit,
+      normalizeFeature: ({ campaignId, feature, lon, lat }) =>
+        normalizePmtilesAddressFeature({
+          campaignId,
+          feature,
+          lon,
+          lat,
+          source: this.config.provisionSource,
+          fallbackRegion: options.regionCode ?? this.config.countryCode,
+          defaultSource: this.config.defaultSource,
+          idPrefix: this.config.provisionSource,
+        }),
+    });
+    const metric = pmtilesResult.metric as BedrockScanResult;
 
-    const filterStartedAt = Date.now();
-    const addresses: StandardCampaignAddress[] = [];
-    for (const row of rows) {
-      const lon = Number(row.longitude);
-      const lat = Number(row.latitude);
-      if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
-      if (!turf.booleanPointInPolygon(turf.point([lon, lat]), options.polygon)) continue;
-      const address = normalizeAddress(this.config, options.campaignId, row);
-      if (!address) continue;
-      addresses.push(address);
-      if (options.addressLimit && addresses.length >= options.addressLimit) break;
-    }
-    const filterMs = Date.now() - filterStartedAt;
-    const totalMs = Date.now() - startedAt;
-
-    const metric: BedrockScanResult = {
-      hits: addresses.length,
-      scanned: rows.length,
-      bboxCandidates: rows.length,
-      seconds: Number((totalMs / 1000).toFixed(2)),
-      queryEngine: 'duckdb_parquet',
-      touchedTiles: paths.length,
-      partitioning,
-      tilePadding,
-      timings: {
-        manifestMs,
-        partitionMs,
-        queryMs,
-        filterMs,
-        totalMs,
-        ...duckDbTimings,
-        manifest_cache_hit: cacheHit,
-      },
-    };
-
-    console.log(`[BedrockCountryService] ${this.config.country} address scan complete`, {
+    console.log(`[BedrockCountryService] ${this.config.country} PMTiles address scan complete`, {
       campaignId: options.campaignId,
       hits: metric.hits,
       scanned: metric.scanned,
+      bboxCandidates: metric.bboxCandidates,
+      polygonCandidates: metric.polygonCandidates,
+      normalizedCandidates: metric.normalizedCandidates,
+      canonicalAddresses: metric.canonicalAddresses,
+      dedupedCandidates: metric.dedupedCandidates,
+      addressLimitApplied: metric.addressLimitApplied,
       touchedTiles: metric.touchedTiles,
       timings: metric.timings,
     });
 
     return {
-      addresses,
+      addresses: pmtilesResult.addresses,
       metrics: { addresses: metric },
-      snapshot: this.snapshotForCampaign(options.campaignId, addresses.length, metric, manifest, options.regionCode),
+      snapshot: this.snapshotForCampaign(options.campaignId, pmtilesResult.addresses.length, metric, options.regionCode),
     };
   }
 
@@ -787,15 +689,13 @@ export class BedrockCountryService {
     campaignId: string,
     regionCode?: string | null
   ): Promise<LambdaSnapshotResponse> {
-    const { manifest } = await readManifest(this.config);
-    return this.snapshotForCampaign(campaignId, 0, emptyBedrockScanMetric(manifest), manifest, regionCode);
+    return this.snapshotForCampaign(campaignId, 0, emptyBedrockScanMetric(this.config), regionCode);
   }
 
   snapshotForCampaign(
     campaignId: string,
     addressCount: number,
     scanMetric: BedrockScanResult,
-    manifest: ParquetManifest,
     regionCode?: string | null
   ): LambdaSnapshotResponse {
     const buildingPmtilesKey = usaBuildingPmtilesKey(this.config, regionCode);
@@ -820,27 +720,11 @@ export class BedrockCountryService {
       addresses_pmtiles_key: addressPmtilesKey,
       addresses_tilejson_key: layerKey(this.config, 'addresses', 'addresses.json'),
       addresses_geojson_key: layerKey(this.config, 'addresses', 'addresses.ndjson.gz'),
-      addresses_parquet_prefix: layerKey(this.config, 'addresses', 'parquet'),
-      addresses_parquet_manifest_key: layerKey(this.config, 'addresses', 'parquet-manifest.json'),
       addresses_pmtiles_index_key: `${prefix(this.config)}/addresses/pmtiles-index.json`,
       parcels_pmtiles_key: parcelPmtilesKey,
       parcels_tilejson_key: parcelPmtilesKey?.replace(/\.pmtiles$/i, '.json') ?? null,
       parcels_geojson_key: null,
       parcels_pmtiles_index_key: `${prefix(this.config)}/parcels/pmtiles-index.json`,
-      addresses_parquet_partitioning: {
-        scheme: manifest.partitioning?.scheme ?? 'web_mercator_xyz',
-        tile_z: manifest.partitioning?.tile_z ?? 12,
-        columns: manifest.partitioning?.scheme === 'state' ? ['state'] : ['tile_z', 'tile_x', 'tile_y'],
-        path_template:
-          manifest.partitioning?.scheme === 'state'
-            ? 'state={state}/*.parquet'
-            : 'tile_z={tile_z}/tile_x={tile_x}/tile_y={tile_y}/*.parquet',
-      },
-      addresses_tile_seam_awareness: manifest.tile_seam_awareness ?? {
-        enabled: true,
-        tile_padding: 1,
-        tile_z: manifest.partitioning?.tile_z ?? 12,
-      },
       source_layers: {
         buildings: 'buildings',
         addresses: 'addresses',
@@ -858,7 +742,7 @@ export class BedrockCountryService {
       minzoom: 12,
       maxzoom: 18,
       address_minzoom: 10,
-      address_maxzoom: 16,
+      address_maxzoom: 18,
       parcel_minzoom: 10,
       parcel_maxzoom: 16,
       addresses_count: addressCount,

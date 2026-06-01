@@ -2,7 +2,16 @@ import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import * as turf from '@turf/turf';
 import type { LambdaSnapshotResponse } from '@/lib/services/TileLambdaService';
 import type { StandardCampaignAddress } from '@/lib/services/AddressAdapter';
-import { duckDbRuntimeSetupStatements } from '@/lib/services/duckdbRuntime';
+import {
+  fetchScopedPmtilesAddresses,
+  normalizePmtilesAddressFeature,
+} from '@/app/api/campaigns/_utils/scoped-pmtiles-addresses';
+import { fetchScopedPmtilesBuildingFeatures } from '@/app/api/campaigns/_utils/scoped-pmtiles-buildings';
+import {
+  fetchScopedPmtilesParcels,
+  parcelTilesFromSnapshot,
+} from '@/app/api/campaigns/_utils/scoped-pmtiles-parcels';
+import type { CampaignSnapshotRow } from '@/lib/diamond/geometry';
 
 type BedrockLayer = 'addresses' | 'buildings' | 'parcels';
 type Bounds = [number, number, number, number];
@@ -11,8 +20,17 @@ type BedrockScanResult = {
   hits: number;
   scanned: number;
   bboxCandidates: number;
+  polygonCandidates?: number;
+  normalizedCandidates?: number;
+  canonicalAddresses?: number;
+  dedupedCandidates?: number;
+  addressLimitApplied?: boolean;
   seconds: number;
-  queryEngine?: 'duckdb_parquet' | 'ndjson_stream';
+  queryEngine?: string;
+  touchedTiles?: number;
+  partitioning?: string;
+  tilePadding?: number;
+  timings?: Record<string, number | string | boolean | undefined>;
 };
 
 type BedrockAddressProperties = {
@@ -242,7 +260,70 @@ function scanMetricOnly(scan: BedrockScanResult & { addresses?: StandardCampaign
     bboxCandidates: scan.bboxCandidates,
     seconds: scan.seconds,
     queryEngine: scan.queryEngine,
+    touchedTiles: scan.touchedTiles,
+    partitioning: scan.partitioning,
+    tilePadding: scan.tilePadding,
+    timings: scan.timings,
   };
+}
+
+function snapshotToCampaignSnapshotRow(snapshot: LambdaSnapshotResponse): CampaignSnapshotRow {
+  return {
+    bucket: snapshot.bucket,
+    prefix: snapshot.prefix,
+    buildings_key: snapshot.s3_keys.buildings,
+    addresses_key: snapshot.s3_keys.addresses,
+    buildings_url: snapshot.urls.buildings,
+    metadata_key: snapshot.s3_keys.metadata,
+    buildings_count: snapshot.counts.buildings,
+    created_at: new Date().toISOString(),
+    tile_metrics: (snapshot.metadata?.tile_metrics ?? null) as Record<string, unknown> | null,
+  };
+}
+
+function pmtilesMetric(input: {
+  hits: number;
+  seconds: number;
+  scanned?: number;
+  bboxCandidates?: number;
+  touchedTiles?: number;
+  timings?: Record<string, number | string | boolean | undefined>;
+}): BedrockScanResult {
+  return {
+    hits: input.hits,
+    scanned: input.scanned ?? input.hits,
+    bboxCandidates: input.bboxCandidates ?? input.hits,
+    seconds: input.seconds,
+    queryEngine: 'bedrock_nz_pmtiles',
+    touchedTiles: input.touchedTiles ?? 0,
+    partitioning: 'web_mercator_xyz',
+    tilePadding: 0,
+    timings: input.timings ?? { totalMs: Math.round(input.seconds * 1000) },
+  };
+}
+
+function parcelResponseToScopedParcel(parcel: { external_id: string; geom: string }): BedrockScopedParcelFeature | null {
+  try {
+    const geometry = JSON.parse(parcel.geom) as GeoJSON.Geometry;
+    if (geometry.type === 'Polygon') {
+      return {
+        externalId: parcel.external_id,
+        geometry: {
+          type: 'MultiPolygon',
+          coordinates: [geometry.coordinates],
+        },
+      };
+    }
+    if (geometry.type === 'MultiPolygon') {
+      return {
+        externalId: parcel.external_id,
+        geometry,
+      };
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 function featureFromParquetRow(row: BedrockParquetRow): GeoJSON.Feature {
@@ -401,105 +482,6 @@ function scopedParcelFeature(feature: GeoJSON.Feature): BedrockScopedParcelFeatu
   };
 }
 
-async function duckDbAll(sql: string, usesS3: boolean): Promise<BedrockParquetRow[]> {
-  const duckdbModule = await import('duckdb');
-  const duckdb = (duckdbModule.default ?? duckdbModule) as typeof duckdbModule;
-  const db = new duckdb.Database(':memory:');
-
-  const all = (statement: string) =>
-    new Promise<BedrockParquetRow[]>((resolve, reject) => {
-      db.all(statement, (error: Error | null, rows: BedrockParquetRow[]) => {
-        if (error) reject(error);
-        else resolve(rows);
-      });
-    });
-
-  try {
-    if (usesS3) {
-      for (const statement of duckDbRuntimeSetupStatements()) {
-        await all(statement);
-      }
-      await all('INSTALL httpfs');
-      await all('LOAD httpfs');
-      await all(`SET s3_region=${sqlString(REGION)}`);
-      const credentials = await getAwsCredentials();
-      if (credentials?.accessKeyId && credentials.secretAccessKey) {
-        await all(`SET s3_access_key_id=${sqlString(credentials.accessKeyId)}`);
-        await all(`SET s3_secret_access_key=${sqlString(credentials.secretAccessKey)}`);
-        if (credentials.sessionToken) {
-          await all(`SET s3_session_token=${sqlString(credentials.sessionToken)}`);
-        }
-      }
-    }
-    return await all(sql);
-  } finally {
-    db.close();
-  }
-}
-
-async function queryParquetLayer(options: {
-  layer: BedrockLayer;
-  polygon: GeoJSON.Polygon;
-  campaignId?: string;
-  limit?: number;
-  collectFeatures?: boolean;
-}): Promise<(BedrockScanResult & { addresses?: StandardCampaignAddress[]; features?: GeoJSON.Feature[] }) | null> {
-  const startedAt = Date.now();
-  const territoryBbox = turf.bbox(options.polygon) as Bounds;
-  const parquetPath = parquetPathForDuckDb(options.layer);
-  const usesS3 = parquetPath.startsWith('s3://');
-  const sql = `
-    SELECT *
-    FROM read_parquet(${sqlString(parquetPath)})
-    WHERE maxx >= ${sqlNumber(territoryBbox[0])}
-      AND minx <= ${sqlNumber(territoryBbox[2])}
-      AND maxy >= ${sqlNumber(territoryBbox[1])}
-      AND miny <= ${sqlNumber(territoryBbox[3])}
-  `;
-  const rows = await duckDbAll(sql, usesS3);
-  const addresses: StandardCampaignAddress[] = [];
-  const features: GeoJSON.Feature[] = [];
-  let hits = 0;
-
-  for (const row of rows) {
-    const feature = featureFromParquetRow(row);
-    if (!featureIntersectsPolygon(feature, options.polygon, territoryBbox)) continue;
-
-    hits += 1;
-    if (options.collectFeatures) {
-      features.push(feature);
-    }
-    if (options.layer === 'addresses' && options.campaignId) {
-      addresses.push(normalizeAddress(options.campaignId, feature as BedrockAddressFeature));
-      if (options.limit && addresses.length >= options.limit) break;
-    }
-  }
-
-  return {
-    hits,
-    scanned: rows.length,
-    bboxCandidates: rows.length,
-    seconds: Number(((Date.now() - startedAt) / 1000).toFixed(2)),
-    queryEngine: 'duckdb_parquet',
-    ...(options.layer === 'addresses' ? { addresses } : {}),
-    ...(options.collectFeatures ? { features } : {}),
-  };
-}
-
-async function queryBedrockLayer(options: {
-  layer: BedrockLayer;
-  polygon: GeoJSON.Polygon;
-  campaignId?: string;
-  limit?: number;
-  collectFeatures?: boolean;
-}): Promise<BedrockScanResult & { addresses?: StandardCampaignAddress[]; features?: GeoJSON.Feature[] }> {
-  const parquetScan = await queryParquetLayer(options);
-  if (!parquetScan) {
-    throw new Error(`BEDROCK New Zealand S3 Parquet layer is unavailable: ${options.layer}`);
-  }
-  return parquetScan;
-}
-
 export class BedrockNzService {
   static isNzRegion(regionCode: string | null | undefined) {
     return regionCode?.trim().toUpperCase() === 'NZ';
@@ -515,26 +497,83 @@ export class BedrockNzService {
     metrics: Record<string, BedrockScanResult>;
     linkGeometry: BedrockNzLinkGeometry;
   }> {
-    const addressScan = await queryBedrockLayer({
-      layer: 'addresses',
-      polygon: options.polygon,
+    const bbox = turf.bbox(options.polygon) as Bounds;
+    const seedSnapshot = this.snapshotForCampaign({
       campaignId: options.campaignId,
-      limit: options.addressLimit,
+      addressCount: 0,
+      buildingCount: 0,
+      parcelCount: 0,
+      scanMetrics: {
+        addresses: pmtilesMetric({ hits: 0, seconds: 0 }),
+        buildings: pmtilesMetric({ hits: 0, seconds: 0 }),
+        parcels: pmtilesMetric({ hits: 0, seconds: 0 }),
+      },
     });
-    const [buildingScan, parcelScan] = await Promise.all([
-      queryBedrockLayer({ layer: 'buildings', polygon: options.polygon, collectFeatures: true }),
-      queryBedrockLayer({ layer: 'parcels', polygon: options.polygon, collectFeatures: true }),
+    const snapshotRow = snapshotToCampaignSnapshotRow(seedSnapshot);
+    const parcelTiles = parcelTilesFromSnapshot(snapshotRow);
+    if (!parcelTiles) {
+      throw new Error('PMTiles parcel artifact unavailable for BEDROCK New Zealand');
+    }
+
+    const [addressScan, buildingCollection, parcelScan] = await Promise.all([
+      fetchScopedPmtilesAddresses({
+        campaignId: options.campaignId,
+        snapshot: snapshotRow,
+        bbox,
+        boundary: options.polygon,
+        queryEngine: 'bedrock_nz_pmtiles',
+        sourceLayer: 'addresses',
+        promoteId: 'address_id',
+        minZoom: 10,
+        maxZoom: 16,
+        addressLimit: options.addressLimit,
+        normalizeFeature: ({ campaignId, feature, lon, lat }) =>
+          normalizePmtilesAddressFeature({
+            campaignId,
+            feature,
+            lon,
+            lat,
+            source: 'bedrock_nz',
+            fallbackRegion: 'NZ',
+            defaultSource: 'LINZ NZ Addresses',
+            idPrefix: 'linz',
+          }),
+      }),
+      fetchScopedPmtilesBuildingFeatures(snapshotRow, bbox, new Set(), options.polygon),
+      fetchScopedPmtilesParcels(options.campaignId, snapshotRow, parcelTiles, bbox, options.polygon),
     ]);
-    const addresses = addressScan.addresses ?? [];
-    const addressMetrics = scanMetricOnly(addressScan);
-    const buildingMetrics = scanMetricOnly(buildingScan);
-    const parcelMetrics = scanMetricOnly(parcelScan);
-    const buildingFeatures = (buildingScan.features ?? [])
+
+    if (!buildingCollection?.features.length) {
+      throw new Error('PMTiles layer produced no usable features: buildings');
+    }
+    if (!parcelScan.parcels.length) {
+      throw new Error('PMTiles layer produced no usable features: parcels');
+    }
+
+    const addresses = addressScan.addresses;
+    const addressMetrics = scanMetricOnly(addressScan.metric);
+    const buildingFeatures = buildingCollection.features
       .map(scopedBuildingFeature)
       .filter((feature): feature is BedrockScopedBuildingFeature => Boolean(feature));
-    const parcelFeatures = (parcelScan.features ?? [])
-      .map(scopedParcelFeature)
+    const parcelFeatures = parcelScan.parcels
+      .map(parcelResponseToScopedParcel)
       .filter((feature): feature is BedrockScopedParcelFeature => Boolean(feature));
+    const buildingMetrics = pmtilesMetric({
+      hits: buildingFeatures.length,
+      seconds: 0,
+      timings: { totalMs: 0 },
+    });
+    const parcelMetrics = pmtilesMetric({
+      hits: parcelFeatures.length,
+      scanned: parcelScan.timings.featureCount,
+      bboxCandidates: parcelScan.parcels.length,
+      seconds: Number((parcelScan.timings.totalMs / 1000).toFixed(2)),
+      touchedTiles: parcelScan.timings.tileCount,
+      timings: {
+        ...parcelScan.timings,
+        cacheStatus: parcelScan.cacheStatus,
+      },
+    });
 
     return {
       addresses,
@@ -550,8 +589,8 @@ export class BedrockNzService {
       snapshot: this.snapshotForCampaign({
         campaignId: options.campaignId,
         addressCount: addresses.length,
-        buildingCount: buildingScan.hits,
-        parcelCount: parcelScan.hits,
+        buildingCount: buildingFeatures.length,
+        parcelCount: parcelFeatures.length,
         scanMetrics: {
           addresses: addressMetrics,
           buildings: buildingMetrics,

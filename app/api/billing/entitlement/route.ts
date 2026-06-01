@@ -30,6 +30,20 @@ function workspaceHasAccess(workspace: WorkspaceBilling | null): boolean {
   return !Number.isNaN(trialEnd.getTime()) && trialEnd > new Date();
 }
 
+function workspaceTrialDaysRemaining(workspace: WorkspaceBilling | null): number | null {
+  if (!workspace || workspace.subscription_status?.toLowerCase() !== 'trialing') {
+    return null;
+  }
+  if (!workspace.trial_ends_at) {
+    return null;
+  }
+  const trialEnd = new Date(workspace.trial_ends_at);
+  if (Number.isNaN(trialEnd.getTime())) {
+    return null;
+  }
+  return Math.max(0, Math.ceil((trialEnd.getTime() - Date.now()) / (24 * 60 * 60 * 1000)));
+}
+
 async function resolvePrimaryWorkspaceBilling(userId: string): Promise<WorkspaceBilling | null> {
   const admin = createAdminClient();
 
@@ -122,6 +136,9 @@ export async function GET(request: NextRequest) {
       is_active: effectiveAccess,
       source: entitlement.source,
       current_period_end: effectivePeriodEnd,
+      subscription_status: workspace?.subscription_status ?? null,
+      trial_ends_at: workspace?.trial_ends_at ?? null,
+      trial_days_remaining: workspaceTrialDaysRemaining(workspace),
       dialer_offer: {
         price_id: dialerOffer.priceId || null,
         amount: dialerOffer.amount,

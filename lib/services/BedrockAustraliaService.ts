@@ -5,7 +5,6 @@ import Pbf from 'pbf';
 import type { LambdaSnapshotResponse } from '@/lib/services/TileLambdaService';
 import type { StandardCampaignAddress } from '@/lib/services/AddressAdapter';
 import { getCachedPmtilesArchive } from '@/app/api/campaigns/_utils/tile-cache';
-import { duckDbRuntimeSetupStatements } from '@/lib/services/duckdbRuntime';
 
 type Bounds = [number, number, number, number];
 type SnapshotTileMetrics = NonNullable<NonNullable<LambdaSnapshotResponse['metadata']>['tile_metrics']>;
@@ -14,8 +13,13 @@ type BedrockScanResult = {
   hits: number;
   scanned: number;
   bboxCandidates: number;
+  polygonCandidates?: number;
+  normalizedCandidates?: number;
+  canonicalAddresses?: number;
+  dedupedCandidates?: number;
+  addressLimitApplied?: boolean;
   seconds: number;
-  queryEngine: 'duckdb_parquet' | 'bedrock_au_pmtiles';
+  queryEngine: 'bedrock_au_pmtiles';
   touchedTiles: number;
   partitioning?: string;
   tilePadding?: number;
@@ -344,6 +348,11 @@ async function loadScopedAddressesFromPmtiles(options: {
         hits: 0,
         scanned: 0,
         bboxCandidates: 0,
+        polygonCandidates: 0,
+        normalizedCandidates: 0,
+        canonicalAddresses: 0,
+        dedupedCandidates: 0,
+        addressLimitApplied: false,
         seconds: Number((elapsedMs(startedAt) / 1000).toFixed(2)),
         queryEngine: 'bedrock_au_pmtiles',
         touchedTiles: 0,
@@ -366,6 +375,8 @@ async function loadScopedAddressesFromPmtiles(options: {
   >();
   let scanned = 0;
   let bboxCandidates = 0;
+  let polygonCandidates = 0;
+  let normalizedCandidates = 0;
   let touchedTiles = 0;
 
   await forEachWithConcurrency(tileCoords, ADDRESS_TILE_FETCH_CONCURRENCY, async ({ x, y, tileIndex }) => {
@@ -391,9 +402,11 @@ async function loadScopedAddressesFromPmtiles(options: {
         if (lon < bbox[0] || lon > bbox[2] || lat < bbox[1] || lat > bbox[3]) continue;
         bboxCandidates += 1;
         if (!turf.booleanPointInPolygon(turf.point([lon, lat]), options.polygon)) continue;
+        polygonCandidates += 1;
 
         const address = normalizeAddressFeature(options.campaignId, feature, lon, lat);
         if (!address) continue;
+        normalizedCandidates += 1;
         const dedupeKey = address.gers_id ?? `${address.formatted}:${lon}:${lat}`;
         const candidate = { tileIndex, layerIndex, featureIndex: index, address };
         const existing = byAddressId.get(dedupeKey);
@@ -405,7 +418,7 @@ async function loadScopedAddressesFromPmtiles(options: {
   });
 
   const tileMs = elapsedMs(tileStartedAt);
-  const addresses = Array.from(byAddressId.values())
+  const canonicalCandidates = Array.from(byAddressId.values())
     .sort((a, b) => {
       const aKey = [
         a.address.formatted,
@@ -421,8 +434,12 @@ async function loadScopedAddressesFromPmtiles(options: {
       ].join('|');
       return aKey.localeCompare(bKey);
     })
-    .map((entry) => entry.address)
-    .slice(0, options.addressLimit ?? Number.POSITIVE_INFINITY);
+    .map((entry) => entry.address);
+  const addressLimit = options.addressLimit ?? Number.POSITIVE_INFINITY;
+  const addresses = canonicalCandidates.slice(0, addressLimit);
+  const canonicalAddresses = canonicalCandidates.length;
+  const dedupedCandidates = Math.max(0, normalizedCandidates - canonicalAddresses);
+  const addressLimitApplied = Number.isFinite(addressLimit) && canonicalAddresses > addressLimit;
   const totalMs = elapsedMs(startedAt);
 
   return {
@@ -431,6 +448,11 @@ async function loadScopedAddressesFromPmtiles(options: {
       hits: addresses.length,
       scanned,
       bboxCandidates,
+      polygonCandidates,
+      normalizedCandidates,
+      canonicalAddresses,
+      dedupedCandidates,
+      addressLimitApplied,
       seconds: Number((totalMs / 1000).toFixed(2)),
       queryEngine: 'bedrock_au_pmtiles',
       touchedTiles,
@@ -443,86 +465,13 @@ async function loadScopedAddressesFromPmtiles(options: {
         totalMs,
         tileCount: tileCoords.length,
         concurrency: ADDRESS_TILE_FETCH_CONCURRENCY,
+        polygonCandidates,
+        normalizedCandidates,
+        canonicalAddresses,
+        dedupedCandidates,
+        addressLimitApplied,
       },
     },
-  };
-}
-
-async function duckDbAll(sql: string, usesS3: boolean): Promise<{
-  rows: BedrockAustraliaRow[];
-  timings: Record<string, number>;
-}> {
-  const importStartedAt = Date.now();
-  const duckdbModule = await import('duckdb');
-  const importMs = elapsedMs(importStartedAt);
-  const duckdb = (duckdbModule.default ?? duckdbModule) as typeof duckdbModule;
-  const openStartedAt = Date.now();
-  const db = new duckdb.Database(':memory:');
-  const openMs = elapsedMs(openStartedAt);
-
-  const all = (statement: string) =>
-    new Promise<BedrockAustraliaRow[]>((resolve, reject) => {
-      db.all(statement, (error: Error | null, rows: BedrockAustraliaRow[]) => {
-        if (error) reject(error);
-        else resolve(rows);
-      });
-    });
-
-  try {
-    let setupMs = 0;
-    if (usesS3) {
-      const setupStartedAt = Date.now();
-      for (const statement of duckDbRuntimeSetupStatements()) {
-        await all(statement);
-      }
-      await all('INSTALL httpfs');
-      await all('LOAD httpfs');
-      await all(`SET s3_region=${sqlString(REGION)}`);
-      await all(`CREATE SECRET IF NOT EXISTS bedrock_au_s3 (TYPE s3, PROVIDER credential_chain, REGION ${sqlString(REGION)})`);
-      setupMs = elapsedMs(setupStartedAt);
-    }
-    const queryStartedAt = Date.now();
-    const rows = await all(sql);
-    const queryMs = elapsedMs(queryStartedAt);
-    return {
-      rows,
-      timings: {
-        importMs,
-        openMs,
-        setupMs,
-        queryMs,
-      },
-    };
-  } finally {
-    db.close();
-  }
-}
-
-function normalizeAddress(campaignId: string, row: BedrockAustraliaRow): StandardCampaignAddress | null {
-  const lon = Number(row.longitude);
-  const lat = Number(row.latitude);
-  if (!Number.isFinite(lon) || !Number.isFinite(lat)) return null;
-
-  const addressPid = typeof row.address_detail_pid === 'string' ? row.address_detail_pid : null;
-  const streetName = [row.street_name, row.street_type].filter(Boolean).join(' ').trim() || undefined;
-  const geometry = typeof row.geometry_json === 'string' && row.geometry_json.trim()
-    ? row.geometry_json
-    : JSON.stringify({ type: 'Point', coordinates: [lon, lat] });
-
-  return {
-    campaign_id: campaignId,
-    formatted: typeof row.full_address === 'string' ? row.full_address : '',
-    house_number: typeof row.number_first === 'string' ? row.number_first : undefined,
-    street_name: streetName,
-    locality: typeof row.locality_name === 'string' ? row.locality_name : undefined,
-    region: typeof row.state === 'string' ? row.state.toUpperCase() : 'AU',
-    postal_code: typeof row.postcode === 'string' ? row.postcode : undefined,
-    coordinate: { lat, lon },
-    lat,
-    lon,
-    geom: geometry,
-    source: 'bedrock_au',
-    gers_id: addressPid ? `gnaf:${addressPid}` : null,
   };
 }
 
@@ -541,7 +490,6 @@ export class BedrockAustraliaService {
     snapshot: LambdaSnapshotResponse;
     metrics: { addresses: BedrockScanResult };
   }> {
-    const startedAt = Date.now();
     const bbox = turf.bbox(options.polygon) as Bounds;
 
     try {
@@ -559,6 +507,12 @@ export class BedrockAustraliaService {
           campaignId: options.campaignId,
           hits: pmtilesResult.metric.hits,
           scanned: pmtilesResult.metric.scanned,
+          bboxCandidates: pmtilesResult.metric.bboxCandidates,
+          polygonCandidates: pmtilesResult.metric.polygonCandidates,
+          normalizedCandidates: pmtilesResult.metric.normalizedCandidates,
+          canonicalAddresses: pmtilesResult.metric.canonicalAddresses,
+          dedupedCandidates: pmtilesResult.metric.dedupedCandidates,
+          addressLimitApplied: pmtilesResult.metric.addressLimitApplied,
           touchedTiles: pmtilesResult.metric.touchedTiles,
           timings: pmtilesResult.metric.timings,
         });
@@ -572,114 +526,18 @@ export class BedrockAustraliaService {
           }),
         };
       }
-      console.warn('[BedrockAustraliaService] PMTiles address scan found no address layer/features; falling back to parquet', {
-        campaignId: options.campaignId,
-        timings: pmtilesResult.metric.timings,
-      });
+      throw new Error('PMTiles layer produced no usable features: addresses');
     } catch (pmtilesError) {
-      console.warn('[BedrockAustraliaService] PMTiles address scan failed; falling back to parquet:', {
-        campaignId: options.campaignId,
-        message: pmtilesError instanceof Error ? pmtilesError.message : String(pmtilesError),
-      });
+      throw new Error(`PMTiles address artifact unavailable for BEDROCK Australia: ${
+        pmtilesError instanceof Error ? pmtilesError.message : String(pmtilesError)
+      }`);
     }
-
-    const { manifest, manifestMs, cacheHit } = await readManifest();
-    const partitionStartedAt = Date.now();
-    const { paths } = parquetPathsForTiles(manifest, bbox);
-    const partitionMs = elapsedMs(partitionStartedAt);
-    if (paths.length === 0) {
-      throw new Error('BEDROCK Australia has no Parquet partitions for this territory');
-    }
-
-    const pathsSql = `[${paths.map(sqlString).join(',')}]`;
-    console.log('[BedrockAustraliaService] address scan starting', {
-      campaignId: options.campaignId,
-      touchedTiles: paths.length,
-      manifestMs,
-      manifestCacheHit: cacheHit,
-      partitionMs,
-      bbox,
-    });
-
-    const { rows, timings: duckDbTimings } = await duckDbAll(
-      `
-        SELECT
-          address_detail_pid,
-          full_address,
-          number_first,
-          street_name,
-          street_type,
-          locality_name,
-          state,
-          postcode,
-          longitude,
-          latitude
-        FROM read_parquet(${pathsSql}, hive_partitioning=1, union_by_name=true)
-        WHERE longitude BETWEEN ${sqlNumber(bbox[0])} AND ${sqlNumber(bbox[2])}
-          AND latitude BETWEEN ${sqlNumber(bbox[1])} AND ${sqlNumber(bbox[3])}
-      `,
-      paths.some((path) => path.startsWith('s3://'))
-    );
-
-    const filterStartedAt = Date.now();
-    const addresses: StandardCampaignAddress[] = [];
-    for (const row of rows) {
-      const lon = Number(row.longitude);
-      const lat = Number(row.latitude);
-      if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
-      if (!turf.booleanPointInPolygon(turf.point([lon, lat]), options.polygon)) continue;
-      const address = normalizeAddress(options.campaignId, row);
-      if (!address) continue;
-      addresses.push(address);
-      if (options.addressLimit && addresses.length >= options.addressLimit) break;
-    }
-    const filterMs = elapsedMs(filterStartedAt);
-    const totalMs = elapsedMs(startedAt);
-
-    const metric: BedrockScanResult = {
-      hits: addresses.length,
-      scanned: rows.length,
-      bboxCandidates: rows.length,
-      seconds: Number((totalMs / 1000).toFixed(2)),
-      queryEngine: 'duckdb_parquet',
-      touchedTiles: paths.length,
-      partitioning: 'web_mercator_xyz',
-      tilePadding: 0,
-      timings: {
-        manifestMs,
-        manifest_cache_hit: cacheHit,
-        partitionMs,
-        filterMs,
-        totalMs,
-        ...duckDbTimings,
-      },
-    };
-
-    console.log('[BedrockAustraliaService] address scan complete', {
-      campaignId: options.campaignId,
-      hits: metric.hits,
-      scanned: metric.scanned,
-      touchedTiles: metric.touchedTiles,
-      timings: metric.timings,
-    });
-
-    return {
-      addresses,
-      metrics: { addresses: metric },
-      snapshot: this.snapshotForCampaign({
-        campaignId: options.campaignId,
-        addressCount: addresses.length,
-        scanMetric: metric,
-        manifest,
-      }),
-    };
   }
 
   static snapshotForCampaign(options: {
     campaignId: string;
     addressCount: number;
     scanMetric: BedrockScanResult;
-    manifest?: ParquetManifest;
   }): LambdaSnapshotResponse {
     const parcelsPmtilesKey = parcelPmtilesKey();
     const tileMetrics = {
@@ -693,24 +551,14 @@ export class BedrockAustraliaService {
       pmtiles_key: buildingKey('buildings.pmtiles'),
       tilejson_key: buildingKey('buildings.json'),
       buildings_geojson_key: buildingKey('buildings.geojson.gz'),
-      buildings_parquet_key: buildingKey('parquet/buildings.spatial.parquet'),
-      buildings_parquet_manifest_key: buildingKey('parquet/buildings.spatial.json'),
       addresses_pmtiles_key: key('addresses.pmtiles'),
       addresses_tilejson_key: key('addresses.json'),
       addresses_geojson_key: key('addresses.ndjson.gz'),
-      addresses_parquet_prefix: key('parquet'),
-      addresses_parquet_manifest_key: key('parquet-manifest.json'),
       addresses_pmtiles_index_key: `${addressPrefix()}/pmtiles-index.json`,
       parcels_pmtiles_key: parcelsPmtilesKey,
       parcels_tilejson_key: parcelsPmtilesKey?.replace(/\.pmtiles$/i, '.json') ?? null,
       parcels_geojson_key: parcelsPmtilesKey?.replace(/\.pmtiles$/i, '.geojson.gz') ?? null,
       parcels_pmtiles_index_key: parcelsPmtilesKey ? `${addressPrefix().replace(/\/addresses$/i, '')}/parcels/pmtiles-index.json` : null,
-      addresses_parquet_partitioning: {
-        scheme: 'web_mercator_xyz',
-        tile_z: options.manifest?.partitioning?.tile_z ?? 12,
-        columns: ['tile_z', 'tile_x', 'tile_y'],
-        path_template: 'tile_z={tile_z}/tile_x={tile_x}/tile_y={tile_y}/*.parquet',
-      },
       source_layers: {
         buildings: 'buildings',
         addresses: 'addresses',

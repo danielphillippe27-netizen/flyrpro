@@ -109,6 +109,33 @@ type CampaignNoteTimeline = {
   entries: CampaignNoteEntry[];
 };
 
+type CampaignAssignmentMode = 'zone_split' | 'whole_team';
+
+type CampaignAssignmentHomeLite = {
+  campaign_address_id: string;
+  sequence: number;
+};
+
+type CampaignAssignmentLite = {
+  id: string;
+  campaign_id: string;
+  assigned_to_user_id: string;
+  mode: CampaignAssignmentMode;
+  goal_homes: number;
+  zone_index: number | null;
+  status: string;
+  homes?: CampaignAssignmentHomeLite[];
+};
+
+type AssignmentScopeState = {
+  role: string | null;
+  assignments: CampaignAssignmentLite[];
+  addressIds: string[] | null;
+  label: string | null;
+  description: string | null;
+  scopedToAssignedZone: boolean;
+};
+
 function isCampaignNotePlaceholder(value: string): boolean {
   return /^\[farm:[0-9a-f-]+\]$/i.test(value.trim());
 }
@@ -211,6 +238,81 @@ function formatSupabaseError(error: unknown, fallback: string): string {
 function isMissingCampaignColumnError(error: unknown, column: 'notes' | 'scripts' | 'flyer_url'): boolean {
   const message = formatSupabaseError(error, '').toLowerCase();
   return isMissingCampaignColumnErrorMessage(message, column);
+}
+
+function buildAssignmentScope(payload: unknown): AssignmentScopeState | null {
+  const data = payload as { assignments?: unknown; role?: unknown } | null;
+  const role = typeof data?.role === 'string' ? data.role : null;
+  const canManage = role === 'owner' || role === 'admin';
+  const assignments = Array.isArray(data?.assignments)
+    ? data.assignments.filter((assignment): assignment is CampaignAssignmentLite => {
+        const candidate = assignment as Partial<CampaignAssignmentLite> | null;
+        return (
+          Boolean(candidate) &&
+          typeof candidate?.id === 'string' &&
+          typeof candidate.campaign_id === 'string' &&
+          typeof candidate.assigned_to_user_id === 'string' &&
+          (candidate.mode === 'zone_split' || candidate.mode === 'whole_team')
+        );
+      })
+    : [];
+
+  if (assignments.length === 0) {
+    return {
+      role,
+      assignments: [],
+      addressIds: null,
+      label: null,
+      description: null,
+      scopedToAssignedZone: false,
+    };
+  }
+
+  const zoneAssignments = assignments.filter((assignment) => assignment.mode === 'zone_split');
+  const totalHomes = assignments.reduce((sum, assignment) => sum + Number(assignment.goal_homes ?? 0), 0);
+
+  if (canManage) {
+    return {
+      role,
+      assignments,
+      addressIds: null,
+      label: 'Assigned',
+      description: `${assignments.length} active assignee${assignments.length === 1 ? '' : 's'} · ${totalHomes} homes`,
+      scopedToAssignedZone: false,
+    };
+  }
+
+  if (zoneAssignments.length > 0) {
+    const assignedAddressIds = Array.from(
+      new Set(
+        zoneAssignments.flatMap((assignment) =>
+          (Array.isArray(assignment.homes) ? assignment.homes : [])
+            .map((home) => home.campaign_address_id)
+            .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+        )
+      )
+    );
+    const firstZone = zoneAssignments[0];
+    const zoneLabel = firstZone.zone_index ? `Zone ${firstZone.zone_index}` : 'Assigned zone';
+
+    return {
+      role,
+      assignments,
+      addressIds: assignedAddressIds,
+      label: zoneLabel,
+      description: `${assignedAddressIds.length || totalHomes} homes assigned to you · only your area is shown`,
+      scopedToAssignedZone: true,
+    };
+  }
+
+  return {
+    role,
+    assignments,
+    addressIds: null,
+    label: 'Assigned',
+    description: `${totalHomes} home goal · shared campaign view`,
+    scopedToAssignedZone: false,
+  };
 }
 
 function getLinkQualityBanner(campaign: CampaignV2 | null): {
@@ -514,7 +616,8 @@ function CampaignContactsList({
 export default function CampaignDetailPage() {
   const params = useParams();
   const campaignId = params.campaignId as string;
-  const { currentWorkspaceId } = useWorkspace();
+  const { currentWorkspaceId, membershipsByWorkspaceId } = useWorkspace();
+  const currentWorkspaceRole = currentWorkspaceId ? membershipsByWorkspaceId[currentWorkspaceId] ?? null : null;
 
   const [campaign, setCampaign] = useState<CampaignV2 | null>(null);
   const [addresses, setAddresses] = useState<CampaignAddress[]>([]);
@@ -544,6 +647,7 @@ export default function CampaignDetailPage() {
   const [generatingBasicQr, setGeneratingBasicQr] = useState(false);
   const [qrScanEventsCount, setQrScanEventsCount] = useState<number | null>(null);
   const [roadMetadata, setRoadMetadata] = useState<CampaignRoadMetadata | null>(null);
+  const [assignmentScope, setAssignmentScope] = useState<AssignmentScopeState | null>(null);
   const campaignStats: CampaignStats = useMemo(
     () => deriveCampaignStats(addresses, contacts),
     [addresses, contacts]
@@ -578,7 +682,43 @@ export default function CampaignDetailPage() {
     setScanEventsError(false);
     setRoadMetadataError(false);
 
-    const addressesRequest = CampaignsService.fetchAddresses(campaignId)
+    const fallbackMemberScope: AssignmentScopeState | null =
+      currentWorkspaceRole === 'member'
+        ? {
+            role: currentWorkspaceRole,
+            assignments: [],
+            addressIds: [],
+            label: 'Assigned',
+            description: 'Could not verify your assigned zone yet.',
+            scopedToAssignedZone: true,
+          }
+        : null;
+
+    const assignmentScopeRequest = fetch(`/api/campaigns/${campaignId}/assignments`, {
+      credentials: 'include',
+    })
+      .then(async (response) => {
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) {
+          console.warn('Unable to fetch campaign assignment scope:', payload?.error ?? response.statusText);
+          setAssignmentScope(fallbackMemberScope);
+          return fallbackMemberScope;
+        }
+        const nextScope = buildAssignmentScope(payload);
+        setAssignmentScope(nextScope);
+        return nextScope;
+      })
+      .catch((error) => {
+        console.warn('Unable to fetch campaign assignment scope:', error);
+        setAssignmentScope(fallbackMemberScope);
+        return fallbackMemberScope;
+      });
+
+    const addressesRequest = assignmentScopeRequest
+      .then((scope) => {
+        const addressIds = scope?.scopedToAssignedZone ? scope.addressIds ?? [] : null;
+        return CampaignsService.fetchAddresses(campaignId, { addressIds });
+      })
       .then((addressesData) => {
         setAddresses(addressesData);
       })
@@ -591,7 +731,11 @@ export default function CampaignDetailPage() {
         setAddressesLoading(false);
       });
 
-    const contactsRequest = CampaignsService.fetchCampaignContacts(campaignId)
+    const contactsRequest = assignmentScopeRequest
+      .then((scope) => {
+        const addressIds = scope?.scopedToAssignedZone ? scope.addressIds ?? [] : null;
+        return CampaignsService.fetchCampaignContacts(campaignId, { addressIds });
+      })
       .then((contactsData) => {
         setContacts(contactsData);
       })
@@ -653,7 +797,7 @@ export default function CampaignDetailPage() {
       scanEventsRequest,
       roadMetadataRequest,
     ]);
-  }, [campaignId]);
+  }, [campaignId, currentWorkspaceRole]);
 
   const loadData = useCallback(async () => {
     setLoadError(false);
@@ -1130,6 +1274,7 @@ export default function CampaignDetailPage() {
   });
   const hasGeneratedAdvancedQr = formattedRecipients.some((recipient) => Boolean(recipient.qr_code_base64));
   const linkQualityBanner = getLinkQualityBanner(campaign);
+  const assignmentBanner = assignmentScope?.label ? assignmentScope : null;
 
   return (
     <div className="min-h-full bg-muted/30 dark:bg-background relative">
@@ -1156,6 +1301,18 @@ export default function CampaignDetailPage() {
               <div className="min-w-0 space-y-1">
                 <p className="text-sm text-muted-foreground">{linkQualityBanner.message}</p>
               </div>
+            </div>
+          </div>
+        ) : null}
+        {assignmentBanner ? (
+          <div className="rounded-xl border border-border bg-card px-4 py-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <Badge variant={assignmentBanner.scopedToAssignedZone ? 'default' : 'secondary'}>
+                {assignmentBanner.label}
+              </Badge>
+              {assignmentBanner.description ? (
+                <p className="text-sm text-muted-foreground">{assignmentBanner.description}</p>
+              ) : null}
             </div>
           </div>
         ) : null}
@@ -1186,6 +1343,7 @@ export default function CampaignDetailPage() {
                 campaignId={campaignId}
                 addresses={addresses}
                 campaign={campaign}
+                visibleAddressIds={assignmentScope?.scopedToAssignedZone ? assignmentScope.addressIds ?? [] : undefined}
                 onSnapComplete={loadData}
                 onContactCreated={loadSecondaryData}
                 buildingPendingOverlay={{

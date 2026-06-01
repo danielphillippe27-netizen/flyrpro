@@ -4,7 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
-import { Loader2, MapPinned, Send, Users } from 'lucide-react';
+import type MapboxDraw from '@mapbox/mapbox-gl-draw';
+import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css';
+import { Check, Eraser, Expand, Loader2, MapPinned, Pencil, PenLine, RotateCcw, Send, Users, X } from 'lucide-react';
 import type { CampaignAddress } from '@/types/database';
 import { MapBuildingsLayer } from '@/components/map/MapBuildingsLayer';
 import { useWorkspace } from '@/lib/workspace-context';
@@ -18,13 +20,23 @@ import {
   type CampaignAssignmentSplitMode,
 } from '@/lib/campaignAssignments';
 import {
+  applyManualOverridesToZones,
+  buildAssignmentByAddressId,
+  countManualOverridesByMember,
+  sanitizeManualOverrides,
+  shallowRecordEqual,
+} from '@/lib/campaignAssignmentDraft';
+import { selectedAddressIdsFromDraw } from '@/lib/campaignAssignmentMapSelection';
+import {
   buildBalancedBlockClusters,
+  buildSmartTerritoryClusters,
   buildNaturalZoneClusters,
   type BuildRouteAddress,
 } from '@/lib/services/BlockRoutingService';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
@@ -152,9 +164,10 @@ function buildZones(
     }),
     { lat: 0, lon: 0 }
   );
-  const clusters =
-    splitMode === 'balanced'
-      ? buildBalancedBlockClusters(addresses, memberIds.length, depot)
+  const clusters = splitMode === 'balanced'
+    ? buildBalancedBlockClusters(addresses, memberIds.length, depot)
+    : splitMode === 'smart'
+      ? buildSmartTerritoryClusters(addresses, memberIds.length, depot)
       : buildNaturalZoneClusters(addresses, memberIds.length, depot);
   const chunks =
     clusters.length === memberIds.length
@@ -179,13 +192,23 @@ function formatMode(mode: CampaignAssignmentMode): string {
 function CampaignAssignmentZonePreviewMap({
   campaignId,
   addresses,
+  assignmentAddresses,
   members,
+  autoZones,
   zones,
+  manualOverrides,
+  editable,
+  onApplyManualOverrides,
 }: {
   campaignId: string;
   addresses: CampaignAddress[];
+  assignmentAddresses: AssignmentAddress[];
   members: ZonePreviewMember[];
+  autoZones: Map<string, AssignmentAddress[]>;
   zones: Map<string, AssignmentAddress[]>;
+  manualOverrides: Record<string, string>;
+  editable: boolean;
+  onApplyManualOverrides: (overrides: Record<string, string>) => void;
 }) {
   const { theme } = useTheme();
   const { preset: mapPreset } = useMapStyle();
@@ -197,6 +220,8 @@ function CampaignAssignmentZonePreviewMap({
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editorStartDraw, setEditorStartDraw] = useState(false);
   const addressById = useMemo(() => new Map(addresses.map((address) => [address.id, address])), [addresses]);
 
   const previewPoints = useMemo<ZonePreviewPoint[]>(
@@ -266,10 +291,31 @@ function CampaignAssignmentZonePreviewMap({
         mapRef.current = map;
         map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'bottom-right');
         map.on('load', () => {
-          if (!cancelled) setMapLoaded(true);
+          if (!cancelled) {
+            setMapLoaded(true);
+            setMapError(null);
+          }
         });
         map.on('error', () => {
-          if (!cancelled) setMapError('Map unavailable.');
+          if (cancelled) return;
+          const hasRenderableStyle = (() => {
+            try {
+              return map.loaded() || map.isStyleLoaded();
+            } catch {
+              return false;
+            }
+          })();
+          if (hasRenderableStyle) return;
+
+          window.setTimeout(() => {
+            if (cancelled || mapRef.current !== map) return;
+            try {
+              if (map.loaded() || map.isStyleLoaded()) return;
+            } catch {
+              // Keep the fatal fallback below if Mapbox can no longer report style state.
+            }
+            setMapError('Map unavailable.');
+          }, 1000);
         });
       })
       .catch(() => {
@@ -311,6 +357,11 @@ function CampaignAssignmentZonePreviewMap({
     return null;
   }
 
+  const openEditor = (startDraw: boolean) => {
+    setEditorStartDraw(startDraw);
+    setEditorOpen(true);
+  };
+
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-muted/20">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-background/85 px-3 py-2">
@@ -319,6 +370,16 @@ function CampaignAssignmentZonePreviewMap({
           <p className="truncate text-sm font-medium text-foreground">Assignment map</p>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
+          <Button type="button" variant="outline" size="sm" onClick={() => openEditor(false)}>
+            <Expand className="h-3.5 w-3.5" />
+            Expand
+          </Button>
+          {editable ? (
+            <Button type="button" variant="secondary" size="sm" onClick={() => openEditor(true)}>
+              <Pencil className="h-3.5 w-3.5" />
+              Edit map
+            </Button>
+          ) : null}
           {members.map((member) => (
             <span key={member.user_id} className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
               <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: member.color }} />
@@ -346,7 +407,426 @@ function CampaignAssignmentZonePreviewMap({
           </div>
         ) : null}
       </div>
+      <AssignmentMapEditorDialog
+        open={editorOpen}
+        startInDrawMode={editorStartDraw}
+        campaignId={campaignId}
+        addresses={addresses}
+        assignmentAddresses={assignmentAddresses}
+        members={members}
+        autoZones={autoZones}
+        appliedManualOverrides={manualOverrides}
+        onApplyManualOverrides={onApplyManualOverrides}
+        onOpenChange={setEditorOpen}
+      />
     </div>
+  );
+}
+
+function AssignmentMapEditorDialog({
+  open,
+  startInDrawMode,
+  campaignId,
+  addresses,
+  assignmentAddresses,
+  members,
+  autoZones,
+  appliedManualOverrides,
+  onApplyManualOverrides,
+  onOpenChange,
+}: {
+  open: boolean;
+  startInDrawMode: boolean;
+  campaignId: string;
+  addresses: CampaignAddress[];
+  assignmentAddresses: AssignmentAddress[];
+  members: ZonePreviewMember[];
+  autoZones: Map<string, AssignmentAddress[]>;
+  appliedManualOverrides: Record<string, string>;
+  onApplyManualOverrides: (overrides: Record<string, string>) => void;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const { theme } = useTheme();
+  const { preset: mapPreset } = useMapStyle();
+  const resolvedMapStyle = useMemo(
+    () => resolveMapStyle(mapPreset, theme, 'v12'),
+    [mapPreset, theme]
+  );
+  const memberIds = useMemo(() => members.map((member) => member.user_id), [members]);
+  const addressById = useMemo(() => new Map(addresses.map((address) => [address.id, address])), [addresses]);
+  const assignmentAddressIdSet = useMemo(
+    () => new Set(assignmentAddresses.map((address) => address.id)),
+    [assignmentAddresses]
+  );
+  const autoAssignmentByAddress = useMemo(() => buildAssignmentByAddressId(autoZones), [autoZones]);
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<mapboxgl.Map | null>(null);
+  const drawRef = useRef<MapboxDraw | null>(null);
+  const [mapLoaded, setMapLoaded] = useState(false);
+  const [mapError, setMapError] = useState<string | null>(null);
+  const [selectedAddressIds, setSelectedAddressIds] = useState<string[]>([]);
+  const [draftOverrides, setDraftOverrides] = useState<Record<string, string>>({});
+  const [activeMemberId, setActiveMemberId] = useState<string>('');
+
+  useEffect(() => {
+    if (!open) return;
+    setSelectedAddressIds([]);
+    setDraftOverrides(appliedManualOverrides);
+    setActiveMemberId((current) =>
+      current && memberIds.includes(current) ? current : memberIds[0] ?? ''
+    );
+  }, [appliedManualOverrides, memberIds, open]);
+
+  const editorZones = useMemo(
+    () => applyManualOverridesToZones(autoZones, assignmentAddresses, memberIds, draftOverrides),
+    [assignmentAddresses, autoZones, draftOverrides, memberIds]
+  );
+  const manualCountsByMember = useMemo(
+    () => countManualOverridesByMember(draftOverrides, assignmentAddresses, memberIds, autoZones),
+    [assignmentAddresses, autoZones, draftOverrides, memberIds]
+  );
+  const assignmentColorByAddressId = useMemo(
+    () =>
+      members.reduce<Record<string, string>>((colors, member) => {
+        (editorZones.get(member.user_id) ?? []).forEach((address) => {
+          colors[address.id] = member.color;
+        });
+        return colors;
+      }, {}),
+    [editorZones, members]
+  );
+  const previewAddresses = useMemo(
+    () =>
+      Object.keys(assignmentColorByAddressId)
+        .map((addressId) => addressById.get(addressId))
+        .filter((address): address is CampaignAddress => Boolean(address)),
+    [addressById, assignmentColorByAddressId]
+  );
+  const previewPoints = useMemo<ZonePreviewPoint[]>(
+    () =>
+      assignmentAddresses.flatMap((address) => {
+        if (!Number.isFinite(address.lon) || !Number.isFinite(address.lat)) return [];
+        if (address.lon === 0 && address.lat === 0) return [];
+        return [{ lon: address.lon, lat: address.lat }];
+      }),
+    [assignmentAddresses]
+  );
+  const initialPoint = previewPoints[0] ?? null;
+  const initialLon = initialPoint?.lon ?? null;
+  const initialLat = initialPoint?.lat ?? null;
+
+  useEffect(() => {
+    const container = mapContainerRef.current;
+    if (!open || !container || initialLon === null || initialLat === null) return;
+
+    const token = getMapboxToken();
+    if (!token) {
+      setMapError('Mapbox token not configured.');
+      return;
+    }
+
+    let cancelled = false;
+    setMapError(null);
+    setMapLoaded(false);
+    mapboxgl.accessToken = token;
+
+    void Promise.all([
+      getResolvedMapInitOptions(resolvedMapStyle),
+      import('@mapbox/mapbox-gl-draw'),
+    ])
+      .then(([initOptions, drawModule]) => {
+        if (cancelled || !mapContainerRef.current) return;
+
+        const map = new mapboxgl.Map({
+          container: mapContainerRef.current,
+          ...initOptions,
+          center: [initialLon, initialLat],
+          zoom: 15,
+          attributionControl: false,
+          pitchWithRotate: false,
+          dragRotate: false,
+        });
+        mapRef.current = map;
+        map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'bottom-right');
+
+        const draw = new drawModule.default({
+          displayControlsDefault: false,
+          controls: {},
+        });
+        drawRef.current = draw;
+
+        const updateSelectionFromDraw = () => {
+          if (!drawRef.current) return;
+          setSelectedAddressIds(selectedAddressIdsFromDraw(drawRef.current, assignmentAddresses));
+        };
+        const drawMap = map as mapboxgl.Map & {
+          on(type: string, listener: () => void): mapboxgl.Map;
+          off(type: string, listener: () => void): mapboxgl.Map;
+        };
+
+        map.on('load', () => {
+          if (cancelled) return;
+          try {
+            map.addControl(draw);
+            drawMap.on('draw.create', updateSelectionFromDraw);
+            drawMap.on('draw.update', updateSelectionFromDraw);
+            drawMap.on('draw.delete', updateSelectionFromDraw);
+            if (startInDrawMode) {
+              window.setTimeout(() => draw.changeMode('draw_polygon'), 0);
+            }
+          } catch {
+            // The map remains useful for click editing if Draw cannot attach.
+          }
+          setMapLoaded(true);
+          setMapError(null);
+          window.setTimeout(() => map.resize(), 0);
+        });
+        map.on('error', () => {
+          if (cancelled) return;
+          const hasRenderableStyle = (() => {
+            try {
+              return map.loaded() || map.isStyleLoaded();
+            } catch {
+              return false;
+            }
+          })();
+          if (hasRenderableStyle) return;
+
+          window.setTimeout(() => {
+            if (cancelled || mapRef.current !== map) return;
+            try {
+              if (map.loaded() || map.isStyleLoaded()) return;
+            } catch {
+              // Keep the fatal fallback below if Mapbox can no longer report style state.
+            }
+            setMapError('Map unavailable.');
+          }, 1000);
+        });
+
+        const cleanupDrawEvents = () => {
+          drawMap.off('draw.create', updateSelectionFromDraw);
+          drawMap.off('draw.update', updateSelectionFromDraw);
+          drawMap.off('draw.delete', updateSelectionFromDraw);
+        };
+        map.once('remove', cleanupDrawEvents);
+      })
+      .catch(() => {
+        if (!cancelled) setMapError('Map unavailable.');
+      });
+
+    return () => {
+      cancelled = true;
+      setMapLoaded(false);
+      if (mapRef.current) {
+        try {
+          if (drawRef.current) mapRef.current.removeControl(drawRef.current);
+        } catch {
+          // Mapbox can already be mid-disposal here.
+        }
+        removeMapboxMapWhenSafe(mapRef.current);
+        mapRef.current = null;
+        drawRef.current = null;
+      }
+    };
+  }, [assignmentAddresses, initialLat, initialLon, open, resolvedMapStyle, startInDrawMode]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded || previewPoints.length === 0) return;
+
+    if (previewPoints.length === 1) {
+      map.easeTo({ center: [previewPoints[0].lon, previewPoints[0].lat], zoom: 17, pitch: 45, duration: 450 });
+      return;
+    }
+
+    const bounds = new mapboxgl.LngLatBounds();
+    previewPoints.forEach((point) => bounds.extend([point.lon, point.lat]));
+    if (!bounds.isEmpty()) {
+      map.fitBounds(bounds, {
+        padding: { top: 56, right: 56, bottom: 56, left: 56 },
+        maxZoom: 17.25,
+        pitch: 45,
+        duration: 450,
+      });
+    }
+  }, [mapLoaded, previewPoints]);
+
+  const drawPolygon = () => {
+    const draw = drawRef.current;
+    if (!draw) return;
+    draw.deleteAll();
+    setSelectedAddressIds([]);
+    draw.changeMode('draw_polygon');
+  };
+
+  const clearSelection = () => {
+    drawRef.current?.deleteAll();
+    setSelectedAddressIds([]);
+  };
+
+  const assignSelectionToMember = () => {
+    if (!activeMemberId || selectedAddressIds.length === 0) return;
+
+    setDraftOverrides((current) => {
+      const next = { ...current };
+      selectedAddressIds.forEach((addressId) => {
+        if (!assignmentAddressIdSet.has(addressId)) return;
+        if (autoAssignmentByAddress.get(addressId) === activeMemberId) {
+          delete next[addressId];
+          return;
+        }
+        next[addressId] = activeMemberId;
+      });
+      return sanitizeManualOverrides(next, assignmentAddresses, memberIds, autoZones);
+    });
+  };
+
+  const resetEdits = () => {
+    setDraftOverrides({});
+    clearSelection();
+  };
+
+  const applyEdits = () => {
+    const sanitized = sanitizeManualOverrides(draftOverrides, assignmentAddresses, memberIds, autoZones);
+    onApplyManualOverrides(sanitized);
+    onOpenChange(false);
+  };
+
+  const handleBuildingClick = useCallback((
+    _buildingId: string,
+    addressId?: string,
+    options?: { additive?: boolean }
+  ) => {
+    if (!addressId || !assignmentAddressIdSet.has(addressId)) return;
+    setSelectedAddressIds((current) => {
+      const exists = current.includes(addressId);
+      if (options?.additive) {
+        return exists ? current.filter((id) => id !== addressId) : [...current, addressId];
+      }
+      return exists && current.length === 1 ? [] : [addressId];
+    });
+  }, [assignmentAddressIdSet]);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        className="grid h-[94vh] w-[96vw] max-w-[1600px] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0"
+        showCloseButton={false}
+      >
+        <DialogHeader className="sr-only">
+          <DialogTitle>Assignment map editor</DialogTitle>
+        </DialogHeader>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-background px-4 py-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <MapPinned className="h-4 w-4 text-muted-foreground" />
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold">Assignment map</p>
+              <p className="text-xs text-muted-foreground">{selectedAddressIds.length} selected</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={drawPolygon}>
+              <PenLine className="h-3.5 w-3.5" />
+              Draw polygon
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={clearSelection} disabled={selectedAddressIds.length === 0}>
+              <Eraser className="h-3.5 w-3.5" />
+              Clear selection
+            </Button>
+          </div>
+        </div>
+
+        <div className="grid min-h-0 lg:grid-cols-[320px_minmax(0,1fr)]">
+          <aside className="min-h-0 overflow-y-auto border-b border-border bg-muted/20 p-4 lg:border-b-0 lg:border-r">
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Member</Label>
+                <div className="space-y-2">
+                  {members.map((member) => {
+                    const active = activeMemberId === member.user_id;
+                    const zoneHomes = editorZones.get(member.user_id) ?? [];
+                    const manualCount = manualCountsByMember.get(member.user_id) ?? 0;
+                    return (
+                      <button
+                        key={member.user_id}
+                        type="button"
+                        onClick={() => setActiveMemberId(member.user_id)}
+                        className={`flex w-full items-center justify-between gap-3 rounded-md border px-3 py-2 text-left transition-colors ${
+                          active
+                            ? 'border-foreground bg-background text-foreground'
+                            : 'border-border bg-background/70 text-muted-foreground hover:bg-background'
+                        }`}
+                      >
+                        <span className="flex min-w-0 items-center gap-2">
+                          <span className="h-3 w-3 rounded-full" style={{ backgroundColor: member.color }} />
+                          <span className="truncate text-sm font-medium">{member.display_name}</span>
+                        </span>
+                        <span className="shrink-0 text-xs">
+                          {zoneHomes.length} / {manualCount} edited
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <Button
+                type="button"
+                className="w-full"
+                onClick={assignSelectionToMember}
+                disabled={!activeMemberId || selectedAddressIds.length === 0}
+              >
+                <Check className="h-4 w-4" />
+                Assign selection to member
+              </Button>
+
+              <Button type="button" variant="outline" className="w-full" onClick={resetEdits}>
+                <RotateCcw className="h-4 w-4" />
+                Reset edits
+              </Button>
+            </div>
+          </aside>
+
+          <div className="relative min-h-[420px]">
+            <div ref={mapContainerRef} className="h-full min-h-[420px] w-full" />
+            {mapRef.current && mapLoaded ? (
+              <MapBuildingsLayer
+                map={mapRef.current}
+                campaignId={campaignId}
+                addressStateOverrides={previewAddresses}
+                assignmentColorByAddressId={assignmentColorByAddressId}
+                selectedAddressIds={selectedAddressIds}
+                showAddressLabels={false}
+                footprintStatusColors
+                isDarkMap={theme === 'dark'}
+                onBuildingClick={handleBuildingClick}
+              />
+            ) : null}
+            {mapError ? (
+              <div className="absolute inset-0 flex items-center justify-center bg-background/90 p-4 text-center text-sm text-muted-foreground">
+                {mapError}
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-background px-4 py-3">
+          <p className="text-xs text-muted-foreground">
+            {Object.keys(sanitizeManualOverrides(draftOverrides, assignmentAddresses, memberIds, autoZones)).length} manual edits
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              <X className="h-4 w-4" />
+              Cancel
+            </Button>
+            <Button type="button" onClick={applyEdits}>
+              <Check className="h-4 w-4" />
+              Apply edits
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -359,7 +839,8 @@ export function CampaignAssignmentView({ campaignId, campaignName, addresses }: 
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
   const [mode, setMode] = useState<CampaignAssignmentMode>('zone_split');
-  const [splitMode, setSplitMode] = useState<CampaignAssignmentSplitMode>('natural');
+  const [splitMode, setSplitMode] = useState<CampaignAssignmentSplitMode>('smart');
+  const [appliedManualOverrides, setAppliedManualOverrides] = useState<Record<string, string>>({});
   const [dueAt, setDueAt] = useState('');
   const [notes, setNotes] = useState('');
   const [assignments, setAssignments] = useState<AssignmentRow[]>([]);
@@ -369,9 +850,17 @@ export function CampaignAssignmentView({ campaignId, campaignName, addresses }: 
   const [warnings, setWarnings] = useState<string[]>([]);
 
   const assignmentAddresses = useMemo(() => toAssignmentAddresses(addresses), [addresses]);
-  const zones = useMemo(
+  const autoZones = useMemo(
     () => buildZones(assignmentAddresses, selectedMemberIds, splitMode),
     [assignmentAddresses, selectedMemberIds, splitMode]
+  );
+  const zones = useMemo(
+    () => applyManualOverridesToZones(autoZones, assignmentAddresses, selectedMemberIds, appliedManualOverrides),
+    [appliedManualOverrides, assignmentAddresses, autoZones, selectedMemberIds]
+  );
+  const manualOverrideCountByMemberId = useMemo(
+    () => countManualOverridesByMember(appliedManualOverrides, assignmentAddresses, selectedMemberIds, autoZones),
+    [appliedManualOverrides, assignmentAddresses, autoZones, selectedMemberIds]
   );
   const wholeTeamGoals = useMemo(
     () => distributeWholeTeamGoals(addresses.length, selectedMemberIds),
@@ -387,6 +876,13 @@ export function CampaignAssignmentView({ campaignId, campaignName, addresses }: 
     });
     return wholeTeamZones;
   }, [assignmentAddresses, mode, selectedMemberIds, zones]);
+
+  useEffect(() => {
+    setAppliedManualOverrides((current) => {
+      const next = sanitizeManualOverrides(current, assignmentAddresses, selectedMemberIds, autoZones);
+      return shallowRecordEqual(current, next) ? current : next;
+    });
+  }, [assignmentAddresses, autoZones, selectedMemberIds]);
 
   const loadAssignments = useCallback(async () => {
     setLoading(true);
@@ -606,12 +1102,12 @@ export function CampaignAssignmentView({ campaignId, campaignName, addresses }: 
                 <div className="inline-flex rounded-lg border border-border bg-muted/20 p-1">
                   <button
                     type="button"
-                    onClick={() => setSplitMode('natural')}
+                    onClick={() => setSplitMode('smart')}
                     className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                      splitMode === 'natural' ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-background/80'
+                      splitMode === 'smart' ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-background/80'
                     }`}
                   >
-                    Natural zones
+                    Smart Territory Split
                   </button>
                   <button
                     type="button"
@@ -620,7 +1116,7 @@ export function CampaignAssignmentView({ campaignId, campaignName, addresses }: 
                       splitMode === 'balanced' ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-background/80'
                     }`}
                   >
-                    Balanced
+                    Equal Count
                   </button>
                 </div>
               </div>
@@ -687,8 +1183,13 @@ export function CampaignAssignmentView({ campaignId, campaignName, addresses }: 
             <CampaignAssignmentZonePreviewMap
               campaignId={campaignId}
               addresses={addresses}
+              assignmentAddresses={assignmentAddresses}
               members={zonePreviewMembers}
+              autoZones={autoZones}
               zones={previewZones}
+              manualOverrides={appliedManualOverrides}
+              editable={mode === 'zone_split'}
+              onApplyManualOverrides={setAppliedManualOverrides}
             />
           ) : null}
 
@@ -712,12 +1213,18 @@ export function CampaignAssignmentView({ campaignId, campaignName, addresses }: 
         {selectedMembers.map((member, index) => {
           const zoneHomes = zones.get(member.user_id) ?? [];
           const goal = mode === 'zone_split' ? zoneHomes.length : wholeTeamGoals.get(member.user_id) ?? 0;
+          const manualCount = manualOverrideCountByMemberId.get(member.user_id) ?? 0;
           return (
             <Card key={member.user_id}>
               <CardHeader className="p-3 pb-2">
                 <div className="flex items-center justify-between gap-3">
                   <CardTitle className="truncate text-sm">{member.display_name}</CardTitle>
-                  <Badge variant="secondary">{goal} homes</Badge>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    {mode === 'zone_split' && manualCount > 0 ? (
+                      <Badge variant="outline">{manualCount} edited</Badge>
+                    ) : null}
+                    <Badge variant="secondary">{goal} homes</Badge>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent className="p-3 pt-0">

@@ -97,6 +97,7 @@ export async function POST(request: NextRequest) {
       brokerageId?: string;
       partnerOfferToken?: string;
       salespersonInviteToken?: string;
+      clientSource?: string;
       teamMemberEmails?: string[];
     };
 
@@ -723,7 +724,12 @@ export async function POST(request: NextRequest) {
     }
 
     const nextPath = hasAccess ? '/home' : '/subscribe';
-    const redirect = `/download-ios?stage=post-onboarding&next=${encodeURIComponent(nextPath)}`;
+    const clientSource =
+      typeof body?.clientSource === 'string' ? body.clientSource.trim().toLowerCase() : '';
+    const redirect =
+      clientSource === 'android'
+        ? nextPath
+        : `/download-ios?stage=post-onboarding&next=${encodeURIComponent(nextPath)}`;
 
     return NextResponse.json({
       success: true,

@@ -40,6 +40,7 @@ type SessionEventRow = {
   event_type: string;
   event_time?: string | null;
   ref_id?: string | null;
+  session_id?: string | null;
   payload?: Record<string, unknown> | null;
   created_at?: string | null;
 };
@@ -658,6 +659,7 @@ async function fetchEventTableRows(
   let timestampColumn: TimestampColumn = 'event_time';
   let includePayload = true;
   let includeRefId = table === 'activity_events';
+  let includeSessionId = table === 'session_events';
   let withWorkspaceFilter = true;
 
   while (true) {
@@ -667,6 +669,9 @@ async function fetchEventTableRows(
     }
     if (includeRefId) {
       selectParts.push('ref_id');
+    }
+    if (includeSessionId) {
+      selectParts.push('session_id');
     }
     if (includePayload) {
       selectParts.push('payload');
@@ -707,7 +712,7 @@ async function fetchEventTableRows(
           user_id: row.user_id,
           event_type: row.event_type,
           event_time: row.event_time ?? row.created_at ?? new Date().toISOString(),
-          ref_id: row.ref_id ?? null,
+          ref_id: row.ref_id ?? row.session_id ?? null,
           payload: row.payload ?? {},
           created_at: row.created_at ?? row.event_time ?? new Date().toISOString(),
         }));
@@ -730,6 +735,10 @@ async function fetchEventTableRows(
     }
     if (includeRefId && isMissingColumn(error, table, 'ref_id')) {
       includeRefId = false;
+      continue;
+    }
+    if (includeSessionId && isMissingColumn(error, table, 'session_id')) {
+      includeSessionId = false;
       continue;
     }
 

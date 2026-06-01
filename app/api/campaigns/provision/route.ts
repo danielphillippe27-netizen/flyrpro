@@ -992,7 +992,7 @@ async function runCampaignPostProcessing(params: {
     if (parcelEnrichment) {
       try {
         parcelPreparation = await timedStage('prepare_parcels', () =>
-          parcelEnrichment.prepareParcelsForProvision(campaignId)
+          parcelEnrichment.prepareParcelsForProvision(campaignId, scopedGeometry?.parcels as GeoJSON.FeatureCollection | undefined)
         );
       } catch (parcelError) {
         console.warn('[Provision] Parcel preparation failed before linking:', parcelError);

@@ -9,6 +9,7 @@ import {
   buildBlockSegments,
   buildNaturalZoneClusters,
   buildRoute,
+  buildSmartTerritoryClusters,
   postmanSort,
 } from '../BlockRoutingService';
 import type { BlockAddress } from '../BlockRoutingService';
@@ -52,6 +53,34 @@ function assertTrue(condition: boolean, msg?: string) {
   if (!condition) {
     throw new Error(msg || 'Expected true, got false');
   }
+}
+
+function makeStreetSideBlock(
+  prefix: string,
+  streetName: string,
+  count: number,
+  options: {
+    lat: number;
+    lon: number;
+    baseNumber?: number;
+    odd?: boolean;
+  }
+): BlockAddress[] {
+  const baseNumber = options.baseNumber ?? 100;
+  return Array.from({ length: count }, (_, index) => ({
+    id: `${prefix}-${index + 1}`,
+    lat: options.lat + index * 0.00003,
+    lon: options.lon,
+    house_number: String(baseNumber + index * 2 + (options.odd ? 1 : 0)),
+    street_name: streetName,
+  }));
+}
+
+function clusterCountByIds(clusters: ReturnType<typeof buildSmartTerritoryClusters>, ids: string[]): number {
+  return clusters.filter((cluster) => {
+    const clusterIds = new Set(cluster.addresses.map((address) => address.id));
+    return ids.some((id) => clusterIds.has(id));
+  }).length;
 }
 
 // ==================== Test Data ====================
@@ -230,6 +259,88 @@ async function run() {
 
     assertEqual(northOnly.length, 2, 'Two agents should stay in the north lobe');
     assertEqual(southOnly.length, 2, 'Two agents should stay in the south lobe');
+  });
+  await testAsync('buildSmartTerritoryClusters: preserves street-side blocks within soft variance', async () => {
+    const alpha = makeStreetSideBlock('alpha', 'Alpha Ave', 11, { lat: 43.9000, lon: -78.9000 });
+    const omega = makeStreetSideBlock('omega', 'Omega Ave', 9, { lat: 43.9010, lon: -78.8988 });
+    const clusters = buildSmartTerritoryClusters([...alpha, ...omega], 2, { lat: 43.9004, lon: -78.8994 });
+
+    assertEqual(
+      clusters.map((cluster) => cluster.addresses.length).sort((a, b) => a - b),
+      [9, 11],
+      'Smart split should accept the clean 11/9 split'
+    );
+    assertEqual(clusterCountByIds(clusters, alpha.map((address) => address.id)), 1, 'Alpha block should stay whole');
+    assertEqual(clusterCountByIds(clusters, omega.map((address) => address.id)), 1, 'Omega block should stay whole');
+  });
+  await testAsync('buildSmartTerritoryClusters: accepts clean imbalance over ugly equal split', async () => {
+    const cleanLarge = makeStreetSideBlock('clean-large', 'Cedar Ave', 12, { lat: 43.9000, lon: -78.9000 });
+    const cleanSmall = makeStreetSideBlock('clean-small', 'Maple Ave', 8, { lat: 43.9010, lon: -78.8988 });
+    const smartClusters = buildSmartTerritoryClusters(
+      [...cleanLarge, ...cleanSmall],
+      2,
+      { lat: 43.9004, lon: -78.8994 }
+    );
+    const balancedClusters = buildBalancedBlockClusters(
+      [...cleanLarge, ...cleanSmall],
+      2,
+      { lat: 43.9004, lon: -78.8994 }
+    );
+
+    assertEqual(
+      smartClusters.map((cluster) => cluster.addresses.length).sort((a, b) => a - b),
+      [8, 12],
+      'Smart split should prefer the two clean pockets'
+    );
+    assertEqual(
+      balancedClusters.map((cluster) => cluster.addresses.length).sort((a, b) => a - b),
+      [10, 10],
+      'Equal Count regression check should remain count-first'
+    );
+    assertEqual(clusterCountByIds(smartClusters, cleanLarge.map((address) => address.id)), 1, 'Large clean pocket should not split');
+  });
+  await testAsync('buildSmartTerritoryClusters: splits only when hard variance would be exceeded', async () => {
+    const underHardLarge = makeStreetSideBlock('under-hard-large', 'Spruce Ave', 24, { lat: 43.9000, lon: -78.9000 });
+    const underHardSmall = makeStreetSideBlock('under-hard-small', 'Pine Ave', 16, { lat: 43.9010, lon: -78.8988 });
+    const underHardClusters = buildSmartTerritoryClusters(
+      [...underHardLarge, ...underHardSmall],
+      2,
+      { lat: 43.9004, lon: -78.8994 }
+    );
+
+    assertEqual(clusterCountByIds(underHardClusters, underHardLarge.map((address) => address.id)), 1);
+
+    const overHardLarge = makeStreetSideBlock('over-hard-large', 'Giant Ave', 30, { lat: 43.9000, lon: -78.9000 });
+    const overHardSmall = makeStreetSideBlock('over-hard-small', 'Pocket Ave', 10, { lat: 43.9010, lon: -78.8988 });
+    const overHardClusters = buildSmartTerritoryClusters(
+      [...overHardLarge, ...overHardSmall],
+      2,
+      { lat: 43.9004, lon: -78.8994 }
+    );
+
+    assertTrue(
+      overHardClusters.some((cluster) => cluster.segments.some((segment) => segment.id.includes('::split-'))),
+      'A block should split once a whole segment would exceed hard variance'
+    );
+    assertTrue(
+      Math.max(...overHardClusters.map((cluster) => cluster.addresses.length)) <= 25,
+      'Hard variance should cap the overloaded rep at 25 homes for a 40-home / 2-rep split'
+    );
+  });
+  await testAsync('buildSmartTerritoryClusters: keeps small island segments with the nearest pocket', async () => {
+    const west = makeStreetSideBlock('west', 'Westview Ave', 10, { lat: 43.9000, lon: -78.9000 });
+    const westCourt = makeStreetSideBlock('west-court', 'Westview Court', 2, { lat: 43.9001, lon: -78.89995 });
+    const east = makeStreetSideBlock('east', 'Eastview Ave', 10, { lat: 43.9030, lon: -78.8950 });
+    const clusters = buildSmartTerritoryClusters([...west, ...westCourt, ...east], 2, { lat: 43.9000, lon: -78.9000 });
+    const westCourtCluster = clusters.find((cluster) =>
+      cluster.addresses.some((address) => address.id.startsWith('west-court-'))
+    );
+
+    assertTrue(Boolean(westCourtCluster), 'Westview Court should be assigned');
+    assertTrue(
+      Boolean(westCourtCluster?.addresses.some((address) => address.id.startsWith('west-'))),
+      'The small court should stay with the adjacent Westview pocket'
+    );
   });
 
   console.log(`\n${'='.repeat(50)}`);

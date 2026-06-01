@@ -509,6 +509,7 @@ export function CampaignDetailMapView({
   campaignId,
   addresses,
   campaign,
+  visibleAddressIds,
   onSnapComplete,
   onContactCreated,
   renderLocationCardExtra,
@@ -519,6 +520,7 @@ export function CampaignDetailMapView({
   campaignId: string;
   addresses: CampaignAddress[];
   campaign?: CampaignV2 | null;
+  visibleAddressIds?: string[];
   onSnapComplete?: () => void;
   onContactCreated?: () => void;
   renderLocationCardExtra?: (args: {
@@ -632,14 +634,29 @@ export function CampaignDetailMapView({
     });
   }, []);
 
+  const visibleAddressIdSet = useMemo(() => {
+    if (!visibleAddressIds) return null;
+    return new Set(
+      visibleAddressIds
+        .map((value) => String(value ?? '').trim())
+        .filter(Boolean)
+    );
+  }, [visibleAddressIds]);
   const visibleAddresses = useMemo(
     () =>
-      addresses.filter((address) => !optimisticallyDeletedAddressIds.includes(address.id)),
-    [addresses, optimisticallyDeletedAddressIds]
+      addresses.filter((address) => {
+        if (optimisticallyDeletedAddressIds.includes(address.id)) return false;
+        return !visibleAddressIdSet || visibleAddressIdSet.has(address.id);
+      }),
+    [addresses, optimisticallyDeletedAddressIds, visibleAddressIdSet]
   );
   const bundleAddresses = useMemo(
-    () => mapBundleAddressesToCampaignAddresses(campaignId, mapBundle?.addresses),
-    [campaignId, mapBundle?.addresses]
+    () => {
+      const mappedAddresses = mapBundleAddressesToCampaignAddresses(campaignId, mapBundle?.addresses);
+      if (!visibleAddressIdSet) return mappedAddresses;
+      return mappedAddresses.filter((address) => visibleAddressIdSet.has(address.id));
+    },
+    [campaignId, mapBundle?.addresses, visibleAddressIdSet]
   );
   const mapAddresses = useMemo(
     () => mergeBundleAddressesWithLiveState(bundleAddresses, visibleAddresses),
@@ -2338,6 +2355,7 @@ export function CampaignDetailMapView({
               buildingFeatures={bundleBuildings}
               buildingDataKey={mapBundleDataKey}
               addressStateOverrides={mapAddresses}
+              visibleAddressIds={visibleAddressIds}
               hiddenBuildingIds={optimisticallyHiddenBuildingIds}
               deletedAddressIds={optimisticallyDeletedAddressIds}
               campaignBoundary={(campaign?.territory_boundary as GeoJSON.Polygon | null | undefined) ?? null}

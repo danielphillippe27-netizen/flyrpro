@@ -14,6 +14,7 @@ type AssignmentRow = {
   campaign_id: string;
   mode: CampaignAssignmentMode;
   goal_homes: number;
+  zone_index: number | null;
   due_at: string | null;
   notes: string | null;
   campaign: {
@@ -22,8 +23,9 @@ type AssignmentRow = {
   } | null;
 };
 
-function modeLabel(mode: CampaignAssignmentMode): string {
-  return mode === 'zone_split' ? 'Zone' : 'Whole team';
+function assignmentLabel(assignment: AssignmentRow): string {
+  if (assignment.mode !== 'zone_split') return 'Whole team';
+  return assignment.zone_index ? `Zone ${assignment.zone_index}` : 'Zone';
 }
 
 const fetchedWorkspaceIds = new Set<string>();
@@ -94,7 +96,7 @@ export function MyCampaignAssignmentsCard() {
                   {assignment.campaign?.name ?? 'Campaign'}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  {modeLabel(assignment.mode)}
+                  {assignmentLabel(assignment)}
                   {assignment.due_at ? ` • due ${new Date(assignment.due_at).toLocaleDateString()}` : ''}
                 </p>
               </div>

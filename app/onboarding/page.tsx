@@ -140,6 +140,7 @@ function OnboardingContent() {
   const offerType = searchParams.get('offer');
   const partnerOfferToken = searchParams.get('partnerOfferToken');
   const salespersonInviteToken = searchParams.get('salespersonInvite');
+  const handoffCode = searchParams.get('code')?.trim() ?? '';
   const partnerExclusiveParam = searchParams.get('partnerExclusive');
   const challenge30FromUrl = searchParams.get('challenge30') === '1';
   const isExclusivePartnerOnboarding =
@@ -258,6 +259,56 @@ function OnboardingContent() {
   const [referralCampaign, setReferralCampaign] = useState<string | null>(null);
   const [seats, setSeats] = useState(TEAM_MIN_SEATS);
   const [teamInviteEmails, setTeamInviteEmails] = useState<string[]>(['']);
+  const [handoffRedeemState, setHandoffRedeemState] = useState<
+    'idle' | 'loading' | 'error'
+  >(handoffCode ? 'loading' : 'idle');
+  const [handoffRedeemError, setHandoffRedeemError] = useState<string>('');
+
+  useEffect(() => {
+    if (!handoffCode) {
+      setHandoffRedeemState('idle');
+      setHandoffRedeemError('');
+      return;
+    }
+
+    let cancelled = false;
+    setHandoffRedeemState('loading');
+    setHandoffRedeemError('');
+
+    fetch('/api/auth/redeem-handoff', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ code: handoffCode }),
+    })
+      .then(async (response) => {
+        if (cancelled) return;
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          setHandoffRedeemState('error');
+          setHandoffRedeemError(
+            typeof payload?.error === 'string'
+              ? payload.error
+              : 'This onboarding link is invalid or expired.'
+          );
+          return;
+        }
+
+        const params = new URLSearchParams(searchParams.toString());
+        params.delete('code');
+        const nextQuery = params.toString();
+        router.replace(`${pathname}${nextQuery ? `?${nextQuery}` : ''}`);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setHandoffRedeemState('error');
+        setHandoffRedeemError('Could not sign you in from the app. Open onboarding again from Android.');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [handoffCode, pathname, router, searchParams]);
 
   useEffect(() => {
     if (!isSalespersonOnboarding || !salespersonInviteToken?.trim()) return;
@@ -586,6 +637,7 @@ function OnboardingContent() {
               : SOLO_SEATS,
           partnerOfferToken: isExclusivePartnerOnboarding ? partnerOfferToken : undefined,
           salespersonInviteToken: isSalespersonOnboarding ? salespersonInviteToken : undefined,
+          clientSource: searchParams.get('source') ?? undefined,
           teamMemberEmails: isExclusivePartnerTeamLayout ? normalizedInviteEmails : undefined,
         }),
       });
@@ -779,6 +831,27 @@ function OnboardingContent() {
     },
     [buildExclusiveAuthCallbackURL, firstName, lastName, persistExclusiveAuthDraft]
   );
+
+  if (handoffRedeemState === 'loading') {
+    return (
+      <div className="dark min-h-screen bg-gradient-to-br from-black to-[#262626] flex flex-col items-center justify-center p-6">
+        <p className="text-zinc-400">Signing you in...</p>
+      </div>
+    );
+  }
+
+  if (handoffRedeemState === 'error') {
+    return (
+      <div className="dark min-h-screen bg-gradient-to-br from-black to-[#262626] flex flex-col items-center justify-center p-6">
+        <div className="max-w-md rounded-xl border border-red-500/40 bg-red-500/10 p-5 text-center">
+          <h1 className="text-lg font-semibold text-white">Onboarding link expired</h1>
+          <p className="mt-2 text-sm text-zinc-300">
+            {handoffRedeemError || 'Open onboarding again from Android.'}
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (!isExclusivePartnerLayoutReady) {
     return (

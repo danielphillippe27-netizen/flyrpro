@@ -43,6 +43,21 @@ type CampaignAddressStatusRow = {
   updated_at?: string | null;
 };
 
+type CampaignAddressFetchOptions = {
+  addressIds?: string[] | null;
+};
+
+function normalizeAddressIdFilter(addressIds: string[] | null | undefined): string[] | null {
+  if (!Array.isArray(addressIds)) return null;
+  return Array.from(
+    new Set(
+      addressIds
+        .map((value) => String(value ?? '').trim())
+        .filter(Boolean)
+    )
+  );
+}
+
 export class CampaignsService {
   private static client = createClient();
 
@@ -160,33 +175,42 @@ export class CampaignsService {
     } as CampaignV2;
   }
 
-  static async fetchAddresses(campaignId: string): Promise<CampaignAddress[]> {
+  static async fetchAddresses(campaignId: string, options: CampaignAddressFetchOptions = {}): Promise<CampaignAddress[]> {
+    const scopedAddressIds = normalizeAddressIdFilter(options.addressIds);
+    if (scopedAddressIds && scopedAddressIds.length === 0) return [];
+
     try {
-      const data = await fetchAllInPages(async (from, to) =>
-        await this.client
+      const data = await fetchAllInPages(async (from, to) => {
+        let query = this.client
           .from('campaign_addresses_geojson')
           .select('*, qr_code_base64') // Explicitly include qr_code_base64
-          .eq('campaign_id', campaignId)
+          .eq('campaign_id', campaignId);
+        if (scopedAddressIds) query = query.in('id', scopedAddressIds);
+        return await query
           .order('seq', { ascending: true, nullsFirst: false })
           .order('id', { ascending: true })
-          .range(from, to)
-      );
-      const baseState = await fetchAllInPages(async (from, to) =>
-        await this.client
+          .range(from, to);
+      });
+      const baseState = await fetchAllInPages(async (from, to) => {
+        let query = this.client
           .from('campaign_addresses')
           .select('id, building_id, building_gers_id, gers_id, source_id, visited, scans, last_scanned_at')
-          .eq('campaign_id', campaignId)
+          .eq('campaign_id', campaignId);
+        if (scopedAddressIds) query = query.in('id', scopedAddressIds);
+        return await query
           .order('id', { ascending: true })
-          .range(from, to)
-      );
-      const statusRows = await fetchAllInPages(async (from, to) =>
-        await this.client
+          .range(from, to);
+      });
+      const statusRows = await fetchAllInPages(async (from, to) => {
+        let query = this.client
           .from('address_statuses')
           .select('campaign_address_id, status, updated_at')
-          .eq('campaign_id', campaignId)
+          .eq('campaign_id', campaignId);
+        if (scopedAddressIds) query = query.in('campaign_address_id', scopedAddressIds);
+        return await query
           .order('updated_at', { ascending: false, nullsFirst: false })
-          .range(from, to)
-      );
+          .range(from, to);
+      });
 
       const statusByAddressId = new Map<string, string>();
       for (const row of (statusRows || []) as CampaignAddressStatusRow[]) {
@@ -231,11 +255,16 @@ export class CampaignsService {
     }
   }
 
-  static async fetchCampaignContacts(campaignId: string): Promise<CampaignContact[]> {
-    const { data, error } = await this.client
+  static async fetchCampaignContacts(campaignId: string, options: CampaignAddressFetchOptions = {}): Promise<CampaignContact[]> {
+    const scopedAddressIds = normalizeAddressIdFilter(options.addressIds);
+    if (scopedAddressIds && scopedAddressIds.length === 0) return [];
+
+    let query = this.client
       .from('campaign_contacts')
       .select('*')
-      .eq('campaign_id', campaignId)
+      .eq('campaign_id', campaignId);
+    if (scopedAddressIds) query = query.in('address_id', scopedAddressIds);
+    const { data, error } = await query
       .order('updated_at', { ascending: false });
 
     if (error) {

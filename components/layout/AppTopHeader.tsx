@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import Image from 'next/image';
-import { Moon, Sun, Maximize2, Minimize2, Menu } from 'lucide-react';
+import { Bell, CheckCheck, Moon, Sun, Maximize2, Minimize2, Menu } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import {
   Dialog,
   DialogContent,
@@ -28,12 +29,43 @@ type UserProfileLite = {
   countryCode: string | null;
 };
 
+type AppNotification = {
+  id: string;
+  type: string;
+  title: string;
+  body: string;
+  data: Record<string, unknown> | null;
+  read_at: string | null;
+  created_at: string;
+};
+
 function initialsFromName(nameOrEmail: string | null): string {
   const value = (nameOrEmail ?? '').trim();
   if (!value) return 'U';
   const parts = value.split(/\s+/).filter(Boolean);
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+}
+
+function notificationLink(data: Record<string, unknown> | null): string | null {
+  const link = data?.link;
+  return typeof link === 'string' && link.startsWith('/') ? link : null;
+}
+
+function notificationLabel(data: Record<string, unknown> | null): string | null {
+  const label = data?.label;
+  return typeof label === 'string' && label.trim() ? label.trim() : null;
+}
+
+function formatNotificationTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 }
 
 export default function AppTopHeader() {
@@ -58,6 +90,11 @@ export default function AppTopHeader() {
   const [feedbackSuccess, setFeedbackSuccess] = useState<string | null>(null);
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
   const [profileEditOpen, setProfileEditOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
+  const [notificationsError, setNotificationsError] = useState<string | null>(null);
+  const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
   const mainLayoutNav = useMainLayoutNav();
 
   const refreshProfile = useCallback(() => {
@@ -174,6 +211,103 @@ export default function AppTopHeader() {
     };
   }, []);
 
+  const loadNotifications = useCallback(async () => {
+    if (!currentWorkspace?.id) {
+      setNotifications([]);
+      setNotificationUnreadCount(0);
+      setNotificationsLoading(false);
+      setNotificationsError(null);
+      return;
+    }
+
+    setNotificationsLoading(true);
+    setNotificationsError(null);
+    try {
+      const response = await fetch(
+        `/api/notifications?workspaceId=${encodeURIComponent(currentWorkspace.id)}&limit=30`,
+        { credentials: 'include' }
+      );
+      const payload = (await response.json().catch(() => null)) as
+        | { notifications?: AppNotification[]; unreadCount?: number; error?: string }
+        | null;
+      if (!response.ok) {
+        setNotificationsError(payload?.error ?? 'Could not load notifications.');
+        return;
+      }
+      setNotifications(Array.isArray(payload?.notifications) ? payload.notifications : []);
+      setNotificationUnreadCount(Number(payload?.unreadCount ?? 0));
+    } catch {
+      setNotificationsError('Could not load notifications.');
+    } finally {
+      setNotificationsLoading(false);
+    }
+  }, [currentWorkspace?.id]);
+
+  useEffect(() => {
+    void loadNotifications();
+    if (!currentWorkspace?.id) return;
+
+    const intervalId = window.setInterval(() => {
+      void loadNotifications();
+    }, 60_000);
+    return () => window.clearInterval(intervalId);
+  }, [currentWorkspace?.id, loadNotifications]);
+
+  const markNotificationRead = useCallback(
+    async (notificationId: string) => {
+      if (!currentWorkspace?.id) return;
+      const existing = notifications.find((notification) => notification.id === notificationId);
+      if (!existing || existing.read_at) return;
+
+      const readAt = new Date().toISOString();
+      setNotifications((current) =>
+        current.map((notification) =>
+          notification.id === notificationId ? { ...notification, read_at: readAt } : notification
+        )
+      );
+      setNotificationUnreadCount((current) => Math.max(0, current - 1));
+
+      try {
+        await fetch('/api/notifications', {
+          method: 'PATCH',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            workspaceId: currentWorkspace.id,
+            notificationId,
+          }),
+        });
+      } catch {
+        void loadNotifications();
+      }
+    },
+    [currentWorkspace?.id, loadNotifications, notifications]
+  );
+
+  const markAllNotificationsRead = useCallback(async () => {
+    if (!currentWorkspace?.id || notificationUnreadCount === 0) return;
+
+    const readAt = new Date().toISOString();
+    setNotifications((current) =>
+      current.map((notification) => notification.read_at ? notification : { ...notification, read_at: readAt })
+    );
+    setNotificationUnreadCount(0);
+
+    try {
+      await fetch('/api/notifications', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspaceId: currentWorkspace.id,
+          markAllRead: true,
+        }),
+      });
+    } catch {
+      void loadNotifications();
+    }
+  }, [currentWorkspace?.id, loadNotifications, notificationUnreadCount]);
+
   const currentRole = useMemo(() => {
     if (!currentWorkspace) return null;
     return membershipsByWorkspaceId[currentWorkspace.id] ?? null;
@@ -284,6 +418,22 @@ export default function AppTopHeader() {
             <Button
               variant="outline"
               size="icon"
+              onClick={() => setNotificationsOpen(true)}
+              aria-label="Notifications"
+              title="Notifications"
+              className="relative"
+            >
+              <Bell className="h-4 w-4" />
+              {notificationUnreadCount > 0 ? (
+                <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-semibold leading-none text-white">
+                  {notificationUnreadCount > 9 ? '9+' : notificationUnreadCount}
+                </span>
+              ) : null}
+            </Button>
+
+            <Button
+              variant="outline"
+              size="icon"
               onClick={toggleFullscreen}
               aria-label={isFullscreen ? 'Exit full screen' : 'Full screen'}
               title={isFullscreen ? 'Exit full screen' : 'Full screen'}
@@ -386,6 +536,103 @@ export default function AppTopHeader() {
             </Button>
             <Button onClick={sendFeedback} disabled={!feedbackMessage.trim() || feedbackSubmitting}>
               {feedbackSubmitting ? 'Sending...' : 'Send'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={notificationsOpen}
+        onOpenChange={(open) => {
+          setNotificationsOpen(open);
+          if (open) void loadNotifications();
+        }}
+      >
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Notifications</DialogTitle>
+            <DialogDescription>
+              {notificationUnreadCount > 0
+                ? `${notificationUnreadCount} unread notification${notificationUnreadCount === 1 ? '' : 's'}`
+                : 'No unread notifications'}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="max-h-[60vh] space-y-2 overflow-y-auto pr-1">
+            {notificationsLoading ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">Loading notifications...</p>
+            ) : null}
+            {!notificationsLoading && notificationsError ? (
+              <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+                {notificationsError}
+              </div>
+            ) : null}
+            {!notificationsLoading && !notificationsError && notifications.length === 0 ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">Nothing new yet.</p>
+            ) : null}
+            {!notificationsLoading && !notificationsError
+              ? notifications.map((notification) => {
+                  const link = notificationLink(notification.data);
+                  const label = notificationLabel(notification.data);
+                  const isUnread = !notification.read_at;
+                  const className = [
+                    'block w-full rounded-lg border p-3 text-left transition hover:bg-muted/60',
+                    isUnread
+                      ? 'border-primary/40 bg-primary/5'
+                      : 'border-border bg-background',
+                  ].join(' ');
+                  const content = (
+                    <>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-foreground">
+                            {notification.title}
+                          </p>
+                          <p className="mt-1 text-sm text-muted-foreground">{notification.body}</p>
+                        </div>
+                        {label ? <Badge variant="secondary">{label}</Badge> : null}
+                      </div>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        {formatNotificationTime(notification.created_at)}
+                      </p>
+                    </>
+                  );
+
+                  return link ? (
+                    <a
+                      key={notification.id}
+                      href={link}
+                      className={className}
+                      onClick={() => {
+                        void markNotificationRead(notification.id);
+                        setNotificationsOpen(false);
+                      }}
+                    >
+                      {content}
+                    </a>
+                  ) : (
+                    <button
+                      key={notification.id}
+                      type="button"
+                      className={className}
+                      onClick={() => void markNotificationRead(notification.id)}
+                    >
+                      {content}
+                    </button>
+                  );
+                })
+              : null}
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void markAllNotificationsRead()}
+              disabled={notificationUnreadCount === 0}
+            >
+              <CheckCheck className="mr-2 h-4 w-4" />
+              Mark all read
             </Button>
           </DialogFooter>
         </DialogContent>

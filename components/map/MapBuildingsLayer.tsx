@@ -42,6 +42,8 @@ interface MapBuildingsLayerProps {
   campaignBbox?: [number, number, number, number] | null;
   statusFilters?: StatusFilters;
   assignmentColorByAddressId?: Record<string, string>;
+  selectedAddressIds?: string[];
+  visibleAddressIds?: string[];
   showOrphans?: boolean; // Toggle to show/hide orphan buildings (buildings without address links)
   showAddressLabels?: boolean;
   /** When false, footprints use a neutral gray (not status colors); roads unchanged. Default true. */
@@ -86,7 +88,9 @@ const POLYGON_GEOMETRY_FILTER: FilterSpecification = [
   false,
 ] as FilterSpecification;
 const POINT_GEOMETRY_FILTER: FilterSpecification = ['==', ['geometry-type'], 'Point'];
+const SELECTED_ASSIGNMENT_FILTER: FilterSpecification = ['==', ['get', 'assignment_selected'], true];
 const INFERRED_BUILDING_LINK_MAX_DISTANCE_M = 45;
+const EMPTY_SELECTED_ADDRESS_IDS: string[] = [];
 
 type CampaignMapBundleResponse = {
   asset_signature?: string | null;
@@ -571,6 +575,8 @@ export function MapBuildingsLayer({
   deletedAddressIds = [],
   statusFilters = defaultStatusFilters,
   assignmentColorByAddressId,
+  selectedAddressIds = EMPTY_SELECTED_ADDRESS_IDS,
+  visibleAddressIds,
   showOrphans = true,
   showAddressLabels = true,
   footprintStatusColors = true,
@@ -587,9 +593,11 @@ export function MapBuildingsLayer({
   const layerId = 'map-buildings-extrusion';
   const shadowLayerId = 'map-buildings-shadow';
   const leadGlowLayerId = 'map-buildings-lead-glow';
+  const selectedOutlineLayerId = 'map-buildings-selected-outline';
   const outlineLayerId = 'map-buildings-outline';
   const circleLayerId = 'map-buildings-extrusion-points';
   const circleLeadGlowLayerId = 'map-buildings-lead-glow-points';
+  const selectedCircleLayerId = 'map-buildings-selected-points';
   const addressLabelSourceId = 'map-address-centroid-label-source';
   const addressLabelLayerId = 'map-address-centroid-labels';
   const untouchedBuildingColor = getMapUntouchedColor(isDarkMap);
@@ -617,6 +625,42 @@ export function MapBuildingsLayer({
 
     return colors;
   }, [addressStateOverrides, assignmentColorByAddressId]);
+  const selectedAddressIdSet = useMemo(
+    () =>
+      new Set(
+        selectedAddressIds
+          .map((value) => String(value ?? '').trim())
+          .filter(Boolean)
+      ),
+    [selectedAddressIds]
+  );
+  const visibleAddressIdSet = useMemo(() => {
+    if (!visibleAddressIds) return null;
+    return new Set(
+      visibleAddressIds
+        .map((value) => String(value ?? '').trim())
+        .filter(Boolean)
+    );
+  }, [visibleAddressIds]);
+  const selectedBuildingIdSet = useMemo(() => {
+    const selectedBuildings = new Set<string>();
+    if (!addressStateOverrides?.length || selectedAddressIdSet.size === 0) return selectedBuildings;
+
+    for (const address of addressStateOverrides) {
+      if (!selectedAddressIdSet.has(address.id)) continue;
+      [
+        address.building_id,
+        address.building_gers_id,
+        address.gers_id,
+        address.source_id,
+      ].forEach((value) => {
+        const normalized = String(value ?? '').trim();
+        if (normalized) selectedBuildings.add(normalized);
+      });
+    }
+
+    return selectedBuildings;
+  }, [addressStateOverrides, selectedAddressIdSet]);
 
   const getSupabase = useCallback(() => {
     if (!supabaseRef.current) {
@@ -869,7 +913,16 @@ export function MapBuildingsLayer({
   const getFootprintEmissiveStrength = (): number =>
     footprintStatusColors ? 0.85 : NEUTRAL_EXTRUSION_EMISSIVE_STRENGTH;
   const forceBuildingLayerVisibility = () => {
-    for (const id of [surfaceLayerId, layerId, leadGlowLayerId, outlineLayerId, circleLeadGlowLayerId, circleLayerId]) {
+    for (const id of [
+      surfaceLayerId,
+      layerId,
+      leadGlowLayerId,
+      selectedOutlineLayerId,
+      outlineLayerId,
+      circleLeadGlowLayerId,
+      circleLayerId,
+      selectedCircleLayerId,
+    ]) {
       try {
         if (map?.getLayer(id)) {
           map.setLayoutProperty(id, 'visibility', 'visible');
@@ -886,16 +939,18 @@ export function MapBuildingsLayer({
   const cleanupRenderedLayers = useCallback(() => {
     if (!map) return;
     safeRemoveLayer(map, addressLabelLayerId);
+    safeRemoveLayer(map, selectedCircleLayerId);
     safeRemoveLayer(map, circleLayerId);
     safeRemoveLayer(map, circleLeadGlowLayerId);
     safeRemoveLayer(map, outlineLayerId);
+    safeRemoveLayer(map, selectedOutlineLayerId);
     safeRemoveLayer(map, leadGlowLayerId);
     safeRemoveLayer(map, layerId);
     safeRemoveLayer(map, surfaceLayerId);
     safeRemoveLayer(map, shadowLayerId);
     safeRemoveSource(map, addressLabelSourceId);
     safeRemoveSource(map, sourceId);
-  }, [map, addressLabelLayerId, circleLayerId, circleLeadGlowLayerId, outlineLayerId, leadGlowLayerId, layerId, surfaceLayerId, shadowLayerId, addressLabelSourceId, sourceId]);
+  }, [map, addressLabelLayerId, selectedCircleLayerId, circleLayerId, circleLeadGlowLayerId, outlineLayerId, selectedOutlineLayerId, leadGlowLayerId, layerId, surfaceLayerId, shadowLayerId, addressLabelSourceId, sourceId]);
 
   // CAMPAIGN MODE: Fetch canonical map-bundle buildings once (no viewport filtering).
   // The old display-time /buildings path is intentionally bypassed; bundles are the source of truth.
@@ -1122,6 +1177,21 @@ export function MapBuildingsLayer({
           (featureAddressId && assignmentColorByAddressId?.[featureAddressId]) ||
           (primaryInferredAddress?.id && assignmentColorByAddressId?.[primaryInferredAddress.id]) ||
           buildingIdentifiers.map((identifier) => assignmentColorByBuildingId.get(identifier)).find(Boolean);
+        const isVisibleAddressFeature =
+          !visibleAddressIdSet ||
+          (featureAddressId && visibleAddressIdSet.has(featureAddressId)) ||
+          (primaryInferredAddress?.id && visibleAddressIdSet.has(primaryInferredAddress.id)) ||
+          inferredAddresses.some((address) => visibleAddressIdSet.has(address.id));
+
+        if (!isVisibleAddressFeature) {
+          return [];
+        }
+
+        const assignmentSelected =
+          (featureAddressId && selectedAddressIdSet.has(featureAddressId)) ||
+          (primaryInferredAddress?.id && selectedAddressIdSet.has(primaryInferredAddress.id)) ||
+          inferredAddresses.some((address) => selectedAddressIdSet.has(address.id)) ||
+          buildingIdentifiers.some((identifier) => selectedBuildingIdSet.has(identifier));
 
         return [{
           ...f,
@@ -1155,6 +1225,7 @@ export function MapBuildingsLayer({
             scans_total: Math.max(Number(props.scans_total ?? 0), inferredScansTotal),
             qr_scanned: Boolean(props.qr_scanned) || inferredScansTotal > 0,
             assignment_color: getStringRecordValue(propsRecord, 'assignment_color') ?? assignmentColor ?? undefined,
+            assignment_selected: Boolean(assignmentSelected),
             gers_id: props.gers_id ?? stableBuildingId,
             building_id: props.building_id ?? stableBuildingId,
             feature_id: props.feature_id ?? stableBuildingId,
@@ -1163,7 +1234,7 @@ export function MapBuildingsLayer({
       }),
     } as BuildingFeatureCollection;
     lastSetDataRef.current = null;
-  }, [addressStateOverrides, assignmentColorByAddressId, assignmentColorByBuildingId, deletedAddressIds, features, hiddenBuildingIds]);
+  }, [addressStateOverrides, assignmentColorByAddressId, assignmentColorByBuildingId, deletedAddressIds, features, hiddenBuildingIds, selectedAddressIdSet, selectedBuildingIdSet, visibleAddressIdSet]);
 
   // EXPLORATION MODE: Fetch buildings in viewport bounding box (when no campaignId)
   const fetchBuildingsInViewport = useCallback(async (bounds: { ne: [number, number]; sw: [number, number] }) => {
@@ -1749,6 +1820,34 @@ export function MapBuildingsLayer({
             map.addLayer(leadGlowLayerConfig);
           }
 
+          if (!map.getLayer(selectedOutlineLayerId)) {
+            const selectedOutlineLayerConfig: LineLayerSpecification = {
+              id: selectedOutlineLayerId,
+              type: 'line',
+              source: sourceId,
+              minzoom: CAMPAIGN_BUILDING_MIN_ZOOM,
+              filter: getScopedGeometryFilter(
+                polygonFilter,
+                combineMapFilters(filterExpr, SELECTED_ASSIGNMENT_FILTER)
+              ),
+              paint: {
+                'line-color': '#fde047',
+                'line-width': [
+                  'interpolate',
+                  ['linear'],
+                  ['zoom'],
+                  12,
+                  3,
+                  18,
+                  6,
+                ],
+                'line-opacity': 0.96,
+                'line-blur': 1.2,
+              },
+            };
+            map.addLayer(selectedOutlineLayerConfig);
+          }
+
           safeRemoveLayer(map, outlineLayerId);
           
           // Add circle layer for Point geometries (addresses without building polygons)
@@ -1784,6 +1883,35 @@ export function MapBuildingsLayer({
               },
             };
             map.addLayer(circleLayerConfig);
+          }
+
+          if (!map.getLayer(selectedCircleLayerId)) {
+            const selectedCircleLayerConfig: CircleLayerSpecification = {
+              id: selectedCircleLayerId,
+              type: 'circle',
+              source: sourceId,
+              minzoom: CAMPAIGN_BUILDING_MIN_ZOOM,
+              filter: getScopedGeometryFilter(
+                POINT_GEOMETRY_FILTER,
+                combineMapFilters(filterExpr, SELECTED_ASSIGNMENT_FILTER)
+              ),
+              paint: {
+                'circle-radius': [
+                  'interpolate',
+                  ['linear'],
+                  ['zoom'],
+                  12,
+                  10,
+                  18,
+                  16,
+                ],
+                'circle-color': '#fde047',
+                'circle-opacity': 0.22,
+                'circle-stroke-width': 2.5,
+                'circle-stroke-color': '#fefce8',
+              },
+            };
+            map.addLayer(selectedCircleLayerConfig);
           }
 
           if (!map.getLayer(addressLabelLayerId)) {
@@ -2138,9 +2266,56 @@ export function MapBuildingsLayer({
           map.setPaintProperty(layerId, 'fill-extrusion-emissive-strength', getFootprintEmissiveStrength());
           map.setFilter(layerId, getScopedGeometryFilter(POLYGON_GEOMETRY_FILTER, filterExpr));
 
+          const selectedPolygonFilter = getScopedGeometryFilter(
+            POLYGON_GEOMETRY_FILTER,
+            combineMapFilters(filterExpr, SELECTED_ASSIGNMENT_FILTER)
+          );
+          if (map.getLayer(selectedOutlineLayerId)) {
+            map.setFilter(selectedOutlineLayerId, selectedPolygonFilter);
+          } else {
+            map.addLayer({
+              id: selectedOutlineLayerId,
+              type: 'line',
+              source: sourceId,
+              minzoom: CAMPAIGN_BUILDING_MIN_ZOOM,
+              filter: selectedPolygonFilter,
+              paint: {
+                'line-color': '#fde047',
+                'line-width': ['interpolate', ['linear'], ['zoom'], 12, 3, 18, 6],
+                'line-opacity': 0.96,
+                'line-blur': 1.2,
+              },
+            });
+          }
+
+          const selectedPointFilter = getScopedGeometryFilter(
+            POINT_GEOMETRY_FILTER,
+            combineMapFilters(filterExpr, SELECTED_ASSIGNMENT_FILTER)
+          );
+          if (map.getLayer(selectedCircleLayerId)) {
+            map.setFilter(selectedCircleLayerId, selectedPointFilter);
+          } else {
+            map.addLayer({
+              id: selectedCircleLayerId,
+              type: 'circle',
+              source: sourceId,
+              minzoom: CAMPAIGN_BUILDING_MIN_ZOOM,
+              filter: selectedPointFilter,
+              paint: {
+                'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 10, 18, 16],
+                'circle-color': '#fde047',
+                'circle-opacity': 0.22,
+                'circle-stroke-width': 2.5,
+                'circle-stroke-color': '#fefce8',
+              },
+            });
+          }
+
           if (map.getLayer(layerId)) {
             try {
               map.moveLayer(layerId);
+              if (map.getLayer(selectedOutlineLayerId)) map.moveLayer(selectedOutlineLayerId);
+              if (map.getLayer(selectedCircleLayerId)) map.moveLayer(selectedCircleLayerId);
               if (map.getLayer(addressLabelLayerId)) {
                 map.moveLayer(addressLabelLayerId);
               }
@@ -2290,7 +2465,7 @@ export function MapBuildingsLayer({
       }
       cleanupLayerInteractionHandlers?.();
     };
-  }, [map, features, zoomLevel, onBuildingClick, statusFilters, campaignId, getSupabase, onAddToCRM, showOrphans, showAddressLabels, footprintStatusColors, addressStateOverrides, isDarkMap, assignmentColorByAddressId]);
+  }, [map, features, zoomLevel, onBuildingClick, statusFilters, campaignId, getSupabase, onAddToCRM, showOrphans, showAddressLabels, footprintStatusColors, addressStateOverrides, isDarkMap, assignmentColorByAddressId, selectedAddressIds, selectedCircleLayerId, selectedOutlineLayerId]);
 
   // Update color and filter when statusFilters or campaignId changes
   useEffect(() => {
@@ -2317,6 +2492,12 @@ export function MapBuildingsLayer({
         map.setPaintProperty(leadGlowLayerId, 'line-opacity', getLeadGlowOpacityExpression());
         map.setFilter(leadGlowLayerId, getScopedGeometryFilter(POLYGON_GEOMETRY_FILTER, filterExpr));
       }
+      if (map.getLayer(selectedOutlineLayerId)) {
+        map.setFilter(
+          selectedOutlineLayerId,
+          getScopedGeometryFilter(POLYGON_GEOMETRY_FILTER, combineMapFilters(filterExpr, SELECTED_ASSIGNMENT_FILTER))
+        );
+      }
       safeRemoveLayer(map, outlineLayerId);
       if (map.getLayer(circleLeadGlowLayerId)) {
         map.setPaintProperty(circleLeadGlowLayerId, 'circle-opacity', getLeadGlowOpacityExpression());
@@ -2328,10 +2509,16 @@ export function MapBuildingsLayer({
         map.setPaintProperty(circleLayerId, 'circle-stroke-color', footprintStatusColors ? '#ffffff' : NEUTRAL_OUTLINE_COLOR);
         map.setFilter(circleLayerId, getScopedGeometryFilter(POINT_GEOMETRY_FILTER, filterExpr));
       }
+      if (map.getLayer(selectedCircleLayerId)) {
+        map.setFilter(
+          selectedCircleLayerId,
+          getScopedGeometryFilter(POINT_GEOMETRY_FILTER, combineMapFilters(filterExpr, SELECTED_ASSIGNMENT_FILTER))
+        );
+      }
     } catch (err) {
       console.error('[MapBuildingsLayer] Error updating color/filter:', err);
     }
-  }, [map, statusFilters, campaignId, layerId, surfaceLayerId, outlineLayerId, showOrphans, footprintStatusColors, circleLayerId, leadGlowLayerId, isDarkMap, assignmentColorByAddressId]);
+  }, [map, statusFilters, campaignId, layerId, surfaceLayerId, outlineLayerId, showOrphans, footprintStatusColors, circleLayerId, leadGlowLayerId, selectedCircleLayerId, selectedOutlineLayerId, isDarkMap, assignmentColorByAddressId, selectedAddressIds]);
 
   // Update filter when showOrphans changes (toggle visibility of orphan buildings)
   useEffect(() => {
@@ -2346,8 +2533,20 @@ export function MapBuildingsLayer({
         }
         safeRemoveLayer(map, surfaceLayerId);
         safeRemoveLayer(map, outlineLayerId);
+        if (map.getLayer(selectedOutlineLayerId)) {
+          map.setFilter(
+            selectedOutlineLayerId,
+            getScopedGeometryFilter(POLYGON_GEOMETRY_FILTER, combineMapFilters(filterExpr, SELECTED_ASSIGNMENT_FILTER))
+          );
+        }
         if (map.getLayer(circleLayerId)) {
           map.setFilter(circleLayerId, getScopedGeometryFilter(POINT_GEOMETRY_FILTER, filterExpr));
+        }
+        if (map.getLayer(selectedCircleLayerId)) {
+          map.setFilter(
+            selectedCircleLayerId,
+            getScopedGeometryFilter(POINT_GEOMETRY_FILTER, combineMapFilters(filterExpr, SELECTED_ASSIGNMENT_FILTER))
+          );
         }
       } catch (err) {
         console.error('[MapBuildingsLayer] Error updating filter for showOrphans:', err);
@@ -2364,7 +2563,7 @@ export function MapBuildingsLayer({
     return () => {
       map.off('load', updateFilters);
     };
-  }, [map, showOrphans, campaignId, statusFilters, layerId, surfaceLayerId, outlineLayerId, circleLayerId]);
+  }, [map, showOrphans, campaignId, statusFilters, layerId, surfaceLayerId, outlineLayerId, circleLayerId, selectedCircleLayerId, selectedOutlineLayerId, selectedAddressIds]);
 
   // Re-apply lighting and refresh colors when map style loads (important for dark mode)
   useEffect(() => {
@@ -2392,6 +2591,12 @@ export function MapBuildingsLayer({
         if (map.getLayer(leadGlowLayerId)) {
           map.setPaintProperty(leadGlowLayerId, 'line-opacity', getLeadGlowOpacityExpression());
         }
+        if (map.getLayer(selectedOutlineLayerId)) {
+          map.setFilter(
+            selectedOutlineLayerId,
+            getScopedGeometryFilter(POLYGON_GEOMETRY_FILTER, combineMapFilters(getFilterExpression(), SELECTED_ASSIGNMENT_FILTER))
+          );
+        }
         if (map.getLayer(circleLeadGlowLayerId)) {
           map.setPaintProperty(circleLeadGlowLayerId, 'circle-opacity', getLeadGlowOpacityExpression());
         }
@@ -2399,6 +2604,12 @@ export function MapBuildingsLayer({
           map.setPaintProperty(circleLayerId, 'circle-color', getFootprintFillColor());
           map.setPaintProperty(circleLayerId, 'circle-opacity', getCircleOpacity());
           map.setPaintProperty(circleLayerId, 'circle-stroke-color', footprintStatusColors ? '#ffffff' : NEUTRAL_OUTLINE_COLOR);
+        }
+        if (map.getLayer(selectedCircleLayerId)) {
+          map.setFilter(
+            selectedCircleLayerId,
+            getScopedGeometryFilter(POINT_GEOMETRY_FILTER, combineMapFilters(getFilterExpression(), SELECTED_ASSIGNMENT_FILTER))
+          );
         }
       } catch (err) {
         console.warn('[MapBuildingsLayer] Error applying lighting/colors:', err);
@@ -2416,7 +2627,7 @@ export function MapBuildingsLayer({
     return () => {
       map.off('style.load', applyLightingAndColors);
     };
-  }, [map, layerId, surfaceLayerId, outlineLayerId, circleLayerId, footprintStatusColors, statusFilters, isDarkMap]);
+  }, [map, layerId, surfaceLayerId, outlineLayerId, circleLayerId, selectedCircleLayerId, selectedOutlineLayerId, footprintStatusColors, statusFilters, isDarkMap, selectedAddressIds]);
 
   // Real-time subscription for building_stats updates
   // When a QR code is scanned, building_stats is updated via trigger
@@ -2626,7 +2837,7 @@ export function MapBuildingsLayer({
           if (map.getSource(sourceId)) {
             map.removeSource(sourceId);
           }
-        } catch (err) {
+        } catch {
           // Ignore cleanup errors
         }
       }

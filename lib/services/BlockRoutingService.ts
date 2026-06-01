@@ -69,6 +69,11 @@ export interface AgentRouteCluster {
 
 export type RouteSplitMode = 'natural' | 'balanced';
 
+export interface SmartTerritoryOptions {
+  softVariance?: number;
+  hardVariance?: number;
+}
+
 interface SegmentClusterState {
   agent_id: number;
   segments: BlockSegment[];
@@ -348,6 +353,31 @@ function weightedClusterCentroid(segments: BlockSegment[]): { lat: number; lon: 
   );
 }
 
+function bboxUnion(
+  left: [number, number, number, number],
+  right: [number, number, number, number]
+): [number, number, number, number] {
+  return [
+    Math.min(left[0], right[0]),
+    Math.min(left[1], right[1]),
+    Math.max(left[2], right[2]),
+    Math.max(left[3], right[3]),
+  ];
+}
+
+function bboxDiagonalKm(bbox: [number, number, number, number]): number {
+  return centroidDistanceKm(
+    { lat: bbox[1], lon: bbox[0] },
+    { lat: bbox[3], lon: bbox[2] }
+  );
+}
+
+function clusterBbox(segments: BlockSegment[]): [number, number, number, number] {
+  const [first] = segments;
+  if (!first) return [0, 0, 0, 0];
+  return segments.slice(1).reduce((bbox, segment) => bboxUnion(bbox, segment.bbox), first.bbox);
+}
+
 function blockDifference(a: number | null, b: number | null): number {
   if (a === null || b === null) return Number.POSITIVE_INFINITY;
   return Math.abs(a - b);
@@ -617,6 +647,297 @@ function orderSegmentsByProximity(
   return orderedIds;
 }
 
+function segmentFromAddressIds(
+  base: BlockSegment,
+  addressIds: string[],
+  addressById: Map<string, BlockAddress>,
+  suffix: string
+): BlockSegment {
+  const segmentAddresses = addressIds
+    .map((id) => addressById.get(id))
+    .filter((address): address is BlockAddress => Boolean(address));
+
+  if (segmentAddresses.length === 0) {
+    return {
+      ...base,
+      id: `${base.id}::${suffix}`,
+      addressIds: [],
+      weight: 0,
+    };
+  }
+
+  const lons = segmentAddresses.map((address) => address.lon);
+  const lats = segmentAddresses.map((address) => address.lat);
+
+  return {
+    ...base,
+    id: `${base.id}::${suffix}`,
+    addressIds,
+    weight: addressIds.length,
+    centroid: segmentAddresses.reduce(
+      (acc, address) => ({
+        lat: acc.lat + address.lat / segmentAddresses.length,
+        lon: acc.lon + address.lon / segmentAddresses.length,
+      }),
+      { lat: 0, lon: 0 }
+    ),
+    bbox: [
+      Math.min(...lons),
+      Math.min(...lats),
+      Math.max(...lons),
+      Math.max(...lats),
+    ],
+  };
+}
+
+function splitSegmentIntoParts(
+  segment: BlockSegment,
+  parts: number,
+  addressById: Map<string, BlockAddress>
+): BlockSegment[] {
+  const safeParts = Math.max(1, Math.min(parts, segment.addressIds.length));
+  if (safeParts <= 1) return [segment];
+
+  const next: BlockSegment[] = [];
+  let cursor = 0;
+  for (let index = 0; index < safeParts; index += 1) {
+    const remainingParts = safeParts - index;
+    const remainingHomes = segment.addressIds.length - cursor;
+    const size = Math.ceil(remainingHomes / remainingParts);
+    const ids = segment.addressIds.slice(cursor, cursor + size);
+    cursor += size;
+    next.push(segmentFromAddressIds(segment, ids, addressById, `split-${index + 1}`));
+  }
+  return next;
+}
+
+function ensureEnoughSegmentsForAgents(
+  segments: BlockSegment[],
+  addressById: Map<string, BlockAddress>,
+  nAgents: number
+): BlockSegment[] {
+  const next = [...segments];
+  while (next.length < nAgents) {
+    let largestIndex = -1;
+    let largestWeight = 1;
+    for (let index = 0; index < next.length; index += 1) {
+      if (next[index].weight > largestWeight) {
+        largestWeight = next[index].weight;
+        largestIndex = index;
+      }
+    }
+    if (largestIndex < 0) break;
+    const [largest] = next.splice(largestIndex, 1);
+    next.push(...splitSegmentIntoParts(largest, 2, addressById));
+  }
+  return next;
+}
+
+function segmentTouchesCluster(
+  segment: BlockSegment,
+  cluster: SegmentClusterState,
+  adjacency: Map<string, Set<string>>
+): boolean {
+  return cluster.segments.some((existing) => adjacency.get(existing.id)?.has(segment.id));
+}
+
+function segmentHasClusterNeighbor(
+  segment: BlockSegment,
+  cluster: SegmentClusterState,
+  adjacency: Map<string, Set<string>>
+): boolean {
+  return cluster.segments.some((existing) =>
+    existing.id !== segment.id && adjacency.get(existing.id)?.has(segment.id)
+  );
+}
+
+function smartTerritoryAssignmentScore(params: {
+  segment: BlockSegment;
+  cluster: SegmentClusterState;
+  clusters: SegmentClusterState[];
+  adjacency: Map<string, Set<string>>;
+  targetWeight: number;
+  softMax: number;
+  hardMax: number;
+  boundaryLat: number | null;
+}) {
+  const {
+    segment,
+    cluster,
+    clusters,
+    adjacency,
+    targetWeight,
+    softMax,
+    hardMax,
+    boundaryLat,
+  } = params;
+  const projectedWeight = cluster.weight + segment.weight;
+  const distancePenalty = centroidDistanceKm(cluster.centroid, segment.centroid);
+  const touchesCluster = segmentTouchesCluster(segment, cluster, adjacency);
+  const hasAdjacentOtherCluster = clusters.some((candidate) =>
+    candidate.agent_id !== cluster.agent_id && segmentTouchesCluster(segment, candidate, adjacency)
+  );
+  const clusterHasFrontier = cluster.segments.some((existing) => (adjacency.get(existing.id)?.size ?? 0) > 0);
+  const streetSideInCluster = cluster.segments.some((existing) =>
+    existing.streetName === segment.streetName && existing.side === segment.side
+  );
+  const streetSideInOtherCluster = clusters.some((candidate) =>
+    candidate.agent_id !== cluster.agent_id &&
+    candidate.segments.some((existing) =>
+      existing.streetName === segment.streetName && existing.side === segment.side
+    )
+  );
+  const streetInOtherCluster = clusters.some((candidate) =>
+    candidate.agent_id !== cluster.agent_id &&
+    candidate.segments.some((existing) => existing.streetName === segment.streetName)
+  );
+  const nextBbox = cluster.segments.length > 0
+    ? bboxUnion(clusterBbox(cluster.segments), segment.bbox)
+    : segment.bbox;
+  const compactnessPenalty = bboxDiagonalKm(nextBbox) * 0.18;
+  const deficitBonus = Math.max(0, targetWeight - cluster.weight) / Math.max(1, targetWeight);
+  const softOverage = Math.max(0, projectedWeight - softMax) / Math.max(1, targetWeight);
+  const hardOverage = Math.max(0, projectedWeight - hardMax) / Math.max(1, targetWeight);
+  const projectedLoadPenalty =
+    Math.abs(projectedWeight - targetWeight) / Math.max(1, targetWeight) +
+    softOverage * 7 +
+    hardOverage * 100;
+  const boundaryPenalty =
+    boundaryLat !== null &&
+    cluster.segments.some((existing) =>
+      (existing.centroid.lat > boundaryLat) !== (segment.centroid.lat > boundaryLat)
+    )
+      ? 3.5
+      : 0;
+
+  return (
+    distancePenalty * 1.15 +
+    projectedLoadPenalty -
+    deficitBonus * 0.45 +
+    compactnessPenalty +
+    (touchesCluster ? -1.6 : clusterHasFrontier ? 2.2 : 0) +
+    (hasAdjacentOtherCluster && !touchesCluster ? 1.8 : 0) +
+    (streetSideInCluster ? -1.1 : 0) +
+    (streetSideInOtherCluster ? 4.5 : 0) +
+    (!streetSideInOtherCluster && streetInOtherCluster ? 0.9 : 0) +
+    boundaryPenalty
+  );
+}
+
+function moveSegmentBetweenClusters(
+  segment: BlockSegment,
+  from: SegmentClusterState,
+  to: SegmentClusterState
+) {
+  from.segments = from.segments.filter((candidate) => candidate.id !== segment.id);
+  from.weight -= segment.weight;
+  from.centroid = weightedClusterCentroid(from.segments);
+  to.segments.push(segment);
+  to.weight += segment.weight;
+  to.centroid = weightedClusterCentroid(to.segments);
+}
+
+function cleanupSmartTerritoryClusters(params: {
+  clusters: SegmentClusterState[];
+  adjacency: Map<string, Set<string>>;
+  targetWeight: number;
+  softMax: number;
+  hardMax: number;
+  boundaryLat: number | null;
+}) {
+  const { clusters, adjacency, targetWeight, softMax, hardMax, boundaryLat } = params;
+
+  for (let pass = 0; pass < 3; pass += 1) {
+    let changed = false;
+
+    for (const cluster of clusters) {
+      if (cluster.segments.length <= 1) continue;
+      const island = cluster.segments.find((segment) => !segmentHasClusterNeighbor(segment, cluster, adjacency));
+      if (!island) continue;
+
+      const destination = clusters
+        .filter((candidate) =>
+          candidate.agent_id !== cluster.agent_id &&
+          candidate.weight + island.weight <= hardMax &&
+          segmentTouchesCluster(island, candidate, adjacency)
+        )
+        .sort((left, right) =>
+          smartTerritoryAssignmentScore({
+            segment: island,
+            cluster: left,
+            clusters,
+            adjacency,
+            targetWeight,
+            softMax,
+            hardMax,
+            boundaryLat,
+          }) -
+          smartTerritoryAssignmentScore({
+            segment: island,
+            cluster: right,
+            clusters,
+            adjacency,
+            targetWeight,
+            softMax,
+            hardMax,
+            boundaryLat,
+          })
+        )[0];
+
+      if (!destination) continue;
+      moveSegmentBetweenClusters(island, cluster, destination);
+      changed = true;
+    }
+
+    for (const cluster of clusters) {
+      if (cluster.weight <= hardMax || cluster.segments.length <= 1) continue;
+      const movable = [...cluster.segments].sort((left, right) => {
+        const leftIsland = segmentHasClusterNeighbor(left, cluster, adjacency) ? 0 : 1;
+        const rightIsland = segmentHasClusterNeighbor(right, cluster, adjacency) ? 0 : 1;
+        if (leftIsland !== rightIsland) return rightIsland - leftIsland;
+        return right.weight - left.weight;
+      });
+
+      for (const segment of movable) {
+        const destination = clusters
+          .filter((candidate) =>
+            candidate.agent_id !== cluster.agent_id &&
+            candidate.weight + segment.weight <= hardMax
+          )
+          .sort((left, right) =>
+            smartTerritoryAssignmentScore({
+              segment,
+              cluster: left,
+              clusters,
+              adjacency,
+              targetWeight,
+              softMax,
+              hardMax,
+              boundaryLat,
+            }) -
+            smartTerritoryAssignmentScore({
+              segment,
+              cluster: right,
+              clusters,
+              adjacency,
+              targetWeight,
+              softMax,
+              hardMax,
+              boundaryLat,
+            })
+          )[0];
+
+        if (!destination) continue;
+        moveSegmentBetweenClusters(segment, cluster, destination);
+        changed = true;
+        break;
+      }
+    }
+
+    if (!changed) break;
+  }
+}
+
 export function buildBalancedBlockClusters(
   addresses: BuildRouteAddress[],
   nAgents: number,
@@ -664,6 +985,145 @@ export function buildBalancedBlockClusters(
   }
 
   return clusters;
+}
+
+export function buildSmartTerritoryClusters(
+  addresses: BuildRouteAddress[],
+  nAgents: number,
+  depot: { lat: number; lon: number },
+  options: SmartTerritoryOptions = {}
+): AgentRouteCluster[] {
+  const safeAgentCount = Math.max(1, Math.floor(nAgents) || 1);
+  const blockAddresses: BlockAddress[] = addresses.map((a) => ({
+    id: a.id,
+    lon: a.lon,
+    lat: a.lat,
+    house_number: a.house_number,
+    street_number: a.street_number,
+    street_name: a.street_name,
+    formatted: a.formatted,
+  }));
+
+  if (blockAddresses.length === 0) return [];
+  if (safeAgentCount <= 1) {
+    return [{
+      agent_id: 1,
+      addresses: blockAddresses.map((address, sequenceIndex) => ({ ...address, sequence_index: sequenceIndex })),
+      segments: buildBlockSegments(blockAddresses),
+    }];
+  }
+
+  const addressById = new Map(blockAddresses.map((address) => [address.id, address]));
+  const baseSegments = buildBlockSegments(blockAddresses);
+  if (baseSegments.length === 0) return [];
+
+  const segments = ensureEnoughSegmentsForAgents(baseSegments, addressById, safeAgentCount);
+  const adjacency = buildSegmentAdjacency(segments, addressById);
+  const totalWeight = segments.reduce((sum, segment) => sum + segment.weight, 0);
+  const targetWeight = totalWeight / safeAgentCount;
+  const softVariance = options.softVariance ?? 0.15;
+  const hardVariance = options.hardVariance ?? 0.25;
+  const softMax = Math.max(1, targetWeight * (1 + softVariance));
+  const hardMax = Math.max(1, targetWeight * (1 + hardVariance));
+  const boundaryLat = detectBoundaryLatitude(blockAddresses);
+
+  const seeds = chooseSeedSegments(segments, safeAgentCount, depot);
+  const seedIds = new Set(seeds.map((seed) => seed.id));
+  const clusters: SegmentClusterState[] = seeds.map((seed, index) => ({
+    agent_id: index + 1,
+    segments: [seed],
+    weight: seed.weight,
+    centroid: { ...seed.centroid },
+  }));
+
+  const unassigned = segments
+    .filter((segment) => !seedIds.has(segment.id))
+    .sort((left, right) => right.weight - left.weight);
+
+  while (unassigned.length > 0) {
+    let bestClusterIndex = 0;
+    let bestSegmentIndex = 0;
+    let bestScore = Infinity;
+
+    for (let segmentIndex = 0; segmentIndex < unassigned.length; segmentIndex += 1) {
+      const segment = unassigned[segmentIndex];
+      for (let clusterIndex = 0; clusterIndex < clusters.length; clusterIndex += 1) {
+        const cluster = clusters[clusterIndex];
+        const score = smartTerritoryAssignmentScore({
+          segment,
+          cluster,
+          clusters,
+          adjacency,
+          targetWeight,
+          softMax,
+          hardMax,
+          boundaryLat,
+        });
+
+        if (score < bestScore) {
+          bestScore = score;
+          bestClusterIndex = clusterIndex;
+          bestSegmentIndex = segmentIndex;
+        }
+      }
+    }
+
+    const [chosen] = unassigned.splice(bestSegmentIndex, 1);
+    const cluster = clusters[bestClusterIndex];
+    cluster.segments.push(chosen);
+    cluster.weight += chosen.weight;
+    cluster.centroid = weightedClusterCentroid(cluster.segments);
+  }
+
+  cleanupSmartTerritoryClusters({
+    clusters,
+    adjacency,
+    targetWeight,
+    softMax,
+    hardMax,
+    boundaryLat,
+  });
+
+  for (let pass = 0; pass < 4; pass += 1) {
+    const overloaded = clusters.find((cluster) => cluster.weight > hardMax);
+    if (!overloaded) break;
+    const largest = [...overloaded.segments]
+      .filter((segment) => segment.weight > 1)
+      .sort((left, right) => right.weight - left.weight)[0];
+    if (!largest) break;
+
+    const destination = [...clusters]
+      .filter((cluster) => cluster.agent_id !== overloaded.agent_id)
+      .sort((left, right) => left.weight - right.weight)[0];
+    if (!destination) break;
+
+    const [keep, move] = splitSegmentIntoParts(largest, 2, addressById);
+    overloaded.segments = overloaded.segments.filter((segment) => segment.id !== largest.id);
+    overloaded.segments.push(keep);
+    overloaded.weight = overloaded.segments.reduce((sum, segment) => sum + segment.weight, 0);
+    overloaded.centroid = weightedClusterCentroid(overloaded.segments);
+    destination.segments.push(move);
+    destination.weight += move.weight;
+    destination.centroid = weightedClusterCentroid(destination.segments);
+  }
+
+  return clusters
+    .sort((left, right) => left.agent_id - right.agent_id)
+    .map((cluster) => {
+      const orderedIds = orderSegmentsByProximity(cluster.segments, addressById, depot);
+      return {
+        agent_id: cluster.agent_id,
+        addresses: orderedIds.map((id, sequenceIndex) => {
+          const address = addressById.get(id);
+          if (!address) throw new Error(`buildSmartTerritoryClusters: unknown id ${id}`);
+          return {
+            ...address,
+            sequence_index: sequenceIndex,
+          };
+        }),
+        segments: cluster.segments,
+      };
+    });
 }
 
 export function buildNaturalZoneClusters(

@@ -355,23 +355,31 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const campaignName = campaignRow.name?.trim() || 'Campaign';
     const campaignUrl = `${request.nextUrl.origin}/campaigns/${campaignId}`;
 
-    const notificationRows = createdAssignments.map((assignment) => ({
-      workspace_id: campaignRow.workspace_id,
-      user_id: assignment.assigned_to_user_id,
-      type: 'campaign_assigned',
-      title: 'Campaign assigned',
-      body:
-        assignment.mode === 'zone_split'
-          ? `${campaignName}: your zone has ${assignment.goal_homes} homes.`
+    const notificationRows = createdAssignments.map((assignment) => {
+      const zoneLabel =
+        assignment.mode === 'zone_split' && assignment.zone_index
+          ? `Zone ${assignment.zone_index}`
+          : null;
+
+      return {
+        workspace_id: campaignRow.workspace_id,
+        user_id: assignment.assigned_to_user_id,
+        type: 'campaign_assigned',
+        title: zoneLabel ? `${zoneLabel} assigned` : 'Campaign assigned',
+        body: zoneLabel
+          ? `${campaignName}: ${zoneLabel} has ${assignment.goal_homes} homes.`
           : `${campaignName}: your house goal is ${assignment.goal_homes}.`,
-      data: {
-        campaignId,
-        assignmentId: assignment.id,
-        mode: assignment.mode,
-        goalHomes: assignment.goal_homes,
-        link: `/campaigns/${campaignId}`,
-      },
-    }));
+        data: {
+          campaignId,
+          assignmentId: assignment.id,
+          mode: assignment.mode,
+          goalHomes: assignment.goal_homes,
+          zoneIndex: assignment.zone_index,
+          label: zoneLabel ?? 'Assigned',
+          link: `/campaigns/${campaignId}`,
+        },
+      };
+    });
     const { error: notificationError } = await admin.from('notifications').insert(notificationRows);
     if (notificationError) {
       warnings.push(`In-app notification failed: ${notificationError.message}`);
@@ -391,6 +399,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
             campaignName,
             mode: assignment.mode,
             goalHomes: assignment.goal_homes,
+            zoneIndex: assignment.zone_index,
             dueAt: assignment.due_at,
             notes: assignment.notes,
             campaignUrl,

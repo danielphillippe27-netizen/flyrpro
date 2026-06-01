@@ -9,6 +9,7 @@ import type { CampaignV2 } from '@/types/database';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { getClientAsync } from '@/lib/supabase/client';
 import { useWorkspace } from '@/lib/workspace-context';
@@ -26,6 +27,17 @@ import {
 type StatusTab = 'active' | 'completed';
 
 const ACTIVE_STATUSES: CampaignV2['status'][] = ['draft', 'active', 'paused'];
+
+type CampaignAssignmentListRow = {
+  campaign_id: string;
+  mode: 'zone_split' | 'whole_team';
+  zone_index: number | null;
+};
+
+type CampaignAssignmentListLabel = {
+  label: string;
+  title: string;
+};
 
 interface CampaignListSidebarProps {
   onNewCampaign?: () => void;
@@ -48,6 +60,7 @@ export function CampaignListSidebar({
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
+  const [assignmentLabelsByCampaignId, setAssignmentLabelsByCampaignId] = useState<Record<string, CampaignAssignmentListLabel>>({});
   const [search, setSearch] = useState('');
   const [statusTab, setStatusTab] = useState<StatusTab>('active');
 
@@ -78,8 +91,50 @@ export function CampaignListSidebar({
         setLoading(false);
         return;
       }
-      const data = await CampaignsService.fetchCampaignsV2(id, currentWorkspaceId);
+      const [data, assignmentsPayload] = await Promise.all([
+        CampaignsService.fetchCampaignsV2(id, currentWorkspaceId),
+        currentWorkspaceId
+          ? fetch(`/api/campaign-assignments?workspaceId=${encodeURIComponent(currentWorkspaceId)}`, {
+              credentials: 'include',
+            })
+              .then((response) => response.ok ? response.json() : null)
+              .catch(() => null)
+          : Promise.resolve(null),
+      ]);
       setCampaigns(data);
+      const assignmentRows = Array.isArray(assignmentsPayload?.assignments)
+        ? (assignmentsPayload.assignments as CampaignAssignmentListRow[])
+        : [];
+      const role = typeof assignmentsPayload?.role === 'string' ? assignmentsPayload.role : null;
+      const canManageAssignments = role === 'owner' || role === 'admin';
+      const groupedAssignments = assignmentRows.reduce((map, assignment) => {
+        const list = map.get(assignment.campaign_id) ?? [];
+        list.push(assignment);
+        map.set(assignment.campaign_id, list);
+        return map;
+      }, new Map<string, CampaignAssignmentListRow[]>());
+      const nextLabels: Record<string, CampaignAssignmentListLabel> = {};
+      groupedAssignments.forEach((rows, campaignId) => {
+        const firstZone = rows.find((assignment) => assignment.mode === 'zone_split');
+        if (canManageAssignments) {
+          nextLabels[campaignId] = {
+            label: 'Assigned',
+            title: `${rows.length} active assignee${rows.length === 1 ? '' : 's'}`,
+          };
+          return;
+        }
+        nextLabels[campaignId] = {
+          label:
+            firstZone?.mode === 'zone_split'
+              ? firstZone.zone_index ? `Zone ${firstZone.zone_index}` : 'Zone'
+              : 'Assigned',
+          title:
+            firstZone?.mode === 'zone_split'
+              ? 'Your assigned campaign zone'
+              : 'Assigned to you',
+        };
+      });
+      setAssignmentLabelsByCampaignId(nextLabels);
     } catch (e) {
       console.error('CampaignListSidebar load:', e);
       setLoadError(true);
@@ -198,6 +253,7 @@ export function CampaignListSidebar({
               activeId={activeId}
               loading={loading}
               userId={userId}
+              assignmentLabelsByCampaignId={assignmentLabelsByCampaignId}
               emptyMessage={byStatus.active.length === 0 ? copy.campaigns.noActive : 'No matches'}
               copy={copy}
               onDeleteCampaign={handleDeleteCampaign}
@@ -212,6 +268,7 @@ export function CampaignListSidebar({
               activeId={activeId}
               loading={loading}
               userId={userId}
+              assignmentLabelsByCampaignId={assignmentLabelsByCampaignId}
               emptyMessage={byStatus.completed.length === 0 ? copy.campaigns.noCompleted : 'No matches'}
               copy={copy}
               onDeleteCampaign={handleDeleteCampaign}
@@ -228,6 +285,7 @@ function CampaignList({
   activeId,
   loading,
   userId,
+  assignmentLabelsByCampaignId,
   emptyMessage,
   copy,
   onDeleteCampaign,
@@ -236,6 +294,7 @@ function CampaignList({
   activeId: string | null;
   loading: boolean;
   userId: string | null;
+  assignmentLabelsByCampaignId: Record<string, CampaignAssignmentListLabel>;
   emptyMessage: string;
   copy: ReturnType<typeof getIndustryCopy>;
   onDeleteCampaign: (id: string) => Promise<void>;
@@ -276,6 +335,7 @@ function CampaignList({
         <ul className="pb-2">
           {campaigns.map((campaign) => {
             const isActive = activeId === campaign.id;
+            const assignmentLabel = assignmentLabelsByCampaignId[campaign.id];
             return (
               <li key={campaign.id} className="group">
                 <div
@@ -292,6 +352,15 @@ function CampaignList({
                   >
                     {campaign.name || copy.campaigns.unnamed}
                   </Link>
+                  {assignmentLabel ? (
+                    <Badge
+                      variant="secondary"
+                      className="h-5 px-1.5 text-[10px]"
+                      title={assignmentLabel.title}
+                    >
+                      {assignmentLabel.label}
+                    </Badge>
+                  ) : null}
                   <Button
                     variant="ghost"
                     size="icon"

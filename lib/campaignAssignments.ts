@@ -1,6 +1,6 @@
 export type CampaignAssignmentMode = 'zone_split' | 'whole_team';
 export type CampaignAssignmentStatus = 'assigned' | 'in_progress' | 'completed' | 'cancelled';
-export type CampaignAssignmentSplitMode = 'natural' | 'balanced';
+export type CampaignAssignmentSplitMode = 'smart' | 'natural' | 'balanced';
 
 export type ZoneAssignmentInput = {
   userId: string;

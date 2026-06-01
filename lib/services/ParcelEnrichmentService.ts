@@ -8,6 +8,11 @@ import { fetchAllInPages } from '@/lib/supabase/fetchAllInPages';
 import { StableLinkerService, type BuildingFeature as SnapshotBuildingFeature } from '@/lib/services/StableLinkerService';
 import { TownhouseSplitterService } from '@/lib/services/TownhouseSplitterService';
 import { CampaignMapModeService } from '@/lib/services/CampaignMapModeService';
+import {
+  fetchScopedPmtilesParcels,
+  parcelTilesFromSnapshot,
+} from '@/app/api/campaigns/_utils/scoped-pmtiles-parcels';
+import type { CampaignSnapshotRow } from '@/lib/diamond/geometry';
 import regionBounds from '../../scripts/regions.json';
 
 const PARCEL_BUCKET = 'flyr-pro-addresses-2025';
@@ -75,6 +80,13 @@ type ParcelEnrichmentDebug = {
   mode?: 'bbox_only' | 'polygon_intersects';
   source_id?: string | null;
   s3_key?: string | null;
+  pmtiles_key?: string | null;
+  source_layer?: string | null;
+  promote_id?: string | null;
+  cache_status?: string | null;
+  tile_count?: number;
+  feature_count?: number;
+  extraction_ms?: number;
   available_source_ids?: string[];
   scanned_lines?: number;
   parsed_records?: number;
@@ -473,9 +485,14 @@ export class ParcelEnrichmentService {
       .eq('id', campaignId);
   }
 
-  async prepareParcelsForProvision(campaignId: string): Promise<ParcelPreparationResult> {
+  async prepareParcelsForProvision(
+    campaignId: string,
+    preloadedParcels?: GeoJSON.FeatureCollection
+  ): Promise<ParcelPreparationResult> {
     const campaign = await this.getCampaign(campaignId);
-    const result = await this.loadCampaignParcels(campaignId, campaign);
+    const result = preloadedParcels?.features.length
+      ? this.preparePreloadedParcels(preloadedParcels)
+      : await this.loadCampaignParcels(campaignId, campaign);
 
     if (result.status === 'ready') {
       await this.replaceCampaignParcels(campaignId, result.parcels);
@@ -489,6 +506,26 @@ export class ParcelEnrichmentService {
     });
 
     return result;
+  }
+
+  private preparePreloadedParcels(preloadedParcels: GeoJSON.FeatureCollection): ParcelPreparationResult {
+    const parcels = preloadedParcels.features
+      .map((parcel) => normalizeParcelLine(parcel))
+      .filter((parcel): parcel is NormalizedParcelRecord => Boolean(parcel));
+
+    return {
+      status: 'ready',
+      sourceId: 'preloaded_pmtiles',
+      parcelCount: parcels.length,
+      parcels,
+      error: null,
+      debug: {
+        mode: 'polygon_intersects',
+        source_id: 'preloaded_pmtiles',
+        inserted_count: parcels.length,
+        completed_at: new Date().toISOString(),
+      },
+    };
   }
 
   async runForCampaign(campaignId: string) {
@@ -591,32 +628,25 @@ export class ParcelEnrichmentService {
     return campaign;
   }
 
+  private async getCampaignSnapshot(campaignId: string): Promise<CampaignSnapshotRow | null> {
+    const { data, error } = await this.supabase
+      .from('campaign_snapshots')
+      .select('bucket, prefix, buildings_key, addresses_key, buildings_url, metadata_key, buildings_count, created_at, tile_metrics')
+      .eq('campaign_id', campaignId)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Campaign snapshot lookup failed: ${error.message}`);
+    }
+
+    return (data as CampaignSnapshotRow | null) ?? null;
+  }
+
   private async loadCampaignParcels(
     campaignId: string,
     campaign: CampaignRow,
     debugOverride?: ParcelEnrichmentDebug
   ): Promise<ParcelPreparationResult> {
-    const regionCode = (campaign.region || '').trim().toUpperCase();
-    const regionMetadata = getRegionMetadata(regionCode);
-    if (!regionMetadata) {
-      return {
-        status: 'skipped',
-        sourceId: null,
-        parcelCount: 0,
-        parcels: [],
-        error: regionCode
-          ? `Parcel enrichment could not resolve a parcel dataset region for campaign region ${regionCode}.`
-          : 'Parcel enrichment could not resolve a campaign region.',
-        debug: {
-          ...(debugOverride ?? {}),
-          skipped_reason: regionCode
-            ? `No region metadata found for campaign region ${regionCode}.`
-            : 'Campaign region missing.',
-          completed_at: new Date().toISOString(),
-        },
-      };
-    }
-
     const bbox = getCampaignBbox(campaign);
     const campaignPolygon = campaign.territory_boundary;
     if (!bbox) {
@@ -641,124 +671,94 @@ export class ParcelEnrichmentService {
       ...debugOverride,
     };
 
-    const regionDatasets = await this.listLatestParcelDatasetsForRegion(regionMetadata);
-    debug.available_source_ids = regionDatasets.map((dataset) => dataset.sourceId);
-    if (regionDatasets.length === 0) {
-      return {
-        status: 'skipped',
-        sourceId: null,
-        parcelCount: 0,
-        parcels: [],
-        error: `No parcel datasets were found in S3 for campaign region ${regionCode}.`,
-        debug: {
-          ...debug,
-          skipped_reason: `No parcel datasets found for region ${regionCode}.`,
-          completed_at: new Date().toISOString(),
-        },
-      };
-    }
-
-    const sourceResolution = await this.inferSourceId(campaignId, regionDatasets);
-    debug.unsupported_localities = sourceResolution.unsupportedLocalities;
-    debug.locality_counts = sourceResolution.localityCounts;
-    const dataset = sourceResolution.dataset;
-    if (!dataset) {
-      return {
-        status: 'skipped',
-        sourceId: null,
-        parcelCount: 0,
-        parcels: [],
-        error: 'No supported parcel source could be inferred from campaign localities.',
-        debug: {
-          ...debug,
-          skipped_reason: 'No supported parcel source could be inferred from campaign localities.',
-          completed_at: new Date().toISOString(),
-        },
-      };
-    }
-    const sourceId = dataset.sourceId;
-    debug.source_id = sourceId;
-    debug.s3_key = dataset.key;
-
-    const response = await this.s3.send(
-      new GetObjectCommand({
-        Bucket: PARCEL_BUCKET,
-        Key: dataset.key,
-      })
-    );
-
-    const deduped = new Map<string, NormalizedParcelRecord>();
-    let scannedLines = 0;
-    let parsedRecords = 0;
-    let bboxCandidates = 0;
-    let polygonMatches = 0;
-    let sanitizedNonFiniteNumberLines = 0;
-    let malformedLines = 0;
-    let firstMalformedLineError: unknown = null;
-    const isCompressed =
-      response.ContentEncoding === 'gzip' ||
-      response.Metadata?.content_encoding === 'gzip' ||
-      dataset.key.endsWith('.gz');
-    for await (const line of streamBodyLines(response.Body, { compressed: isCompressed })) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      scannedLines += 1;
-
-      try {
-        const { parsed, sanitizedNonFiniteNumber } = parseParcelJsonLine(trimmed);
-        if (sanitizedNonFiniteNumber) sanitizedNonFiniteNumberLines += 1;
-        const parcel = normalizeParcelLine(parsed);
-        if (!parcel) continue;
-        parsedRecords += 1;
-        if (!intersectsBbox(parcel.geometry, bbox)) continue;
-        bboxCandidates += 1;
-        if (campaignPolygon && !isWithinCampaignPolygon(parcel.geometry, campaignPolygon)) continue;
-        polygonMatches += 1;
-        deduped.set(parcel.externalId, parcel);
-      } catch (error) {
-        malformedLines += 1;
-        firstMalformedLineError ??= error;
-      }
-    }
-
-    const parcels = Array.from(deduped.values());
-    debug.scanned_lines = scannedLines;
-    debug.parsed_records = parsedRecords;
-    debug.bbox_candidates = bboxCandidates;
-    debug.polygon_matches = polygonMatches;
-    debug.inserted_count = parcels.length;
-    debug.completed_at = new Date().toISOString();
-    if (sanitizedNonFiniteNumberLines > 0) {
-      console.warn(
-        `[ParcelEnrichment] Replaced NaN numeric values with null in ${sanitizedNonFiniteNumberLines} parcel lines from ${dataset.key}`
-      );
-    }
-    if (malformedLines > 0) {
-      console.warn(
-        `[ParcelEnrichment] Skipped ${malformedLines} malformed parcel lines from ${dataset.key}:`,
-        firstMalformedLineError
-      );
-    }
-
-    if (scannedLines === 0) {
+    const snapshot = await this.getCampaignSnapshot(campaignId);
+    const parcelTiles = parcelTilesFromSnapshot(snapshot);
+    if (!snapshot || !parcelTiles) {
       return {
         status: 'failed',
-        sourceId,
+        sourceId: null,
         parcelCount: 0,
         parcels: [],
-        error: `Parcel file ${dataset.key} was empty.`,
-        debug,
+        error: 'PMTiles parcel artifact unavailable for campaign parcel enrichment.',
+        debug: {
+          ...debug,
+          skipped_reason: 'Missing campaign snapshot parcels_pmtiles_key.',
+          completed_at: new Date().toISOString(),
+        },
       };
     }
 
-    return {
-      status: 'ready',
-      sourceId,
-      parcelCount: parcels.length,
-      parcels,
-      error: null,
-      debug,
-    };
+    if (!campaignPolygon) {
+      return {
+        status: 'failed',
+        sourceId: null,
+        parcelCount: 0,
+        parcels: [],
+        error: 'Campaign has no territory boundary for PMTiles parcel filtering.',
+        debug: {
+          ...debug,
+          skipped_reason: 'Campaign has no territory boundary for PMTiles parcel filtering.',
+          completed_at: new Date().toISOString(),
+        },
+      };
+    }
+
+    debug.source_id = parcelTiles.datePart;
+    debug.pmtiles_key = parcelTiles.pmtilesKey;
+    debug.source_layer = parcelTiles.sourceLayer;
+    debug.promote_id = parcelTiles.promoteId;
+
+    try {
+      const scoped = await fetchScopedPmtilesParcels(
+        campaignId,
+        snapshot,
+        parcelTiles,
+        bbox as [number, number, number, number],
+        campaignPolygon as GeoJSON.Polygon
+      );
+      const parcels = scoped.parcels
+        .map((parcel) => normalizeParcelLine({
+          type: 'Feature',
+          geometry: JSON.parse(parcel.geom),
+          properties: {
+            ...parcel.properties,
+            external_id: parcel.external_id,
+            parcel_id: parcel.external_id,
+          },
+        }))
+        .filter((parcel): parcel is NormalizedParcelRecord => Boolean(parcel));
+
+      debug.cache_status = scoped.cacheStatus;
+      debug.tile_count = scoped.timings.tileCount;
+      debug.feature_count = scoped.timings.featureCount;
+      debug.extraction_ms = scoped.timings.totalMs;
+      debug.bbox_candidates = scoped.parcels.length;
+      debug.polygon_matches = parcels.length;
+      debug.inserted_count = parcels.length;
+      debug.completed_at = new Date().toISOString();
+
+      return {
+        status: 'ready',
+        sourceId: parcelTiles.pmtilesKey,
+        parcelCount: parcels.length,
+        parcels,
+        error: null,
+        debug,
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        status: 'failed',
+        sourceId: parcelTiles.pmtilesKey,
+        parcelCount: 0,
+        parcels: [],
+        error: `PMTiles parcel artifact unavailable: ${errorMessage}`,
+        debug: {
+          ...debug,
+          completed_at: new Date().toISOString(),
+        },
+      };
+    }
   }
 
   private async replaceCampaignParcels(campaignId: string, parcels: NormalizedParcelRecord[]) {

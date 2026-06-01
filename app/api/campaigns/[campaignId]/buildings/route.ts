@@ -54,7 +54,7 @@ const PMTILES_BUILDING_DISPLAY_BUFFER_METERS = Math.max(
   0,
   Number.isFinite(Number(process.env.PMTILES_BUILDING_DISPLAY_BUFFER_METERS))
     ? Number(process.env.PMTILES_BUILDING_DISPLAY_BUFFER_METERS)
-    : 150
+    : 0
 );
 const PMTILES_BEDROCK_US_BUILDING_DISPLAY_BUFFER_METERS = Math.max(
   0,
@@ -174,11 +174,18 @@ function snapshotBuildingsCacheKey(params: {
   ].join('|');
 }
 
-function buildingsJsonResponse(value: FeatureCollectionLike) {
+function buildingTimingHeaders(startedAt: number, source: string) {
+  const total = Date.now() - startedAt;
+  return {
+    'Cache-Control': 'private, max-age=30, stale-while-revalidate=60',
+    'Server-Timing': `source;desc="${source}", total;dur=${total}`,
+    'X-FLYR-Server-Timing': `source;desc="${source}", total;dur=${total}`,
+  };
+}
+
+function buildingsJsonResponse(value: FeatureCollectionLike, startedAt: number, source: string) {
   return NextResponse.json(value, {
-    headers: {
-      'Cache-Control': 'private, max-age=30, stale-while-revalidate=60',
-    },
+    headers: buildingTimingHeaders(startedAt, source),
   });
 }
 
@@ -2003,7 +2010,7 @@ export async function GET(
         console.log(
           `[API] Returning ${snapshotBuildingCount} campaign-scoped snapshot buildings in ${Date.now() - requestStartedAt}ms`
         );
-        return buildingsJsonResponse(decoratedSnapshotBuildings);
+        return buildingsJsonResponse(decoratedSnapshotBuildings, requestStartedAt, 'pmtiles');
       }
     } else if (snapshotError) {
       console.warn('[API] Snapshot lookup failed:', snapshotError.message);
@@ -2057,7 +2064,7 @@ export async function GET(
       const visibleCampaignFeatureCount = visibleCampaignFeatures?.features?.length ?? 0;
       if (visibleCampaignFeatureCount > 0 && hasPolygonFeatures(visibleCampaignFeatures)) {
         console.log(`[API] Returning ${visibleCampaignFeatureCount} campaign-scoped RPC features after artifact fallback failed`);
-        return NextResponse.json(visibleCampaignFeatures);
+        return NextResponse.json(visibleCampaignFeatures, { headers: buildingTimingHeaders(requestStartedAt, 'rpc') });
       }
 
     }
@@ -2106,7 +2113,7 @@ export async function GET(
           return NextResponse.json({
             type: 'FeatureCollection',
             features: visibleCampaignBuildingFeatures,
-          });
+          }, { headers: buildingTimingHeaders(requestStartedAt, 'direct-db') });
         }
       }
     }
@@ -2114,11 +2121,11 @@ export async function GET(
     const visibleFallbackFeatureCount = visibleFallbackFeatures?.features?.length ?? 0;
     if (visibleFallbackFeatureCount > 0) {
       console.log(`[API] Returning ${visibleFallbackFeatureCount} address point features while buildings load`);
-      return NextResponse.json(visibleFallbackFeatures);
+      return NextResponse.json(visibleFallbackFeatures, { headers: buildingTimingHeaders(requestStartedAt, 'address-fallback') });
     }
 
     console.log('[API] No buildings found after all fallbacks, returning empty FeatureCollection');
-    return NextResponse.json({ type: 'FeatureCollection', features: [] });
+    return NextResponse.json({ type: 'FeatureCollection', features: [] }, { headers: buildingTimingHeaders(requestStartedAt, 'empty') });
     
   } catch (error) {
     console.error('[API] Error fetching buildings:', error);

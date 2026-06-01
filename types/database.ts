@@ -59,6 +59,9 @@ export interface EntitlementSnapshot {
   is_active: boolean;
   source: EntitlementSource;
   current_period_end: string | null;
+  subscription_status?: string | null;
+  trial_ends_at?: string | null;
+  trial_days_remaining?: number | null;
   dialer_offer?: {
     price_id?: string | null;
     amount: string;

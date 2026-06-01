@@ -32,15 +32,17 @@ export type CampaignAssignmentEmailInput = {
   campaignName: string;
   mode: 'zone_split' | 'whole_team';
   goalHomes: number;
+  zoneIndex?: number | null;
   dueAt: string | null;
   notes: string | null;
   campaignUrl: string;
 };
 
 function buildText(input: CampaignAssignmentEmailInput): string {
+  const zoneLabel = input.mode === 'zone_split' && input.zoneIndex ? `Zone ${input.zoneIndex}` : null;
   const modeLine =
     input.mode === 'zone_split'
-      ? 'You have been assigned a campaign zone.'
+      ? `You have been assigned ${zoneLabel ? `${zoneLabel} for this campaign.` : 'a campaign zone.'}`
       : 'Your team has been assigned this campaign together.';
   const lines = [
     `Hi ${input.recipientName || 'there'},`,
@@ -48,6 +50,7 @@ function buildText(input: CampaignAssignmentEmailInput): string {
     modeLine,
     '',
     `Campaign: ${input.campaignName}`,
+    ...(zoneLabel ? [`Assignment: ${zoneLabel}`] : []),
     `House goal: ${input.goalHomes}`,
   ];
 
@@ -59,9 +62,10 @@ function buildText(input: CampaignAssignmentEmailInput): string {
 }
 
 function buildHtml(input: CampaignAssignmentEmailInput): string {
+  const zoneLabel = input.mode === 'zone_split' && input.zoneIndex ? `Zone ${input.zoneIndex}` : null;
   const modeLine =
     input.mode === 'zone_split'
-      ? 'You have been assigned a campaign zone.'
+      ? `You have been assigned ${zoneLabel ? `${zoneLabel} for this campaign.` : 'a campaign zone.'}`
       : 'Your team has been assigned this campaign together.';
   const due = input.dueAt ? new Date(input.dueAt).toLocaleDateString('en-US') : null;
 
@@ -71,6 +75,7 @@ function buildHtml(input: CampaignAssignmentEmailInput): string {
       <p style="margin:0 0 16px;">${escapeHtml(modeLine)}</p>
       <div style="margin:0 0 18px;padding:14px 16px;border:1px solid #e2e8f0;border-radius:10px;background:#f8fafc;">
         <p style="margin:0 0 8px;"><strong>Campaign:</strong> ${escapeHtml(input.campaignName)}</p>
+        ${zoneLabel ? `<p style="margin:0 0 8px;"><strong>Assignment:</strong> ${escapeHtml(zoneLabel)}</p>` : ''}
         <p style="margin:0 0 8px;"><strong>House goal:</strong> ${input.goalHomes}</p>
         ${due ? `<p style="margin:0;"><strong>Due:</strong> ${escapeHtml(due)}</p>` : ''}
       </div>
@@ -96,7 +101,10 @@ export async function sendCampaignAssignmentEmail(
     from: getEnv('RESEND_FROM_EMAIL') || DEFAULT_FROM_EMAIL,
     to: input.to,
     replyTo: DEFAULT_REPLY_TO,
-    subject: `Campaign assigned: ${input.campaignName}`,
+    subject:
+      input.mode === 'zone_split' && input.zoneIndex
+        ? `Zone ${input.zoneIndex} assigned: ${input.campaignName}`
+        : `Campaign assigned: ${input.campaignName}`,
     html: buildHtml(input),
     text: buildText(input),
   });

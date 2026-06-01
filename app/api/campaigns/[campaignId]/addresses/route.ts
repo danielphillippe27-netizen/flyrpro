@@ -398,6 +398,11 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ campaignId: string }> }
 ) {
+  const routeStarted = performance.now();
+  const timingHeaders = (source: string) => ({
+    'Server-Timing': `source;desc="${source}", total;dur=${Math.round((performance.now() - routeStarted) * 100) / 100}`,
+    'X-FLYR-Server-Timing': `source;desc="${source}", total;dur=${Math.round((performance.now() - routeStarted) * 100) / 100}`,
+  });
   try {
     const { campaignId } = await params;
 
@@ -430,7 +435,7 @@ export async function GET(
       const pmtilesFeatures = await fetchPmtilesAddressFeatures(campaignId);
       if (pmtilesFeatures.length > 0) {
         console.log(`[API] Returning ${pmtilesFeatures.length} address GeoJSON features extracted from PMTiles`);
-        return NextResponse.json(pmtilesFeatures);
+        return NextResponse.json(pmtilesFeatures, { headers: timingHeaders('pmtiles') });
       }
     }
 
@@ -463,7 +468,7 @@ export async function GET(
       console.warn('[API] WARNING: All addresses failed geometry parsing. Sample address:', addresses[0]);
     }
 
-    return NextResponse.json(features);
+    return NextResponse.json(features, { headers: timingHeaders('supabase') });
   } catch (error) {
     console.error('Error fetching campaign addresses:', error);
     return NextResponse.json(

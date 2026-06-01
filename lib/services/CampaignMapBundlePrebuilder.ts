@@ -28,7 +28,7 @@ const PMTILES_BUILDING_DISPLAY_BUFFER_METERS = Math.max(
   0,
   Number.isFinite(Number(process.env.PMTILES_BUILDING_DISPLAY_BUFFER_METERS))
     ? Number(process.env.PMTILES_BUILDING_DISPLAY_BUFFER_METERS)
-    : 150
+    : 0
 );
 const PMTILES_BEDROCK_US_BUILDING_DISPLAY_BUFFER_METERS = Math.max(
   0,
@@ -72,7 +72,7 @@ const EMPTY_FEATURE_COLLECTION: FeatureCollection = {
   features: [],
 };
 
-export const MAP_BUNDLE_RENDER_VERSION = '2026-06-01-bedrock-us-pmtiles-truth-v1';
+export const MAP_BUNDLE_RENDER_VERSION = '2026-06-01-strict-pmtiles-building-scope-v1';
 const MIN_RENDERABLE_BUILDING_AREA_SQM = 30;
 const PARCEL_LABEL_OFFSET_METERS = 4;
 const SCOPED_GEOMETRY_CACHE_TTL_MS = 30_000;
@@ -1221,6 +1221,10 @@ function scopedGeometryCacheKey(params: {
   snapshot: CampaignSnapshotRow;
   campaignRow: { bbox?: unknown; territory_boundary?: unknown } | null;
 }) {
+  const buildingBufferMeters = isBedrockUsSnapshot(params.snapshot)
+    ? PMTILES_BEDROCK_US_BUILDING_DISPLAY_BUFFER_METERS
+    : PMTILES_BUILDING_DISPLAY_BUFFER_METERS;
+
   return stableHash({
     campaign_id: params.campaignId,
     bucket: params.snapshot.bucket,
@@ -1231,6 +1235,7 @@ function scopedGeometryCacheKey(params: {
     tile_metrics: params.snapshot.tile_metrics ?? null,
     bbox: params.campaignRow?.bbox ?? null,
     territory_boundary: params.campaignRow?.territory_boundary ?? null,
+    building_buffer_meters: buildingBufferMeters,
   });
 }
 
