@@ -4,7 +4,6 @@ import {
   fetchScopedPmtilesBuildingFeatures,
   type ScopedBuildingFeatureCollection,
 } from '@/app/api/campaigns/_utils/scoped-pmtiles-buildings';
-import { fetchBedrockUsParquetBuildingFeatures } from '@/lib/services/BedrockUsBuildingParquetService';
 import {
   bboxFromPositions,
   fetchScopedPmtilesParcels,
@@ -73,7 +72,7 @@ const EMPTY_FEATURE_COLLECTION: FeatureCollection = {
   features: [],
 };
 
-export const MAP_BUNDLE_RENDER_VERSION = '2026-06-01-bedrock-us-parquet-buildings-v1';
+export const MAP_BUNDLE_RENDER_VERSION = '2026-06-01-bedrock-us-pmtiles-truth-v1';
 const MIN_RENDERABLE_BUILDING_AREA_SQM = 30;
 const PARCEL_LABEL_OFFSET_METERS = 4;
 const SCOPED_GEOMETRY_CACHE_TTL_MS = 30_000;
@@ -1287,12 +1286,15 @@ async function extractScopedMapGeometry(params: {
     buildingBbox
       ? measure('scoped_buildings', recordTiming, async () => {
           try {
-            const scopedBuildings = isBedrockUs
-              ? await fetchBedrockUsParquetBuildingFeatures(snapshot, buildingBbox, buildingBoundary)
-              : await fetchScopedPmtilesBuildingFeatures(snapshot, buildingBbox, new Set(), buildingBoundary);
+            const scopedBuildings = await fetchScopedPmtilesBuildingFeatures(
+              snapshot,
+              buildingBbox,
+              new Set(),
+              buildingBoundary
+            );
             console.log('[CampaignMapBundlePrebuilder] Scoped buildings hydrated', {
               campaignId,
-              provider: isBedrockUs ? 'bedrock_us_parquet' : 'default',
+              provider: isBedrockUs ? 'bedrock_us_pmtiles_truth' : 'default',
               bufferMeters: buildingBufferMeters,
               boundaryMode: buildingBoundary ? 'buffered_boundary' : 'bbox_only',
               buildings: scopedBuildings?.features.length ?? 0,

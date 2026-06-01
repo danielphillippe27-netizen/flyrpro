@@ -21,6 +21,7 @@
     "diamond:municipal-folders": "npx tsx scripts/upload-municipal-diamond-folders-to-s3.ts",
     "diamond:saint-john": "npx tsx scripts/upload-saint-john-diamond-to-s3.ts",
     "diamond:st-johns-nl": "npx tsx scripts/upload-st-johns-nl-diamond-to-s3.ts",
+    "bedrock-us:buildings": "npx tsx scripts/rebuild-bedrock-us-building-pmtiles.ts",
     "deploy:diamond-lambda": "cd kimi-cli && ./deploy-diamond.sh",
     "deploy:white-gold-lambda": "cd kimi-cli && ./deploy-white-gold.sh",
     "deploy:lambda": "cd kimi-cli && npm install && node bin/kimi.js",
