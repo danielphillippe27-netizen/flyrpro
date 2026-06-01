@@ -1,7 +1,7 @@
-import duckdbModule from 'duckdb';
 import * as turf from '@turf/turf';
 import { duckDbRuntimeSetupStatements } from '@/lib/services/duckdbRuntime';
 import type { CampaignSnapshotRow } from '@/lib/diamond/geometry';
+import type duckdbModule from 'duckdb';
 
 export type BedrockUsBuildingFeatureCollection = {
   type: 'FeatureCollection';
@@ -39,7 +39,7 @@ function sqlNumber(value: number) {
 
 function loadDuckDbModule() {
   if (!duckdbModulePromise) {
-    duckdbModulePromise = Promise.resolve(duckdbModule);
+    duckdbModulePromise = import('duckdb');
   }
   return duckdbModulePromise;
 }
