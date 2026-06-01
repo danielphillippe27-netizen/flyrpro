@@ -1266,6 +1266,10 @@ async function runCampaignPostProcessing(params: {
       map_mode: optimizedMapModeAssessment.mapMode,
     });
 
+    await timedStage('prewarm_map_bundle_optimized', () =>
+      prewarmCanonicalMapBundle(supabase, campaignId)
+    );
+
     console.log('[Provision] Background post-processing complete:', {
       campaignId,
       matched: spatialJoinSummary.matched,
