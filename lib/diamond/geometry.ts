@@ -120,6 +120,15 @@ export function resolveCampaignMapArtifact(
 }
 
 export function resolveFallbackGeoJSONKey(snapshot: CampaignSnapshotRow): string | null {
+  const countryCode = stringMetric(snapshot.tile_metrics, 'bedrock_country_code')?.toUpperCase();
+  const country = stringMetric(snapshot.tile_metrics, 'bedrock_country')?.toLowerCase();
+  if (
+    snapshot.tile_metrics?.bedrock_mode === true &&
+    (countryCode === 'US' || country === 'usa')
+  ) {
+    return null;
+  }
+
   const metricKey =
     stringMetric(snapshot.tile_metrics, 'geojson_key') ||
     stringMetric(snapshot.tile_metrics, 'buildings_geojson_key');

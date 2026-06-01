@@ -121,7 +121,7 @@ test('does not depend on Bedrock building counts', async () => {
   assertTrue(result.layers.buildings, 'Expected buildings layer even with buildings_count=0');
 });
 
-test('omits missing US Bedrock buildings while keeping addresses partial', async () => {
+test('keeps US Bedrock PMTiles as scoped building source', async () => {
   const result = await buildCampaignMapGeometry({
     campaignId: 'campaign-1',
     snapshot: snapshot({
@@ -129,7 +129,6 @@ test('omits missing US Bedrock buildings while keeping addresses partial', async
       bedrock_country: 'usa',
       bedrock_country_code: 'US',
       pmtiles_key: 'bedrock/usa/current/buildings/pmtiles_by_state/state=FL/buildings.pmtiles',
-      buildings_geojson_key: 'bedrock/usa/current/buildings/buildings.ndjson.gz',
       addresses_pmtiles_key: 'bedrock/usa/current/addresses/pmtiles_by_state/state=FL/addresses.pmtiles',
       parcels_pmtiles_key: 'bedrock/usa/current/parcels/pmtiles_by_state/state=FL/parcels.pmtiles',
       source_layers: { buildings: 'buildings', addresses: 'addresses', parcels: 'parcels' },
@@ -141,6 +140,10 @@ test('omits missing US Bedrock buildings while keeping addresses partial', async
 
   assertEqual(result.status, 'ready');
   assertEqual(result.layers.buildings?.kind, 'geojson');
+  assertEqual(
+    result.layers.buildings?.s3Key,
+    'bedrock/usa/current/buildings/pmtiles_by_state/state=FL/buildings.pmtiles'
+  );
   assertEqual(
     result.layers.buildings?.url,
     'https://www.flyrpro.app/api/campaigns/campaign-1/buildings'

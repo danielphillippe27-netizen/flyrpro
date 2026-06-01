@@ -803,6 +803,7 @@ export class BedrockCountryService {
     const addressPmtilesKey = usaAddressPmtilesKey(this.config, regionCode);
     const snapshotAddressKey = addressPmtilesKey ?? layerKey(this.config, 'addresses', 'addresses.pmtiles');
     const parcelPmtilesKey = usaParcelPmtilesKey(this.config, regionCode);
+    const isUsBedrock = this.config.countryCode.toUpperCase() === 'US';
     const tileMetrics = {
       artifact_type: 'diamond',
       diamond_mode: true,
@@ -815,7 +816,7 @@ export class BedrockCountryService {
       pmtiles_key: buildingPmtilesKey,
       tilejson_key: layerKey(this.config, 'buildings', 'buildings.json'),
       buildings_pmtiles_index_key: `${prefix(this.config)}/buildings/pmtiles-index.json`,
-      buildings_geojson_key: layerKey(this.config, 'buildings', 'buildings.ndjson.gz'),
+      buildings_geojson_key: isUsBedrock ? null : layerKey(this.config, 'buildings', 'buildings.ndjson.gz'),
       addresses_pmtiles_key: addressPmtilesKey,
       addresses_tilejson_key: layerKey(this.config, 'addresses', 'addresses.json'),
       addresses_geojson_key: layerKey(this.config, 'addresses', 'addresses.ndjson.gz'),

@@ -166,17 +166,6 @@ function apiTileTemplate(baseUrl: string, campaignId: string, layer: 'buildings'
   return `${baseUrl}/api/campaigns/${encodedCampaignId}/parcel-tiles/{z}/{x}/{y}.mvt?v=${encodedCacheKey}`;
 }
 
-function isUnsupportedUsBedrockBuildingLayer(snapshot: CampaignMapSnapshotRow, key: string) {
-  const metrics = snapshot.tile_metrics;
-  const countryCode = stringMetric(metrics, 'bedrock_country_code')?.toUpperCase();
-  const country = stringMetric(metrics, 'bedrock_country')?.toLowerCase();
-  return (
-    snapshot.tile_metrics?.bedrock_mode === true &&
-    (countryCode === 'US' || country === 'usa') &&
-    /\/buildings\/pmtiles_by_state\//i.test(key)
-  );
-}
-
 async function buildLayer(params: {
   snapshot: CampaignMapSnapshotRow;
   key: string | null;
@@ -328,12 +317,7 @@ export async function buildCampaignMapGeometry(
     stringMetric(metrics, 'buildings_geojson_key') ??
     stringMetric(metrics, 'geojson_key') ??
     (snapshot.buildings_key && !snapshot.buildings_key.endsWith('.pmtiles') ? snapshot.buildings_key : null);
-  const usableBuildingKey =
-    buildingPmtilesKey
-      ? isUnsupportedUsBedrockBuildingLayer(snapshot, buildingPmtilesKey)
-        ? null
-        : buildingPmtilesKey
-      : buildingGeojsonKey;
+  const usableBuildingKey = buildingPmtilesKey ?? buildingGeojsonKey;
   const hasScopedBuildingArtifact = Boolean(buildingPmtilesKey || buildingGeojsonKey);
 
   const addressPmtilesKey =
@@ -442,7 +426,7 @@ export async function buildCampaignMapGeometry(
   if (!hasBuildings) issues.push('buildings_layer_unavailable');
   if (!hasAddresses) issues.push('addresses_layer_unavailable');
   if (buildingPmtilesKey && !usableBuildingKey && !hasScopedBuildingArtifact) {
-    issues.push('bedrock_us_buildings_pmtiles_missing');
+    issues.push('buildings_pmtiles_missing');
   }
 
   const addressCircleLayer = addressSourceLayer;
