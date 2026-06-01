@@ -31,10 +31,10 @@ const PMTILES_BUILDING_DISPLAY_BUFFER_METERS = Math.max(
     : 150
 );
 const PMTILES_BEDROCK_US_BUILDING_DISPLAY_BUFFER_METERS = Math.max(
-  PMTILES_BUILDING_DISPLAY_BUFFER_METERS,
+  0,
   Number.isFinite(Number(process.env.PMTILES_BEDROCK_US_BUILDING_DISPLAY_BUFFER_METERS))
     ? Number(process.env.PMTILES_BEDROCK_US_BUILDING_DISPLAY_BUFFER_METERS)
-    : 500
+    : 0
 );
 
 export type CurrentCampaignMapBundleRow = {
