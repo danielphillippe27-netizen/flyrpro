@@ -13,6 +13,7 @@
  *   E2E_RUNS=3
  *   E2E_SURFACES=flyr_pro,ios_wire,android_wire
  *   E2E_CAPTURE_SCREENSHOT=0
+ *   E2E_REQUIRE_OPTIMIZED=1
  */
 
 import { createHash } from 'node:crypto';
@@ -34,6 +35,7 @@ type Timings = Record<string, number>;
 type FixtureExpected = {
   addresses?: number | null;
   snapshotBuildings?: number | null;
+  bundleBuildings?: number | null;
   endpointBuildings?: number | null;
   roads?: number | null;
   parcels?: number | null;
@@ -212,6 +214,33 @@ const FIXTURES: PolygonFixture[] = [
     expected: { roads: 0 },
   },
   {
+    id: 'austin-tx-building-proxy',
+    name: 'Austin, Texas Building Proxy',
+    region: 'TX',
+    seedQuery: 'TX',
+    polygon: {
+      type: 'Polygon',
+      coordinates: [
+        [
+          [-97.6429772171783, 30.388837676685682],
+          [-97.6406208491556, 30.38703681955164],
+          [-97.63876572608457, 30.388908997077124],
+          [-97.6398870678847, 30.391436379831575],
+          [-97.64143214253208, 30.39041562817691],
+          [-97.6429772171783, 30.388837676685682],
+        ],
+      ],
+    },
+    expected: {
+      addresses: 169,
+      snapshotBuildings: 169,
+      bundleBuildings: 164,
+      endpointBuildings: 169,
+      roads: 0,
+      parcels: 4,
+    },
+  },
+  {
     id: 'au-sydney',
     name: 'Sydney, Australia',
     region: 'AU',
@@ -281,6 +310,7 @@ const runs = intEnv('E2E_RUNS', 3);
 const captureScreenshot = process.env.E2E_CAPTURE_SCREENSHOT !== '0';
 const strictBaseline = process.env.E2E_STRICT_BASELINE === '1';
 const strictPerformance = process.env.E2E_STRICT_PERFORMANCE === '1';
+const requireOptimized = process.env.E2E_REQUIRE_OPTIMIZED === '1';
 const selectedSurfaces = parseSurfaces(process.env.E2E_SURFACES);
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
 const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -306,6 +336,7 @@ async function main() {
   console.log(`Fixture: ${FIXTURE.name} (${FIXTURE.id}) region=${FIXTURE.region}`);
   console.log(`Surfaces: ${selectedSurfaces.join(', ')}`);
   console.log(`Runs per surface: ${runs}`);
+  console.log(`Require optimized: ${requireOptimized ? 'yes' : 'no'}`);
   console.log(`Report directory: ${outputDir}`);
 
   const setup = await timeAsync(() => setupQaIdentity(runId));
@@ -341,6 +372,7 @@ async function main() {
         region: EXPECTED_REGION,
         addresses: FIXTURE.expected.addresses ?? null,
         snapshotBuildings: FIXTURE.expected.snapshotBuildings ?? null,
+        bundleBuildings: FIXTURE.expected.bundleBuildings ?? null,
         endpointBuildings: FIXTURE.expected.endpointBuildings ?? null,
         roads: FIXTURE.expected.roads ?? null,
         parcels: FIXTURE.expected.parcels ?? null,
@@ -647,7 +679,11 @@ async function updateCampaignDetails(
 async function provisionCampaign(accessToken: string, campaignId: string) {
   const response = await authFetch(accessToken, '/api/campaigns/provision', {
     method: 'POST',
-    body: JSON.stringify({ campaign_id: campaignId }),
+    body: JSON.stringify({
+      campaign_id: campaignId,
+      wait_for_postprocess: requireOptimized,
+      require_linked_homes: requireOptimized,
+    }),
     timeoutSeconds: PROVISION_TIMEOUT_SECONDS,
   });
   const body = await response.json().catch(() => ({}));
@@ -664,10 +700,11 @@ async function waitForCampaignReady(campaignId: string) {
     if (campaign?.provision_status === 'failed') {
       throw new Error(`Campaign provisioning failed for ${campaignId}`);
     }
-    if (isMapUsable(campaign)) return campaign;
+    if (requireOptimized && isOptimized(campaign)) return campaign;
+    if (!requireOptimized && isMapUsable(campaign)) return campaign;
     await sleep(POLL_INTERVAL_MS);
   }
-  throw new Error(`Campaign was not ready after ${PROVISION_TIMEOUT_SECONDS}s`);
+  throw new Error(`Campaign was not ${requireOptimized ? 'optimized' : 'ready'} after ${PROVISION_TIMEOUT_SECONDS}s`);
 }
 
 async function collectData(
@@ -901,6 +938,9 @@ function validateRun(results: SurfaceResult[]) {
     if (!isMapUsable(campaign)) {
       errors.push(`${label}: campaign is not map usable (${campaign.provision_status}/${campaign.provision_phase})`);
     }
+    if (requireOptimized && !isOptimized(campaign)) {
+      errors.push(`${label}: campaign is not optimized (${campaign.provision_status}/${campaign.provision_phase})`);
+    }
     if (!sameJson(normalizePolygon(campaign.territory_boundary), normalizePolygon(POLYGON))) {
       errors.push(`${label}: territory_boundary does not match fixture`);
     }
@@ -921,11 +961,17 @@ function validateRun(results: SurfaceResult[]) {
       );
     }
     if (counts.snapshotBuildings != null && counts.mapBundleBuildings !== counts.snapshotBuildings) {
-      baselineMismatch(
-        result,
-        errors,
-        `${label}: bundle buildings ${counts.mapBundleBuildings} do not match snapshot buildings ${counts.snapshotBuildings}`
-      );
+      if (FIXTURE.expected.bundleBuildings != null && counts.mapBundleBuildings === FIXTURE.expected.bundleBuildings) {
+        result.warnings.push(
+          `Renderable building filter: bundle buildings ${counts.mapBundleBuildings}, snapshot buildings ${counts.snapshotBuildings}`
+        );
+      } else {
+        baselineMismatch(
+          result,
+          errors,
+          `${label}: bundle buildings ${counts.mapBundleBuildings} do not match snapshot buildings ${counts.snapshotBuildings}`
+        );
+      }
     }
     if (FIXTURE.expected.endpointBuildings != null && counts.buildingsEndpoint !== FIXTURE.expected.endpointBuildings) {
       baselineMismatch(
@@ -963,6 +1009,9 @@ function validateRun(results: SurfaceResult[]) {
     }
     if (result.workflow?.linksStatus && !['fresh', 'ready'].includes(result.workflow.linksStatus.toLowerCase())) {
       baselineMismatch(result, errors, `${label}: bundle links_status is ${result.workflow.linksStatus}`);
+    }
+    if (requireOptimized && counts.mapBundleAddresses > 0 && (result.workflow?.links ?? 0) <= 0) {
+      errors.push(`${label}: optimized bundle has ${counts.mapBundleAddresses} addresses but ${result.workflow?.links ?? 0} links`);
     }
     if ((result.timings.createShell ?? 0) > CREATE_TARGET_SECONDS) {
       performanceMismatch(
@@ -1064,8 +1113,8 @@ function markdownReport(report: {
   lines.push('');
   lines.push(`## Results`);
   lines.push('');
-  lines.push('| Surface | Run | Campaign | Status | Bundle Addr | Bundle Bldgs | Bundle Parcels | Links Status | Legacy Addr | Legacy Bldgs | Legacy Parcels | Provision | Bundle | Screenshot |');
-  lines.push('| --- | ---: | --- | --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | --- |');
+  lines.push('| Surface | Run | Campaign | Status | Bundle Addr | Bundle Bldgs | Bundle Parcels | Links | Links Status | Legacy Addr | Legacy Bldgs | Legacy Parcels | Provision | Bundle | Screenshot |');
+  lines.push('| --- | ---: | --- | --- | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | --- |');
   for (const result of report.results) {
     lines.push(
       [
@@ -1076,6 +1125,7 @@ function markdownReport(report: {
         String(result.counts?.mapBundleAddresses ?? ''),
         String(result.counts?.mapBundleBuildings ?? ''),
         String(result.counts?.mapBundleParcels ?? ''),
+        String(result.workflow?.links ?? ''),
         result.workflow?.linksStatus ?? '',
         String(result.counts?.addressesEndpoint ?? ''),
         String(result.counts?.buildingsEndpoint ?? ''),
@@ -1226,6 +1276,12 @@ function isMapUsable(campaign: CampaignRow | null | undefined) {
   const status = String(campaign?.provision_status ?? '').trim().toLowerCase();
   const phase = String(campaign?.provision_phase ?? '').trim().toLowerCase();
   return status === 'ready' && ['', 'map_ready', 'linking_failed', 'linked', 'optimizing', 'optimized'].includes(phase);
+}
+
+function isOptimized(campaign: CampaignRow | null | undefined) {
+  const status = String(campaign?.provision_status ?? '').trim().toLowerCase();
+  const phase = String(campaign?.provision_phase ?? '').trim().toLowerCase();
+  return status === 'ready' && phase === 'optimized';
 }
 
 function countPayload(value: unknown): number {
