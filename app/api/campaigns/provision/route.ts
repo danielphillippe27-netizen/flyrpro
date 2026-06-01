@@ -1,4 +1,5 @@
 import { after, NextRequest, NextResponse } from 'next/server';
+import * as turf from '@turf/turf';
 import { createAdminClient } from '@/lib/supabase/server';
 import type { LambdaSnapshotResponse } from '@/lib/services/TileLambdaService';
 import { RoutingService } from '@/lib/services/RoutingService';
@@ -560,6 +561,107 @@ function addressesForInitialHydration(
   }
 
   return addresses.length <= staticGeometryAddressHydrationLimit() ? addresses : [];
+}
+
+function stringFeatureValue(properties: Record<string, unknown>, ...keys: string[]) {
+  for (const key of keys) {
+    const value = properties[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  }
+  return null;
+}
+
+function featureCenter(feature: GeoJSON.Feature): [number, number] | null {
+  try {
+    const center = turf.centerOfMass(feature as GeoJSON.Feature<GeoJSON.Geometry>);
+    const coordinates = center.geometry.coordinates;
+    const lon = Number(coordinates[0]);
+    const lat = Number(coordinates[1]);
+    if (Number.isFinite(lon) && Number.isFinite(lat)) {
+      return [lon, lat];
+    }
+  } catch {
+    // Fall through to bbox center for malformed clipped building fragments.
+  }
+
+  try {
+    const bbox = turf.bbox(feature) as [number, number, number, number];
+    const lon = (bbox[0] + bbox[2]) / 2;
+    const lat = (bbox[1] + bbox[3]) / 2;
+    return Number.isFinite(lon) && Number.isFinite(lat) ? [lon, lat] : null;
+  } catch {
+    return null;
+  }
+}
+
+function buildProxyAddressesFromBuildings(options: {
+  campaignId: string;
+  buildings: GeoJSON.FeatureCollection | null | undefined;
+  source: ProvisionSource;
+  regionCode: string;
+}): StandardCampaignAddress[] {
+  const features = Array.isArray(options.buildings?.features) ? options.buildings.features : [];
+  return features.flatMap((feature, index): StandardCampaignAddress[] => {
+    const center = featureCenter(feature);
+    if (!center) return [];
+
+    const properties = (feature.properties ?? {}) as Record<string, unknown>;
+    const buildingId =
+      stringFeatureValue(properties, 'building_id', 'gers_id', 'id') ??
+      (typeof feature.id === 'string' || typeof feature.id === 'number' ? String(feature.id) : null) ??
+      `building-${index + 1}`;
+    const formatted =
+      stringFeatureValue(properties, 'address_text', 'formatted', 'full_address', 'label', 'name') ??
+      `Door target ${index + 1}`;
+    const [lon, lat] = center;
+
+    return [{
+      campaign_id: options.campaignId,
+      formatted,
+      house_number: stringFeatureValue(properties, 'house_number', 'number', 'street_number') ?? undefined,
+      street_name: stringFeatureValue(properties, 'street_name', 'street', 'road_name') ?? undefined,
+      locality: stringFeatureValue(properties, 'locality', 'city', 'municipality') ?? undefined,
+      region: options.regionCode.toUpperCase(),
+      postal_code: stringFeatureValue(properties, 'postal_code', 'postcode') ?? undefined,
+      coordinate: { lat, lon },
+      lat,
+      lon,
+      geom: JSON.stringify({ type: 'Point', coordinates: [lon, lat] }),
+      source: options.source,
+      gers_id: `${options.source}:building-proxy:${buildingId}`,
+    }];
+  });
+}
+
+function snapshotWithProxyAddressCount(
+  snapshot: LambdaSnapshotResponse,
+  addressCount: number
+): LambdaSnapshotResponse {
+  const tileMetrics = snapshot.metadata?.tile_metrics &&
+    typeof snapshot.metadata.tile_metrics === 'object'
+      ? snapshot.metadata.tile_metrics as Record<string, unknown>
+      : {};
+
+  return {
+    ...snapshot,
+    counts: {
+      ...snapshot.counts,
+      addresses: addressCount,
+    },
+    metadata: {
+      elapsed_ms: snapshot.metadata?.elapsed_ms ?? 0,
+      snapshot_size_bytes: snapshot.metadata?.snapshot_size_bytes ?? 0,
+      overture_release: snapshot.metadata?.overture_release,
+      tile_metrics: {
+        ...tileMetrics,
+        campaign_addresses_count: addressCount,
+        building_proxy_addresses_count: addressCount,
+        address_proxy_reason: 'address_pmtiles_zero_hits',
+        address_proxy_source: 'scoped_pmtiles_buildings',
+      } as unknown as NonNullable<LambdaSnapshotResponse['metadata']>['tile_metrics'],
+    } as LambdaSnapshotResponse['metadata'],
+  };
 }
 
 async function resolveDiamondThenBedrock(options: {
@@ -1426,6 +1528,29 @@ export async function POST(request: NextRequest) {
           });
           const scopedBuildingCount = scopedGeometry.buildings?.features.length ?? null;
           snapshot = snapshot ? snapshotWithScopedBuildingCount(snapshot, scopedBuildingCount) : snapshot;
+
+          if (finalAddressCount === 0 && (scopedGeometry.buildings?.features.length ?? 0) > 0) {
+            const proxyAddresses = buildProxyAddressesFromBuildings({
+              campaignId: campaignId!,
+              buildings: scopedGeometry.buildings,
+              source: addressSource,
+              regionCode,
+            });
+            if (proxyAddresses.length > 0) {
+              console.warn('[Provision] PMTiles address scope produced zero addresses; using scoped building proxy door targets.', {
+                campaignId,
+                buildings: scopedGeometry.buildings?.features.length ?? 0,
+                proxyAddresses: proxyAddresses.length,
+                source: addressSource,
+              });
+              finalAddressCount = await bulkInsertAddresses(supabase, campaignId!, proxyAddresses);
+              snapshot = snapshotWithProxyAddressCount(snapshot, finalAddressCount);
+              await updateCampaignProvision(supabase, campaignId!, {
+                provision_phase: 'addresses_ready',
+                addresses_ready_at: new Date().toISOString(),
+              });
+            }
+          }
 
           await upsertSnapshotMetadata(supabase, campaignId!, snapshot);
 
