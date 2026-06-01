@@ -45,7 +45,8 @@ function loadDuckDbModule() {
 }
 
 async function getRows(sql: string): Promise<BedrockBuildingParquetRow[]> {
-  const duckdb = await loadDuckDbModule();
+  const duckdbImport = await loadDuckDbModule();
+  const duckdb = ((duckdbImport as { default?: typeof duckdbImport }).default ?? duckdbImport) as typeof duckdbImport;
   const db = new duckdb.Database(':memory:');
   const all = (statement: string) =>
     new Promise<BedrockBuildingParquetRow[]>((resolve, reject) => {
