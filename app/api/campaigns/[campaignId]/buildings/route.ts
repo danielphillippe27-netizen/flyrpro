@@ -56,6 +56,12 @@ const PMTILES_BUILDING_DISPLAY_BUFFER_METERS = Math.max(
     ? Number(process.env.PMTILES_BUILDING_DISPLAY_BUFFER_METERS)
     : 150
 );
+const PMTILES_BEDROCK_US_BUILDING_DISPLAY_BUFFER_METERS = Math.max(
+  PMTILES_BUILDING_DISPLAY_BUFFER_METERS,
+  Number.isFinite(Number(process.env.PMTILES_BEDROCK_US_BUILDING_DISPLAY_BUFFER_METERS))
+    ? Number(process.env.PMTILES_BEDROCK_US_BUILDING_DISPLAY_BUFFER_METERS)
+    : 500
+);
 const WEB_MERCATOR_MAX_LAT = 85.05112878;
 const METERS_PER_DEGREE_LATITUDE = 111_320;
 const BUILDINGS_RESPONSE_CACHE_TTL_MS = 30_000;
@@ -75,6 +81,23 @@ const buildingsResponseInflight = new Map<string, Promise<FeatureCollectionLike 
 
 function getFeatureCount(featureCollection: FeatureCollectionLike | null | undefined): number {
   return Array.isArray(featureCollection?.features) ? featureCollection.features.length : 0;
+}
+
+function snapshotStringMetric(snapshot: CampaignSnapshotRow, key: string): string | null {
+  const value = snapshot.tile_metrics?.[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function isBedrockUsSnapshot(snapshot: CampaignSnapshotRow): boolean {
+  const countryCode = snapshotStringMetric(snapshot, 'bedrock_country_code')?.toUpperCase();
+  const prefix = String(snapshot.prefix ?? '').toLowerCase();
+  const buildingsKey = String(snapshot.buildings_key ?? '').toLowerCase();
+
+  return (
+    snapshot.tile_metrics?.bedrock_mode === true &&
+    countryCode === 'US' &&
+    (prefix.startsWith('bedrock/usa/') || buildingsKey.startsWith('bedrock/usa/'))
+  );
 }
 
 function getCachedBuildingsResponse(cacheKey: string): FeatureCollectionLike | null {
@@ -1848,13 +1871,16 @@ export async function GET(
     if (!snapshotError && snapshot?.bucket) {
       const snapshotRow = snapshot as CampaignSnapshotRow;
       const geojsonKey = resolveFallbackGeoJSONKey(snapshotRow);
+      const buildingDisplayBufferMeters = isBedrockUsSnapshot(snapshotRow)
+        ? PMTILES_BEDROCK_US_BUILDING_DISPLAY_BUFFER_METERS
+        : PMTILES_BUILDING_DISPLAY_BUFFER_METERS;
       const bbox = parseBbox((campaignAccess as CampaignAccessRow).bbox) ?? bboxFromPolygon(campaignBoundary);
       const displayBbox = bbox
-        ? expandBboxMeters(bbox, PMTILES_BUILDING_DISPLAY_BUFFER_METERS)
+        ? expandBboxMeters(bbox, buildingDisplayBufferMeters)
         : null;
       const displayBoundary = bufferCampaignBoundaryMeters(
         campaignBoundary,
-        PMTILES_BUILDING_DISPLAY_BUFFER_METERS
+        buildingDisplayBufferMeters
       );
       const cacheKey = snapshotBuildingsCacheKey({
         campaignId,
@@ -1872,7 +1898,8 @@ export async function GET(
           if (displayBbox) {
             console.log('[API] Building scoped features from PMTiles display window', {
               pmtilesKey,
-              displayBufferMeters: PMTILES_BUILDING_DISPLAY_BUFFER_METERS,
+              displayBufferMeters: buildingDisplayBufferMeters,
+              provider: isBedrockUsSnapshot(snapshotRow) ? 'bedrock_us' : 'default',
             });
             try {
               pmtilesCandidate = await fetchVisibleScopedPmtilesBuildings({

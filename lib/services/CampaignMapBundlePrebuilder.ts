@@ -72,7 +72,7 @@ const EMPTY_FEATURE_COLLECTION: FeatureCollection = {
   features: [],
 };
 
-const MAP_BUNDLE_RENDER_VERSION = '2026-06-01-one-owner-mapbundle-v1';
+export const MAP_BUNDLE_RENDER_VERSION = '2026-06-01-one-owner-mapbundle-v1';
 const MIN_RENDERABLE_BUILDING_AREA_SQM = 30;
 const PARCEL_LABEL_OFFSET_METERS = 4;
 const SCOPED_GEOMETRY_CACHE_TTL_MS = 30_000;
@@ -222,6 +222,10 @@ function bundleRenderVersion(row: CurrentCampaignMapBundleRow | null): string | 
   const counts = row?.counts && typeof row.counts === 'object' ? row.counts as JsonRecord : null;
   const value = counts?.render_version;
   return typeof value === 'string' && value.trim() ? value : null;
+}
+
+export function campaignMapBundleNeedsRebuild(row: CurrentCampaignMapBundleRow | null): boolean {
+  return !row || bundleRenderVersion(row) !== MAP_BUNDLE_RENDER_VERSION;
 }
 
 function normalizedWorkflowStatus(value: unknown): string {

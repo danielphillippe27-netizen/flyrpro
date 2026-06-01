@@ -3,10 +3,10 @@ import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { ensureCampaignAccess } from '@/app/api/campaigns/_utils/access';
 import {
+  campaignMapBundleNeedsRebuild,
   pendingCampaignMapBundleResponse,
   prebuildCampaignMapBundle,
   readCurrentCampaignMapBundle,
-  readCurrentCampaignMapBundleMetadata,
   responseFromCampaignMapBundleRow,
 } from '@/lib/services/CampaignMapBundlePrebuilder';
 
@@ -169,27 +169,11 @@ export async function GET(
     }
 
     const signature = clientSignature(request);
-    if (signature) {
-      const metadata = await measured('signature', spans, () =>
-        readCurrentCampaignMapBundleMetadata(supabase, campaignId)
-      );
-      if (metadata?.asset_signature === signature) {
-        return emptyResponse({
-          status: 304,
-          spans,
-          startedAt,
-          extraHeaders: {
-            ETag: etagForSignature(metadata.asset_signature),
-            'X-FLYR-Map-Bundle-Cache': 'not-modified',
-          },
-        });
-      }
-    }
-
     const current = await measured(signature ? 'bundle' : 'signature', spans, () =>
       readCurrentCampaignMapBundle(supabase, campaignId)
     );
-    if (current && signature && current.asset_signature === signature) {
+    const currentNeedsRebuild = campaignMapBundleNeedsRebuild(current);
+    if (current && signature && current.asset_signature === signature && !currentNeedsRebuild) {
       return emptyResponse({
         status: 304,
         spans,
@@ -201,7 +185,7 @@ export async function GET(
       });
     }
 
-    if (current) {
+    if (current && !currentNeedsRebuild) {
       const bundle = responseFromCampaignMapBundleRow(current, (name, durationMs) => {
         spans.push({ name, durationMs });
       });
@@ -247,6 +231,21 @@ export async function GET(
           message: buildError instanceof Error ? buildError.message : String(buildError),
         });
       }
+    }
+
+    if (current) {
+      const bundle = responseFromCampaignMapBundleRow(current, (name, durationMs) => {
+        spans.push({ name, durationMs });
+      });
+      return jsonResponse(bundle, {
+        status: 200,
+        spans,
+        startedAt,
+        extraHeaders: {
+          ETag: etagForSignature(current.asset_signature),
+          'X-FLYR-Map-Bundle-Cache': 'stale-hit',
+        },
+      });
     }
 
     return jsonResponse(pendingCampaignMapBundleResponse(campaignId), {
