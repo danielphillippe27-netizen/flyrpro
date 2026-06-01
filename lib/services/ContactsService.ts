@@ -245,6 +245,33 @@ export class ContactsService {
     return data;
   }
 
+  private static getAddressOutcomeForContact(
+    payload: Pick<CreateContactPayload, 'appointment_at' | 'follow_up_at'>
+  ): 'appointment' | 'follow_up' | null {
+    if (payload.appointment_at) return 'appointment';
+    if (payload.follow_up_at) return 'follow_up';
+    return null;
+  }
+
+  private static async syncContactTimingToAddressOutcome(
+    payload: Pick<CreateContactPayload, 'campaign_id' | 'appointment_at' | 'follow_up_at'> & { address_id?: string }
+  ): Promise<void> {
+    const status = this.getAddressOutcomeForContact(payload);
+    if (!status || !payload.campaign_id || !payload.address_id) return;
+
+    const { error } = await this.client.rpc('record_campaign_address_outcome', {
+      p_campaign_id: payload.campaign_id,
+      p_campaign_address_id: payload.address_id,
+      p_status: status,
+      p_notes: '',
+      p_occurred_at: payload.appointment_at ?? payload.follow_up_at ?? new Date().toISOString(),
+    });
+
+    if (error) {
+      console.warn('[ContactsService] Failed to sync contact timing to address status:', error);
+    }
+  }
+
   static async updateContact(id: string, updates: Partial<Contact>): Promise<void> {
     const { error } = await this.client
       .from('contacts')
@@ -362,7 +389,13 @@ export class ContactsService {
 
     // If address_id is provided, link it
     if (payload.address_id) {
-      return await this.linkContactToAddress(contact.id, payload.address_id);
+      const linkedContact = await this.linkContactToAddress(contact.id, payload.address_id);
+      await this.syncContactTimingToAddressOutcome({
+        ...payload,
+        campaign_id: linkedContact.campaign_id ?? payload.campaign_id,
+        address_id: linkedContact.address_id ?? payload.address_id,
+      });
+      return linkedContact;
     }
 
     return contact;

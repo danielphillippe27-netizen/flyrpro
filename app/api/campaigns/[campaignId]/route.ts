@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { ensureCampaignAccess } from '@/app/api/campaigns/_utils/access';
+import { resolveCampaignRegion } from '@/lib/geo/regionResolver';
+import { bboxFromPolygon } from '@/lib/services/provisionHelpers';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -34,6 +36,52 @@ function isCampaignTypeConstraintError(error: unknown): boolean {
     candidate.details?.includes('campaigns_type_check') ||
     false
   );
+}
+
+function normalizeBbox(value: unknown): [number, number, number, number] | null {
+  if (!Array.isArray(value) || value.length !== 4) return null;
+  const bbox = value.map((entry) => Number(entry));
+  if (!bbox.every(Number.isFinite)) return null;
+  if (bbox[0] > bbox[2] || bbox[1] > bbox[3]) return null;
+  return bbox as [number, number, number, number];
+}
+
+function normalizeTerritoryBoundary(value: unknown): GeoJSON.Polygon | null {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    (value as { type?: unknown }).type !== 'Polygon' ||
+    !Array.isArray((value as { coordinates?: unknown }).coordinates)
+  ) {
+    return null;
+  }
+
+  const polygon = value as GeoJSON.Polygon;
+  const ring = polygon.coordinates[0];
+  if (!Array.isArray(ring) || ring.length < 4) return null;
+  for (const point of ring) {
+    if (
+      !Array.isArray(point) ||
+      point.length < 2 ||
+      typeof point[0] !== 'number' ||
+      typeof point[1] !== 'number' ||
+      !Number.isFinite(point[0]) ||
+      !Number.isFinite(point[1])
+    ) {
+      return null;
+    }
+  }
+
+  const first = ring[0];
+  const last = ring[ring.length - 1];
+  if (first[0] === last[0] && first[1] === last[1]) {
+    return polygon;
+  }
+
+  return {
+    ...polygon,
+    coordinates: [[...ring, [first[0], first[1]]], ...polygon.coordinates.slice(1)],
+  };
 }
 
 type RouteContext = {
@@ -105,9 +153,12 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       name?: unknown;
       description?: unknown;
       type?: unknown;
+      territory_boundary?: unknown;
+      bbox?: unknown;
+      region?: unknown;
     };
 
-    const updates: Record<string, string> = {};
+    const updates: Record<string, unknown> = {};
     if (typeof body.name === 'string') {
       const trimmedName = body.name.trim();
       if (!trimmedName) {
@@ -129,15 +180,25 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       updates.type = trimmedType;
     }
 
-    if (Object.keys(updates).length === 0) {
-      return NextResponse.json({ error: 'No campaign updates provided' }, { status: 400 });
+    const hasTerritoryBoundary = Object.prototype.hasOwnProperty.call(body, 'territory_boundary');
+    const territoryBoundary = hasTerritoryBoundary
+      ? normalizeTerritoryBoundary(body.territory_boundary)
+      : null;
+    if (hasTerritoryBoundary && !territoryBoundary) {
+      return NextResponse.json({ error: 'Invalid territory boundary polygon' }, { status: 400 });
+    }
+
+    const hasBbox = Object.prototype.hasOwnProperty.call(body, 'bbox');
+    const requestedBbox = hasBbox ? normalizeBbox(body.bbox) : null;
+    if (hasBbox && !requestedBbox) {
+      return NextResponse.json({ error: 'Invalid bbox' }, { status: 400 });
     }
 
     const admin = createAdminClient();
 
     const { data: campaign, error: campaignError } = await admin
       .from('campaigns')
-      .select('id, owner_id')
+      .select('id, owner_id, region')
       .eq('id', campaignId)
       .maybeSingle();
 
@@ -152,6 +213,27 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
     if (campaign.owner_id !== user.id) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
+    if (territoryBoundary) {
+      const bbox = requestedBbox ?? bboxFromPolygon(territoryBoundary);
+      if (!bbox) {
+        return NextResponse.json({ error: 'Could not calculate territory bbox' }, { status: 400 });
+      }
+      const regionResolution = await resolveCampaignRegion({
+        currentRegion: typeof body.region === 'string' && body.region.trim()
+          ? body.region.trim().toUpperCase()
+          : campaign.region,
+        polygon: territoryBoundary,
+        bbox,
+      });
+      updates.territory_boundary = territoryBoundary;
+      updates.bbox = bbox;
+      updates.region = regionResolution.regionCode;
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return NextResponse.json({ error: 'No campaign updates provided' }, { status: 400 });
     }
 
     const requestedType = typeof body.type === 'string' ? body.type.trim() : null;

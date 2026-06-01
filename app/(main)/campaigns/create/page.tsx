@@ -31,6 +31,90 @@ import { Satellite, Map, Trash2, Pencil, Search } from 'lucide-react';
 import * as turf from '@turf/turf';
 import Lottie from 'lottie-react';
 
+const MAP_USABLE_PHASES = new Set(['map_ready', 'linker_ready', 'optimized']);
+const MAP_COMPLETE_PHASES = new Set(['optimized']);
+const MAP_READY_TIMEOUT_MS = 5 * 60 * 1000;
+const MAP_BUNDLE_TIMEOUT_MS = 45 * 1000;
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForCampaignMapReady(
+  campaignId: string,
+  onProgress?: (message: string) => void,
+  options?: { requireOptimized?: boolean }
+) {
+  const startedAt = Date.now();
+  const readyPhases = options?.requireOptimized ? MAP_COMPLETE_PHASES : MAP_USABLE_PHASES;
+
+  while (Date.now() - startedAt < MAP_READY_TIMEOUT_MS) {
+    const response = await fetch(`/api/campaigns/${campaignId}`, {
+      credentials: 'include',
+      cache: 'no-store',
+    });
+
+    if (response.ok) {
+      const state = await response.json().catch(() => ({}));
+      const status = typeof state.provision_status === 'string'
+        ? state.provision_status
+        : typeof state.status === 'string'
+          ? state.status
+          : null;
+      const phase = typeof state.provision_phase === 'string' ? state.provision_phase : null;
+
+      if (status === 'failed') {
+        throw new Error('Campaign setup failed while preparing map geometry.');
+      }
+
+      if (status === 'ready' && (!phase || readyPhases.has(phase))) {
+        return state;
+      }
+
+      onProgress?.(options?.requireOptimized
+        ? 'Finishing parcel and building links...'
+        : phase === 'addresses_ready'
+        ? 'Preparing map geometry...'
+        : 'Waiting for map geometry...');
+    }
+
+    await delay(2000);
+  }
+
+  throw new Error('Campaign setup is still running. Please open the campaign again in a moment.');
+}
+
+function mapBundleFeatureCount(bundle: unknown): number {
+  const record = bundle as Record<string, { features?: unknown[] } | undefined>;
+  return (
+    (Array.isArray(record.buildings?.features) ? record.buildings.features.length : 0) +
+    (Array.isArray(record.addresses?.features) ? record.addresses.features.length : 0) +
+    (Array.isArray(record.parcels?.features) ? record.parcels.features.length : 0)
+  );
+}
+
+async function prewarmCampaignMapBundleForOpen(campaignId: string) {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < MAP_BUNDLE_TIMEOUT_MS) {
+    const response = await fetch(`/api/campaigns/${campaignId}/map-bundle`, {
+      credentials: 'include',
+      cache: 'no-store',
+    });
+
+    if (response.ok) {
+      const bundle = await response.json().catch(() => null);
+      if (bundle && (bundle.map_ready === true || bundle.status === 'ready' || mapBundleFeatureCount(bundle) > 0)) {
+        return bundle;
+      }
+    }
+
+    await delay(1500);
+  }
+
+  throw new Error('Map bundle is still warming. Please open the campaign again in a moment.');
+}
+
 export default function CreateCampaignPage() {
   const router = useRouter();
   const { theme } = useTheme();
@@ -374,6 +458,17 @@ export default function CreateCampaignPage() {
     applyDrawModeForPhase(drawRef.current, phase, hasSavedFeatures);
   }, [mapLoaded, phase]);
 
+  useEffect(() => {
+    if (!mapLoaded || !map.current) return;
+
+    const container = map.current.getContainer();
+    container.classList.toggle('flyr-territory-draw-cursor', phase === 'drawing');
+
+    return () => {
+      container.classList.remove('flyr-territory-draw-cursor');
+    };
+  }, [mapLoaded, phase]);
+
   // Keep map fully sized when surrounding layout (e.g. campaign sidebar) collapses/expands.
   useEffect(() => {
     if (!mapLoaded || !map.current || !mapContainer.current) return;
@@ -507,8 +602,6 @@ export default function CreateCampaignPage() {
           type: 'flyer',
           address_source: 'map',
           workspace_id: currentWorkspaceId ?? undefined,
-          bbox,
-          territory_boundary: polygon || undefined,
         }),
       });
       if (!createRes.ok) {
@@ -520,8 +613,23 @@ export default function CreateCampaignPage() {
 
       if (polygon) {
         setProvisioning(true);
-        setProvisionProgress('Scanning 3D Shapes...');
+        setProvisionProgress('Saving territory boundary...');
         try {
+          const boundaryResponse = await fetch(`/api/campaigns/${campaign.id}`, {
+            method: 'PATCH',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              territory_boundary: polygon,
+              bbox,
+            }),
+          });
+          if (!boundaryResponse.ok) {
+            const error = await boundaryResponse.json().catch(() => ({}));
+            throw new Error(error.error || `Failed to save territory boundary (${boundaryResponse.status})`);
+          }
+
+          setProvisionProgress('Scanning 3D Shapes...');
           const progressInterval = setInterval(() => {
             setProvisionProgress((prev) => {
               if (prev === 'Scanning 3D Shapes...') return 'Matching Addresses...';
@@ -537,6 +645,8 @@ export default function CreateCampaignPage() {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 campaign_id: campaign.id,
+                wait_for_postprocess: true,
+                require_linked_homes: true,
               }),
             });
 
@@ -558,6 +668,10 @@ export default function CreateCampaignPage() {
               if (links_created < addresses_saved) {
                 setProvisionProgress(`Linking: ${links_created} / ${addresses_saved} addresses...`);
               }
+              setProvisionProgress('Waiting for map geometry...');
+              await waitForCampaignMapReady(campaign.id, setProvisionProgress, { requireOptimized: true });
+              setProvisionProgress('Preparing map bundle...');
+              await prewarmCampaignMapBundleForOpen(campaign.id);
               await new Promise(resolve => setTimeout(resolve, 800));
             }
           } finally {

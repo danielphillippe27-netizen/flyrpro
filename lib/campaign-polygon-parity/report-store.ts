@@ -57,9 +57,31 @@ function dashboardReport(report: any) {
           campaignId: result?.campaignId,
           timings: result?.timings ?? {},
           counts: result?.counts,
+          workflow: result?.workflow,
+          endpoints: result?.endpoints
+            ? {
+                mapBundle: endpointSummary(result.endpoints.mapBundle),
+                addresses: endpointSummary(result.endpoints.addresses),
+                buildingsCold: endpointSummary(result.endpoints.buildingsCold),
+                buildingsBypass: endpointSummary(result.endpoints.buildingsBypass),
+                parcels: endpointSummary(result.endpoints.parcels),
+              }
+            : undefined,
           warnings: Array.isArray(result?.warnings) ? result.warnings : [],
           errors: Array.isArray(result?.errors) ? result.errors : [],
         }))
       : [],
+  };
+}
+
+function endpointSummary(endpoint: any) {
+  if (!endpoint) return undefined;
+  return {
+    status: endpoint.status,
+    seconds: endpoint.seconds,
+    count: endpoint.count,
+    hash: endpoint.hash,
+    bytes: endpoint.bytes,
+    headers: endpoint.headers,
   };
 }

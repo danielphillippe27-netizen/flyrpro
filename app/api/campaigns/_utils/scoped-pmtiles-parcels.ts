@@ -1,4 +1,5 @@
 import { VectorTile } from '@mapbox/vector-tile';
+import * as turf from '@turf/turf';
 import Pbf from 'pbf';
 import { getCachedPmtilesArchive } from '@/app/api/campaigns/_utils/tile-cache';
 import {
@@ -32,6 +33,10 @@ export type ScopedParcelResult = {
   };
 };
 
+export type ScopedParcelOptions = {
+  residentialOnly?: boolean;
+};
+
 const PARCEL_SEAM_SAFE_MAX_ZOOM = 13;
 const PARCEL_RESPONSE_CACHE_TTL_MS = 30_000;
 const PARCEL_RESPONSE_CACHE_MAX_ENTRIES = 64;
@@ -42,35 +47,68 @@ const PARCEL_TILE_FETCH_CONCURRENCY = Math.max(
     : 12
 );
 const NON_RESIDENTIAL_PARCEL_TERMS = [
-  'road',
-  'street',
-  'motorway',
-  'highway',
-  'rail',
-  'railway',
-  'sidewalk',
-  'footpath',
-  'walkway',
+  'access',
   'accessway',
-  'right of way',
-  'right-of-way',
+  'alley',
+  'allowance',
+  'arterial',
+  'busway',
+  'cemetery',
+  'channel',
+  'common area',
+  'conservation',
+  'corridor',
+  'creek',
+  'ditch',
+  'domain',
   'drain',
   'drainage',
+  'easement',
+  'environmental',
+  'esplanade',
+  'expressway',
+  'fire route',
+  'footpath',
+  'greenbelt',
+  'greenspace',
+  'highway',
+  'hydro',
+  'laneway',
+  'local purpose',
+  'motorway',
+  'open space',
+  'park',
+  'parkette',
+  'parkland',
+  'path',
+  'pathway',
+  'pipeline',
+  'pond',
+  'rail',
+  'railway',
+  'ravine',
+  'recreation',
+  'reserve',
+  'right of way',
+  'right-of-way',
+  'road',
+  'roadway',
+  'roundabout',
+  'school',
+  'sidewalk',
+  'storm',
   'stormwater',
+  'street',
+  'substation',
+  'trail',
+  'transit',
+  'utility',
+  'walkway',
   'wastewater',
   'watercourse',
+  'waterway',
   'river',
   'stream',
-  'creek',
-  'esplanade',
-  'reserve',
-  'recreation',
-  'park',
-  'domain',
-  'local purpose',
-  'utility',
-  'substation',
-  'school',
 ];
 
 const parcelResponseCache = new Map<string, { expiresAt: number; value: ScopedParcelResult }>();
@@ -90,9 +128,20 @@ function numberMetric(metrics: Record<string, unknown> | null | undefined, key: 
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
+function objectMetric(metrics: Record<string, unknown> | null | undefined, key: string): Record<string, unknown> | null {
+  const value = metrics?.[key];
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
 export function parcelTilesFromSnapshot(snapshot: CampaignSnapshotRow | null): ParcelPmtilesResolution | null {
   const pmtilesKey = stringMetric(snapshot?.tile_metrics, 'parcels_pmtiles_key');
   if (!snapshot) return null;
+  const sourceLayers = objectMetric(snapshot.tile_metrics, 'source_layers');
+  const promoteIds = objectMetric(snapshot.tile_metrics, 'promote_ids');
+  const sourceLayer = stringMetric(sourceLayers, 'parcels') ?? 'parcels';
+  const promoteId = stringMetric(promoteIds, 'parcels') ?? 'parcel_id';
 
   if (!pmtilesKey) {
     const buildingPmtilesKey = resolvePmtilesKey(snapshot);
@@ -109,8 +158,8 @@ export function parcelTilesFromSnapshot(snapshot: CampaignSnapshotRow | null): P
       pmtilesKey: derivedPmtilesKey,
       tilejsonKey: derivedPmtilesKey.replace(/\.pmtiles$/i, '.json'),
       datePart: 'snapshot',
-      sourceLayer: 'parcels',
-      promoteId: 'parcel_id',
+      sourceLayer,
+      promoteId,
       minzoom: numberMetric(snapshot.tile_metrics, 'parcel_minzoom') ?? 10,
       maxzoom: numberMetric(snapshot.tile_metrics, 'parcel_maxzoom') ?? 16,
     };
@@ -123,8 +172,8 @@ export function parcelTilesFromSnapshot(snapshot: CampaignSnapshotRow | null): P
       stringMetric(snapshot.tile_metrics, 'parcels_tilejson_key') ??
       pmtilesKey.replace(/\.pmtiles$/i, '.json'),
     datePart: 'snapshot',
-    sourceLayer: 'parcels',
-    promoteId: 'parcel_id',
+    sourceLayer,
+    promoteId,
     minzoom: numberMetric(snapshot.tile_metrics, 'parcel_minzoom') ?? 10,
     maxzoom: numberMetric(snapshot.tile_metrics, 'parcel_maxzoom') ?? 16,
   };
@@ -200,6 +249,17 @@ function geometryIntersectsBbox(
   geometry: GeoJSON.Geometry | null | undefined,
   bbox: [number, number, number, number]
 ): boolean {
+  if (geometry) {
+    try {
+      return turf.booleanIntersects(
+        turf.feature(geometry),
+        turf.bboxPolygon(bbox)
+      );
+    } catch {
+      // Fall through to the cheap vertex check for malformed municipal shapes.
+    }
+  }
+
   return flattenPositions(geometry).some((position) => pointInBbox(position, bbox));
 }
 
@@ -280,9 +340,10 @@ export function tileRangeForParcelBbox(bbox: [number, number, number, number], m
   return null;
 }
 
-export function getParcelFeatureExternalId(feature: GeoJSON.Feature): string | null {
+export function getParcelFeatureExternalId(feature: GeoJSON.Feature, promoteId?: string | null): string | null {
   const properties = (feature.properties ?? {}) as Record<string, unknown>;
   const candidates = [
+    promoteId ? properties[promoteId] : null,
     properties.parcel_id,
     properties.external_id,
     properties.PARCELID,
@@ -303,13 +364,95 @@ export function getParcelFeatureExternalId(feature: GeoJSON.Feature): string | n
 }
 
 function normalizedParcelText(value: unknown): string {
-  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (typeof value === 'string') return value.trim().toLowerCase();
+  if (typeof value === 'number') return String(value);
+  if (Array.isArray(value)) {
+    return value.map(normalizedParcelText).filter(Boolean).join(' ');
+  }
+  if (value && typeof value === 'object') {
+    return Object.values(value as Record<string, unknown>)
+      .map(normalizedParcelText)
+      .filter(Boolean)
+      .join(' ');
+  }
+  return '';
 }
 
 function hasNonResidentialParcelTerm(value: unknown): boolean {
   const text = normalizedParcelText(value);
   if (!text) return false;
   return NON_RESIDENTIAL_PARCEL_TERMS.some((term) => text.includes(term));
+}
+
+function numberValue(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function parcelAreaSqm(properties: Record<string, unknown>): number | null {
+  const rawAttributes = properties.raw_attributes && typeof properties.raw_attributes === 'object'
+    ? properties.raw_attributes as Record<string, unknown>
+    : {};
+  return (
+    numberValue(properties.area_sqm) ??
+    numberValue(properties.area) ??
+    numberValue(rawAttributes.Shape__Area) ??
+    numberValue(rawAttributes.SHAPE_Area) ??
+    numberValue(rawAttributes.shape_area)
+  );
+}
+
+function parcelPerimeterMeters(properties: Record<string, unknown>): number | null {
+  const rawAttributes = properties.raw_attributes && typeof properties.raw_attributes === 'object'
+    ? properties.raw_attributes as Record<string, unknown>
+    : {};
+  return (
+    numberValue(properties.perimeter_m) ??
+    numberValue(properties.perimeter) ??
+    numberValue(properties.shape_length) ??
+    numberValue(rawAttributes.Shape__Length) ??
+    numberValue(rawAttributes.SHAPE_Length) ??
+    numberValue(rawAttributes.shape_length)
+  );
+}
+
+function hasNonDoorableParcelShape(properties: Record<string, unknown>): boolean {
+  const area = parcelAreaSqm(properties);
+  const perimeter = parcelPerimeterMeters(properties);
+  if (area == null || perimeter == null || perimeter <= 0) return false;
+
+  const compactness = area / (perimeter * perimeter);
+  return perimeter >= 250 && compactness < 0.012;
+}
+
+export function isDisplayableParcelFeature(feature: GeoJSON.Feature): boolean {
+  const properties = (feature.properties ?? {}) as Record<string, unknown>;
+  if ([
+    properties.parcel_intent,
+    properties.appellation,
+    properties.statutory_actions,
+    properties.zoning,
+    properties.land_use,
+    properties.landuse,
+    properties.use,
+    properties.type,
+    properties.class,
+    properties.subtype,
+    properties.category,
+    properties.feature_type,
+    properties.description,
+    properties.name,
+    properties.road_name,
+    properties.raw_attributes,
+  ].some(hasNonResidentialParcelTerm)) {
+    return false;
+  }
+
+  return !hasNonDoorableParcelShape(properties);
 }
 
 export function isResidentialParcelFeature(feature: GeoJSON.Feature): boolean {
@@ -342,6 +485,15 @@ export function featureWithinParcelCampaignScope(
   const inBbox = (center && pointInBbox(center, bbox)) || geometryIntersectsBbox(feature.geometry, bbox);
   if (!inBbox) return false;
   if (!boundary) return true;
+  try {
+    return turf.booleanIntersects(
+      feature as GeoJSON.Feature<GeoJSON.Geometry>,
+      turf.feature(boundary)
+    );
+  } catch {
+    // Fall through to center/vertex checks for malformed municipal shapes.
+  }
+
   if (center && pointInPolygon(center, boundary)) return true;
 
   return flattenPositions(feature.geometry).some((position) => pointInPolygon(position, boundary));
@@ -369,6 +521,7 @@ function cacheKeyForScopedParcels(params: {
   parcelTiles: ParcelPmtilesResolution;
   bbox: [number, number, number, number];
   boundary: GeoJSON.Polygon | null;
+  residentialOnly: boolean;
 }) {
   return [
     'parcels',
@@ -378,6 +531,7 @@ function cacheKeyForScopedParcels(params: {
     params.snapshot.created_at ?? '',
     JSON.stringify(params.bbox),
     JSON.stringify(params.boundary),
+    params.residentialOnly ? 'residential' : 'display',
   ].join('|');
 }
 
@@ -419,7 +573,8 @@ async function extractScopedPmtilesParcels(
   snapshot: CampaignSnapshotRow,
   parcelTiles: ParcelPmtilesResolution,
   bbox: [number, number, number, number],
-  boundary: GeoJSON.Polygon | null
+  boundary: GeoJSON.Polygon | null,
+  options: ScopedParcelOptions = {}
 ): Promise<ScopedParcelResult> {
   const totalStarted = performance.now();
   const artifactStarted = performance.now();
@@ -478,9 +633,13 @@ async function extractScopedPmtilesParcels(
       const feature = vectorFeature.toGeoJSON(x, y, range.z) as GeoJSON.Feature;
       if (feature.geometry?.type !== 'Polygon' && feature.geometry?.type !== 'MultiPolygon') continue;
       if (!featureWithinParcelCampaignScope(feature, bbox, boundary)) continue;
-      if (!isResidentialParcelFeature(feature)) continue;
+      if (options.residentialOnly === true) {
+        if (!isResidentialParcelFeature(feature)) continue;
+      } else if (!isDisplayableParcelFeature(feature)) {
+        continue;
+      }
 
-      const externalId = getParcelFeatureExternalId(feature);
+      const externalId = getParcelFeatureExternalId(feature, parcelTiles.promoteId);
       if (!externalId) continue;
 
       parcels.push({
@@ -538,10 +697,18 @@ export async function fetchScopedPmtilesParcels(
   snapshot: CampaignSnapshotRow,
   parcelTiles: ParcelPmtilesResolution,
   bbox: [number, number, number, number],
-  boundary: GeoJSON.Polygon | null
+  boundary: GeoJSON.Polygon | null,
+  options: ScopedParcelOptions = {}
 ): Promise<ScopedParcelResult> {
   const cacheStarted = performance.now();
-  const cacheKey = cacheKeyForScopedParcels({ campaignId, snapshot, parcelTiles, bbox, boundary });
+  const cacheKey = cacheKeyForScopedParcels({
+    campaignId,
+    snapshot,
+    parcelTiles,
+    bbox,
+    boundary,
+    residentialOnly: options.residentialOnly === true,
+  });
   const cached = getCachedScopedParcels(cacheKey);
   if (cached) {
     return {
@@ -568,7 +735,7 @@ export async function fetchScopedPmtilesParcels(
     };
   }
 
-  const promise = extractScopedPmtilesParcels(campaignId, snapshot, parcelTiles, bbox, boundary)
+  const promise = extractScopedPmtilesParcels(campaignId, snapshot, parcelTiles, bbox, boundary, options)
     .then((result) => {
       setCachedScopedParcels(cacheKey, result);
       return result;
@@ -592,6 +759,7 @@ export const scopedPmtilesParcelsTestHooks = {
   PARCEL_TILE_FETCH_CONCURRENCY,
   tileRangeForParcelBbox,
   getParcelFeatureExternalId,
+  isDisplayableParcelFeature,
   isResidentialParcelFeature,
   featureWithinParcelCampaignScope,
   parcelTilesFromSnapshot,

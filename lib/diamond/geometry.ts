@@ -28,8 +28,8 @@ type ParcelPmtilesResolution = {
   pmtilesKey: string;
   tilejsonKey: string;
   datePart: string;
-  sourceLayer: 'parcels';
-  promoteId: 'parcel_id';
+  sourceLayer: string;
+  promoteId: string;
   minzoom: number;
   maxzoom: number;
 };

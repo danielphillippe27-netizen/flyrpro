@@ -1,5 +1,6 @@
 import type { CampaignAddress, CampaignContact } from '@/types/database';
 import type { CampaignStats } from '@/lib/services/CampaignsService';
+import { normalizeAddressStatus } from '@/lib/constants/mapStatus';
 
 const VISITED_STATUSES = new Set([
   'no_answer',
@@ -26,7 +27,7 @@ const LEAD_STATUSES = new Set(['lead', 'interested', 'hot_lead']);
 const HOT_LEAD_STATUSES = new Set(['appointment', 'follow_up', 'appointment_set', 'callback_requested', 'future_seller']);
 
 function normalizeStatus(status?: string | null): string {
-  return (status ?? '').trim().toLowerCase();
+  return normalizeAddressStatus(status);
 }
 
 export function getCampaignAddressMapStatus(

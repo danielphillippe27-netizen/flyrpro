@@ -154,7 +154,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
 
       const { error: linkError } = await supabase
         .from("building_address_links")
-        .upsert(links, { onConflict: "building_id,address_id,campaign_id" });
+        .upsert(links, { onConflict: "campaign_id,address_id" });
 
       if (linkError) {
         console.error("[manual-building] link error:", linkError);

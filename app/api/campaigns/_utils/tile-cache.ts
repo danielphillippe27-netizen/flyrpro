@@ -1,3 +1,4 @@
+import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { FetchSource, PMTiles, type RangeResponse } from 'pmtiles';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { NextRequest } from 'next/server';
@@ -14,11 +15,13 @@ const AUTH_TTL_MS = 60_000;
 const ACCESS_TTL_MS = 60_000;
 const SNAPSHOT_TTL_MS = 30_000;
 const MAX_ARCHIVES = 64;
+const AWS_REGION = process.env.AWS_REGION || process.env.AWS_S3_BUCKET_REGION || 'us-east-2';
 
 const authCache = new Map<string, CacheEntry<RequestUser | null>>();
 const accessCache = new Map<string, CacheEntry<boolean>>();
 const snapshotCache = new Map<string, CacheEntry<CampaignSnapshotRow | null>>();
 const archiveCache = new Map<string, PMTiles>();
+let s3Client: S3Client | null = null;
 
 class EtagTolerantFetchSource extends FetchSource {
   async getBytes(
@@ -32,6 +35,75 @@ class EtagTolerantFetchSource extends FetchSource {
       etag: undefined,
     };
   }
+}
+
+class S3RangeSource {
+  constructor(
+    private readonly url: string,
+    private readonly bucket: string,
+    private readonly key: string
+  ) {}
+
+  getKey() {
+    return this.url;
+  }
+
+  async getBytes(
+    offset: number,
+    length: number,
+    signal?: AbortSignal
+  ): Promise<RangeResponse> {
+    const response = await getS3Client().send(
+      new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: this.key,
+        Range: `bytes=${offset}-${offset + length - 1}`,
+      }),
+      signal ? { abortSignal: signal } : undefined
+    );
+    const body = response.Body as
+      | { transformToByteArray?: () => Promise<Uint8Array> }
+      | undefined;
+    if (!body?.transformToByteArray) {
+      throw new Error(`Unable to read S3 PMTiles range: ${this.bucket}/${this.key}`);
+    }
+    const bytes = await body.transformToByteArray();
+    const data = new ArrayBuffer(bytes.byteLength);
+    new Uint8Array(data).set(bytes);
+    return {
+      data,
+      etag: undefined,
+      cacheControl: response.CacheControl,
+      expires: response.Expires?.toUTCString(),
+    };
+  }
+}
+
+function getS3Client() {
+  if (!s3Client) {
+    s3Client = new S3Client({
+      region: AWS_REGION,
+      credentials: process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY
+        ? {
+            accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+            secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+            sessionToken: process.env.AWS_SESSION_TOKEN,
+          }
+        : undefined,
+    });
+  }
+  return s3Client;
+}
+
+function parseS3Url(url: string): { bucket: string; key: string } | null {
+  if (!url.startsWith('s3://')) return null;
+  const withoutScheme = url.slice('s3://'.length);
+  const slashIndex = withoutScheme.indexOf('/');
+  if (slashIndex <= 0 || slashIndex === withoutScheme.length - 1) return null;
+  return {
+    bucket: withoutScheme.slice(0, slashIndex),
+    key: withoutScheme.slice(slashIndex + 1),
+  };
 }
 
 function getCached<T>(cache: Map<string, CacheEntry<T>>, key: string): T | undefined {
@@ -118,7 +190,12 @@ export function getCachedPmtilesArchive(url: string) {
   const cached = archiveCache.get(url);
   if (cached) return cached;
 
-  const archive = new PMTiles(new EtagTolerantFetchSource(url));
+  const s3Url = parseS3Url(url);
+  const archive = new PMTiles(
+    s3Url
+      ? new S3RangeSource(url, s3Url.bucket, s3Url.key)
+      : new EtagTolerantFetchSource(url)
+  );
   archiveCache.set(url, archive);
 
   if (archiveCache.size > MAX_ARCHIVES) {

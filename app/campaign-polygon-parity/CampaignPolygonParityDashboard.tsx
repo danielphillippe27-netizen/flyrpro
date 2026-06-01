@@ -32,6 +32,27 @@ type ReportResult = {
   ordinal: number;
   campaignId?: string;
   timings: Record<string, number>;
+  workflow?: {
+    status: string | null;
+    phase: string | null;
+    source: string | null;
+    linksStatus: string | null;
+    sourceVersion: string | null;
+    assetSignature: string | null;
+    links: number;
+    addressOrphans: number;
+    buildingOrphans: number;
+    units: number;
+    hasCanonicalFields: boolean;
+  };
+  endpoints?: Record<string, {
+    status: number;
+    seconds: number;
+    count: number;
+    hash: string;
+    bytes: number;
+    headers?: Record<string, string | null>;
+  } | undefined>;
   counts?: {
     addressesTable: number | null;
     snapshotAddresses: number | null;
@@ -53,7 +74,8 @@ type Report = {
   createdAt: string;
   fixture: {
     name: string;
-    baselineCampaignId: string;
+    label?: string;
+    baselineCampaignId: string | null;
     polygon: {
       type: 'Polygon';
       coordinates: number[][][];
@@ -61,10 +83,11 @@ type Report = {
     bbox: number[];
     expected: {
       region: string;
-      addresses: number;
-      snapshotBuildings: number;
-      roads: number;
-      parcels: number;
+      addresses: number | null;
+      snapshotBuildings: number | null;
+      endpointBuildings?: number;
+      roads: number | null;
+      parcels: number | null;
     };
   };
   validationErrors: string[];
@@ -98,6 +121,14 @@ const SURFACES: Array<{
   { id: 'android_wire', label: 'FLYR Android', icon: TabletSmartphone },
 ];
 
+const FIXTURES = [
+  { id: 'oshawa-on', label: 'Oshawa ON', region: 'ON' },
+  { id: 'fort-worth-tx', label: 'Fort Worth TX', region: 'TX' },
+  { id: 'au-sydney', label: 'Sydney AUS', region: 'AU' },
+  { id: 'nz-auckland', label: 'Auckland NZ', region: 'NZ' },
+  { id: 'za-cape-town', label: 'Cape Town ZA', region: 'ZA' },
+];
+
 const FALLBACK_POLYGON = {
   type: 'Polygon' as const,
   coordinates: [[
@@ -109,18 +140,21 @@ const FALLBACK_POLYGON = {
   ]],
 };
 
-const TIMING_STEPS = [
+const CANONICAL_TIMING_STEPS = [
   'createShell',
   'boundaryWrite',
   'detailsWrite',
   'provisionRequest',
   'waitUntilReady',
   'mapBundle',
+  'detailLoad',
+];
+
+const LEGACY_TIMING_STEPS = [
   'addresses',
   'buildingsCold',
   'buildingsBypass',
   'parcels',
-  'detailLoad',
 ];
 
 export function CampaignPolygonParityDashboard({ initialPayload }: { initialPayload: ApiPayload | null }) {
@@ -129,6 +163,7 @@ export function CampaignPolygonParityDashboard({ initialPayload }: { initialPayl
   const [isStarting, setIsStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [runs, setRuns] = useState(1);
+  const [fixture, setFixture] = useState(initialPayload?.latestReport?.fixture?.name ?? 'oshawa-on');
   const [strictPerformance, setStrictPerformance] = useState(false);
   const [strictBaseline, setStrictBaseline] = useState(false);
 
@@ -160,6 +195,7 @@ export function CampaignPolygonParityDashboard({ initialPayload }: { initialPayl
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           runs,
+          fixture,
           captureScreenshot: false,
           strictBaseline,
           strictPerformance,
@@ -195,12 +231,28 @@ export function CampaignPolygonParityDashboard({ initialPayload }: { initialPayl
             </div>
             <h1 className="text-2xl font-semibold tracking-normal">E2E Surface Dashboard</h1>
             <p className="max-w-3xl text-sm text-muted-foreground">
-              Runs the existing parity harness, watches live output, and renders the latest report from
+              Runs the bundle-first parity harness, watches live output, and checks canonical map bundle hydration against
+              legacy endpoint diagnostics from
               <span className="font-mono"> .tmp/campaign-polygon-parity/</span>.
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <label className="flex h-9 items-center gap-2 rounded-md border border-border px-3 text-sm">
+              Area
+              <select
+                className="h-6 rounded border border-border bg-background px-2 text-sm"
+                value={fixture}
+                onChange={(event) => setFixture(event.target.value)}
+                disabled={runActive || isStarting}
+              >
+                {FIXTURES.map((entry) => (
+                  <option key={entry.id} value={entry.id}>
+                    {entry.label}
+                  </option>
+                ))}
+              </select>
+            </label>
             <label className="flex h-9 items-center gap-2 rounded-md border border-border px-3 text-sm">
               Runs
               <input
@@ -246,14 +298,19 @@ export function CampaignPolygonParityDashboard({ initialPayload }: { initialPayl
             <div className="mb-3 flex items-center justify-between">
               <div>
                 <h2 className="text-sm font-semibold">Canonical Polygon</h2>
-                <p className="text-xs text-muted-foreground">{report?.fixture?.name ?? 'ontario-march-20-campaign-polygon'}</p>
+                <p className="text-xs text-muted-foreground">
+                  {report?.fixture?.label ?? FIXTURES.find((entry) => entry.id === fixture)?.label ?? 'Oshawa ON'}
+                  <span className="ml-2 font-mono">{report?.fixture?.name ?? fixture}</span>
+                </p>
               </div>
               <StatusBadge status={job?.status ?? 'idle'} />
             </div>
             <PolygonPreview polygon={polygon} />
             <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
-              <Metric label="Expected addresses" value={report?.fixture?.expected?.addresses ?? 172} />
-              <Metric label="Expected buildings" value={report?.fixture?.expected?.snapshotBuildings ?? 206} />
+              <Metric label="Region" value={report?.fixture?.expected?.region ?? FIXTURES.find((entry) => entry.id === fixture)?.region ?? 'ON'} />
+              <Metric label="Expected addr" value={report?.fixture?.expected?.addresses ?? 'learn'} />
+              <Metric label="Expected bldgs" value={report?.fixture?.expected?.snapshotBuildings ?? 'learn'} />
+              <Metric label="Expected parcels" value={report?.fixture?.expected?.parcels ?? 'learn'} />
               <Metric label="Warnings" value={warningCount} />
               <Metric label="Failures" value={validationCount} tone={validationCount ? 'bad' : 'good'} />
             </div>
@@ -277,12 +334,19 @@ export function CampaignPolygonParityDashboard({ initialPayload }: { initialPayl
           <div className="rounded-md border border-border bg-card p-4">
             <div className="mb-3 flex items-center justify-between">
               <div>
-                <h2 className="text-sm font-semibold">Step Timings</h2>
-                <p className="text-xs text-muted-foreground">Seconds, latest result per surface</p>
+                <h2 className="text-sm font-semibold">Canonical Path Timings</h2>
+                <p className="text-xs text-muted-foreground">Bundle-first steps, seconds, latest result per surface</p>
               </div>
               <Clock3 className="size-4 text-muted-foreground" />
             </div>
-            <TimingTable results={latestBySurface} />
+            <TimingTable results={latestBySurface} steps={CANONICAL_TIMING_STEPS} />
+            <div className="mt-5 border-t border-border pt-4">
+              <div className="mb-3">
+                <h2 className="text-sm font-semibold">Legacy Diagnostics</h2>
+                <p className="text-xs text-muted-foreground">Fallback endpoint timings stay visible until the bundle path is complete</p>
+              </div>
+              <TimingTable results={latestBySurface} steps={LEGACY_TIMING_STEPS} compact />
+            </div>
           </div>
 
           <div className="rounded-md border border-border bg-card p-4">
@@ -338,6 +402,13 @@ function SurfacePanel({
 }) {
   const status = result ? (result.errors.length ? 'failed' : 'passed') : progress?.status ?? 'idle';
   const counts = result?.counts;
+  const workflow = result?.workflow;
+  const bundleComplete = Boolean(
+    counts &&
+      counts.mapBundleAddresses > 0 &&
+      counts.mapBundleBuildings > 0 &&
+      (counts.parcelsEndpoint === 0 || counts.mapBundleParcels === counts.parcelsEndpoint)
+  );
 
   return (
     <div className="rounded-md border border-border bg-card p-4">
@@ -355,14 +426,31 @@ function SurfacePanel({
       </div>
 
       <div className="grid grid-cols-3 gap-2">
-        <Metric label="Addresses" value={counts?.addressesEndpoint ?? (isLoading ? '...' : '-')} />
-        <Metric label="Buildings" value={counts?.buildingsEndpoint ?? (isLoading ? '...' : '-')} />
-        <Metric label="Parcels" value={counts?.parcelsEndpoint ?? (isLoading ? '...' : '-')} />
+        <Metric label="Bundle addr" value={counts?.mapBundleAddresses ?? (isLoading ? '...' : '-')} />
+        <Metric label="Bundle bldgs" value={counts?.mapBundleBuildings ?? (isLoading ? '...' : '-')} />
+        <Metric
+          label="Bundle parcels"
+          value={counts?.mapBundleParcels ?? (isLoading ? '...' : '-')}
+          tone={counts && counts.parcelsEndpoint > 0 && counts.mapBundleParcels !== counts.parcelsEndpoint ? 'bad' : undefined}
+        />
       </div>
 
       <div className="mt-3 grid grid-cols-2 gap-2">
-        <Metric label="Bundle roads" value={counts?.mapBundleRoads ?? '-'} />
-        <Metric label="Snapshot bldgs" value={counts?.snapshotBuildings ?? '-'} />
+        <Metric label="Links status" value={workflow?.linksStatus ?? 'missing'} tone={workflow?.hasCanonicalFields ? undefined : 'bad'} />
+        <Metric label="Workflow" value={bundleComplete ? 'complete' : result ? 'gap' : '-'} tone={bundleComplete ? 'good' : result ? 'bad' : undefined} />
+        <Metric label="/addresses" value={counts?.addressesEndpoint ?? '-'} />
+        <Metric label="/parcels" value={counts?.parcelsEndpoint ?? '-'} />
+      </div>
+
+      <div className="mt-3 rounded-md border border-border bg-background px-3 py-2 text-xs">
+        <div className="mb-1 flex items-center justify-between gap-3">
+          <span className="text-muted-foreground">Asset signature</span>
+          <span className="font-mono">{shortToken(workflow?.assetSignature)}</span>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-muted-foreground">Source version</span>
+          <span className="font-mono">{shortToken(workflow?.sourceVersion)}</span>
+        </div>
       </div>
 
       <div className="mt-4 text-xs text-muted-foreground">
@@ -372,10 +460,18 @@ function SurfacePanel({
   );
 }
 
-function TimingTable({ results }: { results: Partial<Record<Surface, ReportResult>> }) {
+function TimingTable({
+  results,
+  steps,
+  compact,
+}: {
+  results: Partial<Record<Surface, ReportResult>>;
+  steps: string[];
+  compact?: boolean;
+}) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[760px] text-left text-xs">
+      <table className={`w-full min-w-[760px] text-left text-xs ${compact ? 'opacity-90' : ''}`}>
         <thead className="border-b border-border text-muted-foreground">
           <tr>
             <th className="py-2 pr-3 font-medium">Step</th>
@@ -385,7 +481,7 @@ function TimingTable({ results }: { results: Partial<Record<Surface, ReportResul
           </tr>
         </thead>
         <tbody>
-          {TIMING_STEPS.map((step) => (
+          {steps.map((step) => (
             <tr key={step} className="border-b border-border/60 last:border-b-0">
               <td className="py-2 pr-3 font-mono text-muted-foreground">{step}</td>
               {SURFACES.map((surface) => {
@@ -461,6 +557,12 @@ function Metric({
       </div>
     </div>
   );
+}
+
+function shortToken(value: string | null | undefined) {
+  if (!value) return 'missing';
+  if (value.length <= 18) return value;
+  return `${value.slice(0, 10)}...${value.slice(-6)}`;
 }
 
 function StatusBadge({ status }: { status: JobStatus }) {

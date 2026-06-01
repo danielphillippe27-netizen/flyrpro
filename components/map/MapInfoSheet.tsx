@@ -68,6 +68,7 @@ interface MapInfoSheetProps {
  */
 const TOOL_FILTER_ITEMS: Array<{ key: MapStatusKey; label: string }> = [
   { key: 'QR_SCANNED', label: 'QR codes scanned' },
+  { key: 'HOT_LEADS', label: 'Appointments / follow-up' },
   { key: 'LEADS', label: 'Leads' },
   { key: 'CONVERSATIONS', label: 'Conversations' },
   { key: 'TOUCHED', label: 'Attempted' },

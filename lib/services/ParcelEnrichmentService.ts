@@ -908,6 +908,17 @@ export class ParcelEnrichmentService {
     const campaignBuildings = await this.loadCampaignBuildings(campaignId);
     const campaignBuildingCount = campaignBuildings.features.length;
     const linker = new StableLinkerService(this.supabase);
+    const parcelBridgeGeoJSON = {
+      features: parcels.map((parcel) => ({
+        type: 'Feature' as const,
+        geometry: parcel.geometry,
+        properties: {
+          ...parcel.properties,
+          external_id: parcel.externalId,
+          parcel_id: parcel.externalId,
+        },
+      })),
+    };
 
     if (campaignBuildingCount > 0) {
       console.log('[ParcelEnrichment] Relinking campaign building store with area-only house filtering:', {
@@ -923,6 +934,7 @@ export class ParcelEnrichmentService {
         {
           resetExisting: true,
           persistenceMode: 'gold',
+          parcelsGeoJSON: parcelBridgeGeoJSON,
         }
       );
 
@@ -931,7 +943,7 @@ export class ParcelEnrichmentService {
         gold_linker_ran: true,
         consolidated_linker_ran: true,
         snapshot_linker_ran: false,
-        snapshot_linker_used_parcels: false,
+        snapshot_linker_used_parcels: parcels.length > 0,
         campaign_building_count: campaignBuildingCount,
         snapshot_building_count: 0,
       };
@@ -966,6 +978,7 @@ export class ParcelEnrichmentService {
       snapshot.overtureRelease,
       {
         resetExisting: true,
+        parcelsGeoJSON: parcelBridgeGeoJSON,
       }
     );
 
@@ -974,7 +987,7 @@ export class ParcelEnrichmentService {
       gold_linker_ran: false,
       consolidated_linker_ran: true,
       snapshot_linker_ran: true,
-      snapshot_linker_used_parcels: false,
+      snapshot_linker_used_parcels: parcels.length > 0,
       campaign_building_count: campaignBuildingCount,
       snapshot_building_count: snapshot.buildingsGeoJSON.features.length,
     };

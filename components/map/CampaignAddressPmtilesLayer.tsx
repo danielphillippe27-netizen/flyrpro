@@ -4,7 +4,17 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 import type { CampaignAddress, CampaignType } from '@/types/database';
 import { getCampaignAddressMapStatus } from '@/lib/campaignStats';
-import type { StatusFilters } from '@/lib/constants/mapStatus';
+import {
+  CONVERSATION_ADDRESS_STATUSES,
+  DEFAULT_STATUS_FILTERS,
+  HOT_LEAD_ADDRESS_STATUSES,
+  LEAD_ADDRESS_STATUSES,
+  MAP_STATUS_CONFIG,
+  NO_ONE_HOME_ADDRESS_STATUSES,
+  TOUCHED_ADDRESS_STATUSES,
+  UNTOUCHED_ADDRESS_STATUSES,
+  type StatusFilters,
+} from '@/lib/constants/mapStatus';
 import {
   appendTileAccessToken,
   fetchCampaignMapManifest,
@@ -34,6 +44,7 @@ type CampaignAddressPmtilesLayerProps = {
   campaignBoundary?: GeoJSON.Polygon | null;
   campaignBbox?: [number, number, number, number] | null;
   styleKey?: string;
+  allowFallbackFetches?: boolean;
   onAddressClick?: (
     addressId: string,
     buildingId: string | null,
@@ -71,6 +82,44 @@ const ADDRESS_ID_EXPRESSION: mapboxgl.Expression = [
   '',
 ];
 const NO_FEATURES_FILTER: mapboxgl.Expression = ['==', ['literal', 1], 0];
+
+function buildAddressStatusColorExpression(statusFilters: StatusFilters): mapboxgl.Expression {
+  const getAddressStatus = () => [
+    'downcase',
+    ['to-string', ['coalesce', ['feature-state', 'address_status'], ['get', 'address_status'], ['get', 'status'], 'none']],
+  ];
+  const getScansTotal = () => ['to-number', ['coalesce', ['feature-state', 'scans_total'], ['get', 'scans_total'], ['get', 'scans'], 0], 0];
+  const getQrScanned = () => ['coalesce', ['feature-state', 'qr_scanned'], ['get', 'qr_scanned'], false];
+  const isQrScanned = ['any', ['==', getQrScanned(), true], ['==', getQrScanned(), 'true'], ['>', getScansTotal(), 0]];
+  const isHotLead = ['in', getAddressStatus(), ['literal', HOT_LEAD_ADDRESS_STATUSES]];
+  const isLead = ['in', getAddressStatus(), ['literal', LEAD_ADDRESS_STATUSES]];
+  const isConversation = ['in', getAddressStatus(), ['literal', CONVERSATION_ADDRESS_STATUSES]];
+  const isDoNotKnock = ['==', getAddressStatus(), 'do_not_knock'];
+  const isNoOneHome = ['in', getAddressStatus(), ['literal', NO_ONE_HOME_ADDRESS_STATUSES]];
+  const isTouched = ['in', getAddressStatus(), ['literal', TOUCHED_ADDRESS_STATUSES]];
+  const isUntouched = ['in', getAddressStatus(), ['literal', UNTOUCHED_ADDRESS_STATUSES]];
+
+  return [
+    'case',
+    ['all', isQrScanned, statusFilters.QR_SCANNED],
+    MAP_STATUS_CONFIG.QR_SCANNED.color,
+    ['all', isHotLead, statusFilters.HOT_LEADS],
+    MAP_STATUS_CONFIG.HOT_LEADS.color,
+    ['all', isLead, statusFilters.LEADS],
+    MAP_STATUS_CONFIG.LEADS.color,
+    ['all', isConversation, statusFilters.CONVERSATIONS],
+    MAP_STATUS_CONFIG.CONVERSATIONS.color,
+    ['all', isDoNotKnock, statusFilters.DO_NOT_KNOCK],
+    MAP_STATUS_CONFIG.DO_NOT_KNOCK.color,
+    ['all', isNoOneHome, statusFilters.NO_ONE_HOME],
+    MAP_STATUS_CONFIG.NO_ONE_HOME.color,
+    ['all', isTouched, statusFilters.TOUCHED],
+    MAP_STATUS_CONFIG.TOUCHED.color,
+    ['all', isUntouched, statusFilters.UNTOUCHED],
+    MAP_STATUS_CONFIG.UNTOUCHED.color,
+    ADDRESS_CYLINDER_COLOR,
+  ] as mapboxgl.Expression;
+}
 
 function safeRemoveLayer(map: mapboxgl.Map, layerId: string) {
   try {
@@ -366,15 +415,21 @@ export function CampaignAddressPmtilesLayer({
   mapLoaded,
   visible,
   addresses,
+  statusFilters = DEFAULT_STATUS_FILTERS,
   deletedAddressIds = [],
   campaignBoundary,
   styleKey,
+  allowFallbackFetches = true,
   onAddressClick,
 }: CampaignAddressPmtilesLayerProps) {
   const [manifestSource, setManifestSource] = useState<ManifestAddressSource | null | undefined>(undefined);
   const [apiFallbackAddresses, setApiFallbackAddresses] = useState<CampaignAddress[]>([]);
   const onAddressClickRef = useRef(onAddressClick);
   const renderAddresses = addresses.length > 0 ? addresses : apiFallbackAddresses;
+  const addressColorExpression = useMemo(
+    () => buildAddressStatusColorExpression(statusFilters),
+    [statusFilters]
+  );
   const deletedAddressSet = useMemo(
     () => new Set(deletedAddressIds.map((id) => String(id ?? '').trim()).filter(Boolean)),
     [deletedAddressIds]
@@ -433,7 +488,7 @@ export function CampaignAddressPmtilesLayer({
     let cancelled = false;
 
     const loadManifest = async () => {
-      if (!campaignId || !visible || addresses.length > 0) {
+      if (!campaignId || !visible || addresses.length > 0 || !allowFallbackFetches) {
         setManifestSource(null);
         return;
       }
@@ -454,14 +509,15 @@ export function CampaignAddressPmtilesLayer({
     return () => {
       cancelled = true;
     };
-  }, [campaignId, visible, addresses.length]);
+  }, [allowFallbackFetches, campaignId, visible, addresses.length]);
 
   useEffect(() => {
     let cancelled = false;
 
     const loadApiFallbackAddresses = async () => {
-      if (!campaignId || !visible || manifestSource !== null || addresses.length > 0) {
+      if (!campaignId || !visible || manifestSource !== null || addresses.length > 0 || !allowFallbackFetches) {
         if (!cancelled && addresses.length > 0) setApiFallbackAddresses([]);
+        if (!cancelled && !allowFallbackFetches) setApiFallbackAddresses([]);
         return;
       }
 
@@ -494,7 +550,7 @@ export function CampaignAddressPmtilesLayer({
     return () => {
       cancelled = true;
     };
-  }, [campaignId, visible, manifestSource, addresses.length]);
+  }, [allowFallbackFetches, campaignId, visible, manifestSource, addresses.length]);
 
   useEffect(() => {
     if (!map || !mapLoaded || !visible) {
@@ -530,7 +586,7 @@ export function CampaignAddressPmtilesLayer({
         minzoom: 12,
         filter: getLayerFilter('Polygon'),
         paint: {
-          'fill-extrusion-color': ADDRESS_CYLINDER_COLOR,
+          'fill-extrusion-color': addressColorExpression,
           'fill-extrusion-opacity': 0.96,
           'fill-extrusion-height': ADDRESS_CYLINDER_HEIGHT_METERS,
           'fill-extrusion-base': 0,
@@ -660,7 +716,7 @@ export function CampaignAddressPmtilesLayer({
         minzoom: source.minzoom,
         filter: getLayerFilter('Polygon'),
         paint: {
-          'fill-extrusion-color': ADDRESS_CYLINDER_COLOR,
+          'fill-extrusion-color': addressColorExpression,
           'fill-extrusion-opacity': 0.96,
           'fill-extrusion-height': ADDRESS_CYLINDER_HEIGHT_METERS,
           'fill-extrusion-base': 0,
@@ -678,7 +734,7 @@ export function CampaignAddressPmtilesLayer({
         filter: getLayerFilter('Point'),
         paint: {
           'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 2.5, 17, 5],
-          'circle-color': ADDRESS_CYLINDER_COLOR,
+          'circle-color': addressColorExpression,
           'circle-opacity': 0.88,
           'circle-stroke-width': 1,
           'circle-stroke-color': '#111827',
@@ -848,10 +904,11 @@ export function CampaignAddressPmtilesLayer({
         }
         if (map.getLayer(GLOW_LAYER_ID)) {
           map.setFilter(GLOW_LAYER_ID, getLayerFilter('Polygon'));
+          map.setPaintProperty(GLOW_LAYER_ID, 'circle-color', addressColorExpression);
         }
         if (map.getLayer(CIRCLE_LAYER_ID)) {
           map.setFilter(CIRCLE_LAYER_ID, getLayerFilter('Polygon'));
-          map.setPaintProperty(CIRCLE_LAYER_ID, 'fill-extrusion-color', ADDRESS_CYLINDER_COLOR);
+          map.setPaintProperty(CIRCLE_LAYER_ID, 'fill-extrusion-color', addressColorExpression);
         }
         if (map.getLayer(LABEL_LAYER_ID)) {
           map.setFilter(LABEL_LAYER_ID, getLayerFilter('Point'));
@@ -861,8 +918,23 @@ export function CampaignAddressPmtilesLayer({
       }
       return;
     }
+    try {
+      if (map.getLayer(GLOW_LAYER_ID)) {
+        map.setFilter(GLOW_LAYER_ID, getLayerFilter('Point'));
+        map.setPaintProperty(GLOW_LAYER_ID, 'circle-color', addressColorExpression);
+      }
+      if (map.getLayer(CIRCLE_LAYER_ID)) {
+        map.setFilter(CIRCLE_LAYER_ID, getLayerFilter('Polygon'));
+        map.setPaintProperty(CIRCLE_LAYER_ID, 'fill-extrusion-color', addressColorExpression);
+      }
+      if (map.getLayer(LABEL_LAYER_ID)) {
+        map.setFilter(LABEL_LAYER_ID, ['in', ['geometry-type'], ['literal', ['Point', 'Polygon']]] as mapboxgl.Expression);
+      }
+    } catch (error) {
+      console.warn('[CampaignAddressPmtilesLayer] Failed to refresh address vector styling:', error);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [map, manifestSource, visible, deletedAddressSet, renderAddresses, campaignAddressIds]);
+  }, [map, manifestSource, visible, deletedAddressSet, renderAddresses, campaignAddressIds, addressColorExpression]);
 
   return null;
 }

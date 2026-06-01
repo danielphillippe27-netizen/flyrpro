@@ -1,10 +1,10 @@
 import { GetObjectCommand, ListObjectsV2Command, S3Client } from '@aws-sdk/client-s3';
 import { VectorTile } from '@mapbox/vector-tile';
 import * as turf from '@turf/turf';
-import { PMTiles } from 'pmtiles';
 import Pbf from 'pbf';
 import type { StandardCampaignAddress } from '@/lib/services/AddressAdapter';
 import type { LambdaSnapshotResponse } from '@/lib/services/TileLambdaService';
+import { getCachedPmtilesArchive } from '@/app/api/campaigns/_utils/tile-cache';
 
 type Bounds = [number, number, number, number];
 type SnapshotTileMetrics = NonNullable<NonNullable<LambdaSnapshotResponse['metadata']>['tile_metrics']>;
@@ -532,7 +532,7 @@ async function loadScopedAddressesFromPmtiles(options: {
 }): Promise<{ addresses: StandardCampaignAddress[]; scanned: number; bboxCandidates: number; touchedTiles: number }> {
   const bbox = turf.bbox(options.polygon) as Bounds;
   const pmtilesKey = manifestPmtilesKey(options.addressManifest, 'addresses');
-  const archive = new PMTiles(artifactUrl(pmtilesKey));
+  const archive = getCachedPmtilesArchive(artifactUrl(pmtilesKey));
   const header = await archive.getHeader();
   const range = tileRangeForBbox(
     bbox,

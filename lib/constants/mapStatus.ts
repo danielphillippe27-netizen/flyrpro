@@ -26,8 +26,34 @@ export interface MapStatusConfig {
 export const LIGHT_MAP_UNTOUCHED_COLOR = '#cfd8e3';
 export const DARK_MAP_UNTOUCHED_COLOR = '#475569';
 
+export const HOT_LEAD_ADDRESS_STATUSES = [
+  'appointment',
+  'follow_up',
+  'follow-up',
+  'follow up',
+  'appointment_set',
+  'appointment-set',
+  'appointment set',
+  'callback_requested',
+  'callback-requested',
+  'callback requested',
+  'future_seller',
+  'future-seller',
+  'future seller',
+] as const;
+
+export const LEAD_ADDRESS_STATUSES = ['lead', 'interested', 'hot_lead', 'hot lead'] as const;
+export const CONVERSATION_ADDRESS_STATUSES = ['talked', 'conversation', 'spoke'] as const;
+export const NO_ONE_HOME_ADDRESS_STATUSES = ['no_answer', 'no-answer', 'no answer', 'not_home', 'not-home', 'not home', 'attempted'] as const;
+export const TOUCHED_ADDRESS_STATUSES = ['delivered', 'visited'] as const;
+export const UNTOUCHED_ADDRESS_STATUSES = ['none', 'not_visited', 'not-visited', 'not visited', 'untouched'] as const;
+
 export function getMapUntouchedColor(isDarkMap: boolean): string {
   return isDarkMap ? DARK_MAP_UNTOUCHED_COLOR : LIGHT_MAP_UNTOUCHED_COLOR;
+}
+
+export function normalizeAddressStatus(status: string | undefined | null): string {
+  return (status ?? '').trim().toLowerCase().replace(/[-\s]+/g, '_');
 }
 
 /**
@@ -133,18 +159,20 @@ export const ADDRESS_STATUS_COLORS: Record<string, string> = {
 const ADDRESS_MAP_DEFAULT_COLOR = MAP_STATUS_CONFIG.UNTOUCHED.color;
 
 export function getAddressStatusColor(status: string | undefined | null): string {
-  if (!status) return ADDRESS_MAP_DEFAULT_COLOR;
-  return ADDRESS_STATUS_COLORS[status] ?? ADDRESS_MAP_DEFAULT_COLOR;
+  const normalized = normalizeAddressStatus(status);
+  if (!normalized) return ADDRESS_MAP_DEFAULT_COLOR;
+  return ADDRESS_STATUS_COLORS[normalized] ?? ADDRESS_MAP_DEFAULT_COLOR;
 }
 
 /** True if address status should show as blue (lead). */
 export function isAddressStatusBlue(status: string | undefined | null): boolean {
-  return status === 'lead' || status === 'interested' || status === 'hot_lead';
+  const normalized = normalizeAddressStatus(status);
+  return normalized === 'lead' || normalized === 'interested' || normalized === 'hot_lead';
 }
 
 /** True if address status should show as green (talked to person). */
 export function isAddressStatusGreen(status: string | undefined | null): boolean {
-  return status === 'talked';
+  return normalizeAddressStatus(status) === 'talked';
 }
 
 /**

@@ -4,11 +4,11 @@ import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { ensureCampaignAccess } from '@/app/api/campaigns/_utils/access';
 import {
   type CampaignSnapshotRow,
-  type ParcelPmtilesResolution,
   resolveCampaignMapArtifact,
   resolveGeometryEtag,
   resolveGeometryVersion,
 } from '@/lib/diamond/geometry';
+import { parcelTilesFromSnapshot } from '@/app/api/campaigns/_utils/scoped-pmtiles-parcels';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -139,47 +139,6 @@ function deliveryModeResponse() {
       ios: 'backend_zxy',
     },
     static_vector_tile_url_template: null,
-  };
-}
-
-function parcelTilesFromSnapshot(snapshot: CampaignSnapshotRow): ParcelPmtilesResolution | null {
-  const metricParcelPmtilesKey = stringMetric(snapshot.tile_metrics, 'parcels_pmtiles_key');
-  const metricParcelTilejsonKey =
-    stringMetric(snapshot.tile_metrics, 'parcels_tilejson_key') ??
-    metricParcelPmtilesKey?.replace(/\.pmtiles$/i, '.json') ??
-    null;
-
-  if (metricParcelPmtilesKey) {
-    return {
-      bucket: snapshot.bucket,
-      pmtilesKey: metricParcelPmtilesKey,
-      tilejsonKey: metricParcelTilejsonKey ?? metricParcelPmtilesKey.replace(/\.pmtiles$/i, '.json'),
-      datePart: 'snapshot',
-      sourceLayer: 'parcels',
-      promoteId: 'parcel_id',
-      minzoom: numberMetric(snapshot.tile_metrics, 'parcel_minzoom') ?? 10,
-      maxzoom: numberMetric(snapshot.tile_metrics, 'parcel_maxzoom') ?? 16,
-    };
-  }
-
-  const buildingPmtilesKey = resolveCampaignMapArtifact(snapshot).pmtilesKey;
-  const isBedrockNzSnapshot =
-    snapshot.tile_metrics?.bedrock_mode === true &&
-    stringMetric(snapshot.tile_metrics, 'bedrock_country_code') === 'NZ' &&
-    buildingPmtilesKey?.endsWith('/buildings/buildings.pmtiles');
-
-  if (!isBedrockNzSnapshot || !buildingPmtilesKey) return null;
-
-  const pmtilesKey = buildingPmtilesKey.replace(/\/buildings\/buildings\.pmtiles$/i, '/parcels/parcels.pmtiles');
-  return {
-    bucket: snapshot.bucket,
-    pmtilesKey,
-    tilejsonKey: pmtilesKey.replace(/\.pmtiles$/i, '.json'),
-    datePart: 'snapshot',
-    sourceLayer: 'parcels',
-    promoteId: 'parcel_id',
-    minzoom: numberMetric(snapshot.tile_metrics, 'parcel_minzoom') ?? 10,
-    maxzoom: numberMetric(snapshot.tile_metrics, 'parcel_maxzoom') ?? 16,
   };
 }
 

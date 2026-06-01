@@ -9,10 +9,9 @@ import {
 } from '@/app/api/campaigns/_utils/tile-cache';
 import {
   type CampaignSnapshotRow,
-  type ParcelPmtilesResolution,
   resolveArtifactUrl,
-  resolvePmtilesKey,
 } from '@/lib/diamond/geometry';
+import { parcelTilesFromSnapshot } from '@/app/api/campaigns/_utils/scoped-pmtiles-parcels';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -26,56 +25,6 @@ function parseTile(tile: string[]) {
   const y = Number(yClean);
   if (![z, x, y].every(Number.isInteger)) return null;
   return { z, x, y };
-}
-
-function stringMetric(metrics: Record<string, unknown> | null | undefined, key: string): string | null {
-  const value = metrics?.[key];
-  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
-}
-
-function numberMetric(metrics: Record<string, unknown> | null | undefined, key: string): number | null {
-  const value = metrics?.[key];
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
-}
-
-function parcelTilesFromSnapshot(snapshot: CampaignSnapshotRow | null): ParcelPmtilesResolution | null {
-  const pmtilesKey = stringMetric(snapshot?.tile_metrics, 'parcels_pmtiles_key');
-  if (!snapshot) return null;
-
-  if (!pmtilesKey) {
-    const buildingPmtilesKey = resolvePmtilesKey(snapshot);
-    const isBedrockNzSnapshot =
-      snapshot.tile_metrics?.bedrock_mode === true &&
-      stringMetric(snapshot.tile_metrics, 'bedrock_country_code') === 'NZ' &&
-      buildingPmtilesKey?.endsWith('/buildings/buildings.pmtiles');
-
-    if (!isBedrockNzSnapshot || !buildingPmtilesKey) return null;
-
-    const derivedPmtilesKey = buildingPmtilesKey.replace(/\/buildings\/buildings\.pmtiles$/i, '/parcels/parcels.pmtiles');
-    return {
-      bucket: snapshot.bucket,
-      pmtilesKey: derivedPmtilesKey,
-      tilejsonKey: derivedPmtilesKey.replace(/\.pmtiles$/i, '.json'),
-      datePart: 'snapshot',
-      sourceLayer: 'parcels',
-      promoteId: 'parcel_id',
-      minzoom: numberMetric(snapshot.tile_metrics, 'parcel_minzoom') ?? 10,
-      maxzoom: numberMetric(snapshot.tile_metrics, 'parcel_maxzoom') ?? 16,
-    };
-  }
-
-  return {
-    bucket: snapshot.bucket,
-    pmtilesKey,
-    tilejsonKey:
-      stringMetric(snapshot.tile_metrics, 'parcels_tilejson_key') ??
-      pmtilesKey.replace(/\.pmtiles$/i, '.json'),
-    datePart: 'snapshot',
-    sourceLayer: 'parcels',
-    promoteId: 'parcel_id',
-    minzoom: numberMetric(snapshot.tile_metrics, 'parcel_minzoom') ?? 10,
-    maxzoom: numberMetric(snapshot.tile_metrics, 'parcel_maxzoom') ?? 16,
-  };
 }
 
 export async function GET(

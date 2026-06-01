@@ -5,6 +5,7 @@
 import {
   featureWithinParcelCampaignScope,
   getParcelFeatureExternalId,
+  isDisplayableParcelFeature,
   isResidentialParcelFeature,
   parcelTilesFromSnapshot,
   parseParcelBbox,
@@ -76,8 +77,25 @@ const tests: Array<[string, () => void]> = [
     'extracts parcel ids using current priority order',
     () => {
       assertEqual(getParcelFeatureExternalId(feature({ type: 'Point', coordinates: [0, 0] }, { parcel_id: 'p-1', external_id: 'e-1' })), 'p-1');
+      assertEqual(getParcelFeatureExternalId(feature({ type: 'Point', coordinates: [0, 0] }, { custom_pid: 'custom-1', parcel_id: 'p-1' }), 'custom_pid'), 'custom-1');
       assertEqual(getParcelFeatureExternalId(feature({ type: 'Point', coordinates: [0, 0] }, { PARCELID: 42 })), '42');
       assertEqual(getParcelFeatureExternalId(feature({ type: 'Point', coordinates: [0, 0] }, {}, 'feature-id')), 'feature-id');
+    },
+  ],
+  [
+    'displayable parcel filter only rejects non-doorable keyword parcels',
+    () => {
+      assertTrue(isDisplayableParcelFeature(feature({ type: 'Point', coordinates: [0, 0] }, { parcel_intent: 'commercial condominium' })));
+      assertTrue(isDisplayableParcelFeature(feature({ type: 'Point', coordinates: [0, 0] }, { topology_type: 'secondary' })));
+      assertTrue(isDisplayableParcelFeature(feature({ type: 'Point', coordinates: [0, 0] }, { name: 'Courtice Heights' })));
+      assertTrue(isDisplayableParcelFeature(feature({ type: 'Point', coordinates: [0, 0] }, { street_name: 'Moyse Drive' })));
+      assertFalse(isDisplayableParcelFeature(feature({ type: 'Point', coordinates: [0, 0] }, { parcel_intent: 'road allowance' })));
+      assertFalse(isDisplayableParcelFeature(feature({ type: 'Point', coordinates: [0, 0] }, { land_use: 'public park' })));
+      assertFalse(isDisplayableParcelFeature(feature({ type: 'Point', coordinates: [0, 0] }, { raw_attributes: { COMMENT: 'stormwater management pond' } })));
+      assertFalse(isDisplayableParcelFeature(feature({ type: 'Point', coordinates: [0, 0] }, {
+        area_sqm: 65,
+        raw_attributes: { Shape__Length: 610 },
+      })));
     },
   ],
   [
@@ -143,10 +161,26 @@ const tests: Array<[string, () => void]> = [
       assertEqual(
         parcelTilesFromSnapshot(snapshot({
           parcels_pmtiles_key: 'diamond/parcels/canada/on/durham/parcels.pmtiles',
-          source_layers: { parcels: 'parcels' },
-          promote_ids: { parcels: 'parcel_id' },
+          source_layers: { parcels: 'land_parcels' },
+          promote_ids: { parcels: 'custom_pid' },
         }))?.pmtilesKey,
         'diamond/parcels/canada/on/durham/parcels.pmtiles'
+      );
+      assertEqual(
+        parcelTilesFromSnapshot(snapshot({
+          parcels_pmtiles_key: 'diamond/parcels/canada/on/durham/parcels.pmtiles',
+          source_layers: { parcels: 'land_parcels' },
+          promote_ids: { parcels: 'custom_pid' },
+        }))?.sourceLayer,
+        'land_parcels'
+      );
+      assertEqual(
+        parcelTilesFromSnapshot(snapshot({
+          parcels_pmtiles_key: 'diamond/parcels/canada/on/durham/parcels.pmtiles',
+          source_layers: { parcels: 'land_parcels' },
+          promote_ids: { parcels: 'custom_pid' },
+        }))?.promoteId,
+        'custom_pid'
       );
       assertEqual(
         parcelTilesFromSnapshot(snapshot({

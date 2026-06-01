@@ -34,6 +34,7 @@ type DashboardJob = {
 
 type StartBody = {
   runs?: number;
+  fixture?: string;
   captureScreenshot?: boolean;
   strictBaseline?: boolean;
   strictPerformance?: boolean;
@@ -179,6 +180,7 @@ export async function POST(request: NextRequest) {
 
   const body = (await request.json().catch(() => ({}))) as StartBody;
   const runs = Number.isFinite(Number(body.runs)) && Number(body.runs) > 0 ? Math.floor(Number(body.runs)) : 1;
+  const fixture = typeof body.fixture === 'string' && body.fixture.trim() ? body.fixture.trim() : 'oshawa-on';
   const id = `dashboard-${new Date().toISOString().replace(/[:.]/g, '-')}`;
   const command = ['npm', 'run', 'test:campaign-polygon-parity'];
 
@@ -203,6 +205,7 @@ export async function POST(request: NextRequest) {
     env: {
       ...process.env,
       E2E_RUNS: String(runs),
+      E2E_FIXTURE: fixture,
       E2E_CAPTURE_SCREENSHOT: body.captureScreenshot ? '1' : '0',
       E2E_STRICT_BASELINE: body.strictBaseline ? '1' : '0',
       E2E_STRICT_PERFORMANCE: body.strictPerformance ? '1' : '0',
@@ -210,7 +213,7 @@ export async function POST(request: NextRequest) {
   });
   job.process = child;
 
-  appendLog(job, `$ ${command.join(' ')} (E2E_RUNS=${runs})`);
+  appendLog(job, `$ ${command.join(' ')} (E2E_RUNS=${runs} E2E_FIXTURE=${fixture})`);
 
   child.stdout.on('data', (chunk) => appendLog(job, chunk.toString()));
   child.stderr.on('data', (chunk) => appendLog(job, chunk.toString()));

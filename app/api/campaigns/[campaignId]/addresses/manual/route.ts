@@ -201,7 +201,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
                 is_multi_unit: false,
                 unit_count: 1,
               },
-              { onConflict: "building_id,address_id,campaign_id" }
+              { onConflict: "campaign_id,address_id" }
             );
 
           if (linkError) {
@@ -268,7 +268,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
             is_multi_unit: false,
             unit_count: 1,
           },
-          { onConflict: "building_id,address_id,campaign_id" }
+          { onConflict: "campaign_id,address_id" }
         );
 
       if (linkError) {

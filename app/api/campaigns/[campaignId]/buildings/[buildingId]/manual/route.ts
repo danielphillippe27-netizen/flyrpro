@@ -373,7 +373,7 @@ export async function PATCH(request: Request, context: RouteContext): Promise<Re
 
       const { error: linkError } = await supabase
         .from("building_address_links")
-        .upsert(links, { onConflict: "building_id,address_id,campaign_id" });
+        .upsert(links, { onConflict: "campaign_id,address_id" });
       if (linkError) {
         console.error("[manual-building] PATCH link override error:", linkError);
         return NextResponse.json({ error: "Moved building created but address linking failed" }, { status: 500 });

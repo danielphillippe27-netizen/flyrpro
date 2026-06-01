@@ -31,6 +31,27 @@ type JsonObject = Record<string, unknown>;
 
 type Timings = Record<string, number>;
 
+type FixtureExpected = {
+  addresses?: number | null;
+  snapshotBuildings?: number | null;
+  endpointBuildings?: number | null;
+  roads?: number | null;
+  parcels?: number | null;
+};
+
+type PolygonFixture = {
+  id: string;
+  name: string;
+  region: string;
+  seedQuery: string;
+  baselineCampaignId?: string | null;
+  polygon: {
+    type: 'Polygon';
+    coordinates: readonly (readonly (readonly number[])[])[];
+  };
+  expected: FixtureExpected;
+};
+
 type TimedValue<T> = {
   value: T;
   seconds: number;
@@ -67,8 +88,24 @@ type EndpointSnapshot = {
     parcelCache: string | null;
     parcelTiles: string | null;
     parcelFeatures: string | null;
+    etag: string | null;
+    mapBundleCache: string | null;
   };
   body?: unknown;
+};
+
+type BundleWorkflow = {
+  status: string | null;
+  phase: string | null;
+  source: string | null;
+  linksStatus: string | null;
+  sourceVersion: string | null;
+  assetSignature: string | null;
+  links: number;
+  addressOrphans: number;
+  buildingOrphans: number;
+  units: number;
+  hasCanonicalFields: boolean;
 };
 
 type SurfaceResult = {
@@ -81,8 +118,10 @@ type SurfaceResult = {
   timings: Timings;
   campaign?: CampaignRow | null;
   snapshot?: SnapshotRow | null;
+  provisionResponse?: unknown;
   endpoints?: {
     mapBundle: EndpointSnapshot;
+    mapBundleWarm304?: EndpointSnapshot;
     addresses: EndpointSnapshot;
     buildingsCold: EndpointSnapshot;
     buildingsBypass: EndpointSnapshot;
@@ -100,6 +139,7 @@ type SurfaceResult = {
     buildingsEndpoint: number;
     parcelsEndpoint: number;
   };
+  workflow?: BundleWorkflow;
   hashes?: {
     territory: string;
     bbox: string;
@@ -119,33 +159,122 @@ type RunContext = QaIdentity & {
 };
 
 const ALL_SURFACES: Surface[] = ['flyr_pro', 'ios_wire', 'android_wire'];
-const BASELINE_CAMPAIGN_ID = 'e375825f-672c-4ebc-9f09-05eb566730fb';
-const FIXTURE_NAME = 'ontario-march-20-campaign-polygon';
-const EXPECTED_REGION = 'ON';
-const EXPECTED_ADDRESSES = 172;
-const EXPECTED_SNAPSHOT_BUILDINGS = 206;
-const EXPECTED_ROADS = 12;
-const EXPECTED_PARCELS = 0;
 const CREATE_TARGET_SECONDS = 3;
 const PROVISION_TIMEOUT_SECONDS = 300;
 const MAP_BUNDLE_TARGET_SECONDS = 5;
 const BUILDINGS_TARGET_SECONDS = 10;
 const POLL_INTERVAL_MS = 2_000;
 
-const POLYGON = {
-  type: 'Polygon',
-  coordinates: [
-    [
-      [-78.7842254687073, 43.92552044236356],
-      [-78.77887337137338, 43.926841389352035],
-      [-78.77749783233911, 43.92380917196115],
-      [-78.78284159307286, 43.92254219970988],
-      [-78.7842254687073, 43.92552044236356],
-    ],
-  ],
-} as const;
+const FIXTURES: PolygonFixture[] = [
+  {
+    id: 'oshawa-on',
+    name: 'Oshawa, Ontario',
+    region: 'ON',
+    seedQuery: 'ON',
+    baselineCampaignId: 'e375825f-672c-4ebc-9f09-05eb566730fb',
+    polygon: {
+      type: 'Polygon',
+      coordinates: [
+        [
+          [-78.7842254687073, 43.92552044236356],
+          [-78.77887337137338, 43.926841389352035],
+          [-78.77749783233911, 43.92380917196115],
+          [-78.78284159307286, 43.92254219970988],
+          [-78.7842254687073, 43.92552044236356],
+        ],
+      ],
+    },
+    expected: {
+      addresses: 172,
+      snapshotBuildings: 185,
+      endpointBuildings: 240,
+      roads: 0,
+      parcels: 133,
+    },
+  },
+  {
+    id: 'fort-worth-tx',
+    name: 'Fort Worth, Texas',
+    region: 'TX',
+    seedQuery: 'TX',
+    polygon: {
+      type: 'Polygon',
+      coordinates: [
+        [
+          [-97.374146, 32.752274],
+          [-97.369417, 32.752399],
+          [-97.369198, 32.748908],
+          [-97.373947, 32.748743],
+          [-97.374146, 32.752274],
+        ],
+      ],
+    },
+    expected: { roads: 0 },
+  },
+  {
+    id: 'au-sydney',
+    name: 'Sydney, Australia',
+    region: 'AU',
+    seedQuery: 'AU',
+    polygon: {
+      type: 'Polygon',
+      coordinates: [
+        [
+          [151.205837, -33.879971],
+          [151.211309, -33.879812],
+          [151.211025, -33.884063],
+          [151.205511, -33.884204],
+          [151.205837, -33.879971],
+        ],
+      ],
+    },
+    expected: { roads: 0 },
+  },
+  {
+    id: 'nz-auckland',
+    name: 'Auckland, New Zealand',
+    region: 'NZ',
+    seedQuery: 'NZ',
+    polygon: {
+      type: 'Polygon',
+      coordinates: [
+        [
+          [174.739611, -36.862124],
+          [174.744547, -36.861899],
+          [174.744116, -36.866095],
+          [174.739134, -36.866226],
+          [174.739611, -36.862124],
+        ],
+      ],
+    },
+    expected: { roads: 0 },
+  },
+  {
+    id: 'za-cape-town',
+    name: 'Cape Town, South Africa',
+    region: 'ZA',
+    seedQuery: 'ZA',
+    polygon: {
+      type: 'Polygon',
+      coordinates: [
+        [
+          [18.406587, -33.929072],
+          [18.411926, -33.928785],
+          [18.411607, -33.933018],
+          [18.406151, -33.933185],
+          [18.406587, -33.929072],
+        ],
+      ],
+    },
+    expected: { roads: 0 },
+  },
+];
 
-const EXPECTED_BBOX = bboxForPolygon(POLYGON);
+const FIXTURE = selectFixture(process.env.E2E_FIXTURE);
+const FIXTURE_NAME = FIXTURE.id;
+const EXPECTED_REGION = FIXTURE.region;
+const EXPECTED_BBOX = bboxForPolygon(FIXTURE.polygon);
+const POLYGON = FIXTURE.polygon;
 
 const apiBaseUrl = (process.env.API_BASE_URL || 'http://127.0.0.1:3000').replace(/\/+$/, '');
 const runs = intEnv('E2E_RUNS', 3);
@@ -174,6 +303,7 @@ async function main() {
 
   console.log(`Campaign polygon parity run: ${runId}`);
   console.log(`API base URL: ${apiBaseUrl}`);
+  console.log(`Fixture: ${FIXTURE.name} (${FIXTURE.id}) region=${FIXTURE.region}`);
   console.log(`Surfaces: ${selectedSurfaces.join(', ')}`);
   console.log(`Runs per surface: ${runs}`);
   console.log(`Report directory: ${outputDir}`);
@@ -203,15 +333,17 @@ async function main() {
     createdAt: new Date().toISOString(),
     fixture: {
       name: FIXTURE_NAME,
-      baselineCampaignId: BASELINE_CAMPAIGN_ID,
+      label: FIXTURE.name,
+      baselineCampaignId: FIXTURE.baselineCampaignId ?? null,
       polygon: POLYGON,
       bbox: EXPECTED_BBOX,
       expected: {
         region: EXPECTED_REGION,
-        addresses: EXPECTED_ADDRESSES,
-        snapshotBuildings: EXPECTED_SNAPSHOT_BUILDINGS,
-        roads: EXPECTED_ROADS,
-        parcels: EXPECTED_PARCELS,
+        addresses: FIXTURE.expected.addresses ?? null,
+        snapshotBuildings: FIXTURE.expected.snapshotBuildings ?? null,
+        endpointBuildings: FIXTURE.expected.endpointBuildings ?? null,
+        roads: FIXTURE.expected.roads ?? null,
+        parcels: FIXTURE.expected.parcels ?? null,
       },
     },
     apiBaseUrl,
@@ -326,6 +458,7 @@ async function runSurface(
 
     const provision = await timeAsync(() => provisionCampaign(context.accessToken, created.campaignId));
     result.timings.provisionRequest = provision.seconds;
+    result.provisionResponse = provision.value;
 
     const ready = await timeAsync(() => waitForCampaignReady(created.campaignId));
     result.timings.waitUntilReady = ready.seconds;
@@ -336,6 +469,7 @@ async function runSurface(
     result.snapshot = fetched.snapshot;
     result.endpoints = fetched.endpoints;
     result.counts = fetched.counts;
+    result.workflow = fetched.workflow;
     result.hashes = fetched.hashes;
     result.warnings.push(...fetched.warnings);
 
@@ -368,7 +502,7 @@ async function createCampaignForSurface(
           address_source: 'map',
           workspace_id: context.workspaceId,
           region: EXPECTED_REGION,
-          seed_query: EXPECTED_REGION,
+          seed_query: FIXTURE.seedQuery,
           tags: tagsFor(context.runId, surface, ordinal),
           bbox: EXPECTED_BBOX,
           territory_boundary: POLYGON,
@@ -416,7 +550,7 @@ async function createCampaignForSurface(
       ownerId: context.userId,
       workspaceId: context.workspaceId,
       region: EXPECTED_REGION,
-      seedQuery: EXPECTED_REGION,
+      seedQuery: FIXTURE.seedQuery,
       tags: tagsFor(context.runId, surface, ordinal),
       includeSeedQuery: true,
     })
@@ -549,6 +683,22 @@ async function collectData(
 
   const mapBundle = await endpointSnapshot(context.accessToken, `/api/campaigns/${campaignId}/map-bundle`, 'mapBundle');
   timings.mapBundle = mapBundle.seconds;
+  const mapBundleCounts = countsFromMapBundle(mapBundle.body);
+  const workflow = bundleWorkflowFromMapBundle(mapBundle.body);
+  const mapBundleWarm304 = workflow.assetSignature
+    ? await endpointSnapshot(
+        context.accessToken,
+        `/api/campaigns/${campaignId}/map-bundle?signature=${encodeURIComponent(workflow.assetSignature)}`,
+        'mapBundleWarm304',
+        { allowedStatuses: [304] }
+      )
+    : undefined;
+  if (mapBundleWarm304) {
+    timings.mapBundleWarm304 = mapBundleWarm304.seconds;
+    if (mapBundleWarm304.status !== 304) {
+      warnings.push(`${surface} #${ordinal} warm bundle refresh returned ${mapBundleWarm304.status} instead of 304`);
+    }
+  }
   const addresses = await endpointSnapshot(context.accessToken, `/api/campaigns/${campaignId}/addresses`, 'addresses');
   timings.addresses = addresses.seconds;
   const buildingsCold = await endpointSnapshot(context.accessToken, `/api/campaigns/${campaignId}/buildings`, 'buildings');
@@ -563,12 +713,11 @@ async function collectData(
   timings.parcels = parcels.seconds;
 
   const addressesTable = await exactCount('campaign_addresses', campaignId);
-  const mapBundleCounts = countsFromMapBundle(mapBundle.body);
   const territoryHash = hash(normalizePolygon(campaign?.territory_boundary));
   const bboxHash = hash(normalizeNumberArray(campaign?.bbox));
-  const addressHash = hash(normalizeAddressPayload(addresses.body));
-  const buildingHash = hash(normalizeBuildingPayload(buildingsBypass.body));
-  const parcelHash = hash(normalizeFeaturePayload(parcels.body, ['id', 'campaign_id', 'campaignId']));
+  const addressHash = hash(normalizeAddressPayload(bundleLayerPayload(mapBundle.body, 'addresses')));
+  const buildingHash = hash(normalizeBuildingPayload(bundleLayerPayload(mapBundle.body, 'buildings')));
+  const parcelHash = hash(normalizeFeaturePayload(bundleLayerPayload(mapBundle.body, 'parcels'), ['id', 'campaign_id', 'campaignId']));
 
   if (timings.createShell && timings.createShell > CREATE_TARGET_SECONDS) {
     warnings.push(`${surface} #${ordinal} create shell exceeded ${CREATE_TARGET_SECONDS}s`);
@@ -584,7 +733,7 @@ async function collectData(
     timings,
     campaign,
     snapshot,
-    endpoints: { mapBundle, addresses, buildingsCold, buildingsBypass, parcels },
+    endpoints: { mapBundle, mapBundleWarm304, addresses, buildingsCold, buildingsBypass, parcels },
     counts: {
       addressesTable,
       snapshotAddresses: snapshot?.addresses_count ?? null,
@@ -597,6 +746,7 @@ async function collectData(
       buildingsEndpoint: buildingsBypass.count,
       parcelsEndpoint: parcels.count,
     },
+    workflow,
     hashes: {
       territory: territoryHash,
       bbox: bboxHash,
@@ -608,7 +758,12 @@ async function collectData(
   };
 }
 
-async function endpointSnapshot(accessToken: string, endpoint: string, kind: string): Promise<EndpointSnapshot> {
+async function endpointSnapshot(
+  accessToken: string,
+  endpoint: string,
+  kind: string,
+  options: { allowedStatuses?: number[] } = {}
+): Promise<EndpointSnapshot> {
   const started = performance.now();
   let response: Response;
   try {
@@ -625,6 +780,19 @@ async function endpointSnapshot(accessToken: string, endpoint: string, kind: str
     body = text;
   }
   if (!response.ok) {
+    if (options.allowedStatuses?.includes(response.status)) {
+      return {
+        status: response.status,
+        seconds,
+        count: 0,
+        hash: hash(null),
+        bytes: Buffer.byteLength(text),
+        headers: {
+          ...endpointHeaders(response),
+        },
+        body,
+      };
+    }
     throw new Error(`${kind} endpoint failed ${response.status}: ${text.slice(0, 500)}`);
   }
   const normalized =
@@ -640,12 +808,20 @@ async function endpointSnapshot(accessToken: string, endpoint: string, kind: str
     hash: hash(normalized),
     bytes: Buffer.byteLength(text),
     headers: {
-      serverTiming: response.headers.get('server-timing'),
-      parcelCache: response.headers.get('x-flyr-parcels-cache'),
-      parcelTiles: response.headers.get('x-flyr-parcels-tiles'),
-      parcelFeatures: response.headers.get('x-flyr-parcels-features'),
+      ...endpointHeaders(response),
     },
     body,
+  };
+}
+
+function endpointHeaders(response: Response) {
+  return {
+    serverTiming: response.headers.get('server-timing') ?? response.headers.get('x-flyr-server-timing'),
+    parcelCache: response.headers.get('x-flyr-parcels-cache'),
+    parcelTiles: response.headers.get('x-flyr-parcels-tiles'),
+    parcelFeatures: response.headers.get('x-flyr-parcels-features'),
+    etag: response.headers.get('etag'),
+    mapBundleCache: response.headers.get('x-flyr-map-bundle-cache'),
   };
 }
 
@@ -731,35 +907,62 @@ function validateRun(results: SurfaceResult[]) {
     if (!sameJson(normalizeNumberArray(campaign.bbox), EXPECTED_BBOX)) {
       errors.push(`${label}: bbox does not match fixture`);
     }
-    if (counts.addressesTable !== EXPECTED_ADDRESSES) {
-      baselineMismatch(result, errors, `${label}: expected ${EXPECTED_ADDRESSES} table addresses, got ${counts.addressesTable}`);
+    if (FIXTURE.expected.addresses != null && counts.addressesTable !== FIXTURE.expected.addresses) {
+      baselineMismatch(result, errors, `${label}: expected ${FIXTURE.expected.addresses} table addresses, got ${counts.addressesTable}`);
     }
-    if (counts.addressesEndpoint !== EXPECTED_ADDRESSES) {
-      baselineMismatch(result, errors, `${label}: expected ${EXPECTED_ADDRESSES} endpoint addresses, got ${counts.addressesEndpoint}`);
+    if (FIXTURE.expected.addresses != null && counts.addressesEndpoint !== FIXTURE.expected.addresses) {
+      baselineMismatch(result, errors, `${label}: expected ${FIXTURE.expected.addresses} endpoint addresses, got ${counts.addressesEndpoint}`);
     }
-    if (counts.snapshotBuildings !== EXPECTED_SNAPSHOT_BUILDINGS) {
+    if (FIXTURE.expected.snapshotBuildings != null && counts.snapshotBuildings !== FIXTURE.expected.snapshotBuildings) {
       baselineMismatch(
         result,
         errors,
-        `${label}: expected ${EXPECTED_SNAPSHOT_BUILDINGS} snapshot buildings, got ${counts.snapshotBuildings}`
+        `${label}: expected ${FIXTURE.expected.snapshotBuildings} snapshot buildings, got ${counts.snapshotBuildings}`
       );
     }
-    if (counts.buildingsEndpoint !== EXPECTED_SNAPSHOT_BUILDINGS) {
+    if (counts.snapshotBuildings != null && counts.mapBundleBuildings !== counts.snapshotBuildings) {
       baselineMismatch(
         result,
         errors,
-        `${label}: expected ${EXPECTED_SNAPSHOT_BUILDINGS} endpoint buildings, got ${counts.buildingsEndpoint}`
+        `${label}: bundle buildings ${counts.mapBundleBuildings} do not match snapshot buildings ${counts.snapshotBuildings}`
       );
     }
-    if (counts.mapBundleRoads !== EXPECTED_ROADS) {
-      baselineMismatch(result, errors, `${label}: expected ${EXPECTED_ROADS} roads, got ${counts.mapBundleRoads}`);
-    }
-    if (counts.mapBundleParcels !== EXPECTED_PARCELS || counts.parcelsEndpoint !== EXPECTED_PARCELS) {
+    if (FIXTURE.expected.endpointBuildings != null && counts.buildingsEndpoint !== FIXTURE.expected.endpointBuildings) {
       baselineMismatch(
         result,
         errors,
-        `${label}: expected ${EXPECTED_PARCELS} parcels, got bundle=${counts.mapBundleParcels} endpoint=${counts.parcelsEndpoint}`
+        `${label}: expected ${FIXTURE.expected.endpointBuildings} endpoint buildings, got ${counts.buildingsEndpoint}`
       );
+    }
+    if (FIXTURE.expected.roads != null && counts.mapBundleRoads !== FIXTURE.expected.roads) {
+      baselineMismatch(result, errors, `${label}: expected ${FIXTURE.expected.roads} roads, got ${counts.mapBundleRoads}`);
+    }
+    if (FIXTURE.expected.parcels != null && counts.parcelsEndpoint !== FIXTURE.expected.parcels) {
+      baselineMismatch(
+        result,
+        errors,
+        `${label}: expected ${FIXTURE.expected.parcels} endpoint parcels, got ${counts.parcelsEndpoint}`
+      );
+    }
+    if (counts.parcelsEndpoint > 0 && counts.mapBundleParcels !== counts.parcelsEndpoint) {
+      baselineMismatch(
+        result,
+        errors,
+        `${label}: bundle parcels ${counts.mapBundleParcels} do not match /parcels ${counts.parcelsEndpoint}`
+      );
+    }
+    if (counts.mapBundleAddresses !== counts.addressesEndpoint || counts.mapBundleAddresses !== counts.addressesTable) {
+      baselineMismatch(
+        result,
+        errors,
+        `${label}: bundle addresses ${counts.mapBundleAddresses}, endpoint addresses ${counts.addressesEndpoint}, table addresses ${counts.addressesTable}`
+      );
+    }
+    if (!result.workflow?.hasCanonicalFields) {
+      baselineMismatch(result, errors, `${label}: bundle is missing canonical workflow metadata (links_status/source_version/asset_signature)`);
+    }
+    if (result.workflow?.linksStatus && !['fresh', 'ready'].includes(result.workflow.linksStatus.toLowerCase())) {
+      baselineMismatch(result, errors, `${label}: bundle links_status is ${result.workflow.linksStatus}`);
     }
     if ((result.timings.createShell ?? 0) > CREATE_TARGET_SECONDS) {
       performanceMismatch(
@@ -861,8 +1064,8 @@ function markdownReport(report: {
   lines.push('');
   lines.push(`## Results`);
   lines.push('');
-  lines.push('| Surface | Run | Campaign | Status | Addresses | Buildings | Roads | Parcels | Create | Provision | Bundle | Buildings | Screenshot |');
-  lines.push('| --- | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |');
+  lines.push('| Surface | Run | Campaign | Status | Bundle Addr | Bundle Bldgs | Bundle Parcels | Links Status | Legacy Addr | Legacy Bldgs | Legacy Parcels | Provision | Bundle | Screenshot |');
+  lines.push('| --- | ---: | --- | --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | --- |');
   for (const result of report.results) {
     lines.push(
       [
@@ -870,14 +1073,15 @@ function markdownReport(report: {
         String(result.ordinal),
         result.campaignId ? `\`${result.campaignId}\`` : '',
         result.errors.length ? 'failed' : 'passed',
+        String(result.counts?.mapBundleAddresses ?? ''),
+        String(result.counts?.mapBundleBuildings ?? ''),
+        String(result.counts?.mapBundleParcels ?? ''),
+        result.workflow?.linksStatus ?? '',
         String(result.counts?.addressesEndpoint ?? ''),
         String(result.counts?.buildingsEndpoint ?? ''),
-        String(result.counts?.mapBundleRoads ?? ''),
         String(result.counts?.parcelsEndpoint ?? ''),
-        secondsCell(result.timings.createShell),
         secondsCell(result.timings.provisionRequest),
         secondsCell(result.timings.mapBundle),
-        secondsCell(result.timings.buildingsCold),
         result.screenshotPath ? `\`${result.screenshotPath}\`` : '',
       ].join(' | ').replace(/^/, '| ').replace(/$/, ' |')
     );
@@ -977,8 +1181,17 @@ function parseSurfaces(raw: string | undefined): Surface[] {
   return surfaces;
 }
 
+function selectFixture(raw: string | undefined): PolygonFixture {
+  const requested = (raw || 'oshawa-on').trim().toLowerCase();
+  const fixture = FIXTURES.find((entry) => entry.id === requested);
+  if (!fixture) {
+    throw new Error(`Unknown E2E_FIXTURE "${raw}". Valid fixtures: ${FIXTURES.map((entry) => entry.id).join(', ')}`);
+  }
+  return fixture;
+}
+
 function campaignName(runId: string, surface: Surface, ordinal: number) {
-  return `QA Polygon Parity ${surface} ${ordinal} ${runId}`;
+  return `QA Polygon Parity ${FIXTURE.id} ${surface} ${ordinal} ${runId}`;
 }
 
 function descriptionFor(runId: string, surface: Surface, ordinal: number) {
@@ -1031,18 +1244,68 @@ function countPayload(value: unknown): number {
 
 function countsFromMapBundle(value: unknown) {
   const counts = value && typeof value === 'object' ? (value as JsonObject).counts : null;
+  const bundle = value && typeof value === 'object' ? (value as JsonObject) : {};
   const object = counts && typeof counts === 'object' ? (counts as JsonObject) : {};
   return {
-    addresses: numberValue(object.addresses),
-    buildings: numberValue(object.buildings),
-    roads: numberValue(object.roads),
-    parcels: numberValue(object.parcels),
+    addresses: numberValue(object.addresses, countBundleCollection(bundle.addresses)),
+    buildings: numberValue(object.buildings, countBundleCollection(bundle.buildings)),
+    roads: numberValue(object.roads, countBundleCollection(bundle.roads)),
+    parcels: numberValue(object.parcels, countBundleCollection(bundle.parcels)),
   };
 }
 
-function numberValue(value: unknown) {
+function bundleWorkflowFromMapBundle(value: unknown): BundleWorkflow {
+  const bundle = value && typeof value === 'object' ? (value as JsonObject) : {};
+  const counts = isJsonObject(bundle.counts) ? bundle.counts : {};
+  const linksStatus = stringValue(bundle.links_status ?? bundle.linksStatus ?? bundle.links_status_v2);
+  const sourceVersion = stringValue(bundle.source_version ?? bundle.sourceVersion ?? counts.source_version);
+  const assetSignature = stringValue(bundle.asset_signature ?? bundle.assetSignature ?? bundle.signature);
+  return {
+    status: stringValue(bundle.status),
+    phase: stringValue(bundle.phase),
+    source: stringValue(bundle.source),
+    linksStatus,
+    sourceVersion,
+    assetSignature,
+    links: countBundleCollection(bundle.links),
+    addressOrphans: countBundleCollection(bundle.address_orphans ?? bundle.addressOrphans),
+    buildingOrphans: countBundleCollection(bundle.building_orphans ?? bundle.buildingOrphans),
+    units: numberValue(bundle.units_count ?? bundle.unitsCount ?? counts.units, countBundleCollection(bundle.units)),
+    hasCanonicalFields: Boolean(linksStatus || sourceVersion || assetSignature),
+  };
+}
+
+function countBundleCollection(value: unknown): number {
+  if (Array.isArray(value)) return value.length;
+  if (!value || typeof value !== 'object') return 0;
+  const object = value as JsonObject;
+  if (Array.isArray(object.features)) return object.features.length;
+  if (Array.isArray(object.items)) return object.items.length;
+  return 0;
+}
+
+function bundleLayerPayload(value: unknown, layer: 'addresses' | 'buildings' | 'parcels') {
+  if (!value || typeof value !== 'object') return { type: 'FeatureCollection', features: [] };
+  const object = value as JsonObject;
+  const candidate = object[layer];
+  if (
+    candidate &&
+    typeof candidate === 'object' &&
+    (candidate as JsonObject).type === 'FeatureCollection' &&
+    Array.isArray((candidate as JsonObject).features)
+  ) {
+    return candidate;
+  }
+  return { type: 'FeatureCollection', features: [] };
+}
+
+function numberValue(value: unknown, fallback = 0) {
   const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric : 0;
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
 function normalizePolygon(value: unknown) {

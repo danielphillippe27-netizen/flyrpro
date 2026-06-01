@@ -14,31 +14,27 @@ import { createClient } from '@/lib/supabase/client';
 import type { BuildingFeatureCollection, BuildingProperties, GetBuildingsInBboxParams } from '@/types/map-buildings';
 import type { CampaignAddress, CampaignType } from '@/types/database';
 import { getCampaignBuildingStatus } from '@/lib/campaignStats';
-import { DEFAULT_STATUS_FILTERS, MAP_STATUS_CONFIG, getMapUntouchedColor, type StatusFilters } from '@/lib/constants/mapStatus';
-import { displayAddressText, resolveHouseNumberLabel } from '@/lib/map/addressPresentation';
 import {
-  appendTileAccessToken,
-  fetchCampaignMapManifest,
-  hasRenderablePmtilesBuildings,
-  type CampaignMapManifest,
-} from '@/lib/map/campaignMapManifest';
-
-type ManifestBuildingSource = {
-  deliveryMode: 'backend_zxy';
-  url: string;
-  sourceLayer: string;
-  promoteId: string;
-  minzoom: number;
-  maxzoom: number;
-  bounds?: [number, number, number, number];
-  tileBuffer?: number;
-};
+  CONVERSATION_ADDRESS_STATUSES,
+  DEFAULT_STATUS_FILTERS,
+  HOT_LEAD_ADDRESS_STATUSES,
+  LEAD_ADDRESS_STATUSES,
+  MAP_STATUS_CONFIG,
+  NO_ONE_HOME_ADDRESS_STATUSES,
+  TOUCHED_ADDRESS_STATUSES,
+  UNTOUCHED_ADDRESS_STATUSES,
+  getMapUntouchedColor,
+  type StatusFilters,
+} from '@/lib/constants/mapStatus';
+import { displayAddressText, resolveHouseNumberLabel } from '@/lib/map/addressPresentation';
 
 interface MapBuildingsLayerProps {
   map: MapboxMap;
   campaignId?: string | null;
   campaignType?: CampaignType | null;
   refreshKey?: number;
+  buildingFeatures?: BuildingFeatureCollection | null;
+  buildingDataKey?: string | number | null;
   addressStateOverrides?: CampaignAddress[];
   hiddenBuildingIds?: string[];
   deletedAddressIds?: string[];
@@ -81,6 +77,7 @@ const EMPTY_BUILDINGS_MAX_RETRIES = 5;
 const EMPTY_BUILDINGS_RETRY_BASE_DELAY_MS = 3000;
 const ADDRESS_LABEL_MIN_ZOOM = 18;
 const CAMPAIGN_BUILDING_MIN_ZOOM = 0;
+const DEFAULT_BUILDING_HEIGHT_METERS = 8;
 const POLYGON_GEOMETRY_FILTER: FilterSpecification = [
   'match',
   ['geometry-type'],
@@ -89,18 +86,26 @@ const POLYGON_GEOMETRY_FILTER: FilterSpecification = [
   false,
 ] as FilterSpecification;
 const POINT_GEOMETRY_FILTER: FilterSpecification = ['==', ['geometry-type'], 'Point'];
-const NO_FEATURES_FILTER: FilterSpecification = ['==', ['literal', 1], 0] as FilterSpecification;
-const BUILDING_BEFORE_LAYER_IDS = [
-  'campaign-addresses-pmtiles-lead-glow',
-  'campaign-addresses-pmtiles-circle',
-  'campaign-addresses-pmtiles-label',
-  'campaign-point-overlays-circle',
-  'campaign-point-overlays-label',
-  'route-lines',
-  'assigned-routes-lines',
-  'flyr-user-location',
-];
 const INFERRED_BUILDING_LINK_MAX_DISTANCE_M = 45;
+
+type CampaignMapBundleResponse = {
+  asset_signature?: string | null;
+  source_version?: string | null;
+  status?: string | null;
+  phase?: string | null;
+  buildings?: BuildingFeatureCollection | null;
+  counts?: {
+    buildings?: number | null;
+  } | null;
+};
+
+function asBuildingFeatureCollection(value: unknown): BuildingFeatureCollection {
+  const candidate = value as { type?: unknown; features?: unknown } | null;
+  if (candidate?.type === 'FeatureCollection' && Array.isArray(candidate.features)) {
+    return candidate as BuildingFeatureCollection;
+  }
+  return { type: 'FeatureCollection', features: [] } as BuildingFeatureCollection;
+}
 
 /**
  * Scale a polygon ring toward a centroid by a factor (in place).
@@ -442,61 +447,11 @@ function safeGetSource(map: MapboxMap, sourceId: string): boolean {
   }
 }
 
-function canAddCustomMapLayers(map: MapboxMap): boolean {
-  try {
-    const style = map.getStyle();
-    return Boolean(style && Array.isArray(style.layers) && style.sources);
-  } catch {
-    return false;
-  }
-}
-
 function combineMapFilters(...filters: Array<FilterSpecification | undefined | null>): FilterSpecification {
   const activeFilters = filters.filter(Boolean) as FilterSpecification[];
   if (activeFilters.length === 0) return ['all'];
   if (activeFilters.length === 1) return activeFilters[0];
   return ['all', ...activeFilters] as FilterSpecification;
-}
-
-function campaignBoundaryWithinFilter(boundary?: GeoJSON.Polygon | null): FilterSpecification | undefined {
-  if (!boundary?.coordinates?.[0]?.length) return undefined;
-  return ['within', boundary] as unknown as FilterSpecification;
-}
-
-function getCampaignScopedBuildingFilter(addresses?: CampaignAddress[]): FilterSpecification | undefined {
-  if (!addresses?.length) return undefined;
-
-  const buildingIds = new Set<string>();
-
-  for (const address of addresses) {
-    const record = address as CampaignAddress & {
-      address_id?: string | null;
-      building_id?: string | null;
-      source_id?: string | null;
-    };
-
-    for (const value of [
-      record.building_id,
-      record.building_gers_id,
-    ]) {
-      const normalized = String(value ?? '').trim();
-      if (normalized) buildingIds.add(normalized);
-    }
-  }
-
-  const filters: FilterSpecification[] = [];
-  if (buildingIds.size > 0) {
-    const idList = Array.from(buildingIds);
-    filters.push(
-      ['in', ['to-string', ['get', 'building_id']], ['literal', idList]] as FilterSpecification,
-      ['in', ['to-string', ['get', 'gers_id']], ['literal', idList]] as FilterSpecification,
-      ['in', ['to-string', ['get', 'source_id']], ['literal', idList]] as FilterSpecification,
-      ['in', ['to-string', ['get', 'id']], ['literal', idList]] as FilterSpecification
-    );
-  }
-
-  if (filters.length === 0) return undefined;
-  return filters.length === 1 ? filters[0] : ['any', ...filters] as FilterSpecification;
 }
 
 function getCampaignBuildingScopeKey(addresses?: CampaignAddress[]): string {
@@ -535,31 +490,6 @@ function getStringRecordValue(record: Record<string, unknown>, key: string): str
   return undefined;
 }
 
-function toManifestBuildingSource(
-  manifest: CampaignMapManifest,
-  accessToken: string | null
-): ManifestBuildingSource | null {
-  const buildingLayer = manifest.layers?.buildings ?? null;
-  const sourceLayer = buildingLayer?.sourceLayer ?? manifest.source_layers?.buildings;
-  if (!sourceLayer) return null;
-
-  const vectorTileUrlTemplate = buildingLayer?.vectorTileUrlTemplate ?? manifest.vector_tile_url_template;
-  if (vectorTileUrlTemplate) {
-    return {
-      deliveryMode: 'backend_zxy',
-      url: appendTileAccessToken(vectorTileUrlTemplate, accessToken),
-      sourceLayer,
-      promoteId: buildingLayer?.promoteId ?? manifest.promote_ids?.buildings ?? 'building_id',
-      minzoom: buildingLayer?.minzoom ?? manifest.minzoom ?? 13,
-      maxzoom: buildingLayer?.maxzoom ?? manifest.maxzoom ?? 18,
-      bounds: buildingLayer?.bounds ?? manifest.bounds ?? undefined,
-      tileBuffer: buildingLayer?.tileBuffer ?? undefined,
-    };
-  }
-
-  return null;
-}
-
 function safeRemoveLayer(map: MapboxMap, layerId: string) {
   try {
     if (map.getLayer(layerId)) map.removeLayer(layerId);
@@ -574,16 +504,6 @@ function safeRemoveSource(map: MapboxMap, sourceId: string) {
   } catch {
     // Ignore transient style teardown errors.
   }
-}
-
-function firstExistingLayerId(map: MapboxMap, layerIds: string[]): string | undefined {
-  return layerIds.find((id) => {
-    try {
-      return Boolean(map.getLayer(id));
-    } catch {
-      return false;
-    }
-  });
 }
 
 function ensure3dBuildingCamera(map: MapboxMap) {
@@ -644,11 +564,11 @@ export function MapBuildingsLayer({
   map,
   campaignId,
   refreshKey = 0,
+  buildingFeatures,
+  buildingDataKey,
   addressStateOverrides,
   hiddenBuildingIds = [],
   deletedAddressIds = [],
-  campaignBoundary = null,
-  campaignBbox = null,
   statusFilters = defaultStatusFilters,
   assignmentColorByAddressId,
   showOrphans = true,
@@ -660,7 +580,6 @@ export function MapBuildingsLayer({
   onRenderStateChange,
 }: MapBuildingsLayerProps) {
   const [features, setFeatures] = useState<BuildingFeatureCollection | null>(null);
-  const [manifestSource, setManifestSource] = useState<ManifestBuildingSource | null>(null);
   const [isFetching, setIsFetching] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(15);
   const sourceId = 'map-buildings-source';
@@ -675,6 +594,7 @@ export function MapBuildingsLayer({
   const addressLabelLayerId = 'map-address-centroid-labels';
   const untouchedBuildingColor = getMapUntouchedColor(isDarkMap);
   const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null);
+  const isCanonicalBundleControlled = buildingFeatures !== undefined;
   const useCanonicalAddressState = Boolean(addressStateOverrides?.length);
   const assignmentColorByBuildingId = useMemo(() => {
     const colors = new Map<string, string>();
@@ -861,42 +781,34 @@ export function MapBuildingsLayer({
     geometryFilter: FilterSpecification,
     filterExpr?: FilterSpecification
   ): FilterSpecification => {
-    if (!manifestSource) {
-      // Campaign building GeoJSON is already server-scoped. Still keep the
-      // layer geometry filter so Mapbox gets a valid polygon/point filter
-      // instead of a bare ["all"] expression that can fail during addLayer.
-      return filterExpr ? combineMapFilters(geometryFilter, filterExpr) : geometryFilter;
-    }
-
-    const pmtilesScope = filterExpr ?? campaignBoundaryWithinFilter(campaignBoundary);
-    return pmtilesScope
-      ? combineMapFilters(geometryFilter, pmtilesScope)
-      : combineMapFilters(geometryFilter, NO_FEATURES_FILTER);
+    // Canonical map-bundle GeoJSON is already campaign-scoped server-side.
+    // Keep only the geometry filter plus optional status/selection filters.
+    return filterExpr ? combineMapFilters(geometryFilter, filterExpr) : geometryFilter;
   };
 
   // Generate unified color expression based on status priority
-  // Priority: QR_SCANNED > LEADS > CONVERSATIONS > DO_NOT_KNOCK > NO_ONE_HOME > TOUCHED > UNTOUCHED
+  // Priority: QR_SCANNED > HOT_LEADS > LEADS > CONVERSATIONS > DO_NOT_KNOCK > NO_ONE_HOME > TOUCHED > UNTOUCHED
   // Uses ['feature-state', ...] for real-time updates via setFeatureState(),
   // with fallback to ['get', ...] for initial data from properties
   const getColorExpression = (): ExpressionSpecification => {
     // Helper expressions - check feature-state first (real-time), then source properties (initial load)
     const getAssignmentColor = () => ['coalesce', ['feature-state', 'assignment_color'], ['get', 'assignment_color'], ''];
-    const getStatusValue = () => ['coalesce', ['feature-state', 'status'], ['get', 'status'], 'not_visited'];
-    const getAddressStatus = () => ['coalesce', ['feature-state', 'address_status'], ['get', 'address_status'], 'none'];
-    const getScansTotal = () => ['coalesce', ['feature-state', 'scans_total'], ['get', 'scans_total'], 0];
+    const getStatusValue = () => ['downcase', ['to-string', ['coalesce', ['feature-state', 'status'], ['get', 'status'], 'not_visited']]];
+    const getAddressStatus = () => ['downcase', ['to-string', ['coalesce', ['feature-state', 'address_status'], ['get', 'address_status'], 'none']]];
+    const getScansTotal = () => ['to-number', ['coalesce', ['feature-state', 'scans_total'], ['get', 'scans_total'], 0], 0];
     const getQrScanned = () => ['coalesce', ['feature-state', 'qr_scanned'], ['get', 'qr_scanned'], false];
-    const isQrScanned = ['any', ['==', getQrScanned(), true], ['>', getScansTotal(), 0]];
+    const isQrScanned = ['any', ['==', getQrScanned(), true], ['==', getQrScanned(), 'true'], ['>', getScansTotal(), 0]];
     const isHotLead = [
       'any',
       ['==', getStatusValue(), 'hot_lead'],
-      ['in', getAddressStatus(), ['literal', ['appointment', 'follow_up', 'appointment_set', 'callback_requested', 'future_seller']]],
+      ['in', getAddressStatus(), ['literal', HOT_LEAD_ADDRESS_STATUSES]],
     ];
-    const isLead = ['any', ['==', getStatusValue(), 'lead'], ['in', getAddressStatus(), ['literal', ['lead', 'interested', 'hot_lead']]]];
-    const isConversation = ['any', ['==', getStatusValue(), 'hot'], ['==', getAddressStatus(), 'talked']];
+    const isLead = ['any', ['==', getStatusValue(), 'lead'], ['in', getAddressStatus(), ['literal', LEAD_ADDRESS_STATUSES]]];
+    const isConversation = ['any', ['==', getStatusValue(), 'hot'], ['in', getAddressStatus(), ['literal', CONVERSATION_ADDRESS_STATUSES]]];
     const isDoNotKnock = ['any', ['==', getStatusValue(), 'do_not_knock'], ['==', getAddressStatus(), 'do_not_knock']];
-    const isNoOneHome = ['any', ['==', getStatusValue(), 'no_answer'], ['in', getAddressStatus(), ['literal', ['no_answer', 'not_home', 'attempted']]]];
-    const isTouched = ['any', ['==', getStatusValue(), 'visited'], ['==', getAddressStatus(), 'delivered']];
-    const isUntouched = ['all', ['==', getStatusValue(), 'not_visited'], ['==', getAddressStatus(), 'none']];
+    const isNoOneHome = ['any', ['==', getStatusValue(), 'no_answer'], ['in', getAddressStatus(), ['literal', NO_ONE_HOME_ADDRESS_STATUSES]]];
+    const isTouched = ['any', ['==', getStatusValue(), 'visited'], ['in', getAddressStatus(), ['literal', TOUCHED_ADDRESS_STATUSES]]];
+    const isUntouched = ['all', ['==', getStatusValue(), 'not_visited'], ['in', getAddressStatus(), ['literal', UNTOUCHED_ADDRESS_STATUSES]]];
     
     return [
       'case',
@@ -934,9 +846,9 @@ export function MapBuildingsLayer({
   };
 
   const getLeadGlowOpacityExpression = (): ExpressionSpecification => {
-    const getStatusValue = () => ['coalesce', ['feature-state', 'status'], ['get', 'status'], 'not_visited'];
-    const getAddressStatus = () => ['coalesce', ['feature-state', 'address_status'], ['get', 'address_status'], 'none'];
-    const isLead = ['any', ['==', getStatusValue(), 'lead'], ['in', getAddressStatus(), ['literal', ['lead', 'interested', 'hot_lead']]]];
+    const getStatusValue = () => ['downcase', ['to-string', ['coalesce', ['feature-state', 'status'], ['get', 'status'], 'not_visited']]];
+    const getAddressStatus = () => ['downcase', ['to-string', ['coalesce', ['feature-state', 'address_status'], ['get', 'address_status'], 'none']]];
+    const isLead = ['any', ['==', getStatusValue(), 'lead'], ['in', getAddressStatus(), ['literal', LEAD_ADDRESS_STATUSES]]];
 
     return ['case', ['all', isLead, statusFilters.LEADS], 0.82, 0] as ExpressionSpecification;
   };
@@ -985,13 +897,13 @@ export function MapBuildingsLayer({
     safeRemoveSource(map, sourceId);
   }, [map, addressLabelLayerId, circleLayerId, circleLeadGlowLayerId, outlineLayerId, leadGlowLayerId, layerId, surfaceLayerId, shadowLayerId, addressLabelSourceId, sourceId]);
 
-  // CAMPAIGN MODE: Fetch ALL campaign features once (no viewport filtering)
-  // This enables "fetch once, render forever" for buttery smooth pan/zoom
+  // CAMPAIGN MODE: Fetch canonical map-bundle buildings once (no viewport filtering).
+  // The old display-time /buildings path is intentionally bypassed; bundles are the source of truth.
   const fetchCampaignData = useCallback(async () => {
-    if (!isMountedRef.current || !campaignId) return;
+    if (!isMountedRef.current || !campaignId || isCanonicalBundleControlled) return;
 
     setIsFetching(true);
-    const campaignDataKey = `${campaignId}:${refreshKey}:${getCampaignBuildingScopeKey(addressStateOverrides)}`;
+    const campaignDataKey = `${campaignId}:${refreshKey}:${getCampaignBuildingScopeKey(addressStateOverrides)}:map-bundle`;
     if (emptyFallbackRetryKeyRef.current !== campaignDataKey) {
       emptyFallbackRetryKeyRef.current = campaignDataKey;
       emptyFallbackRetryCountRef.current = 0;
@@ -1001,7 +913,7 @@ export function MapBuildingsLayer({
       const supabase = getSupabase();
       const { data: sessionData } = await supabase.auth.getSession();
       const accessToken = sessionData.session?.access_token ?? null;
-      const response = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/buildings`, {
+      const response = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/map-bundle`, {
         credentials: 'include',
         headers: {
           Accept: 'application/json',
@@ -1010,18 +922,19 @@ export function MapBuildingsLayer({
       });
 
       if (!response.ok) {
-        throw new Error(`Campaign buildings request failed with status ${response.status}`);
+        throw new Error(`Campaign map-bundle request failed with status ${response.status}`);
       }
 
-      const campaignFeatures = await response.json() as BuildingFeatureCollection;
-      const normalizedCampaignFeatures =
-        campaignFeatures?.type === 'FeatureCollection' && Array.isArray(campaignFeatures.features)
-          ? campaignFeatures
-          : ({ type: 'FeatureCollection', features: [] } as BuildingFeatureCollection);
+      const bundle = await response.json() as CampaignMapBundleResponse;
+      const normalizedCampaignFeatures = asBuildingFeatureCollection(bundle.buildings);
       const campaignFeatureCount = normalizedCampaignFeatures.features.length;
       setBuildingsDebug({
-        source: 'campaign-buildings-api-geojson',
+        source: 'campaign-map-bundle',
         campaignId,
+        assetSignature: bundle.asset_signature ?? null,
+        sourceVersion: bundle.source_version ?? null,
+        bundleStatus: bundle.status ?? null,
+        bundlePhase: bundle.phase ?? null,
         featureCount: campaignFeatureCount,
         firstFeatureId:
           normalizedCampaignFeatures.features[0]?.properties?.gers_id ??
@@ -1034,7 +947,6 @@ export function MapBuildingsLayer({
       if (campaignFeatureCount > 0) {
         emptyFallbackRetryCountRef.current = 0;
       }
-      setManifestSource(null);
       setFeatures(normalizedCampaignFeatures);
 
       if (campaignFeatureCount === 0 && isMountedRef.current) {
@@ -1067,33 +979,14 @@ export function MapBuildingsLayer({
       }
     } catch (err) {
       console.error('[MapBuildingsLayer] Error in fetchCampaignData:', err);
-      if (!campaignBoundary && !campaignBbox) {
-        try {
-          const { manifest, accessToken } = await fetchCampaignMapManifest(campaignId);
-          if (hasRenderablePmtilesBuildings(manifest)) {
-            const nextSource = toManifestBuildingSource(manifest!, accessToken);
-            if (nextSource) {
-              campaignDataLoadedRef.current = campaignDataKey;
-              emptyFallbackRetryCountRef.current = 0;
-              setFeatures(null);
-              setManifestSource(nextSource);
-              return;
-            }
-          }
-        } catch (manifestError) {
-          console.error('[MapBuildingsLayer] Manifest fallback failed:', manifestError);
-        }
-      }
-
       campaignDataLoadedRef.current = null;
-      setManifestSource(null);
       setFeatures({ type: 'FeatureCollection', features: [] } as BuildingFeatureCollection);
     } finally {
       if (isMountedRef.current) {
         setIsFetching(false);
       }
     }
-  }, [campaignId, refreshKey, addressStateOverrides, campaignBoundary, campaignBbox, getSupabase]);
+  }, [campaignId, refreshKey, addressStateOverrides, getSupabase, isCanonicalBundleControlled]);
 
   useEffect(() => {
     return () => {
@@ -1103,6 +996,49 @@ export function MapBuildingsLayer({
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (!isCanonicalBundleControlled) return;
+
+    if (emptyFallbackRetryRef.current) {
+      window.clearTimeout(emptyFallbackRetryRef.current);
+      emptyFallbackRetryRef.current = null;
+    }
+
+    const normalizedFeatures = asBuildingFeatureCollection(buildingFeatures);
+    const featureCount = normalizedFeatures.features.length;
+    const controlledKey = [
+      campaignId ?? 'no-campaign',
+      refreshKey,
+      getCampaignBuildingScopeKey(addressStateOverrides),
+      buildingDataKey ?? 'canonical-prop',
+      featureCount,
+    ].join(':');
+
+    campaignDataLoadedRef.current = featureCount > 0 ? controlledKey : null;
+    emptyFallbackRetryKeyRef.current = controlledKey;
+    emptyFallbackRetryCountRef.current = 0;
+    setIsFetching(false);
+    setFeatures(normalizedFeatures);
+    setBuildingsDebug({
+      source: 'campaign-map-bundle-prop',
+      campaignId,
+      buildingDataKey: buildingDataKey ?? null,
+      featureCount,
+      firstFeatureId:
+        normalizedFeatures.features[0]?.properties?.gers_id ??
+        normalizedFeatures.features[0]?.properties?.building_id ??
+        normalizedFeatures.features[0]?.id ??
+        null,
+    });
+  }, [
+    addressStateOverrides,
+    buildingDataKey,
+    buildingFeatures,
+    campaignId,
+    isCanonicalBundleControlled,
+    refreshKey,
+  ]);
 
   // Precompute scaled geometry once per fetch — never inside the render/update effect.
   useEffect(() => {
@@ -1382,7 +1318,7 @@ export function MapBuildingsLayer({
   // CAMPAIGN MODE: Fetch full campaign data once when campaignId is set
   // This is the "fetch once, render forever" pattern for smooth pan/zoom
   useEffect(() => {
-    if (!map || !campaignId) {
+    if (!map || !campaignId || isCanonicalBundleControlled) {
       return;
     }
     
@@ -1424,7 +1360,7 @@ export function MapBuildingsLayer({
     return () => {
       map.off('zoomend', onZoomChanged);
     };
-  }, [map, campaignId, fetchCampaignData, onZoomChanged, refreshKey, addressStateOverrides]);
+  }, [map, campaignId, fetchCampaignData, onZoomChanged, refreshKey, addressStateOverrides, isCanonicalBundleControlled]);
 
   // EXPLORATION MODE: Set up viewport event listeners (only when no campaignId)
   useEffect(() => {
@@ -1519,349 +1455,8 @@ export function MapBuildingsLayer({
     };
   }, [circleLayerId, features, isFetching, layerId, surfaceLayerId, outlineLayerId, map, onRenderStateChange, zoomLevel]);
 
-  useEffect(() => {
-    if (!map || !manifestSource) return;
-
-    const hasExpectedManifestLayers = () =>
-      safeGetSource(map, sourceId) &&
-      Boolean(
-        (() => {
-          try {
-            return map.getLayer(layerId) && map.getLayer(leadGlowLayerId);
-          } catch {
-            return false;
-          }
-        })()
-      );
-
-    const addManifestLayers = () => {
-      if (!canAddCustomMapLayers(map)) return;
-      cleanupRenderedLayers();
-
-      const vectorSource: mapboxgl.VectorSourceSpecification & {
-        buffer?: number;
-        promoteId?: Record<string, string>;
-      } = {
-        type: 'vector',
-        minzoom: manifestSource.minzoom,
-        maxzoom: manifestSource.maxzoom,
-        buffer: manifestSource.tileBuffer ?? 128,
-        promoteId: {
-          [manifestSource.sourceLayer]: manifestSource.promoteId,
-        },
-      };
-      vectorSource.tiles = [manifestSource.url];
-      if (manifestSource.bounds) vectorSource.bounds = manifestSource.bounds;
-
-      map.addSource(sourceId, vectorSource);
-      const campaignScopeFilter =
-        campaignBoundaryWithinFilter(campaignBoundary) ??
-        getCampaignScopedBuildingFilter(addressStateOverrides);
-      const buildingFilter = getScopedGeometryFilter(
-        ['==', ['geometry-type'], 'Polygon'] as FilterSpecification,
-        campaignScopeFilter
-      );
-      const beforeLayerId = firstExistingLayerId(map, BUILDING_BEFORE_LAYER_IDS);
-      const addBuildingLayer = (layer: mapboxgl.AnyLayer) => {
-        if (beforeLayerId) {
-          map.addLayer(layer, beforeLayerId);
-        } else {
-          map.addLayer(layer);
-        }
-      };
-
-      const footprintLayer: FillExtrusionLayerSpecification = {
-        id: layerId,
-        type: 'fill-extrusion',
-        source: sourceId,
-        'source-layer': manifestSource.sourceLayer,
-        minzoom: manifestSource.minzoom,
-        filter: buildingFilter,
-        paint: {
-          'fill-extrusion-color': getFootprintFillColor(),
-          'fill-extrusion-opacity': getFootprintFillOpacity(),
-          'fill-extrusion-height': [
-            'coalesce',
-            ['get', 'height'],
-            ['get', 'height_m'],
-            ['get', 'render_height'],
-            8,
-          ] as ExpressionSpecification,
-          'fill-extrusion-base': ['coalesce', ['get', 'min_height'], 0] as ExpressionSpecification,
-          'fill-extrusion-vertical-gradient': getFootprintVerticalGradient(),
-          'fill-extrusion-emissive-strength': getFootprintEmissiveStrength(),
-        },
-      };
-
-      addBuildingLayer(footprintLayer);
-
-      addBuildingLayer({
-        id: leadGlowLayerId,
-        type: 'line',
-        source: sourceId,
-        'source-layer': manifestSource.sourceLayer,
-        minzoom: manifestSource.minzoom,
-        filter: buildingFilter,
-        paint: {
-          'line-color': '#111827',
-          'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.25, 16, 0.7, 18, 1],
-          'line-opacity': getLeadGlowOpacityExpression(),
-        },
-      });
-
-      if (!hasExpectedManifestLayers()) {
-        throw new Error('Building source/layers did not attach.');
-      }
-
-      try {
-        map.setLight({
-          anchor: 'map',
-          color: '#cfd8e3',
-          intensity: 0.35,
-          position: [1.15, 210, 30],
-        });
-        ensure3dBuildingCamera(map);
-      } catch (error) {
-        console.warn('[MapBuildingsLayer] Error setting PMTiles map lighting:', error);
-      }
-
-      const clickHandler = (event: mapboxgl.MapLayerMouseEvent) => {
-        const feature = event.features?.[0];
-        const props = feature?.properties as BuildingProperties | undefined;
-        if (!props) return;
-        const buildingId = String(props.building_id ?? props.gers_id ?? props.id ?? '').trim();
-        if (!buildingId) return;
-        const addressId = String(props.address_id ?? '').trim() || undefined;
-        const originalEvent = event.originalEvent as MouseEvent | undefined;
-        onBuildingClickRef.current?.(buildingId, addressId, {
-          additive: Boolean(originalEvent?.metaKey || originalEvent?.ctrlKey),
-        });
-      };
-      const enterHandler = () => {
-        map.getCanvas().style.cursor = 'pointer';
-      };
-      const leaveHandler = () => {
-        map.getCanvas().style.cursor = '';
-      };
-
-      // Use map-level handlers so Mapbox does not run layer-scoped
-      // queryRenderedFeatures internally during style transitions.
-      const mapClickHandler = (event: mapboxgl.MapMouseEvent) => {
-        try {
-          if (!map.isStyleLoaded() || !map.getLayer(layerId)) return;
-          const features = map.queryRenderedFeatures(event.point, {
-            layers: [layerId],
-          });
-          if (features.length > 0) clickHandler(Object.assign(event, { features }));
-        } catch {
-          return;
-        }
-      };
-      const mapMouseMoveHandler = (event: mapboxgl.MapMouseEvent) => {
-        try {
-          if (!map.isStyleLoaded() || !map.getLayer(layerId)) {
-            leaveHandler();
-            return;
-          }
-          const features = map.queryRenderedFeatures(event.point, {
-            layers: [layerId],
-          });
-          if (features.length > 0) {
-            enterHandler();
-          } else {
-            leaveHandler();
-          }
-        } catch {
-          leaveHandler();
-        }
-      };
-
-      map.on('click', mapClickHandler);
-      map.on('mousemove', mapMouseMoveHandler);
-
-      return () => {
-        map.off('click', mapClickHandler);
-        map.off('mousemove', mapMouseMoveHandler);
-      };
-    };
-
-    let cleanupHandlers: (() => void) | undefined;
-    let cancelled = false;
-    let retryIntervalId: number | undefined;
-    const clearRetry = () => {
-      map.off('style.load', tryAddManifestLayers);
-      map.off('styledata', tryAddManifestLayers);
-      map.off('load', tryAddManifestLayers);
-      map.off('idle', tryAddManifestLayers);
-      if (retryIntervalId !== undefined) {
-        window.clearInterval(retryIntervalId);
-        retryIntervalId = undefined;
-      }
-    };
-    const tryAddManifestLayers = () => {
-      if (cancelled) return;
-      if (hasExpectedManifestLayers()) {
-        clearRetry();
-        return;
-      }
-      if (cleanupHandlers || !canAddCustomMapLayers(map)) return;
-      try {
-        cleanupHandlers = addManifestLayers();
-        if (cleanupHandlers && hasExpectedManifestLayers()) clearRetry();
-      } catch (error) {
-        cleanupHandlers?.();
-        cleanupHandlers = undefined;
-        cleanupRenderedLayers();
-        console.warn('[MapBuildingsLayer] Custom building layer attach deferred:', error);
-      }
-    };
-
-    tryAddManifestLayers();
-    if (!cleanupHandlers) {
-      map.on('style.load', tryAddManifestLayers);
-      map.on('styledata', tryAddManifestLayers);
-      map.on('load', tryAddManifestLayers);
-      map.on('idle', tryAddManifestLayers);
-      retryIntervalId = window.setInterval(tryAddManifestLayers, 150);
-    }
-
-    const reportRenderState = () => {
-      const report = onRenderStateChangeRef.current;
-      if (!report) return;
-      let visibleFeatureCount = 0;
-      if (map.isStyleLoaded()) {
-        try {
-          visibleFeatureCount = map.queryRenderedFeatures({ layers: [layerId] }).length;
-        } catch {
-          visibleFeatureCount = 0;
-        }
-      }
-      report({
-        isFetching: isFetchingRef.current,
-        hasData: true,
-        hasVisibleFeatures: visibleFeatureCount > 0,
-        hasBuildingPolygons: true,
-        buildingsUnavailable: false,
-        featureCount: visibleFeatureCount,
-        visibleFeatureCount,
-        zoomLevel: map.getZoom(),
-      });
-    };
-
-    map.on('idle', reportRenderState);
-    map.on('moveend', reportRenderState);
-    map.on('zoomend', reportRenderState);
-
-    return () => {
-      cancelled = true;
-      clearRetry();
-      cleanupHandlers?.();
-      map.off('idle', reportRenderState);
-      map.off('moveend', reportRenderState);
-      map.off('zoomend', reportRenderState);
-      cleanupRenderedLayers();
-    };
-  }, [map, manifestSource, cleanupRenderedLayers, sourceId, layerId, leadGlowLayerId, addressStateOverrides, campaignBoundary, campaignBbox, statusFilters, footprintStatusColors, isDarkMap, assignmentColorByAddressId]);
-
-  useEffect(() => {
-    if (!map || !manifestSource || !campaignId || !addressStateOverrides?.length) return;
-
-    let frameId: number | null = null;
-    const statusRank = { not_visited: 0, visited: 1, no_answer: 2, do_not_knock: 3, hot: 4, lead: 5, hot_lead: 6 } as const;
-    const buildingStateById = new Map<
-      string,
-      {
-        status: 'not_visited' | 'visited' | 'hot' | 'lead' | 'hot_lead' | 'no_answer' | 'do_not_knock';
-        scans_total: number;
-        qr_scanned: boolean;
-        assignment_color?: string;
-      }
-    >();
-    const addressStateById = new Map<
-      string,
-      {
-        status: 'not_visited' | 'visited' | 'hot' | 'lead' | 'hot_lead' | 'no_answer' | 'do_not_knock';
-        scans_total: number;
-        qr_scanned: boolean;
-        assignment_color?: string;
-      }
-    >();
-
-    for (const address of addressStateOverrides) {
-      addressStateById.set(address.id, {
-        status: getCampaignBuildingStatus(address),
-        scans_total: Number(address.scans ?? 0),
-        qr_scanned: Number(address.scans ?? 0) > 0 || Boolean(address.last_scanned_at),
-        assignment_color: assignmentColorByAddressId?.[address.id],
-      });
-
-      const buildingId =
-        (address as CampaignAddress & { building_id?: string | null }).building_id ??
-        address.gers_id ??
-        null;
-      if (!buildingId) continue;
-
-      const nextState = {
-        status: getCampaignBuildingStatus(address),
-        scans_total: Number(address.scans ?? 0),
-        qr_scanned: Number(address.scans ?? 0) > 0 || Boolean(address.last_scanned_at),
-        assignment_color: assignmentColorByAddressId?.[address.id],
-      };
-      const currentState = buildingStateById.get(buildingId);
-      if (!currentState) {
-        buildingStateById.set(buildingId, nextState);
-        continue;
-      }
-      buildingStateById.set(buildingId, {
-        status:
-          statusRank[nextState.status] > statusRank[currentState.status]
-            ? nextState.status
-            : currentState.status,
-        scans_total: currentState.scans_total + nextState.scans_total,
-        qr_scanned: currentState.qr_scanned || nextState.qr_scanned,
-        assignment_color: currentState.assignment_color ?? nextState.assignment_color,
-      });
-    }
-
-    const applyState = (attempt = 0) => {
-      if (!safeGetSource(map, sourceId)) {
-        if (attempt < 8) frameId = requestAnimationFrame(() => applyState(attempt + 1));
-        return;
-      }
-
-      for (const [addressId, featureState] of addressStateById.entries()) {
-        try {
-          map.setFeatureState(
-            { source: sourceId, sourceLayer: manifestSource.sourceLayer, id: addressId },
-            featureState
-          );
-        } catch (error) {
-          console.warn('[MapBuildingsLayer] Failed to apply PMTiles address feature-state:', error);
-        }
-      }
-
-      for (const [buildingId, featureState] of buildingStateById.entries()) {
-        try {
-          map.setFeatureState(
-            { source: sourceId, sourceLayer: manifestSource.sourceLayer, id: buildingId },
-            featureState
-          );
-        } catch (error) {
-          console.warn('[MapBuildingsLayer] Failed to apply PMTiles building feature-state:', error);
-        }
-      }
-    };
-
-    applyState();
-
-    return () => {
-      if (frameId !== null) cancelAnimationFrame(frameId);
-    };
-  }, [map, manifestSource, campaignId, addressStateOverrides, sourceId, assignmentColorByAddressId]);
-
   // Update Mapbox source and layer when features change
   useEffect(() => {
-    if (manifestSource) return;
     // Only bail if map doesn't exist
     if (!map) {
       return;
@@ -2108,7 +1703,11 @@ export function MapBuildingsLayer({
 
           // Filter for polygon features only
           const polygonFilter: FilterSpecification = POLYGON_GEOMETRY_FILTER;
-          const buildingHeightExpression = ['max', ['coalesce', ['get', 'height'], ['get', 'height_m'], 18], 18] as ExpressionSpecification;
+          const buildingHeightExpression = [
+            'max',
+            ['coalesce', ['get', 'height'], ['get', 'height_m'], DEFAULT_BUILDING_HEIGHT_METERS],
+            DEFAULT_BUILDING_HEIGHT_METERS,
+          ] as ExpressionSpecification;
 
           safeRemoveLayer(map, surfaceLayerId);
           
@@ -2711,19 +2310,6 @@ export function MapBuildingsLayer({
       map.setPaintProperty(layerId, 'fill-extrusion-opacity', getFootprintFillOpacity());
       map.setPaintProperty(layerId, 'fill-extrusion-vertical-gradient', getFootprintVerticalGradient());
       map.setPaintProperty(layerId, 'fill-extrusion-emissive-strength', getFootprintEmissiveStrength());
-      if (manifestSource) {
-        const manifestPolygonFilter = ['==', ['geometry-type'], 'Polygon'] as FilterSpecification;
-        const campaignScopeFilter =
-          campaignBoundaryWithinFilter(campaignBoundary) ??
-          getCampaignScopedBuildingFilter(addressStateOverrides);
-        const manifestScopedFilter = getScopedGeometryFilter(manifestPolygonFilter, campaignScopeFilter);
-        map.setFilter(layerId, manifestScopedFilter);
-        if (map.getLayer(leadGlowLayerId)) {
-          map.setPaintProperty(leadGlowLayerId, 'line-opacity', getLeadGlowOpacityExpression());
-          map.setFilter(leadGlowLayerId, manifestScopedFilter);
-        }
-        return;
-      }
 
       map.setFilter(layerId, getScopedGeometryFilter(POLYGON_GEOMETRY_FILTER, filterExpr));
       safeRemoveLayer(map, surfaceLayerId);
@@ -2745,11 +2331,10 @@ export function MapBuildingsLayer({
     } catch (err) {
       console.error('[MapBuildingsLayer] Error updating color/filter:', err);
     }
-  }, [map, manifestSource, statusFilters, campaignId, layerId, surfaceLayerId, outlineLayerId, showOrphans, footprintStatusColors, circleLayerId, campaignBoundary, addressStateOverrides, leadGlowLayerId, isDarkMap, assignmentColorByAddressId]);
+  }, [map, statusFilters, campaignId, layerId, surfaceLayerId, outlineLayerId, showOrphans, footprintStatusColors, circleLayerId, leadGlowLayerId, isDarkMap, assignmentColorByAddressId]);
 
   // Update filter when showOrphans changes (toggle visibility of orphan buildings)
   useEffect(() => {
-    if (manifestSource) return;
     if (!map) return;
     
     const updateFilters = () => {
@@ -2779,7 +2364,7 @@ export function MapBuildingsLayer({
     return () => {
       map.off('load', updateFilters);
     };
-  }, [map, manifestSource, showOrphans, campaignId, statusFilters, layerId, surfaceLayerId, outlineLayerId, circleLayerId]);
+  }, [map, showOrphans, campaignId, statusFilters, layerId, surfaceLayerId, outlineLayerId, circleLayerId]);
 
   // Re-apply lighting and refresh colors when map style loads (important for dark mode)
   useEffect(() => {
@@ -2802,15 +2387,15 @@ export function MapBuildingsLayer({
           map.setPaintProperty(layerId, 'fill-extrusion-vertical-gradient', getFootprintVerticalGradient());
           map.setPaintProperty(layerId, 'fill-extrusion-emissive-strength', getFootprintEmissiveStrength());
         }
-        if (!manifestSource) safeRemoveLayer(map, surfaceLayerId);
-        if (!manifestSource) safeRemoveLayer(map, outlineLayerId);
+        safeRemoveLayer(map, surfaceLayerId);
+        safeRemoveLayer(map, outlineLayerId);
         if (map.getLayer(leadGlowLayerId)) {
           map.setPaintProperty(leadGlowLayerId, 'line-opacity', getLeadGlowOpacityExpression());
         }
-        if (!manifestSource && map.getLayer(circleLeadGlowLayerId)) {
+        if (map.getLayer(circleLeadGlowLayerId)) {
           map.setPaintProperty(circleLeadGlowLayerId, 'circle-opacity', getLeadGlowOpacityExpression());
         }
-        if (!manifestSource && map.getLayer(circleLayerId)) {
+        if (map.getLayer(circleLayerId)) {
           map.setPaintProperty(circleLayerId, 'circle-color', getFootprintFillColor());
           map.setPaintProperty(circleLayerId, 'circle-opacity', getCircleOpacity());
           map.setPaintProperty(circleLayerId, 'circle-stroke-color', footprintStatusColors ? '#ffffff' : NEUTRAL_OUTLINE_COLOR);
@@ -2831,7 +2416,7 @@ export function MapBuildingsLayer({
     return () => {
       map.off('style.load', applyLightingAndColors);
     };
-  }, [map, manifestSource, layerId, surfaceLayerId, outlineLayerId, circleLayerId, footprintStatusColors, statusFilters, isDarkMap]);
+  }, [map, layerId, surfaceLayerId, outlineLayerId, circleLayerId, footprintStatusColors, statusFilters, isDarkMap]);
 
   // Real-time subscription for building_stats updates
   // When a QR code is scanned, building_stats is updated via trigger
@@ -2990,7 +2575,7 @@ export function MapBuildingsLayer({
 
   // Real-time subscription for building_address_links (stable linker: map snaps grey → red as links are added)
   useEffect(() => {
-    if (!map || !campaignId) return;
+    if (!map || !campaignId || isCanonicalBundleControlled) return;
 
     const supabase = getSupabase();
     const channel = supabase
@@ -3016,7 +2601,7 @@ export function MapBuildingsLayer({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [map, campaignId, getSupabase, fetchCampaignData]);
+  }, [map, campaignId, getSupabase, fetchCampaignData, isCanonicalBundleControlled]);
 
   // Cleanup on unmount
   useEffect(() => {

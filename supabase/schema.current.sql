@@ -584,6 +584,23 @@ CREATE TABLE public."campaign_parcels" (
   CONSTRAINT "campaign_parcels_pkey" PRIMARY KEY ("id")
 );
 
+CREATE TABLE public."campaign_address_parcel_links" (
+  "id" uuid DEFAULT gen_random_uuid() NOT NULL,
+  "campaign_id" uuid NOT NULL,
+  "address_id" uuid NOT NULL,
+  "campaign_parcel_id" uuid,
+  "parcel_id" text NOT NULL,
+  "match_type" text DEFAULT 'contains'::text NOT NULL,
+  "confidence" double precision DEFAULT 1 NOT NULL,
+  "parcel_area_sqm" double precision,
+  "distance_meters" double precision,
+  "source_version" text,
+  "created_at" timestamp with time zone DEFAULT now() NOT NULL,
+  "updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+  CONSTRAINT "campaign_address_parcel_links_pkey" PRIMARY KEY ("id"),
+  CONSTRAINT "campaign_address_parcel_links_campaign_address_key" UNIQUE ("campaign_id", "address_id")
+);
+
 CREATE TABLE public."campaign_polished_building_features" (
   "campaign_id" uuid NOT NULL,
   "source" text NOT NULL,
@@ -2343,6 +2360,9 @@ ALTER TABLE public."campaign_home_events" ADD CONSTRAINT "campaign_home_events_s
 ALTER TABLE public."campaign_landing_page_analytics" ADD CONSTRAINT "campaign_landing_page_analytics_landing_page_id_fkey" FOREIGN KEY ("landing_page_id") REFERENCES public."campaign_landing_pages" ("id");
 ALTER TABLE public."campaign_landing_pages" ADD CONSTRAINT "campaign_landing_pages_campaign_id_fkey" FOREIGN KEY ("campaign_id") REFERENCES public."campaigns" ("id");
 ALTER TABLE public."campaign_members" ADD CONSTRAINT "campaign_members_campaign_id_fkey" FOREIGN KEY ("campaign_id") REFERENCES public."campaigns" ("id");
+ALTER TABLE public."campaign_address_parcel_links" ADD CONSTRAINT "campaign_address_parcel_links_address_id_fkey" FOREIGN KEY ("address_id") REFERENCES public."campaign_addresses" ("id") ON DELETE CASCADE;
+ALTER TABLE public."campaign_address_parcel_links" ADD CONSTRAINT "campaign_address_parcel_links_campaign_id_fkey" FOREIGN KEY ("campaign_id") REFERENCES public."campaigns" ("id") ON DELETE CASCADE;
+ALTER TABLE public."campaign_address_parcel_links" ADD CONSTRAINT "campaign_address_parcel_links_campaign_parcel_id_fkey" FOREIGN KEY ("campaign_parcel_id") REFERENCES public."campaign_parcels" ("id") ON DELETE SET NULL;
 ALTER TABLE public."campaign_parcels" ADD CONSTRAINT "campaign_parcels_campaign_id_fkey" FOREIGN KEY ("campaign_id") REFERENCES public."campaigns" ("id");
 ALTER TABLE public."campaign_polished_building_features" ADD CONSTRAINT "campaign_polished_building_features_campaign_id_fkey" FOREIGN KEY ("campaign_id") REFERENCES public."campaigns" ("id");
 ALTER TABLE public."campaign_presence" ADD CONSTRAINT "campaign_presence_campaign_id_fkey" FOREIGN KEY ("campaign_id") REFERENCES public."campaigns" ("id");
@@ -2604,6 +2624,9 @@ CREATE INDEX idx_campaign_members_user_id ON public.campaign_members USING btree
 CREATE INDEX idx_campaign_parcels_cmp ON public.campaign_parcels USING btree (campaign_id);
 CREATE INDEX idx_campaign_parcels_external ON public.campaign_parcels USING btree (external_id);
 CREATE INDEX idx_campaign_parcels_geom ON public.campaign_parcels USING gist (geom);
+CREATE INDEX idx_campaign_address_parcel_links_address ON public.campaign_address_parcel_links USING btree (address_id);
+CREATE INDEX idx_campaign_address_parcel_links_campaign_parcel ON public.campaign_address_parcel_links USING btree (campaign_id, parcel_id);
+CREATE INDEX idx_campaign_address_parcel_links_campaign_parcel_id ON public.campaign_address_parcel_links USING btree (campaign_parcel_id);
 CREATE INDEX idx_campaign_polished_building_features_updated_at ON public.campaign_polished_building_features USING btree (updated_at DESC);
 CREATE INDEX idx_campaign_presence_campaign_updated ON public.campaign_presence USING btree (campaign_id, updated_at DESC);
 CREATE INDEX idx_campaign_qr_batches_campaign_id ON public.campaign_qr_batches USING btree (campaign_id);
@@ -10997,10 +11020,7 @@ BEGIN
         p.id,
         p.external_id,
         p.properties,
-        CASE
-          WHEN v_boundary IS NULL THEN p.geom
-          ELSE ST_Multi(ST_CollectionExtract(ST_MakeValid(ST_Intersection(p.geom, v_boundary)), 3))
-        END AS geom
+        p.geom
       FROM public.campaign_parcels p
       WHERE p.campaign_id = p_campaign_id
         AND (v_boundary IS NULL OR ST_Intersects(p.geom, v_boundary))

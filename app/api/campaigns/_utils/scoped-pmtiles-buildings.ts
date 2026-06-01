@@ -40,9 +40,25 @@ function lonLatToTile(lon: number, lat: number, z: number) {
   };
 }
 
-function tileRangesForBbox(bbox: [number, number, number, number], maxZoom: number) {
+type TileRange = {
+  z: number;
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+};
+
+function tileRangeCandidatesForBbox(
+  bbox: [number, number, number, number],
+  maxZoom: number,
+  minZoom: number
+): TileRange[] {
   const [minLon, minLat, maxLon, maxLat] = bbox;
-  for (let z = Math.min(maxZoom, 18); z >= 12; z -= 1) {
+  const highestZoom = Math.min(maxZoom, 18);
+  const lowestZoom = Math.min(highestZoom, Math.max(12, minZoom));
+  const candidates: TileRange[] = [];
+
+  for (let z = highestZoom; z >= lowestZoom; z -= 1) {
     const nw = lonLatToTile(minLon, maxLat, z);
     const se = lonLatToTile(maxLon, minLat, z);
     const minX = Math.min(nw.x, se.x);
@@ -50,18 +66,29 @@ function tileRangesForBbox(bbox: [number, number, number, number], maxZoom: numb
     const minY = Math.min(nw.y, se.y);
     const maxY = Math.max(nw.y, se.y);
     const tileCount = (maxX - minX + 1) * (maxY - minY + 1);
-    if (tileCount <= SCOPED_TILE_LIMIT || z === 12) {
+    if (tileCount <= SCOPED_TILE_LIMIT || z === lowestZoom) {
       const maxTile = 2 ** z - 1;
-      return {
+      candidates.push({
         z,
         minX: Math.max(0, minX - TILE_RANGE_PADDING),
         maxX: Math.min(maxTile, maxX + TILE_RANGE_PADDING),
         minY: Math.max(0, minY - TILE_RANGE_PADDING),
         maxY: Math.min(maxTile, maxY + TILE_RANGE_PADDING),
-      };
+      });
     }
   }
-  return null;
+
+  return candidates;
+}
+
+function tileCoordsForRange(range: TileRange): Array<{ x: number; y: number }> {
+  const tileCoords: Array<{ x: number; y: number }> = [];
+  for (let x = range.minX; x <= range.maxX; x += 1) {
+    for (let y = range.minY; y <= range.maxY; y += 1) {
+      tileCoords.push({ x, y });
+    }
+  }
+  return tileCoords;
 }
 
 async function forEachWithConcurrency<T>(
@@ -290,7 +317,42 @@ function mergeBuildingFragments(buildingId: string, fragments: PolygonalBuilding
   };
 }
 
-export async function fetchScopedPmtilesBuildingFeatures(
+function bedrockFallbackSnapshotForBuildings(snapshot: CampaignSnapshotRow): CampaignSnapshotRow | null {
+  const pmtilesKey = resolvePmtilesKey(snapshot);
+  if (!pmtilesKey || pmtilesKey.startsWith('bedrock/')) return null;
+
+  const usStateMatch = pmtilesKey.match(/^diamond\/buildings\/usa\/([a-z]{2})\//i);
+  if (!usStateMatch) return null;
+
+  const state = usStateMatch[1].toUpperCase();
+  const prefix = 'bedrock/usa/current';
+  const fallbackKey = `${prefix}/buildings/pmtiles_by_state/state=${state}/buildings.pmtiles`;
+  const sourceLayers =
+    snapshot.tile_metrics?.source_layers &&
+    typeof snapshot.tile_metrics.source_layers === 'object'
+      ? snapshot.tile_metrics.source_layers as Record<string, unknown>
+      : {};
+
+  return {
+    ...snapshot,
+    prefix,
+    buildings_key: fallbackKey,
+    buildings_url: null,
+    metadata_key: `${prefix}/bedrock-usa.json`,
+    tile_metrics: {
+      ...(snapshot.tile_metrics ?? {}),
+      pmtiles_key: fallbackKey,
+      source_layers: {
+        ...sourceLayers,
+        buildings: 'buildings',
+      },
+      fallback_from_pmtiles_key: pmtilesKey,
+      fallback_reason: 'empty_diamond_building_scope',
+    },
+  };
+}
+
+async function extractScopedPmtilesBuildingFeatures(
   snapshot: CampaignSnapshotRow,
   bbox: [number, number, number, number],
   hiddenBuildingIds: Set<string> = new Set(),
@@ -307,74 +369,89 @@ export async function fetchScopedPmtilesBuildingFeatures(
   const pmtilesUrl = await resolveArtifactUrl(snapshot, pmtilesKey);
   const archive = getCachedPmtilesArchive(pmtilesUrl);
   const header = await archive.getHeader();
-  const range = tileRangesForBbox(bbox, header.maxZoom);
-  if (!range) return null;
+  const ranges = tileRangeCandidatesForBbox(bbox, header.maxZoom, header.minZoom);
+  if (ranges.length === 0) return null;
 
-  const byBuildingId = new Map<string, PolygonalBuildingFeature[]>();
-  const tileCoords: Array<{ x: number; y: number }> = [];
-  for (let x = range.minX; x <= range.maxX; x += 1) {
-    for (let y = range.minY; y <= range.maxY; y += 1) {
-      tileCoords.push({ x, y });
+  for (const range of ranges) {
+    const byBuildingId = new Map<string, PolygonalBuildingFeature[]>();
+    const tileCoords = tileCoordsForRange(range);
+
+    await forEachWithConcurrency(tileCoords, TILE_FETCH_CONCURRENCY, async ({ x, y }) => {
+      const tile = await archive.getZxy(range.z, x, y);
+      if (!tile) return;
+
+      const vectorTile = new VectorTile(new Pbf(Buffer.from(tile.data)));
+      const layer = vectorTile.layers[sourceLayer] ?? vectorTile.layers.buildings;
+      if (!layer) return;
+
+      for (let index = 0; index < layer.length; index += 1) {
+        const vectorFeature = layer.feature(index);
+        const feature = vectorFeature.toGeoJSON(x, y, range.z) as GeoJSON.Feature;
+        if (feature.geometry?.type !== 'Polygon' && feature.geometry?.type !== 'MultiPolygon') continue;
+        const geometry = normalizeGeometryLongitudes(feature.geometry, bbox);
+        const normalizedFeature = { ...feature, geometry };
+
+        const properties = (feature.properties ?? {}) as Record<string, unknown>;
+        const buildingId = String(properties.building_id ?? properties.gers_id ?? properties.id ?? '').trim();
+        if (!buildingId || hiddenBuildingIds.has(buildingId)) continue;
+
+        if (!geometryIntersectsBbox(geometry, bbox)) continue;
+        if (boundary && !featureInCampaignBoundary(normalizedFeature, boundary)) continue;
+
+        const normalizedBuildingFeature: PolygonalBuildingFeature = {
+          ...feature,
+          id: buildingId,
+          geometry,
+          properties: {
+            ...properties,
+            id: buildingId,
+            building_id: buildingId,
+            gers_id: buildingId,
+            height: Math.max(Number(properties.height ?? properties.height_m ?? 10), 10),
+            height_m: Math.max(Number(properties.height_m ?? properties.height ?? 10), 10),
+            min_height: Number(properties.min_height ?? 0),
+            source: properties.source ?? 'bedrock_pmtiles',
+            feature_type: 'matched_house',
+            feature_status: 'matched',
+            status: 'not_visited',
+            scans_total: 0,
+            qr_scanned: false,
+          },
+        };
+        const fragments = byBuildingId.get(buildingId);
+        if (fragments) {
+          fragments.push(normalizedBuildingFeature);
+        } else {
+          byBuildingId.set(buildingId, [normalizedBuildingFeature]);
+        }
+      }
+    });
+
+    const features = Array.from(byBuildingId.entries()).map(([buildingId, fragments]) =>
+      mergeBuildingFragments(buildingId, fragments)
+    );
+    if (features.length > 0) {
+      return {
+        type: 'FeatureCollection',
+        features,
+      };
     }
   }
 
-  await forEachWithConcurrency(tileCoords, TILE_FETCH_CONCURRENCY, async ({ x, y }) => {
-    const tile = await archive.getZxy(range.z, x, y);
-    if (!tile) return;
+  return null;
+}
 
-    const vectorTile = new VectorTile(new Pbf(Buffer.from(tile.data)));
-    const layer = vectorTile.layers[sourceLayer] ?? vectorTile.layers.buildings;
-    if (!layer) return;
+export async function fetchScopedPmtilesBuildingFeatures(
+  snapshot: CampaignSnapshotRow,
+  bbox: [number, number, number, number],
+  hiddenBuildingIds: Set<string> = new Set(),
+  boundary: GeoJSON.Polygon | null = null
+): Promise<ScopedBuildingFeatureCollection | null> {
+  const primary = await extractScopedPmtilesBuildingFeatures(snapshot, bbox, hiddenBuildingIds, boundary);
+  if (primary) return primary;
 
-    for (let index = 0; index < layer.length; index += 1) {
-      const vectorFeature = layer.feature(index);
-      const feature = vectorFeature.toGeoJSON(x, y, range.z) as GeoJSON.Feature;
-      if (feature.geometry?.type !== 'Polygon' && feature.geometry?.type !== 'MultiPolygon') continue;
-      const geometry = normalizeGeometryLongitudes(feature.geometry, bbox);
-      const normalizedFeature = { ...feature, geometry };
+  const fallbackSnapshot = bedrockFallbackSnapshotForBuildings(snapshot);
+  if (!fallbackSnapshot) return null;
 
-      const properties = (feature.properties ?? {}) as Record<string, unknown>;
-      const buildingId = String(properties.building_id ?? properties.gers_id ?? properties.id ?? '').trim();
-      if (!buildingId || hiddenBuildingIds.has(buildingId)) continue;
-
-      if (!geometryIntersectsBbox(geometry, bbox)) continue;
-      if (boundary && !featureInCampaignBoundary(normalizedFeature, boundary)) continue;
-
-      const normalizedBuildingFeature: PolygonalBuildingFeature = {
-        ...feature,
-        id: buildingId,
-        geometry,
-        properties: {
-          ...properties,
-          id: buildingId,
-          building_id: buildingId,
-          gers_id: buildingId,
-          height: Math.max(Number(properties.height ?? properties.height_m ?? 10), 10),
-          height_m: Math.max(Number(properties.height_m ?? properties.height ?? 10), 10),
-          min_height: Number(properties.min_height ?? 0),
-          source: properties.source ?? 'bedrock_pmtiles',
-          feature_type: 'matched_house',
-          feature_status: 'matched',
-          status: 'not_visited',
-          scans_total: 0,
-          qr_scanned: false,
-        },
-      };
-      const fragments = byBuildingId.get(buildingId);
-      if (fragments) {
-        fragments.push(normalizedBuildingFeature);
-      } else {
-        byBuildingId.set(buildingId, [normalizedBuildingFeature]);
-      }
-    }
-  });
-
-  const features = Array.from(byBuildingId.entries()).map(([buildingId, fragments]) =>
-    mergeBuildingFragments(buildingId, fragments)
-  );
-  if (features.length === 0) return null;
-  return {
-    type: 'FeatureCollection',
-    features,
-  };
+  return extractScopedPmtilesBuildingFeatures(fallbackSnapshot, bbox, hiddenBuildingIds, boundary);
 }

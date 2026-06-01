@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import mapboxgl from 'mapbox-gl';
-import type { PostgrestError } from '@supabase/supabase-js';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import * as turf from '@turf/turf';
 import { Maximize2, Minimize2, Trash2 } from 'lucide-react';
@@ -11,7 +10,6 @@ import Lottie from 'lottie-react';
 import type { CampaignAddress, CampaignV2, CampaignParcel } from '@/types/database';
 import { MapBuildingsLayer, type MapBuildingsRenderState } from '@/components/map/MapBuildingsLayer';
 import { CampaignAddressPmtilesLayer } from '@/components/map/CampaignAddressPmtilesLayer';
-import { CampaignParcelPmtilesLayer } from '@/components/map/CampaignParcelPmtilesLayer';
 import type { BuildingFeatureCollection } from '@/types/map-buildings';
 import { MapInfoButton } from '@/components/map/MapInfoButton';
 import { LocationCard } from '@/components/map/LocationCard';
@@ -19,13 +17,11 @@ import { CreateContactDialog } from '@/components/crm/CreateContactDialog';
 import { Button } from '@/components/ui/button';
 import { getCampaignAddressMapStatus } from '@/lib/campaignStats';
 import { createClient } from '@/lib/supabase/client';
-import { fetchAllInPages } from '@/lib/supabase/fetchAllInPages';
 import { useTheme } from '@/lib/theme-provider';
 import { useMapStyle } from '@/lib/map-style-provider';
 import { useWorkspace } from '@/lib/workspace-context';
 import { getMapboxToken, removeMapboxMapWhenSafe } from '@/lib/mapbox';
 import { applyPresetVisualTweaks, applyResolvedMapStyle, getResolvedMapInitOptions, hideBaseBuildingLayers, resolveMapStyle } from '@/lib/map-styles';
-import { fetchCampaignMapManifest, hasRenderablePmtilesParcels } from '@/lib/map/campaignMapManifest';
 import {
   DEFAULT_STATUS_FILTERS,
   MAP_STATUS_CONFIG,
@@ -135,6 +131,8 @@ type GenericFeatureCollection<G extends GeoJSON.Geometry = GeoJSON.Geometry> = G
 
 type CampaignMapBundle = {
   campaign_id?: string;
+  asset_signature?: string;
+  source_version?: string;
   status?: string;
   phase?: string;
   source?: string;
@@ -208,6 +206,54 @@ function mapBundleAddressesToCampaignAddresses(
       locality: getStringProperty(properties, ['locality']) ?? undefined,
       address_status: getStringProperty(properties, ['address_status', 'status']) ?? undefined,
     } satisfies CampaignAddress];
+  });
+}
+
+function addressIdentityKeys(address: CampaignAddress): string[] {
+  const record = address as CampaignAddress & {
+    address_detail_pid?: string | null;
+  };
+  return [
+    address.id,
+    address.source_id,
+    address.gers_id,
+    address.building_id,
+    address.building_gers_id,
+    record.address_detail_pid,
+  ]
+    .map((value) => String(value ?? '').trim())
+    .filter(Boolean);
+}
+
+function mergeBundleAddressesWithLiveState(
+  bundleAddresses: CampaignAddress[],
+  liveAddresses: CampaignAddress[]
+): CampaignAddress[] {
+  if (bundleAddresses.length === 0) return liveAddresses;
+  if (liveAddresses.length === 0) return bundleAddresses;
+
+  const liveAddressByKey = new Map<string, CampaignAddress>();
+  for (const address of liveAddresses) {
+    for (const key of addressIdentityKeys(address)) {
+      if (!liveAddressByKey.has(key)) liveAddressByKey.set(key, address);
+    }
+  }
+
+  return bundleAddresses.map((address) => {
+    const liveAddress = addressIdentityKeys(address)
+      .map((key) => liveAddressByKey.get(key))
+      .find(Boolean);
+
+    if (!liveAddress) return address;
+
+    return {
+      ...address,
+      visited: liveAddress.visited ?? address.visited,
+      scans: liveAddress.scans ?? address.scans,
+      last_scanned_at: liveAddress.last_scanned_at ?? address.last_scanned_at,
+      address_status: liveAddress.address_status ?? address.address_status,
+      qr_code_base64: liveAddress.qr_code_base64 ?? address.qr_code_base64,
+    };
   });
 }
 
@@ -445,27 +491,6 @@ function getParcelAddressLabel(parcel: CampaignParcel): string {
   return '';
 }
 
-function getCampaignParcelExternalId(parcel: CampaignParcel): string | null {
-  const candidates = [
-    parcel.external_id,
-    parcel.properties?.parcel_id,
-    parcel.properties?.external_id,
-    parcel.properties?.PARCELID,
-    parcel.properties?.gisid,
-    parcel.properties?.roll_number,
-    parcel.properties?.id,
-  ];
-
-  for (const candidate of candidates) {
-    if (typeof candidate === 'string' || typeof candidate === 'number') {
-      const normalized = String(candidate).trim();
-      if (normalized) return normalized;
-    }
-  }
-
-  return null;
-}
-
 function extractLeadingHouseNumber(formattedAddress: string): string {
   const match = formattedAddress.trim().match(/^(\d+[A-Za-z]?(?:\/\d+[A-Za-z]?)?)/);
   return match?.[1]?.trim() ?? '';
@@ -567,17 +592,13 @@ export function CampaignDetailMapView({
   const [snapping, setSnapping] = useState(false);
   const [parcels, setParcels] = useState<CampaignParcel[]>([]);
   const [mapBundle, setMapBundle] = useState<CampaignMapBundle | null>(null);
-  const [pmtilesParcelsReady, setPmtilesParcelsReady] = useState(false);
-  const [parcelFetchSuppressed, setParcelFetchSuppressed] = useState(false);
-  const parcelFetchFailureCountRef = useRef(0);
   const parcelEnrichmentStatus = campaign?.parcel_enrichment_status ?? 'not_started';
   const campaignBbox = Array.isArray(campaign?.bbox) &&
     campaign.bbox.length === 4 &&
     campaign.bbox.every((value) => typeof value === 'number' && Number.isFinite(value))
     ? (campaign.bbox as [number, number, number, number])
     : null;
-  const hasParcelPmtilesScope = parcels.length > 0 || Boolean(campaign?.territory_boundary) || Boolean(campaignBbox);
-  const parcelsReady = SHOW_PARCEL_VIEW && (parcels.length > 0 || (pmtilesParcelsReady && hasParcelPmtilesScope));
+  const parcelsReady = SHOW_PARCEL_VIEW && parcels.length > 0;
   const parcelsProcessing = parcelEnrichmentStatus === 'queued' || parcelEnrichmentStatus === 'processing';
   const showGeojsonParcels = SHOW_PARCEL_VIEW && mapViewMode === 'parcels' && parcels.length > 0;
   const parcelStrokeColor = theme === 'dark' ? '#ffffff' : '#000000';
@@ -620,7 +641,15 @@ export function CampaignDetailMapView({
     () => mapBundleAddressesToCampaignAddresses(campaignId, mapBundle?.addresses),
     [campaignId, mapBundle?.addresses]
   );
-  const mapAddresses = visibleAddresses.length > 0 ? visibleAddresses : bundleAddresses;
+  const mapAddresses = useMemo(
+    () => mergeBundleAddressesWithLiveState(bundleAddresses, visibleAddresses),
+    [bundleAddresses, visibleAddresses]
+  );
+  const bundleBuildings = useMemo<BuildingFeatureCollection | null>(
+    () => isFeatureCollection(mapBundle?.buildings) ? mapBundle.buildings : null,
+    [mapBundle?.buildings]
+  );
+  const mapBundleDataKey = mapBundle?.asset_signature ?? mapBundle?.updated_at ?? mapBundle?.source_version ?? null;
   const visibleAddressesRef = useRef(visibleAddresses);
   const mapProvisionRefreshKey = [
     campaign?.provision_status ?? '',
@@ -749,8 +778,6 @@ export function CampaignDetailMapView({
     setMapViewMode(resolvedInitialMapViewMode);
     setParcels([]);
     setMapBundle(null);
-    setParcelFetchSuppressed(false);
-    parcelFetchFailureCountRef.current = 0;
   }, [campaignId, resolvedInitialMapViewMode]);
 
   useEffect(() => {
@@ -783,12 +810,7 @@ export function CampaignDetailMapView({
         setMapBundle(bundle);
 
         if (SHOW_PARCEL_VIEW) {
-          const parcelRows = mapBundleParcelsToCampaignParcels(campaignId, bundle.parcels);
-          if (parcelRows.length > 0) {
-            parcelFetchFailureCountRef.current = 0;
-            setParcels(parcelRows);
-            setParcelFetchSuppressed(true);
-          }
+          setParcels(mapBundleParcelsToCampaignParcels(campaignId, bundle.parcels));
         }
       } catch (error) {
         if (!cancelled) {
@@ -820,118 +842,6 @@ export function CampaignDetailMapView({
       setMapViewMode('buildings');
     }
   }, [mapViewMode, parcelsReady]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    setPmtilesParcelsReady(false);
-
-    if (!SHOW_PARCEL_VIEW || !campaignId) return;
-
-    const loadParcelAvailability = async () => {
-      try {
-        const { manifest } = await fetchCampaignMapManifest(campaignId);
-        if (!cancelled) {
-          setPmtilesParcelsReady(hasRenderablePmtilesParcels(manifest));
-        }
-      } catch (error) {
-        if (!cancelled) {
-          console.warn('[CampaignDetailMapView] Failed to check parcel tile availability:', error);
-          setPmtilesParcelsReady(false);
-        }
-      }
-    };
-
-    void loadParcelAvailability();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [campaignId, mapProvisionRefreshKey]);
-
-  // Fetch parcels for this campaign
-  useEffect(() => {
-    if (!SHOW_PARCEL_VIEW || !campaignId || parcelFetchSuppressed) return;
-
-    let cancelled = false;
-    const maxParcelFetchFailures = 3;
-
-    const fetchParcels = async () => {
-      const supabase = createClient();
-      try {
-        const dbParcels = await fetchAllInPages<CampaignParcel>((from, to) =>
-          supabase
-            .from('campaign_parcels')
-            .select('*')
-            .eq('campaign_id', campaignId)
-            .order('id', { ascending: true })
-            .range(from, to) as unknown as Promise<{ data: CampaignParcel[] | null; error: PostgrestError | null }>
-        );
-
-        let data: CampaignParcel[];
-        if (dbParcels.length > 0) {
-          parcelFetchFailureCountRef.current = 0;
-          data = dbParcels;
-        } else {
-          const response = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/parcels`, {
-            credentials: 'include',
-          });
-          if (!response.ok) {
-            const nextFailureCount = parcelFetchFailureCountRef.current + 1;
-            parcelFetchFailureCountRef.current = nextFailureCount;
-
-            if (nextFailureCount >= maxParcelFetchFailures) {
-              console.warn('Disabling campaign parcel API retries after repeated failures', {
-                campaignId,
-                status: response.status,
-                failures: nextFailureCount,
-              });
-              if (!cancelled) {
-                setParcelFetchSuppressed(true);
-                setParcels([]);
-              }
-            }
-
-            throw new Error(`Campaign parcels request failed with status ${response.status}`);
-          }
-
-          if (response.headers.get('X-FLYR-Parcels-Suppressed')) {
-            setParcelFetchSuppressed(true);
-          }
-
-          parcelFetchFailureCountRef.current = 0;
-          const payload = await response.json() as unknown;
-          data = Array.isArray(payload) ? payload as CampaignParcel[] : [];
-        }
-
-        if (!cancelled) {
-          setParcels(data);
-        }
-      } catch (error) {
-        console.error('Failed to fetch campaign parcels:', error);
-        if (!cancelled) {
-          setParcels([]);
-        }
-      }
-    };
-
-    void fetchParcels();
-
-    if (parcelsProcessing) {
-      const interval = setInterval(() => {
-        void fetchParcels();
-      }, 5000);
-
-      return () => {
-        cancelled = true;
-        clearInterval(interval);
-      };
-    }
-
-    return () => {
-      cancelled = true;
-    };
-  }, [campaignId, parcelFetchSuppressed, parcelsProcessing]);
 
   // Handle building click - opens LocationCard
   // For unit slices, addressId is passed to show specific unit
@@ -1599,44 +1509,6 @@ export function CampaignDetailMapView({
       })
       .filter((value): value is PreparedAddressPoint => value !== null);
   }, [mapAddresses]);
-
-  const parcelStatusByExternalId = useMemo<Record<string, MapStatusKey>>(() => {
-    const statusByExternalId: Record<string, MapStatusKey> = {};
-
-    for (const parcel of parcels) {
-      const externalId = getCampaignParcelExternalId(parcel);
-      if (!externalId) continue;
-
-      let geom: unknown = parcel.geom;
-      if (typeof geom === 'string') {
-        try {
-          geom = JSON.parse(geom);
-        } catch {
-          continue;
-        }
-      }
-      if (
-        !geom ||
-        typeof geom !== 'object' ||
-        !['Polygon', 'MultiPolygon'].includes((geom as { type?: string }).type ?? '')
-      ) {
-        continue;
-      }
-
-      const parcelFeature = turf.feature(geom as GeoJSON.Polygon | GeoJSON.MultiPolygon);
-      const statuses = new Set<MapStatusKey>();
-      for (const addressPoint of preparedAddressPoints) {
-        const point = turf.point([addressPoint.lon, addressPoint.lat]);
-        if (turf.booleanPointInPolygon(point, parcelFeature)) {
-          statuses.add(addressPoint.statusKey);
-        }
-      }
-
-      statusByExternalId[externalId] = MAP_STATUS_PRIORITY.find((key) => statuses.has(key)) ?? 'UNTOUCHED';
-    }
-
-    return statusByExternalId;
-  }, [parcels, preparedAddressPoints]);
 
   const pointOverlaySourceId = 'campaign-point-overlays';
   const pointOverlayCircleLayerId = 'campaign-point-overlays-circle';
@@ -2403,18 +2275,12 @@ export function CampaignDetailMapView({
                         ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
                         : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
                     }`}
-                    title={
-                      pmtilesParcelsReady
-                        ? 'Parcel PMTiles from Diamond S3'
-                        : `${parcels.length} parcel${parcels.length !== 1 ? 's' : ''} in campaign polygon`
-                    }
+                    title={`${parcels.length} parcel${parcels.length !== 1 ? 's' : ''} from campaign map bundle`}
                   >
                     Parcels
-                    {!pmtilesParcelsReady ? (
-                      <span className="ml-1 text-xs opacity-60">
-                        ({parcels.length})
-                      </span>
-                    ) : null}
+                    <span className="ml-1 text-xs opacity-60">
+                      ({parcels.length})
+                    </span>
                   </button>
                 ) : null}
               </div>
@@ -2464,11 +2330,13 @@ export function CampaignDetailMapView({
             </div>
           ) : null}
           {mapViewMode === 'buildings' && (
-            <MapBuildingsLayer 
-              map={map.current} 
+            <MapBuildingsLayer
+              map={map.current}
               campaignId={campaignId}
               campaignType={campaign?.type ?? null}
               refreshKey={mapRefreshKey}
+              buildingFeatures={bundleBuildings}
+              buildingDataKey={mapBundleDataKey}
               addressStateOverrides={mapAddresses}
               hiddenBuildingIds={optimisticallyHiddenBuildingIds}
               deletedAddressIds={optimisticallyDeletedAddressIds}
@@ -2494,23 +2362,9 @@ export function CampaignDetailMapView({
             campaignBoundary={(campaign?.territory_boundary as GeoJSON.Polygon | null | undefined) ?? null}
             campaignBbox={campaignBbox}
             styleKey={resolvedMapStyle.key}
+            allowFallbackFetches={false}
             onAddressClick={(addressId, buildingId, options) => {
               handleMapTargetClick({ buildingId, addressId, parcelId: null }, options);
-            }}
-          />
-          <CampaignParcelPmtilesLayer
-            map={map.current}
-            campaignId={campaignId}
-            mapLoaded={mapLoaded}
-            visible={SHOW_PARCEL_VIEW && mapViewMode === 'parcels' && pmtilesParcelsReady && parcels.length === 0}
-            parcels={parcels}
-            parcelStatusByExternalId={parcelStatusByExternalId}
-            statusFilters={statusFilters}
-            campaignBoundary={(campaign?.territory_boundary as GeoJSON.Polygon | null | undefined) ?? null}
-            campaignBbox={campaignBbox}
-            styleKey={resolvedMapStyle.key}
-            onParcelClick={(parcelId, options) => {
-              handleMapTargetClick({ buildingId: null, addressId: null, parcelId }, options);
             }}
           />
           {/* Location Card - floating card when building is clicked */}

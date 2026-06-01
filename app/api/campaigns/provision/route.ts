@@ -29,12 +29,19 @@ import { CampaignLinkQualityService } from '@/lib/services/CampaignLinkQualitySe
 import {
   CampaignMapModeService,
 } from '@/lib/services/CampaignMapModeService';
+import {
+  prebuildCampaignMapBundle,
+  resolveScopedCampaignMapGeometry,
+  type PrehydratedScopedMapGeometry,
+} from '@/lib/services/CampaignMapBundlePrebuilder';
 import { isParcelRegionSupported } from '@/lib/geo/parcelRegions';
+import {
+  parcelTilesFromSnapshot,
+} from '@/app/api/campaigns/_utils/scoped-pmtiles-parcels';
 import {
   bboxFromPolygon,
   buildAddressIdentity,
   deduplicateAddressesByProvisionKey,
-  featureCollectionCount,
   filterAddressesAgainstExisting,
   isConnectionError,
   isUniqueConstraintError,
@@ -223,6 +230,27 @@ function lambdaSnapshotToCampaignSnapshotRow(snapshot: LambdaSnapshotResponse): 
   };
 }
 
+function numberMetric(metrics: Record<string, unknown> | null | undefined, key: string): number | null {
+  const value = metrics?.[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function staticParcelCountFromSnapshot(snapshot: LambdaSnapshotResponse | null | undefined): number {
+  const row = snapshot ? lambdaSnapshotToCampaignSnapshotRow(snapshot) : null;
+  if (!row || !parcelTilesFromSnapshot(row)) return 0;
+  const metrics = snapshot?.metadata?.tile_metrics as Record<string, unknown> | null | undefined;
+  const scanMetrics = metrics?.scan_metrics;
+  const parcelScan =
+    scanMetrics && typeof scanMetrics === 'object' && !Array.isArray(scanMetrics)
+      ? (scanMetrics as Record<string, unknown>).parcels
+      : null;
+  const parcelScanHits =
+    parcelScan && typeof parcelScan === 'object' && !Array.isArray(parcelScan)
+      ? numberMetric(parcelScan as Record<string, unknown>, 'hits')
+      : null;
+  return parcelScanHits ?? numberMetric(metrics, 'campaign_parcels_count') ?? 1;
+}
+
 function snapshotWithScopedBuildingCount(
   snapshot: LambdaSnapshotResponse,
   scopedBuildingCount: number | null
@@ -252,40 +280,6 @@ function snapshotWithScopedBuildingCount(
       } as unknown as NonNullable<LambdaSnapshotResponse['metadata']>['tile_metrics'],
     } as LambdaSnapshotResponse['metadata'],
   };
-}
-
-async function countScopedStaticPmtilesBuildings(params: {
-  campaignId: string;
-  snapshot: LambdaSnapshotResponse | null;
-  polygon: GeoJSON.Polygon;
-}): Promise<number | null> {
-  const { campaignId, snapshot, polygon } = params;
-  if (!snapshot || !snapshotHasStaticPmtilesGeometry(snapshot)) return null;
-
-  const bbox = bboxFromPolygon(polygon);
-  if (!bbox) return null;
-
-  try {
-    const scopedBuildings = await fetchScopedPmtilesBuildingFeatures(
-      lambdaSnapshotToCampaignSnapshotRow(snapshot),
-      bbox,
-      new Set(),
-      polygon
-    );
-    const scopedBuildingCount = featureCollectionCount(scopedBuildings);
-    console.log('[Provision] Campaign-scoped PMTiles building count resolved', {
-      campaignId,
-      scopedBuildings: scopedBuildingCount,
-      artifactBuildings: snapshot.counts.buildings,
-    });
-    return scopedBuildingCount;
-  } catch (error) {
-    console.warn('[Provision] Failed to resolve campaign-scoped PMTiles building count:', {
-      campaignId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return null;
-  }
 }
 
 function apiBaseUrl(request: NextRequest) {
@@ -661,6 +655,7 @@ async function resolveDiamondThenBedrock(options: {
       campaignId,
       polygon,
       addressLimit: 10000,
+      regionCode,
     });
     console.log('[Provision] BEDROCK Australia S3 polygon scan complete:', {
       campaignId,
@@ -668,6 +663,7 @@ async function resolveDiamondThenBedrock(options: {
       touchedTiles: bedrockResult.metrics.addresses.touchedTiles,
       timings: {
         addresses: bedrockResult.metrics.addresses.seconds,
+        addressesBreakdown: bedrockResult.metrics.addresses.timings,
       },
     });
     return {
@@ -804,6 +800,7 @@ async function runCampaignPostProcessing(params: {
   snapshot: LambdaSnapshotResponse | null;
   insertedCount: number;
   bedrockLinkGeometry?: BedrockNzLinkGeometry | null;
+  scopedGeometry?: PrehydratedScopedMapGeometry | null;
   responseMode?: 'full' | 'linker_ready';
 }) {
   const {
@@ -814,12 +811,29 @@ async function runCampaignPostProcessing(params: {
     snapshot,
     insertedCount,
     bedrockLinkGeometry,
+    scopedGeometry,
     responseMode = 'full',
   } = params;
   const supabase = createAdminClient();
   const linkerReadyOnly = responseMode === 'linker_ready';
+  const postprocessStarted = performance.now();
+  const stageTimings: Record<string, number> = {};
+  const timedStage = async <T>(name: string, action: () => Promise<T>): Promise<T> => {
+    const started = performance.now();
+    try {
+      return await action();
+    } finally {
+      stageTimings[name] = Math.round(performance.now() - started);
+      console.log('[Provision] Map-ready stage timing', {
+        campaignId,
+        stage: name,
+        ms: stageTimings[name],
+      });
+    }
+  };
 
   await updateCampaignProvision(supabase, campaignId, {
+    provision_status: linkerReadyOnly ? 'pending' : 'ready',
     provision_phase: 'optimizing',
   });
 
@@ -833,6 +847,8 @@ async function runCampaignPostProcessing(params: {
         type: 'FeatureCollection',
         features: bedrockLinkGeometry.buildings,
       };
+    } else if (scopedGeometry?.buildings?.features.length) {
+      preFetchedBuildingsGeo = scopedGeometry.buildings;
     } else if (snapshot && snapshotHasStaticPmtilesGeometry(snapshot)) {
       const bbox = bboxFromPolygon(polygon);
       if (bbox) {
@@ -863,7 +879,9 @@ async function runCampaignPostProcessing(params: {
     }
 
     const { buildings: normalizedBuildingsGeoJSON, overtureRelease } =
-      await BuildingAdapter.fetchAndNormalize(effectiveSnapshot, preFetchedBuildingsGeo);
+      await timedStage('normalize_buildings', () =>
+        BuildingAdapter.fetchAndNormalize(effectiveSnapshot, preFetchedBuildingsGeo)
+      );
     const normalizedBuildingCount = normalizedBuildingsGeoJSON.features.length;
 
     let optimizedPathGeometry: GeoJSON.LineString | null = null;
@@ -873,12 +891,12 @@ async function runCampaignPostProcessing(params: {
       waypointCount: number;
     } | null = null;
 
-    const skipRouteOptimization = linkerReadyOnly || process.env.SKIP_PROVISION_ROUTE_OPTIMIZATION === '1';
+    const skipRouteOptimization = true;
     if (skipRouteOptimization) {
       console.log(
         linkerReadyOnly
           ? '[Provision] Stage 1: Route optimization skipped for wait_for_linker response.'
-          : '[Provision] Stage 1: Route optimization skipped by SKIP_PROVISION_ROUTE_OPTIMIZATION.'
+          : '[Provision] Stage 1: Route optimization deferred; canonical map bundle is the readiness gate.'
       );
     } else if (effectiveInsertedCount >= 2) {
       console.log('[Provision] Stage 1: Building route for ALL addresses (Street-Block-Sweep-Snake)...');
@@ -966,22 +984,29 @@ async function runCampaignPostProcessing(params: {
     let parcelPreparation:
       | Awaited<ReturnType<ParcelEnrichmentService['prepareParcelsForProvision']>>
       | null = null;
+    const staticParcelCount = staticParcelCountFromSnapshot(effectiveSnapshot);
     const parcelEnrichment = isParcelRegionSupported(regionCode)
       ? new ParcelEnrichmentService(supabase)
       : null;
 
     if (parcelEnrichment) {
       try {
-        parcelPreparation = await parcelEnrichment.prepareParcelsForProvision(campaignId);
+        parcelPreparation = await timedStage('prepare_parcels', () =>
+          parcelEnrichment.prepareParcelsForProvision(campaignId)
+        );
       } catch (parcelError) {
         console.warn('[Provision] Parcel preparation failed before linking:', parcelError);
       }
     }
 
     if (normalizedBuildingCount === 0) {
+      const optimizedAt = new Date().toISOString();
       await updateCampaignProvision(supabase, campaignId, {
+        provision_status: 'ready',
         provision_phase: 'optimized',
-        optimized_at: new Date().toISOString(),
+        provisioned_at: optimizedAt,
+        map_ready_at: optimizedAt,
+        optimized_at: optimizedAt,
         has_parcels: false,
         building_link_confidence: 0,
         map_mode: 'standard_pins',
@@ -994,6 +1019,7 @@ async function runCampaignPostProcessing(params: {
         campaignId,
         addresses: effectiveInsertedCount,
       });
+      await prewarmCanonicalMapBundle(supabase, campaignId, scopedGeometry);
       return;
     }
 
@@ -1015,17 +1041,21 @@ async function runCampaignPostProcessing(params: {
     };
 
     const linkerService = new StableLinkerService(supabase);
-    spatialJoinSummary = await linkerService.runSpatialJoin(
-      campaignId,
-      normalizedBuildingsGeoJSON as unknown as { features: StableBuildingFeature[] },
-      overtureRelease,
-      {
-        resetExisting: true,
-        persistenceMode: source === 'diamond' ? 'gold' : 'silver',
-      }
+    spatialJoinSummary = await timedStage('stable_linker', () =>
+      linkerService.runSpatialJoin(
+        campaignId,
+        normalizedBuildingsGeoJSON as unknown as { features: StableBuildingFeature[] },
+        overtureRelease,
+        {
+          resetExisting: true,
+          persistenceMode: source === 'diamond' ? 'gold' : 'silver',
+          parcelsGeoJSON: scopedGeometry?.parcels?.features.length
+            ? scopedGeometry.parcels as never
+            : null,
+        }
+      )
     );
 
-    console.log('[Provision] Diamond/Bedrock townhouse splitter: Processing multi-unit buildings...');
     let townhouseSummary = {
       total_buildings: 0,
       townhouses_detected: 0,
@@ -1035,60 +1065,115 @@ async function runCampaignPostProcessing(params: {
       avg_units_per_townhouse: 0,
     };
 
+    const mapModeService = new CampaignMapModeService(supabase);
+    const effectiveParcelCount = Math.max(parcelPreparation?.parcelCount ?? 0, staticParcelCount);
+    const mapModeAssessment = await timedStage('map_mode', () =>
+      mapModeService.computeAndPersist(campaignId, {
+        totalAddresses: effectiveInsertedCount,
+        linkedAddressCount: spatialJoinSummary.matched,
+        hasParcels: effectiveParcelCount > 0,
+        parcelCount: effectiveParcelCount,
+      })
+    );
+
+    let optimizedMapModeAssessment = mapModeAssessment;
+
+    console.log('[Provision] Diamond/Bedrock townhouse splitter: Processing multi-unit buildings before final map bundle...');
     try {
       const splitterService = new TownhouseSplitterService(supabase);
-      townhouseSummary = await splitterService.processCampaignTownhouses(
-        campaignId,
-        normalizedBuildingsGeoJSON as unknown as { features: TownhouseBuildingFeature[] },
-        overtureRelease
+      townhouseSummary = await timedStage('townhouse_splitter', () =>
+        splitterService.processCampaignTownhouses(
+          campaignId,
+          normalizedBuildingsGeoJSON as unknown as { features: TownhouseBuildingFeature[] },
+          overtureRelease
+        )
       );
     } catch (splitterError) {
       console.warn('[Provision] Townhouse splitting failed:', splitterError);
     }
 
-    const linkQualityService = new CampaignLinkQualityService(supabase);
-    const linkQuality = await linkQualityService.assessPersistedLinks(campaignId);
-    await linkQualityService.persist(campaignId, linkQuality);
-
-    const mapModeService = new CampaignMapModeService(supabase);
-    const mapModeAssessment = await mapModeService.computeAndPersist(campaignId, {
-      totalAddresses: effectiveInsertedCount,
-      hasParcels: (parcelPreparation?.parcelCount ?? 0) > 0,
-      parcelCount: parcelPreparation?.parcelCount ?? 0,
+    const mapReadyAt = new Date().toISOString();
+    await updateCampaignProvision(supabase, campaignId, {
+      provision_status: linkerReadyOnly ? 'pending' : 'ready',
+      provision_phase: linkerReadyOnly ? 'map_ready' : 'optimizing',
+      provisioned_at: mapReadyAt,
+      map_ready_at: mapReadyAt,
+      has_parcels: mapModeAssessment.hasParcels,
+      building_link_confidence: mapModeAssessment.buildingLinkConfidence,
+      map_mode: mapModeAssessment.mapMode,
     });
 
-    if (
+    await timedStage('prewarm_map_bundle', () =>
+      prewarmCanonicalMapBundle(supabase, campaignId, scopedGeometry)
+    );
+
+    await updateCampaignProvision(supabase, campaignId, {
+      provision_status: 'ready',
+      provision_phase: linkerReadyOnly ? 'map_ready' : 'optimizing',
+      provisioned_at: mapReadyAt,
+      map_ready_at: mapReadyAt,
+      has_parcels: mapModeAssessment.hasParcels,
+      building_link_confidence: mapModeAssessment.buildingLinkConfidence,
+      map_mode: mapModeAssessment.mapMode,
+    });
+
+    const linkQualityService = new CampaignLinkQualityService(supabase);
+    const linkQuality = await timedStage('link_quality_deferred', async () => {
+      const assessment = await linkQualityService.assessPersistedLinks(campaignId);
+      await linkQualityService.persist(campaignId, assessment);
+      return assessment;
+    });
+    const shouldRunDeferredRepair =
       !linkerReadyOnly &&
       linkQuality.repairRecommended &&
       parcelEnrichment &&
       parcelPreparation &&
-      parcelPreparation.status !== 'ready'
-    ) {
-      await linkQualityService.updateStatus(
-        campaignId,
-        'repairing',
-        linkQuality.reason ? `Repair queued: ${linkQuality.reason}` : 'Repair queued after degraded first-pass linking.'
-      );
-      await parcelEnrichment.runForCampaign(campaignId);
-      await mapModeService.computeAndPersist(campaignId, {
-        totalAddresses: effectiveInsertedCount,
-      });
+      parcelPreparation.status !== 'ready';
+
+	    if (shouldRunDeferredRepair) {
+      try {
+        await linkQualityService.updateStatus(
+          campaignId,
+          'repairing',
+          linkQuality.reason ? `Repair running after map-ready: ${linkQuality.reason}` : 'Repair running after map-ready.'
+        );
+        await timedStage('parcel_repair_deferred', () => parcelEnrichment.runForCampaign(campaignId));
+        optimizedMapModeAssessment = await timedStage('map_mode_after_repair', () =>
+          mapModeService.computeAndPersist(campaignId, {
+            totalAddresses: effectiveInsertedCount,
+          })
+        );
+        await timedStage('prewarm_map_bundle_after_repair', () =>
+          prewarmCanonicalMapBundle(supabase, campaignId, scopedGeometry)
+        );
+      } catch (repairError) {
+        console.warn('[Provision] Deferred parcel/link repair failed after map-ready:', {
+          campaignId,
+          error: repairError instanceof Error ? repairError.message : String(repairError),
+        });
+      }
     }
 
+    const optimizedAt = new Date().toISOString();
     await updateCampaignProvision(supabase, campaignId, {
+      provision_status: 'ready',
       provision_phase: 'optimized',
-      optimized_at: new Date().toISOString(),
-      has_parcels: mapModeAssessment.hasParcels,
-      building_link_confidence: mapModeAssessment.buildingLinkConfidence,
-      map_mode: mapModeAssessment.mapMode,
+      optimized_at: optimizedAt,
+      has_parcels: optimizedMapModeAssessment.hasParcels,
+      building_link_confidence: optimizedMapModeAssessment.buildingLinkConfidence,
+      map_mode: optimizedMapModeAssessment.mapMode,
     });
 
     console.log('[Provision] Background post-processing complete:', {
       campaignId,
       matched: spatialJoinSummary.matched,
       unitsCreated: townhouseSummary.units_created,
-      mapMode: mapModeAssessment.mapMode,
+      mapMode: optimizedMapModeAssessment.mapMode,
       addresses: effectiveInsertedCount,
+      timings: {
+        ...stageTimings,
+        total_ms: Math.round(performance.now() - postprocessStarted),
+      },
     });
   } catch (error) {
     console.error('[Provision] Deferred post-processing failed:', error);
@@ -1100,6 +1185,39 @@ async function runCampaignPostProcessing(params: {
       data_quality_reason: `Post-processing failed: ${failureReason}`,
     }).catch((updateError) => {
       console.error('[Provision] Failed to persist deferred failure state:', updateError);
+    });
+  }
+}
+
+async function prewarmCanonicalMapBundle(
+  supabase: ReturnType<typeof createAdminClient>,
+  campaignId: string,
+  scopedGeometry?: PrehydratedScopedMapGeometry | null,
+  options?: {
+    linksStatusOverride?: string | null;
+    parcelDisplayMode?: 'filtered' | 'raw';
+  }
+) {
+  const timings: Record<string, number> = {};
+  try {
+    await prebuildCampaignMapBundle(supabase, campaignId, (name, durationMs) => {
+      timings[name] = Math.round(durationMs);
+    }, {
+      scopedGeometry,
+      linksStatusOverride: options?.linksStatusOverride,
+      parcelDisplayMode: options?.parcelDisplayMode,
+    });
+    console.log('[Provision] Canonical map-bundle prebuilt:', {
+      campaignId,
+      linksStatusOverride: options?.linksStatusOverride ?? null,
+      parcelDisplayMode: options?.parcelDisplayMode ?? 'filtered',
+      timings,
+    });
+  } catch (error) {
+    console.warn('[Provision] Canonical map-bundle prewarm failed; /map-bundle will stay pending until the next prewarm:', {
+      campaignId,
+      message: error instanceof Error ? error.message : String(error),
+      timings,
     });
   }
 }
@@ -1200,7 +1318,7 @@ export async function POST(request: NextRequest) {
       link_quality_metrics: {},
     });
 
-    if (BedrockUkService.isUkRegion(regionCode)) {
+    if (waitForLinker && BedrockUkService.isUkRegion(regionCode)) {
       try {
         const staticSnapshot = await BedrockUkService.staticSnapshotForCampaign(campaignId, regionCode);
         await upsertSnapshotMetadata(supabase, campaignId, staticSnapshot);
@@ -1228,7 +1346,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const result = await retryWithBackoff(async () => {
+    const runProvisionWorker = async () => {
+      const result = await retryWithBackoff(async () => {
           const sourceTimeoutMs = sourceResolutionTimeoutMs();
           console.log('[Provision] Map-ready provision worker started.', {
             campaignId,
@@ -1289,11 +1408,23 @@ export async function POST(request: NextRequest) {
             });
           }
 
-          const scopedBuildingCount = await countScopedStaticPmtilesBuildings({
+          const campaignPolygon = polygon as GeoJSON.Polygon;
+          const scopedGeometry = await resolveScopedCampaignMapGeometry({
             campaignId: campaignId!,
-            snapshot,
-            polygon: polygon as GeoJSON.Polygon,
+            snapshot: lambdaSnapshotToCampaignSnapshotRow(snapshot),
+            campaignRow: {
+              bbox: campaign.bbox ?? bboxFromPolygon(campaignPolygon),
+              territory_boundary: campaignPolygon,
+            },
+            recordTiming: (name, durationMs) => {
+              console.log('[Provision] Scoped PMTiles geometry timing', {
+                campaignId,
+                phase: name,
+                ms: Math.round(durationMs),
+              });
+            },
           });
+          const scopedBuildingCount = scopedGeometry.buildings?.features.length ?? null;
           snapshot = snapshot ? snapshotWithScopedBuildingCount(snapshot, scopedBuildingCount) : snapshot;
 
           await upsertSnapshotMetadata(supabase, campaignId!, snapshot);
@@ -1303,6 +1434,7 @@ export async function POST(request: NextRequest) {
 	          let mapMode = 'standard_pins';
 	          let linkedBuildingCount = 0;
 	          const effectiveBuildingCount = snapshot.counts.buildings;
+	          const staticParcelCount = staticParcelCountFromSnapshot(snapshot);
 	          const parcelEnrichmentStatus = isParcelRegionSupported(regionCode) ? 'queued' : 'skipped';
 
           if (parcelEnrichmentStatus === 'queued') {
@@ -1310,18 +1442,38 @@ export async function POST(request: NextRequest) {
           }
 
           await updateCampaignProvision(supabase, campaignId!, {
-            provision_status: 'ready',
-            provision_phase: 'map_ready',
+            provision_status: 'pending',
+            provision_phase: finalAddressCount > 0 ? 'addresses_ready' : 'source_probed',
             provision_source: dbProvisionSource(addressSource),
             provisioned_at: readyAt,
-            map_ready_at: readyAt,
-            has_parcels: false,
+            has_parcels: staticParcelCount > 0,
             building_link_confidence: buildingLinkConfidence,
-            map_mode: mapMode,
+            map_mode: staticParcelCount > 0 ? 'hybrid' : mapMode,
             parcel_enrichment_status: parcelEnrichmentStatus,
           });
 
-	          console.log('[Provision] Static S3 geometry is map-ready; no legacy Gold/Lambda/White Gold fallbacks will run.');
+          const initialMapReadyAt = new Date().toISOString();
+          const scopedParcelCount = scopedGeometry.parcels?.features.length ?? 0;
+          await prewarmCanonicalMapBundle(supabase, campaignId!, scopedGeometry, {
+            linksStatusOverride: 'pending_provision',
+            parcelDisplayMode: 'raw',
+          });
+          await updateCampaignProvision(supabase, campaignId!, {
+            provision_status: 'ready',
+            provision_phase: 'map_ready',
+            provisioned_at: initialMapReadyAt,
+            map_ready_at: initialMapReadyAt,
+            has_parcels: staticParcelCount > 0 || scopedParcelCount > 0,
+            building_link_confidence: 0,
+            map_mode: (staticParcelCount > 0 || scopedParcelCount > 0) ? 'hybrid' : mapMode,
+          });
+
+	          console.log('[Provision] Initial map-ready bundle published; backend linking will optimize the canonical bundle in background.', {
+	            campaignId,
+	            addresses: finalAddressCount,
+	            buildings: scopedBuildingCount ?? effectiveBuildingCount,
+	            parcels: scopedParcelCount,
+	          });
 
 	          let optimized = false;
 	          let postprocessDeferred = true;
@@ -1332,12 +1484,13 @@ export async function POST(request: NextRequest) {
 	            });
 	            await runCampaignPostProcessing({
 	              campaignId: campaignId!,
-	              polygon: polygon as GeoJSON.Polygon,
+	              polygon: campaignPolygon,
 	              regionCode,
 	              source: addressSource,
 	              snapshot,
 	              insertedCount: finalAddressCount,
 	              bedrockLinkGeometry,
+	              scopedGeometry,
 	              responseMode: 'linker_ready',
 	            });
 
@@ -1357,16 +1510,15 @@ export async function POST(request: NextRequest) {
 	            optimized = postProcessCampaign?.provision_phase === 'optimized' || Boolean(postProcessCampaign?.optimized_at);
 	            postprocessDeferred = false;
 	          } else {
-	            after(async () => {
-	              await runCampaignPostProcessing({
-	                campaignId: campaignId!,
-	                polygon: polygon as GeoJSON.Polygon,
-	                regionCode,
-	                source: addressSource,
-	                snapshot,
-	                insertedCount: finalAddressCount,
-	                bedrockLinkGeometry,
-	              });
+	            await runCampaignPostProcessing({
+	              campaignId: campaignId!,
+	              polygon: campaignPolygon,
+	              regionCode,
+	              source: addressSource,
+	              snapshot,
+	              insertedCount: finalAddressCount,
+	              bedrockLinkGeometry,
+	              scopedGeometry,
 	            });
 	          }
 
@@ -1378,9 +1530,9 @@ export async function POST(request: NextRequest) {
             source: addressSource,
             links_created: linkedBuildingCount,
             units_created: 0,
-            has_parcels: false,
+            has_parcels: staticParcelCount > 0,
             building_link_confidence: buildingLinkConfidence,
-            map_mode: mapMode,
+            map_mode: staticParcelCount > 0 ? 'hybrid' : mapMode,
             linked_address_count: linkedAddressCount,
             total_campaign_addresses: finalAddressCount,
             provision_status: 'ready',
@@ -1407,26 +1559,66 @@ export async function POST(request: NextRequest) {
 	                ? `building linking completed with ${linkedAddressCount} linked homes.`
 	                : `route optimization, building linking, townhouse splitting, and parcel enrichment will continue in the background.`),
 	          };
-    });
+      });
 
-    if (result?.provision_source) {
-      const { data: provisionRow } = await supabase
-        .from('campaigns')
-        .select('provision_source')
-        .eq('id', campaignId)
-        .maybeSingle();
+      if (result?.provision_source) {
+        const { data: provisionRow } = await supabase
+          .from('campaigns')
+          .select('provision_source')
+          .eq('id', campaignId)
+          .maybeSingle();
 
-      if (!provisionRow?.provision_source) {
-        await updateCampaignProvision(supabase, campaignId, {
-          provision_source: result.provision_source,
-        });
-        console.warn('[Provision] Repaired missing provision_source after map-ready completion:', {
-          campaignId,
-          provision_source: result.provision_source,
-        });
+        if (!provisionRow?.provision_source) {
+          await updateCampaignProvision(supabase, campaignId!, {
+            provision_source: result.provision_source,
+          });
+          console.warn('[Provision] Repaired missing provision_source after map-ready completion:', {
+            campaignId,
+            provision_source: result.provision_source,
+          });
+        }
       }
+
+      return result;
+    };
+
+    if (!waitForLinker) {
+      after(async () => {
+        try {
+          await runProvisionWorker();
+        } catch (workerError) {
+          console.error('[Provision] Background provision worker failed:', workerError);
+          const failureReason = provisionFailureReason(workerError);
+          try {
+            await updateCampaignProvision(createAdminClient(), campaignId!, {
+              provision_status: 'failed',
+              provision_phase: 'failed',
+              link_quality_status: 'failed',
+              link_quality_reason: failureReason,
+              data_quality_reason: failureReason,
+            });
+          } catch (updateError) {
+            console.error('[Provision] Failed to persist background worker failure:', updateError);
+          }
+        }
+      });
+
+      return NextResponse.json(
+        {
+          success: true,
+          accepted: true,
+          campaign_id: campaignId,
+          provision_status: 'pending',
+          provision_phase: 'created',
+          map_ready: false,
+          postprocess_deferred: true,
+          message: 'Campaign provisioning accepted. Map preparation will continue in the background.',
+        },
+        { status: 202 }
+      );
     }
 
+    const result = await runProvisionWorker();
     return NextResponse.json(result);
   } catch (error) {
     console.error('[Provision] Error:', error);

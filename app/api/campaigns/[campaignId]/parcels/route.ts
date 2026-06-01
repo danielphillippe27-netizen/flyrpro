@@ -19,7 +19,10 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const PARCEL_FAILURE_CACHE_TTL_MS = 5 * 60 * 1000;
+const PARCEL_FINAL_RESPONSE_CACHE_TTL_MS = 5 * 60 * 1000;
+const PARCEL_FINAL_RESPONSE_CACHE_MAX_ENTRIES = 128;
 const parcelFailureCache = new Map<string, number>();
+const parcelFinalResponseCache = new Map<string, { expiresAt: number; body: string; featureCount: number }>();
 
 type CampaignScopeRow = {
   bbox: unknown;
@@ -48,9 +51,14 @@ function elapsedMs(started: number) {
   return Math.round((performance.now() - started) * 100) / 100;
 }
 
-function parcelTimingHeader(routeTimings: Record<string, number>, scoped?: ScopedParcelResult) {
+function parcelTimingHeader(
+  routeTimings: Record<string, number>,
+  scoped?: ScopedParcelResult,
+  finalCacheStatus?: 'hit' | 'miss'
+) {
   return [
     ...Object.entries(routeTimings).map(([key, value]) => `${key};dur=${value}`),
+    ...(finalCacheStatus ? [`final_cache;desc="${finalCacheStatus}"`] : []),
     ...(scoped
       ? [
           `cache;desc="${scoped.cacheStatus}"`,
@@ -62,6 +70,54 @@ function parcelTimingHeader(routeTimings: Record<string, number>, scoped?: Scope
         ]
       : []),
   ].join(', ');
+}
+
+function timingHeaders(value: string) {
+  return {
+    'Server-Timing': value,
+    'X-FLYR-Server-Timing': value,
+  };
+}
+
+function finalParcelResponseCacheKey(params: {
+  campaignId: string;
+  signature: string | null;
+  pmtilesKey: string;
+  snapshotCreatedAt: string | null;
+  bbox: [number, number, number, number];
+  boundary: GeoJSON.Polygon | null;
+}) {
+  return [
+    params.campaignId,
+    params.signature ?? 'no-signature',
+    params.pmtilesKey,
+    params.snapshotCreatedAt ?? '',
+    JSON.stringify(params.bbox),
+    JSON.stringify(params.boundary),
+  ].join('|');
+}
+
+function getCachedFinalParcelResponse(cacheKey: string) {
+  const entry = parcelFinalResponseCache.get(cacheKey);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) {
+    parcelFinalResponseCache.delete(cacheKey);
+    return null;
+  }
+  return entry;
+}
+
+function setCachedFinalParcelResponse(cacheKey: string, body: string, featureCount: number) {
+  parcelFinalResponseCache.set(cacheKey, {
+    expiresAt: Date.now() + PARCEL_FINAL_RESPONSE_CACHE_TTL_MS,
+    body,
+    featureCount,
+  });
+
+  if (parcelFinalResponseCache.size > PARCEL_FINAL_RESPONSE_CACHE_MAX_ENTRIES) {
+    const oldestKey = parcelFinalResponseCache.keys().next().value as string | undefined;
+    if (oldestKey) parcelFinalResponseCache.delete(oldestKey);
+  }
 }
 
 export async function GET(
@@ -106,7 +162,7 @@ export async function GET(
     return NextResponse.json([], {
       headers: {
         'Cache-Control': 'private, max-age=60',
-        'Server-Timing': parcelTimingHeader(routeTimings),
+        ...timingHeaders(parcelTimingHeader(routeTimings)),
       },
     });
   }
@@ -119,7 +175,7 @@ export async function GET(
     return NextResponse.json([], {
       headers: {
         'Cache-Control': 'private, max-age=60',
-        'Server-Timing': parcelTimingHeader(routeTimings),
+        ...timingHeaders(parcelTimingHeader(routeTimings)),
       },
     });
   }
@@ -130,7 +186,44 @@ export async function GET(
     return NextResponse.json([], {
       headers: {
         'Cache-Control': 'private, max-age=60',
-        'Server-Timing': parcelTimingHeader(routeTimings),
+        ...timingHeaders(parcelTimingHeader(routeTimings)),
+      },
+    });
+  }
+
+  const signatureStarted = performance.now();
+  const { data: bundleMeta } = await supabase
+    .from('campaign_map_bundles')
+    .select('asset_signature, source_version')
+    .eq('campaign_id', campaignId)
+    .eq('is_current', true)
+    .maybeSingle();
+  routeTimings.signature = elapsedMs(signatureStarted);
+
+  const cacheKey = finalParcelResponseCacheKey({
+    campaignId,
+    signature:
+      typeof bundleMeta?.asset_signature === 'string'
+        ? bundleMeta.asset_signature
+        : typeof bundleMeta?.source_version === 'string'
+          ? bundleMeta.source_version
+          : null,
+    pmtilesKey: parcelTiles.pmtilesKey,
+    snapshotCreatedAt: snapshot.created_at ?? null,
+    bbox,
+    boundary,
+  });
+  const cachedFinalResponse = getCachedFinalParcelResponse(cacheKey);
+  if (cachedFinalResponse) {
+    routeTimings.route = elapsedMs(routeStarted);
+    return new Response(cachedFinalResponse.body, {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'private, max-age=60',
+        ...timingHeaders(parcelTimingHeader(routeTimings, undefined, 'hit')),
+        'X-FLYR-Parcels-Cache': 'final-hit',
+        'X-FLYR-Parcels-Features': String(cachedFinalResponse.featureCount),
       },
     });
   }
@@ -141,7 +234,7 @@ export async function GET(
     return NextResponse.json([], {
       headers: {
         'Cache-Control': 'private, max-age=60',
-        'Server-Timing': parcelTimingHeader(routeTimings),
+        ...timingHeaders(parcelTimingHeader(routeTimings)),
         'X-FLYR-Parcels-Suppressed': 'cached-failure',
       },
     });
@@ -149,11 +242,15 @@ export async function GET(
 
   try {
     const scoped = await fetchScopedPmtilesParcels(campaignId, snapshot, parcelTiles, bbox, boundary);
+    const body = JSON.stringify(scoped.parcels);
+    setCachedFinalParcelResponse(cacheKey, body, scoped.parcels.length);
     routeTimings.route = elapsedMs(routeStarted);
-    return NextResponse.json(scoped.parcels, {
+    return new Response(body, {
+      status: 200,
       headers: {
+        'Content-Type': 'application/json',
         'Cache-Control': 'private, max-age=60',
-        'Server-Timing': parcelTimingHeader(routeTimings, scoped),
+        ...timingHeaders(parcelTimingHeader(routeTimings, scoped, 'miss')),
         'X-FLYR-Parcels-Cache': scoped.cacheStatus,
         'X-FLYR-Parcels-Tiles': String(scoped.timings.tileCount),
         'X-FLYR-Parcels-Features': String(scoped.timings.featureCount),
@@ -171,7 +268,7 @@ export async function GET(
       return NextResponse.json([], {
         headers: {
           'Cache-Control': 'private, max-age=60',
-          'Server-Timing': parcelTimingHeader(routeTimings),
+          ...timingHeaders(parcelTimingHeader(routeTimings)),
           'X-FLYR-Parcels-Suppressed': 'access-denied',
         },
       });
