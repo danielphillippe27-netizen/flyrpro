@@ -372,6 +372,9 @@ async function extractScopedPmtilesBuildingFeatures(
   const ranges = tileRangeCandidatesForBbox(bbox, header.maxZoom, header.minZoom);
   if (ranges.length === 0) return null;
 
+  let bestCollection: ScopedBuildingFeatureCollection | null = null;
+  let bestRange: TileRange | null = null;
+
   for (const range of ranges) {
     const byBuildingId = new Map<string, PolygonalBuildingFeature[]>();
     const tileCoords = tileCoordsForRange(range);
@@ -431,14 +434,26 @@ async function extractScopedPmtilesBuildingFeatures(
       mergeBuildingFragments(buildingId, fragments)
     );
     if (features.length > 0) {
-      return {
+      const collection = {
         type: 'FeatureCollection',
         features,
-      };
+      } satisfies ScopedBuildingFeatureCollection;
+      if (!bestCollection || features.length > bestCollection.features.length) {
+        bestCollection = collection;
+        bestRange = range;
+      }
     }
   }
 
-  return null;
+  if (bestCollection && bestRange) {
+    console.log('[ScopedPMTilesBuildings] Selected richest building tile zoom', {
+      z: bestRange.z,
+      features: bestCollection.features.length,
+      candidates: ranges.length,
+    });
+  }
+
+  return bestCollection;
 }
 
 export async function fetchScopedPmtilesBuildingFeatures(
