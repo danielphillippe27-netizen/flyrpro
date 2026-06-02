@@ -40,6 +40,8 @@ type CliOptions = {
   workdir?: string;
   uploadExisting: boolean;
   strictMaxZoom: boolean;
+  allowMissingRate: number;
+  acceptedMissingReason?: string;
 };
 
 type BuildingRow = {
@@ -86,6 +88,12 @@ type ValidationResult = {
   strictMaxZoom: boolean;
   strict_max_zoom: boolean;
   accepted_lossy: boolean;
+  acceptedMissingIds: boolean;
+  acceptedMissingIdsCount: number;
+  acceptedMissingRate: number;
+  acceptedMissingRateLimit: number;
+  acceptedMissingIdsSample: string[];
+  acceptedMissingReason?: string;
   regressionChecks: RegressionResult[];
 };
 
@@ -161,6 +169,7 @@ function parseArgs(): CliOptions {
     concurrency: PMTILES_TILE_FETCH_CONCURRENCY,
     uploadExisting: false,
     strictMaxZoom: false,
+    allowMissingRate: 0,
   };
 
   for (const arg of process.argv.slice(2)) {
@@ -180,6 +189,8 @@ function parseArgs(): CliOptions {
     else if (key === '--workdir') options.workdir = value;
     else if (key === '--upload-existing') options.uploadExisting = true;
     else if (key === '--strict-max-zoom') options.strictMaxZoom = true;
+    else if (key === '--allow-missing-rate') options.allowMissingRate = Number(value);
+    else if (key === '--accepted-missing-reason') options.acceptedMissingReason = value;
     else if (key === '--help' || key === '-h') {
       printHelp();
       process.exit(0);
@@ -192,6 +203,9 @@ function parseArgs(): CliOptions {
   if (options.all && options.state) throw new Error('Use either --state=TX or --all, not both');
   if (!Number.isFinite(options.maxZoom) || options.maxZoom < options.minZoom) {
     throw new Error(`Invalid zoom range: ${options.minZoom}-${options.maxZoom}`);
+  }
+  if (!Number.isFinite(options.allowMissingRate) || options.allowMissingRate < 0 || options.allowMissingRate > 1) {
+    throw new Error(`Invalid --allow-missing-rate: ${options.allowMissingRate}`);
   }
   return options;
 }
@@ -214,6 +228,10 @@ Options:
                   Upload STATE-validation.json + referenced PMTiles from --workdir without rebuilding.
   --strict-max-zoom
                   Retry only the requested --max-zoom, using no-drop as the final attempt.
+  --allow-missing-rate=0.001
+                  Treat missingIdsCount/sourceCount at or below this rate as accepted validation.
+  --accepted-missing-reason=TEXT
+                  Reason recorded in validation JSON when missing IDs are accepted.
 `);
 }
 
@@ -741,7 +759,16 @@ async function validatePmtiles(
   const regressionChecks = state === 'TX'
     ? await runTexasRegressions(pmtilesPath, maxZoom)
     : [];
-  const validationPassed = missingIdsCount === 0 && regressionChecks.every((check) => check.passed);
+  const acceptedMissingRate = sourceCount > 0 ? missingIdsCount / sourceCount : 0;
+  const acceptedMissingIds = missingIdsCount > 0
+    && options.allowMissingRate > 0
+    && acceptedMissingRate <= options.allowMissingRate;
+  const regressionChecksPassed = regressionChecks.every((check) => check.passed);
+  const validationPassed = (missingIdsCount === 0 || acceptedMissingIds) && regressionChecksPassed;
+  const missingIdsSample = await readSample(missingPath);
+  const acceptedMissingReason = acceptedMissingIds
+    ? options.acceptedMissingReason || `accepted z18 building miss rate <= ${options.allowMissingRate}`
+    : undefined;
 
   return {
     state,
@@ -752,7 +779,7 @@ async function validatePmtiles(
     pmtilesDecodedCount,
     missingIdsCount,
     extraIdsCount,
-    missingIdsSample: await readSample(missingPath),
+    missingIdsSample,
     extraIdsSample: await readSample(extraPath),
     sourceIdsHash,
     pmtilesIdsHash,
@@ -764,6 +791,12 @@ async function validatePmtiles(
     strictMaxZoom: options.strictMaxZoom,
     strict_max_zoom: options.strictMaxZoom,
     accepted_lossy: false,
+    acceptedMissingIds,
+    acceptedMissingIdsCount: acceptedMissingIds ? missingIdsCount : 0,
+    acceptedMissingRate,
+    acceptedMissingRateLimit: options.allowMissingRate,
+    acceptedMissingIdsSample: acceptedMissingIds ? missingIdsSample : [],
+    acceptedMissingReason,
     regressionChecks,
   };
 }
