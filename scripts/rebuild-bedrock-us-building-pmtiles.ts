@@ -790,7 +790,7 @@ async function validatePmtiles(
     requiresSizeReview: noDrop && missingIdsCount === 0 && !options.strictMaxZoom,
     strictMaxZoom: options.strictMaxZoom,
     strict_max_zoom: options.strictMaxZoom,
-    accepted_lossy: false,
+    accepted_lossy: acceptedMissingIds,
     acceptedMissingIds,
     acceptedMissingIdsCount: acceptedMissingIds ? missingIdsCount : 0,
     acceptedMissingRate,
