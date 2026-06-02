@@ -17,7 +17,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { VectorTile } from '@mapbox/vector-tile';
 import Pbf from 'pbf';
-import { PMTiles } from 'pmtiles';
+import { PMTiles, tileIdToZxy, zxyToTileId, type Entry, type Header } from 'pmtiles';
 import * as turf from '@turf/turf';
 import duckdb from 'duckdb';
 
@@ -37,6 +37,7 @@ type CliOptions = {
   concurrency: number;
   workdir?: string;
   uploadExisting: boolean;
+  strictMaxZoom: boolean;
 };
 
 type BuildingRow = {
@@ -80,6 +81,9 @@ type ValidationResult = {
   maxTileFeatureCount: number;
   validationPassed: boolean;
   requiresSizeReview: boolean;
+  strictMaxZoom: boolean;
+  strict_max_zoom: boolean;
+  accepted_lossy: boolean;
   regressionChecks: RegressionResult[];
 };
 
@@ -154,6 +158,7 @@ function parseArgs(): CliOptions {
     prefix: DEFAULT_PREFIX,
     concurrency: PMTILES_TILE_FETCH_CONCURRENCY,
     uploadExisting: false,
+    strictMaxZoom: false,
   };
 
   for (const arg of process.argv.slice(2)) {
@@ -172,6 +177,7 @@ function parseArgs(): CliOptions {
     else if (key === '--concurrency') options.concurrency = Math.max(1, Number(value));
     else if (key === '--workdir') options.workdir = value;
     else if (key === '--upload-existing') options.uploadExisting = true;
+    else if (key === '--strict-max-zoom') options.strictMaxZoom = true;
     else if (key === '--help' || key === '-h') {
       printHelp();
       process.exit(0);
@@ -204,6 +210,8 @@ Options:
   --workdir=PATH   Reuse an existing workdir containing STATE-source-ids.raw.txt and STATE-buildings.geojsonseq.
   --upload-existing
                   Upload STATE-validation.json + referenced PMTiles from --workdir without rebuilding.
+  --strict-max-zoom
+                  Retry only the requested --max-zoom, using no-drop as the final attempt.
 `);
 }
 
@@ -354,6 +362,10 @@ async function setupDuckDb(run: (sql: string) => Promise<void>) {
     if (process.env.AWS_SESSION_TOKEN) {
       await run(`SET s3_session_token=${sqlString(process.env.AWS_SESSION_TOKEN)}`);
     }
+  } else {
+    await run(
+      `CREATE OR REPLACE SECRET flyr_bedrock_s3 (TYPE s3, PROVIDER credential_chain, REGION ${sqlString(AWS_REGION)})`
+    );
   }
 }
 
@@ -532,6 +544,10 @@ async function decodePmtilesIds(options: CliOptions, pmtilesPath: string, bounds
   try {
     const header = await archive.getHeader();
     const decodeZoom = Math.min(maxZoom, header.maxZoom);
+    if (header.specVersion >= 3) {
+      return await decodePmtilesIdsFromDirectory(options, source, archive, header, decodeZoom, outputPath);
+    }
+
     const range = tileRangeForBounds(bounds, decodeZoom);
     const tileCoords: Array<{ x: number; y: number }> = [];
     for (let x = range.minX; x <= range.maxX; x += 1) {
@@ -569,6 +585,82 @@ async function decodePmtilesIds(options: CliOptions, pmtilesPath: string, bounds
   } finally {
     await source.close();
   }
+}
+
+function tileEntryTouchesZoom(entry: Entry, zoom: number) {
+  const zoomStart = zxyToTileId(zoom, 0, 0);
+  const zoomEnd = zoomStart + (2 ** zoom) ** 2 - 1;
+  const entryStart = entry.tileId;
+  const entryEnd = entry.tileId + Math.max(1, entry.runLength) - 1;
+  return entryStart <= zoomEnd && entryEnd >= zoomStart;
+}
+
+async function collectPmtilesDataEntries(archive: PMTiles, header: Header, zoom: number) {
+  const dataEntries: Entry[] = [];
+  const visitedDirectories = new Set<string>();
+
+  async function visitDirectory(offset: number, length: number) {
+    const key = `${offset}:${length}`;
+    if (visitedDirectories.has(key)) return;
+    visitedDirectories.add(key);
+
+    const directory = await archive.cache.getDirectory(archive.source, offset, length, header);
+    for (const entry of directory) {
+      if (entry.runLength === 0) {
+        await visitDirectory(header.leafDirectoryOffset + entry.offset, entry.length);
+        continue;
+      }
+      if (tileEntryTouchesZoom(entry, zoom)) {
+        dataEntries.push(entry);
+      }
+    }
+  }
+
+  await visitDirectory(header.rootDirectoryOffset, header.rootDirectoryLength);
+  return dataEntries;
+}
+
+async function decodePmtilesIdsFromDirectory(
+  options: CliOptions,
+  source: LocalRangeSource,
+  archive: PMTiles,
+  header: Header,
+  decodeZoom: number,
+  outputPath: string,
+) {
+  const tileEntries = await collectPmtilesDataEntries(archive, header, decodeZoom);
+  console.log(`decoding ${tileEntries.length.toLocaleString()} z${decodeZoom} PMTiles data entries`);
+
+  const ids = createWriteStream(outputPath);
+  let decodedTilesWithData = 0;
+  let maxTileFeatureCount = 0;
+  let checked = 0;
+
+  await forEachWithConcurrency(tileEntries, options.concurrency, async (entry) => {
+    const [entryZoom] = tileIdToZxy(entry.tileId);
+    if (entryZoom !== decodeZoom && !tileEntryTouchesZoom(entry, decodeZoom)) return;
+
+    const tile = await source.getBytes(header.tileDataOffset + entry.offset, entry.length);
+    checked += 1;
+    if (checked % 1_000 === 0) {
+      console.log(`decoded ${checked.toLocaleString()}/${tileEntries.length.toLocaleString()} z${decodeZoom} PMTiles data entries`);
+    }
+
+    const decompressed = await archive.decompress(tile.data, header.tileCompression);
+    decodedTilesWithData += 1;
+    const vectorTile = new VectorTile(new Pbf(Buffer.from(decompressed)));
+    const layer = vectorTile.layers.buildings;
+    if (!layer) return;
+    maxTileFeatureCount = Math.max(maxTileFeatureCount, layer.length);
+    for (let index = 0; index < layer.length; index += 1) {
+      const properties = layer.feature(index).properties ?? {};
+      const id = String(properties.building_id ?? properties.gers_id ?? properties.id ?? '').trim();
+      if (id) ids.write(`${id}\n`);
+    }
+  });
+
+  await new Promise<void>((resolve) => ids.end(resolve));
+  return { decodedTilesWithData, maxTileFeatureCount };
 }
 
 async function sortUnique(input: string, output: string) {
@@ -666,7 +758,10 @@ async function validatePmtiles(
     decodedTilesWithData: decodeStats.decodedTilesWithData,
     maxTileFeatureCount: decodeStats.maxTileFeatureCount,
     validationPassed,
-    requiresSizeReview: noDrop && missingIdsCount === 0,
+    requiresSizeReview: noDrop && missingIdsCount === 0 && !options.strictMaxZoom,
+    strictMaxZoom: options.strictMaxZoom,
+    strict_max_zoom: options.strictMaxZoom,
+    accepted_lossy: false,
     regressionChecks,
   };
 }
@@ -944,11 +1039,16 @@ async function rebuildState(options: CliOptions, state: string) {
     const source = options.workdir
       ? await sourceFromWorkdir(options, state, workdir)
       : await exportSource(options, state, workdir);
-    const attempts = [
-      { maxZoom: options.maxZoom, noDrop: false },
-      { maxZoom: Math.max(options.maxZoom + 1, 17), noDrop: false },
-      { maxZoom: Math.max(options.maxZoom + 1, 17), noDrop: true },
-    ];
+    const attempts = options.strictMaxZoom
+      ? [
+          { maxZoom: options.maxZoom, noDrop: false },
+          { maxZoom: options.maxZoom, noDrop: true },
+        ]
+      : [
+          { maxZoom: options.maxZoom, noDrop: false },
+          { maxZoom: Math.max(options.maxZoom + 1, 17), noDrop: false },
+          { maxZoom: Math.max(options.maxZoom + 1, 17), noDrop: true },
+        ];
 
     let finalValidation: ValidationResult | null = null;
     for (const attempt of attempts) {
