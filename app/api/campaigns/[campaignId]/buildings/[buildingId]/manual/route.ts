@@ -335,7 +335,6 @@ export async function PATCH(request: Request, context: RouteContext): Promise<Re
       geom: JSON.stringify(geometry),
       height_m: Number.isFinite(heightMetersRaw) ? heightMetersRaw : 10,
       height: Number.isFinite(heightMetersRaw) ? heightMetersRaw : 10,
-      levels: 1,
       units_count: Math.max(contextForMove.addressIds.length, 1),
       latest_status: "default",
     };

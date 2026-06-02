@@ -101,7 +101,6 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
 
     const heightMetersRaw = Number((body as { height_m?: unknown }).height_m ?? 10);
     const unitsCountRaw = Number((body as { units_count?: unknown }).units_count ?? 1);
-    const levelsRaw = Number((body as { levels?: unknown }).levels ?? 1);
     const addressIds = Array.isArray((body as { address_ids?: unknown }).address_ids)
       ? ((body as { address_ids?: string[] }).address_ids ?? []).map(String)
       : [];
@@ -112,7 +111,6 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       geom: JSON.stringify(geometry),
       height_m: Number.isFinite(heightMetersRaw) ? heightMetersRaw : 10,
       height: Number.isFinite(heightMetersRaw) ? heightMetersRaw : 10,
-      levels: Number.isFinite(levelsRaw) ? levelsRaw : 1,
       units_count: Number.isFinite(unitsCountRaw) ? Math.max(1, Math.round(unitsCountRaw)) : 1,
       latest_status: "default",
     };
