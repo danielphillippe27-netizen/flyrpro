@@ -11,9 +11,11 @@ import {
   CompleteMultipartUploadCommand,
   CopyObjectCommand,
   CreateMultipartUploadCommand,
+  HeadObjectCommand,
   PutObjectCommand,
   S3Client,
   UploadPartCommand,
+  UploadPartCopyCommand,
 } from '@aws-sdk/client-s3';
 import { VectorTile } from '@mapbox/vector-tile';
 import Pbf from 'pbf';
@@ -969,6 +971,13 @@ function sleep(ms: number) {
 }
 
 async function promoteArtifact(client: S3Client, bucket: string, fromKey: string, toKey: string, contentType?: string) {
+  const head = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: fromKey }));
+  const size = Number(head.ContentLength ?? 0);
+  if (size > 5 * 1024 * 1024 * 1024) {
+    await multipartCopyArtifact(client, bucket, fromKey, toKey, size, contentType);
+    return;
+  }
+
   await client.send(new CopyObjectCommand({
     Bucket: bucket,
     Key: toKey,
@@ -977,6 +986,105 @@ async function promoteArtifact(client: S3Client, bucket: string, fromKey: string
     MetadataDirective: contentType ? 'REPLACE' : undefined,
   }));
   console.log(`promoted s3://${bucket}/${fromKey} -> s3://${bucket}/${toKey}`);
+}
+
+async function multipartCopyArtifact(
+  client: S3Client,
+  bucket: string,
+  fromKey: string,
+  toKey: string,
+  size: number,
+  contentType?: string
+) {
+  const totalParts = Math.ceil(size / S3_MULTIPART_PART_BYTES);
+  const createResult = await client.send(new CreateMultipartUploadCommand({
+    Bucket: bucket,
+    Key: toKey,
+    ContentType: contentType,
+  }));
+  if (!createResult.UploadId) throw new Error(`S3 did not return an upload id for multipart copy s3://${bucket}/${toKey}`);
+
+  const uploadId = createResult.UploadId;
+  const parts: Array<{ ETag: string; PartNumber: number }> = [];
+  let completedParts = 0;
+  console.log(
+    `multipart copy s3://${bucket}/${fromKey} -> s3://${bucket}/${toKey} (${totalParts} parts, ${size} bytes, concurrency=${S3_MULTIPART_UPLOAD_CONCURRENCY})`
+  );
+
+  try {
+    const workerCount = Math.min(S3_MULTIPART_UPLOAD_CONCURRENCY, totalParts);
+    let nextPartIndex = 0;
+    await Promise.all(Array.from({ length: workerCount }, async () => {
+      while (nextPartIndex < totalParts) {
+        const index = nextPartIndex;
+        nextPartIndex += 1;
+        const partNumber = index + 1;
+        const start = index * S3_MULTIPART_PART_BYTES;
+        const end = Math.min(start + S3_MULTIPART_PART_BYTES, size) - 1;
+        const result = await uploadPartCopyWithRetry(client, bucket, fromKey, toKey, uploadId, partNumber, start, end);
+        const etag = result.CopyPartResult?.ETag;
+        if (!etag) throw new Error(`S3 did not return an ETag for copied part ${partNumber}`);
+        parts.push({ ETag: etag, PartNumber: partNumber });
+        completedParts += 1;
+        if (completedParts === 1 || completedParts === totalParts || completedParts % 10 === 0) {
+          console.log(`copied ${completedParts}/${totalParts} parts for s3://${bucket}/${toKey}`);
+        }
+      }
+    }));
+
+    await client.send(new CompleteMultipartUploadCommand({
+      Bucket: bucket,
+      Key: toKey,
+      UploadId: uploadId,
+      MultipartUpload: { Parts: parts.sort((a, b) => a.PartNumber - b.PartNumber) },
+    }));
+    console.log(`promoted s3://${bucket}/${fromKey} -> s3://${bucket}/${toKey}`);
+  } catch (error) {
+    await client.send(new AbortMultipartUploadCommand({
+      Bucket: bucket,
+      Key: toKey,
+      UploadId: uploadId,
+    })).catch((abortError) => {
+      console.warn(`failed to abort multipart copy for s3://${bucket}/${toKey}`, abortError);
+    });
+    throw error;
+  }
+}
+
+async function uploadPartCopyWithRetry(
+  client: S3Client,
+  bucket: string,
+  fromKey: string,
+  toKey: string,
+  uploadId: string,
+  partNumber: number,
+  start: number,
+  end: number
+) {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= S3_MULTIPART_UPLOAD_RETRIES; attempt += 1) {
+    try {
+      return await client.send(new UploadPartCopyCommand({
+        Bucket: bucket,
+        Key: toKey,
+        UploadId: uploadId,
+        PartNumber: partNumber,
+        CopySource: `${bucket}/${fromKey}`,
+        CopySourceRange: `bytes=${start}-${end}`,
+      }));
+    } catch (error) {
+      lastError = error;
+      if (attempt === S3_MULTIPART_UPLOAD_RETRIES) break;
+      const delayMs = Math.min(30_000, 1_000 * 2 ** (attempt - 1));
+      console.warn(
+        `retrying copied part ${partNumber} for s3://${bucket}/${toKey} after ${delayMs}ms: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+      await sleep(delayMs);
+    }
+  }
+  throw lastError;
 }
 
 async function uploadAndMaybePromote(
