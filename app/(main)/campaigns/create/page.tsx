@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import {
   TerritoryDrawHint,
 } from '@/components/territory/TerritoryCreateFlow';
@@ -27,7 +28,7 @@ import { AddressAutocomplete } from '@/components/address/AddressAutocomplete';
 import { MapInfoButton } from '@/components/map/MapInfoButton';
 import { UserLocationLayer } from '@/components/map/UserLocationLayer';
 import type { AddressSuggestion } from '@/lib/services/MapboxAutocompleteService';
-import { Satellite, Map, Trash2, Pencil, Search } from 'lucide-react';
+import { CalendarDays, Map, Pencil, Search, Satellite, Trash2, Users } from 'lucide-react';
 import * as turf from '@turf/turf';
 import Lottie from 'lottie-react';
 
@@ -35,6 +36,134 @@ const MAP_USABLE_PHASES = new Set(['map_ready', 'linker_ready', 'optimized']);
 const MAP_COMPLETE_PHASES = new Set(['optimized']);
 const MAP_READY_TIMEOUT_MS = 5 * 60 * 1000;
 const MAP_BUNDLE_TIMEOUT_MS = 45 * 1000;
+const CAMPAIGN_OVERLAY_SOURCE_ID = 'campaign-territory-overlays';
+const CAMPAIGN_OVERLAY_FILL_LAYER_ID = 'campaign-territory-overlays-fill';
+const CAMPAIGN_OVERLAY_LINE_LAYER_ID = 'campaign-territory-overlays-line';
+const CAMPAIGN_OVERLAY_STORAGE_PREFIX = 'flyr:create-map:show-campaign-overlays';
+const CAMPAIGN_OVERLAY_LAYER_IDS = [
+  CAMPAIGN_OVERLAY_FILL_LAYER_ID,
+  CAMPAIGN_OVERLAY_LINE_LAYER_ID,
+] as const;
+
+type TeamMember = {
+  user_id: string;
+  display_name: string;
+  role: 'owner' | 'admin' | 'member';
+  is_current_user?: boolean;
+};
+
+type TerritoryOverlayCampaign = {
+  id: string;
+  name: string;
+  status: string;
+  geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon;
+  bbox: [number, number, number, number] | null;
+  assignees: string[];
+  progress: {
+    visited: number;
+    total: number;
+    percent: number;
+  };
+};
+
+type TerritoryOverlaysPayload = {
+  campaigns?: TerritoryOverlayCampaign[];
+  error?: string;
+};
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function campaignOverlayStorageKey(workspaceId: string): string {
+  return `${CAMPAIGN_OVERLAY_STORAGE_PREFIX}:${workspaceId}`;
+}
+
+function removeCampaignOverlayLayers(mapInstance: mapboxgl.Map) {
+  for (const layerId of CAMPAIGN_OVERLAY_LAYER_IDS) {
+    if (mapInstance.getLayer(layerId)) {
+      mapInstance.removeLayer(layerId);
+    }
+  }
+}
+
+function findFirstDrawLayerId(mapInstance: mapboxgl.Map): string | undefined {
+  return mapInstance.getStyle().layers?.find((layer) => layer.id.startsWith('gl-draw-'))?.id;
+}
+
+function upsertCampaignOverlayLayers(
+  mapInstance: mapboxgl.Map,
+  featureCollection: GeoJSON.FeatureCollection<GeoJSON.Polygon | GeoJSON.MultiPolygon>
+) {
+  removeCampaignOverlayLayers(mapInstance);
+
+  const existingSource = mapInstance.getSource(CAMPAIGN_OVERLAY_SOURCE_ID) as mapboxgl.GeoJSONSource | undefined;
+  if (existingSource) {
+    existingSource.setData(featureCollection);
+  } else {
+    mapInstance.addSource(CAMPAIGN_OVERLAY_SOURCE_ID, {
+      type: 'geojson',
+      data: featureCollection,
+    });
+  }
+
+  const beforeLayerId = findFirstDrawLayerId(mapInstance);
+  mapInstance.addLayer(
+    {
+      id: CAMPAIGN_OVERLAY_FILL_LAYER_ID,
+      type: 'fill',
+      source: CAMPAIGN_OVERLAY_SOURCE_ID,
+      paint: {
+        'fill-color': [
+          'case',
+          ['==', ['get', 'status'], 'completed'],
+          '#22c55e',
+          ['==', ['get', 'status'], 'active'],
+          '#3b82f6',
+          '#64748b',
+        ],
+        'fill-opacity': 0.16,
+      },
+    },
+    beforeLayerId
+  );
+  mapInstance.addLayer(
+    {
+      id: CAMPAIGN_OVERLAY_LINE_LAYER_ID,
+      type: 'line',
+      source: CAMPAIGN_OVERLAY_SOURCE_ID,
+      layout: {
+        'line-cap': 'round',
+        'line-join': 'round',
+      },
+      paint: {
+        'line-color': [
+          'case',
+          ['==', ['get', 'status'], 'completed'],
+          '#16a34a',
+          ['==', ['get', 'status'], 'active'],
+          '#2563eb',
+          '#475569',
+        ],
+        'line-opacity': 0.72,
+        'line-width': 2,
+      },
+    },
+    beforeLayerId
+  );
+}
+
+function removeCampaignOverlaySource(mapInstance: mapboxgl.Map) {
+  removeCampaignOverlayLayers(mapInstance);
+  if (mapInstance.getSource(CAMPAIGN_OVERLAY_SOURCE_ID)) {
+    mapInstance.removeSource(CAMPAIGN_OVERLAY_SOURCE_ID);
+  }
+}
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -118,7 +247,7 @@ async function prewarmCampaignMapBundleForOpen(campaignId: string) {
 export default function CreateCampaignPage() {
   const router = useRouter();
   const { theme } = useTheme();
-  const { currentWorkspace, currentWorkspaceId } = useWorkspace();
+  const { currentWorkspace, currentWorkspaceId, membershipsByWorkspaceId } = useWorkspace();
   const copy = getIndustryCopy(currentWorkspace?.industry);
   const resolvedMapStyle = useMemo(
     () => resolveMapStyle('standard', theme, 'v11'),
@@ -133,11 +262,22 @@ export default function CreateCampaignPage() {
   const [addressCount, setAddressCount] = useState<number | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
+  const [mapStyleRevision, setMapStyleRevision] = useState(0);
   const [isSatellite, setIsSatellite] = useState(false);
   const [mapSearchQuery, setMapSearchQuery] = useState('');
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
+  const [assignmentDeadline, setAssignmentDeadline] = useState('');
+  const [loadingTeamMembers, setLoadingTeamMembers] = useState(false);
+  const [showCampaignOverlays, setShowCampaignOverlays] = useState(false);
+  const [overlayPreferenceLoadedFor, setOverlayPreferenceLoadedFor] = useState<string | null>(null);
+  const [campaignOverlays, setCampaignOverlays] = useState<TerritoryOverlayCampaign[]>([]);
+  const [campaignOverlaysLoading, setCampaignOverlaysLoading] = useState(false);
+  const [campaignOverlaysError, setCampaignOverlaysError] = useState<string | null>(null);
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const drawRef = useRef<MapboxDraw | null>(null);
+  const campaignOverlayPopupRef = useRef<mapboxgl.Popup | null>(null);
   const boundaryLayerIdsRef = useRef<string[]>([]);
   const appliedBaseStyleKeyRef = useRef<string | null>(null);
   const hasCenteredOnUserLocationRef = useRef(false);
@@ -148,6 +288,37 @@ export default function CreateCampaignPage() {
   );
   const { phase, setPhase, startCreating } = useTerritoryCreatePhase({ map, mapLoaded });
   const isBusy = loading || provisioning || generatingAddresses;
+  const currentWorkspaceRole = currentWorkspaceId ? membershipsByWorkspaceId[currentWorkspaceId] : null;
+  const canAssignOnCreate = currentWorkspaceRole === 'owner' || currentWorkspaceRole === 'admin';
+  const selectedTeamMembers = useMemo(
+    () => teamMembers.filter((member) => selectedMemberIds.includes(member.user_id)),
+    [selectedMemberIds, teamMembers]
+  );
+  const campaignOverlayFeatureCollection = useMemo<
+    GeoJSON.FeatureCollection<GeoJSON.Polygon | GeoJSON.MultiPolygon>
+  >(
+    () => ({
+      type: 'FeatureCollection',
+      features: campaignOverlays.map((campaign) => {
+        const assigneesText = campaign.assignees.length > 0 ? campaign.assignees.join(', ') : 'Unassigned';
+        const progressText = `${campaign.progress.visited} / ${campaign.progress.total} homes · ${campaign.progress.percent}%`;
+
+        return {
+          type: 'Feature',
+          id: campaign.id,
+          geometry: campaign.geometry,
+          properties: {
+            id: campaign.id,
+            name: campaign.name,
+            status: campaign.status,
+            assigneesText,
+            progressText,
+          },
+        };
+      }),
+    }),
+    [campaignOverlays]
+  );
 
   useEffect(() => {
     const supabase = createClient();
@@ -155,6 +326,61 @@ export default function CreateCampaignPage() {
       setUserId(user?.id || null);
     });
   }, []);
+
+  useEffect(() => {
+    if (!currentWorkspaceId) {
+      setShowCampaignOverlays(false);
+      setOverlayPreferenceLoadedFor(null);
+      return;
+    }
+
+    const stored = window.localStorage.getItem(campaignOverlayStorageKey(currentWorkspaceId));
+    setShowCampaignOverlays(stored === 'true');
+    setOverlayPreferenceLoadedFor(currentWorkspaceId);
+  }, [currentWorkspaceId]);
+
+  useEffect(() => {
+    if (!currentWorkspaceId || overlayPreferenceLoadedFor !== currentWorkspaceId) return;
+    window.localStorage.setItem(campaignOverlayStorageKey(currentWorkspaceId), String(showCampaignOverlays));
+  }, [currentWorkspaceId, overlayPreferenceLoadedFor, showCampaignOverlays]);
+
+  useEffect(() => {
+    if (!showCampaignOverlays || !currentWorkspaceId) {
+      setCampaignOverlays([]);
+      setCampaignOverlaysLoading(false);
+      setCampaignOverlaysError(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    setCampaignOverlaysLoading(true);
+    setCampaignOverlaysError(null);
+
+    fetch(`/api/campaigns/territory-overlays?workspaceId=${encodeURIComponent(currentWorkspaceId)}`, {
+      credentials: 'include',
+      cache: 'no-store',
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const payload = (await response.json().catch(() => ({}))) as TerritoryOverlaysPayload;
+        if (!response.ok) {
+          throw new Error(payload.error || 'Failed to load campaign overlays.');
+        }
+        setCampaignOverlays(Array.isArray(payload.campaigns) ? payload.campaigns : []);
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        setCampaignOverlays([]);
+        setCampaignOverlaysError(error instanceof Error ? error.message : 'Failed to load campaign overlays.');
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setCampaignOverlaysLoading(false);
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [currentWorkspaceId, showCampaignOverlays]);
 
   useEffect(() => {
     let cancelled = false;
@@ -168,6 +394,43 @@ export default function CreateCampaignPage() {
       cancelled = true;
     };
   }, [lottieSrc]);
+
+  useEffect(() => {
+    if (!canAssignOnCreate || !currentWorkspaceId) {
+      setTeamMembers([]);
+      setSelectedMemberIds([]);
+      return;
+    }
+
+    let mounted = true;
+    setLoadingTeamMembers(true);
+    fetch(`/api/team/roster?workspaceId=${encodeURIComponent(currentWorkspaceId)}`, {
+      credentials: 'include',
+    })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload: { members?: TeamMember[] } | null) => {
+        if (!mounted) return;
+        const roster = Array.isArray(payload?.members) ? payload.members : [];
+        setTeamMembers(roster);
+        setSelectedMemberIds((current) => {
+          const validCurrent = current.filter((id) => roster.some((member) => member.user_id === id));
+          if (validCurrent.length > 0) return validCurrent;
+          return [];
+        });
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setTeamMembers([]);
+        setSelectedMemberIds([]);
+      })
+      .finally(() => {
+        if (mounted) setLoadingTeamMembers(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [canAssignOnCreate, currentWorkspaceId]);
 
   const currentStepText = generatingAddresses
         ? 'Step 3/5: Fetching addresses'
@@ -266,6 +529,7 @@ export default function CreateCampaignPage() {
 
     map.current.on('load', () => {
       setMapLoaded(true);
+      setMapStyleRevision((current) => current + 1);
       if (!isSatellite) {
         add2DBuildingsLayer(map.current!);
       }
@@ -417,6 +681,7 @@ export default function CreateCampaignPage() {
     map.current.once('style.load', () => {
       if (!map.current) return;
       appliedBaseStyleKeyRef.current = expectedStyleKey;
+      setMapStyleRevision((current) => current + 1);
 
       // Keep custom residential building overlays off satellite mode.
       if (!isSatellite) {
@@ -457,6 +722,85 @@ export default function CreateCampaignPage() {
     const hasSavedFeatures = (drawRef.current.getAll()?.features?.length ?? 0) > 0;
     applyDrawModeForPhase(drawRef.current, phase, hasSavedFeatures);
   }, [mapLoaded, phase]);
+
+  useEffect(() => {
+    if (!mapLoaded || !map.current) return;
+
+    if (!showCampaignOverlays || campaignOverlayFeatureCollection.features.length === 0) {
+      removeCampaignOverlaySource(map.current);
+      campaignOverlayPopupRef.current?.remove();
+      campaignOverlayPopupRef.current = null;
+      return;
+    }
+
+    try {
+      upsertCampaignOverlayLayers(map.current, campaignOverlayFeatureCollection);
+    } catch (error) {
+      console.warn('[CreateCampaignPage] Failed to render campaign territory overlays:', error);
+    }
+  }, [campaignOverlayFeatureCollection, mapLoaded, mapStyleRevision, showCampaignOverlays]);
+
+  useEffect(() => {
+    if (!mapLoaded || !map.current || !showCampaignOverlays) return;
+    const mapInstance = map.current;
+    if (!mapInstance.getLayer(CAMPAIGN_OVERLAY_FILL_LAYER_ID)) return;
+
+    const showPopup = (
+      event: mapboxgl.MapMouseEvent & { features?: mapboxgl.MapboxGeoJSONFeature[] },
+      options: { closeButton: boolean; closeOnClick: boolean }
+    ) => {
+      const feature = event.features?.[0];
+      if (!feature?.properties) return;
+
+      const name = String(feature.properties.name ?? 'Untitled Campaign');
+      const assigneesText = String(feature.properties.assigneesText ?? 'Unassigned');
+      const progressText = String(feature.properties.progressText ?? '0 / 0 homes · 0%');
+
+      campaignOverlayPopupRef.current?.remove();
+      campaignOverlayPopupRef.current = new mapboxgl.Popup({
+        closeButton: options.closeButton,
+        closeOnClick: options.closeOnClick,
+        maxWidth: '280px',
+        offset: 12,
+      })
+        .setLngLat(event.lngLat)
+        .setHTML(`
+          <div style="font-family: inherit; min-width: 190px;">
+            <div style="font-size: 13px; font-weight: 700; color: #111827; margin-bottom: 4px;">${escapeHtml(name)}</div>
+            <div style="font-size: 12px; color: #4b5563; line-height: 1.45;">Assigned to: ${escapeHtml(assigneesText)}</div>
+            <div style="font-size: 12px; color: #4b5563; line-height: 1.45;">Visited: ${escapeHtml(progressText)}</div>
+          </div>
+        `)
+        .addTo(mapInstance);
+    };
+
+    const handleMouseEnter = () => {
+      mapInstance.getCanvas().style.cursor = 'pointer';
+    };
+    const handleMouseMove = (event: mapboxgl.MapMouseEvent & { features?: mapboxgl.MapboxGeoJSONFeature[] }) => {
+      showPopup(event, { closeButton: false, closeOnClick: false });
+    };
+    const handleMouseLeave = () => {
+      mapInstance.getCanvas().style.cursor = '';
+      campaignOverlayPopupRef.current?.remove();
+      campaignOverlayPopupRef.current = null;
+    };
+    const handleClick = (event: mapboxgl.MapMouseEvent & { features?: mapboxgl.MapboxGeoJSONFeature[] }) => {
+      showPopup(event, { closeButton: true, closeOnClick: true });
+    };
+
+    mapInstance.on('mouseenter', CAMPAIGN_OVERLAY_FILL_LAYER_ID, handleMouseEnter);
+    mapInstance.on('mousemove', CAMPAIGN_OVERLAY_FILL_LAYER_ID, handleMouseMove);
+    mapInstance.on('mouseleave', CAMPAIGN_OVERLAY_FILL_LAYER_ID, handleMouseLeave);
+    mapInstance.on('click', CAMPAIGN_OVERLAY_FILL_LAYER_ID, handleClick);
+
+    return () => {
+      mapInstance.off('mouseenter', CAMPAIGN_OVERLAY_FILL_LAYER_ID, handleMouseEnter);
+      mapInstance.off('mousemove', CAMPAIGN_OVERLAY_FILL_LAYER_ID, handleMouseMove);
+      mapInstance.off('mouseleave', CAMPAIGN_OVERLAY_FILL_LAYER_ID, handleMouseLeave);
+      mapInstance.off('click', CAMPAIGN_OVERLAY_FILL_LAYER_ID, handleClick);
+    };
+  }, [campaignOverlayFeatureCollection, mapLoaded, mapStyleRevision, showCampaignOverlays]);
 
   useEffect(() => {
     if (!mapLoaded || !map.current) return;
@@ -579,6 +923,11 @@ export default function CreateCampaignPage() {
       return;
     }
 
+    if (selectedMemberIds.length > 0 && !assignmentDeadline) {
+      alert('Choose a deadline for the assigned campaign.');
+      return;
+    }
+
     let bbox: number[] | undefined;
 
     // Calculate bbox from polygon using turf
@@ -615,6 +964,7 @@ export default function CreateCampaignPage() {
         setProvisioning(true);
         setProvisionProgress('Saving territory boundary...');
         try {
+          let campaignReadyForAssignment = false;
           const boundaryResponse = await fetch(`/api/campaigns/${campaign.id}`, {
             method: 'PATCH',
             credentials: 'include',
@@ -656,7 +1006,15 @@ export default function CreateCampaignPage() {
             if (!provisionResponse.ok) {
               const error = await provisionResponse.json().catch(() => ({}));
               console.error('Provisioning error:', error);
-              alert(`Campaign created but provisioning failed: ${error.error || 'Unknown error'}`);
+              const message = typeof error.error === 'string' && error.error.trim()
+                ? error.error
+                : 'Campaign created but provisioning failed.';
+              alert(
+                error.code === 'campaign_home_limit_exceeded' || error.code === 'campaign_too_large_for_app'
+                  ? message
+                  : `Campaign created but provisioning failed: ${message}`
+              );
+              return;
             } else {
               const result = await provisionResponse.json();
               const { addresses_saved = 0, buildings_saved = 0, links_created = 0 } = result;
@@ -673,9 +1031,37 @@ export default function CreateCampaignPage() {
               setProvisionProgress('Preparing map bundle...');
               await prewarmCampaignMapBundleForOpen(campaign.id);
               await new Promise(resolve => setTimeout(resolve, 800));
+              campaignReadyForAssignment = true;
             }
           } finally {
             clearInterval(progressInterval);
+          }
+
+          if (campaignReadyForAssignment && selectedMemberIds.length > 0 && currentWorkspaceId) {
+            setProvisionProgress('Assigning campaign to team...');
+            const assignmentResponse = await fetch(`/api/campaigns/${campaign.id}/assignments`, {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                workspaceId: currentWorkspaceId,
+                mode: 'whole_team',
+                memberIds: selectedMemberIds,
+                dueAt: `${assignmentDeadline}T23:59:59`,
+                notes: null,
+              }),
+            });
+
+            if (!assignmentResponse.ok) {
+              const error = await assignmentResponse.json().catch(() => ({}));
+              alert(`Campaign created but assignment failed: ${error.error || 'Unknown error'}`);
+            } else {
+              const result = await assignmentResponse.json().catch(() => null) as { warnings?: string[] } | null;
+              const warnings = Array.isArray(result?.warnings) ? result.warnings : [];
+              if (warnings.length > 0) {
+                alert(`Campaign assigned, but some notifications need attention:\n${warnings.slice(0, 3).join('\n')}`);
+              }
+            }
           }
         } catch (provisionError) {
           console.error('Error provisioning campaign:', provisionError);
@@ -737,16 +1123,83 @@ export default function CreateCampaignPage() {
               </button>
 
               {phase === 'naming' ? (
-                <div className="space-y-2">
-                  <Label htmlFor="campaign-name">{copy.campaigns.nameLabel}</Label>
-                  <Input
-                    id="campaign-name"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder={copy.campaigns.namePlaceholder}
-                    autoFocus
-                    className="h-11 bg-background"
-                  />
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="campaign-name">{copy.campaigns.nameLabel}</Label>
+                    <Input
+                      id="campaign-name"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder={copy.campaigns.namePlaceholder}
+                      autoFocus
+                      className="h-11 bg-background"
+                    />
+                  </div>
+
+                  {canAssignOnCreate ? (
+                    <div className="space-y-3 rounded-xl border border-border bg-card/80 p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <Label className="flex items-center gap-2 text-sm">
+                          <Users className="h-4 w-4" />
+                          Assign members
+                        </Label>
+                        {selectedTeamMembers.length > 0 ? (
+                          <span className="text-xs text-muted-foreground">
+                            {selectedTeamMembers.length} selected
+                          </span>
+                        ) : null}
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        {loadingTeamMembers ? (
+                          <span className="text-xs text-muted-foreground">Loading members...</span>
+                        ) : null}
+                        {!loadingTeamMembers && teamMembers.length === 0 ? (
+                          <span className="text-xs text-muted-foreground">No team members found.</span>
+                        ) : null}
+                        {teamMembers.map((member) => {
+                          const selected = selectedMemberIds.includes(member.user_id);
+                          return (
+                            <button
+                              key={member.user_id}
+                              type="button"
+                              disabled={isBusy}
+                              onClick={() =>
+                                setSelectedMemberIds((current) =>
+                                  current.includes(member.user_id)
+                                    ? current.filter((id) => id !== member.user_id)
+                                    : [...current, member.user_id]
+                                )
+                              }
+                              className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                                selected
+                                  ? 'border-red-500 bg-red-500 text-white'
+                                  : 'border-border bg-background text-foreground hover:bg-muted/70'
+                              }`}
+                            >
+                              {member.display_name}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="campaign-assignment-deadline" className="flex items-center gap-2 text-sm">
+                          <CalendarDays className="h-4 w-4" />
+                          Deadline
+                        </Label>
+                        <Input
+                          id="campaign-assignment-deadline"
+                          type="date"
+                          value={assignmentDeadline}
+                          onChange={(e) => setAssignmentDeadline(e.target.value)}
+                          disabled={isBusy || selectedMemberIds.length === 0}
+                          className="h-10 bg-background"
+                        />
+                      </div>
+                    </div>
+                  ) : null}
+
                   <button
                     type="button"
                     onClick={handleNamingBack}
@@ -773,6 +1226,27 @@ export default function CreateCampaignPage() {
                   className="flex-1"
                   inputClassName="h-11 bg-background"
                 />
+              </div>
+
+              <div className="rounded-xl border border-border bg-card px-3 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <Label htmlFor="show-campaign-overlays" className="text-sm font-medium">
+                    Show other campaigns
+                  </Label>
+                  <Switch
+                    id="show-campaign-overlays"
+                    checked={showCampaignOverlays}
+                    onCheckedChange={setShowCampaignOverlays}
+                    disabled={!currentWorkspaceId}
+                    aria-label="Show other campaign polygons"
+                  />
+                </div>
+                {showCampaignOverlays && campaignOverlaysLoading ? (
+                  <p className="mt-2 text-xs text-muted-foreground">Loading campaign polygons...</p>
+                ) : null}
+                {showCampaignOverlays && !campaignOverlaysLoading && campaignOverlaysError ? (
+                  <p className="mt-2 text-xs text-red-500">{campaignOverlaysError}</p>
+                ) : null}
               </div>
 
               <div className="grid grid-cols-2 gap-2">

@@ -9,8 +9,8 @@ export default function LeadsPage() {
   const copy = getIndustryCopy(currentWorkspace?.industry);
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-background">
-      <header className="bg-white dark:bg-card border-b border-border sticky top-0 z-10">
+    <div className="flex min-h-screen flex-col bg-gray-50 dark:bg-background">
+      <header className="shrink-0 bg-white dark:bg-card border-b border-border sticky top-0 z-10">
         <div className="w-full px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between gap-4">
             <div>
@@ -20,7 +20,7 @@ export default function LeadsPage() {
           </div>
         </div>
       </header>
-      <main className="w-full px-4 py-6 sm:px-6 lg:px-8">
+      <main className="flex min-h-0 flex-1 overflow-hidden">
         <ContactsHubView />
       </main>
     </div>

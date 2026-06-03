@@ -8,7 +8,7 @@ import { WorkspaceProvider, useWorkspace } from '@/lib/workspace-context';
 import AppTopHeader from '@/components/layout/AppTopHeader';
 import { MainLayoutNavProvider, useMainLayoutNav } from '@/components/layout/MainLayoutNavContext';
 import { MainRouteGuard } from '@/components/guard/MainRouteGuard';
-import { Home, Trophy, Users, Settings, Target, Gauge, Plug, MessageCircle, Activity, CalendarCheck, CornerDownRight, Plus, Link2, UserRoundPlus, BriefcaseBusiness, PhoneCall, ListChecks, Search, Handshake } from 'lucide-react';
+import { Home, Trophy, Users, Settings, Target, Gauge, Plug, MessageCircle, Activity, Clock, CalendarDays, CornerDownRight, Plus, Link2, UserRoundPlus, BriefcaseBusiness, PhoneCall, ListChecks, Search, Handshake } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { DashboardAccessLevel } from '@/app/api/_utils/workspace';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
@@ -23,7 +23,8 @@ const baseTabs = [
   { href: '/activity', icon: Activity, label: 'Activity' },
   { href: '/leads', icon: Users, label: 'Leads' },
   { href: '/follow-up', icon: CornerDownRight, label: 'Follow Up' },
-  { href: '/appointments', icon: CalendarCheck, label: 'Appointments' },
+  { href: '/appointments', icon: Clock, label: 'Appointments' },
+  { href: '/calendar', icon: CalendarDays, label: 'Calendar' },
   { href: '/leaderboard', icon: Trophy, label: 'Leaderboard' },
   { href: '/stats', icon: Gauge, label: 'Performance' },
   { href: '/settings/integrations', icon: Plug, label: 'Integrations' },
@@ -48,7 +49,7 @@ const founderTabs = [
   ...baseTabs.filter((tab) => ['/home'].includes(tab.href)),
   ambassadorsTab,
   salespeopleTab,
-  ...baseTabs.filter((tab) => ['/activity', '/leads', '/follow-up', '/appointments'].includes(tab.href)),
+  ...baseTabs.filter((tab) => ['/activity', '/leads', '/follow-up', '/appointments', '/calendar'].includes(tab.href)),
   settingsTab,
   supportTab,
 ];
@@ -59,6 +60,7 @@ const memberTabs = baseTabs.filter((tab) =>
     '/leads',
     '/activity',
     '/appointments',
+    '/calendar',
     '/follow-up',
     '/leaderboard',
     '/stats',

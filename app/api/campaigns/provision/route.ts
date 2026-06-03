@@ -50,6 +50,12 @@ import {
   shouldFailZeroAddressProvision,
   snapshotHasStaticPmtilesGeometry,
 } from '@/lib/services/provisionHelpers';
+import {
+  APP_LIMIT_SCAN_COUNT,
+  CampaignHomeLimitError,
+  campaignHomeLimitErrorPayload,
+  validateCampaignHomeCount,
+} from '@/lib/services/campaignHomeLimits';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -672,6 +678,7 @@ async function resolveDiamondThenBedrock(options: {
   addressSource: ProvisionSource;
   snapshot: LambdaSnapshotResponse;
   addressesToInsert: StandardCampaignAddress[];
+  resolvedHomeCount: number;
   bedrockLinkGeometry: BedrockNzLinkGeometry | null;
 }> {
   const { campaignId, polygon, regionCode } = options;
@@ -684,7 +691,7 @@ async function resolveDiamondThenBedrock(options: {
     const diamondResult = await DiamondMunicipalService.provisionCampaign({
       campaignId,
       polygon,
-      addressLimit: 10000,
+      addressLimit: APP_LIMIT_SCAN_COUNT,
       regionCode,
     }).catch((error) => {
       console.warn(
@@ -710,6 +717,7 @@ async function resolveDiamondThenBedrock(options: {
         addressSource: 'diamond',
         snapshot: diamondResult.snapshot,
         addressesToInsert: addressesForInitialHydration(diamondResult.addresses),
+        resolvedHomeCount: diamondResult.addresses.length,
         bedrockLinkGeometry: null,
       };
     }
@@ -725,7 +733,7 @@ async function resolveDiamondThenBedrock(options: {
     const bedrockResult = await BedrockNzService.provisionCampaign({
       campaignId,
       polygon,
-      addressLimit: 10000,
+      addressLimit: APP_LIMIT_SCAN_COUNT,
     });
     console.log('[Provision] BEDROCK New Zealand S3 polygon scan complete:', {
       campaignId,
@@ -744,6 +752,7 @@ async function resolveDiamondThenBedrock(options: {
       addressSource: 'bedrock_nz',
       snapshot: bedrockResult.snapshot,
       addressesToInsert: addressesForInitialHydration(bedrockResult.addresses),
+      resolvedHomeCount: bedrockResult.addresses.length,
       bedrockLinkGeometry: bedrockResult.linkGeometry,
     };
   }
@@ -756,7 +765,7 @@ async function resolveDiamondThenBedrock(options: {
     const bedrockResult = await BedrockAustraliaService.provisionCampaign({
       campaignId,
       polygon,
-      addressLimit: 10000,
+      addressLimit: APP_LIMIT_SCAN_COUNT,
       regionCode,
     });
     console.log('[Provision] BEDROCK Australia S3 polygon scan complete:', {
@@ -772,6 +781,7 @@ async function resolveDiamondThenBedrock(options: {
       addressSource: 'bedrock_au',
       snapshot: bedrockResult.snapshot,
       addressesToInsert: addressesForInitialHydration(bedrockResult.addresses),
+      resolvedHomeCount: bedrockResult.addresses.length,
       bedrockLinkGeometry: null,
     };
   }
@@ -784,7 +794,7 @@ async function resolveDiamondThenBedrock(options: {
     const bedrockResult = await BedrockCanadaService.provisionCampaign({
       campaignId,
       polygon,
-      addressLimit: 10000,
+      addressLimit: APP_LIMIT_SCAN_COUNT,
       regionCode,
     });
     console.log('[Provision] BEDROCK Canada S3 polygon scan complete:', {
@@ -800,6 +810,7 @@ async function resolveDiamondThenBedrock(options: {
       addressSource: 'bedrock_ca',
       snapshot: bedrockResult.snapshot,
       addressesToInsert: addressesForInitialHydration(bedrockResult.addresses),
+      resolvedHomeCount: bedrockResult.addresses.length,
       bedrockLinkGeometry: null,
     };
   }
@@ -812,7 +823,7 @@ async function resolveDiamondThenBedrock(options: {
     const bedrockResult = await BedrockSouthAfricaService.provisionCampaign({
       campaignId,
       polygon,
-      addressLimit: 10000,
+      addressLimit: APP_LIMIT_SCAN_COUNT,
       regionCode,
     });
     console.log('[Provision] BEDROCK South Africa S3 polygon scan complete:', {
@@ -828,6 +839,7 @@ async function resolveDiamondThenBedrock(options: {
       addressSource: 'bedrock_za',
       snapshot: bedrockResult.snapshot,
       addressesToInsert: addressesForInitialHydration(bedrockResult.addresses),
+      resolvedHomeCount: bedrockResult.addresses.length,
       bedrockLinkGeometry: null,
     };
   }
@@ -840,7 +852,7 @@ async function resolveDiamondThenBedrock(options: {
     const bedrockResult = await BedrockUkService.provisionCampaign({
       campaignId,
       polygon,
-      addressLimit: 10000,
+      addressLimit: APP_LIMIT_SCAN_COUNT,
       regionCode,
     });
     console.log('[Provision] BEDROCK UK S3 polygon scan complete:', {
@@ -856,6 +868,7 @@ async function resolveDiamondThenBedrock(options: {
       addressSource: 'bedrock_uk',
       snapshot: bedrockResult.snapshot,
       addressesToInsert: addressesForInitialHydration(bedrockResult.addresses),
+      resolvedHomeCount: bedrockResult.addresses.length,
       bedrockLinkGeometry: null,
     };
   }
@@ -868,7 +881,7 @@ async function resolveDiamondThenBedrock(options: {
     const bedrockResult = await BedrockUsService.provisionCampaign({
       campaignId,
       polygon,
-      addressLimit: 10000,
+      addressLimit: APP_LIMIT_SCAN_COUNT,
       regionCode,
     });
     console.log('[Provision] BEDROCK USA S3 polygon scan complete:', {
@@ -884,6 +897,7 @@ async function resolveDiamondThenBedrock(options: {
       addressSource: 'bedrock_us',
       snapshot: bedrockResult.snapshot,
       addressesToInsert: addressesForInitialHydration(bedrockResult.addresses),
+      resolvedHomeCount: bedrockResult.addresses.length,
       bedrockLinkGeometry: null,
     };
   }
@@ -1478,10 +1492,12 @@ export async function POST(request: NextRequest) {
             addressSource,
             snapshot: rawSnapshot,
             addressesToInsert: resolvedAddresses,
+            resolvedHomeCount,
             bedrockLinkGeometry,
           } = resolvedProvision;
           let snapshot = rawSnapshot;
           let addressesToInsert = resolvedAddresses;
+          validateCampaignHomeCount(resolvedHomeCount);
 
           await updateCampaignProvision(supabase, campaignId!, {
             provision_source: dbProvisionSource(addressSource),
@@ -1540,6 +1556,7 @@ export async function POST(request: NextRequest) {
               source: addressSource,
               regionCode,
             });
+            validateCampaignHomeCount(proxyAddresses.length);
             if (proxyAddresses.length > 0) {
               console.warn('[Provision] PMTiles address scope produced zero addresses; using scoped building proxy door targets.', {
                 campaignId,
@@ -1771,11 +1788,16 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const status = error instanceof ProvisionError ? error.status : 500;
+    const status = error instanceof CampaignHomeLimitError
+      ? error.status
+      : error instanceof ProvisionError
+        ? error.status
+        : 500;
     const message = error instanceof Error ? error.message : 'Provisioning failed';
     return NextResponse.json(
       {
         error: message,
+        ...(error instanceof CampaignHomeLimitError ? campaignHomeLimitErrorPayload(error) : {}),
         provision_status: 'failed',
         provision_phase: 'failed',
       },

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Download, Phone, Plus, Upload } from 'lucide-react';
+import { Download, Plus, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -36,8 +36,9 @@ type TeamRosterResponse = {
   members?: TeamMemberOption[];
 };
 
-const DIALER_SELECTION_STORAGE_KEY = 'flyr:dialer:selected-contact-ids';
 const LEAD_RECORD_NAV_STORAGE_KEY = 'flyr:leads:record-contact-ids';
+const LEAD_LIST_SIDEBAR_COLLAPSED_KEY = 'flyr-lead-list-sidebar-collapsed';
+const LIST_SIDEBAR_WIDTH = 280;
 const ALL_LEADS_LIST_ID = 'all';
 const inFlightLeadWorkspaceIds = new Set<string>();
 
@@ -122,6 +123,7 @@ export function ContactsHubView() {
   const [teamMembers, setTeamMembers] = useState<TeamMemberOption[]>([]);
   const [selectedMemberId, setSelectedMemberId] = useState<string>('all');
   const [selectedListId, setSelectedListId] = useState<string>(ALL_LEADS_LIST_ID);
+  const [listSidebarCollapsed, setListSidebarCollapsed] = useState(false);
   const currentRole = currentWorkspaceId ? membershipsByWorkspaceId[currentWorkspaceId] : null;
   const canFilterByMembers = currentRole === 'owner' || currentRole === 'admin';
 
@@ -208,6 +210,20 @@ export function ContactsHubView() {
       }
     });
   }, [loadLeadData]);
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(LEAD_LIST_SIDEBAR_COLLAPSED_KEY);
+      if (stored !== null) setListSidebarCollapsed(stored === 'true');
+    } catch {}
+  }, []);
+
+  const setListSidebarCollapsedPersisted = useCallback((value: boolean) => {
+    setListSidebarCollapsed(value);
+    try {
+      localStorage.setItem(LEAD_LIST_SIDEBAR_COLLAPSED_KEY, String(value));
+    } catch {}
+  }, []);
 
   const handleCreateContact = () => {
     setCreateDialogOpen(true);
@@ -383,12 +399,6 @@ export function ContactsHubView() {
     setSelectedContactIds(checked ? visibleContacts.map((contact) => contact.id) : []);
   };
 
-  const handleSendSelectedToDialer = () => {
-    if (selectedContactIds.length === 0) return;
-    window.sessionStorage.setItem(DIALER_SELECTION_STORAGE_KEY, JSON.stringify(selectedContactIds));
-    router.push('/dialer?selection=1');
-  };
-
   const handleOpenContact = (contact: Contact) => {
     window.sessionStorage.setItem(
       LEAD_RECORD_NAV_STORAGE_KEY,
@@ -429,7 +439,7 @@ export function ContactsHubView() {
   };
 
   return (
-    <div className="space-y-6 lg:flex lg:items-start lg:gap-6 lg:space-y-0">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
       <SmartListSidebar
         builtInLists={builtInListItems}
         customLists={customListItems}
@@ -440,9 +450,12 @@ export function ContactsHubView() {
         canManageCustomLists={false}
         busy={loading}
         copy={copy}
+        collapsed={listSidebarCollapsed}
+        onToggleCollapse={() => setListSidebarCollapsedPersisted(!listSidebarCollapsed)}
+        width={LIST_SIDEBAR_WIDTH}
       />
 
-      <div className="min-w-0 flex-1 space-y-6">
+      <div className="min-w-0 flex-1 space-y-6 overflow-y-auto overscroll-contain px-4 py-6 sm:px-6 lg:px-8">
         <section className="rounded-2xl border border-border bg-card p-5 shadow-sm">
           <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
             <div className="space-y-3">
@@ -479,14 +492,6 @@ export function ContactsHubView() {
               <Button variant="outline" onClick={handleExportContacts} disabled={loading || visibleContacts.length === 0}>
                 <Download className="mr-2 h-4 w-4" />
                 {copy.actions.exportContacts}
-              </Button>
-              <Button
-                variant="outline"
-                onClick={handleSendSelectedToDialer}
-                disabled={loading || selectedContactIds.length === 0}
-              >
-                <Phone className="mr-2 h-4 w-4" />
-                {selectedContactIds.length > 0 ? `Send ${selectedContactIds.length} to Dialer` : copy.actions.sendToDialer}
               </Button>
               <Button variant="outline" onClick={() => setImportDialogOpen(true)}>
                 <Upload className="mr-2 h-4 w-4" />

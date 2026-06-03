@@ -259,10 +259,39 @@ function OnboardingContent() {
   const [referralCampaign, setReferralCampaign] = useState<string | null>(null);
   const [seats, setSeats] = useState(TEAM_MIN_SEATS);
   const [teamInviteEmails, setTeamInviteEmails] = useState<string[]>(['']);
+  const demoPrefillApplied = useRef(false);
   const [handoffRedeemState, setHandoffRedeemState] = useState<
     'idle' | 'loading' | 'error'
   >(handoffCode ? 'loading' : 'idle');
   const [handoffRedeemError, setHandoffRedeemError] = useState<string>('');
+
+  useEffect(() => {
+    if (demoPrefillApplied.current || searchParams.get('source') !== 'demo') return;
+    demoPrefillApplied.current = true;
+
+    const demoFirstName = searchParams.get('firstName')?.trim() ?? '';
+    const demoLastName = searchParams.get('lastName')?.trim() ?? '';
+    const demoWorkEmail = searchParams.get('workEmail')?.trim().toLowerCase() ?? '';
+    const demoTeamSize = searchParams.get('teamSize');
+
+    if (demoFirstName) setFirstName((current) => current || demoFirstName);
+    if (demoLastName) setLastName((current) => current || demoLastName);
+    if (demoWorkEmail) setWorkEmail((current) => current || demoWorkEmail);
+
+    if (demoTeamSize === 'solo') {
+      setUseCase('solo');
+      setSeats(SOLO_SEATS);
+    } else if (demoTeamSize === '2-5') {
+      setUseCase('team');
+      setSeats(2);
+    } else if (demoTeamSize === '6-20') {
+      setUseCase('team');
+      setSeats(6);
+    } else if (demoTeamSize === '20-plus') {
+      setUseCase('team');
+      setSeats(20);
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     if (!handoffCode) {

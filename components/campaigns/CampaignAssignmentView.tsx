@@ -15,7 +15,6 @@ import { useMapStyle } from '@/lib/map-style-provider';
 import { getMapboxToken, removeMapboxMapWhenSafe } from '@/lib/mapbox';
 import { getResolvedMapInitOptions, resolveMapStyle } from '@/lib/map-styles';
 import {
-  distributeWholeTeamGoals,
   type CampaignAssignmentMode,
   type CampaignAssignmentSplitMode,
 } from '@/lib/campaignAssignments';
@@ -197,6 +196,7 @@ function CampaignAssignmentZonePreviewMap({
   autoZones,
   zones,
   manualOverrides,
+  showAssignmentColors,
   editable,
   onApplyManualOverrides,
 }: {
@@ -207,6 +207,7 @@ function CampaignAssignmentZonePreviewMap({
   autoZones: Map<string, AssignmentAddress[]>;
   zones: Map<string, AssignmentAddress[]>;
   manualOverrides: Record<string, string>;
+  showAssignmentColors: boolean;
   editable: boolean;
   onApplyManualOverrides: (overrides: Record<string, string>) => void;
 }) {
@@ -220,6 +221,7 @@ function CampaignAssignmentZonePreviewMap({
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
+  const [expandedOpen, setExpandedOpen] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorStartDraw, setEditorStartDraw] = useState(false);
   const addressById = useMemo(() => new Map(addresses.map((address) => [address.id, address])), [addresses]);
@@ -239,21 +241,25 @@ function CampaignAssignmentZonePreviewMap({
     [members, zones]
   );
   const assignmentColorByAddressId = useMemo(
-    () =>
-      members.reduce<Record<string, string>>((colors, member) => {
+    () => {
+      if (!showAssignmentColors) return {};
+      return members.reduce<Record<string, string>>((colors, member) => {
         (zones.get(member.user_id) ?? []).forEach((address) => {
           colors[address.id] = member.color;
         });
         return colors;
-      }, {}),
-    [members, zones]
+      }, {});
+    },
+    [members, showAssignmentColors, zones]
   );
   const previewAddresses = useMemo(
     () =>
-      Object.keys(assignmentColorByAddressId)
+      Array.from(
+        new Set(members.flatMap((member) => (zones.get(member.user_id) ?? []).map((address) => address.id)))
+      )
         .map((addressId) => addressById.get(addressId))
         .filter((address): address is CampaignAddress => Boolean(address)),
-    [addressById, assignmentColorByAddressId]
+    [addressById, members, zones]
   );
 
   const initialPoint = previewPoints[0] ?? null;
@@ -370,12 +376,12 @@ function CampaignAssignmentZonePreviewMap({
           <p className="truncate text-sm font-medium text-foreground">Assignment map</p>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
-          <Button type="button" variant="outline" size="sm" onClick={() => openEditor(false)}>
+          <Button type="button" variant="outline" size="sm" onClick={() => setExpandedOpen(true)}>
             <Expand className="h-3.5 w-3.5" />
             Expand
           </Button>
           {editable ? (
-            <Button type="button" variant="secondary" size="sm" onClick={() => openEditor(true)}>
+            <Button type="button" variant="secondary" size="sm" onClick={() => openEditor(false)}>
               <Pencil className="h-3.5 w-3.5" />
               Edit map
             </Button>
@@ -395,7 +401,7 @@ function CampaignAssignmentZonePreviewMap({
             map={mapRef.current}
             campaignId={campaignId}
             addressStateOverrides={previewAddresses}
-            assignmentColorByAddressId={assignmentColorByAddressId}
+            assignmentColorByAddressId={showAssignmentColors ? assignmentColorByAddressId : undefined}
             showAddressLabels={false}
             footprintStatusColors
             isDarkMap={theme === 'dark'}
@@ -408,13 +414,31 @@ function CampaignAssignmentZonePreviewMap({
         ) : null}
       </div>
       <AssignmentMapEditorDialog
-        open={editorOpen}
-        startInDrawMode={editorStartDraw}
+        open={expandedOpen}
+        startInDrawMode={false}
+        editable={false}
         campaignId={campaignId}
         addresses={addresses}
         assignmentAddresses={assignmentAddresses}
         members={members}
         autoZones={autoZones}
+        displayZones={zones}
+        showAssignmentColors={showAssignmentColors}
+        appliedManualOverrides={manualOverrides}
+        onApplyManualOverrides={onApplyManualOverrides}
+        onOpenChange={setExpandedOpen}
+      />
+      <AssignmentMapEditorDialog
+        open={editorOpen}
+        startInDrawMode={editorStartDraw}
+        editable
+        campaignId={campaignId}
+        addresses={addresses}
+        assignmentAddresses={assignmentAddresses}
+        members={members}
+        autoZones={autoZones}
+        displayZones={zones}
+        showAssignmentColors={showAssignmentColors}
         appliedManualOverrides={manualOverrides}
         onApplyManualOverrides={onApplyManualOverrides}
         onOpenChange={setEditorOpen}
@@ -426,22 +450,28 @@ function CampaignAssignmentZonePreviewMap({
 function AssignmentMapEditorDialog({
   open,
   startInDrawMode,
+  editable,
   campaignId,
   addresses,
   assignmentAddresses,
   members,
   autoZones,
+  displayZones,
+  showAssignmentColors,
   appliedManualOverrides,
   onApplyManualOverrides,
   onOpenChange,
 }: {
   open: boolean;
   startInDrawMode: boolean;
+  editable: boolean;
   campaignId: string;
   addresses: CampaignAddress[];
   assignmentAddresses: AssignmentAddress[];
   members: ZonePreviewMember[];
   autoZones: Map<string, AssignmentAddress[]>;
+  displayZones: Map<string, AssignmentAddress[]>;
+  showAssignmentColors: boolean;
   appliedManualOverrides: Record<string, string>;
   onApplyManualOverrides: (overrides: Record<string, string>) => void;
   onOpenChange: (open: boolean) => void;
@@ -478,29 +508,36 @@ function AssignmentMapEditorDialog({
   }, [appliedManualOverrides, memberIds, open]);
 
   const editorZones = useMemo(
-    () => applyManualOverridesToZones(autoZones, assignmentAddresses, memberIds, draftOverrides),
-    [assignmentAddresses, autoZones, draftOverrides, memberIds]
+    () =>
+      editable
+        ? applyManualOverridesToZones(autoZones, assignmentAddresses, memberIds, draftOverrides)
+        : displayZones,
+    [assignmentAddresses, autoZones, displayZones, draftOverrides, editable, memberIds]
   );
   const manualCountsByMember = useMemo(
     () => countManualOverridesByMember(draftOverrides, assignmentAddresses, memberIds, autoZones),
     [assignmentAddresses, autoZones, draftOverrides, memberIds]
   );
   const assignmentColorByAddressId = useMemo(
-    () =>
-      members.reduce<Record<string, string>>((colors, member) => {
+    () => {
+      if (!showAssignmentColors) return {};
+      return members.reduce<Record<string, string>>((colors, member) => {
         (editorZones.get(member.user_id) ?? []).forEach((address) => {
           colors[address.id] = member.color;
         });
         return colors;
-      }, {}),
-    [editorZones, members]
+      }, {});
+    },
+    [editorZones, members, showAssignmentColors]
   );
   const previewAddresses = useMemo(
     () =>
-      Object.keys(assignmentColorByAddressId)
+      Array.from(
+        new Set(members.flatMap((member) => (editorZones.get(member.user_id) ?? []).map((address) => address.id)))
+      )
         .map((addressId) => addressById.get(addressId))
         .filter((address): address is CampaignAddress => Boolean(address)),
-    [addressById, assignmentColorByAddressId]
+    [addressById, editorZones, members]
   );
   const previewPoints = useMemo<ZonePreviewPoint[]>(
     () =>
@@ -532,7 +569,7 @@ function AssignmentMapEditorDialog({
 
     void Promise.all([
       getResolvedMapInitOptions(resolvedMapStyle),
-      import('@mapbox/mapbox-gl-draw'),
+      editable ? import('@mapbox/mapbox-gl-draw') : Promise.resolve(null),
     ])
       .then(([initOptions, drawModule]) => {
         if (cancelled || !mapContainerRef.current) return;
@@ -549,10 +586,12 @@ function AssignmentMapEditorDialog({
         mapRef.current = map;
         map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'bottom-right');
 
-        const draw = new drawModule.default({
-          displayControlsDefault: false,
-          controls: {},
-        });
+        const draw = drawModule
+          ? new drawModule.default({
+              displayControlsDefault: false,
+              controls: {},
+            })
+          : null;
         drawRef.current = draw;
 
         const updateSelectionFromDraw = () => {
@@ -567,6 +606,12 @@ function AssignmentMapEditorDialog({
         map.on('load', () => {
           if (cancelled) return;
           try {
+            if (!draw) {
+              setMapLoaded(true);
+              setMapError(null);
+              window.setTimeout(() => map.resize(), 0);
+              return;
+            }
             map.addControl(draw);
             drawMap.on('draw.create', updateSelectionFromDraw);
             drawMap.on('draw.update', updateSelectionFromDraw);
@@ -628,7 +673,7 @@ function AssignmentMapEditorDialog({
         drawRef.current = null;
       }
     };
-  }, [assignmentAddresses, initialLat, initialLon, open, resolvedMapStyle, startInDrawMode]);
+  }, [assignmentAddresses, editable, initialLat, initialLon, open, resolvedMapStyle, startInDrawMode]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -664,21 +709,25 @@ function AssignmentMapEditorDialog({
     setSelectedAddressIds([]);
   };
 
-  const assignSelectionToMember = () => {
-    if (!activeMemberId || selectedAddressIds.length === 0) return;
+  const assignAddressIdsToMember = useCallback((addressIds: string[], memberId: string) => {
+    if (!memberId || addressIds.length === 0) return;
 
     setDraftOverrides((current) => {
       const next = { ...current };
-      selectedAddressIds.forEach((addressId) => {
+      addressIds.forEach((addressId) => {
         if (!assignmentAddressIdSet.has(addressId)) return;
-        if (autoAssignmentByAddress.get(addressId) === activeMemberId) {
+        if (autoAssignmentByAddress.get(addressId) === memberId) {
           delete next[addressId];
           return;
         }
-        next[addressId] = activeMemberId;
+        next[addressId] = memberId;
       });
       return sanitizeManualOverrides(next, assignmentAddresses, memberIds, autoZones);
     });
+  }, [assignmentAddressIdSet, assignmentAddresses, autoAssignmentByAddress, autoZones, memberIds]);
+
+  const assignSelectionToMember = () => {
+    assignAddressIdsToMember(selectedAddressIds, activeMemberId);
   };
 
   const resetEdits = () => {
@@ -698,20 +747,31 @@ function AssignmentMapEditorDialog({
     options?: { additive?: boolean }
   ) => {
     if (!addressId || !assignmentAddressIdSet.has(addressId)) return;
+    const memberId = activeMemberId;
     setSelectedAddressIds((current) => {
       const exists = current.includes(addressId);
       if (options?.additive) {
         return exists ? current.filter((id) => id !== addressId) : [...current, addressId];
       }
-      return exists && current.length === 1 ? [] : [addressId];
+      return [addressId];
     });
-  }, [assignmentAddressIdSet]);
+    if (memberId && !options?.additive) {
+      assignAddressIdsToMember([addressId], memberId);
+    }
+  }, [activeMemberId, assignAddressIdsToMember, assignmentAddressIdSet]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="grid h-[94vh] w-[96vw] max-w-[1600px] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0"
+        className="left-0 top-0 grid h-[100dvh] w-[100vw] max-w-none translate-x-0 translate-y-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden rounded-none border-0 p-0 sm:max-w-none"
         showCloseButton={false}
+        style={{
+          inset: 0,
+          width: '100vw',
+          height: '100dvh',
+          maxWidth: 'none',
+          transform: 'none',
+        }}
       >
         <DialogHeader className="sr-only">
           <DialogTitle>Assignment map editor</DialogTitle>
@@ -721,108 +781,121 @@ function AssignmentMapEditorDialog({
             <MapPinned className="h-4 w-4 text-muted-foreground" />
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold">Assignment map</p>
-              <p className="text-xs text-muted-foreground">{selectedAddressIds.length} selected</p>
+              {editable ? <p className="text-xs text-muted-foreground">{selectedAddressIds.length} selected</p> : null}
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" variant="outline" size="sm" onClick={drawPolygon}>
-              <PenLine className="h-3.5 w-3.5" />
-              Draw polygon
-            </Button>
-            <Button type="button" variant="outline" size="sm" onClick={clearSelection} disabled={selectedAddressIds.length === 0}>
-              <Eraser className="h-3.5 w-3.5" />
-              Clear selection
-            </Button>
-          </div>
-        </div>
-
-        <div className="grid min-h-0 lg:grid-cols-[320px_minmax(0,1fr)]">
-          <aside className="min-h-0 overflow-y-auto border-b border-border bg-muted/20 p-4 lg:border-b-0 lg:border-r">
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label>Member</Label>
-                <div className="space-y-2">
-                  {members.map((member) => {
-                    const active = activeMemberId === member.user_id;
-                    const zoneHomes = editorZones.get(member.user_id) ?? [];
-                    const manualCount = manualCountsByMember.get(member.user_id) ?? 0;
-                    return (
-                      <button
-                        key={member.user_id}
-                        type="button"
-                        onClick={() => setActiveMemberId(member.user_id)}
-                        className={`flex w-full items-center justify-between gap-3 rounded-md border px-3 py-2 text-left transition-colors ${
-                          active
-                            ? 'border-foreground bg-background text-foreground'
-                            : 'border-border bg-background/70 text-muted-foreground hover:bg-background'
-                        }`}
-                      >
-                        <span className="flex min-w-0 items-center gap-2">
-                          <span className="h-3 w-3 rounded-full" style={{ backgroundColor: member.color }} />
-                          <span className="truncate text-sm font-medium">{member.display_name}</span>
-                        </span>
-                        <span className="shrink-0 text-xs">
-                          {zoneHomes.length} / {manualCount} edited
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
+          {editable ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={drawPolygon}>
+                <PenLine className="h-3.5 w-3.5" />
+                Draw polygon
+              </Button>
               <Button
                 type="button"
-                className="w-full"
-                onClick={assignSelectionToMember}
-                disabled={!activeMemberId || selectedAddressIds.length === 0}
+                variant="outline"
+                size="sm"
+                onClick={clearSelection}
+                disabled={selectedAddressIds.length === 0}
               >
-                <Check className="h-4 w-4" />
-                Assign selection to member
-              </Button>
-
-              <Button type="button" variant="outline" className="w-full" onClick={resetEdits}>
-                <RotateCcw className="h-4 w-4" />
-                Reset edits
+                <Eraser className="h-3.5 w-3.5" />
+                Clear selection
               </Button>
             </div>
-          </aside>
+          ) : null}
+        </div>
 
-          <div className="relative min-h-[420px]">
-            <div ref={mapContainerRef} className="h-full min-h-[420px] w-full" />
-            {mapRef.current && mapLoaded ? (
-              <MapBuildingsLayer
-                map={mapRef.current}
-                campaignId={campaignId}
-                addressStateOverrides={previewAddresses}
-                assignmentColorByAddressId={assignmentColorByAddressId}
-                selectedAddressIds={selectedAddressIds}
-                showAddressLabels={false}
-                footprintStatusColors
-                isDarkMap={theme === 'dark'}
-                onBuildingClick={handleBuildingClick}
-              />
-            ) : null}
-            {mapError ? (
-              <div className="absolute inset-0 flex items-center justify-center bg-background/90 p-4 text-center text-sm text-muted-foreground">
-                {mapError}
+        <div className="relative min-h-0">
+          <div ref={mapContainerRef} className="h-full min-h-0 w-full" />
+          {editable ? (
+            <div className="absolute left-4 top-4 z-10 max-h-[calc(100%-2rem)] w-[min(340px,calc(100vw-2rem))] overflow-y-auto rounded-lg border border-border bg-background/95 p-3 shadow-xl backdrop-blur">
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <Label>Assign to</Label>
+                  <div className="space-y-2">
+                    {members.map((member) => {
+                      const active = activeMemberId === member.user_id;
+                      const zoneHomes = editorZones.get(member.user_id) ?? [];
+                      const manualCount = manualCountsByMember.get(member.user_id) ?? 0;
+                      return (
+                        <button
+                          key={member.user_id}
+                          type="button"
+                          onClick={() => setActiveMemberId(member.user_id)}
+                          className={`flex w-full items-center justify-between gap-3 rounded-md border px-3 py-2 text-left transition-colors ${
+                            active
+                              ? 'border-foreground bg-background text-foreground'
+                              : 'border-border bg-background/70 text-muted-foreground hover:bg-background'
+                          }`}
+                        >
+                          <span className="flex min-w-0 items-center gap-2">
+                            <span className="h-3 w-3 rounded-full" style={{ backgroundColor: member.color }} />
+                            <span className="truncate text-sm font-medium">{member.display_name}</span>
+                          </span>
+                          <span className="shrink-0 text-xs">
+                            {zoneHomes.length} / {manualCount} edited
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <Button
+                  type="button"
+                  className="w-full"
+                  onClick={assignSelectionToMember}
+                  disabled={!activeMemberId || selectedAddressIds.length === 0}
+                >
+                  <Check className="h-4 w-4" />
+                  Assign selected
+                </Button>
+
+                <Button type="button" variant="outline" className="w-full" onClick={resetEdits}>
+                  <RotateCcw className="h-4 w-4" />
+                  Reset edits
+                </Button>
               </div>
-            ) : null}
-          </div>
+            </div>
+          ) : null}
+          {mapRef.current && mapLoaded ? (
+            <MapBuildingsLayer
+              map={mapRef.current}
+              campaignId={campaignId}
+              addressStateOverrides={previewAddresses}
+              assignmentColorByAddressId={showAssignmentColors ? assignmentColorByAddressId : undefined}
+              selectedAddressIds={selectedAddressIds}
+              showAddressLabels={false}
+              footprintStatusColors
+              isDarkMap={theme === 'dark'}
+              onBuildingClick={editable ? handleBuildingClick : undefined}
+            />
+          ) : null}
+          {mapError ? (
+            <div className="absolute inset-0 flex items-center justify-center bg-background/90 p-4 text-center text-sm text-muted-foreground">
+              {mapError}
+            </div>
+          ) : null}
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-background px-4 py-3">
-          <p className="text-xs text-muted-foreground">
-            {Object.keys(sanitizeManualOverrides(draftOverrides, assignmentAddresses, memberIds, autoZones)).length} manual edits
-          </p>
+          {editable ? (
+            <p className="text-xs text-muted-foreground">
+              {Object.keys(sanitizeManualOverrides(draftOverrides, assignmentAddresses, memberIds, autoZones)).length} manual edits
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">{assignmentAddresses.length} homes</p>
+          )}
           <div className="flex flex-wrap items-center gap-2">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               <X className="h-4 w-4" />
-              Cancel
+              {editable ? 'Cancel' : 'Close'}
             </Button>
-            <Button type="button" onClick={applyEdits}>
-              <Check className="h-4 w-4" />
-              Apply edits
-            </Button>
+            {editable ? (
+              <Button type="button" onClick={applyEdits}>
+                <Check className="h-4 w-4" />
+                Apply edits
+              </Button>
+            ) : null}
           </div>
         </div>
       </DialogContent>
@@ -862,18 +935,11 @@ export function CampaignAssignmentView({ campaignId, campaignName, addresses }: 
     () => countManualOverridesByMember(appliedManualOverrides, assignmentAddresses, selectedMemberIds, autoZones),
     [appliedManualOverrides, assignmentAddresses, autoZones, selectedMemberIds]
   );
-  const wholeTeamGoals = useMemo(
-    () => distributeWholeTeamGoals(addresses.length, selectedMemberIds),
-    [addresses.length, selectedMemberIds]
-  );
   const previewZones = useMemo(() => {
     if (mode === 'zone_split') return zones;
 
     const wholeTeamZones = new Map<string, AssignmentAddress[]>();
-    const chunks = contiguousSplit(assignmentAddresses, selectedMemberIds.length);
-    selectedMemberIds.forEach((memberId, index) => {
-      wholeTeamZones.set(memberId, chunks[index] ?? []);
-    });
+    if (selectedMemberIds[0]) wholeTeamZones.set(selectedMemberIds[0], assignmentAddresses);
     return wholeTeamZones;
   }, [assignmentAddresses, mode, selectedMemberIds, zones]);
 
@@ -1188,6 +1254,7 @@ export function CampaignAssignmentView({ campaignId, campaignName, addresses }: 
               autoZones={autoZones}
               zones={previewZones}
               manualOverrides={appliedManualOverrides}
+              showAssignmentColors={mode === 'zone_split'}
               editable={mode === 'zone_split'}
               onApplyManualOverrides={setAppliedManualOverrides}
             />
@@ -1212,7 +1279,7 @@ export function CampaignAssignmentView({ campaignId, campaignName, addresses }: 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {selectedMembers.map((member, index) => {
           const zoneHomes = zones.get(member.user_id) ?? [];
-          const goal = mode === 'zone_split' ? zoneHomes.length : wholeTeamGoals.get(member.user_id) ?? 0;
+          const goal = mode === 'zone_split' ? zoneHomes.length : addresses.length;
           const manualCount = manualOverrideCountByMemberId.get(member.user_id) ?? 0;
           return (
             <Card key={member.user_id}>

@@ -139,6 +139,7 @@ async function fetchSyntheticSessionEventsFromSessions(
   end: string
 ): Promise<SessionEventRow[]> {
   let includeLeadsCreated = true;
+  let includePathGeojson = true;
   let data: Array<Record<string, unknown>> | null = null;
   const allowedUserIds = new Set(scopedUserIds);
 
@@ -159,6 +160,9 @@ async function fetchSyntheticSessionEventsFromSessions(
 
     if (includeLeadsCreated) {
       selectColumns.push('leads_created');
+    }
+    if (includePathGeojson) {
+      selectColumns.push('path_geojson');
     }
 
     let query = admin
@@ -188,6 +192,10 @@ async function fetchSyntheticSessionEventsFromSessions(
       includeLeadsCreated = false;
       continue;
     }
+    if (includePathGeojson && isMissingColumn(result.error, 'sessions', 'path_geojson')) {
+      includePathGeojson = false;
+      continue;
+    }
     throw new Error(result.error.message);
   }
 
@@ -209,6 +217,7 @@ async function fetchSyntheticSessionEventsFromSessions(
         flyers_delivered: Number(row.flyers_delivered ?? 0) || 0,
         active_seconds: Number(row.active_seconds ?? 0) || 0,
         distance_meters: Number(row.distance_meters ?? 0) || 0,
+        ...(typeof row.path_geojson === 'string' ? { path_geojson: row.path_geojson } : {}),
       },
     })) as SessionEventRow[];
 }
@@ -1038,7 +1047,20 @@ export async function GET(request: NextRequest) {
       }
       for (const row of synthetic) {
         const key = `session_completed:${firstNonEmptyString(row.session_id, row.id)}`;
-        if (!bySessionKey.has(key)) bySessionKey.set(key, row);
+        const existing = bySessionKey.get(key);
+        if (existing) {
+          bySessionKey.set(key, {
+            ...existing,
+            session_id: firstNonEmptyString(existing.session_id, row.session_id, row.id),
+            campaign_id: firstNonEmptyString(existing.campaign_id, row.campaign_id),
+            payload: {
+              ...(row.payload ?? {}),
+              ...(existing.payload ?? {}),
+            },
+          });
+        } else {
+          bySessionKey.set(key, row);
+        }
       }
       rows = Array.from(bySessionKey.values());
       rows.sort((a, b) => {

@@ -15,7 +15,7 @@ export const CAMPAIGN_POLYGON_PARITY_REPORT_ROOT = path.join(
 export async function readCampaignPolygonParityReport(reportPath: string | null) {
   if (!reportPath || !existsSync(reportPath)) return null;
   try {
-    return dashboardReport(JSON.parse(readFileSync(reportPath, 'utf8')));
+    return dashboardReport(JSON.parse(readFileSync(reportPath, 'utf8')) as unknown);
   } catch {
     return null;
   }
@@ -43,45 +43,57 @@ export async function latestCampaignPolygonParityReportPath() {
   }
 }
 
-function dashboardReport(report: any) {
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+}
+
+function dashboardReport(report: unknown) {
+  const reportRecord = asRecord(report);
+  const results = Array.isArray(reportRecord?.results) ? reportRecord.results : [];
+
   return {
-    runId: report?.runId,
-    createdAt: report?.createdAt,
-    fixture: report?.fixture,
-    validationErrors: Array.isArray(report?.validationErrors) ? report.validationErrors : [],
-    stats: report?.stats ?? {},
-    results: Array.isArray(report?.results)
-      ? report.results.map((result: any) => ({
-          surface: result?.surface,
-          ordinal: result?.ordinal,
-          campaignId: result?.campaignId,
-          timings: result?.timings ?? {},
-          counts: result?.counts,
-          workflow: result?.workflow,
-          endpoints: result?.endpoints
+    runId: reportRecord?.runId,
+    createdAt: reportRecord?.createdAt,
+    fixture: reportRecord?.fixture,
+    validationErrors: Array.isArray(reportRecord?.validationErrors) ? reportRecord.validationErrors : [],
+    stats: reportRecord?.stats ?? {},
+    results: results.map((result) => {
+      const resultRecord = asRecord(result);
+      const endpoints = asRecord(resultRecord?.endpoints);
+
+      return {
+        surface: resultRecord?.surface,
+        ordinal: resultRecord?.ordinal,
+        campaignId: resultRecord?.campaignId,
+        timings: resultRecord?.timings ?? {},
+        counts: resultRecord?.counts,
+        workflow: resultRecord?.workflow,
+        endpoints: endpoints
             ? {
-                mapBundle: endpointSummary(result.endpoints.mapBundle),
-                addresses: endpointSummary(result.endpoints.addresses),
-                buildingsCold: endpointSummary(result.endpoints.buildingsCold),
-                buildingsBypass: endpointSummary(result.endpoints.buildingsBypass),
-                parcels: endpointSummary(result.endpoints.parcels),
+                mapBundle: endpointSummary(endpoints.mapBundle),
+                addresses: endpointSummary(endpoints.addresses),
+                buildingsCold: endpointSummary(endpoints.buildingsCold),
+                buildingsBypass: endpointSummary(endpoints.buildingsBypass),
+                parcels: endpointSummary(endpoints.parcels),
               }
             : undefined,
-          warnings: Array.isArray(result?.warnings) ? result.warnings : [],
-          errors: Array.isArray(result?.errors) ? result.errors : [],
-        }))
-      : [],
+        warnings: Array.isArray(resultRecord?.warnings) ? resultRecord.warnings : [],
+        errors: Array.isArray(resultRecord?.errors) ? resultRecord.errors : [],
+      };
+    }),
   };
 }
 
-function endpointSummary(endpoint: any) {
-  if (!endpoint) return undefined;
+function endpointSummary(endpoint: unknown) {
+  const endpointRecord = asRecord(endpoint);
+  if (!endpointRecord) return undefined;
+
   return {
-    status: endpoint.status,
-    seconds: endpoint.seconds,
-    count: endpoint.count,
-    hash: endpoint.hash,
-    bytes: endpoint.bytes,
-    headers: endpoint.headers,
+    status: endpointRecord.status,
+    seconds: endpointRecord.seconds,
+    count: endpointRecord.count,
+    hash: endpointRecord.hash,
+    bytes: endpointRecord.bytes,
+    headers: endpointRecord.headers,
   };
 }

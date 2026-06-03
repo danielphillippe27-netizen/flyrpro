@@ -13,6 +13,8 @@ type ContactRow = {
   name?: string | null;
   email?: string | null;
   phone?: string | null;
+  address?: string | null;
+  notes?: string | null;
   tags?: string[] | string | null;
 };
 
@@ -38,6 +40,8 @@ function mapContact(row: ContactRow) {
     fullName: row.full_name || row.name || 'Contact',
     email: row.email ?? null,
     phone: row.phone ?? null,
+    address: row.address ?? null,
+    notes: row.notes ?? null,
     tags,
   };
 }
@@ -58,7 +62,7 @@ export async function GET(request: NextRequest) {
 
   let query = admin
     .from('contacts')
-    .select('id, full_name, name, email, phone, tags, created_at')
+    .select('id, full_name, name, email, phone, address, notes, tags, created_at')
     .order('created_at', { ascending: false })
     .limit(200);
   query = workspace.workspaceId ? query.eq('workspace_id', workspace.workspaceId) : query.eq('user_id', requestUser.id);
@@ -106,10 +110,10 @@ export async function POST(request: NextRequest) {
     status: 'new',
   };
 
-  let insert = await admin.from('contacts').insert(payload).select('id, full_name, name, email, phone, tags').single();
+  let insert = await admin.from('contacts').insert(payload).select('id, full_name, name, email, phone, address, notes, tags').single();
   if (insert.error && isMissingColumn(insert.error, 'workspace_id')) {
     delete payload.workspace_id;
-    insert = await admin.from('contacts').insert(payload).select('id, full_name, name, email, phone, tags').single();
+    insert = await admin.from('contacts').insert(payload).select('id, full_name, name, email, phone, address, notes, tags').single();
   }
   if (insert.error) {
     return NextResponse.json({ error: insert.error.message }, { status: 500 });

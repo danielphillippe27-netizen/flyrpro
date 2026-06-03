@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { SessionBreadcrumbMap } from '@/components/home/team/SessionBreadcrumbMap';
 import { Route, Hand, Activity, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -78,6 +79,8 @@ type ActivityResponse = {
   canIncludeMembers?: boolean;
   members?: ActivityMemberOption[];
 };
+
+type SessionPathGeojson = string | GeoJSON.LineString | null;
 
 function formatDateKey(iso: string): string {
   const d = new Date(iso);
@@ -158,6 +161,22 @@ function firstDefined(...values: unknown[]): unknown {
     if (value !== undefined && value !== null) return value;
   }
   return undefined;
+}
+
+function getSessionPathGeojson(event: ActivityEvent): SessionPathGeojson {
+  const raw = event.payload.path_geojson;
+  if (typeof raw === 'string') return raw;
+  if (
+    raw &&
+    typeof raw === 'object' &&
+    'type' in raw &&
+    raw.type === 'LineString' &&
+    'coordinates' in raw &&
+    Array.isArray(raw.coordinates)
+  ) {
+    return raw as GeoJSON.LineString;
+  }
+  return null;
 }
 
 type ActivityPageViewProps = {
@@ -434,54 +453,58 @@ export function ActivityPageView({
           {selectedEvent && (
             <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
               {selectedEvent.event_type === 'session_completed' && (
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  <div className="rounded border p-2">
-                    <div className="text-muted-foreground text-xs">Doors</div>
-                    <div className="font-medium">
-                      {formatMetric(selectedEvent.payload.doors_hit ?? selectedEvent.payload.doors_knocked)}
+                <>
+                  <SessionBreadcrumbMap pathGeojson={getSessionPathGeojson(selectedEvent)} />
+
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div className="rounded border p-2">
+                      <div className="text-muted-foreground text-xs">Doors</div>
+                      <div className="font-medium">
+                        {formatMetric(selectedEvent.payload.doors_hit ?? selectedEvent.payload.doors_knocked)}
+                      </div>
+                    </div>
+                    <div className="rounded border p-2">
+                      <div className="text-muted-foreground text-xs">Conversations</div>
+                      <div className="font-medium">{formatMetric(selectedEvent.payload.conversations)}</div>
+                    </div>
+                    <div className="rounded border p-2">
+                      <div className="text-muted-foreground text-xs">Leads</div>
+                      <div className="font-medium">
+                        {formatMetric(firstDefined(selectedEvent.payload.leads_created, selectedEvent.payload.leads))}
+                      </div>
+                    </div>
+                    <div className="rounded border p-2">
+                      <div className="text-muted-foreground text-xs">Flyers Delivered</div>
+                      <div className="font-medium">{formatMetric(selectedEvent.payload.flyers_delivered)}</div>
+                    </div>
+                    <div className="rounded border p-2">
+                      <div className="text-muted-foreground text-xs">Active Time</div>
+                      <div className="font-medium">{formatDuration(selectedEvent.payload.active_seconds)}</div>
+                    </div>
+                    <div className="rounded border p-2">
+                      <div className="text-muted-foreground text-xs">Conversation Rate</div>
+                      <div className="font-medium">
+                        {formatRatePercent(
+                          selectedEvent.payload.conversations,
+                          selectedEvent.payload.doors_hit ?? selectedEvent.payload.doors_knocked
+                        )}
+                      </div>
+                    </div>
+                    <div className="rounded border p-2">
+                      <div className="text-muted-foreground text-xs">Lead Rate</div>
+                      <div className="font-medium">
+                        {formatRatePercent(
+                          firstDefined(selectedEvent.payload.leads_created, selectedEvent.payload.leads),
+                          selectedEvent.payload.conversations
+                        )}
+                      </div>
+                    </div>
+                    <div className="rounded border p-2 col-span-2">
+                      <div className="text-muted-foreground text-xs">Distance (meters)</div>
+                      <div className="font-medium">{formatMetric(selectedEvent.payload.distance_meters)}</div>
                     </div>
                   </div>
-                  <div className="rounded border p-2">
-                    <div className="text-muted-foreground text-xs">Conversations</div>
-                    <div className="font-medium">{formatMetric(selectedEvent.payload.conversations)}</div>
-                  </div>
-                  <div className="rounded border p-2">
-                    <div className="text-muted-foreground text-xs">Leads</div>
-                    <div className="font-medium">
-                      {formatMetric(firstDefined(selectedEvent.payload.leads_created, selectedEvent.payload.leads))}
-                    </div>
-                  </div>
-                  <div className="rounded border p-2">
-                    <div className="text-muted-foreground text-xs">Flyers Delivered</div>
-                    <div className="font-medium">{formatMetric(selectedEvent.payload.flyers_delivered)}</div>
-                  </div>
-                  <div className="rounded border p-2">
-                    <div className="text-muted-foreground text-xs">Active Time</div>
-                    <div className="font-medium">{formatDuration(selectedEvent.payload.active_seconds)}</div>
-                  </div>
-                  <div className="rounded border p-2">
-                    <div className="text-muted-foreground text-xs">Conversation Rate</div>
-                    <div className="font-medium">
-                      {formatRatePercent(
-                        selectedEvent.payload.conversations,
-                        selectedEvent.payload.doors_hit ?? selectedEvent.payload.doors_knocked
-                      )}
-                    </div>
-                  </div>
-                  <div className="rounded border p-2">
-                    <div className="text-muted-foreground text-xs">Lead Rate</div>
-                    <div className="font-medium">
-                      {formatRatePercent(
-                        firstDefined(selectedEvent.payload.leads_created, selectedEvent.payload.leads),
-                        selectedEvent.payload.conversations
-                      )}
-                    </div>
-                  </div>
-                  <div className="rounded border p-2 col-span-2">
-                    <div className="text-muted-foreground text-xs">Distance (meters)</div>
-                    <div className="font-medium">{formatMetric(selectedEvent.payload.distance_meters)}</div>
-                  </div>
-                </div>
+                </>
               )}
 
               <div className="rounded border p-3 text-sm">

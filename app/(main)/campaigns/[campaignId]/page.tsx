@@ -269,7 +269,11 @@ function buildAssignmentScope(payload: unknown): AssignmentScopeState | null {
   }
 
   const zoneAssignments = assignments.filter((assignment) => assignment.mode === 'zone_split');
-  const totalHomes = assignments.reduce((sum, assignment) => sum + Number(assignment.goal_homes ?? 0), 0);
+  const hasWholeTeamAssignments = assignments.some((assignment) => assignment.mode === 'whole_team');
+  const totalHomes =
+    hasWholeTeamAssignments && zoneAssignments.length === 0
+      ? Math.max(...assignments.map((assignment) => Number(assignment.goal_homes ?? 0)), 0)
+      : assignments.reduce((sum, assignment) => sum + Number(assignment.goal_homes ?? 0), 0);
 
   if (canManage) {
     return {

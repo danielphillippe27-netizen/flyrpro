@@ -25,6 +25,9 @@ type LegacyFieldLead = {
   updated_at?: string | null;
 };
 
+type LinkedCalendarEventType = 'appointment' | 'follow_up';
+type LinkedCalendarSourceKind = 'contact_appointment' | 'contact_follow_up';
+
 export class ContactsService {
   private static client = createClient();
 
@@ -93,6 +96,96 @@ export class ContactsService {
       (contact.address ?? '').trim().toLowerCase(),
       (contact.campaign_id ?? '').trim(),
     ].join('|');
+  }
+
+  private static async linkedCalendarEventId(
+    sourceKind: LinkedCalendarSourceKind,
+    sourceId: string,
+    eventType: LinkedCalendarEventType
+  ): Promise<string> {
+    const seed = `flyr-calendar-event|${sourceKind}|${sourceId.toLowerCase()}|${eventType}`;
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(seed));
+    const bytes = new Uint8Array(digest).slice(0, 16);
+    bytes[6] = (bytes[6] & 0x0f) | 0x50;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+
+  private static async softDeleteLinkedCalendarEvent(
+    sourceKind: LinkedCalendarSourceKind,
+    sourceId: string,
+    eventType: LinkedCalendarEventType
+  ): Promise<void> {
+    const id = await this.linkedCalendarEventId(sourceKind, sourceId, eventType);
+    await this.client
+      .from('calendar_events')
+      .update({
+        deleted_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id);
+  }
+
+  private static async upsertLinkedCalendarEvent(
+    contact: Contact,
+    eventType: LinkedCalendarEventType
+  ): Promise<void> {
+    const sourceKind: LinkedCalendarSourceKind =
+      eventType === 'appointment' ? 'contact_appointment' : 'contact_follow_up';
+    const scheduledAt =
+      eventType === 'appointment'
+        ? contact.appointment_at
+        : contact.follow_up_at ?? contact.reminder_date;
+
+    if (!scheduledAt) {
+      await this.softDeleteLinkedCalendarEvent(sourceKind, contact.id, eventType);
+      return;
+    }
+
+    const startAt = new Date(scheduledAt);
+    if (Number.isNaN(startAt.getTime())) return;
+    const durationMs = eventType === 'appointment' ? 60 * 60 * 1000 : 30 * 60 * 1000;
+    const endAt = new Date(startAt.getTime() + durationMs);
+    const id = await this.linkedCalendarEventId(sourceKind, contact.id, eventType);
+    const label = eventType === 'appointment' ? 'Appointment' : 'Follow up';
+
+    const { error } = await this.client
+      .from('calendar_events')
+      .upsert(
+        {
+          id,
+          user_id: contact.user_id,
+          workspace_id: contact.workspace_id ?? null,
+          title: `${label}: ${contact.full_name || 'Lead'}`,
+          start_at: startAt.toISOString(),
+          end_at: endAt.toISOString(),
+          is_all_day: false,
+          event_type: eventType,
+          contact_id: contact.id,
+          contact_name: contact.full_name,
+          contact_address: contact.address,
+          source_kind: sourceKind,
+          source_id: contact.id,
+          notes: contact.notes ?? null,
+          location: contact.address ?? null,
+          color_key: eventType === 'appointment' ? 'red' : 'blue',
+          deleted_at: null,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'id' }
+      );
+
+    if (error) {
+      console.warn('[ContactsService] Failed to sync linked calendar event:', error);
+    }
+  }
+
+  private static async syncContactCalendarEvents(contact: Contact): Promise<void> {
+    await Promise.all([
+      this.upsertLinkedCalendarEvent(contact, 'appointment'),
+      this.upsertLinkedCalendarEvent(contact, 'follow_up'),
+    ]);
   }
 
   static async fetchContacts(userId: string, workspaceId?: string | null, filters?: {
@@ -242,7 +335,9 @@ export class ContactsService {
     }
 
     if (error) throw error;
-    return data;
+    const contact = data as Contact;
+    await this.syncContactCalendarEvents(contact);
+    return contact;
   }
 
   private static getAddressOutcomeForContact(
@@ -273,18 +368,26 @@ export class ContactsService {
   }
 
   static async updateContact(id: string, updates: Partial<Contact>): Promise<void> {
-    const { error } = await this.client
+    const { data, error } = await this.client
       .from('contacts')
       .update({
         ...updates,
         updated_at: new Date().toISOString(),
       })
-      .eq('id', id);
+      .eq('id', id)
+      .select()
+      .single();
 
     if (error) throw error;
+    await this.syncContactCalendarEvents(data as Contact);
   }
 
   static async deleteContact(id: string): Promise<void> {
+    await Promise.all([
+      this.softDeleteLinkedCalendarEvent('contact_appointment', id, 'appointment'),
+      this.softDeleteLinkedCalendarEvent('contact_follow_up', id, 'follow_up'),
+    ]);
+
     const { error } = await this.client
       .from('contacts')
       .delete()

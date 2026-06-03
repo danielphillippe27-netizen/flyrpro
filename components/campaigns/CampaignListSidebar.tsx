@@ -32,12 +32,44 @@ type CampaignAssignmentListRow = {
   campaign_id: string;
   mode: 'zone_split' | 'whole_team';
   zone_index: number | null;
+  updated_at?: string | null;
+  campaign?: {
+    name?: string | null;
+    status?: string | null;
+  } | null;
 };
 
 type CampaignAssignmentListLabel = {
   label: string;
   title: string;
 };
+
+const CAMPAIGN_STATUS_VALUES = new Set<CampaignV2['status']>(['draft', 'active', 'completed', 'paused']);
+
+function normalizeCampaignStatus(value: string | null | undefined): CampaignV2['status'] {
+  return CAMPAIGN_STATUS_VALUES.has(value as CampaignV2['status'])
+    ? (value as CampaignV2['status'])
+    : 'draft';
+}
+
+function campaignFromAssignment(assignment: CampaignAssignmentListRow, workspaceId?: string | null): CampaignV2 {
+  const createdAt = assignment.updated_at || new Date(0).toISOString();
+  return {
+    id: assignment.campaign_id,
+    owner_id: '',
+    workspace_id: workspaceId ?? null,
+    name: assignment.campaign?.name || 'Campaign',
+    type: 'flyer',
+    address_source: 'map',
+    total_flyers: 0,
+    scans: 0,
+    conversions: 0,
+    created_at: createdAt,
+    status: normalizeCampaignStatus(assignment.campaign?.status),
+    progress: 0,
+    progress_pct: 0,
+  };
+}
 
 interface CampaignListSidebarProps {
   onNewCampaign?: () => void;
@@ -101,10 +133,15 @@ export function CampaignListSidebar({
               .catch(() => null)
           : Promise.resolve(null),
       ]);
-      setCampaigns(data);
       const assignmentRows = Array.isArray(assignmentsPayload?.assignments)
         ? (assignmentsPayload.assignments as CampaignAssignmentListRow[])
         : [];
+      const campaignById = new Map(data.map((campaign) => [campaign.id, campaign]));
+      for (const assignment of assignmentRows) {
+        if (!assignment.campaign_id || campaignById.has(assignment.campaign_id)) continue;
+        campaignById.set(assignment.campaign_id, campaignFromAssignment(assignment, currentWorkspaceId));
+      }
+      setCampaigns(Array.from(campaignById.values()));
       const role = typeof assignmentsPayload?.role === 'string' ? assignmentsPayload.role : null;
       const canManageAssignments = role === 'owner' || role === 'admin';
       const groupedAssignments = assignmentRows.reduce((map, assignment) => {

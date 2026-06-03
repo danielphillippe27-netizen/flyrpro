@@ -10,6 +10,7 @@ type WorkspaceMemberRow = {
   user_id: string;
   role: 'owner' | 'admin' | 'member' | null;
   color: string | null;
+  created_at?: string | null;
 };
 
 type WorkspaceRow = {
@@ -540,7 +541,7 @@ async function buildEmailReportPayload(params: {
     admin.from('workspaces').select('name').eq('id', workspaceId).maybeSingle(),
     admin
       .from('workspace_members')
-      .select('user_id, role, color')
+      .select('user_id, role, color, created_at')
       .eq('workspace_id', workspaceId)
       .order('created_at', { ascending: true }),
   ]);
@@ -775,7 +776,7 @@ export async function GET(request: NextRequest) {
 
     const { data: workspaceMemberRows, error: workspaceMembersError } = await supabase
       .from('workspace_members')
-      .select('user_id, role, color')
+      .select('user_id, role, color, created_at')
       .eq('workspace_id', workspaceId)
       .order('created_at', { ascending: true });
 
@@ -1064,7 +1065,7 @@ export async function POST(request: NextRequest) {
 
     const { data: workspaceMemberRows, error: workspaceMembersError } = await supabase
       .from('workspace_members')
-      .select('user_id, role, color')
+      .select('user_id, role, color, created_at')
       .eq('workspace_id', workspaceId)
       .order('created_at', { ascending: true });
 
@@ -1074,11 +1075,12 @@ export async function POST(request: NextRequest) {
     }
 
     const workspaceMembers = (workspaceMemberRows ?? []) as WorkspaceMemberRow[];
-    const workspaceUserIds = new Set(workspaceMembers.map((member) => member.user_id));
-    const selectedMemberIds = requestedMemberIds.filter((id) => workspaceUserIds.has(id));
-    const notifyUserIds = requestedMemberIds.length > 0
-      ? selectedMemberIds
-      : workspaceMembers.map((member) => member.user_id);
+    const selectedMemberRows = requestedMemberIds.length > 0
+      ? requestedMemberIds
+        .map((id) => workspaceMembers.find((member) => member.user_id === id))
+        .filter((member): member is WorkspaceMemberRow => Boolean(member))
+      : workspaceMembers;
+    const notifyUserIds = selectedMemberRows.map((member) => member.user_id);
 
     if (notifyUserIds.length === 0) {
       return NextResponse.json({
@@ -1135,12 +1137,30 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No report snapshot found for this period' }, { status: 404 });
     }
 
+    const periodEndMs = periodEnd ? new Date(periodEnd).getTime() : NaN;
+    const eligibleMemberRows = selectedMemberRows.filter((member) => {
+      if (!Number.isFinite(periodEndMs)) return true;
+      const joinedAtMs = member.created_at ? new Date(member.created_at).getTime() : NaN;
+      return !Number.isFinite(joinedAtMs) || joinedAtMs <= periodEndMs;
+    });
+    const eligibleUserIds = eligibleMemberRows.map((member) => member.user_id);
+
+    if (eligibleUserIds.length === 0) {
+      return NextResponse.json({
+        created: 0,
+        skipped: notifyUserIds.length,
+        target_count: notifyUserIds.length,
+        period_start: body.periodStart,
+        period_end: periodEnd,
+      });
+    }
+
     const { data: existingNotifications, error: existingNotificationsError } = await supabase
       .from('notifications')
       .select('user_id, data')
       .eq('workspace_id', workspaceId)
       .eq('type', 'report_ready')
-      .in('user_id', notifyUserIds)
+      .in('user_id', eligibleUserIds)
       .limit(1000);
 
     if (existingNotificationsError) {
@@ -1166,9 +1186,11 @@ export async function POST(request: NextRequest) {
         })
     );
 
-    const notificationRows = notifyUserIds.flatMap((userId) => {
+    const notificationRows = eligibleMemberRows.flatMap((member) => {
+      const userId = member.user_id;
       const memberReport = memberReportsByUserId.get(userId);
-      const report = memberReport ?? teamReport;
+      const canReceiveTeamReport = member.role === 'owner' || member.role === 'admin';
+      const report = memberReport ?? (canReceiveTeamReport ? teamReport : null);
       if (!report) return [];
 
       const scope = memberReport ? 'member' : 'team';

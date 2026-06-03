@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import * as turf from '@turf/turf';
-import { Maximize2, Minimize2, Trash2 } from 'lucide-react';
+import { Compass, Maximize2, Minus, Minimize2, Plus, RotateCw, Trash2 } from 'lucide-react';
 import Lottie from 'lottie-react';
 import type { CampaignAddress, CampaignV2, CampaignParcel } from '@/types/database';
 import { MapBuildingsLayer, type MapBuildingsRenderState } from '@/components/map/MapBuildingsLayer';
@@ -45,6 +45,8 @@ const BOUNDARY_LAYER_SNAPPED_FILL = 'campaign-boundary-snapped-fill';
 const BOUNDARY_LAYER_SNAPPED_LINE = 'campaign-boundary-snapped-line';
 const SHOW_CAMPAIGN_BOUNDARY_OVERLAY = false;
 const SHOW_PARCEL_VIEW = true;
+const MAP_CAMERA_PITCH_DEGREES = 45;
+const MAP_ROTATE_STEP_DEGREES = 30;
 const CUSTOM_BUILDING_LAYER_PREFIXES = ['map-buildings-', 'campaign-parcels'];
 const RESIDENTIAL_ONLY_PRESERVE_LAYER_PREFIXES = [
   'map-buildings-',
@@ -2190,6 +2192,32 @@ export function CampaignDetailMapView({
     };
   }, [mapViewMode, waitingForInitialBuildingRender]);
 
+  const zoomMapIn = useCallback(() => {
+    map.current?.zoomIn({ duration: 260 });
+  }, []);
+
+  const zoomMapOut = useCallback(() => {
+    map.current?.zoomOut({ duration: 260 });
+  }, []);
+
+  const toggleMapPitch = useCallback(() => {
+    const currentMap = map.current;
+    if (!currentMap) return;
+    currentMap.easeTo({
+      pitch: currentMap.getPitch() > 10 ? 0 : MAP_CAMERA_PITCH_DEGREES,
+      duration: 320,
+    });
+  }, []);
+
+  const rotateMapClockwise = useCallback(() => {
+    const currentMap = map.current;
+    if (!currentMap) return;
+    currentMap.easeTo({
+      bearing: currentMap.getBearing() + MAP_ROTATE_STEP_DEGREES,
+      duration: 320,
+    });
+  }, []);
+
   return (
     <div
       ref={mapShellRef}
@@ -2309,6 +2337,50 @@ export function CampaignDetailMapView({
                 title={isMapFullscreen ? 'Exit full screen map' : 'Full screen map'}
               >
                 {isMapFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+              </button>
+            </div>
+          </div>
+          <div className="pointer-events-none absolute right-4 bottom-8 z-20 flex flex-col items-end gap-1.5">
+            <div className="pointer-events-auto overflow-hidden rounded-lg border border-gray-200 bg-white/92 shadow-sm backdrop-blur-sm dark:border-gray-700 dark:bg-black/82">
+              <button
+                type="button"
+                onClick={zoomMapIn}
+                className="flex h-8 w-8 items-center justify-center text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+                aria-label="Zoom in"
+                title="Zoom in"
+              >
+                <Plus className="h-4 w-4" />
+              </button>
+              <div className="h-px bg-gray-200 dark:bg-gray-700" />
+              <button
+                type="button"
+                onClick={zoomMapOut}
+                className="flex h-8 w-8 items-center justify-center text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+                aria-label="Zoom out"
+                title="Zoom out"
+              >
+                <Minus className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="pointer-events-auto flex overflow-hidden rounded-lg border border-gray-200 bg-white/92 shadow-sm backdrop-blur-sm dark:border-gray-700 dark:bg-black/82">
+              <button
+                type="button"
+                onClick={toggleMapPitch}
+                className="flex h-8 w-8 items-center justify-center text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+                aria-label="Toggle map tilt"
+                title="Toggle map tilt"
+              >
+                <Compass className="h-4 w-4" />
+              </button>
+              <div className="w-px bg-gray-200 dark:bg-gray-700" />
+              <button
+                type="button"
+                onClick={rotateMapClockwise}
+                className="flex h-8 w-8 items-center justify-center text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+                aria-label="Rotate map"
+                title="Rotate map"
+              >
+                <RotateCw className="h-4 w-4" />
               </button>
             </div>
           </div>

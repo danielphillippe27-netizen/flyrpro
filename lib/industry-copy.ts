@@ -195,6 +195,7 @@ const roofingCopy: IndustryCopy = {
     '/farms': 'Service Areas',
     '/leads': 'Inquiries',
     '/appointments': 'Inspections',
+    '/calendar': 'Calendar',
   },
   actions: {
     createCampaign: 'Create roofing campaign',

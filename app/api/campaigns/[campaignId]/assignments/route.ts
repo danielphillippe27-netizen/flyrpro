@@ -3,7 +3,6 @@ import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { asUuid, canManageRoutes, getWorkspaceRole } from '@/app/api/routes/_lib';
 import {
-  distributeWholeTeamGoals,
   normalizeZoneAssignments,
   type CampaignAssignmentMode,
   type ZoneAssignmentInput,
@@ -274,8 +273,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       mode === 'zone_split'
         ? normalizeZoneAssignments({ memberIds, zoneAssignments, campaignAddressIds })
         : [];
-    const wholeTeamGoals =
-      mode === 'whole_team' ? distributeWholeTeamGoals(campaignAddressIds.length, memberIds) : new Map<string, number>();
+    const wholeTeamGoalHomes = campaignAddressIds.length;
 
     const now = new Date().toISOString();
     const { error: cancelError } = await admin
@@ -308,7 +306,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
             assigned_to_user_id: memberId,
             assigned_by_user_id: requestUser.id,
             mode,
-            goal_homes: wholeTeamGoals.get(memberId) ?? 0,
+            goal_homes: wholeTeamGoalHomes,
             zone_index: index + 1,
             status: 'assigned',
             due_at: dueAt,
