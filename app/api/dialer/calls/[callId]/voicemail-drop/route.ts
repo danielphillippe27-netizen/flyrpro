@@ -16,12 +16,32 @@ type VoicemailDropPayload = {
   workspaceId?: string;
 };
 
-function buildVoicemailTwiml() {
-  const response = new twilio.twiml.VoiceResponse();
-  const audioUrl = getTwilioVoicemailDropAudioUrl();
+async function getWorkspaceVoicemailDropAudioUrl(
+  admin: ReturnType<typeof import('@/lib/supabase/server').createAdminClient>,
+  workspaceId: string
+): Promise<string | null> {
+  const { data, error } = await admin
+    .from('dialer_voicemail_drops')
+    .select('public_url')
+    .eq('workspace_id', workspaceId)
+    .eq('is_active', true)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
-  if (audioUrl) {
-    response.play(audioUrl);
+  if (error && error.code !== 'PGRST116') {
+    console.warn('[dialer/voicemail-drop] failed to load workspace voicemail drop', error);
+  }
+
+  return typeof data?.public_url === 'string' && data.public_url.trim() ? data.public_url.trim() : null;
+}
+
+function buildVoicemailTwiml(audioUrl: string | null) {
+  const response = new twilio.twiml.VoiceResponse();
+  const resolvedAudioUrl = audioUrl || getTwilioVoicemailDropAudioUrl();
+
+  if (resolvedAudioUrl) {
+    response.play(resolvedAudioUrl);
   } else {
     response.say({ voice: 'alice' }, getTwilioVoicemailDropMessage());
   }
@@ -65,16 +85,17 @@ export async function POST(
   }
 
   try {
+    const audioUrl = await getWorkspaceVoicemailDropAudioUrl(context.admin, context.workspaceId);
     const client = twilio(getTwilioAccountSid(), getTwilioAuthToken());
     await client.calls(activeCall.twilio_call_sid).update({
-      twiml: buildVoicemailTwiml(),
+      twiml: buildVoicemailTwiml(audioUrl),
     });
 
     const nextPayload = {
       ...(typeof activeCall.status_payload === 'object' && activeCall.status_payload ? activeCall.status_payload : {}),
       voicemailDrop: {
         droppedAt: new Date().toISOString(),
-        audioUrl: getTwilioVoicemailDropAudioUrl(),
+        audioUrl: audioUrl || getTwilioVoicemailDropAudioUrl(),
       },
     };
 

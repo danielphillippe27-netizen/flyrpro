@@ -35,10 +35,11 @@ const offersTab = { href: '/offers', icon: Link2, label: 'Offers' };
 const ambassadorsTab = { href: '/ambassadors', icon: UserRoundPlus, label: 'Ambassadors' };
 const ambassadorPortalTab = { href: '/ambassador-dashboard', icon: Handshake, label: 'Ambassador' };
 const salespeopleTab = { href: '/salespeople', icon: BriefcaseBusiness, label: 'Salespeople' };
+const diallerTab = { href: '/dialer', icon: PhoneCall, label: 'Dialler' };
 const settingsTab = { href: '/settings', icon: Settings, label: 'Settings' };
 const salespersonWorkspaceTabs = [
   { href: '/home', icon: Home, label: 'Home' },
-  { href: '/dialer', icon: PhoneCall, label: 'Dialer' },
+  diallerTab,
   { href: '/list', icon: ListChecks, label: 'List' },
   { href: '/leads', icon: Users, label: 'Leads' },
   { href: '/stats', icon: Gauge, label: 'Performance' },
@@ -49,7 +50,9 @@ const founderTabs = [
   ...baseTabs.filter((tab) => ['/home'].includes(tab.href)),
   ambassadorsTab,
   salespeopleTab,
-  ...baseTabs.filter((tab) => ['/activity', '/leads', '/follow-up', '/appointments', '/calendar'].includes(tab.href)),
+  ...baseTabs.filter((tab) => ['/activity', '/leads'].includes(tab.href)),
+  diallerTab,
+  ...baseTabs.filter((tab) => ['/follow-up', '/appointments', '/calendar'].includes(tab.href)),
   settingsTab,
   supportTab,
 ];

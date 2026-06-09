@@ -14,6 +14,7 @@ import {
 } from '@/lib/dialer/env';
 import {
   getDialerWorkspaceAccessError,
+  isDialerFounderBypassEmail,
   isDialerEnabledForWorkspace,
 } from '@/lib/dialer/feature-gate';
 import { normalizePhoneNumber } from '@/lib/dialer/phone';
@@ -74,7 +75,9 @@ export async function getDialerRequestContext(
     );
   }
 
-  if (!isDialerEnabledForWorkspace(membership.workspaceId)) {
+  const founderBypassEnabled = isDialerFounderBypassEmail(requestUser.email);
+
+  if (!isDialerEnabledForWorkspace(membership.workspaceId, requestUser.email)) {
     return NextResponse.json(
       { error: getDialerWorkspaceAccessError() },
       { status: 403 }
@@ -82,7 +85,7 @@ export async function getDialerRequestContext(
   }
 
   const settings = await getWorkspaceDialerSettings(admin, membership.workspaceId);
-  if (!settings.dialerAddonActive) {
+  if (!settings.dialerAddonActive && !founderBypassEnabled) {
     return NextResponse.json(
       { error: 'Power Dialer add-on is not active for this workspace' },
       { status: 403 }
@@ -98,7 +101,14 @@ export async function getDialerRequestContext(
     requestUser,
     workspaceId: membership.workspaceId,
     role: membership.role,
-    settings,
+    settings: founderBypassEnabled
+      ? {
+          ...settings,
+          dialerAddonActive: true,
+          dialerAddonStatus: 'active',
+          usesSharedDefaultNumber: true,
+        }
+      : settings,
   };
 }
 

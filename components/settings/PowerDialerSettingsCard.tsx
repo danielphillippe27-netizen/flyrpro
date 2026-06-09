@@ -1,13 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { AlertCircle, CheckCircle2, Phone } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { AlertCircle, CheckCircle2, Loader2, Phone, Trash2, Upload, Voicemail } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useWorkspace } from '@/lib/workspace-context';
+import type { DialerVoicemailDrop } from '@/types/database';
 
 type DialerSettingsStatus = {
   workspaceId: string;
@@ -37,16 +38,23 @@ const inFlightDialerSettingsWorkspaceIds = new Set<string>();
 
 export function PowerDialerSettingsCard() {
   const { currentWorkspaceId } = useWorkspace();
+  const voicemailFileInputRef = useRef<HTMLInputElement | null>(null);
   const [dialerSettingsStatus, setDialerSettingsStatus] = useState<DialerSettingsStatus | null>(null);
   const [dialerAreaCode, setDialerAreaCode] = useState('');
+  const [voicemailDrops, setVoicemailDrops] = useState<DialerVoicemailDrop[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingVoicemails, setLoadingVoicemails] = useState(false);
   const [isEnablingDialerAddon, setIsEnablingDialerAddon] = useState(false);
   const [isProvisioningDialerNumber, setIsProvisioningDialerNumber] = useState(false);
+  const [isUploadingVoicemail, setIsUploadingVoicemail] = useState(false);
+  const [activatingVoicemailId, setActivatingVoicemailId] = useState<string | null>(null);
+  const [deletingVoicemailId, setDeletingVoicemailId] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const dialerOfferLabel = dialerSettingsStatus?.offer
     ? `${dialerSettingsStatus.offer.currency === 'CAD' ? 'CA$' : '$'}${dialerSettingsStatus.offer.amount}${dialerSettingsStatus.offer.currency === 'USD' ? ' USD' : ''}${dialerSettingsStatus.offer.period}`
     : 'CA$19.99/month';
+  const activeVoicemailDrop = voicemailDrops.find((drop) => drop.is_active) ?? null;
 
   const loadDialerSettingsStatus = async (workspaceId?: string) => {
     const requestKey = workspaceId ?? 'default';
@@ -71,9 +79,38 @@ export function PowerDialerSettingsCard() {
     }
   };
 
+  const loadVoicemailDrops = async (workspaceId?: string) => {
+    if (!workspaceId) {
+      setVoicemailDrops([]);
+      return;
+    }
+
+    setLoadingVoicemails(true);
+    try {
+      const response = await fetch(`/api/dialer/voicemail-drops?workspaceId=${encodeURIComponent(workspaceId)}`, {
+        credentials: 'include',
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        recordings?: DialerVoicemailDrop[];
+        error?: string;
+      };
+      if (!response.ok) {
+        setMessage({ type: 'error', text: data.error || 'Failed to load voicemail recordings.' });
+        return;
+      }
+      setVoicemailDrops(data.recordings ?? []);
+    } catch (error) {
+      console.error('Error loading voicemail recordings:', error);
+      setMessage({ type: 'error', text: 'Network error while loading voicemail recordings.' });
+    } finally {
+      setLoadingVoicemails(false);
+    }
+  };
+
   useEffect(() => {
     setLoading(true);
     void loadDialerSettingsStatus(currentWorkspaceId ?? undefined);
+    void loadVoicemailDrops(currentWorkspaceId ?? undefined);
   }, [currentWorkspaceId]);
 
   const handleEnableDialerAddon = async () => {
@@ -139,6 +176,109 @@ export function PowerDialerSettingsCard() {
       setMessage({ type: 'error', text: 'Network error while provisioning the Twilio number.' });
     } finally {
       setIsProvisioningDialerNumber(false);
+    }
+  };
+
+  const handleVoicemailFileSelected = async (file: File | null) => {
+    if (!file || !currentWorkspaceId) return;
+
+    setIsUploadingVoicemail(true);
+    setMessage(null);
+    try {
+      const formData = new FormData();
+      formData.set('workspaceId', currentWorkspaceId);
+      formData.set('file', file);
+
+      const response = await fetch('/api/dialer/voicemail-drops', {
+        method: 'POST',
+        credentials: 'include',
+        body: formData,
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        recording?: DialerVoicemailDrop;
+        error?: string;
+      };
+      if (!response.ok || !data.recording) {
+        setMessage({ type: 'error', text: data.error || 'Failed to upload voicemail recording.' });
+        return;
+      }
+
+      setMessage({ type: 'success', text: 'Voicemail recording uploaded and set active.' });
+      await loadVoicemailDrops(currentWorkspaceId);
+    } catch (error) {
+      console.error(error);
+      setMessage({ type: 'error', text: 'Network error while uploading voicemail recording.' });
+    } finally {
+      setIsUploadingVoicemail(false);
+      if (voicemailFileInputRef.current) voicemailFileInputRef.current.value = '';
+    }
+  };
+
+  const handleActivateVoicemail = async (id: string) => {
+    if (!currentWorkspaceId) return;
+
+    setActivatingVoicemailId(id);
+    setMessage(null);
+    try {
+      const response = await fetch('/api/dialer/voicemail-drops', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          workspaceId: currentWorkspaceId,
+          id,
+          isActive: true,
+        }),
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        recording?: DialerVoicemailDrop;
+        error?: string;
+      };
+      if (!response.ok || !data.recording) {
+        setMessage({ type: 'error', text: data.error || 'Failed to activate voicemail recording.' });
+        return;
+      }
+
+      setVoicemailDrops((currentDrops) =>
+        currentDrops.map((drop) => ({ ...drop, is_active: drop.id === data.recording!.id }))
+      );
+      setMessage({ type: 'success', text: 'Active voicemail recording updated.' });
+    } catch (error) {
+      console.error(error);
+      setMessage({ type: 'error', text: 'Network error while activating voicemail recording.' });
+    } finally {
+      setActivatingVoicemailId(null);
+    }
+  };
+
+  const handleDeleteVoicemail = async (id: string) => {
+    if (!currentWorkspaceId) return;
+
+    setDeletingVoicemailId(id);
+    setMessage(null);
+    try {
+      const response = await fetch('/api/dialer/voicemail-drops', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          workspaceId: currentWorkspaceId,
+          id,
+        }),
+      });
+      const data = (await response.json().catch(() => ({}))) as { deletedId?: string; error?: string };
+      if (!response.ok || !data.deletedId) {
+        setMessage({ type: 'error', text: data.error || 'Failed to delete voicemail recording.' });
+        return;
+      }
+
+      setVoicemailDrops((currentDrops) => currentDrops.filter((drop) => drop.id !== data.deletedId));
+      setMessage({ type: 'success', text: 'Voicemail recording deleted.' });
+    } catch (error) {
+      console.error(error);
+      setMessage({ type: 'error', text: 'Network error while deleting voicemail recording.' });
+    } finally {
+      setDeletingVoicemailId(null);
     }
   };
 
@@ -270,12 +410,116 @@ export function PowerDialerSettingsCard() {
           </div>
         )}
 
+        <div className="rounded-lg border border-gray-200 p-4 space-y-4 dark:border-gray-700">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex items-start gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-red-100 dark:bg-red-950/50">
+                <Voicemail className="h-5 w-5 text-red-600 dark:text-red-300" />
+              </div>
+              <div>
+                <p className="text-sm font-medium dark:text-white">Voicemail Drop Audio</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  {activeVoicemailDrop?.filename
+                    ? `Active recording: ${activeVoicemailDrop.filename}`
+                    : 'No workspace recording selected yet.'}
+                </p>
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <Input
+                ref={voicemailFileInputRef}
+                type="file"
+                accept="audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/wave,audio/vnd.wave,audio/mp4,audio/m4a,audio/x-m4a,audio/aac,audio/*"
+                className="hidden"
+                onChange={(event) => void handleVoicemailFileSelected(event.target.files?.[0] ?? null)}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => voicemailFileInputRef.current?.click()}
+                disabled={isUploadingVoicemail || loadingVoicemails || !currentWorkspaceId}
+              >
+                {isUploadingVoicemail ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                {isUploadingVoicemail ? 'Uploading…' : 'Upload audio'}
+              </Button>
+            </div>
+          </div>
+
+          {activeVoicemailDrop?.public_url && (
+            <audio
+              controls
+              src={activeVoicemailDrop.public_url}
+              className="h-10 w-full"
+            />
+          )}
+
+          {loadingVoicemails ? (
+            <div className="flex items-center gap-2 rounded-md border border-dashed border-gray-200 p-3 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading recordings…
+            </div>
+          ) : voicemailDrops.length > 0 ? (
+            <div className="space-y-2">
+              {voicemailDrops.map((drop) => (
+                <div
+                  key={drop.id}
+                  className="flex flex-col gap-3 rounded-md border border-gray-200 p-3 dark:border-gray-700 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="truncate text-sm font-medium dark:text-white">
+                        {drop.filename || 'Voicemail recording'}
+                      </p>
+                      {drop.is_active && <Badge>Active</Badge>}
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {new Date(drop.created_at).toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    {!drop.is_active && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void handleActivateVoicemail(drop.id)}
+                        disabled={Boolean(activatingVoicemailId) || Boolean(deletingVoicemailId)}
+                      >
+                        {activatingVoicemailId === drop.id && <Loader2 className="h-4 w-4 animate-spin" />}
+                        Set active
+                      </Button>
+                    )}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void handleDeleteVoicemail(drop.id)}
+                      disabled={Boolean(activatingVoicemailId) || Boolean(deletingVoicemailId)}
+                      aria-label={`Delete ${drop.filename || 'voicemail recording'}`}
+                    >
+                      {deletingVoicemailId === drop.id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-md border border-dashed border-gray-200 p-3 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+              Upload an MP3, WAV, or M4A recording. The active recording is what the dialler plays.
+            </div>
+          )}
+        </div>
+
         <div className="rounded-lg border border-gray-200 p-4 text-sm text-gray-600 space-y-1 dark:border-gray-700 dark:text-gray-300">
           <p>1. Set `TWILIO_ACCOUNT_SID`, `TWILIO_API_KEY_SID`, `TWILIO_API_KEY_SECRET`, `TWILIO_AUTH_TOKEN`, and `TWILIO_TWIML_APP_SID`.</p>
           <p>2. Set `TWILIO_DEFAULT_FROM_NUMBER` as the shared fallback caller ID until each workspace claims its own number.</p>
           <p>3. Optional: set `TWILIO_DEFAULT_SMS_FROM_NUMBER` if you want post-call SMS follow-up from the dialer.</p>
           <p>4. Optional: set `TWILIO_INBOUND_FORWARD_TO` if you want a global inbound fallback when a workspace does not set its own forward target.</p>
-          <p>5. Optional: set `TWILIO_VOICEMAIL_DROP_AUDIO_URL` to enable one-tap prerecorded voicemail drop.</p>
+          <p>5. Upload voicemail audio here, or set `TWILIO_VOICEMAIL_DROP_AUDIO_URL` as a fallback.</p>
           <p>6. Point your TwiML App Voice URL at `/api/twilio/voice/outgoing`.</p>
           <p>7. Workspace-claimed numbers are automatically pointed at `/api/twilio/voice/incoming` when provisioned.</p>
           <p>8. Open Leads, send a list to the dialer, initialize microphone access, and start a workspace queue.</p>

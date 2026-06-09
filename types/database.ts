@@ -200,13 +200,21 @@ export type CampaignType =
 export type AddressSource = 'closest_home' | 'import_list' | 'map' | 'same_street';
 export type CampaignStatus = 'draft' | 'active' | 'completed' | 'paused';
 export type CampaignProvisionStatus = 'pending' | 'ready' | 'failed';
-export type CampaignProvisionSource = 'diamond' | 'bedrock_nz' | 'bedrock_au' | 'bedrock_ca' | 'bedrock_us' | 'bedrock_za' | 'bedrock_uk';
+export type CampaignProvisionSource =
+  | 'diamond'
+  | 'bedrock_nz'
+  | 'bedrock_au'
+  | 'bedrock_ca'
+  | 'bedrock_us'
+  | 'bedrock_za'
+  | 'bedrock_uk';
 export type CampaignProvisionPhase =
   | 'created'
   | 'source_probed'
   | 'addresses_loading'
   | 'addresses_ready'
   | 'map_ready'
+  | 'linker_ready'
   | 'optimizing'
   | 'optimized'
   | 'failed';
@@ -342,7 +350,7 @@ export interface BuildingPolygon {
   created_at: string;
 }
 
-/** 
+/**
  * Campaign Parcel - Land parcel boundaries for Golden Key linking.
  * Acts as a "hard container" to link addresses to buildings regardless of distance.
  * Essential for suburban areas and townhomes.
@@ -498,10 +506,26 @@ export interface Farm {
   last_generated_at?: string | null;
 }
 
-export type FarmSessionMode = 'doorknock' | 'flyer' | 'canada_post' | 'pop_by' | 'letter' | 'phone_call' | 'social_ad' | 'event';
+export type FarmSessionMode =
+  | 'doorknock'
+  | 'flyer'
+  | 'canada_post'
+  | 'pop_by'
+  | 'letter'
+  | 'phone_call'
+  | 'social_ad'
+  | 'event';
 export type FarmTouchInterval = 'month' | 'year';
 export type FarmGoalType = 'touches_per_year' | 'touches_per_cycle' | 'homes_per_cycle';
-export type FarmTouchType = 'doorknock' | 'flyer' | 'canada_post' | 'pop_by' | 'letter' | 'phone_call' | 'social_ad' | 'event';
+export type FarmTouchType =
+  | 'doorknock'
+  | 'flyer'
+  | 'canada_post'
+  | 'pop_by'
+  | 'letter'
+  | 'phone_call'
+  | 'social_ad'
+  | 'event';
 export type FarmLeadSource = 'qr_scan' | 'door_knock' | 'flyer' | 'event' | 'newsletter' | 'ad' | 'custom';
 export type FarmAddressOutcomeStatus =
   | 'none'
@@ -867,6 +891,39 @@ export interface DialerSmsFollowup {
   sent_at?: string | null;
   delivered_at?: string | null;
   status_payload?: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DialerVoicemailDrop {
+  id: string;
+  workspace_id: string;
+  user_id?: string | null;
+  storage_bucket: string;
+  storage_path: string;
+  public_url: string;
+  filename?: string | null;
+  content_type?: string | null;
+  duration_seconds?: number | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export type DiallerLeadDisposition = 'interested' | 'callback' | 'not_now' | 'dnc';
+
+export interface DiallerLead {
+  id: string;
+  workspace_id: string;
+  name: string;
+  phone: string;
+  company?: string | null;
+  email?: string | null;
+  follow_up_name?: string | null;
+  follow_up_at?: string | null;
+  disposition?: DiallerLeadDisposition | null;
+  notes?: string | null;
+  called_at?: string | null;
   created_at: string;
   updated_at: string;
 }

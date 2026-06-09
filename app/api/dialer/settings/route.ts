@@ -6,6 +6,7 @@ import {
 import {
   canDialerWorkspaceUseSharedDefault,
   getDialerWorkspaceAccessError,
+  isDialerFounderBypassEmail,
   isDialerEnabledForWorkspace,
 } from '@/lib/dialer/feature-gate';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
@@ -65,10 +66,12 @@ async function buildSettingsResponse(
   admin: ReturnType<typeof createAdminClient>,
   workspaceId: string,
   role: string | null,
+  userEmail: string | null,
   request: NextRequest
 ) {
-  const featureEnabled = isDialerEnabledForWorkspace(workspaceId);
-  const sharedDefaultDialingEnabled = canDialerWorkspaceUseSharedDefault(workspaceId);
+  const founderBypassEnabled = isDialerFounderBypassEmail(userEmail);
+  const featureEnabled = isDialerEnabledForWorkspace(workspaceId, userEmail);
+  const sharedDefaultDialingEnabled = canDialerWorkspaceUseSharedDefault(workspaceId, userEmail);
   if (!featureEnabled) {
     return {
       workspaceId,
@@ -87,6 +90,7 @@ async function buildSettingsResponse(
     getWorkspacePowerDialerAddon(admin, workspaceId),
   ]);
   const offer = getPowerDialerAddonOffer(getRequestBillingCurrency(request));
+  const addonStatus = founderBypassEnabled ? 'active' : addon.status;
 
   return {
     workspaceId,
@@ -101,8 +105,8 @@ async function buildSettingsResponse(
       period: offer.period,
     },
     addon: {
-      status: addon.status,
-      isActive: addon.status === 'active',
+      status: addonStatus,
+      isActive: addonStatus === 'active',
       priceId: addon.stripe_price_id ?? null,
       amountCents: addon.amount_cents ?? null,
       currency: addon.currency ?? null,
@@ -121,6 +125,7 @@ export async function GET(request: NextRequest) {
     context.admin,
     context.workspaceId,
     context.role,
+    context.requestUser.email,
     request
   );
   return NextResponse.json(response);
@@ -149,7 +154,7 @@ export async function PATCH(request: NextRequest) {
     );
   }
 
-  if (!isDialerEnabledForWorkspace(membership.workspaceId)) {
+  if (!isDialerEnabledForWorkspace(membership.workspaceId, authContext.email)) {
     return NextResponse.json(
       { error: getDialerWorkspaceAccessError() },
       { status: 403 }
@@ -252,6 +257,7 @@ export async function PATCH(request: NextRequest) {
     admin,
     membership.workspaceId,
     membership.role,
+    authContext.email,
     request
   );
   return NextResponse.json(response);

@@ -1,83 +1,17 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
-import {
-  AlertCircle,
-  ChevronRight,
-  CheckCircle2,
-  CreditCard,
-  Flame,
-  Gauge,
-  Loader2,
-  MessageSquare,
-  Mic,
-  MicOff,
-  Phone,
-  PhoneCall,
-  PhoneOff,
-  Play,
-  RefreshCw,
-  Rocket,
-  Send,
-  Sparkles,
-  SkipForward,
-  Users,
-  Zap,
-} from 'lucide-react';
-import { Progress } from '@/components/ui/progress';
+import { AlertCircle, CheckCircle2, Loader2, Mail, Mic, Pause, PhoneCall, Play, Save, Send, Trash2, Upload, Voicemail } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
-import { useWorkspace } from '@/lib/workspace-context';
-import { createClient } from '@/lib/supabase/client';
-import { ContactsService } from '@/lib/services/ContactsService';
-import { DIALER_CALL_DISPOSITIONS, DIALER_DISPOSITION_LABELS, isFinalCallStatus } from '@/lib/dialer/constants';
-import { formatPhoneDisplay } from '@/lib/dialer/phone';
 import { useTwilioDevice } from '@/lib/hooks/useTwilioDevice';
-import type {
-  Contact,
-  DialerCall,
-  DialerCallDisposition,
-  DialerSession,
-  DialerSessionLead,
-  DialerSmsFollowup,
-} from '@/types/database';
-
-type TeamMemberOption = {
-  user_id: string;
-  display_name: string;
-};
-
-type SessionSummary = {
-  total: number;
-  pending: number;
-  completed: number;
-  skipped: number;
-  invalid: number;
-  callsPlaced: number;
-  connected: number;
-};
-
-type SessionResponse = {
-  session: DialerSession | null;
-  leads: DialerSessionLead[];
-  calls: DialerCall[];
-  summary: SessionSummary;
-};
-
-type SmsFollowupResponse = {
-  followups?: DialerSmsFollowup[];
-  followup?: DialerSmsFollowup;
-  error?: string;
-  warning?: string;
-};
+import { formatPhoneDisplay, normalizePhoneNumber } from '@/lib/dialer/phone';
+import { useWorkspace } from '@/lib/workspace-context';
+import type { DialerCall, DiallerLead, DiallerLeadDisposition } from '@/types/database';
 
 type DialerAccessResponse = {
   workspaceId: string;
@@ -85,18 +19,9 @@ type DialerAccessResponse = {
   canManage: boolean;
   featureEnabled: boolean;
   sharedDefaultDialingEnabled: boolean;
-  offer: {
-    priceId?: string | null;
-    amount: string;
-    currency: 'USD' | 'CAD';
-    period: string;
-  } | null;
   addon: {
     status: 'inactive' | 'active' | 'past_due' | 'canceled';
     isActive: boolean;
-    priceId?: string | null;
-    amountCents?: number | null;
-    currency?: string | null;
   } | null;
   settings: {
     defaultFromNumber: string;
@@ -107,102 +32,9 @@ type DialerAccessResponse = {
   } | null;
 };
 
-const DIALER_SELECTION_STORAGE_KEY = 'flyr:dialer:selected-contact-ids';
+type DiallerLeadStatus = 'pending' | 'called' | 'skipped';
+
 const DIALER_AUTO_NEXT_STORAGE_KEY = 'flyr:dialer:auto-next';
-const DIALER_SCRIPT_VISIBLE_STORAGE_KEY = 'flyr:dialer:quick-script-visible';
-const SESSION_CALL_GOAL = 50;
-const AUTO_NEXT_DELAY_MS = 1400;
-
-type QuickOutcome = {
-  label: string;
-  disposition: DialerCallDisposition;
-  accent: string;
-};
-
-const QUICK_OUTCOMES: QuickOutcome[] = [
-  { label: 'No Answer', disposition: 'no_answer', accent: 'border-slate-300 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300' },
-  { label: 'Voicemail Left', disposition: 'left_voicemail', accent: 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300' },
-  { label: 'Conversation', disposition: 'connected', accent: 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300' },
-  { label: 'Not Interested', disposition: 'not_interested', accent: 'border-rose-300 bg-rose-50 text-rose-800 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300' },
-  { label: 'Follow Up', disposition: 'follow_up', accent: 'border-sky-300 bg-sky-50 text-sky-800 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-300' },
-];
-
-function toDateTimeInputValue(value?: string | null): string {
-  if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
-  return local.toISOString().slice(0, 16);
-}
-
-function toIsoOrNull(value: string): string | null {
-  if (!value.trim()) return null;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date.toISOString();
-}
-
-function formatLeadDateTime(value?: string | null): string {
-  if (!value) return '—';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '—';
-  return date.toLocaleString();
-}
-
-function defaultDispositionForCall(call: DialerCall | null): DialerCallDisposition {
-  if (!call) return 'connected';
-  if (call.status_payload && typeof call.status_payload.voicemailDrop === 'object' && call.status_payload.voicemailDrop) {
-    return 'left_voicemail';
-  }
-  if (call.status === 'no-answer' || call.status === 'busy' || call.status === 'canceled') return 'no_answer';
-  if (call.status === 'failed') return 'bad_number';
-  return 'connected';
-}
-
-function shouldOfferSmsFollowup(disposition: DialerCallDisposition): boolean {
-  return disposition !== 'bad_number' && disposition !== 'do_not_call';
-}
-
-function buildSuggestedSmsBody(payload: {
-  contact: { full_name?: string | null } | undefined;
-  disposition: DialerCallDisposition;
-  appointmentAt?: string | null;
-}) {
-  const firstName = payload.contact?.full_name?.trim().split(/\s+/)[0] || 'there';
-  const appointmentLabel = payload.appointmentAt
-    ? new Date(payload.appointmentAt).toLocaleString([], {
-        month: 'short',
-        day: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit',
-      })
-    : null;
-
-  switch (payload.disposition) {
-    case 'left_voicemail':
-      return `Hi ${firstName}, this is FLYR. I just left you a voicemail and wanted to send a quick text here too. Reply when you have a minute and I’ll follow up.`;
-    case 'callback_requested':
-    case 'follow_up':
-      return `Hi ${firstName}, thanks for the call today. What time works best for a quick follow-up conversation?`;
-    case 'appointment_set':
-      return appointmentLabel
-        ? `Hi ${firstName}, thanks again for booking time with me. I’ve got you down for ${appointmentLabel}.`
-        : `Hi ${firstName}, thanks again for booking time with me. Looking forward to our appointment.`;
-    case 'no_answer':
-      return `Hi ${firstName}, I just tried to reach you by phone. Feel free to text me back here if that’s easier.`;
-    case 'not_interested':
-      return `Hi ${firstName}, thanks for taking my call today. If anything changes, you can always reply here.`;
-    default:
-      return `Hi ${firstName}, thanks for taking my call today. Feel free to reply here if any questions come up.`;
-  }
-}
-
-function formatSmsStatus(status: string): string {
-  return status
-    .split(/[_-]/g)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ');
-}
 
 function formatCallClock(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60);
@@ -210,351 +42,241 @@ function formatCallClock(totalSeconds: number): string {
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
-function buildLeadContext(contact: Contact | undefined): string {
-  if (!contact) return 'No context on file';
-  const source = contact.source?.trim();
-  const tags = contact.tags?.trim();
-  const notes = contact.notes?.trim();
-  if (source && tags) return `${source} • ${tags}`;
-  if (source) return source;
-  if (tags) return tags;
-  if (notes) return notes.split('\n')[0]?.slice(0, 100) || 'No context on file';
-  return 'No context on file';
+function getDateInputValue(date: Date): string {
+  const timezoneOffset = date.getTimezoneOffset() * 60000;
+  return new Date(date.getTime() - timezoneOffset).toISOString().slice(0, 10);
 }
 
-function buildQuickScript(contact: Contact | undefined) {
-  const firstName = contact?.full_name?.trim().split(/\s+/)[0] || 'there';
+function getTimeInputValue(date: Date): string {
+  return date.toTimeString().slice(0, 5);
+}
+
+function getCallbackDefaultDateTime(choice: 'today' | 'tomorrow' | 'custom', calledAt: Date): { date: string; time: string } {
+  const defaultDate = new Date(calledAt);
+  if (choice === 'today') {
+    defaultDate.setHours(defaultDate.getHours() + 4);
+  }
+  if (choice === 'tomorrow') {
+    defaultDate.setDate(defaultDate.getDate() + 1);
+  }
   return {
-    intro: `Hi ${firstName}, this is Daniel with FLYR. I’ll be quick.`,
-    bullets: [
-      'Reason for calling: local follow-up and a quick value hook.',
-      'If busy: ask for a better callback time immediately.',
-      'If mild interest: offer one concrete next step, not a long pitch.',
-      'If objection: acknowledge, clarify, and either book follow-up or close cleanly.',
-    ],
+    date: getDateInputValue(defaultDate),
+    time: getTimeInputValue(defaultDate),
   };
 }
 
-function formatDialerOfferLabel(offer?: DialerAccessResponse['offer'] | null): string {
-  if (!offer) return 'CA$19.99/month';
-  return `${offer.currency === 'CAD' ? 'CA$' : '$'}${offer.amount}${offer.currency === 'USD' ? ' USD' : ''}${offer.period}`;
+function statusForLead(lead: DiallerLead): DiallerLeadStatus {
+  if (!lead.disposition) return 'pending';
+  return lead.disposition === 'dnc' ? 'skipped' : 'called';
+}
+
+function parseCsv(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let value = '';
+  let inQuotes = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const nextChar = text[index + 1];
+
+    if (char === '"' && inQuotes && nextChar === '"') {
+      value += '"';
+      index += 1;
+      continue;
+    }
+
+    if (char === '"') {
+      inQuotes = !inQuotes;
+      continue;
+    }
+
+    if (char === ',' && !inQuotes) {
+      row.push(value.trim());
+      value = '';
+      continue;
+    }
+
+    if ((char === '\n' || char === '\r') && !inQuotes) {
+      if (char === '\r' && nextChar === '\n') index += 1;
+      row.push(value.trim());
+      if (row.some((cell) => cell.length > 0)) rows.push(row);
+      row = [];
+      value = '';
+      continue;
+    }
+
+    value += char;
+  }
+
+  row.push(value.trim());
+  if (row.some((cell) => cell.length > 0)) rows.push(row);
+  return rows;
+}
+
+function normalizeHeader(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
+
+function findColumn(headers: string[], candidates: string[]): number {
+  return headers.findIndex((header) => candidates.includes(header));
+}
+
+function hasDialablePhone(value: string | null | undefined): boolean {
+  return normalizePhoneNumber(value).isValid;
+}
+
+function scorePhoneColumn(rows: string[][], columnIndex: number): number {
+  return rows.reduce((score, row) => score + (hasDialablePhone(row[columnIndex]) ? 1 : 0), 0);
+}
+
+function findPhoneColumn(headers: string[], rows: string[][]): number {
+  const exactPhoneIndex = findColumn(headers, [
+    'phone',
+    'phone_number',
+    'phone_1',
+    'primary_phone',
+    'contact_phone',
+    'mobile',
+    'mobile_phone',
+    'cell',
+    'cell_phone',
+    'telephone',
+    'tel',
+  ]);
+  if (exactPhoneIndex >= 0 && scorePhoneColumn(rows, exactPhoneIndex) > 0) return exactPhoneIndex;
+
+  const fuzzyIndexes = headers.flatMap((header, index) =>
+    header.includes('phone') || header.includes('mobile') || header.includes('cell') || header.includes('telephone') || header === 'tel'
+      ? [index]
+      : []
+  );
+  const scored = fuzzyIndexes
+    .map((index) => ({ index, score: scorePhoneColumn(rows, index) }))
+    .filter((candidate) => candidate.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  return scored[0]?.index ?? -1;
+}
+
+function leadsFromCsv(text: string): Array<{ name: string; phone: string; company: string | null; email: string | null }> {
+  const rows = parseCsv(text);
+  if (rows.length < 2) return [];
+
+  const headers = rows[0].map(normalizeHeader);
+  const nameIndex = findColumn(headers, ['name', 'full_name', 'contact', 'contact_name', 'lead', 'lead_name']);
+  const dataRows = rows.slice(1);
+  const phoneIndex = findPhoneColumn(headers, dataRows);
+  const companyIndex = findColumn(headers, ['company', 'company_name', 'business', 'organization', 'account']);
+  const emailIndex = findColumn(headers, ['email', 'email_address', 'mail']);
+
+  if (phoneIndex === -1) return [];
+
+  return dataRows.flatMap((row) => {
+    const phone = row[phoneIndex]?.trim() ?? '';
+    if (!hasDialablePhone(phone)) return [];
+    return [{
+      name: nameIndex >= 0 ? row[nameIndex]?.trim() || 'Lead' : 'Lead',
+      phone,
+      company: companyIndex >= 0 ? row[companyIndex]?.trim() || null : null,
+      email: emailIndex >= 0 ? row[emailIndex]?.trim() || null : null,
+    }];
+  });
 }
 
 export function PowerDialerPage() {
-  const searchParams = useSearchParams();
-  const priorityContactId = searchParams.get('contactId');
-  const selectedQueueMode = searchParams.get('selection') === '1';
-  const { currentWorkspaceId, membershipsByWorkspaceId } = useWorkspace();
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [selectedQueueContactIds, setSelectedQueueContactIds] = useState<string[]>([]);
-  const [teamMembers, setTeamMembers] = useState<TeamMemberOption[]>([]);
+  const { currentWorkspaceId } = useWorkspace();
+  const device = useTwilioDevice();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const tabIdRef = useRef<string>(typeof crypto !== 'undefined' ? crypto.randomUUID() : `dialer-${Date.now()}`);
+  const callbackCalledAtRef = useRef<Date | null>(null);
+
   const [dialerAccess, setDialerAccess] = useState<DialerAccessResponse | null>(null);
   const [dialerAccessLoading, setDialerAccessLoading] = useState(true);
-  const [selectedMemberId, setSelectedMemberId] = useState<string>('all');
-  const [loading, setLoading] = useState(true);
-  const [session, setSession] = useState<DialerSession | null>(null);
-  const [leads, setLeads] = useState<DialerSessionLead[]>([]);
-  const [calls, setCalls] = useState<DialerCall[]>([]);
-  const [summary, setSummary] = useState<SessionSummary>({
-    total: 0,
-    pending: 0,
-    completed: 0,
-    skipped: 0,
-    invalid: 0,
-    callsPlaced: 0,
-    connected: 0,
-  });
+  const [leads, setLeads] = useState<DiallerLead[]>([]);
   const [activeLeadId, setActiveLeadId] = useState<string | null>(null);
-  const [activeCallId, setActiveCallId] = useState<string | null>(null);
-  const [creatingSession, setCreatingSession] = useState(false);
-  const [startingCall, setStartingCall] = useState(false);
-  const [startingPowerSession, setStartingPowerSession] = useState(false);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [dispositionOpen, setDispositionOpen] = useState(false);
-  const [disposition, setDisposition] = useState<DialerCallDisposition>('connected');
-  const [dispositionNote, setDispositionNote] = useState('');
-  const [followUpAt, setFollowUpAt] = useState('');
-  const [appointmentAt, setAppointmentAt] = useState('');
-  const [submittingDisposition, setSubmittingDisposition] = useState(false);
-  const [sendSmsFollowup, setSendSmsFollowup] = useState(false);
-  const [smsBody, setSmsBody] = useState('');
-  const [smsHistory, setSmsHistory] = useState<DialerSmsFollowup[]>([]);
-  const [loadingSmsHistory, setLoadingSmsHistory] = useState(false);
-  const [sendingSms, setSendingSms] = useState(false);
+  const [selectedDisposition, setSelectedDisposition] = useState<DiallerLeadDisposition>('interested');
+  const [notes, setNotes] = useState('');
+  const [email, setEmail] = useState('');
+  const [followUpOpen, setFollowUpOpen] = useState(false);
+  const [followUpName, setFollowUpName] = useState('');
+  const [followUpDate, setFollowUpDate] = useState('');
+  const [followUpTime, setFollowUpTime] = useState('');
+  const [followUpChoice, setFollowUpChoice] = useState<'today' | 'tomorrow' | 'custom'>('today');
   const [autoNextEnabled, setAutoNextEnabled] = useState(true);
-  const [scriptVisible, setScriptVisible] = useState(false);
+  const [diallerRunning, setDiallerRunning] = useState(false);
   const [callSeconds, setCallSeconds] = useState(0);
-  const [droppingVoicemail, setDroppingVoicemail] = useState(false);
-  const [nowTick, setNowTick] = useState(Date.now());
+  const [loadingLeads, setLoadingLeads] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [savingContact, setSavingContact] = useState(false);
+  const [deletingList, setDeletingList] = useState(false);
+  const [startingCall, setStartingCall] = useState(false);
+  const [activeCallId, setActiveCallId] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isIphone, setIsIphone] = useState(false);
 
-  const currentRole = currentWorkspaceId ? membershipsByWorkspaceId[currentWorkspaceId] : null;
-  const canFilterByMembers = currentRole === 'owner' || currentRole === 'admin';
-  const device = useTwilioDevice();
-  const tabIdRef = useRef<string>(typeof crypto !== 'undefined' ? crypto.randomUUID() : `dialer-${Date.now()}`);
-  const autoStartedSelectionRef = useRef(false);
-  const autoClaimedSessionRef = useRef<string | null>(null);
-  const autoNextTimeoutRef = useRef<number | null>(null);
-  const leadRowRefs = useRef<Record<string, HTMLButtonElement | null>>({});
-  const dialerGateState = useMemo(() => {
-    if (!currentWorkspaceId) return 'workspace';
-    if (dialerAccessLoading) return 'loading';
-    if (dialerAccess && !dialerAccess.featureEnabled) return 'hidden';
-    if (!dialerAccess) return 'buy';
-    if (!dialerAccess.addon?.isActive) {
-      return dialerAccess.canManage ? 'buy' : 'ask-owner-buy';
-    }
-    if (
-      !dialerAccess.settings?.dedicatedFromNumber &&
-      !dialerAccess.sharedDefaultDialingEnabled
-    ) {
-      return dialerAccess.canManage ? 'setup' : 'ask-owner-setup';
-    }
-    return 'ready';
-  }, [currentWorkspaceId, dialerAccess, dialerAccessLoading]);
-
-  const visibleContacts = useMemo(() => {
-    const base = selectedMemberId === 'all'
-      ? contacts
-      : contacts.filter((contact) => contact.user_id === selectedMemberId);
-
-    const scopedBase = selectedQueueContactIds.length > 0
-      ? selectedQueueContactIds
-          .map((contactId) => base.find((contact) => contact.id === contactId))
-          .filter((contact): contact is Contact => Boolean(contact))
-      : base;
-
-    if (!priorityContactId) return scopedBase;
-
-    const priority = scopedBase.find((contact) => contact.id === priorityContactId);
-    if (!priority) return scopedBase;
-    return [priority, ...scopedBase.filter((contact) => contact.id !== priorityContactId)];
-  }, [contacts, priorityContactId, selectedMemberId, selectedQueueContactIds]);
-
-  const queueContactIds = useMemo(
+  const activeLead = useMemo(
     () =>
-      visibleContacts
-        .filter((contact) => Boolean(contact.phone?.trim()))
-        .map((contact) => contact.id),
-    [visibleContacts]
+      leads.find((lead) => lead.id === activeLeadId) ??
+      leads.find((lead) => statusForLead(lead) === 'pending') ??
+      leads[0] ??
+      null,
+    [activeLeadId, leads]
   );
+  const hasActiveLead = Boolean(activeLead);
+  const calledCount = leads.filter((lead) => statusForLead(lead) === 'called').length;
+  const connectedCount = leads.filter((lead) => lead.disposition === 'interested' || lead.disposition === 'callback').length;
+  const remainingCount = leads.filter((lead) => statusForLead(lead) === 'pending').length;
 
-  const activeLead =
-    leads.find((lead) => lead.id === activeLeadId) ??
-    leads.find((lead) => lead.status === 'claimed' || lead.status === 'calling') ??
-    null;
-  const activeCall =
-    calls.find((call) => call.id === activeCallId) ??
-    calls.find((call) => activeLead && call.session_lead_id === activeLead.id && !isFinalCallStatus(call.status)) ??
-    null;
-  const activeLeadName = activeLead?.contact?.full_name ?? null;
-  const activeCallStatus = activeCall?.status ?? null;
-  const activeCallFollowUpAt = activeCall?.follow_up_at ?? null;
-  const activeCallAppointmentAt = activeCall?.appointment_at ?? null;
-  const activeCallDefaultDisposition = defaultDispositionForCall(activeCall);
-  const nextLeadPreview =
-    leads.find((lead) => activeLead && lead.position === activeLead.position + 1) ??
-    leads.find((lead) => lead.status === 'pending' && lead.id !== activeLead?.id) ??
-    null;
-  const quickScript = useMemo(() => buildQuickScript(activeLead?.contact), [activeLead?.contact]);
-  const leadContext = useMemo(() => buildLeadContext(activeLead?.contact), [activeLead?.contact]);
-  const pickupCalls = useMemo(
-    () => calls.filter((call) => call.status === 'answered' || call.disposition === 'connected' || call.disposition === 'appointment_set').length,
-    [calls]
-  );
-  const conversationCalls = useMemo(
-    () =>
-      calls.filter((call) =>
-        ['connected', 'follow_up', 'appointment_set', 'callback_requested'].includes(call.disposition ?? '')
-      ).length,
-    [calls]
-  );
-  const sessionAgeSeconds = useMemo(() => {
-    if (!session?.started_at) return 0;
-    const diff = Math.floor((nowTick - new Date(session.started_at).getTime()) / 1000);
-    return diff > 0 ? diff : 0;
-  }, [nowTick, session?.started_at]);
-  const averageSecondsPerCall = summary.callsPlaced > 0 && sessionAgeSeconds > 0
-    ? Math.round(sessionAgeSeconds / Math.max(summary.callsPlaced, 1))
-    : 0;
-  const callsPerHour = sessionAgeSeconds > 0
-    ? Math.round((summary.callsPlaced / sessionAgeSeconds) * 3600)
-    : 0;
-  const paceText = callsPerHour > 0 ? `You're on pace for ${callsPerHour} calls/hr` : 'Start dialing to build your pace';
-  const sessionGoalProgress = Math.min(100, Math.round((summary.callsPlaced / SESSION_CALL_GOAL) * 100));
+  const statusChecks = [
+    { label: 'Workspace selected', ok: Boolean(currentWorkspaceId) },
+    { label: 'Microphone granted', ok: device.microphoneGranted },
+    { label: 'Twilio device ready', ok: device.isReady },
+    { label: 'Shared caller ID', ok: Boolean(dialerAccess?.sharedDefaultDialingEnabled || dialerAccess?.settings?.dedicatedFromNumber) },
+  ];
 
-  const applySessionResponse = useCallback((payload: SessionResponse) => {
-    setSession(payload.session);
-    setLeads(payload.leads ?? []);
-    setCalls(payload.calls ?? []);
-    setSummary(
-      payload.summary ?? {
-        total: 0,
-        pending: 0,
-        completed: 0,
-        skipped: 0,
-        invalid: 0,
-        callsPlaced: 0,
-        connected: 0,
-      }
-    );
-
-    const nextLead =
-      (payload.leads ?? []).find((lead) => lead.id === activeLeadId) ??
-      (payload.leads ?? []).find((lead) => lead.status === 'claimed' || lead.status === 'calling') ??
-      null;
-    setActiveLeadId(nextLead?.id ?? null);
-
-    const nextCall =
-      (payload.calls ?? []).find((call) => call.id === activeCallId) ??
-      (payload.calls ?? []).find((call) => nextLead && call.session_lead_id === nextLead.id && !isFinalCallStatus(call.status)) ??
-      null;
-    setActiveCallId(nextCall?.id ?? null);
-  }, [activeCallId, activeLeadId]);
-
-  const refreshSession = useCallback(async (sessionId = session?.id) => {
-    if (!currentWorkspaceId || !sessionId) return;
-
-    try {
-      const response = await fetch(
-        `/api/dialer/sessions?workspaceId=${encodeURIComponent(currentWorkspaceId)}&sessionId=${encodeURIComponent(sessionId)}`,
-        { credentials: 'include' }
-      );
-      const data = (await response.json()) as SessionResponse;
-      if (response.ok) {
-        applySessionResponse(data);
-      }
-    } catch (error) {
-      console.error('[dialer/page] failed to refresh session', error);
-    }
-  }, [applySessionResponse, currentWorkspaceId, session?.id]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    if (!currentWorkspaceId) {
-      setDialerAccess(null);
-      setDialerAccessLoading(false);
-      return;
-    }
-
-    setDialerAccessLoading(true);
-    void fetch(`/api/dialer/settings?workspaceId=${encodeURIComponent(currentWorkspaceId)}`, {
-      credentials: 'include',
-    })
-      .then(async (response) => {
-        const data = (await response.json().catch(() => ({}))) as DialerAccessResponse & {
-          error?: string;
-        };
-
-        if (!response.ok) {
-          throw new Error(data.error || 'Failed to load workspace dialer access');
-        }
-
-        if (!cancelled) {
-          setDialerAccess(data);
-        }
-      })
-      .catch((error) => {
-        console.error('[dialer/page] failed to load dialer access', error);
-        if (!cancelled) {
-          setDialerAccess(null);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setDialerAccessLoading(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [currentWorkspaceId]);
-
-  const loadSmsHistory = useCallback(async (callId: string) => {
+  const loadDiallerLeads = useCallback(async () => {
     if (!currentWorkspaceId) return;
-    setLoadingSmsHistory(true);
+    setLoadingLeads(true);
+    setError(null);
 
     try {
-      const response = await fetch(
-        `/api/dialer/calls/${callId}/sms?workspaceId=${encodeURIComponent(currentWorkspaceId)}`,
-        { credentials: 'include' }
-      );
-      const data = (await response.json().catch(() => ({}))) as SmsFollowupResponse;
+      const response = await fetch(`/api/dialer/leads?workspaceId=${encodeURIComponent(currentWorkspaceId)}`, {
+        credentials: 'include',
+      });
+      const data = (await response.json().catch(() => ({}))) as { leads?: DiallerLead[]; error?: string };
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to load follow-up texts');
-      }
-      setSmsHistory(data.followups ?? []);
-    } catch (error) {
-      console.error('[dialer/page] failed to load sms follow-up history', error);
-      setSmsHistory([]);
-    } finally {
-      setLoadingSmsHistory(false);
-    }
-  }, [currentWorkspaceId]);
-
-  const loadContactsAndSession = useCallback(async () => {
-    if (!currentWorkspaceId || dialerGateState !== 'ready') {
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    setMessage(null);
-
-    try {
-      const supabase = createClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) {
-        setLoading(false);
+        setLeads([]);
+        setActiveLeadId(null);
+        setError(data.error || `Failed to load dialler leads (${response.status}).`);
         return;
       }
 
-      const teamPromise =
-        canFilterByMembers
-          ? fetch(`/api/team/roster?workspaceId=${encodeURIComponent(currentWorkspaceId)}`)
-              .then((response) => (response.ok ? response.json() : { members: [] }))
-              .catch(() => ({ members: [] }))
-          : Promise.resolve({ members: [] as TeamMemberOption[] });
-
-      const [contactsData, sessionResponse, teamResponse] = await Promise.all([
-        ContactsService.fetchContacts(user.id, currentWorkspaceId),
-        fetch(`/api/dialer/sessions?workspaceId=${encodeURIComponent(currentWorkspaceId)}`, {
-          credentials: 'include',
-        }).then((response) => (response.ok ? response.json() : { session: null, leads: [], calls: [], summary: undefined })),
-        teamPromise,
-      ]);
-
-      setContacts(contactsData);
-      setTeamMembers(Array.isArray(teamResponse.members) ? teamResponse.members : []);
-      applySessionResponse(sessionResponse as SessionResponse);
-    } catch (error) {
-      console.error('[dialer/page] failed to load dialer data', error);
-      setMessage({ type: 'error', text: 'Failed to load your dialer queue.' });
+      const nextLeads = data.leads ?? [];
+      setLeads(nextLeads);
+      setActiveLeadId((currentId) => {
+        if (currentId && nextLeads.some((lead) => lead.id === currentId)) return currentId;
+        return nextLeads.find((lead) => statusForLead(lead) === 'pending')?.id ?? nextLeads[0]?.id ?? null;
+      });
+    } catch {
+      setLeads([]);
+      setActiveLeadId(null);
+      setError('Failed to load dialler leads.');
     } finally {
-      setLoading(false);
+      setLoadingLeads(false);
     }
-  }, [applySessionResponse, canFilterByMembers, currentWorkspaceId, dialerGateState]);
+  }, [currentWorkspaceId]);
 
   useEffect(() => {
-    if (dialerGateState !== 'ready') return;
-    void loadContactsAndSession();
-  }, [dialerGateState, loadContactsAndSession]);
+    const userAgent = window.navigator.userAgent;
+    const platform = window.navigator.platform;
+    setIsIphone(/iPhone/.test(userAgent) || (platform === 'MacIntel' && window.navigator.maxTouchPoints > 1));
 
-  useEffect(() => {
     try {
       const storedAutoNext = window.localStorage.getItem(DIALER_AUTO_NEXT_STORAGE_KEY);
-      if (storedAutoNext === 'false') {
-        setAutoNextEnabled(false);
-      }
-
-      const storedScriptVisible = window.localStorage.getItem(DIALER_SCRIPT_VISIBLE_STORAGE_KEY);
-      if (storedScriptVisible === 'true') {
-        setScriptVisible(true);
-      }
+      if (storedAutoNext === 'false') setAutoNextEnabled(false);
     } catch {
       // ignore storage read issues
     }
@@ -569,1298 +291,860 @@ export function PowerDialerPage() {
   }, [autoNextEnabled]);
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(DIALER_SCRIPT_VISIBLE_STORAGE_KEY, String(scriptVisible));
-    } catch {
-      // ignore storage write issues
-    }
-  }, [scriptVisible]);
-
-  useEffect(() => {
-    if (!selectedQueueMode) {
-      autoStartedSelectionRef.current = false;
-      setSelectedQueueContactIds([]);
+    if (!currentWorkspaceId) {
+      setDialerAccess(null);
+      setDialerAccessLoading(false);
+      setLeads([]);
+      setActiveLeadId(null);
       return;
     }
 
-    try {
-      const raw = window.sessionStorage.getItem(DIALER_SELECTION_STORAGE_KEY);
-      if (!raw) {
-        setSelectedQueueContactIds([]);
-        return;
-      }
+    let cancelled = false;
+    setDialerAccessLoading(true);
+    setError(null);
 
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        setSelectedQueueContactIds(
-          Array.from(new Set(parsed.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)))
-        );
-      } else {
-        setSelectedQueueContactIds([]);
-      }
-    } catch {
-      setSelectedQueueContactIds([]);
-    } finally {
-      window.sessionStorage.removeItem(DIALER_SELECTION_STORAGE_KEY);
-    }
-  }, [selectedQueueMode]);
+    void fetch(`/api/dialer/settings?workspaceId=${encodeURIComponent(currentWorkspaceId)}`, {
+      credentials: 'include',
+    })
+      .then(async (response) => {
+        const data = (await response.json().catch(() => ({}))) as DialerAccessResponse & { error?: string };
+        if (!response.ok) throw new Error(data.error || 'Failed to load dialler settings.');
+        if (!cancelled) setDialerAccess(data);
+      })
+      .catch(() => {
+        if (!cancelled) setError('Failed to load dialler settings.');
+      })
+      .finally(() => {
+        if (!cancelled) setDialerAccessLoading(false);
+      });
 
-  useEffect(() => {
-    if (!session?.id || !currentWorkspaceId) return;
-    const interval = window.setInterval(() => {
-      void refreshSession(session.id);
-    }, activeCall ? 2500 : 5000);
-    return () => window.clearInterval(interval);
-  }, [activeCall, currentWorkspaceId, refreshSession, session?.id]);
+    void loadDiallerLeads();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentWorkspaceId, loadDiallerLeads]);
 
   useEffect(() => {
-    const interval = window.setInterval(() => {
-      setNowTick(Date.now());
-    }, 1000);
-    return () => window.clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    if (selectedMemberId === 'all') return;
-    if (teamMembers.some((member) => member.user_id === selectedMemberId)) return;
-    setSelectedMemberId('all');
-  }, [selectedMemberId, teamMembers]);
-
-  useEffect(() => {
-    if (!activeCallId) {
-      setSendSmsFollowup(false);
-      setSmsBody('');
-      setSmsHistory([]);
+    if (!activeLead) {
+      setNotes('');
+      setEmail('');
+      setSelectedDisposition('interested');
       return;
     }
-
-    const nextDisposition = activeCallDefaultDisposition;
-    setDisposition(nextDisposition);
-    setDispositionNote('');
-    setFollowUpAt(toDateTimeInputValue(activeCallFollowUpAt));
-    setAppointmentAt(toDateTimeInputValue(activeCallAppointmentAt));
-    setSendSmsFollowup(
-      device.allowSmsFollowup &&
-        ['left_voicemail', 'callback_requested', 'follow_up', 'appointment_set', 'no_answer'].includes(nextDisposition)
-    );
-    setSmsBody(
-      device.allowSmsFollowup && shouldOfferSmsFollowup(nextDisposition)
-        ? buildSuggestedSmsBody({
-            contact: activeLeadName ? { full_name: activeLeadName } : undefined,
-            disposition: nextDisposition,
-            appointmentAt: activeCallAppointmentAt,
-          })
-        : ''
-    );
-  }, [
-    activeCallAppointmentAt,
-    activeCallDefaultDisposition,
-    activeCallFollowUpAt,
-    activeCallId,
-    activeCallStatus,
-    activeLeadName,
-    device.allowSmsFollowup,
-  ]);
+    setNotes(activeLead.notes ?? '');
+    setEmail(activeLead.email ?? '');
+    setSelectedDisposition(activeLead.disposition ?? 'interested');
+  }, [activeLead]);
 
   useEffect(() => {
-    if (!activeCall?.id) {
-      setSmsHistory([]);
-      return;
-    }
-
-    void loadSmsHistory(activeCall.id);
-  }, [activeCall?.id, loadSmsHistory]);
-
-  useEffect(() => {
-    if (!activeCallId || device.callPhase !== 'ended') return;
-    setDispositionOpen(true);
-    void refreshSession(session?.id);
-  }, [activeCallId, device.callPhase, device.endedCount, refreshSession, session?.id]);
-
-  useEffect(() => {
-    if (!activeLeadId) return;
-    const node = leadRowRefs.current[activeLeadId];
-    node?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }, [activeLeadId]);
-
-  useEffect(() => {
-    if (device.callPhase === 'idle' || device.callPhase === 'ended') {
+    if (!device.isInCall) {
       setCallSeconds(0);
       return;
     }
 
-    const startedAt = activeCall?.answered_at
-      ? new Date(activeCall.answered_at).getTime()
-      : activeCall?.created_at
-        ? new Date(activeCall.created_at).getTime()
-        : Date.now();
-
-    const updateClock = () => {
-      const elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
-      setCallSeconds(elapsed);
-    };
-
-    updateClock();
-    const interval = window.setInterval(updateClock, 1000);
+    const startedAt = Date.now();
+    const interval = window.setInterval(() => {
+      setCallSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
     return () => window.clearInterval(interval);
-  }, [activeCall?.answered_at, activeCall?.created_at, device.callPhase]);
+  }, [device.isInCall]);
 
   useEffect(() => {
-    return () => {
-      if (autoNextTimeoutRef.current) {
-        window.clearTimeout(autoNextTimeoutRef.current);
-      }
-    };
-  }, []);
+    if (device.callPhase !== 'ended' || !activeCallId) return;
+    setDiallerRunning(false);
+    setActiveCallId(null);
+    setMessage((currentMessage) => currentMessage ?? 'Call ended.');
+  }, [activeCallId, device.callPhase]);
 
   const handleInitializeDevice = async () => {
-    if (!currentWorkspaceId || dialerGateState !== 'ready') return;
-    setMessage(null);
+    if (!currentWorkspaceId) return;
+    setError(null);
     await device.initialize(currentWorkspaceId, tabIdRef.current);
   };
 
-  const advanceToNextLeadInternal = useCallback(async (sessionId = session?.id, skipCurrent = false) => {
-    if (!currentWorkspaceId || !sessionId) return;
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
 
-    const response = await fetch(`/api/dialer/sessions/${sessionId}/next`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({
-        workspaceId: currentWorkspaceId,
-        skipCurrent,
-        reason: skipCurrent ? 'Skipped by user' : undefined,
-      }),
-    });
-    const data = (await response.json()) as {
-      lead: DialerSessionLead | null;
-      activeCall: DialerCall | null;
-      error?: string;
-    };
+  const handleFileSelected = async (file: File | null) => {
+    if (!file || !currentWorkspaceId) return;
 
-    if (!response.ok) {
-      throw new Error(data.error || 'Failed to advance to the next lead');
-    }
-
-    setActiveLeadId(data.lead?.id ?? null);
-    setActiveCallId(data.activeCall?.id ?? null);
-    await refreshSession(sessionId);
-    return data;
-  }, [currentWorkspaceId, refreshSession, session?.id]);
-
-  const handleAdvanceToNextLead = useCallback(async (sessionId = session?.id, skipCurrent = false) => {
-    try {
-      const data = await advanceToNextLeadInternal(sessionId, skipCurrent);
-      if (!data?.lead) {
-        setMessage({ type: 'success', text: 'Your dialer queue is complete.' });
-      }
-    } catch (error) {
-      console.error('[dialer/page] failed to advance queue', error);
-      setMessage({
-        type: 'error',
-        text: error instanceof Error ? error.message : 'Failed to move to the next lead.',
-      });
-    }
-  }, [advanceToNextLeadInternal, session?.id]);
-
-  const createDialerSession = useCallback(async () => {
-    if (!currentWorkspaceId || queueContactIds.length === 0) {
-      throw new Error('Add leads with phone numbers before starting the dialer.');
-    }
-    const response = await fetch('/api/dialer/sessions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({
-        workspaceId: currentWorkspaceId,
-        contactIds: queueContactIds,
-        tabId: tabIdRef.current,
-        name: selectedQueueContactIds.length > 0 ? 'Dialer from selected leads' : priorityContactId ? 'Dialer from lead detail' : undefined,
-      }),
-    });
-    const data = (await response.json()) as SessionResponse & { error?: string };
-    if (!response.ok) {
-      throw new Error(data.error || 'Failed to create dialer session');
-    }
-
-    applySessionResponse(data);
-    return data;
-  }, [
-    applySessionResponse,
-    currentWorkspaceId,
-    priorityContactId,
-    queueContactIds,
-    selectedQueueContactIds.length,
-  ]);
-
-  const handleStartSession = useCallback(async () => {
-    setCreatingSession(true);
+    setImporting(true);
+    setError(null);
     setMessage(null);
 
     try {
-      const data = await createDialerSession();
-      setMessage({ type: 'success', text: `Dialer session started with ${data.summary.total} leads.` });
-      await handleAdvanceToNextLead(data.session?.id ?? undefined);
-    } catch (error) {
-      console.error('[dialer/page] failed to start session', error);
-      setMessage({
-        type: 'error',
-        text: error instanceof Error ? error.message : 'Failed to start the dialer session.',
-      });
-    } finally {
-      setCreatingSession(false);
-    }
-  }, [createDialerSession, handleAdvanceToNextLead]);
-
-  const placeCallForLead = useCallback(async (lead: DialerSessionLead, sessionId: string) => {
-    if (!currentWorkspaceId || !lead.contact_id) {
-      throw new Error('This lead is missing the contact details needed to call.');
-    }
-
-    const response = await fetch('/api/dialer/calls', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({
-        workspaceId: currentWorkspaceId,
-        sessionId,
-        sessionLeadId: lead.id,
-        contactId: lead.contact_id,
-      }),
-    });
-    const data = (await response.json()) as { call?: DialerCall; error?: string };
-    if (!response.ok || !data.call) {
-      throw new Error(data.error || 'Failed to place the outbound call');
-    }
-
-    setActiveCallId(data.call.id);
-    await refreshSession(sessionId);
-    await device.startCall(data.call.call_request_id);
-    return data.call;
-  }, [currentWorkspaceId, device, refreshSession]);
-
-  const startNextCallFlow = useCallback(async (options?: { sessionId?: string; delayMs?: number }) => {
-    const sessionId = options?.sessionId ?? session?.id;
-    if (!sessionId) return;
-
-    const nextLeadResult = await advanceToNextLeadInternal(sessionId);
-    if (!nextLeadResult?.lead) {
-      setMessage({ type: 'success', text: 'Your dialer queue is complete.' });
-      return;
-    }
-
-    if (!autoNextEnabled) {
-      return;
-    }
-
-    const delayMs = options?.delayMs ?? AUTO_NEXT_DELAY_MS;
-    if (autoNextTimeoutRef.current) {
-      window.clearTimeout(autoNextTimeoutRef.current);
-    }
-
-    autoNextTimeoutRef.current = window.setTimeout(() => {
-      setStartingCall(true);
-      void placeCallForLead(nextLeadResult.lead!, sessionId)
-        .catch((error) => {
-          console.error('[dialer/page] failed to auto place next call', error);
-          setMessage({
-            type: 'error',
-            text: error instanceof Error ? error.message : 'Failed to place the next call.',
-          });
-        })
-        .finally(() => {
-          setStartingCall(false);
-        });
-    }, delayMs);
-  }, [advanceToNextLeadInternal, autoNextEnabled, placeCallForLead, session?.id]);
-
-  const handleStartPowerSession = useCallback(async () => {
-    if (!currentWorkspaceId || dialerGateState !== 'ready') return;
-
-    setStartingPowerSession(true);
-    setMessage(null);
-
-    try {
-      if (!device.isReady) {
-        await device.initialize(currentWorkspaceId, tabIdRef.current);
+      const text = await file.text();
+      const parsedLeads = leadsFromCsv(text);
+      if (parsedLeads.length === 0) {
+        throw new Error('CSV must include phone plus optional name and company columns.');
       }
 
-      const currentSession = session?.id ? session : await createDialerSession().then((data) => data.session);
-      if (!currentSession?.id) {
-        throw new Error('The power session could not be created.');
-      }
-
-      const nextLeadResult = activeLead
-        ? { lead: activeLead }
-        : await advanceToNextLeadInternal(currentSession.id);
-      const claimedLead = nextLeadResult?.lead ?? null;
-
-      if (!currentSession?.id || !claimedLead) {
-        setMessage({ type: 'success', text: 'Your dialer queue is complete.' });
-        return;
-      }
-
-      setCreatingSession(false);
-      setStartingCall(true);
-      await placeCallForLead(claimedLead, currentSession.id);
-      setMessage({ type: 'success', text: 'Power session live. Stay in flow.' });
-    } catch (error) {
-      console.error('[dialer/page] failed to start power session', error);
-      setMessage({
-        type: 'error',
-        text: error instanceof Error ? error.message : 'Failed to start the power session.',
+      const response = await fetch('/api/dialer/leads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          workspaceId: currentWorkspaceId,
+          leads: parsedLeads,
+        }),
       });
+      const data = (await response.json().catch(() => ({}))) as {
+        leads?: DiallerLead[];
+        importedCount?: number;
+        error?: string;
+      };
+      if (!response.ok) throw new Error(data.error || 'Failed to import list.');
+
+      const importedLeads = data.leads ?? [];
+      setLeads((currentLeads) => [...currentLeads, ...importedLeads]);
+      setActiveLeadId((currentId) => currentId ?? importedLeads[0]?.id ?? null);
+      setMessage(`${data.importedCount ?? importedLeads.length} leads loaded.`);
+    } catch (importError) {
+      setError(importError instanceof Error ? importError.message : 'Failed to import list.');
     } finally {
-      setStartingCall(false);
-      setStartingPowerSession(false);
-    }
-  }, [activeLead, advanceToNextLeadInternal, createDialerSession, currentWorkspaceId, device, dialerGateState, placeCallForLead, session]);
-
-  useEffect(() => {
-    if (!selectedQueueMode || loading || creatingSession) return;
-    if (autoStartedSelectionRef.current) return;
-    if (session?.id || leads.length > 0) return;
-    if (queueContactIds.length === 0) return;
-
-    autoStartedSelectionRef.current = true;
-    void handleStartPowerSession();
-  }, [creatingSession, handleStartPowerSession, leads.length, loading, queueContactIds.length, selectedQueueMode, session?.id]);
-
-  useEffect(() => {
-    if (!session?.id) {
-      autoClaimedSessionRef.current = null;
-      return;
-    }
-
-    if (loading || creatingSession || device.isInCall) return;
-    if (activeLead || activeCall) {
-      autoClaimedSessionRef.current = session.id;
-      return;
-    }
-    if (leads.length === 0 || summary.pending === 0) return;
-    if (autoClaimedSessionRef.current === session.id) return;
-
-    autoClaimedSessionRef.current = session.id;
-    void handleAdvanceToNextLead(session.id);
-  }, [activeCall, activeLead, creatingSession, device.isInCall, handleAdvanceToNextLead, leads.length, loading, session?.id, summary.pending]);
-
-  const handlePlaceCall = async () => {
-    if (!currentWorkspaceId || !session?.id || !activeLead?.contact_id) return;
-
-    setStartingCall(true);
-    setMessage(null);
-
-    try {
-      await placeCallForLead(activeLead, session.id);
-    } catch (error) {
-      console.error('[dialer/page] failed to place call', error);
-      setMessage({
-        type: 'error',
-        text: error instanceof Error ? error.message : 'Failed to place the outbound call.',
-      });
-      await refreshSession(session.id);
-    } finally {
-      setStartingCall(false);
+      setImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
-  const handleDropVoicemail = useCallback(async () => {
-    if (!currentWorkspaceId || !activeCall?.id) return;
-    setDroppingVoicemail(true);
+  const advanceToNextLead = useCallback((updatedLeads: DiallerLead[], currentLeadId: string) => {
+    const currentIndex = updatedLeads.findIndex((lead) => lead.id === currentLeadId);
+    const laterPending = updatedLeads.slice(Math.max(currentIndex + 1, 0)).find((lead) => statusForLead(lead) === 'pending');
+    const firstPending = updatedLeads.find((lead) => statusForLead(lead) === 'pending');
+    setActiveLeadId(laterPending?.id ?? firstPending?.id ?? updatedLeads[currentIndex + 1]?.id ?? updatedLeads[0]?.id ?? null);
+  }, []);
+
+  const saveLeadDisposition = async ({
+    disposition,
+    sendLink = false,
+    notesOverride,
+    followUpNameOverride,
+    followUpAt,
+    createNotification = false,
+    forceAdvance = false,
+    successMessage,
+  }: {
+    disposition: DiallerLeadDisposition;
+    sendLink?: boolean;
+    notesOverride?: string;
+    followUpNameOverride?: string | null;
+    followUpAt?: string | null;
+    createNotification?: boolean;
+    forceAdvance?: boolean;
+    successMessage: string;
+  }) => {
+    if (!activeLead || !currentWorkspaceId) return false;
+
+    setSaving(true);
+    setError(null);
     setMessage(null);
 
     try {
-      const response = await fetch(`/api/dialer/calls/${activeCall.id}/voicemail-drop`, {
-        method: 'POST',
+      const response = await fetch('/api/dialer/leads', {
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
           workspaceId: currentWorkspaceId,
+          id: activeLead.id,
+          disposition,
+          notes: notesOverride ?? notes,
+          email,
+          sendLink,
+          followUpName: followUpNameOverride,
+          followUpAt,
+          createNotification,
         }),
       });
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to drop voicemail');
-      }
+      const data = (await response.json().catch(() => ({}))) as { lead?: DiallerLead; error?: string; warning?: string | null };
+      if (!response.ok || !data.lead) throw new Error(data.error || 'Failed to save lead.');
 
-      await refreshSession(session?.id);
-      device.hangUp();
-      setDisposition('left_voicemail');
-      setDispositionNote('Voicemail dropped from power session.');
-      setMessage({ type: 'success', text: 'Voicemail dropped. Wrapping this lead and moving on.' });
-    } catch (error) {
-      console.error('[dialer/page] failed to drop voicemail', error);
-      setMessage({
-        type: 'error',
-        text: error instanceof Error ? error.message : 'Failed to drop voicemail.',
+      setLeads((currentLeads) => {
+        const updatedLeads = currentLeads.map((lead) => (lead.id === data.lead!.id ? data.lead! : lead));
+        if (autoNextEnabled || forceAdvance) {
+          advanceToNextLead(updatedLeads, data.lead!.id);
+        }
+        return updatedLeads;
       });
+      setMessage(data.warning ?? successMessage);
+      return true;
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Failed to save lead.');
+      return false;
     } finally {
-      setDroppingVoicemail(false);
+      setSaving(false);
     }
-  }, [activeCall?.id, currentWorkspaceId, device, refreshSession, session?.id]);
+  };
 
-  const handleApplySuggestedSms = useCallback(() => {
-    if (!activeLead?.contact) return;
-    setSmsBody(
-      buildSuggestedSmsBody({
-        contact: activeLead.contact,
-        disposition,
-        appointmentAt: toIsoOrNull(appointmentAt),
-      })
-    );
-  }, [activeLead?.contact, appointmentAt, disposition]);
+  const findNextDialableLead = (updatedLeads: DiallerLead[], currentLeadId: string): DiallerLead | null => {
+    const currentIndex = updatedLeads.findIndex((lead) => lead.id === currentLeadId);
+    const laterPending = updatedLeads
+      .slice(Math.max(currentIndex + 1, 0))
+      .find((lead) => statusForLead(lead) === 'pending' && hasDialablePhone(lead.phone));
+    const firstPending = updatedLeads.find((lead) => statusForLead(lead) === 'pending' && hasDialablePhone(lead.phone));
+    return laterPending ?? firstPending ?? null;
+  };
 
-  const handleSubmitDisposition = useCallback(async (overrideDisposition?: DialerCallDisposition) => {
-    if (!currentWorkspaceId || !activeCall) return;
+  const skipInvalidPendingLeads = async (): Promise<{ updatedLeads: DiallerLead[]; skippedCount: number }> => {
+    if (!currentWorkspaceId) return { updatedLeads: leads, skippedCount: 0 };
+    const invalidPendingLeads = leads.filter((lead) => statusForLead(lead) === 'pending' && !hasDialablePhone(lead.phone));
+    if (invalidPendingLeads.length === 0) return { updatedLeads: leads, skippedCount: 0 };
 
-    setSubmittingDisposition(true);
-    setSendingSms(false);
+    const skippedLeads = await Promise.all(
+      invalidPendingLeads.map(async (leadToSkip) => {
+        const nextNotes = [
+          leadToSkip.id === activeLead?.id ? notes.trim() : (leadToSkip.notes ?? '').trim(),
+          `Skipped by dialler: invalid phone number (${leadToSkip.phone || 'missing'}).`,
+        ].filter(Boolean).join('\n');
 
-    try {
-      const selectedDisposition =
-        typeof overrideDisposition === 'string' ? overrideDisposition : disposition;
-      const smsRequested =
-        device.allowSmsFollowup &&
-        sendSmsFollowup &&
-        shouldOfferSmsFollowup(selectedDisposition) &&
-        Boolean(smsBody.trim());
-
-      const response = await fetch(`/api/dialer/calls/${activeCall.id}/disposition`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          workspaceId: currentWorkspaceId,
-          disposition: selectedDisposition,
-          note: dispositionNote,
-          followUpAt: toIsoOrNull(followUpAt),
-          appointmentAt: toIsoOrNull(appointmentAt),
-        }),
-      });
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to save the call disposition');
-      }
-
-      let smsError: string | null = null;
-      let smsWarning: string | null = null;
-      if (smsRequested) {
-        setSendingSms(true);
-        const smsResponse = await fetch(`/api/dialer/calls/${activeCall.id}/sms`, {
-          method: 'POST',
+        const response = await fetch('/api/dialer/leads', {
+          method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           body: JSON.stringify({
             workspaceId: currentWorkspaceId,
-            body: smsBody,
+            id: leadToSkip.id,
+            disposition: 'dnc',
+            notes: nextNotes,
+            email: leadToSkip.email ?? '',
           }),
         });
-        const smsData = (await smsResponse.json().catch(() => ({}))) as SmsFollowupResponse;
-        if (!smsResponse.ok) {
-          smsError = smsData.error || 'Failed to send the follow-up text.';
-        } else if (smsData.warning) {
-          smsWarning = smsData.warning;
-        }
-      }
-
-      setDispositionOpen(false);
-      setActiveCallId(null);
-      device.resetEndedPhase();
-      setSendSmsFollowup(false);
-      setSmsBody('');
-      await refreshSession(session?.id);
-      if (autoNextEnabled) {
-        await startNextCallFlow({ sessionId: session?.id, delayMs: AUTO_NEXT_DELAY_MS });
-      } else {
-        await handleAdvanceToNextLead(session?.id);
-      }
-
-      if (smsError) {
-        setMessage({ type: 'error', text: `Call outcome saved, but the text follow-up failed: ${smsError}` });
-      } else if (smsWarning) {
-        setMessage({ type: 'success', text: `Call outcome saved. ${smsWarning}` });
-      } else if (smsRequested) {
-        setMessage({ type: 'success', text: 'Call outcome saved and follow-up text queued.' });
-      }
-    } catch (error) {
-      console.error('[dialer/page] failed to submit disposition', error);
-      setMessage({
-        type: 'error',
-        text: error instanceof Error ? error.message : 'Failed to save the call disposition.',
-      });
-    } finally {
-      setSendingSms(false);
-      setSubmittingDisposition(false);
-    }
-  }, [activeCall, autoNextEnabled, currentWorkspaceId, device, disposition, dispositionNote, followUpAt, appointmentAt, sendSmsFollowup, smsBody, refreshSession, session?.id, startNextCallFlow, handleAdvanceToNextLead]);
-
-  const handleQuickOutcome = useCallback(async (nextDisposition: DialerCallDisposition) => {
-    setDisposition(nextDisposition);
-    await handleSubmitDisposition(nextDisposition);
-  }, [handleSubmitDisposition]);
-
-  const callMachineState =
-    device.isInCall
-      ? activeCall?.status === 'ringing' || device.callPhase === 'connecting'
-        ? 'Ringing now'
-        : 'Live conversation'
-      : dispositionOpen
-        ? 'Wrap the last call'
-        : activeLead
-          ? 'Ready for next lead'
-          : 'Queue not started';
-  const sessionXp = summary.callsPlaced * 5 + pickupCalls * 10 + conversationCalls * 15;
-  const smsFollowupReady = Boolean(device.allowSmsFollowup && device.smsFromNumber);
-  const dialerOfferLabel = formatDialerOfferLabel(dialerAccess?.offer);
-  const safetyChecks = [
-    { label: 'Workspace selected', ok: Boolean(currentWorkspaceId) },
-    { label: 'Microphone granted', ok: device.microphoneGranted },
-    { label: 'Twilio device ready', ok: device.isReady },
-    { label: 'SMS follow-up ready', ok: smsFollowupReady },
-  ];
-
-  const renderDialerGate = () => {
-    if (dialerGateState === 'loading') {
-      return (
-        <div className="min-h-screen bg-gray-50 dark:bg-background">
-          <main className="mx-auto flex w-full max-w-3xl items-center justify-center px-4 py-24 sm:px-6 lg:px-8">
-            <div className="flex items-center gap-3 rounded-xl border bg-background px-5 py-4 text-sm text-muted-foreground shadow-sm">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Checking Power Dialer access…
-            </div>
-          </main>
-        </div>
-      );
-    }
-
-    if (dialerGateState === 'ready') {
-      return null;
-    }
-
-    let title = 'Power Dialer needs setup';
-    let description = 'Finish setup before launching the dialer.';
-    let primaryHref = '/billing';
-    let primaryLabel = `Enable dialer add-on (${dialerOfferLabel})`;
-    let secondaryHref = '/leads';
-    let secondaryLabel = 'Back to Leads';
-    let accent = 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300';
-    let Icon = CreditCard;
-
-    if (dialerGateState === 'workspace') {
-      title = 'Choose a workspace first';
-      description = 'Pick a workspace before opening the Power Dialer.';
-      primaryHref = '/leads';
-      primaryLabel = 'Go to Leads';
-      secondaryHref = '/settings';
-      secondaryLabel = 'Open Settings';
-      accent = 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300';
-      Icon = Users;
-    } else if (dialerGateState === 'setup') {
-      title = 'Claim your workspace dialer number';
-      description = 'The add-on is active, but this workspace still needs its own Twilio number before anyone can dial.';
-      primaryHref = '/settings';
-      primaryLabel = 'Claim workspace number';
-      secondaryHref = '/billing';
-      secondaryLabel = 'View billing';
-      accent = 'border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-300';
-      Icon = PhoneCall;
-    } else if (dialerGateState === 'hidden') {
-      title = 'Power Dialer is not enabled here yet';
-      description = 'This workspace is outside the current dialer test group. Switch to the test workspace to continue.';
-      primaryHref = '/settings';
-      primaryLabel = 'Open Settings';
-      secondaryHref = '/leads';
-      secondaryLabel = 'Back to Leads';
-      accent = 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300';
-      Icon = AlertCircle;
-    } else if (dialerGateState === 'ask-owner-buy') {
-      title = 'Ask your team owner to enable Power Dialer';
-      description = `This workspace does not have the Power Dialer add-on yet. An owner or admin needs to purchase it first for ${dialerOfferLabel}.`;
-      primaryHref = '/leads';
-      primaryLabel = 'Back to Leads';
-      secondaryHref = '/settings';
-      secondaryLabel = 'Open Settings';
-      accent = 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300';
-      Icon = AlertCircle;
-    } else if (dialerGateState === 'ask-owner-setup') {
-      title = 'Ask your team owner to finish dialer setup';
-      description = 'The Power Dialer add-on is active, but your team owner still needs to claim and assign the workspace phone number.';
-      primaryHref = '/leads';
-      primaryLabel = 'Back to Leads';
-      secondaryHref = '/settings';
-      secondaryLabel = 'Open Settings';
-      accent = 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300';
-      Icon = AlertCircle;
-    }
-
-    return (
-      <div className="min-h-screen bg-gray-50 dark:bg-background">
-        <header className="bg-white dark:bg-card border-b border-border sticky top-0 z-10">
-          <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-4">
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div>
-                <h1 className="text-2xl font-bold text-foreground">Power Dialer</h1>
-                <p className="text-sm text-muted-foreground">
-                  Browser calling for workspace leads with Twilio Voice.
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button asChild variant="outline">
-                  <Link href="/leads">Back to Leads</Link>
-                </Button>
-              </div>
-            </div>
-          </div>
-        </header>
-
-        <main className="mx-auto w-full max-w-3xl px-4 py-10 sm:px-6 lg:px-8">
-          <Card className="overflow-hidden">
-            <CardHeader className="space-y-4">
-              <div className={`inline-flex w-fit items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium ${accent}`}>
-                <Icon className="h-3.5 w-3.5" />
-                {title}
-              </div>
-              <div>
-                <CardTitle>{title}</CardTitle>
-                <CardDescription>{description}</CardDescription>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-5">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="rounded-xl border p-4">
-                  <div className="text-xs uppercase tracking-wide text-muted-foreground">Workspace price</div>
-                  <div className="mt-2 text-2xl font-semibold">{dialerOfferLabel}</div>
-                </div>
-                <div className="rounded-xl border p-4">
-                  <div className="text-xs uppercase tracking-wide text-muted-foreground">Caller ID status</div>
-                  <div className="mt-2 text-base font-semibold text-foreground">
-                    {dialerAccess?.settings?.dedicatedFromNumber
-                      ? dialerAccess.settings.dedicatedFromNumber
-                      : dialerAccess?.sharedDefaultDialingEnabled
-                        ? `${dialerAccess?.settings?.defaultFromNumber ?? 'Shared default number'} (shared default)`
-                        : 'No workspace number assigned'}
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap gap-3">
-                <Button asChild>
-                  <Link href={primaryHref}>{primaryLabel}</Link>
-                </Button>
-                <Button asChild variant="outline">
-                  <Link href={secondaryHref}>{secondaryLabel}</Link>
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </main>
-      </div>
+        const data = (await response.json().catch(() => ({}))) as { lead?: DiallerLead; error?: string };
+        if (!response.ok || !data.lead) throw new Error(data.error || 'Failed to skip invalid lead.');
+        return data.lead;
+      })
     );
+
+    const skippedById = new Map(skippedLeads.map((lead) => [lead.id, lead]));
+    const updatedLeads = leads.map((lead) => skippedById.get(lead.id) ?? lead);
+    setLeads(updatedLeads);
+    return { updatedLeads, skippedCount: skippedLeads.length };
   };
 
-  if (dialerGateState !== 'ready') {
-    return renderDialerGate();
-  }
+  const openFollowUpTask = () => {
+    if (!activeLead) return;
+    const calledAt = new Date();
+    callbackCalledAtRef.current = calledAt;
+    const todayDefault = getCallbackDefaultDateTime('today', calledAt);
+    setFollowUpName(`Follow up with ${activeLead.name || 'lead'}`);
+    setFollowUpChoice('today');
+    setFollowUpDate(todayDefault.date);
+    setFollowUpTime(todayDefault.time);
+    setFollowUpOpen(true);
+  };
+
+  const handleDispositionAction = async (disposition: DiallerLeadDisposition) => {
+    setSelectedDisposition(disposition);
+    await saveLeadDisposition({
+      disposition,
+      sendLink: disposition === 'interested',
+      successMessage: disposition === 'interested' ? 'Interested saved. Link sent.' : 'Saved. Next lead is ready.',
+    });
+  };
+
+  const handleFollowUp = async () => {
+    const calledAt = callbackCalledAtRef.current ?? new Date();
+    const defaultDateTime = getCallbackDefaultDateTime(followUpChoice, calledAt);
+    const resolvedDate = followUpChoice === 'custom' ? followUpDate || defaultDateTime.date : defaultDateTime.date;
+    const resolvedTime = followUpTime || defaultDateTime.time;
+    const followUpAt = new Date(`${resolvedDate}T${resolvedTime}:00`).toISOString();
+    const followUpParts = [
+      followUpName.trim() ? `Follow up: ${followUpName.trim()}` : 'Follow up',
+      `When: ${[resolvedDate, resolvedTime].filter(Boolean).join(' ')}`,
+    ].filter(Boolean);
+    const nextNotes = [notes.trim(), followUpParts.join(' | ')].filter(Boolean).join('\n');
+
+    setSelectedDisposition('callback');
+    const saved = await saveLeadDisposition({
+      disposition: 'callback',
+      notesOverride: nextNotes,
+      followUpNameOverride: followUpName.trim() || `Follow up with ${activeLead?.name || 'lead'}`,
+      followUpAt,
+      createNotification: true,
+      successMessage: email.trim() ? 'Follow-up saved with email.' : 'Follow-up saved.',
+    });
+    if (saved) setFollowUpOpen(false);
+  };
+
+  const placeCurrentCall = async (doubleDial = false) => {
+    if (!activeLead || !currentWorkspaceId) return;
+    if (device.isInCall) {
+      setMessage('A call is already active.');
+      return;
+    }
+
+    setStartingCall(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const { updatedLeads, skippedCount } = await skipInvalidPendingLeads();
+      const activeLeadFromQueue = updatedLeads.find((lead) => lead.id === activeLead.id);
+      const leadToCall =
+        activeLeadFromQueue && statusForLead(activeLeadFromQueue) === 'pending' && hasDialablePhone(activeLeadFromQueue.phone)
+          ? activeLeadFromQueue
+          : findNextDialableLead(updatedLeads, activeLead.id);
+
+      if (!leadToCall) {
+        setActiveLeadId(updatedLeads.find((lead) => statusForLead(lead) === 'pending')?.id ?? updatedLeads[0]?.id ?? null);
+        setMessage(skippedCount > 0 ? `Skipped ${skippedCount} invalid phone numbers. No valid pending leads left.` : 'No valid pending leads left.');
+        return;
+      }
+      setActiveLeadId(leadToCall.id);
+
+      if (!device.isReady && device.setupState !== 'initializing') {
+        await device.initialize(currentWorkspaceId, tabIdRef.current);
+      }
+
+      const response = await fetch('/api/dialer/leads/call', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          workspaceId: currentWorkspaceId,
+          leadId: leadToCall.id,
+          tabId: tabIdRef.current,
+          doubleDial,
+        }),
+      });
+      const data = (await response.json().catch(() => ({}))) as { call?: DialerCall; error?: string };
+      if (!response.ok || !data.call) throw new Error(data.error || 'Failed to place the outbound call.');
+
+      setActiveCallId(data.call.id);
+      setDiallerRunning(true);
+      setMessage(doubleDial ? 'Double dial started.' : 'Call started.');
+      await device.startCall(data.call.call_request_id);
+    } catch (callError) {
+      setDiallerRunning(false);
+      setActiveCallId(null);
+      setError(callError instanceof Error ? callError.message : 'Failed to place the outbound call.');
+    } finally {
+      setStartingCall(false);
+    }
+  };
+
+  const handleDoubleDial = () => {
+    void placeCurrentCall(true);
+  };
+
+  const handleVoicemailDrop = async () => {
+    if (!device.isInCall || !activeCallId || !currentWorkspaceId) {
+      setMessage('Voicemail drop is ready after a live call connects.');
+      setError(null);
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/dialer/calls/${activeCallId}/voicemail-drop`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ workspaceId: currentWorkspaceId }),
+      });
+      const data = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) throw new Error(data.error || 'Failed to drop voicemail.');
+      setMessage('Voicemail dropped.');
+    } catch (dropError) {
+      setError(dropError instanceof Error ? dropError.message : 'Failed to drop voicemail.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveContact = async () => {
+    if (!activeLead || !currentWorkspaceId) return;
+
+    setSavingContact(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const response = await fetch('/api/dialer/leads', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          workspaceId: currentWorkspaceId,
+          id: activeLead.id,
+          notes,
+          email,
+          saveContact: true,
+        }),
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        lead?: DiallerLead;
+        contact?: unknown;
+        warning?: string | null;
+        error?: string;
+      };
+      if (!response.ok || !data.lead) throw new Error(data.error || 'Failed to save contact.');
+
+      setLeads((currentLeads) => currentLeads.map((lead) => (lead.id === data.lead!.id ? data.lead! : lead)));
+      setMessage(data.warning ?? 'Contact saved.');
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Failed to save contact.');
+    } finally {
+      setSavingContact(false);
+    }
+  };
+
+  const handleDeleteLead = async () => {
+    if (!activeLead || !currentWorkspaceId) return;
+
+    setSaving(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const response = await fetch('/api/dialer/leads', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          workspaceId: currentWorkspaceId,
+          id: activeLead.id,
+        }),
+      });
+      const data = (await response.json().catch(() => ({}))) as { deletedId?: string; error?: string };
+      if (!response.ok || !data.deletedId) throw new Error(data.error || 'Failed to delete lead.');
+
+      setLeads((currentLeads) => {
+        const updatedLeads = currentLeads.filter((lead) => lead.id !== data.deletedId);
+        setActiveLeadId(updatedLeads.find((lead) => statusForLead(lead) === 'pending')?.id ?? updatedLeads[0]?.id ?? null);
+        return updatedLeads;
+      });
+      setMessage('Not interested. Lead deleted.');
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : 'Failed to delete lead.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteList = async () => {
+    if (!currentWorkspaceId || leads.length === 0) return;
+    if (!window.confirm('Delete the current dialler list? This removes all loaded dialler leads.')) return;
+
+    if (device.isInCall) {
+      device.hangUp();
+    }
+
+    setDeletingList(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const response = await fetch('/api/dialer/leads', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          workspaceId: currentWorkspaceId,
+          deleteAll: true,
+        }),
+      });
+      const data = (await response.json().catch(() => ({}))) as { deletedCount?: number; error?: string };
+      if (!response.ok) throw new Error(data.error || 'Failed to delete list.');
+
+      setLeads([]);
+      setActiveLeadId(null);
+      setNotes('');
+      setEmail('');
+      setDiallerRunning(false);
+      setActiveCallId(null);
+      setMessage(`Deleted ${data.deletedCount ?? leads.length} leads.`);
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : 'Failed to delete list.');
+    } finally {
+      setDeletingList(false);
+    }
+  };
+
+  const handleStartPause = async () => {
+    if (!diallerRunning) {
+      await placeCurrentCall(false);
+      return;
+    }
+
+    if (device.isInCall) {
+      device.hangUp();
+    }
+    setDiallerRunning(false);
+    setActiveCallId(null);
+    setMessage('Dialler paused.');
+  };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-background">
-      <header className="bg-white dark:bg-card border-b border-border sticky top-0 z-10">
-        <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-foreground">Power Dialer</h1>
-              <p className="text-sm text-muted-foreground">
-                Browser calling for workspace leads with Twilio Voice.
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button variant="outline" onClick={() => void loadContactsAndSession()} disabled={loading}>
-                <RefreshCw className="mr-2 h-4 w-4" />
-                Refresh
-              </Button>
-              <Button asChild variant="outline">
-                <Link href="/leads">Back to Leads</Link>
-              </Button>
-            </div>
-          </div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {safetyChecks.map((check) => (
-              <div
+    <div
+      data-device={isIphone ? 'iphone' : undefined}
+      className="min-h-[100svh] overflow-x-hidden bg-[#111111] px-3 pb-[calc(env(safe-area-inset-bottom)+1rem)] pt-[calc(env(safe-area-inset-top)+0.75rem)] text-neutral-100 sm:px-6 sm:py-4 lg:px-8"
+    >
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-3 sm:gap-4">
+        <div className="-mx-3 overflow-x-auto px-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="flex w-max min-w-full items-center gap-2">
+            {statusChecks.map((check) => (
+              <span
                 key={check.label}
-                className="inline-flex items-center gap-2 rounded-full border bg-muted/40 px-3 py-1.5 text-xs font-medium text-foreground"
+                className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-neutral-800 bg-neutral-950 px-2.5 text-[11px] font-medium text-neutral-300"
               >
                 {check.ok ? (
-                  <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
                 ) : (
-                  <AlertCircle className="h-3.5 w-3.5 text-amber-600" />
+                  <AlertCircle className="h-3.5 w-3.5 text-neutral-500" />
                 )}
-                <span>{check.label}</span>
-              </div>
+                {check.label}
+              </span>
             ))}
-            {device.smsFromNumber && (
-              <div className="inline-flex items-center rounded-full border bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
-                Texts from {formatPhoneDisplay(device.smsFromNumber)}
-              </div>
-            )}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleInitializeDevice}
+              disabled={!currentWorkspaceId || device.setupState === 'initializing'}
+              className="h-7 shrink-0 touch-manipulation border-neutral-800 bg-neutral-950 px-2.5 text-[11px] text-neutral-200 hover:bg-neutral-900"
+            >
+              {device.setupState === 'initializing' ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Mic className="h-3.5 w-3.5" />
+              )}
+              Init
+            </Button>
           </div>
         </div>
-      </header>
 
-      <main className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-6">
-        <div className="space-y-6">
-          {message && (
-            <div
-              className={`rounded-lg border px-4 py-3 text-sm ${
-                message.type === 'success'
-                  ? 'border-green-200 bg-green-50 text-green-700 dark:border-green-900 dark:bg-green-950/40 dark:text-green-300'
-                  : 'border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300'
+        <div className="grid grid-cols-3 gap-2 rounded-lg border border-neutral-900 bg-neutral-950/60 px-3 py-2 text-center text-[11px] text-neutral-500 sm:flex sm:flex-wrap sm:items-center sm:gap-5 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0 sm:text-left sm:text-sm sm:text-neutral-400">
+          <span><span className="block text-base font-semibold leading-none text-neutral-100 sm:inline sm:text-sm">{calledCount}</span> calls</span>
+          <span><span className="block text-base font-semibold leading-none text-neutral-100 sm:inline sm:text-sm">{connectedCount}</span> connected</span>
+          <span><span className="block text-base font-semibold leading-none text-neutral-100 sm:inline sm:text-sm">{remainingCount}</span> left</span>
+          {dialerAccessLoading || loadingLeads ? (
+            <span className="col-span-3 inline-flex items-center justify-center gap-1.5 text-xs sm:col-span-1 sm:justify-start">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Syncing
+            </span>
+          ) : null}
+        </div>
+
+        {(message || error || device.deviceError) && (
+          <div
+            className={`rounded-md border px-3 py-2 text-sm ${
+              error || device.deviceError
+                ? 'border-red-500/30 bg-red-950/40 text-red-200'
+                : 'border-emerald-500/30 bg-emerald-950/30 text-emerald-200'
+            }`}
+          >
+            {error || device.deviceError || message}
+          </div>
+        )}
+
+        <section className="rounded-xl border border-neutral-800 bg-[#202020] p-4 shadow-2xl shadow-black/30 sm:p-5">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="text-xs font-medium uppercase tracking-wide text-neutral-500">
+                {activeLead?.company?.trim() || '—'}
+              </div>
+              <div className="mt-2 truncate text-[26px] font-semibold leading-tight text-neutral-50 sm:text-[28px]">
+                {activeLead?.name?.trim() || '—'}
+              </div>
+              <div className="mt-1 text-base text-neutral-400">
+                {activeLead?.phone ? formatPhoneDisplay(activeLead.phone) : '—'}
+              </div>
+            </div>
+            <div className="font-mono text-xs text-neutral-400">{formatCallClock(callSeconds)}</div>
+          </div>
+
+          <div className="mt-5 grid grid-cols-2 gap-2.5 sm:mt-6 sm:gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={!hasActiveLead || saving || startingCall}
+              onClick={() => void handleDispositionAction('interested')}
+              className={`h-[58px] touch-manipulation justify-center border-neutral-700 bg-transparent text-[15px] text-neutral-100 hover:bg-neutral-800 sm:h-14 sm:text-base ${
+                selectedDisposition === 'interested' ? 'border-red-400 bg-red-500/10 text-white' : ''
+              } ${!hasActiveLead ? 'opacity-40' : ''}`}
+            >
+              {saving && selectedDisposition === 'interested' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              Send link
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={!hasActiveLead || saving || startingCall}
+              onClick={handleDoubleDial}
+              className={`h-[58px] touch-manipulation justify-center border-neutral-700 bg-transparent text-[15px] text-neutral-100 hover:bg-neutral-800 sm:h-14 sm:text-base ${
+                !hasActiveLead ? 'opacity-40' : ''
               }`}
             >
-              {message.text}
-            </div>
-          )}
-
-          {device.deviceError && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
-              {device.deviceError}
-            </div>
-          )}
-
-          <div className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Flow Mode</CardTitle>
-                <CardDescription>
-                  One button to start. Minimal decisions once you are moving.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/10 via-background to-background p-5">
-                  <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-                    <div className="space-y-3">
-                      <div className="inline-flex items-center gap-2 rounded-full bg-background/80 px-3 py-1 text-xs font-medium text-muted-foreground">
-                        <Sparkles className="h-3.5 w-3.5 text-primary" />
-                        {callMachineState}
-                      </div>
-                      <div>
-                        <div className="text-sm text-muted-foreground">Current call timer</div>
-                        <div className="text-5xl font-semibold tracking-tight text-foreground">{formatCallClock(callSeconds)}</div>
-                      </div>
-                    </div>
-
-                    <div className="w-full max-w-sm space-y-3">
-                      <Button
-                        size="lg"
-                        className="h-14 w-full text-base font-semibold shadow-sm"
-                        onClick={handleStartPowerSession}
-                        disabled={startingPowerSession || creatingSession || startingCall || queueContactIds.length === 0}
-                      >
-                        {startingPowerSession || creatingSession || startingCall ? (
-                          <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                        ) : (
-                          <Rocket className="mr-2 h-5 w-5" />
-                        )}
-                        Start Power Session
-                      </Button>
-                      <div className="flex items-center justify-between rounded-xl border bg-background/80 px-4 py-3">
-                        <div>
-                          <div className="text-sm font-medium text-foreground">Auto-next</div>
-                          <div className="text-xs text-muted-foreground">Call the next lead after wrap-up</div>
-                        </div>
-                        <Switch checked={autoNextEnabled} onCheckedChange={setAutoNextEnabled} aria-label="Toggle auto-next" />
-                      </div>
-                      <div className="grid grid-cols-3 gap-2">
-                        <Button variant="outline" onClick={handleInitializeDevice} disabled={!currentWorkspaceId || device.setupState === 'initializing'}>
-                          {device.setupState === 'initializing' ? (
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          ) : (
-                            <Mic className="mr-2 h-4 w-4" />
-                          )}
-                          Init
-                        </Button>
-                        <Button variant="outline" onClick={handlePlaceCall} disabled={!activeLead || startingCall || device.isInCall}>
-                          <PhoneCall className="mr-2 h-4 w-4" />
-                          Call
-                        </Button>
-                        <Button variant="outline" onClick={() => void handleAdvanceToNextLead(session?.id, true)} disabled={!activeLead || Boolean(activeCall) || device.isInCall}>
-                          <SkipForward className="mr-2 h-4 w-4" />
-                          Skip
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  <Button variant="outline" onClick={handleStartSession} disabled={creatingSession || queueContactIds.length === 0}>
-                    <Users className="mr-2 h-4 w-4" />
-                    Queue Only
-                  </Button>
-                  <Button variant="outline" onClick={() => void handleAdvanceToNextLead()} disabled={!session?.id || device.isInCall}>
-                    <ChevronRight className="mr-2 h-4 w-4" />
-                    Next Lead
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={device.toggleMute}
-                    disabled={!device.isInCall}
-                  >
-                    {device.isMuted ? (
-                      <MicOff className="mr-2 h-4 w-4" />
-                    ) : (
-                      <Mic className="mr-2 h-4 w-4" />
-                    )}
-                    {device.isMuted ? 'Unmute' : 'Mute'}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={handleDropVoicemail}
-                    disabled={!device.isInCall || droppingVoicemail}
-                  >
-                    {droppingVoicemail ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Play className="mr-2 h-4 w-4" />
-                    )}
-                    Drop Voicemail
-                  </Button>
-                  <Button variant="destructive" onClick={device.hangUp} disabled={!device.isInCall}>
-                    <PhoneOff className="mr-2 h-4 w-4" />
-                    Hang Up
-                  </Button>
-                </div>
-
-                {canFilterByMembers && teamMembers.length > 0 && (
-                  <div className="max-w-xs">
-                    <Label className="mb-2 block">Filter by member</Label>
-                    <Select value={selectedMemberId} onValueChange={setSelectedMemberId}>
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="All members" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All members</SelectItem>
-                        {teamMembers.map((member) => (
-                          <SelectItem key={member.user_id} value={member.user_id}>
-                            {member.display_name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-
-                {!device.microphoneGranted && device.setupState !== 'idle' && (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
-                    Allow microphone access in your browser to place calls from the web dialer.
-                  </div>
-                )}
-
-                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                  <div className="rounded-xl border p-4">
-                    <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
-                      <Phone className="h-3.5 w-3.5" />
-                      Calls Made
-                    </div>
-                    <div className="mt-2 text-2xl font-semibold">{summary.callsPlaced}</div>
-                  </div>
-                  <div className="rounded-xl border p-4">
-                    <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
-                      <Zap className="h-3.5 w-3.5" />
-                      Connected Calls
-                    </div>
-                    <div className="mt-2 text-2xl font-semibold">{pickupCalls}</div>
-                  </div>
-                  <div className="rounded-xl border p-4">
-                    <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
-                      <Users className="h-3.5 w-3.5" />
-                      Conversations
-                    </div>
-                    <div className="mt-2 text-2xl font-semibold">{conversationCalls}</div>
-                  </div>
-                  <div className="rounded-xl border p-4">
-                    <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
-                      <Gauge className="h-3.5 w-3.5" />
-                      Remaining
-                    </div>
-                    <div className="mt-2 text-2xl font-semibold">{summary.pending}</div>
-                  </div>
-                </div>
-
-                <div className="grid gap-3 xl:grid-cols-3">
-                  <div className="rounded-xl border p-4">
-                    <div className="text-xs uppercase tracking-wide text-muted-foreground">Speed</div>
-                    <div className="mt-2 text-xl font-semibold">
-                      {averageSecondsPerCall > 0 ? `1 call / ${averageSecondsPerCall}s` : 'Waiting to build pace'}
-                    </div>
-                    <div className="mt-1 text-sm text-muted-foreground">{paceText}</div>
-                  </div>
-                  <div className="rounded-xl border p-4">
-                    <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
-                      <Flame className="h-3.5 w-3.5 text-orange-500" />
-                      Streak
-                    </div>
-                    <div className="mt-2 text-xl font-semibold">{summary.callsPlaced} calls in flow</div>
-                    <div className="mt-1 text-sm text-muted-foreground">{sessionXp} XP this session</div>
-                  </div>
-                  <div className="rounded-xl border p-4">
-                    <div className="text-xs uppercase tracking-wide text-muted-foreground">Daily Goal</div>
-                    <div className="mt-2 flex items-center justify-between text-sm">
-                      <span>{summary.callsPlaced} / {SESSION_CALL_GOAL} calls</span>
-                      <span>{sessionGoalProgress}%</span>
-                    </div>
-                    <Progress value={sessionGoalProgress} className="mt-3" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Call Queue</CardTitle>
-                <CardDescription>
-                  {queueContactIds.length} leads are loaded. Keep the pipeline moving.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {nextLeadPreview && (
-                  <div className="mb-4 rounded-xl border bg-muted/40 p-4">
-                    <div className="text-xs uppercase tracking-wide text-muted-foreground">Next Up</div>
-                    <div className="mt-1 font-medium text-foreground">{nextLeadPreview.contact?.full_name ?? 'Lead'}</div>
-                    <div className="mt-1 text-sm text-muted-foreground">
-                      {formatPhoneDisplay(nextLeadPreview.contact?.phone)} • {buildLeadContext(nextLeadPreview.contact)}
-                    </div>
-                  </div>
-                )}
-                {loading ? (
-                  <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Loading queue…
-                  </div>
-                ) : leads.length === 0 ? (
-                  <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-                    {selectedQueueContactIds.length > 0
-                      ? 'Start a session to generate a dialer queue from the leads you selected in Leads.'
-                      : 'Start a session to generate a dialer queue from your current workspace contacts.'}
-                  </div>
-                ) : (
-                  <div className="max-h-[28rem] space-y-2 overflow-y-auto pr-1">
-                    {leads.map((lead) => {
-                      const isCurrent = activeLead?.id === lead.id;
-                      return (
-                        <button
-                          key={lead.id}
-                          ref={(node) => {
-                            leadRowRefs.current[lead.id] = node;
-                          }}
-                          type="button"
-                          onClick={() => setActiveLeadId(lead.id)}
-                          className={`w-full rounded-2xl border p-4 text-left transition-all ${
-                            isCurrent
-                              ? 'scale-[1.01] border-primary bg-primary/10 shadow-[0_0_0_1px_rgba(59,130,246,0.15),0_12px_30px_rgba(59,130,246,0.08)]'
-                              : 'border-border hover:border-primary/40 hover:bg-muted/40'
-                          }`}
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <div className="font-medium text-foreground">
-                                {lead.position}. {lead.contact?.full_name ?? 'Lead'}
-                              </div>
-                              <div className="mt-1 text-sm text-muted-foreground">
-                                {formatPhoneDisplay(lead.contact?.phone)}
-                              </div>
-                              <div className="mt-1 text-xs text-muted-foreground">{buildLeadContext(lead.contact)}</div>
-                            </div>
-                            <div className={`rounded-full px-3 py-1 text-[11px] font-medium uppercase tracking-wide ${
-                              isCurrent ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
-                            }`}>
-                              {isCurrent ? 'Active' : lead.status}
-                            </div>
-                          </div>
-                          {lead.skip_reason && (
-                            <div className="mt-2 text-xs text-muted-foreground">{lead.skip_reason}</div>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Call Cockpit</CardTitle>
-                <CardDescription>
-                  Keep only what you need in front of you while you dial.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {!activeLead ? (
-                  <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-                    No active lead yet. Start a queue, then advance to the next lead.
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    <div className="rounded-2xl border bg-muted/30 p-5">
-                      <div className="text-2xl font-semibold">{activeLead.contact?.full_name ?? 'Lead'}</div>
-                      <div className="mt-1 text-base text-muted-foreground">
-                        {formatPhoneDisplay(activeLead.contact?.phone)}
-                      </div>
-                      <div className="mt-3 text-sm text-foreground">{leadContext}</div>
-                      {activeLead.contact?.address && (
-                        <div className="mt-2 text-sm text-muted-foreground">{activeLead.contact.address}</div>
-                      )}
-                    </div>
-
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <div className="rounded-xl border p-4">
-                        <div className="text-xs uppercase tracking-wide text-muted-foreground">Last Contacted</div>
-                        <div className="mt-2 text-sm font-medium">{formatLeadDateTime(activeLead.contact?.last_contacted)}</div>
-                      </div>
-                      <div className="rounded-xl border p-4">
-                        <div className="text-xs uppercase tracking-wide text-muted-foreground">Contact Status</div>
-                        <div className="mt-2 text-sm font-medium capitalize">{activeLead.contact?.status ?? 'new'}</div>
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl border p-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <div className="text-sm font-medium text-foreground">Quick Script</div>
-                          <div className="text-xs text-muted-foreground">Intro line and objection anchors</div>
-                        </div>
-                        <Switch checked={scriptVisible} onCheckedChange={setScriptVisible} aria-label="Toggle quick script" />
-                      </div>
-                      {scriptVisible && (
-                        <div className="mt-4 space-y-3">
-                          <div className="rounded-lg bg-primary/5 p-3 text-sm text-foreground">
-                            {quickScript.intro}
-                          </div>
-                          <div className="space-y-2">
-                            {quickScript.bullets.map((bullet) => (
-                              <div key={bullet} className="flex gap-2 text-sm text-muted-foreground">
-                                <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                                <span>{bullet}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="flex flex-wrap gap-2">
-                      <Button asChild variant="outline">
-                        <Link href={`/leads/${activeLead.contact_id}`}>Open in Leads</Link>
-                      </Button>
-                      <Button variant="outline" onClick={() => setDispositionOpen(true)} disabled={!activeCallId}>
-                        <MessageSquare className="mr-2 h-4 w-4" />
-                        Wrap Call
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+              {startingCall ? <Loader2 className="h-4 w-4 animate-spin" /> : <PhoneCall className="h-4 w-4" />}
+              Double dial
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={!hasActiveLead || saving || startingCall}
+              onClick={openFollowUpTask}
+              className={`h-[58px] touch-manipulation justify-center border-neutral-700 bg-transparent text-[15px] text-neutral-100 hover:bg-neutral-800 sm:h-14 sm:text-base ${
+                selectedDisposition === 'callback' ? 'border-red-400 bg-red-500/10 text-white' : ''
+              } ${!hasActiveLead ? 'opacity-40' : ''}`}
+            >
+              <Mail className="h-4 w-4" />
+              Callback
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={!hasActiveLead || saving || startingCall}
+              onClick={() => void handleDeleteLead()}
+              className={`h-[58px] touch-manipulation justify-center border-neutral-700 bg-transparent text-[15px] text-neutral-100 hover:border-red-500/60 hover:bg-red-950/30 hover:text-red-100 sm:h-14 sm:text-base ${
+                !hasActiveLead ? 'opacity-40' : ''
+              }`}
+            >
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              Not interested
+            </Button>
           </div>
-        </div>
-      </main>
 
-      <Dialog open={dispositionOpen} onOpenChange={setDispositionOpen}>
-        <DialogContent className="sm:max-w-xl">
-          <DialogHeader>
-            <DialogTitle>Wrap the Call</DialogTitle>
-            <DialogDescription>
-              One tap if you want. Notes and follow-up are optional.
-            </DialogDescription>
-          </DialogHeader>
+          <div className="mt-3 grid grid-cols-2 gap-2 sm:mt-4">
+            <div className="relative">
+              <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-500" />
+              <Input
+                type="email"
+                inputMode="email"
+                autoCapitalize="none"
+                autoCorrect="off"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                disabled={!hasActiveLead || saving}
+                placeholder="Add email"
+                className="h-12 border-neutral-700 bg-[#171717] pl-9 text-base text-neutral-100 placeholder:text-neutral-600 focus-visible:ring-red-500/40"
+              />
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleVoicemailDrop}
+              disabled={!hasActiveLead || saving || startingCall}
+              className="h-12 w-full touch-manipulation border-neutral-700 bg-transparent text-neutral-100 hover:bg-neutral-800"
+            >
+              <Voicemail className="h-4 w-4" />
+              Voicemail drop
+            </Button>
+          </div>
 
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>Quick outcomes</Label>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {QUICK_OUTCOMES.map((option) => (
+          <Textarea
+            value={notes}
+            onChange={(event) => setNotes(event.target.value)}
+            disabled={!hasActiveLead || saving}
+            placeholder="Add a note…"
+            className="mt-3 min-h-[86px] resize-none border-neutral-700 bg-[#171717] text-base text-neutral-100 placeholder:text-neutral-600 focus-visible:ring-red-500/40 sm:min-h-[104px]"
+          />
+
+          <div className="mt-3 flex items-center justify-between rounded-md border border-neutral-800 bg-[#171717] px-3 py-2 sm:mt-4">
+            <div>
+              <div className="text-sm font-medium text-neutral-200">Auto-next</div>
+              <div className="text-xs text-neutral-500">Keep the next lead ready after every tap</div>
+            </div>
+            <Switch checked={autoNextEnabled} onCheckedChange={setAutoNextEnabled} aria-label="Toggle auto-next" />
+          </div>
+
+          <div className="sticky bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] z-20 mt-4 sm:static">
+            <div className="grid grid-cols-[1.2fr_0.8fr] gap-2 sm:grid-cols-[1fr_180px]">
+              <Button
+                type="button"
+                onClick={() => void handleStartPause()}
+                disabled={!hasActiveLead || device.setupState === 'initializing' || startingCall}
+                className="h-[52px] min-h-[52px] w-full touch-manipulation bg-red-500 text-base font-semibold text-white shadow-lg shadow-black/35 hover:bg-red-600 sm:h-12 sm:min-h-12"
+              >
+                {device.setupState === 'initializing' || startingCall ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : diallerRunning ? (
+                  <Pause className="h-4 w-4" />
+                ) : (
+                  <Play className="h-4 w-4" />
+                )}
+                {diallerRunning ? 'Pause' : 'Start'}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void handleSaveContact()}
+                disabled={!hasActiveLead || savingContact || saving || startingCall}
+                className="h-[52px] min-h-[52px] touch-manipulation border-neutral-700 bg-[#171717] text-base font-semibold text-neutral-100 hover:bg-neutral-800 sm:h-12 sm:min-h-12"
+              >
+                {savingContact ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                Save
+              </Button>
+            </div>
+          </div>
+        </section>
+
+        <Dialog open={followUpOpen} onOpenChange={setFollowUpOpen}>
+          <DialogContent
+            className="max-w-[calc(100%-1.5rem)] border-neutral-800 bg-[#202020] p-0 text-neutral-100 sm:max-w-xl"
+            showCloseButton={false}
+          >
+            <DialogHeader className="border-b border-neutral-800 px-4 py-4 text-left sm:px-5">
+              <DialogTitle className="text-xl font-semibold text-neutral-50">Callback</DialogTitle>
+            </DialogHeader>
+            <div className="grid gap-3 px-4 py-4 sm:px-5">
+              <Input
+                value={followUpName}
+                onChange={(event) => setFollowUpName(event.target.value)}
+                placeholder="Callback name"
+                aria-label="Follow up name"
+                className="h-12 border-neutral-700 bg-[#171717] text-base text-neutral-100 placeholder:text-neutral-600 focus-visible:ring-red-500/40"
+              />
+              <div className="grid grid-cols-3 gap-2">
+                {(['today', 'tomorrow', 'custom'] as const).map((choice) => (
                   <Button
-                    key={option.disposition}
+                    key={choice}
                     type="button"
                     variant="outline"
-                    className={`h-auto justify-start px-4 py-3 text-left ${option.accent}`}
-                    onClick={() => void handleQuickOutcome(option.disposition)}
-                    disabled={submittingDisposition}
+                    onClick={() => {
+                      const calledAt = callbackCalledAtRef.current ?? new Date();
+                      const defaults = getCallbackDefaultDateTime(choice, calledAt);
+                      setFollowUpChoice(choice);
+                      setFollowUpDate(defaults.date);
+                      setFollowUpTime(defaults.time);
+                    }}
+                    className={`h-11 border-neutral-700 bg-[#171717] text-neutral-100 hover:bg-neutral-800 ${
+                      followUpChoice === choice ? 'border-red-400 bg-red-500/10 text-white' : ''
+                    }`}
                   >
-                    <div>
-                      <div className="font-medium">{option.label}</div>
-                      <div className="text-xs opacity-80">Save and {autoNextEnabled ? 'move automatically' : 'load the next lead'}</div>
-                    </div>
+                    {choice === 'today' ? 'Today' : choice === 'tomorrow' ? 'Tomorrow' : 'Custom'}
                   </Button>
                 ))}
               </div>
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="dialer-disposition">Detailed outcome</Label>
-              <Select value={disposition} onValueChange={(value) => setDisposition(value as DialerCallDisposition)}>
-                <SelectTrigger id="dialer-disposition" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {DIALER_CALL_DISPOSITIONS.map((option) => (
-                    <SelectItem key={option} value={option}>
-                      {DIALER_DISPOSITION_LABELS[option]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="dialer-note">Call note</Label>
-              <Textarea
-                id="dialer-note"
-                value={dispositionNote}
-                onChange={(event) => setDispositionNote(event.target.value)}
-                placeholder="Capture the key outcome from this conversation."
-              />
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="grid gap-2">
-                <Label htmlFor="dialer-follow-up">Follow up</Label>
-                <Input
-                  id="dialer-follow-up"
-                  type="datetime-local"
-                  value={followUpAt}
-                  onChange={(event) => setFollowUpAt(event.target.value)}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="dialer-appointment">Appointment</Label>
-                <Input
-                  id="dialer-appointment"
-                  type="datetime-local"
-                  value={appointmentAt}
-                  onChange={(event) => setAppointmentAt(event.target.value)}
-                />
-              </div>
-            </div>
-
-            {device.allowSmsFollowup ? (
-              <div className="rounded-xl border p-4">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                      <MessageSquare className="h-4 w-4" />
-                      SMS follow-up
-                    </div>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Queue a text follow-up right after this call outcome is saved.
-                    </p>
-                    {device.smsFromNumber && (
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Sending from {formatPhoneDisplay(device.smsFromNumber)}
-                      </p>
-                    )}
-                  </div>
-                  <Switch
-                    checked={sendSmsFollowup}
-                    onCheckedChange={setSendSmsFollowup}
-                    disabled={!shouldOfferSmsFollowup(disposition) || !device.smsFromNumber}
-                    aria-label="Send SMS follow-up"
+              <div className={`grid gap-2 ${followUpChoice === 'custom' ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                {followUpChoice === 'custom' ? (
+                  <Input
+                    type="date"
+                    value={followUpDate}
+                    onChange={(event) => setFollowUpDate(event.target.value)}
+                    aria-label="Follow up date"
+                    className="h-12 border-neutral-700 bg-[#171717] text-base text-neutral-100 placeholder:text-neutral-600 focus-visible:ring-red-500/40"
                   />
-                </div>
+                ) : null}
+                <Input
+                  type="time"
+                  value={followUpTime}
+                  onChange={(event) => setFollowUpTime(event.target.value)}
+                  aria-label="Follow up time"
+                  className="h-12 border-neutral-700 bg-[#171717] text-base text-neutral-100 placeholder:text-neutral-600 focus-visible:ring-red-500/40"
+                />
+              </div>
+            </div>
+            <DialogFooter className="border-t border-neutral-800 px-4 py-4 sm:flex-row sm:px-5">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setFollowUpOpen(false)}
+                disabled={saving}
+                className="h-11 border-neutral-700 bg-transparent text-neutral-100 hover:bg-neutral-800"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={() => void handleFollowUp()}
+                disabled={!hasActiveLead || saving}
+                className="h-11 bg-red-500 text-white hover:bg-red-600"
+              >
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
+                Create callback
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
-                {!device.smsFromNumber && (
-                  <div className="mt-3 text-xs text-muted-foreground">
-                    Add an SMS-enabled Twilio number to send follow-up texts from this modal.
-                  </div>
-                )}
+        <section className="mt-2">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-neutral-100">Call Queue</h2>
+              <p className="text-sm text-neutral-500">
+                {leads.length > 0 ? `${leads.length} leads loaded.` : 'Import a CSV list to begin.'}
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv,text/csv"
+                className="hidden"
+                onChange={(event) => void handleFileSelected(event.target.files?.[0] ?? null)}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleImportClick}
+                disabled={!currentWorkspaceId || importing}
+                className="min-h-11 touch-manipulation border-neutral-700 bg-transparent text-neutral-100 hover:bg-neutral-900"
+              >
+                {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                <span className="hidden sm:inline">Import List</span>
+                <span className="sm:hidden">Import</span>
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void handleDeleteList()}
+                disabled={!currentWorkspaceId || leads.length === 0 || deletingList || importing}
+                className="min-h-11 touch-manipulation border-red-500/40 bg-transparent text-red-200 hover:border-red-500/70 hover:bg-red-950/30 hover:text-red-100"
+              >
+                {deletingList ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                <span className="hidden sm:inline">Delete List</span>
+                <span className="sm:hidden">Delete</span>
+              </Button>
+            </div>
+          </div>
 
-                {device.smsFromNumber && !shouldOfferSmsFollowup(disposition) && (
-                  <div className="mt-3 text-xs text-muted-foreground">
-                    SMS follow-up is disabled for this outcome.
-                  </div>
-                )}
-
-                {sendSmsFollowup && device.smsFromNumber && shouldOfferSmsFollowup(disposition) && (
-                  <div className="mt-4 space-y-3">
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={handleApplySuggestedSms}
-                      >
-                        Use suggested text
-                      </Button>
-                    </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="dialer-sms-body">Message</Label>
-                      <Textarea
-                        id="dialer-sms-body"
-                        value={smsBody}
-                        onChange={(event) => setSmsBody(event.target.value)}
-                        placeholder="Write the follow-up text that should send after this call."
-                        className="min-h-[120px]"
-                      />
-                      <div className="text-right text-xs text-muted-foreground">
-                        {smsBody.trim().length} characters
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                <div className="mt-4 border-t pt-4">
-                  <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Recent texts for this call</div>
-                  {loadingSmsHistory ? (
-                    <div className="mt-3 inline-flex items-center gap-2 text-sm text-muted-foreground">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Loading follow-up texts…
-                    </div>
-                  ) : smsHistory.length === 0 ? (
-                    <div className="mt-3 text-sm text-muted-foreground">
-                      No follow-up texts have been sent for this call yet.
-                    </div>
-                  ) : (
-                    <div className="mt-3 space-y-2">
-                      {smsHistory.map((followup) => (
-                        <div key={followup.id} className="rounded-lg border bg-muted/30 p-3">
-                          <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-                            <span>{formatSmsStatus(followup.status)}</span>
-                            <span>{formatLeadDateTime(followup.sent_at ?? followup.created_at)}</span>
-                          </div>
-                          <div className="mt-2 whitespace-pre-wrap text-sm text-foreground">{followup.body}</div>
-                          {followup.error_message && (
-                            <div className="mt-2 text-xs text-red-600 dark:text-red-400">{followup.error_message}</div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+          <div className="overflow-hidden rounded-xl border border-neutral-800 bg-[#171717]">
+            {leads.length === 0 ? (
+              <div className="px-4 py-8 text-sm text-neutral-500">
+                No leads loaded.
               </div>
             ) : (
-              <div className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
-                SMS follow-up is off for this workspace. Add a Twilio SMS-enabled number and enable SMS follow-up to text leads from the dialer.
+              <div className="divide-y divide-neutral-800">
+                {leads.map((lead) => {
+                  const status = statusForLead(lead);
+                  const isActive = lead.id === activeLead?.id;
+                  return (
+                    <button
+                      key={lead.id}
+                      type="button"
+                      onClick={() => setActiveLeadId(lead.id)}
+                      className={`grid min-h-[64px] w-full gap-1.5 px-3 py-3 text-left transition hover:bg-neutral-900 sm:grid-cols-[1.2fr_1fr_0.9fr_auto] sm:items-center sm:gap-2 sm:px-4 ${
+                        isActive ? 'bg-neutral-900' : ''
+                      }`}
+                    >
+                      <div className="truncate text-sm font-medium text-neutral-100">{lead.name || 'Lead'}</div>
+                      <div className="truncate text-sm text-neutral-400">{lead.company || '—'}</div>
+                      <div className="text-sm text-neutral-400">{formatPhoneDisplay(lead.phone)}</div>
+                      <Badge
+                        variant="outline"
+                        className={`w-fit border-neutral-700 text-neutral-300 ${
+                          status === 'pending'
+                            ? 'bg-neutral-950'
+                            : status === 'called'
+                              ? 'border-emerald-500/40 bg-emerald-950/30 text-emerald-200'
+                              : 'border-red-500/40 bg-red-950/30 text-red-200'
+                        }`}
+                      >
+                        {status}
+                      </Badge>
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDispositionOpen(false)} disabled={submittingDisposition}>
-              Close
-            </Button>
-            <Button onClick={() => void handleSubmitDisposition()} disabled={submittingDisposition}>
-              {submittingDisposition ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <>
-                  {sendingSms ? <Send className="mr-2 h-4 w-4" /> : <Play className="mr-2 h-4 w-4" />}
-                </>
-              )}
-              {submittingDisposition ? (sendingSms ? 'Saving and texting…' : 'Saving…') : 'Save and continue'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        </section>
+      </div>
     </div>
   );
 }
