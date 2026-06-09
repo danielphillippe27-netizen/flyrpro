@@ -29,6 +29,7 @@ type DialerSettingsStatus = {
     defaultFromNumber: string;
     defaultSmsFromNumber: string | null;
     dedicatedFromNumber: string | null;
+    inboundForwardTo: string | null;
     numberStatus: 'unassigned' | 'active' | 'released';
     usesSharedDefaultNumber: boolean;
   } | null;
@@ -41,11 +42,13 @@ export function PowerDialerSettingsCard() {
   const voicemailFileInputRef = useRef<HTMLInputElement | null>(null);
   const [dialerSettingsStatus, setDialerSettingsStatus] = useState<DialerSettingsStatus | null>(null);
   const [dialerAreaCode, setDialerAreaCode] = useState('');
+  const [inboundForwardTo, setInboundForwardTo] = useState('');
   const [voicemailDrops, setVoicemailDrops] = useState<DialerVoicemailDrop[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingVoicemails, setLoadingVoicemails] = useState(false);
   const [isEnablingDialerAddon, setIsEnablingDialerAddon] = useState(false);
   const [isProvisioningDialerNumber, setIsProvisioningDialerNumber] = useState(false);
+  const [isSavingInboundForward, setIsSavingInboundForward] = useState(false);
   const [isUploadingVoicemail, setIsUploadingVoicemail] = useState(false);
   const [activatingVoicemailId, setActivatingVoicemailId] = useState<string | null>(null);
   const [deletingVoicemailId, setDeletingVoicemailId] = useState<string | null>(null);
@@ -70,6 +73,7 @@ export function PowerDialerSettingsCard() {
       if (response.ok) {
         const data = await response.json();
         setDialerSettingsStatus(data);
+        setInboundForwardTo(data.settings?.inboundForwardTo ?? '');
       }
     } catch (error) {
       console.error('Error loading dialer settings:', error);
@@ -176,6 +180,42 @@ export function PowerDialerSettingsCard() {
       setMessage({ type: 'error', text: 'Network error while provisioning the Twilio number.' });
     } finally {
       setIsProvisioningDialerNumber(false);
+    }
+  };
+
+  const handleSaveInboundForward = async () => {
+    if (!currentWorkspaceId) return;
+
+    setIsSavingInboundForward(true);
+    setMessage(null);
+    try {
+      const response = await fetch('/api/dialer/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          workspaceId: currentWorkspaceId,
+          inboundForwardTo: inboundForwardTo.trim(),
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setMessage({ type: 'error', text: data.error || 'Failed to save inbound forwarding number.' });
+        return;
+      }
+
+      setMessage({
+        type: 'success',
+        text: inboundForwardTo.trim()
+          ? 'Inbound calls will forward to this phone number.'
+          : 'Inbound call forwarding cleared.',
+      });
+      await loadDialerSettingsStatus(currentWorkspaceId);
+    } catch (error) {
+      console.error(error);
+      setMessage({ type: 'error', text: 'Network error while saving inbound forwarding.' });
+    } finally {
+      setIsSavingInboundForward(false);
     }
   };
 
@@ -361,6 +401,30 @@ export function PowerDialerSettingsCard() {
                 </p>
               )}
             </div>
+
+            {dialerSettingsStatus?.canManage && (
+              <div className="space-y-2 rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+                <Label htmlFor="settings-inbound-forward-to">Forward inbound calls</Label>
+                <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                  <Input
+                    id="settings-inbound-forward-to"
+                    inputMode="tel"
+                    placeholder="+1 555 123 4567"
+                    value={inboundForwardTo}
+                    onChange={(event) => setInboundForwardTo(event.target.value)}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void handleSaveInboundForward()}
+                    disabled={isSavingInboundForward || !currentWorkspaceId}
+                  >
+                    {isSavingInboundForward ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                    Save forwarding
+                  </Button>
+                </div>
+              </div>
+            )}
 
             {!dialerSettingsStatus?.addon?.isActive && dialerSettingsStatus?.canManage && (
               <Button

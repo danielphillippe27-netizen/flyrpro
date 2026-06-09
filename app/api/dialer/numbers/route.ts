@@ -138,6 +138,7 @@ export async function POST(request: NextRequest) {
       );
     }
     const voiceUrl = new URL('/api/twilio/voice/incoming', appUrl).toString();
+    const smsUrl = new URL('/api/twilio/messaging/incoming', appUrl).toString();
     const statusCallback = new URL('/api/twilio/voice/incoming-status', appUrl).toString();
 
     const purchasedNumber = await client.incomingPhoneNumbers.create({
@@ -145,6 +146,8 @@ export async function POST(request: NextRequest) {
       friendlyName: `FLYR ${membership.workspaceId}`,
       voiceUrl,
       voiceMethod: 'POST',
+      smsUrl,
+      smsMethod: 'POST',
       statusCallback,
       statusCallbackMethod: 'POST',
     });

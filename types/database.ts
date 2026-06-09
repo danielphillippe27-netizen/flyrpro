@@ -878,7 +878,7 @@ export interface DialerCall {
 export interface DialerSmsFollowup {
   id: string;
   workspace_id: string;
-  call_id: string;
+  call_id?: string | null;
   contact_id: string;
   user_id: string;
   twilio_message_sid?: string | null;
@@ -890,6 +890,21 @@ export interface DialerSmsFollowup {
   error_message?: string | null;
   sent_at?: string | null;
   delivered_at?: string | null;
+  status_payload?: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DialerInboundMessage {
+  id: string;
+  workspace_id: string;
+  contact_id?: string | null;
+  twilio_message_sid?: string | null;
+  from_number_e164: string;
+  to_number_e164: string;
+  body: string;
+  received_at: string;
+  read_at?: string | null;
   status_payload?: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;

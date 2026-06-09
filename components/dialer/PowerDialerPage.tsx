@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, CheckCircle2, Loader2, Mail, Mic, Pause, PhoneCall, Play, Save, Send, Trash2, Upload, Voicemail } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Loader2, Mail, MessageSquare, Mic, Pause, PhoneCall, Play, Save, Send, Trash2, Upload, Voicemail } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -203,6 +203,9 @@ export function PowerDialerPage() {
   const [followUpDate, setFollowUpDate] = useState('');
   const [followUpTime, setFollowUpTime] = useState('');
   const [followUpChoice, setFollowUpChoice] = useState<'today' | 'tomorrow' | 'custom'>('today');
+  const [textOpen, setTextOpen] = useState(false);
+  const [textBody, setTextBody] = useState('');
+  const [sendingText, setSendingText] = useState(false);
   const [autoNextEnabled, setAutoNextEnabled] = useState(true);
   const [diallerRunning, setDiallerRunning] = useState(false);
   const [callSeconds, setCallSeconds] = useState(0);
@@ -329,11 +332,15 @@ export function PowerDialerPage() {
     if (!activeLead) {
       setNotes('');
       setEmail('');
+      setTextBody('');
+      setTextOpen(false);
       setSelectedDisposition('interested');
       return;
     }
     setNotes(activeLead.notes ?? '');
     setEmail(activeLead.email ?? '');
+    setTextBody('');
+    setTextOpen(false);
     setSelectedDisposition(activeLead.disposition ?? 'interested');
   }, [activeLead]);
 
@@ -656,6 +663,49 @@ export function PowerDialerPage() {
     }
   };
 
+  const openTextComposer = () => {
+    if (!activeLead) return;
+    setError(null);
+    setMessage(null);
+    setTextOpen(true);
+  };
+
+  const handleSendText = async () => {
+    if (!activeLead || !currentWorkspaceId) return;
+
+    const body = textBody.trim();
+    if (!body) {
+      setError('Write a text before sending it.');
+      return;
+    }
+
+    setSendingText(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const response = await fetch(`/api/dialer/leads/${activeLead.id}/sms`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          workspaceId: currentWorkspaceId,
+          body,
+        }),
+      });
+      const data = (await response.json().catch(() => ({}))) as { warning?: string | null; error?: string };
+      if (!response.ok) throw new Error(data.error || 'Failed to send text.');
+
+      setTextBody('');
+      setTextOpen(false);
+      setMessage(data.warning ?? 'Text sent.');
+    } catch (sendError) {
+      setError(sendError instanceof Error ? sendError.message : 'Failed to send text.');
+    } finally {
+      setSendingText(false);
+    }
+  };
+
   const handleSaveContact = async () => {
     if (!activeLead || !currentWorkspaceId) return;
 
@@ -909,7 +959,7 @@ export function PowerDialerPage() {
             </Button>
           </div>
 
-          <div className="mt-3 grid grid-cols-2 gap-2 sm:mt-4">
+          <div className="mt-3 grid gap-2 sm:mt-4">
             <div className="relative">
               <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-500" />
               <Input
@@ -924,16 +974,28 @@ export function PowerDialerPage() {
                 className="h-12 border-neutral-700 bg-[#171717] pl-9 text-base text-neutral-100 placeholder:text-neutral-600 focus-visible:ring-red-500/40"
               />
             </div>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={handleVoicemailDrop}
-              disabled={!hasActiveLead || saving || startingCall}
-              className="h-12 w-full touch-manipulation border-neutral-700 bg-transparent text-neutral-100 hover:bg-neutral-800"
-            >
-              <Voicemail className="h-4 w-4" />
-              Voicemail drop
-            </Button>
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={openTextComposer}
+                disabled={!hasActiveLead || sendingText || saving || startingCall}
+                className="h-12 w-full touch-manipulation border-neutral-700 bg-transparent text-neutral-100 hover:bg-neutral-800"
+              >
+                {sendingText ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageSquare className="h-4 w-4" />}
+                Text
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleVoicemailDrop}
+                disabled={!hasActiveLead || saving || startingCall}
+                className="h-12 w-full touch-manipulation border-neutral-700 bg-transparent text-neutral-100 hover:bg-neutral-800"
+              >
+                <Voicemail className="h-4 w-4" />
+                Voicemail drop
+              </Button>
+            </div>
           </div>
 
           <Textarea
@@ -982,6 +1044,50 @@ export function PowerDialerPage() {
             </div>
           </div>
         </section>
+
+        <Dialog open={textOpen} onOpenChange={setTextOpen}>
+          <DialogContent
+            className="max-w-[calc(100%-1.5rem)] border-neutral-800 bg-[#202020] p-0 text-neutral-100 sm:max-w-xl"
+            showCloseButton={false}
+          >
+            <DialogHeader className="border-b border-neutral-800 px-4 py-4 text-left sm:px-5">
+              <DialogTitle className="text-xl font-semibold text-neutral-50">Text</DialogTitle>
+            </DialogHeader>
+            <div className="grid gap-2 px-4 py-4 sm:px-5">
+              <div className="text-sm text-neutral-400">
+                {activeLead?.name?.trim() || 'Lead'} · {activeLead?.phone ? formatPhoneDisplay(activeLead.phone) : '—'}
+              </div>
+              <Textarea
+                value={textBody}
+                onChange={(event) => setTextBody(event.target.value.slice(0, 1000))}
+                disabled={!hasActiveLead || sendingText}
+                placeholder="Write a text…"
+                className="min-h-[132px] resize-none border-neutral-700 bg-[#171717] text-base text-neutral-100 placeholder:text-neutral-600 focus-visible:ring-red-500/40"
+              />
+              <div className="text-right text-xs text-neutral-500">{textBody.trim().length}/1000</div>
+            </div>
+            <DialogFooter className="border-t border-neutral-800 px-4 py-4 sm:flex-row sm:px-5">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setTextOpen(false)}
+                disabled={sendingText}
+                className="h-11 border-neutral-700 bg-transparent text-neutral-100 hover:bg-neutral-800"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={() => void handleSendText()}
+                disabled={!hasActiveLead || sendingText || !textBody.trim()}
+                className="h-11 bg-red-500 text-white hover:bg-red-600"
+              >
+                {sendingText ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageSquare className="h-4 w-4" />}
+                Send text
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <Dialog open={followUpOpen} onOpenChange={setFollowUpOpen}>
           <DialogContent
