@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FLYR PRO — Every Door Accounted For</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#0c0c0a;
+  --paper:#d9d5cb;
+  --paper-deep:#cfcabe;
+  --orange:#ff4d00;
+  --green:#27c878;
+  --amber:#ffb000;
+  --red:#e53935;
+  --mono:'IBM Plex Mono',monospace;
+  --disp:'Archivo',sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  background:var(--ink);
+  color:var(--paper);
+  font-family:var(--mono);
+  font-size:15px;
+  line-height:1.5;
+  overflow-x:hidden;
+}
+::selection{background:var(--orange);color:var(--ink)}
+
+/* ---------- grain ---------- */
+.grain{
+  position:fixed;inset:0;pointer-events:none;z-index:50;opacity:.07;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+}
+
+/* ---------- progress rail ---------- */
+.rail{
+  position:fixed;left:0;top:0;bottom:0;width:54px;z-index:40;
+  display:flex;flex-direction:column;justify-content:center;gap:26px;
+  padding-left:18px;
+}
+.rail a{
+  font-family:var(--mono);font-size:11px;letter-spacing:.08em;
+  color:var(--paper);opacity:.28;text-decoration:none;
+  transition:opacity .3s,color .3s;
+}
+.rail a.active{opacity:1;color:var(--orange)}
+.rail a:focus-visible{outline:2px solid var(--orange);outline-offset:3px;opacity:1}
+@media(max-width:760px){.rail{display:none}}
+
+/* ---------- shared section bones ---------- */
+section{position:relative;min-height:100vh;padding:14vh 8vw;display:flex;flex-direction:column;justify-content:center}
+.eyebrow{
+  font-family:var(--mono);font-size:12px;font-weight:500;letter-spacing:.22em;
+  text-transform:uppercase;display:flex;align-items:center;gap:14px;margin-bottom:4vh;
+}
+.eyebrow::before{content:"";display:block;width:34px;height:2px;background:currentColor}
+h1,h2{
+  font-family:var(--disp);
+  font-weight:900;
+  font-stretch:73%;
+  text-transform:uppercase;
+  line-height:.92;
+  letter-spacing:-.01em;
+}
+.h-mega{font-size:clamp(52px,11vw,158px)}
+.h-big{font-size:clamp(40px,7.6vw,104px)}
+.accent{color:var(--orange)}
+.sub{max-width:54ch;font-size:clamp(14px,1.4vw,17px);opacity:.78;margin-top:3.5vh}
+
+/* reveal */
+.rv{opacity:0;transform:translateY(34px);transition:opacity .8s cubic-bezier(.2,.7,.2,1),transform .8s cubic-bezier(.2,.7,.2,1)}
+.rv.d1{transition-delay:.12s}.rv.d2{transition-delay:.24s}.rv.d3{transition-delay:.38s}.rv.d4{transition-delay:.52s}
+.in .rv{opacity:1;transform:none}
+
+/* light sections */
+.light{background:var(--paper);color:var(--ink)}
+.light ::selection{background:var(--ink);color:var(--paper)}
+
+/* ---------- BEAT 01 ---------- */
+#b1{align-items:flex-start;overflow:hidden}
+#b1 .coords{
+  position:absolute;top:26px;right:8vw;font-size:12px;letter-spacing:.12em;
+  opacity:.55;text-align:right;line-height:1.9;
+}
+#b1 .trace{position:absolute;inset:0;width:100%;height:100%;opacity:.5;pointer-events:none}
+#b1 .trace path{
+  fill:none;stroke:var(--orange);stroke-width:1.6;
+  stroke-dasharray:3000;stroke-dashoffset:3000;
+  animation:trace 7s ease-out .4s forwards;
+}
+@keyframes trace{to{stroke-dashoffset:0}}
+.scrollcue{
+  position:absolute;bottom:30px;left:8vw;font-size:12px;letter-spacing:.22em;opacity:.5;
+  animation:cue 2.2s ease-in-out infinite;
+}
+@keyframes cue{0%,100%{transform:translateY(0)}50%{transform:translateY(8px)}}
+.wordmark{position:absolute;top:26px;left:8vw;font-family:var(--disp);font-weight:900;font-stretch:73%;font-size:18px;letter-spacing:.04em}
+.wordmark b{color:var(--orange)}
+
+/* ---------- BEAT 02 ---------- */
+#b2 .strikes{display:flex;flex-direction:column;gap:1.2vh;margin:4.5vh 0}
+.strike{
+  font-family:var(--disp);font-weight:900;font-stretch:73%;text-transform:uppercase;
+  font-size:clamp(26px,4.6vw,62px);line-height:1.04;position:relative;width:max-content;max-width:100%;
+  opacity:.34;
+}
+.strike::after{
+  content:"";position:absolute;left:-2%;top:52%;height:.09em;width:0;background:var(--orange);
+  transition:width .55s cubic-bezier(.7,0,.3,1);
+}
+.in .strike::after{width:104%}
+.in .strike:nth-child(1)::after{transition-delay:.5s}
+.in .strike:nth-child(2)::after{transition-delay:.85s}
+.in .strike:nth-child(3)::after{transition-delay:1.2s}
+.mathrow{
+  border-top:2px solid var(--ink);border-bottom:2px solid var(--ink);
+  display:flex;flex-wrap:wrap;margin-top:5vh;
+}
+.mathcell{flex:1 1 160px;padding:22px 22px 22px 0;border-right:2px solid var(--ink)}
+.mathcell:last-child{border-right:none;padding-left:22px}
+.mathcell .k{font-size:11px;letter-spacing:.2em;text-transform:uppercase;opacity:.6}
+.mathcell .v{font-family:var(--disp);font-weight:900;font-stretch:73%;font-size:clamp(26px,3.6vw,52px);line-height:1.1}
+.mathcell.hot .v{color:var(--orange)}
+
+/* ---------- canvas stages (beats 3 & 4) ---------- */
+.stage{
+  position:relative;width:100%;border:2px solid currentColor;margin-top:4vh;
+  aspect-ratio:16/9;max-height:62vh;overflow:hidden;
+}
+@media(max-width:760px){.stage{aspect-ratio:4/5}}
+.stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.stage .hud{
+  position:absolute;left:0;right:0;bottom:0;display:flex;justify-content:space-between;align-items:flex-end;
+  padding:14px 16px;font-size:12px;letter-spacing:.14em;text-transform:uppercase;pointer-events:none;
+}
+.counter{font-family:var(--disp);font-weight:900;font-stretch:73%;font-size:clamp(30px,4.4vw,58px);line-height:1}
+.counter small{display:block;font-family:var(--mono);font-weight:500;font-size:11px;letter-spacing:.2em;margin-top:6px}
+.replay{
+  position:absolute;top:14px;right:14px;z-index:5;
+  font-family:var(--mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;
+  background:var(--ink);color:var(--paper);border:2px solid var(--ink);
+  padding:10px 18px;cursor:pointer;transition:background .2s,color .2s;
+}
+.replay:hover,.replay:focus-visible{background:var(--orange);border-color:var(--orange);color:var(--ink);outline:none}
+#b4 .replay{background:var(--paper);color:var(--ink);border-color:var(--paper)}
+#b4 .replay:hover,#b4 .replay:focus-visible{background:var(--orange);border-color:var(--orange)}
+
+/* beat 4 layout */
+#b4 .grid4{display:grid;grid-template-columns:1fr 300px;gap:18px;margin-top:4vh}
+@media(max-width:980px){#b4 .grid4{grid-template-columns:1fr}}
+#b4 .stage{margin-top:0;border-color:#3a3a35}
+.panel{border:2px solid #3a3a35;display:flex;flex-direction:column;min-height:0}
+.panel h3{
+  font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.22em;text-transform:uppercase;
+  padding:12px 14px;border-bottom:2px solid #3a3a35;color:var(--orange);
+}
+.feed{flex:1;overflow:hidden;padding:10px 14px;font-size:12px;line-height:2.1;display:flex;flex-direction:column;justify-content:flex-end;min-height:150px}
+.feed div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;animation:feedin .4s ease-out}
+@keyframes feedin{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.feed .ok{color:var(--green)}.feed .nh{color:var(--amber)}.feed .dk{color:var(--red)}
+.lb{padding:10px 14px;border-top:2px solid #3a3a35}
+.lb .row{display:flex;justify-content:space-between;font-size:12px;line-height:2.2}
+.lb .row b{font-weight:700}
+.lb .row .n{font-family:var(--disp);font-weight:900;font-size:16px}
+
+/* ---------- BEAT 05 phone ---------- */
+#b5 .duo{display:grid;grid-template-columns:1.1fr .9fr;gap:6vw;align-items:center;margin-top:2vh}
+@media(max-width:900px){#b5 .duo{grid-template-columns:1fr}}
+.phone{
+  width:min(330px,86vw);margin:0 auto;background:var(--ink);color:var(--paper);
+  border:3px solid var(--ink);border-radius:34px;padding:14px;
+  box-shadow:14px 14px 0 rgba(12,12,10,.18);
+}
+.screen{background:#161613;border-radius:22px;overflow:hidden;display:flex;flex-direction:column;min-height:480px}
+.appbar{display:flex;justify-content:space-between;padding:14px 16px;font-size:11px;letter-spacing:.14em;border-bottom:1px solid #2c2c27}
+.appbar b{color:var(--orange)}
+.doorcard{padding:18px 16px;border-bottom:1px solid #2c2c27}
+.doorcard .addr{font-family:var(--disp);font-weight:900;font-stretch:73%;font-size:26px;text-transform:uppercase;line-height:1}
+.doorcard .meta{font-size:11px;letter-spacing:.12em;opacity:.6;margin-top:8px}
+.outs{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:16px}
+.outs button{
+  font-family:var(--mono);font-size:12px;letter-spacing:.1em;text-transform:uppercase;font-weight:700;
+  padding:14px 8px;background:transparent;color:var(--paper);border:2px solid #3a3a35;cursor:pointer;
+  transition:all .15s;
+}
+.outs button:hover,.outs button:focus-visible{border-color:var(--paper);outline:none}
+.outs button.sel-ok{background:var(--green);border-color:var(--green);color:var(--ink)}
+.outs button.sel-nh{background:var(--amber);border-color:var(--amber);color:var(--ink)}
+.outs button.sel-na{background:#888;border-color:#888;color:var(--ink)}
+.outs button.sel-dk{background:var(--red);border-color:var(--red);color:var(--ink)}
+.leadflow{padding:0 16px 18px;display:none;flex-direction:column;gap:8px}
+.leadflow.show{display:flex}
+.leadline{display:flex;justify-content:space-between;font-size:12px;border-bottom:1px dashed #3a3a35;padding:8px 0}
+.leadline span:first-child{opacity:.55}
+.sync{
+  margin-top:10px;font-size:12px;letter-spacing:.14em;text-transform:uppercase;font-weight:700;
+  border:2px solid var(--green);color:var(--green);padding:10px 12px;text-align:center;
+  opacity:0;transform:translateY(8px);transition:all .5s .5s;
+}
+.leadflow.show .sync{opacity:1;transform:none}
+#b5 .pitch li{list-style:none;font-size:clamp(14px,1.5vw,17px);padding:14px 0;border-bottom:2px solid var(--ink);display:flex;gap:14px}
+#b5 .pitch li::before{content:"→";color:var(--orange);font-weight:700}
+
+/* ---------- BEAT 06 ---------- */
+#b6{text-align:left}
+#b6 .price{font-size:clamp(64px,14vw,200px)}
+.cta-row{display:flex;flex-wrap:wrap;gap:18px;margin-top:5vh;align-items:center}
+.btn{
+  font-family:var(--mono);font-weight:700;font-size:14px;letter-spacing:.16em;text-transform:uppercase;
+  background:var(--orange);color:var(--ink);border:2px solid var(--orange);
+  padding:20px 34px;text-decoration:none;cursor:pointer;transition:all .15s;
+}
+.btn:hover,.btn:focus-visible{background:transparent;color:var(--orange);outline:none}
+.btn.ghost{background:transparent;color:var(--paper);border-color:var(--paper)}
+.btn.ghost:hover,.btn.ghost:focus-visible{border-color:var(--orange);color:var(--orange)}
+.founder{margin-top:6vh;font-size:13px;letter-spacing:.06em;opacity:.7;max-width:46ch;line-height:2}
+.founder b{color:var(--orange)}
+
+footer{padding:26px 8vw;border-top:1px solid #2c2c27;font-size:11px;letter-spacing:.18em;text-transform:uppercase;opacity:.45;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important}
+  .rv{opacity:1;transform:none}
+}
+</style>
+</head>
+<body>
+<div class="grain" aria-hidden="true"></div>
+
+<nav class="rail" aria-label="Beats">
+  <a href="#b1" data-rail="b1">01</a>
+  <a href="#b2" data-rail="b2">02</a>
+  <a href="#b3" data-rail="b3">03</a>
+  <a href="#b4" data-rail="b4">04</a>
+  <a href="#b5" data-rail="b5">05</a>
+  <a href="#b6" data-rail="b6">06</a>
+</nav>
+
+<!-- ============ BEAT 01 · COLD OPEN ============ -->
+<section id="b1">
+  <div class="wordmark">FLYR<b>PRO</b></div>
+  <div class="coords" id="coords">43.8828° N · 79.4403° W<br>TUE 07:42 · CREW OF 15<br>STATUS: UNKNOWN</div>
+  <svg class="trace" viewBox="0 0 1200 700" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+    <path d="M-50,620 L180,620 L180,470 L390,470 L390,560 L640,560 L640,380 L520,380 L520,250 L820,250 L820,330 L1020,330 L1020,140 L1260,140"/>
+  </svg>
+  <div class="rv eyebrow">Beat 01 · Cold open</div>
+  <h1 class="h-mega rv d1">Your crew is on the doors</h1>
+  <h1 class="h-mega accent rv d2">Prove it.</h1>
+  <p class="sub rv d3">FLYR PRO runs door-to-door field teams — territories, routes, reps, and every knock, verified. Three minutes, no call, no signup. Just scroll.</p>
+  <div class="scrollcue">Scroll ↓</div>
+</section>
+
+<!-- ============ BEAT 02 · PAIN ============ -->
+<section id="b2" class="light">
+  <div class="rv eyebrow">Beat 02 · The problem</div>
+  <h2 class="h-big rv d1">You're paying for work<br>you can't see.</h2>
+  <p class="sub rv d2">Fifteen reps left the shop at 8 AM. Right now the knock record is a group chat and a gut feeling.</p>
+  <div class="strikes rv d3">
+    <div class="strike">Paper route sheets</div>
+    <div class="strike">The group chat</div>
+    <div class="strike">"Trust me, boss"</div>
+  </div>
+  <div class="mathrow rv d4">
+    <div class="mathcell"><div class="k">Reps</div><div class="v">15</div></div>
+    <div class="mathcell"><div class="k">Rate</div><div class="v">$25/hr</div></div>
+    <div class="mathcell"><div class="k">Hours</div><div class="v">6</div></div>
+    <div class="mathcell hot"><div class="k">Paid on faith, daily</div><div class="v">$2,250</div></div>
+  </div>
+</section>
+
+<!-- ============ BEAT 03 · TERRITORY SANDBOX ============ -->
+<section id="b3" class="light">
+  <div class="rv eyebrow">Beat 03 · Territory</div>
+  <h2 class="h-big rv d1">Draw a line.<br><span class="accent">Get every door.</span></h2>
+  <p class="sub rv d2">Draw or import a polygon and every deliverable address inside it is provisioned from municipal records — house by house, unit splits included. Assign routes, run it as a one-day blitz or farm it for months. And when hail hits overnight, you're knocking by 7 AM while the other crew is still printing maps.</p>
+  <div class="stage rv d3" id="stage3">
+    <canvas id="cv3"></canvas>
+    <button class="replay" id="replay3" type="button">↻ Redraw territory</button>
+    <div class="hud">
+      <div class="counter"><span id="count3">0</span><small>Addresses provisioned</small></div>
+      <div id="time3">00.0 s</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ BEAT 04 · LIVE TRACKING ============ -->
+<section id="b4">
+  <div class="rv eyebrow">Beat 04 · Ground truth</div>
+  <h2 class="h-big rv d1">Every rep. Every door.<br><span class="accent">Live.</span></h2>
+  <p class="sub rv d2">This is your dashboard at 2:30 on a Wednesday. GPS-tracked sessions, door-by-door outcomes, and a leaderboard your reps compete on all afternoon. The question at the top of this page — answered.</p>
+  <div class="grid4 rv d3">
+    <div class="stage" id="stage4">
+      <canvas id="cv4"></canvas>
+      <button class="replay" id="replay4" type="button">↻ Restart session</button>
+    </div>
+    <div class="panel">
+      <h3>Live feed</h3>
+      <div class="feed" id="feed4" aria-live="off"></div>
+      <div class="lb" id="lb4">
+        <div class="row"><b style="color:#5ab4ff">MARCUS</b><span class="n" id="lbA">0</span></div>
+        <div class="row"><b style="color:#ff4d00">DEVON</b><span class="n" id="lbB">0</span></div>
+        <div class="row"><b style="color:#27c878">PRIYA</b><span class="n" id="lbC">0</span></div>
+        <div class="row"><b style="color:#ffb000">COLE</b><span class="n" id="lbD">0</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ BEAT 05 · AT THE DOOR ============ -->
+<section id="b5" class="light">
+  <div class="rv eyebrow">Beat 05 · At the door</div>
+  <h2 class="h-big rv d1">Doorstep to CRM<br>in one tap.</h2>
+  <div class="duo">
+    <ul class="pitch rv d2">
+      <li>Tap an outcome below — this phone is live.</li>
+      <li>Leads land in your CRM as they're captured: HubSpot, Follow Up Boss, BoldTrail, Monday — or webhook into anything else.</li>
+      <li>No new workflow. This replaces the group chat, the route sheet, and the end-of-day text thread.</li>
+      <li>Zero signal? Full offline database. Syncs the moment coverage returns.</li>
+      <li>Reps keep stats and shareable performance cards — they want to log doors.</li>
+    </ul>
+    <div class="phone rv d3" aria-label="Interactive phone demo">
+      <div class="screen">
+        <div class="appbar"><span>FLYR<b> · LIVE SESSION</b></span><span>2:31 PM</span></div>
+        <div class="doorcard">
+          <div class="addr" id="addr5">112 Larkspur Crt</div>
+          <div class="meta">Door 47 of 112 · Route B · 4 doors/hr pace</div>
+        </div>
+        <div class="outs" id="outs5">
+          <button data-k="ok" type="button">Interested</button>
+          <button data-k="nh" type="button">Not home</button>
+          <button data-k="na" type="button">No answer</button>
+          <button data-k="dk" type="button">Do not knock</button>
+        </div>
+        <div class="leadflow" id="lead5">
+          <div class="leadline"><span>Name</span><span>J. Okafor</span></div>
+          <div class="leadline"><span>Phone</span><span>(905) 555-0184</span></div>
+          <div class="leadline"><span>Note</span><span>Hail damage, wants quote</span></div>
+          <div class="sync">✓ Synced → HubSpot · 0.4s</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ BEAT 06 · CTA ============ -->
+<section id="b6">
+  <div class="rv eyebrow">Beat 06 · The math</div>
+  <h2 class="price rv d1"><span class="accent">$40</span>/rep/mo.</h2>
+  <h2 class="h-big rv d2">One roof pays<br>for the year.</h2>
+  <div class="cta-row rv d3">
+    <a class="btn" href="mailto:harry@flyrpro.app?subject=Show%20me%20my%20territory">See it on your territory →</a>
+    <a class="btn ghost" href="https://flyrpro.app">flyrpro.app</a>
+  </div>
+  <p class="founder rv d4">No account manager. No ticket queue. <b>You get the person who built it</b> — if something matters at 7 AM before your crew rolls out, I'm the one who picks up, and the one who can fix it by 7:15.</p>
+</section>
+
+<footer>
+  <span>FLYR PRO · Field operations, verified</span>
+  <span>CA · US · UK · AU · NZ · ZA</span>
+</footer>
+
+<script>
+(function(){
+"use strict";
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ---------- reveal + rail ---------- */
+const sections=[...document.querySelectorAll('section')];
+const io=new IntersectionObserver(es=>es.forEach(e=>{
+  if(e.isIntersecting){
+    e.target.classList.add('in');
+    document.querySelectorAll('.rail a').forEach(a=>a.classList.toggle('active',a.dataset.rail===e.target.id));
+  }
+}),{threshold:.25});
+sections.forEach(s=>io.observe(s));
+
+/* ---------- beat 01 coords ticker ---------- */
+const coordsEl=document.getElementById('coords');
+let t0=Date.now();
+if(!reduced)setInterval(()=>{
+  const d=new Date();
+  const lat=(43.8828+Math.sin(Date.now()/9000)*0.0007).toFixed(4);
+  const lng=(79.4403+Math.cos(Date.now()/11000)*0.0007).toFixed(4);
+  coordsEl.innerHTML=lat+'° N · '+lng+'° W<br>TUE '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')+' · CREW OF 15<br>STATUS: UNKNOWN';
+},1000);
+
+/* ---------- shared city model ---------- */
+function buildCity(W,H){
+  // street grid with jitter; returns streets (segments) + addresses (points)
+  const rng=mulberry(7);
+  const vx=[],hy=[];
+  for(let x=W*0.04;x<W*0.99;x+=W*0.085+rng()*W*0.03)vx.push(x);
+  for(let y=H*0.06;y<H*0.99;y+=H*0.14+rng()*H*0.05)hy.push(y);
+  const addrs=[];
+  for(let i=0;i<vx.length-1;i++)for(let j=0;j<hy.length-1;j++){
+    const x0=vx[i],x1=vx[i+1],y0=hy[j],y1=hy[j+1];
+    const inset=Math.min(10,(x1-x0)*0.12);
+    const step=11+rng()*3;
+    for(let x=x0+inset*1.6;x<x1-inset*1.6;x+=step){
+      addrs.push({x,y:y0+inset,side:0});
+      addrs.push({x,y:y1-inset,side:1});
+    }
+    // occasional multi-unit cluster (townhouse split)
+    if(rng()<0.18){
+      const cx=x0+(x1-x0)*0.5,cy=(y0+y1)/2;
+      for(let u=0;u<6;u++)addrs.push({x:cx-15+u*6,y:cy,unit:true});
+    }
+  }
+  return{vx,hy,addrs};
+}
+function mulberry(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+function drawStreets(ctx,city,W,H,col){
+  ctx.strokeStyle=col;ctx.lineWidth=1;
+  ctx.beginPath();
+  city.vx.forEach(x=>{ctx.moveTo(x,0);ctx.lineTo(x,H)});
+  city.hy.forEach(y=>{ctx.moveTo(0,y);ctx.lineTo(W,y)});
+  ctx.stroke();
+}
+function pointInPoly(p,poly){
+  let inside=false;
+  for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+    const xi=poly[i][0],yi=poly[i][1],xj=poly[j][0],yj=poly[j][1];
+    if(((yi>p.y)!=(yj>p.y))&&(p.x<(xj-xi)*(p.y-yi)/(yj-yi)+xi))inside=!inside;
+  }
+  return inside;
+}
+function fitCanvas(cv){
+  const r=cv.getBoundingClientRect(),dpr=Math.min(devicePixelRatio||1,2);
+  cv.width=r.width*dpr;cv.height=r.height*dpr;
+  const ctx=cv.getContext('2d');ctx.setTransform(dpr,0,0,dpr,0,0);
+  return{ctx,W:r.width,H:r.height};
+}
+
+/* ---------- BEAT 03 · territory provision ---------- */
+const cv3=document.getElementById('cv3');
+let anim3=null;
+function runBeat3(){
+  cancelAnimationFrame(anim3);
+  const{ctx,W,H}=fitCanvas(cv3);
+  const city=buildCity(W,H);
+  // irregular polygon ~ centered
+  const poly=[[W*.16,H*.30],[W*.44,H*.12],[W*.80,H*.20],[W*.92,H*.55],[W*.70,H*.90],[W*.30,H*.86],[W*.10,H*.62]];
+  const inside=city.addrs.filter(p=>pointInPoly(p,poly));
+  // shuffle cascade order
+  const rng=mulberry(13);
+  for(let i=inside.length-1;i>0;i--){const j=(rng()*(i+1))|0;[inside[i],inside[j]]=[inside[j],inside[i]]}
+  const total=inside.length;
+  const countEl=document.getElementById('count3'),timeEl=document.getElementById('time3');
+  const drawDur=reduced?0:1100, cascadeDur=reduced?0:2600;
+  const start=performance.now();
+  // polygon perimeter for stroke animation
+  let perim=0;const segs=[];
+  for(let i=0;i<poly.length;i++){
+    const a=poly[i],b=poly[(i+1)%poly.length];
+    const L=Math.hypot(b[0]-a[0],b[1]-a[1]);segs.push({a,b,L});perim+=L;
+  }
+  function frame(now){
+    const t=now-start;
+    ctx.clearRect(0,0,W,H);
+    drawStreets(ctx,city,W,H,'rgba(12,12,10,.22)');
+    // faint all addresses
+    ctx.fillStyle='rgba(12,12,10,.10)';
+    city.addrs.forEach(p=>ctx.fillRect(p.x-1,p.y-1,2,2));
+    // polygon stroke progress
+    const sp=reduced?1:Math.min(1,t/drawDur);
+    let drawn=perim*sp,acc=0;
+    ctx.strokeStyle='#ff4d00';ctx.lineWidth=2.5;ctx.setLineDash([8,5]);
+    ctx.beginPath();
+    for(const s of segs){
+      if(acc>=drawn)break;
+      const take=Math.min(s.L,drawn-acc);
+      const f=take/s.L;
+      ctx.moveTo(s.a[0],s.a[1]);
+      ctx.lineTo(s.a[0]+(s.b[0]-s.a[0])*f,s.a[1]+(s.b[1]-s.a[1])*f);
+      acc+=s.L;
+    }
+    ctx.stroke();ctx.setLineDash([]);
+    if(sp>=1){
+      ctx.fillStyle='rgba(255,77,0,.06)';
+      ctx.beginPath();poly.forEach((p,i)=>i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));ctx.closePath();ctx.fill();
+    }
+    // cascade
+    const cp=reduced?1:Math.max(0,Math.min(1,(t-drawDur)/cascadeDur));
+    const eased=1-Math.pow(1-cp,3);
+    const n=Math.floor(total*eased);
+    ctx.fillStyle='#ff4d00';
+    for(let i=0;i<n;i++){const p=inside[i];ctx.fillRect(p.x-1.5,p.y-1.5,3,3)}
+    // fresh pops glow slightly bigger
+    for(let i=Math.max(0,n-40);i<n;i++){const p=inside[i];ctx.fillRect(p.x-2.5,p.y-2.5,5,5)}
+    countEl.textContent=n.toLocaleString();
+    timeEl.textContent=(Math.min(t,drawDur+cascadeDur)/100).toFixed(1).padStart(4,'0')+' s · unit splits included';
+    if(t<drawDur+cascadeDur+200)anim3=requestAnimationFrame(frame);
+    else timeEl.textContent='38.0 s real provisioning time · unit splits included';
+  }
+  anim3=requestAnimationFrame(frame);
+}
+document.getElementById('replay3').addEventListener('click',runBeat3);
+let ran3=false;
+new IntersectionObserver((es,o)=>{if(es[0].isIntersecting&&!ran3){ran3=true;runBeat3();}},{threshold:.45}).observe(document.getElementById('stage3'));
+
+/* ---------- BEAT 04 · live tracking ---------- */
+const cv4=document.getElementById('cv4');
+let anim4=null,timer4=null;
+const NAMES=[['MARCUS','#5ab4ff','lbA'],['DEVON','#ff4d00','lbB'],['PRIYA','#27c878','lbC'],['COLE','#ffb000','lbD']];
+const STREETS=['Birch St','Larkspur Crt','Mason Ave','Hilltop Rd','Quarry Ln','Fenwick Dr','Aspen Gate'];
+const OUTCOMES=[['INTERESTED','ok',.22],['NOT HOME','nh',.42],['NO ANSWER','nh',.22],['DO NOT KNOCK','dk',.14]];
+function runBeat4(){
+  cancelAnimationFrame(anim4);clearInterval(timer4);
+  const{ctx,W,H}=fitCanvas(cv4);
+  const city=buildCity(W,H);
+  const feed=document.getElementById('feed4');feed.innerHTML='';
+  const scores=[0,0,0,0];NAMES.forEach(n=>document.getElementById(n[2]).textContent='0');
+  // build a walking path per rep along streets
+  const rng=mulberry(31);
+  function makePath(si){
+    const pts=[];let x=city.vx[1+((rng()*(city.vx.length-2))|0)],y=city.hy[1+((rng()*(city.hy.length-2))|0)];
+    pts.push([x,y]);
+    for(let k=0;k<14;k++){
+      if(rng()<.5){x=city.vx[Math.max(0,Math.min(city.vx.length-1,city.vx.indexOf(x)+(rng()<.5?-1:1)))]}
+      else{y=city.hy[Math.max(0,Math.min(city.hy.length-1,city.hy.indexOf(y)+(rng()<.5?-1:1)))]}
+      pts.push([x,y]);
+    }
+    return pts;
+  }
+  const reps=NAMES.map((n,i)=>({name:n[0],col:n[1],path:makePath(i),seg:0,f:0,trail:[],speed:(reduced?0:.0035+rng()*.0015)}));
+  const flips=[]; // {x,y,col}
+  function step(now){
+    ctx.clearRect(0,0,W,H);
+    ctx.fillStyle='#0c0c0a';ctx.fillRect(0,0,W,H);
+    drawStreets(ctx,city,W,H,'rgba(217,213,203,.13)');
+    ctx.fillStyle='rgba(217,213,203,.16)';
+    city.addrs.forEach(p=>ctx.fillRect(p.x-1,p.y-1,2,2));
+    // flipped doors
+    flips.forEach(f=>{ctx.fillStyle=f.col;ctx.fillRect(f.x-2,f.y-2,4,4)});
+    reps.forEach(r=>{
+      // advance
+      if(!reduced){
+        r.f+=r.speed*16;
+        if(r.f>=1){r.f=0;r.seg=(r.seg+1)%(r.path.length-1)}
+      }
+      const a=r.path[r.seg],b=r.path[r.seg+1];
+      const x=a[0]+(b[0]-a[0])*r.f,y=a[1]+(b[1]-a[1])*r.f;
+      r.x=x;r.y=y;
+      r.trail.push([x,y]);if(r.trail.length>90)r.trail.shift();
+      ctx.strokeStyle=r.col+'66';ctx.lineWidth=2;
+      ctx.beginPath();r.trail.forEach((p,i)=>i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));ctx.stroke();
+      ctx.fillStyle=r.col;
+      ctx.beginPath();ctx.arc(x,y,5,0,7);ctx.fill();
+      ctx.strokeStyle=r.col;ctx.lineWidth=1.5;
+      ctx.beginPath();ctx.arc(x,y,9+Math.sin(now/300)*2,0,7);ctx.stroke();
+      ctx.font='700 10px IBM Plex Mono';ctx.fillText(r.name,x+13,y+4);
+    });
+    anim4=requestAnimationFrame(step);
+  }
+  anim4=requestAnimationFrame(step);
+  // outcome events
+  timer4=setInterval(()=>{
+    const ri=(Math.random()*reps.length)|0,r=reps[ri];
+    // pick outcome weighted
+    let q=Math.random(),oc=OUTCOMES[0];
+    for(const o of OUTCOMES){if(q<o[2]){oc=o;break}q-=o[2]}
+    const colMap={ok:'#27c878',nh:'#ffb000',dk:'#e53935'};
+    // flip nearest address
+    let best=null,bd=1e9;
+    for(const p of city.addrs){const d=(p.x-r.x)**2+(p.y-r.y)**2;if(d<bd){bd=d;best=p}}
+    if(best)flips.push({x:best.x,y:best.y,col:colMap[oc[1]]});
+    if(flips.length>400)flips.shift();
+    const num=20+((Math.random()*240)|0);
+    const st=STREETS[(Math.random()*STREETS.length)|0];
+    const d=new Date();
+    const line=document.createElement('div');
+    line.className=oc[1];
+    line.textContent=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')+' · '+num+' '+st.toUpperCase()+' · '+oc[0]+' · '+r.name;
+    feed.appendChild(line);
+    while(feed.children.length>9)feed.removeChild(feed.firstChild);
+    scores[ri]++;document.getElementById(NAMES[ri][2]).textContent=scores[ri];
+  },reduced?999999:1300);
+}
+document.getElementById('replay4').addEventListener('click',runBeat4);
+let ran4=false;
+new IntersectionObserver(es=>{
+  if(es[0].isIntersecting&&!ran4){ran4=true;runBeat4();}
+  if(!es[0].isIntersecting&&ran4){cancelAnimationFrame(anim4);clearInterval(timer4);ran4=false;}
+},{threshold:.35}).observe(document.getElementById('stage4'));
+
+/* ---------- BEAT 05 · phone ---------- */
+const outs=document.getElementById('outs5'),lead=document.getElementById('lead5');
+outs.addEventListener('click',e=>{
+  const b=e.target.closest('button');if(!b)return;
+  [...outs.children].forEach(x=>x.className='');
+  b.className='sel-'+b.dataset.k;
+  lead.classList.toggle('show',b.dataset.k==='ok');
+});
+
+/* resize: rerun static beat3 final frame cheaply */
+let rt;addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(()=>{if(ran3)runBeat3();},250)});
+})();
+</script>
+</body>
+</html>
