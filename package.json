@@ -28,6 +28,7 @@
     "deploy:lambda:dry": "cd kimi-cli && node bin/kimi.js --dry-run",
     "stripe:listen": "stripe listen --forward-to localhost:3000/api/billing/stripe/webhook",
     "stripe:listen:test": "node scripts/stripe-listen-test.js",
+    "seed:danielteam-mock": "npx tsx scripts/seed-danielteam-mock-data.ts",
     "test:ambassador-signup": "npx tsx scripts/test-ambassador-signup.ts",
     "test:ambassador-payout": "npx tsx scripts/test-ambassador-payout.ts",
     "test:campaign-polygon-parity": "npx tsx scripts/campaign-polygon-parity-e2e.ts"

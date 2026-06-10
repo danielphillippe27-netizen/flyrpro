@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, CheckCircle2, Loader2, Mail, MessageSquare, Mic, Pause, PhoneCall, Play, Save, Send, Trash2, Upload, Voicemail } from 'lucide-react';
+import { AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, Loader2, Mail, MessageSquare, Mic, Pause, PhoneCall, Play, Save, Send, Trash2, Upload, Voicemail } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -11,7 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useTwilioDevice } from '@/lib/hooks/useTwilioDevice';
 import { formatPhoneDisplay, normalizePhoneNumber } from '@/lib/dialer/phone';
 import { useWorkspace } from '@/lib/workspace-context';
-import type { DialerCall, DiallerLead, DiallerLeadDisposition } from '@/types/database';
+import type { DialerCall, DialerVoicemailDrop, DiallerLead, DiallerLeadDisposition } from '@/types/database';
 
 type DialerAccessResponse = {
   workspaceId: string;
@@ -33,8 +33,19 @@ type DialerAccessResponse = {
 };
 
 type DiallerLeadStatus = 'pending' | 'called' | 'skipped';
+type PlaceCallOptions = {
+  doubleDial?: boolean;
+  forceLeadId?: string;
+  redialAfterEnd?: boolean;
+};
 
 const DIALER_AUTO_NEXT_STORAGE_KEY = 'flyr:dialer:auto-next';
+const TEST_LEAD = {
+  name: 'Daniel Phillippe',
+  phone: '289-675-2788',
+  company: 'Test Lead',
+  email: null,
+};
 
 function formatCallClock(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60);
@@ -190,11 +201,14 @@ export function PowerDialerPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const tabIdRef = useRef<string>(typeof crypto !== 'undefined' ? crypto.randomUUID() : `dialer-${Date.now()}`);
   const callbackCalledAtRef = useRef<Date | null>(null);
+  const doubleDialRetryRef = useRef<{ leadId: string; remaining: number } | null>(null);
+  const placeCurrentCallRef = useRef<((options?: PlaceCallOptions) => Promise<void>) | null>(null);
 
   const [dialerAccess, setDialerAccess] = useState<DialerAccessResponse | null>(null);
   const [dialerAccessLoading, setDialerAccessLoading] = useState(true);
   const [leads, setLeads] = useState<DiallerLead[]>([]);
   const [activeLeadId, setActiveLeadId] = useState<string | null>(null);
+  const [activeVoicemailDrop, setActiveVoicemailDrop] = useState<DialerVoicemailDrop | null>(null);
   const [selectedDisposition, setSelectedDisposition] = useState<DiallerLeadDisposition>('interested');
   const [notes, setNotes] = useState('');
   const [email, setEmail] = useState('');
@@ -210,10 +224,12 @@ export function PowerDialerPage() {
   const [diallerRunning, setDiallerRunning] = useState(false);
   const [callSeconds, setCallSeconds] = useState(0);
   const [loadingLeads, setLoadingLeads] = useState(false);
+  const [loadingVoicemailDrop, setLoadingVoicemailDrop] = useState(false);
   const [importing, setImporting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savingContact, setSavingContact] = useState(false);
   const [deletingList, setDeletingList] = useState(false);
+  const [loadingTestLead, setLoadingTestLead] = useState(false);
   const [startingCall, setStartingCall] = useState(false);
   const [activeCallId, setActiveCallId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -229,6 +245,9 @@ export function PowerDialerPage() {
     [activeLeadId, leads]
   );
   const hasActiveLead = Boolean(activeLead);
+  const activeLeadIndex = activeLead ? leads.findIndex((lead) => lead.id === activeLead.id) : -1;
+  const canGoPreviousLead = activeLeadIndex > 0;
+  const canGoNextLead = activeLeadIndex >= 0 && activeLeadIndex < leads.length - 1;
   const calledCount = leads.filter((lead) => statusForLead(lead) === 'called').length;
   const connectedCount = leads.filter((lead) => lead.disposition === 'interested' || lead.disposition === 'callback').length;
   const remainingCount = leads.filter((lead) => statusForLead(lead) === 'pending').length;
@@ -272,6 +291,36 @@ export function PowerDialerPage() {
     }
   }, [currentWorkspaceId]);
 
+  const loadActiveVoicemailDrop = useCallback(async () => {
+    if (!currentWorkspaceId) {
+      setActiveVoicemailDrop(null);
+      return;
+    }
+
+    setLoadingVoicemailDrop(true);
+    try {
+      const response = await fetch(`/api/dialer/voicemail-drops?workspaceId=${encodeURIComponent(currentWorkspaceId)}`, {
+        credentials: 'include',
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        recordings?: DialerVoicemailDrop[];
+        error?: string;
+      };
+      if (!response.ok) {
+        setActiveVoicemailDrop(null);
+        console.warn('[dialer] failed to load voicemail drop', data.error);
+        return;
+      }
+
+      setActiveVoicemailDrop((data.recordings ?? []).find((recording) => recording.is_active) ?? null);
+    } catch (voicemailError) {
+      setActiveVoicemailDrop(null);
+      console.warn('[dialer] failed to load voicemail drop', voicemailError);
+    } finally {
+      setLoadingVoicemailDrop(false);
+    }
+  }, [currentWorkspaceId]);
+
   useEffect(() => {
     const userAgent = window.navigator.userAgent;
     const platform = window.navigator.platform;
@@ -299,6 +348,7 @@ export function PowerDialerPage() {
       setDialerAccessLoading(false);
       setLeads([]);
       setActiveLeadId(null);
+      setActiveVoicemailDrop(null);
       return;
     }
 
@@ -322,11 +372,12 @@ export function PowerDialerPage() {
       });
 
     void loadDiallerLeads();
+    void loadActiveVoicemailDrop();
 
     return () => {
       cancelled = true;
     };
-  }, [currentWorkspaceId, loadDiallerLeads]);
+  }, [currentWorkspaceId, loadActiveVoicemailDrop, loadDiallerLeads]);
 
   useEffect(() => {
     if (!activeLead) {
@@ -356,13 +407,6 @@ export function PowerDialerPage() {
     }, 1000);
     return () => window.clearInterval(interval);
   }, [device.isInCall]);
-
-  useEffect(() => {
-    if (device.callPhase !== 'ended' || !activeCallId) return;
-    setDiallerRunning(false);
-    setActiveCallId(null);
-    setMessage((currentMessage) => currentMessage ?? 'Call ended.');
-  }, [activeCallId, device.callPhase]);
 
   const handleInitializeDevice = async () => {
     if (!currentWorkspaceId) return;
@@ -413,6 +457,53 @@ export function PowerDialerPage() {
     } finally {
       setImporting(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleLoadTestLead = async () => {
+    if (!currentWorkspaceId) return;
+
+    const testPhone = normalizePhoneNumber(TEST_LEAD.phone).e164;
+    const existingTestLead = leads.find(
+      (lead) => normalizePhoneNumber(lead.phone).e164 === testPhone && statusForLead(lead) === 'pending'
+    );
+    if (existingTestLead) {
+      setActiveLeadId(existingTestLead.id);
+      setError(null);
+      setMessage('Test lead selected.');
+      return;
+    }
+
+    setLoadingTestLead(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const response = await fetch('/api/dialer/leads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          workspaceId: currentWorkspaceId,
+          leads: [TEST_LEAD],
+        }),
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        leads?: DiallerLead[];
+        error?: string;
+      };
+      if (!response.ok) throw new Error(data.error || 'Failed to add test lead.');
+
+      const testLead = data.leads?.[0];
+      if (!testLead) throw new Error('Failed to add test lead.');
+
+      setLeads((currentLeads) => [...currentLeads, testLead]);
+      setActiveLeadId(testLead.id);
+      setMessage('Test lead loaded.');
+    } catch (testLeadError) {
+      setError(testLeadError instanceof Error ? testLeadError.message : 'Failed to add test lead.');
+    } finally {
+      setLoadingTestLead(false);
     }
   };
 
@@ -543,6 +634,7 @@ export function PowerDialerPage() {
   };
 
   const handleDispositionAction = async (disposition: DiallerLeadDisposition) => {
+    doubleDialRetryRef.current = null;
     setSelectedDisposition(disposition);
     await saveLeadDisposition({
       disposition,
@@ -552,6 +644,7 @@ export function PowerDialerPage() {
   };
 
   const handleFollowUp = async () => {
+    doubleDialRetryRef.current = null;
     const calledAt = callbackCalledAtRef.current ?? new Date();
     const defaultDateTime = getCallbackDefaultDateTime(followUpChoice, calledAt);
     const resolvedDate = followUpChoice === 'custom' ? followUpDate || defaultDateTime.date : defaultDateTime.date;
@@ -575,8 +668,13 @@ export function PowerDialerPage() {
     if (saved) setFollowUpOpen(false);
   };
 
-  const placeCurrentCall = async (doubleDial = false) => {
-    if (!activeLead || !currentWorkspaceId) return;
+  const placeCurrentCall = async ({
+    doubleDial = false,
+    forceLeadId,
+    redialAfterEnd = false,
+  }: PlaceCallOptions = {}) => {
+    const requestedLead = forceLeadId ? leads.find((lead) => lead.id === forceLeadId) ?? null : activeLead;
+    if (!requestedLead || !currentWorkspaceId) return;
     if (device.isInCall) {
       setMessage('A call is already active.');
       return;
@@ -588,15 +686,23 @@ export function PowerDialerPage() {
 
     try {
       const { updatedLeads, skippedCount } = await skipInvalidPendingLeads();
-      const activeLeadFromQueue = updatedLeads.find((lead) => lead.id === activeLead.id);
+      const requestedLeadFromQueue = updatedLeads.find((lead) => lead.id === requestedLead.id);
       const leadToCall =
-        activeLeadFromQueue && statusForLead(activeLeadFromQueue) === 'pending' && hasDialablePhone(activeLeadFromQueue.phone)
-          ? activeLeadFromQueue
-          : findNextDialableLead(updatedLeads, activeLead.id);
+        requestedLeadFromQueue && statusForLead(requestedLeadFromQueue) === 'pending' && hasDialablePhone(requestedLeadFromQueue.phone)
+          ? requestedLeadFromQueue
+          : forceLeadId
+            ? null
+            : findNextDialableLead(updatedLeads, requestedLead.id);
 
       if (!leadToCall) {
         setActiveLeadId(updatedLeads.find((lead) => statusForLead(lead) === 'pending')?.id ?? updatedLeads[0]?.id ?? null);
-        setMessage(skippedCount > 0 ? `Skipped ${skippedCount} invalid phone numbers. No valid pending leads left.` : 'No valid pending leads left.');
+        setMessage(
+          forceLeadId
+            ? 'Could not redial this lead. It is no longer pending or dialable.'
+            : skippedCount > 0
+              ? `Skipped ${skippedCount} invalid phone numbers. No valid pending leads left.`
+              : 'No valid pending leads left.'
+        );
         return;
       }
       setActiveLeadId(leadToCall.id);
@@ -619,11 +725,17 @@ export function PowerDialerPage() {
       const data = (await response.json().catch(() => ({}))) as { call?: DialerCall; error?: string };
       if (!response.ok || !data.call) throw new Error(data.error || 'Failed to place the outbound call.');
 
+      if (redialAfterEnd) {
+        doubleDialRetryRef.current = { leadId: leadToCall.id, remaining: 1 };
+      }
       setActiveCallId(data.call.id);
       setDiallerRunning(true);
-      setMessage(doubleDial ? 'Double dial started.' : 'Call started.');
+      setMessage(doubleDial ? (redialAfterEnd ? 'Double dial started. Will redial this lead once.' : 'Redial started.') : 'Call started.');
       await device.startCall(data.call.call_request_id);
     } catch (callError) {
+      if (redialAfterEnd) {
+        doubleDialRetryRef.current = null;
+      }
       setDiallerRunning(false);
       setActiveCallId(null);
       setError(callError instanceof Error ? callError.message : 'Failed to place the outbound call.');
@@ -631,12 +743,47 @@ export function PowerDialerPage() {
       setStartingCall(false);
     }
   };
+  placeCurrentCallRef.current = placeCurrentCall;
 
   const handleDoubleDial = () => {
-    void placeCurrentCall(true);
+    void placeCurrentCall({ doubleDial: true, redialAfterEnd: true });
   };
 
+  useEffect(() => {
+    if (device.callPhase !== 'ended' || !activeCallId) return;
+
+    const retry = doubleDialRetryRef.current;
+    setDiallerRunning(false);
+    setActiveCallId(null);
+
+    if (retry && retry.remaining > 0) {
+      const retryLead = leads.find((lead) => lead.id === retry.leadId);
+      doubleDialRetryRef.current = null;
+
+      if (retryLead && statusForLead(retryLead) === 'pending' && hasDialablePhone(retryLead.phone)) {
+        setMessage('Redialing same lead...');
+        window.setTimeout(() => {
+          void placeCurrentCallRef.current?.({ doubleDial: true, forceLeadId: retry.leadId });
+        }, 700);
+        return;
+      }
+
+      setMessage('Double dial stopped. Lead is no longer pending or dialable.');
+      return;
+    }
+
+    setMessage((currentMessage) => currentMessage ?? 'Call ended.');
+  }, [activeCallId, device.callPhase, leads]);
+
   const handleVoicemailDrop = async () => {
+    doubleDialRetryRef.current = null;
+
+    if (!activeVoicemailDrop) {
+      setMessage(null);
+      setError('Upload and activate a prerecorded voicemail in Settings before using voicemail drop.');
+      return;
+    }
+
     if (!device.isInCall || !activeCallId || !currentWorkspaceId) {
       setMessage('Voicemail drop is ready after a live call connects.');
       setError(null);
@@ -746,6 +893,7 @@ export function PowerDialerPage() {
   const handleDeleteLead = async () => {
     if (!activeLead || !currentWorkspaceId) return;
 
+    doubleDialRetryRef.current = null;
     setSaving(true);
     setError(null);
     setMessage(null);
@@ -780,6 +928,7 @@ export function PowerDialerPage() {
     if (!currentWorkspaceId || leads.length === 0) return;
     if (!window.confirm('Delete the current dialler list? This removes all loaded dialler leads.')) return;
 
+    doubleDialRetryRef.current = null;
     if (device.isInCall) {
       device.hangUp();
     }
@@ -817,16 +966,27 @@ export function PowerDialerPage() {
 
   const handleStartPause = async () => {
     if (!diallerRunning) {
-      await placeCurrentCall(false);
+      doubleDialRetryRef.current = null;
+      await placeCurrentCall();
       return;
     }
 
+    doubleDialRetryRef.current = null;
     if (device.isInCall) {
       device.hangUp();
     }
     setDiallerRunning(false);
     setActiveCallId(null);
     setMessage('Dialler paused.');
+  };
+
+  const moveActiveLead = (direction: -1 | 1) => {
+    if (activeLeadIndex < 0) return;
+    const nextLead = leads[activeLeadIndex + direction];
+    if (!nextLead) return;
+    setActiveLeadId(nextLead.id);
+    setError(null);
+    setMessage(null);
   };
 
   return (
@@ -905,7 +1065,42 @@ export function PowerDialerPage() {
                 {activeLead?.phone ? formatPhoneDisplay(activeLead.phone) : '—'}
               </div>
             </div>
-            <div className="font-mono text-xs text-neutral-400">{formatCallClock(callSeconds)}</div>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void handleLoadTestLead()}
+                disabled={!currentWorkspaceId || loadingTestLead}
+                className="h-10 touch-manipulation border-neutral-700 bg-[#171717] px-3 text-xs font-semibold text-neutral-100 hover:bg-neutral-800 disabled:opacity-35 sm:h-9"
+              >
+                {loadingTestLead ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                Test
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                aria-label="Previous lead"
+                onClick={() => moveActiveLead(-1)}
+                disabled={!canGoPreviousLead || saving || startingCall}
+                className="h-10 w-10 touch-manipulation border-neutral-700 bg-[#171717] text-neutral-100 hover:bg-neutral-800 disabled:opacity-35 sm:h-9 sm:w-9"
+              >
+                <ChevronLeft className="h-5 w-5" />
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                aria-label="Next lead"
+                onClick={() => moveActiveLead(1)}
+                disabled={!canGoNextLead || saving || startingCall}
+                className="h-10 w-10 touch-manipulation border-neutral-700 bg-[#171717] text-neutral-100 hover:bg-neutral-800 disabled:opacity-35 sm:h-9 sm:w-9"
+              >
+                <ChevronRight className="h-5 w-5" />
+              </Button>
+              <div className="min-w-[46px] text-right font-mono text-xs text-neutral-400">{formatCallClock(callSeconds)}</div>
+            </div>
           </div>
 
           <div className="mt-5 grid grid-cols-2 gap-2.5 sm:mt-6 sm:gap-3">
@@ -989,11 +1184,12 @@ export function PowerDialerPage() {
                 type="button"
                 variant="outline"
                 onClick={handleVoicemailDrop}
-                disabled={!hasActiveLead || saving || startingCall}
+                disabled={!hasActiveLead || !activeVoicemailDrop || loadingVoicemailDrop || saving || startingCall}
+                title={activeVoicemailDrop?.filename ? `Drop ${activeVoicemailDrop.filename}` : 'Upload and activate a voicemail recording in Settings'}
                 className="h-12 w-full touch-manipulation border-neutral-700 bg-transparent text-neutral-100 hover:bg-neutral-800"
               >
-                <Voicemail className="h-4 w-4" />
-                Voicemail drop
+                {loadingVoicemailDrop ? <Loader2 className="h-4 w-4 animate-spin" /> : <Voicemail className="h-4 w-4" />}
+                {activeVoicemailDrop ? 'Voicemail drop' : 'No voicemail'}
               </Button>
             </div>
           </div>

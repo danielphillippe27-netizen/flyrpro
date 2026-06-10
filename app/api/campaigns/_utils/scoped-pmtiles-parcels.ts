@@ -37,7 +37,7 @@ export type ScopedParcelOptions = {
   residentialOnly?: boolean;
 };
 
-const PARCEL_SEAM_SAFE_MAX_ZOOM = 13;
+const PARCEL_MAX_TILE_SCAN_COUNT = 64;
 const PARCEL_RESPONSE_CACHE_TTL_MS = 30_000;
 const PARCEL_RESPONSE_CACHE_MAX_ENTRIES = 64;
 const PARCEL_TILE_FETCH_CONCURRENCY = Math.max(
@@ -325,7 +325,7 @@ function lonLatToTile(lon: number, lat: number, z: number) {
 
 export function tileRangeForParcelBbox(bbox: [number, number, number, number], maxZoom: number) {
   const [minLon, minLat, maxLon, maxLat] = bbox;
-  for (let z = Math.min(maxZoom, PARCEL_SEAM_SAFE_MAX_ZOOM); z >= 10; z -= 1) {
+  for (let z = maxZoom; z >= 10; z -= 1) {
     const nw = lonLatToTile(minLon, maxLat, z);
     const se = lonLatToTile(maxLon, minLat, z);
     const minX = Math.min(nw.x, se.x);
@@ -333,7 +333,7 @@ export function tileRangeForParcelBbox(bbox: [number, number, number, number], m
     const minY = Math.min(nw.y, se.y);
     const maxY = Math.max(nw.y, se.y);
     const tileCount = (maxX - minX + 1) * (maxY - minY + 1);
-    if (tileCount <= 64 || z === 10) {
+    if (tileCount <= PARCEL_MAX_TILE_SCAN_COUNT || z === 10) {
       return { z, minX, maxX, minY, maxY };
     }
   }

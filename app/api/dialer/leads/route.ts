@@ -9,6 +9,7 @@ import { createAdminClient } from '@/lib/supabase/server';
 import { isDialerFounderBypassEmail } from '@/lib/dialer/feature-gate';
 import { getTwilioAccountSid, getTwilioAuthToken, getTwilioDefaultSmsFromNumber } from '@/lib/dialer/env';
 import { normalizePhoneNumber } from '@/lib/dialer/phone';
+import { buildPublicTwilioWebhookUrl } from '@/lib/dialer/server';
 import type { DiallerLead, DiallerLeadDisposition } from '@/types/database';
 
 export const runtime = 'nodejs';
@@ -113,7 +114,7 @@ async function sendInterestedLink(request: NextRequest, lead: DiallerLead): Prom
   if (!normalizedPhone.e164) return 'Lead saved, but the phone number is not valid for SMS.';
 
   const client = twilio(getTwilioAccountSid(), getTwilioAuthToken());
-  const statusCallback = new URL('/api/twilio/messaging/status', request.url);
+  const statusCallback = buildPublicTwilioWebhookUrl(request, '/api/twilio/messaging/status');
   await client.messages.create({
     from,
     to: normalizedPhone.e164,

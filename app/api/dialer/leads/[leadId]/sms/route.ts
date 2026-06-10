@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import twilio from 'twilio';
 import type { DialerSmsFollowup, DiallerLead } from '@/types/database';
-import { getDialerRequestContext } from '@/lib/dialer/server';
+import { buildPublicTwilioWebhookUrl, getDialerRequestContext } from '@/lib/dialer/server';
 import { getTwilioAccountSid, getTwilioAuthToken } from '@/lib/dialer/env';
 import { normalizePhoneNumber } from '@/lib/dialer/phone';
 
@@ -152,7 +152,7 @@ export async function POST(
 
   try {
     const client = twilio(getTwilioAccountSid(), getTwilioAuthToken());
-    const statusCallback = new URL('/api/twilio/messaging/status', request.url);
+    const statusCallback = buildPublicTwilioWebhookUrl(request, '/api/twilio/messaging/status');
     const now = new Date().toISOString();
     const message = await client.messages.create({
       from: context.settings.defaultSmsFromNumber,

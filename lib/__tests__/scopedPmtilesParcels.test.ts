@@ -56,11 +56,11 @@ function snapshot(tileMetrics: Record<string, unknown>): CampaignSnapshotRow {
 
 const tests: Array<[string, () => void]> = [
   [
-    'selects a bounded parcel tile range at seam-safe zoom',
+    'selects the highest bounded parcel tile range within the scan budget',
     () => {
       const range = tileRangeForParcelBbox([-78.7842255, 43.9225422, -78.7774978, 43.9268414], 16);
       assertTrue(range, 'Expected a tile range');
-      assertEqual(range?.z, 13);
+      assertEqual(range?.z, 16);
       const tileCount = ((range?.maxX ?? 0) - (range?.minX ?? 0) + 1) * ((range?.maxY ?? 0) - (range?.minY ?? 0) + 1);
       assertTrue(tileCount <= 64, `Expected <=64 tiles, got ${tileCount}`);
     },

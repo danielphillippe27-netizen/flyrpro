@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import twilio from 'twilio';
-import { xmlResponse, validateTwilioWebhookRequest } from '@/lib/dialer/server';
+import { buildPublicTwilioWebhookUrl, validateTwilioWebhookRequest, xmlResponse } from '@/lib/dialer/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { getTwilioDefaultFromNumber } from '@/lib/dialer/env';
 import { normalizePhoneNumber } from '@/lib/dialer/phone';
@@ -59,9 +59,9 @@ export async function POST(request: NextRequest) {
   }
 
   const response = new twilio.twiml.VoiceResponse();
-  const callbackUrl = new URL('/api/twilio/voice/status', request.url);
+  const callbackUrl = buildPublicTwilioWebhookUrl(request, '/api/twilio/voice/status');
   callbackUrl.searchParams.set('callRequestId', callRequestId);
-  const recordingStatusUrl = new URL('/api/twilio/voice/recording-status', request.url);
+  const recordingStatusUrl = buildPublicTwilioWebhookUrl(request, '/api/twilio/voice/recording-status');
   recordingStatusUrl.searchParams.set('callRequestId', callRequestId);
 
   const dial = response.dial({

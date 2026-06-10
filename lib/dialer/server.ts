@@ -52,6 +52,32 @@ type TwilioWebhookValidationResult = {
   params: Record<string, string>;
 };
 
+function normalizeBaseUrl(value: string | null | undefined): string | null {
+  const cleaned = value?.trim().replace(/\/$/, '');
+  if (!cleaned) return null;
+  const url = cleaned.startsWith('http') ? cleaned : `https://${cleaned}`;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:') return null;
+    if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') return null;
+    return parsed.toString().replace(/\/$/, '');
+  } catch {
+    return null;
+  }
+}
+
+export function buildPublicTwilioWebhookUrl(request: NextRequest, path: string): URL {
+  const baseUrl =
+    normalizeBaseUrl(process.env.TWILIO_WEBHOOK_BASE_URL) ||
+    normalizeBaseUrl(process.env.NEXT_PUBLIC_APP_URL) ||
+    normalizeBaseUrl(process.env.APP_BASE_URL) ||
+    normalizeBaseUrl(process.env.VERCEL_URL) ||
+    normalizeBaseUrl(request.nextUrl.origin) ||
+    'https://flyrpro.app';
+
+  return new URL(path, baseUrl);
+}
+
 export async function getDialerRequestContext(
   request: NextRequest,
   requestedWorkspaceId?: string | null

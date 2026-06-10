@@ -2,12 +2,19 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import {
-  TerritoryDrawHint,
-} from '@/components/territory/TerritoryCreateFlow';
+import { TerritoryDrawHint } from '@/components/territory/TerritoryCreateFlow';
 import { getDrawnPolygon } from '@/lib/territory/create-polygon';
 import {
   applyDrawModeForPhase,
@@ -19,7 +26,12 @@ import { useTheme } from '@/lib/theme-provider';
 import { useWorkspace } from '@/lib/workspace-context';
 import { getIndustryCopy } from '@/lib/industry-copy';
 import { getMapboxToken, removeMapboxMapWhenSafe } from '@/lib/mapbox';
-import { applyPresetVisualTweaks, applyResolvedMapStyle, hideBaseBuildingLayers, resolveMapStyle } from '@/lib/map-styles';
+import {
+  applyPresetVisualTweaks,
+  applyResolvedMapStyle,
+  hideBaseBuildingLayers,
+  resolveMapStyle,
+} from '@/lib/map-styles';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import MapboxDraw from '@mapbox/mapbox-gl-draw';
@@ -28,22 +40,18 @@ import { AddressAutocomplete } from '@/components/address/AddressAutocomplete';
 import { MapInfoButton } from '@/components/map/MapInfoButton';
 import { UserLocationLayer } from '@/components/map/UserLocationLayer';
 import type { AddressSuggestion } from '@/lib/services/MapboxAutocompleteService';
-import { CalendarDays, Map, Pencil, Search, Satellite, Trash2, Users } from 'lucide-react';
+import { CalendarDays, CircleAlert, Map, Pencil, Search, Satellite, Trash2, TriangleAlert, Users } from 'lucide-react';
 import * as turf from '@turf/turf';
 import Lottie from 'lottie-react';
 
-const MAP_USABLE_PHASES = new Set(['map_ready', 'linker_ready', 'optimized']);
-const MAP_COMPLETE_PHASES = new Set(['optimized']);
+const MAP_USABLE_PHASES = new Set(['map_ready', 'linker_ready', 'optimizing', 'optimized']);
 const MAP_READY_TIMEOUT_MS = 5 * 60 * 1000;
 const MAP_BUNDLE_TIMEOUT_MS = 45 * 1000;
 const CAMPAIGN_OVERLAY_SOURCE_ID = 'campaign-territory-overlays';
 const CAMPAIGN_OVERLAY_FILL_LAYER_ID = 'campaign-territory-overlays-fill';
 const CAMPAIGN_OVERLAY_LINE_LAYER_ID = 'campaign-territory-overlays-line';
 const CAMPAIGN_OVERLAY_STORAGE_PREFIX = 'flyr:create-map:show-campaign-overlays';
-const CAMPAIGN_OVERLAY_LAYER_IDS = [
-  CAMPAIGN_OVERLAY_FILL_LAYER_ID,
-  CAMPAIGN_OVERLAY_LINE_LAYER_ID,
-] as const;
+const CAMPAIGN_OVERLAY_LAYER_IDS = [CAMPAIGN_OVERLAY_FILL_LAYER_ID, CAMPAIGN_OVERLAY_LINE_LAYER_ID] as const;
 
 type TeamMember = {
   user_id: string;
@@ -69,6 +77,15 @@ type TerritoryOverlayCampaign = {
 type TerritoryOverlaysPayload = {
   campaigns?: TerritoryOverlayCampaign[];
   error?: string;
+};
+
+type CreateCampaignDialogTone = 'default' | 'warning' | 'destructive';
+
+type CreateCampaignDialogState = {
+  title: string;
+  description: string;
+  tone: CreateCampaignDialogTone;
+  actionLabel: string;
 };
 
 function escapeHtml(value: string): string {
@@ -98,7 +115,7 @@ function findFirstDrawLayerId(mapInstance: mapboxgl.Map): string | undefined {
 
 function upsertCampaignOverlayLayers(
   mapInstance: mapboxgl.Map,
-  featureCollection: GeoJSON.FeatureCollection<GeoJSON.Polygon | GeoJSON.MultiPolygon>
+  featureCollection: GeoJSON.FeatureCollection<GeoJSON.Polygon | GeoJSON.MultiPolygon>,
 ) {
   removeCampaignOverlayLayers(mapInstance);
 
@@ -130,7 +147,7 @@ function upsertCampaignOverlayLayers(
         'fill-opacity': 0.16,
       },
     },
-    beforeLayerId
+    beforeLayerId,
   );
   mapInstance.addLayer(
     {
@@ -154,7 +171,7 @@ function upsertCampaignOverlayLayers(
         'line-width': 2,
       },
     },
-    beforeLayerId
+    beforeLayerId,
   );
 }
 
@@ -169,13 +186,8 @@ function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function waitForCampaignMapReady(
-  campaignId: string,
-  onProgress?: (message: string) => void,
-  options?: { requireOptimized?: boolean }
-) {
+async function waitForCampaignMapReady(campaignId: string, onProgress?: (message: string) => void) {
   const startedAt = Date.now();
-  const readyPhases = options?.requireOptimized ? MAP_COMPLETE_PHASES : MAP_USABLE_PHASES;
 
   while (Date.now() - startedAt < MAP_READY_TIMEOUT_MS) {
     const response = await fetch(`/api/campaigns/${campaignId}`, {
@@ -185,26 +197,29 @@ async function waitForCampaignMapReady(
 
     if (response.ok) {
       const state = await response.json().catch(() => ({}));
-      const status = typeof state.provision_status === 'string'
-        ? state.provision_status
-        : typeof state.status === 'string'
-          ? state.status
-          : null;
+      const status =
+        typeof state.provision_status === 'string'
+          ? state.provision_status
+          : typeof state.status === 'string'
+            ? state.status
+            : null;
       const phase = typeof state.provision_phase === 'string' ? state.provision_phase : null;
 
       if (status === 'failed') {
-        throw new Error('Campaign setup failed while preparing map geometry.');
+        const failureReason =
+          typeof state.data_quality_reason === 'string' && state.data_quality_reason.trim()
+            ? state.data_quality_reason
+            : typeof state.link_quality_reason === 'string' && state.link_quality_reason.trim()
+              ? state.link_quality_reason
+              : 'Campaign setup failed while preparing map geometry.';
+        throw new Error(failureReason);
       }
 
-      if (status === 'ready' && (!phase || readyPhases.has(phase))) {
+      if (status === 'ready' && (!phase || MAP_USABLE_PHASES.has(phase))) {
         return state;
       }
 
-      onProgress?.(options?.requireOptimized
-        ? 'Finishing parcel and building links...'
-        : phase === 'addresses_ready'
-        ? 'Preparing map geometry...'
-        : 'Waiting for map geometry...');
+      onProgress?.(phase === 'addresses_ready' ? 'Preparing map geometry...' : 'Waiting for map geometry...');
     }
 
     await delay(2000);
@@ -220,6 +235,11 @@ function mapBundleFeatureCount(bundle: unknown): number {
     (Array.isArray(record.addresses?.features) ? record.addresses.features.length : 0) +
     (Array.isArray(record.parcels?.features) ? record.parcels.features.length : 0)
   );
+}
+
+function mapBundleAddressCount(bundle: unknown): number {
+  const record = bundle as Record<string, { features?: unknown[] } | undefined>;
+  return Array.isArray(record.addresses?.features) ? record.addresses.features.length : 0;
 }
 
 async function prewarmCampaignMapBundleForOpen(campaignId: string) {
@@ -249,10 +269,7 @@ export default function CreateCampaignPage() {
   const { theme } = useTheme();
   const { currentWorkspace, currentWorkspaceId, membershipsByWorkspaceId } = useWorkspace();
   const copy = getIndustryCopy(currentWorkspace?.industry);
-  const resolvedMapStyle = useMemo(
-    () => resolveMapStyle('standard', theme, 'v11'),
-    [theme],
-  );
+  const resolvedMapStyle = useMemo(() => resolveMapStyle('standard', theme, 'v11'), [theme]);
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
   const [provisioning, setProvisioning] = useState(false);
@@ -274,6 +291,7 @@ export default function CreateCampaignPage() {
   const [campaignOverlays, setCampaignOverlays] = useState<TerritoryOverlayCampaign[]>([]);
   const [campaignOverlaysLoading, setCampaignOverlaysLoading] = useState(false);
   const [campaignOverlaysError, setCampaignOverlaysError] = useState<string | null>(null);
+  const [feedbackDialog, setFeedbackDialog] = useState<CreateCampaignDialogState | null>(null);
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const drawRef = useRef<MapboxDraw | null>(null);
@@ -281,22 +299,21 @@ export default function CreateCampaignPage() {
   const boundaryLayerIdsRef = useRef<string[]>([]);
   const appliedBaseStyleKeyRef = useRef<string | null>(null);
   const hasCenteredOnUserLocationRef = useRef(false);
+  const feedbackDialogResolveRef = useRef<(() => void) | null>(null);
   const isDark = theme === 'dark';
-  const lottieSrc = useMemo(
-    () => (isDark ? '/loading/white.json' : '/loading/black.json'),
-    [isDark]
-  );
-  const { phase, setPhase, startCreating } = useTerritoryCreatePhase({ map, mapLoaded });
+  const lottieSrc = useMemo(() => (isDark ? '/loading/white.json' : '/loading/black.json'), [isDark]);
+  const { phase, setPhase, startCreating } = useTerritoryCreatePhase({
+    map,
+    mapLoaded,
+  });
   const isBusy = loading || provisioning || generatingAddresses;
   const currentWorkspaceRole = currentWorkspaceId ? membershipsByWorkspaceId[currentWorkspaceId] : null;
   const canAssignOnCreate = currentWorkspaceRole === 'owner' || currentWorkspaceRole === 'admin';
   const selectedTeamMembers = useMemo(
     () => teamMembers.filter((member) => selectedMemberIds.includes(member.user_id)),
-    [selectedMemberIds, teamMembers]
+    [selectedMemberIds, teamMembers],
   );
-  const campaignOverlayFeatureCollection = useMemo<
-    GeoJSON.FeatureCollection<GeoJSON.Polygon | GeoJSON.MultiPolygon>
-  >(
+  const campaignOverlayFeatureCollection = useMemo<GeoJSON.FeatureCollection<GeoJSON.Polygon | GeoJSON.MultiPolygon>>(
     () => ({
       type: 'FeatureCollection',
       features: campaignOverlays.map((campaign) => {
@@ -317,7 +334,7 @@ export default function CreateCampaignPage() {
         };
       }),
     }),
-    [campaignOverlays]
+    [campaignOverlays],
   );
 
   useEffect(() => {
@@ -396,6 +413,37 @@ export default function CreateCampaignPage() {
   }, [lottieSrc]);
 
   useEffect(() => {
+    return () => {
+      feedbackDialogResolveRef.current?.();
+      feedbackDialogResolveRef.current = null;
+    };
+  }, []);
+
+  const dismissFeedbackDialog = () => {
+    setFeedbackDialog(null);
+    const resolve = feedbackDialogResolveRef.current;
+    feedbackDialogResolveRef.current = null;
+    resolve?.();
+  };
+
+  const showFeedbackDialog = ({
+    title,
+    description,
+    tone = 'default',
+    actionLabel = 'OK',
+  }: {
+    title: string;
+    description: string;
+    tone?: CreateCampaignDialogTone;
+    actionLabel?: string;
+  }) =>
+    new Promise<void>((resolve) => {
+      feedbackDialogResolveRef.current?.();
+      feedbackDialogResolveRef.current = resolve;
+      setFeedbackDialog({ title, description, tone, actionLabel });
+    });
+
+  useEffect(() => {
     if (!canAssignOnCreate || !currentWorkspaceId) {
       setTeamMembers([]);
       setSelectedMemberIds([]);
@@ -433,14 +481,14 @@ export default function CreateCampaignPage() {
   }, [canAssignOnCreate, currentWorkspaceId]);
 
   const currentStepText = generatingAddresses
-        ? 'Step 3/5: Fetching addresses'
-        : provisionProgress.includes('Scanning')
-          ? 'Step 4/5: Fetching buildings'
-          : provisionProgress.includes('Matching') || provisionProgress.includes('Linking')
-            ? 'Step 4/5: Linking addresses to buildings'
-            : provisionProgress.includes('Finalizing')
-              ? 'Step 5/5: Preparing optimized route'
-              : 'Step 5/5: Finishing setup';
+    ? 'Step 3/5: Fetching addresses'
+    : provisionProgress.includes('Scanning')
+      ? 'Step 4/5: Fetching buildings'
+      : provisionProgress.includes('Matching') || provisionProgress.includes('Linking')
+        ? 'Step 4/5: Linking addresses to buildings'
+        : provisionProgress.includes('Finalizing')
+          ? 'Step 5/5: Preparing optimized route'
+          : 'Step 5/5: Finishing setup';
 
   /** Add residential-only 2D building footprints from Mapbox vector tiles.
    *  Hides built-in style buildings and renders residential buildings with theme-aware slate at 80% opacity.
@@ -485,18 +533,51 @@ export default function CreateCampaignPage() {
         minzoom: 12,
         // Exclude explicitly non-residential building types
         filter: [
-          'match', ['get', 'type'],
-          ['commercial', 'industrial', 'retail', 'warehouse', 'office',
-           'church', 'cathedral', 'chapel', 'temple', 'mosque',
-           'hospital', 'civic', 'government', 'public',
-           'university', 'school', 'college', 'kindergarten',
-           'train_station', 'transportation', 'hangar',
-           'parking', 'garage', 'garages',
-           'service', 'manufacture', 'factory',
-           'supermarket', 'hotel', 'motel',
-           'stadium', 'grandstand',
-           'fire_station', 'barn', 'silo', 'greenhouse',
-           'kiosk', 'roof', 'ruins', 'bridge', 'construction'],
+          'match',
+          ['get', 'type'],
+          [
+            'commercial',
+            'industrial',
+            'retail',
+            'warehouse',
+            'office',
+            'church',
+            'cathedral',
+            'chapel',
+            'temple',
+            'mosque',
+            'hospital',
+            'civic',
+            'government',
+            'public',
+            'university',
+            'school',
+            'college',
+            'kindergarten',
+            'train_station',
+            'transportation',
+            'hangar',
+            'parking',
+            'garage',
+            'garages',
+            'service',
+            'manufacture',
+            'factory',
+            'supermarket',
+            'hotel',
+            'motel',
+            'stadium',
+            'grandstand',
+            'fire_station',
+            'barn',
+            'silo',
+            'greenhouse',
+            'kiosk',
+            'roof',
+            'ruins',
+            'bridge',
+            'construction',
+          ],
           false,
           true,
         ],
@@ -694,13 +775,68 @@ export default function CreateCampaignPage() {
         controls: {},
         defaultMode: 'simple_select',
         styles: [
-          { id: 'gl-draw-polygon-fill', type: 'fill', filter: ['all', ['==', '$type', 'Polygon'], ['!=', 'mode', 'static']], paint: { 'fill-color': '#ef4444', 'fill-outline-color': '#ef4444', 'fill-opacity': 0.15 } },
-          { id: 'gl-draw-polygon-stroke-active', type: 'line', filter: ['all', ['==', '$type', 'Polygon'], ['!=', 'mode', 'static']], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#ef4444', 'line-width': 3 } },
-          { id: 'gl-draw-polygon-and-line-vertex-active', type: 'circle', filter: ['all', ['==', 'meta', 'vertex'], ['==', '$type', 'Point'], ['!=', 'mode', 'static']], paint: { 'circle-radius': 4, 'circle-color': '#ef4444', 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 1 } },
-          { id: 'gl-draw-polygon-midpoint', type: 'circle', filter: ['all', ['==', '$type', 'Point'], ['==', 'meta', 'midpoint']], paint: { 'circle-radius': 4, 'circle-color': '#ef4444' } },
-          { id: 'gl-draw-line-active', type: 'line', filter: ['all', ['==', '$type', 'LineString'], ['!=', 'mode', 'static']], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#ef4444', 'line-width': 3, 'line-dasharray': [0.2, 2] } },
-          { id: 'gl-draw-polygon-fill-static', type: 'fill', filter: ['all', ['==', '$type', 'Polygon'], ['==', 'mode', 'static']], paint: { 'fill-color': '#ef4444', 'fill-outline-color': '#ef4444', 'fill-opacity': 0.15 } },
-          { id: 'gl-draw-polygon-stroke-static', type: 'line', filter: ['all', ['==', '$type', 'Polygon'], ['==', 'mode', 'static']], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#ef4444', 'line-width': 3 } },
+          {
+            id: 'gl-draw-polygon-fill',
+            type: 'fill',
+            filter: ['all', ['==', '$type', 'Polygon'], ['!=', 'mode', 'static']],
+            paint: {
+              'fill-color': '#ef4444',
+              'fill-outline-color': '#ef4444',
+              'fill-opacity': 0.15,
+            },
+          },
+          {
+            id: 'gl-draw-polygon-stroke-active',
+            type: 'line',
+            filter: ['all', ['==', '$type', 'Polygon'], ['!=', 'mode', 'static']],
+            layout: { 'line-cap': 'round', 'line-join': 'round' },
+            paint: { 'line-color': '#ef4444', 'line-width': 3 },
+          },
+          {
+            id: 'gl-draw-polygon-and-line-vertex-active',
+            type: 'circle',
+            filter: ['all', ['==', 'meta', 'vertex'], ['==', '$type', 'Point'], ['!=', 'mode', 'static']],
+            paint: {
+              'circle-radius': 4,
+              'circle-color': '#ef4444',
+              'circle-stroke-color': '#ffffff',
+              'circle-stroke-width': 1,
+            },
+          },
+          {
+            id: 'gl-draw-polygon-midpoint',
+            type: 'circle',
+            filter: ['all', ['==', '$type', 'Point'], ['==', 'meta', 'midpoint']],
+            paint: { 'circle-radius': 4, 'circle-color': '#ef4444' },
+          },
+          {
+            id: 'gl-draw-line-active',
+            type: 'line',
+            filter: ['all', ['==', '$type', 'LineString'], ['!=', 'mode', 'static']],
+            layout: { 'line-cap': 'round', 'line-join': 'round' },
+            paint: {
+              'line-color': '#ef4444',
+              'line-width': 3,
+              'line-dasharray': [0.2, 2],
+            },
+          },
+          {
+            id: 'gl-draw-polygon-fill-static',
+            type: 'fill',
+            filter: ['all', ['==', '$type', 'Polygon'], ['==', 'mode', 'static']],
+            paint: {
+              'fill-color': '#ef4444',
+              'fill-outline-color': '#ef4444',
+              'fill-opacity': 0.15,
+            },
+          },
+          {
+            id: 'gl-draw-polygon-stroke-static',
+            type: 'line',
+            filter: ['all', ['==', '$type', 'Polygon'], ['==', 'mode', 'static']],
+            layout: { 'line-cap': 'round', 'line-join': 'round' },
+            paint: { 'line-color': '#ef4444', 'line-width': 3 },
+          },
         ],
       });
 
@@ -746,8 +882,10 @@ export default function CreateCampaignPage() {
     if (!mapInstance.getLayer(CAMPAIGN_OVERLAY_FILL_LAYER_ID)) return;
 
     const showPopup = (
-      event: mapboxgl.MapMouseEvent & { features?: mapboxgl.MapboxGeoJSONFeature[] },
-      options: { closeButton: boolean; closeOnClick: boolean }
+      event: mapboxgl.MapMouseEvent & {
+        features?: mapboxgl.MapboxGeoJSONFeature[];
+      },
+      options: { closeButton: boolean; closeOnClick: boolean },
     ) => {
       const feature = event.features?.[0];
       if (!feature?.properties) return;
@@ -764,20 +902,26 @@ export default function CreateCampaignPage() {
         offset: 12,
       })
         .setLngLat(event.lngLat)
-        .setHTML(`
+        .setHTML(
+          `
           <div style="font-family: inherit; min-width: 190px;">
             <div style="font-size: 13px; font-weight: 700; color: #111827; margin-bottom: 4px;">${escapeHtml(name)}</div>
             <div style="font-size: 12px; color: #4b5563; line-height: 1.45;">Assigned to: ${escapeHtml(assigneesText)}</div>
             <div style="font-size: 12px; color: #4b5563; line-height: 1.45;">Visited: ${escapeHtml(progressText)}</div>
           </div>
-        `)
+        `,
+        )
         .addTo(mapInstance);
     };
 
     const handleMouseEnter = () => {
       mapInstance.getCanvas().style.cursor = 'pointer';
     };
-    const handleMouseMove = (event: mapboxgl.MapMouseEvent & { features?: mapboxgl.MapboxGeoJSONFeature[] }) => {
+    const handleMouseMove = (
+      event: mapboxgl.MapMouseEvent & {
+        features?: mapboxgl.MapboxGeoJSONFeature[];
+      },
+    ) => {
       showPopup(event, { closeButton: false, closeOnClick: false });
     };
     const handleMouseLeave = () => {
@@ -785,7 +929,11 @@ export default function CreateCampaignPage() {
       campaignOverlayPopupRef.current?.remove();
       campaignOverlayPopupRef.current = null;
     };
-    const handleClick = (event: mapboxgl.MapMouseEvent & { features?: mapboxgl.MapboxGeoJSONFeature[] }) => {
+    const handleClick = (
+      event: mapboxgl.MapMouseEvent & {
+        features?: mapboxgl.MapboxGeoJSONFeature[];
+      },
+    ) => {
       showPopup(event, { closeButton: true, closeOnClick: true });
     };
 
@@ -869,7 +1017,11 @@ export default function CreateCampaignPage() {
     if (phase === 'drawing') {
       const polygon = getDrawnPolygon(drawRef.current);
       if (!polygon) {
-        alert('Draw a territory boundary first. Double-click to finish your shape.');
+        void showFeedbackDialog({
+          title: 'Finish the territory boundary',
+          description: 'Draw a territory boundary first. Double-click to finish your shape.',
+          tone: 'warning',
+        });
         return;
       }
       setPhase('naming');
@@ -901,7 +1053,7 @@ export default function CreateCampaignPage() {
 
   const handleMapSearchSelect = (suggestion: AddressSuggestion) => {
     if (!map.current || !mapLoaded) return;
-    
+
     map.current.flyTo({
       center: [suggestion.coordinate.longitude, suggestion.coordinate.latitude],
       zoom: 18,
@@ -913,18 +1065,30 @@ export default function CreateCampaignPage() {
     e?.preventDefault();
     if (!userId) return;
     if (!name.trim()) {
-      alert(`Enter a ${copy.nouns.campaign} name to continue.`);
+      await showFeedbackDialog({
+        title: `${copy.nouns.campaign.charAt(0).toUpperCase()}${copy.nouns.campaign.slice(1)} name required`,
+        description: `Enter a ${copy.nouns.campaign} name to continue.`,
+        tone: 'warning',
+      });
       return;
     }
 
     const polygon = getDrawnPolygon(drawRef.current);
     if (!polygon) {
-      alert('Please draw a territory boundary on the map. Double-click to finish your shape.');
+      await showFeedbackDialog({
+        title: 'Territory boundary required',
+        description: 'Please draw a territory boundary on the map. Double-click to finish your shape.',
+        tone: 'warning',
+      });
       return;
     }
 
     if (selectedMemberIds.length > 0 && !assignmentDeadline) {
-      alert('Choose a deadline for the assigned campaign.');
+      await showFeedbackDialog({
+        title: 'Deadline required',
+        description: 'Choose a deadline for the assigned campaign.',
+        tone: 'warning',
+      });
       return;
     }
 
@@ -995,8 +1159,6 @@ export default function CreateCampaignPage() {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 campaign_id: campaign.id,
-                wait_for_postprocess: true,
-                require_linked_homes: true,
               }),
             });
 
@@ -1006,31 +1168,51 @@ export default function CreateCampaignPage() {
             if (!provisionResponse.ok) {
               const error = await provisionResponse.json().catch(() => ({}));
               console.error('Provisioning error:', error);
-              const message = typeof error.error === 'string' && error.error.trim()
-                ? error.error
-                : 'Campaign created but provisioning failed.';
-              alert(
-                error.code === 'campaign_home_limit_exceeded' || error.code === 'campaign_too_large_for_app'
-                  ? message
-                  : `Campaign created but provisioning failed: ${message}`
-              );
+              const message =
+                typeof error.error === 'string' && error.error.trim()
+                  ? error.error
+                  : 'Campaign created but provisioning failed.';
+              const isHomeLimitError =
+                error.code === 'campaign_home_limit_exceeded' || error.code === 'campaign_too_large_for_app';
+              setProvisioning(false);
+              setProvisionProgress('');
+              await showFeedbackDialog({
+                title: isHomeLimitError ? 'Territory is too large' : 'Provisioning failed',
+                description: isHomeLimitError ? message : `Campaign created but provisioning failed: ${message}`,
+                tone: isHomeLimitError ? 'warning' : 'destructive',
+                actionLabel: isHomeLimitError ? 'Back to drawing' : 'OK',
+              });
               return;
             } else {
-              const result = await provisionResponse.json();
+              const result = await provisionResponse.json().catch(() => ({}));
               const { addresses_saved = 0, buildings_saved = 0, links_created = 0 } = result;
-              setAddressCount(addresses_saved);
-              console.log(`Staged provision: ${addresses_saved} addresses, ${buildings_saved} buildings, ${links_created} links`);
-              if (result.warning) {
-                alert(result.warning);
+              if (addresses_saved > 0) {
+                setAddressCount(addresses_saved);
               }
-              if (links_created < addresses_saved) {
+              console.log('Campaign provision started:', {
+                status: provisionResponse.status,
+                addresses_saved,
+                buildings_saved,
+                links_created,
+              });
+              if (result.warning) {
+                await showFeedbackDialog({
+                  title: 'Campaign warning',
+                  description: result.warning,
+                  tone: 'warning',
+                });
+              }
+              if (addresses_saved > 0 && links_created > 0 && links_created < addresses_saved) {
                 setProvisionProgress(`Linking: ${links_created} / ${addresses_saved} addresses...`);
               }
               setProvisionProgress('Waiting for map geometry...');
-              await waitForCampaignMapReady(campaign.id, setProvisionProgress, { requireOptimized: true });
+              await waitForCampaignMapReady(campaign.id, setProvisionProgress);
               setProvisionProgress('Preparing map bundle...');
-              await prewarmCampaignMapBundleForOpen(campaign.id);
-              await new Promise(resolve => setTimeout(resolve, 800));
+              const bundle = await prewarmCampaignMapBundleForOpen(campaign.id);
+              const bundleAddressCount = mapBundleAddressCount(bundle);
+              if (bundleAddressCount > 0) {
+                setAddressCount(bundleAddressCount);
+              }
               campaignReadyForAssignment = true;
             }
           } finally {
@@ -1054,18 +1236,30 @@ export default function CreateCampaignPage() {
 
             if (!assignmentResponse.ok) {
               const error = await assignmentResponse.json().catch(() => ({}));
-              alert(`Campaign created but assignment failed: ${error.error || 'Unknown error'}`);
+              await showFeedbackDialog({
+                title: 'Assignment failed',
+                description: `Campaign created but assignment failed: ${error.error || 'Unknown error'}`,
+                tone: 'destructive',
+              });
             } else {
-              const result = await assignmentResponse.json().catch(() => null) as { warnings?: string[] } | null;
+              const result = (await assignmentResponse.json().catch(() => null)) as { warnings?: string[] } | null;
               const warnings = Array.isArray(result?.warnings) ? result.warnings : [];
               if (warnings.length > 0) {
-                alert(`Campaign assigned, but some notifications need attention:\n${warnings.slice(0, 3).join('\n')}`);
+                await showFeedbackDialog({
+                  title: 'Notifications need attention',
+                  description: `Campaign assigned, but some notifications need attention: ${warnings.slice(0, 3).join(' ')}`,
+                  tone: 'warning',
+                });
               }
             }
           }
         } catch (provisionError) {
           console.error('Error provisioning campaign:', provisionError);
-          alert('Campaign created but provisioning failed. You can provision later.');
+          await showFeedbackDialog({
+            title: 'Provisioning failed',
+            description: 'Campaign created but provisioning failed. You can provision later.',
+            tone: 'destructive',
+          });
         } finally {
           setProvisioning(false);
           setProvisionProgress('');
@@ -1079,11 +1273,21 @@ export default function CreateCampaignPage() {
       // Extract meaningful error message
       const errorDetails =
         error && typeof error === 'object'
-          ? (error as { message?: string; details?: string; hint?: string; code?: string })
+          ? (error as {
+              message?: string;
+              details?: string;
+              hint?: string;
+              code?: string;
+            })
           : {};
-      const errorMessage = errorDetails.message || errorDetails.details || errorDetails.hint || 'Unknown error occurred';
+      const errorMessage =
+        errorDetails.message || errorDetails.details || errorDetails.hint || 'Unknown error occurred';
       const errorCode = errorDetails.code ? ` (${errorDetails.code})` : '';
-      alert(`Failed to create campaign: ${errorMessage}${errorCode}`);
+      await showFeedbackDialog({
+        title: 'Failed to create campaign',
+        description: `${errorMessage}${errorCode}`,
+        tone: 'destructive',
+      });
     } finally {
       setLoading(false);
     }
@@ -1102,7 +1306,11 @@ export default function CreateCampaignPage() {
             onLocationFound={(lng, lat) => {
               if (!hasCenteredOnUserLocationRef.current) {
                 hasCenteredOnUserLocationRef.current = true;
-                map.current?.flyTo({ center: [lng, lat], zoom: 15, duration: 800 });
+                map.current?.flyTo({
+                  center: [lng, lat],
+                  zoom: 15,
+                  duration: 800,
+                });
               }
             }}
             onLocationError={() => {}}
@@ -1144,9 +1352,7 @@ export default function CreateCampaignPage() {
                           Assign members
                         </Label>
                         {selectedTeamMembers.length > 0 ? (
-                          <span className="text-xs text-muted-foreground">
-                            {selectedTeamMembers.length} selected
-                          </span>
+                          <span className="text-xs text-muted-foreground">{selectedTeamMembers.length} selected</span>
                         ) : null}
                       </div>
 
@@ -1168,7 +1374,7 @@ export default function CreateCampaignPage() {
                                 setSelectedMemberIds((current) =>
                                   current.includes(member.user_id)
                                     ? current.filter((id) => id !== member.user_id)
-                                    : [...current, member.user_id]
+                                    : [...current, member.user_id],
                                 )
                               }
                               className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
@@ -1300,9 +1506,7 @@ export default function CreateCampaignPage() {
               )}
             </div>
             <div className="pt-3">
-              <h3 className="text-lg font-semibold text-white mb-3">
-                {copy.campaigns.generatingTitle}
-              </h3>
+              <h3 className="text-lg font-semibold text-white mb-3">{copy.campaigns.generatingTitle}</h3>
               <div className="space-y-2">
                 <p className="text-sm font-medium text-white/95">{currentStepText}</p>
                 <p className="text-sm text-white/90">Syncing property data...</p>
@@ -1311,6 +1515,47 @@ export default function CreateCampaignPage() {
           </div>
         </div>
       )}
+
+      <Dialog open={!!feedbackDialog} onOpenChange={(open) => !open && dismissFeedbackDialog()}>
+        <DialogContent className="sm:max-w-md" showCloseButton={false}>
+          {feedbackDialog ? (
+            <>
+              <DialogHeader className="text-left sm:text-left">
+                <div className="flex items-start gap-3">
+                  <div
+                    className={`mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-full border ${
+                      feedbackDialog.tone === 'destructive'
+                        ? 'border-destructive/30 bg-destructive/10 text-destructive'
+                        : feedbackDialog.tone === 'warning'
+                          ? 'border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                          : 'border-primary/30 bg-primary/10 text-primary'
+                    }`}
+                  >
+                    {feedbackDialog.tone === 'destructive' ? (
+                      <CircleAlert className="size-5" />
+                    ) : (
+                      <TriangleAlert className="size-5" />
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <DialogTitle className="text-lg leading-6">{feedbackDialog.title}</DialogTitle>
+                    <DialogDescription className="text-sm leading-6">{feedbackDialog.description}</DialogDescription>
+                  </div>
+                </div>
+              </DialogHeader>
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant={feedbackDialog.tone === 'destructive' ? 'destructive' : 'default'}
+                  onClick={dismissFeedbackDialog}
+                >
+                  {feedbackDialog.actionLabel}
+                </Button>
+              </DialogFooter>
+            </>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

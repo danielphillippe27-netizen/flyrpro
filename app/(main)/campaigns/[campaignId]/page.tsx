@@ -1278,7 +1278,6 @@ export default function CampaignDetailPage() {
   });
   const hasGeneratedAdvancedQr = formattedRecipients.some((recipient) => Boolean(recipient.qr_code_base64));
   const linkQualityBanner = getLinkQualityBanner(campaign);
-  const assignmentBanner = assignmentScope?.label ? assignmentScope : null;
 
   return (
     <div className="min-h-full bg-muted/30 dark:bg-background relative">
@@ -1308,19 +1307,6 @@ export default function CampaignDetailPage() {
             </div>
           </div>
         ) : null}
-        {assignmentBanner ? (
-          <div className="rounded-xl border border-border bg-card px-4 py-3">
-            <div className="flex flex-wrap items-center gap-3">
-              <Badge variant={assignmentBanner.scopedToAssignedZone ? 'default' : 'secondary'}>
-                {assignmentBanner.label}
-              </Badge>
-              {assignmentBanner.description ? (
-                <p className="text-sm text-muted-foreground">{assignmentBanner.description}</p>
-              ) : null}
-            </div>
-          </div>
-        ) : null}
-
         <Tabs defaultValue="map" className="w-full">
           <TabsList>
             <TabsTrigger value="map">Map</TabsTrigger>

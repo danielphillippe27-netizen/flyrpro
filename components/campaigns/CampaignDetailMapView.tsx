@@ -21,7 +21,13 @@ import { useTheme } from '@/lib/theme-provider';
 import { useMapStyle } from '@/lib/map-style-provider';
 import { useWorkspace } from '@/lib/workspace-context';
 import { getMapboxToken, removeMapboxMapWhenSafe } from '@/lib/mapbox';
-import { applyPresetVisualTweaks, applyResolvedMapStyle, getResolvedMapInitOptions, hideBaseBuildingLayers, resolveMapStyle } from '@/lib/map-styles';
+import {
+  applyPresetVisualTweaks,
+  applyResolvedMapStyle,
+  getResolvedMapInitOptions,
+  hideBaseBuildingLayers,
+  resolveMapStyle,
+} from '@/lib/map-styles';
 import {
   DEFAULT_STATUS_FILTERS,
   MAP_STATUS_CONFIG,
@@ -29,6 +35,13 @@ import {
   type MapStatusKey,
   type StatusFilters,
 } from '@/lib/constants/mapStatus';
+import {
+  resolveParcelMapTarget,
+  stringValue as parcelStringValue,
+  type ParcelClickPayload,
+  type ParcelResolutionAddress,
+  type ParcelResolutionParcel,
+} from '@/lib/map/parcelClickResolution';
 import { useFullscreen } from '@/lib/hooks/useFullscreen';
 
 const PARCEL_SOURCE_ID = 'campaign-parcels';
@@ -36,6 +49,11 @@ const PARCEL_LABEL_SOURCE_ID = 'campaign-parcels-labels';
 const PARCEL_FILL_LAYER = 'campaign-parcels-fill';
 const PARCEL_LINE_LAYER = 'campaign-parcels-line';
 const PARCEL_LABEL_LAYER = 'campaign-parcels-label';
+const SELECTED_PARCEL_COLOR = '#60a5fa';
+const LIGHT_PARCEL_STROKE_COLOR = '#2563eb';
+const LIGHT_PARCEL_FILL_COLOR = '#60a5fa';
+const DARK_PARCEL_STROKE_COLOR = '#93c5fd';
+const DARK_PARCEL_FILL_COLOR = '#2563eb';
 
 const BOUNDARY_SOURCE_RAW = 'campaign-boundary-raw';
 const BOUNDARY_SOURCE_SNAPPED = 'campaign-boundary-snapped';
@@ -101,7 +119,8 @@ type BuildingPendingOverlayConfig = {
   description: string;
 };
 
-type MapViewMode = 'buildings' | 'addresses' | 'parcels';
+type MapViewMode = 'buildings' | 'addresses';
+type InitialMapViewMode = MapViewMode | 'parcels';
 
 type PreparedAddressPoint = {
   addressId: string;
@@ -129,7 +148,10 @@ export type MapPointOverlay = {
   label?: string | null;
 };
 
-type GenericFeatureCollection<G extends GeoJSON.Geometry = GeoJSON.Geometry> = GeoJSON.FeatureCollection<G, Record<string, unknown>>;
+type GenericFeatureCollection<G extends GeoJSON.Geometry = GeoJSON.Geometry> = GeoJSON.FeatureCollection<
+  G,
+  Record<string, unknown>
+>;
 
 type CampaignMapBundle = {
   campaign_id?: string;
@@ -153,9 +175,7 @@ type CampaignMapBundle = {
   updated_at?: string;
 };
 
-function isFeatureCollection<G extends GeoJSON.Geometry>(
-  value: unknown
-): value is GenericFeatureCollection<G> {
+function isFeatureCollection<G extends GeoJSON.Geometry>(value: unknown): value is GenericFeatureCollection<G> {
   const collection = value as { type?: unknown; features?: unknown };
   return collection?.type === 'FeatureCollection' && Array.isArray(collection.features);
 }
@@ -173,7 +193,7 @@ function getStringProperty(properties: Record<string, unknown>, keys: string[]):
 
 function mapBundleAddressesToCampaignAddresses(
   campaignId: string,
-  collection?: GenericFeatureCollection<GeoJSON.Point>
+  collection?: GenericFeatureCollection<GeoJSON.Point>,
 ): CampaignAddress[] {
   if (!isFeatureCollection<GeoJSON.Point>(collection)) return [];
 
@@ -189,25 +209,27 @@ function mapBundleAddressesToCampaignAddresses(
         .filter(Boolean)
         .join(' ');
 
-    return [{
-      id,
-      campaign_id: campaignId,
-      address: formatted || id,
-      formatted: formatted || undefined,
-      postal_code: getStringProperty(properties, ['postal_code']) ?? undefined,
-      source: 'map',
-      source_id: getStringProperty(properties, ['source_id', 'gers_id']),
-      gers_id: getStringProperty(properties, ['gers_id']) ?? undefined,
-      building_id: getStringProperty(properties, ['building_id', 'building_gers_id']),
-      building_gers_id: getStringProperty(properties, ['building_gers_id']) ?? undefined,
-      coordinate: { lon, lat },
-      geom: JSON.stringify(feature.geometry),
-      created_at: new Date().toISOString(),
-      street_name: getStringProperty(properties, ['street_name']) ?? undefined,
-      house_number: getStringProperty(properties, ['house_number']) ?? undefined,
-      locality: getStringProperty(properties, ['locality']) ?? undefined,
-      address_status: getStringProperty(properties, ['address_status', 'status']) ?? undefined,
-    } satisfies CampaignAddress];
+    return [
+      {
+        id,
+        campaign_id: campaignId,
+        address: formatted || id,
+        formatted: formatted || undefined,
+        postal_code: getStringProperty(properties, ['postal_code']) ?? undefined,
+        source: 'map',
+        source_id: getStringProperty(properties, ['source_id', 'gers_id']),
+        gers_id: getStringProperty(properties, ['gers_id']) ?? undefined,
+        building_id: getStringProperty(properties, ['building_id', 'building_gers_id']),
+        building_gers_id: getStringProperty(properties, ['building_gers_id']) ?? undefined,
+        coordinate: { lon, lat },
+        geom: JSON.stringify(feature.geometry),
+        created_at: new Date().toISOString(),
+        street_name: getStringProperty(properties, ['street_name']) ?? undefined,
+        house_number: getStringProperty(properties, ['house_number']) ?? undefined,
+        locality: getStringProperty(properties, ['locality']) ?? undefined,
+        address_status: getStringProperty(properties, ['address_status', 'status']) ?? undefined,
+      } satisfies CampaignAddress,
+    ];
   });
 }
 
@@ -229,7 +251,7 @@ function addressIdentityKeys(address: CampaignAddress): string[] {
 
 function mergeBundleAddressesWithLiveState(
   bundleAddresses: CampaignAddress[],
-  liveAddresses: CampaignAddress[]
+  liveAddresses: CampaignAddress[],
 ): CampaignAddress[] {
   if (bundleAddresses.length === 0) return liveAddresses;
   if (liveAddresses.length === 0) return bundleAddresses;
@@ -261,7 +283,7 @@ function mergeBundleAddressesWithLiveState(
 
 function mapBundleParcelsToCampaignParcels(
   campaignId: string,
-  collection?: GenericFeatureCollection<GeoJSON.Polygon | GeoJSON.MultiPolygon>
+  collection?: GenericFeatureCollection<GeoJSON.Polygon | GeoJSON.MultiPolygon>,
 ): CampaignParcel[] {
   if (!isFeatureCollection<GeoJSON.Polygon | GeoJSON.MultiPolygon>(collection)) return [];
 
@@ -276,16 +298,21 @@ function mapBundleParcelsToCampaignParcels(
       'roll_number',
       'id',
     ]);
-    const id = getStringProperty(properties, ['id', 'parcel_row_id']) ?? externalId ?? String(feature.id ?? `bundle-parcel-${index}`);
+    const id =
+      getStringProperty(properties, ['id', 'parcel_row_id']) ??
+      externalId ??
+      String(feature.id ?? `bundle-parcel-${index}`);
 
-    return [{
-      id,
-      campaign_id: campaignId,
-      external_id: externalId ?? undefined,
-      geom: JSON.stringify(feature.geometry),
-      properties,
-      created_at: new Date().toISOString(),
-    } satisfies CampaignParcel];
+    return [
+      {
+        id,
+        campaign_id: campaignId,
+        external_id: externalId ?? undefined,
+        geom: JSON.stringify(feature.geometry),
+        properties,
+        created_at: new Date().toISOString(),
+      } satisfies CampaignParcel,
+    ];
   });
 }
 
@@ -304,6 +331,37 @@ function safeGetSource(m: mapboxgl.Map, sourceId: string): boolean {
   try {
     if (!m.isStyleLoaded()) return false;
     return !!m.getSource(sourceId);
+  } catch {
+    return false;
+  }
+}
+
+function bringParcelLayersToFront(mapInstance: mapboxgl.Map) {
+  for (const layerId of [PARCEL_FILL_LAYER, PARCEL_LINE_LAYER, PARCEL_LABEL_LAYER]) {
+    try {
+      if (safeGetLayer(mapInstance, layerId)) {
+        mapInstance.moveLayer(layerId);
+      }
+    } catch {
+      // Layer order changes can race style swaps; the next idle pass retries.
+    }
+  }
+}
+
+function hasRenderedBaseMapFeatureAtPoint(
+  mapInstance: mapboxgl.Map,
+  point: mapboxgl.PointLike,
+  mapViewMode: MapViewMode,
+): boolean {
+  const candidateLayers =
+    mapViewMode === 'buildings'
+      ? ['map-buildings-extrusion', 'map-buildings-extrusion-points', 'map-buildings-surface']
+      : ['campaign-addresses-pmtiles-circle', 'campaign-addresses-pmtiles-lead-glow'];
+  const layers = candidateLayers.filter((layerId) => safeGetLayer(mapInstance, layerId));
+  if (layers.length === 0) return false;
+
+  try {
+    return mapInstance.queryRenderedFeatures(point, { layers }).length > 0;
   } catch {
     return false;
   }
@@ -391,13 +449,19 @@ function getAddressCoordinate(address: CampaignAddress): { lon: number; lat: num
   let geometry = addressWithGeo.geometry;
   if (typeof geometry === 'string') {
     try {
-      geometry = JSON.parse(geometry) as { type?: string; coordinates?: number[] };
+      geometry = JSON.parse(geometry) as {
+        type?: string;
+        coordinates?: number[];
+      };
     } catch {
       geometry = null;
     }
   }
 
-  const geometryPoint = geometry as { type?: string; coordinates?: number[] } | null;
+  const geometryPoint = geometry as {
+    type?: string;
+    coordinates?: number[];
+  } | null;
   if (
     geometryPoint?.type === 'Point' &&
     Array.isArray(geometryPoint.coordinates) &&
@@ -493,6 +557,64 @@ function getParcelAddressLabel(parcel: CampaignParcel): string {
   return '';
 }
 
+function stringListFromParcelProperty(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap(stringListFromParcelProperty);
+  }
+  if (typeof value === 'number') return [String(value)];
+  if (typeof value !== 'string') return [];
+  const trimmed = value.trim();
+  if (!trimmed) return [];
+  if (trimmed.startsWith('[')) {
+    try {
+      return stringListFromParcelProperty(JSON.parse(trimmed));
+    } catch {
+      // Fall through to delimiter parsing.
+    }
+  }
+  return trimmed
+    .split(/[,\s;]+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function uniqueParcelStrings(values: Array<string | null | undefined>): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    const normalized = value?.trim();
+    if (!normalized) continue;
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(normalized);
+  }
+  return result;
+}
+
+function parcelExternalId(parcel: CampaignParcel): string | null {
+  return (
+    parcelStringValue(parcel.external_id) ??
+    parcelStringValue(parcel.properties?.parcel_id) ??
+    parcelStringValue(parcel.properties?.external_id) ??
+    parcelStringValue(parcel.properties?.PARCELID) ??
+    parcelStringValue(parcel.properties?.gisid) ??
+    parcelStringValue(parcel.properties?.roll_number) ??
+    parcelStringValue(parcel.properties?.id)
+  );
+}
+
+function linkedAddressIdsForParcelProperties(properties: Record<string, unknown> | null | undefined): string[] {
+  if (!properties) return [];
+  return uniqueParcelStrings([
+    parcelStringValue(properties.address_id),
+    parcelStringValue(properties.campaign_address_id),
+    parcelStringValue(properties.campaignAddressId),
+    ...stringListFromParcelProperty(properties.linked_address_ids),
+    ...stringListFromParcelProperty(properties.address_ids),
+  ]);
+}
+
 function extractLeadingHouseNumber(formattedAddress: string): string {
   const match = formattedAddress.trim().match(/^(\d+[A-Za-z]?(?:\/\d+[A-Za-z]?)?)/);
   return match?.[1]?.trim() ?? '';
@@ -532,16 +654,13 @@ export function CampaignDetailMapView({
   }) => ReactNode;
   buildingPendingOverlay?: BuildingPendingOverlayConfig;
   pointOverlays?: MapPointOverlay[];
-  initialMapViewMode?: MapViewMode;
+  initialMapViewMode?: InitialMapViewMode;
 }) {
   const { theme } = useTheme();
   const { preset: mapPreset } = useMapStyle();
   const router = useRouter();
   const { currentWorkspaceId } = useWorkspace();
-  const resolvedMapStyle = useMemo(
-    () => resolveMapStyle(mapPreset, theme, 'v12'),
-    [mapPreset, theme],
-  );
+  const resolvedMapStyle = useMemo(() => resolveMapStyle(mapPreset, theme, 'v12'), [mapPreset, theme]);
   const mapShellRef = useRef<HTMLDivElement>(null);
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
@@ -566,7 +685,7 @@ export function CampaignDetailMapView({
   const mapInitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryCountRef = useRef(0);
   const hasRenderedBuildingsRef = useRef(false);
-  
+
   // Location Card state
   const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(null);
   const [selectedBuildingDeleteId, setSelectedBuildingDeleteId] = useState<string | null>(null);
@@ -579,7 +698,7 @@ export function CampaignDetailMapView({
   const [mapRefreshKey, setMapRefreshKey] = useState(0);
   const [optimisticallyHiddenBuildingIds, setOptimisticallyHiddenBuildingIds] = useState<string[]>([]);
   const [optimisticallyDeletedAddressIds, setOptimisticallyDeletedAddressIds] = useState<string[]>([]);
-  
+
   // Create Contact Dialog state
   const [createContactOpen, setCreateContactOpen] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
@@ -587,33 +706,48 @@ export function CampaignDetailMapView({
   const [selectedAddressText, setSelectedAddressText] = useState<string | undefined>(undefined);
   const [selectedContactNotes, setSelectedContactNotes] = useState<string | undefined>(undefined);
 
-  const resolvedInitialMapViewMode = initialMapViewMode === 'parcels' && !SHOW_PARCEL_VIEW
-    ? 'buildings'
-    : initialMapViewMode;
-  // Map view: residential buildings by default, with address points available as a focused overlay.
+  const resolvedInitialMapViewMode: MapViewMode = initialMapViewMode === 'addresses' ? 'addresses' : 'buildings';
+  const resolvedInitialParcelOverlay = SHOW_PARCEL_VIEW && initialMapViewMode === 'parcels';
+  // Map view: residential buildings by default, with address points available as a focused base layer.
   const [mapViewMode, setMapViewMode] = useState<MapViewMode>(resolvedInitialMapViewMode);
+  const [showParcelsOverlay, setShowParcelsOverlay] = useState(resolvedInitialParcelOverlay);
   // Boundary: Snap to Roads and Raw vs Snapped toggle
   const [snapping, setSnapping] = useState(false);
   const [parcels, setParcels] = useState<CampaignParcel[]>([]);
   const [mapBundle, setMapBundle] = useState<CampaignMapBundle | null>(null);
   const parcelEnrichmentStatus = campaign?.parcel_enrichment_status ?? 'not_started';
-  const campaignBbox = Array.isArray(campaign?.bbox) &&
+  const campaignBbox =
+    Array.isArray(campaign?.bbox) &&
     campaign.bbox.length === 4 &&
     campaign.bbox.every((value) => typeof value === 'number' && Number.isFinite(value))
-    ? (campaign.bbox as [number, number, number, number])
-    : null;
+      ? (campaign.bbox as [number, number, number, number])
+      : null;
   const parcelsReady = SHOW_PARCEL_VIEW && parcels.length > 0;
   const parcelsProcessing = parcelEnrichmentStatus === 'queued' || parcelEnrichmentStatus === 'processing';
-  const showGeojsonParcels = SHOW_PARCEL_VIEW && mapViewMode === 'parcels' && parcels.length > 0;
-  const parcelStrokeColor = theme === 'dark' ? '#ffffff' : '#000000';
-  const parcelFillOpacity = theme === 'dark' ? 0.12 : 0.1;
-  const parcelLineOpacity = theme === 'dark' ? 0.38 : 0.28;
-  const parcelLineWidth = theme === 'dark' ? 0.52 : 0.46;
+  const showGeojsonParcels = SHOW_PARCEL_VIEW && showParcelsOverlay && parcels.length > 0;
+  const parcelStrokeColor = theme === 'dark' ? DARK_PARCEL_STROKE_COLOR : LIGHT_PARCEL_STROKE_COLOR;
+  const parcelFillColor = theme === 'dark' ? DARK_PARCEL_FILL_COLOR : LIGHT_PARCEL_FILL_COLOR;
+  const parcelFillOpacity = theme === 'dark' ? 0.18 : 0.16;
+  const parcelLineOpacity = theme === 'dark' ? 0.86 : 0.82;
+  const parcelLineWidth = theme === 'dark' ? 1.3 : 1.2;
   const parcelLabelHaloColor = theme === 'dark' ? 'rgba(0, 0, 0, 0.82)' : 'rgba(255, 255, 255, 0.92)';
-  const lottieSrc = useMemo(
-    () => (theme === 'dark' ? '/loading/white.json' : '/loading/black.json'),
-    [theme]
-  );
+  const provisionPhase = campaign?.provision_phase ?? null;
+  const mapReadyKey =
+    campaign?.map_ready_at ??
+    (provisionPhase === 'map_ready' ||
+    provisionPhase === 'linker_ready' ||
+    provisionPhase === 'optimizing' ||
+    provisionPhase === 'optimized'
+      ? 'map-ready'
+      : '');
+  const optimizedKey = campaign?.optimized_at ?? '';
+  const mapBundleLoadKey = [
+    campaignId,
+    mapReadyKey,
+    optimizedKey,
+    parcelsProcessing ? parcelEnrichmentStatus : '',
+  ].join(':');
+  const lottieSrc = useMemo(() => (theme === 'dark' ? '/loading/white.json' : '/loading/black.json'), [theme]);
 
   useEffect(() => {
     setFlyrMapInitDebug({ stage: 'component_mounted', campaignId });
@@ -638,11 +772,7 @@ export function CampaignDetailMapView({
 
   const visibleAddressIdSet = useMemo(() => {
     if (!visibleAddressIds) return null;
-    return new Set(
-      visibleAddressIds
-        .map((value) => String(value ?? '').trim())
-        .filter(Boolean)
-    );
+    return new Set(visibleAddressIds.map((value) => String(value ?? '').trim()).filter(Boolean));
   }, [visibleAddressIds]);
   const visibleAddresses = useMemo(
     () =>
@@ -650,35 +780,79 @@ export function CampaignDetailMapView({
         if (optimisticallyDeletedAddressIds.includes(address.id)) return false;
         return !visibleAddressIdSet || visibleAddressIdSet.has(address.id);
       }),
-    [addresses, optimisticallyDeletedAddressIds, visibleAddressIdSet]
+    [addresses, optimisticallyDeletedAddressIds, visibleAddressIdSet],
   );
-  const bundleAddresses = useMemo(
-    () => {
-      const mappedAddresses = mapBundleAddressesToCampaignAddresses(campaignId, mapBundle?.addresses);
-      if (!visibleAddressIdSet) return mappedAddresses;
-      return mappedAddresses.filter((address) => visibleAddressIdSet.has(address.id));
-    },
-    [campaignId, mapBundle?.addresses, visibleAddressIdSet]
-  );
+  const bundleAddresses = useMemo(() => {
+    const mappedAddresses = mapBundleAddressesToCampaignAddresses(campaignId, mapBundle?.addresses);
+    if (!visibleAddressIdSet) return mappedAddresses;
+    return mappedAddresses.filter((address) => visibleAddressIdSet.has(address.id));
+  }, [campaignId, mapBundle?.addresses, visibleAddressIdSet]);
   const mapAddresses = useMemo(
     () => mergeBundleAddressesWithLiveState(bundleAddresses, visibleAddresses),
-    [bundleAddresses, visibleAddresses]
+    [bundleAddresses, visibleAddresses],
   );
   const bundleBuildings = useMemo<BuildingFeatureCollection | null>(
-    () => isFeatureCollection(mapBundle?.buildings) ? mapBundle.buildings : null,
-    [mapBundle?.buildings]
+    () => (isFeatureCollection(mapBundle?.buildings) ? mapBundle.buildings : null),
+    [mapBundle?.buildings],
   );
   const mapBundleDataKey = mapBundle?.asset_signature ?? mapBundle?.updated_at ?? mapBundle?.source_version ?? null;
   const visibleAddressesRef = useRef(visibleAddresses);
+  const mapBundleSignatureRef = useRef<string | null>(null);
+  const lastMapBundleLoadKeyRef = useRef<string | null>(null);
   const mapProvisionRefreshKey = [
     campaign?.provision_status ?? '',
-    campaign?.provision_phase ?? '',
-    campaign?.map_mode ?? '',
     campaign?.map_ready_at ?? '',
     campaign?.optimized_at ?? '',
+    campaign?.map_mode ?? '',
+    mapBundleDataKey ?? '',
     mapAddresses.length,
   ].join(':');
   const lastMapProvisionRefreshKeyRef = useRef<string | null>(null);
+
+  const preparedAddressPoints = useMemo<PreparedAddressPoint[]>(() => {
+    return mapAddresses
+      .map((address) => {
+        const coordinate = getAddressCoordinate(address);
+        if (!coordinate) return null;
+        const linkedBuildingId =
+          (address as CampaignAddress & { building_id?: unknown }).building_id ?? address.gers_id;
+
+        return {
+          addressId: address.id,
+          buildingId: typeof linkedBuildingId === 'string' && linkedBuildingId.trim() ? linkedBuildingId : null,
+          lon: coordinate.lon,
+          lat: coordinate.lat,
+          statusKey: getParcelAddressStatusKey(address),
+        };
+      })
+      .filter((value): value is PreparedAddressPoint => value !== null);
+  }, [mapAddresses]);
+
+  const parcelResolutionAddresses = useMemo<ParcelResolutionAddress[]>(
+    () =>
+      preparedAddressPoints.map((address) => ({
+        id: address.addressId,
+        buildingId: address.buildingId,
+        lon: address.lon,
+        lat: address.lat,
+      })),
+    [preparedAddressPoints],
+  );
+
+  const parcelResolutionParcels = useMemo<ParcelResolutionParcel[]>(
+    () =>
+      parcels.map((parcel) => ({
+        id: parcel.id,
+        externalId: parcelExternalId(parcel),
+        properties: parcel.properties ?? null,
+      })),
+    [parcels],
+  );
+
+  const selectedParcelIds = useMemo(
+    () => uniqueParcelStrings([selectedParcelId, ...multiSelectedTargets.map((target) => target.parcelId)]),
+    [multiSelectedTargets, selectedParcelId],
+  );
 
   useEffect(() => {
     visibleAddressesRef.current = mapAddresses;
@@ -708,37 +882,25 @@ export function CampaignDetailMapView({
       addressIds?: Array<string | null | undefined>;
     }) => {
       const normalizedBuildingIds = Array.from(
-        new Set(
-          buildingIds
-            .map((value) => String(value ?? '').trim())
-            .filter(Boolean)
-        )
+        new Set(buildingIds.map((value) => String(value ?? '').trim()).filter(Boolean)),
       );
       const normalizedAddressIds = Array.from(
-        new Set(
-          addressIds
-            .map((value) => String(value ?? '').trim())
-            .filter(Boolean)
-        )
+        new Set(addressIds.map((value) => String(value ?? '').trim()).filter(Boolean)),
       );
 
       if (normalizedBuildingIds.length > 0) {
-        setOptimisticallyHiddenBuildingIds((prev) =>
-          Array.from(new Set([...prev, ...normalizedBuildingIds]))
-        );
+        setOptimisticallyHiddenBuildingIds((prev) => Array.from(new Set([...prev, ...normalizedBuildingIds])));
       }
 
       if (normalizedAddressIds.length > 0) {
-        setOptimisticallyDeletedAddressIds((prev) =>
-          Array.from(new Set([...prev, ...normalizedAddressIds]))
-        );
+        setOptimisticallyDeletedAddressIds((prev) => Array.from(new Set([...prev, ...normalizedAddressIds])));
       }
 
       if (normalizedBuildingIds.length > 0 || normalizedAddressIds.length > 0) {
         setMapRefreshKey((prev) => prev + 1);
       }
     },
-    []
+    [],
   );
 
   // Get user ID on mount
@@ -795,15 +957,25 @@ export function CampaignDetailMapView({
     setOptimisticallyHiddenBuildingIds([]);
     setOptimisticallyDeletedAddressIds([]);
     setMapViewMode(resolvedInitialMapViewMode);
+    setShowParcelsOverlay(resolvedInitialParcelOverlay);
     setParcels([]);
     setMapBundle(null);
-  }, [campaignId, resolvedInitialMapViewMode]);
+    mapBundleSignatureRef.current = null;
+    lastMapBundleLoadKeyRef.current = null;
+  }, [campaignId, resolvedInitialMapViewMode, resolvedInitialParcelOverlay]);
 
   useEffect(() => {
     if (!campaignId) {
       setMapBundle(null);
+      mapBundleSignatureRef.current = null;
+      lastMapBundleLoadKeyRef.current = null;
       return;
     }
+
+    if (!parcelsProcessing && lastMapBundleLoadKeyRef.current === mapBundleLoadKey) {
+      return;
+    }
+    lastMapBundleLoadKeyRef.current = mapBundleLoadKey;
 
     let cancelled = false;
 
@@ -812,20 +984,30 @@ export function CampaignDetailMapView({
         const supabase = createClient();
         const { data: sessionData } = await supabase.auth.getSession();
         const accessToken = sessionData.session?.access_token ?? null;
-        const response = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/map-bundle`, {
+        const signature = mapBundleSignatureRef.current;
+        const url = new URL(`/api/campaigns/${encodeURIComponent(campaignId)}/map-bundle`, window.location.origin);
+        if (signature) {
+          url.searchParams.set('signature', signature);
+        }
+        const response = await fetch(url.toString(), {
           credentials: 'include',
           headers: {
             Accept: 'application/json',
+            ...(signature ? { 'If-None-Match': `"${signature.replace(/"/g, '')}"` } : {}),
             ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
           },
         });
+        if (response.status === 304) {
+          return;
+        }
         if (!response.ok) {
           throw new Error(`Campaign map bundle request failed with status ${response.status}`);
         }
 
-        const bundle = await response.json() as CampaignMapBundle;
+        const bundle = (await response.json()) as CampaignMapBundle;
         if (cancelled) return;
 
+        mapBundleSignatureRef.current = bundle.asset_signature ?? null;
         setMapBundle(bundle);
 
         if (SHOW_PARCEL_VIEW) {
@@ -854,13 +1036,13 @@ export function CampaignDetailMapView({
     return () => {
       cancelled = true;
     };
-  }, [campaignId, mapProvisionRefreshKey, parcelsProcessing]);
+  }, [campaignId, mapBundleLoadKey, parcelsProcessing]);
 
   useEffect(() => {
-    if ((!SHOW_PARCEL_VIEW || !parcelsReady) && mapViewMode === 'parcels') {
-      setMapViewMode('buildings');
+    if ((!SHOW_PARCEL_VIEW || !parcelsReady) && showParcelsOverlay) {
+      setShowParcelsOverlay(false);
     }
-  }, [mapViewMode, parcelsReady]);
+  }, [parcelsReady, showParcelsOverlay]);
 
   // Handle building click - opens LocationCard
   // For unit slices, addressId is passed to show specific unit
@@ -878,9 +1060,14 @@ export function CampaignDetailMapView({
     locationCardId: string,
     addressId?: string,
     parcelId?: string | null,
-    buildingDeleteId?: string | null
+    buildingDeleteId?: string | null,
   ) => {
-    console.log('Map target clicked:', { locationCardId, addressId, parcelId, buildingDeleteId });
+    console.log('Map target clicked:', {
+      locationCardId,
+      addressId,
+      parcelId,
+      buildingDeleteId,
+    });
     setSelectedBuildingId(locationCardId);
     setSelectedBuildingDeleteId(buildingDeleteId ?? null);
     setSelectedAddressIdForCard(addressId || null);
@@ -888,57 +1075,89 @@ export function CampaignDetailMapView({
     setLocationCardOpen(true);
   };
 
-  const handleMapTargetClick = useCallback((
-    target: {
-      buildingId?: string | null;
-      addressId?: string | null;
-      parcelId?: string | null;
+  const handleMapTargetClick = useCallback(
+    (
+      target: {
+        buildingId?: string | null;
+        addressId?: string | null;
+        parcelId?: string | null;
+      },
+      options?: {
+        additive?: boolean;
+      },
+    ) => {
+      const buildingId = target.buildingId ?? null;
+      const addressId = target.addressId ?? null;
+      const parcelId = target.parcelId ?? null;
+      const key = parcelId
+        ? `parcel:${parcelId}`
+        : buildingId
+          ? `building:${buildingId}:${addressId ?? ''}`
+          : `address:${addressId ?? ''}`;
+
+      if (options?.additive) {
+        setLocationCardOpen(false);
+        setSelectedBuildingId(null);
+        setSelectedBuildingDeleteId(null);
+        setSelectedAddressIdForCard(null);
+        setSelectedParcelId(null);
+        toggleMultiSelection({
+          key,
+          buildingId,
+          addressId,
+          parcelId,
+        });
+        return;
+      }
+
+      setMultiSelectedTargets([]);
+      if (buildingId || addressId) {
+        openLocationCard(buildingId ?? addressId ?? '', addressId ?? undefined, parcelId, buildingId ?? null);
+        return;
+      }
+
+      if (parcelId) {
+        setSelectedBuildingId(null);
+        setSelectedBuildingDeleteId(null);
+        setSelectedAddressIdForCard(null);
+        setSelectedParcelId(parcelId);
+        setLocationCardOpen(false);
+      }
     },
-    options?: {
-      additive?: boolean;
-    }
-  ) => {
-    const buildingId = target.buildingId ?? null;
-    const addressId = target.addressId ?? null;
-    const parcelId = target.parcelId ?? null;
-    const key = parcelId
-      ? `parcel:${parcelId}`
-      : buildingId
-        ? `building:${buildingId}:${addressId ?? ''}`
-        : `address:${addressId ?? ''}`;
+    [toggleMultiSelection],
+  );
 
-    if (options?.additive) {
-      setLocationCardOpen(false);
-      setSelectedBuildingId(null);
-      setSelectedBuildingDeleteId(null);
-      setSelectedAddressIdForCard(null);
-      setSelectedParcelId(null);
-      toggleMultiSelection({
-        key,
-        buildingId,
-        addressId,
-        parcelId,
+  const handleParcelClick = useCallback(
+    (
+      payload: ParcelClickPayload,
+      options?: {
+        additive?: boolean;
+      },
+    ) => {
+      const resolved = resolveParcelMapTarget({
+        payload,
+        parcels: parcelResolutionParcels,
+        addresses: parcelResolutionAddresses,
       });
-      return;
-    }
 
-    setMultiSelectedTargets([]);
-    if (buildingId || addressId) {
-      openLocationCard(
-        buildingId ?? addressId ?? '',
-        addressId ?? undefined,
-        parcelId,
-        buildingId ?? null
+      handleMapTargetClick(
+        {
+          buildingId: resolved.buildingId,
+          addressId: resolved.addressId,
+          parcelId: resolved.parcelId,
+        },
+        options,
       );
-    }
-  }, [toggleMultiSelection]);
+    },
+    [handleMapTargetClick, parcelResolutionAddresses, parcelResolutionParcels],
+  );
 
   const handleBuildingClick = (
     buildingId: string,
     addressId?: string,
     options?: {
       additive?: boolean;
-    }
+    },
   ) => {
     handleMapTargetClick({ buildingId, addressId: addressId ?? null, parcelId: null }, options);
   };
@@ -954,7 +1173,9 @@ export function CampaignDetailMapView({
 
   const getAccessToken = useCallback(async () => {
     const supabase = createClient();
-    const { data: { session } } = await supabase.auth.getSession();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
     return session?.access_token ?? null;
   }, []);
 
@@ -962,43 +1183,49 @@ export function CampaignDetailMapView({
     ignoreStatuses?: number[];
   };
 
-  const requestWithAuth = useCallback(async (url: string, init?: AuthRequestOptions) => {
-    const token = await getAccessToken();
-    if (!token) {
-      throw new Error('Not authenticated');
-    }
-
-    const { ignoreStatuses, ...requestInit } = init ?? {};
-    const response = await fetch(url, {
-      ...requestInit,
-      headers: {
-        ...(requestInit.headers ?? {}),
-        Authorization: `Bearer ${token}`,
-      },
-    });
-
-    if (!response.ok) {
-      if (ignoreStatuses?.includes(response.status)) {
-        return response;
+  const requestWithAuth = useCallback(
+    async (url: string, init?: AuthRequestOptions) => {
+      const token = await getAccessToken();
+      if (!token) {
+        throw new Error('Not authenticated');
       }
 
-      const payload = await response.json().catch(() => null);
-      throw new Error(payload?.error || 'Delete failed');
-    }
+      const { ignoreStatuses, ...requestInit } = init ?? {};
+      const response = await fetch(url, {
+        ...requestInit,
+        headers: {
+          ...(requestInit.headers ?? {}),
+          Authorization: `Bearer ${token}`,
+        },
+      });
 
-    return response;
-  }, [getAccessToken]);
+      if (!response.ok) {
+        if (ignoreStatuses?.includes(response.status)) {
+          return response;
+        }
 
-  const deleteJsonWithAuth = useCallback(async (url: string, options?: { allowMissing?: boolean }) => {
-    const response = await requestWithAuth(url, {
-      method: 'DELETE',
-      ignoreStatuses: options?.allowMissing ? [404] : undefined,
-    });
-    if (response.status === 404) {
-      return null;
-    }
-    return response.json().catch(() => null);
-  }, [requestWithAuth]);
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.error || 'Delete failed');
+      }
+
+      return response;
+    },
+    [getAccessToken],
+  );
+
+  const deleteJsonWithAuth = useCallback(
+    async (url: string, options?: { allowMissing?: boolean }) => {
+      const response = await requestWithAuth(url, {
+        method: 'DELETE',
+        ignoreStatuses: options?.allowMissing ? [404] : undefined,
+      });
+      if (response.status === 404) {
+        return null;
+      }
+      return response.json().catch(() => null);
+    },
+    [requestWithAuth],
+  );
 
   const handleDeleteSelectedLocation = useCallback(async () => {
     const addressId = selectedAddressIdForCard;
@@ -1006,7 +1233,11 @@ export function CampaignDetailMapView({
     const parcelId = selectedParcelId;
 
     if (!addressId && !buildingId && !parcelId) return;
-    if (!window.confirm('Delete this location from the campaign? Any linked address, building, and parcel shown here will be removed.')) {
+    if (
+      !window.confirm(
+        'Delete this location from the campaign? Any linked address, building, and parcel shown here will be removed.',
+      )
+    ) {
       return;
     }
 
@@ -1060,13 +1291,15 @@ export function CampaignDetailMapView({
     if (multiSelectedTargets.length === 0) return;
     const uniqueBuildingIds = Array.from(
       new Set(
-        multiSelectedTargets
-          .map((target) => target.buildingId)
-          .filter((value): value is string => Boolean(value))
-      )
+        multiSelectedTargets.map((target) => target.buildingId).filter((value): value is string => Boolean(value)),
+      ),
     );
 
-    if (!window.confirm(`Delete ${multiSelectedTargets.length} selected house${multiSelectedTargets.length === 1 ? '' : 's'}?`)) {
+    if (
+      !window.confirm(
+        `Delete ${multiSelectedTargets.length} selected house${multiSelectedTargets.length === 1 ? '' : 's'}?`,
+      )
+    ) {
       return;
     }
 
@@ -1080,24 +1313,28 @@ export function CampaignDetailMapView({
             .filter((target) => !target.buildingId && target.addressId)
             .map((target) => target.addressId)
             .filter((value): value is string => Boolean(value)),
-        ])
+        ]),
       );
 
       for (const addressId of uniqueAddressIds) {
-        const result = await deleteJsonWithAuth(`/api/campaigns/${campaignId}/addresses/${addressId}`, { allowMissing: true });
+        const result = await deleteJsonWithAuth(`/api/campaigns/${campaignId}/addresses/${addressId}`, {
+          allowMissing: true,
+        });
         if (typeof result?.address_id === 'string') {
           deletedAddressIds.push(result.address_id);
         }
       }
 
       for (const buildingId of uniqueBuildingIds) {
-        const result = await deleteJsonWithAuth(`/api/campaigns/${campaignId}/buildings/${buildingId}`, { allowMissing: true });
+        const result = await deleteJsonWithAuth(`/api/campaigns/${campaignId}/buildings/${buildingId}`, {
+          allowMissing: true,
+        });
         if (typeof result?.building_id === 'string') {
           deletedBuildingIds.push(result.building_id);
         }
         if (Array.isArray(result?.deleted_address_ids)) {
           deletedAddressIds.push(
-            ...result.deleted_address_ids.filter((value: unknown): value is string => typeof value === 'string')
+            ...result.deleted_address_ids.filter((value: unknown): value is string => typeof value === 'string'),
           );
         }
       }
@@ -1115,7 +1352,14 @@ export function CampaignDetailMapView({
     } finally {
       setBulkDeleting(false);
     }
-  }, [campaignId, deleteJsonWithAuth, handleCloseLocationCard, multiSelectedTargets, router, applyOptimisticMapDeletion]);
+  }, [
+    campaignId,
+    deleteJsonWithAuth,
+    handleCloseLocationCard,
+    multiSelectedTargets,
+    router,
+    applyOptimisticMapDeletion,
+  ]);
 
   // Handle adding a contact from LocationCard
   const handleAddContact = (addressId?: string, addressText?: string, notes?: string) => {
@@ -1170,7 +1414,7 @@ export function CampaignDetailMapView({
         scheduleRetry();
         return;
       }
-      
+
       const rect = mapContainer.current.getBoundingClientRect();
       if (rect.width === 0 || rect.height === 0) {
         setFlyrMapInitDebug({
@@ -1273,26 +1517,30 @@ export function CampaignDetailMapView({
         setFlyrMapInitDebug({ stage: 'map_loaded' });
         setMapInitFailed(false);
         setMapLoaded(true);
-        
+
         // Clean up problematic layers and hide building layers
         const cleanupLayers = () => {
           if (!map.current) return;
-          
+
           try {
             const style = map.current.getStyle();
             if (style && style.layers) {
               applyPresetVisualTweaks(map.current, resolvedMapStyle, {
-                preserveLayerPrefixes: ['map-buildings-', 'campaign-', 'route-', 'assigned-routes-', 'flyr-', 'gl-draw-'],
+                preserveLayerPrefixes: [
+                  'map-buildings-',
+                  'campaign-',
+                  'route-',
+                  'assigned-routes-',
+                  'flyr-',
+                  'gl-draw-',
+                ],
               });
               hideBaseBuildingLayers(map.current, {
                 preserveLayerPrefixes: CUSTOM_BUILDING_LAYER_PREFIXES,
               });
               style.layers.forEach((layer) => {
                 // Remove layers that reference non-existent source layers
-                if (layer.id && (
-                  layer.id.includes('road-label') || 
-                  layer.id.includes('road_label')
-                )) {
+                if (layer.id && (layer.id.includes('road-label') || layer.id.includes('road_label'))) {
                   try {
                     map.current?.removeLayer(layer.id);
                   } catch (err) {
@@ -1305,20 +1553,20 @@ export function CampaignDetailMapView({
             // Ignore cleanup errors
           }
         };
-        
+
         cleanupLayers();
       });
 
       // Handle non-critical source layer errors
       map.current.on('error', (e) => {
         const errorMessage = e.error?.message || String(e.error);
-        const isSourceLayerError = errorMessage.includes('does not exist on source') || 
-                                   errorMessage.includes('Source layer');
-        
+        const isSourceLayerError =
+          errorMessage.includes('does not exist on source') || errorMessage.includes('Source layer');
+
         if (isSourceLayerError) {
           // This is a style validation error - log but don't show to user
           console.warn('Mapbox style layer warning (non-critical):', errorMessage);
-          
+
           // Try to remove the problematic layer after style loads
           if (map.current) {
             map.current.once('style.load', () => {
@@ -1326,10 +1574,7 @@ export function CampaignDetailMapView({
                 const style = map.current?.getStyle();
                 if (style && style.layers) {
                   style.layers.forEach((layer) => {
-                    if (layer.id && (
-                      layer.id.includes('road-label') || 
-                      layer.id.includes('road_label')
-                    )) {
+                    if (layer.id && (layer.id.includes('road-label') || layer.id.includes('road_label'))) {
                       try {
                         map.current?.removeLayer(layer.id);
                       } catch (removeErr) {
@@ -1438,7 +1683,7 @@ export function CampaignDetailMapView({
     if (!boundsFittedRef.current) {
       const bounds = new mapboxgl.LngLatBounds();
       mapAddresses
-        .map(addr => getAddressCoordinate(addr))
+        .map((addr) => getAddressCoordinate(addr))
         .filter((coord): coord is { lon: number; lat: number } => coord !== null)
         .forEach((coord) => {
           bounds.extend([coord.lon, coord.lat]);
@@ -1509,26 +1754,6 @@ export function CampaignDetailMapView({
     // Buildings are handled by MapBuildingsLayer component which provides fill extrusions.
   }, [campaign?.bbox, campaign?.territory_boundary, mapLoaded, mapViewMode, mapAddresses]);
 
-  const preparedAddressPoints = useMemo<PreparedAddressPoint[]>(() => {
-    return mapAddresses
-      .map((address) => {
-        const coordinate = getAddressCoordinate(address);
-        if (!coordinate) return null;
-        const linkedBuildingId =
-          (address as CampaignAddress & { building_id?: unknown }).building_id ??
-          address.gers_id;
-
-        return {
-          addressId: address.id,
-          buildingId: typeof linkedBuildingId === 'string' && linkedBuildingId.trim() ? linkedBuildingId : null,
-          lon: coordinate.lon,
-          lat: coordinate.lat,
-          statusKey: getParcelAddressStatusKey(address),
-        };
-      })
-      .filter((value): value is PreparedAddressPoint => value !== null);
-  }, [mapAddresses]);
-
   const pointOverlaySourceId = 'campaign-point-overlays';
   const pointOverlayCircleLayerId = 'campaign-point-overlays-circle';
   const pointOverlayLabelLayerId = 'campaign-point-overlays-label';
@@ -1538,8 +1763,7 @@ export function CampaignDetailMapView({
     if (!mapInstance || !mapLoaded) return;
 
     const buildPointOverlayGeoJSON = (): GeoJSON.FeatureCollection<GeoJSON.Point> | null => {
-      const visiblePointOverlays = mapViewMode === 'parcels' ? [] : pointOverlays;
-      const features: GeoJSON.Feature<GeoJSON.Point>[] = visiblePointOverlays
+      const features: GeoJSON.Feature<GeoJSON.Point>[] = pointOverlays
         .filter((overlay) => Number.isFinite(overlay.lon) && Number.isFinite(overlay.lat))
         .map((overlay) => ({
           type: 'Feature',
@@ -1596,15 +1820,7 @@ export function CampaignDetailMapView({
             source: pointOverlaySourceId,
             paint: {
               'circle-color': ['coalesce', ['get', 'color'], '#ef4444'],
-              'circle-radius': [
-                'interpolate',
-                ['linear'],
-                ['coalesce', ['get', 'count'], 1],
-                1,
-                8,
-                5,
-                12,
-              ],
+              'circle-radius': ['interpolate', ['linear'], ['coalesce', ['get', 'count'], 1], 1, 8, 5, 12],
               'circle-stroke-width': 2,
               'circle-stroke-color': '#ffffff',
               'circle-opacity': 0.95,
@@ -1641,10 +1857,17 @@ export function CampaignDetailMapView({
       const buildingId = feature.properties.building_id as string | undefined;
       if (buildingId || addressId) {
         handleMapTargetClick(
-          { buildingId: buildingId ?? null, addressId: addressId ?? null, parcelId: null },
           {
-            additive: Boolean((event.originalEvent as MouseEvent | undefined)?.metaKey || (event.originalEvent as MouseEvent | undefined)?.ctrlKey),
-          }
+            buildingId: buildingId ?? null,
+            addressId: addressId ?? null,
+            parcelId: null,
+          },
+          {
+            additive: Boolean(
+              (event.originalEvent as MouseEvent | undefined)?.metaKey ||
+              (event.originalEvent as MouseEvent | undefined)?.ctrlKey,
+            ),
+          },
         );
       }
     };
@@ -1663,7 +1886,7 @@ export function CampaignDetailMapView({
       }
     };
 
-    if (mapViewMode === 'parcels' || pointOverlays.length === 0) {
+    if (pointOverlays.length === 0) {
       removePointOverlayLayers();
       return;
     }
@@ -1763,7 +1986,12 @@ export function CampaignDetailMapView({
     const hasBoth = !!(raw && snapped);
 
     const removeBoundaryLayers = () => {
-      [BOUNDARY_LAYER_RAW_FILL, BOUNDARY_LAYER_RAW_LINE, BOUNDARY_LAYER_SNAPPED_FILL, BOUNDARY_LAYER_SNAPPED_LINE].forEach((id) => {
+      [
+        BOUNDARY_LAYER_RAW_FILL,
+        BOUNDARY_LAYER_RAW_LINE,
+        BOUNDARY_LAYER_SNAPPED_FILL,
+        BOUNDARY_LAYER_SNAPPED_LINE,
+      ].forEach((id) => {
         if (safeGetLayer(m, id)) m.removeLayer(id);
       });
       if (safeGetSource(m, BOUNDARY_SOURCE_RAW)) m.removeSource(BOUNDARY_SOURCE_RAW);
@@ -1793,9 +2021,20 @@ export function CampaignDetailMapView({
       });
 
       if (hasBoth) {
-        m.addSource(BOUNDARY_SOURCE_RAW, { type: 'geojson', data: polyToFeature(raw!) });
-        m.addSource(BOUNDARY_SOURCE_SNAPPED, { type: 'geojson', data: polyToFeature(snapped!) });
-        m.addLayer({ id: BOUNDARY_LAYER_RAW_FILL, type: 'fill', source: BOUNDARY_SOURCE_RAW, paint: { 'fill-color': '#ef4444', 'fill-opacity': 0.08 } });
+        m.addSource(BOUNDARY_SOURCE_RAW, {
+          type: 'geojson',
+          data: polyToFeature(raw!),
+        });
+        m.addSource(BOUNDARY_SOURCE_SNAPPED, {
+          type: 'geojson',
+          data: polyToFeature(snapped!),
+        });
+        m.addLayer({
+          id: BOUNDARY_LAYER_RAW_FILL,
+          type: 'fill',
+          source: BOUNDARY_SOURCE_RAW,
+          paint: { 'fill-color': '#ef4444', 'fill-opacity': 0.08 },
+        });
         m.addLayer({
           id: BOUNDARY_LAYER_RAW_LINE,
           type: 'line',
@@ -1808,23 +2047,44 @@ export function CampaignDetailMapView({
             'line-dasharray': [1, 1.5],
           },
         });
-        m.addLayer({ id: BOUNDARY_LAYER_SNAPPED_FILL, type: 'fill', source: BOUNDARY_SOURCE_SNAPPED, paint: { 'fill-color': '#ef4444', 'fill-opacity': 0.15 } });
+        m.addLayer({
+          id: BOUNDARY_LAYER_SNAPPED_FILL,
+          type: 'fill',
+          source: BOUNDARY_SOURCE_SNAPPED,
+          paint: { 'fill-color': '#ef4444', 'fill-opacity': 0.15 },
+        });
         m.addLayer({
           id: BOUNDARY_LAYER_SNAPPED_LINE,
           type: 'line',
           source: BOUNDARY_SOURCE_SNAPPED,
           layout: { 'line-cap': 'round', 'line-join': 'round' },
-          paint: { 'line-color': '#ef4444', 'line-width': 3, 'line-opacity': 1 },
+          paint: {
+            'line-color': '#ef4444',
+            'line-width': 3,
+            'line-opacity': 1,
+          },
         });
       } else {
-        m.addSource(BOUNDARY_SOURCE_SNAPPED, { type: 'geojson', data: polyToFeature(boundary) });
-        m.addLayer({ id: BOUNDARY_LAYER_SNAPPED_FILL, type: 'fill', source: BOUNDARY_SOURCE_SNAPPED, paint: { 'fill-color': '#ef4444', 'fill-opacity': 0.15 } });
+        m.addSource(BOUNDARY_SOURCE_SNAPPED, {
+          type: 'geojson',
+          data: polyToFeature(boundary),
+        });
+        m.addLayer({
+          id: BOUNDARY_LAYER_SNAPPED_FILL,
+          type: 'fill',
+          source: BOUNDARY_SOURCE_SNAPPED,
+          paint: { 'fill-color': '#ef4444', 'fill-opacity': 0.15 },
+        });
         m.addLayer({
           id: BOUNDARY_LAYER_SNAPPED_LINE,
           type: 'line',
           source: BOUNDARY_SOURCE_SNAPPED,
           layout: { 'line-cap': 'round', 'line-join': 'round' },
-          paint: { 'line-color': '#ef4444', 'line-width': 3, 'line-opacity': 1 },
+          paint: {
+            'line-color': '#ef4444',
+            'line-width': 3,
+            'line-opacity': 1,
+          },
         });
       }
     };
@@ -1835,7 +2095,14 @@ export function CampaignDetailMapView({
     return () => {
       removeBoundaryLayers();
     };
-  }, [mapLoaded, campaign?.id, campaign?.territory_boundary, campaign?.campaign_polygon_raw, campaign?.campaign_polygon_snapped, campaign?.address_source]);
+  }, [
+    mapLoaded,
+    campaign?.id,
+    campaign?.territory_boundary,
+    campaign?.campaign_polygon_raw,
+    campaign?.campaign_polygon_snapped,
+    campaign?.address_source,
+  ]);
 
   const hasMapBoundary = campaign?.address_source === 'map' && campaign?.territory_boundary;
   const hasRawAndSnapped = !!(campaign?.campaign_polygon_raw && campaign?.campaign_polygon_snapped);
@@ -1888,7 +2155,7 @@ export function CampaignDetailMapView({
         MAP_STATUS_CONFIG.TOUCHED.color,
         ['all', ['==', status, 'UNTOUCHED'], statusFilters.UNTOUCHED],
         MAP_STATUS_CONFIG.UNTOUCHED.color,
-        parcelStrokeColor,
+        parcelFillColor,
       ] as mapboxgl.Expression;
     };
 
@@ -1896,6 +2163,8 @@ export function CampaignDetailMapView({
       const status = ['get', 'status_key'];
       return [
         'case',
+        ['boolean', ['get', 'is_selected'], false],
+        Math.min(parcelFillOpacity + 0.16, 0.42),
         ['all', ['==', status, 'QR_SCANNED'], statusFilters.QR_SCANNED],
         parcelFillOpacity,
         ['all', ['==', status, 'HOT_LEADS'], statusFilters.HOT_LEADS],
@@ -1923,11 +2192,13 @@ export function CampaignDetailMapView({
 
       const parcelFeatures: Array<GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>> = [];
       const parcelLabelFeatures: Array<GeoJSON.Feature<GeoJSON.Point>> = [];
+      const selectedParcelIdSet = new Set(selectedParcelIds.map((parcelId) => parcelId.toLowerCase()));
+      const addressPointById = new Map(
+        preparedAddressPoints.map((address) => [address.addressId.toLowerCase(), address]),
+      );
 
       for (const parcel of parcels) {
-        const geom = typeof parcel.geom === 'string'
-          ? JSON.parse(parcel.geom)
-          : parcel.geom;
+        const geom = typeof parcel.geom === 'string' ? JSON.parse(parcel.geom) : parcel.geom;
         if (!geom || (geom.type !== 'Polygon' && geom.type !== 'MultiPolygon')) continue;
 
         const turfFeature = turf.feature(geom as GeoJSON.Polygon | GeoJSON.MultiPolygon);
@@ -1943,19 +2214,41 @@ export function CampaignDetailMapView({
 
         const statusKey = MAP_STATUS_PRIORITY.find((key) => statuses.has(key)) ?? 'UNTOUCHED';
         const parcelLabel = getParcelAddressLabel(parcel);
-        const primaryTarget = getPrimaryParcelTarget(addressesInParcel);
+        const propertyLinkedAddressIds = linkedAddressIdsForParcelProperties(parcel.properties);
+        const linkedTargetsFromProperties = propertyLinkedAddressIds
+          .map((addressId) => addressPointById.get(addressId.toLowerCase()))
+          .filter((address): address is PreparedAddressPoint => Boolean(address));
+        const targetAddresses =
+          linkedTargetsFromProperties.length > 0 ? linkedTargetsFromProperties : addressesInParcel;
+        const primaryTarget = getPrimaryParcelTarget(targetAddresses);
+        const externalId = parcelExternalId(parcel);
+        const linkedAddressIds = uniqueParcelStrings([
+          ...propertyLinkedAddressIds,
+          ...addressesInParcel.map((address) => address.addressId),
+        ]);
+        const isSelected = [parcel.id, externalId, parcel.properties?.parcel_id, parcel.properties?.external_id]
+          .map((value) => parcelStringValue(value)?.toLowerCase())
+          .some((value) => (value ? selectedParcelIdSet.has(value) : false));
 
         parcelFeatures.push({
           type: 'Feature',
           geometry: geom as GeoJSON.Polygon | GeoJSON.MultiPolygon,
           properties: {
-            external_id: parcel.external_id ?? null,
+            ...(parcel.properties ?? {}),
+            external_id: externalId,
             parcel_row_id: parcel.id,
+            parcel_id: parcel.properties?.parcel_id ?? externalId ?? parcel.id,
+            campaign_parcel_id: parcel.properties?.campaign_parcel_id ?? parcel.id,
             address_id: primaryTarget?.addressId ?? null,
+            linked_address_ids: linkedAddressIds,
+            address_ids: linkedAddressIds,
+            address_count: linkedAddressIds.length,
+            is_linked: linkedAddressIds.length > 0,
             building_id: primaryTarget?.buildingId ?? null,
             label: parcelLabel,
             feature_type: parcel.properties?.FEATURE_TYPE || parcel.properties?.feature_type || 'COMMON',
             status_key: statusKey,
+            is_selected: isSelected,
           },
         });
 
@@ -2010,21 +2303,19 @@ export function CampaignDetailMapView({
             'line-join': 'round',
           },
           paint: {
-            'line-color': getParcelFillColorExpression(),
-            'line-width': [
-              'interpolate',
-              ['linear'],
-              ['zoom'],
-              12,
-              0.12,
-              14,
-              0.18,
-              16,
-              0.28,
-              18,
-              parcelLineWidth,
+            'line-color': [
+              'case',
+              ['boolean', ['get', 'is_selected'], false],
+              SELECTED_PARCEL_COLOR,
+              parcelStrokeColor,
             ],
-            'line-opacity': parcelLineOpacity,
+            'line-width': [
+              'case',
+              ['boolean', ['get', 'is_selected'], false],
+              ['interpolate', ['linear'], ['zoom'], 12, 1.4, 14, 2.1, 16, 2.8, 18, 3.4],
+              ['interpolate', ['linear'], ['zoom'], 12, 0.75, 14, 1.05, 16, 1.25, 18, parcelLineWidth],
+            ],
+            'line-opacity': ['case', ['boolean', ['get', 'is_selected'], false], 1, parcelLineOpacity],
           },
         });
 
@@ -2047,6 +2338,7 @@ export function CampaignDetailMapView({
             'text-opacity': 0.9,
           },
         });
+        bringParcelLayersToFront(m);
       } catch (err) {
         console.error('Error adding parcels layer:', err);
       }
@@ -2055,21 +2347,21 @@ export function CampaignDetailMapView({
     const onParcelClick = (event: mapboxgl.MapLayerMouseEvent) => {
       const feature = event.features?.[0];
       if (!feature?.properties) return;
-      const parcelRowId = feature.properties.parcel_row_id as string | undefined;
-      const addressId = feature.properties.address_id as string | undefined;
-      const buildingId = feature.properties.building_id as string | undefined;
-      if (parcelRowId || buildingId || addressId) {
-        handleMapTargetClick(
-          {
-            buildingId: buildingId ?? null,
-            addressId: addressId ?? null,
-            parcelId: parcelRowId ?? null,
-          },
-          {
-            additive: Boolean((event.originalEvent as MouseEvent | undefined)?.metaKey || (event.originalEvent as MouseEvent | undefined)?.ctrlKey),
-          }
-        );
-      }
+      handleParcelClick(
+        {
+          parcelId: parcelStringValue(feature.properties.parcel_row_id),
+          externalParcelId: parcelStringValue(feature.properties.external_id ?? feature.properties.parcel_id),
+          featureId: typeof feature.id === 'string' || typeof feature.id === 'number' ? feature.id : null,
+          properties: feature.properties,
+          lngLat: event.lngLat,
+        },
+        {
+          additive: Boolean(
+            (event.originalEvent as MouseEvent | undefined)?.metaKey ||
+            (event.originalEvent as MouseEvent | undefined)?.ctrlKey,
+          ),
+        },
+      );
     };
 
     // Use a map-level click handler so Mapbox does not run layer-scoped
@@ -2077,6 +2369,7 @@ export function CampaignDetailMapView({
     const onParcelMapClick = (e: mapboxgl.MapMouseEvent) => {
       try {
         if (!m.isStyleLoaded() || !m.getLayer(PARCEL_FILL_LAYER)) return;
+        if (hasRenderedBaseMapFeatureAtPoint(m, e.point, mapViewMode)) return;
         const features = m.queryRenderedFeatures(e.point, {
           layers: [PARCEL_FILL_LAYER],
         });
@@ -2096,6 +2389,10 @@ export function CampaignDetailMapView({
       try {
         if (!m.isStyleLoaded() || !m.getLayer(PARCEL_FILL_LAYER)) {
           m.getCanvas().style.cursor = '';
+          return;
+        }
+        if (hasRenderedBaseMapFeatureAtPoint(m, e.point, mapViewMode)) {
+          m.getCanvas().style.cursor = 'pointer';
           return;
         }
         const features = m.queryRenderedFeatures(e.point, {
@@ -2132,6 +2429,7 @@ export function CampaignDetailMapView({
     };
   }, [
     mapLoaded,
+    mapViewMode,
     showGeojsonParcels,
     parcels,
     preparedAddressPoints,
@@ -2141,13 +2439,39 @@ export function CampaignDetailMapView({
     parcelLineOpacity,
     parcelLineWidth,
     parcelLabelHaloColor,
-    handleMapTargetClick,
+    handleParcelClick,
+    selectedParcelIds,
   ]);
+
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !mapLoaded || !showGeojsonParcels) return;
+
+    const promoteParcelLayers = () => {
+      bringParcelLayersToFront(m);
+    };
+
+    promoteParcelLayers();
+    const frameId = window.requestAnimationFrame(promoteParcelLayers);
+    const timeoutId = window.setTimeout(promoteParcelLayers, 250);
+    m.on('idle', promoteParcelLayers);
+    m.on('styledata', promoteParcelLayers);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.clearTimeout(timeoutId);
+      m.off('idle', promoteParcelLayers);
+      m.off('styledata', promoteParcelLayers);
+    };
+  }, [mapLoaded, showGeojsonParcels, mapViewMode, resolvedMapStyle.key, mapBundleDataKey]);
 
   const handleSnapToRoads = async () => {
     setSnapping(true);
     try {
-      const res = await fetch(`/api/campaigns/${campaignId}/snap`, { method: 'POST', credentials: 'include' });
+      const res = await fetch(`/api/campaigns/${campaignId}/snap`, {
+        method: 'POST',
+        credentials: 'include',
+      });
       if (res.ok) onSnapComplete?.();
       else {
         const data = await res.json().catch(() => ({}));
@@ -2219,21 +2543,14 @@ export function CampaignDetailMapView({
   }, []);
 
   return (
-    <div
-      ref={mapShellRef}
-      className={`relative h-full w-full ${isMapFullscreen ? 'bg-background' : ''}`}
-    >
+    <div ref={mapShellRef} className={`relative h-full w-full ${isMapFullscreen ? 'bg-background' : ''}`}>
       <div ref={mapContainer} className="h-full w-full" />
       {mapInitFailed ? (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-background p-6">
           <div className="max-w-sm rounded-lg border border-border bg-card p-5 text-center shadow-lg">
             <p className="text-sm font-semibold text-foreground">Map could not be loaded.</p>
             <p className="mt-1 text-sm text-muted-foreground">Please refresh the page.</p>
-            <Button
-              className="mt-4"
-              size="sm"
-              onClick={() => window.location.reload()}
-            >
+            <Button className="mt-4" size="sm" onClick={() => window.location.reload()}>
               Refresh
             </Button>
           </div>
@@ -2250,7 +2567,8 @@ export function CampaignDetailMapView({
               multiSelectedTargets.length > 0 ? (
                 <div className="space-y-2">
                   <p className="text-[11px] text-muted-foreground">
-                    {multiSelectedTargets.length} house{multiSelectedTargets.length === 1 ? '' : 's'} selected with Command-click.
+                    {multiSelectedTargets.length} house
+                    {multiSelectedTargets.length === 1 ? '' : 's'} selected with Command-click.
                   </p>
                   <div className="flex items-center gap-2">
                     <Button
@@ -2285,15 +2603,14 @@ export function CampaignDetailMapView({
             <div className="pointer-events-none absolute top-14 left-3 z-20">
               <div className="rounded-xl border border-amber-200 bg-white/92 px-3 py-2 shadow-sm backdrop-blur-sm dark:border-amber-900/50 dark:bg-black/82">
                 <p className="text-sm font-medium text-gray-900 dark:text-white">
-                  {multiSelectedTargets.length} house{multiSelectedTargets.length === 1 ? '' : 's'} selected
+                  {multiSelectedTargets.length} house
+                  {multiSelectedTargets.length === 1 ? '' : 's'} selected
                 </p>
-                <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                  Open Tools to delete or clear selection
-                </p>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400">Open Tools to delete or clear selection</p>
               </div>
             </div>
           ) : null}
-          {/* View switcher: Buildings | Addresses | Parcels */}
+          {/* View switcher: Buildings | Addresses, with parcels as an overlay */}
           <div className="pointer-events-none absolute top-4 right-4 z-20 flex flex-col items-end gap-2">
             <div className="pointer-events-auto flex items-center gap-2">
               <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 bg-white/90 dark:bg-black/80 backdrop-blur-sm shadow-sm overflow-hidden">
@@ -2314,18 +2631,17 @@ export function CampaignDetailMapView({
                 {SHOW_PARCEL_VIEW && parcelsReady ? (
                   <button
                     type="button"
-                    onClick={() => setMapViewMode((current) => current === 'parcels' ? 'buildings' : 'parcels')}
+                    onClick={() => setShowParcelsOverlay((current) => !current)}
                     className={`px-3 py-2 text-sm font-medium transition-colors ${
-                      mapViewMode === 'parcels'
+                      showParcelsOverlay
                         ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
                         : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
                     }`}
-                    title={`${parcels.length} parcel${parcels.length !== 1 ? 's' : ''} from campaign map bundle`}
+                    aria-pressed={showParcelsOverlay}
+                    title={`${parcels.length} parcel${parcels.length !== 1 ? 's' : ''} linked in the campaign map bundle`}
                   >
                     Parcels
-                    <span className="ml-1 text-xs opacity-60">
-                      ({parcels.length})
-                    </span>
+                    <span className="ml-1 text-xs opacity-60">({parcels.length})</span>
                   </button>
                 ) : null}
               </div>
@@ -2400,19 +2716,17 @@ export function CampaignDetailMapView({
                         animationData={loadingAnimationData}
                         loop
                         className="h-full w-full"
-                        rendererSettings={{ preserveAspectRatio: 'xMidYMid meet' }}
+                        rendererSettings={{
+                          preserveAspectRatio: 'xMidYMid meet',
+                        }}
                       />
                     ) : (
                       <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-primary" />
                     )}
                   </div>
                   <div className="space-y-1">
-                    <p className="text-sm font-semibold text-foreground">
-                      {buildingPendingOverlay.title}
-                    </p>
-                    <p className="text-sm text-muted-foreground">
-                      {buildingPendingOverlay.description}
-                    </p>
+                    <p className="text-sm font-semibold text-foreground">{buildingPendingOverlay.title}</p>
+                    <p className="text-sm text-muted-foreground">{buildingPendingOverlay.description}</p>
                   </div>
                 </div>
               </div>
@@ -2495,7 +2809,7 @@ export function CampaignDetailMapView({
           )}
         </>
       )}
-      
+
       {/* Create Contact Dialog */}
       {userId && (
         <CreateContactDialog

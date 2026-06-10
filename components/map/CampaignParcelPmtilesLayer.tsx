@@ -15,6 +15,7 @@ import {
   type MapStatusKey,
   type StatusFilters,
 } from '@/lib/constants/mapStatus';
+import type { ParcelClickPayload } from '@/lib/map/parcelClickResolution';
 
 type ManifestParcelSource = {
   deliveryMode: 'backend_zxy';
@@ -37,12 +38,13 @@ type CampaignParcelPmtilesLayerProps = {
     properties?: Record<string, unknown> | null;
   }>;
   parcelStatusByExternalId?: Record<string, MapStatusKey>;
+  selectedParcelIds?: string[];
   statusFilters?: StatusFilters;
   campaignBoundary?: GeoJSON.Polygon | null;
   campaignBbox?: [number, number, number, number] | null;
   styleKey?: string;
   onParcelClick?: (
-    parcelId: string,
+    payload: ParcelClickPayload,
     options?: {
       additive?: boolean;
     }
@@ -52,6 +54,7 @@ type CampaignParcelPmtilesLayerProps = {
 const SOURCE_ID = 'campaign-parcels-pmtiles-source';
 const FILL_LAYER_ID = 'campaign-parcels-pmtiles-fill';
 const LINE_LAYER_ID = 'campaign-parcels-pmtiles-line';
+const SELECTED_PARCEL_COLOR = '#60a5fa';
 const PARCEL_ID_PROPERTY_NAMES = [
   'parcel_id',
   'external_id',
@@ -168,6 +171,11 @@ function getFeatureParcelExternalId(properties: Record<string, unknown>): string
   return null;
 }
 
+function getFeatureId(feature: mapboxgl.MapboxGeoJSONFeature | undefined): string | number | null {
+  const id = feature?.id;
+  return typeof id === 'string' || typeof id === 'number' ? id : null;
+}
+
 function buildParcelScopeFilter(
   parcelExternalIds: string[],
   campaignBoundary?: GeoJSON.Polygon | null,
@@ -243,6 +251,22 @@ function buildParcelColorExpression(
   return caseExpression as mapboxgl.Expression;
 }
 
+function buildSelectedParcelExpression(selectedParcelIds: string[]): mapboxgl.Expression {
+  const normalizedIds = selectedParcelIds
+    .map((parcelId) => parcelId.trim())
+    .filter(Boolean);
+
+  if (normalizedIds.length === 0) return false as unknown as mapboxgl.Expression;
+
+  return [
+    'match',
+    PARCEL_ID_EXPRESSION,
+    normalizedIds,
+    true,
+    false,
+  ] as mapboxgl.Expression;
+}
+
 export function CampaignParcelPmtilesLayer({
   map,
   campaignId,
@@ -250,6 +274,7 @@ export function CampaignParcelPmtilesLayer({
   visible,
   parcels = [],
   parcelStatusByExternalId = {},
+  selectedParcelIds = [],
   statusFilters = DEFAULT_STATUS_FILTERS,
   campaignBoundary,
   campaignBbox,
@@ -316,6 +341,7 @@ export function CampaignParcelPmtilesLayer({
 
     const scopeFilter = buildParcelScopeFilter(parcelScope.externalIds, campaignBoundary, campaignBbox);
     const parcelColorExpression = buildParcelColorExpression(parcelStatusByExternalId, statusFilters);
+    const selectedParcelExpression = buildSelectedParcelExpression(selectedParcelIds);
     if (!scopeFilter) {
       cleanupParcelLayers(map);
       return;
@@ -350,7 +376,12 @@ export function CampaignParcelPmtilesLayer({
         filter: scopeFilter,
         paint: {
           'fill-color': parcelColorExpression,
-          'fill-opacity': ['interpolate', ['linear'], ['zoom'], 10, 0.14, 14, 0.2, 18, 0.3],
+          'fill-opacity': [
+            'case',
+            selectedParcelExpression,
+            ['interpolate', ['linear'], ['zoom'], 10, 0.22, 14, 0.3, 18, 0.42],
+            ['interpolate', ['linear'], ['zoom'], 10, 0.14, 14, 0.2, 18, 0.3],
+          ],
         },
       });
 
@@ -362,19 +393,41 @@ export function CampaignParcelPmtilesLayer({
         minzoom: manifestSource.minzoom,
         filter: scopeFilter,
         paint: {
-          'line-color': '#e5e7eb',
-          'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.15, 14, 0.3, 18, 0.75],
-          'line-opacity': ['interpolate', ['linear'], ['zoom'], 10, 0.55, 14, 0.75, 18, 0.95],
+          'line-color': [
+            'case',
+            selectedParcelExpression,
+            SELECTED_PARCEL_COLOR,
+            '#e5e7eb',
+          ],
+          'line-width': [
+            'case',
+            selectedParcelExpression,
+            ['interpolate', ['linear'], ['zoom'], 10, 0.9, 14, 1.5, 18, 2.6],
+            ['interpolate', ['linear'], ['zoom'], 10, 0.15, 14, 0.3, 18, 0.75],
+          ],
+          'line-opacity': [
+            'case',
+            selectedParcelExpression,
+            1,
+            ['interpolate', ['linear'], ['zoom'], 10, 0.55, 14, 0.75, 18, 0.95],
+          ],
         },
       });
 
       const clickHandler = (event: mapboxgl.MapLayerMouseEvent) => {
-        const props = event.features?.[0]?.properties ?? {};
+        const feature = event.features?.[0];
+        const props = feature?.properties ?? {};
         const externalParcelId = getFeatureParcelExternalId(props);
         const parcelId = externalParcelId ? parcelScope.rowIdByExternalId.get(externalParcelId) ?? externalParcelId : '';
         if (!parcelId) return;
         const originalEvent = event.originalEvent as MouseEvent | undefined;
-        onParcelClickRef.current?.(parcelId, {
+        onParcelClickRef.current?.({
+          parcelId,
+          externalParcelId,
+          featureId: getFeatureId(feature),
+          properties: props,
+          lngLat: event.lngLat,
+        }, {
           additive: Boolean(originalEvent?.metaKey || originalEvent?.ctrlKey),
         });
       };
@@ -453,6 +506,7 @@ export function CampaignParcelPmtilesLayer({
     parcelScope.externalIds,
     parcelScope.rowIdByExternalId,
     parcelStatusByExternalId,
+    selectedParcelIds,
     statusFilters,
   ]);
 

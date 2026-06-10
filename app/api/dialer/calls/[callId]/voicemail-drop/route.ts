@@ -1,12 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import twilio from 'twilio';
-import type { DialerCall } from '@/types/database';
+import type { DialerCall, DialerVoicemailDrop } from '@/types/database';
 import { getDialerRequestContext } from '@/lib/dialer/server';
 import {
   getTwilioAccountSid,
   getTwilioAuthToken,
-  getTwilioVoicemailDropAudioUrl,
-  getTwilioVoicemailDropMessage,
 } from '@/lib/dialer/env';
 
 export const runtime = 'nodejs';
@@ -16,13 +14,13 @@ type VoicemailDropPayload = {
   workspaceId?: string;
 };
 
-async function getWorkspaceVoicemailDropAudioUrl(
+async function getWorkspaceVoicemailDrop(
   admin: ReturnType<typeof import('@/lib/supabase/server').createAdminClient>,
   workspaceId: string
-): Promise<string | null> {
+): Promise<DialerVoicemailDrop | null> {
   const { data, error } = await admin
     .from('dialer_voicemail_drops')
-    .select('public_url')
+    .select('*')
     .eq('workspace_id', workspaceId)
     .eq('is_active', true)
     .order('created_at', { ascending: false })
@@ -33,19 +31,12 @@ async function getWorkspaceVoicemailDropAudioUrl(
     console.warn('[dialer/voicemail-drop] failed to load workspace voicemail drop', error);
   }
 
-  return typeof data?.public_url === 'string' && data.public_url.trim() ? data.public_url.trim() : null;
+  return typeof data?.public_url === 'string' && data.public_url.trim() ? data as DialerVoicemailDrop : null;
 }
 
-function buildVoicemailTwiml(audioUrl: string | null) {
+function buildVoicemailTwiml(audioUrl: string) {
   const response = new twilio.twiml.VoiceResponse();
-  const resolvedAudioUrl = audioUrl || getTwilioVoicemailDropAudioUrl();
-
-  if (resolvedAudioUrl) {
-    response.play(resolvedAudioUrl);
-  } else {
-    response.say({ voice: 'alice' }, getTwilioVoicemailDropMessage());
-  }
-
+  response.play(audioUrl);
   response.hangup();
   return response.toString();
 }
@@ -85,17 +76,26 @@ export async function POST(
   }
 
   try {
-    const audioUrl = await getWorkspaceVoicemailDropAudioUrl(context.admin, context.workspaceId);
+    const voicemailDrop = await getWorkspaceVoicemailDrop(context.admin, context.workspaceId);
+    if (!voicemailDrop) {
+      return NextResponse.json(
+        { error: 'Upload and activate a prerecorded voicemail before using voicemail drop.' },
+        { status: 409 }
+      );
+    }
+
     const client = twilio(getTwilioAccountSid(), getTwilioAuthToken());
     await client.calls(activeCall.twilio_call_sid).update({
-      twiml: buildVoicemailTwiml(audioUrl),
+      twiml: buildVoicemailTwiml(voicemailDrop.public_url),
     });
 
     const nextPayload = {
       ...(typeof activeCall.status_payload === 'object' && activeCall.status_payload ? activeCall.status_payload : {}),
       voicemailDrop: {
         droppedAt: new Date().toISOString(),
-        audioUrl: audioUrl || getTwilioVoicemailDropAudioUrl(),
+        id: voicemailDrop.id,
+        filename: voicemailDrop.filename,
+        audioUrl: voicemailDrop.public_url,
       },
     };
 

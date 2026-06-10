@@ -211,13 +211,18 @@ function run() {
   });
 
   test('parcel-only ownership emits address-mode-only label metadata', () => {
+    const campaignParcelId = '55555555-5555-4555-8555-555555555555';
     const addresses: GeoJSON.FeatureCollection = {
       type: 'FeatureCollection',
       features: [addressFeature('33333333-3333-4333-8333-333333333333', -79.00005, 43.00005)],
     };
     const parcels: GeoJSON.FeatureCollection = {
       type: 'FeatureCollection',
-      features: [parcelFeature('parcel-label', rectangle(-79.0002, 43.0000, -79.0000, 43.0002))],
+      features: [
+        parcelFeature('parcel-label', rectangle(-79.0002, 43.0000, -79.0000, 43.0002), {
+          id: campaignParcelId,
+        }),
+      ],
     };
 
     const ownership = selectCanonicalAddressParcelOwnershipForBundle(addresses, parcels);
@@ -229,6 +234,7 @@ function run() {
     assertEqual(addressProps.has_building_link, undefined);
     assertEqual(addressProps.label_visibility_mode, 'address_mode_only');
     assertEqual(addressProps.parcel_id, 'parcel-label');
+    assertEqual(addressProps.campaign_parcel_id, campaignParcelId);
     assertEqual(typeof addressProps.label_anchor_lon, 'number');
     assertEqual(typeof addressProps.label_anchor_lat, 'number');
     assertEqual(parcelProps.linked_address_ids, ['33333333-3333-4333-8333-333333333333']);

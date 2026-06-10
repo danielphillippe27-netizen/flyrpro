@@ -25,11 +25,22 @@ const ALLOWED_CAMPAIGN_TYPES = new Set([
   'other',
 ]);
 
-const EXPANDED_CAMPAIGN_TYPES = new Set(['just_sold', 'just_listed', 'prospecting', 'coming_soon', 'market_update', 'other']);
+const EXPANDED_CAMPAIGN_TYPES = new Set([
+  'just_sold',
+  'just_listed',
+  'prospecting',
+  'coming_soon',
+  'market_update',
+  'other',
+]);
 
 function isCampaignTypeConstraintError(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
-  const candidate = error as { code?: string; message?: string; details?: string | null };
+  const candidate = error as {
+    code?: string;
+    message?: string;
+    details?: string | null;
+  };
   return (
     candidate.code === '23514' ||
     candidate.message?.includes('campaigns_type_check') ||
@@ -110,7 +121,9 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
     const { data: campaign, error } = await admin
       .from('campaigns')
-      .select('id, name, title, status, type, provision_status, provision_phase, provision_source, updated_at')
+      .select(
+        'id, name, title, status, type, provision_status, provision_phase, provision_source, map_ready_at, optimized_at, map_mode, building_link_confidence, data_quality_reason, link_quality_reason, updated_at',
+      )
       .eq('id', campaignId)
       .single();
 
@@ -126,14 +139,17 @@ export async function GET(request: NextRequest, context: RouteContext) {
       provision_status: campaign.provision_status ?? null,
       provision_phase: campaign.provision_phase ?? null,
       provision_source: campaign.provision_source ?? null,
+      map_ready_at: campaign.map_ready_at ?? null,
+      optimized_at: campaign.optimized_at ?? null,
+      map_mode: campaign.map_mode ?? null,
+      building_link_confidence: campaign.building_link_confidence ?? null,
+      data_quality_reason: campaign.data_quality_reason ?? null,
+      link_quality_reason: campaign.link_quality_reason ?? null,
       updated_at: campaign.updated_at ?? null,
     });
   } catch (err) {
     console.error('[GET /api/campaigns/[campaignId]] Unhandled error:', err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Unknown server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: err instanceof Error ? err.message : 'Unknown server error' }, { status: 500 });
   }
 }
 
@@ -181,9 +197,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     }
 
     const hasTerritoryBoundary = Object.prototype.hasOwnProperty.call(body, 'territory_boundary');
-    const territoryBoundary = hasTerritoryBoundary
-      ? normalizeTerritoryBoundary(body.territory_boundary)
-      : null;
+    const territoryBoundary = hasTerritoryBoundary ? normalizeTerritoryBoundary(body.territory_boundary) : null;
     if (hasTerritoryBoundary && !territoryBoundary) {
       return NextResponse.json({ error: 'Invalid territory boundary polygon' }, { status: 400 });
     }
@@ -221,9 +235,8 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         return NextResponse.json({ error: 'Could not calculate territory bbox' }, { status: 400 });
       }
       const regionResolution = await resolveCampaignRegion({
-        currentRegion: typeof body.region === 'string' && body.region.trim()
-          ? body.region.trim().toUpperCase()
-          : campaign.region,
+        currentRegion:
+          typeof body.region === 'string' && body.region.trim() ? body.region.trim().toUpperCase() : campaign.region,
         polygon: territoryBoundary,
         bbox,
       });
@@ -281,11 +294,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     }
 
     if (!updatedCampaign) {
-      const { data, error } = await admin
-        .from('campaigns')
-        .select()
-        .eq('id', campaignId)
-        .single();
+      const { data, error } = await admin.from('campaigns').select().eq('id', campaignId).single();
 
       if (error) {
         console.error('[PATCH /api/campaigns/[campaignId]] Failed to reload campaign after update:', error);
@@ -301,10 +310,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     });
   } catch (err) {
     console.error('[PATCH /api/campaigns/[campaignId]] Unhandled error:', err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Unknown server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: err instanceof Error ? err.message : 'Unknown server error' }, { status: 500 });
   }
 }
 
@@ -341,20 +347,14 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const { error: parcelsError } = await admin
-      .from('campaign_parcels')
-      .delete()
-      .eq('campaign_id', campaignId);
+    const { error: parcelsError } = await admin.from('campaign_parcels').delete().eq('campaign_id', campaignId);
 
     if (parcelsError) {
       console.error('[DELETE /api/campaigns/[campaignId]] Failed to delete campaign parcels:', parcelsError);
       return NextResponse.json({ error: parcelsError.message }, { status: 500 });
     }
 
-    const { error: deleteError } = await admin
-      .from('campaigns')
-      .delete()
-      .eq('id', campaignId);
+    const { error: deleteError } = await admin.from('campaigns').delete().eq('id', campaignId);
 
     if (deleteError) {
       console.error('[DELETE /api/campaigns/[campaignId]] Failed to delete campaign:', deleteError);
@@ -364,9 +364,6 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error('[DELETE /api/campaigns/[campaignId]] Unhandled error:', err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Unknown server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: err instanceof Error ? err.message : 'Unknown server error' }, { status: 500 });
   }
 }
