@@ -62,15 +62,15 @@ function getDialerEarlyBirdPricing(countryCode: string): {
   if (countryCode === 'US') {
     return {
       currencyPrefix: '$',
-      earlyBirdPrice: '14.99',
-      regularPrice: '30',
+      earlyBirdPrice: '30',
+      regularPrice: '60',
     };
   }
 
   return {
     currencyPrefix: 'CA$',
-    earlyBirdPrice: '19.99',
-    regularPrice: '40',
+    earlyBirdPrice: '40',
+    regularPrice: '80',
   };
 }
 
