@@ -54,6 +54,26 @@ const MAX_SEATS = 100;
 const FINAL_ONBOARDING_STEP = 6;
 const EXCLUSIVE_ONBOARDING_AUTH_DRAFT_KEY = 'flyr.exclusiveOnboardingAuthDraft';
 
+function getDialerEarlyBirdPricing(countryCode: string): {
+  currencyPrefix: string;
+  earlyBirdPrice: string;
+  regularPrice: string;
+} {
+  if (countryCode === 'US') {
+    return {
+      currencyPrefix: '$',
+      earlyBirdPrice: '14.99',
+      regularPrice: '30',
+    };
+  }
+
+  return {
+    currencyPrefix: 'CA$',
+    earlyBirdPrice: '19.99',
+    regularPrice: '40',
+  };
+}
+
 function normalizeReferralCodeInput(value: string): string {
   return value
     .toUpperCase()
@@ -506,6 +526,7 @@ function OnboardingContent() {
   const canStep3 =
     workspaceName.trim().length > 0 && industry.length > 0;
   const selectedCountry = COUNTRY_OPTIONS.find((country) => country.code === countryCode);
+  const dialerEarlyBirdPricing = getDialerEarlyBirdPricing(countryCode);
   const filteredCountries = useMemo(() => {
     const query = countrySearchQuery.trim().toLowerCase();
     if (!query) return COUNTRY_OPTIONS;
@@ -1488,9 +1509,31 @@ function OnboardingContent() {
 
             {isDialerOnboarding ? (
               <div className="rounded-xl border border-zinc-700 bg-black/30 p-4 space-y-4">
-                <div className="text-center">
-                  <p className="text-lg font-semibold text-white">Start your free trial</p>
-                  <p className="mt-1 text-sm text-zinc-400">Create your account now. No credit card.</p>
+                <div className="rounded-xl border border-red-500/50 bg-red-500/10 p-4 text-center shadow-[0_18px_45px_rgba(127,29,29,0.22)]">
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-red-200">
+                    50% off early bird pricing
+                  </p>
+                  <div className="mt-3 flex items-end justify-center gap-2">
+                    <span className="text-4xl font-black leading-none text-white">
+                      {dialerEarlyBirdPricing.currencyPrefix}
+                      {dialerEarlyBirdPricing.earlyBirdPrice}
+                    </span>
+                    <span className="pb-1 text-sm font-semibold text-zinc-300">/ month</span>
+                  </div>
+                  <p className="mt-2 text-sm text-zinc-300">
+                    Regular price{' '}
+                    <span className="font-semibold text-zinc-500 line-through">
+                      {dialerEarlyBirdPricing.currencyPrefix}
+                      {dialerEarlyBirdPricing.regularPrice}
+                    </span>
+                    . Price going up soon.
+                  </p>
+                  <p className="mt-3 text-lg font-semibold text-white">
+                    Start your 14-day free trial
+                  </p>
+                  <p className="mt-1 text-sm font-medium text-red-100">
+                    No credit card required before sign in.
+                  </p>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="workEmail" className="text-base text-white">Work email</Label>
