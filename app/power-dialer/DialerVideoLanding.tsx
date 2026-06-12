@@ -169,66 +169,102 @@ export function DialerVideoLanding({
         />
       )}
 
-      <section className="relative overflow-hidden">
-        <div className="absolute inset-x-0 top-0 z-20 flex items-center justify-between px-4 py-3 md:px-8 md:py-5">
-          <Link href="/" className="text-4xl font-black leading-none tracking-tight text-red-500 md:text-5xl">
-            FLYR
-          </Link>
-          <Link
-            href={onboardingHref}
-            className="inline-flex h-10 items-center rounded-lg bg-red-600 px-4 text-sm font-semibold text-white shadow-lg shadow-red-950/30 transition hover:bg-red-500 md:h-11 md:px-5"
-          >
-            Start free trial
-            <ArrowRight className="ml-2 h-4 w-4" />
-          </Link>
-        </div>
+      <section className="relative min-h-[100svh] overflow-hidden bg-black">
+        <div className="dialer-portrait-rotator relative min-h-[100svh] bg-black">
+          <div className="absolute inset-x-0 top-0 z-20 flex items-center justify-between px-4 py-3 md:px-8 md:py-5">
+            <Link href="/" className="text-4xl font-black leading-none tracking-tight text-red-500 md:text-5xl">
+              FLYR
+            </Link>
+            <Link
+              href={onboardingHref}
+              className="inline-flex h-10 items-center rounded-lg bg-red-600 px-4 text-sm font-semibold text-white shadow-lg shadow-red-950/30 transition hover:bg-red-500 md:h-11 md:px-5"
+            >
+              Start free trial
+              <ArrowRight className="ml-2 h-4 w-4" />
+            </Link>
+          </div>
 
-        <div className="relative mx-auto flex min-h-[100svh] w-full items-center justify-center bg-black">
-          <div className="relative w-full">
-            <div className="relative w-full bg-black pt-[56.25%]">
-              {videoUrl ? (
-                <video
-                  ref={videoRef}
-                  id="flyr-power-dialer-video"
-                  title="FLYR power dialer demo"
-                  src={videoUrl}
-                  poster={posterUrl}
-                  className="absolute inset-0 h-full w-full bg-black object-contain"
-                  autoPlay
-                  muted
-                  playsInline
-                  preload="auto"
-                />
-              ) : (
-                <iframe
-                  ref={iframeRef}
-                  id="flyr-power-dialer-stream"
-                  title="FLYR power dialer demo"
-                  src={streamUrl ?? undefined}
-                  className="absolute inset-0 h-full w-full border-0"
-                  allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;"
-                  allowFullScreen
-                />
+          <div className="dialer-video-viewport relative mx-auto flex min-h-[100svh] w-full items-center justify-center bg-black">
+            <div className="dialer-player-frame relative w-full">
+              <div className="dialer-aspect relative w-full bg-black pt-[56.25%]">
+                {videoUrl ? (
+                  <video
+                    ref={videoRef}
+                    id="flyr-power-dialer-video"
+                    title="FLYR power dialer demo"
+                    src={videoUrl}
+                    poster={posterUrl}
+                    className="absolute inset-0 h-full w-full bg-black object-contain"
+                    autoPlay
+                    muted
+                    playsInline
+                    preload="auto"
+                  />
+                ) : (
+                  <iframe
+                    ref={iframeRef}
+                    id="flyr-power-dialer-stream"
+                    title="FLYR power dialer demo"
+                    src={streamUrl ?? undefined}
+                    className="absolute inset-0 h-full w-full border-0"
+                    allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;"
+                    allowFullScreen
+                  />
+                )}
+              </div>
+
+              {soundPromptVisible && (
+                <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center px-5">
+                  <button
+                    type="button"
+                    onClick={handleStartWithSound}
+                    className="pointer-events-auto inline-flex h-16 items-center rounded-lg bg-white px-7 text-base font-black text-zinc-950 shadow-2xl shadow-black/40 transition hover:scale-[1.02] hover:bg-zinc-100 md:h-20 md:px-9 md:text-lg"
+                  >
+                    <span className="mr-4 grid h-9 w-9 place-items-center rounded-full bg-red-600 text-white md:h-10 md:w-10">
+                      <Play className="h-5 w-5 fill-current" />
+                    </span>
+                    Play with sound
+                    <Volume2 className="ml-3 h-5 w-5 text-red-600" />
+                  </button>
+                </div>
               )}
             </div>
-
-            {soundPromptVisible && (
-              <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center px-5">
-                <button
-                  type="button"
-                  onClick={handleStartWithSound}
-                  className="pointer-events-auto inline-flex h-16 items-center rounded-lg bg-white px-7 text-base font-black text-zinc-950 shadow-2xl shadow-black/40 transition hover:scale-[1.02] hover:bg-zinc-100 md:h-20 md:px-9 md:text-lg"
-                >
-                  <span className="mr-4 grid h-9 w-9 place-items-center rounded-full bg-red-600 text-white md:h-10 md:w-10">
-                    <Play className="h-5 w-5 fill-current" />
-                  </span>
-                  Play with sound
-                  <Volume2 className="ml-3 h-5 w-5 text-red-600" />
-                </button>
-              </div>
-            )}
           </div>
         </div>
+
+        <style>{`
+          .dialer-player-frame {
+            aspect-ratio: 16 / 9;
+            width: min(100vw, calc(100svh * 16 / 9));
+          }
+
+          .dialer-aspect {
+            height: 100%;
+            padding-top: 0;
+          }
+
+          @media (orientation: portrait) and (max-width: 767px) {
+            .dialer-portrait-rotator {
+              position: fixed;
+              left: 50%;
+              top: 50%;
+              width: 100svh;
+              height: 100svw;
+              min-height: 100svw;
+              transform: translate(-50%, -50%) rotate(90deg);
+              transform-origin: center;
+            }
+
+            .dialer-video-viewport {
+              height: 100svw;
+              min-height: 100svw;
+            }
+
+            .dialer-player-frame {
+              width: min(100svh, calc(100svw * 16 / 9));
+            }
+          }
+        `}</style>
 
         {redirecting && (
           <div className="fixed inset-0 z-50 grid place-items-center bg-zinc-950/90 px-6 text-center backdrop-blur">
