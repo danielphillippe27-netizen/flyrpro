@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, Loader2, Mail, MessageSquare, Mic, Pause, PhoneCall, Play, Save, Send, Trash2, Upload, Voicemail } from 'lucide-react';
+import { AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, Loader2, Mail, MessageSquare, Mic, Pause, PhoneCall, PhoneOff, Play, Save, Send, Trash2, Upload, Voicemail } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -980,6 +980,16 @@ export function PowerDialerPage() {
     setMessage('Dialler paused.');
   };
 
+  const handleHangUp = () => {
+    doubleDialRetryRef.current = null;
+    if (device.isInCall) {
+      device.hangUp();
+    }
+    setDiallerRunning(false);
+    setActiveCallId(null);
+    setMessage('Call hung up.');
+  };
+
   const moveActiveLead = (direction: -1 | 1) => {
     if (activeLeadIndex < 0) return;
     const nextLead = leads[activeLeadIndex + direction];
@@ -1211,7 +1221,7 @@ export function PowerDialerPage() {
           </div>
 
           <div className="sticky bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] z-20 mt-4 sm:static">
-            <div className="grid grid-cols-[1.2fr_0.8fr] gap-2 sm:grid-cols-[1fr_180px]">
+            <div className="grid grid-cols-[1fr_0.72fr_0.72fr] gap-2 sm:grid-cols-[1fr_160px_160px]">
               <Button
                 type="button"
                 onClick={() => void handleStartPause()}
@@ -1226,6 +1236,17 @@ export function PowerDialerPage() {
                   <Play className="h-4 w-4" />
                 )}
                 {diallerRunning ? 'Pause' : 'Start'}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleHangUp}
+                disabled={!device.isInCall && !activeCallId}
+                className="h-[52px] min-h-[52px] touch-manipulation border-red-500/45 bg-[#171717] text-base font-semibold text-red-100 hover:border-red-400 hover:bg-red-950/35 hover:text-white disabled:border-neutral-700 disabled:text-neutral-500 sm:h-12 sm:min-h-12"
+              >
+                <PhoneOff className="h-4 w-4" />
+                <span className="sm:hidden">End</span>
+                <span className="hidden sm:inline">Hang up</span>
               </Button>
               <Button
                 type="button"

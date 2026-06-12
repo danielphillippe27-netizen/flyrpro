@@ -14,6 +14,10 @@ export type ResolvedMapStyle = {
   config?: MapStyleConfig;
 };
 
+const WHITE_OUT_DEFAULT_STYLE = 'mapbox://styles/mapbox/light-v11';
+const WHITE_OUT_BACKGROUND = '#f8fafc';
+const WHITE_OUT_WATER = '#eef1f4';
+
 export const MAP_STYLE_PRESET_META: Record<
   MapStylePreset,
   { label: string; description: string }
@@ -55,8 +59,8 @@ export function resolveMapStyle(
 ): ResolvedMapStyle {
   if (preset === 'whiteOut') {
     return {
-      key: 'whiteOut:classic:light',
-      style: process.env.NEXT_PUBLIC_MAPBOX_STYLE_ID_WHITEOUT ?? '',
+      key: 'whiteOut:light-v11',
+      style: process.env.NEXT_PUBLIC_MAPBOX_STYLE_ID_WHITEOUT || WHITE_OUT_DEFAULT_STYLE,
     };
   }
 
@@ -207,6 +211,11 @@ export function applyPresetVisualTweaks(
     preserveLayerPrefixes?: string[];
   },
 ) {
+  if (resolvedStyle.key.startsWith('whiteOut:')) {
+    applyWhiteOutVisualTweaks(map, options);
+    return;
+  }
+
   if (!resolvedStyle.key.startsWith('blackOps:')) return;
 
   const style = map.getStyle();
@@ -264,6 +273,51 @@ export function applyPresetVisualTweaks(
   }
 }
 
+function applyWhiteOutVisualTweaks(
+  map: mapboxgl.Map,
+  options?: {
+    preserveLayerIds?: string[];
+    preserveLayerPrefixes?: string[];
+  },
+) {
+  const style = map.getStyle();
+  if (!style?.layers) return;
+
+  for (const layer of style.layers) {
+    if (isPreservedLayer(layer.id, options)) continue;
+
+    const lowerLayerId = layer.id.toLowerCase();
+    const sourceLayer =
+      typeof (layer as { 'source-layer'?: unknown })['source-layer'] === 'string'
+        ? String((layer as { 'source-layer'?: unknown })['source-layer']).toLowerCase()
+        : '';
+    const isWater = lowerLayerId.includes('water') || sourceLayer.includes('water');
+
+    try {
+      if (layer.type === 'background') {
+        map.setPaintProperty(layer.id, 'background-color', WHITE_OUT_BACKGROUND);
+        map.setPaintProperty(layer.id, 'background-opacity', 1);
+        continue;
+      }
+
+      if (isWater && layer.type === 'fill') {
+        map.setPaintProperty(layer.id, 'fill-color', WHITE_OUT_WATER);
+        map.setPaintProperty(layer.id, 'fill-outline-color', WHITE_OUT_WATER);
+        continue;
+      }
+
+      if (isWater && layer.type === 'line') {
+        map.setPaintProperty(layer.id, 'line-color', WHITE_OUT_WATER);
+        map.setPaintProperty(layer.id, 'line-opacity', 0.9);
+      }
+    } catch {
+      // Some imported style layers reject direct mutation.
+    }
+  }
+
+  hideBaseAddressNumberLayers(map, options);
+}
+
 function isPreservedLayer(
   layerId: string,
   options?: {
@@ -295,6 +349,93 @@ export function isBaseBuildingLayer(
     || lowerLayerId.includes('structure')
     || sourceLayer.includes('building')
   );
+}
+
+function isBaseAddressNumberLayer(
+  layer: mapboxgl.AnyLayer,
+  options?: {
+    preserveLayerIds?: string[];
+    preserveLayerPrefixes?: string[];
+  },
+) {
+  if (layer.type !== 'symbol') return false;
+  if (isPreservedLayer(layer.id, options)) return false;
+
+  const lowerLayerId = layer.id.toLowerCase();
+  if (isAddressNumberToken(lowerLayerId)) return true;
+
+  return isAddressNumberToken(flattenStyleValue(layer).toLowerCase());
+}
+
+function isAddressNumberToken(value: string) {
+  return (
+    value.includes('housenum')
+    || value.includes('house-num')
+    || value.includes('house num')
+    || value.includes('housenumber')
+    || value.includes('house-number')
+    || value.includes('house number')
+    || value.includes('house_number')
+    || value.includes('house_no')
+    || value.includes('house-no')
+    || value.includes('street_number')
+    || value.includes('street-number')
+    || value.includes('street number')
+    || value.includes('street_no')
+    || value.includes('street-no')
+    || value.includes('addr:housenumber')
+    || value.includes('addr_housenumber')
+    || value.includes('addressnum')
+    || value.includes('address-num')
+    || value.includes('address num')
+    || value.includes('address-number')
+    || value.includes('address number')
+    || value.includes('address_number')
+    || value.includes('building-number')
+    || value.includes('building number')
+    || value.includes('building_number')
+  );
+}
+
+function flattenStyleValue(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) return value.map(flattenStyleValue).join(' ');
+  if (value && typeof value === 'object') {
+    return Object.entries(value)
+      .map(([key, entry]) => `${key} ${flattenStyleValue(entry)}`)
+      .join(' ');
+  }
+  return '';
+}
+
+export function hideBaseAddressNumberLayers(
+  map: mapboxgl.Map,
+  options?: {
+    preserveLayerIds?: string[];
+    preserveLayerPrefixes?: string[];
+  },
+) {
+  const style = map.getStyle();
+  if (!style?.layers) return;
+
+  for (const layer of style.layers) {
+    if (!isBaseAddressNumberLayer(layer, options)) continue;
+
+    try {
+      map.setLayoutProperty(layer.id, 'visibility', 'none');
+      continue;
+    } catch {
+      // Fall through to opacity suppression below.
+    }
+
+    try {
+      map.setPaintProperty(layer.id, 'text-opacity', 0);
+      map.setPaintProperty(layer.id, 'icon-opacity', 0);
+    } catch {
+      // Ignore layers that do not expose the matching paint property.
+    }
+  }
 }
 
 export function hideBaseBuildingLayers(

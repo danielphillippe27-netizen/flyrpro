@@ -1,11 +1,27 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import * as turf from '@turf/turf';
-import { Compass, Maximize2, Minus, Minimize2, Plus, RotateCw, Trash2 } from 'lucide-react';
+import {
+  ArrowLeft,
+  Clapperboard,
+  Compass,
+  Film,
+  Maximize2,
+  Minus,
+  Minimize2,
+  Palette,
+  Play,
+  Plus,
+  RotateCw,
+  Shuffle,
+  Sparkles,
+  Square,
+  Trash2,
+} from 'lucide-react';
 import Lottie from 'lottie-react';
 import type { CampaignAddress, CampaignV2, CampaignParcel } from '@/types/database';
 import { MapBuildingsLayer, type MapBuildingsRenderState } from '@/components/map/MapBuildingsLayer';
@@ -100,6 +116,39 @@ const RESIDENTIAL_ONLY_BASE_LAYER_TOKENS = [
   'water',
   'waterway',
 ];
+const DEMO_GREEN_COLOR = '#22c55e';
+const DEMO_RANDOM_COLORS = ['#22c55e', '#3b82f6', '#ef4444', '#8b5cf6', '#f97316', '#06b6d4', '#eab308'];
+const DEMO_CAMERA_PITCH_STREET_DEGREES = 68;
+const DEMO_CAMERA_PITCH_3D_DEGREES = 62;
+const DEMO_CAMERA_ZOOM_STREET = 18.15;
+
+type DemoColorMode = 'status' | 'allGreen' | 'random';
+type DemoCameraShot =
+  | 'orbit'
+  | 'birdToStreet'
+  | 'flyThrough'
+  | 'streetSweep'
+  | 'birdFlyThrough'
+  | 'craneReveal'
+  | 'angledPullback'
+  | 'slideLeft'
+  | 'streetSegments';
+type DemoCameraSpeed = 'normal' | 'superSlow';
+type DemoSegmentCameraAngle = 'fixed' | 'bird' | 'threeD' | 'street';
+type DemoFitCameraOptions = {
+  pitch: number;
+  bearing: number;
+  maxZoom: number;
+  duration: number;
+};
+type DemoAddressTarget = {
+  addressId: string;
+  lon: number;
+  lat: number;
+  streetKey: string;
+  streetLabel: string;
+  houseNumber: number | null;
+};
 
 type FlyrMapDebugWindow = Window & {
   __flyrMapInitDebug?: Record<string, unknown>;
@@ -629,6 +678,73 @@ function getPrimaryParcelTarget(addressesInParcel: PreparedAddressPoint[]): Prep
   return addressesInParcel[0] ?? null;
 }
 
+function deterministicColorIndex(seed: string, paletteLength: number): number {
+  let hash = 0;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash = (hash * 31 + seed.charCodeAt(index)) >>> 0;
+  }
+  return hash % paletteLength;
+}
+
+function easeInOutCubic(progress: number): number {
+  return progress < 0.5 ? 4 * progress * progress * progress : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+}
+
+function bearingBetween(start: [number, number], end: [number, number]): number {
+  const startLat = (start[1] * Math.PI) / 180;
+  const startLon = (start[0] * Math.PI) / 180;
+  const endLat = (end[1] * Math.PI) / 180;
+  const endLon = (end[0] * Math.PI) / 180;
+  const deltaLon = endLon - startLon;
+  const y = Math.sin(deltaLon) * Math.cos(endLat);
+  const x =
+    Math.cos(startLat) * Math.sin(endLat) -
+    Math.sin(startLat) * Math.cos(endLat) * Math.cos(deltaLon);
+  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+}
+
+function demoSweepEndpoints(bounds: mapboxgl.LngLatBounds): {
+  start: [number, number];
+  middle: [number, number];
+  end: [number, number];
+  bearing: number;
+} {
+  const west = bounds.getWest();
+  const east = bounds.getEast();
+  const south = bounds.getSouth();
+  const north = bounds.getNorth();
+  const center = bounds.getCenter();
+  const lonSpan = Math.abs(east - west);
+  const latSpan = Math.abs(north - south);
+  const start: [number, number] = lonSpan >= latSpan ? [west, center.lat] : [center.lng, south];
+  const end: [number, number] = lonSpan >= latSpan ? [east, center.lat] : [center.lng, north];
+  const middle: [number, number] = [center.lng, center.lat];
+
+  return {
+    start,
+    middle,
+    end,
+    bearing: bearingBetween(start, end),
+  };
+}
+
+function demoStreetLabel(address: CampaignAddress): string {
+  const streetName = String(address.street_name ?? '').trim();
+  if (streetName) return streetName;
+
+  const formatted = String(address.formatted ?? address.address ?? '').trim();
+  const withoutLeadingNumber = formatted.replace(/^\s*\d+[A-Za-z]?(?:[-/]\d+[A-Za-z]?)?\s+/, '').trim();
+  const beforeComma = withoutLeadingNumber.split(',')[0]?.trim();
+  return beforeComma || 'Campaign route';
+}
+
+function demoHouseNumber(address: CampaignAddress): number | null {
+  const direct = String(address.house_number ?? '').trim();
+  const source = direct || String(address.formatted ?? address.address ?? '').trim();
+  const match = source.match(/\d+/);
+  return match ? Number(match[0]) : null;
+}
+
 export function CampaignDetailMapView({
   campaignId,
   addresses,
@@ -666,6 +782,12 @@ export function CampaignDetailMapView({
   const map = useRef<mapboxgl.Map | null>(null);
   const { isFullscreen: isMapFullscreen, toggle: toggleMapFullscreen } = useFullscreen(mapShellRef);
   const [statusFilters, setStatusFilters] = useState<StatusFilters>(DEFAULT_STATUS_FILTERS);
+  const [demoColorMode, setDemoColorMode] = useState<DemoColorMode>('status');
+  const [demoCameraSpeed, setDemoCameraSpeed] = useState<DemoCameraSpeed>('normal');
+  const [demoSegmentCameraAngle, setDemoSegmentCameraAngle] = useState<DemoSegmentCameraAngle>('fixed');
+  const [showDemoControls, setShowDemoControls] = useState(false);
+  const [activeDemoCameraShot, setActiveDemoCameraShot] = useState<DemoCameraShot | null>(null);
+  const [demoPlaybackColorOverrides, setDemoPlaybackColorOverrides] = useState<Record<string, string> | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapInitFailed, setMapInitFailed] = useState(false);
   const [loadingAnimationData, setLoadingAnimationData] = useState<object | null>(null);
@@ -685,6 +807,9 @@ export function CampaignDetailMapView({
   const mapInitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryCountRef = useRef(0);
   const hasRenderedBuildingsRef = useRef(false);
+  const demoCameraTimeoutsRef = useRef<number[]>([]);
+  const demoCameraFrameRef = useRef<number | null>(null);
+  const demoTapGestureRef = useRef({ count: 0, lastTapAt: 0 });
 
   // Location Card state
   const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(null);
@@ -791,6 +916,21 @@ export function CampaignDetailMapView({
     () => mergeBundleAddressesWithLiveState(bundleAddresses, visibleAddresses),
     [bundleAddresses, visibleAddresses],
   );
+  const demoAddressColorOverrides = useMemo(() => {
+    if (demoPlaybackColorOverrides) return demoPlaybackColorOverrides;
+    if (demoColorMode === 'status') return undefined;
+
+    const deletedIds = new Set(optimisticallyDeletedAddressIds);
+    const colors: Record<string, string> = {};
+    for (const address of mapAddresses) {
+      if (!address.id || deletedIds.has(address.id)) continue;
+      colors[address.id] =
+        demoColorMode === 'allGreen'
+          ? DEMO_GREEN_COLOR
+          : DEMO_RANDOM_COLORS[deterministicColorIndex(address.id, DEMO_RANDOM_COLORS.length)];
+    }
+    return colors;
+  }, [demoColorMode, demoPlaybackColorOverrides, mapAddresses, optimisticallyDeletedAddressIds]);
   const bundleBuildings = useMemo<BuildingFeatureCollection | null>(
     () => (isFeatureCollection(mapBundle?.buildings) ? mapBundle.buildings : null),
     [mapBundle?.buildings],
@@ -827,6 +967,61 @@ export function CampaignDetailMapView({
       })
       .filter((value): value is PreparedAddressPoint => value !== null);
   }, [mapAddresses]);
+
+  const getCampaignMapBounds = useCallback((): mapboxgl.LngLatBounds | null => {
+    const bounds = new mapboxgl.LngLatBounds();
+
+    for (const point of preparedAddressPoints) {
+      bounds.extend([point.lon, point.lat]);
+    }
+
+    if (bounds.isEmpty() && campaignBbox) {
+      bounds.extend([campaignBbox[0], campaignBbox[1]]);
+      bounds.extend([campaignBbox[2], campaignBbox[3]]);
+    }
+
+    if (bounds.isEmpty()) {
+      const boundary = campaign?.territory_boundary as GeoJSON.Polygon | null | undefined;
+      const ring = boundary?.coordinates?.[0] ?? [];
+      for (const coordinate of ring) {
+        const [lon, lat] = coordinate;
+        if (Number.isFinite(lon) && Number.isFinite(lat)) {
+          bounds.extend([lon, lat]);
+        }
+      }
+    }
+
+    return bounds.isEmpty() ? null : bounds;
+  }, [campaign?.territory_boundary, campaignBbox, preparedAddressPoints]);
+
+  const demoAddressTargets = useMemo<DemoAddressTarget[]>(() => {
+    const addressById = new Map(mapAddresses.map((address) => [address.id, address]));
+
+    return preparedAddressPoints
+      .map((point) => {
+        const address = addressById.get(point.addressId);
+        if (!address) return null;
+        const streetLabel = demoStreetLabel(address);
+
+        return {
+          addressId: point.addressId,
+          lon: point.lon,
+          lat: point.lat,
+          streetKey: streetLabel.toLowerCase(),
+          streetLabel,
+          houseNumber: demoHouseNumber(address),
+        };
+      })
+      .filter((target): target is DemoAddressTarget => target !== null)
+      .sort((lhs, rhs) => {
+        if (lhs.streetKey !== rhs.streetKey) return lhs.streetKey.localeCompare(rhs.streetKey);
+        if (lhs.houseNumber !== null && rhs.houseNumber !== null && lhs.houseNumber !== rhs.houseNumber) {
+          return lhs.houseNumber - rhs.houseNumber;
+        }
+        if (lhs.lat !== rhs.lat) return lhs.lat - rhs.lat;
+        return lhs.lon - rhs.lon;
+      });
+  }, [mapAddresses, preparedAddressPoints]);
 
   const parcelResolutionAddresses = useMemo<ParcelResolutionAddress[]>(
     () =>
@@ -2516,6 +2711,405 @@ export function CampaignDetailMapView({
     };
   }, [mapViewMode, waitingForInitialBuildingRender]);
 
+  const clearDemoCameraTimers = useCallback(() => {
+    for (const timeoutId of demoCameraTimeoutsRef.current) {
+      window.clearTimeout(timeoutId);
+    }
+    demoCameraTimeoutsRef.current = [];
+    if (demoCameraFrameRef.current !== null) {
+      window.cancelAnimationFrame(demoCameraFrameRef.current);
+      demoCameraFrameRef.current = null;
+    }
+  }, []);
+
+  const stopDemoCamera = useCallback(() => {
+    clearDemoCameraTimers();
+    map.current?.stop();
+    setActiveDemoCameraShot(null);
+    setDemoPlaybackColorOverrides(null);
+  }, [clearDemoCameraTimers]);
+
+  const playDemoCamera = useCallback(
+    (shot: DemoCameraShot) => {
+      const currentMap = map.current;
+      if (!currentMap || !mapLoaded) return;
+
+      const bounds = getCampaignMapBounds();
+      const center = bounds?.getCenter() ?? currentMap.getCenter();
+      const centerTuple: [number, number] = [center.lng, center.lat];
+      const sweep = bounds ? demoSweepEndpoints(bounds) : null;
+      const fallbackZoom = Math.max(15, Math.min(17.2, currentMap.getZoom() || 15));
+      const speedMultiplier = demoCameraSpeed === 'superSlow' ? 2.6 : 1;
+      const speed = (milliseconds: number) => Math.round(milliseconds * speedMultiplier);
+
+      clearDemoCameraTimers();
+      currentMap.stop();
+      currentMap.resize();
+      setDemoPlaybackColorOverrides(null);
+      setMapViewMode('buildings');
+      setShowDemoControls(true);
+      setActiveDemoCameraShot(shot);
+
+      const schedule = (callback: () => void, delay: number) => {
+        const timeoutId = window.setTimeout(callback, speed(delay));
+        demoCameraTimeoutsRef.current.push(timeoutId);
+      };
+
+      const finishAfter = (delay: number) => {
+        schedule(() => setActiveDemoCameraShot(null), delay);
+      };
+
+      const fitCampaign = (options: DemoFitCameraOptions) => {
+        if (bounds) {
+          currentMap.fitBounds(bounds, {
+            padding: { top: 84, right: 84, bottom: 120, left: 84 },
+            ...options,
+          });
+          return;
+        }
+        currentMap.easeTo({
+          center: centerTuple,
+          zoom: fallbackZoom,
+          pitch: options.pitch,
+          bearing: options.bearing,
+          duration: options.duration,
+          easing: easeInOutCubic,
+        });
+      };
+
+      if (shot === 'orbit') {
+        fitCampaign({
+          maxZoom: 16,
+          duration: speed(900),
+          pitch: DEMO_CAMERA_PITCH_3D_DEGREES,
+          bearing: -35,
+        });
+        schedule(() => {
+          const startAt = performance.now();
+          const startBearing = currentMap.getBearing();
+          const orbitZoom = Math.max(15.4, Math.min(17, currentMap.getZoom() + 0.45));
+          const duration = speed(11000);
+
+          const step = (now: number) => {
+            const progress = Math.min(1, (now - startAt) / duration);
+            currentMap.jumpTo({
+              center: centerTuple,
+              zoom: orbitZoom,
+              pitch: DEMO_CAMERA_PITCH_3D_DEGREES,
+              bearing: startBearing + progress * 360,
+            });
+
+            if (progress < 1) {
+              demoCameraFrameRef.current = window.requestAnimationFrame(step);
+            } else {
+              demoCameraFrameRef.current = null;
+              setActiveDemoCameraShot(null);
+            }
+          };
+
+          demoCameraFrameRef.current = window.requestAnimationFrame(step);
+        }, 980);
+        return;
+      }
+
+      if (shot === 'birdToStreet') {
+        fitCampaign({
+          maxZoom: 15.2,
+          duration: speed(900),
+          pitch: 0,
+          bearing: 0,
+        });
+        schedule(() => {
+          currentMap.flyTo({
+            center: centerTuple,
+            zoom: DEMO_CAMERA_ZOOM_STREET,
+            pitch: DEMO_CAMERA_PITCH_STREET_DEGREES,
+            bearing: sweep?.bearing ?? 35,
+            duration: speed(4200),
+            essential: true,
+          });
+        }, 1050);
+        finishAfter(5400);
+        return;
+      }
+
+      if (shot === 'birdFlyThrough') {
+        const start = sweep?.start ?? centerTuple;
+        const middle = sweep?.middle ?? centerTuple;
+        const end = sweep?.end ?? centerTuple;
+        const bearing = sweep?.bearing ?? 0;
+        currentMap.flyTo({
+          center: start,
+          zoom: Math.max(17.1, fallbackZoom + 0.9),
+          pitch: 0,
+          bearing,
+          duration: speed(1050),
+          essential: true,
+        });
+        schedule(() => {
+          currentMap.easeTo({
+            center: middle,
+            zoom: DEMO_CAMERA_ZOOM_STREET,
+            pitch: 0,
+            bearing,
+            duration: speed(3000),
+            easing: easeInOutCubic,
+          });
+        }, 1080);
+        schedule(() => {
+          currentMap.easeTo({
+            center: end,
+            zoom: DEMO_CAMERA_ZOOM_STREET,
+            pitch: 0,
+            bearing,
+            duration: speed(3300),
+            easing: easeInOutCubic,
+          });
+        }, 4150);
+        finishAfter(7600);
+        return;
+      }
+
+      if (shot === 'craneReveal') {
+        const bearing = sweep?.bearing ?? -25;
+        currentMap.flyTo({
+          center: centerTuple,
+          zoom: DEMO_CAMERA_ZOOM_STREET,
+          pitch: DEMO_CAMERA_PITCH_STREET_DEGREES,
+          bearing,
+          duration: speed(1100),
+          essential: true,
+        });
+        schedule(() => {
+          fitCampaign({
+            maxZoom: 15.3,
+            duration: speed(5200),
+            pitch: 0,
+            bearing: bearing + 42,
+          });
+        }, 1150);
+        finishAfter(6600);
+        return;
+      }
+
+      if (shot === 'angledPullback') {
+        const currentCenter = currentMap.getCenter();
+        const startCenter: [number, number] = [currentCenter.lng, currentCenter.lat];
+        const startZoom = currentMap.getZoom();
+        const startPitch = currentMap.getPitch();
+        const startBearing = currentMap.getBearing();
+        const duration = speed(5600);
+        const targetPitch = startPitch > 45 ? 45 : startPitch;
+        const startAt = performance.now();
+
+        const step = (now: number) => {
+          const progress = Math.min(1, (now - startAt) / duration);
+          const eased = easeInOutCubic(progress);
+
+          currentMap.jumpTo({
+            center: startCenter,
+            zoom: Math.max(13.4, startZoom - 1.85 * eased),
+            pitch: startPitch + (targetPitch - startPitch) * eased,
+            bearing: startBearing,
+          });
+
+          if (progress < 1) {
+            demoCameraFrameRef.current = window.requestAnimationFrame(step);
+          } else {
+            demoCameraFrameRef.current = null;
+            setActiveDemoCameraShot(null);
+          }
+        };
+
+        demoCameraFrameRef.current = window.requestAnimationFrame(step);
+        return;
+      }
+
+      if (shot === 'slideLeft') {
+        const startCenter = currentMap.getCenter();
+        const startCenterTuple: [number, number] = [startCenter.lng, startCenter.lat];
+        const startPoint = currentMap.project(startCenter);
+        const canvas = currentMap.getCanvas();
+        const endCenter = currentMap.unproject([
+          startPoint.x - Math.max(360, canvas.clientWidth * 0.62),
+          startPoint.y,
+        ]);
+        const endCenterTuple: [number, number] = [endCenter.lng, endCenter.lat];
+        const zoom = currentMap.getZoom();
+        const pitch = currentMap.getPitch();
+        const bearing = currentMap.getBearing();
+        const duration = speed(5200);
+        const startAt = performance.now();
+
+        const step = (now: number) => {
+          const progress = Math.min(1, (now - startAt) / duration);
+          const eased = easeInOutCubic(progress);
+
+          currentMap.jumpTo({
+            center: [
+              startCenterTuple[0] + (endCenterTuple[0] - startCenterTuple[0]) * eased,
+              startCenterTuple[1] + (endCenterTuple[1] - startCenterTuple[1]) * eased,
+            ],
+            zoom,
+            pitch,
+            bearing,
+          });
+
+          if (progress < 1) {
+            demoCameraFrameRef.current = window.requestAnimationFrame(step);
+          } else {
+            demoCameraFrameRef.current = null;
+            setActiveDemoCameraShot(null);
+          }
+        };
+
+        demoCameraFrameRef.current = window.requestAnimationFrame(step);
+        return;
+      }
+
+      if (shot === 'streetSegments') {
+        const orderedTargets = demoAddressTargets.length > 0 ? demoAddressTargets : [];
+        if (demoSegmentCameraAngle !== 'fixed') {
+          const segmentCamera = {
+            bird: {
+              maxZoom: 16.8,
+              pitch: 0,
+              bearing: 0,
+            },
+            threeD: {
+              maxZoom: 16.2,
+              pitch: DEMO_CAMERA_PITCH_3D_DEGREES,
+              bearing: sweep?.bearing ?? -12,
+            },
+            street: {
+              maxZoom: 17.4,
+              pitch: DEMO_CAMERA_PITCH_STREET_DEGREES,
+              bearing: sweep?.bearing ?? 35,
+            },
+          }[demoSegmentCameraAngle];
+
+          fitCampaign({
+            ...segmentCamera,
+            duration: speed(900),
+          });
+        }
+        setDemoPlaybackColorOverrides({});
+
+        const litColors: Record<string, string> = {};
+        let delay = 1050;
+        let previousStreetKey: string | null = null;
+        orderedTargets.forEach((target, index) => {
+          if (previousStreetKey && previousStreetKey !== target.streetKey) {
+            delay += 420;
+          }
+          previousStreetKey = target.streetKey;
+
+          schedule(() => {
+            litColors[target.addressId] =
+              demoColorMode === 'random'
+                ? DEMO_RANDOM_COLORS[deterministicColorIndex(target.addressId, DEMO_RANDOM_COLORS.length)]
+                : DEMO_GREEN_COLOR;
+            setDemoPlaybackColorOverrides({ ...litColors });
+          }, delay);
+          delay += index < 35 ? 110 : 70;
+        });
+
+        finishAfter(Math.max(1800, delay + 500));
+        return;
+      }
+
+      if (shot === 'flyThrough') {
+        const start = sweep?.start ?? centerTuple;
+        const middle = sweep?.middle ?? centerTuple;
+        const end = sweep?.end ?? centerTuple;
+        const bearing = sweep?.bearing ?? currentMap.getBearing();
+        currentMap.flyTo({
+          center: start,
+          zoom: Math.max(16, fallbackZoom),
+          pitch: DEMO_CAMERA_PITCH_3D_DEGREES,
+          bearing,
+          duration: speed(1200),
+          essential: true,
+        });
+        schedule(() => {
+          currentMap.easeTo({
+            center: middle,
+            zoom: Math.max(17, fallbackZoom + 0.6),
+            pitch: DEMO_CAMERA_PITCH_3D_DEGREES,
+            bearing,
+            duration: speed(3600),
+            easing: easeInOutCubic,
+          });
+        }, 1250);
+        schedule(() => {
+          currentMap.easeTo({
+            center: end,
+            zoom: Math.max(17, fallbackZoom + 0.6),
+            pitch: DEMO_CAMERA_PITCH_3D_DEGREES,
+            bearing,
+            duration: speed(3600),
+            easing: easeInOutCubic,
+          });
+        }, 4900);
+        finishAfter(8700);
+        return;
+      }
+
+      const start = sweep?.start ?? centerTuple;
+      const end = sweep?.end ?? centerTuple;
+      const bearing = sweep?.bearing ?? 35;
+      currentMap.flyTo({
+        center: start,
+        zoom: DEMO_CAMERA_ZOOM_STREET,
+        pitch: DEMO_CAMERA_PITCH_STREET_DEGREES,
+        bearing,
+        duration: speed(1000),
+        essential: true,
+      });
+      schedule(() => {
+        currentMap.easeTo({
+          center: end,
+          zoom: DEMO_CAMERA_ZOOM_STREET,
+          pitch: DEMO_CAMERA_PITCH_STREET_DEGREES,
+          bearing,
+          duration: speed(6200),
+          easing: easeInOutCubic,
+        });
+      }, 1100);
+      finishAfter(7600);
+    },
+    [clearDemoCameraTimers, demoAddressTargets, demoCameraSpeed, demoColorMode, demoSegmentCameraAngle, getCampaignMapBounds, mapLoaded],
+  );
+
+  useEffect(() => {
+    return () => {
+      clearDemoCameraTimers();
+      map.current?.stop();
+    };
+  }, [clearDemoCameraTimers]);
+
+  const handleDemoColorModeChange = useCallback((mode: DemoColorMode) => {
+    setDemoPlaybackColorOverrides(null);
+    setDemoColorMode(mode);
+    if (mode !== 'status') {
+      setMapViewMode('buildings');
+    }
+  }, []);
+
+  const handleMapShellPointerDown = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('button, a, input, textarea, select, [role="button"], .mapboxgl-ctrl')) return;
+
+    const now = performance.now();
+    const nextCount = now - demoTapGestureRef.current.lastTapAt < 700 ? demoTapGestureRef.current.count + 1 : 1;
+    demoTapGestureRef.current = { count: nextCount, lastTapAt: now };
+
+    if (nextCount >= 4) {
+      demoTapGestureRef.current = { count: 0, lastTapAt: 0 };
+      setShowDemoControls(true);
+    }
+  }, []);
+
   const zoomMapIn = useCallback(() => {
     map.current?.zoomIn({ duration: 260 });
   }, []);
@@ -2543,7 +3137,11 @@ export function CampaignDetailMapView({
   }, []);
 
   return (
-    <div ref={mapShellRef} className={`relative h-full w-full ${isMapFullscreen ? 'bg-background' : ''}`}>
+    <div
+      ref={mapShellRef}
+      onPointerDown={handleMapShellPointerDown}
+      className={`relative h-full w-full ${isMapFullscreen ? 'bg-background' : ''}`}
+    >
       <div ref={mapContainer} className="h-full w-full" />
       {mapInitFailed ? (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-background p-6">
@@ -2647,6 +3245,20 @@ export function CampaignDetailMapView({
               </div>
               <button
                 type="button"
+                onClick={() => setShowDemoControls((current) => !current)}
+                className={`flex h-10 w-10 items-center justify-center rounded-lg border border-gray-200 bg-white/90 text-sm font-medium shadow-sm backdrop-blur-sm transition-colors hover:bg-gray-100 dark:border-gray-700 dark:bg-black/80 dark:hover:bg-gray-800 ${
+                  showDemoControls
+                    ? 'text-gray-950 dark:text-white'
+                    : 'text-gray-600 dark:text-gray-300'
+                }`}
+                aria-label="Demo controls"
+                aria-pressed={showDemoControls}
+                title="Demo controls"
+              >
+                <Clapperboard className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
                 onClick={() => void toggleMapFullscreen()}
                 className="flex h-10 w-10 items-center justify-center rounded-lg border border-gray-200 bg-white/90 text-sm font-medium text-gray-600 shadow-sm backdrop-blur-sm transition-colors hover:bg-gray-100 dark:border-gray-700 dark:bg-black/80 dark:text-gray-300 dark:hover:bg-gray-800"
                 aria-label={isMapFullscreen ? 'Exit full screen map' : 'Full screen map'}
@@ -2655,6 +3267,117 @@ export function CampaignDetailMapView({
                 {isMapFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
               </button>
             </div>
+            {showDemoControls ? (
+              <div className="pointer-events-auto w-[min(22rem,calc(100vw-2rem))] rounded-lg border border-gray-200 bg-white/94 p-2 shadow-lg backdrop-blur-sm dark:border-gray-700 dark:bg-black/86">
+                <div className="grid grid-cols-3 gap-1">
+                  {[
+                    { mode: 'status' as DemoColorMode, label: 'Status', icon: Palette },
+                    { mode: 'allGreen' as DemoColorMode, label: 'Green', icon: Sparkles },
+                    { mode: 'random' as DemoColorMode, label: 'Random', icon: Shuffle },
+                  ].map(({ mode, label, icon: Icon }) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => handleDemoColorModeChange(mode)}
+                      className={`flex h-9 min-w-0 items-center justify-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors ${
+                        demoColorMode === mode
+                          ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
+                          : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
+                      }`}
+                      aria-pressed={demoColorMode === mode}
+                      title={`${label} demo colors`}
+                    >
+                      <Icon className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">{label}</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-1.5 grid grid-cols-4 gap-1">
+                  {[
+                    { angle: 'fixed' as DemoSegmentCameraAngle, label: 'Fixed' },
+                    { angle: 'bird' as DemoSegmentCameraAngle, label: 'Bird' },
+                    { angle: 'threeD' as DemoSegmentCameraAngle, label: '3D' },
+                    { angle: 'street' as DemoSegmentCameraAngle, label: 'Street' },
+                  ].map(({ angle, label }) => (
+                    <button
+                      key={angle}
+                      type="button"
+                      onClick={() => setDemoSegmentCameraAngle(angle)}
+                      className={`flex h-8 min-w-0 items-center justify-center rounded-md px-1.5 text-[11px] font-medium transition-colors ${
+                        demoSegmentCameraAngle === angle
+                          ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
+                          : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
+                      }`}
+                      aria-pressed={demoSegmentCameraAngle === angle}
+                      title={`Street segments ${label} camera`}
+                    >
+                      <span className="truncate">{label}</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-1.5 grid grid-cols-2 gap-1">
+                  {[
+                    { speed: 'normal' as DemoCameraSpeed, label: 'Normal' },
+                    { speed: 'superSlow' as DemoCameraSpeed, label: 'Super slow' },
+                  ].map(({ speed, label }) => (
+                    <button
+                      key={speed}
+                      type="button"
+                      onClick={() => setDemoCameraSpeed(speed)}
+                      className={`flex h-8 min-w-0 items-center justify-center rounded-md px-2 text-[11px] font-medium transition-colors ${
+                        demoCameraSpeed === speed
+                          ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
+                          : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
+                      }`}
+                      aria-pressed={demoCameraSpeed === speed}
+                      title={`${label} demo speed`}
+                    >
+                      <span className="truncate">{label}</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-1.5 grid grid-cols-2 gap-1">
+                  {[
+                    { shot: 'orbit' as DemoCameraShot, label: 'Orbit', icon: Compass },
+                    { shot: 'birdToStreet' as DemoCameraShot, label: 'Bird to street', icon: Film },
+                    { shot: 'birdFlyThrough' as DemoCameraShot, label: 'Bird fly', icon: Play },
+                    { shot: 'craneReveal' as DemoCameraShot, label: 'Crane reveal', icon: Film },
+                    { shot: 'angledPullback' as DemoCameraShot, label: 'Angle pullback', icon: Maximize2 },
+                    { shot: 'slideLeft' as DemoCameraShot, label: 'Slide left', icon: ArrowLeft },
+                    { shot: 'flyThrough' as DemoCameraShot, label: 'Fly-through', icon: Play },
+                    { shot: 'streetSweep' as DemoCameraShot, label: 'Street sweep', icon: RotateCw },
+                    { shot: 'streetSegments' as DemoCameraShot, label: 'Street segments', icon: Sparkles },
+                  ].map(({ shot, label, icon: Icon }) => (
+                    <button
+                      key={shot}
+                      type="button"
+                      onClick={() => playDemoCamera(shot)}
+                      className={`flex h-9 min-w-0 items-center justify-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors ${
+                        activeDemoCameraShot === shot
+                          ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
+                          : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
+                      }`}
+                      aria-pressed={activeDemoCameraShot === shot}
+                      title={`Play ${label}`}
+                    >
+                      <Icon className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">{label}</span>
+                    </button>
+                  ))}
+                </div>
+                {activeDemoCameraShot ? (
+                  <button
+                    type="button"
+                    onClick={stopDemoCamera}
+                    className="mt-1.5 flex h-9 w-full items-center justify-center gap-1.5 rounded-md bg-red-50 px-2 text-xs font-medium text-red-600 transition-colors hover:bg-red-100 dark:bg-red-950/35 dark:text-red-300 dark:hover:bg-red-950/55"
+                    title="Stop demo camera"
+                  >
+                    <Square className="h-3.5 w-3.5" />
+                    Stop
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
           </div>
           <div className="pointer-events-none absolute right-4 bottom-8 z-20 flex flex-col items-end gap-1.5">
             <div className="pointer-events-auto overflow-hidden rounded-lg border border-gray-200 bg-white/92 shadow-sm backdrop-blur-sm dark:border-gray-700 dark:bg-black/82">
@@ -2741,6 +3464,7 @@ export function CampaignDetailMapView({
               buildingFeatures={bundleBuildings}
               buildingDataKey={mapBundleDataKey}
               addressStateOverrides={mapAddresses}
+              assignmentColorByAddressId={demoAddressColorOverrides}
               visibleAddressIds={visibleAddressIds}
               hiddenBuildingIds={optimisticallyHiddenBuildingIds}
               deletedAddressIds={optimisticallyDeletedAddressIds}

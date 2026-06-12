@@ -1,19 +1,42 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import Link from 'next/link';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import type MapboxDraw from '@mapbox/mapbox-gl-draw';
 import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css';
-import { Check, Eraser, Expand, Loader2, MapPinned, Pencil, PenLine, RotateCcw, Send, Users, X } from 'lucide-react';
+import {
+  ArrowLeft,
+  Check,
+  Clapperboard,
+  Compass,
+  Eraser,
+  Expand,
+  Film,
+  Loader2,
+  MapPinned,
+  Maximize2,
+  Palette,
+  Pencil,
+  PenLine,
+  Play,
+  RotateCcw,
+  RotateCw,
+  Send,
+  Shuffle,
+  Sparkles,
+  Square,
+  Users,
+  X,
+} from 'lucide-react';
 import type { CampaignAddress } from '@/types/database';
-import { MapBuildingsLayer } from '@/components/map/MapBuildingsLayer';
+import { MapBuildingsLayer, type MapBuildingsRenderState } from '@/components/map/MapBuildingsLayer';
 import { useWorkspace } from '@/lib/workspace-context';
 import { useTheme } from '@/lib/theme-provider';
 import { useMapStyle } from '@/lib/map-style-provider';
 import { getMapboxToken, removeMapboxMapWhenSafe } from '@/lib/mapbox';
-import { getResolvedMapInitOptions, resolveMapStyle } from '@/lib/map-styles';
+import { applyPresetVisualTweaks, getResolvedMapInitOptions, resolveMapStyle } from '@/lib/map-styles';
 import {
   type CampaignAssignmentMode,
   type CampaignAssignmentSplitMode,
@@ -70,6 +93,11 @@ type AssignmentAddress = BuildRouteAddress & {
 };
 
 const COLORS = ['#ef4444', '#22c55e', '#3b82f6', '#8b5cf6', '#d946ef', '#f97316'];
+const DEMO_GREEN_COLOR = '#22c55e';
+const DEMO_RANDOM_COLORS = ['#22c55e', '#3b82f6', '#ef4444', '#8b5cf6', '#f97316', '#06b6d4', '#eab308'];
+const DEMO_CAMERA_PITCH_STREET_DEGREES = 68;
+const DEMO_CAMERA_PITCH_3D_DEGREES = 62;
+const DEMO_CAMERA_ZOOM_STREET = 18.15;
 
 type ZonePreviewMember = {
   user_id: string;
@@ -81,6 +109,101 @@ type ZonePreviewPoint = {
   lon: number;
   lat: number;
 };
+
+type DemoColorMode = 'zones' | 'allGreen' | 'random';
+type DemoCameraShot =
+  | 'orbit'
+  | 'birdToStreet'
+  | 'flyThrough'
+  | 'streetSweep'
+  | 'birdFlyThrough'
+  | 'craneReveal'
+  | 'angledPullback'
+  | 'slideLeft'
+  | 'streetSegments';
+type DemoCameraSpeed = 'normal' | 'superSlow';
+type DemoSegmentCameraAngle = 'fixed' | 'bird' | 'threeD' | 'street';
+type DemoFitCameraOptions = {
+  pitch: number;
+  bearing: number;
+  maxZoom: number;
+  duration: number;
+};
+type DemoAddressTarget = {
+  addressId: string;
+  lon: number;
+  lat: number;
+  streetKey: string;
+  streetLabel: string;
+  houseNumber: number | null;
+};
+
+function deterministicColorIndex(seed: string, paletteLength: number): number {
+  let hash = 0;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash = (hash * 31 + seed.charCodeAt(index)) >>> 0;
+  }
+  return hash % paletteLength;
+}
+
+function easeInOutCubic(progress: number): number {
+  return progress < 0.5 ? 4 * progress * progress * progress : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+}
+
+function bearingBetween(start: [number, number], end: [number, number]): number {
+  const startLat = (start[1] * Math.PI) / 180;
+  const startLon = (start[0] * Math.PI) / 180;
+  const endLat = (end[1] * Math.PI) / 180;
+  const endLon = (end[0] * Math.PI) / 180;
+  const deltaLon = endLon - startLon;
+  const y = Math.sin(deltaLon) * Math.cos(endLat);
+  const x =
+    Math.cos(startLat) * Math.sin(endLat) -
+    Math.sin(startLat) * Math.cos(endLat) * Math.cos(deltaLon);
+  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+}
+
+function demoSweepEndpoints(bounds: mapboxgl.LngLatBounds): {
+  start: [number, number];
+  middle: [number, number];
+  end: [number, number];
+  bearing: number;
+} {
+  const west = bounds.getWest();
+  const east = bounds.getEast();
+  const south = bounds.getSouth();
+  const north = bounds.getNorth();
+  const center = bounds.getCenter();
+  const lonSpan = Math.abs(east - west);
+  const latSpan = Math.abs(north - south);
+  const start: [number, number] = lonSpan >= latSpan ? [west, center.lat] : [center.lng, south];
+  const end: [number, number] = lonSpan >= latSpan ? [east, center.lat] : [center.lng, north];
+  const middle: [number, number] = [center.lng, center.lat];
+
+  return {
+    start,
+    middle,
+    end,
+    bearing: bearingBetween(start, end),
+  };
+}
+
+function demoStreetLabel(address: AssignmentAddress): string {
+  const streetName = String(address.street_name ?? '').trim();
+  if (streetName) return streetName;
+
+  const formatted = String(address.formatted ?? '').trim();
+  const withoutLeadingNumber = formatted.replace(/^\s*\d+[A-Za-z]?(?:[-/]\d+[A-Za-z]?)?\s+/, '').trim();
+  const beforeComma = withoutLeadingNumber.split(',')[0]?.trim();
+  return beforeComma || 'Assignment route';
+}
+
+function demoHouseNumber(address: AssignmentAddress): number | null {
+  const direct = String(address.house_number ?? '').trim();
+  const source = direct || String(address.formatted ?? '').trim();
+  const match = source.match(/\d+/);
+  return match ? Number(match[0]) : null;
+}
 
 function getAddressCoords(address: CampaignAddress): { lat: number; lon: number } | null {
   const coordinate = address.coordinate;
@@ -188,6 +311,808 @@ function formatMode(mode: CampaignAssignmentMode): string {
   return mode === 'zone_split' ? 'Zone split' : 'Whole team';
 }
 
+function syncMapSize(map: mapboxgl.Map) {
+  try {
+    map.resize();
+  } catch {
+    // Ignore transient resize errors while the dialog is opening or closing.
+  }
+}
+
+function enableFreeMapCamera(map: mapboxgl.Map) {
+  map.dragRotate.enable();
+  map.touchZoomRotate.enableRotation();
+}
+
+function hasRenderableMapStyle(map: mapboxgl.Map) {
+  try {
+    if (map.loaded() || map.isStyleLoaded()) return true;
+  } catch {
+    // Fall through to style inspection.
+  }
+
+  try {
+    return Boolean(map.getStyle()?.layers?.length);
+  } catch {
+    return false;
+  }
+}
+
+function useAssignmentDemoCamera({
+  mapRef,
+  mapLoaded,
+  assignmentAddresses,
+  previewPoints,
+  baseColorByAddressId,
+}: {
+  mapRef: RefObject<mapboxgl.Map | null>;
+  mapLoaded: boolean;
+  assignmentAddresses: AssignmentAddress[];
+  previewPoints: ZonePreviewPoint[];
+  baseColorByAddressId?: Record<string, string>;
+}) {
+  const [demoColorMode, setDemoColorMode] = useState<DemoColorMode>('zones');
+  const [demoCameraSpeed, setDemoCameraSpeed] = useState<DemoCameraSpeed>('normal');
+  const [demoSegmentCameraAngle, setDemoSegmentCameraAngle] = useState<DemoSegmentCameraAngle>('fixed');
+  const [showDemoControls, setShowDemoControls] = useState(false);
+  const [activeDemoCameraShot, setActiveDemoCameraShot] = useState<DemoCameraShot | null>(null);
+  const [demoPlaybackColorOverrides, setDemoPlaybackColorOverrides] = useState<Record<string, string> | null>(null);
+  const demoCameraTimeoutsRef = useRef<number[]>([]);
+  const demoCameraFrameRef = useRef<number | null>(null);
+
+  const getAssignmentMapBounds = useCallback((): mapboxgl.LngLatBounds | null => {
+    const bounds = new mapboxgl.LngLatBounds();
+    for (const point of previewPoints) {
+      if (Number.isFinite(point.lon) && Number.isFinite(point.lat)) {
+        bounds.extend([point.lon, point.lat]);
+      }
+    }
+    return bounds.isEmpty() ? null : bounds;
+  }, [previewPoints]);
+
+  const demoAddressTargets = useMemo<DemoAddressTarget[]>(
+    () =>
+      assignmentAddresses
+        .flatMap((address) => {
+          if (!Number.isFinite(address.lon) || !Number.isFinite(address.lat)) return [];
+          if (address.lon === 0 && address.lat === 0) return [];
+          const streetLabel = demoStreetLabel(address);
+
+          return [{
+            addressId: address.id,
+            lon: address.lon,
+            lat: address.lat,
+            streetKey: streetLabel.toLowerCase(),
+            streetLabel,
+            houseNumber: demoHouseNumber(address),
+          }];
+        })
+        .sort((lhs, rhs) => {
+          if (lhs.streetKey !== rhs.streetKey) return lhs.streetKey.localeCompare(rhs.streetKey);
+          if (lhs.houseNumber !== null && rhs.houseNumber !== null && lhs.houseNumber !== rhs.houseNumber) {
+            return lhs.houseNumber - rhs.houseNumber;
+          }
+          if (lhs.lat !== rhs.lat) return lhs.lat - rhs.lat;
+          return lhs.lon - rhs.lon;
+        }),
+    [assignmentAddresses]
+  );
+
+  const demoColorByAddressId = useMemo(() => {
+    if (demoPlaybackColorOverrides) return demoPlaybackColorOverrides;
+    if (demoColorMode === 'zones') return baseColorByAddressId;
+
+    const colors: Record<string, string> = {};
+    for (const address of assignmentAddresses) {
+      if (!address.id) continue;
+      colors[address.id] =
+        demoColorMode === 'allGreen'
+          ? DEMO_GREEN_COLOR
+          : DEMO_RANDOM_COLORS[deterministicColorIndex(address.id, DEMO_RANDOM_COLORS.length)];
+    }
+    return colors;
+  }, [assignmentAddresses, baseColorByAddressId, demoColorMode, demoPlaybackColorOverrides]);
+
+  const clearDemoCameraTimers = useCallback(() => {
+    for (const timeoutId of demoCameraTimeoutsRef.current) {
+      window.clearTimeout(timeoutId);
+    }
+    demoCameraTimeoutsRef.current = [];
+    if (demoCameraFrameRef.current !== null) {
+      window.cancelAnimationFrame(demoCameraFrameRef.current);
+      demoCameraFrameRef.current = null;
+    }
+  }, []);
+
+  const stopDemoCamera = useCallback(() => {
+    clearDemoCameraTimers();
+    mapRef.current?.stop();
+    setActiveDemoCameraShot(null);
+    setDemoPlaybackColorOverrides(null);
+  }, [clearDemoCameraTimers, mapRef]);
+
+  const playDemoCamera = useCallback(
+    (shot: DemoCameraShot) => {
+      const currentMap = mapRef.current;
+      if (!currentMap || !mapLoaded) return;
+
+      const bounds = getAssignmentMapBounds();
+      const center = bounds?.getCenter() ?? currentMap.getCenter();
+      const centerTuple: [number, number] = [center.lng, center.lat];
+      const sweep = bounds ? demoSweepEndpoints(bounds) : null;
+      const fallbackZoom = Math.max(15, Math.min(17.2, currentMap.getZoom() || 15));
+      const speedMultiplier = demoCameraSpeed === 'superSlow' ? 2.6 : 1;
+      const speed = (milliseconds: number) => Math.round(milliseconds * speedMultiplier);
+
+      clearDemoCameraTimers();
+      currentMap.stop();
+      currentMap.resize();
+      setDemoPlaybackColorOverrides(null);
+      setShowDemoControls(true);
+      setActiveDemoCameraShot(shot);
+
+      const schedule = (callback: () => void, delay: number) => {
+        const timeoutId = window.setTimeout(callback, speed(delay));
+        demoCameraTimeoutsRef.current.push(timeoutId);
+      };
+
+      const finishAfter = (delay: number) => {
+        schedule(() => setActiveDemoCameraShot(null), delay);
+      };
+
+      const fitAssignment = (options: DemoFitCameraOptions) => {
+        if (bounds) {
+          currentMap.fitBounds(bounds, {
+            padding: { top: 72, right: 72, bottom: 96, left: 72 },
+            ...options,
+          });
+          return;
+        }
+        currentMap.easeTo({
+          center: centerTuple,
+          zoom: fallbackZoom,
+          pitch: options.pitch,
+          bearing: options.bearing,
+          duration: options.duration,
+          easing: easeInOutCubic,
+        });
+      };
+
+      if (shot === 'orbit') {
+        fitAssignment({
+          maxZoom: 16,
+          duration: speed(900),
+          pitch: DEMO_CAMERA_PITCH_3D_DEGREES,
+          bearing: -35,
+        });
+        schedule(() => {
+          const startAt = performance.now();
+          const startBearing = currentMap.getBearing();
+          const orbitZoom = Math.max(15.4, Math.min(17, currentMap.getZoom() + 0.45));
+          const duration = speed(11000);
+
+          const step = (now: number) => {
+            const progress = Math.min(1, (now - startAt) / duration);
+            currentMap.jumpTo({
+              center: centerTuple,
+              zoom: orbitZoom,
+              pitch: DEMO_CAMERA_PITCH_3D_DEGREES,
+              bearing: startBearing + progress * 360,
+            });
+
+            if (progress < 1) {
+              demoCameraFrameRef.current = window.requestAnimationFrame(step);
+            } else {
+              demoCameraFrameRef.current = null;
+              setActiveDemoCameraShot(null);
+            }
+          };
+
+          demoCameraFrameRef.current = window.requestAnimationFrame(step);
+        }, 980);
+        return;
+      }
+
+      if (shot === 'birdToStreet') {
+        fitAssignment({
+          maxZoom: 15.2,
+          duration: speed(900),
+          pitch: 0,
+          bearing: 0,
+        });
+        schedule(() => {
+          currentMap.flyTo({
+            center: centerTuple,
+            zoom: DEMO_CAMERA_ZOOM_STREET,
+            pitch: DEMO_CAMERA_PITCH_STREET_DEGREES,
+            bearing: sweep?.bearing ?? 35,
+            duration: speed(4200),
+            essential: true,
+          });
+        }, 1050);
+        finishAfter(5400);
+        return;
+      }
+
+      if (shot === 'birdFlyThrough') {
+        const start = sweep?.start ?? centerTuple;
+        const middle = sweep?.middle ?? centerTuple;
+        const end = sweep?.end ?? centerTuple;
+        const bearing = sweep?.bearing ?? 0;
+        currentMap.flyTo({
+          center: start,
+          zoom: Math.max(17.1, fallbackZoom + 0.9),
+          pitch: 0,
+          bearing,
+          duration: speed(1050),
+          essential: true,
+        });
+        schedule(() => {
+          currentMap.easeTo({
+            center: middle,
+            zoom: DEMO_CAMERA_ZOOM_STREET,
+            pitch: 0,
+            bearing,
+            duration: speed(3000),
+            easing: easeInOutCubic,
+          });
+        }, 1080);
+        schedule(() => {
+          currentMap.easeTo({
+            center: end,
+            zoom: DEMO_CAMERA_ZOOM_STREET,
+            pitch: 0,
+            bearing,
+            duration: speed(3300),
+            easing: easeInOutCubic,
+          });
+        }, 4150);
+        finishAfter(7600);
+        return;
+      }
+
+      if (shot === 'craneReveal') {
+        const bearing = sweep?.bearing ?? -25;
+        currentMap.flyTo({
+          center: centerTuple,
+          zoom: DEMO_CAMERA_ZOOM_STREET,
+          pitch: DEMO_CAMERA_PITCH_STREET_DEGREES,
+          bearing,
+          duration: speed(1100),
+          essential: true,
+        });
+        schedule(() => {
+          fitAssignment({
+            maxZoom: 15.3,
+            duration: speed(5200),
+            pitch: 0,
+            bearing: bearing + 42,
+          });
+        }, 1150);
+        finishAfter(6600);
+        return;
+      }
+
+      if (shot === 'angledPullback') {
+        const currentCenter = currentMap.getCenter();
+        const startCenter: [number, number] = [currentCenter.lng, currentCenter.lat];
+        const startZoom = currentMap.getZoom();
+        const startPitch = currentMap.getPitch();
+        const startBearing = currentMap.getBearing();
+        const duration = speed(5600);
+        const targetPitch = startPitch > 45 ? 45 : startPitch;
+        const startAt = performance.now();
+
+        const step = (now: number) => {
+          const progress = Math.min(1, (now - startAt) / duration);
+          const eased = easeInOutCubic(progress);
+
+          currentMap.jumpTo({
+            center: startCenter,
+            zoom: Math.max(13.4, startZoom - 1.85 * eased),
+            pitch: startPitch + (targetPitch - startPitch) * eased,
+            bearing: startBearing,
+          });
+
+          if (progress < 1) {
+            demoCameraFrameRef.current = window.requestAnimationFrame(step);
+          } else {
+            demoCameraFrameRef.current = null;
+            setActiveDemoCameraShot(null);
+          }
+        };
+
+        demoCameraFrameRef.current = window.requestAnimationFrame(step);
+        return;
+      }
+
+      if (shot === 'slideLeft') {
+        const startCenter = currentMap.getCenter();
+        const startCenterTuple: [number, number] = [startCenter.lng, startCenter.lat];
+        const startPoint = currentMap.project(startCenter);
+        const canvas = currentMap.getCanvas();
+        const endCenter = currentMap.unproject([
+          startPoint.x - Math.max(360, canvas.clientWidth * 0.62),
+          startPoint.y,
+        ]);
+        const endCenterTuple: [number, number] = [endCenter.lng, endCenter.lat];
+        const zoom = currentMap.getZoom();
+        const pitch = currentMap.getPitch();
+        const bearing = currentMap.getBearing();
+        const duration = speed(5200);
+        const startAt = performance.now();
+
+        const step = (now: number) => {
+          const progress = Math.min(1, (now - startAt) / duration);
+          const eased = easeInOutCubic(progress);
+
+          currentMap.jumpTo({
+            center: [
+              startCenterTuple[0] + (endCenterTuple[0] - startCenterTuple[0]) * eased,
+              startCenterTuple[1] + (endCenterTuple[1] - startCenterTuple[1]) * eased,
+            ],
+            zoom,
+            pitch,
+            bearing,
+          });
+
+          if (progress < 1) {
+            demoCameraFrameRef.current = window.requestAnimationFrame(step);
+          } else {
+            demoCameraFrameRef.current = null;
+            setActiveDemoCameraShot(null);
+          }
+        };
+
+        demoCameraFrameRef.current = window.requestAnimationFrame(step);
+        return;
+      }
+
+      if (shot === 'streetSegments') {
+        const segmentCamera =
+          demoSegmentCameraAngle === 'fixed'
+            ? null
+            : {
+                bird: {
+                  maxZoom: 16.8,
+                  pitch: 0,
+                  bearing: 0,
+                },
+                threeD: {
+                  maxZoom: 16.2,
+                  pitch: DEMO_CAMERA_PITCH_3D_DEGREES,
+                  bearing: sweep?.bearing ?? -12,
+                },
+                street: {
+                  maxZoom: 17.4,
+                  pitch: DEMO_CAMERA_PITCH_STREET_DEGREES,
+                  bearing: sweep?.bearing ?? 35,
+                },
+              }[demoSegmentCameraAngle];
+
+        if (segmentCamera) {
+          fitAssignment({
+            ...segmentCamera,
+            duration: speed(900),
+          });
+        }
+        setDemoPlaybackColorOverrides({});
+
+        const litColors: Record<string, string> = {};
+        let delay = 1050;
+        let previousStreetKey: string | null = null;
+        demoAddressTargets.forEach((target, index) => {
+          if (previousStreetKey && previousStreetKey !== target.streetKey) {
+            delay += 420;
+          }
+          previousStreetKey = target.streetKey;
+
+          schedule(() => {
+            litColors[target.addressId] =
+              demoColorMode === 'random'
+                ? DEMO_RANDOM_COLORS[deterministicColorIndex(target.addressId, DEMO_RANDOM_COLORS.length)]
+                : DEMO_GREEN_COLOR;
+            setDemoPlaybackColorOverrides({ ...litColors });
+          }, delay);
+          delay += index < 35 ? 110 : 70;
+        });
+
+        finishAfter(Math.max(1800, delay + 500));
+        return;
+      }
+
+      if (shot === 'flyThrough') {
+        const start = sweep?.start ?? centerTuple;
+        const middle = sweep?.middle ?? centerTuple;
+        const end = sweep?.end ?? centerTuple;
+        const bearing = sweep?.bearing ?? currentMap.getBearing();
+        currentMap.flyTo({
+          center: start,
+          zoom: Math.max(16, fallbackZoom),
+          pitch: DEMO_CAMERA_PITCH_3D_DEGREES,
+          bearing,
+          duration: speed(1200),
+          essential: true,
+        });
+        schedule(() => {
+          currentMap.easeTo({
+            center: middle,
+            zoom: Math.max(17, fallbackZoom + 0.6),
+            pitch: DEMO_CAMERA_PITCH_3D_DEGREES,
+            bearing,
+            duration: speed(3600),
+            easing: easeInOutCubic,
+          });
+        }, 1250);
+        schedule(() => {
+          currentMap.easeTo({
+            center: end,
+            zoom: Math.max(17, fallbackZoom + 0.6),
+            pitch: DEMO_CAMERA_PITCH_3D_DEGREES,
+            bearing,
+            duration: speed(3600),
+            easing: easeInOutCubic,
+          });
+        }, 4900);
+        finishAfter(8700);
+        return;
+      }
+
+      const start = sweep?.start ?? centerTuple;
+      const end = sweep?.end ?? centerTuple;
+      const bearing = sweep?.bearing ?? 35;
+      currentMap.flyTo({
+        center: start,
+        zoom: DEMO_CAMERA_ZOOM_STREET,
+        pitch: DEMO_CAMERA_PITCH_STREET_DEGREES,
+        bearing,
+        duration: speed(1000),
+        essential: true,
+      });
+      schedule(() => {
+        currentMap.easeTo({
+          center: end,
+          zoom: DEMO_CAMERA_ZOOM_STREET,
+          pitch: DEMO_CAMERA_PITCH_STREET_DEGREES,
+          bearing,
+          duration: speed(6200),
+          easing: easeInOutCubic,
+        });
+      }, 1100);
+      finishAfter(7600);
+    },
+    [
+      clearDemoCameraTimers,
+      demoAddressTargets,
+      demoCameraSpeed,
+      demoColorMode,
+      demoSegmentCameraAngle,
+      getAssignmentMapBounds,
+      mapLoaded,
+      mapRef,
+    ]
+  );
+
+  useEffect(() => {
+    const currentMap = mapRef.current;
+    return () => {
+      clearDemoCameraTimers();
+      currentMap?.stop();
+    };
+  }, [clearDemoCameraTimers, mapRef]);
+
+  const handleDemoColorModeChange = useCallback((mode: DemoColorMode) => {
+    setDemoPlaybackColorOverrides(null);
+    setDemoColorMode(mode);
+  }, []);
+
+  return {
+    activeDemoCameraShot,
+    demoCameraSpeed,
+    demoColorByAddressId,
+    demoColorMode,
+    demoSegmentCameraAngle,
+    handleDemoColorModeChange,
+    playDemoCamera,
+    setDemoCameraSpeed,
+    setDemoSegmentCameraAngle,
+    setShowDemoControls,
+    showDemoControls,
+    stopDemoCamera,
+  };
+}
+
+function AssignmentDemoCameraControls({
+  activeDemoCameraShot,
+  demoCameraSpeed,
+  demoColorMode,
+  demoSegmentCameraAngle,
+  disabled,
+  onColorModeChange,
+  onPlayShot,
+  onSegmentCameraAngleChange,
+  onSpeedChange,
+  onStop,
+  setShowDemoControls,
+  showDemoControls,
+}: {
+  activeDemoCameraShot: DemoCameraShot | null;
+  demoCameraSpeed: DemoCameraSpeed;
+  demoColorMode: DemoColorMode;
+  demoSegmentCameraAngle: DemoSegmentCameraAngle;
+  disabled?: boolean;
+  onColorModeChange: (mode: DemoColorMode) => void;
+  onPlayShot: (shot: DemoCameraShot) => void;
+  onSegmentCameraAngleChange: (angle: DemoSegmentCameraAngle) => void;
+  onSpeedChange: (speed: DemoCameraSpeed) => void;
+  onStop: () => void;
+  setShowDemoControls: (value: boolean | ((current: boolean) => boolean)) => void;
+  showDemoControls: boolean;
+}) {
+  return (
+    <div className="pointer-events-none absolute right-3 top-3 z-20 flex flex-col items-end gap-2">
+      <button
+        type="button"
+        onClick={() => setShowDemoControls((current) => !current)}
+        disabled={disabled}
+        className={`pointer-events-auto flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 bg-white/92 text-sm font-medium shadow-sm backdrop-blur-sm transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-black/82 dark:hover:bg-gray-800 ${
+          showDemoControls
+            ? 'text-gray-950 dark:text-white'
+            : 'text-gray-600 dark:text-gray-300'
+        }`}
+        aria-label="Demo controls"
+        aria-pressed={showDemoControls}
+        title="Demo controls"
+      >
+        <Clapperboard className="h-4 w-4" />
+      </button>
+      {showDemoControls ? (
+        <div className="pointer-events-auto max-h-[calc(100dvh-8rem)] w-[min(22rem,calc(100vw-1.5rem))] overflow-y-auto rounded-lg border border-gray-200 bg-white/94 p-2 shadow-lg backdrop-blur-sm dark:border-gray-700 dark:bg-black/86">
+          <div className="grid grid-cols-3 gap-1">
+            {[
+              { mode: 'zones' as DemoColorMode, label: 'Zones', icon: Palette },
+              { mode: 'allGreen' as DemoColorMode, label: 'Green', icon: Sparkles },
+              { mode: 'random' as DemoColorMode, label: 'Random', icon: Shuffle },
+            ].map(({ mode, label, icon: Icon }) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => onColorModeChange(mode)}
+                className={`flex h-9 min-w-0 items-center justify-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors ${
+                  demoColorMode === mode
+                    ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
+                    : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
+                }`}
+                aria-pressed={demoColorMode === mode}
+                title={`${label} demo colors`}
+              >
+                <Icon className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">{label}</span>
+              </button>
+            ))}
+          </div>
+          <div className="mt-1.5 grid grid-cols-4 gap-1">
+            {[
+              { angle: 'fixed' as DemoSegmentCameraAngle, label: 'Fixed' },
+              { angle: 'bird' as DemoSegmentCameraAngle, label: 'Bird' },
+              { angle: 'threeD' as DemoSegmentCameraAngle, label: '3D' },
+              { angle: 'street' as DemoSegmentCameraAngle, label: 'Street' },
+            ].map(({ angle, label }) => (
+              <button
+                key={angle}
+                type="button"
+                onClick={() => onSegmentCameraAngleChange(angle)}
+                className={`flex h-8 min-w-0 items-center justify-center rounded-md px-1.5 text-[11px] font-medium transition-colors ${
+                  demoSegmentCameraAngle === angle
+                    ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
+                    : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
+                }`}
+                aria-pressed={demoSegmentCameraAngle === angle}
+                title={`Street segments ${label} camera`}
+              >
+                <span className="truncate">{label}</span>
+              </button>
+            ))}
+          </div>
+          <div className="mt-1.5 grid grid-cols-2 gap-1">
+            {[
+              { speed: 'normal' as DemoCameraSpeed, label: 'Normal' },
+              { speed: 'superSlow' as DemoCameraSpeed, label: 'Super slow' },
+            ].map(({ speed, label }) => (
+              <button
+                key={speed}
+                type="button"
+                onClick={() => onSpeedChange(speed)}
+                className={`flex h-8 min-w-0 items-center justify-center rounded-md px-2 text-[11px] font-medium transition-colors ${
+                  demoCameraSpeed === speed
+                    ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
+                    : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
+                }`}
+                aria-pressed={demoCameraSpeed === speed}
+                title={`${label} demo speed`}
+              >
+                <span className="truncate">{label}</span>
+              </button>
+            ))}
+          </div>
+          <div className="mt-1.5 grid grid-cols-2 gap-1">
+            {[
+              { shot: 'orbit' as DemoCameraShot, label: 'Orbit', icon: Compass },
+              { shot: 'birdToStreet' as DemoCameraShot, label: 'Bird to street', icon: Film },
+              { shot: 'birdFlyThrough' as DemoCameraShot, label: 'Bird fly', icon: Play },
+              { shot: 'craneReveal' as DemoCameraShot, label: 'Crane reveal', icon: Film },
+              { shot: 'angledPullback' as DemoCameraShot, label: 'Angle pullback', icon: Maximize2 },
+              { shot: 'slideLeft' as DemoCameraShot, label: 'Slide left', icon: ArrowLeft },
+              { shot: 'flyThrough' as DemoCameraShot, label: 'Fly-through', icon: Play },
+              { shot: 'streetSweep' as DemoCameraShot, label: 'Street sweep', icon: RotateCw },
+              { shot: 'streetSegments' as DemoCameraShot, label: 'Street segments', icon: Sparkles },
+            ].map(({ shot, label, icon: Icon }) => (
+              <button
+                key={shot}
+                type="button"
+                onClick={() => onPlayShot(shot)}
+                disabled={disabled}
+                className={`flex h-9 min-w-0 items-center justify-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                  activeDemoCameraShot === shot
+                    ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
+                    : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
+                }`}
+                aria-pressed={activeDemoCameraShot === shot}
+                title={`Play ${label}`}
+              >
+                <Icon className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">{label}</span>
+              </button>
+            ))}
+          </div>
+          {activeDemoCameraShot ? (
+            <button
+              type="button"
+              onClick={onStop}
+              className="mt-1.5 flex h-9 w-full items-center justify-center gap-1.5 rounded-md bg-red-50 px-2 text-xs font-medium text-red-600 transition-colors hover:bg-red-100 dark:bg-red-950/35 dark:text-red-300 dark:hover:bg-red-950/55"
+              title="Stop demo camera"
+            >
+              <Square className="h-3.5 w-3.5" />
+              Stop
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function buildAssignmentPreviewAddresses(
+  addressById: Map<string, CampaignAddress>,
+  assignmentAddresses: AssignmentAddress[],
+  zones: Map<string, AssignmentAddress[]>,
+  members: ZonePreviewMember[]
+) {
+  const zoneAddresses = Array.from(
+    new Set(members.flatMap((member) => (zones.get(member.user_id) ?? []).map((address) => address.id)))
+  )
+    .map((addressId) => addressById.get(addressId))
+    .filter((address): address is CampaignAddress => Boolean(address));
+
+  if (zoneAddresses.length > 0) return zoneAddresses;
+
+  return assignmentAddresses
+    .map((address) => addressById.get(address.id))
+    .filter((address): address is CampaignAddress => Boolean(address));
+}
+
+function AssignmentAddressMarkerLayer({
+  map,
+  mapLoaded,
+  assignmentAddresses,
+  members,
+  zones,
+  colorOverrides,
+}: {
+  map: mapboxgl.Map | null;
+  mapLoaded: boolean;
+  assignmentAddresses: AssignmentAddress[];
+  members: ZonePreviewMember[];
+  zones: Map<string, AssignmentAddress[]>;
+  colorOverrides?: Record<string, string>;
+}) {
+  const colorByAddressId = useMemo(
+    () =>
+      members.reduce<Record<string, string>>((colors, member) => {
+        (zones.get(member.user_id) ?? []).forEach((address) => {
+          colors[address.id] = member.color;
+        });
+        return colors;
+      }, {}),
+    [members, zones]
+  );
+  const markerData = useMemo<GeoJSON.FeatureCollection<GeoJSON.Point>>(
+    () => ({
+      type: 'FeatureCollection',
+      features: assignmentAddresses.flatMap((address, index) => {
+        if (!Number.isFinite(address.lon) || !Number.isFinite(address.lat)) return [];
+        if (address.lon === 0 && address.lat === 0) return [];
+        return [{
+          type: 'Feature' as const,
+          geometry: {
+            type: 'Point' as const,
+            coordinates: [address.lon, address.lat],
+          },
+          properties: {
+            id: address.id,
+            color: colorOverrides?.[address.id] ?? colorByAddressId[address.id] ?? COLORS[index % COLORS.length],
+            label: address.house_number ?? '',
+          },
+        }];
+      }),
+    }),
+    [assignmentAddresses, colorByAddressId, colorOverrides]
+  );
+
+  useEffect(() => {
+    if (!map || !mapLoaded || markerData.features.length === 0) return;
+
+    const sourceId = 'assignment-address-markers-source';
+    const circleLayerId = 'assignment-address-markers-circle';
+
+    const removeLayers = () => {
+      [circleLayerId].forEach((layerId) => {
+        try {
+          if (map.getLayer(layerId)) map.removeLayer(layerId);
+        } catch {
+          // Ignore transient style errors while Mapbox is swapping styles.
+        }
+      });
+      try {
+        if (map.getSource(sourceId)) map.removeSource(sourceId);
+      } catch {
+        // Ignore transient style errors while Mapbox is swapping styles.
+      }
+    };
+
+    const addOrUpdateLayers = () => {
+      if (!map.isStyleLoaded()) return;
+
+      const source = map.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined;
+      if (source) {
+        source.setData(markerData);
+      } else {
+        map.addSource(sourceId, {
+          type: 'geojson',
+          data: markerData,
+        });
+      }
+
+      if (!map.getLayer(circleLayerId)) {
+        map.addLayer({
+          id: circleLayerId,
+          type: 'circle',
+          source: sourceId,
+          paint: {
+            'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 3, 16, 6],
+            'circle-color': ['coalesce', ['get', 'color'], '#ef4444'],
+            'circle-opacity': 0.9,
+            'circle-stroke-color': '#ffffff',
+            'circle-stroke-width': 1,
+          },
+        });
+      }
+    };
+
+    addOrUpdateLayers();
+    map.on('style.load', addOrUpdateLayers);
+    map.on('idle', addOrUpdateLayers);
+
+    return () => {
+      map.off('style.load', addOrUpdateLayers);
+      map.off('idle', addOrUpdateLayers);
+      removeLayers();
+    };
+  }, [map, mapLoaded, markerData]);
+
+  return null;
+}
+
 function CampaignAssignmentZonePreviewMap({
   campaignId,
   addresses,
@@ -221,6 +1146,7 @@ function CampaignAssignmentZonePreviewMap({
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
+  const [buildingRenderState, setBuildingRenderState] = useState<MapBuildingsRenderState | null>(null);
   const [expandedOpen, setExpandedOpen] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorStartDraw, setEditorStartDraw] = useState(false);
@@ -252,19 +1178,34 @@ function CampaignAssignmentZonePreviewMap({
     },
     [members, showAssignmentColors, zones]
   );
+  const demoCamera = useAssignmentDemoCamera({
+    mapRef,
+    mapLoaded,
+    assignmentAddresses,
+    previewPoints,
+    baseColorByAddressId: showAssignmentColors ? assignmentColorByAddressId : undefined,
+  });
   const previewAddresses = useMemo(
-    () =>
-      Array.from(
-        new Set(members.flatMap((member) => (zones.get(member.user_id) ?? []).map((address) => address.id)))
-      )
-        .map((addressId) => addressById.get(addressId))
-        .filter((address): address is CampaignAddress => Boolean(address)),
-    [addressById, members, zones]
+    () => buildAssignmentPreviewAddresses(addressById, assignmentAddresses, zones, members),
+    [addressById, assignmentAddresses, members, zones]
   );
 
   const initialPoint = previewPoints[0] ?? null;
   const initialLon = initialPoint?.lon ?? null;
   const initialLat = initialPoint?.lat ?? null;
+  const showFallbackMarkers = Boolean(
+    buildingRenderState &&
+    !buildingRenderState.isFetching &&
+    !buildingRenderState.hasVisibleFeatures
+  );
+  const hasRenderableAssignmentMap = Boolean(mapLoaded || buildingRenderState?.hasVisibleFeatures);
+  const showMapError = Boolean(mapError && !hasRenderableAssignmentMap);
+
+  useEffect(() => {
+    if (buildingRenderState?.hasVisibleFeatures) {
+      setMapError(null);
+    }
+  }, [buildingRenderState?.hasVisibleFeatures]);
 
   useEffect(() => {
     const container = mapContainerRef.current;
@@ -290,35 +1231,42 @@ function CampaignAssignmentZonePreviewMap({
           ...initOptions,
           center: [initialLon, initialLat],
           zoom: 14.5,
+          pitch: 45,
           attributionControl: false,
-          pitchWithRotate: false,
-          dragRotate: false,
+          pitchWithRotate: true,
+          dragRotate: true,
         });
         mapRef.current = map;
-        map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'bottom-right');
+        enableFreeMapCamera(map);
+        map.addControl(new mapboxgl.NavigationControl({ showCompass: true, visualizePitch: true }), 'bottom-right');
+        map.on('style.load', () => {
+          if (cancelled) return;
+          applyPresetVisualTweaks(map, resolvedMapStyle, {
+            preserveLayerPrefixes: ['map-buildings-', 'campaign-', 'flyr-', 'gl-draw-'],
+          });
+          syncMapSize(map);
+          setMapLoaded(true);
+          setMapError(null);
+        });
         map.on('load', () => {
           if (!cancelled) {
             setMapLoaded(true);
             setMapError(null);
+            window.requestAnimationFrame(() => syncMapSize(map));
           }
         });
         map.on('error', () => {
           if (cancelled) return;
-          const hasRenderableStyle = (() => {
-            try {
-              return map.loaded() || map.isStyleLoaded();
-            } catch {
-              return false;
-            }
-          })();
-          if (hasRenderableStyle) return;
+          if (hasRenderableMapStyle(map)) {
+            setMapError(null);
+            return;
+          }
 
           window.setTimeout(() => {
             if (cancelled || mapRef.current !== map) return;
-            try {
-              if (map.loaded() || map.isStyleLoaded()) return;
-            } catch {
-              // Keep the fatal fallback below if Mapbox can no longer report style state.
+            if (hasRenderableMapStyle(map)) {
+              setMapError(null);
+              return;
             }
             setMapError('Map unavailable.');
           }, 1000);
@@ -359,6 +1307,50 @@ function CampaignAssignmentZonePreviewMap({
     }
   }, [mapLoaded, previewPoints]);
 
+  useEffect(() => {
+    const map = mapRef.current;
+    const container = mapContainerRef.current;
+    if (!map || !container || !mapLoaded) return;
+
+    let frameId: number | null = null;
+    const resizeMap = () => {
+      if (frameId !== null) cancelAnimationFrame(frameId);
+      frameId = requestAnimationFrame(() => {
+        syncMapSize(map);
+        frameId = null;
+      });
+    };
+
+    const observer = new ResizeObserver(resizeMap);
+    observer.observe(container);
+    window.addEventListener('resize', resizeMap);
+    window.addEventListener('orientationchange', resizeMap);
+    resizeMap();
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', resizeMap);
+      window.removeEventListener('orientationchange', resizeMap);
+      if (frameId !== null) cancelAnimationFrame(frameId);
+    };
+  }, [mapLoaded]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+
+    const resizeDelays = expandedOpen ? [0, 80, 180, 320] : [0, 120];
+    const timerIds = resizeDelays.map((delay) =>
+      window.setTimeout(() => {
+        syncMapSize(map);
+      }, delay)
+    );
+
+    return () => {
+      timerIds.forEach((timerId) => window.clearTimeout(timerId));
+    };
+  }, [expandedOpen, mapLoaded]);
+
   if (previewPoints.length === 0) {
     return null;
   }
@@ -368,18 +1360,27 @@ function CampaignAssignmentZonePreviewMap({
     setEditorOpen(true);
   };
 
+  const wrapperClassName = expandedOpen
+    ? 'fixed inset-0 z-[70] grid h-[100dvh] w-[100vw] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-none border-0 bg-background'
+    : 'overflow-hidden rounded-lg border border-border bg-muted/20';
+  const mapFrameClassName = expandedOpen
+    ? 'relative h-full min-h-0 w-full'
+    : 'relative h-[360px] min-h-[320px] w-full';
+
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-muted/20">
+    <div className={wrapperClassName}>
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-background/85 px-3 py-2">
         <div className="flex min-w-0 items-center gap-2">
           <MapPinned className="h-4 w-4 text-muted-foreground" />
           <p className="truncate text-sm font-medium text-foreground">Assignment map</p>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
-          <Button type="button" variant="outline" size="sm" onClick={() => setExpandedOpen(true)}>
-            <Expand className="h-3.5 w-3.5" />
-            Expand
-          </Button>
+          {expandedOpen ? null : (
+            <Button type="button" variant="outline" size="sm" onClick={() => setExpandedOpen(true)}>
+              <Expand className="h-3.5 w-3.5" />
+              Expand
+            </Button>
+          )}
           {editable ? (
             <Button type="button" variant="secondary" size="sm" onClick={() => openEditor(false)}>
               <Pencil className="h-3.5 w-3.5" />
@@ -394,40 +1395,62 @@ function CampaignAssignmentZonePreviewMap({
           ))}
         </div>
       </div>
-      <div className="relative h-[360px] min-h-[320px] w-full">
+      <div className={mapFrameClassName}>
         <div ref={mapContainerRef} className="h-full w-full" />
         {mapRef.current && mapLoaded ? (
-          <MapBuildingsLayer
-            map={mapRef.current}
-            campaignId={campaignId}
-            addressStateOverrides={previewAddresses}
-            assignmentColorByAddressId={showAssignmentColors ? assignmentColorByAddressId : undefined}
-            showAddressLabels={false}
-            footprintStatusColors
-            isDarkMap={theme === 'dark'}
-          />
+          <>
+            {showFallbackMarkers ? (
+              <AssignmentAddressMarkerLayer
+                map={mapRef.current}
+                mapLoaded={mapLoaded}
+                assignmentAddresses={assignmentAddresses}
+                members={members}
+                zones={zones}
+                colorOverrides={demoCamera.demoColorByAddressId}
+              />
+            ) : null}
+            <MapBuildingsLayer
+              map={mapRef.current}
+              campaignId={campaignId}
+              addressStateOverrides={previewAddresses}
+              assignmentColorByAddressId={demoCamera.demoColorByAddressId}
+              visibleAddressIds={assignmentAddresses.map((address) => address.id)}
+              showAddressLabels={false}
+              footprintStatusColors
+              isDarkMap={theme === 'dark'}
+              onRenderStateChange={setBuildingRenderState}
+            />
+          </>
         ) : null}
-        {mapError ? (
+        <AssignmentDemoCameraControls
+          activeDemoCameraShot={demoCamera.activeDemoCameraShot}
+          demoCameraSpeed={demoCamera.demoCameraSpeed}
+          demoColorMode={demoCamera.demoColorMode}
+          demoSegmentCameraAngle={demoCamera.demoSegmentCameraAngle}
+          disabled={!mapLoaded}
+          onColorModeChange={demoCamera.handleDemoColorModeChange}
+          onPlayShot={demoCamera.playDemoCamera}
+          onSegmentCameraAngleChange={demoCamera.setDemoSegmentCameraAngle}
+          onSpeedChange={demoCamera.setDemoCameraSpeed}
+          onStop={demoCamera.stopDemoCamera}
+          setShowDemoControls={demoCamera.setShowDemoControls}
+          showDemoControls={demoCamera.showDemoControls}
+        />
+        {showMapError ? (
           <div className="absolute inset-0 flex items-center justify-center bg-background/90 p-4 text-center text-sm text-muted-foreground">
             {mapError}
           </div>
         ) : null}
       </div>
-      <AssignmentMapEditorDialog
-        open={expandedOpen}
-        startInDrawMode={false}
-        editable={false}
-        campaignId={campaignId}
-        addresses={addresses}
-        assignmentAddresses={assignmentAddresses}
-        members={members}
-        autoZones={autoZones}
-        displayZones={zones}
-        showAssignmentColors={showAssignmentColors}
-        appliedManualOverrides={manualOverrides}
-        onApplyManualOverrides={onApplyManualOverrides}
-        onOpenChange={setExpandedOpen}
-      />
+      {expandedOpen ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-background px-4 py-3">
+          <p className="text-xs text-muted-foreground">{assignmentAddresses.length} homes</p>
+          <Button type="button" variant="outline" onClick={() => setExpandedOpen(false)}>
+            <X className="h-4 w-4" />
+            Close
+          </Button>
+        </div>
+      ) : null}
       <AssignmentMapEditorDialog
         open={editorOpen}
         startInDrawMode={editorStartDraw}
@@ -494,6 +1517,7 @@ function AssignmentMapEditorDialog({
   const drawRef = useRef<MapboxDraw | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
+  const [buildingRenderState, setBuildingRenderState] = useState<MapBuildingsRenderState | null>(null);
   const [selectedAddressIds, setSelectedAddressIds] = useState<string[]>([]);
   const [draftOverrides, setDraftOverrides] = useState<Record<string, string>>({});
   const [activeMemberId, setActiveMemberId] = useState<string>('');
@@ -531,13 +1555,8 @@ function AssignmentMapEditorDialog({
     [editorZones, members, showAssignmentColors]
   );
   const previewAddresses = useMemo(
-    () =>
-      Array.from(
-        new Set(members.flatMap((member) => (editorZones.get(member.user_id) ?? []).map((address) => address.id)))
-      )
-        .map((addressId) => addressById.get(addressId))
-        .filter((address): address is CampaignAddress => Boolean(address)),
-    [addressById, editorZones, members]
+    () => buildAssignmentPreviewAddresses(addressById, assignmentAddresses, editorZones, members),
+    [addressById, assignmentAddresses, editorZones, members]
   );
   const previewPoints = useMemo<ZonePreviewPoint[]>(
     () =>
@@ -548,9 +1567,29 @@ function AssignmentMapEditorDialog({
       }),
     [assignmentAddresses]
   );
+  const demoCamera = useAssignmentDemoCamera({
+    mapRef,
+    mapLoaded,
+    assignmentAddresses,
+    previewPoints,
+    baseColorByAddressId: showAssignmentColors ? assignmentColorByAddressId : undefined,
+  });
   const initialPoint = previewPoints[0] ?? null;
   const initialLon = initialPoint?.lon ?? null;
   const initialLat = initialPoint?.lat ?? null;
+  const showFallbackMarkers = Boolean(
+    buildingRenderState &&
+    !buildingRenderState.isFetching &&
+    !buildingRenderState.hasVisibleFeatures
+  );
+  const hasRenderableAssignmentMap = Boolean(mapLoaded || buildingRenderState?.hasVisibleFeatures);
+  const showMapError = Boolean(mapError && !hasRenderableAssignmentMap);
+
+  useEffect(() => {
+    if (buildingRenderState?.hasVisibleFeatures) {
+      setMapError(null);
+    }
+  }, [buildingRenderState?.hasVisibleFeatures]);
 
   useEffect(() => {
     const container = mapContainerRef.current;
@@ -579,12 +1618,14 @@ function AssignmentMapEditorDialog({
           ...initOptions,
           center: [initialLon, initialLat],
           zoom: 15,
+          pitch: 45,
           attributionControl: false,
-          pitchWithRotate: false,
-          dragRotate: false,
+          pitchWithRotate: true,
+          dragRotate: true,
         });
         mapRef.current = map;
-        map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'bottom-right');
+        enableFreeMapCamera(map);
+        map.addControl(new mapboxgl.NavigationControl({ showCompass: true, visualizePitch: true }), 'bottom-right');
 
         const draw = drawModule
           ? new drawModule.default({
@@ -603,13 +1644,29 @@ function AssignmentMapEditorDialog({
           off(type: string, listener: () => void): mapboxgl.Map;
         };
 
+        const handleMapReady = () => {
+          applyPresetVisualTweaks(map, resolvedMapStyle, {
+            preserveLayerPrefixes: ['map-buildings-', 'campaign-', 'flyr-', 'gl-draw-'],
+          });
+          syncMapSize(map);
+        };
+
+        const handleStyleLoad = () => {
+          if (cancelled) return;
+          handleMapReady();
+          setMapLoaded(true);
+          setMapError(null);
+        };
+
+        map.on('style.load', handleStyleLoad);
         map.on('load', () => {
           if (cancelled) return;
           try {
+            handleMapReady();
             if (!draw) {
               setMapLoaded(true);
               setMapError(null);
-              window.setTimeout(() => map.resize(), 0);
+              window.requestAnimationFrame(() => syncMapSize(map));
               return;
             }
             map.addControl(draw);
@@ -624,25 +1681,20 @@ function AssignmentMapEditorDialog({
           }
           setMapLoaded(true);
           setMapError(null);
-          window.setTimeout(() => map.resize(), 0);
+          window.requestAnimationFrame(() => syncMapSize(map));
         });
         map.on('error', () => {
           if (cancelled) return;
-          const hasRenderableStyle = (() => {
-            try {
-              return map.loaded() || map.isStyleLoaded();
-            } catch {
-              return false;
-            }
-          })();
-          if (hasRenderableStyle) return;
+          if (hasRenderableMapStyle(map)) {
+            setMapError(null);
+            return;
+          }
 
           window.setTimeout(() => {
             if (cancelled || mapRef.current !== map) return;
-            try {
-              if (map.loaded() || map.isStyleLoaded()) return;
-            } catch {
-              // Keep the fatal fallback below if Mapbox can no longer report style state.
+            if (hasRenderableMapStyle(map)) {
+              setMapError(null);
+              return;
             }
             setMapError('Map unavailable.');
           }, 1000);
@@ -652,6 +1704,7 @@ function AssignmentMapEditorDialog({
           drawMap.off('draw.create', updateSelectionFromDraw);
           drawMap.off('draw.update', updateSelectionFromDraw);
           drawMap.off('draw.delete', updateSelectionFromDraw);
+          map.off('style.load', handleStyleLoad);
         };
         map.once('remove', cleanupDrawEvents);
       })
@@ -695,6 +1748,37 @@ function AssignmentMapEditorDialog({
       });
     }
   }, [mapLoaded, previewPoints]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const container = mapContainerRef.current;
+    if (!open || !map || !container || !mapLoaded) return;
+
+    let frameId: number | null = null;
+    const resizeMap = () => {
+      if (frameId !== null) cancelAnimationFrame(frameId);
+      frameId = requestAnimationFrame(() => {
+        syncMapSize(map);
+        frameId = null;
+      });
+    };
+
+    const observer = new ResizeObserver(resizeMap);
+    observer.observe(container);
+    window.addEventListener('resize', resizeMap);
+    window.addEventListener('orientationchange', resizeMap);
+
+    resizeMap();
+    const settleTimers = [50, 150, 300].map((delay) => window.setTimeout(resizeMap, delay));
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', resizeMap);
+      window.removeEventListener('orientationchange', resizeMap);
+      settleTimers.forEach((timerId) => window.clearTimeout(timerId));
+      if (frameId !== null) cancelAnimationFrame(frameId);
+    };
+  }, [mapLoaded, open]);
 
   const drawPolygon = () => {
     const draw = drawRef.current;
@@ -858,19 +1942,47 @@ function AssignmentMapEditorDialog({
             </div>
           ) : null}
           {mapRef.current && mapLoaded ? (
-            <MapBuildingsLayer
-              map={mapRef.current}
-              campaignId={campaignId}
-              addressStateOverrides={previewAddresses}
-              assignmentColorByAddressId={showAssignmentColors ? assignmentColorByAddressId : undefined}
-              selectedAddressIds={selectedAddressIds}
-              showAddressLabels={false}
-              footprintStatusColors
-              isDarkMap={theme === 'dark'}
-              onBuildingClick={editable ? handleBuildingClick : undefined}
-            />
+            <>
+              {showFallbackMarkers ? (
+                <AssignmentAddressMarkerLayer
+                  map={mapRef.current}
+                  mapLoaded={mapLoaded}
+                  assignmentAddresses={assignmentAddresses}
+                  members={members}
+                  zones={editorZones}
+                  colorOverrides={demoCamera.demoColorByAddressId}
+                />
+              ) : null}
+              <MapBuildingsLayer
+                map={mapRef.current}
+                campaignId={campaignId}
+                addressStateOverrides={previewAddresses}
+                assignmentColorByAddressId={demoCamera.demoColorByAddressId}
+                selectedAddressIds={selectedAddressIds}
+                visibleAddressIds={assignmentAddresses.map((address) => address.id)}
+                showAddressLabels={false}
+                footprintStatusColors
+                isDarkMap={theme === 'dark'}
+                onBuildingClick={editable ? handleBuildingClick : undefined}
+                onRenderStateChange={setBuildingRenderState}
+              />
+            </>
           ) : null}
-          {mapError ? (
+          <AssignmentDemoCameraControls
+            activeDemoCameraShot={demoCamera.activeDemoCameraShot}
+            demoCameraSpeed={demoCamera.demoCameraSpeed}
+            demoColorMode={demoCamera.demoColorMode}
+            demoSegmentCameraAngle={demoCamera.demoSegmentCameraAngle}
+            disabled={!mapLoaded}
+            onColorModeChange={demoCamera.handleDemoColorModeChange}
+            onPlayShot={demoCamera.playDemoCamera}
+            onSegmentCameraAngleChange={demoCamera.setDemoSegmentCameraAngle}
+            onSpeedChange={demoCamera.setDemoCameraSpeed}
+            onStop={demoCamera.stopDemoCamera}
+            setShowDemoControls={demoCamera.setShowDemoControls}
+            showDemoControls={demoCamera.showDemoControls}
+          />
+          {showMapError ? (
             <div className="absolute inset-0 flex items-center justify-center bg-background/90 p-4 text-center text-sm text-muted-foreground">
               {mapError}
             </div>

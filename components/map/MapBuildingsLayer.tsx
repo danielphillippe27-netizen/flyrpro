@@ -80,6 +80,9 @@ const EMPTY_BUILDINGS_RETRY_BASE_DELAY_MS = 3000;
 const ADDRESS_LABEL_MIN_ZOOM = 18;
 const CAMPAIGN_BUILDING_MIN_ZOOM = 0;
 const DEFAULT_BUILDING_HEIGHT_METERS = 8;
+const GENERATED_HOME_WIDTH_METERS = 9;
+const GENERATED_HOME_DEPTH_METERS = 7;
+const GENERATED_HOME_HEIGHT_METERS = 5.5;
 const POLYGON_GEOMETRY_FILTER: FilterSpecification = [
   'match',
   ['geometry-type'],
@@ -562,6 +565,77 @@ function getFeatureCollectionBbox(features: GeoJSON.Feature[]): [number, number,
   return [minLon, minLat, maxLon, maxLat].every(Number.isFinite)
     ? [minLon, minLat, maxLon, maxLat]
     : null;
+}
+
+function metersToLongitudeDegrees(meters: number, latitude: number): number {
+  const safeLatitude = Number.isFinite(latitude) ? latitude : 0;
+  const latitudeRadians = (safeLatitude * Math.PI) / 180;
+  const metersPerDegree = 111_320 * Math.max(Math.cos(latitudeRadians), 0.01);
+  return meters / metersPerDegree;
+}
+
+function metersToLatitudeDegrees(meters: number): number {
+  return meters / 110_574;
+}
+
+function readBearingDegrees(properties: Record<string, unknown>): number {
+  const candidates = [
+    properties.house_bearing,
+    properties.front_bearing,
+    properties.bearing,
+    typeof properties.road_bearing === 'number' ? properties.road_bearing + 90 : undefined,
+  ];
+
+  for (const candidate of candidates) {
+    const value = Number(candidate);
+    if (Number.isFinite(value)) return value;
+  }
+
+  return 0;
+}
+
+function rotatePoint(
+  x: number,
+  y: number,
+  radians: number
+): [number, number] {
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  return [x * cos - y * sin, x * sin + y * cos];
+}
+
+function pointToGeneratedHomeFootprint(
+  coordinates: GeoJSON.Position,
+  properties: Record<string, unknown>
+): GeoJSON.Polygon | null {
+  const lon = Number(coordinates[0]);
+  const lat = Number(coordinates[1]);
+  if (!Number.isFinite(lon) || !Number.isFinite(lat)) return null;
+
+  const halfWidth = metersToLongitudeDegrees(GENERATED_HOME_WIDTH_METERS / 2, lat);
+  const halfDepth = metersToLatitudeDegrees(GENERATED_HOME_DEPTH_METERS / 2);
+  const porchInset = halfDepth * 0.35;
+  const rotation = (readBearingDegrees(properties) * Math.PI) / 180;
+
+  // A small house-shaped footprint: rectangle back, shallow peaked front.
+  const localPoints: Array<[number, number]> = [
+    [-halfWidth, -halfDepth],
+    [halfWidth, -halfDepth],
+    [halfWidth, halfDepth - porchInset],
+    [0, halfDepth],
+    [-halfWidth, halfDepth - porchInset],
+  ];
+
+  const ring = localPoints.map(([x, y]) => {
+    const [rotatedX, rotatedY] = rotatePoint(x, y, rotation);
+    return [lon + rotatedX, lat + rotatedY];
+  });
+  ring.push(ring[0]);
+
+  return {
+    type: 'Polygon',
+    coordinates: [ring],
+  };
 }
 
 export function MapBuildingsLayer({
@@ -1123,7 +1197,7 @@ export function MapBuildingsLayer({
         const props = f.properties ?? {};
         const propsRecord = toRecord(props);
         const fid = props.feature_id ?? props.gers_id ?? f.id ?? getStringRecordValue(propsRecord, 'id');
-        const geom = f.geometry;
+        const geom = f.geometry as GeoJSON.Geometry | null | undefined;
         const featureAddressId = typeof props.address_id === 'string' ? props.address_id.trim() : '';
         const buildingIdentifiers = [
           props.building_id,
@@ -1143,10 +1217,14 @@ export function MapBuildingsLayer({
         }
 
         // Deep-clone geometry ONCE here so we never mutate the source data.
+        const generatedHomeFootprint =
+          geom?.type === 'Point'
+            ? pointToGeneratedHomeFootprint(geom.coordinates, propsRecord)
+            : null;
         const scaledGeom =
           geom?.type === 'Polygon' || geom?.type === 'MultiPolygon'
             ? (JSON.parse(JSON.stringify(geom)) as GeoJSON.Polygon | GeoJSON.MultiPolygon)
-            : geom;
+            : generatedHomeFootprint ?? geom;
 
         if (scaledGeom && (scaledGeom.type === 'Polygon' || scaledGeom.type === 'MultiPolygon')) {
           scaleFootprint(scaledGeom, FOOTPRINT_SCALE);
@@ -1226,6 +1304,10 @@ export function MapBuildingsLayer({
             qr_scanned: Boolean(props.qr_scanned) || inferredScansTotal > 0,
             assignment_color: getStringRecordValue(propsRecord, 'assignment_color') ?? assignmentColor ?? undefined,
             assignment_selected: Boolean(assignmentSelected),
+            generated_home_footprint: Boolean(generatedHomeFootprint),
+            height_m:
+              Number(props.height_m ?? propsRecord.height ?? GENERATED_HOME_HEIGHT_METERS) ||
+              GENERATED_HOME_HEIGHT_METERS,
             gers_id: props.gers_id ?? stableBuildingId,
             building_id: props.building_id ?? stableBuildingId,
             feature_id: props.feature_id ?? stableBuildingId,
