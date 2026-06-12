@@ -171,10 +171,7 @@ export function DialerVideoLanding({
 
       <section className="relative min-h-[100svh] overflow-hidden bg-black">
         <div className="dialer-portrait-rotator relative min-h-[100svh] bg-black">
-          <div className="absolute inset-x-0 top-0 z-20 flex items-center justify-between px-4 py-3 md:px-8 md:py-5">
-            <Link href="/" className="text-4xl font-black leading-none tracking-tight text-red-500 md:text-5xl">
-              FLYR
-            </Link>
+          <div className="absolute inset-x-0 top-0 z-20 flex items-center justify-end px-4 py-3 md:px-8 md:py-5">
             <Link
               href={onboardingHref}
               className="inline-flex h-10 items-center rounded-lg bg-red-600 px-4 text-sm font-semibold text-white shadow-lg shadow-red-950/30 transition hover:bg-red-500 md:h-11 md:px-5"
