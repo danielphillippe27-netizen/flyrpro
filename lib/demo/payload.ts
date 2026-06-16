@@ -5,6 +5,7 @@ export type BeatCopy = {
   b1Sub: string;
   b1Accent: string;
   b2Headline: string;
+  b2Sub: string;
   b2Strikes: string[];
   b2Math: { key: string; value: string; hot?: boolean }[];
   b3Headline: string;

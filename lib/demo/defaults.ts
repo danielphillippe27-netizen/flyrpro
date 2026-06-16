@@ -3,7 +3,7 @@ import type { DemoPayload } from './payload';
 export const DEFAULT_PAYLOAD: DemoPayload = {
   slug: 'demo',
   vertical: 'generic',
-  center: [43.8828, -79.4403],
+  center: [43.8828, 79.4403],
   ctaVariant: 'territory',
   ctaUrl: 'mailto:harry@flyrpro.app?subject=Show%20me%20my%20territory',
   copy: {
@@ -12,6 +12,8 @@ export const DEFAULT_PAYLOAD: DemoPayload = {
       'FLYR PRO runs door-to-door field teams — territories, routes, reps, and every knock, verified. Three minutes, no call, no signup. Just scroll.',
     b1Accent: 'Prove it.',
     b2Headline: "You're paying for work\nyou can't see.",
+    b2Sub:
+      'Fifteen reps left the shop at 8 AM. Right now the knock record is a group chat and a gut feeling.',
     b2Strikes: ['Paper route sheets', 'The group chat', '"Trust me, boss"'],
     b2Math: [
       { key: 'Reps', value: '15' },

@@ -10,28 +10,46 @@ export function DemoShell({ children }: { children: ReactNode }) {
   const [activeBeat, setActiveBeat] = useState<(typeof BEATS)[number]>('b1');
 
   useEffect(() => {
-    const sections = BEATS.map((beat) => document.getElementById(beat)).filter(
-      (section): section is HTMLElement => section !== null
-    );
+    let frame = 0;
+    let observer: IntersectionObserver | undefined;
 
-    if (!sections.length) {
-      return;
-    }
+    const registerSections = () => {
+      const sections = [...document.querySelectorAll('section')].filter((section) =>
+        BEATS.includes(section.id as (typeof BEATS)[number])
+      );
 
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting && BEATS.includes(entry.target.id as (typeof BEATS)[number])) {
-            setActiveBeat(entry.target.id as (typeof BEATS)[number]);
-          }
-        });
-      },
-      { threshold: 0.25 }
-    );
+      observer = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            if (entry.isIntersecting && BEATS.includes(entry.target.id as (typeof BEATS)[number])) {
+              entry.target.classList.add('in');
+              setActiveBeat(entry.target.id as (typeof BEATS)[number]);
+            }
+          });
+        },
+        { threshold: 0.25 }
+      );
 
-    sections.forEach((section) => observer.observe(section));
+      sections.forEach((section) => {
+        const rect = section.getBoundingClientRect();
+        const visibleHeight = Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0);
+        const visibleRatio = visibleHeight / rect.height;
 
-    return () => observer.disconnect();
+        if (visibleRatio >= 0.25) {
+          section.classList.add('in');
+          setActiveBeat(section.id as (typeof BEATS)[number]);
+        }
+
+        observer?.observe(section);
+      });
+    };
+
+    frame = requestAnimationFrame(registerSections);
+
+    return () => {
+      cancelAnimationFrame(frame);
+      observer?.disconnect();
+    };
   }, []);
 
   return (
@@ -70,7 +88,6 @@ export function DemoShell({ children }: { children: ReactNode }) {
           );
         })}
       </nav>
-      {children}
       <style jsx global>{`
         .demo-beat-rail {
           position: fixed;
@@ -98,6 +115,7 @@ export function DemoShell({ children }: { children: ReactNode }) {
           }
         }
       `}</style>
+      {children}
     </>
   );
 }
