@@ -56,12 +56,8 @@ export function DemoShell({ children }: { children: ReactNode }) {
     <>
       <div
         aria-hidden="true"
+        className="demo-grain"
         style={{
-          position: 'fixed',
-          inset: 0,
-          pointerEvents: 'none',
-          zIndex: 50,
-          opacity: '7%',
           backgroundImage: GRAIN_BACKGROUND,
         }}
       />
@@ -89,6 +85,18 @@ export function DemoShell({ children }: { children: ReactNode }) {
         })}
       </nav>
       <style jsx global>{`
+        .demo-grain {
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100vw;
+          height: 100vh;
+          height: 100dvh;
+          pointer-events: none;
+          z-index: 50;
+          opacity: 7%;
+        }
+
         .demo-beat-rail {
           position: fixed;
           left: 0;

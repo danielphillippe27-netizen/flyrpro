@@ -59,7 +59,9 @@ export default function DemoLayout({ children }: { children: ReactNode }) {
         section:is(#b1, #b2, #b3, #b4, #b5, #b6) {
           position: relative;
           min-height: 100vh;
+          min-height: 100dvh;
           padding: 14vh 8vw;
+          padding: 14dvh 8vw;
           display: flex;
           flex-direction: column;
           justify-content: center;
@@ -174,6 +176,8 @@ export default function DemoLayout({ children }: { children: ReactNode }) {
           height: 100%;
           opacity: .5;
           pointer-events: none;
+          overflow: hidden;
+          contain: layout paint;
         }
 
         #b1 .trace path {
@@ -319,6 +323,7 @@ export default function DemoLayout({ children }: { children: ReactNode }) {
           margin-top: 4vh;
           aspect-ratio: 16/9;
           max-height: 62vh;
+          max-height: 62dvh;
           overflow: hidden;
         }
 
@@ -381,6 +386,7 @@ export default function DemoLayout({ children }: { children: ReactNode }) {
           color: var(--paper);
           border: 2px solid var(--ink);
           padding: 10px 18px;
+          min-height: 44px;
           cursor: pointer;
           transition: background .2s,color .2s;
         }
@@ -522,6 +528,7 @@ export default function DemoLayout({ children }: { children: ReactNode }) {
 
         .phone {
           width: min(330px,86vw);
+          box-sizing: border-box;
           margin: 0 auto;
           background: var(--ink);
           color: var(--paper);
@@ -588,6 +595,7 @@ export default function DemoLayout({ children }: { children: ReactNode }) {
           text-transform: uppercase;
           font-weight: 700;
           padding: 14px 8px;
+          min-height: 44px;
           background: transparent;
           color: var(--paper);
           border: 2px solid #3a3a35;
@@ -709,6 +717,13 @@ export default function DemoLayout({ children }: { children: ReactNode }) {
           color: var(--ink);
           border: 2px solid var(--orange);
           padding: 20px 34px;
+          min-height: 44px;
+          max-width: 100%;
+          box-sizing: border-box;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          text-align: center;
           text-decoration: none;
           cursor: pointer;
           transition: all .15s;
