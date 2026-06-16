@@ -46,16 +46,30 @@ function renderLines(value: string) {
 }
 
 function makePath(city: DemoCity, rng: () => number) {
-  const pts = [];
-  let x = city.vx[1 + ((rng() * (city.vx.length - 2)) | 0)],
-    y = city.hy[1 + ((rng() * (city.hy.length - 2)) | 0)];
+  const pts: number[][] = [];
+  let xIndex = 1 + ((rng() * (city.vx.length - 2)) | 0);
+  let yIndex = 1 + ((rng() * (city.hy.length - 2)) | 0);
+  let x = city.vx[xIndex],
+    y = city.hy[yIndex];
+  const startX = x,
+    startY = y;
   pts.push([x, y]);
   for (let k = 0; k < 14; k++) {
     if (rng() < 0.5) {
-      x = city.vx[Math.max(0, Math.min(city.vx.length - 1, city.vx.indexOf(x) + (rng() < 0.5 ? -1 : 1)))];
+      xIndex = Math.max(0, Math.min(city.vx.length - 1, xIndex + (rng() < 0.5 ? -1 : 1)));
+      x = city.vx[xIndex];
     } else {
-      y = city.hy[Math.max(0, Math.min(city.hy.length - 1, city.hy.indexOf(y) + (rng() < 0.5 ? -1 : 1)))];
+      yIndex = Math.max(0, Math.min(city.hy.length - 1, yIndex + (rng() < 0.5 ? -1 : 1)));
+      y = city.hy[yIndex];
     }
+    pts.push([x, y]);
+  }
+  if (x !== startX) {
+    x = startX;
+    pts.push([x, y]);
+  }
+  if (y !== startY) {
+    y = startY;
     pts.push([x, y]);
   }
   return pts;
