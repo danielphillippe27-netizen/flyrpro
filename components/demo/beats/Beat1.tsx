@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { getInitialReducedMotion } from '@/lib/demo/canvas/useReducedMotion';
 import type { BeatCopy } from '@/lib/demo/payload';
 
 type Beat1Props = {
@@ -32,7 +33,7 @@ export function Beat1({ copy, center }: Beat1Props) {
   useEffect(() => {
     setCoords(formatCoords(baseLat, baseLng));
 
-    const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const reduced = getInitialReducedMotion();
 
     if (reduced) {
       return;

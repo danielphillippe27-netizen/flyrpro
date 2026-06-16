@@ -312,6 +312,377 @@ export default function DemoLayout({ children }: { children: ReactNode }) {
           color: var(--orange);
         }
 
+        .stage {
+          position: relative;
+          width: 100%;
+          border: 2px solid currentColor;
+          margin-top: 4vh;
+          aspect-ratio: 16/9;
+          max-height: 62vh;
+          overflow: hidden;
+        }
+
+        @media(max-width:760px) {
+          .stage {
+            aspect-ratio: 4/5;
+          }
+        }
+
+        .stage canvas {
+          position: absolute;
+          inset: 0;
+          width: 100%;
+          height: 100%;
+          display: block;
+        }
+
+        .stage .hud {
+          position: absolute;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-end;
+          padding: 14px 16px;
+          font-size: 12px;
+          letter-spacing: .14em;
+          text-transform: uppercase;
+          pointer-events: none;
+        }
+
+        .counter {
+          font-family: var(--disp);
+          font-weight: 900;
+          font-stretch: 73%;
+          font-size: clamp(30px,4.4vw,58px);
+          line-height: 1;
+        }
+
+        .counter small {
+          display: block;
+          font-family: var(--mono);
+          font-weight: 500;
+          font-size: 11px;
+          letter-spacing: .2em;
+          margin-top: 6px;
+        }
+
+        .replay {
+          position: absolute;
+          top: 14px;
+          right: 14px;
+          z-index: 5;
+          font-family: var(--mono);
+          font-size: 12px;
+          letter-spacing: .16em;
+          text-transform: uppercase;
+          background: var(--ink);
+          color: var(--paper);
+          border: 2px solid var(--ink);
+          padding: 10px 18px;
+          cursor: pointer;
+          transition: background .2s,color .2s;
+        }
+
+        .replay:hover,
+        .replay:focus-visible {
+          background: var(--orange);
+          border-color: var(--orange);
+          color: var(--ink);
+          outline: none;
+        }
+
+        #b4 .replay {
+          background: var(--paper);
+          color: var(--ink);
+          border-color: var(--paper);
+        }
+
+        #b4 .replay:hover,
+        #b4 .replay:focus-visible {
+          background: var(--orange);
+          border-color: var(--orange);
+        }
+
+        #b4 .grid4 {
+          display: grid;
+          grid-template-columns: 1fr 300px;
+          gap: 18px;
+          margin-top: 4vh;
+        }
+
+        @media(max-width:980px) {
+          #b4 .grid4 {
+            grid-template-columns: 1fr;
+          }
+        }
+
+        #b4 .stage {
+          margin-top: 0;
+          border-color: #3a3a35;
+        }
+
+        .panel {
+          border: 2px solid #3a3a35;
+          display: flex;
+          flex-direction: column;
+          min-height: 0;
+        }
+
+        .panel h3 {
+          font-family: var(--mono);
+          font-size: 11px;
+          font-weight: 700;
+          letter-spacing: .22em;
+          text-transform: uppercase;
+          padding: 12px 14px;
+          border-bottom: 2px solid #3a3a35;
+          color: var(--orange);
+        }
+
+        .feed {
+          flex: 1;
+          overflow: hidden;
+          padding: 10px 14px;
+          font-size: 12px;
+          line-height: 2.1;
+          display: flex;
+          flex-direction: column;
+          justify-content: flex-end;
+          min-height: 150px;
+        }
+
+        .feed div {
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          animation: feedin .4s ease-out;
+        }
+
+        @keyframes feedin {
+          from {
+            opacity: 0;
+            transform: translateY(8px);
+          }
+
+          to {
+            opacity: 1;
+            transform: none;
+          }
+        }
+
+        .feed .ok {
+          color: var(--green);
+        }
+
+        .feed .nh {
+          color: var(--amber);
+        }
+
+        .feed .dk {
+          color: var(--red);
+        }
+
+        .lb {
+          padding: 10px 14px;
+          border-top: 2px solid #3a3a35;
+        }
+
+        .lb .row {
+          display: flex;
+          justify-content: space-between;
+          font-size: 12px;
+          line-height: 2.2;
+        }
+
+        .lb .row b {
+          font-weight: 700;
+        }
+
+        .lb .row .n {
+          font-family: var(--disp);
+          font-weight: 900;
+          font-size: 16px;
+        }
+
+        #b5 .duo {
+          display: grid;
+          grid-template-columns: 1.1fr .9fr;
+          gap: 6vw;
+          align-items: center;
+          margin-top: 2vh;
+        }
+
+        @media(max-width:900px) {
+          #b5 .duo {
+            grid-template-columns: 1fr;
+          }
+        }
+
+        .phone {
+          width: min(330px,86vw);
+          margin: 0 auto;
+          background: var(--ink);
+          color: var(--paper);
+          border: 3px solid var(--ink);
+          border-radius: 34px;
+          padding: 14px;
+          box-shadow: 14px 14px 0 rgba(12,12,10,.18);
+        }
+
+        .screen {
+          background: #161613;
+          border-radius: 22px;
+          overflow: hidden;
+          display: flex;
+          flex-direction: column;
+          min-height: 480px;
+        }
+
+        .appbar {
+          display: flex;
+          justify-content: space-between;
+          padding: 14px 16px;
+          font-size: 11px;
+          letter-spacing: .14em;
+          border-bottom: 1px solid #2c2c27;
+        }
+
+        .appbar b {
+          color: var(--orange);
+        }
+
+        .doorcard {
+          padding: 18px 16px;
+          border-bottom: 1px solid #2c2c27;
+        }
+
+        .doorcard .addr {
+          font-family: var(--disp);
+          font-weight: 900;
+          font-stretch: 73%;
+          font-size: 26px;
+          text-transform: uppercase;
+          line-height: 1;
+        }
+
+        .doorcard .meta {
+          font-size: 11px;
+          letter-spacing: .12em;
+          opacity: .6;
+          margin-top: 8px;
+        }
+
+        .outs {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 10px;
+          padding: 16px;
+        }
+
+        .outs button {
+          font-family: var(--mono);
+          font-size: 12px;
+          letter-spacing: .1em;
+          text-transform: uppercase;
+          font-weight: 700;
+          padding: 14px 8px;
+          background: transparent;
+          color: var(--paper);
+          border: 2px solid #3a3a35;
+          cursor: pointer;
+          transition: all .15s;
+        }
+
+        .outs button:hover,
+        .outs button:focus-visible {
+          border-color: var(--paper);
+          outline: none;
+        }
+
+        .outs button.sel-ok {
+          background: var(--green);
+          border-color: var(--green);
+          color: var(--ink);
+        }
+
+        .outs button.sel-nh {
+          background: var(--amber);
+          border-color: var(--amber);
+          color: var(--ink);
+        }
+
+        .outs button.sel-na {
+          background: #888;
+          border-color: #888;
+          color: var(--ink);
+        }
+
+        .outs button.sel-dk {
+          background: var(--red);
+          border-color: var(--red);
+          color: var(--ink);
+        }
+
+        .leadflow {
+          padding: 0 16px 18px;
+          display: none;
+          flex-direction: column;
+          gap: 8px;
+        }
+
+        .leadflow.show {
+          display: flex;
+        }
+
+        .leadline {
+          display: flex;
+          justify-content: space-between;
+          font-size: 12px;
+          border-bottom: 1px dashed #3a3a35;
+          padding: 8px 0;
+        }
+
+        .leadline span:first-child {
+          opacity: .55;
+        }
+
+        .sync {
+          margin-top: 10px;
+          font-size: 12px;
+          letter-spacing: .14em;
+          text-transform: uppercase;
+          font-weight: 700;
+          border: 2px solid var(--green);
+          color: var(--green);
+          padding: 10px 12px;
+          text-align: center;
+          opacity: 0;
+          transform: translateY(8px);
+          transition: all .5s .5s;
+        }
+
+        .leadflow.show .sync {
+          opacity: 1;
+          transform: none;
+        }
+
+        #b5 .pitch li {
+          list-style: none;
+          font-size: clamp(14px,1.5vw,17px);
+          padding: 14px 0;
+          border-bottom: 2px solid var(--ink);
+          display: flex;
+          gap: 14px;
+        }
+
+        #b5 .pitch li::before {
+          content: "→";
+          color: var(--orange);
+          font-weight: 700;
+        }
+
         #b6 {
           text-align: left;
         }
