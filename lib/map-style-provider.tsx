@@ -4,7 +4,7 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import {
   MAP_STYLE_PRESET_META,
   type MapStylePreset,
-} from '@/lib/map-styles';
+} from '@/lib/map-style-presets';
 
 interface MapStyleContextType {
   preset: MapStylePreset;
