@@ -373,6 +373,39 @@ export default function DemoLayout({ children }: { children: ReactNode }) {
           margin-top: 6px;
         }
 
+        .demo-map-label {
+          position: absolute;
+          top: 17px;
+          left: 16px;
+          z-index: 5;
+          max-width: calc(100% - 240px);
+          font-family: var(--mono);
+          font-size: 11px;
+          font-weight: 500;
+          letter-spacing: .18em;
+          line-height: 1.4;
+          text-transform: uppercase;
+          color: var(--ink);
+          opacity: .62;
+          pointer-events: none;
+        }
+
+        .demo-map-counter {
+          margin-bottom: 44px;
+        }
+
+        @media(max-width:760px) {
+          .demo-map-label {
+            max-width: calc(100% - 180px);
+            font-size: 10px;
+            letter-spacing: .14em;
+          }
+
+          .demo-map-counter {
+            margin-bottom: 46px;
+          }
+        }
+
         .replay {
           position: absolute;
           top: 14px;

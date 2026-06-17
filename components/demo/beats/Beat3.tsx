@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   GeoJSONSource,
-  LngLatLike,
+  LngLatBoundsLike,
   Map as MapboxMap,
   MapboxGeoJSONFeature,
   PointLike,
@@ -87,6 +87,39 @@ function buildTerritoryRing(center: LngLat): LngLat[] {
   });
 }
 
+function boundsOfRing(ring: LngLat[]): LngLatBoundsLike {
+  const bounds = ring.reduce(
+    (acc, coord) => ({
+      minLng: Math.min(acc.minLng, coord[0]),
+      minLat: Math.min(acc.minLat, coord[1]),
+      maxLng: Math.max(acc.maxLng, coord[0]),
+      maxLat: Math.max(acc.maxLat, coord[1]),
+    }),
+    {
+      minLng: Number.POSITIVE_INFINITY,
+      minLat: Number.POSITIVE_INFINITY,
+      maxLng: Number.NEGATIVE_INFINITY,
+      maxLat: Number.NEGATIVE_INFINITY,
+    }
+  );
+
+  return [
+    [bounds.minLng, bounds.minLat],
+    [bounds.maxLng, bounds.maxLat],
+  ];
+}
+
+function mapPersonalizationLabel(company?: string, city?: string) {
+  const companyText = company?.trim();
+  const cityText = city?.trim();
+
+  if (companyText && cityText) {
+    return `${companyText} · ${cityText}`.toUpperCase();
+  }
+
+  return (cityText ?? '').toUpperCase();
+}
+
 function interpolateRing(ring: LngLat[], progress: number): LngLat[] {
   if (progress >= 1) {
     return [...ring, ring[0]];
@@ -148,6 +181,23 @@ function featureCentroid(feature: MapboxGeoJSONFeature): LngLat | null {
   return [totals.lng / usable.length, totals.lat / usable.length];
 }
 
+function pointInLngLatRing(point: LngLat, ring: LngLat[]) {
+  let inside = false;
+
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0];
+    const yi = ring[i][1];
+    const xj = ring[j][0];
+    const yj = ring[j][1];
+
+    if (yi > point[1] !== yj > point[1] && point[0] < ((xj - xi) * (point[1] - yi)) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+
+  return inside;
+}
+
 function shuffleCentroids(centroids: LngLat[]) {
   const shuffled = [...centroids];
   const rng = mulberry(13);
@@ -162,7 +212,17 @@ function source(map: MapboxMap, id: string) {
   return map.getSource(id) as GeoJSONSource | undefined;
 }
 
-function Beat3Map({ copy, center }: { copy: BeatCopy; center: LngLat }) {
+function Beat3Map({
+  copy,
+  center,
+  company,
+  city,
+}: {
+  copy: BeatCopy;
+  center: LngLat;
+  company?: string;
+  city?: string;
+}) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapboxMap | null>(null);
@@ -175,6 +235,7 @@ function Beat3Map({ copy, center }: { copy: BeatCopy; center: LngLat }) {
   const [count, setCount] = useState('0');
   const [timer, setTimer] = useState('00.0 s');
   const [fallback, setFallback] = useState(false);
+  const label = mapPersonalizationLabel(company, city);
 
   const cancelAnimation = useCallback(() => {
     if (animationRef.current !== null) {
@@ -198,17 +259,36 @@ function Beat3Map({ copy, center }: { copy: BeatCopy; center: LngLat }) {
     const buildingLayerId = buildingLayerIdRef.current;
     if (!map || !buildingLayerId) return [];
 
-    const screenPolygon = ringRef.current.map((coord) => map.project(coord) as PointLike);
+    const screenPolygon = ringRef.current.map((coord) => map.project(coord));
+    const screenBounds = screenPolygon.reduce(
+      (acc, point) => ({
+        minX: Math.min(acc.minX, point.x),
+        minY: Math.min(acc.minY, point.y),
+        maxX: Math.max(acc.maxX, point.x),
+        maxY: Math.max(acc.maxY, point.y),
+      }),
+      {
+        minX: Number.POSITIVE_INFINITY,
+        minY: Number.POSITIVE_INFINITY,
+        maxX: Number.NEGATIVE_INFINITY,
+        maxY: Number.NEGATIVE_INFINITY,
+      }
+    );
+    const queryBounds: [PointLike, PointLike] = [
+      [screenBounds.minX, screenBounds.minY],
+      [screenBounds.maxX, screenBounds.maxY],
+    ];
     const queryRenderedFeatures = map.queryRenderedFeatures.bind(map) as unknown as (
-      geometry: PointLike[],
+      geometry: [PointLike, PointLike],
       options: { layers: string[] }
     ) => MapboxGeoJSONFeature[];
-    const features = queryRenderedFeatures(screenPolygon, { layers: [buildingLayerId] });
+    const features = queryRenderedFeatures(queryBounds, { layers: [buildingLayerId] });
     const unique = new Map<string, LngLat>();
 
     for (const feature of features) {
       const centroid = featureCentroid(feature);
       if (!centroid) continue;
+      if (!pointInLngLatRing(centroid, ringRef.current)) continue;
 
       const key = String(feature.id ?? feature.properties?.id ?? feature.properties?.mapbox_id ?? centroid.join(','));
       unique.set(key, centroid);
@@ -311,8 +391,6 @@ function Beat3Map({ copy, center }: { copy: BeatCopy; center: LngLat }) {
 
       const map = new mapboxgl.Map({
         container: mapContainerRef.current,
-        center: center as LngLatLike,
-        zoom: 15,
         pitch: 0,
         bearing: 0,
         interactive: false,
@@ -378,7 +456,8 @@ function Beat3Map({ copy, center }: { copy: BeatCopy; center: LngLat }) {
             },
           });
 
-          runSequence();
+          map.fitBounds(boundsOfRing(ringRef.current), { padding: 60, duration: 0 });
+          map.once('idle', runSequence);
         } catch (error) {
           console.error('[Beat3] Falling back to canvas after map setup failed:', error);
           setFallback(true);
@@ -432,8 +511,9 @@ function Beat3Map({ copy, center }: { copy: BeatCopy; center: LngLat }) {
       <div className="rv eyebrow">Beat 03 · Territory</div>
       <h2 className="h-big rv d1">{renderLines(copy.b3Headline)}</h2>
       <p className="sub rv d2">{copy.b3Sub}</p>
-      <div className="stage rv d3" id="stage3" ref={stageRef}>
+      <div className="stage demo-map-stage rv d3" id="stage3" ref={stageRef}>
         <div ref={mapContainerRef} style={{ position: 'absolute', inset: 0 }} />
+        {label ? <div className="demo-map-label">{label}</div> : null}
         <button
           className="replay"
           id="replay3"
@@ -445,8 +525,8 @@ function Beat3Map({ copy, center }: { copy: BeatCopy; center: LngLat }) {
         >
           {copy.b3ReplayLabel}
         </button>
-        <div className="hud">
-          <div className="counter">
+        <div className="hud demo-map-hud">
+          <div className="counter demo-map-counter">
             <span id="count3">{count}</span>
             <small>{copy.b3CounterLabel}</small>
           </div>
@@ -457,10 +537,20 @@ function Beat3Map({ copy, center }: { copy: BeatCopy; center: LngLat }) {
   );
 }
 
-export function Beat3({ copy, center }: { copy: BeatCopy; center?: LngLat }) {
+export function Beat3({
+  copy,
+  center,
+  company,
+  city,
+}: {
+  copy: BeatCopy;
+  center?: LngLat;
+  company?: string;
+  city?: string;
+}) {
   if (!center) {
     return <Beat3Canvas copy={copy} />;
   }
 
-  return <Beat3Map copy={copy} center={center} />;
+  return <Beat3Map copy={copy} center={center} company={company} city={city} />;
 }
