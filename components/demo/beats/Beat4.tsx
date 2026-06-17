@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { buildCity, drawStreets, fitCanvas, mulberry, type CityAddress, type DemoCity } from '@/lib/demo/canvas/cityModel';
 import { getInitialReducedMotion } from '@/lib/demo/canvas/useReducedMotion';
+import { track } from '@/lib/demo/analytics/track';
 import type { BeatCopy } from '@/lib/demo/payload';
 
 type RepName = 'MARCUS' | 'DEVON' | 'PRIYA' | 'COLE';
@@ -259,7 +260,15 @@ export function Beat4({ copy }: { copy: BeatCopy }) {
       <div className="grid4 rv d3">
         <div className="stage" id="stage4" ref={stageRef}>
           <canvas id="cv4" ref={canvasRef} />
-          <button className="replay" id="replay4" type="button" onClick={runBeat4}>
+          <button
+            className="replay"
+            id="replay4"
+            type="button"
+            onClick={() => {
+              track('replay', 4);
+              runBeat4();
+            }}
+          >
             {copy.b4ReplayLabel}
           </button>
         </div>

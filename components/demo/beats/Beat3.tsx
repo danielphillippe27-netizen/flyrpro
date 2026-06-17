@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { buildCity, drawStreets, fitCanvas, mulberry, pointInPoly, type PolygonPoint } from '@/lib/demo/canvas/cityModel';
 import { getInitialReducedMotion } from '@/lib/demo/canvas/useReducedMotion';
+import { track } from '@/lib/demo/analytics/track';
 import type { BeatCopy } from '@/lib/demo/payload';
 
 function renderLines(value: string) {
@@ -155,7 +156,15 @@ export function Beat3({ copy }: { copy: BeatCopy }) {
       <p className="sub rv d2">{copy.b3Sub}</p>
       <div className="stage rv d3" id="stage3" ref={stageRef}>
         <canvas id="cv3" ref={canvasRef} />
-        <button className="replay" id="replay3" type="button" onClick={runBeat3}>
+        <button
+          className="replay"
+          id="replay3"
+          type="button"
+          onClick={() => {
+            track('replay', 3);
+            runBeat3();
+          }}
+        >
           {copy.b3ReplayLabel}
         </button>
         <div className="hud">

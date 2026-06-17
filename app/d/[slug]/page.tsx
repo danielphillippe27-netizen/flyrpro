@@ -16,7 +16,7 @@ export default async function DemoPage({ params }: DemoPageProps) {
   const payload = await resolvePayloadForSlug(slug);
 
   return (
-    <DemoShell>
+    <DemoShell slug={payload.slug}>
       <Beat1 copy={payload.copy} center={payload.center} />
       <Beat2 copy={payload.copy} />
       <Beat3 copy={payload.copy} />

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { track } from '@/lib/demo/analytics/track';
 import type { BeatCopy } from '@/lib/demo/payload';
 
 type OutcomeKey = 'ok' | 'nh' | 'na' | 'dk';
@@ -49,7 +50,10 @@ export function Beat5({ copy }: { copy: BeatCopy }) {
                   data-k={key}
                   key={key}
                   type="button"
-                  onClick={() => setSelectedOutcome(key)}
+                  onClick={() => {
+                    track('phone_tap', 5, { outcome: key });
+                    setSelectedOutcome(key);
+                  }}
                 >
                   {copy.b5OutcomeButtons[key]}
                 </button>

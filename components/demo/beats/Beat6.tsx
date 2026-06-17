@@ -1,3 +1,6 @@
+'use client';
+
+import { track } from '@/lib/demo/analytics/track';
 import type { BeatCopy, DemoPayload } from '@/lib/demo/payload';
 
 type Beat6Props = {
@@ -53,10 +56,18 @@ export function Beat6({ copy, ctaVariant, ctaUrl }: Beat6Props) {
         <h2 className="price rv d1">{renderPrice(copy.b6Price)}</h2>
         <h2 className="h-big rv d2">{renderLines(copy.b6Headline)}</h2>
         <div className="cta-row rv d3">
-          <a className="btn" href={ctaUrl}>
+          <a
+            className="btn"
+            href={ctaUrl}
+            onClick={() => track('cta_click', 6, { variant: ctaVariant, target: 'primary' })}
+          >
             {copy.ctaPrimary}
           </a>
-          <a className="btn ghost" href="https://flyrpro.app">
+          <a
+            className="btn ghost"
+            href="https://flyrpro.app"
+            onClick={() => track('cta_click', 6, { variant: ctaVariant, target: 'secondary' })}
+          >
             {copy.ctaSecondary}
           </a>
         </div>

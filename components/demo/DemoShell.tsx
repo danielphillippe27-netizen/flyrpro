@@ -1,17 +1,33 @@
 'use client';
 
 import { useEffect, useState, type ReactNode } from 'react';
+import { initTracking, track } from '@/lib/demo/analytics/track';
 
 const BEATS = ['b1', 'b2', 'b3', 'b4', 'b5', 'b6'] as const;
 const GRAIN_BACKGROUND =
   'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'180\' height=\'180\'%3E%3Cfilter id=\'n\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'0.9\' numOctaves=\'2\'/%3E%3C/filter%3E%3Crect width=\'180\' height=\'180\' filter=\'url(%23n)\' opacity=\'1\'/%3E%3C/svg%3E")';
 
-export function DemoShell({ children }: { children: ReactNode }) {
+export function DemoShell({ children, slug }: { children: ReactNode; slug: string }) {
   const [activeBeat, setActiveBeat] = useState<(typeof BEATS)[number]>('b1');
+
+  useEffect(() => {
+    initTracking(slug);
+
+    try {
+      track('open', undefined, {
+        device: navigator.userAgent.includes('Mobi') ? 'mobile' : 'desktop',
+        viewport: `${window.innerWidth}x${window.innerHeight}`,
+        referrer: document.referrer || null,
+      });
+    } catch {
+      // Analytics must never affect the demo experience.
+    }
+  }, [slug]);
 
   useEffect(() => {
     let frame = 0;
     let observer: IntersectionObserver | undefined;
+    const intersectingBeats = new Set<string>();
 
     const registerSections = () => {
       const sections = [...document.querySelectorAll('section')].filter((section) =>
@@ -21,9 +37,29 @@ export function DemoShell({ children }: { children: ReactNode }) {
       observer = new IntersectionObserver(
         (entries) => {
           entries.forEach((entry) => {
-            if (entry.isIntersecting && BEATS.includes(entry.target.id as (typeof BEATS)[number])) {
+            const beatId = entry.target.id as (typeof BEATS)[number];
+            if (!BEATS.includes(beatId)) {
+              return;
+            }
+
+            const beatNumber = Number(beatId.replace('b', ''));
+
+            if (entry.isIntersecting) {
               entry.target.classList.add('in');
-              setActiveBeat(entry.target.id as (typeof BEATS)[number]);
+              setActiveBeat(beatId);
+
+              if (!intersectingBeats.has(beatId)) {
+                intersectingBeats.add(beatId);
+                track('beat_enter', beatNumber);
+
+                if (beatId === 'b6') {
+                  track('cta_view', beatNumber);
+                  track('complete', beatNumber);
+                }
+              }
+            } else if (intersectingBeats.has(beatId)) {
+              intersectingBeats.delete(beatId);
+              track('beat_exit', beatNumber);
             }
           });
         },
@@ -37,7 +73,16 @@ export function DemoShell({ children }: { children: ReactNode }) {
 
         if (visibleRatio >= 0.25) {
           section.classList.add('in');
-          setActiveBeat(section.id as (typeof BEATS)[number]);
+          const beatId = section.id as (typeof BEATS)[number];
+          setActiveBeat(beatId);
+          intersectingBeats.add(beatId);
+          const beatNumber = Number(beatId.replace('b', ''));
+          track('beat_enter', beatNumber);
+
+          if (beatId === 'b6') {
+            track('cta_view', beatNumber);
+            track('complete', beatNumber);
+          }
         }
 
         observer?.observe(section);
