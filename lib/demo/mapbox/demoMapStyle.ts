@@ -178,15 +178,6 @@ function applyDarkOverrides(layer: AnyLayer) {
 function applyDemoOverrides(style: StyleSpecification, variant: DemoMapVariant) {
   style.layers = (style.layers ?? []).map((layer) => {
     const nextLayer = layer as AnyLayer;
-    const id = nextLayer.id.toLowerCase();
-    const sourceLayer = layerSourceLayer(nextLayer);
-
-    if (
-      (nextLayer.type === 'fill' || nextLayer.type === 'fill-extrusion')
-      && (id.includes('building') || sourceLayer.includes('building'))
-    ) {
-      nextLayer.minzoom = 0;
-    }
 
     if (hideLabelLayer(nextLayer)) {
       nextLayer.layout = {

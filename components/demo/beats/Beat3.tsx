@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   GeoJSONSource,
-  LngLatBoundsLike,
+  LngLatLike,
   Map as MapboxMap,
   MapboxGeoJSONFeature,
   PointLike,
@@ -24,6 +24,8 @@ const POLYGON_LINE_LAYER_ID = 'demo-b3-polygon-line';
 const POINTS_SOURCE_ID = 'demo-b3-points-source';
 const POINTS_LAYER_ID = 'demo-b3-points';
 const FRESH_POINTS_LAYER_ID = 'demo-b3-points-fresh';
+const TARGET_ZOOM = 15.5;
+const TERRITORY_RADIUS_RATIO = 0.2;
 
 function renderLines(value: string) {
   return value.split('\n').map((line, index) => (
@@ -78,35 +80,24 @@ function offsetMeters(center: LngLat, eastMeters: number, northMeters: number): 
   return [center[0] + lngDelta, center[1] + latDelta];
 }
 
-function buildTerritoryRing(center: LngLat): LngLat[] {
-  const bearings = [-118, -56, -6, 48, 111, 169, -164];
-  const radii = [430, 560, 510, 455, 590, 480, 540];
-  return bearings.map((bearing, index) => {
-    const radians = (bearing * Math.PI) / 180;
-    return offsetMeters(center, Math.cos(radians) * radii[index], Math.sin(radians) * radii[index]);
-  });
+function metersPerPixelAtZoom(lat: number, zoom: number) {
+  return (156543.03392 * Math.cos((lat * Math.PI) / 180)) / Math.pow(2, zoom);
 }
 
-function boundsOfRing(ring: LngLat[]): LngLatBoundsLike {
-  const bounds = ring.reduce(
-    (acc, coord) => ({
-      minLng: Math.min(acc.minLng, coord[0]),
-      minLat: Math.min(acc.minLat, coord[1]),
-      maxLng: Math.max(acc.maxLng, coord[0]),
-      maxLat: Math.max(acc.maxLat, coord[1]),
-    }),
-    {
-      minLng: Number.POSITIVE_INFINITY,
-      minLat: Number.POSITIVE_INFINITY,
-      maxLng: Number.NEGATIVE_INFINITY,
-      maxLat: Number.NEGATIVE_INFINITY,
-    }
-  );
+function territoryRadiusMeters(center: LngLat, stageEl: HTMLElement) {
+  const rect = stageEl.getBoundingClientRect();
+  const smallerStageDimension = Math.min(rect.width, rect.height);
+  return smallerStageDimension * TERRITORY_RADIUS_RATIO * metersPerPixelAtZoom(center[1], TARGET_ZOOM);
+}
 
-  return [
-    [bounds.minLng, bounds.minLat],
-    [bounds.maxLng, bounds.maxLat],
-  ];
+function buildTerritoryRing(center: LngLat, radiusMeters: number): LngLat[] {
+  const bearings = [-118, -56, -6, 48, 111, 169, -164];
+  const radiusMultipliers = [0.86, 1.12, 1.02, 0.91, 1.18, 0.96, 1.08];
+  return bearings.map((bearing, index) => {
+    const radians = (bearing * Math.PI) / 180;
+    const radius = radiusMeters * radiusMultipliers[index];
+    return offsetMeters(center, Math.cos(radians) * radius, Math.sin(radians) * radius);
+  });
 }
 
 function mapPersonalizationLabel(company?: string, city?: string) {
@@ -387,10 +378,12 @@ function Beat3Map({
       }
 
       buildingLayerIdRef.current = buildingLayerId;
-      ringRef.current = buildTerritoryRing(center);
+      ringRef.current = buildTerritoryRing(center, territoryRadiusMeters(center, mapContainerRef.current));
 
       const map = new mapboxgl.Map({
         container: mapContainerRef.current,
+        center: center as LngLatLike,
+        zoom: TARGET_ZOOM,
         pitch: 0,
         bearing: 0,
         interactive: false,
@@ -456,7 +449,8 @@ function Beat3Map({
             },
           });
 
-          map.fitBounds(boundsOfRing(ringRef.current), { padding: 60, duration: 0 });
+          map.setCenter(center as LngLatLike);
+          map.setZoom(TARGET_ZOOM);
           map.once('idle', runSequence);
         } catch (error) {
           console.error('[Beat3] Falling back to canvas after map setup failed:', error);
