@@ -3,7 +3,6 @@ import type { DemoPayload } from './payload';
 export const DEFAULT_PAYLOAD: DemoPayload = {
   slug: 'demo',
   vertical: 'generic',
-  center: [43.8828, 79.4403],
   ctaVariant: 'territory',
   ctaUrl: 'mailto:harry@flyrpro.app?subject=Show%20me%20my%20territory',
   navigationMode: 'scroll',

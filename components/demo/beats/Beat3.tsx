@@ -1,10 +1,29 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { buildCity, drawStreets, fitCanvas, mulberry, pointInPoly, type PolygonPoint } from '@/lib/demo/canvas/cityModel';
+import type {
+  GeoJSONSource,
+  LngLatLike,
+  Map as MapboxMap,
+  MapboxGeoJSONFeature,
+  PointLike,
+} from 'mapbox-gl';
+import { mulberry } from '@/lib/demo/canvas/cityModel';
 import { getInitialReducedMotion } from '@/lib/demo/canvas/useReducedMotion';
 import { track } from '@/lib/demo/analytics/track';
+import { findDemoBuildingLayerId, getDemoMapStyle } from '@/lib/demo/mapbox/demoMapStyle';
+import { getMapboxGl } from '@/lib/demo/mapbox/loadMapboxGl';
 import type { BeatCopy } from '@/lib/demo/payload';
+import { Beat3Canvas } from './Beat3Canvas';
+
+type LngLat = [number, number];
+
+const POLYGON_SOURCE_ID = 'demo-b3-polygon-source';
+const POLYGON_FILL_LAYER_ID = 'demo-b3-polygon-fill';
+const POLYGON_LINE_LAYER_ID = 'demo-b3-polygon-line';
+const POINTS_SOURCE_ID = 'demo-b3-points-source';
+const POINTS_LAYER_ID = 'demo-b3-points';
+const FRESH_POINTS_LAYER_ID = 'demo-b3-points-fresh';
 
 function renderLines(value: string) {
   return value.split('\n').map((line, index) => (
@@ -15,14 +34,147 @@ function renderLines(value: string) {
   ));
 }
 
-export function Beat3({ copy }: { copy: BeatCopy }) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+function emptyFeatureCollection(): GeoJSON.FeatureCollection {
+  return { type: 'FeatureCollection', features: [] };
+}
+
+function polygonFeature(ring: LngLat[]): GeoJSON.Feature<GeoJSON.Polygon> {
+  return {
+    type: 'Feature',
+    properties: {},
+    geometry: {
+      type: 'Polygon',
+      coordinates: [[...ring, ring[0]]],
+    },
+  };
+}
+
+function lineFeature(coords: LngLat[]): GeoJSON.Feature<GeoJSON.LineString> {
+  return {
+    type: 'Feature',
+    properties: {},
+    geometry: {
+      type: 'LineString',
+      coordinates: coords,
+    },
+  };
+}
+
+function pointFeature(coord: LngLat, index: number, fresh: boolean): GeoJSON.Feature<GeoJSON.Point> {
+  return {
+    type: 'Feature',
+    properties: { index, fresh },
+    geometry: {
+      type: 'Point',
+      coordinates: coord,
+    },
+  };
+}
+
+function offsetMeters(center: LngLat, eastMeters: number, northMeters: number): LngLat {
+  const latRad = (center[1] * Math.PI) / 180;
+  const lngDelta = eastMeters / (111_320 * Math.max(Math.cos(latRad), 0.01));
+  const latDelta = northMeters / 110_540;
+  return [center[0] + lngDelta, center[1] + latDelta];
+}
+
+function buildTerritoryRing(center: LngLat): LngLat[] {
+  const bearings = [-118, -56, -6, 48, 111, 169, -164];
+  const radii = [430, 560, 510, 455, 590, 480, 540];
+  return bearings.map((bearing, index) => {
+    const radians = (bearing * Math.PI) / 180;
+    return offsetMeters(center, Math.cos(radians) * radii[index], Math.sin(radians) * radii[index]);
+  });
+}
+
+function interpolateRing(ring: LngLat[], progress: number): LngLat[] {
+  if (progress >= 1) {
+    return [...ring, ring[0]];
+  }
+
+  const closed = [...ring, ring[0]];
+  const segments = closed.slice(0, -1).map((point, index) => {
+    const next = closed[index + 1];
+    return {
+      a: point,
+      b: next,
+      length: Math.hypot(next[0] - point[0], next[1] - point[1]),
+    };
+  });
+  const perimeter = segments.reduce((sum, segment) => sum + segment.length, 0);
+  let remaining = perimeter * progress;
+  const coords: LngLat[] = [closed[0]];
+
+  for (const segment of segments) {
+    if (remaining <= 0) break;
+    const take = Math.min(segment.length, remaining);
+    const ratio = segment.length === 0 ? 1 : take / segment.length;
+    coords.push([
+      segment.a[0] + (segment.b[0] - segment.a[0]) * ratio,
+      segment.a[1] + (segment.b[1] - segment.a[1]) * ratio,
+    ]);
+    remaining -= segment.length;
+  }
+
+  return coords;
+}
+
+function featureCentroid(feature: MapboxGeoJSONFeature): LngLat | null {
+  const geometry = feature.geometry;
+  if (!geometry) return null;
+
+  let coords: number[][] = [];
+
+  if (geometry.type === 'Polygon') {
+    coords = geometry.coordinates[0] ?? [];
+  } else if (geometry.type === 'MultiPolygon') {
+    coords = geometry.coordinates[0]?.[0] ?? [];
+  } else {
+    return null;
+  }
+
+  const usable = coords.filter((coord) => Number.isFinite(coord[0]) && Number.isFinite(coord[1]));
+  if (usable.length === 0) return null;
+
+  const totals = usable.reduce(
+    (acc, coord) => {
+      acc.lng += coord[0];
+      acc.lat += coord[1];
+      return acc;
+    },
+    { lng: 0, lat: 0 }
+  );
+
+  return [totals.lng / usable.length, totals.lat / usable.length];
+}
+
+function shuffleCentroids(centroids: LngLat[]) {
+  const shuffled = [...centroids];
+  const rng = mulberry(13);
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = (rng() * (i + 1)) | 0;
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+}
+
+function source(map: MapboxMap, id: string) {
+  return map.getSource(id) as GeoJSONSource | undefined;
+}
+
+function Beat3Map({ copy, center }: { copy: BeatCopy; center: LngLat }) {
+  const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<MapboxMap | null>(null);
   const animationRef = useRef<number | null>(null);
-  const hasRunRef = useRef(false);
+  const hasInitializedRef = useRef(false);
+  const buildingLayerIdRef = useRef<string | null>(null);
+  const ringRef = useRef<LngLat[]>([]);
+  const centroidsRef = useRef<LngLat[]>([]);
   const reducedRef = useRef(false);
   const [count, setCount] = useState('0');
   const [timer, setTimer] = useState('00.0 s');
+  const [fallback, setFallback] = useState(false);
 
   const cancelAnimation = useCallback(() => {
     if (animationRef.current !== null) {
@@ -31,123 +183,249 @@ export function Beat3({ copy }: { copy: BeatCopy }) {
     }
   }, []);
 
-  const runBeat3 = useCallback(() => {
-    const cv = canvasRef.current;
+  const setPointData = useCallback((points: LngLat[], freshStart: number) => {
+    const map = mapRef.current;
+    if (!map) return;
 
-    if (!cv) {
+    source(map, POINTS_SOURCE_ID)?.setData({
+      type: 'FeatureCollection',
+      features: points.map((point, index) => pointFeature(point, index, index >= freshStart)),
+    });
+  }, []);
+
+  const queryBuildingCentroids = useCallback(() => {
+    const map = mapRef.current;
+    const buildingLayerId = buildingLayerIdRef.current;
+    if (!map || !buildingLayerId) return [];
+
+    const screenPolygon = ringRef.current.map((coord) => map.project(coord) as PointLike);
+    const queryRenderedFeatures = map.queryRenderedFeatures.bind(map) as unknown as (
+      geometry: PointLike[],
+      options: { layers: string[] }
+    ) => MapboxGeoJSONFeature[];
+    const features = queryRenderedFeatures(screenPolygon, { layers: [buildingLayerId] });
+    const unique = new Map<string, LngLat>();
+
+    for (const feature of features) {
+      const centroid = featureCentroid(feature);
+      if (!centroid) continue;
+
+      const key = String(feature.id ?? feature.properties?.id ?? feature.properties?.mapbox_id ?? centroid.join(','));
+      unique.set(key, centroid);
+    }
+
+    return shuffleCentroids([...unique.values()]);
+  }, []);
+
+  const runSequence = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    cancelAnimation();
+    const ring = ringRef.current;
+    source(map, POLYGON_SOURCE_ID)?.setData(emptyFeatureCollection());
+    source(map, POINTS_SOURCE_ID)?.setData(emptyFeatureCollection());
+    setCount('0');
+    setTimer('00.0 s');
+
+    const polygonSource = source(map, POLYGON_SOURCE_ID);
+    if (!polygonSource) return;
+    const polygonGeoJsonSource = polygonSource;
+
+    const drawDur = reducedRef.current ? 0 : 1100;
+    const cascadeDur = reducedRef.current ? 0 : 2600;
+
+    if (reducedRef.current) {
+      polygonGeoJsonSource.setData({
+        type: 'FeatureCollection',
+        features: [polygonFeature(ring), lineFeature([...ring, ring[0]])],
+      });
+      const centroids = queryBuildingCentroids();
+      centroidsRef.current = centroids;
+      setPointData(centroids, Math.max(0, centroids.length - 40));
+      setCount(centroids.length.toLocaleString());
+      setTimer(copy.b3FinalTimer);
       return;
     }
 
-    cancelAnimation();
-    const { ctx, W, H } = fitCanvas(cv);
-    const city = buildCity(W, H);
-    const poly: PolygonPoint[] = [
-      [W * 0.16, H * 0.3],
-      [W * 0.44, H * 0.12],
-      [W * 0.8, H * 0.2],
-      [W * 0.92, H * 0.55],
-      [W * 0.7, H * 0.9],
-      [W * 0.3, H * 0.86],
-      [W * 0.1, H * 0.62],
-    ];
-    const inside = city.addrs.filter((p) => pointInPoly(p, poly));
-    const rng = mulberry(13);
-    for (let i = inside.length - 1; i > 0; i--) {
-      const j = (rng() * (i + 1)) | 0;
-      [inside[i], inside[j]] = [inside[j], inside[i]];
-    }
-    const total = inside.length;
-    const drawDur = reducedRef.current ? 0 : 1100;
-    const cascadeDur = reducedRef.current ? 0 : 2600;
     const start = performance.now();
-    let perim = 0;
-    const segs: { a: PolygonPoint; b: PolygonPoint; L: number }[] = [];
-    for (let i = 0; i < poly.length; i++) {
-      const a = poly[i],
-        b = poly[(i + 1) % poly.length];
-      const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
-      segs.push({ a, b, L });
-      perim += L;
-    }
+    let queried = false;
+    let centroids: LngLat[] = [];
 
     function frame(now: number) {
       const t = now - start;
-      ctx.clearRect(0, 0, W, H);
-      drawStreets(ctx, city, W, H, 'rgba(12,12,10,.22)');
-      ctx.fillStyle = 'rgba(12,12,10,.10)';
-      city.addrs.forEach((p) => ctx.fillRect(p.x - 1, p.y - 1, 2, 2));
-      const sp = reducedRef.current ? 1 : Math.min(1, t / drawDur);
-      let drawn = perim * sp,
-        acc = 0;
-      ctx.strokeStyle = '#ff4d00';
-      ctx.lineWidth = 2.5;
-      ctx.setLineDash([8, 5]);
-      ctx.beginPath();
-      for (const s of segs) {
-        if (acc >= drawn) break;
-        const take = Math.min(s.L, drawn - acc);
-        const f = take / s.L;
-        ctx.moveTo(s.a[0], s.a[1]);
-        ctx.lineTo(s.a[0] + (s.b[0] - s.a[0]) * f, s.a[1] + (s.b[1] - s.a[1]) * f);
-        acc += s.L;
+      const sp = Math.min(1, t / drawDur);
+      const partialLine = interpolateRing(ring, sp);
+
+      polygonGeoJsonSource.setData({
+        type: 'FeatureCollection',
+        features: [
+          ...(sp >= 1 ? [polygonFeature(ring)] : []),
+          lineFeature(partialLine),
+        ],
+      });
+
+      if (sp >= 1 && !queried) {
+        queried = true;
+        centroids = queryBuildingCentroids();
+        centroidsRef.current = centroids;
       }
-      ctx.stroke();
-      ctx.setLineDash([]);
-      if (sp >= 1) {
-        ctx.fillStyle = 'rgba(255,77,0,.06)';
-        ctx.beginPath();
-        poly.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])));
-        ctx.closePath();
-        ctx.fill();
-      }
-      const cp = reducedRef.current ? 1 : Math.max(0, Math.min(1, (t - drawDur) / cascadeDur));
+
+      const cp = Math.max(0, Math.min(1, (t - drawDur) / cascadeDur));
       const eased = 1 - Math.pow(1 - cp, 3);
-      const n = Math.floor(total * eased);
-      ctx.fillStyle = '#ff4d00';
-      for (let i = 0; i < n; i++) {
-        const p = inside[i];
-        ctx.fillRect(p.x - 1.5, p.y - 1.5, 3, 3);
-      }
-      for (let i = Math.max(0, n - 40); i < n; i++) {
-        const p = inside[i];
-        ctx.fillRect(p.x - 2.5, p.y - 2.5, 5, 5);
-      }
+      const n = Math.floor(centroids.length * eased);
+      setPointData(centroids.slice(0, n), Math.max(0, n - 40));
       setCount(n.toLocaleString());
       setTimer((Math.min(t, drawDur + cascadeDur) / 100).toFixed(1).padStart(4, '0') + ' s · unit splits included');
-      if (t < drawDur + cascadeDur + 200) animationRef.current = requestAnimationFrame(frame);
-      else {
+
+      if (t < drawDur + cascadeDur + 200) {
+        animationRef.current = requestAnimationFrame(frame);
+      } else {
         animationRef.current = null;
+        setPointData(centroids, Math.max(0, centroids.length - 40));
+        setCount(centroids.length.toLocaleString());
         setTimer(copy.b3FinalTimer);
       }
     }
 
     animationRef.current = requestAnimationFrame(frame);
-  }, [cancelAnimation, copy.b3FinalTimer]);
+  }, [cancelAnimation, copy.b3FinalTimer, queryBuildingCentroids, setPointData]);
+
+  const initializeMap = useCallback(async () => {
+    if (hasInitializedRef.current || !mapContainerRef.current) return;
+
+    hasInitializedRef.current = true;
+
+    try {
+      reducedRef.current = getInitialReducedMotion();
+      const [mapboxglModule, style] = await Promise.all([getMapboxGl(), getDemoMapStyle('light')]);
+      const mapboxgl = mapboxglModule.default ?? mapboxglModule;
+      const buildingLayerId = findDemoBuildingLayerId(style);
+
+      if (!buildingLayerId) {
+        throw new Error('Demo map style did not expose a building layer.');
+      }
+
+      buildingLayerIdRef.current = buildingLayerId;
+      ringRef.current = buildTerritoryRing(center);
+
+      const map = new mapboxgl.Map({
+        container: mapContainerRef.current,
+        center: center as LngLatLike,
+        zoom: 15,
+        pitch: 0,
+        bearing: 0,
+        interactive: false,
+        attributionControl: false,
+        style,
+      });
+      mapRef.current = map;
+
+      map.once('load', () => {
+        try {
+          if (!map.getLayer(buildingLayerId)) {
+            throw new Error(`Building layer "${buildingLayerId}" was not available after style load.`);
+          }
+
+          map.addSource(POLYGON_SOURCE_ID, {
+            type: 'geojson',
+            data: emptyFeatureCollection(),
+          });
+          map.addSource(POINTS_SOURCE_ID, {
+            type: 'geojson',
+            data: emptyFeatureCollection(),
+          });
+          map.addLayer({
+            id: POLYGON_FILL_LAYER_ID,
+            type: 'fill',
+            source: POLYGON_SOURCE_ID,
+            filter: ['==', ['geometry-type'], 'Polygon'],
+            paint: {
+              'fill-color': '#ff4d00',
+              'fill-opacity': 0.06,
+            },
+          });
+          map.addLayer({
+            id: POLYGON_LINE_LAYER_ID,
+            type: 'line',
+            source: POLYGON_SOURCE_ID,
+            filter: ['==', ['geometry-type'], 'LineString'],
+            paint: {
+              'line-color': '#ff4d00',
+              'line-width': 2.5,
+              'line-dasharray': [8, 5],
+            },
+          });
+          map.addLayer({
+            id: POINTS_LAYER_ID,
+            type: 'circle',
+            source: POINTS_SOURCE_ID,
+            paint: {
+              'circle-radius': 2,
+              'circle-color': '#ff4d00',
+              'circle-opacity': 1,
+            },
+          });
+          map.addLayer({
+            id: FRESH_POINTS_LAYER_ID,
+            type: 'circle',
+            source: POINTS_SOURCE_ID,
+            filter: ['==', ['get', 'fresh'], true],
+            paint: {
+              'circle-radius': 3.5,
+              'circle-color': '#ff4d00',
+              'circle-opacity': 1,
+            },
+          });
+
+          runSequence();
+        } catch (error) {
+          console.error('[Beat3] Falling back to canvas after map setup failed:', error);
+          setFallback(true);
+        }
+      });
+
+      map.once('error', (event) => {
+        console.error('[Beat3] Falling back to canvas after map error:', event.error);
+        setFallback(true);
+      });
+    } catch (error) {
+      console.error('[Beat3] Falling back to canvas after Mapbox load failed:', error);
+      setFallback(true);
+    }
+  }, [center, runSequence]);
 
   useEffect(() => {
-    reducedRef.current = getInitialReducedMotion();
     const stage = stageRef.current;
-
-    if (!stage) {
-      return;
-    }
+    if (!stage) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && !hasRunRef.current) {
-          hasRunRef.current = true;
-          runBeat3();
+        if (entries[0].isIntersecting) {
+          void initializeMap();
         }
       },
       { threshold: 0.45 }
     );
+
     observer.observe(stage);
 
     return () => {
       observer.disconnect();
-      cancelAnimation();
     };
-  }, [cancelAnimation, runBeat3]);
+  }, [initializeMap]);
+
+  useEffect(() => {
+    return () => {
+      cancelAnimation();
+      mapRef.current?.remove();
+      mapRef.current = null;
+    };
+  }, [cancelAnimation]);
+
+  if (fallback) {
+    return <Beat3Canvas copy={copy} />;
+  }
 
   return (
     <section id="b3" className="light">
@@ -155,14 +433,14 @@ export function Beat3({ copy }: { copy: BeatCopy }) {
       <h2 className="h-big rv d1">{renderLines(copy.b3Headline)}</h2>
       <p className="sub rv d2">{copy.b3Sub}</p>
       <div className="stage rv d3" id="stage3" ref={stageRef}>
-        <canvas id="cv3" ref={canvasRef} />
+        <div ref={mapContainerRef} style={{ position: 'absolute', inset: 0 }} />
         <button
           className="replay"
           id="replay3"
           type="button"
           onClick={() => {
             track('replay', 3);
-            runBeat3();
+            runSequence();
           }}
         >
           {copy.b3ReplayLabel}
@@ -177,4 +455,12 @@ export function Beat3({ copy }: { copy: BeatCopy }) {
       </div>
     </section>
   );
+}
+
+export function Beat3({ copy, center }: { copy: BeatCopy; center?: LngLat }) {
+  if (!center) {
+    return <Beat3Canvas copy={copy} />;
+  }
+
+  return <Beat3Map copy={copy} center={center} />;
 }
