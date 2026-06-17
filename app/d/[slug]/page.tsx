@@ -5,10 +5,15 @@ import { Beat4 } from '@/components/demo/beats/Beat4';
 import { Beat5 } from '@/components/demo/beats/Beat5';
 import { Beat6 } from '@/components/demo/beats/Beat6';
 import { DemoShell } from '@/components/demo/DemoShell';
-import { DEFAULT_PAYLOAD } from '@/lib/demo/defaults';
+import { resolvePayloadForSlug } from '@/lib/demo/resolvePayload';
 
-export default function DemoPage() {
-  const payload = DEFAULT_PAYLOAD;
+type DemoPageProps = {
+  params: Promise<{ slug: string }>;
+};
+
+export default async function DemoPage({ params }: DemoPageProps) {
+  const { slug } = await params;
+  const payload = await resolvePayloadForSlug(slug);
 
   return (
     <DemoShell>

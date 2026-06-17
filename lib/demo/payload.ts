@@ -1,3 +1,10 @@
+// FUTURE: navigationMode is currently always 'scroll'. When click-mode
+// is built, centralize "which beat is active" into a shared
+// useDemoBeatActive(beatId) hook/context that both modes implement,
+// rather than each beat managing its own IntersectionObserver. Do not
+// refactor Beat1/Beat3/Beat4's existing scroll logic until click-mode
+// is actually being built.
+
 export type DemoVertical = 'roofing' | 'lawncare' | 'hvac' | 'solar' | 'political' | 'generic';
 
 export type BeatCopy = {
@@ -51,4 +58,5 @@ export type DemoPayload = {
   copy: BeatCopy;
   ctaVariant: 'book' | 'reply' | 'territory';
   ctaUrl: string;
+  navigationMode: 'scroll' | 'click';
 };

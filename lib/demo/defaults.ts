@@ -6,6 +6,7 @@ export const DEFAULT_PAYLOAD: DemoPayload = {
   center: [43.8828, 79.4403],
   ctaVariant: 'territory',
   ctaUrl: 'mailto:harry@flyrpro.app?subject=Show%20me%20my%20territory',
+  navigationMode: 'scroll',
   copy: {
     b1Headline: 'Your crew is on the doors',
     b1Sub:
