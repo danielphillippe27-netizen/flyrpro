@@ -1,11 +1,11 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { mulberry } from '@/lib/demo/canvas/cityModel';
 import { getInitialReducedMotion } from '@/lib/demo/canvas/useReducedMotion';
 import { getDemoMapStyle } from '@/lib/demo/mapbox/demoMapStyle';
 import { getMapboxGl } from '@/lib/demo/mapbox/loadMapboxGl';
 import type { BeatCopy } from '@/lib/demo/payload';
+import { Beat4Canvas } from './Beat4Canvas';
 
 type LngLat = [number, number];
 type SessionStatKey =
@@ -27,7 +27,6 @@ type SessionStat = {
 };
 
 type SessionModel = {
-  path: number[][];
   coordinates: LngLat[];
   distanceMeters: number;
   stats: SessionStat[];
@@ -48,19 +47,35 @@ type DemoMapLike = {
 };
 
 const TARGET_ZOOM = 15.5;
-const SESSION_DOOR_COUNT = 32;
-const TARGET_ROUTE_DISTANCE_METERS = 560;
 const WALKING_METERS_PER_SECOND = 1.25;
 const ROUTE_SOURCE_ID = 'demo-b4-session-route-source';
 const ROUTE_LAYER_ID = 'demo-b4-session-route-line';
 const POINT_SOURCE_ID = 'demo-b4-session-points-source';
 const POINT_LAYER_ID = 'demo-b4-session-points';
+const ROUTE_DRAW_DURATION_MS = 2600;
+const SESSION_DOOR_COUNT = 32;
+const SESSION_CONVERSATIONS = 7;
+const SESSION_LEADS = 4;
+const SESSION_FLYERS = 30;
 
-const OUTCOMES: [string, 'ok' | 'nh' | 'dk', number][] = [
-  ['INTERESTED', 'ok', 0.22],
-  ['NOT HOME', 'nh', 0.42],
-  ['NO ANSWER', 'nh', 0.22],
-  ['DO NOT KNOCK', 'dk', 0.14],
+const OSHAWA_SESSION_ROUTE: LngLat[] = [
+  [-78.865524, 43.8970384],
+  [-78.865524, 43.8973584],
+  [-78.865144, 43.8973584],
+  [-78.865144, 43.8976424],
+  [-78.864684, 43.8976424],
+  [-78.864684, 43.8979184],
+  [-78.864164, 43.8979184],
+  [-78.864164, 43.8976264],
+  [-78.863704, 43.8976264],
+  [-78.863704, 43.8979464],
+  [-78.863164, 43.8979464],
+  [-78.863164, 43.8976904],
+  [-78.862644, 43.8976904],
+  [-78.862644, 43.8973984],
+  [-78.862164, 43.8973984],
+  [-78.862164, 43.8971184],
+  [-78.861744, 43.8971184],
 ];
 
 function renderLines(value: string) {
@@ -72,95 +87,11 @@ function renderLines(value: string) {
   ));
 }
 
-function metersPerPixelAtZoom(lat: number, zoom: number) {
-  return (156543.03392 * Math.cos((lat * Math.PI) / 180)) / Math.pow(2, zoom);
-}
-
-function makeOpenSessionPath(W: number, H: number, doors: number) {
-  const ratios = [
-    [0.16, 0.76],
-    [0.16, 0.58],
-    [0.3, 0.58],
-    [0.3, 0.42],
-    [0.45, 0.42],
-    [0.45, 0.25],
-    [0.62, 0.25],
-    [0.62, 0.45],
-    [0.78, 0.45],
-    [0.78, 0.3],
-    [0.9, 0.3],
-    [0.9, 0.56],
-    [0.72, 0.56],
-    [0.72, 0.74],
-    [0.55, 0.74],
-    [0.55, 0.62],
-    [0.38, 0.62],
-    [0.38, 0.82],
-    [0.24, 0.82],
-  ];
-  const segmentCount = Math.min(ratios.length - 1, Math.max(10, Math.ceil(doors / 1.8)));
-  return ratios.slice(0, segmentCount + 1).map(([x, y]) => [x * W, y * H]);
-}
-
-function pathPixelLength(path: number[][]) {
-  return path.reduce((sum, point, index) => {
-    if (index === 0) return sum;
-    const previous = path[index - 1];
-    return sum + Math.hypot(point[0] - previous[0], point[1] - previous[1]);
-  }, 0);
-}
-
-function syntheticMetersPerPixel(W: number, H: number, path: number[][], lat: number) {
-  const mapMetersPerPixel = metersPerPixelAtZoom(lat, TARGET_ZOOM);
-  const targetRouteInMapPixels = TARGET_ROUTE_DISTANCE_METERS / mapMetersPerPixel;
-  const targetRouteMeters = targetRouteInMapPixels * mapMetersPerPixel;
-  return targetRouteMeters / Math.max(1, pathPixelLength(path));
-}
-
-function canvasPointToMeters(point: number[], W: number, H: number, metersPerSyntheticPixel: number) {
-  return {
-    east: (point[0] - W / 2) * metersPerSyntheticPixel,
-    north: (H / 2 - point[1]) * metersPerSyntheticPixel,
-  };
-}
-
-function offsetMeters(center: LngLat, eastMeters: number, northMeters: number): LngLat {
-  const latRad = (center[1] * Math.PI) / 180;
-  const lngDelta = eastMeters / (111_320 * Math.max(Math.cos(latRad), 0.01));
-  const latDelta = northMeters / 110_540;
-  return [center[0] + lngDelta, center[1] + latDelta];
-}
-
-function canvasPointToLngLat(
-  point: number[],
-  center: LngLat,
-  W: number,
-  H: number,
-  metersPerSyntheticPixel: number
-): LngLat {
-  const meters = canvasPointToMeters(point, W, H, metersPerSyntheticPixel);
-  return offsetMeters(center, meters.east, meters.north);
-}
-
-function segmentMeters(a: number[], b: number[], W: number, H: number, metersPerSyntheticPixel: number) {
-  const am = canvasPointToMeters(a, W, H, metersPerSyntheticPixel);
-  const bm = canvasPointToMeters(b, W, H, metersPerSyntheticPixel);
-  return Math.hypot(bm.east - am.east, bm.north - am.north);
-}
-
-function pickOutcome(rng: () => number) {
-  let q = rng();
-  let outcome = OUTCOMES[0];
-
-  for (const candidate of OUTCOMES) {
-    if (q < candidate[2]) {
-      outcome = candidate;
-      break;
-    }
-    q -= candidate[2];
-  }
-
-  return outcome;
+function segmentMeters(a: LngLat, b: LngLat) {
+  const lat = (((a[1] + b[1]) / 2) * Math.PI) / 180;
+  const east = (b[0] - a[0]) * 111_320 * Math.cos(lat);
+  const north = (b[1] - a[1]) * 110_540;
+  return Math.hypot(east, north);
 }
 
 function formatDuration(seconds: number) {
@@ -184,35 +115,22 @@ function numberFormatter(value: number) {
   return Math.round(value).toLocaleString();
 }
 
-function buildSessionModel(W: number, H: number, center: LngLat): SessionModel {
-  const path = makeOpenSessionPath(W, H, SESSION_DOOR_COUNT);
-  const metersPerSyntheticPixel = syntheticMetersPerPixel(W, H, path, center[1]);
-  const coordinates = path.map((point) => canvasPointToLngLat(point, center, W, H, metersPerSyntheticPixel));
-  const distanceMeters = path.reduce((sum, point, index) => {
+function buildSessionModel(): SessionModel {
+  const coordinates = OSHAWA_SESSION_ROUTE;
+  const distanceMeters = coordinates.reduce((sum, point, index) => {
     if (index === 0) return sum;
-    return sum + segmentMeters(path[index - 1], point, W, H, metersPerSyntheticPixel);
+    return sum + segmentMeters(coordinates[index - 1], point);
   }, 0);
   const doors = SESSION_DOOR_COUNT;
-  const outcomeRng = mulberry(41);
-  let conversations = 0;
-  let leads = 0;
-  let flyers = 0;
-
-  for (let index = 0; index < doors; index++) {
-    const outcome = pickOutcome(outcomeRng);
-    if (outcome[1] !== 'dk') flyers += 1;
-    if (outcome[1] === 'ok') {
-      conversations += 1;
-      if (outcomeRng() < 0.58) leads += 1;
-    }
-  }
+  const conversations = SESSION_CONVERSATIONS;
+  const leads = SESSION_LEADS;
+  const flyers = SESSION_FLYERS;
 
   const activeSeconds = distanceMeters / WALKING_METERS_PER_SECOND;
   const conversationRate = doors > 0 ? (conversations / doors) * 100 : 0;
   const leadRate = conversations > 0 ? (leads / conversations) * 100 : 0;
 
   return {
-    path,
     coordinates,
     distanceMeters,
     stats: [
@@ -229,19 +147,20 @@ function buildSessionModel(W: number, H: number, center: LngLat): SessionModel {
 }
 
 function routeFeature(coordinates: LngLat[]): GeoJSON.FeatureCollection<GeoJSON.LineString> {
+  const lineCoordinates = coordinates.length === 1 ? [coordinates[0], coordinates[0]] : coordinates;
   return {
     type: 'FeatureCollection',
     features: [
       {
         type: 'Feature',
         properties: {},
-        geometry: { type: 'LineString', coordinates },
+        geometry: { type: 'LineString', coordinates: lineCoordinates },
       },
     ],
   };
 }
 
-function pointFeatures(coordinates: LngLat[]): GeoJSON.FeatureCollection<GeoJSON.Point> {
+function pointFeatures(coordinates: LngLat[], showEnd: boolean): GeoJSON.FeatureCollection<GeoJSON.Point> {
   const first = coordinates[0];
   const last = coordinates[coordinates.length - 1];
   return {
@@ -250,7 +169,9 @@ function pointFeatures(coordinates: LngLat[]): GeoJSON.FeatureCollection<GeoJSON
       first && last
         ? [
             { type: 'Feature', properties: { kind: 'start' }, geometry: { type: 'Point', coordinates: first } },
-            { type: 'Feature', properties: { kind: 'end' }, geometry: { type: 'Point', coordinates: last } },
+            ...(showEnd
+              ? [{ type: 'Feature' as const, properties: { kind: 'end' }, geometry: { type: 'Point' as const, coordinates: last } }]
+              : []),
           ]
         : [],
   };
@@ -290,13 +211,13 @@ function mapSource(map: DemoMapLike, id: string) {
   return map.getSource(id);
 }
 
-function diagonalSegmentCount(path: number[][]) {
-  return path.reduce((count, point, index) => {
+function routeDiagonalSegmentCount(coordinates: LngLat[]) {
+  return coordinates.reduce((count, coordinate, index) => {
     if (index === 0) return count;
-    const previous = path[index - 1];
-    const changedX = point[0] !== previous[0];
-    const changedY = point[1] !== previous[1];
-    return count + (changedX && changedY ? 1 : 0);
+    const previous = coordinates[index - 1];
+    const changedLng = coordinate[0] !== previous[0];
+    const changedLat = coordinate[1] !== previous[1];
+    return count + (changedLng && changedLat ? 1 : 0);
   }, 0);
 }
 
@@ -342,14 +263,14 @@ function useCountUp(visible: boolean, reduceMotion: boolean) {
 function StaticRouteSvg({ model, progress }: { model: SessionModel; progress: number }) {
   const width = 1000;
   const height = 560;
-  const minX = Math.min(...model.path.map((point) => point[0]));
-  const maxX = Math.max(...model.path.map((point) => point[0]));
-  const minY = Math.min(...model.path.map((point) => point[1]));
-  const maxY = Math.max(...model.path.map((point) => point[1]));
+  const minX = Math.min(...model.coordinates.map((point) => point[0]));
+  const maxX = Math.max(...model.coordinates.map((point) => point[0]));
+  const minY = Math.min(...model.coordinates.map((point) => point[1]));
+  const maxY = Math.max(...model.coordinates.map((point) => point[1]));
   const scale = Math.min((width - 160) / Math.max(1, maxX - minX), (height - 140) / Math.max(1, maxY - minY));
   const offsetX = (width - (maxX - minX) * scale) / 2;
   const offsetY = (height - (maxY - minY) * scale) / 2;
-  const projected = model.path.map((point) => [offsetX + (point[0] - minX) * scale, offsetY + (point[1] - minY) * scale]);
+  const projected = model.coordinates.map((point) => [offsetX + (point[0] - minX) * scale, offsetY + (point[1] - minY) * scale]);
   const partial = interpolateCanvasPath(projected, progress);
   const points = partial.map((point) => point.join(',')).join(' ');
   const start = projected[0];
@@ -367,7 +288,7 @@ function StaticRouteSvg({ model, progress }: { model: SessionModel; progress: nu
         ))}
       </g>
       <polyline points={points} fill="none" stroke="#2563EB" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" opacity="0.88" />
-      {progress >= 1 && start ? <circle cx={start[0]} cy={start[1]} r="7" fill="#22C55E" stroke="#FFFFFF" strokeWidth="2" /> : null}
+      {progress > 0 && start ? <circle cx={start[0]} cy={start[1]} r="7" fill="#22C55E" stroke="#FFFFFF" strokeWidth="2" /> : null}
       {progress >= 1 && end ? <circle cx={end[0]} cy={end[1]} r="7" fill="#EF4444" stroke="#FFFFFF" strokeWidth="2" /> : null}
     </svg>
   );
@@ -397,14 +318,19 @@ function interpolateCanvasPath(points: number[][], progress: number) {
 function SessionMap({
   center,
   model,
-  progress,
+  active,
+  reducedMotion,
 }: {
   center?: LngLat;
   model: SessionModel;
-  progress: number;
+  active: boolean;
+  reducedMotion: boolean;
 }) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<DemoMapLike | null>(null);
+  const drawAnimationRef = useRef<number | null>(null);
+  const drawStartedRef = useRef(false);
+  const [mapReady, setMapReady] = useState(false);
   const [fallback, setFallback] = useState(!center);
 
   useEffect(() => {
@@ -465,6 +391,7 @@ function SessionMap({
         model.coordinates.forEach((coordinate) => bounds.extend(coordinate));
         map.fitBounds(bounds, { padding: 44, maxZoom: 17, duration: 0 });
         map.resize();
+        setMapReady(true);
       } catch (error) {
         console.error('[Beat4] Falling back to static breadcrumb after Mapbox load failed:', error);
         setFallback(true);
@@ -475,20 +402,49 @@ function SessionMap({
 
     return () => {
       cancelled = true;
+      if (drawAnimationRef.current !== null) {
+        cancelAnimationFrame(drawAnimationRef.current);
+        drawAnimationRef.current = null;
+      }
       mapRef.current?.remove();
       mapRef.current = null;
+      setMapReady(false);
     };
   }, [center, model]);
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) return;
-    mapSource(map, ROUTE_SOURCE_ID)?.setData(routeFeature(interpolateRoute(model.coordinates, progress)));
-    mapSource(map, POINT_SOURCE_ID)?.setData(progress >= 1 ? pointFeatures(model.coordinates) : { type: 'FeatureCollection', features: [] });
-  }, [model, progress]);
+    if (!map || !mapReady || !active || drawStartedRef.current) return;
+    drawStartedRef.current = true;
+    mapSource(map, ROUTE_SOURCE_ID)?.setData(routeFeature([model.coordinates[0]]));
+    mapSource(map, POINT_SOURCE_ID)?.setData(pointFeatures(model.coordinates, false));
+
+    if (reducedMotion) {
+      mapSource(map, ROUTE_SOURCE_ID)?.setData(routeFeature(model.coordinates));
+      mapSource(map, POINT_SOURCE_ID)?.setData(pointFeatures(model.coordinates, true));
+      return;
+    }
+
+    const start = performance.now();
+
+    function step(now: number) {
+      const map = mapRef.current;
+      if (!map) return;
+      const p = Math.min(1, (now - start) / ROUTE_DRAW_DURATION_MS);
+      const eased = 1 - Math.pow(1 - p, 3);
+      mapSource(map, ROUTE_SOURCE_ID)?.setData(routeFeature(interpolateRoute(model.coordinates, eased)));
+      mapSource(map, POINT_SOURCE_ID)?.setData(pointFeatures(model.coordinates, p >= 1));
+
+      if (p < 1) {
+        drawAnimationRef.current = requestAnimationFrame(step);
+      }
+    }
+
+    drawAnimationRef.current = requestAnimationFrame(step);
+  }, [active, mapReady, model, reducedMotion]);
 
   if (fallback) {
-    return <StaticRouteSvg model={model} progress={progress} />;
+    return <StaticRouteSvg model={model} progress={active ? 1 : 0} />;
   }
 
   return <div ref={mapContainerRef} className="demo-session-mapbox" />;
@@ -498,9 +454,9 @@ function Beat4Session({ copy, center }: { copy: BeatCopy; center?: LngLat }) {
   const cardRef = useRef<HTMLDivElement | null>(null);
   const [visible, setVisible] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
-  const model = useMemo(() => buildSessionModel(1000, 560, center ?? [-78.696, 43.929]), [center]);
+  const model = useMemo(() => buildSessionModel(), []);
   const progress = useCountUp(visible, reducedMotion);
-  const diagonalCount = useMemo(() => diagonalSegmentCount(model.path), [model]);
+  const diagonalCount = useMemo(() => routeDiagonalSegmentCount(model.coordinates), [model]);
 
   useEffect(() => {
     setReducedMotion(getInitialReducedMotion());
@@ -531,7 +487,7 @@ function Beat4Session({ copy, center }: { copy: BeatCopy; center?: LngLat }) {
           </div>
           <span>Completed session</span>
         </div>
-        <SessionMap center={center} model={model} progress={progress} />
+        <SessionMap center={center} model={model} active={visible} reducedMotion={reducedMotion} />
         <div className="demo-session-stats">
           {model.stats.map((stat) => (
             <div className={stat.wide ? 'wide' : undefined} key={stat.key}>
@@ -546,5 +502,9 @@ function Beat4Session({ copy, center }: { copy: BeatCopy; center?: LngLat }) {
 }
 
 export function Beat4({ copy, center }: { copy: BeatCopy; center?: LngLat }) {
+  if (!center) {
+    return <Beat4Canvas copy={copy} />;
+  }
+
   return <Beat4Session copy={copy} center={center} />;
 }
