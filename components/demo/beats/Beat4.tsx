@@ -28,6 +28,7 @@ type SessionStat = {
 
 type SessionModel = {
   coordinates: LngLat[];
+  center: LngLat;
   distanceMeters: number;
   stats: SessionStat[];
 };
@@ -47,7 +48,6 @@ type DemoMapLike = {
 };
 
 const TARGET_ZOOM = 15.5;
-const WALKING_METERS_PER_SECOND = 1.25;
 const ROUTE_SOURCE_ID = 'demo-b4-session-route-source';
 const ROUTE_LAYER_ID = 'demo-b4-session-route-line';
 const POINT_SOURCE_ID = 'demo-b4-session-points-source';
@@ -57,25 +57,77 @@ const SESSION_DOOR_COUNT = 32;
 const SESSION_CONVERSATIONS = 7;
 const SESSION_LEADS = 4;
 const SESSION_FLYERS = 30;
+const SESSION_ACTIVE_SECONDS = 7 * 60 + 28;
 
 const OSHAWA_SESSION_ROUTE: LngLat[] = [
-  [-78.865524, 43.8970384],
-  [-78.865524, 43.8973584],
-  [-78.865144, 43.8973584],
-  [-78.865144, 43.8976424],
-  [-78.864684, 43.8976424],
-  [-78.864684, 43.8979184],
-  [-78.864164, 43.8979184],
-  [-78.864164, 43.8976264],
-  [-78.863704, 43.8976264],
-  [-78.863704, 43.8979464],
-  [-78.863164, 43.8979464],
-  [-78.863164, 43.8976904],
-  [-78.862644, 43.8976904],
-  [-78.862644, 43.8973984],
-  [-78.862164, 43.8973984],
-  [-78.862164, 43.8971184],
-  [-78.861744, 43.8971184],
+  [-79.3246178, 43.8241617],
+  [-79.3247404, 43.8244801],
+  [-79.3248385, 43.8248339],
+  [-79.3249366, 43.8251347],
+  [-79.3250347, 43.8254708],
+  [-79.3252063, 43.8260016],
+  [-79.3251818, 43.8262139],
+  [-79.3251082, 43.8263377],
+  [-79.3249366, 43.82655],
+  [-79.3247404, 43.8268154],
+  [-79.3245442, 43.8270277],
+  [-79.3244216, 43.8271338],
+  [-79.3240047, 43.8273815],
+  [-79.3235634, 43.8276999],
+  [-79.3231465, 43.8280184],
+  [-79.3229503, 43.8281776],
+  [-79.3228032, 43.8285314],
+  [-79.3226315, 43.8289029],
+  [-79.3223863, 43.8291682],
+  [-79.3220185, 43.8293628],
+  [-79.321479, 43.829469],
+  [-79.320915, 43.8295928],
+  [-79.3200812, 43.8295751],
+  [-79.3194191, 43.8295221],
+  [-79.3190268, 43.8293628],
+  [-79.3186099, 43.8291682],
+  [-79.3183402, 43.8288498],
+  [-79.3182176, 43.8285668],
+  [-79.318144, 43.8282483],
+  [-79.3182666, 43.8279122],
+  [-79.3185118, 43.827523],
+  [-79.3186835, 43.8272046],
+  [-79.3186344, 43.8269215],
+  [-79.3184137, 43.8267269],
+  [-79.3179723, 43.8265854],
+  [-79.3172612, 43.8265146],
+  [-79.3167462, 43.8265323],
+  [-79.3161577, 43.8266915],
+  [-79.3156182, 43.8269569],
+  [-79.315324, 43.8273461],
+  [-79.3152994, 43.8276645],
+  [-79.3154711, 43.8279653],
+  [-79.3156673, 43.8281776],
+  [-79.3160841, 43.8284429],
+  [-79.3163539, 43.8287437],
+  [-79.3165501, 43.8290798],
+  [-79.3166481, 43.8295574],
+  [-79.3166236, 43.8298759],
+  [-79.316501, 43.8301058],
+  [-79.3161577, 43.8302827],
+  [-79.3156918, 43.8304773],
+  [-79.315422, 43.8307073],
+  [-79.3150052, 43.8310788],
+  [-79.3145147, 43.8314503],
+  [-79.3140979, 43.8317156],
+  [-79.3135584, 43.8318041],
+  [-79.3129453, 43.8316625],
+  [-79.3125775, 43.8313972],
+  [-79.3122342, 43.8310788],
+  [-79.312087, 43.8306012],
+  [-79.3119154, 43.829982],
+  [-79.3116947, 43.8293098],
+  [-79.3115966, 43.8288852],
+  [-79.3114985, 43.828496],
+  [-79.3112778, 43.8281776],
+  [-79.3110081, 43.8280361],
+  [-79.3107629, 43.8279299],
+  [-79.3107383, 43.8279122],
 ];
 
 function renderLines(value: string) {
@@ -115,8 +167,22 @@ function numberFormatter(value: number) {
   return Math.round(value).toLocaleString();
 }
 
+function routeCentroid(coordinates: LngLat[]): LngLat {
+  const totals = coordinates.reduce(
+    (acc, coordinate) => {
+      acc.lng += coordinate[0];
+      acc.lat += coordinate[1];
+      return acc;
+    },
+    { lng: 0, lat: 0 }
+  );
+
+  return [totals.lng / coordinates.length, totals.lat / coordinates.length];
+}
+
 function buildSessionModel(): SessionModel {
   const coordinates = OSHAWA_SESSION_ROUTE;
+  const center = routeCentroid(coordinates);
   const distanceMeters = coordinates.reduce((sum, point, index) => {
     if (index === 0) return sum;
     return sum + segmentMeters(coordinates[index - 1], point);
@@ -126,12 +192,13 @@ function buildSessionModel(): SessionModel {
   const leads = SESSION_LEADS;
   const flyers = SESSION_FLYERS;
 
-  const activeSeconds = distanceMeters / WALKING_METERS_PER_SECOND;
+  const activeSeconds = SESSION_ACTIVE_SECONDS;
   const conversationRate = doors > 0 ? (conversations / doors) * 100 : 0;
   const leadRate = conversations > 0 ? (leads / conversations) * 100 : 0;
 
   return {
     coordinates,
+    center,
     distanceMeters,
     stats: [
       { key: 'doors', label: 'Doors', value: doors, formatter: numberFormatter },
@@ -345,7 +412,7 @@ function SessionMap({
         const mapboxgl = mapboxglModule.default ?? mapboxglModule;
         const map = new mapboxgl.Map({
           container: mapContainerRef.current,
-          center,
+          center: model.center,
           zoom: TARGET_ZOOM,
           pitch: 0,
           bearing: 0,
