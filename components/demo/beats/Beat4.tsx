@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { buildCity, mulberry, type DemoCity } from '@/lib/demo/canvas/cityModel';
+import { mulberry } from '@/lib/demo/canvas/cityModel';
 import { getInitialReducedMotion } from '@/lib/demo/canvas/useReducedMotion';
 import { getDemoMapStyle } from '@/lib/demo/mapbox/demoMapStyle';
 import { getMapboxGl } from '@/lib/demo/mapbox/loadMapboxGl';
@@ -48,7 +48,8 @@ type DemoMapLike = {
 };
 
 const TARGET_ZOOM = 15.5;
-const LOOP_DIAMETER_METERS = 220;
+const SESSION_DOOR_COUNT = 32;
+const TARGET_ROUTE_DISTANCE_METERS = 560;
 const WALKING_METERS_PER_SECOND = 1.25;
 const ROUTE_SOURCE_ID = 'demo-b4-session-route-source';
 const ROUTE_LAYER_ID = 'demo-b4-session-route-line';
@@ -71,48 +72,49 @@ function renderLines(value: string) {
   ));
 }
 
-function makePath(city: DemoCity, rng: () => number) {
-  const pts: number[][] = [];
-  let xIndex = 1 + ((rng() * (city.vx.length - 2)) | 0);
-  let yIndex = 1 + ((rng() * (city.hy.length - 2)) | 0);
-  let x = city.vx[xIndex];
-  let y = city.hy[yIndex];
-  const startX = x;
-  const startY = y;
-
-  pts.push([x, y]);
-
-  for (let k = 0; k < 14; k++) {
-    if (rng() < 0.5) {
-      xIndex = Math.max(0, Math.min(city.vx.length - 1, xIndex + (rng() < 0.5 ? -1 : 1)));
-      x = city.vx[xIndex];
-    } else {
-      yIndex = Math.max(0, Math.min(city.hy.length - 1, yIndex + (rng() < 0.5 ? -1 : 1)));
-      y = city.hy[yIndex];
-    }
-    pts.push([x, y]);
-  }
-
-  if (x !== startX) {
-    x = startX;
-    pts.push([x, y]);
-  }
-  if (y !== startY) {
-    y = startY;
-    pts.push([x, y]);
-  }
-
-  return pts;
-}
-
 function metersPerPixelAtZoom(lat: number, zoom: number) {
   return (156543.03392 * Math.cos((lat * Math.PI) / 180)) / Math.pow(2, zoom);
 }
 
-function syntheticMetersPerPixel(W: number, H: number, lat: number) {
+function makeOpenSessionPath(W: number, H: number, doors: number) {
+  const ratios = [
+    [0.16, 0.76],
+    [0.16, 0.58],
+    [0.3, 0.58],
+    [0.3, 0.42],
+    [0.45, 0.42],
+    [0.45, 0.25],
+    [0.62, 0.25],
+    [0.62, 0.45],
+    [0.78, 0.45],
+    [0.78, 0.3],
+    [0.9, 0.3],
+    [0.9, 0.56],
+    [0.72, 0.56],
+    [0.72, 0.74],
+    [0.55, 0.74],
+    [0.55, 0.62],
+    [0.38, 0.62],
+    [0.38, 0.82],
+    [0.24, 0.82],
+  ];
+  const segmentCount = Math.min(ratios.length - 1, Math.max(10, Math.ceil(doors / 1.8)));
+  return ratios.slice(0, segmentCount + 1).map(([x, y]) => [x * W, y * H]);
+}
+
+function pathPixelLength(path: number[][]) {
+  return path.reduce((sum, point, index) => {
+    if (index === 0) return sum;
+    const previous = path[index - 1];
+    return sum + Math.hypot(point[0] - previous[0], point[1] - previous[1]);
+  }, 0);
+}
+
+function syntheticMetersPerPixel(W: number, H: number, path: number[][], lat: number) {
   const mapMetersPerPixel = metersPerPixelAtZoom(lat, TARGET_ZOOM);
-  const loopDiameterInMapPixels = LOOP_DIAMETER_METERS / mapMetersPerPixel;
-  return (loopDiameterInMapPixels * mapMetersPerPixel) / Math.max(W, H);
+  const targetRouteInMapPixels = TARGET_ROUTE_DISTANCE_METERS / mapMetersPerPixel;
+  const targetRouteMeters = targetRouteInMapPixels * mapMetersPerPixel;
+  return targetRouteMeters / Math.max(1, pathPixelLength(path));
 }
 
 function canvasPointToMeters(point: number[], W: number, H: number, metersPerSyntheticPixel: number) {
@@ -183,15 +185,14 @@ function numberFormatter(value: number) {
 }
 
 function buildSessionModel(W: number, H: number, center: LngLat): SessionModel {
-  const city = buildCity(W, H);
-  const path = makePath(city, mulberry(31));
-  const metersPerSyntheticPixel = syntheticMetersPerPixel(W, H, center[1]);
+  const path = makeOpenSessionPath(W, H, SESSION_DOOR_COUNT);
+  const metersPerSyntheticPixel = syntheticMetersPerPixel(W, H, path, center[1]);
   const coordinates = path.map((point) => canvasPointToLngLat(point, center, W, H, metersPerSyntheticPixel));
   const distanceMeters = path.reduce((sum, point, index) => {
     if (index === 0) return sum;
     return sum + segmentMeters(path[index - 1], point, W, H, metersPerSyntheticPixel);
   }, 0);
-  const doors = Math.max(0, path.length - 1);
+  const doors = SESSION_DOOR_COUNT;
   const outcomeRng = mulberry(41);
   let conversations = 0;
   let leads = 0;
