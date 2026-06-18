@@ -10,8 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
-import { Loader2, MessageCircle, AlertTriangle, Bug, DollarSign, UserRoundPlus, CheckCircle2, Copy } from 'lucide-react';
-import { FounderGlobalChallengesSection } from '@/components/challenges/FounderGlobalChallengesSection';
+import { Loader2, AlertTriangle, DollarSign, UserRoundPlus, CheckCircle2, Copy } from 'lucide-react';
 
 type SupportThreadPreview = {
   id: string;
@@ -41,47 +40,10 @@ type SupportInboxPayload = {
     unread: number;
     needsReply: number;
     openThreads: number;
+    receivedMessages: number;
   };
   threads: SupportThreadPreview[];
   latestInboundMessages: SupportInboundPreview[];
-};
-
-type FeedbackThreadPreview = {
-  id: string;
-  userId: string;
-  userEmail: string | null;
-  userName: string | null;
-  status: string;
-  lastFeedbackAt: string;
-  unreadForFounder: boolean;
-  createdAt: string;
-};
-
-type FeedbackItemPreview = {
-  id: string;
-  threadId: string;
-  userId: string;
-  userEmail: string | null;
-  userName: string | null;
-  type: 'bug' | 'feature' | 'other';
-  title: string | null;
-  body: string;
-  createdAt: string;
-  context?: Record<string, unknown> | null;
-  appVersion: string | null;
-  buildNumber: string | null;
-  iosVersion: string | null;
-  deviceModel: string | null;
-  screenName: string | null;
-  screenshotUrl: string | null;
-};
-
-type FeedbackInboxPayload = {
-  kpis: {
-    newFeedback: number;
-  };
-  threads: FeedbackThreadPreview[];
-  items: FeedbackItemPreview[];
 };
 
 type SummaryPayload = {
@@ -382,7 +344,6 @@ export function FounderDashboard({
   mode?: 'full' | 'ambassadors';
 }) {
   const [support, setSupport] = useState<SupportInboxPayload | null>(null);
-  const [feedback, setFeedback] = useState<FeedbackInboxPayload | null>(null);
   const [summary, setSummary] = useState<SummaryPayload | null>(null);
   const [ambassadors, setAmbassadors] = useState<AmbassadorInboxPayload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -400,15 +361,8 @@ export function FounderDashboard({
     useState<AmbassadorProgramTab>('dashboard');
 
   const loadSupport = useCallback(async () => {
-    const payload = await readJson<SupportInboxPayload>('/api/admin/inbox/support');
+    const payload = await readJson<SupportInboxPayload>('/api/admin/inbox/support?details=false');
     setSupport(payload);
-  }, []);
-
-  const loadFeedback = useCallback(async () => {
-    const payload = await readJson<FeedbackInboxPayload>(
-      '/api/admin/inbox/feedback?itemLimit=40&threadLimit=40'
-    );
-    setFeedback(payload);
   }, []);
 
   const loadSummary = useCallback(async () => {
@@ -428,14 +382,14 @@ export function FounderDashboard({
       if (mode === 'ambassadors') {
         await loadAmbassadors();
       } else {
-        await Promise.all([loadSupport(), loadFeedback(), loadSummary(), loadAmbassadors()]);
+        await Promise.all([loadSupport(), loadSummary()]);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load founder dashboard');
     } finally {
       setLoading(false);
     }
-  }, [loadAmbassadors, loadFeedback, loadSummary, loadSupport, mode]);
+  }, [loadAmbassadors, loadSummary, loadSupport, mode]);
 
   useEffect(() => {
     void loadAll();
@@ -477,23 +431,12 @@ export function FounderDashboard({
           void loadSupport();
         }
       )
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'feedback_items',
-        },
-        () => {
-          void loadFeedback();
-        }
-      )
       .subscribe();
 
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [loadFeedback, loadSupport, mode]);
+  }, [loadSupport, mode]);
 
   const setActionLoading = useCallback((applicationId: string, label: string | null) => {
     setAmbassadorActionState((current) => {
@@ -818,56 +761,7 @@ export function FounderDashboard({
     [summary]
   );
 
-  /** Desktop/header feedback uses feedback_items; native chat uses support_messages — merge for one at-a-glance list. */
-  const latestUserMessages = useMemo(() => {
-    type Merged =
-      | {
-          key: string;
-          sortAt: string;
-          kind: 'support';
-          title: string;
-          preview: string;
-          href: string;
-        }
-      | {
-          key: string;
-          sortAt: string;
-          kind: 'feedback';
-          title: string;
-          preview: string;
-          href: string;
-          sourceLabel: string;
-        };
-
-    const fromSupport: Merged[] = (support?.latestInboundMessages ?? []).map((m) => ({
-      key: `s-${m.id}`,
-      sortAt: m.createdAt,
-      kind: 'support',
-      title: displayUserName(m.userName, m.userEmail, m.userId),
-      preview: m.body,
-      href: `/admin/support?thread=${m.threadId}`,
-    }));
-
-    const fromFeedback: Merged[] = (feedback?.items ?? []).map((item) => {
-      const source =
-        typeof item.context?.source === 'string' ? item.context.source : null;
-      const sourceLabel =
-        source === 'web' ? 'Web' : source === 'ios' || source === 'app' ? 'App' : 'Feedback';
-      return {
-        key: `f-${item.id}`,
-        sortAt: item.createdAt,
-        kind: 'feedback' as const,
-        title: displayUserName(item.userName, item.userEmail, item.userId),
-        preview: item.title?.trim() ? `${item.title} — ${item.body}` : item.body,
-        href: `/admin/feedback?thread=${item.threadId}`,
-        sourceLabel,
-      };
-    });
-
-    return [...fromSupport, ...fromFeedback]
-      .sort((a, b) => new Date(b.sortAt).getTime() - new Date(a.sortAt).getTime())
-      .slice(0, 20);
-  }, [support, feedback]);
+  const hasReceivedSupportMessages = (support?.kpis.receivedMessages ?? 0) > 0;
 
   const ambassadorKpiCards = (
     <div className="grid gap-3 md:grid-cols-3">
@@ -1693,7 +1587,7 @@ export function FounderDashboard({
         <div>
           <h1 className="text-2xl font-bold text-foreground">Founder Dashboard</h1>
           <p className="text-muted-foreground mt-1">
-            Who needs a reply now, and is the product healthy this week.
+            Messages received, revenue, and product health at a glance.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -1715,32 +1609,24 @@ export function FounderDashboard({
         </Card>
       ) : null}
 
-      <FounderGlobalChallengesSection />
-
-      <section className="grid gap-3 md:grid-cols-3 lg:grid-cols-6">
+      <section className="grid gap-3 md:grid-cols-3">
         <Card>
           <CardHeader>
-            <CardDescription>Unread</CardDescription>
-            <CardTitle>{support?.kpis.unread ?? 0}</CardTitle>
+            <CardDescription>Support Messages</CardDescription>
+            <CardTitle>{hasReceivedSupportMessages ? 'Yes' : 'No'}</CardTitle>
           </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardDescription>Needs Reply</CardDescription>
-            <CardTitle>{support?.kpis.needsReply ?? 0}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardDescription>Open Threads</CardDescription>
-            <CardTitle>{support?.kpis.openThreads ?? 0}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardDescription>New Feedback</CardDescription>
-            <CardTitle>{feedback?.kpis.newFeedback ?? 0}</CardTitle>
-          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-xs text-muted-foreground">
+                {hasReceivedSupportMessages
+                  ? `${support?.kpis.receivedMessages ?? 0} received`
+                  : 'None received yet'}
+              </div>
+              <Link href="/support">
+                <Button variant="outline" size="sm">Open</Button>
+              </Link>
+            </div>
+          </CardContent>
         </Card>
         <Card>
           <CardHeader>
@@ -1753,621 +1639,6 @@ export function FounderDashboard({
             <CardDescription>Monthly Revenue</CardDescription>
             <CardTitle>{revenueAmount}</CardTitle>
           </CardHeader>
-        </Card>
-      </section>
-
-      <section>
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <UserRoundPlus className="h-4 w-4" />
-              Ambassador Applications
-            </CardTitle>
-            <CardDescription>
-              Review creator applications and copy Stripe onboarding links for applicants in one click.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-3 md:grid-cols-3">
-              <div className="rounded-md border p-3">
-                <div className="text-muted-foreground text-sm">Awaiting review</div>
-                <div className="font-semibold text-lg">{ambassadors?.kpis.applied ?? 0}</div>
-              </div>
-              <div className="rounded-md border p-3">
-                <div className="text-muted-foreground text-sm">Approved</div>
-                <div className="font-semibold text-lg">{ambassadors?.kpis.approved ?? 0}</div>
-              </div>
-              <div className="rounded-md border p-3">
-                <div className="text-muted-foreground text-sm">Payouts ready</div>
-                <div className="font-semibold text-lg">{ambassadors?.kpis.payoutsReady ?? 0}</div>
-              </div>
-            </div>
-
-            {ambassadors?.setupRequired ? (
-              <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-                Ambassador storage is not ready yet. Run the migration for
-                <span className="font-medium"> ambassador_applications </span>
-                before using this inbox.
-              </div>
-            ) : null}
-
-            {ambassadorStatusMessage ? (
-              <div className="rounded-md border p-3 text-sm">{ambassadorStatusMessage}</div>
-            ) : null}
-
-            {ambassadors?.applications.length ? (
-              <div className="space-y-3">
-                {ambassadors.applications.map((application) => {
-                  const loadingState = ambassadorActionState[application.id];
-                  const draft = ambassadorDrafts[application.id] ?? {
-                    referralCode: application.referralCode ?? '',
-                    referralCodeMaxUses:
-                      application.referralCodeMaxUses != null
-                        ? String(application.referralCodeMaxUses)
-                        : '',
-                    commissionRatePercent: String(application.commissionRateBps / 100),
-                    commissionDurationMonths: String(application.commissionDurationMonths),
-                  };
-                  const handles = [
-                    application.instagramHandle,
-                    application.tiktokHandle,
-                    application.youtubeHandle,
-                  ].filter(Boolean);
-                  const shareUrl = application.referralCode
-                    ? buildAmbassadorShareUrl(application.referralCode)
-                    : null;
-
-                  return (
-                    <div key={application.id} className="rounded-md border p-4">
-                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                        <div className="min-w-0 space-y-2">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <div className="font-medium text-sm">
-                              {application.fullName}
-                            </div>
-                            <Badge
-                              variant={
-                                application.status === 'approved'
-                                  ? 'default'
-                                  : application.status === 'rejected'
-                                    ? 'destructive'
-                                    : 'secondary'
-                              }
-                            >
-                              {application.status}
-                            </Badge>
-                            {application.stripePayoutsEnabled ? (
-                              <Badge variant="outline" className="gap-1">
-                                <CheckCircle2 className="h-3 w-3" />
-                                payouts ready
-                              </Badge>
-                            ) : null}
-                            {application.stripeConnectAccountId ? (
-                              <Badge variant="outline" className="gap-1">
-                                <Copy className="h-3 w-3" />
-                                Stripe linked
-                              </Badge>
-                            ) : null}
-                          </div>
-                          <div className="text-xs text-muted-foreground flex flex-wrap gap-x-3 gap-y-1">
-                            <span>{application.email}</span>
-                            <span>{application.primaryNiche}</span>
-                            <span>{application.primaryPlatform}</span>
-                            {application.city ? <span>{application.city}</span> : null}
-                            {application.audienceSize ? <span>{application.audienceSize}</span> : null}
-                          </div>
-                          <div className="text-xs text-muted-foreground flex flex-wrap gap-x-3 gap-y-1">
-                            {application.referralCode ? (
-                              <span>Code {application.referralCode}</span>
-                            ) : (
-                              <span>Code will generate on approval</span>
-                            )}
-                            <span>
-                              {application.referralCodeUseCount} use
-                              {application.referralCodeUseCount === 1 ? '' : 's'}
-                            </span>
-                            <span>
-                              {application.referralCodeMaxUses != null
-                                ? `${application.referralCodeRemainingUses ?? 0} left of ${application.referralCodeMaxUses}`
-                                : 'No referral limit'}
-                            </span>
-                            <span>
-                              {formatCommissionRate(application.commissionRateBps)} for{' '}
-                              {application.commissionDurationMonths} months
-                            </span>
-                          </div>
-                          {shareUrl ? (
-                            <div className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground break-all">
-                              Share link: {shareUrl}
-                            </div>
-                          ) : null}
-                          <div className="grid gap-2 pt-1 md:grid-cols-[minmax(0,1.2fr)_minmax(160px,0.7fr)_minmax(130px,0.55fr)_minmax(130px,0.55fr)_auto]">
-                            <Input
-                              value={draft.referralCode}
-                              onChange={(event) =>
-                                handleAmbassadorDraftChange(
-                                  application.id,
-                                  'referralCode',
-                                  event.target.value
-                                )
-                              }
-                              placeholder="Custom referral code"
-                              disabled={!!loadingState}
-                            />
-                            <Input
-                              type="number"
-                              min={1}
-                              step={1}
-                              value={draft.referralCodeMaxUses}
-                              onChange={(event) =>
-                                handleAmbassadorDraftChange(
-                                  application.id,
-                                  'referralCodeMaxUses',
-                                  event.target.value
-                                )
-                              }
-                              placeholder="No limit"
-                              disabled={!!loadingState}
-                            />
-                            <Input
-                              type="number"
-                              min={1}
-                              max={100}
-                              step="0.5"
-                              value={draft.commissionRatePercent}
-                              onChange={(event) =>
-                                handleAmbassadorDraftChange(
-                                  application.id,
-                                  'commissionRatePercent',
-                                  event.target.value
-                                )
-                              }
-                              placeholder="25"
-                              disabled={!!loadingState}
-                            />
-                            <Input
-                              type="number"
-                              min={1}
-                              max={36}
-                              step={1}
-                              value={draft.commissionDurationMonths}
-                              onChange={(event) =>
-                                handleAmbassadorDraftChange(
-                                  application.id,
-                                  'commissionDurationMonths',
-                                  event.target.value
-                                )
-                              }
-                              placeholder="12"
-                              disabled={!!loadingState}
-                            />
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => void handleSaveAmbassadorSettings(application.id)}
-                              disabled={!!loadingState}
-                            >
-                              {loadingState === 'save' ? 'Saving...' : 'Save settings'}
-                            </Button>
-                          </div>
-                          <div className="text-[11px] text-muted-foreground">
-                            Commission % and duration are saved per ambassador before payout tracking starts.
-                          </div>
-                          {application.stripePromotionCodeId ? (
-                            <div className="text-[11px] text-muted-foreground">
-                              Stripe promo code synced
-                            </div>
-                          ) : null}
-                          {handles.length ? (
-                            <div className="text-xs text-muted-foreground flex flex-wrap gap-x-3 gap-y-1">
-                              {handles.map((handle) => (
-                                <span key={handle}>{handle}</span>
-                              ))}
-                            </div>
-                          ) : null}
-                          <div className="text-sm text-muted-foreground line-clamp-2">
-                            {application.whyFlyr}
-                          </div>
-                          {application.promotionPlan ? (
-                            <div className="text-xs text-muted-foreground line-clamp-2">
-                              Promotion plan: {application.promotionPlan}
-                            </div>
-                          ) : null}
-                          <div className="text-xs text-muted-foreground">
-                            Applied {formatDateTime(application.createdAt)}
-                          </div>
-                        </div>
-
-                        <div className="flex flex-wrap gap-2 lg:justify-end">
-                          <Button
-                            size="sm"
-                            onClick={() => void handleApproveAndCreateStripeLink(application.id)}
-                            disabled={loadingState === 'stripe' || !!loadingState}
-                          >
-                            {loadingState === 'stripe'
-                              ? 'Creating applicant link...'
-                              : application.stripeConnectAccountId
-                                ? 'Copy applicant Stripe link'
-                                : 'Approve + copy Stripe link'}
-                          </Button>
-                          {application.referralCode ? (
-                            <>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() =>
-                                  void handleCopyAmbassadorShareLink(
-                                    application.referralCode ?? '',
-                                    application.fullName
-                                  )
-                                }
-                                disabled={!!loadingState}
-                              >
-                                Copy share link
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() =>
-                                  void handleCopyToClipboard(
-                                    application.referralCode ?? '',
-                                    `${application.fullName}'s referral code`
-                                  )
-                                }
-                                disabled={!!loadingState}
-                              >
-                                Copy code
-                              </Button>
-                            </>
-                          ) : null}
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() =>
-                              void handleAmbassadorStatusUpdate(
-                                application.id,
-                                'paused',
-                                'pause'
-                              )
-                            }
-                            disabled={!!loadingState}
-                          >
-                            Pause
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() =>
-                              void handleAmbassadorStatusUpdate(
-                                application.id,
-                                'rejected',
-                                'reject'
-                              )
-                            }
-                            disabled={!!loadingState}
-                          >
-                            Reject
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : ambassadors?.setupRequired ? null : (
-              <div className="text-sm text-muted-foreground">No ambassador applications yet.</div>
-            )}
-
-            <div className="grid gap-3 border-t pt-4 md:grid-cols-3">
-              <div className="rounded-md border p-3">
-                <div className="text-muted-foreground text-sm">Ready to pay</div>
-                <div className="font-semibold text-lg">
-                  {formatCurrencyTotals(ambassadors?.payoutQueue.readyTotals ?? [])}
-                </div>
-                <div className="text-xs text-muted-foreground mt-1">
-                  {ambassadors?.payoutQueue.readyCommissionCount ?? 0} open commission items
-                </div>
-              </div>
-              <div className="rounded-md border p-3">
-                <div className="text-muted-foreground text-sm">Waiting on Stripe setup</div>
-                <div className="font-semibold text-lg">
-                  {formatCurrencyTotals(ambassadors?.payoutQueue.pendingSetupTotals ?? [])}
-                </div>
-                <div className="text-xs text-muted-foreground mt-1">
-                  {ambassadors?.payoutQueue.pendingSetupCommissionCount ?? 0} items blocked on payouts
-                </div>
-              </div>
-              <div className="rounded-md border p-3">
-                <div className="text-muted-foreground text-sm">Payout-ready ambassadors</div>
-                <div className="font-semibold text-lg">
-                  {ambassadors?.payoutQueue.readyByAmbassador.length ?? 0}
-                </div>
-                <div className="text-xs text-muted-foreground mt-1">
-                  Ambassadors with Stripe enabled and unpaid commission balance
-                </div>
-              </div>
-            </div>
-
-            {ambassadors?.payoutQueue.readyByAmbassador.length ? (
-              <div className="space-y-3 border-t pt-4">
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  <DollarSign className="h-4 w-4" />
-                  Payout-ready balances
-                </div>
-                {ambassadors.payoutQueue.readyByAmbassador.map((entry) => (
-                  <div key={`${entry.ambassadorApplicationId}-${entry.currency}`} className="rounded-md border p-3">
-                    <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                      <div>
-                        <div className="font-medium text-sm">{entry.fullName}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {entry.email} {entry.referralCode ? `· Code ${entry.referralCode}` : ''}
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="font-semibold text-sm">
-                          {formatAmount(entry.totalCommissionCents, entry.currency)}
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          {entry.openCommissionCount} items · revenue{' '}
-                          {formatAmount(entry.totalRevenueCents, entry.currency)}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="text-xs text-muted-foreground">
-                        Oldest unpaid commission {formatDateTime(entry.oldestEarnedAt)}
-                      </div>
-                      <Button
-                        size="sm"
-                        onClick={() =>
-                          void handleAmbassadorPayout(
-                            entry.ambassadorApplicationId,
-                            entry.currency
-                          )
-                        }
-                        disabled={
-                          ambassadorActionState[entry.ambassadorApplicationId] === 'payout' ||
-                          !!ambassadorActionState[entry.ambassadorApplicationId]
-                        }
-                      >
-                        {ambassadorActionState[entry.ambassadorApplicationId] === 'payout'
-                          ? 'Paying...'
-                          : 'Pay now'}
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-
-            {ambassadors?.payoutQueue.recentCommissions.length ? (
-              <div className="space-y-3 border-t pt-4">
-                <div className="text-sm font-medium">Recent commission activity</div>
-                {ambassadors.payoutQueue.recentCommissions.map((commission) => (
-                  <div key={commission.id} className="rounded-md border p-3">
-                    <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                      <div>
-                        <div className="font-medium text-sm">{commission.ambassadorName}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {commission.referralCode ? `Code ${commission.referralCode} · ` : ''}
-                          Invoice {commission.stripeInvoiceId}
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="font-semibold text-sm">
-                          {formatAmount(commission.commissionAmountCents, commission.currency)}
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          on {formatAmount(commission.revenueAmountCents, commission.currency)} at{' '}
-                          {formatCommissionRate(commission.commissionRateBps)}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2 mt-2 text-xs text-muted-foreground">
-                      <Badge variant={commission.status === 'paid' ? 'default' : 'secondary'}>
-                        {commission.status}
-                      </Badge>
-                      {!commission.payoutsEnabled && commission.status === 'pending' ? (
-                        <Badge variant="outline">waiting on Stripe setup</Badge>
-                      ) : null}
-                      <span>{formatDateTime(commission.earnedAt)}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-
-            {ambassadors?.payoutQueue.payoutHistory.length ? (
-              <div className="space-y-3 border-t pt-4">
-                <div className="text-sm font-medium">Recent payout history</div>
-                {ambassadors.payoutQueue.payoutHistory.map((batch) => (
-                  <div key={batch.id} className="rounded-md border p-3">
-                    <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                      <div>
-                        <div className="font-medium text-sm">{batch.ambassadorName}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {batch.ambassadorEmail}
-                          {batch.referralCode ? ` · Code ${batch.referralCode}` : ''}
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="font-semibold text-sm">
-                          {formatAmount(batch.totalCommissionCents, batch.currency)}
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          {batch.paidAt
-                            ? `Paid ${formatDateTime(batch.paidAt)}`
-                            : `Created ${formatDateTime(batch.createdAt)}`}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                      <Badge
-                        variant={
-                          batch.status === 'paid'
-                            ? 'default'
-                            : batch.status === 'failed'
-                              ? 'destructive'
-                              : 'secondary'
-                        }
-                      >
-                        {batch.status}
-                      </Badge>
-                      {batch.stripeTransferId ? (
-                        <span>Transfer {batch.stripeTransferId}</span>
-                      ) : null}
-                      {batch.failureReason ? <span>{batch.failureReason}</span> : null}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-          </CardContent>
-        </Card>
-      </section>
-
-      <section>
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <MessageCircle className="h-4 w-4" />
-              Latest user messages
-            </CardTitle>
-            <CardDescription>
-              App support chat and web/header feedback in one place (newest first).
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {latestUserMessages.length ? (
-              <div className="space-y-2">
-                {latestUserMessages.map((row) => (
-                  <Link
-                    key={row.key}
-                    href={row.href}
-                    className="flex items-start gap-3 rounded-md border p-3 hover:bg-muted/50 transition-colors"
-                  >
-                    <Badge variant={row.kind === 'support' ? 'default' : 'secondary'} className="shrink-0 mt-0.5">
-                      {row.kind === 'support' ? 'Support' : row.sourceLabel}
-                    </Badge>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm font-medium truncate">{row.title}</div>
-                      <div className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{row.preview}</div>
-                      <div className="text-xs text-muted-foreground mt-1">{formatDateTime(row.sortAt)}</div>
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            ) : (
-              <div className="text-sm text-muted-foreground">No messages or feedback yet.</div>
-            )}
-          </CardContent>
-        </Card>
-      </section>
-
-      <section className="grid gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <MessageCircle className="h-4 w-4" />
-              Support Inbox
-            </CardTitle>
-            <CardDescription>App support threads and inbound chat messages.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              {support?.threads.length ? (
-                support.threads.map((thread) => (
-                  <Link
-                    key={thread.id}
-                    href={`/admin/support?thread=${thread.id}`}
-                    className="block rounded-md border p-3 hover:bg-muted/50 transition-colors"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="font-medium text-sm">
-                        {displayUserName(thread.userName, thread.userEmail, thread.userId)}
-                      </div>
-                      <div className="flex gap-1">
-                        {thread.unreadForSupport ? <Badge variant="secondary">Unread</Badge> : null}
-                        {thread.needsReply ? <Badge>Needs reply</Badge> : null}
-                      </div>
-                    </div>
-                    <div className="text-xs text-muted-foreground mt-1 truncate">
-                      {thread.lastMessagePreview || 'No message preview'}
-                    </div>
-                    <div className="text-xs text-muted-foreground mt-1">
-                      {formatDateTime(thread.lastMessageAt)}
-                    </div>
-                  </Link>
-                ))
-              ) : (
-                <div className="text-sm text-muted-foreground">No support threads yet.</div>
-              )}
-            </div>
-
-            <div className="space-y-2">
-              <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Latest inbound
-              </div>
-              {support?.latestInboundMessages.length ? (
-                support.latestInboundMessages.map((message) => (
-                  <Link
-                    key={message.id}
-                    href={`/admin/support?thread=${message.threadId}`}
-                    className="block rounded-md border p-2 hover:bg-muted/50 transition-colors"
-                  >
-                    <div className="text-sm">
-                      {displayUserName(message.userName, message.userEmail, message.userId)}
-                    </div>
-                    <div className="text-xs text-muted-foreground truncate">{message.body}</div>
-                  </Link>
-                ))
-              ) : (
-                <div className="text-sm text-muted-foreground">No inbound messages.</div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Bug className="h-4 w-4" />
-              Feedback
-            </CardTitle>
-            <CardDescription>Web (header) and in-app bug reports and requests.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {feedback?.items.length ? (
-              feedback.items.map((item) => (
-                <Link
-                  key={item.id}
-                  href={`/admin/feedback?thread=${item.threadId}`}
-                  className="block rounded-md border p-3 hover:bg-muted/50 transition-colors"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="font-medium text-sm truncate">
-                      {item.title || item.body.slice(0, 70)}
-                    </div>
-                    <Badge variant="outline">{item.type}</Badge>
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-1 line-clamp-2">{item.body}</div>
-                  <div className="text-xs text-muted-foreground mt-2 flex flex-wrap gap-x-3 gap-y-1">
-                    <span>{displayUserName(item.userName, item.userEmail, item.userId)}</span>
-                    {item.screenName ? <span>Screen: {item.screenName}</span> : null}
-                    {item.appVersion ? <span>App: {item.appVersion}</span> : null}
-                    {item.deviceModel ? <span>Device: {item.deviceModel}</span> : null}
-                  </div>
-                </Link>
-              ))
-            ) : (
-              <div className="text-sm text-muted-foreground">No feedback items yet.</div>
-            )}
-            <div className="pt-2">
-              <Link href="/admin/feedback">
-                <Button variant="outline" size="sm">Open Feedback Inbox</Button>
-              </Link>
-            </div>
-          </CardContent>
         </Card>
       </section>
 

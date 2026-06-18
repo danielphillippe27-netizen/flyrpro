@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   Bell,
   CalendarDays,
+  CheckCircle2,
   Clock3,
   Download,
   DoorOpen,
@@ -82,7 +83,7 @@ type ReportResponse = {
   period: ReportPeriod;
   period_start: string | null;
   period_end: string | null;
-  source: 'live_sessions' | 'team_snapshot' | 'member_aggregate' | 'member_aggregate_fallback' | 'none';
+  source: 'live_sessions' | 'team_snapshot' | 'member_aggregate' | 'member_aggregate_fallback' | 'demo_replay' | 'none';
   generated_at?: string | null;
   availablePeriods: AvailablePeriod[];
   totals: Metrics;
@@ -106,6 +107,16 @@ type TeamReportingTabProps = {
   memberIds: string[];
 };
 
+type DemoState = {
+  seeded_campaign_id: string | null;
+  completed_items: Record<string, boolean>;
+  dismissed_at: string | null;
+};
+
+type DemoStateResponse = {
+  state?: DemoState;
+};
+
 const PERIOD_OPTIONS: { value: ReportPeriod; label: string }[] = [
   { value: 'weekly', label: 'Weekly' },
   { value: 'monthly', label: 'Monthly' },
@@ -113,6 +124,12 @@ const PERIOD_OPTIONS: { value: ReportPeriod; label: string }[] = [
 ];
 
 const SURFACE_CLASS = 'operator-surface rounded-2xl border border-border/70 bg-card shadow-none';
+const DEMO_REPORT_CREATED_AT = '2026-05-25T17:30:00.000Z';
+const DEMO_REPORT_PERIODS: Record<ReportPeriod, { start: string; end: string }> = {
+  weekly: { start: '2026-05-18T00:00:00.000Z', end: '2026-05-25T00:00:00.000Z' },
+  monthly: { start: '2026-05-01T00:00:00.000Z', end: '2026-06-01T00:00:00.000Z' },
+  yearly: { start: '2026-01-01T00:00:00.000Z', end: '2027-01-01T00:00:00.000Z' },
+};
 
 function formatNumber(value: number): string {
   return new Intl.NumberFormat().format(Math.round(value));
@@ -179,7 +196,130 @@ function sourceLabel(source: ReportResponse['source']): string {
   if (source === 'team_snapshot') return 'Team snapshot';
   if (source === 'member_aggregate') return 'Selected members';
   if (source === 'member_aggregate_fallback') return 'Member snapshot fallback';
+  if (source === 'demo_replay') return 'Salt Lake City replay';
   return 'No snapshot';
+}
+
+function zeroDeltas(): Record<MetricKey, Delta> {
+  return {
+    doors_knocked: { abs: 18, pct: 14, trend: 'up' },
+    flyers_delivered: { abs: 16, pct: 14, trend: 'up' },
+    conversations: { abs: 7, pct: 20, trend: 'up' },
+    leads_created: { abs: 3, pct: 27, trend: 'up' },
+    appointments_set: { abs: 2, pct: 50, trend: 'up' },
+    time_spent_seconds: { abs: 2700, pct: 7, trend: 'up' },
+    sessions_count: { abs: 1, pct: 13, trend: 'up' },
+  };
+}
+
+function buildSaltLakeCityDemoReport(period: ReportPeriod): ReportResponse {
+  const periodRange = DEMO_REPORT_PERIODS[period];
+  const members: ReportMember[] = [
+    {
+      user_id: 'demo-ava-morales',
+      display_name: 'Ava Morales',
+      role: 'Field rep',
+      color: '#ef4444',
+      has_report: true,
+      metrics: {
+        doors_knocked: 54,
+        flyers_delivered: 49,
+        conversations: 16,
+        leads_created: 5,
+        appointments_set: 2,
+        time_spent_seconds: 22800,
+        sessions_count: 3,
+      },
+      deltas: zeroDeltas(),
+      rates: {
+        conversations_per_door: 16 / 54,
+        leads_per_conversation: 5 / 16,
+        appointments_per_conversation: 2 / 16,
+      },
+    },
+    {
+      user_id: 'demo-marcus-chen',
+      display_name: 'Marcus Chen',
+      role: 'Field rep',
+      color: '#06b6d4',
+      has_report: true,
+      metrics: {
+        doors_knocked: 47,
+        flyers_delivered: 43,
+        conversations: 13,
+        leads_created: 4,
+        appointments_set: 2,
+        time_spent_seconds: 20400,
+        sessions_count: 3,
+      },
+      deltas: zeroDeltas(),
+      rates: {
+        conversations_per_door: 13 / 47,
+        leads_per_conversation: 4 / 13,
+        appointments_per_conversation: 2 / 13,
+      },
+    },
+    {
+      user_id: 'demo-nina-patel',
+      display_name: 'Nina Patel',
+      role: 'Team lead',
+      color: '#22c55e',
+      has_report: true,
+      metrics: {
+        doors_knocked: 47,
+        flyers_delivered: 39,
+        conversations: 13,
+        leads_created: 5,
+        appointments_set: 2,
+        time_spent_seconds: 20400,
+        sessions_count: 3,
+      },
+      deltas: zeroDeltas(),
+      rates: {
+        conversations_per_door: 13 / 47,
+        leads_per_conversation: 5 / 13,
+        appointments_per_conversation: 2 / 13,
+      },
+    },
+  ];
+
+  return {
+    period,
+    period_start: periodRange.start,
+    period_end: periodRange.end,
+    source: 'demo_replay',
+    generated_at: DEMO_REPORT_CREATED_AT,
+    availablePeriods: [
+      {
+        period_start: periodRange.start,
+        period_end: periodRange.end,
+        created_at: DEMO_REPORT_CREATED_AT,
+        report_count: members.length,
+      },
+    ],
+    totals: {
+      doors_knocked: 148,
+      flyers_delivered: 131,
+      conversations: 42,
+      leads_created: 14,
+      appointments_set: 6,
+      time_spent_seconds: 63600,
+      sessions_count: 9,
+    },
+    deltas: zeroDeltas(),
+    rates: {
+      conversations_per_door: 42 / 148,
+      leads_per_conversation: 14 / 42,
+      appointments_per_conversation: 6 / 42,
+    },
+    members,
+    coverage: {
+      expected_member_count: members.length,
+      covered_member_count: members.length,
+      missing_member_ids: [],
+      invalid_member_ids: [],
+    },
+  };
 }
 
 type MetricCardProps = {
@@ -261,6 +401,8 @@ export function TeamReportingTab({ memberIds }: TeamReportingTabProps) {
   const [error, setError] = useState<string | null>(null);
   const [notifying, setNotifying] = useState(false);
   const [emailing, setEmailing] = useState(false);
+  const [demoState, setDemoState] = useState<DemoState | null>(null);
+  const [finishingDemoReport, setFinishingDemoReport] = useState(false);
 
   const fetchReport = useCallback(async () => {
     if (!currentWorkspaceId) {
@@ -301,32 +443,93 @@ export function TeamReportingTab({ memberIds }: TeamReportingTabProps) {
     fetchReport();
   }, [fetchReport]);
 
+  useEffect(() => {
+    if (!currentWorkspaceId) {
+      setDemoState(null);
+      return;
+    }
+
+    let cancelled = false;
+    fetch(`/api/onboarding/demo/state?workspaceId=${encodeURIComponent(currentWorkspaceId)}`, {
+      credentials: 'include',
+      cache: 'no-store',
+    })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload: DemoStateResponse | null) => {
+        if (!cancelled) setDemoState(payload?.state ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setDemoState(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentWorkspaceId]);
+
   const resetPeriod = (nextPeriod: ReportPeriod) => {
     setPeriod(nextPeriod);
     setSelectedPeriodStart(null);
   };
 
+  const demoReport = useMemo(() => {
+    if (!demoState?.seeded_campaign_id || demoState.dismissed_at) return null;
+    return buildSaltLakeCityDemoReport(period);
+  }, [demoState?.dismissed_at, demoState?.seeded_campaign_id, period]);
+
+  const printableReport = report?.period_start ? report : demoReport;
+  const totals = printableReport?.totals;
+  const deltas = printableReport?.deltas;
+  const demoReportReviewed = Boolean(demoState?.completed_items.review_reporting);
+  const isDemoReport = printableReport?.source === 'demo_replay';
+
   const reportTitle = useMemo(() => {
+    if (isDemoReport) return 'Salt Lake City campaign report';
     const label = PERIOD_OPTIONS.find((option) => option.value === period)?.label ?? 'Weekly';
     return `${label} team report`;
-  }, [period]);
+  }, [isDemoReport, period]);
+
+  const markDemoReportReviewed = useCallback(async () => {
+    if (!currentWorkspaceId || !isDemoReport || demoReportReviewed) return;
+    setFinishingDemoReport(true);
+    try {
+      const res = await fetch(`/api/onboarding/demo/state?workspaceId=${encodeURIComponent(currentWorkspaceId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ completedItems: { review_reporting: true } }),
+      });
+      const payload = (await res.json().catch(() => null)) as DemoStateResponse | null;
+      if (!res.ok) throw new Error('Failed to mark report reviewed');
+      if (payload?.state) setDemoState(payload.state);
+      toast.success('Salt Lake City report marked done.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to mark report reviewed');
+    } finally {
+      setFinishingDemoReport(false);
+    }
+  }, [currentWorkspaceId, demoReportReviewed, isDemoReport]);
 
   const downloadCsv = () => {
-    if (!report) return;
-    const csv = buildCsv(report);
+    if (!printableReport) return;
+    const csv = buildCsv(printableReport);
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = `team-${period}-report-${(report.period_start ?? 'snapshot').slice(0, 10)}.csv`;
+    anchor.download = isDemoReport
+      ? `salt-lake-city-campaign-report-${period}.csv`
+      : `team-${period}-report-${(printableReport.period_start ?? 'snapshot').slice(0, 10)}.csv`;
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
     URL.revokeObjectURL(url);
+    if (isDemoReport) void markDemoReportReviewed();
   };
 
   const printReport = () => {
     window.print();
+    if (isDemoReport) void markDemoReportReviewed();
   };
 
   const notifyReport = async () => {
@@ -403,7 +606,7 @@ export function TeamReportingTab({ memberIds }: TeamReportingTabProps) {
     }
   };
 
-  if (loading && !report) {
+  if (loading && !report && !demoReport) {
     return (
       <div className="space-y-6">
         <Skeleton className="h-28 rounded-2xl" />
@@ -417,10 +620,7 @@ export function TeamReportingTab({ memberIds }: TeamReportingTabProps) {
     );
   }
 
-  const printableReport = report?.period_start ? report : null;
-  const totals = printableReport?.totals;
-  const deltas = printableReport?.deltas;
-  const availablePeriods = report?.availablePeriods ?? [];
+  const availablePeriods = report?.availablePeriods?.length ? report.availablePeriods : demoReport?.availablePeriods ?? [];
   const hasReport = Boolean(printableReport && totals && deltas);
   const missingCount = printableReport?.coverage.missing_member_ids.length ?? 0;
 
@@ -443,7 +643,7 @@ export function TeamReportingTab({ memberIds }: TeamReportingTabProps) {
             </Select>
 
             <Select
-              value={selectedPeriodStart ?? report?.period_start ?? ''}
+              value={selectedPeriodStart ?? report?.period_start ?? demoReport?.period_start ?? ''}
               onValueChange={(value) => setSelectedPeriodStart(value)}
               disabled={availablePeriods.length === 0}
             >
@@ -459,15 +659,27 @@ export function TeamReportingTab({ memberIds }: TeamReportingTabProps) {
               </SelectContent>
             </Select>
 
-            {report ? <Badge variant="outline">{sourceLabel(report.source)}</Badge> : null}
+            {printableReport ? <Badge variant="outline">{sourceLabel(printableReport.source)}</Badge> : null}
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" className="gap-2" onClick={emailReportLead} disabled={!hasReport || emailing}>
+            {isDemoReport ? (
+              <Button
+                variant={demoReportReviewed ? 'secondary' : 'default'}
+                size="sm"
+                className="gap-2"
+                onClick={() => void markDemoReportReviewed()}
+                disabled={demoReportReviewed || finishingDemoReport}
+              >
+                <CheckCircle2 className="h-4 w-4" />
+                {demoReportReviewed ? 'Reviewed' : finishingDemoReport ? 'Finishing' : 'Finish review'}
+              </Button>
+            ) : null}
+            <Button variant="outline" size="sm" className="gap-2" onClick={emailReportLead} disabled={!hasReport || emailing || isDemoReport}>
               <Mail className="h-4 w-4" />
               {emailing ? 'Emailing' : 'Email lead'}
             </Button>
-            <Button variant="outline" size="sm" className="gap-2" onClick={notifyReport} disabled={!hasReport || notifying}>
+            <Button variant="outline" size="sm" className="gap-2" onClick={notifyReport} disabled={!hasReport || notifying || isDemoReport}>
               <Bell className="h-4 w-4" />
               {notifying ? 'Notifying' : 'Notify'}
             </Button>

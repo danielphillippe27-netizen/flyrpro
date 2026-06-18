@@ -12,20 +12,26 @@ export const dynamic = 'force-dynamic';
 
 type VoicemailDropPayload = {
   workspaceId?: string;
+  voicemailDropId?: string;
 };
 
 async function getWorkspaceVoicemailDrop(
   admin: ReturnType<typeof import('@/lib/supabase/server').createAdminClient>,
-  workspaceId: string
+  workspaceId: string,
+  voicemailDropId?: string
 ): Promise<DialerVoicemailDrop | null> {
-  const { data, error } = await admin
+  let query = admin
     .from('dialer_voicemail_drops')
     .select('*')
-    .eq('workspace_id', workspaceId)
-    .eq('is_active', true)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .eq('workspace_id', workspaceId);
+
+  if (voicemailDropId) {
+    query = query.eq('id', voicemailDropId);
+  } else {
+    query = query.eq('is_active', true).order('created_at', { ascending: false }).limit(1);
+  }
+
+  const { data, error } = await query.maybeSingle();
 
   if (error && error.code !== 'PGRST116') {
     console.warn('[dialer/voicemail-drop] failed to load workspace voicemail drop', error);
@@ -76,10 +82,10 @@ export async function POST(
   }
 
   try {
-    const voicemailDrop = await getWorkspaceVoicemailDrop(context.admin, context.workspaceId);
+    const voicemailDrop = await getWorkspaceVoicemailDrop(context.admin, context.workspaceId, body.voicemailDropId);
     if (!voicemailDrop) {
       return NextResponse.json(
-        { error: 'Upload and activate a prerecorded voicemail before using voicemail drop.' },
+        { error: body.voicemailDropId ? 'Selected voicemail recording was not found.' : 'Upload and activate a prerecorded voicemail before using voicemail drop.' },
         { status: 409 }
       );
     }

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { Resend } from 'resend';
 import twilio from 'twilio';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import {
@@ -10,7 +11,16 @@ import { isDialerFounderBypassEmail } from '@/lib/dialer/feature-gate';
 import { getTwilioAccountSid, getTwilioAuthToken, getTwilioDefaultSmsFromNumber } from '@/lib/dialer/env';
 import { normalizePhoneNumber } from '@/lib/dialer/phone';
 import { buildPublicTwilioWebhookUrl } from '@/lib/dialer/server';
+import {
+  DEMO_EMAIL_DOMAIN,
+  resolveAvailableDemoEmailHandle,
+  type HandleLookupClient,
+} from '@/lib/dialer/demo-email-handle';
 import type { DiallerLead, DiallerLeadDisposition } from '@/types/database';
+import {
+  ensureSalespersonReferralCode,
+  normalizeSalespersonReferralCodeInput,
+} from '@/app/lib/billing/salespeople';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -31,11 +41,31 @@ type UpdateLeadPayload = {
   disposition?: DiallerLeadDisposition | null;
   notes?: string | null;
   email?: string | null;
+  sendDemoEmail?: boolean;
   sendLink?: boolean;
   followUpName?: string | null;
   followUpAt?: string | null;
   createNotification?: boolean;
   saveContact?: boolean;
+};
+
+type DiallerContext = {
+  admin: ReturnType<typeof createAdminClient>;
+  workspaceId: string;
+  requestUser: { id: string; email: string | null };
+};
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{12}$/i;
+
+type SalespersonReferralRow = {
+  id: string;
+  full_name: string | null;
+  email?: string | null;
+  referral_code: string | null;
+  demo_email_handle?: string | null;
+  demo_email_reply_to?: string | null;
+  workspace_id?: string | null;
 };
 
 const VALID_DISPOSITIONS = new Set<DiallerLeadDisposition>([
@@ -44,6 +74,7 @@ const VALID_DISPOSITIONS = new Set<DiallerLeadDisposition>([
   'not_now',
   'dnc',
 ]);
+const FALLBACK_PUBLIC_ORIGIN = 'https://flyr.software';
 
 async function resolveDiallerContext(request: NextRequest, workspaceId?: string | null) {
   const requestUser = await resolveUserFromRequest(request);
@@ -92,37 +123,339 @@ function cleanText(value: string | null | undefined): string {
   return (value ?? '').trim();
 }
 
-function getAppLink(request: NextRequest): string {
+function getEnv(name: string): string | null {
+  const value = process.env[name];
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function formatDemoSenderName(salesperson: SalespersonReferralRow | null, userEmail: string | null): string {
+  return cleanText(salesperson?.full_name) || cleanText(userEmail).split('@')[0] || 'FLYR';
+}
+
+function parseUuidList(value: string | null | undefined): string[] {
+  return Array.from(
+    new Set(
+      (value ?? '')
+        .split(',')
+        .map((id) => id.trim())
+        .filter((id) => UUID_PATTERN.test(id))
+    )
+  ).slice(0, 100);
+}
+
+function normalizePublicOrigin(value: string | null | undefined): string | null {
+  const cleaned = value?.trim().replace(/\/+$/, '');
+  if (!cleaned) return null;
+  try {
+    const parsed = new URL(cleaned.startsWith('http') ? cleaned : `https://${cleaned}`);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    return parsed.origin;
+  } catch {
+    return null;
+  }
+}
+
+function getPublicOrigin(request: NextRequest): string {
   return (
-    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
-    process.env.APP_BASE_URL?.trim() ||
-    request.nextUrl.origin
-  ).replace(/\/$/, '');
+    normalizePublicOrigin(process.env.NEXT_PUBLIC_APP_URL) ||
+    normalizePublicOrigin(process.env.APP_BASE_URL) ||
+    normalizePublicOrigin(process.env.VERCEL_URL) ||
+    normalizePublicOrigin(request.nextUrl.origin) ||
+    FALLBACK_PUBLIC_ORIGIN
+  );
 }
 
-function buildInterestedLinkText(lead: DiallerLead, linkUrl: string): string {
-  const firstName = lead.name.trim().split(/\s+/)[0];
-  const greeting = firstName ? `Hi ${firstName},` : 'Hi,';
-  return `${greeting} here is the FLYR link: ${linkUrl}`;
+async function resolveSalespersonReferralCode(context: DiallerContext): Promise<string | null> {
+  const normalizedEmail = context.requestUser.email?.trim().toLowerCase();
+  const select = 'id, full_name, email, referral_code, workspace_id';
+  const ensureCode = async (salesperson: SalespersonReferralRow | null | undefined) => {
+    if (!salesperson?.id) return null;
+
+    const existing = normalizeSalespersonReferralCodeInput(
+      (salesperson.referral_code ?? '').trim()
+    );
+    if (existing) return existing;
+
+    try {
+      return await ensureSalespersonReferralCode(context.admin, {
+        salespersonId: salesperson.id,
+        fullName: salesperson.full_name || normalizedEmail || 'Salesperson',
+        existingReferralCode: salesperson.referral_code,
+      });
+    } catch (error) {
+      console.warn('[dialer/leads] salesperson referral code generation failed', error);
+      return null;
+    }
+  };
+
+  if (normalizedEmail) {
+    const { data, error } = await context.admin
+      .from('salespeople')
+      .select(select)
+      .ilike('email', normalizedEmail)
+      .eq('status', 'active')
+      .limit(1)
+      .maybeSingle();
+
+    if (!error && data) {
+      return ensureCode(data as SalespersonReferralRow);
+    }
+
+    if (error) {
+      console.warn('[dialer/leads] salesperson email lookup failed', error);
+    }
+  }
+
+  const { data, error } = await context.admin
+    .from('salespeople')
+    .select(select)
+    .eq('workspace_id', context.workspaceId)
+    .eq('status', 'active')
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.warn('[dialer/leads] salesperson workspace lookup failed', error);
+    return null;
+  }
+
+  return ensureCode(data as SalespersonReferralRow | null);
 }
 
-async function sendInterestedLink(request: NextRequest, lead: DiallerLead): Promise<string | null> {
+async function resolveSalespersonForDemoEmail(context: DiallerContext): Promise<SalespersonReferralRow | null> {
+  const normalizedEmail = context.requestUser.email?.trim().toLowerCase();
+  const select = 'id, full_name, email, referral_code, demo_email_handle, demo_email_reply_to, workspace_id';
+
+  if (normalizedEmail) {
+    const { data, error } = await context.admin
+      .from('salespeople')
+      .select(select)
+      .ilike('email', normalizedEmail)
+      .eq('status', 'active')
+      .limit(1)
+      .maybeSingle();
+
+    if (!error && data) return data as SalespersonReferralRow;
+    if (error) console.warn('[dialer/leads] salesperson demo email lookup failed', error);
+  }
+
+  const { data, error } = await context.admin
+    .from('salespeople')
+    .select(select)
+    .eq('workspace_id', context.workspaceId)
+    .eq('status', 'active')
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.warn('[dialer/leads] salesperson workspace demo email lookup failed', error);
+    return null;
+  }
+
+  return data as SalespersonReferralRow | null;
+}
+
+async function buildDialerDemoUrl(request: NextRequest, context: DiallerContext): Promise<{
+  url: string;
+  referralCode: string | null;
+}> {
+  const publicOrigin = getPublicOrigin(request);
+  const referralCode = await resolveSalespersonReferralCode(context);
+  const demoPath = '/demo1';
+
+  if (!referralCode) {
+    return {
+      url: new URL(demoPath, publicOrigin).toString(),
+      referralCode: null,
+    };
+  }
+
+  const url = new URL(`/s/${encodeURIComponent(referralCode)}`, publicOrigin);
+  url.searchParams.set('source', 'salesperson');
+  url.searchParams.set('campaign', 'power-dialer-demo');
+  url.searchParams.set('redirect', demoPath);
+
+  return {
+    url: url.toString(),
+    referralCode,
+  };
+}
+
+function buildInterestedLinkText(lead: DiallerLead, demoUrl: string): string {
+  const firstName = cleanText(lead.name).split(/\s+/)[0];
+  const greeting = firstName ? `Hey ${firstName},` : 'Hey,';
+
+  return [
+    greeting,
+    '',
+    'Great connecting with you.',
+    '',
+    'I’ve attached a quick 90 second demo in this message.',
+    '',
+    demoUrl,
+    '',
+    'Take a look when you get the chance. I’m confident you’ll see how powerful this could be for your team, especially around tracking activity, managing leads, and keeping agents accountable in the field.',
+    '',
+    'If you have any questions at all, just text or call me.',
+    '',
+    'Thanks again!',
+  ].join('\n');
+}
+
+function buildDemoEmailContent(lead: DiallerLead, demoUrl: string, senderName: string): { subject: string; text: string; html: string } {
+  const firstName = cleanText(lead.name).split(/\s+/)[0];
+  const greetingName = firstName || 'there';
+  const subject = 'Quick FLYR demo';
+  const text = [
+    `Hey ${greetingName},`,
+    '',
+    `It was great connecting with you. Here is the quick FLYR demo I mentioned:`,
+    '',
+    demoUrl,
+    '',
+    'It shows how teams can track field activity, manage leads, and keep agents accountable from one place.',
+    '',
+    'Reply here with any questions and I will get back to you.',
+    '',
+    `Thanks,`,
+    senderName,
+  ].join('\n');
+
+  const escapedGreetingName = escapeHtml(greetingName);
+  const escapedDemoUrl = escapeHtml(demoUrl);
+  const escapedSenderName = escapeHtml(senderName);
+  const html = `
+    <div style="margin:0;padding:28px 18px;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#111827;">
+      <div style="max-width:580px;margin:0 auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;">
+        <div style="padding:24px 28px 14px;border-bottom:1px solid #e5e7eb;">
+          <div style="font-size:26px;line-height:1;font-weight:800;color:#111827;">FLYR</div>
+          <h1 style="margin:12px 0 0;font-size:22px;line-height:1.25;color:#111827;font-weight:700;">Quick demo</h1>
+        </div>
+        <div style="padding:24px 28px;">
+          <p style="margin:0 0 16px;font-size:15px;line-height:1.65;color:#374151;">Hey ${escapedGreetingName},</p>
+          <p style="margin:0 0 18px;font-size:15px;line-height:1.65;color:#374151;">It was great connecting with you. Here is the quick FLYR demo I mentioned.</p>
+          <p style="margin:0 0 22px;">
+            <a href="${escapedDemoUrl}" style="display:inline-block;background:#111827;color:#ffffff;text-decoration:none;padding:12px 18px;border-radius:8px;font-size:15px;font-weight:700;">
+              Watch the demo
+            </a>
+          </p>
+          <p style="margin:0 0 18px;font-size:15px;line-height:1.65;color:#374151;">It shows how teams can track field activity, manage leads, and keep agents accountable from one place.</p>
+          <p style="margin:0 0 18px;font-size:15px;line-height:1.65;color:#374151;">Reply here with any questions and I will get back to you.</p>
+          <p style="margin:0;font-size:15px;line-height:1.65;color:#374151;">Thanks,<br />${escapedSenderName}</p>
+          <p style="margin:22px 0 0;font-size:12px;line-height:1.55;color:#6b7280;word-break:break-all;">
+            If the button does not work, use this link: <a href="${escapedDemoUrl}" style="color:#374151;text-decoration:underline;">${escapedDemoUrl}</a>
+          </p>
+        </div>
+      </div>
+    </div>
+  `.trim();
+
+  return { subject, text, html };
+}
+
+async function sendDemoEmail(
+  request: NextRequest,
+  context: DiallerContext,
+  lead: DiallerLead,
+  contact: Record<string, unknown> | null
+): Promise<string | null> {
+  const recipient = cleanText(lead.email);
+  if (!recipient) return 'Lead saved, but no email address was added.';
+
+  const apiKey = getEnv('RESEND_API_KEY');
+  if (!apiKey) return 'Lead saved, but RESEND_API_KEY is not configured.';
+
+  const salesperson = await resolveSalespersonForDemoEmail(context);
+  const handleLookupAdmin = context.admin as unknown as HandleLookupClient;
+  const handle = await resolveAvailableDemoEmailHandle(
+    handleLookupAdmin,
+    salesperson,
+    context.requestUser.email
+  );
+  if (salesperson?.id && !cleanText(salesperson.demo_email_handle)) {
+    const { error: handleSaveError } = await context.admin
+      .from('salespeople')
+      .update({ demo_email_handle: handle })
+      .eq('id', salesperson.id)
+      .is('demo_email_handle', null);
+
+    if (handleSaveError) {
+      console.warn('[dialer/leads] failed to store generated demo email handle', handleSaveError);
+    }
+  }
+
+  const senderName = formatDemoSenderName(salesperson, context.requestUser.email);
+  const from = `${senderName} <${handle}@${DEMO_EMAIL_DOMAIN}>`;
+  const replyTo = cleanText(salesperson?.demo_email_reply_to) || cleanText(salesperson?.email) || cleanText(context.requestUser.email) || getEnv('RESEND_REPLY_TO');
+  const demo = await buildDialerDemoUrl(request, context);
+  const content = buildDemoEmailContent(lead, demo.url, senderName);
+  const resend = new Resend(apiKey);
+  const { data, error } = await resend.emails.send({
+    from,
+    to: recipient,
+    subject: content.subject,
+    text: content.text,
+    html: content.html,
+    ...(replyTo ? { replyTo } : {}),
+  });
+
+  if (error) {
+    const message = error.message?.trim() || 'Resend email request failed';
+    return `Lead saved, but the demo email was not sent. ${message}`;
+  }
+
+  const contactId = typeof contact?.id === 'string' ? contact.id : null;
+  if (contactId) {
+    const now = new Date().toISOString();
+    const { error: activityError } = await context.admin.from('contact_activities').insert({
+      contact_id: contactId,
+      type: 'email',
+      note: `Demo email sent: ${content.subject}\n${demo.url}`,
+      timestamp: now,
+    });
+    if (activityError) console.warn('[dialer/leads] failed to log demo email activity', activityError);
+  }
+
+  return data?.id
+    ? null
+    : 'Demo email sent, but Resend did not return a message id.';
+}
+
+async function sendInterestedLink(
+  request: NextRequest,
+  context: DiallerContext,
+  lead: DiallerLead
+): Promise<string | null> {
   const from = getTwilioDefaultSmsFromNumber();
   if (!from) return 'Lead saved, but no SMS-enabled Twilio number is configured.';
 
   const normalizedPhone = normalizePhoneNumber(lead.phone);
   if (!normalizedPhone.e164) return 'Lead saved, but the phone number is not valid for SMS.';
 
+  const demo = await buildDialerDemoUrl(request, context);
   const client = twilio(getTwilioAccountSid(), getTwilioAuthToken());
   const statusCallback = buildPublicTwilioWebhookUrl(request, '/api/twilio/messaging/status');
   await client.messages.create({
     from,
     to: normalizedPhone.e164,
-    body: buildInterestedLinkText(lead, getAppLink(request)),
+    body: buildInterestedLinkText(lead, demo.url),
     statusCallback: statusCallback.toString(),
   });
 
-  return null;
+  return demo.referralCode
+    ? null
+    : 'Demo sent, but no active salesperson referral code was found for this account.';
 }
 
 function cleanIsoDate(value: string | null | undefined): string | null {
@@ -349,14 +682,21 @@ function shapeMissingTableError(error: { message?: string; code?: string } | nul
 
 export async function GET(request: NextRequest) {
   const workspaceId = request.nextUrl.searchParams.get('workspaceId');
+  const requestedIds = parseUuidList(request.nextUrl.searchParams.get('leadIds'));
   const context = await resolveDiallerContext(request, workspaceId);
   if (context instanceof NextResponse) return context;
 
-  const { data, error } = await context.admin
+  let query = context.admin
     .from('dialler_leads')
     .select('*')
     .eq('workspace_id', context.workspaceId)
     .order('created_at', { ascending: true });
+
+  if (requestedIds.length > 0) {
+    query = query.in('id', requestedIds);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     const tableError = shapeMissingTableError(error);
@@ -364,7 +704,16 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: tableError ?? 'Failed to load dialler leads' }, { status: 500 });
   }
 
-  return NextResponse.json({ leads: (data ?? []) as DiallerLead[] });
+  const leads = (data ?? []) as DiallerLead[];
+  if (requestedIds.length === 0) {
+    return NextResponse.json({ leads });
+  }
+
+  const orderById = new Map(requestedIds.map((id, index) => [id, index]));
+  return NextResponse.json({
+    leads: [...leads].sort((a, b) => (orderById.get(a.id) ?? 9999) - (orderById.get(b.id) ?? 9999)),
+    focusedLeadIds: requestedIds,
+  });
 }
 
 export async function POST(request: NextRequest) {
@@ -458,10 +807,21 @@ export async function PATCH(request: NextRequest) {
       cleanText(body.notes) || null
     );
 
+    let warning = contactSave.warning;
+    if (body.sendDemoEmail) {
+      try {
+        const emailWarning = await sendDemoEmail(request, context, data as DiallerLead, contactSave.contact);
+        warning = warning ?? emailWarning;
+      } catch (sendError) {
+        console.error('[dialer/leads] failed to send demo email', sendError);
+        warning = warning ?? (sendError instanceof Error ? sendError.message : 'Lead saved, but the demo email could not be sent.');
+      }
+    }
+
     return NextResponse.json({
       lead: data as DiallerLead,
       contact: contactSave.contact,
-      warning: contactSave.warning,
+      warning,
     });
   }
 
@@ -493,11 +853,18 @@ export async function PATCH(request: NextRequest) {
   let warning: string | null = null;
   if (body.sendLink) {
     try {
-      warning = await sendInterestedLink(request, data as DiallerLead);
+      warning = await sendInterestedLink(request, context, data as DiallerLead);
     } catch (sendError) {
       console.error('[dialer/leads] failed to send interested link', sendError);
       warning = sendError instanceof Error ? sendError.message : 'Lead saved, but the link text could not be sent.';
     }
+
+    const contactSave = await upsertDiallerContact(
+      context,
+      data as DiallerLead,
+      cleanText(body.notes) || null
+    );
+    warning = warning ?? contactSave.warning;
   }
 
   if (body.createNotification) {
@@ -521,16 +888,29 @@ export async function PATCH(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  const body = (await request.json().catch(() => ({}))) as { workspaceId?: string; id?: string; deleteAll?: boolean };
+  const body = (await request.json().catch(() => ({}))) as {
+    workspaceId?: string;
+    id?: string;
+    ids?: string[];
+    deleteAll?: boolean;
+  };
   const context = await resolveDiallerContext(request, body.workspaceId);
   if (context instanceof NextResponse) return context;
 
   if (body.deleteAll) {
-    const { data, error } = await context.admin
+    const ids = Array.isArray(body.ids)
+      ? Array.from(new Set(body.ids.map((id) => id.trim()).filter((id) => UUID_PATTERN.test(id)))).slice(0, 100)
+      : [];
+    let query = context.admin
       .from('dialler_leads')
       .delete()
-      .eq('workspace_id', context.workspaceId)
-      .select('id');
+      .eq('workspace_id', context.workspaceId);
+
+    if (ids.length > 0) {
+      query = query.in('id', ids);
+    }
+
+    const { data, error } = await query.select('id');
 
     if (error) {
       const tableError = shapeMissingTableError(error);

@@ -1,20 +1,13 @@
 'use client';
 
 import Image from 'next/image';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ChangeEvent } from 'react';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   Copy,
   Download,
-  ExternalLink,
-  ImageIcon,
   Loader2,
-  Plus,
   Save,
-  Trash2,
-  Upload,
-  Video,
-  X,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -23,17 +16,20 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Textarea } from '@/components/ui/textarea';
-import { createClient as createSupabaseBrowserClient } from '@/lib/supabase/client';
+import { useWorkspace } from '@/lib/workspace-context';
 
 type DashboardPayload = {
   referralCode: string;
   shareLink: string;
   landingPageUrl: string;
+  reTeamLink: string;
   commissionRate: number;
   commissionDurationMonths: number | null;
   totalClicks: number;
   landingPageViews: number;
+  reTeamLandingPageViews: number;
+  reTeamClicks: number;
+  reTeamSignupCount: number;
   signupCount: number;
   workspaceCount: number;
   paidActiveReferralCount: number;
@@ -61,36 +57,6 @@ type LandingPagePayload = {
   isPublished: boolean;
   publicUrl: string;
 };
-
-type AmbassadorLink = {
-  id: string;
-  name: string;
-  source: string;
-  campaign: string;
-  destination: 'onboarding' | 'landing_page';
-  generatedUrl: string;
-  clickCount: number;
-  signupCount: number;
-  paidCustomerCount: number;
-  notes?: string | null;
-  createdAt: string;
-};
-
-type LinkDraft = {
-  name: string;
-  source: string;
-  campaign: string;
-  notes: string;
-};
-
-const emptyLinkDraft: LinkDraft = {
-  name: '',
-  source: 'instagram',
-  campaign: '',
-  notes: '',
-};
-
-const FREE_TRIAL_BUTTON_TEXT = 'Start 14 day free trial';
 
 const brandingBlocks = [
   {
@@ -168,36 +134,13 @@ async function copyText(value: string) {
 }
 
 export function AmbassadorPartnerPortal() {
+  const router = useRouter();
+  const { accessLevel, isAmbassador } = useWorkspace();
   const [dashboard, setDashboard] = useState<DashboardPayload | null>(null);
   const [landingPage, setLandingPage] = useState<LandingPagePayload | null>(null);
-  const [links, setLinks] = useState<AmbassadorLink[]>([]);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<string | null>(null);
-  const [landingSaving, setLandingSaving] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
-  const [linkSaving, setLinkSaving] = useState(false);
-  const [mediaUploading, setMediaUploading] = useState<'photo' | 'video' | null>(null);
-  const [linkDraft, setLinkDraft] = useState<LinkDraft>(emptyLinkDraft);
-  const [editingLinkId, setEditingLinkId] = useState<string | null>(null);
-  const photoInputRef = useRef<HTMLInputElement | null>(null);
-  const videoInputRef = useRef<HTMLInputElement | null>(null);
-
-  const landingDraft = useMemo(
-    () => ({
-      slug: landingPage?.slug ?? '',
-      displayName: landingPage?.displayName ?? '',
-      headline: landingPage?.headline ?? '',
-      introMessage: landingPage?.introMessage ?? '',
-      profileImageUrl: landingPage?.profileImageUrl ?? '',
-      heroVideoUrl: landingPage?.heroVideoUrl ?? '',
-      audienceType: landingPage?.audienceType ?? 'real_estate',
-      ctaText: landingPage?.ctaText ?? FREE_TRIAL_BUTTON_TEXT,
-      offerText: landingPage?.offerText ?? '',
-      isPublished: landingPage?.isPublished ?? false,
-    }),
-    [landingPage]
-  );
-  const [landingForm, setLandingForm] = useState(landingDraft);
   const [settingsForm, setSettingsForm] = useState({
     username: '',
     displayName: '',
@@ -207,10 +150,9 @@ export function AmbassadorPartnerPortal() {
     setLoading(true);
     setStatus(null);
     try {
-      const [dashboardRes, landingRes, linksRes] = await Promise.all([
+      const [dashboardRes, landingRes] = await Promise.all([
         fetch('/api/ambassador/dashboard', { credentials: 'include' }),
         fetch('/api/ambassador/landing-page', { credentials: 'include' }),
-        fetch('/api/ambassador/links', { credentials: 'include' }),
       ]);
       if (dashboardRes.status === 403) {
         setStatus('Ambassador access is not active for this account.');
@@ -220,26 +162,10 @@ export function AmbassadorPartnerPortal() {
       if (landingRes.ok) {
         const landing = (await landingRes.json()) as LandingPagePayload;
         setLandingPage(landing);
-        setLandingForm({
-          slug: landing.slug ?? '',
-          displayName: landing.displayName ?? '',
-          headline: landing.headline ?? '',
-          introMessage: landing.introMessage ?? '',
-          profileImageUrl: landing.profileImageUrl ?? '',
-          heroVideoUrl: landing.heroVideoUrl ?? '',
-          audienceType: landing.audienceType ?? 'real_estate',
-          ctaText: landing.ctaText ?? FREE_TRIAL_BUTTON_TEXT,
-          offerText: landing.offerText ?? '',
-          isPublished: landing.isPublished ?? false,
-        });
         setSettingsForm({
           username: landing.slug ?? '',
           displayName: landing.displayName ?? '',
         });
-      }
-      if (linksRes.ok) {
-        const payload = (await linksRes.json()) as { links: AmbassadorLink[] };
-        setLinks(payload.links ?? []);
       }
     } catch {
       setStatus('Could not load your partner portal. Please refresh and try again.');
@@ -249,136 +175,13 @@ export function AmbassadorPartnerPortal() {
   };
 
   useEffect(() => {
+    if (accessLevel === 'salesperson' && !isAmbassador) {
+      router.replace('/home');
+      return;
+    }
+
     void loadAll();
-  }, []);
-
-  const saveLandingPage = async () => {
-    setLandingSaving(true);
-    setStatus(null);
-    try {
-      const response = await fetch('/api/ambassador/landing-page', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...landingForm,
-          ctaText: FREE_TRIAL_BUTTON_TEXT,
-        }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        setStatus(payload.error ?? 'Could not save landing page settings.');
-        return;
-      }
-      setLandingPage(payload);
-      setLandingForm((current) => ({
-        ...current,
-        ...payload,
-        ctaText: payload.ctaText ?? FREE_TRIAL_BUTTON_TEXT,
-      }));
-      setStatus('Landing page saved.');
-    } finally {
-      setLandingSaving(false);
-    }
-  };
-
-  const uploadLandingMedia = async (kind: 'photo' | 'video', file: File | null | undefined) => {
-    if (!file) return;
-
-    setMediaUploading(kind);
-    setStatus(null);
-    try {
-      const prepareResponse = await fetch('/api/ambassador/media', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'prepare',
-          kind,
-          fileName: file.name,
-          contentType: file.type,
-          size: file.size,
-        }),
-      });
-      const preparePayload = await prepareResponse.json().catch(() => ({}));
-      if (!prepareResponse.ok) {
-        setStatus(preparePayload.error ?? 'Could not prepare upload.');
-        return;
-      }
-
-      const supabase = createSupabaseBrowserClient();
-      const { error: uploadError } = await supabase.storage
-        .from(preparePayload.bucket)
-        .uploadToSignedUrl(preparePayload.path, preparePayload.token, file);
-
-      if (uploadError) {
-        setStatus(uploadError.message || 'Could not upload media.');
-        return;
-      }
-
-      const completeResponse = await fetch('/api/ambassador/media', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'complete',
-          kind,
-          path: preparePayload.path,
-        }),
-      });
-      const completePayload = await completeResponse.json().catch(() => ({}));
-      if (!completeResponse.ok) {
-        setStatus(completePayload.error ?? 'Upload finished, but the landing page could not be updated.');
-        return;
-      }
-
-      if (completePayload.landingPage) {
-        setLandingPage(completePayload.landingPage);
-        setLandingForm((current) => ({
-          ...current,
-          profileImageUrl: completePayload.landingPage.profileImageUrl ?? '',
-          heroVideoUrl: completePayload.landingPage.heroVideoUrl ?? '',
-        }));
-      }
-
-      setStatus(kind === 'photo' ? 'Photo uploaded.' : 'Video uploaded.');
-    } finally {
-      setMediaUploading(null);
-      if (kind === 'photo' && photoInputRef.current) photoInputRef.current.value = '';
-      if (kind === 'video' && videoInputRef.current) videoInputRef.current.value = '';
-    }
-  };
-
-  const clearLandingMedia = async (kind: 'photo' | 'video') => {
-    const nextForm = {
-      ...landingForm,
-      profileImageUrl: kind === 'photo' ? '' : landingForm.profileImageUrl,
-      heroVideoUrl: kind === 'video' ? '' : landingForm.heroVideoUrl,
-    };
-    setLandingForm(nextForm);
-    setLandingSaving(true);
-    setStatus(null);
-    try {
-      const response = await fetch('/api/ambassador/landing-page', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...nextForm,
-          ctaText: FREE_TRIAL_BUTTON_TEXT,
-        }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        setStatus(payload.error ?? 'Could not remove media.');
-        return;
-      }
-      setLandingPage(payload);
-      setStatus(kind === 'photo' ? 'Photo removed.' : 'Video removed.');
-    } finally {
-      setLandingSaving(false);
-    }
-  };
+  }, [accessLevel, isAmbassador, router]);
 
   const saveSettings = async () => {
     setSettingsSaving(true);
@@ -405,11 +208,6 @@ export function AmbassadorPartnerPortal() {
             }
           : current
       );
-      setLandingForm((current) => ({
-        ...current,
-        slug: payload.username ?? current.slug,
-        displayName: payload.displayName ?? current.displayName,
-      }));
       setSettingsForm({
         username: payload.username ?? settingsForm.username,
         displayName: payload.displayName ?? settingsForm.displayName,
@@ -419,53 +217,6 @@ export function AmbassadorPartnerPortal() {
     } finally {
       setSettingsSaving(false);
     }
-  };
-
-  const submitLink = async () => {
-    setLinkSaving(true);
-    setStatus(null);
-    try {
-      const method = editingLinkId ? 'PATCH' : 'POST';
-      const url = editingLinkId ? `/api/ambassador/links/${editingLinkId}` : '/api/ambassador/links';
-      const response = await fetch(url, {
-        method,
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(linkDraft),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        setStatus(payload.error ?? 'Could not save link.');
-        return;
-      }
-      setLinkDraft(emptyLinkDraft);
-      setEditingLinkId(null);
-      await loadAll();
-      setStatus(editingLinkId ? 'Link updated.' : 'Link created.');
-    } finally {
-      setLinkSaving(false);
-    }
-  };
-
-  const deleteLink = async (id: string) => {
-    const response = await fetch(`/api/ambassador/links/${id}`, {
-      method: 'DELETE',
-      credentials: 'include',
-    });
-    if (response.ok) {
-      setLinks((current) => current.filter((link) => link.id !== id));
-      setStatus('Link deleted.');
-    }
-  };
-
-  const editLink = (link: AmbassadorLink) => {
-    setEditingLinkId(link.id);
-    setLinkDraft({
-      name: link.name,
-      source: link.source,
-      campaign: link.campaign,
-      notes: link.notes ?? '',
-    });
   };
 
   if (loading) {
@@ -485,7 +236,7 @@ export function AmbassadorPartnerPortal() {
             <Badge>AMBASSADOR</Badge>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            Track referrals, manage your offer page, build campaign links, and copy approved content.
+            Track referrals and copy approved content.
           </p>
         </div>
         {dashboard ? (
@@ -498,10 +249,8 @@ export function AmbassadorPartnerPortal() {
       {status ? <div className="rounded-md border bg-background p-3 text-sm">{status}</div> : null}
 
       <Tabs defaultValue="dashboard" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-2 md:w-fit md:grid-cols-5">
+        <TabsList className="grid w-full grid-cols-3 md:w-fit">
           <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
-          <TabsTrigger value="landing">Landing Page</TabsTrigger>
-          <TabsTrigger value="links">Link Builder</TabsTrigger>
           <TabsTrigger value="kit">Branding Kit</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
         </TabsList>
@@ -534,6 +283,7 @@ export function AmbassadorPartnerPortal() {
               <CardContent className="space-y-3">
                 {[
                   ['Main link', dashboard?.shareLink ?? ''],
+                  ['RE Team link', dashboard?.reTeamLink ?? ''],
                   ['Referral code', dashboard?.referralCode ?? ''],
                   ['Landing page', dashboard?.landingPageUrl ?? ''],
                 ].map(([label, value]) => (
@@ -554,7 +304,7 @@ export function AmbassadorPartnerPortal() {
                 <CardTitle>Funnel</CardTitle>
                 <CardDescription>Clicks -&gt; Signups -&gt; Paid -&gt; Commission</CardDescription>
               </CardHeader>
-              <CardContent>
+              <CardContent className="space-y-4">
                 <div className="grid grid-cols-4 gap-2 text-center text-sm">
                   {[
                     dashboard?.totalClicks ?? 0,
@@ -566,6 +316,21 @@ export function AmbassadorPartnerPortal() {
                       {value}
                     </div>
                   ))}
+                </div>
+                <div className="rounded-md border bg-muted/30 p-3">
+                  <div className="mb-3 text-sm font-medium">RE Team link</div>
+                  <div className="grid grid-cols-3 gap-2 text-center text-sm">
+                    {[
+                      ['Views', dashboard?.reTeamLandingPageViews ?? 0],
+                      ['Clicks', dashboard?.reTeamClicks ?? 0],
+                      ['Signups', dashboard?.reTeamSignupCount ?? 0],
+                    ].map(([label, value]) => (
+                      <div key={label} className="rounded-md border bg-background p-2">
+                        <div className="font-semibold">{value}</div>
+                        <div className="text-xs text-muted-foreground">{label}</div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -599,250 +364,6 @@ export function AmbassadorPartnerPortal() {
                 </Table>
               ) : (
                 <p className="text-sm text-muted-foreground">No commission activity yet.</p>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="landing" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Custom Landing Page</CardTitle>
-              <CardDescription>Control your public partner offer page.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-3 md:grid-cols-[1fr_auto_auto] md:items-end">
-                <div className="space-y-2">
-                  <Label>Public URL</Label>
-                  <Input value={landingPage?.publicUrl ?? ''} readOnly />
-                </div>
-                <Button variant="outline" onClick={() => copyText(landingPage?.publicUrl ?? '')}>
-                  <Copy className="mr-2 h-4 w-4" />
-                  Copy URL
-                </Button>
-                <Button variant="outline" asChild>
-                  <a href={landingPage?.publicUrl ?? '#'} target="_blank" rel="noreferrer">
-                    <ExternalLink className="mr-2 h-4 w-4" />
-                    Preview
-                  </a>
-                </Button>
-              </div>
-
-              <div className="grid gap-4">
-                <div className="space-y-2 md:col-span-2">
-                  <Label>Headline</Label>
-                  <Input value={landingForm.headline} onChange={(event) => setLandingForm({ ...landingForm, headline: event.target.value })} />
-                </div>
-                <div className="space-y-2 md:col-span-2">
-                  <Label>Subline</Label>
-                  <Textarea value={landingForm.introMessage} onChange={(event) => setLandingForm({ ...landingForm, introMessage: event.target.value })} />
-                </div>
-                <div className="space-y-3 md:col-span-2">
-                  <Label>Photo or video</Label>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="rounded-md border bg-muted/20 p-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-2 text-sm font-medium">
-                          <ImageIcon className="h-4 w-4 text-muted-foreground" />
-                          Photo
-                        </div>
-                        <div className="flex gap-2">
-                          {landingForm.profileImageUrl ? (
-                            <Button variant="outline" size="sm" onClick={() => clearLandingMedia('photo')}>
-                              <X className="h-4 w-4" />
-                            </Button>
-                          ) : null}
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => photoInputRef.current?.click()}
-                            disabled={mediaUploading !== null}
-                          >
-                            {mediaUploading === 'photo' ? (
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            ) : (
-                              <Upload className="mr-2 h-4 w-4" />
-                            )}
-                            Upload
-                          </Button>
-                        </div>
-                      </div>
-                      {landingForm.profileImageUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={landingForm.profileImageUrl}
-                          alt="Landing page photo preview"
-                          className="mt-3 aspect-video w-full rounded-md border object-cover"
-                        />
-                      ) : (
-                        <div className="mt-3 flex aspect-video items-center justify-center rounded-md border border-dashed text-sm text-muted-foreground">
-                          No photo uploaded
-                        </div>
-                      )}
-                      <input
-                        ref={photoInputRef}
-                        type="file"
-                        accept="image/jpeg,image/png,image/webp,image/gif"
-                        className="hidden"
-                        onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                          uploadLandingMedia('photo', event.target.files?.[0])
-                        }
-                      />
-                    </div>
-
-                    <div className="rounded-md border bg-muted/20 p-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-2 text-sm font-medium">
-                          <Video className="h-4 w-4 text-muted-foreground" />
-                          Video
-                        </div>
-                        <div className="flex gap-2">
-                          {landingForm.heroVideoUrl ? (
-                            <Button variant="outline" size="sm" onClick={() => clearLandingMedia('video')}>
-                              <X className="h-4 w-4" />
-                            </Button>
-                          ) : null}
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => videoInputRef.current?.click()}
-                            disabled={mediaUploading !== null}
-                          >
-                            {mediaUploading === 'video' ? (
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            ) : (
-                              <Upload className="mr-2 h-4 w-4" />
-                            )}
-                            Upload
-                          </Button>
-                        </div>
-                      </div>
-                      {landingForm.heroVideoUrl ? (
-                        <video
-                          src={landingForm.heroVideoUrl}
-                          className="mt-3 aspect-video w-full rounded-md border object-cover"
-                          controls
-                          playsInline
-                        />
-                      ) : (
-                        <div className="mt-3 flex aspect-video items-center justify-center rounded-md border border-dashed text-sm text-muted-foreground">
-                          No video uploaded
-                        </div>
-                      )}
-                      <input
-                        ref={videoInputRef}
-                        type="file"
-                        accept="video/mp4,video/webm,video/quicktime"
-                        className="hidden"
-                        onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                          uploadLandingMedia('video', event.target.files?.[0])
-                        }
-                      />
-                    </div>
-                  </div>
-                </div>
-                <div className="space-y-2 md:col-span-2">
-                  <Label>CTA</Label>
-                  <Textarea value={landingForm.offerText} onChange={(event) => setLandingForm({ ...landingForm, offerText: event.target.value })} />
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <Button
-                  variant={landingForm.isPublished ? 'default' : 'outline'}
-                  onClick={() => setLandingForm({ ...landingForm, isPublished: !landingForm.isPublished })}
-                >
-                  {landingForm.isPublished ? 'Published' : 'Unpublished'}
-                </Button>
-                <Button onClick={saveLandingPage} disabled={landingSaving}>
-                  {landingSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                  Save
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="links" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>{editingLinkId ? 'Edit Link' : 'Create Link'}</CardTitle>
-              <CardDescription>Create tracked links for each platform or content campaign.</CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-4 md:grid-cols-4">
-              <div className="space-y-2">
-                <Label>Name</Label>
-                <Input value={linkDraft.name} onChange={(event) => setLinkDraft({ ...linkDraft, name: event.target.value })} />
-              </div>
-              <div className="space-y-2">
-                <Label>Source</Label>
-                <Input value={linkDraft.source} onChange={(event) => setLinkDraft({ ...linkDraft, source: event.target.value })} />
-              </div>
-              <div className="space-y-2">
-                <Label>Campaign</Label>
-                <Input value={linkDraft.campaign} onChange={(event) => setLinkDraft({ ...linkDraft, campaign: event.target.value })} />
-              </div>
-              <div className="flex items-end">
-                <Button className="w-full" onClick={submitLink} disabled={linkSaving}>
-                  {linkSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
-                  {editingLinkId ? 'Save Link' : 'Create'}
-                </Button>
-              </div>
-              <div className="space-y-2 md:col-span-4">
-                <Label>Notes</Label>
-                <Textarea value={linkDraft.notes} onChange={(event) => setLinkDraft({ ...linkDraft, notes: event.target.value })} />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Tracked Links</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {links.length ? (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Source</TableHead>
-                      <TableHead>Campaign</TableHead>
-                      <TableHead>Clicks</TableHead>
-                      <TableHead>Signups</TableHead>
-                      <TableHead>Paid</TableHead>
-                      <TableHead>Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {links.map((link) => (
-                      <TableRow key={link.id}>
-                        <TableCell>{link.name}</TableCell>
-                        <TableCell>{link.source}</TableCell>
-                        <TableCell>{link.campaign}</TableCell>
-                        <TableCell>{link.clickCount}</TableCell>
-                        <TableCell>{link.signupCount}</TableCell>
-                        <TableCell>{link.paidCustomerCount}</TableCell>
-                        <TableCell>
-                          <div className="flex gap-2">
-                            <Button variant="outline" size="sm" onClick={() => copyText(link.generatedUrl)}>
-                              <Copy className="h-4 w-4" />
-                            </Button>
-                            <Button variant="outline" size="sm" onClick={() => editLink(link)}>
-                              Edit
-                            </Button>
-                            <Button variant="outline" size="sm" onClick={() => deleteLink(link.id)}>
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  Create your first tracked link for Instagram, TikTok, YouTube, email, or DMs.
-                </p>
               )}
             </CardContent>
           </Card>

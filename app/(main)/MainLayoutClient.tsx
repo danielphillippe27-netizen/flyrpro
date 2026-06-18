@@ -8,7 +8,8 @@ import { WorkspaceProvider, useWorkspace } from '@/lib/workspace-context';
 import AppTopHeader from '@/components/layout/AppTopHeader';
 import { MainLayoutNavProvider, useMainLayoutNav } from '@/components/layout/MainLayoutNavContext';
 import { MainRouteGuard } from '@/components/guard/MainRouteGuard';
-import { Home, Trophy, Users, Settings, Target, Gauge, Plug, MessageCircle, Activity, Clock, CalendarDays, CornerDownRight, Plus, Link2, UserRoundPlus, BriefcaseBusiness, PhoneCall, ListChecks, Search, Handshake } from 'lucide-react';
+import { DialerRuntimeProvider } from '@/components/dialer/DialerRuntimeProvider';
+import { Home, Trophy, Users, Settings, Target, Gauge, Plug, MessageCircle, Activity, Clock, CalendarDays, CornerDownRight, Plus, UserRoundPlus, BriefcaseBusiness, PhoneCall, Handshake, FileText, Inbox, PlayCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { DashboardAccessLevel } from '@/app/api/_utils/workspace';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
@@ -17,8 +18,12 @@ import { getIndustryCopy } from '@/lib/industry-copy';
 const SIDEBAR_COLLAPSED_W = 48;   // 3rem – icons only
 const SIDEBAR_EXPANDED_W = 160;   // 10rem – icons + labels
 
+const scriptsTab = { href: '/scripts', icon: FileText, label: 'Scripts' };
+const inboxTab = { href: '/inbox', icon: Inbox, label: 'Inbox' };
+
 const baseTabs = [
   { href: '/home', icon: Home, label: 'Home' },
+  inboxTab,
   { href: '/campaigns', icon: Target, label: 'Campaign' },
   { href: '/activity', icon: Activity, label: 'Activity' },
   { href: '/leads', icon: Users, label: 'Leads' },
@@ -31,25 +36,30 @@ const baseTabs = [
 ];
 
 const supportTab = { href: '/support', icon: MessageCircle, label: 'Support' };
-const offersTab = { href: '/offers', icon: Link2, label: 'Offers' };
 const ambassadorsTab = { href: '/ambassadors', icon: UserRoundPlus, label: 'Ambassadors' };
 const ambassadorPortalTab = { href: '/ambassador-dashboard', icon: Handshake, label: 'Ambassador' };
 const salespeopleTab = { href: '/salespeople', icon: BriefcaseBusiness, label: 'Salespeople' };
+const salesLeaderboardTab = { href: '/sales-leaderboard', icon: Trophy, label: 'Sales Board' };
 const diallerTab = { href: '/dialer', icon: PhoneCall, label: 'Dialler' };
+const demoTab = { href: '/demo-center', icon: PlayCircle, label: 'Demo' };
 const settingsTab = { href: '/settings', icon: Settings, label: 'Settings' };
 const salespersonWorkspaceTabs = [
   { href: '/home', icon: Home, label: 'Home' },
+  inboxTab,
   diallerTab,
-  { href: '/list', icon: ListChecks, label: 'List' },
+  scriptsTab,
   { href: '/leads', icon: Users, label: 'Leads' },
+  { href: '/scraper', icon: Plus, label: 'Add Leads' },
+  demoTab,
   { href: '/stats', icon: Gauge, label: 'Performance' },
-  { href: '/scraper', icon: Search, label: 'Scraper' },
   settingsTab,
 ];
 const founderTabs = [
   ...baseTabs.filter((tab) => ['/home'].includes(tab.href)),
+  inboxTab,
   ambassadorsTab,
   salespeopleTab,
+  salesLeaderboardTab,
   ...baseTabs.filter((tab) => ['/activity', '/leads'].includes(tab.href)),
   diallerTab,
   ...baseTabs.filter((tab) => ['/follow-up', '/appointments', '/calendar'].includes(tab.href)),
@@ -59,6 +69,7 @@ const founderTabs = [
 const memberTabs = baseTabs.filter((tab) =>
   [
     '/home',
+    '/inbox',
     '/campaigns',
     '/leads',
     '/activity',
@@ -103,31 +114,34 @@ function MainNavItems({
   const { currentWorkspace } = useWorkspace();
   const copy = getIndustryCopy(currentWorkspace?.industry);
   const createCampaignLabel = copy.actions.createCampaign;
+  const showCreate = accessLevel !== 'salesperson';
 
   return (
     <>
-      <Link
-        href="/campaigns/create"
-        onClick={onNavigate}
-        className={cn(
-          'flex items-center gap-2 py-2.5 rounded-md w-full transition-opacity hover:opacity-90 min-h-[42px]',
-          variant === 'drawer' ? 'px-3 justify-start' : sidebarExpanded ? 'px-2.5 justify-start' : 'justify-center px-0'
-        )}
-        title={createCampaignLabel}
-        aria-label={createCampaignLabel}
-      >
-        <span className="flex items-center justify-center w-8 h-8 rounded-md bg-red-500 text-white shrink-0">
-          <Plus className="w-4 h-4" strokeWidth={2.5} />
-        </span>
-        <span
+      {showCreate ? (
+        <Link
+          href="/campaigns/create"
+          onClick={onNavigate}
           className={cn(
-            'text-[13px] font-medium text-red-500 whitespace-nowrap overflow-hidden',
-            showLabels ? 'opacity-100' : 'opacity-0 w-0 sr-only'
+            'flex items-center gap-2 py-2.5 rounded-md w-full transition-opacity hover:opacity-90 min-h-[42px]',
+            variant === 'drawer' ? 'px-3 justify-start' : sidebarExpanded ? 'px-2.5 justify-start' : 'justify-center px-0'
           )}
+          title={createCampaignLabel}
+          aria-label={createCampaignLabel}
         >
-          Create
-        </span>
-      </Link>
+          <span className="flex items-center justify-center w-8 h-8 rounded-md bg-red-500 text-white shrink-0">
+            <Plus className="w-4 h-4" strokeWidth={2.5} />
+          </span>
+          <span
+            className={cn(
+              'text-[13px] font-medium text-red-500 whitespace-nowrap overflow-hidden',
+              showLabels ? 'opacity-100' : 'opacity-0 w-0 sr-only'
+            )}
+          >
+            Create
+          </span>
+        </Link>
+      ) : null}
       {tabs.map((tab) => {
         const Icon = tab.icon;
         const label = copy.navLabels[tab.href] ?? tab.label;
@@ -278,6 +292,7 @@ function MainLayoutContent({
   const tabs: TabDef[] = (() => {
     const withAmbassadorPortal = (items: TabDef[]) => {
       if (!isAmbassador) return items;
+      if (items.some((tab) => tab.href === ambassadorPortalTab.href)) return items;
       const settingsIndex = items.findIndex((tab) => tab.href === '/settings');
       if (settingsIndex === -1) return [...items, ambassadorPortalTab];
       return [
@@ -298,9 +313,11 @@ function MainLayoutContent({
   return (
     <MainRouteGuard>
       <MainLayoutNavProvider>
-        <MainLayoutShell tabs={tabs} pathname={pathname} accessLevel={accessLevel}>
-          {children}
-        </MainLayoutShell>
+        <DialerRuntimeProvider>
+          <MainLayoutShell tabs={tabs} pathname={pathname} accessLevel={accessLevel}>
+            {children}
+          </MainLayoutShell>
+        </DialerRuntimeProvider>
       </MainLayoutNavProvider>
     </MainRouteGuard>
   );

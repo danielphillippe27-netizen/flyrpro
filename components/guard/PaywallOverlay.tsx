@@ -10,8 +10,11 @@ type AccessState = {
   role: string | null;
   workspaceName: string | null;
   maxSeats?: number;
+  billableSeats?: number;
   hasAccess: boolean;
   reason?: string;
+  subscriptionStatus?: string | null;
+  trialEndsAt?: string | null;
 };
 
 const FEATURES = [
@@ -25,6 +28,13 @@ const FEATURES = [
   { icon: MoreHorizontal, label: '& much more' },
 ] as const;
 
+const hasExpiredTrial = (state: AccessState, queryReason: string | null) => {
+  if (queryReason === 'trial-ended' || state.reason === 'trial-ended') return true;
+  if (state.subscriptionStatus !== 'trialing' || !state.trialEndsAt) return false;
+  const trialEnd = new Date(state.trialEndsAt).getTime();
+  return Number.isFinite(trialEnd) && trialEnd <= Date.now();
+};
+
 export function PaywallOverlay() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -33,15 +43,17 @@ export function PaywallOverlay() {
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const [plan, setPlan] = useState<'annual' | 'monthly'>('annual');
-  const [currency, setCurrency] = useState<'USD' | 'CAD'>('CAD');
-  const seats = Math.max(1, state?.maxSeats ?? 1);
+  const [currency, setCurrency] = useState<'USD' | 'CAD'>('USD');
+  const seats = Math.max(1, state?.billableSeats ?? state?.maxSeats ?? 1);
 
-  const annualBase = currency === 'CAD' ? 399 : 299;
+  const annualBase = currency === 'CAD' ? 400 : 300;
+  const annualRetailBase = annualBase * 2;
   const annualMonthlyEquivalent = annualBase / 12;
   const annualTotal = annualBase * seats;
-  const monthlyPrice = currency === 'CAD' ? 39.99 : 29.99;
+  const monthlyPrice = currency === 'CAD' ? 40 : 30;
+  const monthlyRetailPrice = monthlyPrice * 2;
   const monthlyTotal = monthlyPrice * seats;
-  const cadMonthlyList = 50 * seats;
+  const monthlyRetailTotal = monthlyRetailPrice * seats;
 
   useEffect(() => {
     let mounted = true;
@@ -100,7 +112,7 @@ export function PaywallOverlay() {
       } else {
         setCheckoutError(data?.error ?? 'Failed to start checkout.');
       }
-    } catch (e) {
+    } catch {
       setCheckoutError('Network error. Please try again.');
     } finally {
       setCheckoutLoading(false);
@@ -124,6 +136,7 @@ export function PaywallOverlay() {
   const isMemberInactive =
     state.reason === 'member-inactive' ||
     (state.role !== 'owner' && !state.hasAccess);
+  const isTrialEnded = hasExpiredTrial(state, searchParams.get('reason'));
 
   return (
     <div
@@ -158,10 +171,12 @@ export function PaywallOverlay() {
           <>
             <div className="text-center space-y-3">
               <h1 id="paywall-title" className="text-5xl font-bold text-foreground">
-                Track your outreach.
+                {isTrialEnded ? 'TRIAL ended' : 'Track your outreach.'}
               </h1>
               <p className="text-muted-foreground text-xl">
-                Your business will reward you.
+                {isTrialEnded
+                  ? "Continue reaching your business's potential by choosing a payment plan."
+                  : 'Your business will reward you.'}
               </p>
             </div>
 
@@ -192,10 +207,18 @@ export function PaywallOverlay() {
                     <span className="ml-1 text-[10px] uppercase text-muted-foreground">{currency}</span>
                   </p>
                 </div>
-                <p className="font-semibold text-foreground text-right">
-                  ~${(annualMonthlyEquivalent * seats).toFixed(2)}/month
-                  <span className="ml-1 text-[10px] font-normal uppercase text-muted-foreground">{currency}</span>
-                </p>
+                <div className="text-right">
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-600 dark:text-emerald-300">
+                    50% off early bird
+                  </p>
+                  <p className="font-semibold text-foreground">
+                    <span className="mr-2 text-sm font-normal text-muted-foreground line-through">
+                      ${(annualRetailBase / 12 * seats).toFixed(2)}
+                    </span>
+                    ~${(annualMonthlyEquivalent * seats).toFixed(2)}/month
+                    <span className="ml-1 text-[10px] font-normal uppercase text-muted-foreground">{currency}</span>
+                  </p>
+                </div>
               </button>
               <button
                 type="button"
@@ -211,27 +234,21 @@ export function PaywallOverlay() {
                   <p className="text-xs text-muted-foreground">
                     {seats} seat{seats === 1 ? '' : 's'}
                   </p>
-                  {currency === 'CAD' && (
-                    <p className="text-xs text-muted-foreground">Limited-time offer</p>
-                  )}
+                  <p className="text-xs text-muted-foreground">Founding Team Pricing</p>
                 </div>
                 <p className="font-semibold text-foreground text-right">
-                  {currency === 'CAD' ? (
-                    <span className="flex flex-col items-end">
-                      <span className="line-through text-muted-foreground text-sm font-normal">
-                        ${cadMonthlyList.toFixed(2)}/month <span className="text-[10px] uppercase">CAD</span>
-                      </span>
-                      <span>
-                        ${monthlyTotal.toFixed(2)}/month{' '}
-                        <span className="text-[10px] font-normal uppercase text-muted-foreground">CAD</span>
-                      </span>
+                  <span className="flex flex-col items-end">
+                    <span className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-600 dark:text-emerald-300">
+                      50% off early bird
                     </span>
-                  ) : (
+                    <span className="line-through text-muted-foreground text-sm font-normal">
+                      ${monthlyRetailTotal.toFixed(2)}/month <span className="text-[10px] uppercase">{currency}</span>
+                    </span>
                     <span>
                       ${monthlyTotal.toFixed(2)}/month{' '}
-                      <span className="ml-1 text-[10px] font-normal uppercase text-muted-foreground">USD</span>
+                      <span className="text-[10px] font-normal uppercase text-muted-foreground">{currency}</span>
                     </span>
-                  )}
+                  </span>
                 </p>
               </button>
             </div>
@@ -256,7 +273,11 @@ export function PaywallOverlay() {
                 disabled={checkoutLoading}
                 className="w-full bg-primary hover:bg-primary/90"
               >
-                {checkoutLoading ? 'Redirecting…' : 'Start trial'}
+                {checkoutLoading
+                  ? 'Redirecting…'
+                  : isTrialEnded
+                    ? 'Continue with payment'
+                    : 'Start trial'}
               </Button>
               <p className="text-xs text-muted-foreground text-center">
                 Recurring billing. Cancel anytime.

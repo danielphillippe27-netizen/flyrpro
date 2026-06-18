@@ -343,7 +343,7 @@ async function run() {
     assertEqual(match.buildingId, 'building-2');
   });
 
-  test('Canonical proximity: street metadata is required outside containment or parcel bridge', () => {
+  test('Footprint grace: building with no street metadata can link a just-outside street address', () => {
     const service = createStableLinkerHarness();
     const building = makeBuilding(
       'building-3',
@@ -352,7 +352,8 @@ async function run() {
     const address = makeAddress('300', -79.00098, 43.00110, 'Pine Road');
 
     const match = service.matchAddressToBuilding(address, [building]);
-    assertEqual(match.matchType, 'orphan');
+    assertEqual(match.matchType, 'point_on_surface');
+    assertEqual(match.buildingId, 'building-3');
   });
 
   test('Canonical proximity: same-street distance can reach the 45m band', () => {
@@ -696,7 +697,7 @@ async function run() {
     assertTrue(match.distanceMeters < 10, 'Expected footprint distance under 10m');
   });
 
-  test('Right-outside footprint address: no street metadata still links by geometry', () => {
+  test('Right-outside footprint address: no usable street signal stays orphan', () => {
     const service = new StableLinkerService({} as any);
     const building = makeBuilding(
       'no-street-building',
@@ -720,6 +721,23 @@ async function run() {
       { primaryStreet: 'Other Road' }
     );
     const address = makeAddress('602', -79.01860, 43.02010, 'Fallback Road');
+
+    const match = (service as any).matchAddressToBuilding(
+      address,
+      [building]
+    );
+
+    assertEqual(match.matchType, 'orphan');
+  });
+
+  test('Right-outside different-street address stays orphan without parcel bridge', () => {
+    const service = new StableLinkerService({} as any);
+    const building = makeBuilding(
+      'wrong-street-edge',
+      rectangle(-79.02120, 43.02100, -79.02100, 43.02120),
+      { primaryStreet: 'Other Road' }
+    );
+    const address = makeAddress('603', -79.02094, 43.02110, 'Fallback Road');
 
     const match = (service as any).matchAddressToBuilding(
       address,

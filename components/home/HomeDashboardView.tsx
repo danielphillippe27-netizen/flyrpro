@@ -13,6 +13,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent } from '@/components/ui/card';
 import { useWorkspace } from '@/lib/workspace-context';
 import { getIndustryCopy } from '@/lib/industry-copy';
+import { DemoGettingStartedPanel } from '@/components/onboarding/DemoGettingStartedPanel';
 
 function DashboardSkeleton() {
   return (
@@ -137,6 +138,8 @@ export function HomeDashboardView({ disableGoalEditing = false }: HomeDashboardV
         dayStreak={stats.dayStreak}
         lastSessionAt={lastSessionAt}
       />
+
+      <DemoGettingStartedPanel />
 
       {/* TODO: Re-enable when accountability_posts migration is applied
           <WeeklyAccountabilityBanner />

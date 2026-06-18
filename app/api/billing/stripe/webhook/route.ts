@@ -205,22 +205,18 @@ export async function POST(request: NextRequest) {
                 row.user_id,
                 subscription
               );
-              const recordedSalespersonCommission =
-                await recordSalespersonCommissionForInvoice(
-                  supabase,
-                  row.user_id,
-                  subscription,
-                  invoice
-                );
-
-              if (!recordedSalespersonCommission) {
-                await recordAmbassadorCommissionForInvoice(
+              await recordSalespersonCommissionForInvoice(
                 supabase,
                 row.user_id,
                 subscription,
                 invoice
-                );
-              }
+              );
+              await recordAmbassadorCommissionForInvoice(
+                supabase,
+                row.user_id,
+                subscription,
+                invoice
+              );
             }
           }
         }

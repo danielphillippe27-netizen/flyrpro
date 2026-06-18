@@ -174,7 +174,7 @@ export function getPublicAppUrl(
 export type BillingCurrency = 'USD' | 'CAD';
 
 export function getBillingCurrencyFromCountry(country: string | null | undefined): BillingCurrency {
-  return country === 'US' ? 'USD' : 'CAD';
+  return country === 'CA' ? 'CAD' : 'USD';
 }
 
 export function getRequestBillingCurrency(

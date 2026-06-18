@@ -111,7 +111,7 @@ export function LeadsTableView({
         <StatCard label={copy.leads.totalLabel} value={loading ? '…' : totalLeads} />
         <StatCard label={copy.leads.newThisWeekLabel} value={loading ? '…' : newThisWeek} />
         <StatCard label={copy.leads.conversionRateLabel} value={loading ? '…' : conversationToLeadRate} />
-        <StatCard label="Knock-to-conversation rate" value={loading ? '…' : knockToConversationRate} />
+        <StatCard label="Call-to-connected-call rate" value={loading ? '…' : knockToConversationRate} />
       </div>
 
       {/* Table */}

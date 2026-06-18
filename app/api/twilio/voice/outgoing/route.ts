@@ -61,6 +61,8 @@ export async function POST(request: NextRequest) {
   const response = new twilio.twiml.VoiceResponse();
   const callbackUrl = buildPublicTwilioWebhookUrl(request, '/api/twilio/voice/status');
   callbackUrl.searchParams.set('callRequestId', callRequestId);
+  const amdStatusUrl = buildPublicTwilioWebhookUrl(request, '/api/twilio/voice/amd-status');
+  amdStatusUrl.searchParams.set('callRequestId', callRequestId);
   const recordingStatusUrl = buildPublicTwilioWebhookUrl(request, '/api/twilio/voice/recording-status');
   recordingStatusUrl.searchParams.set('callRequestId', callRequestId);
 
@@ -75,6 +77,9 @@ export async function POST(request: NextRequest) {
 
   dial.number(
     {
+      machineDetection: 'Enable',
+      amdStatusCallback: amdStatusUrl.toString(),
+      amdStatusCallbackMethod: 'POST',
       statusCallback: callbackUrl.toString(),
       statusCallbackMethod: 'POST',
       statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],

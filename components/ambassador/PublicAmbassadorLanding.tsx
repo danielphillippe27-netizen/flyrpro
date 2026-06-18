@@ -1,5 +1,12 @@
 import Link from 'next/link';
-import { AMBASSADOR_LANDING_DEFAULTS, buildAmbassadorSharePath } from '@/app/lib/ambassador/portal';
+import {
+  AMBASSADOR_LANDING_DEFAULTS,
+  AMBASSADOR_RE_TEAM_CAMPAIGN,
+  AMBASSADOR_RE_TEAM_DEMO_VIDEO_URL,
+  AMBASSADOR_RE_TEAM_LANDING_COPY,
+  buildAmbassadorSharePath,
+  sanitizeTrackingParam,
+} from '@/app/lib/ambassador/portal';
 import type { PublicAmbassadorLandingPage } from '@/app/lib/ambassador/public-landing';
 
 type PublicAmbassadorLandingProps = {
@@ -31,12 +38,25 @@ export function PublicAmbassadorLanding({
   campaign,
 }: PublicAmbassadorLandingProps) {
   const displayName = landingPage.display_name || landingPage.ambassador.full_name;
-  const mediaUrl = landingPage.hero_video_url || landingPage.profile_image_url || '';
+  const normalizedCampaign = sanitizeTrackingParam(campaign);
+  const isReTeamLanding = normalizedCampaign === AMBASSADOR_RE_TEAM_CAMPAIGN;
+  const mediaUrl = isReTeamLanding
+    ? AMBASSADOR_RE_TEAM_DEMO_VIDEO_URL
+    : landingPage.hero_video_url || landingPage.profile_image_url || '';
   const ctaPath = buildAmbassadorSharePath(
     landingPage.ambassador.referral_code,
     source || 'landing_page',
-    campaign || landingPage.slug
+    normalizedCampaign || landingPage.slug
   );
+  const headline = isReTeamLanding
+    ? AMBASSADOR_RE_TEAM_LANDING_COPY.headline
+    : landingPage.headline || AMBASSADOR_LANDING_DEFAULTS.headline;
+  const introMessage = isReTeamLanding
+    ? AMBASSADOR_RE_TEAM_LANDING_COPY.introMessage
+    : landingPage.intro_message || AMBASSADOR_LANDING_DEFAULTS.subline;
+  const offerText = isReTeamLanding
+    ? AMBASSADOR_RE_TEAM_LANDING_COPY.offerText
+    : landingPage.offer_text || AMBASSADOR_LANDING_DEFAULTS.offerText;
 
   return (
     <main className="min-h-screen bg-zinc-950 text-white">
@@ -46,10 +66,10 @@ export function PublicAmbassadorLanding({
             FLYR Partner / {displayName}
           </p>
           <h1 className="max-w-4xl text-4xl font-semibold tracking-normal md:text-6xl">
-            {landingPage.headline || AMBASSADOR_LANDING_DEFAULTS.headline}
+            {headline}
           </h1>
           <p className="max-w-3xl text-lg leading-8 text-zinc-300 md:text-xl">
-            {landingPage.intro_message || AMBASSADOR_LANDING_DEFAULTS.subline}
+            {introMessage}
           </p>
         </div>
 
@@ -87,7 +107,7 @@ export function PublicAmbassadorLanding({
 
         <div className="space-y-4">
           <p className="max-w-3xl text-xl leading-8 text-zinc-100">
-            {landingPage.offer_text || AMBASSADOR_LANDING_DEFAULTS.offerText}
+            {offerText}
           </p>
           <Link
             href={ctaPath}

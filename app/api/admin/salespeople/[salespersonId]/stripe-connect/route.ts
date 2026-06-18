@@ -4,6 +4,11 @@ import { requireFounderApi } from '@/app/api/admin/_utils/founder';
 import { stripe } from '@/lib/stripe';
 import { isStripeSecretKeyConfigured } from '@/app/lib/billing/stripe-env';
 import {
+  buildConnectBusinessProfilePrefill,
+  buildIndividualConnectPrefill,
+  isMissingStripeConnectAccountError,
+} from '@/app/lib/billing/stripe-connect-prefill';
+import {
   ensureSalespersonReferralCode,
   isMissingSalespeopleSchemaError,
 } from '@/app/lib/billing/salespeople';
@@ -108,29 +113,68 @@ export async function POST(
     });
 
     let accountId = salesperson.stripe_connect_account_id;
-    if (!accountId) {
+    const individual = buildIndividualConnectPrefill({
+      email: salesperson.email,
+      fullName: salesperson.full_name,
+      title: 'Salesperson',
+    });
+    const businessProfile = buildConnectBusinessProfilePrefill({
+      origin: request.nextUrl.origin,
+      productDescription: 'FLYR direct sales commissions and salesperson payouts',
+    });
+
+    const createAccount = async () => {
       const account = await stripe.accounts.create({
         type: 'express',
         email: salesperson.email,
         business_type: 'individual',
-        business_profile: {
-          product_description: 'FLYR direct sales commissions and salesperson payouts',
-        },
+        individual,
+        business_profile: businessProfile,
         metadata: {
           salesperson_id: salesperson.id,
           salesperson_name: salesperson.full_name,
           source: 'flyr_salespeople_program',
         },
       });
-      accountId = account.id;
+      return account.id;
+    };
+
+    if (!accountId) {
+      accountId = await createAccount();
+    } else {
+      try {
+        const existingAccount = await stripe.accounts.retrieve(accountId);
+        if (!existingAccount.details_submitted) {
+          await stripe.accounts.update(accountId, {
+            business_profile: businessProfile,
+            individual,
+          });
+        }
+      } catch (error) {
+        if (isMissingStripeConnectAccountError(error)) {
+          accountId = await createAccount();
+        } else {
+          console.warn('[api/admin/salespeople/:id/stripe-connect] Stripe prefill update failed:', error);
+        }
+      }
     }
 
-    const accountLink = await stripe.accountLinks.create({
-      account: accountId,
-      refresh_url: `${request.nextUrl.origin}/salespeople?stripeOnboarding=refresh`,
-      return_url: `${request.nextUrl.origin}/salespeople?stripeOnboarding=complete`,
-      type: 'account_onboarding',
-    });
+    const createAccountLink = async (stripeAccountId: string) =>
+      stripe.accountLinks.create({
+        account: stripeAccountId,
+        refresh_url: `${request.nextUrl.origin}/salespeople?stripeOnboarding=refresh`,
+        return_url: `${request.nextUrl.origin}/salespeople?stripeOnboarding=complete`,
+        type: 'account_onboarding',
+      });
+
+    let accountLink;
+    try {
+      accountLink = await createAccountLink(accountId);
+    } catch (error) {
+      if (!isMissingStripeConnectAccountError(error)) throw error;
+      accountId = await createAccount();
+      accountLink = await createAccountLink(accountId);
+    }
 
     const account = await stripe.accounts.retrieve(accountId);
     const updatePayload: Record<string, string | number | boolean | null> = {

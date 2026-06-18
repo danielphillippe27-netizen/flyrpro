@@ -17,7 +17,6 @@ export type IndustryCopy = {
     createCampaign: string;
     addContact: string;
     importLeads: string;
-    exportContacts: string;
     sendToDialer: string;
   };
   home: {
@@ -106,8 +105,7 @@ const genericCopy: IndustryCopy = {
     createCampaign: 'Create campaign',
     addContact: 'Add Contact',
     importLeads: 'Import CSV',
-    exportContacts: 'Export Contacts',
-    sendToDialer: 'Send to Dialer',
+    sendToDialer: 'Send to Dialler',
   },
   home: {
     recentCampaignsTitle: 'Recently used campaigns',
@@ -134,14 +132,14 @@ const genericCopy: IndustryCopy = {
     pageTitle: 'Leads',
     pageDescription: 'Manage leads with lists from imports, campaigns, and farms, then send the right group to the dialer.',
     allListName: 'All Leads',
-    allListDescription: 'Everything in your current workspace lead list.',
+    allListDescription: 'People your team has actually contacted.',
     campaignListDescription: 'Campaign list',
     farmListDescription: 'Farm list',
-    selectedAllDescription: 'Browse all leads in this workspace, then export or send the right list to the dialer.',
-    selectedListDescription: (listName: string) => `Working from the ${listName} list. Export it or send this group straight to the dialer.`,
-    totalLabel: 'Total leads',
-    newThisWeekLabel: 'New leads this week',
-    conversionRateLabel: 'Conversation-to-lead rate',
+    selectedAllDescription: 'Browse people your team has talked to. New scraper prospects stay in their saved lists until contacted.',
+    selectedListDescription: (listName: string) => `Working from the ${listName} list. Send this group straight to the dialler.`,
+    totalLabel: 'Total calls',
+    newThisWeekLabel: 'New calls this week',
+    conversionRateLabel: 'Connected-call-to-call rate',
     loading: 'Loading leads...',
     empty: 'No leads match your filters.',
     selectAllAria: 'Select all visible leads',
@@ -201,8 +199,7 @@ const roofingCopy: IndustryCopy = {
     createCampaign: 'Create roofing campaign',
     addContact: 'Add Homeowner',
     importLeads: 'Import CSV',
-    exportContacts: 'Export Homeowners',
-    sendToDialer: 'Send to Dialer',
+    sendToDialer: 'Send to Dialler',
   },
   home: {
     recentCampaignsTitle: 'Recently used roofing campaigns',
@@ -230,11 +227,11 @@ const roofingCopy: IndustryCopy = {
     pageTitle: 'Roofing inquiries',
     pageDescription: 'Manage homeowner inquiries from imports, roofing campaigns, and service areas, then send the right group to the dialer.',
     allListName: 'All Roofing Inquiries',
-    allListDescription: 'Every homeowner inquiry in your current workspace.',
+    allListDescription: 'Homeowners your team has actually contacted.',
     campaignListDescription: 'Roofing campaign list',
     farmListDescription: 'Service area list',
-    selectedAllDescription: 'Browse all roofing inquiries in this workspace, then export or send the right group to the dialer.',
-    selectedListDescription: (listName: string) => `Working from the ${listName} list. Export it or send these homeowners straight to the dialer.`,
+    selectedAllDescription: 'Browse homeowners your team has talked to. New scraper prospects stay in their saved lists until contacted.',
+    selectedListDescription: (listName: string) => `Working from the ${listName} list. Send these homeowners straight to the dialler.`,
     totalLabel: 'Total roofing inquiries',
     newThisWeekLabel: 'New inquiries this week',
     conversionRateLabel: 'Conversation-to-inquiry rate',

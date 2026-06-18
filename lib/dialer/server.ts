@@ -18,6 +18,10 @@ import {
   isDialerEnabledForWorkspace,
 } from '@/lib/dialer/feature-gate';
 import { normalizePhoneNumber } from '@/lib/dialer/phone';
+import {
+  getSalespersonDialerSettingsForUser,
+  type DialerSalespersonRow,
+} from '@/lib/dialer/salesperson-settings';
 import { getWorkspacePowerDialerAddon } from '@/app/lib/billing/workspace-addons';
 import type {
   WorkspaceBillingAddonStatus,
@@ -29,12 +33,16 @@ export type DialerRequestContext = {
   requestUser: { id: string; email: string | null };
   workspaceId: string;
   role: WorkspaceRole | null;
+  salesperson: DialerSalespersonRow | null;
   settings: {
     enabled: boolean;
     defaultFromNumber: string;
     defaultSmsFromNumber: string | null;
     dedicatedFromNumber: string | null;
     dedicatedSmsFromNumber: string | null;
+    salespersonFromNumber: string | null;
+    salespersonSmsFromNumber: string | null;
+    salespersonInboundForwardTo: string | null;
     inboundForwardTo: string | null;
     allowSmsFollowup: boolean;
     dialerAddonActive: boolean;
@@ -101,16 +109,29 @@ export async function getDialerRequestContext(
     );
   }
 
+  const salespersonContext = await getSalespersonDialerSettingsForUser(admin, {
+    userId: requestUser.id,
+    email: requestUser.email,
+    workspaceId: membership.workspaceId,
+  });
   const founderBypassEnabled = isDialerFounderBypassEmail(requestUser.email);
+  const salespersonFeatureEnabled = Boolean(salespersonContext.salesperson?.id);
 
-  if (!isDialerEnabledForWorkspace(membership.workspaceId, requestUser.email)) {
+  if (
+    !salespersonFeatureEnabled &&
+    !isDialerEnabledForWorkspace(membership.workspaceId, requestUser.email)
+  ) {
     return NextResponse.json(
       { error: getDialerWorkspaceAccessError() },
       { status: 403 }
     );
   }
 
-  const settings = await getWorkspaceDialerSettings(admin, membership.workspaceId);
+  const settings = await getWorkspaceDialerSettings(
+    admin,
+    membership.workspaceId,
+    salespersonContext.settings
+  );
   if (!settings.dialerAddonActive && !founderBypassEnabled) {
     return NextResponse.json(
       { error: 'Power Dialer add-on is not active for this workspace' },
@@ -127,6 +148,7 @@ export async function getDialerRequestContext(
     requestUser,
     workspaceId: membership.workspaceId,
     role: membership.role,
+    salesperson: salespersonContext.salesperson,
     settings: founderBypassEnabled
       ? {
           ...settings,
@@ -140,7 +162,12 @@ export async function getDialerRequestContext(
 
 export async function getWorkspaceDialerSettings(
   admin: ReturnType<typeof createAdminClient>,
-  workspaceId: string
+  workspaceId: string,
+  salespersonSettings?: {
+    assigned_phone_number?: string | null;
+    default_sms_from_number?: string | null;
+    inbound_forward_to?: string | null;
+  } | null
 ): Promise<DialerRequestContext['settings']> {
   const envDefaultFromNumber = getTwilioDefaultFromNumber();
   const envDefaultSmsFromNumber = getTwilioDefaultSmsFromNumber();
@@ -157,14 +184,23 @@ export async function getWorkspaceDialerSettings(
   const workspaceFromNumber = normalizePhoneNumber(data?.default_from_number).e164;
   const workspaceSmsFromNumber = normalizePhoneNumber(data?.default_sms_from_number).e164;
   const workspaceInboundForwardTo = normalizePhoneNumber(data?.inbound_forward_to).e164;
+  const salespersonFromNumber = normalizePhoneNumber(salespersonSettings?.assigned_phone_number).e164;
+  const salespersonSmsFromNumber =
+    normalizePhoneNumber(salespersonSettings?.default_sms_from_number).e164 || salespersonFromNumber;
+  const salespersonInboundForwardTo =
+    normalizePhoneNumber(salespersonSettings?.inbound_forward_to).e164;
 
   return {
     enabled: data?.enabled ?? true,
-    defaultFromNumber: workspaceFromNumber || envDefaultFromNumber,
-    defaultSmsFromNumber: workspaceSmsFromNumber || envDefaultSmsFromNumber,
+    defaultFromNumber: salespersonFromNumber || workspaceFromNumber || envDefaultFromNumber,
+    defaultSmsFromNumber:
+      salespersonSmsFromNumber || workspaceSmsFromNumber || envDefaultSmsFromNumber,
     dedicatedFromNumber: workspaceFromNumber,
     dedicatedSmsFromNumber: workspaceSmsFromNumber,
-    inboundForwardTo: workspaceInboundForwardTo,
+    salespersonFromNumber,
+    salespersonSmsFromNumber,
+    salespersonInboundForwardTo,
+    inboundForwardTo: salespersonInboundForwardTo || workspaceInboundForwardTo,
     allowSmsFollowup: Boolean(data?.allow_sms_followup),
     dialerAddonActive: addon.status === 'active',
     dialerAddonStatus: addon.status,

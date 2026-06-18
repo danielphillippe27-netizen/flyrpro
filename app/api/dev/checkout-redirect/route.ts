@@ -5,7 +5,7 @@ function normalizePlan(value: string | null): 'annual' | 'monthly' {
 }
 
 function normalizeCurrency(value: string | null): 'CAD' | 'USD' {
-  return value === 'USD' ? 'USD' : 'CAD';
+  return value === 'CAD' ? 'CAD' : 'USD';
 }
 
 function normalizeSeats(value: string | null): number {

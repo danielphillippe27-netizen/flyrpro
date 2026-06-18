@@ -24,6 +24,27 @@ function getEnv(name: string): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function stripWrappingQuotes(value: string): string {
+  let next = value.trim();
+  for (let index = 0; index < 3; index += 1) {
+    const first = next[0];
+    const last = next[next.length - 1];
+    const wraps =
+      (first === '"' && last === '"') ||
+      (first === "'" && last === "'") ||
+      (first === '`' && last === '`');
+    if (!wraps) break;
+    next = next.slice(1, -1).trim();
+  }
+  return next.replace(/\\"/g, '"').replace(/\\'/g, "'");
+}
+
+function normalizeEmailSender(value: string | null): string | null {
+  if (!value) return null;
+  const normalized = stripWrappingQuotes(value);
+  return normalized || null;
+}
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -46,8 +67,7 @@ function formatExpiry(expiresAt: string): string {
 }
 
 function extractEmailAddress(value: string | null): string | null {
-  if (!value) return null;
-  const trimmed = value.trim();
+  const trimmed = normalizeEmailSender(value);
   if (!trimmed) return null;
 
   const angleMatch = trimmed.match(/<([^>]+)>/);
@@ -56,7 +76,7 @@ function extractEmailAddress(value: string | null): string | null {
 }
 
 function getRawConfiguredInviteFrom(): string | null {
-  return getEnv('RESEND_FROM_EMAIL') || getEnv('INVITES_FROM_EMAIL');
+  return normalizeEmailSender(getEnv('RESEND_FROM_EMAIL')) || normalizeEmailSender(getEnv('INVITES_FROM_EMAIL'));
 }
 
 function getInviteFromEmailValidationError(): string | null {
@@ -97,8 +117,8 @@ export function getInviteReplyToEmail(): string | null {
 
 export function getInviteAppOrigin(fallbackOrigin?: string): string {
   return (
-    getEnv('NEXT_PUBLIC_APP_URL') ||
     getEnv('APP_BASE_URL') ||
+    getEnv('NEXT_PUBLIC_APP_URL') ||
     fallbackOrigin?.trim().replace(/\/$/, '') ||
     DEFAULT_APP_ORIGIN
   );
@@ -120,6 +140,23 @@ export type AmbassadorStripeOnboardingEmailInput = {
   fullName: string;
   onboardingUrl: string;
   referralCode: string | null;
+};
+
+export type SalespersonInviteEmailInput = {
+  to: string;
+  fullName: string;
+  onboardingUrl: string;
+  referralCode: string | null;
+  commissionRateBps: number;
+};
+
+export type SalespersonMessengerEmailInput = {
+  to: string;
+  recipientName: string;
+  senderName: string;
+  preview: string;
+  messageUrl: string;
+  idempotencyKey?: string | null;
 };
 
 function getAmbassadorMailerConfigError(): string | null {
@@ -225,6 +262,218 @@ export async function sendAmbassadorStripeOnboardingEmail(
         message
           ? `${message} Use a sender address on a domain you have verified in Resend.`
           : 'Resend rejected the ambassador onboarding email. Use a sender on a verified domain in Resend.'
+      );
+    }
+
+    throw new Error(message);
+  }
+
+  return {
+    id: typeof data?.id === 'string' ? data.id : null,
+  };
+}
+
+export async function sendSalespersonInviteEmail(
+  input: SalespersonInviteEmailInput
+): Promise<{ id: string | null }> {
+  const apiKey = getEnv('RESEND_API_KEY');
+  const from = getInviteFromEmail();
+  const configError = getInviteMailerConfigError();
+
+  if (configError || !apiKey || !from) {
+    throw new Error(configError ?? 'Salesperson invite email is not configured.');
+  }
+
+  const firstName = input.fullName.trim().split(/\s+/)[0] || 'there';
+  const escapedFirstName = escapeHtml(firstName);
+  const escapedOnboardingUrl = escapeHtml(input.onboardingUrl);
+  const commissionLabel = `${(input.commissionRateBps / 100).toFixed(
+    input.commissionRateBps % 100 === 0 ? 0 : 2
+  )}%`;
+  const referralLine = input.referralCode
+    ? `Your referral code is ${input.referralCode}.`
+    : 'Your referral code will be generated after setup.';
+
+  const text = [
+    'You have been invited to sell with FLYR',
+    '',
+    `Hi ${firstName},`,
+    '',
+    'You have been invited to join the FLYR sales program.',
+    `${referralLine} Your commission rate is ${commissionLabel}.`,
+    '',
+    `Complete setup: ${input.onboardingUrl}`,
+    '',
+    'Use the same email address this invite was sent to when you create or sign into your account.',
+  ].join('\n');
+
+  const html = `
+    <div style="margin:0;padding:32px 18px;background:#06090f;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#e5e7eb;">
+      <div style="max-width:580px;margin:0 auto;background:#11151f;border:1px solid #222938;border-radius:18px;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.45);">
+        <div style="padding:30px 30px 22px;border-bottom:1px solid #222938;background:linear-gradient(180deg,#161c29 0%,#11151f 100%);">
+          <div style="font-size:30px;line-height:1;font-weight:800;letter-spacing:.02em;color:#ffffff;">FLYR</div>
+          <h1 style="margin:12px 0 0;font-size:28px;line-height:1.2;color:#f9fafb;font-weight:700;">Salesperson setup</h1>
+        </div>
+        <div style="padding:30px;">
+          <p style="margin:0 0 16px;font-size:16px;line-height:1.65;color:#c6cfdf;">Hi ${escapedFirstName},</p>
+          <p style="margin:0 0 16px;font-size:16px;line-height:1.65;color:#c6cfdf;">You have been invited to join the FLYR sales program.</p>
+          <p style="margin:0 0 24px;font-size:15px;line-height:1.65;color:#aab4c6;">${escapeHtml(referralLine)} Your commission rate is ${escapeHtml(commissionLabel)}.</p>
+          <p style="margin:0 0 24px;">
+            <a href="${escapedOnboardingUrl}" style="display:inline-block;background:#ef4444;color:#ffffff;text-decoration:none;padding:13px 22px;border-radius:11px;font-size:15px;font-weight:700;letter-spacing:.01em;">
+              Complete setup
+            </a>
+          </p>
+          <p style="margin:0 0 16px;font-size:13px;line-height:1.6;color:#8f9bb1;">Use the same email address this invite was sent to when you create or sign into your account.</p>
+          <p style="margin:0;font-size:12px;line-height:1.6;word-break:break-all;">
+            <a href="${escapedOnboardingUrl}" style="color:#7084a8;text-decoration:underline;">${escapedOnboardingUrl}</a>
+          </p>
+        </div>
+      </div>
+    </div>
+  `.trim();
+
+  const resend = new Resend(apiKey);
+  const replyTo = getInviteReplyToEmail();
+  const { data, error } = await resend.emails.send({
+    from,
+    to: input.to,
+    subject: 'You have been invited to sell with FLYR',
+    html,
+    text,
+    ...(replyTo ? { replyTo } : {}),
+  });
+
+  if (error) {
+    const message = error.message.trim() || 'Resend email request failed';
+    if (/only send testing emails|verify a domain at resend\.com\/domains/i.test(message)) {
+      throw new Error(
+        'Salesperson invite was created, but email was not sent to this address. Resend test mode only delivers to your account email.'
+      );
+    }
+
+    if (error.statusCode === 403) {
+      throw new Error(
+        message
+          ? `${message} Use a sender address on a domain you have verified in Resend.`
+          : 'Resend rejected the salesperson invite email. Use a sender on a verified domain in Resend.'
+      );
+    }
+
+    throw new Error(message);
+  }
+
+  return {
+    id: typeof data?.id === 'string' ? data.id : null,
+  };
+}
+
+function getSalespersonMessengerMailerConfigError(): string | null {
+  if (!getEnv('RESEND_API_KEY')) {
+    return 'Sales Floor email notification was not sent because the Resend API key is not configured on the server.';
+  }
+
+  const from = getInviteFromEmail();
+  const address = extractEmailAddress(from);
+  if (!address) {
+    return 'Sales Floor email notification was not sent because RESEND_FROM_EMAIL is not configured.';
+  }
+
+  const domain = address.split('@')[1]?.trim().toLowerCase();
+  if (!domain) {
+    return 'Sales Floor email notification was not sent because the sender address is invalid.';
+  }
+
+  if (PERSONAL_INBOX_DOMAINS.has(domain)) {
+    return `Sales Floor email notification was not sent. Resend cannot send from personal inboxes (${address}).`;
+  }
+
+  return null;
+}
+
+export async function sendSalespersonMessengerEmail(
+  input: SalespersonMessengerEmailInput
+): Promise<{ id: string | null }> {
+  const apiKey = getEnv('RESEND_API_KEY');
+  const from = getInviteFromEmail();
+  const configError = getSalespersonMessengerMailerConfigError();
+
+  if (configError || !apiKey || !from) {
+    throw new Error(configError ?? 'Sales Floor email notification is not configured.');
+  }
+
+  const recipientFirstName = input.recipientName.trim().split(/\s+/)[0] || 'there';
+  const senderName = input.senderName.trim() || 'Sales Floor';
+  const preview = input.preview.trim() || 'New message';
+  const escapedRecipientFirstName = escapeHtml(recipientFirstName);
+  const escapedSenderName = escapeHtml(senderName);
+  const escapedPreview = escapeHtml(preview);
+  const escapedMessageUrl = escapeHtml(input.messageUrl);
+
+  const text = [
+    `New Sales Floor message from ${senderName}`,
+    '',
+    `Hi ${recipientFirstName},`,
+    '',
+    `${senderName} posted in Sales Floor:`,
+    preview,
+    '',
+    `Open Sales Floor: ${input.messageUrl}`,
+  ].join('\n');
+
+  const html = `
+    <div style="margin:0;padding:32px 18px;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#0f172a;">
+      <div style="max-width:580px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;">
+        <div style="padding:28px 30px 18px;border-bottom:1px solid #e2e8f0;">
+          <div style="font-size:28px;line-height:1;font-weight:800;color:#111827;">FLYR</div>
+          <h1 style="margin:14px 0 0;font-size:24px;line-height:1.25;color:#111827;font-weight:700;">New Sales Floor message</h1>
+        </div>
+        <div style="padding:28px 30px;">
+          <p style="margin:0 0 16px;font-size:15px;line-height:1.65;color:#334155;">Hi ${escapedRecipientFirstName},</p>
+          <p style="margin:0 0 16px;font-size:15px;line-height:1.65;color:#334155;"><strong style="color:#111827;">${escapedSenderName}</strong> posted in Sales Floor.</p>
+          <div style="margin:0 0 24px;padding:14px 16px;border-radius:12px;background:#f1f5f9;border:1px solid #e2e8f0;color:#334155;font-size:15px;line-height:1.55;">
+            ${escapedPreview}
+          </div>
+          <p style="margin:0 0 24px;">
+            <a href="${escapedMessageUrl}" style="display:inline-block;background:#111827;color:#ffffff;text-decoration:none;padding:13px 20px;border-radius:10px;font-size:15px;font-weight:700;">
+              Open Sales Floor
+            </a>
+          </p>
+          <p style="margin:0;font-size:12px;line-height:1.6;color:#64748b;">You will not receive another Sales Floor email for this conversation for about 2 hours.</p>
+        </div>
+      </div>
+    </div>
+  `.trim();
+
+  const resend = new Resend(apiKey);
+  const replyTo = getInviteReplyToEmail();
+  const options = input.idempotencyKey
+    ? { headers: { 'Idempotency-Key': input.idempotencyKey } }
+    : undefined;
+  const { data, error } = await resend.emails.send(
+    {
+      from,
+      to: input.to,
+      subject: `New Sales Floor message from ${senderName}`,
+      html,
+      text,
+      ...(replyTo ? { replyTo } : {}),
+    },
+    options
+  );
+
+  if (error) {
+    const message = error.message.trim() || 'Resend email request failed';
+    if (/only send testing emails|verify a domain at resend\.com\/domains/i.test(message)) {
+      throw new Error(
+        'Sales Floor email notification was not sent. Resend test mode only delivers to your account email.'
+      );
+    }
+
+    if (error.statusCode === 403) {
+      throw new Error(
+        message
+          ? `${message} Use a sender address on a domain you have verified in Resend.`
+          : 'Resend rejected the Sales Floor email notification. Use a sender on a verified domain in Resend.'
       );
     }
 

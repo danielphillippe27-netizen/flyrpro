@@ -9,8 +9,91 @@ import { validateTwilioWebhookRequest } from '@/lib/dialer/server';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+type InboundNumberRoute = {
+  workspaceId: string;
+  salespersonId: string | null;
+};
+
 function cleanText(value: string | null | undefined): string {
   return (value ?? '').trim();
+}
+
+function phoneLookupCandidates(e164Number: string): string[] {
+  const normalized = normalizePhoneNumber(e164Number);
+  const digits = e164Number.replace(/\D/g, '');
+  const localDigits = digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;
+  const localDashed = localDigits.length === 10
+    ? `${localDigits.slice(0, 3)}-${localDigits.slice(3, 6)}-${localDigits.slice(6)}`
+    : null;
+  const localSpaced = localDigits.length === 10
+    ? `${localDigits.slice(0, 3)} ${localDigits.slice(3, 6)} ${localDigits.slice(6)}`
+    : null;
+  const localParentheses = localDigits.length === 10
+    ? `(${localDigits.slice(0, 3)}) ${localDigits.slice(3, 6)}-${localDigits.slice(6)}`
+    : null;
+
+  return Array.from(new Set([
+    e164Number,
+    normalized.national,
+    digits,
+    localDigits,
+    localDashed,
+    localSpaced,
+    localParentheses,
+  ].filter((value): value is string => Boolean(value && value.trim()))));
+}
+
+async function findExistingContact(context: {
+  admin: ReturnType<typeof createAdminClient>;
+  workspaceId: string;
+}, fromNumber: string): Promise<Record<string, unknown> | null> {
+  const { data: e164Match, error: e164Error } = await context.admin
+    .from('contacts')
+    .select('*')
+    .eq('workspace_id', context.workspaceId)
+    .eq('phone_e164', fromNumber)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (e164Error && e164Error.code !== 'PGRST116') {
+    console.warn('[twilio/messaging/incoming] contact phone_e164 lookup failed', e164Error);
+  }
+
+  if (e164Match) return e164Match as Record<string, unknown>;
+
+  const phoneCandidates = phoneLookupCandidates(fromNumber);
+  const { data: phoneMatches, error: phoneError } = await context.admin
+    .from('contacts')
+    .select('*')
+    .eq('workspace_id', context.workspaceId)
+    .in('phone', phoneCandidates)
+    .order('updated_at', { ascending: false })
+    .limit(1);
+
+  if (phoneError) {
+    console.warn('[twilio/messaging/incoming] contact phone lookup failed', phoneError);
+  }
+
+  if (phoneMatches?.[0]) return phoneMatches[0] as Record<string, unknown>;
+
+  const { data: fallbackRows, error: fallbackError } = await context.admin
+    .from('contacts')
+    .select('*')
+    .eq('workspace_id', context.workspaceId)
+    .not('phone', 'is', null)
+    .order('updated_at', { ascending: false })
+    .limit(500);
+
+  if (fallbackError) {
+    console.warn('[twilio/messaging/incoming] contact normalized phone lookup failed', fallbackError);
+    return null;
+  }
+
+  return (
+    (fallbackRows ?? []).find((row) => normalizePhoneNumber((row as { phone?: string | null }).phone).e164 === fromNumber) ??
+    null
+  ) as Record<string, unknown> | null;
 }
 
 function getFallbackWorkspaceId(): string | null {
@@ -18,7 +101,32 @@ function getFallbackWorkspaceId(): string | null {
   return enabledWorkspaceIds.length === 1 ? enabledWorkspaceIds[0] : null;
 }
 
-async function resolveWorkspaceId(admin: ReturnType<typeof createAdminClient>, toNumber: string): Promise<string | null> {
+async function resolveInboundNumberRoute(
+  admin: ReturnType<typeof createAdminClient>,
+  toNumber: string
+): Promise<InboundNumberRoute | null> {
+  const { data: salespersonNumber, error: salespersonNumberError } = await admin
+    .from('salesperson_dialer_settings')
+    .select('workspace_id, salesperson_id')
+    .or(`default_sms_from_number.eq.${toNumber},assigned_phone_number.eq.${toNumber}`)
+    .eq('number_status', 'active')
+    .limit(1)
+    .maybeSingle();
+
+  if (salespersonNumberError && salespersonNumberError.code !== 'PGRST116') {
+    console.warn('[twilio/messaging/incoming] salesperson number lookup failed', salespersonNumberError);
+  }
+
+  if (salespersonNumber?.workspace_id) {
+    return {
+      workspaceId: salespersonNumber.workspace_id as string,
+      salespersonId:
+        typeof salespersonNumber.salesperson_id === 'string'
+          ? salespersonNumber.salesperson_id
+          : null,
+    };
+  }
+
   const { data, error } = await admin
     .from('workspace_dialer_settings')
     .select('workspace_id')
@@ -30,12 +138,15 @@ async function resolveWorkspaceId(admin: ReturnType<typeof createAdminClient>, t
     console.warn('[twilio/messaging/incoming] workspace lookup failed', error);
   }
 
-  if (data?.workspace_id) return data.workspace_id as string;
+  if (data?.workspace_id) {
+    return { workspaceId: data.workspace_id as string, salespersonId: null };
+  }
 
   const sharedSmsNumber = getTwilioDefaultSmsFromNumber();
   const sharedVoiceNumber = getTwilioDefaultFromNumber();
   if (toNumber === sharedSmsNumber || toNumber === sharedVoiceNumber) {
-    return getFallbackWorkspaceId();
+    const workspaceId = getFallbackWorkspaceId();
+    return workspaceId ? { workspaceId, salespersonId: null } : null;
   }
 
   return null;
@@ -45,24 +156,15 @@ async function findOrCreateContact(context: {
   admin: ReturnType<typeof createAdminClient>;
   workspaceId: string;
 }, fromNumber: string, body: string): Promise<Record<string, unknown> | null> {
-  const { data: existing, error: lookupError } = await context.admin
-    .from('contacts')
-    .select('*')
-    .eq('workspace_id', context.workspaceId)
-    .eq('phone_e164', fromNumber)
-    .order('updated_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (lookupError && lookupError.code !== 'PGRST116') {
-    console.warn('[twilio/messaging/incoming] contact lookup failed', lookupError);
-  }
-
   const now = new Date().toISOString();
+  const existing = await findExistingContact(context, fromNumber);
   if (existing) {
     const { data: updated, error: updateError } = await context.admin
       .from('contacts')
       .update({
+        phone_e164: fromNumber,
+        phone_last_validated_at: now,
+        phone_validation_error: null,
         last_contacted: now,
         updated_at: now,
       })
@@ -183,11 +285,12 @@ export async function POST(request: NextRequest) {
   }
 
   const admin = createAdminClient();
-  const workspaceId = await resolveWorkspaceId(admin, toNumber);
-  if (!workspaceId) {
+  const inboundRoute = await resolveInboundNumberRoute(admin, toNumber);
+  if (!inboundRoute?.workspaceId) {
     console.warn('[twilio/messaging/incoming] no workspace matched inbound text', { toNumber });
     return NextResponse.json({ ok: true });
   }
+  const { workspaceId, salespersonId } = inboundRoute;
 
   const contact = await findOrCreateContact({ admin, workspaceId }, fromNumber, body);
   const contactId = typeof contact?.id === 'string' ? contact.id : null;
@@ -195,6 +298,7 @@ export async function POST(request: NextRequest) {
 
   const insertPayload = {
     workspace_id: workspaceId,
+    salesperson_id: salespersonId,
     contact_id: contactId,
     twilio_message_sid: messageSid,
     from_number_e164: fromNumber,

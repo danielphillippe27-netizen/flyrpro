@@ -18,7 +18,7 @@ interface PriceOption {
 }
 
 export default function PricingPage() {
-  const [prices, setPrices] = useState<PriceOption[]>([]);
+  const [, setPrices] = useState<PriceOption[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -99,9 +99,24 @@ export default function PricingPage() {
               ]}
               cta={
                 <>
-                  <p className="text-center text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-                    CA$39.99 / month
-                  </p>
+                  <div className="text-center text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+                    <p className="text-xs uppercase tracking-[0.2em] text-emerald-600 dark:text-emerald-400">
+                      50% off
+                    </p>
+                    <p className="mt-1">
+                      <span className="mr-2 text-zinc-400 line-through dark:text-zinc-500">
+                        CA$80
+                      </span>
+                      CA$40 / month
+                    </p>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                      or{' '}
+                      <span className="mr-1 text-zinc-400 line-through dark:text-zinc-500">
+                        $60 USD
+                      </span>
+                      $30 USD / month
+                    </p>
+                  </div>
                   <Button className="w-full" asChild>
                     <Link href="/billing">Get started</Link>
                   </Button>
@@ -113,7 +128,7 @@ export default function PricingPage() {
               subtitle="Collaboration + accountability for small teams."
               features={[
                 { text: 'Everything in Pro', bold: true },
-                { text: '2 seats included in base price' },
+                { text: 'Simple per-user seat pricing' },
                 { text: 'Invite / remove team members' },
                 { text: 'Roles & permissions (Admin, Member)' },
                 { text: 'Assign territories & campaigns to teammates' },
@@ -126,9 +141,6 @@ export default function PricingPage() {
               cta={
                 <>
                   <TeamSeatSelector />
-                  <p className="text-center text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-                    CA$79.99 / month + CA$30 per seat
-                  </p>
                   <Button className="w-full" asChild>
                     <Link href="/billing">Start team</Link>
                   </Button>

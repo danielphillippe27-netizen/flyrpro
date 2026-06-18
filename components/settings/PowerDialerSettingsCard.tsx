@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { AlertCircle, CheckCircle2, Loader2, Phone, Trash2, Upload, Voicemail } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Loader2, Mail, Phone, Save, Trash2, Upload, Voicemail } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -33,6 +33,15 @@ type DialerSettingsStatus = {
     numberStatus: 'unassigned' | 'active' | 'released';
     usesSharedDefaultNumber: boolean;
   } | null;
+  salesperson?: {
+    id: string | null;
+    fullName: string | null;
+    email: string | null;
+    demoEmailHandle: string | null;
+    demoEmailAddress: string | null;
+    demoEmailReplyTo: string | null;
+    demoEmailDomain: string;
+  } | null;
 };
 
 const inFlightDialerSettingsWorkspaceIds = new Set<string>();
@@ -43,12 +52,15 @@ export function PowerDialerSettingsCard() {
   const [dialerSettingsStatus, setDialerSettingsStatus] = useState<DialerSettingsStatus | null>(null);
   const [dialerAreaCode, setDialerAreaCode] = useState('');
   const [inboundForwardTo, setInboundForwardTo] = useState('');
+  const [demoEmailHandle, setDemoEmailHandle] = useState('');
+  const [demoEmailReplyTo, setDemoEmailReplyTo] = useState('');
   const [voicemailDrops, setVoicemailDrops] = useState<DialerVoicemailDrop[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingVoicemails, setLoadingVoicemails] = useState(false);
   const [isEnablingDialerAddon, setIsEnablingDialerAddon] = useState(false);
   const [isProvisioningDialerNumber, setIsProvisioningDialerNumber] = useState(false);
   const [isSavingInboundForward, setIsSavingInboundForward] = useState(false);
+  const [isSavingDemoEmail, setIsSavingDemoEmail] = useState(false);
   const [isUploadingVoicemail, setIsUploadingVoicemail] = useState(false);
   const [activatingVoicemailId, setActivatingVoicemailId] = useState<string | null>(null);
   const [deletingVoicemailId, setDeletingVoicemailId] = useState<string | null>(null);
@@ -74,6 +86,8 @@ export function PowerDialerSettingsCard() {
         const data = await response.json();
         setDialerSettingsStatus(data);
         setInboundForwardTo(data.settings?.inboundForwardTo ?? '');
+        setDemoEmailHandle(data.salesperson?.demoEmailHandle ?? '');
+        setDemoEmailReplyTo(data.salesperson?.demoEmailReplyTo ?? data.salesperson?.email ?? '');
       }
     } catch (error) {
       console.error('Error loading dialer settings:', error);
@@ -216,6 +230,40 @@ export function PowerDialerSettingsCard() {
       setMessage({ type: 'error', text: 'Network error while saving inbound forwarding.' });
     } finally {
       setIsSavingInboundForward(false);
+    }
+  };
+
+  const handleSaveDemoEmail = async () => {
+    if (!currentWorkspaceId) return;
+
+    setIsSavingDemoEmail(true);
+    setMessage(null);
+    try {
+      const response = await fetch('/api/dialer/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          workspaceId: currentWorkspaceId,
+          demoEmailHandle: demoEmailHandle.trim(),
+          demoEmailReplyTo: demoEmailReplyTo.trim(),
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setMessage({ type: 'error', text: data.error || 'Failed to save demo email sender.' });
+        return;
+      }
+
+      setDialerSettingsStatus(data);
+      setDemoEmailHandle(data.salesperson?.demoEmailHandle ?? '');
+      setDemoEmailReplyTo(data.salesperson?.demoEmailReplyTo ?? data.salesperson?.email ?? '');
+      setMessage({ type: 'success', text: 'Demo email sender saved.' });
+    } catch (error) {
+      console.error(error);
+      setMessage({ type: 'error', text: 'Network error while saving demo email sender.' });
+    } finally {
+      setIsSavingDemoEmail(false);
     }
   };
 
@@ -425,6 +473,47 @@ export function PowerDialerSettingsCard() {
                 </div>
               </div>
             )}
+
+            <div className="space-y-3 rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+              <div className="flex items-center gap-2">
+                <Mail className="h-4 w-4 text-gray-500 dark:text-gray-400" />
+                <Label htmlFor="settings-demo-email-handle">Demo email sender</Label>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+                <div className="flex min-w-0 overflow-hidden rounded-md border border-input bg-background dark:bg-card">
+                  <Input
+                    id="settings-demo-email-handle"
+                    value={demoEmailHandle}
+                    onChange={(event) => setDemoEmailHandle(event.target.value.toLowerCase().replace(/[^a-z0-9._-]/g, ''))}
+                    placeholder="firstname"
+                    className="h-10 min-w-0 border-0 focus-visible:ring-0"
+                  />
+                  <span className="flex h-10 shrink-0 items-center border-l border-input px-3 text-sm text-gray-500 dark:text-gray-400">
+                    @{dialerSettingsStatus?.salesperson?.demoEmailDomain ?? 'flyr.software'}
+                  </span>
+                </div>
+                <Input
+                  type="email"
+                  inputMode="email"
+                  value={demoEmailReplyTo}
+                  onChange={(event) => setDemoEmailReplyTo(event.target.value)}
+                  placeholder="forward replies to"
+                  className="h-10"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void handleSaveDemoEmail()}
+                  disabled={isSavingDemoEmail || !currentWorkspaceId || !dialerSettingsStatus?.salesperson?.id}
+                >
+                  {isSavingDemoEmail ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                  Save sender
+                </Button>
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Sends from {demoEmailHandle || 'demo'}@{dialerSettingsStatus?.salesperson?.demoEmailDomain ?? 'flyr.software'}, saves replies in FLYR Inbox, and forwards replies to {demoEmailReplyTo || 'the rep email'}.
+              </p>
+            </div>
 
             {!dialerSettingsStatus?.addon?.isActive && dialerSettingsStatus?.canManage && (
               <Button

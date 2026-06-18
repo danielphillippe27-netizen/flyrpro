@@ -63,6 +63,19 @@ const NON_US_CANADA_REGION_BOUNDS: Record<string, Bounds> = {
   WC: [17.7, -35.0, 24.3, -30.3],
 };
 const SOUTH_AFRICA_REGION_CODES = new Set(['EC', 'FS', 'GP', 'KZN', 'LP', 'MP', 'NC', 'NW', 'WC']);
+const AUSTRALIA_REGION_CODES = new Set(['ACT', 'NSW', 'NT', 'QLD', 'SA', 'TAS', 'VIC', 'WA']);
+const COARSE_REGION_CODES = new Set(['AU', 'GB', 'NZ', 'ZA']);
+
+const AUSTRALIA_REGION_BOUNDS: Record<string, Bounds> = {
+  ACT: [148.7, -35.95, 149.45, -35.1],
+  NSW: [140.99, -37.7, 159.2, -28.0],
+  NT: [129.0, -26.1, 138.1, -10.9],
+  QLD: [137.0, -29.7, 154.2, -8.4],
+  SA: [129.0, -38.2, 141.1, -25.9],
+  TAS: [143.7, -43.8, 148.6, -39.5],
+  VIC: [140.7, -39.3, 150.1, -33.9],
+  WA: [112.8, -35.2, 129.1, -13.4],
+};
 
 const CANADA_REGION_BOUNDS: Record<string, Bounds> = {
   BC: [-139.06, 48.2, -114.03, 60.01],
@@ -94,6 +107,14 @@ const REGION_NAME_TO_CODE: Record<string, string> = {
     return acc;
   }, {}),
   'QUÉBEC': 'QC',
+  'AUSTRALIAN CAPITAL TERRITORY': 'ACT',
+  'NEW SOUTH WALES': 'NSW',
+  'NORTHERN TERRITORY': 'NT',
+  QUEENSLAND: 'QLD',
+  'SOUTH AUSTRALIA': 'SA',
+  TASMANIA: 'TAS',
+  VICTORIA: 'VIC',
+  'WESTERN AUSTRALIA': 'WA',
 };
 
 function isNumber(value: unknown): value is number {
@@ -104,6 +125,7 @@ function normalizeRegionCode(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim().toUpperCase();
   if (/^[A-Z]{2}$/.test(trimmed)) return trimmed;
+  if (AUSTRALIA_REGION_CODES.has(trimmed)) return trimmed;
   return null;
 }
 
@@ -112,6 +134,9 @@ function parseShortCode(value: unknown): string | null {
   const upper = value.trim().toUpperCase();
   if (/^[A-Z]{2}$/.test(upper)) return upper;
   const parts = upper.split('-');
+  if (parts.length === 2 && parts[0] === 'AU' && AUSTRALIA_REGION_CODES.has(parts[1])) {
+    return parts[1];
+  }
   if (parts.length === 2 && /^[A-Z]{2}$/.test(parts[1])) {
     return parts[1];
   }
@@ -182,13 +207,14 @@ function centroidFromPolygon(polygon: GeoJSON.Polygon): Point | null {
 }
 
 function inferRegionFromBounds(point: Point): string | null {
-  const matches: Array<{ region: string; area: number; depth: number }> = [];
+  const matches: Array<{ region: string; area: number; depth: number; specificity: number }> = [];
 
   const collectMatches = (boundsMap: Record<string, Bounds>) => {
     for (const [region, [minLng, minLat, maxLng, maxLat]] of Object.entries(boundsMap)) {
       if (point.lng >= minLng && point.lng <= maxLng && point.lat >= minLat && point.lat <= maxLat) {
         matches.push({
           region,
+          specificity: COARSE_REGION_CODES.has(region) ? 0 : 1,
           area: Math.abs((maxLng - minLng) * (maxLat - minLat)),
           // Prefer the region where the point sits farther from the nearest bbox edge.
           depth: Math.min(
@@ -203,12 +229,14 @@ function inferRegionFromBounds(point: Point): string | null {
   };
 
   collectMatches(NON_US_CANADA_REGION_BOUNDS);
+  collectMatches(AUSTRALIA_REGION_BOUNDS);
   collectMatches(CANADA_REGION_BOUNDS);
   collectMatches(US_REGION_BOUNDS);
 
   if (matches.length === 0) return null;
 
   matches.sort((a, b) => {
+    if (b.specificity !== a.specificity) return b.specificity - a.specificity;
     if (b.depth !== a.depth) return b.depth - a.depth;
     return a.area - b.area;
   });
@@ -260,6 +288,7 @@ async function inferRegionFromMapbox(point: Point): Promise<string | null> {
     }
 
     return (
+      candidateCodes.find((code) => AUSTRALIA_REGION_CODES.has(code)) ??
       candidateCodes.find((code) => SOUTH_AFRICA_REGION_CODES.has(code)) ??
       candidateCodes.find((code) => code !== 'CA' && code !== 'US') ??
       null

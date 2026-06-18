@@ -33,6 +33,10 @@ function parseLimit(value: string | null, fallback: number, max: number): number
   return Math.max(1, Math.min(max, Math.floor(parsed)));
 }
 
+function includeDetails(value: string | null): boolean {
+  return value !== 'false';
+}
+
 export async function GET(request: NextRequest) {
   try {
     const auth = await requireFounderApi();
@@ -43,13 +47,9 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const threadLimit = parseLimit(searchParams.get('threadLimit'), 10, 20);
     const inboundLimit = parseLimit(searchParams.get('inboundLimit'), 10, 20);
+    const shouldIncludeDetails = includeDetails(searchParams.get('details'));
 
-    const [threadsRes, unreadRes, needsReplyRes, openRes, inboundRes] = await Promise.all([
-      auth.admin
-        .from('support_threads')
-        .select('id, user_id, status, last_message_at, created_at, last_message_preview, last_sender_type, needs_reply, unread_for_support')
-        .order('last_message_at', { ascending: false })
-        .limit(threadLimit),
+    const [unreadRes, needsReplyRes, openRes, receivedMessagesRes] = await Promise.all([
       auth.admin
         .from('support_threads')
         .select('id', { count: 'exact', head: true })
@@ -62,6 +62,31 @@ export async function GET(request: NextRequest) {
         .from('support_threads')
         .select('id', { count: 'exact', head: true })
         .neq('status', 'closed'),
+      auth.admin
+        .from('support_messages')
+        .select('id', { count: 'exact', head: true })
+        .eq('sender_type', 'user'),
+    ]);
+
+    if (!shouldIncludeDetails) {
+      return NextResponse.json({
+        kpis: {
+          unread: unreadRes.count ?? 0,
+          needsReply: needsReplyRes.count ?? 0,
+          openThreads: openRes.count ?? 0,
+          receivedMessages: receivedMessagesRes.count ?? 0,
+        },
+        threads: [],
+        latestInboundMessages: [],
+      });
+    }
+
+    const [threadsRes, inboundRes] = await Promise.all([
+      auth.admin
+        .from('support_threads')
+        .select('id, user_id, status, last_message_at, created_at, last_message_preview, last_sender_type, needs_reply, unread_for_support')
+        .order('last_message_at', { ascending: false })
+        .limit(threadLimit),
       auth.admin
         .from('support_messages')
         .select('id, thread_id, sender_user_id, body, created_at')
@@ -107,6 +132,7 @@ export async function GET(request: NextRequest) {
         unread: unreadRes.count ?? 0,
         needsReply: needsReplyRes.count ?? 0,
         openThreads: openRes.count ?? 0,
+        receivedMessages: receivedMessagesRes.count ?? 0,
       },
       threads: threadRows.map((row) => {
         const profile = profilesById.get(row.user_id);

@@ -1,17 +1,30 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, Loader2, Mail, MessageSquare, Mic, Pause, PhoneCall, PhoneOff, Play, Save, Send, Trash2, Upload, Voicemail } from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
+import { AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, Clock, ListPlus, Loader2, Mail, MessageSquare, Mic, Pause, PhoneOff, Play, Save, Send, Trash2, Upload, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
-import { useTwilioDevice } from '@/lib/hooks/useTwilioDevice';
+import { useDialerRuntime } from '@/components/dialer/DialerRuntimeProvider';
+import {
+  buildCustomSmartListOption,
+  filterContactsBySmartList,
+  type SmartListOption,
+} from '@/components/crm/smart-list-utils';
 import { formatPhoneDisplay, normalizePhoneNumber } from '@/lib/dialer/phone';
+import { cn } from '@/lib/utils';
 import { useWorkspace } from '@/lib/workspace-context';
-import type { DialerCall, DialerVoicemailDrop, DiallerLead, DiallerLeadDisposition } from '@/types/database';
+import { ContactsService } from '@/lib/services/ContactsService';
+import { CampaignsService } from '@/lib/services/CampaignsService';
+import { FarmService } from '@/lib/services/FarmService';
+import { SmartListsService } from '@/lib/services/SmartListsService';
+import { createClient } from '@/lib/supabase/client';
+import type { CampaignV2, Contact, DialerCall, DiallerLead, DiallerLeadDisposition, Farm } from '@/types/database';
+import type { SmartListCriteria } from '@/types/smart-lists';
 
 type DialerAccessResponse = {
   workspaceId: string;
@@ -30,6 +43,11 @@ type DialerAccessResponse = {
     numberStatus: 'unassigned' | 'active' | 'released';
     usesSharedDefaultNumber: boolean;
   } | null;
+  salesperson?: {
+    id: string | null;
+    fullName: string | null;
+    email: string | null;
+  } | null;
 };
 
 type DiallerLeadStatus = 'pending' | 'called' | 'skipped';
@@ -37,6 +55,16 @@ type PlaceCallOptions = {
   doubleDial?: boolean;
   forceLeadId?: string;
   redialAfterEnd?: boolean;
+};
+type DiallerListOption = SmartListOption & {
+  contacts: Contact[];
+  count: number;
+  dialableCount: number;
+};
+type DiallerImportResponse = {
+  leads?: DiallerLead[];
+  importedCount?: number;
+  error?: string;
 };
 
 const DIALER_AUTO_NEXT_STORAGE_KEY = 'flyr:dialer:auto-next';
@@ -46,6 +74,15 @@ const TEST_LEAD = {
   company: 'Test Lead',
   email: null,
 };
+const DIALER_OUTLINE_BUTTON_CLASS =
+  'border-border bg-background text-foreground hover:bg-muted hover:text-foreground disabled:border-border disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100 dark:bg-card dark:hover:bg-muted/80 dark:disabled:bg-muted/50';
+const DIALER_PRIMARY_BUTTON_CLASS =
+  'bg-foreground text-background hover:bg-foreground/90 disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100 dark:bg-foreground dark:text-background dark:hover:bg-foreground/90 dark:disabled:bg-muted/50';
+const DIALER_INPUT_CLASS =
+  'border-input bg-background text-foreground placeholder:text-muted-foreground focus-visible:ring-ring/30 disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100 dark:bg-card dark:disabled:bg-muted/50';
+const DIALER_SELECTED_BUTTON_CLASS =
+  'border-foreground bg-foreground text-background hover:bg-foreground/90 hover:text-background dark:border-foreground dark:bg-foreground dark:text-background dark:hover:bg-foreground/90';
+const ALL_LEADS_LIST_ID = 'all';
 
 function formatCallClock(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60);
@@ -74,6 +111,35 @@ function getCallbackDefaultDateTime(choice: 'today' | 'tomorrow' | 'custom', cal
     date: getDateInputValue(defaultDate),
     time: getTimeInputValue(defaultDate),
   };
+}
+
+function getFirstName(name: string | null | undefined): string {
+  return (name ?? '').trim().split(/\s+/)[0] || '';
+}
+
+function titleCaseName(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
+}
+
+function getRepFirstName(dialerAccess: DialerAccessResponse | null): string {
+  const fullName = dialerAccess?.salesperson?.fullName?.trim();
+  const emailName = dialerAccess?.salesperson?.email?.split('@')[0]?.split(/[._+-]/)[0]?.trim();
+  return titleCaseName(getFirstName(fullName) || emailName || 'Daniel');
+}
+
+function buildTextDropBody(lead: DiallerLead, repName: string): string {
+  const firstName = getFirstName(lead.name);
+  return `Hey ${firstName || 'there'}, its ${repName} with FLYR can you give me a call back when you get a chance !`;
+}
+
+function getTwoDayFollowUpAt(): string {
+  const followUpAt = new Date();
+  followUpAt.setDate(followUpAt.getDate() + 2);
+  followUpAt.setHours(9, 0, 0, 0);
+  return followUpAt.toISOString();
 }
 
 function statusForLead(lead: DiallerLead): DiallerLeadStatus {
@@ -137,6 +203,64 @@ function hasDialablePhone(value: string | null | undefined): boolean {
   return normalizePhoneNumber(value).isValid;
 }
 
+function isWorkedContact(contact: Contact): boolean {
+  return Boolean(contact.last_contacted) || contact.status !== 'new';
+}
+
+function buildListCriteria(baseKind: SmartListCriteria['baseKind'], overrides?: Partial<SmartListCriteria>): SmartListCriteria {
+  return {
+    baseKind,
+    source: '',
+    tags: [],
+    campaignIds: [],
+    farmIds: [],
+    contactIds: [],
+    ...overrides,
+  };
+}
+
+function buildDiallerAllLeadsList(): SmartListOption {
+  return {
+    id: ALL_LEADS_LIST_ID,
+    name: 'All Leads',
+    kind: 'all',
+    description: 'People your team has actually contacted.',
+  };
+}
+
+function buildDiallerCampaignListOption(campaign: CampaignV2): SmartListOption {
+  return {
+    id: `campaign:${campaign.id}`,
+    name: campaign.name?.trim() || 'Untitled Campaign',
+    kind: 'campaign',
+    description: 'Campaign list',
+    isCustom: true,
+    criteria: buildListCriteria('campaign', { campaignIds: [campaign.id] }),
+  };
+}
+
+function buildDiallerFarmListOption(farm: Farm): SmartListOption {
+  return {
+    id: `farm:${farm.id}`,
+    name: farm.name?.trim() || 'Untitled Farm',
+    kind: 'farm',
+    description: 'Farm list',
+    isCustom: true,
+    criteria: buildListCriteria('farm', { farmIds: [farm.id] }),
+  };
+}
+
+function parseFocusedLeadIds(value: string | null): string[] {
+  return Array.from(
+    new Set(
+      (value ?? '')
+        .split(',')
+        .map((id) => id.trim())
+        .filter(Boolean)
+    )
+  ).slice(0, 100);
+}
+
 function scorePhoneColumn(rows: string[][], columnIndex: number): number {
   return rows.reduce((score, row) => score + (hasDialablePhone(row[columnIndex]) ? 1 : 0), 0);
 }
@@ -197,44 +321,66 @@ function leadsFromCsv(text: string): Array<{ name: string; phone: string; compan
 
 export function PowerDialerPage() {
   const { currentWorkspaceId } = useWorkspace();
-  const device = useTwilioDevice();
+  const searchParams = useSearchParams();
+  const {
+    activeLeadId,
+    activeCallId,
+    activeCallIsDoubleDial,
+    callSeconds,
+    device,
+    diallerLeads: leads,
+    diallerRunning,
+    isPlacingNextCall,
+    placeNextDiallerCall,
+    setActiveLeadId,
+    setActiveCallId,
+    setActiveCallIsDoubleDial,
+    setActiveLeadSnapshot,
+    setDiallerLeads: setLeads,
+    setDiallerRunning,
+    setStartingCall,
+    startingCall,
+    tabId,
+  } = useDialerRuntime();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const tabIdRef = useRef<string>(typeof crypto !== 'undefined' ? crypto.randomUUID() : `dialer-${Date.now()}`);
   const callbackCalledAtRef = useRef<Date | null>(null);
   const doubleDialRetryRef = useRef<{ leadId: string; remaining: number } | null>(null);
   const placeCurrentCallRef = useRef<((options?: PlaceCallOptions) => Promise<void>) | null>(null);
 
   const [dialerAccess, setDialerAccess] = useState<DialerAccessResponse | null>(null);
   const [dialerAccessLoading, setDialerAccessLoading] = useState(true);
-  const [leads, setLeads] = useState<DiallerLead[]>([]);
-  const [activeLeadId, setActiveLeadId] = useState<string | null>(null);
-  const [activeVoicemailDrop, setActiveVoicemailDrop] = useState<DialerVoicemailDrop | null>(null);
   const [selectedDisposition, setSelectedDisposition] = useState<DiallerLeadDisposition>('interested');
   const [notes, setNotes] = useState('');
   const [email, setEmail] = useState('');
   const [followUpOpen, setFollowUpOpen] = useState(false);
+  const [listPickerOpen, setListPickerOpen] = useState(false);
+  const [leadListOptions, setLeadListOptions] = useState<DiallerListOption[]>([]);
+  const [loadingLeadLists, setLoadingLeadLists] = useState(false);
+  const [addingLeadListId, setAddingLeadListId] = useState<string | null>(null);
   const [followUpName, setFollowUpName] = useState('');
   const [followUpDate, setFollowUpDate] = useState('');
   const [followUpTime, setFollowUpTime] = useState('');
   const [followUpChoice, setFollowUpChoice] = useState<'today' | 'tomorrow' | 'custom'>('today');
-  const [textOpen, setTextOpen] = useState(false);
   const [textBody, setTextBody] = useState('');
   const [sendingText, setSendingText] = useState(false);
   const [autoNextEnabled, setAutoNextEnabled] = useState(true);
-  const [diallerRunning, setDiallerRunning] = useState(false);
-  const [callSeconds, setCallSeconds] = useState(0);
   const [loadingLeads, setLoadingLeads] = useState(false);
-  const [loadingVoicemailDrop, setLoadingVoicemailDrop] = useState(false);
   const [importing, setImporting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savingContact, setSavingContact] = useState(false);
-  const [deletingList, setDeletingList] = useState(false);
+  const [sendingDemoEmail, setSendingDemoEmail] = useState(false);
+  const [removingList, setRemovingList] = useState(false);
   const [loadingTestLead, setLoadingTestLead] = useState(false);
-  const [startingCall, setStartingCall] = useState(false);
-  const [activeCallId, setActiveCallId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isIphone, setIsIphone] = useState(false);
+
+  const focusedLeadIds = useMemo(
+    () => parseFocusedLeadIds(searchParams.get('leadIds')),
+    [searchParams]
+  );
+  const focusedListName = searchParams.get('listName')?.trim() || '';
+  const hasFocusedDialerList = focusedLeadIds.length > 0;
 
   const activeLead = useMemo(
     () =>
@@ -251,6 +397,7 @@ export function PowerDialerPage() {
   const calledCount = leads.filter((lead) => statusForLead(lead) === 'called').length;
   const connectedCount = leads.filter((lead) => lead.disposition === 'interested' || lead.disposition === 'callback').length;
   const remainingCount = leads.filter((lead) => statusForLead(lead) === 'pending').length;
+  const repFirstName = getRepFirstName(dialerAccess);
 
   const statusChecks = [
     { label: 'Workspace selected', ok: Boolean(currentWorkspaceId) },
@@ -265,7 +412,10 @@ export function PowerDialerPage() {
     setError(null);
 
     try {
-      const response = await fetch(`/api/dialer/leads?workspaceId=${encodeURIComponent(currentWorkspaceId)}`, {
+      const params = new URLSearchParams({ workspaceId: currentWorkspaceId });
+      if (focusedLeadIds.length > 0) params.set('leadIds', focusedLeadIds.join(','));
+
+      const response = await fetch(`/api/dialer/leads?${params.toString()}`, {
         credentials: 'include',
       });
       const data = (await response.json().catch(() => ({}))) as { leads?: DiallerLead[]; error?: string };
@@ -282,6 +432,13 @@ export function PowerDialerPage() {
         if (currentId && nextLeads.some((lead) => lead.id === currentId)) return currentId;
         return nextLeads.find((lead) => statusForLead(lead) === 'pending')?.id ?? nextLeads[0]?.id ?? null;
       });
+      if (focusedLeadIds.length > 0) {
+        setMessage(
+          nextLeads.length > 0
+            ? `Loaded ${nextLeads.length} lead${nextLeads.length === 1 ? '' : 's'} from ${focusedListName || 'the selected list'}.`
+            : 'No matching dialler leads were found for that list.'
+        );
+      }
     } catch {
       setLeads([]);
       setActiveLeadId(null);
@@ -289,37 +446,7 @@ export function PowerDialerPage() {
     } finally {
       setLoadingLeads(false);
     }
-  }, [currentWorkspaceId]);
-
-  const loadActiveVoicemailDrop = useCallback(async () => {
-    if (!currentWorkspaceId) {
-      setActiveVoicemailDrop(null);
-      return;
-    }
-
-    setLoadingVoicemailDrop(true);
-    try {
-      const response = await fetch(`/api/dialer/voicemail-drops?workspaceId=${encodeURIComponent(currentWorkspaceId)}`, {
-        credentials: 'include',
-      });
-      const data = (await response.json().catch(() => ({}))) as {
-        recordings?: DialerVoicemailDrop[];
-        error?: string;
-      };
-      if (!response.ok) {
-        setActiveVoicemailDrop(null);
-        console.warn('[dialer] failed to load voicemail drop', data.error);
-        return;
-      }
-
-      setActiveVoicemailDrop((data.recordings ?? []).find((recording) => recording.is_active) ?? null);
-    } catch (voicemailError) {
-      setActiveVoicemailDrop(null);
-      console.warn('[dialer] failed to load voicemail drop', voicemailError);
-    } finally {
-      setLoadingVoicemailDrop(false);
-    }
-  }, [currentWorkspaceId]);
+  }, [currentWorkspaceId, focusedLeadIds, focusedListName, setActiveLeadId, setLeads]);
 
   useEffect(() => {
     const userAgent = window.navigator.userAgent;
@@ -348,7 +475,6 @@ export function PowerDialerPage() {
       setDialerAccessLoading(false);
       setLeads([]);
       setActiveLeadId(null);
-      setActiveVoicemailDrop(null);
       return;
     }
 
@@ -372,50 +498,147 @@ export function PowerDialerPage() {
       });
 
     void loadDiallerLeads();
-    void loadActiveVoicemailDrop();
 
     return () => {
       cancelled = true;
     };
-  }, [currentWorkspaceId, loadActiveVoicemailDrop, loadDiallerLeads]);
+  }, [currentWorkspaceId, loadDiallerLeads, setActiveLeadId, setLeads]);
 
   useEffect(() => {
     if (!activeLead) {
       setNotes('');
       setEmail('');
       setTextBody('');
-      setTextOpen(false);
       setSelectedDisposition('interested');
       return;
     }
     setNotes(activeLead.notes ?? '');
     setEmail(activeLead.email ?? '');
-    setTextBody('');
-    setTextOpen(false);
+    setTextBody(buildTextDropBody(activeLead, repFirstName));
     setSelectedDisposition(activeLead.disposition ?? 'interested');
-  }, [activeLead]);
+  }, [activeLead, repFirstName]);
 
   useEffect(() => {
-    if (!device.isInCall) {
-      setCallSeconds(0);
-      return;
-    }
-
-    const startedAt = Date.now();
-    const interval = window.setInterval(() => {
-      setCallSeconds(Math.floor((Date.now() - startedAt) / 1000));
-    }, 1000);
-    return () => window.clearInterval(interval);
-  }, [device.isInCall]);
+    setActiveLeadSnapshot(
+      activeLead
+        ? {
+            id: activeLead.id,
+            name: activeLead.name ?? null,
+            phone: activeLead.phone ?? null,
+            company: activeLead.company ?? null,
+          }
+        : null
+    );
+  }, [activeLead, setActiveLeadSnapshot]);
 
   const handleInitializeDevice = async () => {
     if (!currentWorkspaceId) return;
     setError(null);
-    await device.initialize(currentWorkspaceId, tabIdRef.current);
+    await device.initialize(currentWorkspaceId, tabId);
   };
 
   const handleImportClick = () => {
     fileInputRef.current?.click();
+  };
+
+  const loadLeadListOptions = async () => {
+    if (!currentWorkspaceId) {
+      setError('Select a workspace before adding a list.');
+      return;
+    }
+
+    setLoadingLeadLists(true);
+    setError(null);
+
+    try {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user?.id) throw new Error('Sign in before adding a Leads list.');
+
+      const [contactsData, campaignsData, farmsData, smartListsData] = await Promise.all([
+        ContactsService.fetchContacts(user.id, currentWorkspaceId),
+        CampaignsService.fetchCampaignsV2(user.id, currentWorkspaceId).catch(() => [] as CampaignV2[]),
+        FarmService.fetchFarms(user.id, currentWorkspaceId).catch(() => [] as Farm[]),
+        SmartListsService.fetchWorkspaceSmartLists(currentWorkspaceId).catch(() => []),
+      ]);
+
+      const smartListOptions = [
+        buildDiallerAllLeadsList(),
+        ...[...campaignsData]
+          .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+          .map(buildDiallerCampaignListOption),
+        ...[...farmsData]
+          .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+          .map(buildDiallerFarmListOption),
+        ...smartListsData.map((list) => buildCustomSmartListOption(list)),
+      ];
+
+      const nextOptions = smartListOptions
+        .map((list) => {
+          const contactsForList =
+            list.id === ALL_LEADS_LIST_ID
+              ? contactsData.filter(isWorkedContact)
+              : filterContactsBySmartList(contactsData, list);
+          return {
+            ...list,
+            contacts: contactsForList,
+            count: contactsForList.length,
+            dialableCount: contactsForList.filter((contact) => hasDialablePhone(contact.phone)).length,
+          };
+        })
+        .filter((list) => list.count > 0);
+
+      setLeadListOptions(nextOptions);
+      setListPickerOpen(true);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : 'Failed to load Leads lists.');
+    } finally {
+      setLoadingLeadLists(false);
+    }
+  };
+
+  const handleAddListFromLeads = () => {
+    setListPickerOpen(true);
+    void loadLeadListOptions();
+  };
+
+  const handleAddLeadListToDialler = async (list: DiallerListOption) => {
+    if (!currentWorkspaceId || list.dialableCount === 0) return;
+
+    setAddingLeadListId(list.id);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const response = await fetch('/api/dialer/leads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          workspaceId: currentWorkspaceId,
+          leads: list.contacts
+            .filter((contact) => hasDialablePhone(contact.phone))
+            .map((contact) => ({
+              name: contact.full_name?.trim() || 'Lead',
+              phone: contact.phone?.trim() || '',
+              company: contact.address?.trim() || null,
+              email: contact.email?.trim() || null,
+            })),
+        }),
+      });
+      const data = (await response.json().catch(() => ({}))) as DiallerImportResponse;
+      if (!response.ok) throw new Error(data.error || 'Failed to add this list to the dialler.');
+
+      const importedLeads = data.leads ?? [];
+      setLeads((currentLeads) => [...currentLeads, ...importedLeads]);
+      setActiveLeadId((currentId) => currentId ?? importedLeads[0]?.id ?? null);
+      setMessage(`${data.importedCount ?? importedLeads.length} leads added from ${list.name}.`);
+      setListPickerOpen(false);
+    } catch (addError) {
+      setError(addError instanceof Error ? addError.message : 'Failed to add this list to the dialler.');
+    } finally {
+      setAddingLeadListId(null);
+    }
   };
 
   const handleFileSelected = async (file: File | null) => {
@@ -512,7 +735,7 @@ export function PowerDialerPage() {
     const laterPending = updatedLeads.slice(Math.max(currentIndex + 1, 0)).find((lead) => statusForLead(lead) === 'pending');
     const firstPending = updatedLeads.find((lead) => statusForLead(lead) === 'pending');
     setActiveLeadId(laterPending?.id ?? firstPending?.id ?? updatedLeads[currentIndex + 1]?.id ?? updatedLeads[0]?.id ?? null);
-  }, []);
+  }, [setActiveLeadId]);
 
   const saveLeadDisposition = async ({
     disposition,
@@ -636,10 +859,19 @@ export function PowerDialerPage() {
   const handleDispositionAction = async (disposition: DiallerLeadDisposition) => {
     doubleDialRetryRef.current = null;
     setSelectedDisposition(disposition);
+    const successMessage =
+      disposition === 'interested'
+        ? 'Interested saved. Link sent.'
+        : disposition === 'callback'
+          ? 'Follow-up saved.'
+          : disposition === 'dnc'
+            ? 'Do not call saved.'
+            : 'Not interested saved.';
     await saveLeadDisposition({
       disposition,
       sendLink: disposition === 'interested',
-      successMessage: disposition === 'interested' ? 'Interested saved. Link sent.' : 'Saved. Next lead is ready.',
+      forceAdvance: disposition === 'not_now' || disposition === 'dnc',
+      successMessage,
     });
   };
 
@@ -708,7 +940,7 @@ export function PowerDialerPage() {
       setActiveLeadId(leadToCall.id);
 
       if (!device.isReady && device.setupState !== 'initializing') {
-        await device.initialize(currentWorkspaceId, tabIdRef.current);
+        await device.initialize(currentWorkspaceId, tabId);
       }
 
       const response = await fetch('/api/dialer/leads/call', {
@@ -718,7 +950,7 @@ export function PowerDialerPage() {
         body: JSON.stringify({
           workspaceId: currentWorkspaceId,
           leadId: leadToCall.id,
-          tabId: tabIdRef.current,
+          tabId,
           doubleDial,
         }),
       });
@@ -730,6 +962,7 @@ export function PowerDialerPage() {
       }
       setActiveCallId(data.call.id);
       setDiallerRunning(true);
+      setActiveCallIsDoubleDial(doubleDial);
       setMessage(doubleDial ? (redialAfterEnd ? 'Double dial started. Will redial this lead once.' : 'Redial started.') : 'Call started.');
       await device.startCall(data.call.call_request_id);
     } catch (callError) {
@@ -738,6 +971,7 @@ export function PowerDialerPage() {
       }
       setDiallerRunning(false);
       setActiveCallId(null);
+      setActiveCallIsDoubleDial(false);
       setError(callError instanceof Error ? callError.message : 'Failed to place the outbound call.');
     } finally {
       setStartingCall(false);
@@ -755,6 +989,7 @@ export function PowerDialerPage() {
     const retry = doubleDialRetryRef.current;
     setDiallerRunning(false);
     setActiveCallId(null);
+    setActiveCallIsDoubleDial(false);
 
     if (retry && retry.remaining > 0) {
       const retryLead = leads.find((lead) => lead.id === retry.leadId);
@@ -773,58 +1008,25 @@ export function PowerDialerPage() {
     }
 
     setMessage((currentMessage) => currentMessage ?? 'Call ended.');
-  }, [activeCallId, device.callPhase, leads]);
+  }, [activeCallId, device.callPhase, leads, setActiveCallId, setActiveCallIsDoubleDial, setDiallerRunning]);
 
-  const handleVoicemailDrop = async () => {
-    doubleDialRetryRef.current = null;
-
-    if (!activeVoicemailDrop) {
-      setMessage(null);
-      setError('Upload and activate a prerecorded voicemail in Settings before using voicemail drop.');
-      return;
-    }
-
-    if (!device.isInCall || !activeCallId || !currentWorkspaceId) {
-      setMessage('Voicemail drop is ready after a live call connects.');
-      setError(null);
-      return;
-    }
-
-    setSaving(true);
-    setError(null);
-    setMessage(null);
-    try {
-      const response = await fetch(`/api/dialer/calls/${activeCallId}/voicemail-drop`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ workspaceId: currentWorkspaceId }),
-      });
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
-      if (!response.ok) throw new Error(data.error || 'Failed to drop voicemail.');
-      setMessage('Voicemail dropped.');
-    } catch (dropError) {
-      setError(dropError instanceof Error ? dropError.message : 'Failed to drop voicemail.');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const openTextComposer = () => {
-    if (!activeLead) return;
-    setError(null);
-    setMessage(null);
-    setTextOpen(true);
-  };
-
-  const handleSendText = async () => {
+  const handleTextDrop = async () => {
     if (!activeLead || !currentWorkspaceId) return;
 
+    doubleDialRetryRef.current = null;
     const body = textBody.trim();
     if (!body) {
       setError('Write a text before sending it.');
       return;
     }
+
+    const followUpAt = getTwoDayFollowUpAt();
+    const followUpLabel = `Follow up with ${activeLead.name || 'lead'}`;
+    const nextNotes = [
+      notes.trim(),
+      `Text drop sent: ${body}`,
+      `Follow up: ${followUpLabel} | When: ${new Date(followUpAt).toLocaleString()}`,
+    ].filter(Boolean).join('\n');
 
     setSendingText(true);
     setError(null);
@@ -841,16 +1043,26 @@ export function PowerDialerPage() {
         }),
       });
       const data = (await response.json().catch(() => ({}))) as { warning?: string | null; error?: string };
-      if (!response.ok) throw new Error(data.error || 'Failed to send text.');
+      if (!response.ok) throw new Error(data.error || 'Failed to send text drop.');
 
-      setTextBody('');
-      setTextOpen(false);
-      setMessage(data.warning ?? 'Text sent.');
-    } catch (sendError) {
-      setError(sendError instanceof Error ? sendError.message : 'Failed to send text.');
+      setSelectedDisposition('callback');
+      await saveLeadDisposition({
+        disposition: 'callback',
+        notesOverride: nextNotes,
+        followUpNameOverride: followUpLabel,
+        followUpAt,
+        createNotification: true,
+        successMessage: data.warning ?? 'Text drop sent. Follow-up set for two days from now.',
+      });
+    } catch (dropError) {
+      setError(dropError instanceof Error ? dropError.message : 'Failed to send text drop.');
     } finally {
       setSendingText(false);
     }
+  };
+
+  const handleTextBodyChange = (body: string) => {
+    setTextBody(body.slice(0, 1000));
   };
 
   const handleSaveContact = async () => {
@@ -890,6 +1102,49 @@ export function PowerDialerPage() {
     }
   };
 
+  const handleSaveAndSendDemo = async () => {
+    if (!activeLead || !currentWorkspaceId) return;
+
+    if (!email.trim()) {
+      setError('Add an email before sending the demo.');
+      return;
+    }
+
+    setSendingDemoEmail(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const response = await fetch('/api/dialer/leads', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          workspaceId: currentWorkspaceId,
+          id: activeLead.id,
+          notes,
+          email,
+          saveContact: true,
+          sendDemoEmail: true,
+        }),
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        lead?: DiallerLead;
+        contact?: unknown;
+        warning?: string | null;
+        error?: string;
+      };
+      if (!response.ok || !data.lead) throw new Error(data.error || 'Failed to send demo email.');
+
+      setLeads((currentLeads) => currentLeads.map((lead) => (lead.id === data.lead!.id ? data.lead! : lead)));
+      setMessage(data.warning ?? 'Contact saved. Demo email sent.');
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Failed to send demo email.');
+    } finally {
+      setSendingDemoEmail(false);
+    }
+  };
+
   const handleDeleteLead = async () => {
     if (!activeLead || !currentWorkspaceId) return;
 
@@ -924,16 +1179,16 @@ export function PowerDialerPage() {
     }
   };
 
-  const handleDeleteList = async () => {
+  const handleRemoveList = async () => {
     if (!currentWorkspaceId || leads.length === 0) return;
-    if (!window.confirm('Delete the current dialler list? This removes all loaded dialler leads.')) return;
+    if (!window.confirm('Remove this list from the dialler queue? Your saved Contacts list will not be deleted.')) return;
 
     doubleDialRetryRef.current = null;
     if (device.isInCall) {
       device.hangUp();
     }
 
-    setDeletingList(true);
+    setRemovingList(true);
     setError(null);
     setMessage(null);
 
@@ -945,10 +1200,11 @@ export function PowerDialerPage() {
         body: JSON.stringify({
           workspaceId: currentWorkspaceId,
           deleteAll: true,
+          ids: hasFocusedDialerList ? leads.map((lead) => lead.id) : undefined,
         }),
       });
       const data = (await response.json().catch(() => ({}))) as { deletedCount?: number; error?: string };
-      if (!response.ok) throw new Error(data.error || 'Failed to delete list.');
+      if (!response.ok) throw new Error(data.error || 'Failed to remove list from the dialler.');
 
       setLeads([]);
       setActiveLeadId(null);
@@ -956,11 +1212,12 @@ export function PowerDialerPage() {
       setEmail('');
       setDiallerRunning(false);
       setActiveCallId(null);
-      setMessage(`Deleted ${data.deletedCount ?? leads.length} leads.`);
+      setActiveCallIsDoubleDial(false);
+      setMessage(`Removed ${data.deletedCount ?? leads.length} leads from the dialler queue.`);
     } catch (deleteError) {
-      setError(deleteError instanceof Error ? deleteError.message : 'Failed to delete list.');
+      setError(deleteError instanceof Error ? deleteError.message : 'Failed to remove list from the dialler.');
     } finally {
-      setDeletingList(false);
+      setRemovingList(false);
     }
   };
 
@@ -977,7 +1234,22 @@ export function PowerDialerPage() {
     }
     setDiallerRunning(false);
     setActiveCallId(null);
+    setActiveCallIsDoubleDial(false);
     setMessage('Dialler paused.');
+  };
+
+  const handleNextCall = async () => {
+    if (!activeLead) return;
+
+    doubleDialRetryRef.current = null;
+    const result = await placeNextDiallerCall();
+    if (result.ok) {
+      setError(null);
+      setMessage(result.message);
+      return;
+    }
+    setMessage(null);
+    setError(result.message);
   };
 
   const handleHangUp = () => {
@@ -987,6 +1259,7 @@ export function PowerDialerPage() {
     }
     setDiallerRunning(false);
     setActiveCallId(null);
+    setActiveCallIsDoubleDial(false);
     setMessage('Call hung up.');
   };
 
@@ -1002,7 +1275,7 @@ export function PowerDialerPage() {
   return (
     <div
       data-device={isIphone ? 'iphone' : undefined}
-      className="min-h-[100svh] overflow-x-hidden bg-[#111111] px-3 pb-[calc(env(safe-area-inset-bottom)+1rem)] pt-[calc(env(safe-area-inset-top)+0.75rem)] text-neutral-100 sm:px-6 sm:py-4 lg:px-8"
+      className="min-h-[100svh] overflow-x-hidden bg-background px-3 pb-[calc(env(safe-area-inset-bottom)+1rem)] pt-[calc(env(safe-area-inset-top)+0.75rem)] text-foreground sm:px-6 sm:py-4 lg:px-8"
     >
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-3 sm:gap-4">
         <div className="-mx-3 overflow-x-auto px-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
@@ -1010,12 +1283,12 @@ export function PowerDialerPage() {
             {statusChecks.map((check) => (
               <span
                 key={check.label}
-                className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-neutral-800 bg-neutral-950 px-2.5 text-[11px] font-medium text-neutral-300"
+                className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-border bg-card px-2.5 text-[11px] font-medium text-muted-foreground shadow-sm shadow-neutral-200/40 dark:shadow-black/20"
               >
                 {check.ok ? (
-                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                  <CheckCircle2 className="h-3.5 w-3.5 text-foreground" />
                 ) : (
-                  <AlertCircle className="h-3.5 w-3.5 text-neutral-500" />
+                  <AlertCircle className="h-3.5 w-3.5 text-muted-foreground" />
                 )}
                 {check.label}
               </span>
@@ -1026,7 +1299,7 @@ export function PowerDialerPage() {
               size="sm"
               onClick={handleInitializeDevice}
               disabled={!currentWorkspaceId || device.setupState === 'initializing'}
-              className="h-7 shrink-0 touch-manipulation border-neutral-800 bg-neutral-950 px-2.5 text-[11px] text-neutral-200 hover:bg-neutral-900"
+              className={cn('h-7 shrink-0 touch-manipulation px-2.5 text-[11px]', DIALER_OUTLINE_BUTTON_CLASS)}
             >
               {device.setupState === 'initializing' ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -1038,10 +1311,10 @@ export function PowerDialerPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-2 rounded-lg border border-neutral-900 bg-neutral-950/60 px-3 py-2 text-center text-[11px] text-neutral-500 sm:flex sm:flex-wrap sm:items-center sm:gap-5 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0 sm:text-left sm:text-sm sm:text-neutral-400">
-          <span><span className="block text-base font-semibold leading-none text-neutral-100 sm:inline sm:text-sm">{calledCount}</span> calls</span>
-          <span><span className="block text-base font-semibold leading-none text-neutral-100 sm:inline sm:text-sm">{connectedCount}</span> connected</span>
-          <span><span className="block text-base font-semibold leading-none text-neutral-100 sm:inline sm:text-sm">{remainingCount}</span> left</span>
+        <div className="grid grid-cols-3 gap-2 rounded-lg border border-border bg-muted px-3 py-2 text-center text-[11px] text-muted-foreground sm:flex sm:flex-wrap sm:items-center sm:gap-5 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0 sm:text-left sm:text-sm">
+          <span><span className="block text-base font-semibold leading-none text-foreground sm:inline sm:text-sm">{calledCount}</span> calls</span>
+          <span><span className="block text-base font-semibold leading-none text-foreground sm:inline sm:text-sm">{connectedCount}</span> connected</span>
+          <span><span className="block text-base font-semibold leading-none text-foreground sm:inline sm:text-sm">{remainingCount}</span> left</span>
           {dialerAccessLoading || loadingLeads ? (
             <span className="col-span-3 inline-flex items-center justify-center gap-1.5 text-xs sm:col-span-1 sm:justify-start">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -1054,25 +1327,30 @@ export function PowerDialerPage() {
           <div
             className={`rounded-md border px-3 py-2 text-sm ${
               error || device.deviceError
-                ? 'border-red-500/30 bg-red-950/40 text-red-200'
-                : 'border-emerald-500/30 bg-emerald-950/30 text-emerald-200'
+                ? 'border-border bg-muted text-foreground'
+                : 'border-border bg-card text-foreground'
             }`}
           >
             {error || device.deviceError || message}
           </div>
         )}
 
-        <section className="rounded-xl border border-neutral-800 bg-[#202020] p-4 shadow-2xl shadow-black/30 sm:p-5">
+        <section className="rounded-xl border border-border bg-card p-4 shadow-xl shadow-neutral-200/70 dark:shadow-black/30 sm:p-5">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
-              <div className="text-xs font-medium uppercase tracking-wide text-neutral-500">
+              <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 {activeLead?.company?.trim() || '—'}
               </div>
-              <div className="mt-2 truncate text-[26px] font-semibold leading-tight text-neutral-50 sm:text-[28px]">
+              <div className="mt-2 truncate text-[26px] font-semibold leading-tight text-foreground sm:text-[28px]">
                 {activeLead?.name?.trim() || '—'}
               </div>
-              <div className="mt-1 text-base text-neutral-400">
-                {activeLead?.phone ? formatPhoneDisplay(activeLead.phone) : '—'}
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-base text-muted-foreground">
+                <span>{activeLead?.phone ? formatPhoneDisplay(activeLead.phone) : '—'}</span>
+                {activeCallIsDoubleDial ? (
+                  <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-[11px] font-semibold uppercase leading-none tracking-wide text-foreground">
+                    Double dial
+                  </span>
+                ) : null}
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-2">
@@ -1082,7 +1360,7 @@ export function PowerDialerPage() {
                 size="sm"
                 onClick={() => void handleLoadTestLead()}
                 disabled={!currentWorkspaceId || loadingTestLead}
-                className="h-10 touch-manipulation border-neutral-700 bg-[#171717] px-3 text-xs font-semibold text-neutral-100 hover:bg-neutral-800 disabled:opacity-35 sm:h-9"
+                className={cn('h-10 touch-manipulation px-3 text-xs font-semibold sm:h-9', DIALER_OUTLINE_BUTTON_CLASS)}
               >
                 {loadingTestLead ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                 Test
@@ -1094,7 +1372,7 @@ export function PowerDialerPage() {
                 aria-label="Previous lead"
                 onClick={() => moveActiveLead(-1)}
                 disabled={!canGoPreviousLead || saving || startingCall}
-                className="h-10 w-10 touch-manipulation border-neutral-700 bg-[#171717] text-neutral-100 hover:bg-neutral-800 disabled:opacity-35 sm:h-9 sm:w-9"
+                className={cn('h-10 w-10 touch-manipulation sm:h-9 sm:w-9', DIALER_OUTLINE_BUTTON_CLASS)}
               >
                 <ChevronLeft className="h-5 w-5" />
               </Button>
@@ -1105,11 +1383,11 @@ export function PowerDialerPage() {
                 aria-label="Next lead"
                 onClick={() => moveActiveLead(1)}
                 disabled={!canGoNextLead || saving || startingCall}
-                className="h-10 w-10 touch-manipulation border-neutral-700 bg-[#171717] text-neutral-100 hover:bg-neutral-800 disabled:opacity-35 sm:h-9 sm:w-9"
+                className={cn('h-10 w-10 touch-manipulation sm:h-9 sm:w-9', DIALER_OUTLINE_BUTTON_CLASS)}
               >
                 <ChevronRight className="h-5 w-5" />
               </Button>
-              <div className="min-w-[46px] text-right font-mono text-xs text-neutral-400">{formatCallClock(callSeconds)}</div>
+              <div className="min-w-[46px] text-right font-mono text-xs text-muted-foreground">{formatCallClock(callSeconds)}</div>
             </div>
           </div>
 
@@ -1119,9 +1397,11 @@ export function PowerDialerPage() {
               variant="outline"
               disabled={!hasActiveLead || saving || startingCall}
               onClick={() => void handleDispositionAction('interested')}
-              className={`h-[58px] touch-manipulation justify-center border-neutral-700 bg-transparent text-[15px] text-neutral-100 hover:bg-neutral-800 sm:h-14 sm:text-base ${
-                selectedDisposition === 'interested' ? 'border-red-400 bg-red-500/10 text-white' : ''
-              } ${!hasActiveLead ? 'opacity-40' : ''}`}
+              className={cn(
+                'h-[58px] touch-manipulation justify-center text-[15px] sm:h-14 sm:text-base',
+                DIALER_OUTLINE_BUTTON_CLASS,
+                selectedDisposition === 'interested' && DIALER_SELECTED_BUTTON_CLASS
+              )}
             >
               {saving && selectedDisposition === 'interested' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               Send link
@@ -1130,103 +1410,145 @@ export function PowerDialerPage() {
               type="button"
               variant="outline"
               disabled={!hasActiveLead || saving || startingCall}
-              onClick={handleDoubleDial}
-              className={`h-[58px] touch-manipulation justify-center border-neutral-700 bg-transparent text-[15px] text-neutral-100 hover:bg-neutral-800 sm:h-14 sm:text-base ${
-                !hasActiveLead ? 'opacity-40' : ''
-              }`}
-            >
-              {startingCall ? <Loader2 className="h-4 w-4 animate-spin" /> : <PhoneCall className="h-4 w-4" />}
-              Double dial
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={!hasActiveLead || saving || startingCall}
               onClick={openFollowUpTask}
-              className={`h-[58px] touch-manipulation justify-center border-neutral-700 bg-transparent text-[15px] text-neutral-100 hover:bg-neutral-800 sm:h-14 sm:text-base ${
-                selectedDisposition === 'callback' ? 'border-red-400 bg-red-500/10 text-white' : ''
-              } ${!hasActiveLead ? 'opacity-40' : ''}`}
+              className={cn(
+                'h-[58px] touch-manipulation justify-center text-[15px] sm:h-14 sm:text-base',
+                DIALER_OUTLINE_BUTTON_CLASS,
+                selectedDisposition === 'callback' && DIALER_SELECTED_BUTTON_CLASS
+              )}
             >
-              <Mail className="h-4 w-4" />
-              Callback
+              <Clock className="h-4 w-4" />
+              Follow up
             </Button>
             <Button
               type="button"
               variant="outline"
               disabled={!hasActiveLead || saving || startingCall}
-              onClick={() => void handleDeleteLead()}
-              className={`h-[58px] touch-manipulation justify-center border-neutral-700 bg-transparent text-[15px] text-neutral-100 hover:border-red-500/60 hover:bg-red-950/30 hover:text-red-100 sm:h-14 sm:text-base ${
-                !hasActiveLead ? 'opacity-40' : ''
-              }`}
+              onClick={() => void handleDispositionAction('not_now')}
+              className={cn(
+                'h-[58px] touch-manipulation justify-center text-[15px] sm:h-14 sm:text-base',
+                DIALER_OUTLINE_BUTTON_CLASS,
+                selectedDisposition === 'not_now' && DIALER_SELECTED_BUTTON_CLASS
+              )}
             >
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              {saving && selectedDisposition === 'not_now' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
               Not interested
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={!hasActiveLead || saving || startingCall}
+              onClick={() => void handleDispositionAction('dnc')}
+              className={cn(
+                'h-[58px] touch-manipulation justify-center text-[15px] sm:h-14 sm:text-base',
+                DIALER_OUTLINE_BUTTON_CLASS,
+                selectedDisposition === 'dnc' && DIALER_SELECTED_BUTTON_CLASS
+              )}
+            >
+              {saving && selectedDisposition === 'dnc' ? <Loader2 className="h-4 w-4 animate-spin" /> : <PhoneOff className="h-4 w-4" />}
+              Do not call
             </Button>
           </div>
 
           <div className="mt-3 grid gap-2 sm:mt-4">
-            <div className="relative">
-              <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-500" />
-              <Input
-                type="email"
-                inputMode="email"
-                autoCapitalize="none"
-                autoCorrect="off"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                disabled={!hasActiveLead || saving}
-                placeholder="Add email"
-                className="h-12 border-neutral-700 bg-[#171717] pl-9 text-base text-neutral-100 placeholder:text-neutral-600 focus-visible:ring-red-500/40"
-              />
+            <div className="grid gap-2">
+              <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_112px_172px]">
+                <div className="relative">
+                  <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    type="email"
+                    inputMode="email"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    disabled={!hasActiveLead || saving || savingContact || sendingDemoEmail}
+                    placeholder="Add email"
+                    className={cn('h-12 pl-9 text-base', DIALER_INPUT_CLASS)}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2 lg:contents">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void handleSaveContact()}
+                    disabled={!hasActiveLead || savingContact || saving || sendingDemoEmail || startingCall}
+                    className={cn('h-12 touch-manipulation text-sm font-semibold', DIALER_OUTLINE_BUTTON_CLASS)}
+                  >
+                    {savingContact ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                    Save
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void handleSaveAndSendDemo()}
+                    disabled={!hasActiveLead || savingContact || saving || sendingDemoEmail || startingCall || !email.trim()}
+                    className={cn('h-12 touch-manipulation text-sm font-semibold', DIALER_OUTLINE_BUTTON_CLASS)}
+                  >
+                    {sendingDemoEmail ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                    <span className="hidden sm:inline">Save & Send Demo</span>
+                    <span className="sm:hidden">Send Demo</span>
+                  </Button>
+                </div>
+              </div>
+              <div className="relative">
+                <MessageSquare className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-muted-foreground" />
+                <Textarea
+                  value={notes}
+                  onChange={(event) => setNotes(event.target.value)}
+                  disabled={!hasActiveLead || saving || savingContact || sendingDemoEmail}
+                  placeholder="Add note"
+                  className={cn('min-h-12 resize-none pl-9 text-base sm:min-h-12', DIALER_INPUT_CLASS)}
+                />
+              </div>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={openTextComposer}
-                disabled={!hasActiveLead || sendingText || saving || startingCall}
-                className="h-12 w-full touch-manipulation border-neutral-700 bg-transparent text-neutral-100 hover:bg-neutral-800"
-              >
-                {sendingText ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageSquare className="h-4 w-4" />}
-                Text
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={handleVoicemailDrop}
-                disabled={!hasActiveLead || !activeVoicemailDrop || loadingVoicemailDrop || saving || startingCall}
-                title={activeVoicemailDrop?.filename ? `Drop ${activeVoicemailDrop.filename}` : 'Upload and activate a voicemail recording in Settings'}
-                className="h-12 w-full touch-manipulation border-neutral-700 bg-transparent text-neutral-100 hover:bg-neutral-800"
-              >
-                {loadingVoicemailDrop ? <Loader2 className="h-4 w-4 animate-spin" /> : <Voicemail className="h-4 w-4" />}
-                {activeVoicemailDrop ? 'Voicemail drop' : 'No voicemail'}
-              </Button>
+            <div className="rounded-md border border-border bg-muted px-3 py-2">
+              <div className="grid min-h-12 gap-2 sm:grid-cols-[minmax(0,1fr)_132px] sm:items-center">
+                <label className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-3">
+                  <span className="shrink-0 text-xs font-medium uppercase text-muted-foreground">Text drop</span>
+                  <textarea
+                    value={textBody}
+                    onChange={(event) => handleTextBodyChange(event.target.value)}
+                    disabled={!hasActiveLead || sendingText || saving}
+                    placeholder={activeLead ? 'Write a text message...' : `Hey there, its ${repFirstName} with FLYR can you give me a call back when you get a chance !`}
+                    rows={1}
+                    className="h-6 min-h-6 w-full resize-none overflow-hidden border-0 bg-transparent p-0 text-base leading-6 text-foreground outline-none placeholder:text-muted-foreground focus:ring-0 disabled:cursor-not-allowed disabled:text-muted-foreground disabled:opacity-100"
+                  />
+                </label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void handleTextDrop()}
+                  disabled={!hasActiveLead || sendingText || saving || startingCall || !textBody.trim()}
+                  className={cn('h-10 touch-manipulation text-sm font-semibold', DIALER_OUTLINE_BUTTON_CLASS)}
+                >
+                  {sendingText ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageSquare className="h-4 w-4" />}
+                  Text drop
+                </Button>
+              </div>
             </div>
           </div>
 
-          <Textarea
-            value={notes}
-            onChange={(event) => setNotes(event.target.value)}
-            disabled={!hasActiveLead || saving}
-            placeholder="Add a note…"
-            className="mt-3 min-h-[86px] resize-none border-neutral-700 bg-[#171717] text-base text-neutral-100 placeholder:text-neutral-600 focus-visible:ring-red-500/40 sm:min-h-[104px]"
-          />
-
-          <div className="mt-3 flex items-center justify-between rounded-md border border-neutral-800 bg-[#171717] px-3 py-2 sm:mt-4">
+          <div className="mt-3 flex items-center justify-between rounded-md border border-border bg-muted px-3 py-2 sm:mt-4">
             <div>
-              <div className="text-sm font-medium text-neutral-200">Auto-next</div>
-              <div className="text-xs text-neutral-500">Keep the next lead ready after every tap</div>
+              <div className="text-sm font-medium text-foreground">Auto-next</div>
+              <div className="text-xs text-muted-foreground">Keep the next lead ready after every tap</div>
             </div>
-            <Switch checked={autoNextEnabled} onCheckedChange={setAutoNextEnabled} aria-label="Toggle auto-next" />
+            <Switch
+              checked={autoNextEnabled}
+              onCheckedChange={setAutoNextEnabled}
+              aria-label="Toggle auto-next"
+              className="data-[state=checked]:bg-foreground data-[state=unchecked]:bg-input"
+            />
           </div>
 
           <div className="sticky bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] z-20 mt-4 sm:static">
-            <div className="grid grid-cols-[1fr_0.72fr_0.72fr] gap-2 sm:grid-cols-[1fr_160px_160px]">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-[1fr_150px_140px_140px]">
               <Button
                 type="button"
                 onClick={() => void handleStartPause()}
                 disabled={!hasActiveLead || device.setupState === 'initializing' || startingCall}
-                className="h-[52px] min-h-[52px] w-full touch-manipulation bg-red-500 text-base font-semibold text-white shadow-lg shadow-black/35 hover:bg-red-600 sm:h-12 sm:min-h-12"
+                className={cn('h-[52px] min-h-[52px] w-full touch-manipulation text-base font-semibold shadow-lg shadow-neutral-300/70 dark:shadow-black/25 sm:h-12 sm:min-h-12', DIALER_PRIMARY_BUTTON_CLASS)}
               >
                 {device.setupState === 'initializing' || startingCall ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -1240,9 +1562,20 @@ export function PowerDialerPage() {
               <Button
                 type="button"
                 variant="outline"
+                onClick={() => void handleNextCall()}
+                disabled={!hasActiveLead || device.setupState === 'initializing' || startingCall || isPlacingNextCall}
+                className={cn('h-[52px] min-h-[52px] touch-manipulation text-base font-semibold sm:h-12 sm:min-h-12', DIALER_OUTLINE_BUTTON_CLASS)}
+              >
+                {startingCall || isPlacingNextCall ? <Loader2 className="h-4 w-4 animate-spin" /> : <ChevronRight className="h-4 w-4" />}
+                <span className="sm:hidden">Next</span>
+                <span className="hidden sm:inline">Next call</span>
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
                 onClick={handleHangUp}
                 disabled={!device.isInCall && !activeCallId}
-                className="h-[52px] min-h-[52px] touch-manipulation border-red-500/45 bg-[#171717] text-base font-semibold text-red-100 hover:border-red-400 hover:bg-red-950/35 hover:text-white disabled:border-neutral-700 disabled:text-neutral-500 sm:h-12 sm:min-h-12"
+                className={cn('h-[52px] min-h-[52px] touch-manipulation text-base font-semibold sm:h-12 sm:min-h-12', DIALER_OUTLINE_BUTTON_CLASS)}
               >
                 <PhoneOff className="h-4 w-4" />
                 <span className="sm:hidden">End</span>
@@ -1252,8 +1585,8 @@ export function PowerDialerPage() {
                 type="button"
                 variant="outline"
                 onClick={() => void handleSaveContact()}
-                disabled={!hasActiveLead || savingContact || saving || startingCall}
-                className="h-[52px] min-h-[52px] touch-manipulation border-neutral-700 bg-[#171717] text-base font-semibold text-neutral-100 hover:bg-neutral-800 sm:h-12 sm:min-h-12"
+                disabled={!hasActiveLead || savingContact || saving || sendingDemoEmail || startingCall}
+                className={cn('h-[52px] min-h-[52px] touch-manipulation text-base font-semibold sm:h-12 sm:min-h-12', DIALER_OUTLINE_BUTTON_CLASS)}
               >
                 {savingContact ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                 Save
@@ -1262,45 +1595,65 @@ export function PowerDialerPage() {
           </div>
         </section>
 
-        <Dialog open={textOpen} onOpenChange={setTextOpen}>
+        <Dialog open={listPickerOpen} onOpenChange={setListPickerOpen}>
           <DialogContent
-            className="max-w-[calc(100%-1.5rem)] border-neutral-800 bg-[#202020] p-0 text-neutral-100 sm:max-w-xl"
+            className="max-w-[calc(100%-1.5rem)] border-border bg-card p-0 text-foreground sm:max-w-2xl"
             showCloseButton={false}
           >
-            <DialogHeader className="border-b border-neutral-800 px-4 py-4 text-left sm:px-5">
-              <DialogTitle className="text-xl font-semibold text-neutral-50">Text</DialogTitle>
+            <DialogHeader className="border-b border-border px-4 py-4 text-left sm:px-5">
+              <DialogTitle className="text-xl font-semibold text-foreground">Add list</DialogTitle>
             </DialogHeader>
-            <div className="grid gap-2 px-4 py-4 sm:px-5">
-              <div className="text-sm text-neutral-400">
-                {activeLead?.name?.trim() || 'Lead'} · {activeLead?.phone ? formatPhoneDisplay(activeLead.phone) : '—'}
-              </div>
-              <Textarea
-                value={textBody}
-                onChange={(event) => setTextBody(event.target.value.slice(0, 1000))}
-                disabled={!hasActiveLead || sendingText}
-                placeholder="Write a text…"
-                className="min-h-[132px] resize-none border-neutral-700 bg-[#171717] text-base text-neutral-100 placeholder:text-neutral-600 focus-visible:ring-red-500/40"
-              />
-              <div className="text-right text-xs text-neutral-500">{textBody.trim().length}/1000</div>
+            <div className="max-h-[60vh] overflow-y-auto px-4 py-4 sm:px-5">
+              {loadingLeadLists ? (
+                <div className="flex min-h-32 items-center justify-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading lists
+                </div>
+              ) : leadListOptions.length === 0 ? (
+                <div className="rounded-lg border border-border bg-muted px-4 py-6 text-sm text-muted-foreground">
+                  No Leads lists with contacts found.
+                </div>
+              ) : (
+                <div className="grid gap-2">
+                  {leadListOptions.map((list) => {
+                    const isAdding = addingLeadListId === list.id;
+                    return (
+                      <Button
+                        key={list.id}
+                        type="button"
+                        variant="outline"
+                        onClick={() => void handleAddLeadListToDialler(list)}
+                        disabled={addingLeadListId !== null || list.dialableCount === 0}
+                        className={cn(
+                          'h-auto min-h-[68px] justify-between gap-3 px-3 py-3 text-left',
+                          DIALER_OUTLINE_BUTTON_CLASS
+                        )}
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-semibold text-foreground">{list.name}</span>
+                          <span className="mt-1 block truncate text-xs font-normal text-muted-foreground">
+                            {list.description}
+                          </span>
+                        </span>
+                        <span className="flex shrink-0 items-center gap-2 text-xs font-semibold text-muted-foreground">
+                          {isAdding ? <Loader2 className="h-4 w-4 animate-spin" /> : <ListPlus className="h-4 w-4" />}
+                          {list.dialableCount}/{list.count}
+                        </span>
+                      </Button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-            <DialogFooter className="border-t border-neutral-800 px-4 py-4 sm:flex-row sm:px-5">
+            <DialogFooter className="border-t border-border px-4 py-4 sm:flex-row sm:px-5">
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setTextOpen(false)}
-                disabled={sendingText}
-                className="h-11 border-neutral-700 bg-transparent text-neutral-100 hover:bg-neutral-800"
+                onClick={() => setListPickerOpen(false)}
+                disabled={addingLeadListId !== null}
+                className={cn('h-11', DIALER_OUTLINE_BUTTON_CLASS)}
               >
                 Cancel
-              </Button>
-              <Button
-                type="button"
-                onClick={() => void handleSendText()}
-                disabled={!hasActiveLead || sendingText || !textBody.trim()}
-                className="h-11 bg-red-500 text-white hover:bg-red-600"
-              >
-                {sendingText ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageSquare className="h-4 w-4" />}
-                Send text
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -1308,11 +1661,11 @@ export function PowerDialerPage() {
 
         <Dialog open={followUpOpen} onOpenChange={setFollowUpOpen}>
           <DialogContent
-            className="max-w-[calc(100%-1.5rem)] border-neutral-800 bg-[#202020] p-0 text-neutral-100 sm:max-w-xl"
+            className="max-w-[calc(100%-1.5rem)] border-border bg-card p-0 text-foreground sm:max-w-xl"
             showCloseButton={false}
           >
-            <DialogHeader className="border-b border-neutral-800 px-4 py-4 text-left sm:px-5">
-              <DialogTitle className="text-xl font-semibold text-neutral-50">Callback</DialogTitle>
+            <DialogHeader className="border-b border-border px-4 py-4 text-left sm:px-5">
+              <DialogTitle className="text-xl font-semibold text-foreground">Callback follow-up</DialogTitle>
             </DialogHeader>
             <div className="grid gap-3 px-4 py-4 sm:px-5">
               <Input
@@ -1320,7 +1673,7 @@ export function PowerDialerPage() {
                 onChange={(event) => setFollowUpName(event.target.value)}
                 placeholder="Callback name"
                 aria-label="Follow up name"
-                className="h-12 border-neutral-700 bg-[#171717] text-base text-neutral-100 placeholder:text-neutral-600 focus-visible:ring-red-500/40"
+                className={cn('h-12 text-base', DIALER_INPUT_CLASS)}
               />
               <div className="grid grid-cols-3 gap-2">
                 {(['today', 'tomorrow', 'custom'] as const).map((choice) => (
@@ -1335,9 +1688,11 @@ export function PowerDialerPage() {
                       setFollowUpDate(defaults.date);
                       setFollowUpTime(defaults.time);
                     }}
-                    className={`h-11 border-neutral-700 bg-[#171717] text-neutral-100 hover:bg-neutral-800 ${
-                      followUpChoice === choice ? 'border-red-400 bg-red-500/10 text-white' : ''
-                    }`}
+                    className={cn(
+                      'h-11',
+                      DIALER_OUTLINE_BUTTON_CLASS,
+                      followUpChoice === choice && DIALER_SELECTED_BUTTON_CLASS
+                    )}
                   >
                     {choice === 'today' ? 'Today' : choice === 'tomorrow' ? 'Tomorrow' : 'Custom'}
                   </Button>
@@ -1350,7 +1705,7 @@ export function PowerDialerPage() {
                     value={followUpDate}
                     onChange={(event) => setFollowUpDate(event.target.value)}
                     aria-label="Follow up date"
-                    className="h-12 border-neutral-700 bg-[#171717] text-base text-neutral-100 placeholder:text-neutral-600 focus-visible:ring-red-500/40"
+                    className={cn('h-12 text-base', DIALER_INPUT_CLASS)}
                   />
                 ) : null}
                 <Input
@@ -1358,17 +1713,17 @@ export function PowerDialerPage() {
                   value={followUpTime}
                   onChange={(event) => setFollowUpTime(event.target.value)}
                   aria-label="Follow up time"
-                  className="h-12 border-neutral-700 bg-[#171717] text-base text-neutral-100 placeholder:text-neutral-600 focus-visible:ring-red-500/40"
+                  className={cn('h-12 text-base', DIALER_INPUT_CLASS)}
                 />
               </div>
             </div>
-            <DialogFooter className="border-t border-neutral-800 px-4 py-4 sm:flex-row sm:px-5">
+            <DialogFooter className="border-t border-border px-4 py-4 sm:flex-row sm:px-5">
               <Button
                 type="button"
                 variant="outline"
                 onClick={() => setFollowUpOpen(false)}
                 disabled={saving}
-                className="h-11 border-neutral-700 bg-transparent text-neutral-100 hover:bg-neutral-800"
+                className={cn('h-11', DIALER_OUTLINE_BUTTON_CLASS)}
               >
                 Cancel
               </Button>
@@ -1376,7 +1731,7 @@ export function PowerDialerPage() {
                 type="button"
                 onClick={() => void handleFollowUp()}
                 disabled={!hasActiveLead || saving}
-                className="h-11 bg-red-500 text-white hover:bg-red-600"
+                className={cn('h-11', DIALER_PRIMARY_BUTTON_CLASS)}
               >
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
                 Create callback
@@ -1388,9 +1743,9 @@ export function PowerDialerPage() {
         <section className="mt-2">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div>
-              <h2 className="text-base font-semibold text-neutral-100">Call Queue</h2>
-              <p className="text-sm text-neutral-500">
-                {leads.length > 0 ? `${leads.length} leads loaded.` : 'Import a CSV list to begin.'}
+              <h2 className="text-base font-semibold text-foreground">Call Queue</h2>
+              <p className="text-sm text-muted-foreground">
+                {leads.length > 0 ? `${leads.length} leads loaded.` : 'Add a Leads list or import a CSV to begin.'}
               </p>
             </div>
             <div className="flex shrink-0 items-center gap-2">
@@ -1404,9 +1759,20 @@ export function PowerDialerPage() {
               <Button
                 type="button"
                 variant="outline"
+                onClick={handleAddListFromLeads}
+                disabled={!currentWorkspaceId || loadingLeadLists}
+                className={cn('min-h-11 touch-manipulation', DIALER_OUTLINE_BUTTON_CLASS)}
+              >
+                {loadingLeadLists ? <Loader2 className="h-4 w-4 animate-spin" /> : <ListPlus className="h-4 w-4" />}
+                <span className="hidden sm:inline">Add List</span>
+                <span className="sm:hidden">Add</span>
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
                 onClick={handleImportClick}
                 disabled={!currentWorkspaceId || importing}
-                className="min-h-11 touch-manipulation border-neutral-700 bg-transparent text-neutral-100 hover:bg-neutral-900"
+                className={cn('min-h-11 touch-manipulation', DIALER_OUTLINE_BUTTON_CLASS)}
               >
                 {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
                 <span className="hidden sm:inline">Import List</span>
@@ -1415,24 +1781,24 @@ export function PowerDialerPage() {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => void handleDeleteList()}
-                disabled={!currentWorkspaceId || leads.length === 0 || deletingList || importing}
-                className="min-h-11 touch-manipulation border-red-500/40 bg-transparent text-red-200 hover:border-red-500/70 hover:bg-red-950/30 hover:text-red-100"
+                onClick={() => void handleRemoveList()}
+                disabled={!currentWorkspaceId || leads.length === 0 || removingList || importing}
+                className={cn('min-h-11 touch-manipulation', DIALER_OUTLINE_BUTTON_CLASS)}
               >
-                {deletingList ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                <span className="hidden sm:inline">Delete List</span>
-                <span className="sm:hidden">Delete</span>
+                {removingList ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
+                <span className="hidden sm:inline">Remove List</span>
+                <span className="sm:hidden">Remove</span>
               </Button>
             </div>
           </div>
 
-          <div className="overflow-hidden rounded-xl border border-neutral-800 bg-[#171717]">
+          <div className="overflow-hidden rounded-xl border border-border bg-card">
             {leads.length === 0 ? (
-              <div className="px-4 py-8 text-sm text-neutral-500">
+              <div className="px-4 py-8 text-sm text-muted-foreground">
                 No leads loaded.
               </div>
             ) : (
-              <div className="divide-y divide-neutral-800">
+              <div className="divide-y divide-border">
                 {leads.map((lead) => {
                   const status = statusForLead(lead);
                   const isActive = lead.id === activeLead?.id;
@@ -1441,21 +1807,22 @@ export function PowerDialerPage() {
                       key={lead.id}
                       type="button"
                       onClick={() => setActiveLeadId(lead.id)}
-                      className={`grid min-h-[64px] w-full gap-1.5 px-3 py-3 text-left transition hover:bg-neutral-900 sm:grid-cols-[1.2fr_1fr_0.9fr_auto] sm:items-center sm:gap-2 sm:px-4 ${
-                        isActive ? 'bg-neutral-900' : ''
-                      }`}
+                      className={cn(
+                        'grid min-h-[64px] w-full gap-1.5 px-3 py-3 text-left transition hover:bg-muted/70 sm:grid-cols-[1.2fr_1fr_0.9fr_auto] sm:items-center sm:gap-2 sm:px-4',
+                        isActive && 'bg-muted'
+                      )}
                     >
-                      <div className="truncate text-sm font-medium text-neutral-100">{lead.name || 'Lead'}</div>
-                      <div className="truncate text-sm text-neutral-400">{lead.company || '—'}</div>
-                      <div className="text-sm text-neutral-400">{formatPhoneDisplay(lead.phone)}</div>
+                      <div className="truncate text-sm font-medium text-foreground">{lead.name || 'Lead'}</div>
+                      <div className="truncate text-sm text-muted-foreground">{lead.company || '—'}</div>
+                      <div className="text-sm text-muted-foreground">{formatPhoneDisplay(lead.phone)}</div>
                       <Badge
                         variant="outline"
-                        className={`w-fit border-neutral-700 text-neutral-300 ${
+                        className={`w-fit border-border text-muted-foreground ${
                           status === 'pending'
-                            ? 'bg-neutral-950'
+                            ? 'bg-background dark:bg-card'
                             : status === 'called'
-                              ? 'border-emerald-500/40 bg-emerald-950/30 text-emerald-200'
-                              : 'border-red-500/40 bg-red-950/30 text-red-200'
+                              ? 'bg-muted text-foreground'
+                              : 'bg-muted text-muted-foreground'
                         }`}
                       >
                         {status}

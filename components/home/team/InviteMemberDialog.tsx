@@ -87,8 +87,8 @@ export function InviteMemberDialog({
   const submitLabel =
     role === 'member' && additionalSeats > 0 && actorRole === 'owner' && !isTrialActive
       ? busy
-        ? 'Updating seats…'
-        : `Add ${additionalSeats} seat${additionalSeats === 1 ? '' : 's'}, then add members`
+        ? 'Opening Stripe...'
+        : `Pay for ${additionalSeats} seat${additionalSeats === 1 ? '' : 's'} in Stripe`
       : busy
         ? 'Adding…'
         : `Add member${filledEmails.length === 1 ? '' : 's'}`;

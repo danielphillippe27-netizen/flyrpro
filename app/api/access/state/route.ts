@@ -4,6 +4,8 @@ import { resolveDashboardAccessLevel } from '@/app/api/_utils/workspace';
 import type { MinimalSupabaseClient } from '@/app/api/_utils/workspace';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { getApprovedAmbassadorByEmail } from '@/app/lib/billing/ambassador-access';
+import { resolveSalespersonForUser } from '@/lib/dialer/salesperson-settings';
+import { getSeatUsage } from '@/app/api/team/_lib/manage';
 
 /**
  * GET /api/access/state
@@ -18,24 +20,14 @@ export async function GET(request: NextRequest) {
 
     const admin = createAdminClient();
     const normalizedEmail = requestUser.email?.trim().toLowerCase() ?? null;
-    const [approvedAmbassador, salespersonLookup, membershipResult] = await Promise.all([
+    const [approvedAmbassador, membershipResult] = await Promise.all([
       getApprovedAmbassadorByEmail(admin, normalizedEmail),
-      normalizedEmail
-        ? admin
-            .from('salespeople')
-            .select('id, full_name, email, status')
-            .eq('email', normalizedEmail)
-            .eq('status', 'active')
-            .maybeSingle()
-        : Promise.resolve({ data: null, error: null }),
       admin
         .from('workspace_members')
         .select('workspace_id, role, created_at')
         .eq('user_id', requestUser.id)
         .order('created_at', { ascending: true }),
     ]);
-    const isAmbassador = !!approvedAmbassador;
-    const isSalesperson = !!salespersonLookup.data && !salespersonLookup.error;
     const requestedWorkspaceId = request.nextUrl.searchParams.get('workspaceId')?.trim() || null;
     const membershipRows = membershipResult.data ?? [];
     const workspaceIds = Array.from(
@@ -65,6 +57,13 @@ export async function GET(request: NextRequest) {
         workspaces: workspaceRows ?? [],
       }
     );
+    const salesperson = await resolveSalespersonForUser(admin, {
+      userId: requestUser.id,
+      email: normalizedEmail,
+      workspaceId: access.workspaceId,
+    });
+    const isAmbassador = !!approvedAmbassador;
+    const isSalesperson = !!salesperson;
     if (!access.workspaceId) {
       return NextResponse.json({
         userId: requestUser.id,
@@ -80,7 +79,7 @@ export async function GET(request: NextRequest) {
         plan: isAmbassador ? 'ambassador' : 'free',
         planBadgeLabel: isAmbassador ? 'AMBASSADOR' : null,
         isSalesperson,
-        salesperson: salespersonLookup.data ?? null,
+        salesperson,
         accessLevel: isSalesperson ? 'salesperson' : access.level,
         onboardingComplete: false,
         memberCount: access.memberCount,
@@ -104,7 +103,9 @@ export async function GET(request: NextRequest) {
         ambassadorApplicationId: approvedAmbassador?.id ?? null,
         plan: isAmbassador ? 'ambassador' : 'free',
         planBadgeLabel: isAmbassador ? 'AMBASSADOR' : null,
-        accessLevel: access.level,
+        isSalesperson,
+        salesperson,
+        accessLevel: isSalesperson && !access.isFounder ? 'salesperson' : access.level,
         onboardingComplete: false,
         memberCount: access.memberCount,
         workspaces: workspaceOptions,
@@ -115,10 +116,21 @@ export async function GET(request: NextRequest) {
     const trialEnd = workspace.trial_ends_at
       ? new Date(workspace.trial_ends_at)
       : null;
+    const nowDate = new Date();
+    const trialExpired =
+      status === 'trialing' && !!trialEnd && trialEnd <= nowDate;
     const subscriptionAccess =
       status === 'active' ||
-      (status === 'trialing' && (!trialEnd || trialEnd > new Date()));
+      (status === 'trialing' && (!trialEnd || trialEnd > nowDate));
     const hasAccess = subscriptionAccess || access.isFounder || isAmbassador;
+    const billableSeats = await getSeatUsage(admin, workspace.id, {
+      maxSeats: workspace.max_seats ?? null,
+    })
+      .then((seatUsage) => Math.max(1, seatUsage.seatsUsed))
+      .catch((error) => {
+        console.warn('[access/state] seat usage lookup failed; falling back to workspace max seats', error);
+        return Math.max(1, workspace.max_seats ?? 1);
+      });
     const now = Date.now();
     const trialDaysRemaining =
       status === 'trialing' && trialEnd && trialEnd.getTime() > now
@@ -146,6 +158,9 @@ export async function GET(request: NextRequest) {
       workspaceName: workspace.name,
       industry: workspace.industry ?? null,
       maxSeats: workspace.max_seats ?? 1,
+      billableSeats: trialExpired
+        ? billableSeats
+        : Math.max(1, workspace.max_seats ?? 1, billableSeats),
       hasAccess,
       plan,
       subscriptionStatus: status,
@@ -156,13 +171,14 @@ export async function GET(request: NextRequest) {
       isAmbassador,
       ambassadorApplicationId: approvedAmbassador?.id ?? null,
       isSalesperson,
-      salesperson: salespersonLookup.data ?? null,
+      salesperson,
       accessLevel: isSalesperson && !access.isFounder ? 'salesperson' : access.level,
       onboardingComplete: !!workspace.onboarding_completed_at,
       memberCount: access.memberCount,
       workspaces: workspaceOptions,
-      reason:
-        access.level === 'member' && !hasAccess
+      reason: trialExpired
+        ? 'trial-ended'
+        : access.level === 'member' && !hasAccess
           ? 'member-inactive'
           : undefined,
     });

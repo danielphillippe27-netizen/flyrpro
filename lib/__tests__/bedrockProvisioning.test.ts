@@ -94,6 +94,12 @@ test('maps AU region code to bedrock_au', async () => {
   assertEqual(regionCodeToProvisionSource('AU'), 'bedrock_au');
 });
 
+test('maps Australian state codes to bedrock_au', async () => {
+  for (const regionCode of ['NSW', 'QLD']) {
+    assertEqual(regionCodeToProvisionSource(regionCode), 'bedrock_au', `${regionCode} should map to bedrock_au`);
+  }
+});
+
 test('maps NZ region code to bedrock_nz', async () => {
   assertEqual(regionCodeToProvisionSource('NZ'), 'bedrock_nz');
 });

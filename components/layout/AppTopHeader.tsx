@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import Image from 'next/image';
-import { Bell, CheckCheck, Moon, Sun, Maximize2, Minimize2, Menu } from 'lucide-react';
+import { Bell, CheckCheck, HelpCircle, Moon, Sun, Maximize2, Minimize2, Menu } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -21,6 +21,7 @@ import { getClientAsync } from '@/lib/supabase/client';
 import { ProfileEditDialog } from '@/components/profile/ProfileEditDialog';
 import { useMainLayoutNav } from '@/components/layout/MainLayoutNavContext';
 import { countryCodeToFlag } from '@/lib/countries';
+import { HelpMeSellFlyrDialog } from '@/components/scripts/HelpMeSellFlyrDialog';
 
 type UserProfileLite = {
   email: string | null;
@@ -76,6 +77,7 @@ export default function AppTopHeader() {
     membershipsByWorkspaceId,
     refreshWorkspaces,
     isFounder,
+    accessLevel,
     planBadgeLabel,
   } = useWorkspace();
   const [profile, setProfile] = useState<UserProfileLite>({
@@ -85,6 +87,7 @@ export default function AppTopHeader() {
     countryCode: null,
   });
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [salesHelpOpen, setSalesHelpOpen] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState('');
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
   const [feedbackSuccess, setFeedbackSuccess] = useState<string | null>(null);
@@ -314,6 +317,8 @@ export default function AppTopHeader() {
   }, [currentWorkspace, membershipsByWorkspaceId]);
   const isTrialBadge = Boolean(planBadgeLabel && /trial/i.test(planBadgeLabel));
   const profileFlag = countryCodeToFlag(profile.countryCode);
+  const displayName = profile.fullName ?? profile.email ?? 'User';
+  const showSalesHelp = accessLevel === 'salesperson' || isFounder;
 
   const sendFeedback = async () => {
     const trimmed = feedbackMessage.trim();
@@ -388,12 +393,28 @@ export default function AppTopHeader() {
               className="hidden h-6 w-auto shrink-0 dark:block"
             />
 
-            <div className="hidden min-w-0 text-sm font-medium text-foreground md:flex md:items-center">
-              <span className="mr-2 text-muted-foreground">/</span>
-              <span className="truncate align-middle">{currentWorkspace?.name ?? 'Workspace'}</span>
-              <span className="mx-2 text-muted-foreground">/</span>
-              <span className="capitalize text-muted-foreground">{isFounder ? 'Founder' : (currentRole ?? 'member')}</span>
-            </div>
+            {accessLevel === 'salesperson' ? (
+              <div className="hidden min-w-0 text-sm font-medium text-foreground md:flex md:items-center">
+                <span className="mr-2 text-muted-foreground">/</span>
+                <span className="truncate align-middle">Salesperson</span>
+                <span className="mx-2 text-muted-foreground">/</span>
+                <span className="truncate text-muted-foreground">{displayName}</span>
+              </div>
+            ) : isFounder ? (
+              <div className="hidden min-w-0 text-sm font-medium text-foreground md:flex md:items-center">
+                <span className="mr-2 text-muted-foreground">/</span>
+                <span className="truncate align-middle">{currentWorkspace?.name ?? 'Workspace'}</span>
+                <span className="mx-2 text-muted-foreground">/</span>
+                <span className="capitalize text-muted-foreground">Founder</span>
+              </div>
+            ) : currentWorkspace && currentRole ? (
+              <div className="hidden min-w-0 text-sm font-medium text-foreground md:flex md:items-center">
+                <span className="mr-2 text-muted-foreground">/</span>
+                <span className="truncate align-middle">{currentWorkspace?.name ?? 'Workspace'}</span>
+                <span className="mx-2 text-muted-foreground">/</span>
+                <span className="capitalize text-muted-foreground">{currentRole}</span>
+              </div>
+            ) : null}
           </div>
 
           <div className="flex shrink-0 items-center gap-1 sm:gap-2">
@@ -414,6 +435,20 @@ export default function AppTopHeader() {
             >
               <span>Feedback ?</span>
             </Button>
+
+            {showSalesHelp ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setSalesHelpOpen(true)}
+                className="px-2 sm:px-3"
+                aria-label="Help me sell FLYR"
+                title="Help me sell FLYR"
+              >
+                <HelpCircle className="h-4 w-4" />
+                <span className="hidden lg:inline">Help Me Sell FLYR</span>
+              </Button>
+            ) : null}
 
             <Button
               variant="outline"
@@ -493,6 +528,10 @@ export default function AppTopHeader() {
           refreshWorkspaces();
         }}
       />
+
+      {showSalesHelp ? (
+        <HelpMeSellFlyrDialog open={salesHelpOpen} onOpenChange={setSalesHelpOpen} />
+      ) : null}
 
       <Dialog
         open={feedbackOpen}

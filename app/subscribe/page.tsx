@@ -6,12 +6,17 @@ import { Button } from '@/components/ui/button';
 import { AlertCircle, LogOut, Monitor, Flag, QrCode, Link, Calendar, RefreshCw, Map, Gauge, MoreHorizontal } from 'lucide-react';
 import { getClientAsync } from '@/lib/supabase/client';
 
+export const dynamic = 'force-dynamic';
+
 type AccessState = {
   role: string | null;
   workspaceName: string | null;
   maxSeats?: number;
+  billableSeats?: number;
   hasAccess: boolean;
   reason?: string;
+  subscriptionStatus?: string | null;
+  trialEndsAt?: string | null;
 };
 
 type ReferralPreview = {
@@ -38,6 +43,21 @@ const FEATURES = [
   { icon: MoreHorizontal, label: '& much more' },
 ] as const;
 
+const formatPrice = (amount: number, currency: 'USD' | 'CAD') => {
+  const formatted = amount.toLocaleString('en-US', {
+    minimumFractionDigits: amount % 1 === 0 ? 0 : 2,
+    maximumFractionDigits: 2,
+  });
+  return currency === 'CAD' ? `CA$${formatted}` : `$${formatted}`;
+};
+
+const hasExpiredTrial = (state: AccessState, queryReason: string | null) => {
+  if (queryReason === 'trial-ended' || state.reason === 'trial-ended') return true;
+  if (state.subscriptionStatus !== 'trialing' || !state.trialEndsAt) return false;
+  const trialEnd = new Date(state.trialEndsAt).getTime();
+  return Number.isFinite(trialEnd) && trialEnd <= Date.now();
+};
+
 function SubscribeContent() {
 
   const router = useRouter();
@@ -50,18 +70,23 @@ function SubscribeContent() {
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const [plan, setPlan] = useState<'annual' | 'monthly'>('annual');
-  const [currency, setCurrency] = useState<'USD' | 'CAD'>('CAD');
+  const [currency, setCurrency] = useState<'USD' | 'CAD'>('USD');
   const [referralPreview, setReferralPreview] = useState<ReferralPreview | null>(null);
   const [additionalSeats, setAdditionalSeats] = useState(0);
   const [seatSelectionInitialized, setSeatSelectionInitialized] = useState(false);
-  const paidSeats = Math.max(1, state?.maxSeats ?? 1);
+  const paidSeats = Math.max(1, state?.billableSeats ?? state?.maxSeats ?? 1);
   const seats = paidSeats + additionalSeats;
 
-  const annualBase = currency === 'CAD' ? 399 : 299;
+  const annualBase = currency === 'CAD' ? 400 : 300;
+  const annualRetailBase = annualBase * 2;
   const annualMonthlyEquivalentBase = annualBase / 12;
   const annualTotalBase = annualBase * seats;
-  const monthlyPrice = currency === 'CAD' ? 39.99 : 29.99;
+  const annualRetailMonthlyEquivalentBase = annualRetailBase / 12;
+  const annualRetailTotalBase = annualRetailBase * seats;
+  const monthlyPrice = currency === 'CAD' ? 40 : 30;
+  const monthlyRetailPrice = monthlyPrice * 2;
   const monthlyTotalBase = monthlyPrice * seats;
+  const monthlyRetailTotalBase = monthlyRetailPrice * seats;
   const percentOff =
     referralPreview?.hasDiscount && typeof referralPreview.discount?.percentOff === 'number'
       ? Math.max(0, Math.min(100, referralPreview.discount.percentOff))
@@ -80,7 +105,7 @@ function SubscribeContent() {
   const annualMonthlyEquivalent = annualMonthlyEquivalentBase * seats * discountMultiplier;
   const monthlyTotal = monthlyTotalBase * discountMultiplier;
   const planButtonBaseClass =
-    'group relative w-full overflow-hidden rounded-2xl border px-5 py-4 text-left backdrop-blur-xl transition-all duration-200';
+    'group relative flex w-full flex-col gap-3 overflow-hidden rounded-2xl border px-5 py-4 text-left backdrop-blur-xl transition-all duration-200 sm:flex-row sm:items-center sm:justify-between';
 
   useEffect(() => {
     let mounted = true;
@@ -203,6 +228,7 @@ function SubscribeContent() {
     reason === 'member-inactive' ||
     state.reason === 'member-inactive' ||
     (state.role !== 'owner' && !state.hasAccess);
+  const isTrialEnded = hasExpiredTrial(state, reason);
 
   if (isMemberInactive) {
     return (
@@ -262,10 +288,12 @@ function SubscribeContent() {
 
         <div className="relative z-10 text-center space-y-3">
           <h1 className="text-5xl font-bold text-white">
-            Track your outreach.
+            {isTrialEnded ? 'TRIAL ended' : 'Track your outreach.'}
           </h1>
           <p className="text-[#AAAAAA] text-xl">
-            Your business will reward you.
+            {isTrialEnded
+              ? "Continue reaching your business's potential by choosing a payment plan."
+              : 'Your business will reward you.'}
           </p>
         </div>
 
@@ -344,17 +372,23 @@ function SubscribeContent() {
             <div className="relative z-10">
               <p className="font-semibold text-white">Annual</p>
               <p className="text-xs text-[#B2B2B2]">
-                Billed at ${annualTotal.toFixed(2)}/year for {seats} seat{seats === 1 ? '' : 's'}
+                Billed at {formatPrice(annualTotal, currency)}/year for {seats} seat{seats === 1 ? '' : 's'}
               </p>
             </div>
-            <p className="relative z-10 font-semibold text-white text-right">
-              {percentOff > 0 && (
+            <div className="relative z-10 text-right">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-300">
+                50% off
+              </p>
+              <p className="font-semibold text-white">
                 <span className="mr-2 text-[#A0A0A0] line-through">
-                  ${(annualMonthlyEquivalentBase * seats).toFixed(2)}
+                  {formatPrice(annualRetailMonthlyEquivalentBase * seats, currency)}
                 </span>
-              )}
-              ${annualMonthlyEquivalent.toFixed(2)}/month
-            </p>
+                {formatPrice(annualMonthlyEquivalent, currency)}/month
+              </p>
+              <p className="text-[11px] text-[#8F8F8F]">
+                was {formatPrice(annualRetailTotalBase, currency)}/year
+              </p>
+            </div>
           </button>
           <button
             type="button"
@@ -369,17 +403,20 @@ function SubscribeContent() {
             <div className="relative z-10">
               <p className="font-semibold text-white">Monthly</p>
               <p className="text-xs text-[#B2B2B2]">
-                Billed at ${monthlyTotal.toFixed(2)}/month for {seats} seat{seats === 1 ? '' : 's'}
+                Billed at {formatPrice(monthlyTotal, currency)}/month for {seats} seat{seats === 1 ? '' : 's'}
               </p>
             </div>
-            <p className="relative z-10 font-semibold text-white text-right">
-              {percentOff > 0 && (
+            <div className="relative z-10 text-right">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-300">
+                50% off
+              </p>
+              <p className="font-semibold text-white">
                 <span className="mr-2 text-[#A0A0A0] line-through">
-                  ${monthlyTotalBase.toFixed(2)}
+                  {formatPrice(monthlyRetailTotalBase, currency)}
                 </span>
-              )}
-              ${monthlyTotal.toFixed(2)}/month
-            </p>
+                {formatPrice(monthlyTotal, currency)}/month
+              </p>
+            </div>
           </button>
         </div>
 
@@ -423,7 +460,9 @@ function SubscribeContent() {
               ? 'Redirecting…'
               : isFreeForeverOffer
                 ? 'Activate free partner subscription'
-                : 'Continue to checkout'}
+                : isTrialEnded
+                  ? 'Continue with payment'
+                  : 'Continue to checkout'}
           </Button>
           <p className="text-xs text-[#AAAAAA] text-center">
             {isFreeForeverOffer ? 'Free forever with your FLYR Partner offer.' : 'Recurring billing. Cancel anytime.'}

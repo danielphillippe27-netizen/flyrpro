@@ -1,9 +1,22 @@
 import type { Metadata } from 'next';
 import { DialerVideoLanding } from '../power-dialer/DialerVideoLanding';
+import { normalizeSalespersonReferralCodeInput } from '@/app/lib/billing/salespeople';
 
-const ONBOARDING_HREF = '/onboarding?source=dialer&campaign=power-dialer';
-const DEFAULT_DIALER_VIDEO_URL = 'https://d34c49t0gfk0ai.cloudfront.net/demo-video/demo-video.mp4';
-const DIALER_VIDEO_REDIRECT_AT_SECONDS = 85;
+const FOUNDER_CALL_HREF =
+  process.env.NEXT_PUBLIC_FOUNDER_CALL_URL ||
+  'https://calendly.com/daniel-phillippe';
+const DIALER_STREAM_CUSTOMER_CODE = process.env.NEXT_PUBLIC_CLOUDFLARE_STREAM_CUSTOMER_CODE;
+const DIALER_STREAM_VIDEO_UID = process.env.NEXT_PUBLIC_DIALER_STREAM_VIDEO_UID;
+const configuredDialerVideoUrl = process.env.NEXT_PUBLIC_DIALER_VIDEO_URL;
+const DIALER_VIDEO_URL =
+  DIALER_STREAM_CUSTOMER_CODE && DIALER_STREAM_VIDEO_UID
+    ? undefined
+    : configuredDialerVideoUrl;
+const configuredCtaAtSeconds = Number(process.env.NEXT_PUBLIC_DIALER_VIDEO_CTA_AT_SECONDS);
+const DIALER_VIDEO_CTA_AT_SECONDS =
+  Number.isFinite(configuredCtaAtSeconds) && configuredCtaAtSeconds > 0
+    ? configuredCtaAtSeconds
+    : 85;
 
 export const metadata: Metadata = {
   title: 'Demo 1 | FLYR',
@@ -15,15 +28,57 @@ export const metadata: Metadata = {
   },
 };
 
-export default function DemoOnePage() {
+type DemoOnePageProps = {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
+
+function firstParam(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? value[0] ?? '' : value ?? '';
+}
+
+async function buildOnboardingHref(searchParams?: DemoOnePageProps['searchParams']) {
+  const params = await searchParams;
+  const referralCode = normalizeSalespersonReferralCodeInput(
+    firstParam(params?.referralCode ?? params?.ref)
+  );
+  const onboardingParams = new URLSearchParams({
+    source: 'dialer',
+    campaign: 'power-dialer',
+  });
+
+  if (referralCode) {
+    onboardingParams.set('referralCode', referralCode);
+  }
+
+  return `/onboarding?${onboardingParams.toString()}`;
+}
+
+async function buildTrackingProps(searchParams?: DemoOnePageProps['searchParams']) {
+  const params = await searchParams;
+  return {
+    referralCode: normalizeSalespersonReferralCodeInput(
+      firstParam(params?.referralCode ?? params?.ref)
+    ),
+    source: firstParam(params?.source),
+    campaign: firstParam(params?.campaign),
+  };
+}
+
+export default async function DemoOnePage({ searchParams }: DemoOnePageProps) {
+  const tracking = await buildTrackingProps(searchParams);
+
   return (
     <DialerVideoLanding
-      videoUrl={process.env.NEXT_PUBLIC_DIALER_VIDEO_URL || DEFAULT_DIALER_VIDEO_URL}
-      customerCode={process.env.NEXT_PUBLIC_CLOUDFLARE_STREAM_CUSTOMER_CODE}
-      videoUid={process.env.NEXT_PUBLIC_DIALER_STREAM_VIDEO_UID}
+      videoUrl={DIALER_VIDEO_URL}
+      customerCode={DIALER_STREAM_CUSTOMER_CODE}
+      videoUid={DIALER_STREAM_VIDEO_UID}
       posterUrl={process.env.NEXT_PUBLIC_DIALER_STREAM_POSTER_URL}
-      onboardingHref={ONBOARDING_HREF}
-      redirectAtSeconds={DIALER_VIDEO_REDIRECT_AT_SECONDS}
+      onboardingHref={await buildOnboardingHref(searchParams)}
+      founderCallHref={FOUNDER_CALL_HREF}
+      redirectAtSeconds={DIALER_VIDEO_CTA_AT_SECONDS}
+      referralCode={tracking.referralCode}
+      trackingSource={tracking.source}
+      trackingCampaign={tracking.campaign}
     />
   );
 }

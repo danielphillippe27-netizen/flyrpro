@@ -39,6 +39,37 @@ type ParquetManifest = {
   }>;
 };
 
+type AuParcelIndexEntry = {
+  state?: string;
+  region?: string;
+  key?: string;
+  source_key?: string;
+  tilejson_url?: string;
+  bounds?: Bounds;
+  minzoom?: number;
+  maxzoom?: number;
+  feature_count?: number;
+};
+
+type AuParcelIndex = {
+  pmtiles?: AuParcelIndexEntry[];
+  parcels?: AuParcelIndexEntry[];
+};
+
+type ResolvedParcelTiles = {
+  state: string | null;
+  key: string;
+  tilejsonKey: string | null;
+  geojsonKey: string | null;
+  indexKey: string;
+  sourceLayer: string;
+  promoteId: string;
+  minzoom: number | null;
+  maxzoom: number | null;
+  featureCount: number | null;
+  source: 'env' | 'index';
+};
+
 type BedrockAustraliaRow = Record<string, unknown> & {
   address_detail_pid?: string;
   full_address?: string;
@@ -56,6 +87,8 @@ type BedrockAustraliaRow = Record<string, unknown> & {
 const DEFAULT_BUCKET = 'flyr-pro-addresses-2025';
 const DEFAULT_ADDRESS_PREFIX = 'bedrock/australia/current/addresses';
 const DEFAULT_BUILDING_PREFIX = 'bedrock/australia/buildings/national';
+const AU_REGION_CODES = new Set(['AU', 'ACT', 'NSW', 'NT', 'QLD', 'SA', 'TAS', 'VIC', 'WA']);
+const AU_PARCEL_REGION_CODES = new Set(['NSW', 'QLD']);
 const REGION = process.env.AWS_REGION || process.env.AWS_S3_BUCKET_REGION || 'us-east-2';
 const WEB_MERCATOR_MAX_LAT = 85.05112878;
 const MANIFEST_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -68,6 +101,7 @@ const ADDRESS_TILE_FETCH_CONCURRENCY = Math.max(
 
 let s3Client: S3Client | null = null;
 let manifestCache: { cacheKey: string; expiresAt: number; value: ParquetManifest } | null = null;
+let parcelIndexCache: { cacheKey: string; expiresAt: number; value: AuParcelIndex } | null = null;
 
 function elapsedMs(startedAt: number) {
   return Date.now() - startedAt;
@@ -101,6 +135,10 @@ function buildingPrefix() {
   return (process.env.BEDROCK_AU_BUILDING_PREFIX || DEFAULT_BUILDING_PREFIX).replace(/^\/+|\/+$/g, '');
 }
 
+function datasetPrefix() {
+  return addressPrefix().replace(/\/addresses$/i, '');
+}
+
 function key(filename: string) {
   return `${addressPrefix()}/${filename}`;
 }
@@ -114,6 +152,21 @@ function parcelPmtilesKey() {
   return configured ? configured.replace(/^\/+/, '') : null;
 }
 
+function parcelIndexKey() {
+  return `${datasetPrefix()}/parcels/pmtiles-index.json`;
+}
+
+function normalizeS3Key(value: string | null | undefined): string | null {
+  if (!value?.trim()) return null;
+  const trimmed = value.trim();
+  if (trimmed.startsWith('s3://')) {
+    const withoutScheme = trimmed.slice('s3://'.length);
+    const slashIndex = withoutScheme.indexOf('/');
+    return slashIndex >= 0 ? withoutScheme.slice(slashIndex + 1).replace(/^\/+/, '') : null;
+  }
+  return trimmed.replace(/^\/+/, '');
+}
+
 function cdnUrlForKey(s3Key: string) {
   const cdnBase =
     process.env.BEDROCK_AU_CDN_BASE_URL ||
@@ -123,6 +176,10 @@ function cdnUrlForKey(s3Key: string) {
   if (cdnBase.trim()) {
     return `${cdnBase.replace(/\/+$/, '')}/${s3Key}`;
   }
+  return `s3://${bucket()}/${s3Key}`;
+}
+
+function s3UrlForKey(s3Key: string) {
   return `s3://${bucket()}/${s3Key}`;
 }
 
@@ -182,6 +239,22 @@ async function readManifest(): Promise<{ manifest: ParquetManifest; manifestMs: 
     manifestMs: elapsedMs(startedAt),
     cacheHit: false,
   };
+}
+
+async function readParcelIndex(): Promise<AuParcelIndex> {
+  const indexKey = parcelIndexKey();
+  const cacheKey = `${bucket()}/${indexKey}`;
+  if (parcelIndexCache?.cacheKey === cacheKey && parcelIndexCache.expiresAt > Date.now()) {
+    return parcelIndexCache.value;
+  }
+
+  const index = JSON.parse(await s3Text(indexKey)) as AuParcelIndex;
+  parcelIndexCache = {
+    cacheKey,
+    expiresAt: Date.now() + MANIFEST_CACHE_TTL_MS,
+    value: index,
+  };
+  return index;
 }
 
 function parquetPathsForTiles(manifest: ParquetManifest, bbox: Bounds) {
@@ -256,6 +329,93 @@ function firstPoint(geometry: GeoJSON.Geometry | null | undefined): [number, num
 
 function text(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function normalizeAuParcelRegion(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toUpperCase();
+  return AU_PARCEL_REGION_CODES.has(normalized) ? normalized : null;
+}
+
+function parcelEntries(index: AuParcelIndex): AuParcelIndexEntry[] {
+  return Array.isArray(index.pmtiles) ? index.pmtiles : Array.isArray(index.parcels) ? index.parcels : [];
+}
+
+function dominantParcelRegion(addresses: StandardCampaignAddress[]): string | null {
+  const counts = new Map<string, number>();
+  for (const address of addresses) {
+    const region = normalizeAuParcelRegion(address.region);
+    if (!region) continue;
+    counts.set(region, (counts.get(region) ?? 0) + 1);
+  }
+
+  return Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? null;
+}
+
+function entryRegion(entry: AuParcelIndexEntry): string | null {
+  return normalizeAuParcelRegion(entry.state) ?? normalizeAuParcelRegion(entry.region);
+}
+
+function selectParcelIndexEntry(
+  index: AuParcelIndex,
+  regionCode: string | null | undefined,
+  addresses: StandardCampaignAddress[]
+): AuParcelIndexEntry | null {
+  const entries = parcelEntries(index);
+  const requestedRegion = normalizeAuParcelRegion(regionCode);
+  const fallbackRegion = dominantParcelRegion(addresses);
+  const selectedRegion = requestedRegion ?? fallbackRegion;
+  if (!selectedRegion) return null;
+
+  return entries.find((entry) => entryRegion(entry) === selectedRegion && (entry.key || entry.source_key)) ?? null;
+}
+
+function resolveParcelTilesFromEnv(): ResolvedParcelTiles | null {
+  const configuredKey = normalizeS3Key(parcelPmtilesKey());
+  if (!configuredKey) return null;
+  return {
+    state: null,
+    key: configuredKey,
+    tilejsonKey: configuredKey.replace(/\.pmtiles$/i, '.json'),
+    geojsonKey: configuredKey.replace(/\.pmtiles$/i, '.geojson.gz'),
+    indexKey: parcelIndexKey(),
+    sourceLayer: 'parcels',
+    promoteId: 'parcel_id',
+    minzoom: 10,
+    maxzoom: 16,
+    featureCount: null,
+    source: 'env',
+  };
+}
+
+function resolveParcelTilesFromIndex(entry: AuParcelIndexEntry | null): ResolvedParcelTiles | null {
+  const selectedKey = normalizeS3Key(entry?.key) ?? normalizeS3Key(entry?.source_key);
+  if (!selectedKey || !entry) return null;
+
+  return {
+    state: entryRegion(entry),
+    key: selectedKey,
+    tilejsonKey: normalizeS3Key(entry.tilejson_url) ?? selectedKey.replace(/\.pmtiles$/i, '.json'),
+    geojsonKey: selectedKey.replace(/\.pmtiles$/i, '.geojson.gz'),
+    indexKey: parcelIndexKey(),
+    sourceLayer: 'parcels',
+    promoteId: 'parcel_id',
+    minzoom: Number.isFinite(entry.minzoom) ? entry.minzoom! : 10,
+    maxzoom: Number.isFinite(entry.maxzoom) ? entry.maxzoom! : 16,
+    featureCount: Number.isFinite(entry.feature_count) ? entry.feature_count! : null,
+    source: 'index',
+  };
+}
+
+async function resolveParcelTiles(options: {
+  regionCode?: string | null;
+  addresses: StandardCampaignAddress[];
+}): Promise<ResolvedParcelTiles | null> {
+  const envTiles = resolveParcelTilesFromEnv();
+  if (envTiles) return envTiles;
+
+  const index = await readParcelIndex();
+  return resolveParcelTilesFromIndex(selectParcelIndexEntry(index, options.regionCode, options.addresses));
 }
 
 function normalizeAddressFeature(
@@ -335,7 +495,7 @@ async function loadScopedAddressesFromPmtiles(options: {
   const startedAt = Date.now();
   const bbox = turf.bbox(options.polygon) as Bounds;
   const archiveStartedAt = Date.now();
-  const archive = getCachedPmtilesArchive(cdnUrl('addresses.pmtiles'));
+  const archive = getCachedPmtilesArchive(s3UrlForKey(key('addresses.pmtiles')));
   const header = await archive.getHeader();
   const headerMs = elapsedMs(archiveStartedAt);
   const rangeStartedAt = Date.now();
@@ -477,7 +637,7 @@ async function loadScopedAddressesFromPmtiles(options: {
 
 export class BedrockAustraliaService {
   static isAustraliaRegion(regionCode: string | null | undefined) {
-    return regionCode?.trim().toUpperCase() === 'AU';
+    return AU_REGION_CODES.has(regionCode?.trim().toUpperCase() ?? '');
   }
 
   static async provisionCampaign(options: {
@@ -503,6 +663,32 @@ export class BedrockAustraliaService {
         addressLimit: options.addressLimit,
       });
       if (pmtilesResult.metric.hits > 0 || pmtilesResult.metric.scanned > 0) {
+        let parcelTiles: ResolvedParcelTiles | null = null;
+        try {
+          parcelTiles = await resolveParcelTiles({
+            regionCode: options.regionCode,
+            addresses: pmtilesResult.addresses,
+          });
+          if (parcelTiles) {
+            console.log('[BedrockAustraliaService] AU parcel PMTiles selected', {
+              campaignId: options.campaignId,
+              state: parcelTiles.state,
+              key: parcelTiles.key,
+              source: parcelTiles.source,
+            });
+          } else {
+            console.warn('[BedrockAustraliaService] No AU parcel PMTiles matched campaign region/address states', {
+              campaignId: options.campaignId,
+              regionCode: options.regionCode,
+              addressRegions: Array.from(new Set(pmtilesResult.addresses.map((address) => address.region))).slice(0, 8),
+            });
+          }
+        } catch (parcelError) {
+          console.warn('[BedrockAustraliaService] AU parcel PMTiles index unavailable', {
+            campaignId: options.campaignId,
+            error: parcelError instanceof Error ? parcelError.message : String(parcelError),
+          });
+        }
         console.log('[BedrockAustraliaService] PMTiles address scan complete', {
           campaignId: options.campaignId,
           hits: pmtilesResult.metric.hits,
@@ -523,6 +709,7 @@ export class BedrockAustraliaService {
             campaignId: options.campaignId,
             addressCount: pmtilesResult.addresses.length,
             scanMetric: pmtilesResult.metric,
+            parcelTiles,
           }),
         };
       }
@@ -538,8 +725,9 @@ export class BedrockAustraliaService {
     campaignId: string;
     addressCount: number;
     scanMetric: BedrockScanResult;
+    parcelTiles?: ResolvedParcelTiles | null;
   }): LambdaSnapshotResponse {
-    const parcelsPmtilesKey = parcelPmtilesKey();
+    const parcelTiles = options.parcelTiles ?? null;
     const tileMetrics = {
       artifact_type: 'diamond',
       diamond_mode: true,
@@ -555,19 +743,22 @@ export class BedrockAustraliaService {
       addresses_tilejson_key: key('addresses.json'),
       addresses_geojson_key: key('addresses.ndjson.gz'),
       addresses_pmtiles_index_key: `${addressPrefix()}/pmtiles-index.json`,
-      parcels_pmtiles_key: parcelsPmtilesKey,
-      parcels_tilejson_key: parcelsPmtilesKey?.replace(/\.pmtiles$/i, '.json') ?? null,
-      parcels_geojson_key: parcelsPmtilesKey?.replace(/\.pmtiles$/i, '.geojson.gz') ?? null,
-      parcels_pmtiles_index_key: parcelsPmtilesKey ? `${addressPrefix().replace(/\/addresses$/i, '')}/parcels/pmtiles-index.json` : null,
+      parcels_pmtiles_key: parcelTiles?.key ?? null,
+      parcels_tilejson_key: parcelTiles?.tilejsonKey ?? null,
+      parcels_geojson_key: parcelTiles?.geojsonKey ?? null,
+      parcels_pmtiles_index_key: parcelTiles?.indexKey ?? null,
+      parcels_state: parcelTiles?.state ?? null,
+      parcels_source: parcelTiles?.source ?? null,
+      parcels_count: parcelTiles?.featureCount ?? null,
       source_layers: {
         buildings: 'buildings',
         addresses: 'addresses',
-        parcels: parcelsPmtilesKey ? 'parcels' : null,
+        parcels: parcelTiles?.sourceLayer ?? null,
       },
       promote_ids: {
         buildings: 'building_id',
         addresses: 'address_detail_pid',
-        parcels: parcelsPmtilesKey ? 'parcel_id' : null,
+        parcels: parcelTiles?.promoteId ?? null,
       },
       join_key: 'address_detail_pid',
       sources: {
@@ -576,8 +767,8 @@ export class BedrockAustraliaService {
       },
       address_minzoom: 8,
       address_maxzoom: 17,
-      parcel_minzoom: parcelsPmtilesKey ? 10 : null,
-      parcel_maxzoom: parcelsPmtilesKey ? 16 : null,
+      parcel_minzoom: parcelTiles?.minzoom ?? null,
+      parcel_maxzoom: parcelTiles?.maxzoom ?? null,
       addresses_count: options.addressCount,
       scan_metrics: {
         addresses: options.scanMetric,

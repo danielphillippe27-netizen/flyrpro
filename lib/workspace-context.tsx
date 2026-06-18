@@ -90,9 +90,19 @@ type AccessStateRow = {
   isAmbassador?: boolean | null;
   isSalesperson?: boolean | null;
   planBadgeLabel?: string | null;
+  reason?: string | null;
+  subscriptionStatus?: string | null;
+  trialEndsAt?: string | null;
   onboardingComplete?: boolean | null;
   unauthorized?: boolean;
 };
+
+function accessStateHasExpiredTrial(state: AccessStateRow): boolean {
+  if (state.reason === 'trial-ended') return true;
+  if (state.subscriptionStatus !== 'trialing' || !state.trialEndsAt) return false;
+  const trialEnd = new Date(state.trialEndsAt).getTime();
+  return Number.isFinite(trialEnd) && trialEnd <= Date.now();
+}
 
 type WorkspacePreferenceRow = {
   current_workspace_id?: string | null;
@@ -122,7 +132,9 @@ function computeRedirectPath(state: AccessStateRow, pathname: string): string | 
     return '/subscribe?reason=member-inactive';
   }
 
-  if (!state.hasAccess) return '/subscribe';
+  if (!state.hasAccess) {
+    return accessStateHasExpiredTrial(state) ? '/subscribe?reason=trial-ended' : '/subscribe';
+  }
 
   return null;
 }

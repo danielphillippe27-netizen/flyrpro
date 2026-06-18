@@ -13,6 +13,17 @@ export default async function HomePage() {
   }
   const admin = createAdminClient();
   const access = await resolveDashboardAccessLevel(admin, user.id);
+  const normalizedEmail = user.email?.trim().toLowerCase() ?? null;
+  const { data: salesperson } = normalizedEmail
+    ? await admin
+        .from('salespeople')
+        .select('id')
+        .eq('email', normalizedEmail)
+        .eq('status', 'active')
+        .maybeSingle()
+    : { data: null };
+  const accessLevel = salesperson && !access.isFounder ? 'salesperson' : access.level;
+
   if (access.level === 'founder') {
     redirect('/admin');
   }
@@ -24,7 +35,7 @@ export default async function HomePage() {
         </div>
       }
     >
-      <HomePageClient accessLevel={access.level} />
+      <HomePageClient accessLevel={accessLevel} />
     </Suspense>
   );
 }

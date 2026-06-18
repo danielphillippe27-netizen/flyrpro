@@ -798,6 +798,21 @@ export interface WorkspaceDialerSettings {
   updated_at: string;
 }
 
+export interface SalespersonDialerSettings {
+  id: string;
+  salesperson_id: string;
+  workspace_id: string;
+  assigned_phone_number?: string | null;
+  default_sms_from_number?: string | null;
+  inbound_forward_to?: string | null;
+  twilio_incoming_phone_number_sid?: string | null;
+  number_status: WorkspaceDialerNumberStatus;
+  number_assigned_at?: string | null;
+  provisioning_metadata?: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface WorkspaceBillingAddon {
   id: string;
   workspace_id: string;
@@ -834,7 +849,7 @@ export interface DialerSessionLead {
   id: string;
   session_id: string;
   workspace_id: string;
-  contact_id: string;
+  contact_id?: string | null;
   position: number;
   status: DialerSessionLeadStatus;
   attempt_count: number;
@@ -853,7 +868,7 @@ export interface DialerCall {
   workspace_id: string;
   session_id: string;
   session_lead_id: string;
-  contact_id: string;
+  contact_id?: string | null;
   user_id: string;
   call_request_id: string;
   twilio_call_sid?: string | null;
@@ -898,6 +913,7 @@ export interface DialerSmsFollowup {
 export interface DialerInboundMessage {
   id: string;
   workspace_id: string;
+  salesperson_id?: string | null;
   contact_id?: string | null;
   twilio_message_sid?: string | null;
   from_number_e164: string;
@@ -939,6 +955,60 @@ export interface DiallerLead {
   disposition?: DiallerLeadDisposition | null;
   notes?: string | null;
   called_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Salesperson {
+  id: string;
+  user_id?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  full_name: string;
+  email: string;
+  phone?: string | null;
+  role?: string | null;
+  territory?: string | null;
+  referral_code?: string | null;
+  commission_rate_bps?: number | null;
+  commission_duration_months?: number | null;
+  status: 'active' | 'paused' | 'inactive';
+  notes?: string | null;
+  workspace_id?: string | null;
+  demo_email_handle?: string | null;
+  demo_email_reply_to?: string | null;
+}
+
+export type InboxItemSource = 'email' | 'sms' | 'call' | 'task' | 'system';
+export type InboxItemStatus = 'open' | 'done' | 'snoozed' | 'archived';
+export type InboxItemPriority = 'low' | 'normal' | 'high';
+
+export interface InboxItem {
+  id: string;
+  workspace_id: string;
+  owner_user_id?: string | null;
+  salesperson_id?: string | null;
+  contact_id?: string | null;
+  source: InboxItemSource;
+  source_table?: string | null;
+  source_id?: string | null;
+  external_id?: string | null;
+  title: string;
+  preview?: string | null;
+  body?: string | null;
+  from_label?: string | null;
+  from_email?: string | null;
+  from_phone?: string | null;
+  to_label?: string | null;
+  to_email?: string | null;
+  to_phone?: string | null;
+  status: InboxItemStatus;
+  priority: InboxItemPriority;
+  occurred_at: string;
+  read_at?: string | null;
+  done_at?: string | null;
+  snoozed_until?: string | null;
+  raw_payload?: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 }
