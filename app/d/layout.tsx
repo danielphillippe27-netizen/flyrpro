@@ -394,6 +394,116 @@ export default function DemoLayout({ children }: { children: ReactNode }) {
           margin-bottom: 44px;
         }
 
+        .demo-campaign-detail-stage {
+          aspect-ratio: auto;
+          max-height: none;
+          display: flex;
+          flex-direction: column;
+          background: #ffffff;
+          color: oklch(0.145 0 0);
+        }
+
+        .demo-campaign-map-area {
+          position: relative;
+          flex: 1 1 auto;
+          min-height: min(520px, 56dvh);
+          overflow: hidden;
+          background: #f8fafc;
+        }
+
+        .demo-campaign-detail-panel {
+          flex: 0 0 auto;
+          padding: 16px;
+          font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+          background: oklch(1 0 0);
+          color: oklch(0.145 0 0);
+          border-top: 1px solid oklch(0.922 0 0);
+          opacity: 0;
+          transform: translateY(12px);
+          transition: opacity .45s ease, transform .45s ease;
+        }
+
+        .demo-campaign-detail-panel.is-visible {
+          opacity: 1;
+          transform: none;
+        }
+
+        .demo-campaign-quality-banner {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: flex-start;
+          gap: 12px;
+          margin-bottom: 16px;
+          padding: 12px 16px;
+          border: 1px solid oklch(0.922 0 0);
+          border-radius: 12px;
+          background: oklch(1 0 0);
+        }
+
+        .demo-campaign-quality-banner p {
+          min-width: 0;
+          margin: 0;
+          font-size: 14px;
+          line-height: 1.45;
+          color: oklch(0.556 0 0);
+        }
+
+        .demo-campaign-quality-badge {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: fit-content;
+          flex-shrink: 0;
+          gap: 4px;
+          white-space: nowrap;
+          overflow: hidden;
+          border: 1px solid currentColor;
+          border-radius: 6px;
+          padding: 2px 8px;
+          font-size: 12px;
+          line-height: 1.35;
+          font-weight: 500;
+          color: oklch(0.145 0 0);
+        }
+
+        .demo-campaign-stat-grid {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 16px;
+        }
+
+        .demo-campaign-stat-card {
+          padding: 24px;
+          border: 1px solid oklch(0.922 0 0);
+          border-radius: 16px;
+          background: oklch(1 0 0);
+          color: oklch(0.145 0 0);
+        }
+
+        .demo-campaign-stat-label {
+          margin-bottom: 4px;
+          font-size: 14px;
+          line-height: 1.45;
+          color: oklch(0.556 0 0);
+        }
+
+        .demo-campaign-stat-value {
+          font-size: 30px;
+          line-height: 1.2;
+          font-weight: 700;
+        }
+
+        .demo-campaign-stat-positive {
+          color: rgb(22 163 74);
+        }
+
+        .demo-campaign-stat-note {
+          margin-top: 4px;
+          font-size: 12px;
+          line-height: 1.35;
+          color: oklch(0.556 0 0);
+        }
+
         @media(max-width:760px) {
           .demo-map-label {
             max-width: calc(100% - 180px);
@@ -403,6 +513,27 @@ export default function DemoLayout({ children }: { children: ReactNode }) {
 
           .demo-map-counter {
             margin-bottom: 46px;
+          }
+
+          .demo-campaign-map-area {
+            min-height: min(430px, 54dvh);
+          }
+
+          .demo-campaign-detail-panel {
+            padding: 12px;
+          }
+
+          .demo-campaign-stat-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+          }
+
+          .demo-campaign-stat-card {
+            padding: 16px;
+          }
+
+          .demo-campaign-stat-value {
+            font-size: 24px;
           }
         }
 
@@ -950,6 +1081,11 @@ export default function DemoLayout({ children }: { children: ReactNode }) {
           }
 
           .rv {
+            opacity: 1;
+            transform: none;
+          }
+
+          .demo-campaign-detail-panel {
             opacity: 1;
             transform: none;
           }

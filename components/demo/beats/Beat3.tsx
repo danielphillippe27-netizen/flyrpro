@@ -11,7 +11,7 @@ import type {
 import { mulberry } from '@/lib/demo/canvas/cityModel';
 import { getInitialReducedMotion } from '@/lib/demo/canvas/useReducedMotion';
 import { track } from '@/lib/demo/analytics/track';
-import { findDemoBuildingLayerId, getDemoMapStyle } from '@/lib/demo/mapbox/demoMapStyle';
+import { findDemoBuildingLayerId, getDemoStandardLightMapStyle } from '@/lib/demo/mapbox/demoMapStyle';
 import { getMapboxGl } from '@/lib/demo/mapbox/loadMapboxGl';
 import type { BeatCopy } from '@/lib/demo/payload';
 import { Beat3Canvas } from './Beat3Canvas';
@@ -26,6 +26,7 @@ const POINTS_LAYER_ID = 'demo-b3-points';
 const FRESH_POINTS_LAYER_ID = 'demo-b3-points-fresh';
 const TARGET_ZOOM = 15.5;
 const TERRITORY_RADIUS_RATIO = 0.2;
+const ADDRESS_HIGHLIGHT_COLOR = '#6b7280';
 
 function renderLines(value: string) {
   return value.split('\n').map((line, index) => (
@@ -224,7 +225,9 @@ function Beat3Map({
   const centroidsRef = useRef<LngLat[]>([]);
   const reducedRef = useRef(false);
   const [count, setCount] = useState('0');
+  const [homeCount, setHomeCount] = useState(0);
   const [timer, setTimer] = useState('00.0 s');
+  const [settled, setSettled] = useState(false);
   const [fallback, setFallback] = useState(false);
   const label = mapPersonalizationLabel(company, city);
 
@@ -297,7 +300,9 @@ function Beat3Map({
     source(map, POLYGON_SOURCE_ID)?.setData(emptyFeatureCollection());
     source(map, POINTS_SOURCE_ID)?.setData(emptyFeatureCollection());
     setCount('0');
+    setHomeCount(0);
     setTimer('00.0 s');
+    setSettled(false);
 
     const polygonSource = source(map, POLYGON_SOURCE_ID);
     if (!polygonSource) return;
@@ -315,7 +320,9 @@ function Beat3Map({
       centroidsRef.current = centroids;
       setPointData(centroids, Math.max(0, centroids.length - 40));
       setCount(centroids.length.toLocaleString());
+      setHomeCount(centroids.length);
       setTimer(copy.b3FinalTimer);
+      setSettled(true);
       return;
     }
 
@@ -355,7 +362,9 @@ function Beat3Map({
         animationRef.current = null;
         setPointData(centroids, Math.max(0, centroids.length - 40));
         setCount(centroids.length.toLocaleString());
+        setHomeCount(centroids.length);
         setTimer(copy.b3FinalTimer);
+        setSettled(true);
       }
     }
 
@@ -369,7 +378,7 @@ function Beat3Map({
 
     try {
       reducedRef.current = getInitialReducedMotion();
-      const [mapboxglModule, style] = await Promise.all([getMapboxGl(), getDemoMapStyle('light')]);
+      const [mapboxglModule, style] = await Promise.all([getMapboxGl(), getDemoStandardLightMapStyle()]);
       const mapboxgl = mapboxglModule.default ?? mapboxglModule;
       const buildingLayerId = findDemoBuildingLayerId(style);
 
@@ -433,8 +442,8 @@ function Beat3Map({
             source: POINTS_SOURCE_ID,
             paint: {
               'circle-radius': 2,
-              'circle-color': '#ff4d00',
-              'circle-opacity': 1,
+              'circle-color': ADDRESS_HIGHLIGHT_COLOR,
+              'circle-opacity': 0.96,
             },
           });
           map.addLayer({
@@ -444,8 +453,8 @@ function Beat3Map({
             filter: ['==', ['get', 'fresh'], true],
             paint: {
               'circle-radius': 3.5,
-              'circle-color': '#ff4d00',
-              'circle-opacity': 1,
+              'circle-color': ADDRESS_HIGHLIGHT_COLOR,
+              'circle-opacity': 0.96,
             },
           });
 
@@ -505,26 +514,56 @@ function Beat3Map({
       <div className="rv eyebrow">Beat 03 · Territory</div>
       <h2 className="h-big rv d1">{renderLines(copy.b3Headline)}</h2>
       <p className="sub rv d2">{copy.b3Sub}</p>
-      <div className="stage demo-map-stage rv d3" id="stage3" ref={stageRef}>
-        <div ref={mapContainerRef} style={{ position: 'absolute', inset: 0 }} />
-        {label ? <div className="demo-map-label">{label}</div> : null}
-        <button
-          className="replay"
-          id="replay3"
-          type="button"
-          onClick={() => {
-            track('replay', 3);
-            runSequence();
-          }}
-        >
-          {copy.b3ReplayLabel}
-        </button>
-        <div className="hud demo-map-hud">
-          <div className="counter demo-map-counter">
-            <span id="count3">{count}</span>
-            <small>{copy.b3CounterLabel}</small>
+      <div className="stage demo-map-stage demo-campaign-detail-stage rv d3" id="stage3" ref={stageRef}>
+        <div className="demo-campaign-map-area">
+          <div ref={mapContainerRef} style={{ position: 'absolute', inset: 0 }} />
+          {label ? <div className="demo-map-label">{label}</div> : null}
+          <button
+            className="replay"
+            id="replay3"
+            type="button"
+            onClick={() => {
+              track('replay', 3);
+              runSequence();
+            }}
+          >
+            {copy.b3ReplayLabel}
+          </button>
+          <div className="hud demo-map-hud">
+            <div className="counter demo-map-counter">
+              <span id="count3">{count}</span>
+              <small>{copy.b3CounterLabel}</small>
+            </div>
+            <div id="time3">{timer}</div>
           </div>
-          <div id="time3">{timer}</div>
+        </div>
+        <div className={`demo-campaign-detail-panel${settled ? ' is-visible' : ''}`} aria-hidden={!settled}>
+          <div className="demo-campaign-quality-banner">
+            <span className="demo-campaign-quality-badge">Data Quality 95</span>
+            <p>Address and building coverage are within target thresholds.</p>
+          </div>
+          <div className="demo-campaign-stat-grid">
+            <div className="demo-campaign-stat-card">
+              <div className="demo-campaign-stat-label">Total homes</div>
+              <div className="demo-campaign-stat-value">{homeCount.toLocaleString()}</div>
+              <div className="demo-campaign-stat-note">addresses in campaign</div>
+            </div>
+            <div className="demo-campaign-stat-card">
+              <div className="demo-campaign-stat-label">Leads</div>
+              <div className="demo-campaign-stat-value">0</div>
+              <div className="demo-campaign-stat-note">contacts in campaign</div>
+            </div>
+            <div className="demo-campaign-stat-card">
+              <div className="demo-campaign-stat-label">Visited</div>
+              <div className="demo-campaign-stat-value demo-campaign-stat-positive">0%</div>
+              <div className="demo-campaign-stat-note">0% of houses</div>
+            </div>
+            <div className="demo-campaign-stat-card">
+              <div className="demo-campaign-stat-label">Scan Rate</div>
+              <div className="demo-campaign-stat-value demo-campaign-stat-positive">0%</div>
+              <div className="demo-campaign-stat-note">0 scanned</div>
+            </div>
+          </div>
         </div>
       </div>
     </section>
