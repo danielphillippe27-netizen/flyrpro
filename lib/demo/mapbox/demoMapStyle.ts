@@ -10,8 +10,12 @@ const BASE_STYLES: Record<DemoMapVariant, string> = {
   light: 'mapbox://styles/mapbox/light-v11',
   dark: 'mapbox://styles/mapbox/dark-v11',
 };
+const WHITE_OUT_STYLE = 'mapbox://styles/mapbox/light-v11';
+const WHITE_OUT_BACKGROUND = '#f8fafc';
+const WHITE_OUT_WATER = '#eef1f4';
 
 const styleCache = new Map<DemoMapVariant, StyleSpecification>();
+let whiteOutStyleCache: StyleSpecification | null = null;
 
 function toStylesApiUrl(styleUrl: string, accessToken: string) {
   const match = styleUrl.match(/^mapbox:\/\/styles\/([^/]+)\/([^/?#]+)$/);
@@ -60,6 +64,85 @@ function hideLabelLayer(layer: AnyLayer) {
     || id.includes('airport')
     || id.includes('transit')
   );
+}
+
+function flattenStyleValue(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) return value.map(flattenStyleValue).join(' ');
+  if (value && typeof value === 'object') {
+    return Object.entries(value)
+      .map(([key, entry]) => `${key} ${flattenStyleValue(entry)}`)
+      .join(' ');
+  }
+  return '';
+}
+
+function isAddressNumberToken(value: string) {
+  return (
+    value.includes('housenum')
+    || value.includes('house-num')
+    || value.includes('house num')
+    || value.includes('housenumber')
+    || value.includes('house-number')
+    || value.includes('house number')
+    || value.includes('house_number')
+    || value.includes('house_no')
+    || value.includes('street_number')
+    || value.includes('street-number')
+    || value.includes('street number')
+    || value.includes('addr:housenumber')
+    || value.includes('addr_housenumber')
+    || value.includes('address-number')
+    || value.includes('address number')
+    || value.includes('address_number')
+    || value.includes('building-number')
+    || value.includes('building number')
+    || value.includes('building_number')
+  );
+}
+
+function isBaseAddressNumberLayer(layer: AnyLayer) {
+  if (layer.type !== 'symbol') return false;
+  const layerId = layer.id.toLowerCase();
+  return isAddressNumberToken(layerId) || isAddressNumberToken(flattenStyleValue(layer).toLowerCase());
+}
+
+function applyWhiteOutOverrides(style: StyleSpecification) {
+  style.layers = (style.layers ?? []).map((layer) => {
+    const nextLayer = layer as AnyLayer;
+    const id = nextLayer.id.toLowerCase();
+    const sourceLayer = layerSourceLayer(nextLayer);
+    const isWater = id.includes('water') || sourceLayer.includes('water');
+    const paint = ((nextLayer.paint ??= {}) as MutablePaint);
+
+    if (nextLayer.type === 'background') {
+      paint['background-color'] = WHITE_OUT_BACKGROUND;
+      paint['background-opacity'] = 1;
+      return nextLayer;
+    }
+
+    if (isWater && nextLayer.type === 'fill') {
+      paint['fill-color'] = WHITE_OUT_WATER;
+      paint['fill-outline-color'] = WHITE_OUT_WATER;
+      return nextLayer;
+    }
+
+    if (isWater && nextLayer.type === 'line') {
+      paint['line-color'] = WHITE_OUT_WATER;
+      paint['line-opacity'] = 0.9;
+      return nextLayer;
+    }
+
+    if (isBaseAddressNumberLayer(nextLayer)) {
+      nextLayer.layout = {
+        ...(nextLayer.layout ?? {}),
+        visibility: 'none',
+      };
+    }
+
+    return nextLayer;
+  }) as StyleSpecification['layers'];
 }
 
 function applyLightOverrides(layer: AnyLayer) {
@@ -221,5 +304,32 @@ export async function getDemoMapStyle(variant: DemoMapVariant): Promise<StyleSpe
 
   applyDemoOverrides(style, variant);
   styleCache.set(variant, style);
+  return cloneStyle(style);
+}
+
+export async function getDemoWhiteOutMapStyle(): Promise<StyleSpecification> {
+  if (whiteOutStyleCache) {
+    return cloneStyle(whiteOutStyleCache);
+  }
+
+  const accessToken = getMapboxToken();
+  const apiUrl = toStylesApiUrl(WHITE_OUT_STYLE, accessToken);
+  if (!accessToken || !apiUrl) {
+    throw new Error('Mapbox access token is required for demo whiteOut style loading.');
+  }
+
+  const response = await fetch(apiUrl);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch demo whiteOut map style: ${response.status}`);
+  }
+
+  const style = (await response.json()) as StyleSpecification;
+  const buildingLayerId = findDemoBuildingLayerId(style);
+  if (!buildingLayerId) {
+    throw new Error('Demo whiteOut map style does not include a queryable building layer.');
+  }
+
+  applyWhiteOutOverrides(style);
+  whiteOutStyleCache = style;
   return cloneStyle(style);
 }

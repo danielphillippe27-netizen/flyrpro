@@ -11,22 +11,26 @@ import type {
 import { mulberry } from '@/lib/demo/canvas/cityModel';
 import { getInitialReducedMotion } from '@/lib/demo/canvas/useReducedMotion';
 import { track } from '@/lib/demo/analytics/track';
-import { findDemoBuildingLayerId, getDemoMapStyle } from '@/lib/demo/mapbox/demoMapStyle';
+import { findDemoBuildingLayerId, getDemoWhiteOutMapStyle } from '@/lib/demo/mapbox/demoMapStyle';
 import { getMapboxGl } from '@/lib/demo/mapbox/loadMapboxGl';
 import type { BeatCopy } from '@/lib/demo/payload';
 import { Beat3Canvas } from './Beat3Canvas';
 
 type LngLat = [number, number];
+type DemoBuildingFeature = GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon, Record<string, unknown>>;
 
 const POLYGON_SOURCE_ID = 'demo-b3-polygon-source';
 const POLYGON_FILL_LAYER_ID = 'demo-b3-polygon-fill';
 const POLYGON_LINE_LAYER_ID = 'demo-b3-polygon-line';
-const POINTS_SOURCE_ID = 'demo-b3-points-source';
-const POINTS_LAYER_ID = 'demo-b3-points';
-const FRESH_POINTS_LAYER_ID = 'demo-b3-points-fresh';
+const BUILDINGS_SOURCE_ID = 'demo-b3-buildings-source';
+const BUILDINGS_LAYER_ID = 'demo-b3-buildings-extrusion';
+const FRESH_BUILDINGS_LAYER_ID = 'demo-b3-buildings-fresh-extrusion';
 const TARGET_ZOOM = 15.5;
-const TERRITORY_RADIUS_RATIO = 0.2;
+const TARGET_PITCH = 45;
+const TERRITORY_RADIUS_RATIO = 0.225;
 const ADDRESS_HIGHLIGHT_COLOR = '#6b7280';
+const ADDRESS_EXTRUSION_HEIGHT_METERS = 12;
+const BUILDING_GEOMETRY_FILTER = ['match', ['geometry-type'], ['Polygon', 'MultiPolygon'], true, false];
 
 function renderLines(value: string) {
   return value.split('\n').map((line, index) => (
@@ -59,17 +63,6 @@ function lineFeature(coords: LngLat[]): GeoJSON.Feature<GeoJSON.LineString> {
     geometry: {
       type: 'LineString',
       coordinates: coords,
-    },
-  };
-}
-
-function pointFeature(coord: LngLat, index: number, fresh: boolean): GeoJSON.Feature<GeoJSON.Point> {
-  return {
-    type: 'Feature',
-    properties: { index, fresh },
-    geometry: {
-      type: 'Point',
-      coordinates: coord,
     },
   };
 }
@@ -190,14 +183,48 @@ function pointInLngLatRing(point: LngLat, ring: LngLat[]) {
   return inside;
 }
 
-function shuffleCentroids(centroids: LngLat[]) {
-  const shuffled = [...centroids];
+function buildingFeatureFromRendered(feature: MapboxGeoJSONFeature, index: number): DemoBuildingFeature | null {
+  const geometry = feature.geometry;
+  if (!geometry || (geometry.type !== 'Polygon' && geometry.type !== 'MultiPolygon')) return null;
+
+  return {
+    type: 'Feature',
+    id: feature.id,
+    properties: {
+      ...(feature.properties ?? {}),
+      demo_index: index,
+      fresh: false,
+    },
+    geometry: JSON.parse(JSON.stringify(geometry)) as GeoJSON.Polygon | GeoJSON.MultiPolygon,
+  };
+}
+
+function shuffleBuildings(buildings: DemoBuildingFeature[]) {
+  const shuffled = [...buildings];
   const rng = mulberry(13);
   for (let i = shuffled.length - 1; i > 0; i--) {
     const j = (rng() * (i + 1)) | 0;
     [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
   }
   return shuffled;
+}
+
+function hideBaseBuildingLayer(map: MapboxMap, layerId: string) {
+  try {
+    const layer = map.getLayer(layerId);
+    if (!layer) return;
+
+    if (layer.type === 'fill') {
+      map.setPaintProperty(layerId, 'fill-opacity', 0);
+      return;
+    }
+
+    if (layer.type === 'fill-extrusion') {
+      map.setPaintProperty(layerId, 'fill-extrusion-opacity', 0);
+    }
+  } catch {
+    // Base style layers can reject paint mutation during style transitions.
+  }
 }
 
 function source(map: MapboxMap, id: string) {
@@ -222,7 +249,7 @@ function Beat3Map({
   const hasInitializedRef = useRef(false);
   const buildingLayerIdRef = useRef<string | null>(null);
   const ringRef = useRef<LngLat[]>([]);
-  const centroidsRef = useRef<LngLat[]>([]);
+  const buildingsRef = useRef<DemoBuildingFeature[] | null>(null);
   const reducedRef = useRef(false);
   const [count, setCount] = useState('0');
   const [homeCount, setHomeCount] = useState(0);
@@ -238,17 +265,25 @@ function Beat3Map({
     }
   }, []);
 
-  const setPointData = useCallback((points: LngLat[], freshStart: number) => {
+  const setBuildingData = useCallback((buildings: DemoBuildingFeature[], freshStart: number) => {
     const map = mapRef.current;
     if (!map) return;
 
-    source(map, POINTS_SOURCE_ID)?.setData({
+    source(map, BUILDINGS_SOURCE_ID)?.setData({
       type: 'FeatureCollection',
-      features: points.map((point, index) => pointFeature(point, index, index >= freshStart)),
+      features: buildings.map((building, index) => ({
+        ...building,
+        properties: {
+          ...(building.properties ?? {}),
+          fresh: index >= freshStart,
+        },
+      })),
     });
   }, []);
 
-  const queryBuildingCentroids = useCallback(() => {
+  const queryBuildingFeatures = useCallback(() => {
+    if (buildingsRef.current) return buildingsRef.current;
+
     const map = mapRef.current;
     const buildingLayerId = buildingLayerIdRef.current;
     if (!map || !buildingLayerId) return [];
@@ -277,18 +312,22 @@ function Beat3Map({
       options: { layers: string[] }
     ) => MapboxGeoJSONFeature[];
     const features = queryRenderedFeatures(queryBounds, { layers: [buildingLayerId] });
-    const unique = new Map<string, LngLat>();
+    const unique = new Map<string, DemoBuildingFeature>();
 
-    for (const feature of features) {
+    for (const [index, feature] of features.entries()) {
       const centroid = featureCentroid(feature);
       if (!centroid) continue;
       if (!pointInLngLatRing(centroid, ringRef.current)) continue;
 
       const key = String(feature.id ?? feature.properties?.id ?? feature.properties?.mapbox_id ?? centroid.join(','));
-      unique.set(key, centroid);
+      const building = buildingFeatureFromRendered(feature, index);
+      if (building) unique.set(key, building);
     }
 
-    return shuffleCentroids([...unique.values()]);
+    const shuffled = shuffleBuildings([...unique.values()]);
+    buildingsRef.current = shuffled;
+    hideBaseBuildingLayer(map, buildingLayerId);
+    return shuffled;
   }, []);
 
   const runSequence = useCallback(() => {
@@ -298,7 +337,7 @@ function Beat3Map({
     cancelAnimation();
     const ring = ringRef.current;
     source(map, POLYGON_SOURCE_ID)?.setData(emptyFeatureCollection());
-    source(map, POINTS_SOURCE_ID)?.setData(emptyFeatureCollection());
+    source(map, BUILDINGS_SOURCE_ID)?.setData(emptyFeatureCollection());
     setCount('0');
     setHomeCount(0);
     setTimer('00.0 s');
@@ -316,11 +355,10 @@ function Beat3Map({
         type: 'FeatureCollection',
         features: [polygonFeature(ring), lineFeature([...ring, ring[0]])],
       });
-      const centroids = queryBuildingCentroids();
-      centroidsRef.current = centroids;
-      setPointData(centroids, Math.max(0, centroids.length - 40));
-      setCount(centroids.length.toLocaleString());
-      setHomeCount(centroids.length);
+      const buildings = queryBuildingFeatures();
+      setBuildingData(buildings, Math.max(0, buildings.length - 40));
+      setCount(buildings.length.toLocaleString());
+      setHomeCount(buildings.length);
       setTimer(copy.b3FinalTimer);
       setSettled(true);
       return;
@@ -328,7 +366,7 @@ function Beat3Map({
 
     const start = performance.now();
     let queried = false;
-    let centroids: LngLat[] = [];
+    let buildings: DemoBuildingFeature[] = [];
 
     function frame(now: number) {
       const t = now - start;
@@ -345,14 +383,13 @@ function Beat3Map({
 
       if (sp >= 1 && !queried) {
         queried = true;
-        centroids = queryBuildingCentroids();
-        centroidsRef.current = centroids;
+        buildings = queryBuildingFeatures();
       }
 
       const cp = Math.max(0, Math.min(1, (t - drawDur) / cascadeDur));
       const eased = 1 - Math.pow(1 - cp, 3);
-      const n = Math.floor(centroids.length * eased);
-      setPointData(centroids.slice(0, n), Math.max(0, n - 40));
+      const n = Math.floor(buildings.length * eased);
+      setBuildingData(buildings.slice(0, n), Math.max(0, n - 40));
       setCount(n.toLocaleString());
       setTimer((Math.min(t, drawDur + cascadeDur) / 100).toFixed(1).padStart(4, '0') + ' s · unit splits included');
 
@@ -360,16 +397,16 @@ function Beat3Map({
         animationRef.current = requestAnimationFrame(frame);
       } else {
         animationRef.current = null;
-        setPointData(centroids, Math.max(0, centroids.length - 40));
-        setCount(centroids.length.toLocaleString());
-        setHomeCount(centroids.length);
+        setBuildingData(buildings, Math.max(0, buildings.length - 40));
+        setCount(buildings.length.toLocaleString());
+        setHomeCount(buildings.length);
         setTimer(copy.b3FinalTimer);
         setSettled(true);
       }
     }
 
     animationRef.current = requestAnimationFrame(frame);
-  }, [cancelAnimation, copy.b3FinalTimer, queryBuildingCentroids, setPointData]);
+  }, [cancelAnimation, copy.b3FinalTimer, queryBuildingFeatures, setBuildingData]);
 
   const initializeMap = useCallback(async () => {
     if (hasInitializedRef.current || !mapContainerRef.current) return;
@@ -378,7 +415,7 @@ function Beat3Map({
 
     try {
       reducedRef.current = getInitialReducedMotion();
-      const [mapboxglModule, style] = await Promise.all([getMapboxGl(), getDemoMapStyle('light')]);
+      const [mapboxglModule, style] = await Promise.all([getMapboxGl(), getDemoWhiteOutMapStyle()]);
       const mapboxgl = mapboxglModule.default ?? mapboxglModule;
       const buildingLayerId = findDemoBuildingLayerId(style);
 
@@ -393,7 +430,7 @@ function Beat3Map({
         container: mapContainerRef.current,
         center: center as LngLatLike,
         zoom: TARGET_ZOOM,
-        pitch: 0,
+        pitch: TARGET_PITCH,
         bearing: 0,
         interactive: false,
         attributionControl: false,
@@ -411,7 +448,7 @@ function Beat3Map({
             type: 'geojson',
             data: emptyFeatureCollection(),
           });
-          map.addSource(POINTS_SOURCE_ID, {
+          map.addSource(BUILDINGS_SOURCE_ID, {
             type: 'geojson',
             data: emptyFeatureCollection(),
           });
@@ -437,30 +474,41 @@ function Beat3Map({
             },
           });
           map.addLayer({
-            id: POINTS_LAYER_ID,
-            type: 'circle',
-            source: POINTS_SOURCE_ID,
+            id: BUILDINGS_LAYER_ID,
+            type: 'fill-extrusion',
+            source: BUILDINGS_SOURCE_ID,
+            filter: ['all', BUILDING_GEOMETRY_FILTER, ['!=', ['get', 'fresh'], true]],
             paint: {
-              'circle-radius': 2,
-              'circle-color': ADDRESS_HIGHLIGHT_COLOR,
-              'circle-opacity': 0.96,
+              'fill-extrusion-color': ADDRESS_HIGHLIGHT_COLOR,
+              'fill-extrusion-opacity': 0.96,
+              'fill-extrusion-height': ADDRESS_EXTRUSION_HEIGHT_METERS,
+              'fill-extrusion-base': 0,
+              'fill-extrusion-vertical-gradient': true,
+              'fill-extrusion-emissive-strength': 0.45,
             },
           });
           map.addLayer({
-            id: FRESH_POINTS_LAYER_ID,
-            type: 'circle',
-            source: POINTS_SOURCE_ID,
-            filter: ['==', ['get', 'fresh'], true],
+            id: FRESH_BUILDINGS_LAYER_ID,
+            type: 'fill-extrusion',
+            source: BUILDINGS_SOURCE_ID,
+            filter: ['all', BUILDING_GEOMETRY_FILTER, ['==', ['get', 'fresh'], true]],
             paint: {
-              'circle-radius': 3.5,
-              'circle-color': ADDRESS_HIGHLIGHT_COLOR,
-              'circle-opacity': 0.96,
+              'fill-extrusion-color': ADDRESS_HIGHLIGHT_COLOR,
+              'fill-extrusion-opacity': 0.96,
+              'fill-extrusion-height': ADDRESS_EXTRUSION_HEIGHT_METERS,
+              'fill-extrusion-base': 0,
+              'fill-extrusion-vertical-gradient': true,
+              'fill-extrusion-emissive-strength': 0.65,
             },
           });
 
           map.setCenter(center as LngLatLike);
           map.setZoom(TARGET_ZOOM);
-          map.once('idle', runSequence);
+          map.setPitch(TARGET_PITCH);
+          map.once('idle', () => {
+            buildingsRef.current = queryBuildingFeatures();
+            runSequence();
+          });
         } catch (error) {
           console.error('[Beat3] Falling back to canvas after map setup failed:', error);
           setFallback(true);
