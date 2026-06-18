@@ -418,14 +418,19 @@ export default function DemoLayout({ children }: { children: ReactNode }) {
           background: oklch(1 0 0);
           color: oklch(0.145 0 0);
           border-top: 1px solid oklch(0.922 0 0);
-          opacity: 0;
-          transform: translateY(12px);
-          transition: opacity .45s ease, transform .45s ease;
+          animation: campaignPanelIn .28s ease-out both;
         }
 
-        .demo-campaign-detail-panel.is-visible {
-          opacity: 1;
-          transform: none;
+        @keyframes campaignPanelIn {
+          from {
+            opacity: 0;
+            transform: translateY(10px);
+          }
+
+          to {
+            opacity: 1;
+            transform: none;
+          }
         }
 
         .demo-campaign-quality-banner {
@@ -1081,11 +1086,6 @@ export default function DemoLayout({ children }: { children: ReactNode }) {
           }
 
           .rv {
-            opacity: 1;
-            transform: none;
-          }
-
-          .demo-campaign-detail-panel {
             opacity: 1;
             transform: none;
           }

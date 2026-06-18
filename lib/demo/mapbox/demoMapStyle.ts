@@ -10,10 +10,8 @@ const BASE_STYLES: Record<DemoMapVariant, string> = {
   light: 'mapbox://styles/mapbox/light-v11',
   dark: 'mapbox://styles/mapbox/dark-v11',
 };
-const STANDARD_LIGHT_STYLE = 'mapbox://styles/mapbox/streets-v12';
 
 const styleCache = new Map<DemoMapVariant, StyleSpecification>();
-let standardLightStyleCache: StyleSpecification | null = null;
 
 function toStylesApiUrl(styleUrl: string, accessToken: string) {
   const match = styleUrl.match(/^mapbox:\/\/styles\/([^/]+)\/([^/?#]+)$/);
@@ -223,31 +221,5 @@ export async function getDemoMapStyle(variant: DemoMapVariant): Promise<StyleSpe
 
   applyDemoOverrides(style, variant);
   styleCache.set(variant, style);
-  return cloneStyle(style);
-}
-
-export async function getDemoStandardLightMapStyle(): Promise<StyleSpecification> {
-  if (standardLightStyleCache) {
-    return cloneStyle(standardLightStyleCache);
-  }
-
-  const accessToken = getMapboxToken();
-  const apiUrl = toStylesApiUrl(STANDARD_LIGHT_STYLE, accessToken);
-  if (!accessToken || !apiUrl) {
-    throw new Error('Mapbox access token is required for demo standard map style loading.');
-  }
-
-  const response = await fetch(apiUrl);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch demo standard map style: ${response.status}`);
-  }
-
-  const style = (await response.json()) as StyleSpecification;
-  const buildingLayerId = findDemoBuildingLayerId(style);
-  if (!buildingLayerId) {
-    throw new Error('Demo standard map style does not include a queryable building layer.');
-  }
-
-  standardLightStyleCache = style;
   return cloneStyle(style);
 }
