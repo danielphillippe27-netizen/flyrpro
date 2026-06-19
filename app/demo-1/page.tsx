@@ -61,6 +61,7 @@ async function buildTrackingProps(searchParams?: DemoOnePageProps['searchParams'
     ),
     source: firstParam(params?.source),
     campaign: firstParam(params?.campaign),
+    demoLinkToken: firstParam(params?.demoLink),
   };
 }
 
@@ -79,6 +80,7 @@ export default async function DemoOnePage({ searchParams }: DemoOnePageProps) {
       referralCode={tracking.referralCode}
       trackingSource={tracking.source}
       trackingCampaign={tracking.campaign}
+      demoLinkToken={tracking.demoLinkToken}
     />
   );
 }

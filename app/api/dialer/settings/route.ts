@@ -26,6 +26,7 @@ import {
   buildFallbackDemoEmailHandle,
   normalizeDemoEmailHandle,
   resolveAvailableDemoEmailHandle,
+  type HandleLookupClient,
 } from '@/lib/dialer/demo-email-handle';
 import {
   getSalespersonDialerSettingsForUser,
@@ -129,7 +130,7 @@ async function buildSettingsResponse(
   const sharedDefaultDialingEnabled =
     salespersonFeatureEnabled || canDialerWorkspaceUseSharedDefault(workspaceId, userEmail);
   const fallbackHandle = salesperson
-    ? await resolveAvailableDemoEmailHandle(admin, salesperson, userEmail)
+    ? await resolveAvailableDemoEmailHandle(admin as unknown as HandleLookupClient, salesperson, userEmail)
     : buildFallbackDemoEmailHandle(null, userEmail);
   const salespersonResponse = buildSalespersonSettingsResponse(
     salesperson,

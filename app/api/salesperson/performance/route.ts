@@ -7,6 +7,7 @@ type PeriodKey = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
 type SalespersonRow = {
   id: string;
+  user_id: string | null;
   full_name: string;
   email: string;
   referral_code: string | null;
@@ -14,14 +15,28 @@ type SalespersonRow = {
 };
 
 type CallRow = {
+  id?: string;
   answered_at: string | null;
   duration_seconds: number | null;
   status: string | null;
   disposition: string | null;
+  status_payload?: unknown;
+  created_at?: string | null;
 };
 
 type ContactRow = {
   id: string;
+};
+
+type DiallerLeadOutcomeRow = {
+  called_at: string | null;
+  disposition: string | null;
+};
+
+type DemoLinkRow = {
+  id: string;
+  created_at: string;
+  recipient_email: string | null;
 };
 
 type ReferralRow = {
@@ -90,6 +105,12 @@ function isAnsweredCall(call: CallRow): boolean {
   );
 }
 
+function payloadSalespersonId(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const value = (payload as Record<string, unknown>).salespersonId;
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
 function isPayingReferral(referral: ReferralRow, startIso: string, endIso: string): boolean {
   const subscriptionStatus = referral.stripe_subscription_status?.toLowerCase() ?? '';
   const status = referral.status?.toLowerCase() ?? '';
@@ -112,10 +133,30 @@ async function safeExactCount(query: CountQuery): Promise<number> {
 async function resolveSalesperson(
   admin: ReturnType<typeof createAdminClient>,
   workspaceId: string | null,
+  userId: string,
   email: string | null
 ): Promise<SalespersonRow | null> {
-  const select = 'id, full_name, email, referral_code, workspace_id';
+  const select = 'id, user_id, full_name, email, referral_code, workspace_id';
   const normalizedEmail = email?.trim().toLowerCase();
+
+  let byUserId = admin
+    .from('salespeople')
+    .select(select)
+    .eq('user_id', userId)
+    .eq('status', 'active')
+    .order('created_at', { ascending: false })
+    .limit(1);
+  if (workspaceId) byUserId = byUserId.eq('workspace_id', workspaceId);
+
+  const { data: userSalesperson, error: userSalespersonError } = await byUserId.maybeSingle();
+  if (userSalespersonError) {
+    const message = userSalespersonError.message?.toLowerCase() ?? '';
+    if (!message.includes('user_id') || !message.includes('salespeople')) {
+      if (isMissingSalespeopleSchemaError(userSalespersonError.message)) return null;
+      throw new Error(userSalespersonError.message);
+    }
+  }
+  if (userSalesperson) return userSalesperson as SalespersonRow;
 
   if (workspaceId && normalizedEmail) {
     const { data, error } = await admin
@@ -150,6 +191,44 @@ async function resolveSalesperson(
   }
 
   return (data as SalespersonRow | null) ?? null;
+}
+
+function compactStrings(values: Array<string | null | undefined>): string[] {
+  return Array.from(new Set(values.filter((value): value is string => Boolean(value))));
+}
+
+async function countInboundMessages(
+  admin: ReturnType<typeof createAdminClient>,
+  params: {
+    workspaceId: string;
+    salespersonId: string;
+    startIso: string;
+    endIso: string;
+  }
+): Promise<number> {
+  const attributed = await admin
+    .from('dialer_inbound_messages')
+    .select('id', { count: 'exact', head: true })
+    .eq('workspace_id', params.workspaceId)
+    .or(`salesperson_id.eq.${params.salespersonId},salesperson_id.is.null`)
+    .gte('received_at', params.startIso)
+    .lt('received_at', params.endIso);
+
+  if (!attributed.error) return attributed.count ?? 0;
+
+  const message = attributed.error.message?.toLowerCase() ?? '';
+  if (!message.includes('salesperson_id') && !message.includes('schema cache')) {
+    throw new Error(attributed.error.message ?? 'Failed to load inbound messages');
+  }
+
+  return safeExactCount(
+    admin
+      .from('dialer_inbound_messages')
+      .select('id', { count: 'exact', head: true })
+      .eq('workspace_id', params.workspaceId)
+      .gte('received_at', params.startIso)
+      .lt('received_at', params.endIso)
+  );
 }
 
 function totalCommissionsByCurrency(commissions: CommissionRow[]) {
@@ -246,7 +325,7 @@ export async function GET(request: NextRequest) {
   const admin = createAdminClient();
 
   try {
-    const salesperson = await resolveSalesperson(admin, workspaceId, requestUser.email);
+    const salesperson = await resolveSalesperson(admin, workspaceId, requestUser.id, requestUser.email);
     if (!salesperson) {
       return NextResponse.json({ error: 'Salesperson workspace not found' }, { status: 403 });
     }
@@ -270,13 +349,18 @@ export async function GET(request: NextRequest) {
     }
 
     const referralCode = salesperson.referral_code?.trim().toUpperCase() ?? '';
+    const outreachUserIds = compactStrings([salesperson.user_id, requestUser.id]);
 
     const [
       callsCount,
       callsRowsResponse,
+      workspaceCallsRowsResponse,
+      diallerLeadOutcomesResponse,
       outboundMessages,
+      workspaceOutboundMessages,
       inboundMessages,
       contactRowsResponse,
+      demoLinksResponse,
       linkOpens,
       signups,
       referralsResponse,
@@ -288,7 +372,7 @@ export async function GET(request: NextRequest) {
           .from('dialer_calls')
           .select('id', { count: 'exact', head: true })
           .eq('workspace_id', effectiveWorkspaceId)
-          .eq('user_id', requestUser.id)
+          .in('user_id', outreachUserIds)
           .gte('created_at', startIso)
           .lt('created_at', endIso)
       ),
@@ -296,32 +380,60 @@ export async function GET(request: NextRequest) {
         .from('dialer_calls')
         .select('answered_at, duration_seconds, status, disposition')
         .eq('workspace_id', effectiveWorkspaceId)
-        .eq('user_id', requestUser.id)
+        .in('user_id', outreachUserIds)
         .gte('created_at', startIso)
         .lt('created_at', endIso)
+        .range(0, 9999),
+      admin
+        .from('dialer_calls')
+        .select('id, answered_at, duration_seconds, status, disposition, status_payload, created_at')
+        .eq('workspace_id', effectiveWorkspaceId)
+        .gte('created_at', startIso)
+        .lt('created_at', endIso)
+        .range(0, 9999),
+      admin
+        .from('dialler_leads')
+        .select('called_at, disposition')
+        .eq('workspace_id', effectiveWorkspaceId)
+        .gte('called_at', startIso)
+        .lt('called_at', endIso)
         .range(0, 9999),
       safeExactCount(
         admin
           .from('dialer_sms_followups')
           .select('id', { count: 'exact', head: true })
           .eq('workspace_id', effectiveWorkspaceId)
-          .eq('user_id', requestUser.id)
+          .in('user_id', outreachUserIds)
           .gte('created_at', startIso)
           .lt('created_at', endIso)
       ),
       safeExactCount(
         admin
-          .from('dialer_inbound_messages')
+          .from('dialer_sms_followups')
           .select('id', { count: 'exact', head: true })
           .eq('workspace_id', effectiveWorkspaceId)
-          .gte('received_at', startIso)
-          .lt('received_at', endIso)
+          .gte('created_at', startIso)
+          .lt('created_at', endIso)
       ),
+      countInboundMessages(admin, {
+        workspaceId: effectiveWorkspaceId,
+        salespersonId: salesperson.id,
+        startIso,
+        endIso,
+      }),
       admin
         .from('contacts')
         .select('id')
         .eq('workspace_id', effectiveWorkspaceId)
-        .eq('user_id', requestUser.id)
+        .in('user_id', outreachUserIds)
+        .range(0, 9999),
+      admin
+        .from('salesperson_demo_links')
+        .select('id, created_at, recipient_email')
+        .eq('salesperson_id', salesperson.id)
+        .eq('workspace_id', effectiveWorkspaceId)
+        .gte('created_at', startIso)
+        .lt('created_at', endIso)
         .range(0, 9999),
       safeExactCount(
         admin
@@ -363,7 +475,28 @@ export async function GET(request: NextRequest) {
     ]);
 
     if (callsRowsResponse.error) throw new Error(callsRowsResponse.error.message);
+    if (workspaceCallsRowsResponse.error) throw new Error(workspaceCallsRowsResponse.error.message);
+    if (diallerLeadOutcomesResponse.error) {
+      const message = diallerLeadOutcomesResponse.error.message?.toLowerCase() ?? '';
+      if (
+        !message.includes('dialler_leads') &&
+        !message.includes('does not exist') &&
+        !message.includes('schema cache')
+      ) {
+        throw new Error(diallerLeadOutcomesResponse.error.message);
+      }
+    }
     if (contactRowsResponse.error) throw new Error(contactRowsResponse.error.message);
+    if (demoLinksResponse.error) {
+      const message = demoLinksResponse.error.message?.toLowerCase() ?? '';
+      if (
+        !message.includes('salesperson_demo_links') &&
+        !message.includes('does not exist') &&
+        !message.includes('schema cache')
+      ) {
+        throw new Error(demoLinksResponse.error.message);
+      }
+    }
     if (referralsResponse.error) {
       if (!isMissingSalespeopleSchemaError(referralsResponse.error.message)) {
         throw new Error(referralsResponse.error.message);
@@ -399,6 +532,20 @@ export async function GET(request: NextRequest) {
       : 0;
 
     const calls = ((callsRowsResponse.data ?? []) as CallRow[]);
+    const workspaceCalls = ((workspaceCallsRowsResponse.data ?? []) as CallRow[]);
+    const taggedSalespersonCalls = workspaceCalls.filter(
+      (call) => payloadSalespersonId(call.status_payload) === salesperson.id
+    );
+    const fallbackWorkspaceCalls = taggedSalespersonCalls.length > 0 ? taggedSalespersonCalls : workspaceCalls;
+    const diallerLeadOutcomes = ((diallerLeadOutcomesResponse.data ?? []) as DiallerLeadOutcomeRow[]);
+    const diallerLeadCalls = diallerLeadOutcomes.filter((lead) => lead.called_at).length;
+    const diallerLeadAnswers = diallerLeadOutcomes.filter((lead) =>
+      ['interested', 'callback'].includes(lead.disposition?.toLowerCase() ?? '')
+    ).length;
+    const answeredCalls = calls.filter(isAnsweredCall).length;
+    const workspaceAnsweredCalls = fallbackWorkspaceCalls.filter(isAnsweredCall).length;
+    const demoEmailLinks = ((demoLinksResponse.data ?? []) as DemoLinkRow[])
+      .filter((link) => Boolean(link.recipient_email?.trim())).length;
     const referrals = ((referralsResponse.data ?? []) as ReferralRow[]);
     const commissions = ((commissionsResponse.data ?? []) as CommissionRow[]);
     const demoVideoEvents = ((demoVideoEventsResponse.data ?? []) as DemoVideoEventRow[]);
@@ -418,12 +565,12 @@ export async function GET(request: NextRequest) {
         trackedLink,
       },
       outreach: {
-        calls: callsCount,
-        answers: calls.filter(isAnsweredCall).length,
-        messages: outboundMessages + inboundMessages,
-        outboundMessages,
+        calls: Math.max(callsCount, fallbackWorkspaceCalls.length, diallerLeadCalls),
+        answers: Math.max(answeredCalls, workspaceAnsweredCalls, diallerLeadAnswers),
+        messages: Math.max(outboundMessages, workspaceOutboundMessages) + inboundMessages,
+        outboundMessages: Math.max(outboundMessages, workspaceOutboundMessages),
         inboundMessages,
-        emails,
+        emails: Math.max(emails, demoEmailLinks),
       },
       links: {
         opens: linkOpens,

@@ -7,6 +7,7 @@ import {
 } from '@/app/lib/billing/salespeople';
 import { hashRequestIp } from '@/app/lib/ambassador/tracking';
 import { sanitizeTrackingParam } from '@/app/lib/ambassador/portal';
+import { isMissingDemoLinkSchemaError, resolveDemoLinkForEvent } from '@/lib/dialer/demo-link-tracking';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -77,6 +78,7 @@ function isMissingDemoEventsSchemaError(message: string | undefined): boolean {
   const normalized = message?.toLowerCase() ?? '';
   return (
     isMissingSalespeopleSchemaError(message) ||
+    isMissingDemoLinkSchemaError({ message }) ||
     normalized.includes('salesperson_demo_video_events') ||
     (normalized.includes('relation') && normalized.includes('does not exist')) ||
     (normalized.includes('schema cache') && normalized.includes('salesperson_demo_video_events'))
@@ -106,6 +108,11 @@ export async function POST(request: NextRequest) {
     const watchSeconds = normalizeSeconds(payload?.watchSeconds);
     const maxWatchSeconds = Math.max(watchSeconds, normalizeSeconds(payload?.maxWatchSeconds));
     const durationSeconds = normalizeSeconds(payload?.videoDurationSeconds);
+    const demoLink = await resolveDemoLinkForEvent({
+      admin,
+      token: normalizeText(payload?.demoLinkToken, 160),
+      referralCode: salesperson.referral_code,
+    });
     const source = sanitizeTrackingParam(
       typeof payload?.source === 'string'
         ? payload.source
@@ -128,6 +135,7 @@ export async function POST(request: NextRequest) {
       max_watch_seconds: maxWatchSeconds,
       video_duration_seconds: durationSeconds || null,
       metadata: normalizeMetadata(payload?.metadata),
+      ...(demoLink?.id ? { demo_link_id: demoLink.id } : {}),
       ip_hash: hashRequestIp(request),
       user_agent: request.headers.get('user-agent')?.slice(0, 500) ?? null,
       referer: request.headers.get('referer')?.slice(0, 500) ?? null,

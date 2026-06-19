@@ -17,7 +17,10 @@ function cleanText(value: string | null | undefined): string {
   return (value ?? '').trim();
 }
 
-async function findExistingContact(context: DialerRequestContext, lead: DiallerLead) {
+async function findExistingContact(
+  context: DialerRequestContext,
+  lead: DiallerLead
+): Promise<Contact | null> {
   const normalizedPhone = normalizePhoneNumber(lead.phone);
   const lookups = [
     normalizedPhone.e164 ? { column: 'phone_e164', value: normalizedPhone.e164 } : null,
@@ -42,50 +45,6 @@ async function findExistingContact(context: DialerRequestContext, lead: DiallerL
   }
 
   return null;
-}
-
-async function upsertDiallerLeadContact(
-  context: DialerRequestContext,
-  lead: DiallerLead
-): Promise<{ contact: Contact | null; error: string | null }> {
-  const normalizedPhone = normalizePhoneNumber(lead.phone);
-  const existing = await findExistingContact(context, lead);
-  const now = new Date().toISOString();
-  const contactPayload = {
-    user_id: context.requestUser.id,
-    workspace_id: context.workspaceId,
-    full_name: cleanText(lead.name) || 'Lead',
-    phone: cleanText(lead.phone) || null,
-    phone_e164: normalizedPhone.e164,
-    phone_last_validated_at: now,
-    phone_validation_error: normalizedPhone.error,
-    email: cleanText(lead.email) || null,
-    address: '',
-    status: 'warm',
-    notes: cleanText(lead.notes) || null,
-    last_contacted: now,
-    updated_at: now,
-  };
-
-  const { data, error } = existing?.id
-    ? await context.admin
-        .from('contacts')
-        .update(contactPayload)
-        .eq('id', existing.id)
-        .select('*')
-        .single()
-    : await context.admin
-        .from('contacts')
-        .insert({ ...contactPayload, created_at: now })
-        .select('*')
-        .single();
-
-  if (error) {
-    console.error('[dialer/leads/call] failed to prepare dialler contact', error);
-    return { contact: null, error: 'Failed to prepare the contact before starting the call.' };
-  }
-
-  return { contact: data as Contact, error: null };
 }
 
 export async function POST(request: NextRequest) {
@@ -120,16 +79,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: normalized.error ?? 'Phone number is invalid.' }, { status: 400 });
   }
 
-  const contactSave = await upsertDiallerLeadContact(context, diallerLead);
-  if (!contactSave.contact?.id) {
-    return NextResponse.json(
-      { error: contactSave.error ?? 'Failed to prepare the contact before starting the call.' },
-      { status: 500 }
-    );
-  }
-  const contactId = contactSave.contact.id;
-
   const now = new Date().toISOString();
+  const existingContact = await findExistingContact(context, diallerLead);
+  const contactId = existingContact?.id ?? null;
   const { data: session, error: sessionError } = await context.admin
     .from('dialer_sessions')
     .insert({
@@ -193,6 +145,7 @@ export async function POST(request: NextRequest) {
         diallerLeadPhone: cleanText(diallerLead.phone),
         diallerLeadEmail: cleanText(diallerLead.email) || null,
         diallerLeadCompany: cleanText(diallerLead.company) || null,
+        salespersonId: context.salesperson?.id ?? null,
         doubleDial: body.doubleDial === true,
       },
     })
@@ -211,7 +164,7 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json({
     call: call as DialerCall,
-    contact: contactSave.contact,
+    contact: existingContact,
     session: session as DialerSession,
     sessionLead: sessionLead as DialerSessionLead,
   });

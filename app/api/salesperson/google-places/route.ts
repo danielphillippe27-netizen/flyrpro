@@ -3,6 +3,10 @@ import { z } from 'zod';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import {
+  resolveWorkspaceIdForUser,
+  type MinimalSupabaseClient,
+} from '@/app/api/_utils/workspace';
+import {
   formatGooglePlacesSearchError,
   getPlacesApiKey,
   searchGooglePlacesLeadsForJobSignals,
@@ -66,6 +70,7 @@ const requestSchema = z.object({
   region: z.string().trim().max(80).optional(),
   pageSize: z.number().int().min(1).max(20).default(12),
   relatedTerms: z.array(z.string().trim().min(2).max(120)).max(12).optional(),
+  workspaceId: z.string().uuid().optional(),
   marketId: z.string().uuid().optional(),
   industryId: z.string().uuid().optional(),
   leadSource: z.enum(['places', 'job_signals']).default('places'),
@@ -104,6 +109,32 @@ async function isFounderUser(
 
   if (error) throw new Error(error.message);
   return Boolean((data as { is_founder?: boolean | null } | null)?.is_founder);
+}
+
+async function resolveWorkspaceIdForSearch(params: {
+  admin: ReturnType<typeof createAdminClient>;
+  requestUser: { id: string };
+  salesperson: SalespersonRow | null;
+  requestedWorkspaceId?: string | null;
+}): Promise<string | null> {
+  if (params.requestedWorkspaceId) {
+    const requestedResolution = await resolveWorkspaceIdForUser(
+      params.admin as unknown as MinimalSupabaseClient,
+      params.requestUser.id,
+      params.requestedWorkspaceId
+    );
+    if (requestedResolution.workspaceId) return requestedResolution.workspaceId;
+  }
+
+  if (params.salesperson?.workspace_id) return params.salesperson.workspace_id;
+
+  const resolution = await resolveWorkspaceIdForUser(
+    params.admin as unknown as MinimalSupabaseClient,
+    params.requestUser.id,
+    params.requestedWorkspaceId ?? null
+  );
+
+  return resolution.workspaceId;
 }
 
 function formatListDate(): string {
@@ -518,6 +549,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const workspaceId = await resolveWorkspaceIdForSearch({
+      admin,
+      requestUser,
+      salesperson,
+      requestedWorkspaceId: parsed.data.workspaceId,
+    });
+
     const jobSignalResult = parsed.data.leadSource === 'job_signals'
       ? await searchD2DJobSignals({
           city: parsed.data.city,
@@ -555,7 +593,7 @@ export async function POST(request: NextRequest) {
     const savedList = await saveScraperResults({
       admin,
       userId: requestUser.id,
-      workspaceId: salesperson?.workspace_id ?? null,
+      workspaceId,
       leads: result.prospects,
       city: parsed.data.city,
       industry: parsed.data.industry,
@@ -565,7 +603,7 @@ export async function POST(request: NextRequest) {
     await recordProspectSearchRun({
       admin,
       userId: requestUser.id,
-      workspaceId: salesperson?.workspace_id ?? null,
+      workspaceId,
       marketId: parsed.data.marketId,
       industryId: parsed.data.industryId,
       city: parsed.data.city,
@@ -591,7 +629,7 @@ export async function POST(request: NextRequest) {
             id: salesperson.id,
             fullName: salesperson.full_name,
             email: salesperson.email,
-            workspaceId: salesperson.workspace_id,
+            workspaceId,
           }
         : null,
       savedList,

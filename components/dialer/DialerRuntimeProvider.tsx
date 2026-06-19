@@ -4,10 +4,11 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { Dispatch, ReactNode, SetStateAction } from 'react';
-import { ChevronRight, Loader2, MoreHorizontal, PhoneCall, PhoneOff } from 'lucide-react';
+import { ChevronRight, Loader2, Mail, MessageSquare, MoreHorizontal, PhoneCall, PhoneOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useTwilioDevice } from '@/lib/hooks/useTwilioDevice';
 import { formatPhoneDisplay, normalizePhoneNumber } from '@/lib/dialer/phone';
+import { getDialerCallRecordingSummary } from '@/lib/dialer/recordings';
 import { useWorkspace } from '@/lib/workspace-context';
 import type { DialerCall, DiallerLead } from '@/types/database';
 
@@ -59,6 +60,14 @@ type PlaceDiallerLeadCallOptions = {
   doubleDial?: boolean;
 };
 
+type DemoMessageResponse = {
+  demoLinkToken?: string | null;
+  textBody?: string;
+  emailSubject?: string;
+  emailBody?: string;
+  error?: string;
+};
+
 const ACTIVE_LEAD_SNAPSHOT_STORAGE_KEY = 'flyr:dialer:active-lead-snapshot';
 
 function createTabId(): string {
@@ -93,8 +102,10 @@ function formatCallClock(totalSeconds: number): string {
 }
 
 function statusForLead(lead: DiallerLead): 'pending' | 'called' | 'skipped' {
+  if (lead.disposition === 'dnc') return 'skipped';
+  if (lead.latest_call_outcome === 'answered' || lead.latest_call_outcome === 'no_answer') return 'called';
   if (!lead.disposition) return 'pending';
-  return lead.disposition === 'dnc' ? 'skipped' : 'called';
+  return 'called';
 }
 
 function hasDialablePhone(value: string | null | undefined): boolean {
@@ -109,6 +120,13 @@ function getDialerCallStatusPayload(call: DialerCall | null | undefined): Dialer
 
 function isMachineAnswer(answeredBy: unknown, isMachine: unknown): boolean {
   return isMachine === true || (typeof answeredBy === 'string' && answeredBy.startsWith('machine'));
+}
+
+function getCallOutcome(call: DialerCall): DiallerLead['latest_call_outcome'] {
+  if (call.answered_at || call.status === 'answered' || call.status === 'in-progress') return 'answered';
+  if (call.status === 'completed') return call.answered_at ? 'answered' : 'no_answer';
+  if (['no-answer', 'busy', 'failed', 'canceled'].includes(call.status ?? '')) return 'no_answer';
+  return 'pending';
 }
 
 export function useDialerRuntime() {
@@ -297,11 +315,29 @@ export function DialerRuntimeProvider({ children }: { children: ReactNode }) {
         if (cancelled || !response.ok || !data.call) return;
 
         const payload = getDialerCallStatusPayload(data.call);
+        const leadId = typeof payload.diallerLeadId === 'string' ? payload.diallerLeadId : activeLeadId;
+        if (leadId) {
+          setDiallerLeads((currentLeads) =>
+            currentLeads.map((lead) =>
+              lead.id === leadId
+                ? {
+                    ...lead,
+                    latest_call_id: data.call!.id,
+                    latest_call_status: data.call!.status,
+                    latest_call_outcome: getCallOutcome(data.call!),
+                    latest_call_answered_at: data.call!.answered_at ?? null,
+                    latest_call_ended_at: data.call!.ended_at ?? null,
+                    latest_call_created_at: data.call!.created_at,
+                    latest_call_recording: getDialerCallRecordingSummary(data.call!),
+                  }
+                : lead
+            )
+          );
+        }
         const shouldRedial =
           isMachineAnswer(payload.amd?.answeredBy, payload.amd?.isMachine) &&
           payload.doubleDial !== true &&
           !autoDoubleDialCallIdsRef.current.has(data.call.id);
-        const leadId = typeof payload.diallerLeadId === 'string' ? payload.diallerLeadId : activeLeadId;
 
         if (!shouldRedial || !leadId) return;
 
@@ -383,25 +419,133 @@ export function DialerRuntimeProvider({ children }: { children: ReactNode }) {
 
 function PersistentDialerBar() {
   const pathname = usePathname();
+  const { currentWorkspaceId } = useWorkspace();
   const {
     activeCallId,
     activeCallIsDoubleDial,
+    activeLeadId,
     activeLeadSnapshot,
     callSeconds,
     device,
+    diallerLeads,
     diallerRunning,
     hangUpActiveCall,
     isPlacingNextCall,
     placeNextDiallerCall,
+    setDiallerLeads,
     startingCall,
   } = useDialerRuntime();
+  const [demoAction, setDemoAction] = useState<'text' | 'email' | null>(null);
+  const [demoStatus, setDemoStatus] = useState<string | null>(null);
   const shouldShow = !pathname?.startsWith('/dialer') && (device.isInCall || Boolean(activeCallId) || diallerRunning);
 
   if (!shouldShow) return null;
 
+  const activeLead = activeLeadId
+    ? diallerLeads.find((lead) => lead.id === activeLeadId) ?? null
+    : null;
   const leadName = activeLeadSnapshot?.name?.trim() || 'Dialler call';
   const leadPhone = activeLeadSnapshot?.phone ? formatPhoneDisplay(activeLeadSnapshot.phone) : null;
   const phaseLabel = device.isConnecting ? 'Connecting' : device.isInCall ? 'Live' : device.callPhase === 'ended' ? 'Ended' : 'Ready';
+  const isSendingDemo = demoAction !== null;
+
+  const loadDemoMessage = async (): Promise<DemoMessageResponse> => {
+    if (!activeLeadId || !currentWorkspaceId) {
+      throw new Error('Open the dialer and select a lead first.');
+    }
+
+    const response = await fetch(`/api/dialer/leads/${activeLeadId}/demo-message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        workspaceId: currentWorkspaceId,
+        email: activeLead?.email ?? null,
+      }),
+    });
+    const data = (await response.json().catch(() => ({}))) as DemoMessageResponse;
+    if (!response.ok) throw new Error(data.error || 'Failed to prepare demo message.');
+    return data;
+  };
+
+  const sendDemoText = async () => {
+    setDemoAction('text');
+    setDemoStatus(null);
+
+    try {
+      const data = await loadDemoMessage();
+      const body = data.textBody?.trim();
+      if (!body || !activeLeadId || !currentWorkspaceId) {
+        throw new Error('Demo text is not ready yet.');
+      }
+
+      const response = await fetch(`/api/dialer/leads/${activeLeadId}/sms`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          workspaceId: currentWorkspaceId,
+          body,
+        }),
+      });
+      const result = (await response.json().catch(() => ({}))) as { warning?: string | null; error?: string };
+      if (!response.ok) throw new Error(result.error || 'Failed to send demo text.');
+      setDemoStatus(result.warning ?? 'Demo text sent.');
+    } catch (error) {
+      setDemoStatus(error instanceof Error ? error.message : 'Failed to send demo text.');
+    } finally {
+      setDemoAction(null);
+    }
+  };
+
+  const sendDemoEmail = async () => {
+    const email = activeLead?.email?.trim();
+    if (!email) {
+      setDemoStatus('Add an email on the dialer page first.');
+      return;
+    }
+
+    setDemoAction('email');
+    setDemoStatus(null);
+
+    try {
+      const data = await loadDemoMessage();
+      if (!activeLeadId || !currentWorkspaceId || !data.emailBody?.trim()) {
+        throw new Error('Demo email is not ready yet.');
+      }
+
+      const response = await fetch('/api/dialer/leads', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          workspaceId: currentWorkspaceId,
+          id: activeLeadId,
+          email,
+          saveContact: true,
+          sendDemoEmail: true,
+          demoEmailSubject: data.emailSubject,
+          demoEmailBody: data.emailBody,
+          demoLinkToken: data.demoLinkToken,
+        }),
+      });
+      const result = (await response.json().catch(() => ({}))) as {
+        lead?: DiallerLead;
+        warning?: string | null;
+        error?: string;
+      };
+      if (!response.ok || !result.lead) throw new Error(result.error || 'Failed to send demo email.');
+
+      setDiallerLeads((currentLeads) =>
+        currentLeads.map((lead) => (lead.id === result.lead!.id ? result.lead! : lead))
+      );
+      setDemoStatus(result.warning ?? 'Demo email sent.');
+    } catch (error) {
+      setDemoStatus(error instanceof Error ? error.message : 'Failed to send demo email.');
+    } finally {
+      setDemoAction(null);
+    }
+  };
 
   return (
     <div className="fixed right-3 top-[calc(env(safe-area-inset-top)+0.75rem)] z-[70] w-[min(calc(100vw-1.5rem),21rem)] overflow-hidden rounded-lg border border-neutral-200 bg-white/95 text-neutral-950 shadow-2xl shadow-neutral-300/70 backdrop-blur sm:right-4 sm:top-[calc(env(safe-area-inset-top)+1rem)]">
@@ -456,6 +600,41 @@ function PersistentDialerBar() {
           </Link>
         </Button>
       </div>
+      <div className="grid grid-cols-2 gap-1.5 border-t border-neutral-200 p-2 pt-2">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => void sendDemoText()}
+          disabled={isSendingDemo || !activeLeadId || !currentWorkspaceId}
+          className="h-9 min-w-0 border-neutral-300 bg-white px-2 text-xs font-semibold text-neutral-950 hover:bg-neutral-100 disabled:text-neutral-400"
+        >
+          {demoAction === 'text' ? (
+            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+          ) : (
+            <MessageSquare className="h-3.5 w-3.5 shrink-0" />
+          )}
+          Text demo
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => void sendDemoEmail()}
+          disabled={isSendingDemo || !activeLeadId || !currentWorkspaceId}
+          className="h-9 min-w-0 border-neutral-300 bg-white px-2 text-xs font-semibold text-neutral-950 hover:bg-neutral-100 disabled:text-neutral-400"
+        >
+          {demoAction === 'email' ? (
+            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+          ) : (
+            <Mail className="h-3.5 w-3.5 shrink-0" />
+          )}
+          Email demo
+        </Button>
+      </div>
+      {demoStatus ? (
+        <div className="border-t border-neutral-200 px-3 py-2 text-xs leading-5 text-neutral-600">
+          {demoStatus}
+        </div>
+      ) : null}
     </div>
   );
 }

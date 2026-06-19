@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Building2,
@@ -39,6 +39,7 @@ import {
   MapboxAutocompleteService,
   type CitySuggestion,
 } from '@/lib/services/MapboxAutocompleteService';
+import { useWorkspace } from '@/lib/workspace-context';
 
 type PlacesLeadPayload = {
   ok?: boolean;
@@ -266,9 +267,11 @@ function formatRunDate(value: string | null | undefined): string {
 
 export function SalespersonPlacesLeadFinder() {
   const router = useRouter();
+  const { currentWorkspaceId } = useWorkspace();
   const [markets, setMarkets] = useState<ProspectMarket[]>([]);
   const [industries, setIndustries] = useState<ProspectIndustry[]>([]);
   const [recentRuns, setRecentRuns] = useState<ProspectSearchRun[]>([]);
+  const [prospectingWorkspaceId, setProspectingWorkspaceId] = useState<string | null>(null);
   const [selectedMarketId, setSelectedMarketId] = useState('');
   const [selectedIndustryId, setSelectedIndustryId] = useState('');
   const [citySuggestions, setCitySuggestions] = useState<CitySuggestion[]>([]);
@@ -289,6 +292,7 @@ export function SalespersonPlacesLeadFinder() {
   const cityBlurRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const realEstateMode = isRealEstateIndustry(industry);
+  const saveWorkspaceId = currentWorkspaceId ?? prospectingWorkspaceId;
   const canSubmit = city.trim().length >= 2 && industry.trim().length >= 2 && !loading;
   const csv = useMemo(() => buildPlacesCsv(prospects), [prospects]);
   const cityMarketSuggestions = useMemo(() => {
@@ -307,24 +311,29 @@ export function SalespersonPlacesLeadFinder() {
     ) ?? null;
   }, [recentRuns, selectedIndustryId, selectedMarketId]);
 
-  async function loadProspectingOptions() {
+  const loadProspectingOptions = useCallback(async () => {
     try {
-      const response = await fetch('/api/prospecting/options', { credentials: 'include' });
+      const params = new URLSearchParams();
+      if (currentWorkspaceId) params.set('workspaceId', currentWorkspaceId);
+      const query = params.toString();
+      const response = await fetch(`/api/prospecting/options${query ? `?${query}` : ''}`, { credentials: 'include' });
       const payload = (await response.json().catch(() => ({}))) as ProspectingOptionsPayload;
       if (!response.ok) throw new Error(payload.error || 'Failed to load prospecting picks.');
+      setProspectingWorkspaceId(payload.workspaceId ?? null);
       setMarkets(payload.markets ?? []);
       setIndustries(payload.industries ?? []);
       setRecentRuns(payload.recentRuns ?? []);
     } catch {
+      setProspectingWorkspaceId(null);
       setMarkets([]);
       setIndustries([]);
       setRecentRuns([]);
     }
-  }
+  }, [currentWorkspaceId]);
 
   useEffect(() => {
     void loadProspectingOptions();
-  }, []);
+  }, [loadProspectingOptions]);
 
   useEffect(() => {
     if (!realEstateMode) setRealEstateTeamSearch(false);
@@ -450,6 +459,7 @@ export function SalespersonPlacesLeadFinder() {
           industry,
           countryCode,
           region: region.trim() || undefined,
+          workspaceId: saveWorkspaceId ?? undefined,
           relatedTerms: uniqueTerms([...teamTerms, ...typedRelatedTerms]).slice(0, 12),
           pageSize: 20,
           marketId: selectedMarketId || undefined,
@@ -526,7 +536,21 @@ export function SalespersonPlacesLeadFinder() {
     const params = new URLSearchParams();
     params.set('leadIds', saved.dialerLeadIds.join(','));
     params.set('listName', saved.listName);
+    if (saveWorkspaceId) params.set('workspaceId', saveWorkspaceId);
     router.push(`/dialer?${params.toString()}`);
+  }
+
+  function openSavedListInLeads() {
+    const saved = summary?.savedList;
+    if (!saved?.listId) {
+      router.push('/leads');
+      return;
+    }
+
+    const params = new URLSearchParams();
+    params.set('listId', saved.listId);
+    params.set('listName', saved.listName);
+    router.push(`/leads?${params.toString()}`);
   }
 
   return (
@@ -725,10 +749,16 @@ export function SalespersonPlacesLeadFinder() {
                 <p className="mt-1 text-sm text-amber-700 dark:text-amber-300">{summary.savedList.warning}</p>
               ) : null}
             </div>
-            <Button type="button" onClick={openSavedListInDialer} className="shrink-0">
-              <Phone />
-              Open List in Dialer
-            </Button>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <Button type="button" variant="outline" onClick={openSavedListInLeads}>
+                <ListChecks />
+                Open in Leads
+              </Button>
+              <Button type="button" onClick={openSavedListInDialer}>
+                <Phone />
+                Open in Dialer
+              </Button>
+            </div>
           </div>
         </section>
       ) : null}

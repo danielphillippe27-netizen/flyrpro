@@ -32,6 +32,7 @@ type DialerVideoLandingProps = {
   referralCode?: string;
   trackingSource?: string;
   trackingCampaign?: string;
+  demoLinkToken?: string;
 };
 
 type DemoEventType =
@@ -71,6 +72,7 @@ export function DialerVideoLanding({
   referralCode,
   trackingSource,
   trackingCampaign,
+  demoLinkToken,
 }: DialerVideoLandingProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -106,6 +108,7 @@ export function DialerVideoLanding({
       const body = JSON.stringify({
         eventType,
         referralCode,
+        demoLinkToken,
         sessionId: getSessionId(),
         source: trackingSource,
         campaign: trackingCampaign,
@@ -128,7 +131,7 @@ export function DialerVideoLanding({
         keepalive: useBeacon,
       }).catch(() => undefined);
     },
-    [getSessionId, referralCode, trackingCampaign, trackingSource]
+    [demoLinkToken, getSessionId, referralCode, trackingCampaign, trackingSource]
   );
 
   const sendOnce = useCallback(

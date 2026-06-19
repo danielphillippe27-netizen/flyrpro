@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 
 type VoiceConnectionLike = {
   disconnect: () => void;
+  getLocalStream?: () => MediaStream | undefined;
   mute: (shouldMute?: boolean) => void;
   isMuted?: () => boolean;
 };
@@ -32,6 +33,8 @@ type SelectedMicrophone = {
   source: MicrophoneSelectionSource;
   browserTrackDeviceId: string | null;
 };
+
+type MicTrackState = 'idle' | 'live' | 'muted' | 'ended' | 'error';
 
 type TokenResponse = {
   token: string;
@@ -163,6 +166,7 @@ export function useTwilioDevice() {
   const deviceRef = useRef<VoiceDeviceLike | null>(null);
   const connectionRef = useRef<VoiceConnectionLike | null>(null);
   const selectedInputStreamRef = useRef<MediaStream | null>(null);
+  const micMeterRef = useRef<{ audioContext: AudioContext; intervalId: number } | null>(null);
   const workspaceIdRef = useRef<string | null>(null);
   const tabIdRef = useRef<string | null>(null);
   const hangUpRequestedRef = useRef(false);
@@ -178,6 +182,72 @@ export function useTwilioDevice() {
   const [smsFromNumber, setSmsFromNumber] = useState<string | null>(null);
   const [allowSmsFollowup, setAllowSmsFollowup] = useState(false);
   const [selectedMicrophone, setSelectedMicrophone] = useState<SelectedMicrophone | null>(null);
+  const [micLevel, setMicLevel] = useState(0);
+  const [micTrackLabel, setMicTrackLabel] = useState<string | null>(null);
+  const [micTrackState, setMicTrackState] = useState<MicTrackState>('idle');
+
+  const stopMicMeter = () => {
+    if (micMeterRef.current) {
+      window.clearInterval(micMeterRef.current.intervalId);
+      void micMeterRef.current.audioContext.close().catch(() => undefined);
+      micMeterRef.current = null;
+    }
+    setMicLevel(0);
+    setMicTrackLabel(null);
+    setMicTrackState('idle');
+  };
+
+  const startMicMeter = (stream: MediaStream | null, fallbackLabel?: string | null) => {
+    stopMicMeter();
+    const track = stream?.getAudioTracks()[0] ?? null;
+    if (!stream || !track) {
+      setMicTrackLabel(fallbackLabel ?? null);
+      setMicTrackState(stream ? 'error' : 'idle');
+      return;
+    }
+
+    try {
+      const AudioContextCtor =
+        window.AudioContext ?? (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioContextCtor) {
+        setMicTrackLabel(track.label || fallbackLabel || 'Selected microphone');
+        setMicTrackState(track.readyState === 'ended' ? 'ended' : track.muted ? 'muted' : 'live');
+        return;
+      }
+
+      const audioContext = new AudioContextCtor();
+      const source = audioContext.createMediaStreamSource(stream);
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 512;
+      const data = new Uint8Array(analyser.fftSize);
+      source.connect(analyser);
+      void audioContext.resume().catch(() => undefined);
+
+      const updateMeter = () => {
+        analyser.getByteTimeDomainData(data);
+        let sum = 0;
+        for (const sample of data) {
+          const value = (sample - 128) / 128;
+          sum += value * value;
+        }
+        const rms = Math.sqrt(sum / data.length);
+        setMicLevel(Math.min(1, rms * 6));
+        setMicTrackLabel(track.label || fallbackLabel || 'Selected microphone');
+        setMicTrackState(track.readyState === 'ended' ? 'ended' : track.muted ? 'muted' : 'live');
+      };
+
+      updateMeter();
+      micMeterRef.current = {
+        audioContext,
+        intervalId: window.setInterval(updateMeter, 200),
+      };
+    } catch (error) {
+      console.warn('[dialer/device] failed to start microphone meter', error);
+      setMicLevel(0);
+      setMicTrackLabel(track.label || fallbackLabel || 'Selected microphone');
+      setMicTrackState('error');
+    }
+  };
 
   const destroyDevice = () => {
     connectionRef.current = null;
@@ -187,6 +257,7 @@ export function useTwilioDevice() {
       console.warn('[dialer/device] failed to destroy Twilio device', error);
     }
     deviceRef.current = null;
+    stopMicMeter();
     stopMediaStream(selectedInputStreamRef.current);
     selectedInputStreamRef.current = null;
     setCallPhase('idle');
@@ -292,6 +363,7 @@ export function useTwilioDevice() {
       tabIdRef.current = tabId;
       destroyDevice();
       selectedInputStreamRef.current = selectedInputStream;
+      startMicMeter(selectedInputStream, microphone?.label ?? null);
 
       const tokenData = await fetchToken(workspaceId, tabId);
       const sdk = await import('@twilio/voice-sdk');
@@ -363,6 +435,7 @@ export function useTwilioDevice() {
 
       device.on('connect', (connection) => {
         connectionRef.current = (connection as VoiceConnectionLike) ?? connectionRef.current;
+        startMicMeter(connectionRef.current?.getLocalStream?.() ?? selectedInputStreamRef.current, microphone?.label ?? null);
         setCallPhase('connected');
         setIsMuted(Boolean(connectionRef.current?.isMuted?.()));
       });
@@ -405,6 +478,7 @@ export function useTwilioDevice() {
       setCallPhase('idle');
     } catch (error) {
       console.error('[dialer/device] failed to initialize', error);
+      stopMicMeter();
       stopMediaStream(selectedInputStreamRef.current);
       selectedInputStreamRef.current = null;
       setSetupState('error');
@@ -443,6 +517,7 @@ export function useTwilioDevice() {
       throw error;
     }
     connectionRef.current = connection;
+    startMicMeter(connection.getLocalStream?.() ?? selectedInputStreamRef.current, selectedMicrophone?.label ?? null);
     if (hangUpRequestedRef.current) {
       connection.disconnect();
       connectionRef.current = null;
@@ -485,6 +560,9 @@ export function useTwilioDevice() {
     isMuted,
     microphoneGranted,
     selectedMicrophone,
+    micLevel,
+    micTrackLabel,
+    micTrackState,
     deviceError,
     tokenExpiresAt,
     endedCount,

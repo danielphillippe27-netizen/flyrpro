@@ -13,7 +13,9 @@ import {
   DEMO_EMAIL_DOMAIN,
   buildFallbackDemoEmailHandle,
   resolveAvailableDemoEmailHandle,
+  type HandleLookupClient,
 } from '@/lib/dialer/demo-email-handle';
+import { isMissingDemoLinkSchemaError } from '@/lib/dialer/demo-link-tracking';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -44,7 +46,7 @@ async function safeCount(
   query: PromiseLike<{ count: number | null; error: { message: string } | null }>
 ): Promise<number> {
   const { count, error } = await query;
-  if (error && !isMissingSalespeopleSchemaError(error.message)) {
+  if (error && !isMissingSalespeopleSchemaError(error.message) && !isMissingDemoLinkSchemaError(error)) {
     console.warn('[salesperson/demo-center] count failed', error);
   }
   return count ?? 0;
@@ -75,7 +77,7 @@ export async function GET(request: NextRequest) {
       preferredReferralCode,
     });
 
-    const [dialerSettings, clickCount, demoViewCount, demoStartCount, trialCount] = await Promise.all([
+    const [dialerSettings, clickCount, demoViewCount, demoStartCount, trialCount, trackedEmailOpenCount] = await Promise.all([
       getSalespersonDialerSettings(admin, salesperson.id),
       safeCount(
         admin
@@ -103,13 +105,20 @@ export async function GET(request: NextRequest) {
           .select('id', { count: 'exact', head: true })
           .ilike('referral_code_used', referralCode)
       ),
+      safeCount(
+        admin
+          .from('salesperson_demo_links')
+          .select('id', { count: 'exact', head: true })
+          .eq('salesperson_id', salesperson.id)
+          .not('opened_at', 'is', null)
+      ),
     ]);
 
     const origin = getPublicOrigin(request);
 
     const demoHandle =
       salesperson.demo_email_handle ||
-      (await resolveAvailableDemoEmailHandle(admin, salesperson, requestUser.email)) ||
+      (await resolveAvailableDemoEmailHandle(admin as unknown as HandleLookupClient, salesperson, requestUser.email)) ||
       buildFallbackDemoEmailHandle(salesperson, requestUser.email);
 
     return NextResponse.json({
@@ -134,8 +143,8 @@ export async function GET(request: NextRequest) {
         demoViews: demoViewCount,
         videoStarts: demoStartCount,
         trials: trialCount,
-        emailOpens: 0,
-        emailOpenTrackingEnabled: false,
+        emailOpens: trackedEmailOpenCount,
+        emailOpenTrackingEnabled: true,
       },
     });
   } catch (error) {

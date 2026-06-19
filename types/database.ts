@@ -720,7 +720,7 @@ export interface FinanceEntry {
 }
 
 // Contact Types
-export type ContactStatus = 'hot' | 'warm' | 'cold' | 'new';
+export type ContactStatus = 'hot' | 'warm' | 'cold' | 'new' | 'follow_up';
 export type ActivityType = 'knock' | 'call' | 'flyer' | 'note' | 'text' | 'email' | 'meeting';
 export type DialerSessionStatus = 'draft' | 'active' | 'paused' | 'completed';
 export type DialerSessionLeadStatus = 'pending' | 'claimed' | 'calling' | 'completed' | 'skipped' | 'invalid';
@@ -765,6 +765,7 @@ export interface Contact {
   notes?: string;
   reminder_date?: string;
   follow_up_at?: string;
+  demo_link_follow_up_id?: string | null;
   appointment_at?: string;
   gers_id?: string; // Overture GERS ID linking to map_buildings.gers_id
   address_id?: string; // FK to campaign_addresses.id
@@ -890,6 +891,15 @@ export interface DialerCall {
   updated_at: string;
 }
 
+export interface DialerCallRecordingSummary {
+  status: string;
+  available: boolean;
+  duration_seconds?: number | null;
+  channels?: number | null;
+  updated_at?: string | null;
+  error_code?: string | null;
+}
+
 export interface DialerSmsFollowup {
   id: string;
   workspace_id: string;
@@ -942,6 +952,7 @@ export interface DialerVoicemailDrop {
 }
 
 export type DiallerLeadDisposition = 'interested' | 'callback' | 'not_now' | 'dnc';
+export type DiallerLeadCallOutcome = 'pending' | 'no_answer' | 'answered';
 
 export interface DiallerLead {
   id: string;
@@ -952,7 +963,15 @@ export interface DiallerLead {
   email?: string | null;
   follow_up_name?: string | null;
   follow_up_at?: string | null;
+  demo_link_follow_up_id?: string | null;
   disposition?: DiallerLeadDisposition | null;
+  latest_call_id?: string | null;
+  latest_call_status?: DialerCallStatus | null;
+  latest_call_outcome?: DiallerLeadCallOutcome | null;
+  latest_call_answered_at?: string | null;
+  latest_call_ended_at?: string | null;
+  latest_call_created_at?: string | null;
+  latest_call_recording?: DialerCallRecordingSummary | null;
   notes?: string | null;
   called_at?: string | null;
   created_at: string;

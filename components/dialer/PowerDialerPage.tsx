@@ -2,12 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, Clock, ListPlus, Loader2, Mail, MessageSquare, Mic, Pause, PhoneOff, Play, Save, Send, Trash2, Upload, X } from 'lucide-react';
+import { AlertCircle, CheckCircle2, ChevronRight, Clock, Download, ListPlus, Loader2, Mail, MessageSquare, Mic, Pause, PhoneOff, Play, Save, Send, Trash2, Upload, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { useDialerRuntime } from '@/components/dialer/DialerRuntimeProvider';
 import {
@@ -50,7 +49,7 @@ type DialerAccessResponse = {
   } | null;
 };
 
-type DiallerLeadStatus = 'pending' | 'called' | 'skipped';
+type DiallerLeadStatus = 'pending' | 'no_answer' | 'answered' | 'skipped';
 type PlaceCallOptions = {
   doubleDial?: boolean;
   forceLeadId?: string;
@@ -67,13 +66,6 @@ type DiallerImportResponse = {
   error?: string;
 };
 
-const DIALER_AUTO_NEXT_STORAGE_KEY = 'flyr:dialer:auto-next';
-const TEST_LEAD = {
-  name: 'Daniel Phillippe',
-  phone: '289-675-2788',
-  company: 'Test Lead',
-  email: null,
-};
 const DIALER_OUTLINE_BUTTON_CLASS =
   'border-border bg-background text-foreground hover:bg-muted hover:text-foreground disabled:border-border disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100 dark:bg-card dark:hover:bg-muted/80 dark:disabled:bg-muted/50';
 const DIALER_PRIMARY_BUTTON_CLASS =
@@ -83,6 +75,12 @@ const DIALER_INPUT_CLASS =
 const DIALER_SELECTED_BUTTON_CLASS =
   'border-foreground bg-foreground text-background hover:bg-foreground/90 hover:text-background dark:border-foreground dark:bg-foreground dark:text-background dark:hover:bg-foreground/90';
 const ALL_LEADS_LIST_ID = 'all';
+const TEST_LEAD = {
+  name: 'Daniel Phillippe',
+  phone: '289-675-2788',
+  company: 'Test Lead',
+  email: null,
+};
 
 function formatCallClock(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60);
@@ -130,6 +128,19 @@ function getRepFirstName(dialerAccess: DialerAccessResponse | null): string {
   return titleCaseName(getFirstName(fullName) || emailName || 'Daniel');
 }
 
+function getLeadRecordingExportHref(lead: DiallerLead | null | undefined, workspaceId: string | null | undefined): string | null {
+  if (!lead?.latest_call_recording?.available || !workspaceId) return null;
+  const params = new URLSearchParams({ workspaceId });
+  return `/api/dialer/leads/${encodeURIComponent(lead.id)}/recording?${params.toString()}`;
+}
+
+function formatRecordingDuration(totalSeconds: number | null | undefined): string | null {
+  if (!totalSeconds || totalSeconds < 1) return null;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
 function buildTextDropBody(lead: DiallerLead, repName: string): string {
   const firstName = getFirstName(lead.name);
   return `Hey ${firstName || 'there'}, its ${repName} with FLYR can you give me a call back when you get a chance !`;
@@ -143,8 +154,37 @@ function getTwoDayFollowUpAt(): string {
 }
 
 function statusForLead(lead: DiallerLead): DiallerLeadStatus {
-  if (!lead.disposition) return 'pending';
-  return lead.disposition === 'dnc' ? 'skipped' : 'called';
+  if (lead.disposition === 'dnc') return 'skipped';
+  if (lead.latest_call_outcome === 'answered') return 'answered';
+  if (lead.latest_call_outcome === 'no_answer') return 'no_answer';
+  if (lead.disposition === 'interested' || lead.disposition === 'callback') return 'answered';
+  if (lead.disposition === 'not_now') return 'no_answer';
+  return 'pending';
+}
+
+function leadStatusLabel(status: DiallerLeadStatus): string {
+  switch (status) {
+    case 'no_answer':
+      return 'No Answer';
+    case 'answered':
+      return 'Answered';
+    case 'skipped':
+      return 'Skipped';
+    default:
+      return 'Pending';
+  }
+}
+
+function leadStatusPillClass(status: DiallerLeadStatus): string {
+  switch (status) {
+    case 'answered':
+      return 'border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-200';
+    case 'no_answer':
+    case 'skipped':
+      return 'border-red-500/40 bg-red-500/15 text-red-700 dark:text-red-200';
+    default:
+      return 'border-border bg-muted text-muted-foreground';
+  }
 }
 
 function parseCsv(text: string): string[][] {
@@ -320,7 +360,7 @@ function leadsFromCsv(text: string): Array<{ name: string; phone: string; compan
 }
 
 export function PowerDialerPage() {
-  const { currentWorkspaceId } = useWorkspace();
+  const { currentWorkspaceId, setCurrentWorkspaceId } = useWorkspace();
   const searchParams = useSearchParams();
   const {
     activeLeadId,
@@ -363,14 +403,13 @@ export function PowerDialerPage() {
   const [followUpChoice, setFollowUpChoice] = useState<'today' | 'tomorrow' | 'custom'>('today');
   const [textBody, setTextBody] = useState('');
   const [sendingText, setSendingText] = useState(false);
-  const [autoNextEnabled, setAutoNextEnabled] = useState(true);
   const [loadingLeads, setLoadingLeads] = useState(false);
   const [importing, setImporting] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [loadingTestLead, setLoadingTestLead] = useState(false);
   const [savingContact, setSavingContact] = useState(false);
   const [sendingDemoEmail, setSendingDemoEmail] = useState(false);
   const [removingList, setRemovingList] = useState(false);
-  const [loadingTestLead, setLoadingTestLead] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isIphone, setIsIphone] = useState(false);
@@ -380,6 +419,7 @@ export function PowerDialerPage() {
     [searchParams]
   );
   const focusedListName = searchParams.get('listName')?.trim() || '';
+  const focusedWorkspaceId = searchParams.get('workspaceId')?.trim() || '';
   const hasFocusedDialerList = focusedLeadIds.length > 0;
 
   const activeLead = useMemo(
@@ -391,13 +431,27 @@ export function PowerDialerPage() {
     [activeLeadId, leads]
   );
   const hasActiveLead = Boolean(activeLead);
-  const activeLeadIndex = activeLead ? leads.findIndex((lead) => lead.id === activeLead.id) : -1;
-  const canGoPreviousLead = activeLeadIndex > 0;
-  const canGoNextLead = activeLeadIndex >= 0 && activeLeadIndex < leads.length - 1;
-  const calledCount = leads.filter((lead) => statusForLead(lead) === 'called').length;
-  const connectedCount = leads.filter((lead) => lead.disposition === 'interested' || lead.disposition === 'callback').length;
+  const activeRecordingExportHref = getLeadRecordingExportHref(activeLead, currentWorkspaceId);
+  const activeRecordingDuration = formatRecordingDuration(activeLead?.latest_call_recording?.duration_seconds);
+  const calledCount = leads.filter((lead) => statusForLead(lead) !== 'pending').length;
+  const connectedCount = leads.filter((lead) => statusForLead(lead) === 'answered').length;
   const remainingCount = leads.filter((lead) => statusForLead(lead) === 'pending').length;
   const repFirstName = getRepFirstName(dialerAccess);
+  const micLevelPercent = Math.round(device.micLevel * 100);
+  const micSignalActive = device.micLevel > 0.03;
+  const micDiagnosticLabel = device.micTrackLabel || device.selectedMicrophone?.label || 'No microphone stream';
+  const micDiagnosticStatus =
+    device.micTrackState === 'live'
+      ? micSignalActive
+        ? 'Signal'
+        : 'Listening'
+      : device.micTrackState === 'muted'
+        ? 'Muted'
+        : device.micTrackState === 'ended'
+          ? 'Ended'
+          : device.micTrackState === 'error'
+            ? 'Meter unavailable'
+            : 'Idle';
 
   const statusChecks = [
     { label: 'Workspace selected', ok: Boolean(currentWorkspaceId) },
@@ -406,10 +460,10 @@ export function PowerDialerPage() {
     { label: 'Shared caller ID', ok: Boolean(dialerAccess?.sharedDefaultDialingEnabled || dialerAccess?.settings?.dedicatedFromNumber) },
   ];
 
-  const loadDiallerLeads = useCallback(async () => {
+  const loadDiallerLeads = useCallback(async (options?: { silent?: boolean }) => {
     if (!currentWorkspaceId) return;
-    setLoadingLeads(true);
-    setError(null);
+    if (!options?.silent) setLoadingLeads(true);
+    if (!options?.silent) setError(null);
 
     try {
       const params = new URLSearchParams({ workspaceId: currentWorkspaceId });
@@ -418,7 +472,12 @@ export function PowerDialerPage() {
       const response = await fetch(`/api/dialer/leads?${params.toString()}`, {
         credentials: 'include',
       });
-      const data = (await response.json().catch(() => ({}))) as { leads?: DiallerLead[]; error?: string };
+      const data = (await response.json().catch(() => ({}))) as {
+        leads?: DiallerLead[];
+        focusedLeadIds?: string[];
+        resolvedWorkspaceId?: string;
+        error?: string;
+      };
       if (!response.ok) {
         setLeads([]);
         setActiveLeadId(null);
@@ -427,6 +486,9 @@ export function PowerDialerPage() {
       }
 
       const nextLeads = data.leads ?? [];
+      if (data.resolvedWorkspaceId && data.resolvedWorkspaceId !== currentWorkspaceId) {
+        setCurrentWorkspaceId(data.resolvedWorkspaceId);
+      }
       setLeads(nextLeads);
       setActiveLeadId((currentId) => {
         if (currentId && nextLeads.some((lead) => lead.id === currentId)) return currentId;
@@ -440,34 +502,43 @@ export function PowerDialerPage() {
         );
       }
     } catch {
-      setLeads([]);
-      setActiveLeadId(null);
-      setError('Failed to load dialler leads.');
+      if (!options?.silent) {
+        setLeads([]);
+        setActiveLeadId(null);
+        setError('Failed to load dialler leads.');
+      }
     } finally {
-      setLoadingLeads(false);
+      if (!options?.silent) setLoadingLeads(false);
     }
-  }, [currentWorkspaceId, focusedLeadIds, focusedListName, setActiveLeadId, setLeads]);
+  }, [currentWorkspaceId, focusedLeadIds, focusedListName, setActiveLeadId, setCurrentWorkspaceId, setLeads]);
+
+  useEffect(() => {
+    if (!currentWorkspaceId || leads.length === 0) return;
+    if (!activeCallId && !diallerRunning && device.callPhase !== 'ended') return;
+
+    let cancelled = false;
+    const refresh = () => {
+      if (!cancelled) void loadDiallerLeads({ silent: true });
+    };
+
+    refresh();
+    const interval = window.setInterval(refresh, 2500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [activeCallId, currentWorkspaceId, device.callPhase, diallerRunning, leads.length, loadDiallerLeads]);
 
   useEffect(() => {
     const userAgent = window.navigator.userAgent;
     const platform = window.navigator.platform;
     setIsIphone(/iPhone/.test(userAgent) || (platform === 'MacIntel' && window.navigator.maxTouchPoints > 1));
-
-    try {
-      const storedAutoNext = window.localStorage.getItem(DIALER_AUTO_NEXT_STORAGE_KEY);
-      if (storedAutoNext === 'false') setAutoNextEnabled(false);
-    } catch {
-      // ignore storage read issues
-    }
   }, []);
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(DIALER_AUTO_NEXT_STORAGE_KEY, String(autoNextEnabled));
-    } catch {
-      // ignore storage write issues
-    }
-  }, [autoNextEnabled]);
+    if (!focusedWorkspaceId || focusedWorkspaceId === currentWorkspaceId) return;
+    setCurrentWorkspaceId(focusedWorkspaceId);
+  }, [currentWorkspaceId, focusedWorkspaceId, setCurrentWorkspaceId]);
 
   useEffect(() => {
     if (!currentWorkspaceId) {
@@ -711,10 +782,7 @@ export function PowerDialerPage() {
           leads: [TEST_LEAD],
         }),
       });
-      const data = (await response.json().catch(() => ({}))) as {
-        leads?: DiallerLead[];
-        error?: string;
-      };
+      const data = (await response.json().catch(() => ({}))) as DiallerImportResponse;
       if (!response.ok) throw new Error(data.error || 'Failed to add test lead.');
 
       const testLead = data.leads?.[0];
@@ -745,7 +813,9 @@ export function PowerDialerPage() {
     followUpAt,
     createNotification = false,
     forceAdvance = false,
+    suppressAutoAdvance = false,
     successMessage,
+    leadOverride,
   }: {
     disposition: DiallerLeadDisposition;
     sendLink?: boolean;
@@ -754,9 +824,12 @@ export function PowerDialerPage() {
     followUpAt?: string | null;
     createNotification?: boolean;
     forceAdvance?: boolean;
+    suppressAutoAdvance?: boolean;
     successMessage: string;
+    leadOverride?: DiallerLead;
   }) => {
-    if (!activeLead || !currentWorkspaceId) return false;
+    const targetLead = leadOverride ?? activeLead;
+    if (!targetLead || !currentWorkspaceId) return false;
 
     setSaving(true);
     setError(null);
@@ -769,10 +842,10 @@ export function PowerDialerPage() {
         credentials: 'include',
         body: JSON.stringify({
           workspaceId: currentWorkspaceId,
-          id: activeLead.id,
+          id: targetLead.id,
           disposition,
-          notes: notesOverride ?? notes,
-          email,
+          notes: notesOverride ?? (targetLead.id === activeLead?.id ? notes : targetLead.notes ?? ''),
+          email: targetLead.id === activeLead?.id ? email : targetLead.email ?? '',
           sendLink,
           followUpName: followUpNameOverride,
           followUpAt,
@@ -784,7 +857,7 @@ export function PowerDialerPage() {
 
       setLeads((currentLeads) => {
         const updatedLeads = currentLeads.map((lead) => (lead.id === data.lead!.id ? data.lead! : lead));
-        if (autoNextEnabled || forceAdvance) {
+        if (!suppressAutoAdvance || forceAdvance) {
           advanceToNextLead(updatedLeads, data.lead!.id);
         }
         return updatedLeads;
@@ -979,10 +1052,6 @@ export function PowerDialerPage() {
   };
   placeCurrentCallRef.current = placeCurrentCall;
 
-  const handleDoubleDial = () => {
-    void placeCurrentCall({ doubleDial: true, redialAfterEnd: true });
-  };
-
   useEffect(() => {
     if (device.callPhase !== 'ended' || !activeCallId) return;
 
@@ -1046,14 +1115,25 @@ export function PowerDialerPage() {
       if (!response.ok) throw new Error(data.error || 'Failed to send text drop.');
 
       setSelectedDisposition('callback');
-      await saveLeadDisposition({
+      const saved = await saveLeadDisposition({
         disposition: 'callback',
         notesOverride: nextNotes,
         followUpNameOverride: followUpLabel,
         followUpAt,
         createNotification: true,
+        suppressAutoAdvance: true,
         successMessage: data.warning ?? 'Text drop sent. Follow-up set for two days from now.',
       });
+      if (saved) {
+        const nextCall = await placeNextDiallerCall();
+        if (nextCall.ok) {
+          setError(null);
+          setMessage(`${data.warning ?? 'Text drop sent. Follow-up set for two days from now.'} ${nextCall.message}`);
+        } else {
+          setMessage(data.warning ?? 'Text drop sent. Follow-up set for two days from now.');
+          setError(nextCall.message);
+        }
+      }
     } catch (dropError) {
       setError(dropError instanceof Error ? dropError.message : 'Failed to send text drop.');
     } finally {
@@ -1145,40 +1225,6 @@ export function PowerDialerPage() {
     }
   };
 
-  const handleDeleteLead = async () => {
-    if (!activeLead || !currentWorkspaceId) return;
-
-    doubleDialRetryRef.current = null;
-    setSaving(true);
-    setError(null);
-    setMessage(null);
-
-    try {
-      const response = await fetch('/api/dialer/leads', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          workspaceId: currentWorkspaceId,
-          id: activeLead.id,
-        }),
-      });
-      const data = (await response.json().catch(() => ({}))) as { deletedId?: string; error?: string };
-      if (!response.ok || !data.deletedId) throw new Error(data.error || 'Failed to delete lead.');
-
-      setLeads((currentLeads) => {
-        const updatedLeads = currentLeads.filter((lead) => lead.id !== data.deletedId);
-        setActiveLeadId(updatedLeads.find((lead) => statusForLead(lead) === 'pending')?.id ?? updatedLeads[0]?.id ?? null);
-        return updatedLeads;
-      });
-      setMessage('Not interested. Lead deleted.');
-    } catch (deleteError) {
-      setError(deleteError instanceof Error ? deleteError.message : 'Failed to delete lead.');
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const handleRemoveList = async () => {
     if (!currentWorkspaceId || leads.length === 0) return;
     if (!window.confirm('Remove this list from the dialler queue? Your saved Contacts list will not be deleted.')) return;
@@ -1263,19 +1309,10 @@ export function PowerDialerPage() {
     setMessage('Call hung up.');
   };
 
-  const moveActiveLead = (direction: -1 | 1) => {
-    if (activeLeadIndex < 0) return;
-    const nextLead = leads[activeLeadIndex + direction];
-    if (!nextLead) return;
-    setActiveLeadId(nextLead.id);
-    setError(null);
-    setMessage(null);
-  };
-
   return (
     <div
       data-device={isIphone ? 'iphone' : undefined}
-      className="min-h-[100svh] overflow-x-hidden bg-background px-3 pb-[calc(env(safe-area-inset-bottom)+1rem)] pt-[calc(env(safe-area-inset-top)+0.75rem)] text-foreground sm:px-6 sm:py-4 lg:px-8"
+      className="min-h-[100svh] overflow-x-hidden bg-background px-3 pb-[calc(env(safe-area-inset-bottom)+4rem)] pt-[calc(env(safe-area-inset-top)+0.75rem)] text-foreground sm:px-6 sm:pt-4 lg:px-8"
     >
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-3 sm:gap-4">
         <div className="-mx-3 overflow-x-auto px-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
@@ -1323,6 +1360,22 @@ export function PowerDialerPage() {
           ) : null}
         </div>
 
+        {(device.microphoneGranted || device.selectedMicrophone) && (
+          <div className="grid gap-2 rounded-md border border-border bg-card px-3 py-2 text-xs text-muted-foreground sm:grid-cols-[minmax(0,1fr)_160px] sm:items-center">
+            <div className="flex min-w-0 items-center gap-2">
+              <Mic className="h-4 w-4 shrink-0 text-foreground" />
+              <span className="truncate font-medium text-foreground">{micDiagnosticLabel}</span>
+              <span className="shrink-0 text-muted-foreground">{micDiagnosticStatus}</span>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-muted">
+              <div
+                className={cn('h-full rounded-full transition-[width]', micSignalActive ? 'bg-foreground' : 'bg-muted-foreground/40')}
+                style={{ width: `${Math.max(device.micLevel > 0 ? 6 : 0, micLevelPercent)}%` }}
+              />
+            </div>
+          </div>
+        )}
+
         {(message || error || device.deviceError) && (
           <div
             className={`rounded-md border px-3 py-2 text-sm ${
@@ -1354,12 +1407,31 @@ export function PowerDialerPage() {
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-2">
+              {activeRecordingExportHref ? (
+                <Button
+                  asChild
+                  variant="outline"
+                  size="sm"
+                  className={cn('h-10 touch-manipulation px-3 text-xs font-semibold sm:h-9', DIALER_OUTLINE_BUTTON_CLASS)}
+                >
+                  <a href={activeRecordingExportHref} download>
+                    <Download className="h-4 w-4" />
+                    <span className="hidden sm:inline">Export audio</span>
+                    <span className="sm:hidden">Export</span>
+                    {activeRecordingDuration ? (
+                      <span className="hidden font-mono text-[11px] text-muted-foreground lg:inline">
+                        {activeRecordingDuration}
+                      </span>
+                    ) : null}
+                  </a>
+                </Button>
+              ) : null}
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
                 onClick={() => void handleLoadTestLead()}
-                disabled={!currentWorkspaceId || loadingTestLead}
+                disabled={!currentWorkspaceId || loadingTestLead || startingCall || isPlacingNextCall}
                 className={cn('h-10 touch-manipulation px-3 text-xs font-semibold sm:h-9', DIALER_OUTLINE_BUTTON_CLASS)}
               >
                 {loadingTestLead ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
@@ -1368,24 +1440,13 @@ export function PowerDialerPage() {
               <Button
                 type="button"
                 variant="outline"
-                size="icon"
-                aria-label="Previous lead"
-                onClick={() => moveActiveLead(-1)}
-                disabled={!canGoPreviousLead || saving || startingCall}
-                className={cn('h-10 w-10 touch-manipulation sm:h-9 sm:w-9', DIALER_OUTLINE_BUTTON_CLASS)}
+                size="sm"
+                onClick={() => void handleNextCall()}
+                disabled={!hasActiveLead || device.setupState === 'initializing' || startingCall || isPlacingNextCall}
+                className={cn('h-10 touch-manipulation px-3 text-xs font-semibold sm:h-9', DIALER_OUTLINE_BUTTON_CLASS)}
               >
-                <ChevronLeft className="h-5 w-5" />
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                aria-label="Next lead"
-                onClick={() => moveActiveLead(1)}
-                disabled={!canGoNextLead || saving || startingCall}
-                className={cn('h-10 w-10 touch-manipulation sm:h-9 sm:w-9', DIALER_OUTLINE_BUTTON_CLASS)}
-              >
-                <ChevronRight className="h-5 w-5" />
+                {startingCall || isPlacingNextCall ? <Loader2 className="h-4 w-4 animate-spin" /> : <ChevronRight className="h-4 w-4" />}
+                Next call
               </Button>
               <div className="min-w-[46px] text-right font-mono text-xs text-muted-foreground">{formatCallClock(callSeconds)}</div>
             </div>
@@ -1529,21 +1590,8 @@ export function PowerDialerPage() {
             </div>
           </div>
 
-          <div className="mt-3 flex items-center justify-between rounded-md border border-border bg-muted px-3 py-2 sm:mt-4">
-            <div>
-              <div className="text-sm font-medium text-foreground">Auto-next</div>
-              <div className="text-xs text-muted-foreground">Keep the next lead ready after every tap</div>
-            </div>
-            <Switch
-              checked={autoNextEnabled}
-              onCheckedChange={setAutoNextEnabled}
-              aria-label="Toggle auto-next"
-              className="data-[state=checked]:bg-foreground data-[state=unchecked]:bg-input"
-            />
-          </div>
-
           <div className="sticky bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] z-20 mt-4 sm:static">
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-[1fr_150px_140px_140px]">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-[1fr_140px_140px]">
               <Button
                 type="button"
                 onClick={() => void handleStartPause()}
@@ -1558,17 +1606,6 @@ export function PowerDialerPage() {
                   <Play className="h-4 w-4" />
                 )}
                 {diallerRunning ? 'Pause' : 'Start'}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => void handleNextCall()}
-                disabled={!hasActiveLead || device.setupState === 'initializing' || startingCall || isPlacingNextCall}
-                className={cn('h-[52px] min-h-[52px] touch-manipulation text-base font-semibold sm:h-12 sm:min-h-12', DIALER_OUTLINE_BUTTON_CLASS)}
-              >
-                {startingCall || isPlacingNextCall ? <Loader2 className="h-4 w-4 animate-spin" /> : <ChevronRight className="h-4 w-4" />}
-                <span className="sm:hidden">Next</span>
-                <span className="hidden sm:inline">Next call</span>
               </Button>
               <Button
                 type="button"
@@ -1741,99 +1778,130 @@ export function PowerDialerPage() {
         </Dialog>
 
         <section className="mt-2">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-base font-semibold text-foreground">Call Queue</h2>
-              <p className="text-sm text-muted-foreground">
-                {leads.length > 0 ? `${leads.length} leads loaded.` : 'Add a Leads list or import a CSV to begin.'}
-              </p>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-semibold text-foreground">People</h2>
+                <p className="text-sm text-muted-foreground">
+                  {leads.length > 0 ? `${leads.length} leads loaded.` : 'Add a Leads list or import a CSV to begin.'}
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".csv,text/csv"
+                  className="hidden"
+                  onChange={(event) => void handleFileSelected(event.target.files?.[0] ?? null)}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleAddListFromLeads}
+                  disabled={!currentWorkspaceId || loadingLeadLists}
+                  className={cn('min-h-11 touch-manipulation', DIALER_OUTLINE_BUTTON_CLASS)}
+                >
+                  {loadingLeadLists ? <Loader2 className="h-4 w-4 animate-spin" /> : <ListPlus className="h-4 w-4" />}
+                  <span className="hidden sm:inline">Add List</span>
+                  <span className="sm:hidden">Add</span>
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleImportClick}
+                  disabled={!currentWorkspaceId || importing}
+                  className={cn('min-h-11 touch-manipulation', DIALER_OUTLINE_BUTTON_CLASS)}
+                >
+                  {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                  <span className="hidden sm:inline">Import List</span>
+                  <span className="sm:hidden">Import</span>
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void handleRemoveList()}
+                  disabled={!currentWorkspaceId || leads.length === 0 || removingList || importing}
+                  className={cn('min-h-11 touch-manipulation', DIALER_OUTLINE_BUTTON_CLASS)}
+                >
+                  {removingList ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
+                  <span className="hidden sm:inline">Remove List</span>
+                  <span className="sm:hidden">Remove</span>
+                </Button>
+              </div>
             </div>
-            <div className="flex shrink-0 items-center gap-2">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".csv,text/csv"
-                className="hidden"
-                onChange={(event) => void handleFileSelected(event.target.files?.[0] ?? null)}
-              />
-              <Button
-                type="button"
-                variant="outline"
-                onClick={handleAddListFromLeads}
-                disabled={!currentWorkspaceId || loadingLeadLists}
-                className={cn('min-h-11 touch-manipulation', DIALER_OUTLINE_BUTTON_CLASS)}
-              >
-                {loadingLeadLists ? <Loader2 className="h-4 w-4 animate-spin" /> : <ListPlus className="h-4 w-4" />}
-                <span className="hidden sm:inline">Add List</span>
-                <span className="sm:hidden">Add</span>
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={handleImportClick}
-                disabled={!currentWorkspaceId || importing}
-                className={cn('min-h-11 touch-manipulation', DIALER_OUTLINE_BUTTON_CLASS)}
-              >
-                {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                <span className="hidden sm:inline">Import List</span>
-                <span className="sm:hidden">Import</span>
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => void handleRemoveList()}
-                disabled={!currentWorkspaceId || leads.length === 0 || removingList || importing}
-                className={cn('min-h-11 touch-manipulation', DIALER_OUTLINE_BUTTON_CLASS)}
-              >
-                {removingList ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
-                <span className="hidden sm:inline">Remove List</span>
-                <span className="sm:hidden">Remove</span>
-              </Button>
-            </div>
-          </div>
 
-          <div className="overflow-hidden rounded-xl border border-border bg-card">
-            {leads.length === 0 ? (
-              <div className="px-4 py-8 text-sm text-muted-foreground">
-                No leads loaded.
-              </div>
-            ) : (
-              <div className="divide-y divide-border">
-                {leads.map((lead) => {
-                  const status = statusForLead(lead);
-                  const isActive = lead.id === activeLead?.id;
-                  return (
-                    <button
-                      key={lead.id}
-                      type="button"
-                      onClick={() => setActiveLeadId(lead.id)}
-                      className={cn(
-                        'grid min-h-[64px] w-full gap-1.5 px-3 py-3 text-left transition hover:bg-muted/70 sm:grid-cols-[1.2fr_1fr_0.9fr_auto] sm:items-center sm:gap-2 sm:px-4',
-                        isActive && 'bg-muted'
-                      )}
-                    >
-                      <div className="truncate text-sm font-medium text-foreground">{lead.name || 'Lead'}</div>
-                      <div className="truncate text-sm text-muted-foreground">{lead.company || '—'}</div>
-                      <div className="text-sm text-muted-foreground">{formatPhoneDisplay(lead.phone)}</div>
-                      <Badge
-                        variant="outline"
-                        className={`w-fit border-border text-muted-foreground ${
-                          status === 'pending'
-                            ? 'bg-background dark:bg-card'
-                            : status === 'called'
-                              ? 'bg-muted text-foreground'
-                              : 'bg-muted text-muted-foreground'
-                        }`}
+            <div className="max-h-[22rem] overflow-y-auto rounded-xl border border-border bg-card">
+              {leads.length === 0 ? (
+                <div className="px-4 py-8 text-sm text-muted-foreground">
+                  No leads loaded.
+                </div>
+              ) : (
+                <div className="divide-y divide-border">
+                  {leads.map((lead) => {
+                    const status = statusForLead(lead);
+                    const isActive = lead.id === activeLead?.id;
+                    const recordingHref = getLeadRecordingExportHref(lead, currentWorkspaceId);
+                    const recordingDuration = formatRecordingDuration(lead.latest_call_recording?.duration_seconds);
+                    return (
+                      <div
+                        key={lead.id}
+                        className={cn(
+                          'grid min-h-[64px] w-full gap-1.5 px-3 py-3 text-left transition hover:bg-muted/70 sm:grid-cols-[1.2fr_1fr_0.9fr_auto_auto] sm:items-center sm:gap-2 sm:px-4',
+                          isActive && 'bg-muted'
+                        )}
                       >
-                        {status}
-                      </Badge>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </section>
+                        <button
+                          type="button"
+                          onClick={() => setActiveLeadId(lead.id)}
+                          className="min-w-0 truncate text-left text-sm font-medium text-foreground"
+                        >
+                          {lead.name || 'Lead'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setActiveLeadId(lead.id)}
+                          className="min-w-0 truncate text-left text-sm text-muted-foreground"
+                        >
+                          {lead.company || '—'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setActiveLeadId(lead.id)}
+                          className="text-left text-sm text-muted-foreground"
+                        >
+                          {formatPhoneDisplay(lead.phone)}
+                        </button>
+                        <Badge
+                          variant="outline"
+                          className={cn('w-fit sm:justify-self-end', leadStatusPillClass(status))}
+                        >
+                          {leadStatusLabel(status)}
+                        </Badge>
+                        {recordingHref ? (
+                          <Button
+                            asChild
+                            variant="outline"
+                            size="icon-sm"
+                            className={cn('h-8 w-8 sm:justify-self-end', DIALER_OUTLINE_BUTTON_CLASS)}
+                          >
+                            <a
+                              href={recordingHref}
+                              download
+                              title={recordingDuration ? `Export recording (${recordingDuration})` : 'Export recording'}
+                              aria-label={recordingDuration ? `Export recording (${recordingDuration})` : 'Export recording'}
+                            >
+                              <Download className="h-4 w-4" />
+                            </a>
+                          </Button>
+                        ) : (
+                          <span className="hidden h-8 w-8 sm:block" aria-hidden="true" />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </section>
       </div>
     </div>
   );

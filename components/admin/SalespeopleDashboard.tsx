@@ -35,6 +35,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { useWorkspace } from '@/lib/workspace-context';
+import {
+  SALESPERSON_STRIPE_GUARDIAN_POLICY,
+  SALESPERSON_STRIPE_ONBOARDING_POLICY,
+  SALESPERSON_STRIPE_PAYOUT_POLICY,
+} from '@/app/lib/billing/salesperson-stripe-policy';
 
 type SalespersonStatus = 'active' | 'paused' | 'inactive';
 
@@ -1388,7 +1393,19 @@ export function SalespeopleDashboard({ stripeNotice }: { stripeNotice: string | 
                 {liveSalespeopleCount > 0 ? ` ${liveSalespeopleCount} live now.` : ''}
               </CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <div>
+                    <p className="font-medium">{SALESPERSON_STRIPE_PAYOUT_POLICY}</p>
+                    <p className="mt-1">
+                      {SALESPERSON_STRIPE_ONBOARDING_POLICY}{' '}
+                      {SALESPERSON_STRIPE_GUARDIAN_POLICY}
+                    </p>
+                  </div>
+                </div>
+              </div>
               {loading ? (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />

@@ -100,7 +100,7 @@ export default function LandingPage() {
 
   return (
     <div className="min-h-screen bg-zinc-50 text-zinc-900">
-      <PublicSiteHeader />
+      <PublicSiteHeader showAmbassador={false} />
 
       <main>
         <section className="relative overflow-hidden px-5 py-24 md:px-8 md:py-32">
@@ -166,12 +166,6 @@ export default function LandingPage() {
                 className="inline-flex h-12 items-center rounded-2xl bg-red-600 px-6 text-base font-semibold text-white transition hover:bg-red-500"
               >
                 Start your free trial
-              </Link>
-              <Link
-                href="/ambassador"
-                className="inline-flex h-12 items-center rounded-md border border-zinc-300 bg-white px-6 text-base font-semibold text-zinc-900 transition hover:bg-zinc-100"
-              >
-                Apply to Ambassador Program
               </Link>
             </div>
           </div>

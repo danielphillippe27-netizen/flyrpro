@@ -38,6 +38,7 @@ import {
 import { normalizeCountryCode } from '@/lib/countries';
 import { sanitizeTrackingParam } from '@/app/lib/ambassador/portal';
 import { seedStarterCampaignForWorkspace, type DemoSeedResult } from '@/lib/onboarding/demo';
+import { markConvertedDemoLinks } from '@/lib/dialer/demo-link-tracking';
 
 const INDUSTRIES = [
   'Real Estate',
@@ -807,6 +808,16 @@ export async function POST(request: NextRequest) {
           { status: 500 }
         );
       }
+    }
+
+    if (typeof updates.referral_code_used === 'string') {
+      await markConvertedDemoLinks({
+        admin,
+        referralCode: updates.referral_code_used,
+        recipientEmail: requestUser.email,
+        convertedUserId: userId,
+        convertedWorkspaceId: workspaceId,
+      });
     }
 
     const resultingSubscriptionStatus = shouldStartTrial

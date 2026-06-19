@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import Image from 'next/image';
-import { Bell, CheckCheck, HelpCircle, Moon, Sun, Maximize2, Minimize2, Menu } from 'lucide-react';
+import { Bell, CheckCheck, Moon, Sun, Maximize2, Minimize2, Menu } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -319,6 +319,7 @@ export default function AppTopHeader() {
   const profileFlag = countryCodeToFlag(profile.countryCode);
   const displayName = profile.fullName ?? profile.email ?? 'User';
   const showSalesHelp = accessLevel === 'salesperson' || isFounder;
+  const showPlanAndFeedback = accessLevel !== 'salesperson';
 
   const sendFeedback = async () => {
     const trimmed = feedbackMessage.trim();
@@ -418,7 +419,7 @@ export default function AppTopHeader() {
           </div>
 
           <div className="flex shrink-0 items-center gap-1 sm:gap-2">
-            {planBadgeLabel ? (
+            {showPlanAndFeedback && planBadgeLabel ? (
               <div
                 className={`inline-flex max-w-[5.5rem] truncate rounded-md border border-border bg-muted px-1.5 py-0.5 text-[10px] font-semibold sm:max-w-none sm:px-2 sm:py-1 sm:text-[11px] ${
                   isTrialBadge ? 'text-red-600 dark:text-red-400' : 'text-foreground'
@@ -427,14 +428,16 @@ export default function AppTopHeader() {
                 {planBadgeLabel}
               </div>
             ) : null}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setFeedbackOpen(true)}
-              className="px-2 sm:px-3"
-            >
-              <span>Feedback ?</span>
-            </Button>
+            {showPlanAndFeedback ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setFeedbackOpen(true)}
+                className="px-2 sm:px-3"
+              >
+                <span>Feedback ?</span>
+              </Button>
+            ) : null}
 
             {showSalesHelp ? (
               <Button
@@ -445,7 +448,6 @@ export default function AppTopHeader() {
                 aria-label="Help me sell FLYR"
                 title="Help me sell FLYR"
               >
-                <HelpCircle className="h-4 w-4" />
                 <span className="hidden lg:inline">Help Me Sell FLYR</span>
               </Button>
             ) : null}

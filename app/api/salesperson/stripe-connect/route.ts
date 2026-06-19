@@ -7,6 +7,7 @@ import {
   buildIndividualConnectPrefill,
   isMissingStripeConnectAccountError,
 } from '@/app/lib/billing/stripe-connect-prefill';
+import { SALESPERSON_STRIPE_ONBOARDING_POLICY } from '@/app/lib/billing/salesperson-stripe-policy';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { isMissingSalespeopleSchemaError } from '@/app/lib/billing/salespeople';
 
@@ -230,7 +231,7 @@ export async function POST(request: NextRequest) {
             onboardingUrl: null,
             message: existingAccount.payouts_enabled
               ? 'Stripe payouts are ready.'
-              : 'Stripe has your details. Payout readiness is still pending with Stripe.',
+              : `Stripe has your details. ${SALESPERSON_STRIPE_ONBOARDING_POLICY}`,
             ...synced,
           });
         }

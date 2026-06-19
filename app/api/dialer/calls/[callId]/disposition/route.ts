@@ -50,6 +50,60 @@ function buildActivityNote(payload: {
   return fragments.join(' | ');
 }
 
+function cleanText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function getPayloadText(payload: unknown, key: string): string {
+  if (!payload || typeof payload !== 'object') return '';
+  return cleanText((payload as Record<string, unknown>)[key]);
+}
+
+async function createContactForScheduledDisposition(params: {
+  context: Exclude<Awaited<ReturnType<typeof getDialerRequestContext>>, NextResponse>;
+  call: Record<string, unknown>;
+  status: 'hot' | 'warm' | 'cold' | 'new';
+  followUpAt: string | null;
+  appointmentAt: string | null;
+  note: string | null;
+  now: string;
+}): Promise<string | null> {
+  if (!params.followUpAt && !params.appointmentAt) return null;
+
+  const payload = params.call.status_payload;
+  const name = getPayloadText(payload, 'diallerLeadName') || 'Lead';
+  const phone = getPayloadText(payload, 'diallerLeadPhone') || cleanText(params.call.to_number_raw);
+  const email = getPayloadText(payload, 'diallerLeadEmail') || null;
+
+  const { data, error } = await params.context.admin
+    .from('contacts')
+    .insert({
+      user_id: params.context.requestUser.id,
+      workspace_id: params.context.workspaceId,
+      full_name: name,
+      phone: phone || null,
+      email,
+      address: '',
+      status: params.status,
+      notes: params.note,
+      last_contacted: params.now,
+      follow_up_at: params.followUpAt,
+      reminder_date: params.followUpAt,
+      appointment_at: params.appointmentAt,
+      created_at: params.now,
+      updated_at: params.now,
+    })
+    .select('id')
+    .single();
+
+  if (error) {
+    console.warn('[dialer/disposition] failed to create contact for scheduled disposition', error);
+    return null;
+  }
+
+  return cleanText((data as { id?: unknown } | null)?.id);
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ callId: string }> }
@@ -99,20 +153,39 @@ export async function POST(
     updated_at: now,
   };
 
+  const contactId = cleanText(call.contact_id);
+  const contactStatus = dispositionToContactStatus(body.disposition);
+  const resolvedFollowUpAt = body.followUpAt || (body.disposition === 'follow_up' || body.disposition === 'callback_requested' ? now : null);
+  const resolvedAppointmentAt = body.appointmentAt || null;
   const contactUpdate = {
-    status: dispositionToContactStatus(body.disposition),
+    status: contactStatus,
     last_contacted: now,
-    follow_up_at: body.followUpAt || (body.disposition === 'follow_up' || body.disposition === 'callback_requested' ? now : null),
-    appointment_at: body.appointmentAt || null,
+    follow_up_at: resolvedFollowUpAt,
+    appointment_at: resolvedAppointmentAt,
     updated_at: now,
   };
+
+  const createdContactId = contactId
+    ? null
+    : await createContactForScheduledDisposition({
+        context,
+        call: call as Record<string, unknown>,
+        status: contactStatus,
+        followUpAt: resolvedFollowUpAt,
+        appointmentAt: resolvedAppointmentAt,
+        note: body.note?.trim() || null,
+        now,
+      });
+  const activityContactId = contactId || createdContactId;
 
   const leadStatus = body.disposition === 'bad_number' ? 'invalid' : body.disposition === 'do_not_call' ? 'skipped' : 'completed';
   const leadSkipReason = body.disposition === 'bad_number' ? 'Bad number' : body.disposition === 'do_not_call' ? 'Do not call' : null;
 
-  const [{ error: updatedCallError }, { error: updatedContactError }, { error: updatedLeadError }, { error: activityError }] = await Promise.all([
+  const [{ error: updatedCallError }, contactResult, { error: updatedLeadError }, activityResult] = await Promise.all([
     context.admin.from('dialer_calls').update(callUpdate).eq('id', callId),
-    context.admin.from('contacts').update(contactUpdate).eq('id', call.contact_id),
+    contactId
+      ? context.admin.from('contacts').update(contactUpdate).eq('id', contactId)
+      : Promise.resolve({ error: null }),
     context.admin
       .from('dialer_session_leads')
       .update({
@@ -122,17 +195,21 @@ export async function POST(
         updated_at: now,
       })
       .eq('id', call.session_lead_id),
-    context.admin.from('contact_activities').insert({
-      contact_id: call.contact_id,
-      type: 'call',
-      note: buildActivityNote({
-        disposition: body.disposition,
-        durationSeconds: call.duration_seconds,
-        note: body.note,
-      }),
-      timestamp: now,
-    }),
+    activityContactId
+      ? context.admin.from('contact_activities').insert({
+          contact_id: activityContactId,
+          type: 'call',
+          note: buildActivityNote({
+            disposition: body.disposition,
+            durationSeconds: call.duration_seconds,
+            note: body.note,
+          }),
+          timestamp: now,
+        })
+      : Promise.resolve({ error: null }),
   ]);
+  const updatedContactError = contactResult.error;
+  const activityError = activityResult.error;
 
   if (updatedCallError || updatedContactError || updatedLeadError || activityError) {
     console.error('[dialer/disposition] failed to persist disposition', {

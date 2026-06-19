@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Loader2, PhoneCall, Plus, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -125,6 +125,7 @@ export function ContactsHubView() {
   const [selectedMemberId, setSelectedMemberId] = useState<string>('all');
   const [selectedListId, setSelectedListId] = useState<string>(ALL_LEADS_LIST_ID);
   const [listSidebarCollapsed, setListSidebarCollapsed] = useState(false);
+  const selectedUrlListIdRef = useRef<string | null>(null);
   const currentRole = currentWorkspaceId ? membershipsByWorkspaceId[currentWorkspaceId] : null;
   const canFilterByMembers = currentRole === 'owner' || currentRole === 'admin';
 
@@ -281,6 +282,19 @@ export function ContactsHubView() {
     () => workspaceSmartLists.map((list) => buildCustomSmartListOption(list)),
     [workspaceSmartLists]
   );
+
+  useEffect(() => {
+    if (selectedUrlListIdRef.current === null) {
+      selectedUrlListIdRef.current = new URLSearchParams(window.location.search).get('listId') || '';
+    }
+
+    const requestedListId = selectedUrlListIdRef.current;
+    if (!requestedListId || selectedListId === requestedListId) return;
+    const availableIds = new Set(customLists.map((list) => list.id));
+    if (availableIds.has(requestedListId)) {
+      setSelectedListId(requestedListId);
+    }
+  }, [customLists, selectedListId]);
 
   const builtInLists = useMemo(
     () => [allLeadsList, ...campaignLists, ...farmLists],

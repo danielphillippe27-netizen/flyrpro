@@ -123,6 +123,12 @@ export function parseScriptFlowBody(
   }
 }
 
+const QUICK_DEMO_CLOSE_OPTIONS: StarterScriptFlowNode["options"] = [
+  { label: "Show them demo", nextId: "demo-send" },
+  { label: "Still not convinced", nextId: "fallback-not-convinced" },
+  { label: "Asks price", nextId: "price-objection" },
+];
+
 export const STARTER_SCRIPT_FLOW: StarterScriptFlowNode[] = [
   {
     id: "start",
@@ -157,7 +163,7 @@ export const STARTER_SCRIPT_FLOW: StarterScriptFlowNode[] = [
     label: "Busy",
     kind: "objection",
     title: "If they are busy",
-    say: "No worries. I will be quick. FLYR helps real estate team leads track door knocking, agent activity, and leads from the field. Would it be okay if I text you a 90-second demo?",
+    say: "No worries. I will be quick. FLYR helps real estate team leads track door knocking, agent activity, and leads from the field. Would it be okay if I emailed you a 90-second demo?",
     coach:
       "Do not keep selling. Convert the call into permission to send the demo or a callback.",
     options: [
@@ -280,7 +286,7 @@ export const STARTER_SCRIPT_FLOW: StarterScriptFlowNode[] = [
     label: "Demo ask",
     kind: "close",
     title: "Micro-close",
-    say: "Would it be okay if I text you a 90-second demo? You'll know pretty quickly if it makes sense for your team.",
+    say: "Would it be okay if I emailed you a 90-second demo? You'll know pretty quickly if it makes sense for your team.",
     coach: "This is the call goal. Qualify, send demo, then set the next step.",
     options: [
       { label: "Yes", nextId: "send-demo" },
@@ -295,12 +301,12 @@ export const STARTER_SCRIPT_FLOW: StarterScriptFlowNode[] = [
     label: "Send demo",
     kind: "close",
     title: "Send the 90-second demo",
-    say: "Perfect. I'll send it now. If it looks useful, we can book 10 minutes and I will show you how it would work for your team.",
-    coach: "Send immediately, then create the follow-up task before moving on.",
+    say: "Perfect. What is the best email? I will send it now. If it looks useful, we can book 10 minutes and I will show you how it would work for your team.",
+    coach: "Confirm the email, send immediately, then create the follow-up task before moving on.",
     options: [
+      { label: "Email confirmed", nextId: "done" },
       { label: "Book follow-up", nextId: "book-demo" },
       { label: "Set callback", nextId: "call-later" },
-      { label: "Done", nextId: "done" },
     ],
   },
   {
@@ -396,7 +402,7 @@ If they use another tool:
 Totally. A lot of tools are general canvassing platforms. FLYR is focused on real estate teams: territories, agent accountability, neighbourhood coverage, and lead follow-up.
 
 MICRO-CLOSE:
-Would it be okay if I text you a 90-second demo? You'll know pretty quickly if it makes sense for your team.
+Would it be okay if I emailed you a 90-second demo? You'll know pretty quickly if it makes sense for your team.
 
 REP RULES:
 1. Do not explain every feature.
@@ -515,7 +521,7 @@ export const REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW: StarterScriptFlowNode[] = [
       },
     ],
     coach: "Bring it back to a manageable first step.",
-    options: [{ label: "Ask about demo", nextId: "demo-send" }],
+    options: QUICK_DEMO_CLOSE_OPTIONS,
   },
   {
     id: "objection-does-not-work",
@@ -583,7 +589,7 @@ export const REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW: StarterScriptFlowNode[] = [
       },
     ],
     coach: "Anchor the value in system and territory ownership.",
-    options: [{ label: "Ask about demo", nextId: "demo-send" }],
+    options: QUICK_DEMO_CLOSE_OPTIONS,
   },
   {
     id: "objection-no-time",
@@ -650,7 +656,7 @@ export const REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW: StarterScriptFlowNode[] = [
       },
     ],
     coach: "Make FLYR feel like replacement, not additional workload.",
-    options: [{ label: "Ask about demo", nextId: "demo-send" }],
+    options: QUICK_DEMO_CLOSE_OPTIONS,
   },
   {
     id: "objection-repeat-referral",
@@ -717,7 +723,7 @@ export const REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW: StarterScriptFlowNode[] = [
       },
     ],
     coach: "Protect what they already have instead of replacing it.",
-    options: [{ label: "Ask about demo", nextId: "demo-send" }],
+    options: QUICK_DEMO_CLOSE_OPTIONS,
   },
   {
     id: "objection-no-system",
@@ -784,7 +790,7 @@ export const REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW: StarterScriptFlowNode[] = [
       },
     ],
     coach: "Frame the lack of a system as a clean starting point.",
-    options: [{ label: "Ask about demo", nextId: "demo-send" }],
+    options: QUICK_DEMO_CLOSE_OPTIONS,
   },
   {
     id: "objection-too-salesy",
@@ -851,7 +857,7 @@ export const REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW: StarterScriptFlowNode[] = [
       },
     ],
     coach: "Make the door a relationship start, not a sales moment.",
-    options: [{ label: "Ask about demo", nextId: "demo-send" }],
+    options: QUICK_DEMO_CLOSE_OPTIONS,
   },
   {
     id: "tracking-check",
@@ -866,7 +872,7 @@ export const REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW: StarterScriptFlowNode[] = [
       },
     ],
     coach:
-      "Listen for whether they use spreadsheets, notes, CRM tasks, or nothing at all.",
+      "Listen for whether they use spreadsheets, notes, another software, or nothing at all.",
     options: [
       { label: "Yes, tracking somehow", nextId: "tracking-yes" },
       { label: "No tracking", nextId: "pain-match" },
@@ -877,19 +883,20 @@ export const REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW: StarterScriptFlowNode[] = [
     label: "Tracking",
     kind: "question",
     title: "Ask what tracking looks like",
-    say: "Yes, we track it somehow.\nNice - what does that look like? Like are you using a spreadsheet, your CRM, notes on your phone, or something else?",
+    say: "Yes, we track it somehow.\nNice - what does that look like? Like are you using a spreadsheet, notes on your phone, another software, or are you not really tracking it yet?",
     lines: [
       { speaker: "person", text: "Yes, we track it somehow." },
       {
         speaker: "rep",
-        text: "Nice - what does that look like? Like are you using a spreadsheet, your CRM, notes on your phone, or something else?",
+        text: "Nice - what does that look like? Like are you using a spreadsheet, notes on your phone, another software, or are you not really tracking it yet?",
       },
     ],
     coach:
       "Let them describe it. The messier it sounds, the better. Do not judge or rush to pitch. Let them feel the gap between what they are doing and what is possible.",
     options: [
       { label: "Spreadsheet / notes / phone", nextId: "tracking-manual" },
-      { label: "CRM", nextId: "tracking-crm" },
+      { label: "Another software", nextId: "tracking-crm" },
+      { label: "No tracking", nextId: "pain-match" },
     ],
   },
   {
@@ -897,16 +904,17 @@ export const REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW: StarterScriptFlowNode[] = [
     label: "Tracking",
     kind: "question",
     title: "Manual tracking follow-up",
-    say: "Spreadsheet, notes, or phone.\nSo you're essentially building this manually every time. How long does that take you, and how confident are you that nothing's falling through the cracks?",
+    say: "Spreadsheet, notes, or phone.\nHonestly, you're 90% there. Recognizing the importance of tracking field effort is literally what our company is founded on.\nIf I could show you a system that automatically tracks advanced field data and creates a weekly report for your team, would you be open to checking it out?",
     lines: [
       { speaker: "person", text: "Spreadsheet, notes, or phone." },
       {
         speaker: "rep",
-        text: "So you're essentially building this manually every time. How long does that take you, and how confident are you that nothing's falling through the cracks?",
+        text: "Honestly, you're 90% there. Recognizing the importance of tracking field effort is literally what our company is founded on.\n\nIf I could show you a system that automatically tracks advanced field data and creates a weekly report for your team, would you be open to checking it out?",
       },
     ],
-    coach: "Pause after the question. Let them sit with the manual effort and risk.",
-    options: [{ label: "Position FLYR", nextId: "tracking-manual-close" }],
+    coach:
+      "Validate that they already understand the tracking problem, then make the ask about seeing the system.",
+    options: QUICK_DEMO_CLOSE_OPTIONS,
   },
   {
     id: "tracking-manual-close",
@@ -921,39 +929,39 @@ export const REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW: StarterScriptFlowNode[] = [
       },
     ],
     coach: "Tie the pain directly to speed, automation, and visibility.",
-    options: [{ label: "Ask about demo", nextId: "demo-send" }],
+    options: QUICK_DEMO_CLOSE_OPTIONS,
   },
   {
     id: "tracking-crm",
     label: "Tracking",
     kind: "question",
-    title: "CRM tracking follow-up",
-    say: "CRM.\nWhich one? And does it have a map view, a knock sequence, or does it just log a contact?",
+    title: "Software tracking follow-up",
+    say: "Another software.\nWhich one? And does it have a map view, route history, a knock sequence, and follow-up reminders for each door?",
     lines: [
-      { speaker: "person", text: "CRM." },
+      { speaker: "person", text: "Another software." },
       {
         speaker: "rep",
-        text: "Which one? And does it have a map view, a knock sequence, or does it just log a contact?",
+        text: "Which one? And does it have a map view, route history, a knock sequence, and follow-up reminders for each door?",
       },
     ],
-    coach: "Most CRMs have none of that. Ask plainly and let the gap show up.",
+    coach: "Stay curious. Let them explain the system, then look for the missing field layer.",
     options: [{ label: "Position FLYR", nextId: "tracking-crm-close" }],
   },
   {
     id: "tracking-crm-close",
     label: "Tracking",
     kind: "close",
-    title: "Close the CRM tracking gap",
-    say: "Right - CRMs are built for pipeline management, not field prospecting. FLYR is built specifically for the door. It sits on top of whatever CRM you're already using and handles everything that happens before a lead exists.",
+    title: "Close the software tracking gap",
+    say: "That makes sense. FLYR can sit beside whatever you're using and handle the field layer: mapped territory, door outcomes, agent activity, and follow-up prompts before it becomes an actual lead.",
     lines: [
       {
         speaker: "rep",
-        text: "Right - CRMs are built for pipeline management, not field prospecting. FLYR is built specifically for the door. It sits on top of whatever CRM you're already using and handles everything that happens before a lead exists.",
+        text: "That makes sense. FLYR can sit beside whatever you're using and handle the field layer: mapped territory, door outcomes, agent activity, and follow-up prompts before it becomes an actual lead.",
       },
     ],
     coach:
-      "Position FLYR before the CRM: field activity, map, sequence, and pre-lead tracking.",
-    options: [{ label: "Ask about demo", nextId: "demo-send" }],
+      "Position FLYR as the missing field-prospecting layer instead of a replacement for tools they already like.",
+    options: QUICK_DEMO_CLOSE_OPTIONS,
   },
   {
     id: "pain-match",
@@ -970,38 +978,195 @@ export const REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW: StarterScriptFlowNode[] = [
     ],
     coach:
       "Make this about their current visibility gap, not a long feature list.",
-    options: [{ label: "Worth a quick look", nextId: "demo-send" }],
+    options: QUICK_DEMO_CLOSE_OPTIONS,
+  },
+  {
+    id: "fallback-not-convinced",
+    label: "Hesitation",
+    kind: "question",
+    title: "Still not convinced",
+    say: "Fair enough - I'm not trying to push you into something that's not right. Can I ask one thing though: is it the idea of farming in general that doesn't sit right, or just doing it with us?",
+    lines: [
+      {
+        speaker: "rep",
+        text: "Fair enough - I'm not trying to push you into something that's not right.\n\nCan I ask one thing though: is it the idea of farming in general that doesn't sit right, or just doing it with us?",
+      },
+    ],
+    coach:
+      "This splits 'not interested in farming' from 'not interested in FLYR specifically.' Do not close the call without learning which one it is.",
+    options: [
+      { label: "Farming is not for me", nextId: "fallback-not-convinced-farming" },
+      { label: "Not sure about FLYR / timing", nextId: "fallback-not-convinced-flyr" },
+      { label: "Asks price", nextId: "price-objection" },
+    ],
+  },
+  {
+    id: "fallback-not-convinced-farming",
+    label: "Hesitation",
+    kind: "objection",
+    title: "Farming is not for them",
+    say: "Farming in general isn't for me.\nTotally get it - it's not for everyone, and forcing it usually backfires. Before I leave it there, would you be open to a quick 90-second demo just to see if it's for you? If it doesn't click in 90 seconds, no worries at all.",
+    lines: [
+      { speaker: "person", text: "Farming in general isn't for me." },
+      {
+        speaker: "rep",
+        text: "Totally get it - it's not for everyone, and forcing it usually backfires.\n\nBefore I leave it there, would you be open to a quick 90-second demo just to see if it's for you? If it doesn't click in 90 seconds, no worries at all.",
+      },
+    ],
+    coach:
+      "Make the ask smaller and low-pressure: a quick demo to let them decide, not a calendar commitment.",
+    options: [{ label: "Open to quick demo", nextId: "demo-send" }],
+  },
+  {
+    id: "fallback-not-convinced-flyr",
+    label: "Hesitation",
+    kind: "close",
+    title: "Unsure about FLYR or timing",
+    say: "Just not sure about doing it with you right now.\nThat's fair, and honestly a smart way to think about it. What would actually need to be true for this to make sense - timing, proof it works, seeing the app first?\nRather than trying to book you into anything now, I can email the short demo video so you can check it out on your own time.",
+    lines: [
+      { speaker: "person", text: "Just not sure about doing it with you right now." },
+      {
+        speaker: "rep",
+        text: "That's fair, and honestly a smart way to think about it.\n\nWhat would actually need to be true for this to make sense - timing, proof it works, seeing the app first?\n\nRather than trying to book you into anything now, I can email the short demo video so you can check it out on your own time.",
+      },
+    ],
+    coach:
+      "Listen before the ask. The second ask must be smaller than the one they declined: video, one-pager, or check-in date.",
+    options: [
+      { label: "Email video", nextId: "demo-send" },
+      { label: "Send resource instead", nextId: "fallback-soft-nurture" },
+    ],
+  },
+  {
+    id: "fallback-soft-nurture",
+    label: "Nurture",
+    kind: "close",
+    title: "Soft nurture exit",
+    say: "No problem. I will send the resource over and leave it there. No calendar invite, no pressure - just something useful if farming becomes relevant later.",
+    lines: [
+      {
+        speaker: "rep",
+        text: "No problem. I will send the resource over and leave it there.\n\nNo calendar invite, no pressure - just something useful if farming becomes relevant later.",
+      },
+    ],
+    coach:
+      "Soft exit. Mark the lead as nurture, not lost, and do not create a calendar ask.",
+    options: [{ label: "Mark nurture", nextId: "soft-nurture-exit" }],
+  },
+  {
+    id: "soft-nurture-exit",
+    label: "Nurture",
+    kind: "done",
+    title: "Nurture complete",
+    say: "Send the farm ownership resource, mark the lead as nurture, and set a light future check-in if appropriate.",
+    lines: [
+      {
+        speaker: "rep",
+        text: "Send the farm ownership resource, mark the lead as nurture, and set a light future check-in if appropriate.",
+      },
+    ],
+    coach: "This is a soft exit. Do not count it as a lost lead.",
+    options: [{ label: "Start again", nextId: "opening" }],
+  },
+  {
+    id: "price-objection",
+    label: "Price",
+    kind: "question",
+    title: "Ask about current spend",
+    say: "Good question - before I throw a number at you, can I ask what you're currently spending on lead gen or marketing in this farm-sized area? Just so the number means something.",
+    lines: [
+      {
+        speaker: "rep",
+        text: "Good question - before I throw a number at you, can I ask what you're currently spending on lead gen or marketing in this farm-sized area? Just so the number means something.",
+      },
+    ],
+    coach:
+      "Never quote price in a vacuum. Anchor it against what they already spend on lead gen, ISAs, paid ads, or staying visible.",
+    options: [
+      { label: "Do not track spend / not much", nextId: "price-low-spend" },
+      { label: "Spend a fair amount already", nextId: "price-existing-spend" },
+    ],
+  },
+  {
+    id: "price-low-spend",
+    label: "Price",
+    kind: "objection",
+    title: "They do not track spend",
+    say: "I don't really track that, or not much.\nThat's actually common - most agents don't realize how much unattributed spend goes into staying visible. FLYR is a flat monthly cost that replaces a lot of that guesswork with something you can point to: doors knocked, contacts logged, listings sourced from the farm.",
+    lines: [
+      { speaker: "person", text: "I don't really track that, or not much." },
+      {
+        speaker: "rep",
+        text: "That's actually common - most agents don't realize how much unattributed spend goes into staying visible.\n\nFLYR is a flat monthly cost that replaces a lot of that guesswork with something you can point to: doors knocked, contacts logged, listings sourced from the farm.",
+      },
+    ],
+    coach:
+      "Make price feel like replacing invisible spend with measurable activity.",
+    options: [{ label: "Email pricing", nextId: "price-email-close" }],
+  },
+  {
+    id: "price-existing-spend",
+    label: "Price",
+    kind: "objection",
+    title: "They already spend on lead gen",
+    say: "I spend a fair amount already.\nThen this is probably going to feel cheap by comparison. FLYR starts at $30 USD per user per month, which is about $40 CAD.\nIf you're already spending on lead gen, the question is really whether this gives you cleaner tracking and better follow-up for less than what you're already paying.",
+    lines: [
+      { speaker: "person", text: "I spend a fair amount already." },
+      {
+        speaker: "rep",
+        text: "Then this is probably going to feel cheap by comparison.\n\nFLYR starts at $30 USD per user per month, which is about $40 CAD.\n\nIf you're already spending on lead gen, the question is really whether this gives you cleaner tracking and better follow-up for less than what you're already paying.",
+      },
+    ],
+    coach:
+      "Keep price relative to what they already pay for lead generation and visibility.",
+    options: [{ label: "Email pricing", nextId: "price-email-close" }],
+  },
+  {
+    id: "price-email-close",
+    label: "Price",
+    kind: "close",
+    title: "Email pricing breakdown",
+    say: "I can email you the pricing breakdown so you can see it next to what you're already spending. No pressure to decide on this call.",
+    lines: [
+      {
+        speaker: "rep",
+        text: "I can email you the pricing breakdown so you can see it next to what you're already spending.\n\nNo pressure to decide on this call.",
+      },
+    ],
+    coach:
+      "Email the pricing breakdown and set a follow-up. Do not force a decision on the call.",
+    options: [{ label: "Pricing email confirmed", nextId: "done" }],
   },
   {
     id: "demo-send",
     label: "Demo",
     kind: "close",
     title: "Ask to send demo",
-    say: "Amazing. Is this a good number to send you a quick 90-second video showing how the software works?\nYes.",
+    say: "Amazing. What is the best email to send you a quick 90-second video showing how the software works?\nYes.",
     lines: [
       {
         speaker: "rep",
-        text: "Amazing. Is this a good number to send you a quick 90-second video showing how the software works?",
+        text: "Amazing. What is the best email to send you a quick 90-second video showing how the software works?",
       },
       { speaker: "person", text: "Yes." },
     ],
-    coach: "Confirm the channel and send it immediately after the call.",
-    options: [{ label: "Good number confirmed", nextId: "trial-close" }],
+    coach: "Confirm the email and send it immediately after the call.",
+    options: [{ label: "Email confirmed", nextId: "trial-close" }],
   },
   {
     id: "trial-close",
     label: "Close",
     kind: "close",
     title: "Send trial access",
-    say: "Perfect. I will send that over now.\nI will also include access to a free trial so you can test it out with your team.\nIf you have any questions after watching it, feel free to reach out anytime.",
+    say: "Perfect. I will email that over now.\nI will also include access to a free trial so you can test it out with your team.\nIf you have any questions after watching it, feel free to reach out anytime.",
     lines: [
       {
         speaker: "rep",
-        text: "Perfect. I will send that over now.\n\nI will also include access to a free trial so you can test it out with your team.\n\nIf you have any questions after watching it, feel free to reach out anytime.",
+        text: "Perfect. I will email that over now.\n\nI will also include access to a free trial so you can test it out with your team.\n\nIf you have any questions after watching it, feel free to reach out anytime.",
       },
     ],
     coach:
-      "End cleanly, then send the video and trial link before moving to the next lead.",
+      "End cleanly, then email the video and trial link before moving to the next lead.",
     options: [{ label: "Done", nextId: "done" }],
   },
   {
@@ -1009,14 +1174,14 @@ export const REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW: StarterScriptFlowNode[] = [
     label: "Done",
     kind: "done",
     title: "Call complete",
-    say: "Log the outcome, send the 90-second video, include trial access, and set a follow-up.",
+    say: "Log the outcome, email the 90-second video, include trial access, and set a follow-up.",
     lines: [
       {
         speaker: "rep",
-        text: "Log the outcome, send the 90-second video, include trial access, and set a follow-up.",
+        text: "Log the outcome, email the 90-second video, include trial access, and set a follow-up.",
       },
     ],
-    coach: "The call outcome should be demo sent with trial access.",
+    coach: "The call outcome should be demo emailed with trial access.",
     options: [{ label: "Start again", nextId: "opening" }],
   },
 ];
@@ -1058,6 +1223,13 @@ export function upgradeBuiltInScriptFlow(
 ): StarterScriptFlowNode[] | null {
   if (scriptName !== REAL_ESTATE_QUICK_DEMO_SCRIPT_NAME || !flow) return flow;
 
+  const isCurrentTrackingNode = (node: StarterScriptFlowNode) =>
+    node.id.startsWith("tracking-") || node.id === "pain-match";
+  const isUniversalFallbackNode = (node: StarterScriptFlowNode) =>
+    node.id.startsWith("fallback-") ||
+    node.id.startsWith("price-") ||
+    node.id === "soft-nurture-exit";
+
   const flowWithoutOpeningConfirmation = flow.map((node) => {
     if (node.id !== "opening" || !node.lines?.length) return node;
 
@@ -1086,14 +1258,6 @@ export function upgradeBuiltInScriptFlow(
   const hasNoDoorKnockingNode = flow.some(
     (node) => node.id === "no-door-knocking-reason",
   );
-  const hasNoDoorKnockingOption = flow.some(
-    (node) =>
-      node.id === "opening" &&
-      node.options.some(
-        (option) => option.nextId === "no-door-knocking-reason",
-      ),
-  );
-
   const noDoorKnockingNode = REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW.find(
     (node) => node.id === "no-door-knocking-reason",
   );
@@ -1113,28 +1277,44 @@ export function upgradeBuiltInScriptFlow(
     ).map((node) => [node.id, node]),
   );
   const currentTrackingNodes = new Map(
+    REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW.filter(isCurrentTrackingNode).map(
+      (node) => [node.id, node],
+    ),
+  );
+  const currentUniversalFallbackNodes = new Map(
+    REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW.filter(isUniversalFallbackNode).map(
+      (node) => [node.id, node],
+    ),
+  );
+  const currentDemoCloseNodes = new Map(
     REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW.filter((node) =>
-      node.id.startsWith("tracking-"),
+      ["demo-send", "trial-close", "done"].includes(node.id),
     ).map((node) => [node.id, node]),
   );
   const flowWithCurrentNodes = flowWithObjectionOptions.map(
     (node) =>
       currentObjectionNodes.get(node.id) ??
       currentTrackingNodes.get(node.id) ??
+      currentUniversalFallbackNodes.get(node.id) ??
+      currentDemoCloseNodes.get(node.id) ??
       node,
   );
 
   let upgradedFlow = flowWithCurrentNodes.map((node) => {
-    if (node.id !== "opening" || hasNoDoorKnockingOption) return node;
+    if (node.id !== "opening") return node;
+
+    const options = node.options
+      .filter((option) => option.nextId !== "price-objection")
+      .map((option) =>
+        option.nextId === "tracking-check" ? { ...option, label: "Yes" } : option,
+      );
+    if (!options.some((option) => option.nextId === "no-door-knocking-reason")) {
+      options.push({ label: "No", nextId: "no-door-knocking-reason" });
+    }
 
     return {
       ...node,
-      options: [
-        ...node.options.map((option) =>
-          option.nextId === "tracking-check" ? { ...option, label: "Yes" } : option,
-        ),
-        { label: "No", nextId: "no-door-knocking-reason" },
-      ],
+      options,
     };
   });
 
@@ -1156,11 +1336,12 @@ export function upgradeBuiltInScriptFlow(
   if (currentObjectionNodeList.length === 0) return upgradedFlow;
 
   const flowWithoutObjectionNodes = upgradedFlow.filter(
-    (node) => !node.id.startsWith("objection-"),
+    (node) => !node.id.startsWith("objection-") && !isUniversalFallbackNode(node),
   );
-  const currentTrackingNodeList = REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW.filter(
-    (node) => node.id.startsWith("tracking-"),
-  );
+  const currentTrackingNodeList =
+    REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW.filter(isCurrentTrackingNode);
+  const currentUniversalFallbackNodeList =
+    REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW.filter(isUniversalFallbackNode);
   const trackingIndex = flowWithoutObjectionNodes.findIndex(
     (node) => node.id === "tracking-check",
   );
@@ -1170,23 +1351,35 @@ export function upgradeBuiltInScriptFlow(
       : [
           ...flowWithoutObjectionNodes
             .slice(0, trackingIndex)
-            .filter((node) => !node.id.startsWith("tracking-")),
+            .filter((node) => !isCurrentTrackingNode(node)),
           ...currentTrackingNodeList,
           ...flowWithoutObjectionNodes
             .slice(trackingIndex + 1)
-            .filter((node) => !node.id.startsWith("tracking-")),
+            .filter((node) => !isCurrentTrackingNode(node)),
         ];
 
-  const noDoorKnockingIndex = flowWithCurrentTrackingNodes.findIndex(
+  const demoIndex = flowWithCurrentTrackingNodes.findIndex(
+    (node) => node.id === "demo-send",
+  );
+  const flowWithUniversalFallbackNodes =
+    demoIndex === -1
+      ? [...flowWithCurrentTrackingNodes, ...currentUniversalFallbackNodeList]
+      : [
+          ...flowWithCurrentTrackingNodes.slice(0, demoIndex),
+          ...currentUniversalFallbackNodeList,
+          ...flowWithCurrentTrackingNodes.slice(demoIndex),
+        ];
+
+  const noDoorKnockingIndex = flowWithUniversalFallbackNodes.findIndex(
     (node) => node.id === "no-door-knocking-reason",
   );
   if (noDoorKnockingIndex === -1) {
-    return [...flowWithCurrentTrackingNodes, ...currentObjectionNodeList];
+    return [...flowWithUniversalFallbackNodes, ...currentObjectionNodeList];
   }
 
   return [
-    ...flowWithCurrentTrackingNodes.slice(0, noDoorKnockingIndex + 1),
+    ...flowWithUniversalFallbackNodes.slice(0, noDoorKnockingIndex + 1),
     ...currentObjectionNodeList,
-    ...flowWithCurrentTrackingNodes.slice(noDoorKnockingIndex + 1),
+    ...flowWithUniversalFallbackNodes.slice(noDoorKnockingIndex + 1),
   ];
 }
