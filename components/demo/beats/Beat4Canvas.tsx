@@ -182,6 +182,10 @@ export function Beat4Canvas({ copy }: { copy: BeatCopy }) {
       animationRef.current = requestAnimationFrame(step);
     }
 
+    if (reducedRef.current) {
+      return;
+    }
+
     timerRef.current = setInterval(() => {
       const ri = (Math.random() * reps.length) | 0,
         r = reps[ri];
@@ -222,7 +226,7 @@ export function Beat4Canvas({ copy }: { copy: BeatCopy }) {
         r.name;
       setFeed((current) => [...current, { id: feedIdRef.current++, className: oc[1], text }].slice(-9));
       setScores((current) => ({ ...current, [r.name]: current[r.name] + 1 }));
-    }, reducedRef.current ? 999999 : 1300);
+    }, 1300);
   }, [stopBeat4]);
 
   useEffect(() => {

@@ -70,6 +70,39 @@ export function Beat3Canvas({ copy }: { copy: BeatCopy }) {
       perim += L;
     }
 
+    function drawFinalState() {
+      ctx.clearRect(0, 0, W, H);
+      drawStreets(ctx, city, W, H, 'rgba(12,12,10,.22)');
+      ctx.fillStyle = 'rgba(12,12,10,.10)';
+      city.addrs.forEach((p) => ctx.fillRect(p.x - 1, p.y - 1, 2, 2));
+
+      ctx.strokeStyle = '#ff4d00';
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([8, 5]);
+      ctx.beginPath();
+      poly.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])));
+      ctx.closePath();
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.fillStyle = 'rgba(255,77,0,.06)';
+      ctx.beginPath();
+      poly.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])));
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = '#ff4d00';
+      inside.forEach((p) => ctx.fillRect(p.x - 1.5, p.y - 1.5, 3, 3));
+      inside.slice(Math.max(0, total - 40)).forEach((p) => ctx.fillRect(p.x - 2.5, p.y - 2.5, 5, 5));
+      setCount(total.toLocaleString());
+      setTimer(copy.b3FinalTimer);
+    }
+
+    if (reducedRef.current) {
+      drawFinalState();
+      return;
+    }
+
     function frame(now: number) {
       const t = now - start;
       ctx.clearRect(0, 0, W, H);

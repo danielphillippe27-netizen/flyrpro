@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { getInitialReducedMotion } from '@/lib/demo/canvas/useReducedMotion';
+import { useInitialReducedMotion } from '@/lib/demo/canvas/useReducedMotion';
 import { getDemoMapStyle } from '@/lib/demo/mapbox/demoMapStyle';
 import { getMapboxGl } from '@/lib/demo/mapbox/loadMapboxGl';
 import type { BeatCopy } from '@/lib/demo/payload';
@@ -520,13 +520,12 @@ function SessionMap({
 function Beat4Session({ copy, center }: { copy: BeatCopy; center?: LngLat }) {
   const cardRef = useRef<HTMLDivElement | null>(null);
   const [visible, setVisible] = useState(false);
-  const [reducedMotion, setReducedMotion] = useState(false);
+  const reducedMotion = useInitialReducedMotion();
   const model = useMemo(() => buildSessionModel(), []);
   const progress = useCountUp(visible, reducedMotion);
   const diagonalCount = useMemo(() => routeDiagonalSegmentCount(model.coordinates), [model]);
 
   useEffect(() => {
-    setReducedMotion(getInitialReducedMotion());
     const card = cardRef.current;
     if (!card) return;
 
