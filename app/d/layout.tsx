@@ -381,15 +381,17 @@ export default function DemoLayout({ children }: { children: ReactNode }) {
           max-width: calc(100% - 240px);
           overflow: hidden;
           font-family: var(--mono);
-          font-size: 13px;
+          font-size: 17px;
           font-weight: 700;
           letter-spacing: .2em;
           line-height: 1.4;
           text-transform: uppercase;
           text-overflow: ellipsis;
           white-space: nowrap;
-          color: var(--ink);
-          opacity: .84;
+          background: var(--ink);
+          color: var(--paper);
+          border: 2px solid var(--ink);
+          padding: 10px 18px;
           pointer-events: none;
         }
 
@@ -421,8 +423,9 @@ export default function DemoLayout({ children }: { children: ReactNode }) {
         @media(max-width:760px) {
           .demo-map-label {
             max-width: calc(100% - 180px);
-            font-size: 11px;
+            font-size: 13px;
             letter-spacing: .16em;
+            padding: 8px 12px;
           }
 
           .demo-map-counter {
