@@ -938,7 +938,7 @@ export function PowerDialerPage() {
     setSelectedDisposition(disposition);
     const successMessage =
       disposition === 'interested'
-        ? 'Interested saved. Link sent.'
+        ? 'Interested saved. Text link sent.'
         : disposition === 'callback'
           ? 'Follow-up saved.'
           : disposition === 'dnc'
@@ -1469,7 +1469,7 @@ export function PowerDialerPage() {
               )}
             >
               {saving && selectedDisposition === 'interested' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              Send link
+              Text link
             </Button>
             <Button
               type="button"
