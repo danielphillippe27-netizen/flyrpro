@@ -8,6 +8,14 @@ export type DialerCallListStats = {
   newCallsThisWeek: number;
   connectedCalls: number;
   connectedCallsThisWeek: number;
+  lastStatusByContactId: Record<string, DialerCallListLastStatus>;
+};
+
+export type DialerCallListLastStatus = {
+  status: string | null;
+  disposition: string | null;
+  answeredAt: string | null;
+  createdAt: string | null;
 };
 
 type AppointmentCandidateRow = {
@@ -24,6 +32,7 @@ type AppointmentCandidateRow = {
 type LeadCandidateRow = AppointmentCandidateRow;
 
 type DialerCallStatsRow = {
+  contact_id?: string | null;
   status?: string | null;
   disposition?: string | null;
   answered_at?: string | null;
@@ -255,6 +264,7 @@ export class StatsService {
       newCallsThisWeek: 0,
       connectedCalls: 0,
       connectedCallsThisWeek: 0,
+      lastStatusByContactId: {},
     };
     if (!workspaceId || uniqueContactIds.length === 0) return emptyStats;
 
@@ -266,7 +276,7 @@ export class StatsService {
       const chunk = uniqueContactIds.slice(index, index + chunkSize);
       const { data, error } = await this.client
         .from('dialer_calls')
-        .select('status, disposition, answered_at, created_at')
+        .select('contact_id, status, disposition, answered_at, created_at')
         .eq('workspace_id', workspaceId)
         .in('contact_id', chunk);
 
@@ -283,6 +293,19 @@ export class StatsService {
       if (isThisWeek) acc.newCallsThisWeek += 1;
       if (isConnected) acc.connectedCalls += 1;
       if (isConnected && isThisWeek) acc.connectedCallsThisWeek += 1;
+
+      if (call.contact_id) {
+        const current = acc.lastStatusByContactId[call.contact_id];
+        const currentMs = current?.createdAt ? new Date(current.createdAt).getTime() : 0;
+        if (!current || createdAtMs >= currentMs) {
+          acc.lastStatusByContactId[call.contact_id] = {
+            status: call.status ?? null,
+            disposition: call.disposition ?? null,
+            answeredAt: call.answered_at ?? null,
+            createdAt: call.created_at ?? null,
+          };
+        }
+      }
       return acc;
     }, emptyStats);
   }

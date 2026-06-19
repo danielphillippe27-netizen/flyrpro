@@ -2,7 +2,7 @@
 
 import type { Contact } from '@/types/database';
 import type { IndustryCopy } from '@/lib/industry-copy';
-import type { DialerCallListStats } from '@/lib/services/StatsService';
+import type { DialerCallListLastStatus, DialerCallListStats } from '@/lib/services/StatsService';
 import { StatCard } from '@/components/stats/StatCard';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -49,6 +49,40 @@ function formatAddressShort(address: string | null | undefined): string {
   if (!address?.trim()) return '—';
   const parts = address.split(',').map((p) => p.trim()).filter(Boolean);
   return parts.slice(0, 2).join(', ') || '—';
+}
+
+function formatLastDialerStatus(status: DialerCallListLastStatus): string {
+  const disposition = status.disposition?.trim();
+  if (disposition) {
+    const labels: Record<string, string> = {
+      appointment_set: 'Appointment set',
+      bad_number: 'Bad number',
+      callback_requested: 'Callback',
+      connected: 'Connected',
+      do_not_call: 'Do not call',
+      follow_up: 'Follow up',
+      left_voicemail: 'Voicemail',
+      no_answer: 'No answer',
+      not_interested: 'Not interested',
+    };
+    return labels[disposition] ?? disposition.replace(/[_-]/g, ' ');
+  }
+
+  const callStatus = status.status?.trim();
+  if (!callStatus) return '—';
+  const labels: Record<string, string> = {
+    answered: 'Answered',
+    busy: 'Busy',
+    canceled: 'Canceled',
+    completed: 'Completed',
+    failed: 'Failed',
+    initiated: 'Initiated',
+    'in-progress': 'In progress',
+    'no-answer': 'No answer',
+    pending: 'Pending',
+    ringing: 'Ringing',
+  };
+  return labels[callStatus] ?? callStatus.replace(/[_-]/g, ' ');
 }
 
 export function LeadsTableView({
@@ -123,17 +157,20 @@ export function LeadsTableView({
                 <TableHead>Email</TableHead>
                 <TableHead>Address</TableHead>
                 <TableHead>Lists</TableHead>
+                <TableHead>Last status</TableHead>
                 <TableHead>Last Contacted</TableHead>
                 <TableHead>Created</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {contacts.map((contact) => (
-                <TableRow
-                  key={contact.id}
-                  className="cursor-pointer"
-                  onClick={() => onContactSelect(contact)}
-                >
+              {contacts.map((contact) => {
+                const lastStatus = callStats?.lastStatusByContactId[contact.id];
+                return (
+                  <TableRow
+                    key={contact.id}
+                    className="cursor-pointer"
+                    onClick={() => onContactSelect(contact)}
+                  >
                   <TableCell onClick={(event) => event.stopPropagation()}>
                     <input
                       type="checkbox"
@@ -173,14 +210,24 @@ export function LeadsTableView({
                       )}
                     </div>
                   </TableCell>
+                  <TableCell className="whitespace-nowrap text-muted-foreground">
+                    {lastStatus ? (
+                      <Badge variant="outline" className="rounded-full px-2 py-0 text-[11px] capitalize">
+                        {formatLastDialerStatus(lastStatus)}
+                      </Badge>
+                    ) : (
+                      '—'
+                    )}
+                  </TableCell>
                   <TableCell className="text-muted-foreground whitespace-nowrap">
                     {formatDateTime(contact.last_contacted)}
                   </TableCell>
                   <TableCell className="text-muted-foreground whitespace-nowrap">
                     {formatCreatedAt(contact.created_at)}
                   </TableCell>
-                </TableRow>
-              ))}
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         )}

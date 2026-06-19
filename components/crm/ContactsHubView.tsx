@@ -53,6 +53,7 @@ const EMPTY_DIALER_CALL_STATS: DialerCallListStats = {
   newCallsThisWeek: 0,
   connectedCalls: 0,
   connectedCallsThisWeek: 0,
+  lastStatusByContactId: {},
 };
 
 function isWorkedContact(contact: Contact): boolean {
