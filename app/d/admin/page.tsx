@@ -28,6 +28,8 @@ type SummaryRow = {
   phoneTaps: number;
   ctaClicked: boolean;
   ctaVariant: string | null;
+  territoryCity: string | null;
+  territoryCityAt: string | null;
 };
 
 async function loadRows() {
@@ -76,6 +78,8 @@ function aggregate(links: DemoLinkRow[], events: DemoEventRow[]): SummaryRow[] {
       phoneTaps: 0,
       ctaClicked: false,
       ctaVariant: null,
+      territoryCity: null,
+      territoryCityAt: null,
     });
   }
 
@@ -93,6 +97,8 @@ function aggregate(links: DemoLinkRow[], events: DemoEventRow[]): SummaryRow[] {
         phoneTaps: 0,
         ctaClicked: false,
         ctaVariant: null,
+        territoryCity: null,
+        territoryCityAt: null,
       } satisfies SummaryRow);
 
     if (event.event === 'open') {
@@ -126,7 +132,12 @@ function aggregate(links: DemoLinkRow[], events: DemoEventRow[]): SummaryRow[] {
     if (event.event === 'cta_click') {
       current.ctaClicked = true;
       const variant = event.meta?.variant;
+      const city = event.meta?.city;
       current.ctaVariant = typeof variant === 'string' ? variant : current.ctaVariant;
+      if (typeof city === 'string' && city.trim() && (!current.territoryCityAt || event.created_at > current.territoryCityAt)) {
+        current.territoryCity = city;
+        current.territoryCityAt = event.created_at;
+      }
     }
 
     bySlug.set(event.slug, current);
@@ -185,7 +196,18 @@ export default async function DemoAdminPage() {
           <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 920 }}>
             <thead>
               <tr>
-                {['Company / Slug', 'Opened', 'Last Open', 'Max Beat', 'Dwell (s)', 'Replays', 'Phone Taps', 'CTA Clicked', 'Preview'].map(
+                {[
+                  'Company / Slug',
+                  'Opened',
+                  'Last Open',
+                  'Max Beat',
+                  'Dwell (s)',
+                  'Replays',
+                  'Phone Taps',
+                  'CTA Clicked',
+                  'Territory City',
+                  'Preview',
+                ].map(
                   (heading) => (
                     <th key={heading} style={thStyle}>
                       {heading}
@@ -210,6 +232,7 @@ export default async function DemoAdminPage() {
                   <td style={tdStyle}>{row.replays}</td>
                   <td style={tdStyle}>{row.phoneTaps}</td>
                   <td style={tdStyle}>{row.ctaClicked ? row.ctaVariant ?? 'yes' : 'no'}</td>
+                  <td style={tdStyle}>{row.territoryCity ?? '-'}</td>
                   <td style={tdStyle}>
                     <Link href={`/d/${row.slug}`} target="_blank" style={{ color: 'var(--paper)' }}>
                       open
@@ -219,7 +242,7 @@ export default async function DemoAdminPage() {
               ))}
               {rows.length === 0 ? (
                 <tr>
-                  <td style={tdStyle} colSpan={9}>
+                  <td style={tdStyle} colSpan={10}>
                     No demo links or events yet.
                   </td>
                 </tr>

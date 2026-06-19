@@ -947,6 +947,64 @@ export default function DemoLayout({ children }: { children: ReactNode }) {
           color: var(--orange);
         }
 
+        .territory-cta {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+          max-width: min(620px, 100%);
+        }
+
+        .territory-copy {
+          color: var(--paper);
+          font-family: var(--mono);
+          font-size: 12px;
+          font-weight: 700;
+          letter-spacing: .14em;
+          text-transform: uppercase;
+        }
+
+        .territory-form-row {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 12px;
+        }
+
+        .territory-input {
+          appearance: none;
+          background: var(--ink);
+          border: 2px solid var(--paper);
+          border-radius: 0;
+          color: var(--paper);
+          font-family: var(--mono);
+          font-size: 14px;
+          min-height: 44px;
+          min-width: min(300px, 100%);
+          padding: 18px 16px;
+          text-transform: uppercase;
+        }
+
+        .territory-input:focus {
+          border-color: var(--orange);
+          outline: none;
+        }
+
+        .territory-input::placeholder {
+          color: rgba(217,213,203,.42);
+        }
+
+        .territory-confirm {
+          border: 2px solid var(--orange);
+          color: var(--orange);
+          font-family: var(--mono);
+          font-size: 13px;
+          font-weight: 700;
+          letter-spacing: .14em;
+          max-width: min(620px, 100%);
+          min-height: 44px;
+          padding: 18px 20px;
+          text-transform: uppercase;
+        }
+
         .founder {
           margin-top: 6vh;
           font-size: 13px;

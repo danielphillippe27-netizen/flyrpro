@@ -22,7 +22,7 @@ export default async function DemoPage({ params }: DemoPageProps) {
       <Beat3 copy={payload.copy} center={payload.center} company={payload.company} city={payload.city} />
       <Beat4 copy={payload.copy} center={payload.center} />
       <Beat5 copy={payload.copy} />
-      <Beat6 copy={payload.copy} ctaVariant={payload.ctaVariant} ctaUrl={payload.ctaUrl} />
+      <Beat6 copy={payload.copy} ctaVariant={payload.ctaVariant} ctaUrl={payload.ctaUrl} company={payload.company} />
     </DemoShell>
   );
 }
