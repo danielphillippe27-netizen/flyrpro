@@ -11,8 +11,8 @@ const BASE_STYLES: Record<DemoMapVariant, string> = {
   dark: 'mapbox://styles/mapbox/dark-v11',
 };
 const WHITE_OUT_STYLE = 'mapbox://styles/mapbox/light-v11';
-const WHITE_OUT_BACKGROUND = '#f8fafc';
-const WHITE_OUT_WATER = '#eef1f4';
+const WHITE_OUT_BACKGROUND = '#f4f5f3';
+const WHITE_OUT_WATER = '#eceee9';
 
 const styleCache = new Map<DemoMapVariant, StyleSpecification>();
 let whiteOutStyleCache: StyleSpecification | null = null;

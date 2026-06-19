@@ -252,9 +252,7 @@ function Beat3Map({
   const buildingsRef = useRef<DemoBuildingFeature[] | null>(null);
   const reducedRef = useRef(false);
   const [count, setCount] = useState('0');
-  const [homeCount, setHomeCount] = useState(0);
   const [timer, setTimer] = useState('00.0 s');
-  const [settled, setSettled] = useState(false);
   const [fallback, setFallback] = useState(false);
   const label = mapPersonalizationLabel(company, city);
 
@@ -339,9 +337,7 @@ function Beat3Map({
     source(map, POLYGON_SOURCE_ID)?.setData(emptyFeatureCollection());
     source(map, BUILDINGS_SOURCE_ID)?.setData(emptyFeatureCollection());
     setCount('0');
-    setHomeCount(0);
     setTimer('00.0 s');
-    setSettled(false);
 
     const polygonSource = source(map, POLYGON_SOURCE_ID);
     if (!polygonSource) return;
@@ -358,9 +354,7 @@ function Beat3Map({
       const buildings = queryBuildingFeatures();
       setBuildingData(buildings, Math.max(0, buildings.length - 40));
       setCount(buildings.length.toLocaleString());
-      setHomeCount(buildings.length);
       setTimer(copy.b3FinalTimer);
-      setSettled(true);
       return;
     }
 
@@ -399,9 +393,7 @@ function Beat3Map({
         animationRef.current = null;
         setBuildingData(buildings, Math.max(0, buildings.length - 40));
         setCount(buildings.length.toLocaleString());
-        setHomeCount(buildings.length);
         setTimer(copy.b3FinalTimer);
-        setSettled(true);
       }
     }
 
@@ -585,36 +577,6 @@ function Beat3Map({
             <div id="time3">{timer}</div>
           </div>
         </div>
-        {settled ? (
-          <div className="demo-campaign-detail-panel">
-            <div className="demo-campaign-quality-banner">
-              <span className="demo-campaign-quality-badge">Data Quality 95</span>
-              <p>Address and building coverage are within target thresholds.</p>
-            </div>
-            <div className="demo-campaign-stat-grid">
-              <div className="demo-campaign-stat-card">
-                <div className="demo-campaign-stat-label">Total homes</div>
-                <div className="demo-campaign-stat-value">{homeCount.toLocaleString()}</div>
-                <div className="demo-campaign-stat-note">addresses in campaign</div>
-              </div>
-              <div className="demo-campaign-stat-card">
-                <div className="demo-campaign-stat-label">Leads</div>
-                <div className="demo-campaign-stat-value">0</div>
-                <div className="demo-campaign-stat-note">contacts in campaign</div>
-              </div>
-              <div className="demo-campaign-stat-card">
-                <div className="demo-campaign-stat-label">Visited</div>
-                <div className="demo-campaign-stat-value demo-campaign-stat-positive">0%</div>
-                <div className="demo-campaign-stat-note">0% of houses</div>
-              </div>
-              <div className="demo-campaign-stat-card">
-                <div className="demo-campaign-stat-label">Scan Rate</div>
-                <div className="demo-campaign-stat-value demo-campaign-stat-positive">0%</div>
-                <div className="demo-campaign-stat-note">0 scanned</div>
-              </div>
-            </div>
-          </div>
-        ) : null}
       </div>
     </section>
   );
