@@ -116,6 +116,49 @@ export default function DemoLayout({ children }: { children: ReactNode }) {
           margin-top: 3.5vh;
         }
 
+        .static-list {
+          display: grid;
+          gap: 14px;
+          margin-top: 4vh;
+          max-width: 58ch;
+        }
+
+        .static-list p,
+        .static-list li {
+          border-bottom: 2px solid currentColor;
+          font-family: var(--mono);
+          font-size: 13px;
+          font-weight: 700;
+          letter-spacing: .12em;
+          list-style: none;
+          margin: 0;
+          padding: 0 0 12px;
+          text-transform: uppercase;
+        }
+
+        .static-stage {
+          border: 2px solid currentColor;
+          display: inline-flex;
+          flex-direction: column;
+          gap: 10px;
+          margin-top: 5vh;
+          max-width: min(560px, 100%);
+          padding: 22px;
+          text-transform: uppercase;
+        }
+
+        .static-stage b {
+          color: var(--orange);
+          font-size: 13px;
+          letter-spacing: .16em;
+        }
+
+        .static-stage span {
+          font-size: 12px;
+          letter-spacing: .12em;
+          opacity: .72;
+        }
+
         .rv {
           opacity: 0;
           transform: translateY(34px);
