@@ -324,20 +324,19 @@ export default function DemoLayout({ children }: { children: ReactNode }) {
         .mathrow {
           border-top: 2px solid var(--ink);
           border-bottom: 2px solid var(--ink);
-          display: flex;
-          flex-wrap: wrap;
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
           margin-top: 5vh;
         }
 
         .mathcell {
-          flex: 1 1 160px;
-          padding: 22px 22px 22px 0;
-          border-right: 2px solid var(--ink);
+          padding: 22px;
+          border-left: 2px solid var(--ink);
+          text-align: left;
         }
 
-        .mathcell:last-child {
-          border-right: none;
-          padding-left: 22px;
+        .mathcell:first-child {
+          border-left: none;
         }
 
         .mathcell .k {
@@ -357,6 +356,40 @@ export default function DemoLayout({ children }: { children: ReactNode }) {
 
         .mathcell.hot .v {
           color: var(--orange);
+        }
+
+        @media(max-width:760px) {
+          .mathrow {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+
+          .mathcell {
+            border-left: none;
+            border-top: 2px solid var(--ink);
+          }
+
+          .mathcell:nth-child(-n+2) {
+            border-top: none;
+          }
+
+          .mathcell:nth-child(even) {
+            border-left: 2px solid var(--ink);
+          }
+        }
+
+        @media(max-width:480px) {
+          .mathrow {
+            grid-template-columns: 1fr;
+          }
+
+          .mathcell,
+          .mathcell:nth-child(even) {
+            border-left: none;
+          }
+
+          .mathcell:nth-child(n+2) {
+            border-top: 2px solid var(--ink);
+          }
         }
 
         .stage {
