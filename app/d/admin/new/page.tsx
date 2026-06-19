@@ -174,13 +174,12 @@ export default function NewDemoLinkPage() {
           </label>
 
           <label style={styles.label}>
-            {form.ctaVariant === 'reply' ? 'CTA email' : form.ctaVariant === 'territory' ? 'CTA URL (optional)' : 'CTA URL'}
+            CTA URL or email
             <input
               value={form.ctaUrl}
               onChange={(event) => setField('ctaUrl', event.target.value)}
               style={styles.input}
-              inputMode={form.ctaVariant === 'reply' ? 'email' : 'url'}
-              placeholder={form.ctaVariant === 'reply' ? 'founder@example.com' : undefined}
+              inputMode="url"
             />
           </label>
 
