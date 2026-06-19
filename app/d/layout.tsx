@@ -400,7 +400,8 @@ export default function DemoLayout({ children }: { children: ReactNode }) {
         .demo-campaign-detail-stage {
           width: 100%;
           aspect-ratio: 4/3;
-          max-height: none;
+          max-height: 100vh;
+          max-height: 100dvh;
           display: flex;
           flex-direction: column;
           background: #ffffff;

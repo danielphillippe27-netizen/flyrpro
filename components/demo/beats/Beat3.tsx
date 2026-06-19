@@ -247,6 +247,9 @@ function Beat3Map({
   const mapRef = useRef<MapboxMap | null>(null);
   const animationRef = useRef<number | null>(null);
   const hasInitializedRef = useRef(false);
+  const hasAutoRunRef = useRef(false);
+  const isMapReadyRef = useRef(false);
+  const shouldRunSequenceRef = useRef(false);
   const buildingLayerIdRef = useRef<string | null>(null);
   const ringRef = useRef<LngLat[]>([]);
   const buildingsRef = useRef<DemoBuildingFeature[] | null>(null);
@@ -400,6 +403,19 @@ function Beat3Map({
     animationRef.current = requestAnimationFrame(frame);
   }, [cancelAnimation, copy.b3FinalTimer, queryBuildingFeatures, setBuildingData]);
 
+  const triggerAutoSequence = useCallback(() => {
+    if (hasAutoRunRef.current) return;
+
+    hasAutoRunRef.current = true;
+
+    if (isMapReadyRef.current) {
+      runSequence();
+      return;
+    }
+
+    shouldRunSequenceRef.current = true;
+  }, [runSequence]);
+
   const initializeMap = useCallback(async () => {
     if (hasInitializedRef.current || !mapContainerRef.current) return;
 
@@ -500,8 +516,12 @@ function Beat3Map({
           map.setZoom(TARGET_ZOOM);
           map.setPitch(TARGET_PITCH);
           map.once('idle', () => {
+            isMapReadyRef.current = true;
             buildingsRef.current = queryBuildingFeatures();
-            runSequence();
+            if (shouldRunSequenceRef.current) {
+              shouldRunSequenceRef.current = false;
+              runSequence();
+            }
           });
         } catch (error) {
           console.error('[Beat3] Falling back to canvas after map setup failed:', error);
@@ -517,7 +537,11 @@ function Beat3Map({
       console.error('[Beat3] Falling back to canvas after Mapbox load failed:', error);
       setFallback(true);
     }
-  }, [center, runSequence]);
+  }, [center, queryBuildingFeatures, runSequence]);
+
+  useEffect(() => {
+    void initializeMap();
+  }, [initializeMap]);
 
   useEffect(() => {
     const stage = stageRef.current;
@@ -526,7 +550,7 @@ function Beat3Map({
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting) {
-          void initializeMap();
+          triggerAutoSequence();
         }
       },
       { threshold: 0.45 }
@@ -537,7 +561,7 @@ function Beat3Map({
     return () => {
       observer.disconnect();
     };
-  }, [initializeMap]);
+  }, [triggerAutoSequence]);
 
   useEffect(() => {
     return () => {
