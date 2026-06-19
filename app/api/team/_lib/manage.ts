@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server';
 import type { WorkspaceRole } from '@/app/api/_utils/workspace';
 import { resolveWorkspaceMembershipForUser } from '@/app/api/_utils/workspace';
 import type { createAdminClient } from '@/lib/supabase/server';
+import { getInviteAppOrigin } from '@/lib/email/resend';
 
 export type TeamManagerRole = Extract<WorkspaceRole, 'owner' | 'admin'>;
 export type PendingInviteRole = 'admin' | 'member';
@@ -314,7 +315,10 @@ export async function getWorkspaceTrialState(
 }
 
 export function buildJoinUrl(request: NextRequest, token: string): string {
-  return new URL(`/join?token=${encodeURIComponent(token)}`, request.url).toString();
+  return new URL(
+    `/join?token=${encodeURIComponent(token)}`,
+    getInviteAppOrigin(request.nextUrl.origin)
+  ).toString();
 }
 
 export async function listPendingWorkspaceInvites(

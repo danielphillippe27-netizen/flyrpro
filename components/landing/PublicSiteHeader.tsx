@@ -2,6 +2,7 @@ import Link from 'next/link';
 
 type PublicSiteHeaderProps = {
   active?: 'ambassador' | 'pricing' | 'download';
+  showAmbassador?: boolean;
 };
 
 function getNavLinkClass(isActive: boolean) {
@@ -10,7 +11,7 @@ function getNavLinkClass(isActive: boolean) {
     : 'text-sm font-medium text-zinc-600 transition hover:text-zinc-900';
 }
 
-export function PublicSiteHeader({ active }: PublicSiteHeaderProps) {
+export function PublicSiteHeader({ active, showAmbassador = true }: PublicSiteHeaderProps) {
   return (
     <header className="sticky top-0 z-50 border-b border-zinc-200/80 bg-zinc-50/90 backdrop-blur-sm">
       <div className="flex w-full items-center justify-between px-4 py-3 md:px-6">
@@ -21,9 +22,11 @@ export function PublicSiteHeader({ active }: PublicSiteHeaderProps) {
         </Link>
 
         <div className="flex items-center gap-5 md:gap-6">
-          <Link href="/ambassador" className={getNavLinkClass(active === 'ambassador')}>
-            Ambassador
-          </Link>
+          {showAmbassador && (
+            <Link href="/ambassador" className={getNavLinkClass(active === 'ambassador')}>
+              Ambassador
+            </Link>
+          )}
           <Link href="/plans" className={getNavLinkClass(active === 'pricing')}>
             Pricing
           </Link>

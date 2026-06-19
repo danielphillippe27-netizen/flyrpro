@@ -20,6 +20,20 @@ import {
   getRequestBillingCurrency,
 } from '@/app/lib/billing/stripe-products';
 import { normalizePhoneNumber } from '@/lib/dialer/phone';
+import {
+  DEMO_EMAIL_DOMAIN,
+  DEMO_EMAIL_HANDLE_PATTERN,
+  buildFallbackDemoEmailHandle,
+  normalizeDemoEmailHandle,
+  resolveAvailableDemoEmailHandle,
+  type HandleLookupClient,
+} from '@/lib/dialer/demo-email-handle';
+import {
+  getSalespersonDialerSettingsForUser,
+  normalizeSalespersonDialerNumber,
+  type DialerSalespersonRow,
+  type SalespersonDialerSettingsRow,
+} from '@/lib/dialer/salesperson-settings';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -31,7 +45,38 @@ type UpdatePayload = {
   defaultFromNumber?: string | null;
   defaultSmsFromNumber?: string | null;
   inboundForwardTo?: string | null;
+  demoEmailHandle?: string | null;
+  demoEmailReplyTo?: string | null;
+  salesPhoneForwardTo?: string | null;
 };
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function cleanText(value: string | null | undefined): string {
+  return (value ?? '').trim();
+}
+
+function buildSalespersonSettingsResponse(
+  salesperson: DialerSalespersonRow | null,
+  dialerSettings: SalespersonDialerSettingsRow | null,
+  fallbackHandle: string,
+  userEmail: string | null
+) {
+  const demoHandle = salesperson?.demo_email_handle ?? fallbackHandle;
+  return {
+    id: salesperson?.id ?? null,
+    fullName: salesperson?.full_name ?? null,
+    email: salesperson?.email ?? userEmail,
+    demoEmailHandle: demoHandle,
+    demoEmailAddress: `${demoHandle}@${DEMO_EMAIL_DOMAIN}`,
+    demoEmailReplyTo: salesperson?.demo_email_reply_to ?? salesperson?.email ?? userEmail,
+    demoEmailDomain: DEMO_EMAIL_DOMAIN,
+    assignedPhoneNumber: normalizeSalespersonDialerNumber(dialerSettings?.assigned_phone_number),
+    phoneForwardTo: normalizeSalespersonDialerNumber(dialerSettings?.inbound_forward_to),
+    phoneNumberStatus: dialerSettings?.number_status ?? 'unassigned',
+    phoneNumberAssignedAt: dialerSettings?.number_assigned_at ?? null,
+  };
+}
 
 async function resolveWorkspaceContext(request: NextRequest) {
   const requestUser = await resolveUserFromRequest(request);
@@ -66,12 +111,34 @@ async function buildSettingsResponse(
   admin: ReturnType<typeof createAdminClient>,
   workspaceId: string,
   role: string | null,
+  userId: string,
   userEmail: string | null,
   request: NextRequest
 ) {
   const founderBypassEnabled = isDialerFounderBypassEmail(userEmail);
-  const featureEnabled = isDialerEnabledForWorkspace(workspaceId, userEmail);
-  const sharedDefaultDialingEnabled = canDialerWorkspaceUseSharedDefault(workspaceId, userEmail);
+  const {
+    salesperson,
+    settings: salespersonDialerSettings,
+  } = await getSalespersonDialerSettingsForUser(admin, {
+    userId,
+    email: userEmail,
+    workspaceId,
+  });
+  const salespersonFeatureEnabled = Boolean(salesperson?.id);
+  const featureEnabled =
+    salespersonFeatureEnabled || isDialerEnabledForWorkspace(workspaceId, userEmail);
+  const sharedDefaultDialingEnabled =
+    salespersonFeatureEnabled || canDialerWorkspaceUseSharedDefault(workspaceId, userEmail);
+  const fallbackHandle = salesperson
+    ? await resolveAvailableDemoEmailHandle(admin as unknown as HandleLookupClient, salesperson, userEmail)
+    : buildFallbackDemoEmailHandle(null, userEmail);
+  const salespersonResponse = buildSalespersonSettingsResponse(
+    salesperson,
+    salespersonDialerSettings,
+    fallbackHandle,
+    userEmail
+  );
+
   if (!featureEnabled) {
     return {
       workspaceId,
@@ -81,12 +148,13 @@ async function buildSettingsResponse(
       sharedDefaultDialingEnabled: false,
       offer: null,
       addon: null,
+      salesperson: salespersonResponse,
       settings: null,
     };
   }
 
   const [settings, addon] = await Promise.all([
-    getWorkspaceDialerSettings(admin, workspaceId),
+    getWorkspaceDialerSettings(admin, workspaceId, salespersonDialerSettings),
     getWorkspacePowerDialerAddon(admin, workspaceId),
   ]);
   const offer = getPowerDialerAddonOffer(getRequestBillingCurrency(request));
@@ -111,6 +179,7 @@ async function buildSettingsResponse(
       amountCents: addon.amount_cents ?? null,
       currency: addon.currency ?? null,
     },
+    salesperson: salespersonResponse,
     settings,
   };
 }
@@ -125,6 +194,7 @@ export async function GET(request: NextRequest) {
     context.admin,
     context.workspaceId,
     context.role,
+    context.requestUser.id,
     context.requestUser.email,
     request
   );
@@ -154,7 +224,18 @@ export async function PATCH(request: NextRequest) {
     );
   }
 
-  if (!isDialerEnabledForWorkspace(membership.workspaceId, authContext.email)) {
+  const hasWorkspaceSettingsUpdate =
+    body.enabled !== undefined ||
+    body.allowSmsFollowup !== undefined ||
+    body.defaultFromNumber !== undefined ||
+    body.defaultSmsFromNumber !== undefined ||
+    body.inboundForwardTo !== undefined;
+  const hasDemoEmailUpdate = body.demoEmailHandle !== undefined || body.demoEmailReplyTo !== undefined;
+  const hasSalesPhoneUpdate = body.salesPhoneForwardTo !== undefined;
+  const isSalespersonOnlyUpdate =
+    (hasDemoEmailUpdate || hasSalesPhoneUpdate) && !hasWorkspaceSettingsUpdate;
+
+  if (!isSalespersonOnlyUpdate && !isDialerEnabledForWorkspace(membership.workspaceId, authContext.email)) {
     return NextResponse.json(
       { error: getDialerWorkspaceAccessError() },
       { status: 403 }
@@ -162,10 +243,121 @@ export async function PATCH(request: NextRequest) {
   }
 
   if (membership.role !== 'owner' && membership.role !== 'admin') {
-    return NextResponse.json(
-      { error: 'Only workspace owners and admins can manage dialer settings' },
-      { status: 403 }
+    if (!isSalespersonOnlyUpdate) {
+      return NextResponse.json(
+        { error: 'Only workspace owners and admins can manage dialer settings' },
+        { status: 403 }
+      );
+    }
+  }
+
+  let salespersonForUpdates: DialerSalespersonRow | null = null;
+  if (hasDemoEmailUpdate || hasSalesPhoneUpdate) {
+    salespersonForUpdates = (await getSalespersonDialerSettingsForUser(admin, {
+      userId: authContext.id,
+      email: authContext.email,
+      workspaceId: membership.workspaceId,
+    })).salesperson;
+  }
+
+  if (body.demoEmailHandle !== undefined || body.demoEmailReplyTo !== undefined) {
+    const normalizedEmail = authContext.email?.trim().toLowerCase();
+    if (!normalizedEmail) {
+      return NextResponse.json({ error: 'Sign in with an email before setting a demo sender.' }, { status: 400 });
+    }
+    if (!salespersonForUpdates?.id) {
+      return NextResponse.json({ error: 'Salesperson access is required to set a demo sender.' }, { status: 403 });
+    }
+
+    const updates: Record<string, unknown> = {};
+    if (body.demoEmailHandle !== undefined) {
+      const handle = normalizeDemoEmailHandle(body.demoEmailHandle);
+      if (handle && !DEMO_EMAIL_HANDLE_PATTERN.test(handle)) {
+        return NextResponse.json(
+          { error: 'Use only letters, numbers, dots, dashes, and underscores for the demo sender.' },
+          { status: 400 }
+        );
+      }
+      updates.demo_email_handle = handle;
+    }
+
+    if (body.demoEmailReplyTo !== undefined) {
+      const replyTo = cleanText(body.demoEmailReplyTo).toLowerCase();
+      if (replyTo && !EMAIL_PATTERN.test(replyTo)) {
+        return NextResponse.json({ error: 'Reply-to must be a valid email address.' }, { status: 400 });
+      }
+      updates.demo_email_reply_to = replyTo || null;
+    }
+
+    if (Object.keys(updates).length > 0) {
+      const { error } = await admin
+        .from('salespeople')
+        .update(updates)
+        .eq('id', salespersonForUpdates.id)
+        .eq('status', 'active');
+
+      if (error) {
+        console.error('[dialer/settings] failed to update salesperson demo email settings', error);
+        return NextResponse.json(
+          { error: 'Failed to save demo email settings. Run the latest Supabase migration first.' },
+          { status: 500 }
+        );
+      }
+    }
+  }
+
+  if (body.salesPhoneForwardTo !== undefined) {
+    if (!salespersonForUpdates?.id) {
+      return NextResponse.json({ error: 'Salesperson access is required to set phone forwarding.' }, { status: 403 });
+    }
+
+    const normalizedForwardTo = normalizePhoneNumber(body.salesPhoneForwardTo ?? undefined);
+    if (
+      typeof body.salesPhoneForwardTo === 'string' &&
+      body.salesPhoneForwardTo.trim().length > 0 &&
+      (!normalizedForwardTo.isValid || !normalizedForwardTo.e164)
+    ) {
+      return NextResponse.json(
+        { error: normalizedForwardTo.error ?? 'Forwarding phone must be a valid phone number.' },
+        { status: 400 }
+      );
+    }
+
+    const { error } = await admin
+      .from('salesperson_dialer_settings')
+      .upsert(
+        {
+          salesperson_id: salespersonForUpdates.id,
+          workspace_id: membership.workspaceId,
+          inbound_forward_to:
+            typeof body.salesPhoneForwardTo === 'string' &&
+            body.salesPhoneForwardTo.trim().length === 0
+              ? null
+              : normalizedForwardTo.e164,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'salesperson_id' }
+      );
+
+    if (error) {
+      console.error('[dialer/settings] failed to update salesperson phone forwarding', error);
+      return NextResponse.json(
+        { error: 'Failed to save sales phone forwarding. Run the latest Supabase migration first.' },
+        { status: 500 }
+      );
+    }
+  }
+
+  if (!hasWorkspaceSettingsUpdate) {
+    const response = await buildSettingsResponse(
+      admin,
+      membership.workspaceId,
+      membership.role,
+      authContext.id,
+      authContext.email,
+      request
     );
+    return NextResponse.json(response);
   }
 
   const normalizedFrom = normalizePhoneNumber(body.defaultFromNumber ?? undefined);
@@ -257,6 +449,7 @@ export async function PATCH(request: NextRequest) {
     admin,
     membership.workspaceId,
     membership.role,
+    authContext.id,
     authContext.email,
     request
   );

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTheme } from '@/lib/theme-provider';
+import { useWorkspace } from '@/lib/workspace-context';
 import { createClient } from '@/lib/supabase/client';
 import { retryWithBackoff } from '@/lib/utils/retryWithBackoff';
 import {
@@ -10,17 +11,27 @@ import {
   Sun, 
   User, 
   Mail, 
+  Phone,
   CreditCard, 
   LogOut, 
   Shield,
   Globe,
   Plug,
-  Flag
+  Flag,
+  WalletCards,
+  Loader2,
+  Save
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { PowerDialerSettingsCard } from '@/components/settings/PowerDialerSettingsCard';
+import {
+  SALESPERSON_STRIPE_GUARDIAN_POLICY,
+  SALESPERSON_STRIPE_ONBOARDING_POLICY,
+  SALESPERSON_STRIPE_PAYOUT_POLICY,
+} from '@/app/lib/billing/salesperson-stripe-policy';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
 
 interface EntitlementSnapshot {
@@ -33,10 +44,55 @@ interface EntitlementSnapshot {
   planBadgeLabel?: string | null;
 }
 
+interface SalespersonSettingsState {
+  id: string;
+  full_name?: string | null;
+  email?: string | null;
+  status?: string | null;
+  stripe_connect_account_id?: string | null;
+  stripe_onboarding_completed?: boolean | null;
+  stripe_details_submitted?: boolean | null;
+  stripe_charges_enabled?: boolean | null;
+  stripe_payouts_enabled?: boolean | null;
+}
+
+interface AccessStateSnapshot {
+  isSalesperson?: boolean;
+  accessLevel?: string | null;
+  salesperson?: SalespersonSettingsState | null;
+}
+
+type SalespersonStripeStatusPayload = {
+  accountId?: string | null;
+  chargesEnabled?: boolean | null;
+  payoutsEnabled?: boolean | null;
+  detailsSubmitted?: boolean | null;
+  onboardingUrl?: string | null;
+  message?: string | null;
+  error?: string;
+};
+
+type SalesEmailSettingsPayload = {
+  salesperson?: {
+    id: string | null;
+    email: string | null;
+    demoEmailHandle: string | null;
+    demoEmailAddress: string | null;
+    demoEmailReplyTo: string | null;
+    demoEmailDomain: string;
+    assignedPhoneNumber?: string | null;
+    phoneForwardTo?: string | null;
+    phoneNumberStatus?: string | null;
+    phoneNumberAssignedAt?: string | null;
+  } | null;
+  error?: string;
+};
+
 const inFlightBillingWorkspaceIds = new Set<string>();
 
 function SettingsPageContent() {
   const { theme, setTheme } = useTheme();
+  const { currentWorkspaceId } = useWorkspace();
   const router = useRouter();
   const [user, setUser] = useState<SupabaseUser | null>(null);
   const [entitlement, setEntitlement] = useState<EntitlementSnapshot | null>(null);
@@ -45,7 +101,58 @@ function SettingsPageContent() {
   const [entitlementError, setEntitlementError] = useState(false);
   const [upgradeLoading, setUpgradeLoading] = useState(false);
   const [portalLoading, setPortalLoading] = useState(false);
+  const [accessState, setAccessState] = useState<AccessStateSnapshot | null>(null);
+  const [stripeConnectLoading, setStripeConnectLoading] = useState(false);
+  const [stripeConnectError, setStripeConnectError] = useState<string | null>(null);
+  const [stripeConnectNotice, setStripeConnectNotice] = useState<string | null>(null);
+  const [salesEmailHandle, setSalesEmailHandle] = useState('');
+  const [salesEmailForwardTo, setSalesEmailForwardTo] = useState('');
+  const [salesEmailDomain, setSalesEmailDomain] = useState('flyr.software');
+  const [salesAssignedPhoneNumber, setSalesAssignedPhoneNumber] = useState('');
+  const [salesPhoneForwardTo, setSalesPhoneForwardTo] = useState('');
+  const [salesPhoneNumberStatus, setSalesPhoneNumberStatus] = useState('unassigned');
+  const [salesEmailLoading, setSalesEmailLoading] = useState(false);
+  const [salesEmailSaving, setSalesEmailSaving] = useState(false);
+  const [salesEmailMessage, setSalesEmailMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [salesPhoneSaving, setSalesPhoneSaving] = useState(false);
+  const [salesPhoneMessage, setSalesPhoneMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [loggingOut, setLoggingOut] = useState(false);
+  const isSalespersonSettings =
+    accessState?.isSalesperson === true || accessState?.accessLevel === 'salesperson';
+  const salesperson = accessState?.salesperson ?? null;
+
+  const applySalespersonStripeStatus = (payload: SalespersonStripeStatusPayload | null) => {
+    if (!payload) return;
+    setAccessState((current) => {
+      if (!current?.salesperson) return current;
+      return {
+        ...current,
+        salesperson: {
+          ...current.salesperson,
+          stripe_connect_account_id:
+            payload.accountId !== undefined
+              ? payload.accountId
+              : current.salesperson.stripe_connect_account_id,
+          stripe_details_submitted:
+            payload.detailsSubmitted !== undefined
+              ? payload.detailsSubmitted
+              : current.salesperson.stripe_details_submitted,
+          stripe_onboarding_completed:
+            payload.detailsSubmitted !== undefined
+              ? payload.detailsSubmitted
+              : current.salesperson.stripe_onboarding_completed,
+          stripe_charges_enabled:
+            payload.chargesEnabled !== undefined
+              ? payload.chargesEnabled
+              : current.salesperson.stripe_charges_enabled,
+          stripe_payouts_enabled:
+            payload.payoutsEnabled !== undefined
+              ? payload.payoutsEnabled
+              : current.salesperson.stripe_payouts_enabled,
+        },
+      };
+    });
+  };
 
   useEffect(() => {
     const loadUserData = async () => {
@@ -78,6 +185,36 @@ function SettingsPageContent() {
             if (newProfile) {
               void newProfile;
             }
+          }
+
+          const stripeOnboardingStatus =
+            typeof window !== 'undefined'
+              ? new URLSearchParams(window.location.search).get('stripeOnboarding')
+              : null;
+          if (stripeOnboardingStatus === 'complete') {
+            try {
+              const response = await fetch('/api/salesperson/stripe-connect', {
+                method: 'GET',
+                credentials: 'include',
+              });
+              if (response.ok) {
+                applySalespersonStripeStatus(await response.json());
+              }
+            } catch (error) {
+              console.error('Error refreshing Stripe Connect status:', error);
+            }
+          }
+
+          try {
+            const accessRes = await fetch('/api/access/state', { credentials: 'include' });
+            if (accessRes.ok) {
+              setAccessState(await accessRes.json());
+            } else {
+              setAccessState(null);
+            }
+          } catch (error) {
+            console.error('Error loading access state:', error);
+            setAccessState(null);
           }
 
           try {
@@ -121,6 +258,45 @@ function SettingsPageContent() {
 
     loadUserData();
   }, [router]);
+
+  useEffect(() => {
+    if (!isSalespersonSettings) return;
+
+    let cancelled = false;
+    const loadSalesEmailSettings = async () => {
+      setSalesEmailLoading(true);
+      setSalesEmailMessage(null);
+      try {
+        const qs = currentWorkspaceId ? `?workspaceId=${encodeURIComponent(currentWorkspaceId)}` : '';
+        const response = await fetch(`/api/dialer/settings${qs}`, { credentials: 'include' });
+        const data = (await response.json().catch(() => ({}))) as SalesEmailSettingsPayload;
+        if (!response.ok) {
+          throw new Error(data.error || 'Could not load sales email settings.');
+        }
+        if (cancelled) return;
+        setSalesEmailHandle(data.salesperson?.demoEmailHandle ?? '');
+        setSalesEmailForwardTo(data.salesperson?.demoEmailReplyTo ?? data.salesperson?.email ?? user?.email ?? '');
+        setSalesEmailDomain(data.salesperson?.demoEmailDomain ?? 'flyr.software');
+        setSalesAssignedPhoneNumber(data.salesperson?.assignedPhoneNumber ?? '');
+        setSalesPhoneForwardTo(data.salesperson?.phoneForwardTo ?? '');
+        setSalesPhoneNumberStatus(data.salesperson?.phoneNumberStatus ?? 'unassigned');
+      } catch (error) {
+        if (!cancelled) {
+          setSalesEmailMessage({
+            type: 'error',
+            text: error instanceof Error ? error.message : 'Could not load sales email settings.',
+          });
+        }
+      } finally {
+        if (!cancelled) setSalesEmailLoading(false);
+      }
+    };
+
+    void loadSalesEmailSettings();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentWorkspaceId, isSalespersonSettings, user?.email]);
 
   const handleLogout = async () => {
     setLoggingOut(true);
@@ -179,6 +355,104 @@ function SettingsPageContent() {
     }
   };
 
+  const handleSalespersonStripeConnect = async () => {
+    setStripeConnectLoading(true);
+    setStripeConnectError(null);
+    setStripeConnectNotice(null);
+    try {
+      const response = await fetch('/api/salesperson/stripe-connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || 'Could not create Stripe onboarding link.');
+      }
+      applySalespersonStripeStatus(data);
+      if (typeof data.onboardingUrl === 'string' && data.onboardingUrl) {
+        window.location.href = data.onboardingUrl;
+        return;
+      }
+      setStripeConnectNotice(
+        typeof data.message === 'string' && data.message
+          ? data.message
+          : 'Stripe payout status refreshed.'
+      );
+    } catch (error) {
+      setStripeConnectError(
+        error instanceof Error ? error.message : 'Could not create Stripe onboarding link.'
+      );
+    } finally {
+      setStripeConnectLoading(false);
+    }
+  };
+
+  const handleSaveSalesEmail = async () => {
+    setSalesEmailSaving(true);
+    setSalesEmailMessage(null);
+    try {
+      const response = await fetch('/api/dialer/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          workspaceId: currentWorkspaceId ?? undefined,
+          demoEmailHandle: salesEmailHandle.trim(),
+          demoEmailReplyTo: salesEmailForwardTo.trim(),
+        }),
+      });
+      const data = (await response.json().catch(() => ({}))) as SalesEmailSettingsPayload;
+      if (!response.ok) {
+        throw new Error(data.error || 'Could not save sales email settings.');
+      }
+
+      setSalesEmailHandle(data.salesperson?.demoEmailHandle ?? '');
+      setSalesEmailForwardTo(data.salesperson?.demoEmailReplyTo ?? data.salesperson?.email ?? user?.email ?? '');
+      setSalesEmailDomain(data.salesperson?.demoEmailDomain ?? 'flyr.software');
+      setSalesEmailMessage({ type: 'success', text: 'Sales email saved.' });
+    } catch (error) {
+      setSalesEmailMessage({
+        type: 'error',
+        text: error instanceof Error ? error.message : 'Could not save sales email settings.',
+      });
+    } finally {
+      setSalesEmailSaving(false);
+    }
+  };
+
+  const handleSaveSalesPhone = async () => {
+    setSalesPhoneSaving(true);
+    setSalesPhoneMessage(null);
+    try {
+      const response = await fetch('/api/dialer/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          workspaceId: currentWorkspaceId ?? undefined,
+          salesPhoneForwardTo: salesPhoneForwardTo.trim(),
+        }),
+      });
+      const data = (await response.json().catch(() => ({}))) as SalesEmailSettingsPayload;
+      if (!response.ok) {
+        throw new Error(data.error || 'Could not save sales phone forwarding.');
+      }
+
+      setSalesAssignedPhoneNumber(data.salesperson?.assignedPhoneNumber ?? '');
+      setSalesPhoneForwardTo(data.salesperson?.phoneForwardTo ?? '');
+      setSalesPhoneNumberStatus(data.salesperson?.phoneNumberStatus ?? 'unassigned');
+      setSalesPhoneMessage({ type: 'success', text: 'Sales phone forwarding saved.' });
+    } catch (error) {
+      setSalesPhoneMessage({
+        type: 'error',
+        text: error instanceof Error ? error.message : 'Could not save sales phone forwarding.',
+      });
+    } finally {
+      setSalesPhoneSaving(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-background flex items-center justify-center">
@@ -188,6 +462,10 @@ function SettingsPageContent() {
       </div>
     );
   }
+
+  const salespersonPayoutsReady = salesperson?.stripe_payouts_enabled === true;
+  const salespersonDetailsSubmitted = salesperson?.stripe_details_submitted === true;
+  const salespersonStripeStarted = Boolean(salesperson?.stripe_connect_account_id);
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-background">
@@ -239,125 +517,326 @@ function SettingsPageContent() {
             </CardContent>
           </Card>
 
-          {/* Subscription Section — source of truth: entitlements */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <CreditCard className="w-5 h-5" />
-                <CardTitle>Subscription</CardTitle>
-              </div>
-              <CardDescription>
-                Manage your subscription and billing
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="space-y-1">
+          {isSalespersonSettings ? (
+            <>
+              <Card>
+                <CardHeader>
                   <div className="flex items-center gap-2">
-                    <p className="text-base font-medium dark:text-white">Plan</p>
-                    {entitlementError ? (
-                      <Badge variant="outline">Unavailable</Badge>
-                    ) : entitlement?.isAmbassador ? (
-                      <Badge className="bg-red-500 hover:bg-red-600">AMBASSADOR</Badge>
-                    ) : entitlement?.is_active && (entitlement.plan === 'pro' || entitlement.plan === 'team') ? (
-                      <Badge className="bg-green-500 hover:bg-green-600">Pro</Badge>
-                    ) : (
-                      <Badge variant="outline">Free</Badge>
-                    )}
+                    <WalletCards className="w-5 h-5" />
+                    <CardTitle>Stripe Connect</CardTitle>
+                  </div>
+                  <CardDescription>
+                    Set up your payout account for FLYR sales commissions
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center justify-between flex-wrap gap-3">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <p className="text-base font-medium dark:text-white">Payout setup</p>
+                        {salespersonPayoutsReady ? (
+                          <Badge className="bg-green-500 hover:bg-green-600">Ready</Badge>
+                        ) : salespersonDetailsSubmitted ? (
+                          <Badge variant="outline">Submitted</Badge>
+                        ) : salespersonStripeStarted ? (
+                          <Badge variant="outline">In progress</Badge>
+                        ) : (
+                          <Badge variant="outline">Not connected</Badge>
+                        )}
+                      </div>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        {salespersonPayoutsReady
+                          ? 'Stripe has confirmed your payout account is ready.'
+                          : salespersonDetailsSubmitted
+                            ? 'Stripe has your details. FLYR will wait for Stripe to enable payouts before commissions are paid.'
+                            : salespersonStripeStarted
+                              ? 'Continue Stripe onboarding to finish identity and bank details.'
+                              : 'Connect Stripe so FLYR can pay your salesperson commissions.'}
+                      </p>
+                      <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+                        <div className="flex items-start gap-2">
+                          <Shield className="mt-0.5 h-4 w-4 shrink-0" />
+                          <div>
+                            <p className="font-medium">{SALESPERSON_STRIPE_PAYOUT_POLICY}</p>
+                            <p className="mt-1">
+                              {SALESPERSON_STRIPE_ONBOARDING_POLICY}{' '}
+                              {SALESPERSON_STRIPE_GUARDIAN_POLICY}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                      {stripeConnectError ? (
+                        <p className="text-sm text-red-500">{stripeConnectError}</p>
+                      ) : null}
+                      {stripeConnectNotice ? (
+                        <p className="text-sm text-gray-500 dark:text-gray-400">{stripeConnectNotice}</p>
+                      ) : null}
+                    </div>
+                    <Button
+                      variant={salespersonPayoutsReady ? 'outline' : 'default'}
+                      size="sm"
+                      onClick={handleSalespersonStripeConnect}
+                      disabled={stripeConnectLoading}
+                    >
+                      <CreditCard className="w-4 h-4 mr-2" />
+                      {stripeConnectLoading
+                        ? 'Opening Stripe…'
+                        : salespersonPayoutsReady
+                          ? 'Update Stripe'
+                          : salespersonDetailsSubmitted
+                            ? 'Refresh status'
+                          : salespersonStripeStarted
+                            ? 'Continue setup'
+                            : 'Set up payouts'}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center gap-2">
+                    <Mail className="w-5 h-5" />
+                    <CardTitle>Sales email</CardTitle>
+                  </div>
+                  <CardDescription>
+                    Create your FLYR sender and choose where replies forward
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {salesEmailMessage ? (
+                    <div
+                      className={`rounded-lg border px-3 py-2 text-sm ${
+                        salesEmailMessage.type === 'success'
+                          ? 'border-green-200 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-900/20 dark:text-green-400'
+                          : 'border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-400'
+                      }`}
+                    >
+                      {salesEmailMessage.text}
+                    </div>
+                  ) : null}
+
+                  <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+                    <div className="flex min-w-0 overflow-hidden rounded-md border border-input bg-background dark:bg-card">
+                      <Input
+                        value={salesEmailHandle}
+                        onChange={(event) =>
+                          setSalesEmailHandle(event.target.value.toLowerCase().replace(/[^a-z0-9._-]/g, ''))
+                        }
+                        disabled={salesEmailLoading || salesEmailSaving}
+                        placeholder="firstname"
+                        aria-label="Sales email handle"
+                        className="h-10 min-w-0 border-0 focus-visible:ring-0"
+                      />
+                      <span className="flex h-10 shrink-0 items-center border-l border-input px-3 text-sm text-gray-500 dark:text-gray-400">
+                        @{salesEmailDomain}
+                      </span>
+                    </div>
+                    <Input
+                      type="email"
+                      inputMode="email"
+                      value={salesEmailForwardTo}
+                      onChange={(event) => setSalesEmailForwardTo(event.target.value)}
+                      disabled={salesEmailLoading || salesEmailSaving}
+                      placeholder="forward replies to"
+                      aria-label="Forward replies to"
+                      className="h-10"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => void handleSaveSalesEmail()}
+                      disabled={salesEmailLoading || salesEmailSaving || !salesEmailHandle.trim() || !salesEmailForwardTo.trim()}
+                    >
+                      {salesEmailSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                      Save email
+                    </Button>
                   </div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">
-                    {entitlementError
-                      ? 'Could not load plan details.'
-                      : entitlement?.isAmbassador
-                      ? 'You have Pro-level access through the FLYR Ambassador Program.'
-                      : entitlement?.is_active
-                      ? 'You have access to all Pro features'
-                      : 'Upgrade to Pro for unlimited QR codes and advanced features'}
+                    Sends demos from {salesEmailHandle || 'demo'}@{salesEmailDomain}, saves replies in FLYR Inbox, and forwards replies to {salesEmailForwardTo || 'your email'}.
                   </p>
-                </div>
-                <div className="flex gap-2">
-                  {!entitlementError && !entitlement?.is_active && !entitlement?.isAmbassador && (
-                    <Button onClick={handleUpgrade} size="sm" disabled={upgradeLoading}>
-                      {upgradeLoading ? 'Redirecting…' : 'Upgrade to Pro'}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center gap-2">
+                    <Phone className="w-5 h-5" />
+                    <CardTitle>Sales phone</CardTitle>
+                  </div>
+                  <CardDescription>
+                    Forward calls from your FLYR sales number to your phone
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {salesPhoneMessage ? (
+                    <div
+                      className={`rounded-lg border px-3 py-2 text-sm ${
+                        salesPhoneMessage.type === 'success'
+                          ? 'border-green-200 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-900/20 dark:text-green-400'
+                          : 'border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-400'
+                      }`}
+                    >
+                      {salesPhoneMessage.text}
+                    </div>
+                  ) : null}
+
+                  <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+                    <Input
+                      value={salesAssignedPhoneNumber || 'No sales number assigned yet'}
+                      disabled
+                      aria-label="Assigned sales phone number"
+                      className="h-10"
+                    />
+                    <Input
+                      type="tel"
+                      inputMode="tel"
+                      value={salesPhoneForwardTo}
+                      onChange={(event) => setSalesPhoneForwardTo(event.target.value)}
+                      disabled={salesEmailLoading || salesPhoneSaving}
+                      placeholder="forward calls to"
+                      aria-label="Forward calls to"
+                      className="h-10"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => void handleSaveSalesPhone()}
+                      disabled={salesEmailLoading || salesPhoneSaving}
+                    >
+                      {salesPhoneSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                      Save phone
                     </Button>
-                  )}
-                  {!entitlement?.isAmbassador && (
+                  </div>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Status: {salesPhoneNumberStatus}. Incoming calls to {salesAssignedPhoneNumber || 'your assigned FLYR number'} forward to {salesPhoneForwardTo || 'your phone once saved'}.
+                  </p>
+                </CardContent>
+              </Card>
+            </>
+          ) : (
+            <Card>
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <CreditCard className="w-5 h-5" />
+                  <CardTitle>Subscription</CardTitle>
+                </div>
+                <CardDescription>
+                  Manage your subscription and billing
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <p className="text-base font-medium dark:text-white">Plan</p>
+                      {entitlementError ? (
+                        <Badge variant="outline">Unavailable</Badge>
+                      ) : entitlement?.isAmbassador ? (
+                        <Badge className="bg-red-500 hover:bg-red-600">AMBASSADOR</Badge>
+                      ) : entitlement?.is_active && (entitlement.plan === 'pro' || entitlement.plan === 'team') ? (
+                        <Badge className="bg-green-500 hover:bg-green-600">Pro</Badge>
+                      ) : (
+                        <Badge variant="outline">Free</Badge>
+                      )}
+                    </div>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      {entitlementError
+                        ? 'Could not load plan details.'
+                        : entitlement?.isAmbassador
+                        ? 'You have Pro-level access through the FLYR Ambassador Program.'
+                        : entitlement?.is_active
+                        ? 'You have access to all Pro features'
+                        : 'Upgrade to Pro for unlimited QR codes and advanced features'}
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    {!entitlementError && !entitlement?.is_active && !entitlement?.isAmbassador && (
+                      <Button onClick={handleUpgrade} size="sm" disabled={upgradeLoading}>
+                        {upgradeLoading ? 'Redirecting…' : 'Upgrade to Pro'}
+                      </Button>
+                    )}
+                    {!entitlement?.isAmbassador && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleManageBilling}
+                        disabled={portalLoading}
+                      >
+                        {portalLoading ? 'Opening…' : 'Manage billing'}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {!isSalespersonSettings ? <PowerDialerSettingsCard /> : null}
+
+          {!isSalespersonSettings ? (
+            <>
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center gap-2">
+                    <Plug className="w-5 h-5" />
+                    <CardTitle>Integrations</CardTitle>
+                  </div>
+                  <CardDescription>
+                    Connect your CRM and other tools
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-base font-medium dark:text-white mb-1">CRM Connections</p>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        Sync leads to Follow Up Boss and other CRMs
+                      </p>
+                    </div>
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={handleManageBilling}
-                      disabled={portalLoading}
+                      onClick={() => router.push('/settings/integrations')}
                     >
-                      {portalLoading ? 'Opening…' : 'Manage billing'}
+                      <Plug className="w-4 h-4 mr-2" />
+                      Manage
                     </Button>
-                  )}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+                  </div>
+                </CardContent>
+              </Card>
 
-          <PowerDialerSettingsCard />
-
-          {/* Integrations Section */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <Plug className="w-5 h-5" />
-                <CardTitle>Integrations</CardTitle>
-              </div>
-              <CardDescription>
-                Connect your CRM and other tools
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-base font-medium dark:text-white mb-1">CRM Connections</p>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    Sync leads to Follow Up Boss and other CRMs
-                  </p>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => router.push('/settings/integrations')}
-                >
-                  <Plug className="w-4 h-4 mr-2" />
-                  Manage
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <Flag className="w-5 h-5" />
-                <CardTitle>Challenges</CardTitle>
-              </div>
-              <CardDescription>
-                View active global and team challenges from Settings
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-base font-medium dark:text-white mb-1">Challenge center</p>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    Track progress, review upcoming challenges, and check completed runs.
-                  </p>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => router.push('/settings/challenges')}
-                >
-                  <Flag className="w-4 h-4 mr-2" />
-                  Open Challenges
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center gap-2">
+                    <Flag className="w-5 h-5" />
+                    <CardTitle>Challenges</CardTitle>
+                  </div>
+                  <CardDescription>
+                    View active global and team challenges from Settings
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-base font-medium dark:text-white mb-1">Challenge center</p>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        Track progress, review upcoming challenges, and check completed runs.
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => router.push('/settings/challenges')}
+                    >
+                      <Flag className="w-4 h-4 mr-2" />
+                      Open Challenges
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </>
+          ) : null}
 
           {/* Appearance Section */}
           <Card>

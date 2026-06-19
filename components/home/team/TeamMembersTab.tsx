@@ -87,6 +87,12 @@ type BillingEntitlement = {
   upgrade_price_id?: string;
 };
 
+type BillingMutationResponse = {
+  error?: string;
+  url?: string;
+  maxSeats?: number;
+};
+
 type RosterResponse = {
   workspace?: {
     trialActive?: boolean;
@@ -313,9 +319,13 @@ export function TeamMembersTab(props: TeamMembersTabProps) {
           credentials: 'include',
           body: JSON.stringify({ seats: targetSeats }),
         });
-        const payload = (await response.json().catch(() => null)) as { error?: string; maxSeats?: number } | null;
+        const payload = (await response.json().catch(() => null)) as BillingMutationResponse | null;
         if (!response.ok) {
           throw new Error(payload?.error ?? 'Failed to update paid seats');
+        }
+        if (payload?.url) {
+          window.location.href = payload.url;
+          return 'redirected';
         }
         if (options?.showNotice !== false) {
           const updatedSeats = payload?.maxSeats ?? targetSeats;

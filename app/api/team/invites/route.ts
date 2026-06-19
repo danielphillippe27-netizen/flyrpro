@@ -261,16 +261,45 @@ export async function POST(request: NextRequest) {
         !Number.isNaN(existingInviteExpiresAt.getTime()) &&
         existingInviteExpiresAt > now
       ) {
-        return NextResponse.json(
-          {
-            error: 'A pending invite already exists for that email',
-            invite: {
-              ...existingInvite,
-              join_url: existingInvite.token ? buildJoinUrl(request, existingInvite.token) : '',
-            },
+        const joinUrl = existingInvite.token ? buildJoinUrl(request, existingInvite.token) : '';
+        const workspaceName = await getWorkspaceName(admin, context.workspaceId);
+        let emailSent = false;
+        let emailError: string | null = getInviteMailerConfigError();
+
+        if (!emailError) {
+          try {
+            await sendWorkspaceInviteEmail({
+              to: email,
+              joinUrl,
+              workspaceName,
+              role: existingInvite.role,
+              inviterEmail: requestUser.email,
+              expiresAt: existingInvite.expires_at,
+              subjectPrefix: 'Reminder:',
+            });
+            emailSent = true;
+            emailError = null;
+            await updateWorkspaceInviteRecord(admin, existingInvite.id, {
+              last_sent_at: now.toISOString(),
+              updated_at: now.toISOString(),
+            });
+          } catch (sendError) {
+            emailError =
+              sendError instanceof Error ? sendError.message : 'Invite exists, but email failed to send.';
+            console.error('[team/invites] resend existing invite email error:', sendError);
+          }
+        }
+
+        return NextResponse.json({
+          success: true,
+          alreadyPending: true,
+          emailSent,
+          emailError,
+          invite: {
+            ...existingInvite,
+            join_url: joinUrl,
           },
-          { status: 409 }
-        );
+        });
       }
 
       const recycledToken = crypto.randomUUID();

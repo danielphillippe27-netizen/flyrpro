@@ -32,6 +32,7 @@ export class ContactsService {
   private static client = createClient();
 
   private static getErrorMessage(error: unknown): string {
+    if (error instanceof Error) return error.message;
     if (!error || typeof error !== 'object') return '';
     if ('message' in error && typeof (error as { message?: unknown }).message === 'string') {
       return (error as { message: string }).message;
@@ -39,14 +40,19 @@ export class ContactsService {
     return '';
   }
 
-  private static isMissingContactsColumn(error: unknown, column: string): boolean {
-    const message = this.getErrorMessage(error).toLowerCase();
-    return (
-      message.includes(`column contacts.${column}`) ||
-      message.includes(`column "${column}"`) ||
-      message.includes(`'${column}' column`) ||
-      message.includes(`${column} does not exist`)
-    );
+  private static parseJsonResponse(text: string): unknown {
+    if (!text.trim()) return null;
+    try {
+      return JSON.parse(text);
+    } catch {
+      return null;
+    }
+  }
+
+  private static getResponseFallbackMessage(response: Response, text: string): string {
+    const plainText = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    const details = plainText ? `: ${plainText.slice(0, 220)}` : '';
+    return `Contact create request failed (${response.status} ${response.statusText || 'Error'})${details}`;
   }
 
   private static normalizeLegacyStatus(status?: string | null): Contact['status'] {
@@ -291,11 +297,11 @@ export class ContactsService {
 
     const insertPayload = {
       user_id: userId,
-      workspace_id: workspaceId ?? undefined,
+      workspaceId: workspaceId ?? undefined,
       full_name: full_name,
       phone: payload.phone,
       email: payload.email,
-      address: payload.address,
+      address: payload.address ?? '',
       campaign_id: payload.campaign_id,
       farm_id: payload.farm_id,
       status: payload.status,
@@ -305,36 +311,22 @@ export class ContactsService {
       follow_up_at: payload.follow_up_at ?? undefined,
       appointment_at: payload.appointment_at ?? undefined,
       tags: payload.tags ?? undefined,
+      address_id: payload.address_id ?? undefined,
     };
 
-    let { data, error } = await this.client
-      .from('contacts')
-      .insert(insertPayload)
-      .select()
-      .single();
+    const response = await fetch('/api/contacts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(insertPayload),
+    });
+    const responseText = await response.text().catch(() => '');
+    const data = this.parseJsonResponse(responseText);
 
-    const optionalColumns = ['source', 'last_contacted', 'follow_up_at', 'appointment_at'] as const;
-    const missingOptionalColumns = optionalColumns.filter((column) =>
-      this.isMissingContactsColumn(error, column)
-    );
-
-    if (error && missingOptionalColumns.length > 0) {
-      const fallbackPayload = { ...insertPayload };
-      for (const column of missingOptionalColumns) {
-        delete (fallbackPayload as Partial<typeof insertPayload>)[column];
-      }
-
-      const retryResult = await this.client
-        .from('contacts')
-        .insert(fallbackPayload)
-        .select()
-        .single();
-
-      data = retryResult.data;
-      error = retryResult.error;
+    if (!response.ok) {
+      throw new Error(this.getErrorMessage(data) || this.getResponseFallbackMessage(response, responseText));
     }
 
-    if (error) throw error;
     const contact = data as Contact;
     await this.syncContactCalendarEvents(contact);
     return contact;
@@ -478,27 +470,19 @@ export class ContactsService {
     return updatedContact;
   }
 
-  /**
-   * Update createContact to optionally accept address_id and auto-link
-   * This is a wrapper that calls linkContactToAddress after creation if address_id is provided
-   */
   static async createContactWithAddress(
     userId: string,
     payload: CreateContactPayload & { address_id?: string },
     workspaceId?: string | null
   ): Promise<Contact> {
-    // Create contact first
     const contact = await this.createContact(userId, payload, workspaceId);
 
-    // If address_id is provided, link it
     if (payload.address_id) {
-      const linkedContact = await this.linkContactToAddress(contact.id, payload.address_id);
       await this.syncContactTimingToAddressOutcome({
         ...payload,
-        campaign_id: linkedContact.campaign_id ?? payload.campaign_id,
-        address_id: linkedContact.address_id ?? payload.address_id,
+        campaign_id: contact.campaign_id ?? payload.campaign_id,
+        address_id: contact.address_id ?? payload.address_id,
       });
-      return linkedContact;
     }
 
     return contact;

@@ -7,7 +7,7 @@ export type PostAuthRedirect =
   | { redirect: 'login'; path: '/login' }
   | { redirect: 'join'; path: string }
   | { redirect: 'onboarding'; path: string }
-  | { redirect: 'subscribe'; path: '/subscribe' }
+  | { redirect: 'subscribe'; path: '/subscribe' | '/subscribe?reason=trial-ended' }
   | { redirect: 'contact-owner'; path: '/subscribe?reason=member-inactive' }
   | { redirect: 'dashboard'; path: string };
 
@@ -115,6 +115,8 @@ export async function getPostAuthRedirectForUserId(
   const subscriptionStatus = workspace.subscription_status ?? 'inactive';
   const trialEndsAt = workspace.trial_ends_at ? new Date(workspace.trial_ends_at) : null;
   const onboardingComplete = !!workspace.onboarding_completed_at;
+  const trialExpired =
+    subscriptionStatus === 'trialing' && !!trialEndsAt && trialEndsAt <= new Date();
   const hasDashboardAccess =
     subscriptionStatus === 'active' ||
     (subscriptionStatus === 'trialing' && (!trialEndsAt || trialEndsAt > new Date()));
@@ -140,7 +142,7 @@ export async function getPostAuthRedirectForUserId(
   }
 
   if ((access.level === 'solo_owner' || access.level === 'team_leader') && !effectiveAccess) {
-    return { redirect: 'subscribe', path: '/subscribe' };
+    return { redirect: 'subscribe', path: trialExpired ? '/subscribe?reason=trial-ended' : '/subscribe' };
   }
 
   return { redirect: 'dashboard', path: next || '/home' };

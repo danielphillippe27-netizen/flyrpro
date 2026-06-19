@@ -9,6 +9,18 @@ export const AMBASSADOR_LANDING_DEFAULTS = {
 } as const;
 
 export const FLYR_PUBLIC_ORIGIN = 'https://flyr.software';
+export const AMBASSADOR_RE_TEAM_SOURCE = 'ambassador';
+export const AMBASSADOR_RE_TEAM_CAMPAIGN = 're-team';
+export const AMBASSADOR_RE_TEAM_DEMO_VIDEO_URL =
+  'https://d34c49t0gfk0ai.cloudfront.net/demo-video/demo-video.mp4';
+
+export const AMBASSADOR_RE_TEAM_LANDING_COPY = {
+  headline: 'Field prospecting built for real estate teams.',
+  introMessage:
+    'Give every agent a clear territory, track every door, and turn real-world prospecting into team visibility.',
+  offerText:
+    'Watch the demo, then start a 14 day free trial with this ambassador link.',
+} as const;
 
 export const AMBASSADOR_RESERVED_SLUGS = new Set([
   'admin',
@@ -92,6 +104,10 @@ export function buildLegacyPublicLandingPath(slug: string, source?: string | nul
   if (normalizedCampaign) params.set('campaign', normalizedCampaign);
   const query = params.toString();
   return `/p/${encodeURIComponent(slug)}${query ? `?${query}` : ''}`;
+}
+
+export function buildAmbassadorReTeamLandingPath(slug: string): string {
+  return buildPublicLandingPath(slug, AMBASSADOR_RE_TEAM_SOURCE, AMBASSADOR_RE_TEAM_CAMPAIGN);
 }
 
 export function withOrigin(origin: string, path: string): string {

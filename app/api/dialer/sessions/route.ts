@@ -136,7 +136,7 @@ async function buildSessionResponse(
 
   const leads = ((leadRows ?? []) as DialerSessionLead[]).map((lead) => ({
     ...lead,
-    contact: contactsById[lead.contact_id],
+    contact: lead.contact_id ? contactsById[lead.contact_id] : undefined,
   }));
   const calls = (callRows ?? []) as DialerCall[];
 

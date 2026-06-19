@@ -5,9 +5,11 @@ type RegionBoundsRow = {
 };
 
 const SUPPORTED_REGION_CODES = new Set(
-  (regionBounds as RegionBoundsRow[])
-    .map((row) => row.code.trim().toUpperCase())
-    .filter((code) => code.length > 0)
+  [
+    ...(regionBounds as RegionBoundsRow[]).map((row) => row.code.trim().toUpperCase()),
+    'NSW',
+    'QLD',
+  ].filter((code) => code.length > 0)
 );
 
 export function normalizeRegionCode(regionCode: string | null | undefined): string | null {

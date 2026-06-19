@@ -13,6 +13,7 @@ import { buildPartnerOfferMetadata } from '@/lib/offers/partnerOfferMetadata';
 import { isPartnerOfferTeamExclusiveOnboarding } from '@/components/offers/partnerOfferUtils';
 import { loadPublicAmbassadorLandingBySlug } from '@/app/lib/ambassador/public-landing';
 import { isMissingAmbassadorSchemaError } from '@/app/lib/billing/ambassador-program';
+import { sanitizeTrackingParam } from '@/app/lib/ambassador/portal';
 
 type Params = {
   params: Promise<{ slug: string }>;
@@ -71,18 +72,29 @@ export default async function PartnerOfferVanityPage({ params, searchParams }: P
       notFound();
     }
 
+    const landingPageEvent = {
+      ambassador_application_id: landingPage.ambassador.id,
+      landing_page_id: landingPage.id,
+      slug: landingPage.slug,
+      event_type: 'view',
+      source: sanitizeTrackingParam(query?.source),
+      campaign: sanitizeTrackingParam(query?.campaign),
+    };
+
     await admin
       .from('ambassador_landing_page_events')
-      .insert({
-        ambassador_application_id: landingPage.ambassador.id,
-        landing_page_id: landingPage.id,
-        slug: landingPage.slug,
-        event_type: 'view',
-      })
+      .insert(landingPageEvent)
       .then(({ error }) => {
         if (error && !isMissingAmbassadorSchemaError(error.message)) {
           console.warn('[ambassador vanity page] view tracking failed', error);
         }
+        if (!error || !isMissingAmbassadorSchemaError(error.message)) return null;
+        return admin.from('ambassador_landing_page_events').insert({
+          ambassador_application_id: landingPageEvent.ambassador_application_id,
+          landing_page_id: landingPageEvent.landing_page_id,
+          slug: landingPageEvent.slug,
+          event_type: landingPageEvent.event_type,
+        });
       });
 
     return (

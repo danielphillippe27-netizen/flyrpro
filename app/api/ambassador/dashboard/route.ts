@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireApprovedAmbassadorApi, ensureApprovedAmbassadorReferralCode } from '@/app/lib/billing/ambassador-access';
-import { buildPublicLandingPath, withFlyrOrigin } from '@/app/lib/ambassador/portal';
+import {
+  AMBASSADOR_RE_TEAM_CAMPAIGN,
+  buildAmbassadorReTeamLandingPath,
+  buildPublicLandingPath,
+  withFlyrOrigin,
+} from '@/app/lib/ambassador/portal';
 import { getOrCreateAmbassadorLandingPage } from '@/app/lib/ambassador/landing-page';
 import { isMissingAmbassadorSchemaError } from '@/app/lib/billing/ambassador-program';
 
@@ -30,6 +35,9 @@ export async function GET(request: NextRequest) {
       landingPageViews,
       workspaceCount,
       paidActiveReferralCount,
+      reTeamLandingPageViews,
+      reTeamClicks,
+      reTeamSignupCount,
       pendingCommissionsRes,
       paidCommissionsRes,
       recentCommissionsRes,
@@ -58,6 +66,27 @@ export async function GET(request: NextRequest) {
           .select('id', { count: 'exact', head: true })
           .eq('ambassador_application_id', ambassador.id)
           .eq('status', 'active')
+      ),
+      safeExactCount(
+        admin
+          .from('ambassador_landing_page_events')
+          .select('id', { count: 'exact', head: true })
+          .eq('ambassador_application_id', ambassador.id)
+          .eq('campaign', AMBASSADOR_RE_TEAM_CAMPAIGN)
+      ),
+      safeExactCount(
+        admin
+          .from('ambassador_click_events')
+          .select('id', { count: 'exact', head: true })
+          .eq('ambassador_application_id', ambassador.id)
+          .eq('campaign', AMBASSADOR_RE_TEAM_CAMPAIGN)
+      ),
+      safeExactCount(
+        admin
+          .from('ambassador_referrals')
+          .select('id', { count: 'exact', head: true })
+          .eq('ambassador_application_id', ambassador.id)
+          .eq('campaign', AMBASSADOR_RE_TEAM_CAMPAIGN)
       ),
       admin
         .from('ambassador_commissions')
@@ -114,6 +143,10 @@ export async function GET(request: NextRequest) {
       referralCode,
       shareLink: withFlyrOrigin(buildPublicLandingPath(landingPage.slug)),
       landingPageUrl: withFlyrOrigin(buildPublicLandingPath(landingPage.slug)),
+      reTeamLink: withFlyrOrigin(buildAmbassadorReTeamLandingPath(landingPage.slug)),
+      reTeamLandingPageViews,
+      reTeamClicks,
+      reTeamSignupCount,
       commissionRate: ambassador.commission_rate_bps / 100,
       commissionDurationMonths: ambassador.commission_duration_months,
       totalClicks,

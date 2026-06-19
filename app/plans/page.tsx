@@ -20,7 +20,7 @@ const proFeatures = [
 
 const teamFeatures = [
   { text: 'Everything in Pro', bold: true },
-  { text: '2 seats included in base price' },
+  { text: 'Simple per-user seat pricing' },
   { text: 'Invite / remove team members' },
   { text: 'Roles & permissions (Admin, Member)' },
   { text: 'Assign territories & campaigns to teammates' },
@@ -53,9 +53,24 @@ export default function PlansPage() {
               features={proFeatures}
               cta={
                 <>
-                  <p className="text-center text-base font-semibold text-zinc-800">
-                    CA$39.99 / month
-                  </p>
+                  <div className="text-center text-base font-semibold text-zinc-800">
+                    <p className="text-xs uppercase tracking-[0.2em] text-emerald-600">
+                      50% off
+                    </p>
+                    <p className="mt-1">
+                      <span className="mr-2 text-zinc-400 line-through">
+                        CA$80
+                      </span>
+                      CA$40 / month
+                    </p>
+                    <p className="text-sm text-zinc-500">
+                      or{' '}
+                      <span className="mr-1 text-zinc-400 line-through">
+                        $60 USD
+                      </span>
+                      $30 USD / month
+                    </p>
+                  </div>
                   <Link
                     href={loginRedirect}
                     className="inline-flex h-11 w-full items-center justify-center rounded-2xl bg-zinc-900 text-sm font-semibold text-white transition hover:bg-zinc-700"
@@ -72,9 +87,6 @@ export default function PlansPage() {
               cta={
                 <>
                   <TeamSeatSelector />
-                  <p className="text-center text-base font-semibold text-zinc-800">
-                    CA$79.99 / month + CA$30 per seat
-                  </p>
                   <Link
                     href={loginRedirect}
                     className="inline-flex h-11 w-full items-center justify-center rounded-2xl bg-zinc-900 text-sm font-semibold text-white transition hover:bg-zinc-700"

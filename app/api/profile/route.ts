@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { normalizeCountryCode } from '@/lib/countries';
+import { normalizePhoneNumber } from '@/lib/dialer/phone';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 
 /**
@@ -15,16 +16,27 @@ export async function GET(request: NextRequest) {
     }
 
     const supabase = createAdminClient();
-    const {
-      data: { user },
-    } = await supabase.auth.admin.getUserById(requestUser.id);
-    const { data: profile, error: profileError } = await supabase
-      .from('user_profiles')
-      .select(
-        'first_name, last_name, country_code, industry, brokerage_name, quote, avatar_url, is_founder'
-      )
-      .eq('user_id', requestUser.id)
-      .maybeSingle();
+    const [
+      {
+        data: { user },
+      },
+      { data: profile, error: profileError },
+      { data: publicProfile, error: publicProfileError },
+    ] = await Promise.all([
+      supabase.auth.admin.getUserById(requestUser.id),
+      supabase
+        .from('user_profiles')
+        .select(
+          'first_name, last_name, country_code, industry, brokerage_name, quote, avatar_url, is_founder'
+        )
+        .eq('user_id', requestUser.id)
+        .maybeSingle(),
+      supabase
+        .from('profiles')
+        .select('phone_number')
+        .eq('id', requestUser.id)
+        .maybeSingle(),
+    ]);
 
     if (profileError) {
       console.error('Profile GET error:', profileError);
@@ -32,6 +44,9 @@ export async function GET(request: NextRequest) {
         { error: 'Failed to load profile' },
         { status: 500 }
       );
+    }
+    if (publicProfileError) {
+      console.warn('Profile GET public profile lookup error:', publicProfileError);
     }
 
     const fullName =
@@ -56,6 +71,7 @@ export async function GET(request: NextRequest) {
       brokerage_name: profile?.brokerage_name ?? null,
       quote: profile?.quote ?? null,
       avatar_url: avatarUrl,
+      phone_number: publicProfile?.phone_number ?? null,
       is_founder: !!profile?.is_founder,
     });
   } catch (err) {
@@ -88,6 +104,7 @@ export async function PATCH(request: NextRequest) {
       last_name,
       industry,
       country_code,
+      phone_number,
       brokerage_name,
       quote,
       avatar_url,
@@ -99,6 +116,7 @@ export async function PATCH(request: NextRequest) {
       last_name?: string | null;
       industry?: string | null;
       country_code?: string | null;
+      phone_number?: string | null;
       brokerage_name?: string | null;
       quote?: string | null;
       avatar_url?: string | null;
@@ -138,6 +156,17 @@ export async function PATCH(request: NextRequest) {
     if (country_code !== undefined) {
       updates.country_code = normalizeCountryCode(country_code);
     }
+    const normalizedPhone = normalizePhoneNumber(phone_number ?? undefined);
+    if (
+      typeof phone_number === 'string' &&
+      phone_number.trim().length > 0 &&
+      (!normalizedPhone.isValid || !normalizedPhone.e164)
+    ) {
+      return NextResponse.json(
+        { error: normalizedPhone.error ?? 'Phone number must be valid.' },
+        { status: 400 }
+      );
+    }
     if (brokerage_name !== undefined) {
       updates.brokerage_name =
         typeof brokerage_name === 'string'
@@ -171,36 +200,55 @@ export async function PATCH(request: NextRequest) {
           { status: 500 }
         );
       }
+    }
 
-      // Mirror name fields into public.profiles so list/admin views stay consistent.
-      if (first_name !== undefined || last_name !== undefined || country_code !== undefined) {
-        const normalizedFirstName =
-          typeof first_name === 'string' ? first_name.trim() || null : null;
-        const normalizedLastName =
-          typeof last_name === 'string' ? last_name.trim() || null : null;
-        const normalizedCountryCode = normalizeCountryCode(country_code);
-        const fullName =
-          [normalizedFirstName, normalizedLastName]
-            .filter((part): part is string => typeof part === 'string' && part.length > 0)
-            .join(' ')
-            .trim() || null;
-        const mirrorUpdates = {
-          ...(first_name !== undefined ? { first_name: normalizedFirstName } : {}),
-          ...(last_name !== undefined ? { last_name: normalizedLastName } : {}),
-          ...(country_code !== undefined ? { country_code: normalizedCountryCode } : {}),
-          ...(first_name !== undefined || last_name !== undefined ? { full_name: fullName } : {}),
-          updated_at: new Date().toISOString(),
-        };
+    // Mirror fields into public.profiles so list/admin views and dialer callbacks stay consistent.
+    if (
+      first_name !== undefined ||
+      last_name !== undefined ||
+      country_code !== undefined ||
+      phone_number !== undefined
+    ) {
+      const normalizedFirstName =
+        typeof first_name === 'string' ? first_name.trim() || null : null;
+      const normalizedLastName =
+        typeof last_name === 'string' ? last_name.trim() || null : null;
+      const normalizedCountryCode = normalizeCountryCode(country_code);
+      const fullName =
+        [normalizedFirstName, normalizedLastName]
+          .filter((part): part is string => typeof part === 'string' && part.length > 0)
+          .join(' ')
+          .trim() || null;
+      const mirrorUpdates = {
+        ...(first_name !== undefined ? { first_name: normalizedFirstName } : {}),
+        ...(last_name !== undefined ? { last_name: normalizedLastName } : {}),
+        ...(country_code !== undefined ? { country_code: normalizedCountryCode } : {}),
+        ...(first_name !== undefined || last_name !== undefined ? { full_name: fullName } : {}),
+        ...(phone_number !== undefined
+          ? {
+              phone_number:
+                typeof phone_number === 'string' && phone_number.trim().length === 0
+                  ? null
+                  : normalizedPhone.e164,
+            }
+          : {}),
+        updated_at: new Date().toISOString(),
+      };
 
-        const admin = createAdminClient();
-        const { error: mirrorProfileError } = await admin
-          .from('profiles')
-          .update(mirrorUpdates)
-          .eq('id', user.id);
+      const admin = createAdminClient();
+      const { error: mirrorProfileError } = await admin
+        .from('profiles')
+        .upsert(
+          {
+            id: user.id,
+            email: user.email ?? null,
+            ...mirrorUpdates,
+          },
+          { onConflict: 'id' }
+        );
 
-        if (mirrorProfileError) {
-          console.warn('Profile PATCH: failed to mirror names into profiles', mirrorProfileError);
-        }
+      if (mirrorProfileError) {
+        console.warn('Profile PATCH: failed to mirror profile fields', mirrorProfileError);
       }
     }
 

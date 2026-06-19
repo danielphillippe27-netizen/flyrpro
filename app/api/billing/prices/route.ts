@@ -46,7 +46,7 @@ export async function GET() {
     prices.push({
       priceId: STRIPE_PRICE_CAD_MONTHLY,
       name: 'Pro Monthly',
-      amount: '39.99',
+      amount: '40',
       period: '/month',
       currency: 'CAD',
       interval: 'month',

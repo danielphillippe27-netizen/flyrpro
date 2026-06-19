@@ -1,8 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Download, Plus, Upload } from 'lucide-react';
+import { Loader2, PhoneCall, Plus, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -20,12 +20,13 @@ import { ContactsService } from '@/lib/services/ContactsService';
 import { CampaignsService } from '@/lib/services/CampaignsService';
 import { FarmService } from '@/lib/services/FarmService';
 import { SmartListsService } from '@/lib/services/SmartListsService';
-import { StatsService } from '@/lib/services/StatsService';
-import type { CampaignV2, Contact, Farm, UserStats } from '@/types/database';
+import { StatsService, type DialerCallListStats } from '@/lib/services/StatsService';
+import type { CampaignV2, Contact, Farm } from '@/types/database';
 import type { SmartListCriteria, WorkspaceSmartList } from '@/types/smart-lists';
 import { createClient } from '@/lib/supabase/client';
 import { useWorkspace } from '@/lib/workspace-context';
 import { getIndustryCopy, type IndustryCopy } from '@/lib/industry-copy';
+import { DemoContextNudge } from '@/components/onboarding/DemoGettingStartedPanel';
 
 type TeamMemberOption = {
   user_id: string;
@@ -36,22 +37,27 @@ type TeamRosterResponse = {
   members?: TeamMemberOption[];
 };
 
+type DiallerImportResponse = {
+  leads?: Array<{ id: string }>;
+  importedCount?: number;
+  error?: string;
+};
+
 const LEAD_RECORD_NAV_STORAGE_KEY = 'flyr:leads:record-contact-ids';
 const LEAD_LIST_SIDEBAR_COLLAPSED_KEY = 'flyr-lead-list-sidebar-collapsed';
 const LIST_SIDEBAR_WIDTH = 280;
 const ALL_LEADS_LIST_ID = 'all';
 const inFlightLeadWorkspaceIds = new Set<string>();
+const EMPTY_DIALER_CALL_STATS: DialerCallListStats = {
+  totalCalls: 0,
+  newCallsThisWeek: 0,
+  connectedCalls: 0,
+  connectedCallsThisWeek: 0,
+  lastStatusByContactId: {},
+};
 
-function escapeCsv(value: string | null | undefined): string {
-  const safe = value ?? '';
-  if (/[",\n]/.test(safe)) {
-    return `"${safe.replace(/"/g, '""')}"`;
-  }
-  return safe;
-}
-
-function slugify(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+function isWorkedContact(contact: Contact): boolean {
+  return Boolean(contact.last_contacted) || contact.status !== 'new';
 }
 
 function buildListCriteria(baseKind: SmartListCriteria['baseKind'], overrides?: Partial<SmartListCriteria>): SmartListCriteria {
@@ -114,16 +120,20 @@ export function ContactsHubView() {
   const [farms, setFarms] = useState<Farm[]>([]);
   const [workspaceSmartLists, setWorkspaceSmartLists] = useState<WorkspaceSmartList[]>([]);
   const [selectedContactIds, setSelectedContactIds] = useState<string[]>([]);
-  const [statsByUserId, setStatsByUserId] = useState<Record<string, UserStats>>({});
+  const [dialerCallStats, setDialerCallStats] = useState<DialerCallListStats>(EMPTY_DIALER_CALL_STATS);
+  const [dialerCallStatsLoading, setDialerCallStatsLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [sendingToDialler, setSendingToDialler] = useState(false);
+  const [diallerError, setDiallerError] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [teamMembers, setTeamMembers] = useState<TeamMemberOption[]>([]);
   const [selectedMemberId, setSelectedMemberId] = useState<string>('all');
   const [selectedListId, setSelectedListId] = useState<string>(ALL_LEADS_LIST_ID);
   const [listSidebarCollapsed, setListSidebarCollapsed] = useState(false);
+  const selectedUrlListIdRef = useRef<string | null>(null);
   const currentRole = currentWorkspaceId ? membershipsByWorkspaceId[currentWorkspaceId] : null;
   const canFilterByMembers = currentRole === 'owner' || currentRole === 'admin';
 
@@ -166,23 +176,11 @@ export function ContactsHubView() {
           : Promise.resolve([] as WorkspaceSmartList[]),
       ]);
 
-      const statsUsers = members.length > 0 ? members.map((member) => member.user_id) : [currentUserId];
-      const statsRows =
-        statsUsers.length > 1
-          ? await StatsService.fetchUserStatsForUsers(statsUsers)
-          : [await StatsService.fetchUserStats(statsUsers[0])].filter((value): value is UserStats => Boolean(value));
-
       setContacts(contactsData);
       setCampaigns(campaignsData);
       setFarms(farmsData);
       setWorkspaceSmartLists(smartListsData);
       setTeamMembers(members);
-      setStatsByUserId(
-        statsRows.reduce<Record<string, UserStats>>((acc, stat) => {
-          acc[stat.user_id] = stat;
-          return acc;
-        }, {})
-      );
       setLoadError(false);
     } catch (error) {
       console.error('Error loading contacts or stats:', error);
@@ -192,7 +190,6 @@ export function ContactsHubView() {
       setFarms([]);
       setWorkspaceSmartLists([]);
       setTeamMembers([]);
-      setStatsByUserId({});
     } finally {
       inFlightLeadWorkspaceIds.delete(loadKey);
       setLoading(false);
@@ -241,26 +238,15 @@ export function ContactsHubView() {
     setSelectedMemberId('all');
   }, [teamMembers, selectedMemberId]);
 
-  const memberNameById = useMemo(
-    () =>
-      teamMembers.reduce<Record<string, string>>((acc, member) => {
-        acc[member.user_id] = member.display_name;
-        return acc;
-      }, {}),
-    [teamMembers]
-  );
-
   const memberScopedContacts = useMemo(() => {
     if (selectedMemberId === 'all') return contacts;
     return contacts.filter((contact) => contact.user_id === selectedMemberId);
   }, [contacts, selectedMemberId]);
 
-  const visibleStats = useMemo(() => {
-    if (selectedMemberId === 'all') {
-      return StatsService.aggregateUserStats(Object.values(statsByUserId), 'all');
-    }
-    return statsByUserId[selectedMemberId] ?? null;
-  }, [selectedMemberId, statsByUserId]);
+  const workedContacts = useMemo(
+    () => memberScopedContacts.filter(isWorkedContact),
+    [memberScopedContacts]
+  );
 
   const allLeadsList = useMemo(() => buildAllLeadsList(copy), [copy]);
 
@@ -285,6 +271,19 @@ export function ContactsHubView() {
     [workspaceSmartLists]
   );
 
+  useEffect(() => {
+    if (selectedUrlListIdRef.current === null) {
+      selectedUrlListIdRef.current = new URLSearchParams(window.location.search).get('listId') || '';
+    }
+
+    const requestedListId = selectedUrlListIdRef.current;
+    if (!requestedListId || selectedListId === requestedListId) return;
+    const availableIds = new Set(customLists.map((list) => list.id));
+    if (availableIds.has(requestedListId)) {
+      setSelectedListId(requestedListId);
+    }
+  }, [customLists, selectedListId]);
+
   const builtInLists = useMemo(
     () => [allLeadsList, ...campaignLists, ...farmLists],
     [allLeadsList, campaignLists, farmLists]
@@ -302,17 +301,45 @@ export function ContactsHubView() {
   }, [builtInLists, customLists, selectedListId]);
 
   const visibleContacts = useMemo(() => {
-    if (selectedList.id === ALL_LEADS_LIST_ID) return memberScopedContacts;
+    if (selectedList.id === ALL_LEADS_LIST_ID) return workedContacts;
     return filterContactsBySmartList(memberScopedContacts, selectedList);
-  }, [memberScopedContacts, selectedList]);
+  }, [memberScopedContacts, selectedList, workedContacts]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const contactIds = visibleContacts.map((contact) => contact.id);
+
+    if (!currentWorkspaceId || contactIds.length === 0) {
+      setDialerCallStats(EMPTY_DIALER_CALL_STATS);
+      setDialerCallStatsLoading(false);
+      return;
+    }
+
+    setDialerCallStatsLoading(true);
+    StatsService.fetchDialerCallStatsForContacts(currentWorkspaceId, contactIds)
+      .then((stats) => {
+        if (!cancelled) setDialerCallStats(stats);
+      })
+      .catch((error) => {
+        console.error('Error loading dialer call stats:', error);
+        if (!cancelled) setDialerCallStats(EMPTY_DIALER_CALL_STATS);
+      })
+      .finally(() => {
+        if (!cancelled) setDialerCallStatsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentWorkspaceId, visibleContacts]);
 
   const builtInListItems = useMemo(
     () =>
       builtInLists.map((list) => ({
         ...list,
-        count: list.id === ALL_LEADS_LIST_ID ? memberScopedContacts.length : filterContactsBySmartList(memberScopedContacts, list).length,
+        count: list.id === ALL_LEADS_LIST_ID ? workedContacts.length : filterContactsBySmartList(memberScopedContacts, list).length,
       })),
-    [builtInLists, memberScopedContacts]
+    [builtInLists, memberScopedContacts, workedContacts]
   );
 
   const customListItems = useMemo(
@@ -344,46 +371,51 @@ export function ContactsHubView() {
     setSelectedContactIds((current) => current.filter((id) => visibleIds.has(id)));
   }, [visibleContacts]);
 
-  const handleExportContacts = () => {
-    if (visibleContacts.length === 0) return;
+  const handleSendListToDialler = async () => {
+    if (!currentWorkspaceId || visibleContacts.length === 0) return;
 
-    const headers = ['Name', 'Phone', 'Email', 'Address', 'Status', 'Lists', 'Last Contacted', 'Created'];
-    if (canFilterByMembers) headers.splice(4, 0, 'Member');
+    const diallerRows = visibleContacts
+      .map((contact) => ({
+        name: contact.full_name?.trim() || 'Lead',
+        phone: contact.phone?.trim() || '',
+        company: contact.address?.trim() || null,
+        email: contact.email?.trim() || null,
+      }))
+      .filter((row) => row.phone.length > 0);
 
-    const rows = visibleContacts.map((contact) => {
-      const values = [
-        contact.full_name,
-        contact.phone ?? '',
-        contact.email ?? '',
-        contact.address ?? '',
-        contact.status,
-        (contactListLabelsById[contact.id] ?? []).join(' | '),
-        contact.last_contacted ?? '',
-        contact.created_at,
-      ];
+    if (diallerRows.length === 0) {
+      setDiallerError('This list does not have any phone numbers to send to the dialler.');
+      return;
+    }
 
-      if (canFilterByMembers) {
-        values.splice(4, 0, memberNameById[contact.user_id] ?? 'Member');
+    setSendingToDialler(true);
+    setDiallerError(null);
+
+    try {
+      const response = await fetch('/api/dialer/leads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          workspaceId: currentWorkspaceId,
+          leads: diallerRows,
+        }),
+      });
+      const data = (await response.json().catch(() => ({}))) as DiallerImportResponse;
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to move this list to the dialler.');
       }
 
-      return values.map((value) => escapeCsv(String(value ?? ''))).join(',');
-    });
-
-    const csv = [headers.join(','), ...rows].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    const selectedMemberLabel =
-      selectedMemberId === 'all'
-        ? 'all-members'
-        : slugify(memberNameById[selectedMemberId] ?? 'member') || 'member';
-
-    link.href = url;
-    link.download = `contacts-${selectedMemberLabel}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+      const leadIds = (data.leads ?? []).map((lead) => lead.id).filter(Boolean);
+      const params = new URLSearchParams();
+      if (leadIds.length > 0) params.set('leadIds', leadIds.join(','));
+      params.set('listName', selectedList.name);
+      router.push(`/dialer?${params.toString()}`);
+    } catch (error) {
+      setDiallerError(error instanceof Error ? error.message : 'Failed to move this list to the dialler.');
+    } finally {
+      setSendingToDialler(false);
+    }
   };
 
   const handleToggleContactSelection = (contactId: string, checked: boolean) => {
@@ -456,6 +488,8 @@ export function ContactsHubView() {
       />
 
       <div className="min-w-0 flex-1 space-y-6 overflow-y-auto overscroll-contain px-4 py-6 sm:px-6 lg:px-8">
+        <DemoContextNudge context="leads" />
+
         <section className="rounded-2xl border border-border bg-card p-5 shadow-sm">
           <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
             <div className="space-y-3">
@@ -489,9 +523,17 @@ export function ContactsHubView() {
                 </Select>
               )}
 
-              <Button variant="outline" onClick={handleExportContacts} disabled={loading || visibleContacts.length === 0}>
-                <Download className="mr-2 h-4 w-4" />
-                {copy.actions.exportContacts}
+              <Button
+                variant="outline"
+                onClick={handleSendListToDialler}
+                disabled={loading || sendingToDialler || !currentWorkspaceId || visibleContacts.length === 0}
+              >
+                {sendingToDialler ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <PhoneCall className="mr-2 h-4 w-4" />
+                )}
+                {sendingToDialler ? 'Moving...' : copy.actions.sendToDialer}
               </Button>
               <Button variant="outline" onClick={() => setImportDialogOpen(true)}>
                 <Upload className="mr-2 h-4 w-4" />
@@ -504,6 +546,12 @@ export function ContactsHubView() {
             </div>
           </div>
         </section>
+
+        {diallerError && (
+          <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3">
+            <p className="text-sm font-medium text-destructive">{diallerError}</p>
+          </div>
+        )}
 
         {loadError && contacts.length === 0 && (
           <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3">
@@ -525,8 +573,8 @@ export function ContactsHubView() {
 
         <LeadsTableView
           contacts={visibleContacts}
-          userStats={visibleStats}
-          loading={loading}
+          callStats={dialerCallStats}
+          loading={loading || dialerCallStatsLoading}
           onContactSelect={handleOpenContact}
           contactListLabelsById={contactListLabelsById}
           selectedContactIds={selectedContactIds}

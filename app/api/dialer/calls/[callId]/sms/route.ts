@@ -14,6 +14,61 @@ type SendSmsPayload = {
 
 const MAX_SMS_BODY_LENGTH = 1000;
 
+function cleanText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function getPayloadText(payload: unknown, key: string): string {
+  if (!payload || typeof payload !== 'object') return '';
+  return cleanText((payload as Record<string, unknown>)[key]);
+}
+
+async function ensureContactForCallSms(params: {
+  context: Exclude<Awaited<ReturnType<typeof getDialerRequestContext>>, NextResponse>;
+  call: DialerCall;
+  now: string;
+}): Promise<string | null> {
+  const existingContactId = cleanText(params.call.contact_id);
+  if (existingContactId) return existingContactId;
+
+  const payload = params.call.status_payload;
+  const name = getPayloadText(payload, 'diallerLeadName') || 'Lead';
+  const phone = getPayloadText(payload, 'diallerLeadPhone') || cleanText(params.call.to_number_raw);
+  const email = getPayloadText(payload, 'diallerLeadEmail') || null;
+
+  const { data, error } = await params.context.admin
+    .from('contacts')
+    .insert({
+      user_id: params.context.requestUser.id,
+      workspace_id: params.context.workspaceId,
+      full_name: name,
+      phone: phone || null,
+      email,
+      address: '',
+      status: 'warm',
+      last_contacted: params.now,
+      created_at: params.now,
+      updated_at: params.now,
+    })
+    .select('id')
+    .single();
+
+  if (error) {
+    console.error('[dialer/sms] failed to create contact for SMS follow-up', error);
+    return null;
+  }
+
+  const contactId = cleanText((data as { id?: unknown } | null)?.id);
+  if (!contactId) return null;
+
+  await Promise.all([
+    params.context.admin.from('dialer_calls').update({ contact_id: contactId, updated_at: params.now }).eq('id', params.call.id),
+    params.context.admin.from('dialer_session_leads').update({ contact_id: contactId, updated_at: params.now }).eq('id', params.call.session_lead_id),
+  ]);
+
+  return contactId;
+}
+
 async function loadAuthorizedCall(
   request: NextRequest,
   workspaceId: string | undefined,
@@ -116,6 +171,10 @@ export async function POST(
     const client = twilio(getTwilioAccountSid(), getTwilioAuthToken());
     const statusCallback = buildPublicTwilioWebhookUrl(request, '/api/twilio/messaging/status');
     const now = new Date().toISOString();
+    const contactId = await ensureContactForCallSms({ context, call, now });
+    if (!contactId) {
+      return NextResponse.json({ error: 'Could not save this lead before sending the text.' }, { status: 500 });
+    }
 
     const message = await client.messages.create({
       from: context.settings.defaultSmsFromNumber,
@@ -127,7 +186,7 @@ export async function POST(
     const insertPayload = {
       workspace_id: context.workspaceId,
       call_id: call.id,
-      contact_id: call.contact_id,
+      contact_id: contactId,
       user_id: context.requestUser.id,
       twilio_message_sid: message.sid,
       from_number_e164: context.settings.defaultSmsFromNumber,
@@ -144,12 +203,12 @@ export async function POST(
     const [{ data: followup, error: insertError }, { error: activityError }, { error: contactError }] = await Promise.all([
       context.admin.from('dialer_sms_followups').insert(insertPayload).select('*').single(),
       context.admin.from('contact_activities').insert({
-        contact_id: call.contact_id,
+        contact_id: contactId,
         type: 'text',
         note: `Dialer SMS follow-up: ${messageBody}`,
         timestamp: now,
       }),
-      context.admin.from('contacts').update({ last_contacted: now, updated_at: now }).eq('id', call.contact_id),
+      context.admin.from('contacts').update({ last_contacted: now, updated_at: now }).eq('id', contactId),
     ]);
 
     if (insertError) {

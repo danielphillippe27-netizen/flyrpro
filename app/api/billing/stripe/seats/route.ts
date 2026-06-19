@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
+import type Stripe from 'stripe';
 import { stripe } from '@/lib/stripe';
 import { createAdminClient } from '@/lib/supabase/server';
 import { getEntitlementForUser } from '@/app/lib/billing/entitlements';
 import { applyStripeSubscriptionUpdate } from '@/app/lib/billing/stripe-subscription-sync';
 import { isStripeSecretKeyConfigured } from '@/app/lib/billing/stripe-env';
+import { planFromStripePriceId } from '@/app/lib/billing/stripe-products';
 import {
   getStripeCrossModeMessage,
   isStripeCrossModeError,
@@ -11,10 +13,31 @@ import {
 } from '@/app/lib/billing/stripe-errors';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 
+function resolvePrimaryPlanItem(
+  subscription: Stripe.Subscription
+): Stripe.SubscriptionItem | null {
+  return (
+    subscription.items?.data?.find((item) => {
+      const priceId = item.price?.id ?? '';
+      return planFromStripePriceId(priceId) !== 'free';
+    }) ??
+    subscription.items?.data?.[0] ??
+    null
+  );
+}
+
+function getOpenHostedInvoiceUrl(subscription: Stripe.Subscription): string | null {
+  const invoice = subscription.latest_invoice;
+  if (!invoice || typeof invoice === 'string') return null;
+  if (invoice.status === 'paid') return null;
+  return invoice.hosted_invoice_url ?? null;
+}
+
 /**
  * POST /api/billing/stripe/seats
  * Body: { seats: number }
- * Updates the current Stripe subscription quantity for paid seats.
+ * Updates the current Stripe subscription quantity for paid seats. Seat increases
+ * create an immediate Stripe invoice and return its hosted payment URL.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -66,7 +89,8 @@ export async function POST(request: NextRequest) {
       const subscription = await stripe.subscriptions.retrieve(
         entitlement.stripe_subscription_id
       );
-      const subscriptionItemId = subscription.items?.data?.[0]?.id;
+      const subscriptionItem = resolvePrimaryPlanItem(subscription);
+      const subscriptionItemId = subscriptionItem?.id;
 
       if (!subscriptionItemId) {
         return NextResponse.json(
@@ -75,15 +99,24 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      updatedSubscription = await stripe.subscriptions.update(subscription.id, {
+      const currentSeats = Math.max(1, subscriptionItem.quantity ?? 1);
+      const isSeatIncrease = seats > currentSeats;
+      const updateParams: Stripe.SubscriptionUpdateParams = {
         items: [
           {
             id: subscriptionItemId,
             quantity: seats,
           },
         ],
-        proration_behavior: 'create_prorations',
-      });
+        proration_behavior: isSeatIncrease ? 'always_invoice' : 'create_prorations',
+      };
+
+      if (isSeatIncrease) {
+        updateParams.payment_behavior = 'pending_if_incomplete';
+        updateParams.expand = ['latest_invoice'];
+      }
+
+      updatedSubscription = await stripe.subscriptions.update(subscription.id, updateParams);
     } catch (error) {
       if (isStripeCrossModeError(error)) {
         return NextResponse.json(
@@ -107,6 +140,15 @@ export async function POST(request: NextRequest) {
 
     const admin = createAdminClient();
     await applyStripeSubscriptionUpdate(admin, requestUser.id, updatedSubscription);
+
+    const hostedInvoiceUrl = getOpenHostedInvoiceUrl(updatedSubscription);
+    if (hostedInvoiceUrl) {
+      return NextResponse.json({
+        success: true,
+        maxSeats: seats,
+        url: hostedInvoiceUrl,
+      });
+    }
 
     return NextResponse.json({
       success: true,

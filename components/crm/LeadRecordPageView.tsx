@@ -4,38 +4,33 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
-  AlertCircle,
-  Calendar,
-  CheckCircle,
   ChevronRight,
   Clock3,
-  FileText,
   Loader2,
   Mail,
   MapPin,
   Mic,
   MicOff,
+  MessageSquare,
+  Pencil,
   Phone,
   PhoneOff,
-  Plus,
   RefreshCw,
-  Upload,
-  Users,
-  Workflow,
+  Send,
+  X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Badge } from '@/components/ui/badge';
 import { ContactsService } from '@/lib/services/ContactsService';
 import { createClient } from '@/lib/supabase/client';
 import { useWorkspace } from '@/lib/workspace-context';
 import { useTwilioDevice } from '@/lib/hooks/useTwilioDevice';
 import { DIALER_DISPOSITION_LABELS, formatDialerCallStatus, isFinalCallStatus } from '@/lib/dialer/constants';
-import { formatPhoneDisplay } from '@/lib/dialer/phone';
-import type { Contact, ContactActivity, DialerCall, DialerCallDisposition, DialerSession, DialerSessionLead } from '@/types/database';
+import { formatPhoneDisplay, normalizePhoneNumber } from '@/lib/dialer/phone';
+import type { Contact, ContactActivity, DialerCall, DialerCallDisposition, DialerInboundMessage, DialerSession, DialerSessionLead } from '@/types/database';
 
 type SessionSummary = {
   total: number;
@@ -60,6 +55,23 @@ type NextLeadResponse = {
   error?: string;
 };
 
+type ComposerMode = 'note' | 'text' | 'email';
+type ContactDraft = {
+  full_name: string;
+  phone: string;
+  email: string;
+  address: string;
+};
+
+type CommunicationItem = {
+  id: string;
+  kind: 'note' | 'message' | 'call';
+  title: string;
+  body?: string;
+  meta: string;
+  timestamp: string;
+};
+
 const LEAD_RECORD_NAV_STORAGE_KEY = 'flyr:leads:record-contact-ids';
 
 function toDateTimeInputValue(value?: string | null): string {
@@ -70,26 +82,10 @@ function toDateTimeInputValue(value?: string | null): string {
   return local.toISOString().slice(0, 16);
 }
 
-function toIsoOrUndefined(value: string): string | undefined {
-  if (!value.trim()) return undefined;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
-}
-
 function toIsoOrNull(value: string): string | null {
   if (!value.trim()) return null;
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
-}
-
-function splitFullName(fullName: string): { firstName: string; lastName: string } {
-  const trimmed = (fullName || '').trim();
-  const space = trimmed.indexOf(' ');
-  if (space <= 0) return { firstName: trimmed, lastName: '' };
-  return {
-    firstName: trimmed.slice(0, space),
-    lastName: trimmed.slice(space + 1).trim(),
-  };
 }
 
 function getInitials(fullName: string): string {
@@ -121,39 +117,14 @@ function formatDateTime(value?: string | null): string {
   return date.toLocaleString();
 }
 
-function splitTags(value?: string | null): string[] {
-  if (!value) return [];
-  return value
-    .split(',')
-    .map((tag) => tag.trim())
-    .filter(Boolean);
-}
-
-function EmptySidebarSection({
-  icon: Icon,
-  title,
-  message,
-}: {
-  icon: typeof Calendar;
-  title: string;
-  message: string;
-}) {
-  return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-        <div className="flex items-center gap-3">
-          <Icon className="h-4 w-4 text-muted-foreground" />
-          <CardTitle className="text-base">{title}</CardTitle>
-        </div>
-        <Button variant="outline" size="icon" className="h-8 w-8 rounded-full">
-          <Plus className="h-4 w-4" />
-        </Button>
-      </CardHeader>
-      <CardContent>
-        <p className="text-sm text-muted-foreground">{message}</p>
-      </CardContent>
-    </Card>
-  );
+function formatDuration(seconds?: number | null): string {
+  const totalSeconds = Math.max(0, Math.floor(seconds ?? 0));
+  const minutes = Math.floor(totalSeconds / 60);
+  const remainder = totalSeconds % 60;
+  if (minutes < 60) return `${minutes}:${String(remainder).padStart(2, '0')}`;
+  const hours = Math.floor(minutes / 60);
+  const minuteRemainder = minutes % 60;
+  return `${hours}h ${minuteRemainder}m`;
 }
 
 export function LeadRecordPageView({ contactId }: { contactId: string }) {
@@ -172,26 +143,23 @@ export function LeadRecordPageView({ contactId }: { contactId: string }) {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const [noteDraft, setNoteDraft] = useState('');
-  const [leadNotes, setLeadNotes] = useState('');
-  const [sourceValue, setSourceValue] = useState('');
-  const [tagsValue, setTagsValue] = useState('');
-  const [lastContactedValue, setLastContactedValue] = useState('');
-  const [pushLoading, setPushLoading] = useState(false);
-  const [pushResult, setPushResult] = useState<'success' | 'error' | null>(null);
-  const [pushMessage, setPushMessage] = useState<string | null>(null);
+  const [emailSubject, setEmailSubject] = useState('');
+  const [editingContact, setEditingContact] = useState(false);
+  const [contactDraft, setContactDraft] = useState<ContactDraft>({
+    full_name: '',
+    phone: '',
+    email: '',
+    address: '',
+  });
+  const [composerMode, setComposerMode] = useState<ComposerMode>('note');
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  const [sendingOutbound, setSendingOutbound] = useState(false);
+  const [contactCalls, setContactCalls] = useState<DialerCall[]>([]);
+  const [inboundMessages, setInboundMessages] = useState<DialerInboundMessage[]>([]);
 
   const [session, setSession] = useState<DialerSession | null>(null);
   const [leads, setLeads] = useState<DialerSessionLead[]>([]);
   const [calls, setCalls] = useState<DialerCall[]>([]);
-  const [summary, setSummary] = useState<SessionSummary>({
-    total: 0,
-    pending: 0,
-    completed: 0,
-    skipped: 0,
-    invalid: 0,
-    callsPlaced: 0,
-    connected: 0,
-  });
   const [activeLeadId, setActiveLeadId] = useState<string | null>(null);
   const [activeCallId, setActiveCallId] = useState<string | null>(null);
   const [refreshingSession, setRefreshingSession] = useState(false);
@@ -292,47 +260,147 @@ export function LeadRecordPageView({ contactId }: { contactId: string }) {
         ? 'Connected'
         : 'Idle';
 
-  const loadActivities = useCallback(async (currentContactId: string) => {
-    setLoadingActivity(true);
+  const communicationItems = useMemo<CommunicationItem[]>(() => {
+    const contactName = contact?.full_name?.trim() || 'Lead';
+    const cleanCommunicationBody = (value?: string | null) =>
+      (value ?? '')
+        .replace(/^Inbound SMS:\s*/i, '')
+        .replace(/^Outbound SMS:\s*/i, '')
+        .replace(/^Outbound email:\s*/i, '')
+        .trim();
+
+    const inboundTextBodies = new Set(
+      inboundMessages.map((item) => item.body.trim()).filter(Boolean)
+    );
+
+    const activityItems = activities
+      .filter((activity) => {
+        if (activity.type === 'text' && activity.note?.startsWith('Inbound SMS:')) {
+          const body = activity.note.replace(/^Inbound SMS:\s*/i, '').trim();
+          return !inboundTextBodies.has(body);
+        }
+        return true;
+      })
+      .map<CommunicationItem>((activity) => {
+        const isMessage = activity.type === 'text' || activity.type === 'email';
+        const title =
+          activity.type === 'note'
+            ? 'Note'
+            : activity.type === 'text'
+              ? contactName
+              : activity.type === 'email'
+                ? contactName
+                : activity.type === 'call'
+                  ? 'Manual call note'
+                  : activity.type;
+        return {
+          id: `activity-${activity.id}`,
+          kind: activity.type === 'call' ? 'call' : isMessage ? 'message' : 'note',
+          title,
+          body: isMessage ? cleanCommunicationBody(activity.note) : activity.note,
+          meta: formatDateTime(activity.timestamp),
+          timestamp: activity.timestamp,
+        };
+      });
+
+    const inboundItems = inboundMessages.map<CommunicationItem>((item) => ({
+      id: `inbound-${item.id}`,
+      kind: 'message',
+      title: contactName,
+      body: item.body,
+      meta: `${formatPhoneDisplay(item.from_number_e164)} • ${formatDateTime(item.received_at)}`,
+      timestamp: item.received_at,
+    }));
+
+    const callItems = contactCalls.map<CommunicationItem>((call) => {
+      const connected = Boolean(call.answered_at || (call.duration_seconds ?? 0) > 0 || call.disposition === 'connected');
+      const duration = (call.duration_seconds ?? 0) > 0 ? `Connected for ${formatDuration(call.duration_seconds)}` : connected ? 'Connected' : 'No connection recorded';
+      const dispositionLabel = call.disposition ? DIALER_DISPOSITION_LABELS[call.disposition] : formatDialerCallStatus(call.status);
+      return {
+        id: `call-${call.id}`,
+        kind: 'call',
+        title: connected ? 'Call connected' : 'Call logged',
+        body: [duration, call.disposition_note].filter(Boolean).join('\n'),
+        meta: `${dispositionLabel} • ${formatDateTime(call.ended_at ?? call.created_at)}`,
+        timestamp: call.ended_at ?? call.created_at,
+      };
+    });
+
+    return [...activityItems, ...inboundItems, ...callItems]
+      .sort((left, right) => new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime());
+  }, [activities, contact?.full_name, contactCalls, inboundMessages]);
+
+  const loadActivities = useCallback(async (currentContactId: string, options?: { silent?: boolean }) => {
+    if (!options?.silent) setLoadingActivity(true);
     try {
-      const data = await ContactsService.fetchActivities(currentContactId);
-      setActivities(data);
+      const supabase = createClient();
+      const [activityRows, callRows, inboundRows] = await Promise.all([
+        ContactsService.fetchActivities(currentContactId),
+        supabase
+          .from('dialer_calls')
+          .select('*')
+          .eq('contact_id', currentContactId)
+          .order('created_at', { ascending: false })
+          .limit(50),
+        supabase
+          .from('dialer_inbound_messages')
+          .select('*')
+          .eq('contact_id', currentContactId)
+          .order('received_at', { ascending: false })
+          .limit(50),
+      ]);
+
+      setActivities(activityRows);
+
+      if (callRows.error) {
+        console.warn('[lead-record] failed to load dialer calls', callRows.error);
+      } else {
+        setContactCalls((callRows.data ?? []) as DialerCall[]);
+      }
+
+      if (inboundRows.error) {
+        console.warn('[lead-record] failed to load inbound texts', inboundRows.error);
+      } else {
+        setInboundMessages((inboundRows.data ?? []) as DialerInboundMessage[]);
+      }
     } catch (error) {
       console.error('Error loading activities:', error);
       setActivities([]);
+      setContactCalls([]);
+      setInboundMessages([]);
     } finally {
-      setLoadingActivity(false);
+      if (!options?.silent) setLoadingActivity(false);
     }
   }, []);
 
   useEffect(() => {
     if (!contact) return;
     setNoteDraft('');
-    setLeadNotes(contact.notes ?? '');
-    setSourceValue(contact.source ?? '');
-    setTagsValue(contact.tags ?? '');
-    setLastContactedValue(toDateTimeInputValue(contact.last_contacted));
-    setPushResult(null);
-    setPushMessage(null);
+    setEmailSubject('');
+    setContactDraft({
+      full_name: contact.full_name,
+      phone: contact.phone ?? '',
+      email: contact.email ?? '',
+      address: contact.address ?? '',
+    });
+    setEditingContact(false);
+    setComposerMode('note');
     setMessage(null);
     void loadActivities(contact.id);
+  }, [contact, loadActivities]);
+
+  useEffect(() => {
+    if (!contact) return;
+    const interval = window.setInterval(() => {
+      void loadActivities(contact.id, { silent: true });
+    }, 8000);
+    return () => window.clearInterval(interval);
   }, [contact, loadActivities]);
 
   const applySessionResponse = useCallback((payload: SessionResponse, currentContactId: string) => {
     setSession(payload.session);
     setLeads(payload.leads ?? []);
     setCalls(payload.calls ?? []);
-    setSummary(
-      payload.summary ?? {
-        total: 0,
-        pending: 0,
-        completed: 0,
-        skipped: 0,
-        invalid: 0,
-        callsPlaced: 0,
-        connected: 0,
-      }
-    );
 
     const nextLead =
       (payload.leads ?? []).find((lead) => lead.contact_id === currentContactId) ??
@@ -383,19 +451,80 @@ export function LeadRecordPageView({ contactId }: { contactId: string }) {
     setAppointmentAt(toDateTimeInputValue(activeCall.appointment_at));
   }, [activeCall]);
 
-  const saveContactPatch = useCallback(async (updates: Partial<Contact>) => {
+  const focusComposer = useCallback((mode: ComposerMode) => {
+    setComposerMode(mode);
+    window.setTimeout(() => composerRef.current?.focus(), 0);
+  }, []);
+
+  const handleSaveContactDetails = useCallback(async () => {
     if (!contact || !userId) return;
+    const fullName = contactDraft.full_name.trim();
+    const phone = contactDraft.phone.trim();
+    const email = contactDraft.email.trim();
+    const address = contactDraft.address.trim();
+
+    if (!fullName) {
+      setMessage({ type: 'error', text: 'Name is required.' });
+      return;
+    }
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setMessage({ type: 'error', text: 'Enter a valid email address.' });
+      return;
+    }
+
+    const normalizedPhone = phone ? normalizePhoneNumber(phone, 'CA') : null;
+    if (phone && !normalizedPhone?.e164) {
+      setMessage({ type: 'error', text: normalizedPhone?.error ?? 'Enter a valid phone number.' });
+      return;
+    }
+
     setSaving(true);
     try {
+      const updates: Partial<Contact> = {
+        full_name: fullName,
+        phone,
+        email,
+        address,
+        phone_e164: normalizedPhone?.e164 ?? '',
+        phone_validation_error: normalizedPhone?.error ?? '',
+      };
+      if (phone) {
+        updates.phone_last_validated_at = new Date().toISOString();
+      }
+
       await ContactsService.updateContact(contact.id, updates);
       await loadContacts(userId);
+      setEditingContact(false);
+      setMessage({ type: 'success', text: 'Contact details saved.' });
     } catch (error) {
-      console.error('Error updating contact:', error);
-      setMessage({ type: 'error', text: 'Unable to save that change right now.' });
+      console.error('Error saving contact details:', error);
+      setMessage({ type: 'error', text: 'Unable to save contact details right now.' });
     } finally {
       setSaving(false);
     }
-  }, [contact, loadContacts, userId]);
+  }, [contact, contactDraft, loadContacts, userId]);
+
+  const handleQuickFollowUp = useCallback(async () => {
+    if (!contact || !userId) return;
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    setSaving(true);
+    setMessage(null);
+    try {
+      await ContactsService.updateContact(contact.id, { follow_up_at: tomorrow, reminder_date: tomorrow });
+      await ContactsService.logActivity({
+        contactId: contact.id,
+        type: 'note',
+        note: `Follow-up scheduled for ${formatDateTime(tomorrow)}.`,
+      });
+      await Promise.all([loadActivities(contact.id), loadContacts(userId)]);
+      setMessage({ type: 'success', text: 'Follow-up set for tomorrow.' });
+    } catch (error) {
+      console.error('Error setting follow-up:', error);
+      setMessage({ type: 'error', text: 'Unable to set that follow-up right now.' });
+    } finally {
+      setSaving(false);
+    }
+  }, [contact, loadActivities, loadContacts, userId]);
 
   const handleLogActivity = useCallback(async (type: 'call' | 'note' | 'text' | 'email', note?: string) => {
     if (!contact || !userId) return;
@@ -414,6 +543,47 @@ export function LeadRecordPageView({ contactId }: { contactId: string }) {
       setSaving(false);
     }
   }, [contact, loadActivities, loadContacts, userId]);
+
+  const handleSendOutbound = useCallback(async () => {
+    if (!contact || !userId || !currentWorkspaceId || composerMode === 'note') return;
+    const body = noteDraft.trim();
+    if (!body) return;
+
+    setSendingOutbound(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/contacts/${contact.id}/outbound`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          workspaceId: currentWorkspaceId,
+          channel: composerMode,
+          body,
+          subject: composerMode === 'email' ? emailSubject.trim() : undefined,
+        }),
+      });
+      const data = (await response.json().catch(() => ({}))) as { error?: string; warning?: string };
+      if (!response.ok) {
+        throw new Error(data.error || `Failed to send ${composerMode === 'email' ? 'email' : 'message'}.`);
+      }
+
+      setNoteDraft('');
+      setEmailSubject('');
+      setMessage({
+        type: 'success',
+        text: data.warning || (composerMode === 'email' ? 'Email sent.' : 'Message sent.'),
+      });
+      await Promise.all([loadActivities(contact.id), loadContacts(userId)]);
+    } catch (error) {
+      setMessage({
+        type: 'error',
+        text: error instanceof Error ? error.message : `Failed to send ${composerMode === 'email' ? 'email' : 'message'}.`,
+      });
+    } finally {
+      setSendingOutbound(false);
+    }
+  }, [composerMode, contact, currentWorkspaceId, emailSubject, loadActivities, loadContacts, noteDraft, userId]);
 
   const createSessionForCurrentContact = useCallback(async (currentContact: Contact) => {
     if (!currentWorkspaceId) {
@@ -491,6 +661,7 @@ export function LeadRecordPageView({ contactId }: { contactId: string }) {
       }
 
       setActiveCallId(data.call.id);
+      setContactCalls((previous) => [data.call as DialerCall, ...previous.filter((call) => call.id !== data.call?.id)]);
       await refreshSession(contact.id, prepared.sessionId);
       await device.startCall(data.call.call_request_id);
     } catch (error) {
@@ -528,7 +699,7 @@ export function LeadRecordPageView({ contactId }: { contactId: string }) {
 
       device.resetEndedPhase();
       setActiveCallId(null);
-      await Promise.all([refreshSession(contact.id, session?.id), loadContacts(userId ?? '')]);
+      await Promise.all([refreshSession(contact.id, session?.id), loadActivities(contact.id), loadContacts(userId ?? '')]);
       if (canGoNext) {
         router.push(`/leads/${orderedContacts[currentIndex + 1].id}`);
       } else {
@@ -542,45 +713,6 @@ export function LeadRecordPageView({ contactId }: { contactId: string }) {
       });
     } finally {
       setSubmittingDisposition(false);
-    }
-  };
-
-  const handlePushToCrm = async () => {
-    if (!contact || !(contact.email || contact.phone) || pushLoading) return;
-
-    setPushLoading(true);
-    setPushResult(null);
-    setPushMessage(null);
-    try {
-      const { firstName, lastName } = splitFullName(contact.full_name);
-      const res = await fetch('/api/integrations/followupboss/push-lead', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          firstName: firstName || undefined,
-          lastName: lastName || undefined,
-          email: contact.email || undefined,
-          phone: contact.phone || undefined,
-          address: contact.address || undefined,
-          message: leadNotes ? `FLYR lead: ${leadNotes}` : 'Lead from FLYR',
-          source: 'FLYR',
-          campaignId: contact.campaign_id || undefined,
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok) {
-        setPushResult('success');
-        setPushMessage(data?.message ?? 'Pushed to Follow Up Boss');
-      } else {
-        setPushResult('error');
-        setPushMessage(data?.error ?? 'Failed to push to CRM');
-      }
-    } catch (error) {
-      console.error('Push to CRM error:', error);
-      setPushResult('error');
-      setPushMessage('Failed to push to CRM');
-    } finally {
-      setPushLoading(false);
     }
   };
 
@@ -616,174 +748,210 @@ export function LeadRecordPageView({ contactId }: { contactId: string }) {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-background">
-      <header className="sticky top-0 z-10 border-b border-border bg-white/95 backdrop-blur dark:bg-card/95">
-        <div className="mx-auto w-full max-w-[1600px] px-4 py-4 sm:px-6 lg:px-8">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-            <div>
-              <div className="text-sm text-muted-foreground">
-                <Link href="/leads" className="hover:text-foreground">
-                  Leads
-                </Link>
-                <span className="mx-2">/</span>
-                <span>{contact.full_name}</span>
-              </div>
-              <h1 className="mt-1 text-2xl font-bold text-foreground">{contact.full_name}</h1>
-              <p className="text-sm text-muted-foreground">
+    <div className="min-h-screen bg-slate-100 text-slate-900 dark:bg-background dark:text-foreground">
+      <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 backdrop-blur dark:border-border dark:bg-card/95">
+        <div className="mx-auto w-full max-w-[1500px] px-4 py-3 sm:px-6 lg:px-8">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <h1 className="truncate text-2xl font-semibold tracking-normal text-slate-950 dark:text-foreground">
+                {contact.full_name}
+              </h1>
+              <p className="text-sm text-slate-500 dark:text-muted-foreground">
                 Last communication {formatRelativeTime(contact.last_contacted)}
               </p>
             </div>
 
-            <div className="flex items-center gap-3 self-end xl:self-auto">
-              <div className="text-sm font-medium text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+              <div className="mr-1 text-sm font-medium text-slate-500 dark:text-muted-foreground">
                 Person {currentIndex >= 0 ? currentIndex + 1 : 1} of {orderedContacts.length}
               </div>
-              <Button variant="outline" onClick={() => router.push('/leads')}>
+              <Button variant="outline" size="sm" onClick={() => router.push('/leads')}>
                 Back to Leads
               </Button>
-              <Button variant="outline" onClick={() => canGoNext && router.push(`/leads/${orderedContacts[currentIndex + 1].id}`)} disabled={!canGoNext || device.isInCall}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => canGoNext && router.push(`/leads/${orderedContacts[currentIndex + 1].id}`)}
+                disabled={!canGoNext || device.isInCall}
+              >
                 Next Person
-                <ChevronRight className="ml-2 h-4 w-4" />
+                <ChevronRight className="ml-1 h-4 w-4" />
               </Button>
             </div>
           </div>
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 lg:px-8">
-        <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)_360px]">
-          <aside className="space-y-6">
-            <Card>
-              <CardContent className="p-6">
-                <div className="flex items-start gap-4">
-                  <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xl font-semibold text-primary">
-                    {getInitials(contact.full_name)}
-                  </div>
-                  <div className="min-w-0">
-                    <div className="truncate text-2xl font-semibold text-foreground">{contact.full_name}</div>
-                    <div className="mt-1 text-sm text-muted-foreground">
-                      Last communication {formatRelativeTime(contact.last_contacted)}
+      <main className="mx-auto w-full max-w-[1500px] px-4 py-4 sm:px-6 lg:px-8">
+        <div className="grid gap-4 lg:grid-cols-[270px_minmax(0,1fr)]">
+          <aside className="space-y-4">
+            <Card className="overflow-hidden border-slate-200 bg-white shadow-sm dark:border-border dark:bg-card">
+              <CardContent className="p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-slate-200 text-base font-semibold text-slate-700 dark:bg-primary/15 dark:text-primary">
+                      {getInitials(editingContact ? contactDraft.full_name || contact.full_name : contact.full_name)}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="truncate text-lg font-semibold text-slate-950 dark:text-foreground">
+                        {editingContact ? contactDraft.full_name || 'Lead' : contact.full_name}
+                      </div>
+                      <div className="mt-0.5 text-xs text-slate-500 dark:text-muted-foreground">
+                        {formatRelativeTime(contact.last_contacted)}
+                      </div>
                     </div>
                   </div>
-                </div>
-
-                <div className="mt-6 space-y-4 text-sm">
-                  <div className="flex items-center gap-3">
-                    <Phone className="h-4 w-4 text-muted-foreground" />
-                    <span>{contact.phone ? formatPhoneDisplay(contact.phone) : 'Add phone'}</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <Mail className="h-4 w-4 text-muted-foreground" />
-                    <span>{contact.email || 'Add email'}</span>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <MapPin className="mt-0.5 h-4 w-4 text-muted-foreground" />
-                    <span>{contact.address || 'No address on file'}</span>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Details</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-5">
-                <div>
-                  <Label>Status</Label>
-                  <div className="mt-2">
-                    <Badge variant="outline" className="capitalize">
-                      {contact.status}
-                    </Badge>
-                  </div>
-                </div>
-
-                <div>
-                  <Label htmlFor="lead-source">Source</Label>
-                  <Input
-                    id="lead-source"
-                    value={sourceValue}
-                    onChange={(event) => setSourceValue(event.target.value)}
-                    onBlur={() => {
-                      const nextValue = sourceValue.trim();
-                      if (nextValue === (contact.source ?? '')) return;
-                      void saveContactPatch({ source: nextValue || undefined });
-                    }}
-                    placeholder="Referral, Website, Open house..."
-                    disabled={saving}
-                    className="mt-2"
-                  />
-                </div>
-
-                <div>
-                  <Label htmlFor="lead-tags">Tags</Label>
-                  <Input
-                    id="lead-tags"
-                    value={tagsValue}
-                    onChange={(event) => setTagsValue(event.target.value)}
-                    onBlur={() => {
-                      const nextValue = tagsValue.trim();
-                      if (nextValue === (contact.tags ?? '')) return;
-                      void saveContactPatch({ tags: nextValue || undefined });
-                    }}
-                    placeholder="Buyer, Import, London Team..."
-                    disabled={saving}
-                    className="mt-2"
-                  />
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {splitTags(tagsValue).map((tag) => (
-                      <Badge key={tag} variant="secondary" className="rounded-full">
-                        {tag}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <Label htmlFor="lead-last-contacted">Last Contacted</Label>
-                  <Input
-                    id="lead-last-contacted"
-                    type="datetime-local"
-                    value={lastContactedValue}
-                    onChange={(event) => setLastContactedValue(event.target.value)}
-                    onBlur={() => {
-                      if (lastContactedValue === toDateTimeInputValue(contact.last_contacted)) return;
-                      void saveContactPatch({ last_contacted: toIsoOrUndefined(lastContactedValue) });
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 shrink-0 px-2 text-xs"
+                    onClick={() => {
+                      if (editingContact) {
+                        setContactDraft({
+                          full_name: contact.full_name,
+                          phone: contact.phone ?? '',
+                          email: contact.email ?? '',
+                          address: contact.address ?? '',
+                        });
+                        setEditingContact(false);
+                        return;
+                      }
+                      setEditingContact(true);
                     }}
                     disabled={saving}
-                    className="mt-2"
-                  />
+                  >
+                    {editingContact ? <X className="mr-1 h-3.5 w-3.5" /> : <Pencil className="mr-1 h-3.5 w-3.5" />}
+                    {editingContact ? 'Cancel' : 'Edit'}
+                  </Button>
                 </div>
-              </CardContent>
-            </Card>
 
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Notes</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <Textarea
-                  value={leadNotes}
-                  onChange={(event) => setLeadNotes(event.target.value)}
-                  onBlur={() => {
-                    const nextValue = leadNotes.trim();
-                    if (nextValue === (contact.notes ?? '')) return;
-                    void saveContactPatch({ notes: nextValue || undefined });
-                  }}
-                  placeholder="Internal notes for this lead..."
-                  className="min-h-[150px]"
-                  disabled={saving}
-                />
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  <Button variant="outline" size="sm" className="h-9 px-2 text-xs" onClick={() => focusComposer('text')}>
+                    <MessageSquare className="mr-1 h-3.5 w-3.5" />
+                    Message
+                  </Button>
+                  <Button variant="outline" size="sm" className="h-9 px-2 text-xs" onClick={() => focusComposer('email')}>
+                    <Mail className="mr-1 h-3.5 w-3.5" />
+                    Email
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-9 px-2 text-xs"
+                    onClick={async () => {
+                      if (!device.isReady) {
+                        setMessage(null);
+                        await device.initialize(currentWorkspaceId ?? '', tabIdRef.current);
+                        return;
+                      }
+                      await handleCallCurrentPerson();
+                    }}
+                    disabled={!currentWorkspaceId || !contact.phone?.trim() || startingCall || device.isInCall || device.setupState === 'initializing'}
+                  >
+                    {startingCall ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Phone className="mr-1 h-3.5 w-3.5" />}
+                    Call
+                  </Button>
+                  <Button variant="outline" size="sm" className="h-9 px-2 text-xs" onClick={handleQuickFollowUp} disabled={saving}>
+                    <Clock3 className="mr-1 h-3.5 w-3.5" />
+                    Follow
+                  </Button>
+                </div>
+
+                {editingContact ? (
+                  <div className="mt-5 space-y-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="lead-full-name" className="text-xs text-slate-500 dark:text-muted-foreground">
+                        Name
+                      </Label>
+                      <Input
+                        id="lead-full-name"
+                        value={contactDraft.full_name}
+                        onChange={(event) => setContactDraft((draft) => ({ ...draft, full_name: event.target.value }))}
+                        className="h-9 bg-white dark:bg-background"
+                        autoFocus
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="lead-phone" className="text-xs text-slate-500 dark:text-muted-foreground">
+                        Phone
+                      </Label>
+                      <Input
+                        id="lead-phone"
+                        value={contactDraft.phone}
+                        onChange={(event) => setContactDraft((draft) => ({ ...draft, phone: event.target.value }))}
+                        placeholder="Phone number"
+                        className="h-9 bg-white dark:bg-background"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="lead-email" className="text-xs text-slate-500 dark:text-muted-foreground">
+                        Email
+                      </Label>
+                      <Input
+                        id="lead-email"
+                        value={contactDraft.email}
+                        onChange={(event) => setContactDraft((draft) => ({ ...draft, email: event.target.value }))}
+                        placeholder="Email address"
+                        type="email"
+                        className="h-9 bg-white dark:bg-background"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="lead-address" className="text-xs text-slate-500 dark:text-muted-foreground">
+                        Address
+                      </Label>
+                      <Textarea
+                        id="lead-address"
+                        value={contactDraft.address}
+                        onChange={(event) => setContactDraft((draft) => ({ ...draft, address: event.target.value }))}
+                        placeholder="Address"
+                        className="min-h-[72px] resize-none bg-white dark:bg-background"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Button variant="outline" size="sm" onClick={() => {
+                        setContactDraft({
+                          full_name: contact.full_name,
+                          phone: contact.phone ?? '',
+                          email: contact.email ?? '',
+                          address: contact.address ?? '',
+                        });
+                        setEditingContact(false);
+                      }} disabled={saving}>
+                        Cancel
+                      </Button>
+                      <Button size="sm" onClick={() => void handleSaveContactDetails()} disabled={saving}>
+                        {saving ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
+                        Save
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-5 space-y-3 text-sm">
+                    <div className="flex items-center gap-2 text-slate-700 dark:text-foreground">
+                      <Phone className="h-4 w-4 shrink-0 text-slate-400 dark:text-muted-foreground" />
+                      <span className="truncate">{contact.phone ? formatPhoneDisplay(contact.phone) : 'Add phone'}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-slate-700 dark:text-foreground">
+                      <Mail className="h-4 w-4 shrink-0 text-slate-400 dark:text-muted-foreground" />
+                      <span className="min-w-0 truncate">{contact.email || 'Add email'}</span>
+                    </div>
+                    <div className="flex items-start gap-2 text-slate-700 dark:text-foreground">
+                      <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-slate-400 dark:text-muted-foreground" />
+                      <span className="line-clamp-2">{contact.address || 'No address on file'}</span>
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </aside>
 
-          <section className="space-y-6">
+          <section className="space-y-4">
             {message && (
               <div
-                className={`rounded-lg border px-4 py-3 text-sm ${
+                className={`rounded-md border px-4 py-3 text-sm ${
                   message.type === 'success'
-                    ? 'border-green-200 bg-green-50 text-green-700 dark:border-green-900 dark:bg-green-950/40 dark:text-green-300'
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300'
                     : 'border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300'
                 }`}
               >
@@ -791,168 +959,106 @@ export function LeadRecordPageView({ contactId }: { contactId: string }) {
               </div>
             )}
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Create Note</CardTitle>
-                <CardDescription>Add notes, log a call, or capture the next action for this person.</CardDescription>
+            <Card className="border-slate-200 bg-white shadow-sm dark:border-border dark:bg-card">
+              <CardHeader className="flex flex-row items-center justify-between gap-3 p-5 pb-3">
+                <div>
+                  <CardTitle className="text-base">New communication</CardTitle>
+                  <CardDescription>Write a note or send a message or email.</CardDescription>
+                </div>
+                <div className="flex rounded-md border border-slate-200 bg-slate-50 p-1 dark:border-border dark:bg-background">
+                  <Button
+                    variant={composerMode === 'note' ? 'default' : 'ghost'}
+                    size="sm"
+                    className="h-8"
+                    onClick={() => focusComposer('note')}
+                  >
+                    Note
+                  </Button>
+                  <Button
+                    variant={composerMode === 'text' ? 'default' : 'ghost'}
+                    size="sm"
+                    className="h-8"
+                    onClick={() => focusComposer('text')}
+                  >
+                    Message
+                  </Button>
+                  <Button
+                    variant={composerMode === 'email' ? 'default' : 'ghost'}
+                    size="sm"
+                    className="h-8"
+                    onClick={() => focusComposer('email')}
+                  >
+                    Email
+                  </Button>
+                </div>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="space-y-3 p-5 pt-0">
+                {composerMode === 'email' && (
+                  <Input
+                    value={emailSubject}
+                    onChange={(event) => setEmailSubject(event.target.value)}
+                    placeholder="Subject"
+                    className="bg-white dark:bg-background"
+                  />
+                )}
                 <Textarea
+                  ref={composerRef}
                   value={noteDraft}
                   onChange={(event) => setNoteDraft(event.target.value)}
-                  placeholder="Add notes or type @name to notify"
-                  className="min-h-[170px]"
+                  placeholder={
+                    composerMode === 'note'
+                      ? 'Add a note...'
+                      : composerMode === 'email'
+                        ? 'Write an email...'
+                        : 'Write a text message...'
+                  }
+                  className="min-h-[130px] resize-y bg-white dark:bg-background"
                 />
-                <div className="flex flex-wrap gap-2">
+                <div className="flex justify-end">
                   <Button
                     onClick={async () => {
                       if (!noteDraft.trim()) return;
-                      await handleLogActivity('note', noteDraft.trim());
-                      setNoteDraft('');
+                      if (composerMode === 'note') {
+                        await handleLogActivity('note', noteDraft.trim());
+                        setNoteDraft('');
+                        return;
+                      }
+                      await handleSendOutbound();
                     }}
-                    disabled={saving || !noteDraft.trim()}
+                    disabled={saving || sendingOutbound || !noteDraft.trim()}
                   >
-                    Create Note
-                  </Button>
-                  <Button variant="outline" onClick={() => void handleLogActivity('email')} disabled={saving}>
-                    Send Email
-                  </Button>
-                  <Button variant="outline" onClick={() => void handleLogActivity('text')} disabled={saving}>
-                    Text
-                  </Button>
-                  <Button variant="outline" onClick={() => void handleLogActivity('call')} disabled={saving}>
-                    Log Call
+                    {sendingOutbound ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : composerMode === 'note' ? null : (
+                      <Send className="mr-2 h-4 w-4" />
+                    )}
+                    {composerMode === 'note' ? 'Save Note' : composerMode === 'email' ? 'Send Email' : 'Send'}
                   </Button>
                 </div>
               </CardContent>
             </Card>
 
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
-                <div>
-                  <CardTitle>Activity Timeline</CardTitle>
-                  <CardDescription>Recent touches, notes, and communication history.</CardDescription>
-                </div>
-                <Button variant="outline" size="sm" onClick={() => void loadActivities(contact.id)} disabled={loadingActivity}>
-                  {loadingActivity ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Refresh'}
-                </Button>
-              </CardHeader>
-              <CardContent>
-                {loadingActivity ? (
-                  <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Loading activity…
+            {(startingCall || device.isInCall || activeCall) && (
+              <Card className="mx-auto max-w-xl border-slate-200 bg-white shadow-sm dark:border-border dark:bg-card">
+                <CardHeader className="p-5 pb-3 text-center">
+                  <CardTitle className="text-base">Call controls</CardTitle>
+                  <CardDescription>Calls are logged automatically when placed.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3 p-5 pt-0">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="rounded-md border border-slate-200 p-3 dark:border-border">
+                      <div className="text-[11px] uppercase tracking-[0.14em] text-slate-500 dark:text-muted-foreground">Device</div>
+                      <div className="mt-1 text-sm font-semibold">{deviceStatusLabel}</div>
+                    </div>
+                    <div className="rounded-md border border-slate-200 p-3 dark:border-border">
+                      <div className="text-[11px] uppercase tracking-[0.14em] text-slate-500 dark:text-muted-foreground">Call</div>
+                      <div className="mt-1 text-sm font-semibold">{startingCall ? 'Calling' : callStatusLabel}</div>
+                    </div>
                   </div>
-                ) : activities.length === 0 ? (
-                  <div className="rounded-xl border border-dashed p-6 text-sm text-muted-foreground">
-                    No activity yet. Create a note or log a call to get started.
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {activities.map((activity) => (
-                      <div key={activity.id} className="rounded-xl border border-border bg-card p-4">
-                        <div className="flex items-start justify-between gap-4">
-                          <div>
-                            <div className="text-sm font-semibold capitalize text-foreground">{activity.type}</div>
-                            <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-                              <Clock3 className="h-3.5 w-3.5" />
-                              {formatDateTime(activity.timestamp)}
-                            </div>
-                          </div>
-                          <Badge variant="outline" className="capitalize">
-                            {activity.type}
-                          </Badge>
-                        </div>
-                        {activity.note && (
-                          <p className="mt-3 whitespace-pre-wrap text-sm text-foreground/90">
-                            {activity.note}
-                          </p>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </section>
-
-          <aside className="space-y-6">
-            <div className="px-1 text-right text-sm font-medium text-muted-foreground">
-              Person {currentIndex >= 0 ? currentIndex + 1 : 1} of {orderedContacts.length}
-            </div>
-
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Dialer</CardTitle>
-                <CardDescription>Put the call controls in reach while you review the lead.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-xl border p-3">
-                    <div className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Device</div>
-                    <div className="mt-1 text-sm font-semibold">{deviceStatusLabel}</div>
-                  </div>
-                  <div className="rounded-xl border p-3">
-                    <div className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Call</div>
-                    <div className="mt-1 text-sm font-semibold">{callStatusLabel}</div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-xl border p-3">
-                    <div className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Pending</div>
-                    <div className="mt-1 text-sm font-semibold">{summary.pending}</div>
-                  </div>
-                  <div className="rounded-xl border p-3">
-                    <div className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Calls</div>
-                    <div className="mt-1 text-sm font-semibold">{summary.callsPlaced}</div>
-                  </div>
-                </div>
-
-                <div className="rounded-xl border p-4">
-                  <div className="text-sm font-medium text-foreground">{contact.full_name}</div>
-                  <div className="mt-1 text-sm text-muted-foreground">
-                    {contact.phone ? formatPhoneDisplay(contact.phone) : 'No phone number on file'}
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {contact.source ? <Badge variant="outline">{contact.source}</Badge> : null}
-                    {splitTags(contact.tags).slice(0, 2).map((tag) => (
-                      <Badge key={tag} variant="secondary">
-                        {tag}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-2">
-                  <Button onClick={async () => {
-                    setMessage(null);
-                    await device.initialize(currentWorkspaceId ?? '', tabIdRef.current);
-                  }} disabled={!currentWorkspaceId || device.setupState === 'initializing'}>
-                    {device.setupState === 'initializing' ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Mic className="mr-2 h-4 w-4" />
-                    )}
-                    Initialize Browser Dialer
-                  </Button>
-
-                  <Button onClick={handleCallCurrentPerson} disabled={!contact.phone?.trim() || !device.isReady || startingCall || device.isInCall}>
-                    {startingCall ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Phone className="mr-2 h-4 w-4" />
-                    )}
-                    Call Current Person
-                  </Button>
 
                   <div className="grid grid-cols-2 gap-2">
                     <Button variant="outline" onClick={device.toggleMute} disabled={!device.isInCall}>
-                      {device.isMuted ? (
-                        <MicOff className="mr-2 h-4 w-4" />
-                      ) : (
-                        <Mic className="mr-2 h-4 w-4" />
-                      )}
+                      {device.isMuted ? <MicOff className="mr-2 h-4 w-4" /> : <Mic className="mr-2 h-4 w-4" />}
                       {device.isMuted ? 'Unmute' : 'Mute'}
                     </Button>
                     <Button variant="destructive" onClick={device.hangUp} disabled={!device.isInCall}>
@@ -961,76 +1067,108 @@ export function LeadRecordPageView({ contactId }: { contactId: string }) {
                     </Button>
                   </div>
 
-                  <Button variant="outline" onClick={() => void refreshSession(contact.id)} disabled={!session?.id || refreshingSession}>
-                    {refreshingSession ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <RefreshCw className="mr-2 h-4 w-4" />
-                    )}
+                  <Button variant="ghost" className="w-full" onClick={() => void refreshSession(contact.id)} disabled={!session?.id || refreshingSession}>
+                    {refreshingSession ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
                     Refresh Dialer
                   </Button>
+
+                  {device.deviceError && (
+                    <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
+                      {device.deviceError}
+                    </div>
+                  )}
+
+                  {activeCall && (
+                    <div className="space-y-3 border-t border-slate-200 pt-3 dark:border-border">
+                      <div>
+                        <div className="text-sm font-medium">Save call outcome</div>
+                        <div className="text-xs text-slate-500 dark:text-muted-foreground">
+                          Current outcome: {DIALER_DISPOSITION_LABELS[disposition]}
+                        </div>
+                      </div>
+                      <Textarea
+                        value={dispositionNote}
+                        onChange={(event) => setDispositionNote(event.target.value)}
+                        placeholder="Add call notes..."
+                        className="min-h-[90px]"
+                      />
+                      <div className="space-y-2">
+                        <Label htmlFor="call-follow-up" className="text-xs">Follow up</Label>
+                        <Input id="call-follow-up" type="datetime-local" value={followUpAt} onChange={(event) => setFollowUpAt(event.target.value)} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="call-appointment" className="text-xs">Appointment</Label>
+                        <Input id="call-appointment" type="datetime-local" value={appointmentAt} onChange={(event) => setAppointmentAt(event.target.value)} />
+                      </div>
+                      <Button className="w-full" onClick={handleSubmitDisposition} disabled={submittingDisposition}>
+                        {submittingDisposition ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                        Save and Continue
+                      </Button>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            <Card className="border-slate-200 bg-white shadow-sm dark:border-border dark:bg-card">
+              <CardHeader className="flex flex-row items-center justify-between gap-3 p-5 pb-3">
+                <div>
+                  <CardTitle className="text-base">Communication</CardTitle>
+                  <CardDescription>Notes, texts, and automatically recorded calls.</CardDescription>
                 </div>
-
-                {device.deviceError && (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
-                    {device.deviceError}
-                  </div>
-                )}
-
-                {activeCall && (
-                  <div className="rounded-xl border p-4">
-                    <div className="text-sm font-medium text-foreground">Save Call Outcome</div>
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      Current outcome: {DIALER_DISPOSITION_LABELS[disposition]}
-                    </div>
-                    <Textarea
-                      value={dispositionNote}
-                      onChange={(event) => setDispositionNote(event.target.value)}
-                      placeholder="Add call notes..."
-                      className="mt-3 min-h-[100px]"
-                    />
-                    <div className="mt-3 grid gap-3">
-                      <Input type="datetime-local" value={followUpAt} onChange={(event) => setFollowUpAt(event.target.value)} />
-                      <Input type="datetime-local" value={appointmentAt} onChange={(event) => setAppointmentAt(event.target.value)} />
-                    </div>
-                    <Button className="mt-3 w-full" onClick={handleSubmitDisposition} disabled={submittingDisposition}>
-                      {submittingDisposition ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                      Save and Continue
-                    </Button>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            <EmptySidebarSection icon={Calendar} title="Appointments" message="No upcoming appointments" />
-            <EmptySidebarSection icon={FileText} title="Files" message="No files yet" />
-            <EmptySidebarSection icon={Users} title="Collaborators" message="No collaborators" />
-            <EmptySidebarSection icon={Workflow} title="Action Plans" message="No action plans running" />
-
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">CRM Sync</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <Button className="w-full" onClick={handlePushToCrm} disabled={!(contact.email || contact.phone) || pushLoading}>
-                  <Upload className="mr-2 h-4 w-4" />
-                  {pushLoading ? 'Pushing…' : 'Push to CRM'}
+                <Button variant="outline" size="sm" onClick={() => void loadActivities(contact.id)} disabled={loadingActivity}>
+                  {loadingActivity ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                 </Button>
-                {pushResult === 'success' && pushMessage && (
-                  <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
-                    <CheckCircle className="h-4 w-4 shrink-0" />
-                    {pushMessage}
+              </CardHeader>
+              <CardContent className="p-5 pt-1">
+                {loadingActivity ? (
+                  <div className="flex items-center gap-2 py-10 text-sm text-slate-500 dark:text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Loading communication…
                   </div>
-                )}
-                {pushResult === 'error' && pushMessage && (
-                  <div className="flex items-center gap-2 text-sm text-destructive">
-                    <AlertCircle className="h-4 w-4 shrink-0" />
-                    {pushMessage}
+                ) : communicationItems.length === 0 ? (
+                  <div className="rounded-md border border-dashed border-slate-300 p-6 text-sm text-slate-500 dark:border-border dark:text-muted-foreground">
+                    No notes or messages yet. Calls and inbound texts will appear here automatically.
+                  </div>
+                ) : (
+                  <div className="divide-y divide-slate-200 dark:divide-border">
+                    {communicationItems.map((item) => (
+                      <div key={item.id} className="flex gap-3 py-4 first:pt-0 last:pb-0">
+                        <div
+                          className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
+                            item.kind === 'call'
+                              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+                              : item.kind === 'message'
+                                ? 'bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300'
+                                : 'bg-slate-100 text-slate-600 dark:bg-background dark:text-muted-foreground'
+                          }`}
+                        >
+                          {item.kind === 'call' ? (
+                            <Phone className="h-4 w-4" />
+                          ) : item.kind === 'message' ? (
+                            <MessageSquare className="h-4 w-4" />
+                          ) : (
+                            <Clock3 className="h-4 w-4" />
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="font-medium text-slate-950 dark:text-foreground">{item.title}</div>
+                            <div className="text-xs text-slate-500 dark:text-muted-foreground">{item.meta}</div>
+                          </div>
+                          {item.body ? (
+                            <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700 dark:text-foreground/90">
+                              {item.body}
+                            </p>
+                          ) : null}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
               </CardContent>
             </Card>
-          </aside>
+          </section>
         </div>
       </main>
     </div>

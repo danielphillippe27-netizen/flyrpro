@@ -1,6 +1,6 @@
 const DIALER_ENABLED_WORKSPACE_IDS_ENV = 'DIALER_ENABLED_WORKSPACE_IDS';
 const DIALER_FOUNDER_BYPASS_EMAILS_ENV = 'DIALER_FOUNDER_BYPASS_EMAILS';
-const DEFAULT_FOUNDER_BYPASS_EMAILS = ['danielfounder@gmail.com'];
+const DEFAULT_FOUNDER_BYPASS_EMAILS = ['danielfounder@gmail.com', 'danielsales@gmail.com'];
 
 function parseWorkspaceIdList(raw: string | undefined): string[] {
   if (!raw) return [];

@@ -146,6 +146,8 @@ const MIN_LINKABLE_BUILDING_AREA_SQM = 30;
 const NEAREST_BUILDING_CANDIDATE_LIMIT = 10;
 const PARCEL_BRIDGE_CONFIDENCE = 0.95;
 const PROXIMITY_CONFIDENCE = 0.80;
+const FOOTPRINT_EDGE_GRACE_CONFIDENCE = 0.90;
+const FOOTPRINT_EDGE_GRACE_METERS = 10;
 const FALLBACK_RADIUS_METERS = 75;
 const PROXIMITY_RADIUS_METERS = 60;
 const MULTI_ADDRESS_NEARBY_RADIUS_METERS = 25;
@@ -523,6 +525,19 @@ export class StableLinkerService {
       .sort((a, b) => this.rankMatches(a, b))[0];
     if (semantic) return this.matchFromCandidate(address, semantic);
 
+    const footprintEdgeMatch = nearby
+      .filter((candidate) => (
+        candidate.distance <= FOOTPRINT_EDGE_GRACE_METERS &&
+        this.hasFootprintEdgeGrace(address, candidate)
+      ))
+      .map((candidate) => ({
+        ...candidate,
+        matchType: 'point_on_surface',
+        confidence: FOOTPRINT_EDGE_GRACE_CONFIDENCE,
+      } satisfies MatchCandidate))
+      .sort((a, b) => this.rankMatches(a, b))[0];
+    if (footprintEdgeMatch) return this.matchFromCandidate(address, footprintEdgeMatch);
+
     const inferredMultiNearby = nearby
       .filter((candidate) => (
         candidate.distance <= MULTI_ADDRESS_NEARBY_RADIUS_METERS &&
@@ -532,6 +547,25 @@ export class StableLinkerService {
     if (inferredMultiNearby) return this.matchFromCandidate(address, inferredMultiNearby);
 
     return this.createMatchResult(address, null, 'orphan', 0, 0, 0);
+  }
+
+  private hasFootprintEdgeGrace(address: CampaignAddressWithPoint, candidate: MatchCandidate): boolean {
+    if (candidate.streetScore >= 0.40) return true;
+
+    const addressStreet = this.normalizeStreet(address.street_name ?? address.formatted);
+    const buildingStreet = this.normalizeStreet(
+      candidate.building.properties.street_name ??
+      candidate.building.properties.primary_street ??
+      candidate.building.properties.name ??
+      candidate.building.properties.address_text
+    );
+    const buildingHouse = this.normalizeHouseNumber(
+      candidate.building.properties.house_number ??
+      candidate.building.properties.address_text ??
+      candidate.building.properties.name
+    );
+
+    return Boolean(addressStreet) && !buildingStreet && !buildingHouse;
   }
 
   private matchFromCandidate(address: CampaignAddressWithPoint, candidate: MatchCandidate): MatchResult {
@@ -1907,6 +1941,7 @@ export class StableLinkerService {
     const proximityMatches = validMatches.filter(
       m =>
         m.matchType === 'parcel_verified' ||
+        m.matchType === 'point_on_surface' ||
         m.matchType === 'proximity_verified' ||
         m.matchType === 'proximity_fallback'
     );

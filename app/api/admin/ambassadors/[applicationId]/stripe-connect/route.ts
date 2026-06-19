@@ -4,6 +4,10 @@ import { requireFounderApi } from '@/app/api/admin/_utils/founder';
 import { stripe } from '@/lib/stripe';
 import { isStripeSecretKeyConfigured } from '@/app/lib/billing/stripe-env';
 import {
+  buildConnectBusinessProfilePrefill,
+  isMissingStripeConnectAccountError,
+} from '@/app/lib/billing/stripe-connect-prefill';
+import {
   ensureAmbassadorReferralCode,
   isMissingAmbassadorSchemaError,
   syncAmbassadorStripePromotionCode,
@@ -152,29 +156,61 @@ export async function POST(
     stripePromotionCodeWarning = promoSync.skippedReason;
 
     let accountId = application.stripe_connect_account_id;
-    if (!accountId) {
+    const businessProfile = buildConnectBusinessProfilePrefill({
+      origin: request.nextUrl.origin,
+      productDescription: 'FLYR ambassador commissions and creator partnership payouts',
+    });
+
+    const createAccount = async () => {
       const account = await stripe.accounts.create({
         type: 'express',
         email: application.email,
         business_type: 'individual',
-        business_profile: {
-          product_description: 'FLYR ambassador commissions and creator partnership payouts',
-        },
+        business_profile: businessProfile,
         metadata: {
           ambassador_application_id: application.id,
           ambassador_name: application.full_name,
           source: 'flyr_ambassador_program',
         },
       });
-      accountId = account.id;
+      return account.id;
+    };
+
+    if (!accountId) {
+      accountId = await createAccount();
+    } else {
+      try {
+        const existingAccount = await stripe.accounts.retrieve(accountId);
+        if (!existingAccount.details_submitted) {
+          await stripe.accounts.update(accountId, {
+            business_profile: businessProfile,
+          });
+        }
+      } catch (error) {
+        if (isMissingStripeConnectAccountError(error)) {
+          accountId = await createAccount();
+        } else {
+          console.warn('[api/admin/ambassadors/:id/stripe-connect] Stripe prefill update failed:', error);
+        }
+      }
     }
 
-    const accountLink = await stripe.accountLinks.create({
-      account: accountId,
-      refresh_url: `${request.nextUrl.origin}/ambassador?stripeOnboarding=refresh`,
-      return_url: `${request.nextUrl.origin}/ambassador?stripeOnboarding=complete`,
-      type: 'account_onboarding',
-    });
+    const createAccountLink = async (stripeAccountId: string) =>
+      stripe.accountLinks.create({
+        account: stripeAccountId,
+        refresh_url: `${request.nextUrl.origin}/ambassador?stripeOnboarding=refresh`,
+        return_url: `${request.nextUrl.origin}/ambassador?stripeOnboarding=complete`,
+        type: 'account_onboarding',
+      });
+
+    let accountLink;
+    try {
+      accountLink = await createAccountLink(accountId);
+    } catch (error) {
+      if (!isMissingStripeConnectAccountError(error)) throw error;
+      accountId = await createAccount();
+      accountLink = await createAccountLink(accountId);
+    }
 
     const account = await stripe.accounts.retrieve(accountId);
 

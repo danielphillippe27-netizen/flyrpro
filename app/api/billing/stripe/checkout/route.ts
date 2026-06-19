@@ -17,6 +17,7 @@ import {
 } from '@/app/lib/billing/stripe-errors';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { WORKSPACE_TRIAL_DAYS } from '@/app/lib/billing/workspace-trial';
+import { getSeatUsage } from '@/app/api/team/_lib/manage';
 
 export async function POST(request: NextRequest) {
   try {
@@ -62,6 +63,7 @@ export async function POST(request: NextRequest) {
       .maybeSingle();
 
     let workspaceSeats = 1;
+    let minimumBillableSeats = 1;
     let workspaceReferralCode: string | null = null;
     let workspaceSubscriptionStatus: string | null = null;
     let workspaceTrialEndsAt: string | null = null;
@@ -71,7 +73,25 @@ export async function POST(request: NextRequest) {
         .select('max_seats, referral_code_used, subscription_status, trial_ends_at')
         .eq('id', ownerMembership.workspace_id)
         .maybeSingle();
-      workspaceSeats = Math.max(1, workspace?.max_seats ?? 1);
+      const workspaceMaxSeats = Math.max(1, workspace?.max_seats ?? 1);
+      const workspaceTrialEnd = workspace?.trial_ends_at
+        ? new Date(workspace.trial_ends_at)
+        : null;
+      const isWorkspaceTrialExpired =
+        workspace?.subscription_status === 'trialing' &&
+        !!workspaceTrialEnd &&
+        workspaceTrialEnd.getTime() <= Date.now();
+      minimumBillableSeats = await getSeatUsage(admin, ownerMembership.workspace_id, {
+        maxSeats: workspace?.max_seats ?? null,
+      })
+        .then((seatUsage) => Math.max(1, seatUsage.seatsUsed))
+        .catch((error) => {
+          console.warn('[billing/stripe/checkout] seat usage lookup failed; falling back to workspace max seats', error);
+          return workspaceMaxSeats;
+        });
+      workspaceSeats = isWorkspaceTrialExpired
+        ? minimumBillableSeats
+        : Math.max(workspaceMaxSeats, minimumBillableSeats);
       workspaceReferralCode =
         typeof workspace?.referral_code_used === 'string' &&
         workspace.referral_code_used.trim().length > 0
@@ -92,7 +112,7 @@ export async function POST(request: NextRequest) {
         ? Math.trunc(requestedSeatsRaw)
         : NaN;
     const quantity = Number.isFinite(parsedRequestedSeats) && parsedRequestedSeats > 0
-      ? Math.min(100, parsedRequestedSeats)
+      ? Math.min(100, Math.max(minimumBillableSeats, parsedRequestedSeats))
       : Math.min(100, workspaceSeats);
     const seatDelta = quantity - workspaceSeats;
     const seatSummaryMessage =
@@ -145,7 +165,7 @@ export async function POST(request: NextRequest) {
             quantity,
             adjustable_quantity: {
               enabled: true,
-              minimum: 1,
+              minimum: minimumBillableSeats,
               maximum: 100,
             },
           },

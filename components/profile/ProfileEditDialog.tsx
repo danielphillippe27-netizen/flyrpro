@@ -70,6 +70,7 @@ export function ProfileEditDialog({
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [countryCode, setCountryCode] = useState('');
+  const [callbackPhone, setCallbackPhone] = useState('');
   const [industry, setIndustry] = useState('');
   const [brokerageName, setBrokerageName] = useState('');
   const [brokerageId, setBrokerageId] = useState<string | null>(null);
@@ -125,6 +126,7 @@ export function ProfileEditDialog({
           setFirstName(profileData.first_name ?? '');
           setLastName(profileData.last_name ?? '');
           setCountryCode(profileData.country_code ?? '');
+          setCallbackPhone(profileData.phone_number ?? '');
           setIndustry(profileData.industry ?? '');
           setBrokerageName(profileData.brokerage_name ?? '');
           setQuote(profileData.quote ?? '');
@@ -238,6 +240,7 @@ export function ProfileEditDialog({
           first_name: firstName.trim() || null,
           last_name: lastName.trim() || null,
           country_code: countryCode || null,
+          phone_number: callbackPhone.trim() || null,
           industry: industry.trim() || null,
           brokerage_name: brokerageName.trim() || null,
           quote: quote.trim().slice(0, 500) || null,
@@ -279,7 +282,7 @@ export function ProfileEditDialog({
         <DialogHeader>
           <DialogTitle>Edit profile</DialogTitle>
           <DialogDescription>
-            Update your photo, name, industry, and quote. Team owners can change the workspace name.
+            Update your photo, contact info, industry, and quote. Team owners can change the workspace name.
           </DialogDescription>
         </DialogHeader>
 
@@ -367,6 +370,18 @@ export function ProfileEditDialog({
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="profile-callback-phone">Callback phone</Label>
+              <Input
+                id="profile-callback-phone"
+                type="tel"
+                value={callbackPhone}
+                onChange={(e) => setCallbackPhone(e.target.value)}
+                placeholder="+1 555 123 4567"
+                autoComplete="tel"
+              />
             </div>
 
             <div className="grid gap-2">

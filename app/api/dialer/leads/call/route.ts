@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import type { Contact, DialerCall, DialerSession, DialerSessionLead, DiallerLead } from '@/types/database';
-import { getDialerRequestContext } from '@/lib/dialer/server';
+import { getDialerRequestContext, type DialerRequestContext } from '@/lib/dialer/server';
 import { normalizePhoneNumber } from '@/lib/dialer/phone';
 
 export const runtime = 'nodejs';
@@ -17,13 +17,13 @@ function cleanText(value: string | null | undefined): string {
   return (value ?? '').trim();
 }
 
-async function findOrCreateContact(
-  context: Exclude<Awaited<ReturnType<typeof getDialerRequestContext>>, NextResponse>,
+async function findExistingContact(
+  context: DialerRequestContext,
   lead: DiallerLead
-): Promise<{ contact: Contact | null; error: string | null }> {
-  const normalized = normalizePhoneNumber(lead.phone);
+): Promise<Contact | null> {
+  const normalizedPhone = normalizePhoneNumber(lead.phone);
   const lookups = [
-    normalized.e164 ? { column: 'phone_e164', value: normalized.e164 } : null,
+    normalizedPhone.e164 ? { column: 'phone_e164', value: normalizedPhone.e164 } : null,
     cleanText(lead.phone) ? { column: 'phone', value: cleanText(lead.phone) } : null,
     cleanText(lead.email) ? { column: 'email', value: cleanText(lead.email) } : null,
   ].filter((lookup): lookup is { column: string; value: string } => Boolean(lookup));
@@ -38,63 +38,13 @@ async function findOrCreateContact(
       .limit(1)
       .maybeSingle();
 
-    if (!error && data) {
-      const now = new Date().toISOString();
-      const { data: updated, error: updateError } = await context.admin
-        .from('contacts')
-        .update({
-          full_name: cleanText(lead.name) || (data as Contact).full_name || 'Lead',
-          phone: cleanText(lead.phone) || (data as Contact).phone || null,
-          phone_e164: normalized.e164,
-          phone_last_validated_at: now,
-          phone_validation_error: normalized.error,
-          email: cleanText(lead.email) || (data as Contact).email || null,
-          notes: cleanText(lead.notes) || (data as Contact).notes || null,
-          updated_at: now,
-        })
-        .eq('id', data.id)
-        .select('*')
-        .single();
-
-      if (updateError) {
-        console.warn('[dialer/leads/call] failed to refresh contact before call', updateError);
-        return { contact: data as Contact, error: null };
-      }
-      return { contact: updated as Contact, error: null };
-    }
-
+    if (!error && data) return data as Contact;
     if (error && error.code !== 'PGRST116') {
       console.warn('[dialer/leads/call] contact lookup failed', error);
     }
   }
 
-  const now = new Date().toISOString();
-  const { data, error } = await context.admin
-    .from('contacts')
-    .insert({
-      user_id: context.requestUser.id,
-      workspace_id: context.workspaceId,
-      full_name: cleanText(lead.name) || 'Lead',
-      phone: cleanText(lead.phone) || null,
-      phone_e164: normalized.e164,
-      phone_last_validated_at: now,
-      phone_validation_error: normalized.error,
-      email: cleanText(lead.email) || null,
-      address: '',
-      status: 'new',
-      notes: cleanText(lead.notes) || null,
-      created_at: now,
-      updated_at: now,
-    })
-    .select('*')
-    .single();
-
-  if (error || !data) {
-    console.error('[dialer/leads/call] failed to create contact', error);
-    return { contact: null, error: 'Failed to prepare this lead for calling.' };
-  }
-
-  return { contact: data as Contact, error: null };
+  return null;
 }
 
 export async function POST(request: NextRequest) {
@@ -129,12 +79,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: normalized.error ?? 'Phone number is invalid.' }, { status: 400 });
   }
 
-  const preparedContact = await findOrCreateContact(context, diallerLead);
-  if (!preparedContact.contact) {
-    return NextResponse.json({ error: preparedContact.error ?? 'Failed to prepare contact.' }, { status: 500 });
-  }
-
   const now = new Date().toISOString();
+  const existingContact = await findExistingContact(context, diallerLead);
+  const contactId = existingContact?.id ?? null;
   const { data: session, error: sessionError } = await context.admin
     .from('dialer_sessions')
     .insert({
@@ -163,7 +110,7 @@ export async function POST(request: NextRequest) {
     .insert({
       session_id: session.id,
       workspace_id: context.workspaceId,
-      contact_id: preparedContact.contact.id,
+      contact_id: contactId,
       position: 1,
       status: 'calling',
       attempt_count: 1,
@@ -184,7 +131,7 @@ export async function POST(request: NextRequest) {
       workspace_id: context.workspaceId,
       session_id: session.id,
       session_lead_id: sessionLead.id,
-      contact_id: preparedContact.contact.id,
+      contact_id: contactId,
       user_id: context.requestUser.id,
       call_request_id: callRequestId,
       to_number_raw: diallerLead.phone,
@@ -194,6 +141,11 @@ export async function POST(request: NextRequest) {
       direction: 'outbound',
       status_payload: {
         diallerLeadId: diallerLead.id,
+        diallerLeadName: cleanText(diallerLead.name) || 'Lead',
+        diallerLeadPhone: cleanText(diallerLead.phone),
+        diallerLeadEmail: cleanText(diallerLead.email) || null,
+        diallerLeadCompany: cleanText(diallerLead.company) || null,
+        salespersonId: context.salesperson?.id ?? null,
         doubleDial: body.doubleDial === true,
       },
     })
@@ -212,7 +164,7 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json({
     call: call as DialerCall,
-    contact: preparedContact.contact,
+    contact: existingContact,
     session: session as DialerSession,
     sessionLead: sessionLead as DialerSessionLead,
   });

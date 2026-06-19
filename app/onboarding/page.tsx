@@ -13,7 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Check, ChevronDown, User, Users, Building2, Plus, Minus } from 'lucide-react';
+import { Check, ChevronDown, User, Users, Building2, Plus, Tag } from 'lucide-react';
 import { ExclusiveOfferArcadeEmbed } from '@/components/landing/ExclusiveOfferArcadeEmbed';
 import { getClientAsync } from '@/lib/supabase/client';
 import { COUNTRY_OPTIONS } from '@/lib/countries';
@@ -32,6 +32,9 @@ type ReferralValidation = {
   referralCode: string;
   trialDays: number;
   ambassadorName?: string | null;
+  partnerName?: string | null;
+  salespersonName?: string | null;
+  referralType?: 'ambassador' | 'salesperson';
 };
 
 const INDUSTRIES_TOP = ['Real Estate', 'Solar', 'Roofing & Exteriors'];
@@ -50,7 +53,7 @@ const INDUSTRIES_REST = [
 
 const SOLO_SEATS = 1;
 const TEAM_MIN_SEATS = 2;
-const MAX_SEATS = 100;
+const MAX_SEATS = 200;
 const FINAL_ONBOARDING_STEP = 6;
 const EXCLUSIVE_ONBOARDING_AUTH_DRAFT_KEY = 'flyr.exclusiveOnboardingAuthDraft';
 
@@ -59,18 +62,18 @@ function getDialerEarlyBirdPricing(countryCode: string): {
   earlyBirdPrice: string;
   regularPrice: string;
 } {
-  if (countryCode === 'US') {
+  if (countryCode === 'CA') {
     return {
-      currencyPrefix: '$',
-      earlyBirdPrice: '30',
-      regularPrice: '60',
+      currencyPrefix: 'CA$',
+      earlyBirdPrice: '40',
+      regularPrice: '80',
     };
   }
 
   return {
-    currencyPrefix: 'CA$',
-    earlyBirdPrice: '40',
-    regularPrice: '80',
+    currencyPrefix: '$',
+    earlyBirdPrice: '30',
+    regularPrice: '60',
   };
 }
 
@@ -527,6 +530,7 @@ function OnboardingContent() {
     workspaceName.trim().length > 0 && industry.length > 0;
   const selectedCountry = COUNTRY_OPTIONS.find((country) => country.code === countryCode);
   const dialerEarlyBirdPricing = getDialerEarlyBirdPricing(countryCode);
+  const dialerPriceCurrencyLabel = countryCode === 'CA' ? 'CAD' : 'USD';
   const filteredCountries = useMemo(() => {
     const query = countrySearchQuery.trim().toLowerCase();
     if (!query) return COUNTRY_OPTIONS;
@@ -642,6 +646,12 @@ function OnboardingContent() {
               : 30,
           ambassadorName:
             typeof payload.ambassadorName === 'string' ? payload.ambassadorName : null,
+          partnerName:
+            typeof payload.partnerName === 'string' ? payload.partnerName : null,
+          salespersonName:
+            typeof payload.salespersonName === 'string' ? payload.salespersonName : null,
+          referralType:
+            payload.referralType === 'salesperson' ? 'salesperson' : 'ambassador',
         });
         return true;
       }
@@ -922,7 +932,13 @@ function OnboardingContent() {
     <div className="dark min-h-screen bg-gradient-to-br from-black to-[#262626] flex flex-col items-center justify-center p-6 pb-28 sm:pb-24 relative overflow-x-hidden overflow-y-auto">
       <div className="absolute inset-0 bg-gradient-to-b from-red-950/40 via-transparent to-black/80 pointer-events-none" />
       <div
-        className={`relative w-full min-w-0 space-y-8 rounded-2xl border border-white/15 bg-white/[0.06] p-6 sm:p-10 backdrop-blur-2xl shadow-[0_24px_70px_rgba(0,0,0,0.6),0_10px_30px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.2)] ${step >= 5 && !(isDialerOnboarding && step === 6) ? 'max-w-5xl' : 'max-w-lg'}`}
+        className={`relative w-full min-w-0 space-y-8 rounded-2xl border border-white/15 bg-white/[0.06] p-6 sm:p-10 backdrop-blur-2xl shadow-[0_24px_70px_rgba(0,0,0,0.6),0_10px_30px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.2)] ${
+          isDialerOnboarding && step === 6
+            ? 'max-w-2xl'
+            : step >= 5
+              ? 'max-w-5xl'
+              : 'max-w-lg'
+        }`}
       >
         {!(isDialerOnboarding && step === 6) && (
           <div className="text-center space-y-2">
@@ -1002,7 +1018,12 @@ function OnboardingContent() {
               e.preventDefault();
               if (!canStep1) return;
               const authReady = await ensureExclusiveAuth();
-              if (authReady) setStep((s) => s + 1);
+              if (!authReady) return;
+              if (isSalespersonOnboarding) {
+                await handleSubmit();
+                return;
+              }
+              setStep((s) => s + 1);
             }}
           >
             <div className="space-y-2">
@@ -1029,7 +1050,12 @@ function OnboardingContent() {
                     e.preventDefault();
                     void (async () => {
                       const authReady = await ensureExclusiveAuth();
-                      if (authReady) setStep((s) => s + 1);
+                      if (!authReady) return;
+                      if (isSalespersonOnboarding) {
+                        await handleSubmit();
+                        return;
+                      }
+                      setStep((s) => s + 1);
                     })();
                   }
                 }}
@@ -1375,38 +1401,25 @@ function OnboardingContent() {
             )}
             {useCase === 'team' && (
               <div className="space-y-2">
-                <Label className="text-base text-white">Members</Label>
-                <div className="flex items-center justify-between rounded-md border border-zinc-600 bg-[#2a2a2a] px-4 py-3">
-                  <span className="text-2xl md:text-2xl text-white tabular-nums">
-                    {seats}
-                  </span>
-                  <div className="flex items-center gap-1">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-10 w-10 text-white hover:bg-zinc-700"
-                      onClick={() =>
-                        setSeats((prev) => Math.max(TEAM_MIN_SEATS, prev - 1))
-                      }
-                      disabled={seats <= TEAM_MIN_SEATS}
-                      aria-label="Decrease seats"
-                    >
-                      <Minus className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-10 w-10 text-white hover:bg-zinc-700"
-                      onClick={() => setSeats((prev) => Math.min(MAX_SEATS, prev + 1))}
-                      disabled={seats >= MAX_SEATS}
-                      aria-label="Increase seats"
-                    >
-                      <Plus className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
+                <Label htmlFor="teamSeats" className="text-base text-white">Members</Label>
+                <Input
+                  id="teamSeats"
+                  type="number"
+                  min={TEAM_MIN_SEATS}
+                  max={MAX_SEATS}
+                  inputMode="numeric"
+                  value={seats}
+                  onChange={(event) => {
+                    const requestedSeats = Number.parseInt(event.target.value, 10);
+                    if (!Number.isFinite(requestedSeats)) {
+                      setSeats(TEAM_MIN_SEATS);
+                      return;
+                    }
+                    setSeats(Math.min(MAX_SEATS, Math.max(TEAM_MIN_SEATS, requestedSeats)));
+                  }}
+                  onFocus={(event) => event.currentTarget.select()}
+                  className="h-16 text-2xl md:text-2xl text-white tabular-nums placeholder:text-gray-500 bg-[#2a2a2a] border-zinc-600 [appearance:textfield] focus-visible:border-white focus-visible:ring-2 focus-visible:ring-white/40 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                />
               </div>
             )}
           </div>
@@ -1416,7 +1429,7 @@ function OnboardingContent() {
           <div className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="referralCode" className="text-base text-white">
-                Ambassador code (optional)
+                Referral code (optional)
               </Label>
               <Input
                 id="referralCode"
@@ -1437,9 +1450,9 @@ function OnboardingContent() {
             </div>
             {referralValidation ? (
               <div className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
-                30-day trial unlocked
-                {referralValidation.ambassadorName
-                  ? ` with ${referralValidation.ambassadorName}`
+                {referralValidation.trialDays}-day trial unlocked
+                {referralValidation.partnerName || referralValidation.ambassadorName || referralValidation.salespersonName
+                  ? ` with ${referralValidation.partnerName || referralValidation.ambassadorName || referralValidation.salespersonName}`
                   : ''}
                 .
               </div>
@@ -1508,31 +1521,34 @@ function OnboardingContent() {
             )}
 
             {isDialerOnboarding ? (
-              <div className="rounded-xl border border-zinc-700 bg-black/30 p-4 space-y-4">
-                <div className="rounded-xl border border-red-500/50 bg-red-500/10 p-4 text-center shadow-[0_18px_45px_rgba(127,29,29,0.22)]">
-                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-red-200">
-                    50% off early bird pricing
-                  </p>
-                  <div className="mt-3 flex items-end justify-center gap-2">
-                    <span className="text-4xl font-black leading-none text-white">
+              <div className="space-y-6">
+                <div className="rounded-[28px] border-2 border-red-500/80 bg-[radial-gradient(circle_at_24%_12%,rgba(239,68,68,0.20),transparent_32%),linear-gradient(135deg,rgba(80,18,18,0.70),rgba(12,12,14,0.92)_58%)] px-8 py-8 shadow-[0_22px_70px_rgba(127,29,29,0.30)] sm:px-10 sm:py-9">
+                  <div className="inline-flex max-w-full flex-wrap items-center gap-3 rounded-full border border-red-500/80 bg-black/20 px-5 py-2 text-sm font-semibold uppercase tracking-[0.18em] text-red-300 sm:flex-nowrap">
+                    <Tag className="h-5 w-5 fill-red-500 text-red-500" aria-hidden />
+                    <span>50% off founding team pricing</span>
+                  </div>
+                  <div className="mt-8 flex flex-wrap items-end gap-x-4 gap-y-2 sm:flex-nowrap">
+                    <span className="text-6xl font-black leading-none text-white drop-shadow-[0_0_18px_rgba(255,255,255,0.22)] sm:text-7xl">
                       {dialerEarlyBirdPricing.currencyPrefix}
                       {dialerEarlyBirdPricing.earlyBirdPrice}
                     </span>
-                    <span className="pb-1 text-sm font-semibold text-zinc-300">/ month</span>
+                    {dialerPriceCurrencyLabel ? (
+                      <span className="pb-2 text-3xl font-extrabold leading-none text-white sm:text-4xl">
+                        {dialerPriceCurrencyLabel}
+                      </span>
+                    ) : null}
+                    <span className="pb-2 text-2xl font-medium leading-none text-zinc-400">
+                      / user / month
+                    </span>
                   </div>
-                  <p className="mt-2 text-sm text-zinc-300">
-                    Regular price{' '}
-                    <span className="font-semibold text-zinc-500 line-through">
+                  <p className="mt-6 text-3xl font-medium text-zinc-500 line-through decoration-red-500/80 decoration-2">
                       {dialerEarlyBirdPricing.currencyPrefix}
                       {dialerEarlyBirdPricing.regularPrice}
-                    </span>
-                    . Price going up soon.
+                      {dialerPriceCurrencyLabel ? ` ${dialerPriceCurrencyLabel}` : ''}
                   </p>
-                  <p className="mt-3 text-lg font-semibold text-white">
-                    Start your 14-day free trial
-                  </p>
-                  <p className="mt-1 text-sm font-medium text-red-100">
-                    No credit card required before sign in.
+                  <div className="mt-8 border-t border-white/10" />
+                  <p className="mt-7 text-xl font-medium text-zinc-300">
+                    14-day free trial. No credit card required.
                   </p>
                 </div>
                 <div className="space-y-2">
@@ -1651,6 +1667,10 @@ function OnboardingContent() {
                   if (!canStep1) return;
                   const authReady = await ensureExclusiveAuth();
                   if (!authReady) return;
+                  if (isSalespersonOnboarding) {
+                    await handleSubmit();
+                    return;
+                  }
                 }
                 if (step === 4) {
                   const referralReady = await validateReferralStep();
@@ -1659,6 +1679,7 @@ function OnboardingContent() {
                 setStep((s) => (!shouldShowReferralStep && s === 3 ? 5 : s + 1));
               }}
               disabled={
+                loading ||
                 authLoading ||
                 referralValidationLoading ||
                 (step === 1 && !canStep1) ||
@@ -1666,7 +1687,9 @@ function OnboardingContent() {
               }
               className="w-full h-14 text-lg font-semibold bg-[#ef4444] text-white hover:bg-[#dc2626] border-0"
             >
-              {authLoading && step === 1
+              {loading && isSalespersonOnboarding
+                ? 'Setting up salesperson workspace…'
+                : authLoading && step === 1
                 ? authMode === 'google'
                   ? 'Continuing with Google…'
                   : authMode === 'apple'
@@ -1702,7 +1725,7 @@ function OnboardingContent() {
                 : isExclusivePartnerOnboarding
                   ? 'Activate 30-day exclusive access'
                   : referralValidation
-                    ? 'Continue for 30-day free trial'
+                    ? `Continue for ${referralValidation.trialDays}-day free trial`
                   : 'Continue for 14-day free trial'}
             </Button>
           )}

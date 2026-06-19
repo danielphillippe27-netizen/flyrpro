@@ -13,6 +13,18 @@ export interface AddressSuggestion {
   };
 }
 
+export interface CitySuggestion {
+  id: string;
+  city: string;
+  region: string;
+  countryCode: string;
+  label: string;
+  coordinate: {
+    latitude: number;
+    longitude: number;
+  };
+}
+
 export interface UserLocation {
   lat: number;
   lng: number;
@@ -114,6 +126,57 @@ export class MapboxAutocompleteService {
     }
   }
 
+  static async searchCities(
+    query: string,
+    proximity?: UserLocation,
+    signal?: AbortSignal
+  ): Promise<CitySuggestion[]> {
+    const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
+
+    if (!mapboxToken) {
+      throw new Error('Mapbox token not configured. Set NEXT_PUBLIC_MAPBOX_TOKEN environment variable.');
+    }
+
+    const encodedQuery = encodeURIComponent(query);
+    const params = new URLSearchParams({
+      access_token: mapboxToken,
+      types: 'place,locality',
+      autocomplete: 'true',
+      fuzzyMatch: 'true',
+      limit: '8',
+      country: 'US,CA,AU,NZ',
+      language: 'en',
+    });
+
+    if (proximity) {
+      params.append('proximity', `${proximity.lng},${proximity.lat}`);
+    }
+
+    const url = `${this.BASE_URL}/${encodedQuery}.json?${params.toString()}`;
+
+    try {
+      const response = await fetch(url, { signal });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Mapbox API error: ${response.status} - ${errorText}`);
+      }
+
+      const data: MapboxResponse = await response.json();
+      return data.features.map((feature) => this.parseCityFeature(feature));
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw error;
+      }
+
+      if (error instanceof Error) {
+        throw error;
+      }
+
+      throw new Error('Unknown error occurred while searching cities');
+    }
+  }
+
   /**
    * Parse a Mapbox feature into AddressSuggestion format
    */
@@ -137,6 +200,28 @@ export class MapboxAutocompleteService {
       id: feature.id,
       title,
       subtitle,
+      coordinate: {
+        latitude,
+        longitude,
+      },
+    };
+  }
+
+  private static parseCityFeature(feature: MapboxFeature): CitySuggestion {
+    const city = feature.text || feature.place_name.split(',')[0]?.trim() || '';
+    const regionContext = feature.context?.find((ctx) => ctx.id.startsWith('region.'));
+    const countryContext = feature.context?.find((ctx) => ctx.id.startsWith('country.'));
+    const region = regionContext?.text ?? '';
+    const countryCode = countryContext?.short_code?.toUpperCase() ?? '';
+    const [longitude, latitude] = feature.center;
+    const label = [city, region, countryCode].filter(Boolean).join(', ');
+
+    return {
+      id: feature.id,
+      city,
+      region,
+      countryCode,
+      label: label || feature.place_name,
       coordinate: {
         latitude,
         longitude,

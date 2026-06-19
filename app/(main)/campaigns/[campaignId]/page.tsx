@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { CampaignsService, type CampaignStats } from '@/lib/services/CampaignsService';
@@ -28,6 +28,7 @@ import { useWorkspace } from '@/lib/workspace-context';
 import { ActivityPageView } from '@/components/activity/ActivityPageView';
 import { CampaignAssignmentView } from '@/components/campaigns/CampaignAssignmentView';
 import { FinancePanel } from '@/components/finance/FinancePanel';
+import { DemoContextNudge } from '@/components/onboarding/DemoGettingStartedPanel';
 import {
   buildLegacyCampaignText,
   isMissingCampaignColumnErrorMessage,
@@ -619,6 +620,7 @@ function CampaignContactsList({
 
 export default function CampaignDetailPage() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const campaignId = params.campaignId as string;
   const { currentWorkspaceId, membershipsByWorkspaceId } = useWorkspace();
   const currentWorkspaceRole = currentWorkspaceId ? membershipsByWorkspaceId[currentWorkspaceId] ?? null : null;
@@ -1278,6 +1280,16 @@ export default function CampaignDetailPage() {
   });
   const hasGeneratedAdvancedQr = formattedRecipients.some((recipient) => Boolean(recipient.qr_code_base64));
   const linkQualityBanner = getLinkQualityBanner(campaign);
+  const campaignRecord = campaign as { tags?: string | null; title?: string | null; name?: string | null };
+  const campaignIsStarterDemo =
+    campaignRecord.tags?.split(',').map((tag) => tag.trim()).includes('starter-demo') ||
+    campaignRecord.name === 'Sugar House Starter Farm' ||
+    campaignRecord.title === 'Sugar House Starter Farm';
+  const requestedTab = searchParams.get('tab');
+  const initialTab =
+    requestedTab && ['map', 'activity', 'addresses', 'contacts', 'qr', 'finance', 'assignments', 'notes'].includes(requestedTab)
+      ? requestedTab
+      : 'map';
 
   return (
     <div className="min-h-full bg-muted/30 dark:bg-background relative">
@@ -1297,6 +1309,7 @@ export default function CampaignDetailPage() {
 
       <main className="w-full px-4 sm:px-6 lg:px-8 py-6 space-y-6">
         <StatsHeader stats={campaignStats} />
+        <DemoContextNudge context="campaign" campaignIsStarter={campaignIsStarterDemo} />
         {linkQualityBanner ? (
           <div className="rounded-xl border border-border bg-card px-4 py-3">
             <div className="flex flex-wrap items-start gap-3">
@@ -1307,7 +1320,7 @@ export default function CampaignDetailPage() {
             </div>
           </div>
         ) : null}
-        <Tabs defaultValue="map" className="w-full">
+        <Tabs defaultValue={initialTab} className="w-full">
           <TabsList>
             <TabsTrigger value="map">Map</TabsTrigger>
             <TabsTrigger value="activity">Activity</TabsTrigger>

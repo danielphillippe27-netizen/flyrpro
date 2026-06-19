@@ -95,7 +95,8 @@ export function filterAddressesAgainstExisting(
 
   for (const address of addresses) {
     const signature = buildAddressIdentity(address);
-    if (existingSignatures.has(signature) || seenThisBatch.has(signature)) {
+    const hasExternalId = Boolean(externalAddressId(address));
+    if ((!hasExternalId && existingSignatures.has(signature)) || seenThisBatch.has(signature)) {
       continue;
     }
     seenThisBatch.add(signature);

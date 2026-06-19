@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 /**
  * GET /api/currency
  * Returns country and currency from request (e.g. Vercel x-vercel-ip-country).
- * Used by subscribe/paywall to show USD vs CAD and Canadian discount.
+ * Used by subscribe/paywall to show USD globally and CAD in Canada.
  * Query ?currency=CAD or ?currency=USD overrides (for testing).
  */
 export async function GET(request: NextRequest) {
@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
     request.headers.get('x-vercel-ip-country') ??
     request.headers.get('cf-ipcountry') ??
     null;
-  // Default to CAD when country unknown (e.g. local dev); US gets USD
-  const currency = country === 'US' ? 'USD' : 'CAD';
-  return NextResponse.json({ country: country ?? 'CA', currency });
+  // Canada gets CAD; every other country, including unknown local dev, gets USD.
+  const currency = country === 'CA' ? 'CAD' : 'USD';
+  return NextResponse.json({ country: country ?? 'US', currency });
 }

@@ -1,8 +1,8 @@
 'use client';
 
 import type { Contact } from '@/types/database';
-import type { UserStats } from '@/types/database';
 import type { IndustryCopy } from '@/lib/industry-copy';
+import type { DialerCallListLastStatus, DialerCallListStats } from '@/lib/services/StatsService';
 import { StatCard } from '@/components/stats/StatCard';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -13,15 +13,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-
-function startOfWeek(d: Date): Date {
-  const date = new Date(d);
-  const day = date.getDay();
-  const diff = date.getDate() - day;
-  date.setDate(diff);
-  date.setHours(0, 0, 0, 0);
-  return date;
-}
 
 function formatCreatedAt(createdAt: string): string {
   try {
@@ -60,9 +51,43 @@ function formatAddressShort(address: string | null | undefined): string {
   return parts.slice(0, 2).join(', ') || '—';
 }
 
+function formatLastDialerStatus(status: DialerCallListLastStatus): string {
+  const disposition = status.disposition?.trim();
+  if (disposition) {
+    const labels: Record<string, string> = {
+      appointment_set: 'Appointment set',
+      bad_number: 'Bad number',
+      callback_requested: 'Callback',
+      connected: 'Connected',
+      do_not_call: 'Do not call',
+      follow_up: 'Follow up',
+      left_voicemail: 'Voicemail',
+      no_answer: 'No answer',
+      not_interested: 'Not interested',
+    };
+    return labels[disposition] ?? disposition.replace(/[_-]/g, ' ');
+  }
+
+  const callStatus = status.status?.trim();
+  if (!callStatus) return '—';
+  const labels: Record<string, string> = {
+    answered: 'Answered',
+    busy: 'Busy',
+    canceled: 'Canceled',
+    completed: 'Completed',
+    failed: 'Failed',
+    initiated: 'Initiated',
+    'in-progress': 'In progress',
+    'no-answer': 'No answer',
+    pending: 'Pending',
+    ringing: 'Ringing',
+  };
+  return labels[callStatus] ?? callStatus.replace(/[_-]/g, ' ');
+}
+
 export function LeadsTableView({
   contacts,
-  userStats,
+  callStats,
   loading,
   onContactSelect,
   contactListLabelsById,
@@ -74,7 +99,7 @@ export function LeadsTableView({
   copy,
 }: {
   contacts: Contact[];
-  userStats: UserStats | null;
+  callStats: DialerCallListStats | null;
   loading: boolean;
   onContactSelect: (contact: Contact) => void;
   contactListLabelsById: Record<string, string[]>;
@@ -92,26 +117,18 @@ export function LeadsTableView({
   };
   const formatPercent = (value: number): string => `${value.toFixed(1)}%`;
 
-  const totalLeads = contacts.length;
-  const weekStart = startOfWeek(new Date()).getTime();
-  const newThisWeek = contacts.filter((c) => new Date(c.created_at).getTime() >= weekStart).length;
-
-  const conversationToLeadRaw =
-    userStats ? toPercent(userStats.leads_created, userStats.conversations) : null;
-  const knockToConversationRaw =
-    userStats ? toPercent(userStats.conversations, userStats.doors_knocked) : null;
-
-  const conversationToLeadRate = formatPercent(conversationToLeadRaw ?? 0);
-  const knockToConversationRate = formatPercent(knockToConversationRaw ?? 0);
+  const totalCalls = callStats?.totalCalls ?? 0;
+  const connectedCalls = callStats?.connectedCalls ?? 0;
+  const connectedCallRate = formatPercent(toPercent(connectedCalls, totalCalls) ?? 0);
 
   return (
     <div className="space-y-6">
       {/* Metric cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label={copy.leads.totalLabel} value={loading ? '…' : totalLeads} />
-        <StatCard label={copy.leads.newThisWeekLabel} value={loading ? '…' : newThisWeek} />
-        <StatCard label={copy.leads.conversionRateLabel} value={loading ? '…' : conversationToLeadRate} />
-        <StatCard label="Knock-to-conversation rate" value={loading ? '…' : knockToConversationRate} />
+        <StatCard label={copy.leads.totalLabel} value={loading ? '…' : totalCalls} />
+        <StatCard label={copy.leads.newThisWeekLabel} value={loading ? '…' : (callStats?.newCallsThisWeek ?? 0)} />
+        <StatCard label={copy.leads.conversionRateLabel} value={loading ? '…' : connectedCallRate} />
+        <StatCard label="Connected calls" value={loading ? '…' : connectedCalls} />
       </div>
 
       {/* Table */}
@@ -140,17 +157,20 @@ export function LeadsTableView({
                 <TableHead>Email</TableHead>
                 <TableHead>Address</TableHead>
                 <TableHead>Lists</TableHead>
+                <TableHead>Last status</TableHead>
                 <TableHead>Last Contacted</TableHead>
                 <TableHead>Created</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {contacts.map((contact) => (
-                <TableRow
-                  key={contact.id}
-                  className="cursor-pointer"
-                  onClick={() => onContactSelect(contact)}
-                >
+              {contacts.map((contact) => {
+                const lastStatus = callStats?.lastStatusByContactId[contact.id];
+                return (
+                  <TableRow
+                    key={contact.id}
+                    className="cursor-pointer"
+                    onClick={() => onContactSelect(contact)}
+                  >
                   <TableCell onClick={(event) => event.stopPropagation()}>
                     <input
                       type="checkbox"
@@ -190,14 +210,24 @@ export function LeadsTableView({
                       )}
                     </div>
                   </TableCell>
+                  <TableCell className="whitespace-nowrap text-muted-foreground">
+                    {lastStatus ? (
+                      <Badge variant="outline" className="rounded-full px-2 py-0 text-[11px] capitalize">
+                        {formatLastDialerStatus(lastStatus)}
+                      </Badge>
+                    ) : (
+                      '—'
+                    )}
+                  </TableCell>
                   <TableCell className="text-muted-foreground whitespace-nowrap">
                     {formatDateTime(contact.last_contacted)}
                   </TableCell>
                   <TableCell className="text-muted-foreground whitespace-nowrap">
                     {formatCreatedAt(contact.created_at)}
                   </TableCell>
-                </TableRow>
-              ))}
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         )}

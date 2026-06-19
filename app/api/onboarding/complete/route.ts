@@ -19,14 +19,26 @@ import {
   validateAmbassadorReferralCodeForOnboarding,
   type ValidAmbassadorReferral,
 } from '@/app/lib/billing/ambassador-program';
-import { resolveActiveSalespersonReferralCode } from '@/app/lib/billing/salespeople';
+import {
+  normalizeSalespersonReferralCodeInput,
+  resolveActiveSalespersonReferralCode,
+} from '@/app/lib/billing/salespeople';
+import {
+  buildConnectBusinessProfilePrefill,
+  buildIndividualConnectPrefill,
+  isMissingStripeConnectAccountError,
+} from '@/app/lib/billing/stripe-connect-prefill';
+import { isStripeSecretKeyConfigured } from '@/app/lib/billing/stripe-env';
 import { sendWorkspaceInviteEmail } from '@/lib/email/resend';
+import { stripe } from '@/lib/stripe';
 import {
   FLYR_PARTNER_FREE_FOREVER_REFERRAL_CODE,
   isFlyrPartnerFreeForeverOffer,
 } from '@/components/offers/partnerOfferUtils';
 import { normalizeCountryCode } from '@/lib/countries';
 import { sanitizeTrackingParam } from '@/app/lib/ambassador/portal';
+import { seedStarterCampaignForWorkspace, type DemoSeedResult } from '@/lib/onboarding/demo';
+import { markConvertedDemoLinks } from '@/lib/dialer/demo-link-tracking';
 
 const INDUSTRIES = [
   'Real Estate',
@@ -45,6 +57,20 @@ const INDUSTRIES = [
 
 const INVITE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
+type SalespersonInviteRow = {
+  id: string;
+  full_name: string;
+  email: string;
+  status: 'active' | 'paused' | 'inactive';
+  referral_code: string | null;
+  founder_user_id: string | null;
+  workspace_id: string | null;
+  invite_token: string | null;
+  approved_at: string | null;
+  onboarding_completed_at: string | null;
+  stripe_connect_account_id: string | null;
+};
+
 function normalizeEmailArray(values: unknown): string[] {
   if (!Array.isArray(values)) return [];
   const result: string[] = [];
@@ -57,6 +83,107 @@ function normalizeEmailArray(values: unknown): string[] {
     result.push(normalized);
   }
   return result;
+}
+
+async function createSalespersonStripeOnboardingRedirect(params: {
+  admin: ReturnType<typeof createAdminClient>;
+  origin: string;
+  salesperson: SalespersonInviteRow;
+}): Promise<string | null> {
+  if (!isStripeSecretKeyConfigured()) return null;
+
+  try {
+    let accountId = params.salesperson.stripe_connect_account_id;
+    const individual = buildIndividualConnectPrefill({
+      email: params.salesperson.email,
+      fullName: params.salesperson.full_name,
+      title: 'Salesperson',
+    });
+    const businessProfile = buildConnectBusinessProfilePrefill({
+      origin: params.origin,
+      productDescription: 'FLYR direct sales commissions and salesperson payouts',
+    });
+
+    const createAccount = async () => {
+      const account = await stripe.accounts.create({
+        type: 'express',
+        email: params.salesperson.email,
+        business_type: 'individual',
+        individual,
+        business_profile: businessProfile,
+        metadata: {
+          salesperson_id: params.salesperson.id,
+          salesperson_name: params.salesperson.full_name,
+          source: 'flyr_salesperson_onboarding',
+        },
+      });
+      return account.id;
+    };
+
+    if (!accountId) {
+      accountId = await createAccount();
+    } else {
+      try {
+        const existingAccount = await stripe.accounts.retrieve(accountId);
+        if (!existingAccount.details_submitted) {
+          await stripe.accounts.update(accountId, {
+            business_profile: businessProfile,
+            individual,
+          });
+        }
+      } catch (error) {
+        if (isMissingStripeConnectAccountError(error)) {
+          accountId = await createAccount();
+        } else {
+          console.warn('[onboarding/complete] salesperson Stripe prefill update failed:', error);
+        }
+      }
+    }
+
+    const refreshUrl = new URL('/onboarding', params.origin);
+    if (params.salesperson.invite_token) {
+      refreshUrl.searchParams.set('salespersonInvite', params.salesperson.invite_token);
+    }
+    refreshUrl.searchParams.set('stripeOnboarding', 'refresh');
+
+    const returnUrl = new URL('/home', params.origin);
+    returnUrl.searchParams.set('stripeOnboarding', 'complete');
+
+    const createAccountLink = async (stripeAccountId: string) =>
+      stripe.accountLinks.create({
+        account: stripeAccountId,
+        refresh_url: refreshUrl.toString(),
+        return_url: returnUrl.toString(),
+        type: 'account_onboarding',
+      });
+
+    let accountLink;
+    try {
+      accountLink = await createAccountLink(accountId);
+    } catch (error) {
+      if (!isMissingStripeConnectAccountError(error)) throw error;
+      accountId = await createAccount();
+      accountLink = await createAccountLink(accountId);
+    }
+
+    const account = await stripe.accounts.retrieve(accountId);
+    await params.admin
+      .from('salespeople')
+      .update({
+        stripe_connect_account_id: accountId,
+        stripe_onboarding_completed: account.details_submitted ?? false,
+        stripe_details_submitted: account.details_submitted ?? false,
+        stripe_charges_enabled: account.charges_enabled ?? false,
+        stripe_payouts_enabled: account.payouts_enabled ?? false,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', params.salesperson.id);
+
+    return accountLink.url;
+  } catch (error) {
+    console.warn('[onboarding/complete] salesperson Stripe onboarding link failed:', error);
+    return null;
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -181,7 +308,7 @@ export async function POST(request: NextRequest) {
       const { data: salesperson, error: salespersonError } = await admin
         .from('salespeople')
         .select(
-          'id, full_name, email, status, referral_code, founder_user_id, workspace_id, invite_token, approved_at, onboarding_completed_at'
+          'id, full_name, email, status, referral_code, founder_user_id, workspace_id, invite_token, approved_at, onboarding_completed_at, stripe_connect_account_id'
         )
         .eq('invite_token', salespersonInviteToken)
         .maybeSingle();
@@ -210,46 +337,75 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const founderUserId =
-        typeof salesperson.founder_user_id === 'string' && salesperson.founder_user_id
-          ? salesperson.founder_user_id
-          : null;
+      const { data: danielSalesUser, error: danielSalesUserError } = await admin
+        .from('profiles')
+        .select('id')
+        .ilike('email', 'danielsales@gmail.com')
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (danielSalesUserError) {
+        console.warn('[onboarding/complete] Daniel sales profile lookup failed', danielSalesUserError);
+      }
+
+      let founderUserId =
+        typeof danielSalesUser?.id === 'string' && danielSalesUser.id
+          ? danielSalesUser.id
+          : typeof salesperson.founder_user_id === 'string' && salesperson.founder_user_id
+            ? salesperson.founder_user_id
+            : null;
+
+      if (!founderUserId) {
+        const { data: authUsers, error: authUserError } = await admin.auth.admin.listUsers();
+        if (authUserError) {
+          console.warn('[onboarding/complete] Daniel sales auth lookup failed', authUserError);
+        }
+        const danielAuthUser = authUsers?.users.find(
+          (user) => user.email?.trim().toLowerCase() === 'danielsales@gmail.com'
+        );
+        founderUserId = danielAuthUser?.id ?? null;
+      }
+
       if (!founderUserId) {
         return NextResponse.json(
-          { error: 'This salesperson invite is missing a founder owner. Create a fresh invite.' },
+          { error: 'The Daniel sales workspace owner is missing. Create danielsales@gmail.com before completing salesperson onboarding.' },
           { status: 400 }
         );
       }
 
       const nowIso = new Date().toISOString();
-      const salespersonWorkspaceName = `FLYR / Salespeople / ${salesperson.full_name}`;
-      let salespersonWorkspaceId =
-        typeof salesperson.workspace_id === 'string' && salesperson.workspace_id
-          ? salesperson.workspace_id
-          : null;
+      let salespersonWorkspaceId: string | null = null;
+
+      const { data: ownerMembership } = await admin
+        .from('workspace_members')
+        .select('workspace_id')
+        .eq('user_id', founderUserId)
+        .eq('role', 'owner')
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      salespersonWorkspaceId = ownerMembership?.workspace_id ?? null;
 
       if (!salespersonWorkspaceId) {
         const { data: createdWorkspace, error: createWorkspaceError } = await admin
           .from('workspaces')
           .insert({
-            name: salespersonWorkspaceName,
+            name: 'Daniel Sales Workspace',
             owner_id: founderUserId,
             industry: typeof industry === 'string' && industry.trim() ? industry.trim() : 'Real Estate',
             subscription_status: 'active',
-            max_seats: 1,
+            max_seats: 200,
             onboarding_completed_at: nowIso,
-            referral_code_used:
-              typeof salesperson.referral_code === 'string' && salesperson.referral_code.trim()
-                ? salesperson.referral_code.trim().toUpperCase()
-                : null,
           })
           .select('id')
           .single();
 
         if (createWorkspaceError || !createdWorkspace?.id) {
-          console.error('Salesperson onboarding: failed to create workspace', createWorkspaceError);
+          console.error('Salesperson onboarding: failed to create shared workspace', createWorkspaceError);
           return NextResponse.json(
-            { error: 'Failed to create salesperson workspace. Please try again.' },
+            { error: 'Failed to create the shared salesperson workspace. Please try again.' },
             { status: 500 }
           );
         }
@@ -259,11 +415,9 @@ export async function POST(request: NextRequest) {
         const { error: updateWorkspaceError } = await admin
           .from('workspaces')
           .update({
-            name: salespersonWorkspaceName,
             owner_id: founderUserId,
-            industry: typeof industry === 'string' && industry.trim() ? industry.trim() : 'Real Estate',
             subscription_status: 'active',
-            max_seats: 1,
+            max_seats: 200,
             onboarding_completed_at: nowIso,
             updated_at: nowIso,
           })
@@ -271,7 +425,7 @@ export async function POST(request: NextRequest) {
 
         if (updateWorkspaceError) {
           return NextResponse.json(
-            { error: 'Failed to update salesperson workspace. Please try again.' },
+            { error: 'Failed to update the shared salesperson workspace. Please try again.' },
             { status: 500 }
           );
         }
@@ -281,9 +435,9 @@ export async function POST(request: NextRequest) {
         .from('workspace_members')
         .upsert(
           {
-            workspace_id: salespersonWorkspaceId,
-            user_id: founderUserId,
-            role: 'owner',
+          workspace_id: salespersonWorkspaceId,
+          user_id: founderUserId,
+          role: 'owner',
             updated_at: nowIso,
           },
           { onConflict: 'workspace_id,user_id' }
@@ -319,9 +473,37 @@ export async function POST(request: NextRequest) {
         .from('user_profiles')
         .upsert({ user_id: userId, current_workspace_id: salespersonWorkspaceId });
 
+      await admin
+        .from('workspace_billing_addons')
+        .upsert(
+          {
+            workspace_id: salespersonWorkspaceId,
+            addon_key: 'power_dialer',
+            status: 'active',
+            quantity: 1,
+            activated_at: nowIso,
+            updated_at: nowIso,
+          },
+          { onConflict: 'workspace_id,addon_key' }
+        );
+
+      await admin
+        .from('workspace_dialer_settings')
+        .upsert(
+          {
+            workspace_id: salespersonWorkspaceId,
+            enabled: true,
+            allow_sms_followup: true,
+            updated_at: nowIso,
+          },
+          { onConflict: 'workspace_id' }
+        );
+
       const { error: salespersonUpdateError } = await admin
         .from('salespeople')
         .update({
+          user_id: userId,
+          founder_user_id: founderUserId,
           workspace_id: salespersonWorkspaceId,
           onboarding_completed_at: nowIso,
           approved_at: salesperson.approved_at ?? nowIso,
@@ -335,10 +517,33 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      await admin
+        .from('salesperson_dialer_settings')
+        .upsert(
+          {
+            salesperson_id: salesperson.id,
+            workspace_id: salespersonWorkspaceId,
+            updated_at: nowIso,
+          },
+          { onConflict: 'salesperson_id' }
+        );
+
+      const stripeOnboardingRedirect = await createSalespersonStripeOnboardingRedirect({
+        admin,
+        origin: request.nextUrl.origin,
+        salesperson: {
+          ...(salesperson as SalespersonInviteRow),
+          workspace_id: salespersonWorkspaceId,
+          onboarding_completed_at: nowIso,
+          approved_at: salesperson.approved_at ?? nowIso,
+        },
+      });
+
       return NextResponse.json({
         success: true,
-        redirect: '/home',
+        redirect: stripeOnboardingRedirect ?? '/home',
         workspaceId: salespersonWorkspaceId,
+        stripeOnboardingRedirect: Boolean(stripeOnboardingRedirect),
       });
     }
 
@@ -461,16 +666,20 @@ export async function POST(request: NextRequest) {
         : industry.trim();
     }
     if (referralCode !== undefined || partnerOfferReferralCode) {
-      const normalizedReferralCode =
+      let normalizedReferralCode =
         partnerOfferReferralCode ??
         (typeof referralCode === 'string' && referralCode.trim()
-          ? normalizeAmbassadorReferralCodeInput(referralCode)
+          ? referralCode.trim().toUpperCase()
           : null);
 
       if (normalizedReferralCode && !partnerOfferReferralCode) {
+        const salespersonReferralCode =
+          normalizeSalespersonReferralCodeInput(normalizedReferralCode);
+        const ambassadorReferralCode =
+          normalizeAmbassadorReferralCodeInput(normalizedReferralCode);
         const [salespersonReferral, ambassadorReferralValidation] = await Promise.all([
-          resolveActiveSalespersonReferralCode(admin, normalizedReferralCode),
-          validateAmbassadorReferralCodeForOnboarding(admin, normalizedReferralCode),
+          resolveActiveSalespersonReferralCode(admin, salespersonReferralCode),
+          validateAmbassadorReferralCodeForOnboarding(admin, ambassadorReferralCode),
         ]);
 
         if (!ambassadorReferralValidation.ok && ambassadorReferralValidation.reason === 'maxed') {
@@ -485,6 +694,9 @@ export async function POST(request: NextRequest) {
         if (ambassadorReferralValidation.ok) {
           onboardingAmbassadorReferral = ambassadorReferralValidation.ambassador;
           normalizedAmbassadorReferralCode = ambassadorReferralValidation.referralCode;
+          normalizedReferralCode = ambassadorReferralValidation.referralCode;
+        } else if (salespersonReferral?.referral_code) {
+          normalizedReferralCode = salespersonReferral.referral_code.trim().toUpperCase();
         } else if (!salespersonReferral) {
           return NextResponse.json(
             {
@@ -519,7 +731,7 @@ export async function POST(request: NextRequest) {
           ? Math.trunc(maxSeats)
           : NaN;
       if (Number.isFinite(requestedSeats) && requestedSeats > 0) {
-        updates.max_seats = Math.min(100, requestedSeats);
+        updates.max_seats = Math.min(200, requestedSeats);
       } else if (useCase === 'team') {
         updates.max_seats = 2;
       } else if (useCase === 'solo') {
@@ -596,6 +808,16 @@ export async function POST(request: NextRequest) {
           { status: 500 }
         );
       }
+    }
+
+    if (typeof updates.referral_code_used === 'string') {
+      await markConvertedDemoLinks({
+        admin,
+        referralCode: updates.referral_code_used,
+        recipientEmail: requestUser.email,
+        convertedUserId: userId,
+        convertedWorkspaceId: workspaceId,
+      });
     }
 
     const resultingSubscriptionStatus = shouldStartTrial
@@ -723,6 +945,26 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    let demoSeed: DemoSeedResult | null = null;
+    try {
+      demoSeed = await seedStarterCampaignForWorkspace(admin, {
+        workspaceId,
+        userId,
+        role: 'owner',
+        memberCount: 1,
+        maxSeats:
+          typeof updates.max_seats === 'number'
+            ? updates.max_seats
+            : typeof maxSeats === 'number'
+              ? maxSeats
+              : useCase === 'team'
+                ? 2
+                : 1,
+      });
+    } catch (demoSeedError) {
+      console.warn('Onboarding: starter demo seeding failed; continuing onboarding', demoSeedError);
+    }
+
     const nextPath = hasAccess ? '/home' : '/subscribe';
     const clientSource =
       typeof body?.clientSource === 'string' ? body.clientSource.trim().toLowerCase() : '';
@@ -739,6 +981,7 @@ export async function POST(request: NextRequest) {
         sent: inviteResults.filter((result) => result.sent).length,
         results: inviteResults,
       },
+      demo: demoSeed,
     });
   } catch (e) {
     console.error('Onboarding complete error:', e);
