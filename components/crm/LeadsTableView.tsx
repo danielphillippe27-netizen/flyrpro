@@ -1,8 +1,8 @@
 'use client';
 
 import type { Contact } from '@/types/database';
-import type { UserStats } from '@/types/database';
 import type { IndustryCopy } from '@/lib/industry-copy';
+import type { DialerCallListStats } from '@/lib/services/StatsService';
 import { StatCard } from '@/components/stats/StatCard';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -13,15 +13,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-
-function startOfWeek(d: Date): Date {
-  const date = new Date(d);
-  const day = date.getDay();
-  const diff = date.getDate() - day;
-  date.setDate(diff);
-  date.setHours(0, 0, 0, 0);
-  return date;
-}
 
 function formatCreatedAt(createdAt: string): string {
   try {
@@ -62,7 +53,7 @@ function formatAddressShort(address: string | null | undefined): string {
 
 export function LeadsTableView({
   contacts,
-  userStats,
+  callStats,
   loading,
   onContactSelect,
   contactListLabelsById,
@@ -74,7 +65,7 @@ export function LeadsTableView({
   copy,
 }: {
   contacts: Contact[];
-  userStats: UserStats | null;
+  callStats: DialerCallListStats | null;
   loading: boolean;
   onContactSelect: (contact: Contact) => void;
   contactListLabelsById: Record<string, string[]>;
@@ -92,26 +83,18 @@ export function LeadsTableView({
   };
   const formatPercent = (value: number): string => `${value.toFixed(1)}%`;
 
-  const totalLeads = contacts.length;
-  const weekStart = startOfWeek(new Date()).getTime();
-  const newThisWeek = contacts.filter((c) => new Date(c.created_at).getTime() >= weekStart).length;
-
-  const conversationToLeadRaw =
-    userStats ? toPercent(userStats.leads_created, userStats.conversations) : null;
-  const knockToConversationRaw =
-    userStats ? toPercent(userStats.conversations, userStats.doors_knocked) : null;
-
-  const conversationToLeadRate = formatPercent(conversationToLeadRaw ?? 0);
-  const knockToConversationRate = formatPercent(knockToConversationRaw ?? 0);
+  const totalCalls = callStats?.totalCalls ?? 0;
+  const connectedCalls = callStats?.connectedCalls ?? 0;
+  const connectedCallRate = formatPercent(toPercent(connectedCalls, totalCalls) ?? 0);
 
   return (
     <div className="space-y-6">
       {/* Metric cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label={copy.leads.totalLabel} value={loading ? '…' : totalLeads} />
-        <StatCard label={copy.leads.newThisWeekLabel} value={loading ? '…' : newThisWeek} />
-        <StatCard label={copy.leads.conversionRateLabel} value={loading ? '…' : conversationToLeadRate} />
-        <StatCard label="Call-to-connected-call rate" value={loading ? '…' : knockToConversationRate} />
+        <StatCard label={copy.leads.totalLabel} value={loading ? '…' : totalCalls} />
+        <StatCard label={copy.leads.newThisWeekLabel} value={loading ? '…' : (callStats?.newCallsThisWeek ?? 0)} />
+        <StatCard label={copy.leads.conversionRateLabel} value={loading ? '…' : connectedCallRate} />
+        <StatCard label="Connected calls" value={loading ? '…' : connectedCalls} />
       </div>
 
       {/* Table */}

@@ -20,8 +20,8 @@ import { ContactsService } from '@/lib/services/ContactsService';
 import { CampaignsService } from '@/lib/services/CampaignsService';
 import { FarmService } from '@/lib/services/FarmService';
 import { SmartListsService } from '@/lib/services/SmartListsService';
-import { StatsService } from '@/lib/services/StatsService';
-import type { CampaignV2, Contact, Farm, UserStats } from '@/types/database';
+import { StatsService, type DialerCallListStats } from '@/lib/services/StatsService';
+import type { CampaignV2, Contact, Farm } from '@/types/database';
 import type { SmartListCriteria, WorkspaceSmartList } from '@/types/smart-lists';
 import { createClient } from '@/lib/supabase/client';
 import { useWorkspace } from '@/lib/workspace-context';
@@ -48,6 +48,12 @@ const LEAD_LIST_SIDEBAR_COLLAPSED_KEY = 'flyr-lead-list-sidebar-collapsed';
 const LIST_SIDEBAR_WIDTH = 280;
 const ALL_LEADS_LIST_ID = 'all';
 const inFlightLeadWorkspaceIds = new Set<string>();
+const EMPTY_DIALER_CALL_STATS: DialerCallListStats = {
+  totalCalls: 0,
+  newCallsThisWeek: 0,
+  connectedCalls: 0,
+  connectedCallsThisWeek: 0,
+};
 
 function isWorkedContact(contact: Contact): boolean {
   return Boolean(contact.last_contacted) || contact.status !== 'new';
@@ -113,7 +119,8 @@ export function ContactsHubView() {
   const [farms, setFarms] = useState<Farm[]>([]);
   const [workspaceSmartLists, setWorkspaceSmartLists] = useState<WorkspaceSmartList[]>([]);
   const [selectedContactIds, setSelectedContactIds] = useState<string[]>([]);
-  const [statsByUserId, setStatsByUserId] = useState<Record<string, UserStats>>({});
+  const [dialerCallStats, setDialerCallStats] = useState<DialerCallListStats>(EMPTY_DIALER_CALL_STATS);
+  const [dialerCallStatsLoading, setDialerCallStatsLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -168,23 +175,11 @@ export function ContactsHubView() {
           : Promise.resolve([] as WorkspaceSmartList[]),
       ]);
 
-      const statsUsers = members.length > 0 ? members.map((member) => member.user_id) : [currentUserId];
-      const statsRows =
-        statsUsers.length > 1
-          ? await StatsService.fetchUserStatsForUsers(statsUsers)
-          : [await StatsService.fetchUserStats(statsUsers[0])].filter((value): value is UserStats => Boolean(value));
-
       setContacts(contactsData);
       setCampaigns(campaignsData);
       setFarms(farmsData);
       setWorkspaceSmartLists(smartListsData);
       setTeamMembers(members);
-      setStatsByUserId(
-        statsRows.reduce<Record<string, UserStats>>((acc, stat) => {
-          acc[stat.user_id] = stat;
-          return acc;
-        }, {})
-      );
       setLoadError(false);
     } catch (error) {
       console.error('Error loading contacts or stats:', error);
@@ -194,7 +189,6 @@ export function ContactsHubView() {
       setFarms([]);
       setWorkspaceSmartLists([]);
       setTeamMembers([]);
-      setStatsByUserId({});
     } finally {
       inFlightLeadWorkspaceIds.delete(loadKey);
       setLoading(false);
@@ -253,13 +247,6 @@ export function ContactsHubView() {
     [memberScopedContacts]
   );
 
-  const visibleStats = useMemo(() => {
-    if (selectedMemberId === 'all') {
-      return StatsService.aggregateUserStats(Object.values(statsByUserId), 'all');
-    }
-    return statsByUserId[selectedMemberId] ?? null;
-  }, [selectedMemberId, statsByUserId]);
-
   const allLeadsList = useMemo(() => buildAllLeadsList(copy), [copy]);
 
   const campaignLists = useMemo(
@@ -316,6 +303,34 @@ export function ContactsHubView() {
     if (selectedList.id === ALL_LEADS_LIST_ID) return workedContacts;
     return filterContactsBySmartList(memberScopedContacts, selectedList);
   }, [memberScopedContacts, selectedList, workedContacts]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const contactIds = visibleContacts.map((contact) => contact.id);
+
+    if (!currentWorkspaceId || contactIds.length === 0) {
+      setDialerCallStats(EMPTY_DIALER_CALL_STATS);
+      setDialerCallStatsLoading(false);
+      return;
+    }
+
+    setDialerCallStatsLoading(true);
+    StatsService.fetchDialerCallStatsForContacts(currentWorkspaceId, contactIds)
+      .then((stats) => {
+        if (!cancelled) setDialerCallStats(stats);
+      })
+      .catch((error) => {
+        console.error('Error loading dialer call stats:', error);
+        if (!cancelled) setDialerCallStats(EMPTY_DIALER_CALL_STATS);
+      })
+      .finally(() => {
+        if (!cancelled) setDialerCallStatsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentWorkspaceId, visibleContacts]);
 
   const builtInListItems = useMemo(
     () =>
@@ -557,8 +572,8 @@ export function ContactsHubView() {
 
         <LeadsTableView
           contacts={visibleContacts}
-          userStats={visibleStats}
-          loading={loading}
+          callStats={dialerCallStats}
+          loading={loading || dialerCallStatsLoading}
           onContactSelect={handleOpenContact}
           contactListLabelsById={contactListLabelsById}
           selectedContactIds={selectedContactIds}

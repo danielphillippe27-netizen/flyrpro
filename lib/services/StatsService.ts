@@ -3,6 +3,13 @@ import type { UserStats } from '@/types/database';
 
 export type StatsPeriod = 'daily' | 'weekly' | 'monthly' | 'lifetime';
 
+export type DialerCallListStats = {
+  totalCalls: number;
+  newCallsThisWeek: number;
+  connectedCalls: number;
+  connectedCallsThisWeek: number;
+};
+
 type AppointmentCandidateRow = {
   full_name?: string | null;
   name?: string | null;
@@ -15,6 +22,13 @@ type AppointmentCandidateRow = {
 };
 
 type LeadCandidateRow = AppointmentCandidateRow;
+
+type DialerCallStatsRow = {
+  status?: string | null;
+  disposition?: string | null;
+  answered_at?: string | null;
+  created_at?: string | null;
+};
 
 function getErrorMessage(error: unknown): string {
   if (!error || typeof error !== 'object') return '';
@@ -76,6 +90,24 @@ function appointmentSignature(row: AppointmentCandidateRow): string {
     (row.address ?? '').trim().toLowerCase(),
     (row.campaign_id ?? '').trim(),
   ].join('|');
+}
+
+function startOfWeek(d: Date): Date {
+  const date = new Date(d);
+  const day = date.getDay();
+  const diff = date.getDate() - day;
+  date.setDate(diff);
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
+function isConnectedDialerCall(call: DialerCallStatsRow): boolean {
+  return (
+    Boolean(call.answered_at) ||
+    call.status === 'answered' ||
+    call.disposition === 'connected' ||
+    call.disposition === 'appointment_set'
+  );
 }
 
 async function fetchLeadCandidateRows(
@@ -211,6 +243,48 @@ export class StatsService {
       aggregated.qr_codes_scanned > 0 ? aggregated.leads_created / aggregated.qr_codes_scanned : 0;
 
     return aggregated;
+  }
+
+  static async fetchDialerCallStatsForContacts(
+    workspaceId: string,
+    contactIds: string[]
+  ): Promise<DialerCallListStats> {
+    const uniqueContactIds = Array.from(new Set(contactIds.filter(Boolean)));
+    const emptyStats: DialerCallListStats = {
+      totalCalls: 0,
+      newCallsThisWeek: 0,
+      connectedCalls: 0,
+      connectedCallsThisWeek: 0,
+    };
+    if (!workspaceId || uniqueContactIds.length === 0) return emptyStats;
+
+    const weekStartMs = startOfWeek(new Date()).getTime();
+    const rows: DialerCallStatsRow[] = [];
+    const chunkSize = 250;
+
+    for (let index = 0; index < uniqueContactIds.length; index += chunkSize) {
+      const chunk = uniqueContactIds.slice(index, index + chunkSize);
+      const { data, error } = await this.client
+        .from('dialer_calls')
+        .select('status, disposition, answered_at, created_at')
+        .eq('workspace_id', workspaceId)
+        .in('contact_id', chunk);
+
+      if (error) throw new Error(error.message || 'Failed to load dialer call stats');
+      rows.push(...((data ?? []) as DialerCallStatsRow[]));
+    }
+
+    return rows.reduce<DialerCallListStats>((acc, call) => {
+      const createdAtMs = call.created_at ? new Date(call.created_at).getTime() : 0;
+      const isThisWeek = Number.isFinite(createdAtMs) && createdAtMs >= weekStartMs;
+      const isConnected = isConnectedDialerCall(call);
+
+      acc.totalCalls += 1;
+      if (isThisWeek) acc.newCallsThisWeek += 1;
+      if (isConnected) acc.connectedCalls += 1;
+      if (isConnected && isThisWeek) acc.connectedCallsThisWeek += 1;
+      return acc;
+    }, emptyStats);
   }
 
   static async fetchAppointmentCount(userId: string): Promise<number> {
