@@ -126,7 +126,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       slug,
-      url: `https://flyr.software/d/${slug}`,
+      url: `https://flyr.software/demo/${slug}`,
       center,
     });
   } catch (error) {

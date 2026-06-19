@@ -1,7 +1,7 @@
 import type { DemoPayload } from './payload';
 
 export const DEFAULT_PAYLOAD: DemoPayload = {
-  slug: 'demo',
+  slug: 'default',
   vertical: 'generic',
   ctaVariant: 'territory',
   ctaUrl: 'mailto:harry@flyrpro.app?subject=Show%20me%20my%20territory',

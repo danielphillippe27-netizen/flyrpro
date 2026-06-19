@@ -8,7 +8,7 @@ let loggedConfigError = false;
 export async function middleware(req: NextRequest) {
   const pathname = req.nextUrl.pathname;
 
-  if (pathname.startsWith('/d/admin') || pathname.startsWith('/api/demo-links')) {
+  if (pathname.startsWith('/demo/admin') || pathname.startsWith('/api/demo-links')) {
     if (!hasValidDemoAdminAuth(req)) {
       return new NextResponse('Unauthorized', {
         status: 401,

@@ -21,10 +21,10 @@ create index idx_demo_events_session on public.demo_events (session_id);
 alter table public.demo_events enable row level security;
 -- No permissive policies. All writes go through app/api/demo-events/route.ts
 -- using the service-role admin client. All reads go through the
--- Basic-Auth-protected /d/admin readout page using the same admin client.
+-- Basic-Auth-protected /demo/admin readout page using the same admin client.
 --
 -- Deviation from the brief: no FK on slug referencing demo_links(slug).
--- The generic /d/demo page and any unknown-slug fallback (per Phase 1's
+-- The generic /demo/default page and any unknown-slug fallback (per Phase 1's
 -- "never 404" requirement) don't have a demo_links row, and a FK would
 -- silently break tracking for exactly those cases. Plain text slug avoids
 -- this fragility.

@@ -173,7 +173,7 @@ export default async function DemoAdminPage() {
             Analytics
           </h1>
         </div>
-        <Link href="/d/admin/new" style={linkButtonStyle}>
+        <Link href="/demo/admin/new" style={linkButtonStyle}>
           New link
         </Link>
       </div>
@@ -221,7 +221,7 @@ export default async function DemoAdminPage() {
                   <td style={tdStyle}>{row.phoneTaps}</td>
                   <td style={tdStyle}>{row.ctaClicked ? row.ctaVariant ?? 'yes' : 'no'}</td>
                   <td style={tdStyle}>
-                    <Link href={`/d/${row.slug}`} target="_blank" style={{ color: 'var(--paper)' }}>
+                    <Link href={`/demo/${row.slug}`} target="_blank" style={{ color: 'var(--paper)' }}>
                       open
                     </Link>
                   </td>
