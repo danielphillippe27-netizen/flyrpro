@@ -386,6 +386,7 @@ export function PowerDialerPage() {
   const callbackCalledAtRef = useRef<Date | null>(null);
   const doubleDialRetryRef = useRef<{ leadId: string; remaining: number } | null>(null);
   const placeCurrentCallRef = useRef<((options?: PlaceCallOptions) => Promise<void>) | null>(null);
+  const hydratedLeadIdRef = useRef<string | null>(null);
 
   const [dialerAccess, setDialerAccess] = useState<DialerAccessResponse | null>(null);
   const [dialerAccessLoading, setDialerAccessLoading] = useState(true);
@@ -577,12 +578,15 @@ export function PowerDialerPage() {
 
   useEffect(() => {
     if (!activeLead) {
+      hydratedLeadIdRef.current = null;
       setNotes('');
       setEmail('');
       setTextBody('');
       setSelectedDisposition('interested');
       return;
     }
+    if (hydratedLeadIdRef.current === activeLead.id) return;
+    hydratedLeadIdRef.current = activeLead.id;
     setNotes(activeLead.notes ?? '');
     setEmail(activeLead.email ?? '');
     setTextBody(buildTextDropBody(activeLead, repFirstName));
