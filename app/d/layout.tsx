@@ -379,12 +379,15 @@ export default function DemoLayout({ children }: { children: ReactNode }) {
           left: 16px;
           z-index: 5;
           max-width: calc(100% - 240px);
+          overflow: hidden;
           font-family: var(--mono);
           font-size: 13px;
           font-weight: 700;
           letter-spacing: .2em;
           line-height: 1.4;
           text-transform: uppercase;
+          text-overflow: ellipsis;
+          white-space: nowrap;
           color: var(--ink);
           opacity: .84;
           pointer-events: none;
