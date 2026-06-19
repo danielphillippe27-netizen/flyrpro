@@ -67,7 +67,7 @@ export function Beat6({ copy, ctaVariant, ctaUrl }: Beat6Props) {
   return (
     <>
       <section id="b6" data-cta-variant={ctaVariant}>
-        <div className="rv eyebrow">Beat 06 · The math</div>
+        <div className="rv eyebrow"></div>
         <h2 className="price rv d1">{renderPrice(copy.b6Price)}</h2>
         <h2 className="h-big rv d2">{renderLines(copy.b6Headline)}</h2>
         <div className="cta-row rv d3">

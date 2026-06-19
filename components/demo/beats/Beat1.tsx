@@ -62,7 +62,7 @@ export function Beat1({ copy, center }: Beat1Props) {
       <svg className="trace" viewBox="0 0 1200 700" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
         <path d="M-50,620 L180,620 L180,470 L390,470 L390,560 L640,560 L640,380 L520,380 L520,250 L820,250 L820,330 L1020,330 L1020,140 L1260,140" />
       </svg>
-      <div className="rv eyebrow">Beat 01 · Cold open</div>
+      <div className="rv eyebrow"></div>
       <h1 className="h-mega rv d1">{copy.b1Headline}</h1>
       <h1 className="h-mega accent rv d2">{copy.b1Accent}</h1>
       <p className="sub rv d3">{copy.b1Sub}</p>

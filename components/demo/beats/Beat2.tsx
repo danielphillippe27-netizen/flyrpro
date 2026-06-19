@@ -12,7 +12,7 @@ function renderLines(value: string) {
 export function Beat2({ copy }: { copy: BeatCopy }) {
   return (
     <section id="b2" className="light">
-      <div className="rv eyebrow">Beat 02 · The problem</div>
+      <div className="rv eyebrow"></div>
       <h2 className="h-big rv d1">{renderLines(copy.b2Headline)}</h2>
       <p className="sub rv d2">{copy.b2Sub}</p>
       <div className="strikes rv d3">

@@ -542,7 +542,7 @@ function Beat4Session({ copy, center }: { copy: BeatCopy; center?: LngLat }) {
 
   return (
     <section id="b4">
-      <div className="rv eyebrow">Beat 04 · Ground truth</div>
+      <div className="rv eyebrow"></div>
       <h2 className="h-big rv d1">{renderLines(copy.b4Headline)}</h2>
       <p className="sub rv d2">{copy.b4Sub}</p>
       <div className="demo-session-card rv d3" ref={cardRef} data-diagonal-segments={diagonalCount}>

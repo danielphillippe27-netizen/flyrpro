@@ -577,7 +577,7 @@ function Beat3Map({
 
   return (
     <section id="b3" className="light">
-      <div className="rv eyebrow">Beat 03 · Territory</div>
+      <div className="rv eyebrow"></div>
       <h2 className="h-big rv d1">{renderLines(copy.b3Headline)}</h2>
       <p className="sub rv d2">{copy.b3Sub}</p>
       <div className="stage demo-map-stage demo-campaign-detail-stage rv d3" id="stage3" ref={stageRef}>

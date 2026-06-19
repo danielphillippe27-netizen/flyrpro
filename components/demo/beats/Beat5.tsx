@@ -20,7 +20,7 @@ export function Beat5({ copy }: { copy: BeatCopy }) {
 
   return (
     <section id="b5" className="light">
-      <div className="rv eyebrow">Beat 05 · At the door</div>
+      <div className="rv eyebrow"></div>
       <h2 className="h-big rv d1">{renderLines(copy.b5Headline)}</h2>
       <div className="duo">
         <ul className="pitch rv d2">
