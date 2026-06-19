@@ -432,6 +432,8 @@ function Beat3Map({
 
       map.once('load', () => {
         try {
+          map.resize();
+
           if (!map.getLayer(buildingLayerId)) {
             throw new Error(`Building layer "${buildingLayerId}" was not available after style load.`);
           }

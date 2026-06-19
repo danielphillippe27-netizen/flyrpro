@@ -398,8 +398,8 @@ export default function DemoLayout({ children }: { children: ReactNode }) {
         }
 
         .demo-campaign-detail-stage {
-          width: min(100%, 76dvh);
-          aspect-ratio: 1/1;
+          width: 100%;
+          aspect-ratio: 4/3;
           max-height: none;
           display: flex;
           flex-direction: column;
