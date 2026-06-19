@@ -2,8 +2,9 @@
 
 import mapboxgl from 'mapbox-gl';
 import type { Theme } from '@/lib/theme-provider';
+export { MAP_STYLE_PRESET_META, type MapStylePreset } from './map-style-presets';
+import type { MapStylePreset } from './map-style-presets';
 
-export type MapStylePreset = 'standard' | 'whiteOut' | 'blackOps' | 'satellite';
 export type MapStyleVersion = 'v11' | 'v12';
 
 type MapStyleConfig = mapboxgl.MapboxOptions['config'];
@@ -17,28 +18,6 @@ export type ResolvedMapStyle = {
 const WHITE_OUT_DEFAULT_STYLE = 'mapbox://styles/mapbox/light-v11';
 const WHITE_OUT_BACKGROUND = '#f8fafc';
 const WHITE_OUT_WATER = '#eef1f4';
-
-export const MAP_STYLE_PRESET_META: Record<
-  MapStylePreset,
-  { label: string; description: string }
-> = {
-  standard: {
-    label: 'Standard',
-    description: 'Uses the default FLYR light and dark map styles.',
-  },
-  whiteOut: {
-    label: 'White Out',
-    description: 'Bright stripped-back basemap that avoids the Standard building footprint bleed-through.',
-  },
-  blackOps: {
-    label: 'Black Out',
-    description: 'Dark stripped-back basemap that keeps campaign houses readable without Standard footprint outlines.',
-  },
-  satellite: {
-    label: 'Satellite',
-    description: 'Satellite imagery with street labels for checking real-world context.',
-  },
-};
 
 const STANDARD_V12_STYLES: Record<Theme, string> = {
   light: process.env.NEXT_PUBLIC_MAPBOX_STYLE_ID_STANDARD_LIGHT || 'mapbox://styles/mapbox/streets-v12',
