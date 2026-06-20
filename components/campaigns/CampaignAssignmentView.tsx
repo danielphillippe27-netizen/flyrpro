@@ -33,6 +33,7 @@ import {
 import type { CampaignAddress } from '@/types/database';
 import { MapBuildingsLayer, type MapBuildingsRenderState } from '@/components/map/MapBuildingsLayer';
 import { useWorkspace } from '@/lib/workspace-context';
+import { useMovieMapControlsEnabled } from '@/lib/hooks/useMovieMapControlsEnabled';
 import { useTheme } from '@/lib/theme-provider';
 import { useMapStyle } from '@/lib/map-style-provider';
 import { getMapboxToken, removeMapboxMapWhenSafe } from '@/lib/mapbox';
@@ -344,12 +345,14 @@ function useAssignmentDemoCamera({
   assignmentAddresses,
   previewPoints,
   baseColorByAddressId,
+  enabled,
 }: {
   mapRef: RefObject<mapboxgl.Map | null>;
   mapLoaded: boolean;
   assignmentAddresses: AssignmentAddress[];
   previewPoints: ZonePreviewPoint[];
   baseColorByAddressId?: Record<string, string>;
+  enabled: boolean;
 }) {
   const [demoColorMode, setDemoColorMode] = useState<DemoColorMode>('zones');
   const [demoCameraSpeed, setDemoCameraSpeed] = useState<DemoCameraSpeed>('normal');
@@ -399,6 +402,7 @@ function useAssignmentDemoCamera({
   );
 
   const demoColorByAddressId = useMemo(() => {
+    if (!enabled) return baseColorByAddressId;
     if (demoPlaybackColorOverrides) return demoPlaybackColorOverrides;
     if (demoColorMode === 'zones') return baseColorByAddressId;
 
@@ -411,7 +415,7 @@ function useAssignmentDemoCamera({
           : DEMO_RANDOM_COLORS[deterministicColorIndex(address.id, DEMO_RANDOM_COLORS.length)];
     }
     return colors;
-  }, [assignmentAddresses, baseColorByAddressId, demoColorMode, demoPlaybackColorOverrides]);
+  }, [assignmentAddresses, baseColorByAddressId, demoColorMode, demoPlaybackColorOverrides, enabled]);
 
   const clearDemoCameraTimers = useCallback(() => {
     for (const timeoutId of demoCameraTimeoutsRef.current) {
@@ -434,7 +438,7 @@ function useAssignmentDemoCamera({
   const playDemoCamera = useCallback(
     (shot: DemoCameraShot) => {
       const currentMap = mapRef.current;
-      if (!currentMap || !mapLoaded) return;
+      if (!enabled || !currentMap || !mapLoaded) return;
 
       const bounds = getAssignmentMapBounds();
       const center = bounds?.getCenter() ?? currentMap.getCenter();
@@ -787,11 +791,19 @@ function useAssignmentDemoCamera({
       demoCameraSpeed,
       demoColorMode,
       demoSegmentCameraAngle,
+      enabled,
       getAssignmentMapBounds,
       mapLoaded,
       mapRef,
     ]
   );
+
+  useEffect(() => {
+    if (enabled) return;
+    setShowDemoControls(false);
+    setDemoColorMode('zones');
+    stopDemoCamera();
+  }, [enabled, stopDemoCamera]);
 
   useEffect(() => {
     const currentMap = mapRef.current;
@@ -828,6 +840,7 @@ function AssignmentDemoCameraControls({
   demoColorMode,
   demoSegmentCameraAngle,
   disabled,
+  enabled,
   onColorModeChange,
   onPlayShot,
   onSegmentCameraAngleChange,
@@ -841,6 +854,7 @@ function AssignmentDemoCameraControls({
   demoColorMode: DemoColorMode;
   demoSegmentCameraAngle: DemoSegmentCameraAngle;
   disabled?: boolean;
+  enabled: boolean;
   onColorModeChange: (mode: DemoColorMode) => void;
   onPlayShot: (shot: DemoCameraShot) => void;
   onSegmentCameraAngleChange: (angle: DemoSegmentCameraAngle) => void;
@@ -849,6 +863,8 @@ function AssignmentDemoCameraControls({
   setShowDemoControls: (value: boolean | ((current: boolean) => boolean)) => void;
   showDemoControls: boolean;
 }) {
+  if (!enabled) return null;
+
   return (
     <div className="pointer-events-none absolute right-3 top-3 z-20 flex flex-col items-end gap-2">
       <button
@@ -1138,6 +1154,8 @@ function CampaignAssignmentZonePreviewMap({
 }) {
   const { theme } = useTheme();
   const { preset: mapPreset } = useMapStyle();
+  const { currentWorkspaceId } = useWorkspace();
+  const { movieMapControlsEnabled } = useMovieMapControlsEnabled(currentWorkspaceId);
   const resolvedMapStyle = useMemo(
     () => resolveMapStyle(mapPreset, theme, 'v12'),
     [mapPreset, theme]
@@ -1184,6 +1202,7 @@ function CampaignAssignmentZonePreviewMap({
     assignmentAddresses,
     previewPoints,
     baseColorByAddressId: showAssignmentColors ? assignmentColorByAddressId : undefined,
+    enabled: movieMapControlsEnabled,
   });
   const previewAddresses = useMemo(
     () => buildAssignmentPreviewAddresses(addressById, assignmentAddresses, zones, members),
@@ -1428,6 +1447,7 @@ function CampaignAssignmentZonePreviewMap({
           demoColorMode={demoCamera.demoColorMode}
           demoSegmentCameraAngle={demoCamera.demoSegmentCameraAngle}
           disabled={!mapLoaded}
+          enabled={movieMapControlsEnabled}
           onColorModeChange={demoCamera.handleDemoColorModeChange}
           onPlayShot={demoCamera.playDemoCamera}
           onSegmentCameraAngleChange={demoCamera.setDemoSegmentCameraAngle}
@@ -1501,6 +1521,8 @@ function AssignmentMapEditorDialog({
 }) {
   const { theme } = useTheme();
   const { preset: mapPreset } = useMapStyle();
+  const { currentWorkspaceId } = useWorkspace();
+  const { movieMapControlsEnabled } = useMovieMapControlsEnabled(currentWorkspaceId);
   const resolvedMapStyle = useMemo(
     () => resolveMapStyle(mapPreset, theme, 'v12'),
     [mapPreset, theme]
@@ -1573,6 +1595,7 @@ function AssignmentMapEditorDialog({
     assignmentAddresses,
     previewPoints,
     baseColorByAddressId: showAssignmentColors ? assignmentColorByAddressId : undefined,
+    enabled: movieMapControlsEnabled,
   });
   const initialPoint = previewPoints[0] ?? null;
   const initialLon = initialPoint?.lon ?? null;
@@ -1974,6 +1997,7 @@ function AssignmentMapEditorDialog({
             demoColorMode={demoCamera.demoColorMode}
             demoSegmentCameraAngle={demoCamera.demoSegmentCameraAngle}
             disabled={!mapLoaded}
+            enabled={movieMapControlsEnabled}
             onColorModeChange={demoCamera.handleDemoColorModeChange}
             onPlayShot={demoCamera.playDemoCamera}
             onSegmentCameraAngleChange={demoCamera.setDemoSegmentCameraAngle}

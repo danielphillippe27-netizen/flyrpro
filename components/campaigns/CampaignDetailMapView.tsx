@@ -36,6 +36,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useTheme } from '@/lib/theme-provider';
 import { useMapStyle } from '@/lib/map-style-provider';
 import { useWorkspace } from '@/lib/workspace-context';
+import { useMovieMapControlsEnabled } from '@/lib/hooks/useMovieMapControlsEnabled';
 import { getMapboxToken, removeMapboxMapWhenSafe } from '@/lib/mapbox';
 import {
   applyPresetVisualTweaks,
@@ -776,6 +777,7 @@ export function CampaignDetailMapView({
   const { preset: mapPreset } = useMapStyle();
   const router = useRouter();
   const { currentWorkspaceId } = useWorkspace();
+  const { movieMapControlsEnabled } = useMovieMapControlsEnabled(currentWorkspaceId);
   const resolvedMapStyle = useMemo(() => resolveMapStyle(mapPreset, theme, 'v12'), [mapPreset, theme]);
   const mapShellRef = useRef<HTMLDivElement>(null);
   const mapContainer = useRef<HTMLDivElement>(null);
@@ -917,6 +919,7 @@ export function CampaignDetailMapView({
     [bundleAddresses, visibleAddresses],
   );
   const demoAddressColorOverrides = useMemo(() => {
+    if (!movieMapControlsEnabled) return undefined;
     if (demoPlaybackColorOverrides) return demoPlaybackColorOverrides;
     if (demoColorMode === 'status') return undefined;
 
@@ -930,7 +933,7 @@ export function CampaignDetailMapView({
           : DEMO_RANDOM_COLORS[deterministicColorIndex(address.id, DEMO_RANDOM_COLORS.length)];
     }
     return colors;
-  }, [demoColorMode, demoPlaybackColorOverrides, mapAddresses, optimisticallyDeletedAddressIds]);
+  }, [demoColorMode, demoPlaybackColorOverrides, mapAddresses, movieMapControlsEnabled, optimisticallyDeletedAddressIds]);
   const bundleBuildings = useMemo<BuildingFeatureCollection | null>(
     () => (isFeatureCollection(mapBundle?.buildings) ? mapBundle.buildings : null),
     [mapBundle?.buildings],
@@ -2732,7 +2735,7 @@ export function CampaignDetailMapView({
   const playDemoCamera = useCallback(
     (shot: DemoCameraShot) => {
       const currentMap = map.current;
-      if (!currentMap || !mapLoaded) return;
+      if (!movieMapControlsEnabled || !currentMap || !mapLoaded) return;
 
       const bounds = getCampaignMapBounds();
       const center = bounds?.getCenter() ?? currentMap.getCenter();
@@ -3078,7 +3081,7 @@ export function CampaignDetailMapView({
       }, 1100);
       finishAfter(7600);
     },
-    [clearDemoCameraTimers, demoAddressTargets, demoCameraSpeed, demoColorMode, demoSegmentCameraAngle, getCampaignMapBounds, mapLoaded],
+    [clearDemoCameraTimers, demoAddressTargets, demoCameraSpeed, demoColorMode, demoSegmentCameraAngle, getCampaignMapBounds, mapLoaded, movieMapControlsEnabled],
   );
 
   useEffect(() => {
@@ -3087,6 +3090,13 @@ export function CampaignDetailMapView({
       map.current?.stop();
     };
   }, [clearDemoCameraTimers]);
+
+  useEffect(() => {
+    if (movieMapControlsEnabled) return;
+    setShowDemoControls(false);
+    setDemoColorMode('status');
+    stopDemoCamera();
+  }, [movieMapControlsEnabled, stopDemoCamera]);
 
   const handleDemoColorModeChange = useCallback((mode: DemoColorMode) => {
     setDemoPlaybackColorOverrides(null);
@@ -3243,20 +3253,22 @@ export function CampaignDetailMapView({
                   </button>
                 ) : null}
               </div>
-              <button
-                type="button"
-                onClick={() => setShowDemoControls((current) => !current)}
-                className={`flex h-10 w-10 items-center justify-center rounded-lg border border-gray-200 bg-white/90 text-sm font-medium shadow-sm backdrop-blur-sm transition-colors hover:bg-gray-100 dark:border-gray-700 dark:bg-black/80 dark:hover:bg-gray-800 ${
-                  showDemoControls
-                    ? 'text-gray-950 dark:text-white'
-                    : 'text-gray-600 dark:text-gray-300'
-                }`}
-                aria-label="Demo controls"
-                aria-pressed={showDemoControls}
-                title="Demo controls"
-              >
-                <Clapperboard className="h-4 w-4" />
-              </button>
+              {movieMapControlsEnabled ? (
+                <button
+                  type="button"
+                  onClick={() => setShowDemoControls((current) => !current)}
+                  className={`flex h-10 w-10 items-center justify-center rounded-lg border border-gray-200 bg-white/90 text-sm font-medium shadow-sm backdrop-blur-sm transition-colors hover:bg-gray-100 dark:border-gray-700 dark:bg-black/80 dark:hover:bg-gray-800 ${
+                    showDemoControls
+                      ? 'text-gray-950 dark:text-white'
+                      : 'text-gray-600 dark:text-gray-300'
+                  }`}
+                  aria-label="Demo controls"
+                  aria-pressed={showDemoControls}
+                  title="Demo controls"
+                >
+                  <Clapperboard className="h-4 w-4" />
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={() => void toggleMapFullscreen()}
@@ -3267,7 +3279,7 @@ export function CampaignDetailMapView({
                 {isMapFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
               </button>
             </div>
-            {showDemoControls ? (
+            {movieMapControlsEnabled && showDemoControls ? (
               <div className="pointer-events-auto w-[min(22rem,calc(100vw-2rem))] rounded-lg border border-gray-200 bg-white/94 p-2 shadow-lg backdrop-blur-sm dark:border-gray-700 dark:bg-black/86">
                 <div className="grid grid-cols-3 gap-1">
                   {[

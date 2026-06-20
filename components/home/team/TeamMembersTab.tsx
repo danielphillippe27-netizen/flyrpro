@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useWorkspace } from '@/lib/workspace-context';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -135,7 +136,9 @@ type TeamMembersTabProps = {
 
 export function TeamMembersTab(props: TeamMembersTabProps) {
   const { range, onMemberClick } = props;
+  const searchParams = useSearchParams();
   const { currentWorkspaceId } = useWorkspace();
+  const handledAutoInviteRef = useRef(false);
   const [rosterMembers, setRosterMembers] = useState<RosterMember[]>([]);
   const [analyticsByUserId, setAnalyticsByUserId] = useState<Record<string, AnalyticsRow>>({});
   const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
@@ -164,6 +167,8 @@ export function TeamMembersTab(props: TeamMembersTabProps) {
       member.role !== 'owner' &&
       (actorRole === 'owner' || member.role === 'member')
   );
+  const shouldAutoOpenInvite =
+    searchParams.get('invite') === 'members' || searchParams.get('inviteMembers') === 'true';
 
   const fetchMembers = useCallback(async () => {
     if (!currentWorkspaceId) {
@@ -239,6 +244,12 @@ export function TeamMembersTab(props: TeamMembersTabProps) {
   useEffect(() => {
     fetchMembers();
   }, [fetchMembers]);
+
+  useEffect(() => {
+    if (handledAutoInviteRef.current || loading || !seatUsage || !shouldAutoOpenInvite) return;
+    handledAutoInviteRef.current = true;
+    setInviteDialogOpen(true);
+  }, [loading, seatUsage, shouldAutoOpenInvite]);
 
   const runAction = useCallback(
     async (key: string, work: () => Promise<void>) => {

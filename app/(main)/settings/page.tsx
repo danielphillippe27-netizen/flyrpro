@@ -19,6 +19,7 @@ import {
   Plug,
   Flag,
   WalletCards,
+  Clapperboard,
   Loader2,
   Save
 } from 'lucide-react';
@@ -26,6 +27,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 import { PowerDialerSettingsCard } from '@/components/settings/PowerDialerSettingsCard';
 import {
   SALESPERSON_STRIPE_GUARDIAN_POLICY,
@@ -92,7 +94,7 @@ const inFlightBillingWorkspaceIds = new Set<string>();
 
 function SettingsPageContent() {
   const { theme, setTheme } = useTheme();
-  const { currentWorkspaceId } = useWorkspace();
+  const { currentWorkspaceId, membershipsByWorkspaceId } = useWorkspace();
   const router = useRouter();
   const [user, setUser] = useState<SupabaseUser | null>(null);
   const [entitlement, setEntitlement] = useState<EntitlementSnapshot | null>(null);
@@ -116,10 +118,17 @@ function SettingsPageContent() {
   const [salesEmailMessage, setSalesEmailMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [salesPhoneSaving, setSalesPhoneSaving] = useState(false);
   const [salesPhoneMessage, setSalesPhoneMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [movieMapControlsEnabled, setMovieMapControlsEnabled] = useState(false);
+  const [movieMapControlsLoading, setMovieMapControlsLoading] = useState(false);
+  const [movieMapControlsSaving, setMovieMapControlsSaving] = useState(false);
+  const [movieMapControlsMessage, setMovieMapControlsMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [loggingOut, setLoggingOut] = useState(false);
   const isSalespersonSettings =
     accessState?.isSalesperson === true || accessState?.accessLevel === 'salesperson';
   const salesperson = accessState?.salesperson ?? null;
+  const currentWorkspaceRole = currentWorkspaceId ? membershipsByWorkspaceId[currentWorkspaceId] : null;
+  const canManageWorkspaceSettings =
+    currentWorkspaceRole === 'owner' || currentWorkspaceRole === 'admin';
 
   const applySalespersonStripeStatus = (payload: SalespersonStripeStatusPayload | null) => {
     if (!payload) return;
@@ -298,6 +307,56 @@ function SettingsPageContent() {
     };
   }, [currentWorkspaceId, isSalespersonSettings, user?.email]);
 
+  useEffect(() => {
+    if (isSalespersonSettings || !currentWorkspaceId) {
+      setMovieMapControlsEnabled(false);
+      setMovieMapControlsLoading(false);
+      setMovieMapControlsMessage(null);
+      return;
+    }
+
+    let cancelled = false;
+    setMovieMapControlsEnabled(false);
+    setMovieMapControlsLoading(true);
+    setMovieMapControlsMessage(null);
+
+    fetch(`/api/workspace/map-settings?workspaceId=${encodeURIComponent(currentWorkspaceId)}`, {
+      credentials: 'include',
+      cache: 'no-store',
+    })
+      .then(async (response) => {
+        const data = (await response.json().catch(() => ({}))) as {
+          movieMapControlsEnabled?: boolean;
+          error?: string;
+        };
+        if (!response.ok) {
+          throw new Error(data.error || 'Could not load map controls settings.');
+        }
+        return data;
+      })
+      .then((data) => {
+        if (!cancelled) {
+          setMovieMapControlsEnabled(data.movieMapControlsEnabled === true);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setMovieMapControlsEnabled(false);
+          setMovieMapControlsMessage({
+            type: 'error',
+            text: error instanceof Error ? error.message : 'Could not load map controls settings.',
+          });
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setMovieMapControlsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentWorkspaceId, isSalespersonSettings]);
+
   const handleLogout = async () => {
     setLoggingOut(true);
     const supabase = createClient();
@@ -450,6 +509,45 @@ function SettingsPageContent() {
       });
     } finally {
       setSalesPhoneSaving(false);
+    }
+  };
+
+  const handleMovieMapControlsChange = async (checked: boolean) => {
+    if (!currentWorkspaceId || !canManageWorkspaceSettings) return;
+
+    const previousValue = movieMapControlsEnabled;
+    setMovieMapControlsEnabled(checked);
+    setMovieMapControlsSaving(true);
+    setMovieMapControlsMessage(null);
+
+    try {
+      const response = await fetch('/api/workspace/map-settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          workspaceId: currentWorkspaceId,
+          movieMapControlsEnabled: checked,
+        }),
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        movieMapControlsEnabled?: boolean;
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(data.error || 'Could not save map controls settings.');
+      }
+
+      setMovieMapControlsEnabled(data.movieMapControlsEnabled === true);
+      setMovieMapControlsMessage({ type: 'success', text: 'Map controls setting saved.' });
+    } catch (error) {
+      setMovieMapControlsEnabled(previousValue);
+      setMovieMapControlsMessage({
+        type: 'error',
+        text: error instanceof Error ? error.message : 'Could not save map controls settings.',
+      });
+    } finally {
+      setMovieMapControlsSaving(false);
     }
   };
 
@@ -771,6 +869,53 @@ function SettingsPageContent() {
               </CardContent>
             </Card>
           )}
+
+          {!isSalespersonSettings ? (
+            <Card>
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <Clapperboard className="w-5 h-5" />
+                  <CardTitle>Map controls</CardTitle>
+                </div>
+                <CardDescription>
+                  Show cinematic clapperboard controls on campaign and assignment maps.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {movieMapControlsMessage ? (
+                  <div
+                    className={`rounded-lg border px-3 py-2 text-sm ${
+                      movieMapControlsMessage.type === 'success'
+                        ? 'border-green-200 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-900/20 dark:text-green-400'
+                        : 'border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-400'
+                    }`}
+                  >
+                    {movieMapControlsMessage.text}
+                  </div>
+                ) : null}
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-base font-medium dark:text-white mb-1">Movie controls</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      Show cinematic clapperboard controls on campaign and assignment maps.
+                    </p>
+                  </div>
+                  <Switch
+                    id="movie-map-controls"
+                    checked={movieMapControlsEnabled}
+                    disabled={
+                      movieMapControlsLoading ||
+                      movieMapControlsSaving ||
+                      !currentWorkspaceId ||
+                      !canManageWorkspaceSettings
+                    }
+                    onCheckedChange={(checked) => void handleMovieMapControlsChange(checked)}
+                    aria-label="Movie controls"
+                  />
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
 
           {!isSalespersonSettings ? <PowerDialerSettingsCard /> : null}
 

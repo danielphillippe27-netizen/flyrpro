@@ -9,7 +9,7 @@ import AppTopHeader from '@/components/layout/AppTopHeader';
 import { MainLayoutNavProvider, useMainLayoutNav } from '@/components/layout/MainLayoutNavContext';
 import { MainRouteGuard } from '@/components/guard/MainRouteGuard';
 import { DialerRuntimeProvider } from '@/components/dialer/DialerRuntimeProvider';
-import { Home, Trophy, Users, Settings, Target, Gauge, Plug, MessageCircle, Activity, Clock, CalendarDays, CornerDownRight, Plus, UserRoundPlus, BriefcaseBusiness, PhoneCall, Handshake, FileText, Inbox, PlayCircle } from 'lucide-react';
+import { Home, Trophy, Users, Settings, Target, Gauge, Plug, MessageCircle, Activity, Clock, CalendarDays, CornerDownRight, Plus, UserRoundPlus, BriefcaseBusiness, PhoneCall, Handshake, FileText, PlayCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { DashboardAccessLevel } from '@/app/api/_utils/workspace';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
@@ -19,11 +19,9 @@ const SIDEBAR_COLLAPSED_W = 48;   // 3rem – icons only
 const SIDEBAR_EXPANDED_W = 160;   // 10rem – icons + labels
 
 const scriptsTab = { href: '/scripts', icon: FileText, label: 'Scripts' };
-const inboxTab = { href: '/inbox', icon: Inbox, label: 'Inbox' };
 
 const baseTabs = [
   { href: '/home', icon: Home, label: 'Home' },
-  inboxTab,
   { href: '/campaigns', icon: Target, label: 'Campaign' },
   { href: '/activity', icon: Activity, label: 'Activity' },
   { href: '/leads', icon: Users, label: 'Leads' },
@@ -45,7 +43,6 @@ const demoTab = { href: '/demo-center', icon: PlayCircle, label: 'Demo' };
 const settingsTab = { href: '/settings', icon: Settings, label: 'Settings' };
 const salespersonWorkspaceTabs = [
   { href: '/home', icon: Home, label: 'Home' },
-  inboxTab,
   diallerTab,
   scriptsTab,
   { href: '/leads', icon: Users, label: 'Leads' },
@@ -56,7 +53,6 @@ const salespersonWorkspaceTabs = [
 ];
 const founderTabs = [
   ...baseTabs.filter((tab) => ['/home'].includes(tab.href)),
-  inboxTab,
   ambassadorsTab,
   salespeopleTab,
   salesLeaderboardTab,
@@ -69,7 +65,6 @@ const founderTabs = [
 const memberTabs = baseTabs.filter((tab) =>
   [
     '/home',
-    '/inbox',
     '/campaigns',
     '/leads',
     '/activity',

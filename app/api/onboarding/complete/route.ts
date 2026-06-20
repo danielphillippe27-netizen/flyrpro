@@ -37,7 +37,6 @@ import {
 } from '@/components/offers/partnerOfferUtils';
 import { normalizeCountryCode } from '@/lib/countries';
 import { sanitizeTrackingParam } from '@/app/lib/ambassador/portal';
-import { seedStarterCampaignForWorkspace, type DemoSeedResult } from '@/lib/onboarding/demo';
 import { markConvertedDemoLinks } from '@/lib/dialer/demo-link-tracking';
 
 const INDUSTRIES = [
@@ -945,27 +944,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    let demoSeed: DemoSeedResult | null = null;
-    try {
-      demoSeed = await seedStarterCampaignForWorkspace(admin, {
-        workspaceId,
-        userId,
-        role: 'owner',
-        memberCount: 1,
-        maxSeats:
-          typeof updates.max_seats === 'number'
-            ? updates.max_seats
-            : typeof maxSeats === 'number'
-              ? maxSeats
-              : useCase === 'team'
-                ? 2
-                : 1,
-      });
-    } catch (demoSeedError) {
-      console.warn('Onboarding: starter demo seeding failed; continuing onboarding', demoSeedError);
-    }
-
-    const nextPath = hasAccess ? '/home' : '/subscribe';
+    const ownerInviteMembersPath = '/home?tab=settings&invite=members';
+    const nextPath = hasAccess ? ownerInviteMembersPath : '/subscribe';
     const clientSource =
       typeof body?.clientSource === 'string' ? body.clientSource.trim().toLowerCase() : '';
     const redirect =
@@ -981,7 +961,6 @@ export async function POST(request: NextRequest) {
         sent: inviteResults.filter((result) => result.sent).length,
         results: inviteResults,
       },
-      demo: demoSeed,
     });
   } catch (e) {
     console.error('Onboarding complete error:', e);

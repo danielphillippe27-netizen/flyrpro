@@ -10,7 +10,6 @@ import { TeamReportingTab } from '@/components/home/team/TeamReportingTab';
 import { TeamSettingsTab } from '@/components/home/team/TeamSettingsTab';
 import { MemberDetailDrawer } from '@/components/home/team/MemberDetailDrawer';
 import { useWorkspace } from '@/lib/workspace-context';
-import { DemoContextNudge, DemoGettingStartedPanel } from '@/components/onboarding/DemoGettingStartedPanel';
 
 const TAB_VALUES = new Set(['summary', 'activity', 'reporting', 'settings']);
 
@@ -82,8 +81,6 @@ export function TeamOwnerDashboardView() {
     <div className="min-h-screen bg-gray-50 dark:bg-background">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         <h1 className="text-2xl font-semibold text-foreground mb-4 text-center">Team dashboard</h1>
-        <DemoGettingStartedPanel className="mb-4" />
-        <DemoContextNudge context="team" className="mb-4" />
         <TeamControlsBar
           range={range}
           onRangeChange={setRange}

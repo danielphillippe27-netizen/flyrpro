@@ -36,6 +36,18 @@ export interface UserProfile {
   weekly_minutes_goal?: number | null;
 }
 
+export interface Workspace {
+  id: string;
+  name: string;
+  owner_id: string | null;
+  created_at: string;
+  updated_at: string;
+  industry: string | null;
+  brokerage_id: string | null;
+  brokerage_name: string | null;
+  movie_map_controls_enabled: boolean;
+}
+
 /** Entitlements: source of truth for plan/status (web + iOS). */
 export type EntitlementPlan = 'free' | 'pro' | 'team' | 'ambassador';
 export type EntitlementSource = 'none' | 'stripe' | 'apple';

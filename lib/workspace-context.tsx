@@ -31,6 +31,7 @@ export type Workspace = {
   brokerage_id: string | null;
   /** Free-text brokerage name when no template match. */
   brokerage_name: string | null;
+  movie_map_controls_enabled: boolean;
 };
 
 type WorkspaceMembership = {
@@ -74,6 +75,7 @@ type WorkspaceRow = {
   industry: string | null;
   brokerage_id: string | null;
   brokerage_name: string | null;
+  movie_map_controls_enabled: boolean;
 };
 
 type AccessStateRow = {
@@ -226,6 +228,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             industry: typeof data.industry === 'string' ? data.industry : null,
             brokerage_id: null,
             brokerage_name: null,
+            movie_map_controls_enabled: false,
           },
         ]);
         setMemberships([{ workspace_id: workspaceId, role }]);
@@ -294,7 +297,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         const [workspaceResult, membersResult, preferenceResult] = await Promise.all([
           supabase
             .from('workspaces')
-            .select('id, name, owner_id, created_at, updated_at, industry, brokerage_id, brokerage_name')
+            .select('id, name, owner_id, created_at, updated_at, industry, brokerage_id, brokerage_name, movie_map_controls_enabled')
             .in('id', workspaceIds)
             .order('created_at', { ascending: true }),
           supabase
@@ -407,6 +410,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 industry: typeof data.industry === 'string' ? data.industry : null,
                 brokerage_id: null,
                 brokerage_name: null,
+                movie_map_controls_enabled: false,
               },
             ]);
             setMemberships([{ workspace_id: workspaceId, role }]);
