@@ -26,7 +26,6 @@ import type { SmartListCriteria, WorkspaceSmartList } from '@/types/smart-lists'
 import { createClient } from '@/lib/supabase/client';
 import { useWorkspace } from '@/lib/workspace-context';
 import { getIndustryCopy, type IndustryCopy } from '@/lib/industry-copy';
-import { DemoContextNudge } from '@/components/onboarding/DemoGettingStartedPanel';
 
 type TeamMemberOption = {
   user_id: string;
@@ -488,8 +487,6 @@ export function ContactsHubView() {
       />
 
       <div className="min-w-0 flex-1 space-y-6 overflow-y-auto overscroll-contain px-4 py-6 sm:px-6 lg:px-8">
-        <DemoContextNudge context="leads" />
-
         <section className="rounded-2xl border border-border bg-card p-5 shadow-sm">
           <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
             <div className="space-y-3">
