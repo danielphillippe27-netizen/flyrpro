@@ -32,11 +32,41 @@ export async function isFlyrInternalWorkspaceMember(
   return Boolean(data?.id);
 }
 
+export async function isFlyrFounder(
+  admin: AdminClient,
+  userId: string
+): Promise<boolean> {
+  const { data, error } = await admin
+    .from('user_profiles')
+    .select('is_founder')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (error) {
+    console.error('[flyr-internal-auth] Founder lookup failed:', error);
+    return false;
+  }
+
+  return data?.is_founder === true;
+}
+
+export async function hasFlyrDemoAdminAccess(
+  admin: AdminClient,
+  userId: string
+): Promise<boolean> {
+  const [isInternalMember, isFounder] = await Promise.all([
+    isFlyrInternalWorkspaceMember(admin, userId),
+    isFlyrFounder(admin, userId),
+  ]);
+
+  return isInternalMember || isFounder;
+}
+
 /**
  * Server-only guard for internal FLYR demo tooling.
- * Unauthenticated users go to login; authenticated non-members get a 404.
+ * Unauthenticated users go to login; authenticated non-members/non-founders get a 404.
  */
-export async function requireFlyrInternalWorkspaceMember(): Promise<{ user: User }> {
+export async function requireFlyrDemoAdminAccess(): Promise<{ user: User }> {
   const supabase = await getSupabaseServerClient();
   const {
     data: { user },
@@ -48,7 +78,7 @@ export async function requireFlyrInternalWorkspaceMember(): Promise<{ user: User
   }
 
   const admin = createAdminClient();
-  const allowed = await isFlyrInternalWorkspaceMember(admin, user.id);
+  const allowed = await hasFlyrDemoAdminAccess(admin, user.id);
   if (!allowed) {
     notFound();
   }

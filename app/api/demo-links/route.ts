@@ -4,7 +4,7 @@ import { DEFAULT_PAYLOAD } from '@/lib/demo/defaults';
 import { createAdminClient } from '@/lib/supabase/server';
 import { MapService } from '@/lib/services/MapService';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
-import { isFlyrInternalWorkspaceMember } from '@/lib/auth/flyrInternalWorkspace';
+import { hasFlyrDemoAdminAccess } from '@/lib/auth/flyrInternalWorkspace';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
   }
 
   const admin = createAdminClient();
-  const allowed = await isFlyrInternalWorkspaceMember(admin, requestUser.id);
+  const allowed = await hasFlyrDemoAdminAccess(admin, requestUser.id);
   if (!allowed) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
