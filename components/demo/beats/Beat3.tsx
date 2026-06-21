@@ -27,7 +27,7 @@ const BUILDINGS_LAYER_ID = 'demo-b3-buildings-extrusion';
 const FRESH_BUILDINGS_LAYER_ID = 'demo-b3-buildings-fresh-extrusion';
 const TARGET_ZOOM = 16.5;
 const TARGET_PITCH = 45;
-const TERRITORY_RADIUS_RATIO = 0.225;
+const TERRITORY_RADIUS_METERS = 180;
 const ADDRESS_HIGHLIGHT_COLOR = '#6b7280';
 const ADDRESS_EXTRUSION_HEIGHT_METERS = 12;
 const BUILDING_GEOMETRY_FILTER = ['match', ['geometry-type'], ['Polygon', 'MultiPolygon'], true, false];
@@ -72,16 +72,6 @@ function offsetMeters(center: LngLat, eastMeters: number, northMeters: number): 
   const lngDelta = eastMeters / (111_320 * Math.max(Math.cos(latRad), 0.01));
   const latDelta = northMeters / 110_540;
   return [center[0] + lngDelta, center[1] + latDelta];
-}
-
-function metersPerPixelAtZoom(lat: number, zoom: number) {
-  return (156543.03392 * Math.cos((lat * Math.PI) / 180)) / Math.pow(2, zoom);
-}
-
-function territoryRadiusMeters(center: LngLat, stageEl: HTMLElement) {
-  const rect = stageEl.getBoundingClientRect();
-  const smallerStageDimension = Math.min(rect.width, rect.height);
-  return smallerStageDimension * TERRITORY_RADIUS_RATIO * metersPerPixelAtZoom(center[1], TARGET_ZOOM);
 }
 
 function buildTerritoryRing(center: LngLat, radiusMeters: number): LngLat[] {
@@ -432,7 +422,7 @@ function Beat3Map({
       }
 
       buildingLayerIdRef.current = buildingLayerId;
-      ringRef.current = buildTerritoryRing(center, territoryRadiusMeters(center, mapContainerRef.current));
+      ringRef.current = buildTerritoryRing(center, TERRITORY_RADIUS_METERS);
 
       const map = new mapboxgl.Map({
         container: mapContainerRef.current,
