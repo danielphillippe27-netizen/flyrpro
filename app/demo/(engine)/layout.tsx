@@ -498,10 +498,23 @@ export default function DemoLayout({ children }: { children: ReactNode }) {
 
         @media(max-width:760px) {
           .demo-map-label {
-            max-width: calc(100% - 180px);
+            top: 12px;
+            left: 12px;
+            right: 12px;
+            max-width: calc(100% - 24px);
             font-size: 13px;
             letter-spacing: .16em;
+            line-height: 1.35;
             padding: 8px 12px;
+            text-overflow: clip;
+            white-space: normal;
+          }
+
+          #b3 .replay {
+            top: 82px;
+            left: 12px;
+            right: auto;
+            min-width: 44px;
           }
 
           .demo-map-counter {
