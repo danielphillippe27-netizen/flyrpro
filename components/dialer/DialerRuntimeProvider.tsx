@@ -4,15 +4,15 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { Dispatch, ReactNode, SetStateAction } from 'react';
-import { ChevronRight, Loader2, Mail, MessageSquare, MoreHorizontal, PhoneCall, PhoneOff } from 'lucide-react';
+import { ChevronRight, Loader2, Mail, MessageSquare, MoreHorizontal, PhoneCall, PhoneIncoming, PhoneOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useTwilioDevice } from '@/lib/hooks/useTwilioDevice';
+import { useDialerDevice } from '@/lib/hooks/useDialerDevice';
 import { formatPhoneDisplay, normalizePhoneNumber } from '@/lib/dialer/phone';
 import { getDialerCallRecordingSummary } from '@/lib/dialer/recordings';
 import { useWorkspace } from '@/lib/workspace-context';
 import type { DialerCall, DiallerLead } from '@/types/database';
 
-type DialerDevice = ReturnType<typeof useTwilioDevice>;
+type DialerDevice = ReturnType<typeof useDialerDevice>;
 
 export type ActiveDialerLeadSnapshot = {
   id: string;
@@ -129,6 +129,10 @@ function getCallOutcome(call: DialerCall): DiallerLead['latest_call_outcome'] {
   return 'pending';
 }
 
+function isTerminalDialerCall(call: DialerCall): boolean {
+  return Boolean(call.ended_at) || ['completed', 'no-answer', 'busy', 'failed', 'canceled'].includes(call.status ?? '');
+}
+
 export function useDialerRuntime() {
   const runtime = useContext(DialerRuntimeContext);
   if (!runtime) {
@@ -139,7 +143,7 @@ export function useDialerRuntime() {
 
 export function DialerRuntimeProvider({ children }: { children: ReactNode }) {
   const { currentWorkspaceId } = useWorkspace();
-  const device = useTwilioDevice();
+  const device = useDialerDevice();
   const [tabId] = useState(createTabId);
   const callStartedAtRef = useRef<number | null>(null);
   const [diallerLeads, setDiallerLeads] = useState<DiallerLead[]>([]);
@@ -155,6 +159,7 @@ export function DialerRuntimeProvider({ children }: { children: ReactNode }) {
   const [isPlacingNextCall, setIsPlacingNextCall] = useState(false);
   const autoDoubleDialCallIdsRef = useRef<Set<string>>(new Set());
   const autoDoubleDialTimeoutRef = useRef<number | null>(null);
+  const removedDiallerLeadIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!device.isInCall) {
@@ -185,11 +190,54 @@ export function DialerRuntimeProvider({ children }: { children: ReactNode }) {
   const hangUpActiveCall = useCallback(() => {
     if (device.isInCall) {
       device.hangUp();
+    } else if (activeCallId && currentWorkspaceId) {
+      void fetch(`/api/dialer/calls/${encodeURIComponent(activeCallId)}/hangup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ workspaceId: currentWorkspaceId }),
+      }).catch((error) => {
+        console.warn('[dialer/runtime] failed to hang up backend call', error);
+      });
     }
     setDiallerRunning(false);
     setActiveCallId(null);
     setActiveCallIsDoubleDial(false);
-  }, [device]);
+  }, [activeCallId, currentWorkspaceId, device]);
+
+  const removeDiallerLeadFromQueue = useCallback(async (leadId: string): Promise<void> => {
+    if (!currentWorkspaceId || removedDiallerLeadIdsRef.current.has(leadId)) return;
+    removedDiallerLeadIdsRef.current.add(leadId);
+
+    try {
+      const response = await fetch('/api/dialer/leads', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          workspaceId: currentWorkspaceId,
+          id: leadId,
+        }),
+      });
+      if (!response.ok) throw new Error('Failed to remove dialler lead.');
+    } catch {
+      removedDiallerLeadIdsRef.current.delete(leadId);
+      return;
+    }
+
+    setDiallerLeads((currentLeads) => {
+      const removedIndex = currentLeads.findIndex((lead) => lead.id === leadId);
+      const nextLeads = currentLeads.filter((lead) => lead.id !== leadId);
+      setActiveLeadId((currentId) => {
+        if (currentId && currentId !== leadId && nextLeads.some((lead) => lead.id === currentId)) return currentId;
+        const laterPending = nextLeads.slice(Math.max(removedIndex, 0)).find((lead) => statusForLead(lead) === 'pending');
+        const firstPending = nextLeads.find((lead) => statusForLead(lead) === 'pending');
+        return laterPending?.id ?? firstPending?.id ?? nextLeads[0]?.id ?? null;
+      });
+      return nextLeads;
+    });
+    setActiveLeadSnapshot((snapshot) => (snapshot?.id === leadId ? null : snapshot));
+  }, [currentWorkspaceId]);
 
   const placeDiallerLeadCall = useCallback(async ({
     leadId,
@@ -226,10 +274,6 @@ export function DialerRuntimeProvider({ children }: { children: ReactNode }) {
         company: leadToCall.company ?? null,
       });
 
-      if (!device.isReady) {
-        await device.initialize(currentWorkspaceId, tabId);
-      }
-
       const response = await fetch('/api/dialer/leads/call', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -249,10 +293,19 @@ export function DialerRuntimeProvider({ children }: { children: ReactNode }) {
       setActiveCallId(data.call.id);
       setActiveCallIsDoubleDial(doubleDial);
       setDiallerRunning(true);
-      await device.startCall(data.call.call_request_id);
+      if (!device.isReady) {
+        await device.initialize(currentWorkspaceId, tabId);
+      }
+      await device.startCall(data.call.call_request_id, {
+        toNumber: data.call.to_number_e164,
+        fromNumber: data.call.from_number_e164,
+      });
       return {
         ok: true,
-        message: doubleDial ? `Voicemail detected. Redialing ${leadToCall.name || 'lead'} once.` : `Calling ${leadToCall.name || 'next lead'}.`,
+        message:
+          doubleDial
+            ? `Voicemail detected. Redialing ${leadToCall.name || 'lead'} once.`
+            : `Calling ${leadToCall.name || 'next lead'}.`,
       };
     } catch (error) {
       setDiallerRunning(false);
@@ -316,7 +369,14 @@ export function DialerRuntimeProvider({ children }: { children: ReactNode }) {
 
         const payload = getDialerCallStatusPayload(data.call);
         const leadId = typeof payload.diallerLeadId === 'string' ? payload.diallerLeadId : activeLeadId;
-        if (leadId) {
+        const shouldRedial =
+          isMachineAnswer(payload.amd?.answeredBy, payload.amd?.isMachine) &&
+          payload.doubleDial !== true &&
+          !autoDoubleDialCallIdsRef.current.has(data.call.id);
+
+        if (leadId && isTerminalDialerCall(data.call) && getCallOutcome(data.call) !== 'pending' && !shouldRedial) {
+          void removeDiallerLeadFromQueue(leadId);
+        } else if (leadId) {
           setDiallerLeads((currentLeads) =>
             currentLeads.map((lead) =>
               lead.id === leadId
@@ -334,10 +394,6 @@ export function DialerRuntimeProvider({ children }: { children: ReactNode }) {
             )
           );
         }
-        const shouldRedial =
-          isMachineAnswer(payload.amd?.answeredBy, payload.amd?.isMachine) &&
-          payload.doubleDial !== true &&
-          !autoDoubleDialCallIdsRef.current.has(data.call.id);
 
         if (!shouldRedial || !leadId) return;
 
@@ -366,7 +422,7 @@ export function DialerRuntimeProvider({ children }: { children: ReactNode }) {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [activeCallId, activeLeadId, currentWorkspaceId, device, diallerRunning, placeDiallerLeadCall]);
+  }, [activeCallId, activeLeadId, currentWorkspaceId, device, diallerRunning, placeDiallerLeadCall, removeDiallerLeadFromQueue]);
 
 
   const value = useMemo<DialerRuntimeContextValue>(
@@ -437,16 +493,30 @@ function PersistentDialerBar() {
   } = useDialerRuntime();
   const [demoAction, setDemoAction] = useState<'text' | 'email' | null>(null);
   const [demoStatus, setDemoStatus] = useState<string | null>(null);
-  const shouldShow = !pathname?.startsWith('/dialer') && (device.isInCall || Boolean(activeCallId) || diallerRunning);
+  const shouldShow =
+    !pathname?.startsWith('/dialer') &&
+    (device.isInCall || device.hasIncomingCall || Boolean(activeCallId) || diallerRunning);
 
   if (!shouldShow) return null;
 
   const activeLead = activeLeadId
     ? diallerLeads.find((lead) => lead.id === activeLeadId) ?? null
     : null;
-  const leadName = activeLeadSnapshot?.name?.trim() || 'Dialler call';
-  const leadPhone = activeLeadSnapshot?.phone ? formatPhoneDisplay(activeLeadSnapshot.phone) : null;
-  const phaseLabel = device.isConnecting ? 'Connecting' : device.isInCall ? 'Live' : device.callPhase === 'ended' ? 'Ended' : 'Ready';
+  const leadName = device.hasIncomingCall
+    ? device.incomingCall?.name?.trim() || 'Incoming call'
+    : activeLeadSnapshot?.name?.trim() || 'Dialler call';
+  const leadPhone = device.hasIncomingCall
+    ? device.incomingCall?.number ? formatPhoneDisplay(device.incomingCall.number) : null
+    : activeLeadSnapshot?.phone ? formatPhoneDisplay(activeLeadSnapshot.phone) : null;
+  const phaseLabel = device.hasIncomingCall
+    ? 'Incoming'
+    : device.isConnecting
+      ? 'Connecting'
+      : device.isInCall
+        ? 'Live'
+        : device.callPhase === 'ended'
+          ? 'Ended'
+          : 'Ready';
   const isSendingDemo = demoAction !== null;
 
   const loadDemoMessage = async (): Promise<DemoMessageResponse> => {
@@ -569,30 +639,54 @@ function PersistentDialerBar() {
         </div>
       </div>
       <div className="grid grid-cols-3 gap-1.5 p-2">
-        <Button
-          type="button"
-          variant="outline"
-          onClick={hangUpActiveCall}
-          disabled={!device.isInCall && !activeCallId}
-          className="h-9 min-w-0 border-neutral-300 bg-white px-2 text-xs font-semibold text-neutral-950 hover:border-neutral-950 hover:bg-neutral-100 disabled:border-neutral-300 disabled:text-neutral-400"
-        >
-          <PhoneOff className="h-3.5 w-3.5 shrink-0" />
-          Hang up
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => void placeNextDiallerCall()}
-          disabled={device.setupState === 'initializing' || startingCall || isPlacingNextCall}
-          className="h-9 min-w-0 border-neutral-300 bg-white px-2 text-xs font-semibold text-neutral-950 hover:bg-neutral-100 disabled:text-neutral-400"
-        >
-          {isPlacingNextCall || startingCall ? (
-            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
-          ) : (
-            <ChevronRight className="h-3.5 w-3.5 shrink-0" />
-          )}
-          Next call
-        </Button>
+        {device.hasIncomingCall ? (
+          <>
+            <Button
+              type="button"
+              onClick={() => void device.answerIncomingCall()}
+              className="h-9 min-w-0 bg-neutral-950 px-2 text-xs font-semibold text-white hover:bg-neutral-800"
+            >
+              <PhoneIncoming className="h-3.5 w-3.5 shrink-0" />
+              Answer
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={device.rejectIncomingCall}
+              className="h-9 min-w-0 border-neutral-300 bg-white px-2 text-xs font-semibold text-neutral-950 hover:border-neutral-950 hover:bg-neutral-100"
+            >
+              <PhoneOff className="h-3.5 w-3.5 shrink-0" />
+              Decline
+            </Button>
+          </>
+        ) : (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={hangUpActiveCall}
+            disabled={!device.isInCall && !activeCallId}
+            className="h-9 min-w-0 border-neutral-300 bg-white px-2 text-xs font-semibold text-neutral-950 hover:border-neutral-950 hover:bg-neutral-100 disabled:border-neutral-300 disabled:text-neutral-400"
+          >
+            <PhoneOff className="h-3.5 w-3.5 shrink-0" />
+            Hang up
+          </Button>
+        )}
+        {!device.hasIncomingCall ? (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => void placeNextDiallerCall()}
+            disabled={device.setupState === 'initializing' || startingCall || isPlacingNextCall}
+            className="h-9 min-w-0 border-neutral-300 bg-white px-2 text-xs font-semibold text-neutral-950 hover:bg-neutral-100 disabled:text-neutral-400"
+          >
+            {isPlacingNextCall || startingCall ? (
+              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5 shrink-0" />
+            )}
+            Next call
+          </Button>
+        ) : null}
         <Button asChild className="h-9 min-w-0 bg-neutral-950 px-2 text-xs font-semibold text-white hover:bg-neutral-800">
           <Link href="/dialer">
             <MoreHorizontal className="h-3.5 w-3.5 shrink-0" />

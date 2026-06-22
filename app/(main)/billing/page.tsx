@@ -268,7 +268,7 @@ export default function BillingPage() {
             <div>
               <CardTitle>Power Dialer Add-On</CardTitle>
               <CardDescription>
-                Workspace add-on for the Twilio power dialer with a dedicated caller ID path.
+                Workspace add-on for the power dialer with a dedicated caller ID path.
               </CardDescription>
             </div>
             {entitlement?.dialer_addon?.is_active ? (
@@ -280,7 +280,7 @@ export default function BillingPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            {dialerOfferLabel} per workspace. This turns on dialer billing and gives the workspace its own Twilio number instead of falling back to a shared default caller ID.
+            {dialerOfferLabel} per workspace. This turns on dialer billing and gives the workspace its own dialer number instead of falling back to a shared default caller ID.
           </p>
           <div className="space-y-1 text-sm">
             <p>

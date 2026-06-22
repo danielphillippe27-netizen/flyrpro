@@ -40,9 +40,11 @@ const salespeopleTab = { href: '/salespeople', icon: BriefcaseBusiness, label: '
 const salesLeaderboardTab = { href: '/sales-leaderboard', icon: Trophy, label: 'Sales Board' };
 const diallerTab = { href: '/dialer', icon: PhoneCall, label: 'Dialler' };
 const demoTab = { href: '/demo-center', icon: PlayCircle, label: 'Demo' };
+const salesFloorTab = { href: '/sales-floor', icon: MessageCircle, label: 'Sales Floor' };
 const settingsTab = { href: '/settings', icon: Settings, label: 'Settings' };
 const salespersonWorkspaceTabs = [
   { href: '/home', icon: Home, label: 'Home' },
+  salesFloorTab,
   diallerTab,
   scriptsTab,
   { href: '/leads', icon: Users, label: 'Leads' },
@@ -53,6 +55,7 @@ const salespersonWorkspaceTabs = [
 ];
 const founderTabs = [
   ...baseTabs.filter((tab) => ['/home'].includes(tab.href)),
+  salesFloorTab,
   ambassadorsTab,
   salespeopleTab,
   salesLeaderboardTab,

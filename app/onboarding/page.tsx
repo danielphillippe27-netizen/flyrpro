@@ -1,6 +1,7 @@
 'use client';
 
 import { Suspense, useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import Image from 'next/image';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Check, ChevronDown, User, Users, Building2, Plus, Tag } from 'lucide-react';
+import { Check, ChevronDown, User, Users, Building2, Plus } from 'lucide-react';
 import { ExclusiveOfferArcadeEmbed } from '@/components/landing/ExclusiveOfferArcadeEmbed';
 import { getClientAsync } from '@/lib/supabase/client';
 import { COUNTRY_OPTIONS } from '@/lib/countries';
@@ -36,6 +37,13 @@ type ReferralValidation = {
   salespersonName?: string | null;
   referralType?: 'ambassador' | 'salesperson';
 };
+type BillingPlan = 'annual' | 'monthly';
+type BillingCurrency = 'USD' | 'CAD';
+type OnboardingCompletionResponse = {
+  success?: boolean;
+  redirect?: string;
+  error?: string;
+};
 
 const INDUSTRIES_TOP = ['Real Estate', 'Solar', 'Roofing & Exteriors'];
 
@@ -57,24 +65,22 @@ const MAX_SEATS = 200;
 const FINAL_ONBOARDING_STEP = 6;
 const EXCLUSIVE_ONBOARDING_AUTH_DRAFT_KEY = 'flyr.exclusiveOnboardingAuthDraft';
 
-function getDialerEarlyBirdPricing(countryCode: string): {
-  currencyPrefix: string;
-  earlyBirdPrice: string;
-  regularPrice: string;
-} {
-  if (countryCode === 'CA') {
-    return {
-      currencyPrefix: 'CA$',
-      earlyBirdPrice: '40',
-      regularPrice: '80',
-    };
-  }
+function getBillingCurrency(): BillingCurrency {
+  return 'USD';
+}
 
-  return {
-    currencyPrefix: '$',
-    earlyBirdPrice: '30',
-    regularPrice: '60',
-  };
+function formatPlanPrice(amount: number, currency: BillingCurrency): string {
+  const formatted = amount.toLocaleString('en-US', {
+    minimumFractionDigits: amount % 1 === 0 ? 0 : 2,
+    maximumFractionDigits: 2,
+  });
+  return currency === 'CAD' ? `CA$${formatted} CAD` : `$${formatted} USD`;
+}
+
+function getSeatPricing(): {
+  seatMonthlyDisplay: number;
+} {
+  return { seatMonthlyDisplay: 30 };
 }
 
 function normalizeReferralCodeInput(value: string): string {
@@ -180,8 +186,8 @@ function OnboardingContent() {
     typeof salespersonInviteToken === 'string' && salespersonInviteToken.trim().length > 0;
   const isDialerOnboarding =
     searchParams.get('source') === 'dialer' || searchParams.get('campaign') === 'power-dialer';
-  const requiresStepOneAuth = isExclusivePartnerOnboarding || isSalespersonOnboarding;
-  const requiresOnboardingAuth = requiresStepOneAuth || isDialerOnboarding;
+  const requiresOnboardingAuth = isExclusivePartnerOnboarding || isSalespersonOnboarding || isDialerOnboarding;
+  const requiresStepOneAuth = requiresOnboardingAuth;
 
   useEffect(() => {
     if (!isExclusivePartnerOnboarding) {
@@ -253,7 +259,11 @@ function OnboardingContent() {
       : 'team';
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const billingPlan: BillingPlan = 'monthly';
+  const [postOnboardingRedirect, setPostOnboardingRedirect] = useState<string | null>(null);
 
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -529,8 +539,6 @@ function OnboardingContent() {
   const canStep3 =
     workspaceName.trim().length > 0 && industry.length > 0;
   const selectedCountry = COUNTRY_OPTIONS.find((country) => country.code === countryCode);
-  const dialerEarlyBirdPricing = getDialerEarlyBirdPricing(countryCode);
-  const dialerPriceCurrencyLabel = countryCode === 'CA' ? 'CAD' : 'USD';
   const filteredCountries = useMemo(() => {
     const query = countrySearchQuery.trim().toLowerCase();
     if (!query) return COUNTRY_OPTIONS;
@@ -538,6 +546,18 @@ function OnboardingContent() {
       `${country.label} ${country.name} ${country.code}`.toLowerCase().includes(query)
     );
   }, [countrySearchQuery]);
+  const billingCurrency = getBillingCurrency();
+  const seatPricing = getSeatPricing();
+  const selectedSeatCount = useCase === 'team' ? Math.max(TEAM_MIN_SEATS, seats) : SOLO_SEATS;
+  const pricingCards = [
+    {
+      id: 'simple-pro',
+      title: 'FLYR Pro',
+      seatCount: selectedSeatCount,
+      description: 'Everything you need to run campaigns, track routes, and follow up with leads.',
+      features: ['Campaign planning', 'Route tracking', 'Lead follow-up', 'Team seats when you need them'],
+    },
+  ] as const;
 
   const persistExclusiveAuthDraft = useCallback(() => {
     if (!requiresOnboardingAuth || typeof window === 'undefined') return;
@@ -672,11 +692,20 @@ function OnboardingContent() {
     }
   }, [referralCode, referralValidation?.referralCode]);
 
-  const handleSubmit = async () => {
+  const completeOnboarding = async (options?: {
+    checkoutSeats?: number;
+    checkoutUseCase?: 'solo' | 'team';
+  }): Promise<OnboardingCompletionResponse | null> => {
     setError(null);
+    setCheckoutError(null);
     setLoading(true);
     try {
       const normalizedInviteEmails = normalizeEmailList(teamInviteEmails);
+      const completionUseCase = options?.checkoutUseCase ?? useCase;
+      const completionSeats =
+        typeof options?.checkoutSeats === 'number' && Number.isFinite(options.checkoutSeats)
+          ? options.checkoutSeats
+          : seats;
       const res = await fetch('/api/onboarding/complete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -692,11 +721,11 @@ function OnboardingContent() {
           referralCampaign,
           brokerage: brokerage.trim() || undefined,
           brokerageId: brokerageId ?? undefined,
-          useCase: isExclusivePartnerTeamLayout ? 'team' : useCase,
+          useCase: isExclusivePartnerTeamLayout ? 'team' : completionUseCase,
           maxSeats: isExclusivePartnerTeamLayout
-            ? Math.max(TEAM_MIN_SEATS, normalizedInviteEmails.length + 1, seats)
-            : useCase === 'team'
-              ? Math.max(TEAM_MIN_SEATS, seats)
+            ? Math.max(TEAM_MIN_SEATS, normalizedInviteEmails.length + 1, completionSeats)
+            : completionUseCase === 'team'
+              ? Math.max(TEAM_MIN_SEATS, completionSeats)
               : SOLO_SEATS,
           partnerOfferToken: isExclusivePartnerOnboarding ? partnerOfferToken : undefined,
           salespersonInviteToken: isSalespersonOnboarding ? salespersonInviteToken : undefined,
@@ -705,18 +734,76 @@ function OnboardingContent() {
         }),
       });
       const data = await res.json().catch(() => ({}));
-      if (res.ok && data.redirect) {
-        if (typeof window !== 'undefined') {
-          window.localStorage.removeItem(EXCLUSIVE_ONBOARDING_AUTH_DRAFT_KEY);
+      if (res.ok) {
+        if (typeof data?.redirect === 'string') {
+          setPostOnboardingRedirect(data.redirect);
         }
-        window.location.href = data.redirect;
-        return;
+        return data as OnboardingCompletionResponse;
       }
       setError(data?.error ?? 'Something went wrong. Please try again.');
+      return null;
     } catch {
       setError('Network error. Please try again.');
+      return null;
     } finally {
       setLoading(false);
+    }
+  };
+
+  const redirectAfterOnboarding = (redirect?: string | null) => {
+    const destination = redirect || postOnboardingRedirect;
+    if (!destination) return;
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem(EXCLUSIVE_ONBOARDING_AUTH_DRAFT_KEY);
+      window.location.href = destination;
+    }
+  };
+
+  const handleSubmit = async (options?: {
+    checkoutSeats?: number;
+    checkoutUseCase?: 'solo' | 'team';
+  }) => {
+    const data = await completeOnboarding(options);
+    if (data?.redirect) {
+      redirectAfterOnboarding(data.redirect);
+    }
+  };
+
+  const handleSelectPlan = async (checkoutSeats: number) => {
+    const checkoutUseCase = checkoutSeats > SOLO_SEATS ? 'team' : 'solo';
+    const completion = await completeOnboarding({ checkoutSeats, checkoutUseCase });
+    if (!completion?.redirect) return;
+
+    setCheckoutLoading(true);
+    setCheckoutError(null);
+    try {
+      const checkoutRes = await fetch('/api/billing/stripe/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          plan: billingPlan,
+          currency: billingCurrency,
+          seats: checkoutSeats,
+        }),
+      });
+      const data = await checkoutRes.json().catch(() => ({}));
+      if (checkoutRes.ok && data?.url) {
+        if (typeof window !== 'undefined') {
+          window.localStorage.removeItem(EXCLUSIVE_ONBOARDING_AUTH_DRAFT_KEY);
+          window.location.href = data.url;
+        }
+        return;
+      }
+      setCheckoutError(
+        typeof data?.error === 'string'
+          ? `${data.error} Your onboarding is saved, so you can skip into FLYR.`
+          : 'Checkout could not start. Your onboarding is saved, so you can skip into FLYR.'
+      );
+    } catch {
+      setCheckoutError('Network error starting checkout. Your onboarding is saved, so you can skip into FLYR.');
+    } finally {
+      setCheckoutLoading(false);
     }
   };
 
@@ -899,20 +986,58 @@ function OnboardingContent() {
     [buildExclusiveAuthCallbackURL, firstName, lastName, persistExclusiveAuthDraft]
   );
 
+  const labelClass = 'text-sm font-semibold text-[#1f2024]';
+  const inputClass =
+    'h-14 rounded-xl border-[#d9dce2] bg-white text-base font-semibold text-[#17181c] placeholder:text-[#8a8f99] shadow-none focus-visible:border-[#17181c] focus-visible:ring-2 focus-visible:ring-black/10 dark:bg-white dark:text-[#17181c] dark:placeholder:text-[#8a8f99]';
+  const outlineButtonClass =
+    'h-12 rounded-xl border-[#d9dce2] bg-white text-[#202124] hover:bg-[#f5f6f8] hover:text-[#202124] dark:border-[#d9dce2] dark:bg-white dark:text-[#202124] dark:hover:bg-[#f5f6f8] dark:hover:text-[#202124]';
+  const onboardingNavButtonClass =
+    'h-auto min-h-11 min-w-20 rounded-none bg-transparent px-2 text-xl font-bold text-[#17181c] shadow-none hover:bg-transparent hover:text-[#17181c] focus-visible:ring-black/10 dark:bg-transparent dark:text-[#17181c] dark:hover:bg-transparent dark:hover:text-[#17181c]';
+  const activeDotClass = 'h-2.5 w-7 rounded-full bg-[#17181c]';
+  const inactiveDotClass = 'h-2.5 w-2.5 rounded-full bg-[#c7c9ce]';
+
+  const heading =
+    step === 1
+      ? 'Help us personalize your experience'
+      : step === 2
+        ? 'How will you use FLYR?'
+        : step === 3
+          ? 'Set up your workspace'
+          : step === 4
+            ? 'Ambassador referral code'
+            : step === 5
+              ? 'FLYR is built for the field'
+              : 'Do more with FLYR';
+
+  const subheading =
+    step === 1
+      ? null
+      : step === 2
+        ? isExclusivePartnerTeamLayout
+          ? 'Team mode is pre-selected for this exclusive offer.'
+          : 'Choose solo or team so we can tailor your workspace.'
+        : step === 3
+          ? 'Name your business and tell us your industry.'
+          : step === 4
+            ? 'Enter an ambassador code to unlock your offer, or skip this step.'
+            : step === 5
+              ? 'Plan campaigns, track doors, and keep your leads organized.'
+              : 'Select a plan based on your needs';
+
   if (handoffRedeemState === 'loading') {
     return (
-      <div className="dark min-h-screen bg-gradient-to-br from-black to-[#262626] flex flex-col items-center justify-center p-6">
-        <p className="text-zinc-400">Signing you in...</p>
+      <div className="min-h-screen bg-white flex flex-col items-center justify-center p-6">
+        <p className="text-[#6f7480]">Signing you in...</p>
       </div>
     );
   }
 
   if (handoffRedeemState === 'error') {
     return (
-      <div className="dark min-h-screen bg-gradient-to-br from-black to-[#262626] flex flex-col items-center justify-center p-6">
-        <div className="max-w-md rounded-xl border border-red-500/40 bg-red-500/10 p-5 text-center">
-          <h1 className="text-lg font-semibold text-white">Onboarding link expired</h1>
-          <p className="mt-2 text-sm text-zinc-300">
+      <div className="min-h-screen bg-white flex flex-col items-center justify-center p-6">
+        <div className="max-w-md rounded-xl border border-red-200 bg-red-50 p-5 text-center">
+          <h1 className="text-lg font-semibold text-[#17181c]">Onboarding link expired</h1>
+          <p className="mt-2 text-sm text-[#6f7480]">
             {handoffRedeemError || 'Open onboarding again from Android.'}
           </p>
         </div>
@@ -922,828 +1047,591 @@ function OnboardingContent() {
 
   if (!isExclusivePartnerLayoutReady) {
     return (
-      <div className="dark min-h-screen bg-gradient-to-br from-black to-[#262626] flex flex-col items-center justify-center p-6">
-        <p className="text-zinc-400">Loading your offer…</p>
+      <div className="min-h-screen bg-white flex flex-col items-center justify-center p-6">
+        <p className="text-[#6f7480]">Loading your offer...</p>
       </div>
     );
   }
 
   return (
-    <div className="dark min-h-screen bg-gradient-to-br from-black to-[#262626] flex flex-col items-center justify-center p-6 pb-28 sm:pb-24 relative overflow-x-hidden overflow-y-auto">
-      <div className="absolute inset-0 bg-gradient-to-b from-red-950/40 via-transparent to-black/80 pointer-events-none" />
-      <div
-        className={`relative w-full min-w-0 space-y-8 rounded-2xl border border-white/15 bg-white/[0.06] p-6 sm:p-10 backdrop-blur-2xl shadow-[0_24px_70px_rgba(0,0,0,0.6),0_10px_30px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.2)] ${
-          isDialerOnboarding && step === 6
-            ? 'max-w-2xl'
-            : step >= 5
-              ? 'max-w-5xl'
-              : 'max-w-lg'
+    <div className="min-h-screen bg-white text-[#17181c] flex flex-col items-center justify-center overflow-x-hidden px-5 py-10">
+      <main
+        className={`w-full min-w-0 ${
+          step === FINAL_ONBOARDING_STEP ? 'max-w-[1280px]' : step === 5 ? 'max-w-5xl' : 'max-w-[720px]'
         }`}
       >
-        {!(isDialerOnboarding && step === 6) && (
-          <div className="text-center space-y-2">
-            <h1
-              className={`max-w-full min-w-0 font-bold leading-tight text-white break-words [overflow-wrap:anywhere] ${
-                step === 5
-                  ? 'text-3xl sm:text-4xl md:text-5xl'
-                  : step === 6
-                    ? 'text-4xl'
-                    : 'text-3xl'
-              }`}
-            >
-              {step === 1 && 'What should we call you?'}
-              {step === 2 && 'How will you use FLYR?'}
-              {step === 3 && 'Set up your workspace'}
-              {step === 4 && 'Ambassador referral code'}
-              {step === 5 && (
-                <>
-                  FLYR is revolutionizing
-                  <br />
-                  Door 2 Door Marketing
-                </>
-              )}
-              {step === 6 && (
-                <>
-                  You&apos;re one step away from tracking every door
-                  <br />
-                  and never losing a lead.
-                </>
-              )}
+        <div className={step === FINAL_ONBOARDING_STEP ? 'mb-10 text-center' : 'mb-8 text-center'}>
+          <div className="space-y-3">
+            <h1 className={step === FINAL_ONBOARDING_STEP ? 'text-4xl font-bold leading-tight tracking-normal sm:text-5xl' : 'text-3xl font-bold leading-tight tracking-normal sm:text-4xl'}>
+              {heading}
             </h1>
-            {(step === 1 || step === 2 || step === 3 || step === 4) && (
-              <p className="text-base text-[#AAAAAA]">
-                {step === 1 && 'We use this to personalize your experience.'}
-                {step === 2 &&
-                  (isExclusivePartnerTeamLayout
-                    ? 'We set this to team mode for your exclusive offer.'
-                    : 'Choose solo or invite your team.')}
-                {step === 3 && 'Name your business and tell us your industry.'}
-                {step === 4 && 'Enter an ambassador code to unlock your 30-day trial, or skip this step.'}
-              </p>
-            )}
+            {subheading ? (
+              <p className="text-lg font-semibold text-[#7b7f89]">{subheading}</p>
+            ) : null}
           </div>
-        )}
+        </div>
 
         {(isExclusivePartnerOnboarding || isSalespersonOnboarding) && step === 1 ? (
-          <div className="rounded-xl border border-red-500/40 bg-red-500/10 p-4">
-            <p className="text-center text-xs font-semibold uppercase tracking-wider text-red-300">
+          <div className="mb-6 rounded-xl border border-[#d9dce2] bg-[#fafafa] p-4 text-center">
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#6f7480]">
               {isSalespersonOnboarding
                 ? 'Salesperson onboarding'
                 : isExclusivePartnerTeamLayout
                   ? 'Exclusive Team Onboarding'
                   : 'Exclusive offer'}
             </p>
-            <p className="mt-1 text-center text-lg font-semibold text-white">
+            <p className="mt-1 text-lg font-bold text-[#17181c]">
               {isSalespersonOnboarding ? 'Set up your FLYR sales workspace' : '30-day exclusive offer unlocked'}
             </p>
-            <p className="mt-1 text-center text-sm text-zinc-300">
+            <p className="mt-1 text-sm text-[#6f7480]">
               {isSalespersonOnboarding
                 ? 'Create your account with the invited email. Your workspace will be nested under FLYR / Salespeople.'
                 : hideExclusiveStep1Demo
-                ? 'Finish onboarding to activate your 30-day trial.'
-                : 'Finish onboarding to activate your 30-day trial and watch the demo if you haven&apos;t already.'}
+                  ? 'Finish onboarding to activate your 30-day trial.'
+                  : 'Finish onboarding to activate your 30-day trial and watch the demo if you have not already.'}
             </p>
             {!isSalespersonOnboarding && !hideExclusiveStep1Demo ? (
-              <div className="mt-4 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900">
+              <div className="mt-4 overflow-hidden rounded-lg border border-[#d9dce2] bg-white">
                 <ExclusiveOfferArcadeEmbed demo={onboardingDemo} />
               </div>
             ) : null}
           </div>
         ) : null}
 
-        {step === 1 && (
-          <form
-            className="space-y-5"
-            onSubmit={async (e) => {
-              e.preventDefault();
-              if (!canStep1) return;
-              const authReady = await ensureExclusiveAuth();
-              if (!authReady) return;
-              if (isSalespersonOnboarding) {
-                await handleSubmit();
-                return;
-              }
-              setStep((s) => s + 1);
-            }}
-          >
-            <div className="space-y-2">
-              <Label htmlFor="firstName" className="text-base text-white">First name</Label>
-              <Input
-                id="firstName"
-                value={firstName}
-                onChange={(e) => setFirstName(e.target.value)}
-                placeholder="First name"
-                autoFocus
-                className="h-16 text-2xl md:text-2xl text-white placeholder:text-gray-500 bg-[#2a2a2a] border-zinc-600 focus-visible:border-white focus-visible:ring-2 focus-visible:ring-white/40"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="lastName" className="text-base text-white">Last name</Label>
-              <Input
-                id="lastName"
-                value={lastName}
-                onChange={(e) => setLastName(e.target.value)}
-                placeholder="Last name"
-                className="h-16 text-2xl md:text-2xl text-white placeholder:text-gray-500 bg-[#2a2a2a] border-zinc-600 focus-visible:border-white focus-visible:ring-2 focus-visible:ring-white/40"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && canStep1) {
-                    e.preventDefault();
-                    void (async () => {
-                      const authReady = await ensureExclusiveAuth();
-                      if (!authReady) return;
-                      if (isSalespersonOnboarding) {
-                        await handleSubmit();
-                        return;
+        <section className={step === FINAL_ONBOARDING_STEP ? '' : 'mx-auto max-w-[720px]'}>
+          {step === 1 && (
+            <form
+              className="space-y-5"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (!canStep1) return;
+                const authReady = await ensureExclusiveAuth();
+                if (!authReady) return;
+                if (isSalespersonOnboarding) {
+                  await handleSubmit();
+                  return;
+                }
+                setStep((s) => s + 1);
+              }}
+            >
+              <div className="grid gap-5 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="firstName" className={labelClass}>First name</Label>
+                  <Input
+                    id="firstName"
+                    value={firstName}
+                    onChange={(e) => setFirstName(e.target.value)}
+                    placeholder="First name"
+                    autoFocus
+                    className={inputClass}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="lastName" className={labelClass}>Last name</Label>
+                  <Input
+                    id="lastName"
+                    value={lastName}
+                    onChange={(e) => setLastName(e.target.value)}
+                    placeholder="Last name"
+                    className={inputClass}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && canStep1) {
+                        e.preventDefault();
+                        void (async () => {
+                          const authReady = await ensureExclusiveAuth();
+                          if (!authReady) return;
+                          if (isSalespersonOnboarding) {
+                            await handleSubmit();
+                            return;
+                          }
+                          setStep((s) => s + 1);
+                        })();
                       }
-                      setStep((s) => s + 1);
-                    })();
-                  }
-                }}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="countryCode" className="text-base text-white">Country</Label>
-              <div className="relative">
-                <button
-                  id="countryCode"
-                  type="button"
-                  onClick={() => setCountrySearchOpen((open) => !open)}
-                  className="flex h-16 w-full items-center justify-between rounded-md border border-zinc-600 bg-[#2a2a2a] px-3 text-left text-2xl text-white outline-none focus:border-white focus:ring-2 focus:ring-white/40"
-                  aria-haspopup="listbox"
-                  aria-expanded={countrySearchOpen}
-                >
-                  <span>{selectedCountry?.label ?? 'Select your country'}</span>
-                  <ChevronDown className="h-5 w-5 text-zinc-400" />
-                </button>
-                {countrySearchOpen ? (
-                  <div className="absolute z-50 mt-2 w-full overflow-hidden rounded-md border border-zinc-600 bg-[#1f1f1f] shadow-xl">
-                    <Input
-                      value={countrySearchQuery}
-                      onChange={(event) => setCountrySearchQuery(event.target.value)}
-                      placeholder="Search countries..."
-                      className="h-12 rounded-none border-0 border-b border-zinc-700 bg-[#2a2a2a] text-white placeholder:text-zinc-500 focus-visible:ring-0"
-                    />
-                    <div className="max-h-64 overflow-y-auto" role="listbox" aria-label="Countries">
-                      {filteredCountries.length > 0 ? (
-                        filteredCountries.map((country) => (
-                          <button
-                            key={country.code}
-                            type="button"
-                            role="option"
-                            aria-selected={country.code === countryCode}
-                            onClick={() => {
-                              setCountryCode(country.code);
-                              setCountrySearchOpen(false);
-                              setCountrySearchQuery('');
-                            }}
-                            className="flex w-full items-center justify-between px-3 py-3 text-left text-base text-white hover:bg-white/10"
-                          >
-                            <span>{country.label}</span>
-                            {country.code === countryCode ? <Check className="h-4 w-4" /> : null}
-                          </button>
-                        ))
-                      ) : (
-                        <p className="px-3 py-3 text-sm text-zinc-400">No countries found.</p>
-                      )}
+                    }}
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="countryCode" className={labelClass}>Country</Label>
+                <div className="relative">
+                  <button
+                    id="countryCode"
+                    type="button"
+                    onClick={() => setCountrySearchOpen((open) => !open)}
+                    className="flex h-14 w-full items-center justify-between rounded-xl border border-[#d9dce2] bg-white px-4 text-left text-base font-semibold text-[#17181c] outline-none transition focus:border-[#17181c] focus:ring-2 focus:ring-black/10"
+                    aria-haspopup="listbox"
+                    aria-expanded={countrySearchOpen}
+                  >
+                    <span>{selectedCountry?.label ?? 'Select your country'}</span>
+                    <ChevronDown className="h-5 w-5 text-[#7b7f89]" />
+                  </button>
+                  {countrySearchOpen ? (
+                    <div className="absolute z-50 mt-2 w-full overflow-hidden rounded-xl border border-[#d9dce2] bg-white shadow-xl">
+                      <Input
+                        value={countrySearchQuery}
+                        onChange={(event) => setCountrySearchQuery(event.target.value)}
+                        placeholder="Search countries..."
+                        className="h-12 rounded-none border-0 border-b border-[#e3e5e8] bg-white text-[#17181c] placeholder:text-[#8a8f99] focus-visible:ring-0"
+                      />
+                      <div className="max-h-64 overflow-y-auto" role="listbox" aria-label="Countries">
+                        {filteredCountries.length > 0 ? (
+                          filteredCountries.map((country) => (
+                            <button
+                              key={country.code}
+                              type="button"
+                              role="option"
+                              aria-selected={country.code === countryCode}
+                              onClick={() => {
+                                setCountryCode(country.code);
+                                setCountrySearchOpen(false);
+                                setCountrySearchQuery('');
+                              }}
+                              className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-semibold text-[#17181c] hover:bg-[#f5f6f8]"
+                            >
+                              <span>{country.label}</span>
+                              {country.code === countryCode ? <Check className="h-4 w-4" /> : null}
+                            </button>
+                          ))
+                        ) : (
+                          <p className="px-4 py-3 text-sm text-[#6f7480]">No countries found.</p>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ) : null}
-              </div>
-            </div>
-            {requiresStepOneAuth ? (
-              <>
-                <div className="space-y-2">
-                  <Label htmlFor="workEmail" className="text-base text-white">Work email</Label>
-                  <Input
-                    id="workEmail"
-                    type="email"
-                    value={workEmail}
-                    onChange={(e) => setWorkEmail(e.target.value.trim().toLowerCase())}
-                    placeholder="you@company.com"
-                    className="h-16 text-2xl md:text-2xl text-white placeholder:text-gray-500 bg-[#2a2a2a] border-zinc-600 focus-visible:border-white focus-visible:ring-2 focus-visible:ring-white/40"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="accountPassword" className="text-base text-white">Password</Label>
-                  <Input
-                    id="accountPassword"
-                    type="password"
-                    value={accountPassword}
-                    onChange={(e) => setAccountPassword(e.target.value)}
-                    placeholder="At least 6 characters"
-                    className="h-16 text-2xl md:text-2xl text-white placeholder:text-gray-500 bg-[#2a2a2a] border-zinc-600 focus-visible:border-white focus-visible:ring-2 focus-visible:ring-white/40"
-                  />
-                </div>
-                {hasAuthenticatedOnboardingSession ? (
-                  <p className="text-xs text-emerald-300">
-                    Signed in as {authenticatedEmail}. Continue onboarding below, or choose another sign-in option.
-                  </p>
-                ) : (
-                  <p className="text-xs text-zinc-400">
-                    We will sign in or create this account before continuing so onboarding never runs on the wrong user.
-                  </p>
-                )}
-                <div className="relative flex items-center gap-4 pt-1">
-                  <span className="flex-1 border-t border-zinc-600" />
-                  <span className="shrink-0 text-xs uppercase tracking-[0.2em] text-zinc-500">
-                    Or continue with
-                  </span>
-                  <span className="flex-1 border-t border-zinc-600" />
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-12 border-zinc-600 bg-transparent text-white hover:bg-zinc-800 hover:text-white"
-                    onClick={() => void handleExclusiveOAuthSignIn('google')}
-                    disabled={authLoading}
-                  >
-                    <svg className="mr-2 h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="none">
-                      <path
-                        fill="currentColor"
-                        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                      />
-                      <path
-                        fill="currentColor"
-                        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                      />
-                      <path
-                        fill="currentColor"
-                        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
-                      />
-                      <path
-                        fill="currentColor"
-                        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-                      />
-                    </svg>
-                    {authLoading && authMode === 'google'
-                      ? 'Continuing with Google…'
-                      : 'Continue with Google'}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-12 border-zinc-600 bg-transparent text-white hover:bg-zinc-800 hover:text-white"
-                    onClick={() => void handleExclusiveOAuthSignIn('apple')}
-                    disabled={authLoading}
-                  >
-                    <svg className="mr-2 h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M17.05 20.28c-.98.95-2.05.88-3.08.4-1.09-.5-2.08-.48-3.24 0-1.44.62-2.2.44-3.06-.4C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.54 4.09l.01-.01zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z" />
-                    </svg>
-                    {authLoading && authMode === 'apple'
-                      ? 'Continuing with Apple…'
-                      : 'Continue with Apple'}
-                  </Button>
-                </div>
-              </>
-            ) : null}
-          </form>
-        )}
-
-        {step === 2 && (
-          isExclusivePartnerTeamLayout ? (
-            <div className="space-y-4">
-              <div className="rounded-xl border border-red-500/40 bg-red-500/10 p-4 text-center">
-                <p className="text-sm font-semibold text-white">Team onboarding is pre-selected for this exclusive offer.</p>
-                <p className="mt-1 text-xs text-zinc-300">Add teammate emails now and invites will be sent after onboarding completes.</p>
-              </div>
-              <div className="space-y-3">
-                <Label className="text-base text-white">Team member emails (optional)</Label>
-                <div className="space-y-2">
-                  {teamInviteEmails.map((email, index) => (
-                    <Input
-                      key={index}
-                      type="email"
-                      value={email}
-                      onChange={(event) => {
-                        const nextEmails = [...teamInviteEmails];
-                        nextEmails[index] = event.target.value;
-                        setTeamInviteEmails(nextEmails);
-                      }}
-                      placeholder={`teammate${index + 1}@company.com`}
-                      className="h-12 text-base text-white placeholder:text-gray-500 bg-[#2a2a2a] border-zinc-600 focus-visible:border-white focus-visible:ring-2 focus-visible:ring-white/40"
-                    />
-                  ))}
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setTeamInviteEmails((prev) => [...prev, ''])}
-                    className="border-zinc-600 text-white hover:bg-zinc-800 hover:text-white"
-                  >
-                    Add another email
-                  </Button>
-                  {teamInviteEmails.length > 1 ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => setTeamInviteEmails((prev) => prev.slice(0, -1))}
-                      className="border-zinc-600 text-white hover:bg-zinc-800 hover:text-white"
-                    >
-                      Remove last
-                    </Button>
                   ) : null}
                 </div>
               </div>
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 gap-4">
-              <button
-                type="button"
-                onClick={() => {
-                  setUseCase('solo');
-                  setSeats(SOLO_SEATS);
-                }}
-                className={`flex flex-col items-center gap-2 rounded-xl border-2 p-7 transition-colors ${
-                  useCase === 'solo'
-                    ? 'border-red-500 bg-red-500/10'
-                    : 'border-zinc-600 hover:border-zinc-500'
-                }`}
-              >
-                <User className="h-9 w-9 text-[#AAAAAA]" />
-                <span className="text-base font-medium text-white">For myself</span>
-                <span className="text-sm text-[#AAAAAA] text-center">
-                  Solo use
-                </span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setUseCase('team');
-                  setSeats((prev) => Math.max(prev, TEAM_MIN_SEATS));
-                }}
-                className={`flex flex-col items-center gap-2 rounded-xl border-2 p-7 transition-colors ${
-                  useCase === 'team'
-                    ? 'border-red-500 bg-red-500/10'
-                    : 'border-zinc-600 hover:border-zinc-500'
-                }`}
-              >
-                <Users className="h-9 w-9 text-[#AAAAAA]" />
-                <span className="text-base font-medium text-white">For my team</span>
-                <span className="text-sm text-[#AAAAAA] text-center">
-                  Add teammates later
-                </span>
-              </button>
-            </div>
-          )
-        )}
+              {requiresStepOneAuth ? (
+                <div className="space-y-5">
+                  <div className="space-y-2">
+                    <Label htmlFor="workEmail" className={labelClass}>Work email</Label>
+                    <Input
+                      id="workEmail"
+                      type="email"
+                      value={workEmail}
+                      onChange={(e) => setWorkEmail(e.target.value.trim().toLowerCase())}
+                      placeholder="you@company.com"
+                      className={inputClass}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="accountPassword" className={labelClass}>Password</Label>
+                    <Input
+                      id="accountPassword"
+                      type="password"
+                      value={accountPassword}
+                      onChange={(e) => setAccountPassword(e.target.value)}
+                      placeholder="At least 6 characters"
+                      className={inputClass}
+                    />
+                  </div>
+                  <p className={`text-xs ${hasAuthenticatedOnboardingSession ? 'text-emerald-700' : 'text-[#6f7480]'}`}>
+                    {hasAuthenticatedOnboardingSession
+                      ? `Signed in as ${authenticatedEmail}.`
+                      : 'We will sign in or create this account before continuing.'}
+                  </p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Button type="button" variant="outline" className={outlineButtonClass} onClick={() => void handleExclusiveOAuthSignIn('google')} disabled={authLoading}>
+                      {authLoading && authMode === 'google' ? 'Continuing with Google...' : 'Continue with Google'}
+                    </Button>
+                    <Button type="button" variant="outline" className={outlineButtonClass} onClick={() => void handleExclusiveOAuthSignIn('apple')} disabled={authLoading}>
+                      {authLoading && authMode === 'apple' ? 'Continuing with Apple...' : 'Continue with Apple'}
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+            </form>
+          )}
 
-        {step === 3 && (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="workspaceName" className="text-base text-white">Business or team name</Label>
-              <Input
-                id="workspaceName"
-                value={workspaceName}
-                onChange={(e) => setWorkspaceName(e.target.value)}
-                placeholder="XYZ Group"
-                autoFocus
-                className="h-16 text-2xl md:text-2xl text-white placeholder:text-gray-500 bg-[#2a2a2a] border-zinc-600 focus-visible:border-white focus-visible:ring-2 focus-visible:ring-white/40"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="industry" className="text-base text-white">Industry</Label>
-              <Select
-                value={industry || undefined}
-                onValueChange={(value) => {
-                  setIndustry(value);
-                  if (value !== 'Real Estate') {
-                    setBrokerage('');
-                    setBrokerageId(null);
-                    setBrokerageSuggestions([]);
-                    setBrokerageSuggestionsOpen(false);
-                  }
-                }}
-              >
-                <SelectTrigger id="industry" className="w-full h-16 text-2xl md:text-2xl text-white bg-[#2a2a2a] border-zinc-600 data-[placeholder]:text-gray-500">
-                  <SelectValue placeholder="Select industry" />
-                </SelectTrigger>
-                <SelectContent className="max-h-[190px] overflow-y-auto">
-                  {INDUSTRIES_TOP.map((ind) => (
-                    <SelectItem key={ind} value={ind}>
-                      {ind}
-                    </SelectItem>
-                  ))}
-                  <SelectSeparator className="bg-red-500/50 my-1.5 mx-3 h-px rounded-full" />
-                  {INDUSTRIES_REST.map((ind) => (
-                    <SelectItem key={ind} value={ind}>
-                      {ind}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            {industry === 'Real Estate' && (
-              <div className="space-y-2 relative" ref={brokerageListRef}>
-                <Label htmlFor="brokerage" className="text-base text-white">Brokerage</Label>
-                <Input
-                  ref={brokerageInputRef}
-                  id="brokerage"
-                  value={brokerage}
-                  onChange={(e) => {
-                    setBrokerage(e.target.value);
-                    setBrokerageId(null);
-                  }}
-                  onFocus={() => brokerage.trim() && setBrokerageSuggestionsOpen(true)}
-                  placeholder="Search brokerage..."
-                  className="h-16 text-2xl md:text-2xl text-white placeholder:text-gray-500 bg-[#2a2a2a] border-zinc-600 focus-visible:border-white focus-visible:ring-2 focus-visible:ring-white/40"
-                  autoComplete="off"
-                />
-                {brokerageSuggestionsOpen && brokerage.trim() && (
-                  <div
-                    className="absolute z-50 mt-1 w-full rounded-md border border-zinc-600 bg-[#2a2a2a] shadow-lg max-h-72 overflow-auto py-1"
-                    role="listbox"
-                  >
-                    {brokerageSuggestions.map((b) => (
-                      <button
-                        key={b.id}
-                        type="button"
-                        role="option"
-                        className="w-full px-4 py-3 text-left text-base text-white hover:bg-zinc-700 focus:bg-zinc-700 focus:outline-none flex items-center gap-3"
-                        onClick={() => {
-                          setBrokerage(b.name);
-                          setBrokerageId(b.id);
-                          setBrokerageSuggestionsOpen(false);
-                          setBrokerageSuggestions([]);
+          {step === 2 && (
+            isExclusivePartnerTeamLayout ? (
+              <div className="space-y-4">
+                <div className="rounded-xl border border-[#d9dce2] bg-[#fafafa] p-4 text-center">
+                  <p className="text-sm font-bold text-[#17181c]">Team onboarding is pre-selected for this exclusive offer.</p>
+                  <p className="mt-1 text-xs text-[#6f7480]">Add teammate emails now and invites will be sent after onboarding completes.</p>
+                </div>
+                <div className="space-y-3">
+                  <Label className={labelClass}>Team member emails (optional)</Label>
+                  <div className="space-y-2">
+                    {teamInviteEmails.map((email, index) => (
+                      <Input
+                        key={index}
+                        type="email"
+                        value={email}
+                        onChange={(event) => {
+                          const nextEmails = [...teamInviteEmails];
+                          nextEmails[index] = event.target.value;
+                          setTeamInviteEmails(nextEmails);
                         }}
-                      >
-                        <Building2 className="h-4 w-4 shrink-0 text-[#AAAAAA]" aria-hidden />
-                        <span>{b.name}</span>
-                        <span className="text-xs text-[#AAAAAA] ml-auto">Existing</span>
-                      </button>
+                        placeholder={`teammate${index + 1}@company.com`}
+                        className={inputClass}
+                      />
                     ))}
-                    {brokerage.trim() &&
-                      !brokerageSuggestions.some(
-                        (b) => b.name.toLowerCase() === brokerage.trim().toLowerCase()
-                      ) && (
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" variant="outline" onClick={() => setTeamInviteEmails((prev) => [...prev, ''])} className={outlineButtonClass}>
+                      Add another email
+                    </Button>
+                    {teamInviteEmails.length > 1 ? (
+                      <Button type="button" variant="outline" onClick={() => setTeamInviteEmails((prev) => prev.slice(0, -1))} className={outlineButtonClass}>
+                        Remove last
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                {[
+                  { value: 'solo' as const, icon: User, title: 'For myself', description: 'Solo use' },
+                  { value: 'team' as const, icon: Users, title: 'For my team', description: 'Add teammates later' },
+                ].map(({ value, icon: Icon, title, description }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => {
+                      setUseCase(value);
+                      setSeats(value === 'team' ? (prev) => Math.max(prev, TEAM_MIN_SEATS) : SOLO_SEATS);
+                    }}
+                    className={`flex min-h-32 items-center gap-5 rounded-xl border p-6 text-left transition ${
+                      useCase === value
+                        ? 'border-[#17181c] bg-[#fafafa] shadow-[0_12px_30px_rgba(0,0,0,0.08)]'
+                        : 'border-[#d9dce2] bg-white hover:border-[#aeb3bd]'
+                    }`}
+                  >
+                    <Icon className="h-7 w-7 shrink-0 text-[#17181c]" />
+                    <span>
+                      <span className="block text-lg font-bold text-[#17181c]">{title}</span>
+                      <span className="mt-1 block text-sm font-semibold text-[#6f7480]">{description}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )
+          )}
+
+          {step === 3 && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="workspaceName" className={labelClass}>Business or team name</Label>
+                <Input id="workspaceName" value={workspaceName} onChange={(e) => setWorkspaceName(e.target.value)} placeholder="XYZ Group" autoFocus className={inputClass} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="industry" className={labelClass}>Industry</Label>
+                <Select
+                  value={industry}
+                  onValueChange={(value) => {
+                    setIndustry(value);
+                    if (value !== 'Real Estate') {
+                      setBrokerage('');
+                      setBrokerageId(null);
+                      setBrokerageSuggestions([]);
+                      setBrokerageSuggestionsOpen(false);
+                    }
+                  }}
+                >
+                  <SelectTrigger id="industry" className="h-14 w-full rounded-xl border-[#d9dce2] bg-white text-base font-semibold text-[#17181c] data-[placeholder]:text-[#8a8f99] dark:bg-white dark:text-[#17181c] dark:data-[placeholder]:text-[#8a8f99]">
+                    <SelectValue placeholder="Select industry" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-[220px] overflow-y-auto rounded-xl border-[#d9dce2] bg-white text-[#17181c] dark:bg-white dark:text-[#17181c]">
+                    {INDUSTRIES_TOP.map((ind) => (
+                      <SelectItem key={ind} value={ind} className="text-base font-semibold text-[#17181c] focus:bg-[#f5f6f8] focus:text-[#17181c] dark:text-[#17181c] dark:focus:bg-[#f5f6f8] dark:focus:text-[#17181c]">{ind}</SelectItem>
+                    ))}
+                    <SelectSeparator className="mx-3 my-1.5 h-px rounded-full bg-[#e3e5e8]" />
+                    {INDUSTRIES_REST.map((ind) => (
+                      <SelectItem key={ind} value={ind} className="text-base font-semibold text-[#17181c] focus:bg-[#f5f6f8] focus:text-[#17181c] dark:text-[#17181c] dark:focus:bg-[#f5f6f8] dark:focus:text-[#17181c]">{ind}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {industry === 'Real Estate' && (
+                <div className="relative space-y-2" ref={brokerageListRef}>
+                  <Label htmlFor="brokerage" className={labelClass}>Brokerage</Label>
+                  <Input
+                    ref={brokerageInputRef}
+                    id="brokerage"
+                    value={brokerage}
+                    onChange={(e) => {
+                      setBrokerage(e.target.value);
+                      setBrokerageId(null);
+                    }}
+                    onFocus={() => brokerage.trim() && setBrokerageSuggestionsOpen(true)}
+                    placeholder="Search brokerage..."
+                    className={inputClass}
+                    autoComplete="off"
+                  />
+                  {brokerageSuggestionsOpen && brokerage.trim() && (
+                    <div className="absolute z-50 mt-1 max-h-72 w-full overflow-auto rounded-xl border border-[#d9dce2] bg-white py-1 shadow-lg" role="listbox">
+                      {brokerageSuggestions.map((b) => (
                         <button
+                          key={b.id}
                           type="button"
                           role="option"
-                          className="w-full px-4 py-3 text-left text-base text-white hover:bg-zinc-700 focus:bg-zinc-700 focus:outline-none flex items-center gap-3 border-t border-zinc-600 mt-1 pt-2"
+                          aria-selected={false}
+                          className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-semibold text-[#17181c] hover:bg-[#f5f6f8] focus:bg-[#f5f6f8] focus:outline-none"
                           onClick={() => {
-                            const value = brokerage.trim().replace(/\s+/g, ' ');
-                            setBrokerage(value);
-                            setBrokerageId(null);
+                            setBrokerage(b.name);
+                            setBrokerageId(b.id);
                             setBrokerageSuggestionsOpen(false);
                             setBrokerageSuggestions([]);
                           }}
                         >
-                          <Plus className="h-4 w-4 shrink-0 text-red-500" aria-hidden />
-                          <span className="text-[#AAAAAA]">
-                            Add &quot;{brokerage.trim()}&quot; as new brokerage
-                          </span>
+                          <Building2 className="h-4 w-4 shrink-0 text-[#6f7480]" aria-hidden />
+                          <span>{b.name}</span>
+                          <span className="ml-auto text-xs text-[#6f7480]">Existing</span>
                         </button>
-                      )}
-                  </div>
-                )}
-              </div>
-            )}
-            {useCase === 'team' && (
+                      ))}
+                      {brokerage.trim() &&
+                        !brokerageSuggestions.some((b) => b.name.toLowerCase() === brokerage.trim().toLowerCase()) && (
+                          <button
+                            type="button"
+                            role="option"
+                            aria-selected={false}
+                            className="mt-1 flex w-full items-center gap-3 border-t border-[#e3e5e8] px-4 py-3 pt-3 text-left text-sm font-semibold text-[#17181c] hover:bg-[#f5f6f8] focus:bg-[#f5f6f8] focus:outline-none"
+                            onClick={() => {
+                              const value = brokerage.trim().replace(/\s+/g, ' ');
+                              setBrokerage(value);
+                              setBrokerageId(null);
+                              setBrokerageSuggestionsOpen(false);
+                              setBrokerageSuggestions([]);
+                            }}
+                          >
+                            <Plus className="h-4 w-4 shrink-0 text-[#17181c]" aria-hidden />
+                            <span>Add &quot;{brokerage.trim()}&quot; as new brokerage</span>
+                          </button>
+                        )}
+                    </div>
+                  )}
+                </div>
+              )}
+              {useCase === 'team' && (
+                <div className="space-y-2">
+                  <Label htmlFor="teamSeats" className={labelClass}>Members</Label>
+                  <Input
+                    id="teamSeats"
+                    type="number"
+                    min={TEAM_MIN_SEATS}
+                    max={MAX_SEATS}
+                    inputMode="numeric"
+                    value={seats}
+                    onChange={(event) => {
+                      const requestedSeats = Number.parseInt(event.target.value, 10);
+                      if (!Number.isFinite(requestedSeats)) {
+                        setSeats(TEAM_MIN_SEATS);
+                        return;
+                      }
+                      setSeats(Math.min(MAX_SEATS, Math.max(TEAM_MIN_SEATS, requestedSeats)));
+                    }}
+                    onFocus={(event) => event.currentTarget.select()}
+                    className={`${inputClass} tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none`}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          {step === 4 && (
+            <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="teamSeats" className="text-base text-white">Members</Label>
+                <Label htmlFor="referralCode" className={labelClass}>Referral code (optional)</Label>
                 <Input
-                  id="teamSeats"
-                  type="number"
-                  min={TEAM_MIN_SEATS}
-                  max={MAX_SEATS}
-                  inputMode="numeric"
-                  value={seats}
-                  onChange={(event) => {
-                    const requestedSeats = Number.parseInt(event.target.value, 10);
-                    if (!Number.isFinite(requestedSeats)) {
-                      setSeats(TEAM_MIN_SEATS);
-                      return;
+                  id="referralCode"
+                  value={referralCode}
+                  onChange={(e) => setReferralCode(e.target.value)}
+                  placeholder="e.g. LAUNCH2026"
+                  className={`${inputClass} uppercase placeholder:normal-case`}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      void (async () => {
+                        if (await validateReferralStep()) setStep(5);
+                      })();
                     }
-                    setSeats(Math.min(MAX_SEATS, Math.max(TEAM_MIN_SEATS, requestedSeats)));
                   }}
-                  onFocus={(event) => event.currentTarget.select()}
-                  className="h-16 text-2xl md:text-2xl text-white tabular-nums placeholder:text-gray-500 bg-[#2a2a2a] border-zinc-600 [appearance:textfield] focus-visible:border-white focus-visible:ring-2 focus-visible:ring-white/40 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                  autoComplete="off"
                 />
               </div>
-            )}
-          </div>
-        )}
-
-        {step === 4 && (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="referralCode" className="text-base text-white">
-                Referral code (optional)
-              </Label>
-              <Input
-                id="referralCode"
-                value={referralCode}
-                onChange={(e) => setReferralCode(e.target.value)}
-                placeholder="e.g. LAUNCH2026"
-                className="h-16 text-2xl md:text-2xl uppercase text-white placeholder:normal-case placeholder:text-gray-500 bg-[#2a2a2a] border-zinc-600 focus-visible:border-white focus-visible:ring-2 focus-visible:ring-white/40"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    void (async () => {
-                      if (await validateReferralStep()) setStep(5);
-                    })();
-                  }
-                }}
-                autoComplete="off"
-              />
-            </div>
-            {referralValidation ? (
-              <div className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
-                {referralValidation.trialDays}-day trial unlocked
-                {referralValidation.partnerName || referralValidation.ambassadorName || referralValidation.salespersonName
-                  ? ` with ${referralValidation.partnerName || referralValidation.ambassadorName || referralValidation.salespersonName}`
-                  : ''}
-                .
-              </div>
-            ) : (
-              <p className="text-sm leading-6 text-zinc-400">
-                No code? No problem. You can continue without one.
-              </p>
-            )}
-            {referralValidationError ? (
-              <p className="text-sm text-red-400">{referralValidationError}</p>
-            ) : null}
-          </div>
-        )}
-
-        {step === 5 && (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-            {[
-              { title: 'Create your campaign', src: '/onboarding-create-campaign.png' },
-              { title: 'Own your data', src: '/onboarding-own-data.png' },
-              { title: 'Track your results', src: '/onboarding-track-results.png' },
-            ].map((card) => (
-              <div
-                key={card.title}
-                className="flex flex-col items-center"
-              >
-                <div className="w-full rounded-xl border border-zinc-600 bg-[#2a2a2a] overflow-hidden shadow-sm">
-                  <div className="aspect-[4/3] w-full bg-zinc-800 overflow-hidden">
-                    <img
-                      src={card.src}
-                      alt=""
-                      className="w-full h-full object-cover"
-                    />
-                  </div>
+              {referralValidation ? (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
+                  {referralValidation.trialDays}-day trial unlocked
+                  {referralValidation.partnerName || referralValidation.ambassadorName || referralValidation.salespersonName
+                    ? ` with ${referralValidation.partnerName || referralValidation.ambassadorName || referralValidation.salespersonName}`
+                    : ''}
+                  .
                 </div>
-                <p className="mt-3 text-center text-2xl font-semibold text-white">{card.title}</p>
-              </div>
-            ))}
-          </div>
-        )}
+              ) : (
+                <p className="text-sm leading-6 text-[#6f7480]">No code? No problem. You can continue without one.</p>
+              )}
+              {referralValidationError ? <p className="text-sm font-semibold text-red-600">{referralValidationError}</p> : null}
+            </div>
+          )}
 
-        {step === 6 && (
-          <div className="space-y-6">
-            {!isDialerOnboarding && (
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
+          {step === 5 && (
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
               {[
-                { title: 'Plan your route', src: '/onboarding-see-rank.svg' },
-                { title: "Record session's", src: '/onboarding-record-session.svg' },
-                { title: 'Stay organized', src: '/onboarding-stay-organized.svg' },
-                { title: 'See your rank', src: '/onboarding-plan-route.svg' },
+                { title: 'Create your campaign', src: '/onboarding-create-campaign.png' },
+                { title: 'Own your data', src: '/onboarding-own-data.png' },
+                { title: 'Track your results', src: '/onboarding-track-results.png' },
               ].map((card) => (
-                <div
-                  key={card.title}
-                  className="flex flex-col items-center"
-                >
-                  <div className="w-full flex items-center justify-center p-1 overflow-hidden">
-                    <img
-                      src={card.src}
-                      alt=""
-                      className="w-full h-[210px] object-contain"
-                    />
+                <div key={card.title} className="flex flex-col items-center">
+                  <div className="w-full overflow-hidden rounded-xl border border-[#d9dce2] bg-[#f5f6f8] shadow-sm">
+                    <div className="relative aspect-[4/3] w-full overflow-hidden bg-[#f5f6f8]">
+                      <Image
+                        src={card.src}
+                        alt=""
+                        fill
+                        sizes="(min-width: 640px) 33vw, 100vw"
+                        className="object-cover"
+                      />
+                    </div>
                   </div>
-                  <p className="mt-2 text-center text-2xl font-semibold text-white">{card.title}</p>
+                  <p className="mt-3 text-center text-xl font-bold text-[#17181c]">{card.title}</p>
                 </div>
               ))}
-              </div>
-            )}
+            </div>
+          )}
 
-            {isDialerOnboarding ? (
-              <div className="space-y-6">
-                <div className="rounded-[28px] border-2 border-red-500/80 bg-[radial-gradient(circle_at_24%_12%,rgba(239,68,68,0.20),transparent_32%),linear-gradient(135deg,rgba(80,18,18,0.70),rgba(12,12,14,0.92)_58%)] px-8 py-8 shadow-[0_22px_70px_rgba(127,29,29,0.30)] sm:px-10 sm:py-9">
-                  <div className="inline-flex max-w-full flex-wrap items-center gap-3 rounded-full border border-red-500/80 bg-black/20 px-5 py-2 text-sm font-semibold uppercase tracking-[0.18em] text-red-300 sm:flex-nowrap">
-                    <Tag className="h-5 w-5 fill-red-500 text-red-500" aria-hidden />
-                    <span>50% off founding team pricing</span>
-                  </div>
-                  <div className="mt-8 flex flex-wrap items-end gap-x-4 gap-y-2 sm:flex-nowrap">
-                    <span className="text-6xl font-black leading-none text-white drop-shadow-[0_0_18px_rgba(255,255,255,0.22)] sm:text-7xl">
-                      {dialerEarlyBirdPricing.currencyPrefix}
-                      {dialerEarlyBirdPricing.earlyBirdPrice}
-                    </span>
-                    {dialerPriceCurrencyLabel ? (
-                      <span className="pb-2 text-3xl font-extrabold leading-none text-white sm:text-4xl">
-                        {dialerPriceCurrencyLabel}
-                      </span>
-                    ) : null}
-                    <span className="pb-2 text-2xl font-medium leading-none text-zinc-400">
-                      / user / month
-                    </span>
-                  </div>
-                  <p className="mt-6 text-3xl font-medium text-zinc-500 line-through decoration-red-500/80 decoration-2">
-                      {dialerEarlyBirdPricing.currencyPrefix}
-                      {dialerEarlyBirdPricing.regularPrice}
-                      {dialerPriceCurrencyLabel ? ` ${dialerPriceCurrencyLabel}` : ''}
-                  </p>
-                  <div className="mt-8 border-t border-white/10" />
-                  <p className="mt-7 text-xl font-medium text-zinc-300">
-                    14-day free trial. No credit card required.
-                  </p>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="workEmail" className="text-base text-white">Work email</Label>
-                  <Input
-                    id="workEmail"
-                    type="email"
-                    value={workEmail}
-                    onChange={(e) => setWorkEmail(e.target.value.trim().toLowerCase())}
-                    placeholder="you@company.com"
-                    className="h-14 text-xl text-white placeholder:text-gray-500 bg-[#2a2a2a] border-zinc-600 focus-visible:border-white focus-visible:ring-2 focus-visible:ring-white/40"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="accountPassword" className="text-base text-white">Password</Label>
-                  <Input
-                    id="accountPassword"
-                    type="password"
-                    value={accountPassword}
-                    onChange={(e) => setAccountPassword(e.target.value)}
-                    placeholder="At least 6 characters"
-                    className="h-14 text-xl text-white placeholder:text-gray-500 bg-[#2a2a2a] border-zinc-600 focus-visible:border-white focus-visible:ring-2 focus-visible:ring-white/40"
-                  />
-                </div>
-                {hasAuthenticatedOnboardingSession ? (
-                  <p className="text-xs text-center text-emerald-300">
-                    Signed in as {authenticatedEmail}.
-                  </p>
-                ) : (
-                  <p className="text-xs text-center text-zinc-400">
-                    We will sign in or create this account before activating your trial.
-                  </p>
-                )}
-                <div className="relative flex items-center gap-4 pt-1">
-                  <span className="flex-1 border-t border-zinc-600" />
-                  <span className="shrink-0 text-xs uppercase tracking-[0.2em] text-zinc-500">
-                    Or continue with
-                  </span>
-                  <span className="flex-1 border-t border-zinc-600" />
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-12 border-zinc-600 bg-transparent text-white hover:bg-zinc-800 hover:text-white"
-                    onClick={() => void handleExclusiveOAuthSignIn('google')}
-                    disabled={authLoading}
-                  >
-                    <svg className="mr-2 h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="none">
-                      <path
-                        fill="currentColor"
-                        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                      />
-                      <path
-                        fill="currentColor"
-                        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                      />
-                      <path
-                        fill="currentColor"
-                        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
-                      />
-                      <path
-                        fill="currentColor"
-                        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-                      />
-                    </svg>
-                    {authLoading && authMode === 'google'
-                      ? 'Continuing with Google…'
-                      : 'Continue with Google'}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-12 border-zinc-600 bg-transparent text-white hover:bg-zinc-800 hover:text-white"
-                    onClick={() => void handleExclusiveOAuthSignIn('apple')}
-                    disabled={authLoading}
-                  >
-                    <svg className="mr-2 h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M17.05 20.28c-.98.95-2.05.88-3.08.4-1.09-.5-2.08-.48-3.24 0-1.44.62-2.2.44-3.06-.4C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.54 4.09l.01-.01zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z" />
-                    </svg>
-                    {authLoading && authMode === 'apple'
-                      ? 'Continuing with Apple…'
-                      : 'Continue with Apple'}
-                  </Button>
-                </div>
+          {step === FINAL_ONBOARDING_STEP && (
+            <div className="space-y-8">
+              <div className="mx-auto grid max-w-xl gap-6">
+                {pricingCards.map((card) => {
+                  return (
+                    <div
+                      key={card.id}
+                      className="flex min-h-[520px] flex-col rounded-[26px] border border-[#d9dce2] bg-white p-8 shadow-[0_18px_45px_rgba(0,0,0,0.08)]"
+                    >
+                      <h2 className="text-3xl font-bold text-[#17181c]">{card.title}</h2>
+                      <div className="mt-7">
+                        <span className="text-5xl font-bold text-[#050505]">
+                          {formatPlanPrice(seatPricing.seatMonthlyDisplay, billingCurrency)}
+                        </span>
+                        <span className="text-2xl font-medium text-[#17181c]">/seat/month</span>
+                      </div>
+                      <p className="mt-2 text-sm font-semibold text-[#7b7f89]">
+                        {card.seatCount} seat{card.seatCount === 1 ? '' : 's'} selected. Billed monthly.
+                      </p>
+                      <p className="mt-6 text-lg font-semibold leading-7 text-[#7b7f89]">
+                        {card.description}
+                      </p>
+                      <ul className="mt-7 space-y-4">
+                        {card.features.map((feature) => (
+                          <li key={feature} className="flex items-center gap-3 text-base font-semibold text-[#17181c]">
+                            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#17181c] text-white">
+                              <Check className="h-4 w-4" />
+                            </span>
+                            {feature}
+                          </li>
+                          ))}
+                      </ul>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={loading || checkoutLoading || authLoading}
+                        onClick={async () => {
+                          if (isDialerOnboarding) {
+                            const authReady = await ensureExclusiveAuth();
+                            if (!authReady) return;
+                          }
+                          await handleSelectPlan(card.seatCount);
+                        }}
+                        className="mt-8 h-12 w-full rounded-xl border-[#d9dce2] bg-[#09090b] text-base font-bold text-white hover:bg-[#27272a] hover:text-white dark:border-[#09090b] dark:bg-[#09090b] dark:text-white dark:hover:bg-[#27272a] dark:hover:text-white"
+                      >
+                        {checkoutLoading ? 'Redirecting...' : 'Select plan'}
+                      </Button>
+                    </div>
+                  );
+                })}
               </div>
+            </div>
+          )}
+
+          {error ? <p className="mt-5 text-center text-sm font-semibold text-red-600">{error}</p> : null}
+          {authError ? <p className="mt-5 text-center text-sm font-semibold text-red-600">{authError}</p> : null}
+          {checkoutError ? <p className="mt-5 text-center text-sm font-semibold text-red-600">{checkoutError}</p> : null}
+
+          <div className="mt-10 flex items-center justify-center gap-14 sm:gap-24">
+            {step > 1 ? (
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setStep((s) => (!shouldShowReferralStep && s === 5 ? 3 : s - 1))}
+                className={onboardingNavButtonClass}
+                disabled={loading || checkoutLoading || authLoading}
+              >
+                Back
+              </Button>
             ) : null}
-          </div>
-        )}
-
-        {error && (
-          <p className="text-sm text-red-400 text-center">{error}</p>
-        )}
-        {authError && (
-          <p className="text-sm text-red-400 text-center">{authError}</p>
-        )}
-
-        <div className="flex flex-col gap-3">
-          {step > 1 && (
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() =>
-                setStep((s) => (!shouldShowReferralStep && s === 5 ? 3 : s - 1))
-              }
-              className="w-full h-12 text-base border-zinc-600 text-white hover:bg-zinc-800 hover:text-white"
-            >
-              Back
-            </Button>
-          )}
-          {step < FINAL_ONBOARDING_STEP ? (
-            <Button
-              type="button"
-              onClick={async () => {
-                if (step === 1 && requiresStepOneAuth) {
-                  if (!canStep1) return;
-                  const authReady = await ensureExclusiveAuth();
-                  if (!authReady) return;
-                  if (isSalespersonOnboarding) {
-                    await handleSubmit();
-                    return;
+            {step < FINAL_ONBOARDING_STEP ? (
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={async () => {
+                  if (step === 1 && requiresStepOneAuth) {
+                    if (!canStep1) return;
+                    const authReady = await ensureExclusiveAuth();
+                    if (!authReady) return;
+                    if (isSalespersonOnboarding) {
+                      await handleSubmit();
+                      return;
+                    }
                   }
-                }
-                if (step === 4) {
-                  const referralReady = await validateReferralStep();
-                  if (!referralReady) return;
-                }
-                setStep((s) => (!shouldShowReferralStep && s === 3 ? 5 : s + 1));
-              }}
-              disabled={
-                loading ||
-                authLoading ||
-                referralValidationLoading ||
-                (step === 1 && !canStep1) ||
-                (step === 3 && !canStep3)
-              }
-              className="w-full h-14 text-lg font-semibold bg-[#ef4444] text-white hover:bg-[#dc2626] border-0"
-            >
-              {loading && isSalespersonOnboarding
-                ? 'Setting up salesperson workspace…'
-                : authLoading && step === 1
-                ? authMode === 'google'
-                  ? 'Continuing with Google…'
-                  : authMode === 'apple'
-                  ? 'Continuing with Apple…'
-                  : 'Verifying account…'
-                : referralValidationLoading && step === 4
-                  ? 'Checking code…'
-                : 'Continue'}
-            </Button>
-          ) : (
-            <Button
-              type="button"
-              onClick={async () => {
-                if (isDialerOnboarding) {
-                  const authReady = await ensureExclusiveAuth();
-                  if (!authReady) return;
-                }
-                await handleSubmit();
-              }}
-              disabled={loading || authLoading}
-              className="w-full h-14 text-lg font-semibold bg-[#ef4444] text-white hover:bg-[#dc2626] border-0"
-            >
-              {authLoading && isDialerOnboarding
-                ? authMode === 'google'
-                  ? 'Continuing with Google…'
-                  : authMode === 'apple'
-                    ? 'Continuing with Apple…'
-                    : 'Verifying account…'
-                : loading
-                ? 'Saving…'
-                : isSalespersonOnboarding
-                  ? 'Enter salesperson workspace'
-                : isExclusivePartnerOnboarding
-                  ? 'Activate 30-day exclusive access'
-                  : referralValidation
-                    ? `Continue for ${referralValidation.trialDays}-day free trial`
-                  : 'Continue for 14-day free trial'}
-            </Button>
-          )}
-        </div>
+                  if (step === 4) {
+                    const referralReady = await validateReferralStep();
+                    if (!referralReady) return;
+                  }
+                  setStep((s) => (!shouldShowReferralStep && s === 3 ? 5 : s + 1));
+                }}
+                disabled={loading || authLoading || referralValidationLoading || (step === 1 && !canStep1) || (step === 3 && !canStep3)}
+                className={onboardingNavButtonClass}
+              >
+                {loading && isSalespersonOnboarding
+                  ? 'Setting up salesperson workspace...'
+                  : authLoading && step === 1
+                    ? authMode === 'google'
+                      ? 'Continuing with Google...'
+                      : authMode === 'apple'
+                        ? 'Continuing with Apple...'
+                        : 'Verifying account...'
+                    : referralValidationLoading && step === 4
+                      ? 'Checking code...'
+                      : 'Next'}
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={async () => {
+                  if (isDialerOnboarding) {
+                    const authReady = await ensureExclusiveAuth();
+                    if (!authReady) return;
+                  }
+                  await handleSubmit();
+                }}
+                disabled={loading || checkoutLoading || authLoading}
+                className={onboardingNavButtonClass}
+              >
+                {loading ? 'Saving...' : 'Skip'}
+              </Button>
+            )}
+          </div>
+        </section>
+      </main>
+
+      <div className="fixed bottom-7 left-0 right-0 z-20 flex justify-center gap-2 pointer-events-none px-4">
+        {Array.from({ length: FINAL_ONBOARDING_STEP }, (_, index) => (
+          <span key={index} className={index + 1 === step ? activeDotClass : inactiveDotClass} />
+        ))}
       </div>
 
-      <div className="fixed bottom-5 left-0 right-0 z-20 flex justify-center pointer-events-none px-4">
-        <button
-          type="button"
-          onClick={() => void handleLogout()}
-          disabled={signingOut}
-          title="Log out"
-          aria-label="Log out"
-          className="pointer-events-auto inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-black/40 text-zinc-400 backdrop-blur-sm transition-colors hover:border-white/25 hover:bg-white/10 hover:text-white disabled:opacity-50"
-        >
-          <LogoutDoorEmblem className="h-5 w-5" />
-        </button>
-      </div>
+      <button
+        type="button"
+        onClick={() => void handleLogout()}
+        disabled={signingOut}
+        title="Log out"
+        aria-label="Log out"
+        className="fixed right-5 top-5 inline-flex h-10 w-10 items-center justify-center rounded-full border border-[#d9dce2] bg-white text-[#6f7480] shadow-sm transition-colors hover:bg-[#f5f6f8] hover:text-[#17181c] disabled:opacity-50"
+      >
+        <LogoutDoorEmblem className="h-5 w-5" />
+      </button>
     </div>
   );
 }
@@ -1752,8 +1640,8 @@ export default function OnboardingPage() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
-          <p className="text-muted-foreground">Loading…</p>
+        <div className="min-h-screen bg-white flex items-center justify-center">
+          <p className="text-[#6f7480]">Loading...</p>
         </div>
       }
     >

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Resend } from 'resend';
-import twilio from 'twilio';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import {
   resolveWorkspaceMembershipForUser,
@@ -8,10 +7,14 @@ import {
 } from '@/app/api/_utils/workspace';
 import { createAdminClient } from '@/lib/supabase/server';
 import { isDialerFounderBypassEmail } from '@/lib/dialer/feature-gate';
-import { getTwilioAccountSid, getTwilioAuthToken, getTwilioDefaultSmsFromNumber } from '@/lib/dialer/env';
-import { normalizePhoneNumber } from '@/lib/dialer/phone';
+import {
+  getDialerTelecomProvider,
+  getTelnyxDefaultSmsFromNumber,
+  getTwilioDefaultSmsFromNumber,
+} from '@/lib/dialer/env';
+import { normalizePhoneMarket, normalizePhoneNumber, phoneMarketFromCountryCode, type SupportedPhoneMarket } from '@/lib/dialer/phone';
 import { getDialerCallRecordingSummary } from '@/lib/dialer/recordings';
-import { buildPublicTwilioWebhookUrl } from '@/lib/dialer/server';
+import { sendDialerSms } from '@/lib/dialer/provider';
 import {
   DEMO_EMAIL_DOMAIN,
   resolveAvailableDemoEmailHandle,
@@ -23,12 +26,19 @@ import {
   ensureSalespersonReferralCode,
   normalizeSalespersonReferralCodeInput,
 } from '@/app/lib/billing/salespeople';
+import {
+  attachDiallerLeadToMaster,
+  ensureSalespersonLeadMaster,
+  updateMasterLeadDispositionForDiallerLead,
+} from '@/lib/sales-leads/master-list';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 type ImportLeadPayload = {
   workspaceId?: string;
+  phoneMarket?: string | null;
+  testLead?: boolean;
   leads?: Array<{
     name?: string | null;
     phone?: string | null;
@@ -37,9 +47,27 @@ type ImportLeadPayload = {
   }>;
 };
 
+type DiallerLeadInsert = {
+  workspace_id: string;
+  user_id: string;
+  name: string;
+  phone: string;
+  phone_e164?: string | null;
+  phone_country_code?: string | null;
+  phone_area_code?: string | null;
+  phone_area_label?: string | null;
+  company: string | null;
+  email: string | null;
+  disposition: null;
+  notes: null;
+  called_at: null;
+  master_lead_id?: string | null;
+};
+
 type UpdateLeadPayload = {
   workspaceId?: string;
   id?: string;
+  isStarred?: boolean;
   disposition?: DiallerLeadDisposition | null;
   notes?: string | null;
   email?: string | null;
@@ -79,7 +107,8 @@ const VALID_DISPOSITIONS = new Set<DiallerLeadDisposition>([
   'not_now',
   'dnc',
 ]);
-const FALLBACK_PUBLIC_ORIGIN = 'https://flyr.software';
+const FALLBACK_PUBLIC_ORIGIN = 'https://www.flyrpro.app';
+const DIALER_DEMO_VIDEO_PATH = '/demo-1';
 
 type DiallerLeadCallRow = {
   id: string;
@@ -88,6 +117,12 @@ type DiallerLeadCallRow = {
   ended_at: string | null;
   created_at: string;
   status_payload: Record<string, unknown> | null;
+};
+
+type MasterLeadRow = {
+  id: string;
+  assigned_user_id: string;
+  dialler_lead_id?: string | null;
 };
 
 async function resolveDiallerContext(request: NextRequest, workspaceId?: string | null) {
@@ -137,6 +172,30 @@ function cleanText(value: string | null | undefined): string {
   return (value ?? '').trim();
 }
 
+function inferDiallerListName(lead: DiallerLead): string | null {
+  const notes = cleanText(lead.notes);
+  const match = notes.match(/(?:^|\n)List:\s*([^\n]+)/i);
+  return cleanText(match?.[1] ?? null) || null;
+}
+
+function withDiallerListMetadata(lead: DiallerLead): DiallerLead {
+  const listName = cleanText(lead.list_name) || inferDiallerListName(lead);
+  if (!listName) return lead;
+
+  return {
+    ...lead,
+    list_id: cleanText(lead.list_id) || listName.toLowerCase(),
+    list_name: listName,
+  };
+}
+
+function normalizeDiallerLeadPhone(lead: DiallerLead) {
+  return normalizePhoneNumber(
+    cleanText(lead.phone_e164) || lead.phone,
+    phoneMarketFromCountryCode(lead.phone_country_code)
+  );
+}
+
 function getEnv(name: string): string | null {
   const value = process.env[name];
   if (typeof value !== 'string') return null;
@@ -174,6 +233,9 @@ function normalizePublicOrigin(value: string | null | undefined): string | null 
   try {
     const parsed = new URL(cleaned.startsWith('http') ? cleaned : `https://${cleaned}`);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    if (parsed.hostname.toLowerCase() === 'flyrpro.app') {
+      parsed.hostname = 'www.flyrpro.app';
+    }
     return parsed.origin;
   } catch {
     return null;
@@ -286,7 +348,7 @@ async function buildDialerDemoUrl(request: NextRequest, context: DiallerContext)
 }> {
   const publicOrigin = getPublicOrigin(request);
   const referralCode = await resolveSalespersonReferralCode(context);
-  const demoPath = '/demo1';
+  const demoPath = DIALER_DEMO_VIDEO_PATH;
 
   if (!referralCode) {
     return {
@@ -307,7 +369,7 @@ async function buildDialerDemoUrl(request: NextRequest, context: DiallerContext)
 }
 
 function buildSharedDialerDemoUrl(publicOrigin: string, referralCode: string | null): string {
-  const demoPath = '/demo1';
+  const demoPath = DIALER_DEMO_VIDEO_PATH;
   if (!referralCode) return new URL(demoPath, publicOrigin).toString();
 
   const url = new URL(`/s/${encodeURIComponent(referralCode)}`, publicOrigin);
@@ -340,7 +402,7 @@ async function buildTrackedDialerDemoUrl(
     referralCode,
     source: 'salesperson',
     campaign: 'power-dialer-demo',
-    destinationPath: '/demo1',
+    destinationPath: DIALER_DEMO_VIDEO_PATH,
   });
 
   return {
@@ -533,21 +595,21 @@ async function sendInterestedLink(
   context: DiallerContext,
   lead: DiallerLead
 ): Promise<string | null> {
-  const from = getTwilioDefaultSmsFromNumber();
-  if (!from) return 'Lead saved, but no SMS-enabled Twilio number is configured.';
+  const from =
+    getDialerTelecomProvider() === 'telnyx'
+      ? getTelnyxDefaultSmsFromNumber()
+      : getTwilioDefaultSmsFromNumber();
+  if (!from) return 'Lead saved, but no SMS-enabled dialer number is configured.';
 
-  const normalizedPhone = normalizePhoneNumber(lead.phone);
+  const normalizedPhone = normalizeDiallerLeadPhone(lead);
   if (!normalizedPhone.e164) return 'Lead saved, but the phone number is not valid for SMS.';
 
   const demo = await buildDialerDemoUrl(request, context);
-  const client = twilio(getTwilioAccountSid(), getTwilioAuthToken());
-  const statusCallback = buildPublicTwilioWebhookUrl(request, '/api/twilio/messaging/status');
   const messageBody = buildInterestedLinkText(lead, demo.url);
-  const message = await client.messages.create({
+  const message = await sendDialerSms(request, {
     from,
     to: normalizedPhone.e164,
     body: messageBody,
-    statusCallback: statusCallback.toString(),
   });
 
   const now = new Date().toISOString();
@@ -563,15 +625,17 @@ async function sendInterestedLink(
       call_id: null,
       contact_id: contactId,
       user_id: context.requestUser.id,
-      twilio_message_sid: message.sid,
+      telecom_provider: message.provider,
+      provider_message_id: message.messageId,
+      twilio_message_sid: message.provider === 'twilio' ? message.messageId : null,
       from_number_e164: from,
       to_number_e164: normalizedPhone.e164,
       body: messageBody,
-      status: message.status ?? 'queued',
+      status: message.status,
       sent_at: now,
       status_payload: {
-        sid: message.sid,
-        status: message.status ?? 'queued',
+        ...message.raw,
+        provider: message.provider,
         source: 'dialler_lead_interested_link',
         diallerLeadId: lead.id,
         referralCode: demo.referralCode,
@@ -620,6 +684,50 @@ function deriveDiallerLeadCallOutcome(call: DiallerLeadCallRow | null): DiallerL
   return 'pending';
 }
 
+function isTerminalDialerCallStatus(status: DialerCallStatus | null | undefined): boolean {
+  return status === 'completed' || status === 'no-answer' || status === 'busy' || status === 'failed' || status === 'canceled';
+}
+
+function shouldKeepDiallerLeadInQueue(lead: DiallerLead): boolean {
+  if (lead.disposition || lead.called_at) return false;
+  if (
+    lead.latest_call_outcome &&
+    lead.latest_call_outcome !== 'pending' &&
+    (lead.latest_call_ended_at || isTerminalDialerCallStatus(lead.latest_call_status))
+  ) {
+    return false;
+  }
+  return true;
+}
+
+async function findReusableDiallerLeadForMaster(context: DiallerContext, masterLead: MasterLeadRow | null): Promise<DiallerLead | null> {
+  if (!masterLead || masterLead.assigned_user_id !== context.requestUser.id) return null;
+
+  if (masterLead.dialler_lead_id) {
+    const { data, error } = await context.admin
+      .from('dialler_leads')
+      .select('*')
+      .eq('id', masterLead.dialler_lead_id)
+      .eq('workspace_id', context.workspaceId)
+      .eq('user_id', context.requestUser.id)
+      .maybeSingle();
+
+    if (!error && data && shouldKeepDiallerLeadInQueue(data as DiallerLead)) {
+      return data as DiallerLead;
+    }
+
+    if (error && error.code !== 'PGRST116') {
+      console.warn('[dialer/leads] reusable dialler lead lookup failed', error);
+    }
+  }
+
+  return null;
+}
+
+function isMasterLeadAssignedToCurrentUser(context: DiallerContext, masterLead: MasterLeadRow | null): boolean {
+  return masterLead?.assigned_user_id === context.requestUser.id;
+}
+
 async function attachLatestCallOutcomes(
   context: DiallerContext,
   leads: DiallerLead[]
@@ -631,6 +739,7 @@ async function attachLatestCallOutcomes(
     .from('dialer_calls')
     .select('id,status,answered_at,ended_at,created_at,status_payload')
     .eq('workspace_id', context.workspaceId)
+    .eq('user_id', context.requestUser.id)
     .in('status_payload->>diallerLeadId', Array.from(leadIds))
     .order('created_at', { ascending: false })
     .limit(Math.max(leadIds.size * 4, 100));
@@ -666,7 +775,7 @@ async function findExistingContact(context: {
   admin: ReturnType<typeof createAdminClient>;
   workspaceId: string;
 }, lead: DiallerLead): Promise<Record<string, unknown> | null> {
-  const normalizedPhone = normalizePhoneNumber(lead.phone);
+  const normalizedPhone = normalizeDiallerLeadPhone(lead);
   const lookups = [
     normalizedPhone.e164 ? { column: 'phone_e164', value: normalizedPhone.e164 } : null,
     cleanText(lead.phone) ? { column: 'phone', value: cleanText(lead.phone) } : null,
@@ -755,7 +864,7 @@ async function upsertContactFollowUp(context: {
 }, lead: DiallerLead, followUpAt: string | null, notes: string | null): Promise<string | null> {
   if (!followUpAt) return null;
 
-  const normalizedPhone = normalizePhoneNumber(lead.phone);
+  const normalizedPhone = normalizeDiallerLeadPhone(lead);
   const existing = await findExistingContact(context, lead);
   const now = new Date().toISOString();
   const contactPayload = {
@@ -764,6 +873,9 @@ async function upsertContactFollowUp(context: {
     full_name: cleanText(lead.name) || 'Lead',
     phone: cleanText(lead.phone) || null,
     phone_e164: normalizedPhone.e164,
+    phone_country_code: normalizedPhone.countryCode,
+    phone_area_code: normalizedPhone.areaCode,
+    phone_area_label: normalizedPhone.areaLabel,
     email: cleanText(lead.email) || null,
     address: '',
     status: 'warm',
@@ -801,7 +913,7 @@ async function upsertDiallerContact(context: {
   workspaceId: string;
   requestUser: { id: string };
 }, lead: DiallerLead, notes: string | null): Promise<{ contact: Record<string, unknown> | null; warning: string | null }> {
-  const normalizedPhone = normalizePhoneNumber(lead.phone);
+  const normalizedPhone = normalizeDiallerLeadPhone(lead);
   const existing = await findExistingContact(context, lead);
   const now = new Date().toISOString();
   const contactPayload = {
@@ -810,6 +922,9 @@ async function upsertDiallerContact(context: {
     full_name: cleanText(lead.name) || 'Lead',
     phone: cleanText(lead.phone) || null,
     phone_e164: normalizedPhone.e164,
+    phone_country_code: normalizedPhone.countryCode,
+    phone_area_code: normalizedPhone.areaCode,
+    phone_area_label: normalizedPhone.areaLabel,
     phone_last_validated_at: now,
     phone_validation_error: normalizedPhone.error,
     email: cleanText(lead.email) || null,
@@ -887,6 +1002,7 @@ export async function GET(request: NextRequest) {
     .from('dialler_leads')
     .select('*')
     .eq('workspace_id', context.workspaceId)
+    .eq('user_id', context.requestUser.id)
     .order('created_at', { ascending: true });
 
   if (requestedIds.length > 0) {
@@ -903,7 +1019,12 @@ export async function GET(request: NextRequest) {
 
   const leads = (data ?? []) as DiallerLead[];
   if (requestedIds.length === 0) {
-    return NextResponse.json({ leads: await attachLatestCallOutcomes(context, leads) });
+    const leadsWithOutcomes = await attachLatestCallOutcomes(context, leads);
+    return NextResponse.json({
+      leads: leadsWithOutcomes
+        .filter(shouldKeepDiallerLeadInQueue)
+        .map(withDiallerListMetadata),
+    });
   }
 
   const orderById = new Map(requestedIds.map((id, index) => [id, index]));
@@ -911,7 +1032,8 @@ export async function GET(request: NextRequest) {
     const { data: fallbackData, error: fallbackError } = await context.admin
       .from('dialler_leads')
       .select('*')
-      .in('id', requestedIds);
+      .in('id', requestedIds)
+      .eq('user_id', context.requestUser.id);
 
     if (!fallbackError) {
       const fallbackLeads = (fallbackData ?? []) as DiallerLead[];
@@ -923,12 +1045,19 @@ export async function GET(request: NextRequest) {
         const fallbackContext = await resolveDiallerContext(request, fallbackWorkspaceId);
         if (!(fallbackContext instanceof NextResponse)) {
           const accessibleLeads = fallbackLeads
-            .filter((lead) => lead.workspace_id === fallbackContext.workspaceId)
+            .filter(
+              (lead) =>
+                lead.workspace_id === fallbackContext.workspaceId &&
+                lead.user_id === fallbackContext.requestUser.id
+            )
             .sort((a, b) => (orderById.get(a.id) ?? 9999) - (orderById.get(b.id) ?? 9999));
 
           if (accessibleLeads.length > 0) {
+            const accessibleLeadsWithOutcomes = await attachLatestCallOutcomes(fallbackContext, accessibleLeads);
             return NextResponse.json({
-              leads: await attachLatestCallOutcomes(fallbackContext, accessibleLeads),
+              leads: accessibleLeadsWithOutcomes
+                .filter(shouldKeepDiallerLeadInQueue)
+                .map(withDiallerListMetadata),
               focusedLeadIds: requestedIds,
               resolvedWorkspaceId: fallbackContext.workspaceId,
             });
@@ -940,11 +1069,14 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  const focusedLeadsWithOutcomes = await attachLatestCallOutcomes(
+    context,
+    [...leads].sort((a, b) => (orderById.get(a.id) ?? 9999) - (orderById.get(b.id) ?? 9999))
+  );
   return NextResponse.json({
-    leads: await attachLatestCallOutcomes(
-      context,
-      [...leads].sort((a, b) => (orderById.get(a.id) ?? 9999) - (orderById.get(b.id) ?? 9999))
-    ),
+    leads: focusedLeadsWithOutcomes
+      .filter(shouldKeepDiallerLeadInQueue)
+      .map(withDiallerListMetadata),
     focusedLeadIds: requestedIds,
     resolvedWorkspaceId: context.workspaceId,
   });
@@ -955,30 +1087,115 @@ export async function POST(request: NextRequest) {
   const context = await resolveDiallerContext(request, body.workspaceId);
   if (context instanceof NextResponse) return context;
 
+  const salesperson = await resolveSalespersonForDemoEmail(context);
+  const phoneMarket = normalizePhoneMarket(body.phoneMarket);
+  const isTestLeadImport = body.testLead === true;
   const rows = Array.isArray(body.leads) ? body.leads : [];
-  const inserts = rows
-    .flatMap((row) => {
-      const phone = cleanText(row.phone);
-      if (!normalizePhoneNumber(phone).isValid) return [];
-      return [{
-        workspace_id: context.workspaceId,
-        name: cleanText(row.name) || 'Lead',
-        phone,
-        company: cleanText(row.company) || null,
-        email: cleanText(row.email) || null,
-        disposition: null,
-        notes: null,
-        called_at: null,
-      }];
-    });
+  let skippedMasterCount = 0;
+  let reusedMasterCount = 0;
+  let masterWarning: string | null = null;
+  const inserts: DiallerLeadInsert[] = [];
+  const reusedLeads: DiallerLead[] = [];
 
-  if (inserts.length === 0) {
-    return NextResponse.json({ error: 'Import a CSV with at least one phone number.' }, { status: 400 });
+  for (const row of rows) {
+    const phone = cleanText(row.phone);
+    const normalizedPhone = normalizePhoneNumber(phone, phoneMarket as SupportedPhoneMarket);
+    if (!normalizedPhone.isValid || !normalizedPhone.e164) continue;
+    const masterResult = isTestLeadImport
+      ? null
+      : await ensureSalespersonLeadMaster(context.admin, {
+          workspaceId: context.workspaceId,
+          assignedUserId: context.requestUser.id,
+          assignedSalespersonId: salesperson?.id ?? null,
+          createdByUserId: context.requestUser.id,
+          name: cleanText(row.name) || 'Lead',
+          company: cleanText(row.company) || null,
+          phone: normalizedPhone.e164,
+          email: cleanText(row.email) || null,
+          countryCode: normalizedPhone.countryCode,
+          source: 'dialler_import',
+          state: 'assigned',
+        });
+
+    if (masterResult) {
+      if (!masterResult.available) {
+        masterWarning = masterWarning ?? masterResult.warning;
+      } else if (masterResult.existing) {
+        if (!isMasterLeadAssignedToCurrentUser(context, masterResult.row)) {
+          skippedMasterCount += 1;
+          continue;
+        }
+
+        const reusableLead = await findReusableDiallerLeadForMaster(context, masterResult.row);
+        if (reusableLead) {
+          reusedLeads.push(reusableLead);
+          reusedMasterCount += 1;
+          continue;
+        }
+      }
+    }
+
+    inserts.push({
+      workspace_id: context.workspaceId,
+      user_id: context.requestUser.id,
+      name: cleanText(row.name) || 'Lead',
+      phone: normalizedPhone.e164,
+      phone_e164: normalizedPhone.e164,
+      phone_country_code: normalizedPhone.countryCode,
+      phone_area_code: normalizedPhone.areaCode,
+      phone_area_label: normalizedPhone.areaLabel,
+      company: cleanText(row.company) || null,
+      email: cleanText(row.email) || null,
+      disposition: null,
+      notes: null,
+      called_at: null,
+      master_lead_id: masterResult?.row?.id ?? null,
+    });
   }
 
+  if (inserts.length === 0 && reusedLeads.length === 0) {
+    return NextResponse.json(
+      {
+        error: skippedMasterCount > 0
+          ? 'Those leads are assigned to another agent in the master list.'
+          : 'Import a CSV with at least one phone number.',
+        skippedMasterCount,
+        reusedMasterCount,
+        warning: masterWarning,
+      },
+      { status: 400 }
+    );
+  }
+
+  if (inserts.length === 0) {
+    return NextResponse.json(
+      {
+        leads: reusedLeads,
+        importedCount: reusedLeads.length,
+        skippedMasterCount,
+        reusedMasterCount,
+        warning: masterWarning,
+      },
+      { status: 200 }
+    );
+  }
+
+  const masterIdByPhone = new Map(
+    inserts
+      .map((lead) => [
+        lead.phone_e164 || normalizePhoneNumber(lead.phone).e164 || lead.phone.trim(),
+        lead.master_lead_id ?? null,
+      ] as const)
+      .filter(([phone, masterId]) => Boolean(phone && masterId))
+  );
+  const insertPayload = inserts.map((lead) => {
+    const payload = { ...lead };
+    delete (payload as { master_lead_id?: string | null }).master_lead_id;
+    return payload;
+  });
   const { data, error } = await context.admin
     .from('dialler_leads')
-    .insert(inserts)
+    .insert(insertPayload)
     .select('*');
 
   if (error) {
@@ -987,7 +1204,21 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: tableError ?? 'Failed to import dialler leads' }, { status: 500 });
   }
 
-  return NextResponse.json({ leads: (data ?? []) as DiallerLead[], importedCount: data?.length ?? inserts.length }, { status: 201 });
+  for (const lead of (data ?? []) as DiallerLead[]) {
+    const phone = lead.phone_e164 || normalizePhoneNumber(lead.phone).e164 || lead.phone.trim();
+    await attachDiallerLeadToMaster(context.admin, masterIdByPhone.get(phone), lead.id);
+  }
+
+  return NextResponse.json(
+    {
+      leads: [...reusedLeads, ...((data ?? []) as DiallerLead[])],
+      importedCount: reusedLeads.length + (data?.length ?? inserts.length),
+      skippedMasterCount,
+      reusedMasterCount,
+      warning: masterWarning,
+    },
+    { status: 201 }
+  );
 }
 
 export async function PATCH(request: NextRequest) {
@@ -999,12 +1230,35 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: 'Lead id is required.' }, { status: 400 });
   }
 
+  if (typeof body.isStarred === 'boolean') {
+    const { data, error } = await context.admin
+      .from('dialler_leads')
+      .update({
+        is_starred: body.isStarred,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', body.id)
+      .eq('workspace_id', context.workspaceId)
+      .eq('user_id', context.requestUser.id)
+      .select('*')
+      .single();
+
+    if (error) {
+      const tableError = shapeMissingTableError(error);
+      console.error('[dialer/leads] failed to update dialler lead star', error);
+      return NextResponse.json({ error: tableError ?? 'Failed to update lead star' }, { status: 500 });
+    }
+
+    return NextResponse.json({ lead: data as DiallerLead });
+  }
+
   if (body.saveContact) {
     const { data: existingLead, error: existingLeadError } = await context.admin
       .from('dialler_leads')
       .select('*')
       .eq('id', body.id)
       .eq('workspace_id', context.workspaceId)
+      .eq('user_id', context.requestUser.id)
       .maybeSingle();
 
     if (existingLeadError) {
@@ -1026,6 +1280,7 @@ export async function PATCH(request: NextRequest) {
       })
       .eq('id', body.id)
       .eq('workspace_id', context.workspaceId)
+      .eq('user_id', context.requestUser.id)
       .select('*')
       .single();
 
@@ -1085,6 +1340,7 @@ export async function PATCH(request: NextRequest) {
     })
     .eq('id', body.id)
     .eq('workspace_id', context.workspaceId)
+    .eq('user_id', context.requestUser.id)
     .select('*')
     .single();
 
@@ -1121,6 +1377,14 @@ export async function PATCH(request: NextRequest) {
     warning = warning ?? contactWarning ?? notificationWarning;
   }
 
+  await updateMasterLeadDispositionForDiallerLead({
+    admin: context.admin,
+    lead: data as DiallerLead,
+    disposition: body.disposition,
+    notes: cleanText(body.notes) || null,
+    nextFollowUpAt: cleanIsoDate(body.followUpAt),
+  });
+
   return NextResponse.json({ lead: data as DiallerLead, warning });
 }
 
@@ -1141,7 +1405,8 @@ export async function DELETE(request: NextRequest) {
     let query = context.admin
       .from('dialler_leads')
       .delete()
-      .eq('workspace_id', context.workspaceId);
+      .eq('workspace_id', context.workspaceId)
+      .eq('user_id', context.requestUser.id);
 
     if (ids.length > 0) {
       query = query.in('id', ids);
@@ -1166,7 +1431,8 @@ export async function DELETE(request: NextRequest) {
     .from('dialler_leads')
     .delete()
     .eq('id', body.id)
-    .eq('workspace_id', context.workspaceId);
+    .eq('workspace_id', context.workspaceId)
+    .eq('user_id', context.requestUser.id);
 
   if (error) {
     const tableError = shapeMissingTableError(error);

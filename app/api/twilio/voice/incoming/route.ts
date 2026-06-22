@@ -1,7 +1,12 @@
 import { NextRequest } from 'next/server';
 import twilio from 'twilio';
 import { getTwilioInboundFallbackMessage, getTwilioInboundForwardTo } from '@/lib/dialer/env';
-import { buildPublicTwilioWebhookUrl, validateTwilioWebhookRequest, xmlResponse } from '@/lib/dialer/server';
+import {
+  buildDialerIdentity,
+  buildPublicTwilioWebhookUrl,
+  validateTwilioWebhookRequest,
+  xmlResponse,
+} from '@/lib/dialer/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { normalizePhoneNumber } from '@/lib/dialer/phone';
 
@@ -19,6 +24,7 @@ type ProfilePhone = {
 type SalespersonNumberRoute = {
   workspace_id: string;
   salesperson_id: string;
+  salesperson_user_id: string | null;
   inbound_forward_to: string | null;
 };
 
@@ -109,7 +115,25 @@ async function resolveSalespersonNumberRoute(
     return null;
   }
 
-  return (data as SalespersonNumberRoute | null) ?? null;
+  if (!data?.workspace_id || !data.salesperson_id) {
+    return null;
+  }
+
+  const { data: salesperson, error: salespersonError } = await admin
+    .from('salespeople')
+    .select('user_id')
+    .eq('id', data.salesperson_id)
+    .maybeSingle();
+
+  if (salespersonError && salespersonError.code !== 'PGRST116') {
+    console.warn('[twilio/incoming] salesperson user lookup failed', salespersonError);
+  }
+
+  return {
+    ...(data as Omit<SalespersonNumberRoute, 'salesperson_user_id'>),
+    salesperson_user_id:
+      typeof salesperson?.user_id === 'string' ? salesperson.user_id : null,
+  };
 }
 
 export async function POST(request: NextRequest) {
@@ -126,6 +150,10 @@ export async function POST(request: NextRequest) {
 
   const admin = createAdminClient();
   const salespersonRoute = await resolveSalespersonNumberRoute(admin, calledNumber);
+  const salespersonClientIdentity =
+    salespersonRoute?.workspace_id && salespersonRoute.salesperson_user_id
+      ? buildDialerIdentity(salespersonRoute.workspace_id, salespersonRoute.salesperson_user_id, 'ios')
+      : null;
   forwardToNumber = normalizePhoneNumber(salespersonRoute?.inbound_forward_to).e164;
 
   forwardToNumber ||= await resolveRecentDialerAgentForwardTo(
@@ -144,7 +172,7 @@ export async function POST(request: NextRequest) {
   }
 
   forwardToNumber ||= getTwilioInboundForwardTo();
-  if (!forwardToNumber) {
+  if (!salespersonClientIdentity && !forwardToNumber) {
     return buildFallbackResponse(getTwilioInboundFallbackMessage());
   }
 
@@ -155,14 +183,25 @@ export async function POST(request: NextRequest) {
     answerOnBridge: true,
   });
 
-  dial.number(
-    {
-      statusCallback: statusUrl.toString(),
-      statusCallbackMethod: 'POST',
-      statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
-    },
-    forwardToNumber
-  );
+  if (salespersonClientIdentity) {
+    dial.client(
+      {
+        statusCallback: statusUrl.toString(),
+        statusCallbackMethod: 'POST',
+        statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
+      },
+      salespersonClientIdentity
+    );
+  } else if (forwardToNumber) {
+    dial.number(
+      {
+        statusCallback: statusUrl.toString(),
+        statusCallbackMethod: 'POST',
+        statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
+      },
+      forwardToNumber
+    );
+  }
 
   response.say({ voice: 'alice' }, 'The person you are trying to reach is unavailable right now. Please leave a voicemail or try again later.');
 

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import type { DialerCall, DiallerLead } from '@/types/database';
-import { getTwilioAccountSid, getTwilioAuthToken } from '@/lib/dialer/env';
+import { getTelnyxApiKey, getTwilioAccountSid, getTwilioAuthToken } from '@/lib/dialer/env';
 import { getDialerCallRecording } from '@/lib/dialer/recordings';
 import { getDialerRequestContext } from '@/lib/dialer/server';
 
@@ -42,6 +42,7 @@ export async function GET(
     .select('*')
     .eq('id', leadId)
     .eq('workspace_id', context.workspaceId)
+    .eq('user_id', context.requestUser.id)
     .maybeSingle();
 
   if (leadError) {
@@ -57,6 +58,7 @@ export async function GET(
     .from('dialer_calls')
     .select('*')
     .eq('workspace_id', context.workspaceId)
+    .eq('user_id', context.requestUser.id)
     .eq('status_payload->>diallerLeadId', leadId)
     .order('created_at', { ascending: false })
     .limit(10);
@@ -77,11 +79,13 @@ export async function GET(
   }
 
   const recordedCallId = recordedCall.id;
-  const basicAuth = Buffer.from(`${getTwilioAccountSid()}:${getTwilioAuthToken()}`).toString('base64');
+  const provider = recordedCall.telecom_provider ?? recording.provider;
+  const headers =
+    provider === 'telnyx'
+      ? { Authorization: `Bearer ${getTelnyxApiKey()}` }
+      : { Authorization: `Basic ${Buffer.from(`${getTwilioAccountSid()}:${getTwilioAuthToken()}`).toString('base64')}` };
   const mediaResponse = await fetch(recording.mp3Url, {
-    headers: {
-      Authorization: `Basic ${basicAuth}`,
-    },
+    headers,
     cache: 'no-store',
   });
 

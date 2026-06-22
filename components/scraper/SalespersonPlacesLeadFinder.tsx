@@ -61,6 +61,8 @@ type PlacesLeadPayload = {
     dialerLeadIds: string[];
     dialerImportedCount: number;
     dialerSkippedCount: number;
+    masterAddedCount: number;
+    masterSkippedCount: number;
     warning: string | null;
   } | null;
   error?: string;
@@ -117,6 +119,14 @@ type ProspectingOptionsPayload = {
   error?: string;
 };
 
+type RealEstateTarget = 'agents' | 'individual_agents' | 'teams' | 'brokerages';
+type LeadIntent =
+  | 'generic'
+  | 'real_estate_agents'
+  | 'real_estate_individual_agents'
+  | 'real_estate_teams'
+  | 'real_estate_brokerages';
+
 const countryOptions = [
   { value: 'US', label: 'United States' },
   { value: 'CA', label: 'Canada' },
@@ -151,6 +161,23 @@ function uniqueTerms(terms: string[]): string[] {
   }
 
   return output;
+}
+
+function filterIndividualAgentTerms(terms: string[]): string[] {
+  return terms.filter((term) => {
+    const normalized = normalizeInput(term);
+    return !['team', 'group', 'collective', 'associates', 'partners', 'brokerage', 'office'].some((signal) =>
+      normalized.includes(signal)
+    );
+  });
+}
+
+function leadIntentLabel(leadIntent: LeadIntent): string {
+  if (leadIntent === 'real_estate_teams') return 'team leads';
+  if (leadIntent === 'real_estate_brokerages') return 'brokerage leads';
+  if (leadIntent === 'real_estate_individual_agents') return 'individual agent leads';
+  if (leadIntent === 'real_estate_agents') return 'agent leads';
+  return 'leads';
 }
 
 function csvEscape(value: string | number | null | undefined): string {
@@ -282,7 +309,7 @@ export function SalespersonPlacesLeadFinder() {
   const [region, setRegion] = useState('');
   const [countryCode, setCountryCode] = useState('US');
   const [relatedTerms, setRelatedTerms] = useState('');
-  const [realEstateTeamSearch, setRealEstateTeamSearch] = useState(false);
+  const [realEstateTarget, setRealEstateTarget] = useState<RealEstateTarget>('agents');
   const [prospects, setProspects] = useState<PlacesLead[]>([]);
   const [summary, setSummary] = useState<PlacesLeadPayload | null>(null);
   const [loading, setLoading] = useState(false);
@@ -336,7 +363,7 @@ export function SalespersonPlacesLeadFinder() {
   }, [loadProspectingOptions]);
 
   useEffect(() => {
-    if (!realEstateMode) setRealEstateTeamSearch(false);
+    if (!realEstateMode) setRealEstateTarget('agents');
   }, [realEstateMode]);
 
   useEffect(() => {
@@ -440,14 +467,26 @@ export function SalespersonPlacesLeadFinder() {
         .split(',')
         .map((term) => term.trim())
         .filter(Boolean);
+      const safeRelatedTerms =
+        realEstateMode && realEstateTarget === 'individual_agents'
+          ? filterIndividualAgentTerms(typedRelatedTerms)
+          : typedRelatedTerms;
       const teamTerms =
-        realEstateMode && realEstateTeamSearch
-          ? ['real estate team', 'realtor team', 'real estate group', 'real estate collective', 'real estate associates']
+        realEstateMode && realEstateTarget === 'teams'
+          ? ['real estate team', 'realtor team', 'real estate group', 'realtor group']
           : [];
-      const leadIntent = realEstateMode
-        ? realEstateTeamSearch
+      const brokerageTerms =
+        realEstateMode && realEstateTarget === 'brokerages'
+          ? ['real estate brokerage', 'real estate office', 'realtor office', 'realty brokerage']
+          : [];
+      const leadIntent: LeadIntent = realEstateMode
+        ? realEstateTarget === 'teams'
           ? 'real_estate_teams'
-          : 'real_estate_agents'
+          : realEstateTarget === 'individual_agents'
+            ? 'real_estate_individual_agents'
+            : realEstateTarget === 'brokerages'
+              ? 'real_estate_brokerages'
+              : 'real_estate_agents'
         : 'generic';
 
       const response = await fetch('/api/salesperson/google-places', {
@@ -460,7 +499,7 @@ export function SalespersonPlacesLeadFinder() {
           countryCode,
           region: region.trim() || undefined,
           workspaceId: saveWorkspaceId ?? undefined,
-          relatedTerms: uniqueTerms([...teamTerms, ...typedRelatedTerms]).slice(0, 12),
+          relatedTerms: uniqueTerms([...teamTerms, ...brokerageTerms, ...safeRelatedTerms]).slice(0, 12),
           pageSize: 20,
           marketId: selectedMarketId || undefined,
           industryId: selectedIndustryId || undefined,
@@ -477,10 +516,11 @@ export function SalespersonPlacesLeadFinder() {
       setProspects(nextProspects);
       setSummary(payload);
       const saved = payload.savedList;
+      const foundLabel = leadIntentLabel(leadIntent);
       setStatus(
         saved
-          ? `${nextProspects.length.toLocaleString()} ${leadIntent === 'real_estate_teams' ? 'team leads' : leadIntent === 'real_estate_agents' ? 'agent leads' : 'leads'} found. Saved "${saved.listName}" with ${saved.contactCount.toLocaleString()} list rows and ${saved.dialerLeadIds.length.toLocaleString()} dialer rows.`
-          : `${nextProspects.length.toLocaleString()} ${leadIntent === 'real_estate_teams' ? 'team leads' : leadIntent === 'real_estate_agents' ? 'agent leads' : 'leads'} found.`
+          ? `${nextProspects.length.toLocaleString()} ${foundLabel} found. Saved "${saved.listName}" with ${saved.contactCount.toLocaleString()} list rows and ${saved.dialerLeadIds.length.toLocaleString()} dialer rows.`
+          : `${nextProspects.length.toLocaleString()} ${foundLabel} found.`
       );
       void loadProspectingOptions();
     } catch (e) {
@@ -661,30 +701,54 @@ export function SalespersonPlacesLeadFinder() {
           {realEstateMode ? (
             <div className="space-y-2">
               <Label>Target</Label>
-              <div className="grid h-9 grid-cols-2 rounded-md border border-input bg-background p-0.5">
+              <div className="grid min-h-9 grid-cols-4 rounded-md border border-input bg-background p-0.5">
                 <button
                   type="button"
-                  aria-pressed={!realEstateTeamSearch}
+                  aria-pressed={realEstateTarget === 'agents'}
                   className={
-                    !realEstateTeamSearch
-                      ? 'rounded-sm bg-primary px-3 text-sm font-medium text-primary-foreground'
-                      : 'rounded-sm px-3 text-sm font-medium text-muted-foreground hover:text-foreground'
+                    realEstateTarget === 'agents'
+                      ? 'rounded-sm bg-primary px-2 text-xs font-medium text-primary-foreground'
+                      : 'rounded-sm px-2 text-xs font-medium text-muted-foreground hover:text-foreground'
                   }
-                  onClick={() => setRealEstateTeamSearch(false)}
+                  onClick={() => setRealEstateTarget('agents')}
                 >
                   Agents
                 </button>
                 <button
                   type="button"
-                  aria-pressed={realEstateTeamSearch}
+                  aria-pressed={realEstateTarget === 'individual_agents'}
                   className={
-                    realEstateTeamSearch
-                      ? 'rounded-sm bg-primary px-3 text-sm font-medium text-primary-foreground'
-                      : 'rounded-sm px-3 text-sm font-medium text-muted-foreground hover:text-foreground'
+                    realEstateTarget === 'individual_agents'
+                      ? 'rounded-sm bg-primary px-2 text-xs font-medium text-primary-foreground'
+                      : 'rounded-sm px-2 text-xs font-medium text-muted-foreground hover:text-foreground'
                   }
-                  onClick={() => setRealEstateTeamSearch(true)}
+                  onClick={() => setRealEstateTarget('individual_agents')}
+                >
+                  Individual
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={realEstateTarget === 'teams'}
+                  className={
+                    realEstateTarget === 'teams'
+                      ? 'rounded-sm bg-primary px-2 text-xs font-medium text-primary-foreground'
+                      : 'rounded-sm px-2 text-xs font-medium text-muted-foreground hover:text-foreground'
+                  }
+                  onClick={() => setRealEstateTarget('teams')}
                 >
                   Teams
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={realEstateTarget === 'brokerages'}
+                  className={
+                    realEstateTarget === 'brokerages'
+                      ? 'rounded-sm bg-primary px-2 text-xs font-medium text-primary-foreground'
+                      : 'rounded-sm px-2 text-xs font-medium text-muted-foreground hover:text-foreground'
+                  }
+                  onClick={() => setRealEstateTarget('brokerages')}
+                >
+                  Brokerages
                 </button>
               </div>
             </div>
@@ -742,6 +806,9 @@ export function SalespersonPlacesLeadFinder() {
                 {summary.savedList.dialerImportedCount.toLocaleString()} added to the dialer
                 {summary.savedList.dialerSkippedCount > 0
                   ? `, ${summary.savedList.dialerSkippedCount.toLocaleString()} already queued`
+                  : ''}
+                {summary.savedList.masterSkippedCount > 0
+                  ? `, ${summary.savedList.masterSkippedCount.toLocaleString()} already assigned in the master list`
                   : ''}
                 .
               </p>

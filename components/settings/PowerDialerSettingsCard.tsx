@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { AlertCircle, CheckCircle2, Loader2, Mail, Phone, Save, Trash2, Upload, Voicemail } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Download, Loader2, Mail, Phone, Save, Star, Trash2, Upload, Voicemail } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -9,6 +9,25 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useWorkspace } from '@/lib/workspace-context';
 import type { DialerVoicemailDrop } from '@/types/database';
+
+type DialerRecordingGroup = {
+  leadId: string;
+  leadName: string;
+  company: string | null;
+  phone: string | null;
+  isStarred: boolean;
+  recordings: Array<{
+    callId: string;
+    createdAt: string;
+    answeredAt: string | null;
+    endedAt: string | null;
+    durationSeconds: number | null;
+    provider: string | null;
+    recordingStatus: string;
+    recordingUpdatedAt: string | null;
+    downloadUrl: string;
+  }>;
+};
 
 type DialerSettingsStatus = {
   workspaceId: string;
@@ -55,8 +74,10 @@ export function PowerDialerSettingsCard() {
   const [demoEmailHandle, setDemoEmailHandle] = useState('');
   const [demoEmailReplyTo, setDemoEmailReplyTo] = useState('');
   const [voicemailDrops, setVoicemailDrops] = useState<DialerVoicemailDrop[]>([]);
+  const [recordingGroups, setRecordingGroups] = useState<DialerRecordingGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingVoicemails, setLoadingVoicemails] = useState(false);
+  const [loadingRecordings, setLoadingRecordings] = useState(false);
   const [isEnablingDialerAddon, setIsEnablingDialerAddon] = useState(false);
   const [isProvisioningDialerNumber, setIsProvisioningDialerNumber] = useState(false);
   const [isSavingInboundForward, setIsSavingInboundForward] = useState(false);
@@ -70,6 +91,13 @@ export function PowerDialerSettingsCard() {
     ? `${dialerSettingsStatus.offer.currency === 'CAD' ? 'CA$' : '$'}${dialerSettingsStatus.offer.amount}${dialerSettingsStatus.offer.currency === 'USD' ? ' USD' : ''}${dialerSettingsStatus.offer.period}`
     : 'CA$19.99/month';
   const activeVoicemailDrop = voicemailDrops.find((drop) => drop.is_active) ?? null;
+
+  const formatRecordingDuration = (seconds: number | null | undefined) => {
+    if (!seconds || seconds < 1) return null;
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = Math.round(seconds % 60);
+    return `${minutes}:${String(remainingSeconds).padStart(2, '0')}`;
+  };
 
   const loadDialerSettingsStatus = async (workspaceId?: string) => {
     const requestKey = workspaceId ?? 'default';
@@ -125,10 +153,39 @@ export function PowerDialerSettingsCard() {
     }
   };
 
+  const loadCallRecordings = async (workspaceId?: string) => {
+    if (!workspaceId) {
+      setRecordingGroups([]);
+      return;
+    }
+
+    setLoadingRecordings(true);
+    try {
+      const response = await fetch(`/api/dialer/recordings?workspaceId=${encodeURIComponent(workspaceId)}`, {
+        credentials: 'include',
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        groups?: DialerRecordingGroup[];
+        error?: string;
+      };
+      if (!response.ok) {
+        setMessage({ type: 'error', text: data.error || 'Failed to load call recordings.' });
+        return;
+      }
+      setRecordingGroups(data.groups ?? []);
+    } catch (error) {
+      console.error('Error loading call recordings:', error);
+      setMessage({ type: 'error', text: 'Network error while loading call recordings.' });
+    } finally {
+      setLoadingRecordings(false);
+    }
+  };
+
   useEffect(() => {
     setLoading(true);
     void loadDialerSettingsStatus(currentWorkspaceId ?? undefined);
     void loadVoicemailDrops(currentWorkspaceId ?? undefined);
+    void loadCallRecordings(currentWorkspaceId ?? undefined);
   }, [currentWorkspaceId]);
 
   const handleEnableDialerAddon = async () => {
@@ -181,7 +238,7 @@ export function PowerDialerSettingsCard() {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        setMessage({ type: 'error', text: data.error || 'Failed to provision a Twilio number.' });
+        setMessage({ type: 'error', text: data.error || 'Failed to provision a Telnyx number.' });
         return;
       }
       setMessage({
@@ -191,7 +248,7 @@ export function PowerDialerSettingsCard() {
       await loadDialerSettingsStatus(currentWorkspaceId ?? undefined);
     } catch (error) {
       console.error(error);
-      setMessage({ type: 'error', text: 'Network error while provisioning the Twilio number.' });
+      setMessage({ type: 'error', text: 'Network error while provisioning the Telnyx number.' });
     } finally {
       setIsProvisioningDialerNumber(false);
     }
@@ -411,7 +468,7 @@ export function PowerDialerSettingsCard() {
         )}
 
         <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300">
-          Configure the Twilio environment values for this deployment, then launch the dialer from Leads when you are ready to call.
+          Configure the Telnyx environment values for this deployment, then launch the dialer from Leads when you are ready to call.
         </div>
 
         {loading ? (
@@ -549,14 +606,14 @@ export function PowerDialerSettingsCard() {
                       onChange={(event) => setDialerAreaCode(event.target.value.replace(/\D/g, '').slice(0, 3))}
                     />
                     <p className="text-xs text-gray-500 dark:text-gray-400">
-                      Leave blank to grab the first available local Twilio number.
+                      Leave blank to grab the first available local Telnyx number.
                     </p>
                   </div>
                   <Button
                     onClick={handleProvisionDialerNumber}
                     disabled={isProvisioningDialerNumber}
                   >
-                    {isProvisioningDialerNumber ? 'Claiming number…' : 'Claim Twilio number'}
+                    {isProvisioningDialerNumber ? 'Claiming number…' : 'Claim Telnyx number'}
                   </Button>
                 </div>
               )}
@@ -667,14 +724,93 @@ export function PowerDialerSettingsCard() {
           )}
         </div>
 
+        <div className="rounded-lg border border-gray-200 p-4 space-y-4 dark:border-gray-700">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex items-start gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-100 dark:bg-amber-950/50">
+                <Star className="h-5 w-5 text-amber-600 dark:text-amber-300" />
+              </div>
+              <div>
+                <p className="text-sm font-medium dark:text-white">Call Recordings</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Auto-recorded conversations organized by lead, date, and time. Starred leads stay at the top.
+                </p>
+              </div>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void loadCallRecordings(currentWorkspaceId ?? undefined)}
+              disabled={loadingRecordings || !currentWorkspaceId}
+            >
+              {loadingRecordings ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Refresh
+            </Button>
+          </div>
+
+          {loadingRecordings ? (
+            <div className="flex items-center gap-2 rounded-md border border-dashed border-gray-200 p-3 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading call recordings…
+            </div>
+          ) : recordingGroups.length > 0 ? (
+            <div className="space-y-3">
+              {recordingGroups.map((group) => (
+                <div key={group.leadId} className="rounded-md border border-gray-200 p-3 dark:border-gray-700">
+                  <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        {group.isStarred ? <Star className="h-4 w-4 fill-amber-400 text-amber-500" /> : null}
+                        <p className="truncate text-sm font-medium dark:text-white">{group.leadName}</p>
+                      </div>
+                      <p className="truncate text-xs text-gray-500 dark:text-gray-400">
+                        {[group.company, group.phone].filter(Boolean).join(' · ') || 'Lead recording'}
+                      </p>
+                    </div>
+                    <Badge variant="outline">{group.recordings.length} recording{group.recordings.length === 1 ? '' : 's'}</Badge>
+                  </div>
+                  <div className="mt-3 divide-y divide-gray-100 dark:divide-gray-800">
+                    {group.recordings.map((recording) => {
+                      const duration = formatRecordingDuration(recording.durationSeconds);
+                      return (
+                        <div key={recording.callId} className="flex flex-col gap-2 py-2 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="min-w-0 text-sm">
+                            <p className="font-medium dark:text-white">
+                              {new Date(recording.createdAt).toLocaleDateString()} · {new Date(recording.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                            </p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                              {[duration, recording.provider ?? 'voice provider'].filter(Boolean).join(' · ')}
+                            </p>
+                          </div>
+                          <Button asChild type="button" variant="outline" size="sm">
+                            <a href={recording.downloadUrl} download>
+                              <Download className="h-4 w-4" />
+                              Download
+                            </a>
+                          </Button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-md border border-dashed border-gray-200 p-3 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+              No call recordings yet. Telnyx records answered dialler calls automatically once the lead leg connects.
+            </div>
+          )}
+        </div>
+
         <div className="rounded-lg border border-gray-200 p-4 text-sm text-gray-600 space-y-1 dark:border-gray-700 dark:text-gray-300">
-          <p>1. Set `TWILIO_ACCOUNT_SID`, `TWILIO_API_KEY_SID`, `TWILIO_API_KEY_SECRET`, `TWILIO_AUTH_TOKEN`, and `TWILIO_TWIML_APP_SID`.</p>
-          <p>2. Set `TWILIO_DEFAULT_FROM_NUMBER` as the shared fallback caller ID until each workspace claims its own number.</p>
-          <p>3. Optional: set `TWILIO_DEFAULT_SMS_FROM_NUMBER` if you want post-call SMS follow-up from the dialer.</p>
-          <p>4. Optional: set `TWILIO_INBOUND_FORWARD_TO` if you want a global inbound fallback when a workspace does not set its own forward target.</p>
-          <p>5. Upload voicemail audio here, or set `TWILIO_VOICEMAIL_DROP_AUDIO_URL` as a fallback.</p>
-          <p>6. Point your TwiML App Voice URL at `/api/twilio/voice/outgoing`.</p>
-          <p>7. Workspace-claimed numbers are automatically pointed at `/api/twilio/voice/incoming` when provisioned.</p>
+          <p>1. Set `TELNYX_API_KEY`, `TELNYX_PUBLIC_KEY`, `TELNYX_CONNECTION_ID`, and `TELNYX_TELEPHONY_CREDENTIAL_ID`.</p>
+          <p>2. Set `TELNYX_DEFAULT_FROM_NUMBER` as the shared fallback caller ID until each workspace claims its own number.</p>
+          <p>3. Optional: set `TELNYX_DEFAULT_SMS_FROM_NUMBER` if you want post-call SMS follow-up from the dialer.</p>
+          <p>4. Optional: set `TELNYX_INBOUND_FORWARD_TO` if you want a global inbound fallback when a workspace does not set its own forward target.</p>
+          <p>5. Upload voicemail audio here, or set `TELNYX_VOICEMAIL_DROP_MESSAGE` as a fallback.</p>
+          <p>6. Point Telnyx messaging webhooks at `/api/telnyx/messaging/incoming` and `/api/telnyx/messaging/status`.</p>
+          <p>7. Browser calling uses Telnyx WebRTC tokens from `/api/dialer/token`.</p>
           <p>8. Open Leads, send a list to the dialer, initialize microphone access, and start a workspace queue.</p>
         </div>
       </CardContent>

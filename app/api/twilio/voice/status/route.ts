@@ -45,12 +45,22 @@ export async function POST(request: NextRequest) {
   const now = new Date().toISOString();
   const resolvedStatus = status === 'in-progress' && !call.answered_at ? 'answered' : status;
   const durationSeconds = Number(validation.params.CallDuration ?? 0) || null;
+  const providerErrorCode = validation.params.ErrorCode ?? null;
+  const providerErrorMessage =
+    providerErrorCode && ['failed', 'canceled'].includes(resolvedStatus ?? '')
+      ? 'Provider rejected the outbound call. Check Voice Geographic Permissions for this destination country and caller ID restrictions.'
+      : null;
   const nextPayload = {
     ...(typeof call.status_payload === 'object' && call.status_payload ? call.status_payload : {}),
     lastWebhook: validation.params,
+    providerErrorCode,
+    providerErrorMessage,
   };
 
   const updatePayload: Record<string, unknown> = {
+    telecom_provider: 'twilio',
+    provider_call_id: callSid,
+    provider_parent_call_id: validation.params.ParentCallSid ?? call.provider_parent_call_id,
     twilio_call_sid: callSid,
     twilio_parent_call_sid: validation.params.ParentCallSid ?? call.twilio_parent_call_sid,
     status: resolvedStatus ?? call.status,

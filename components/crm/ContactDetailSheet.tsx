@@ -32,7 +32,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { ContactsService } from '@/lib/services/ContactsService';
 import { useWorkspace } from '@/lib/workspace-context';
-import { useTwilioDevice } from '@/lib/hooks/useTwilioDevice';
+import { useDialerDevice } from '@/lib/hooks/useDialerDevice';
 import { DIALER_DISPOSITION_LABELS, formatDialerCallStatus, isFinalCallStatus } from '@/lib/dialer/constants';
 import { formatPhoneDisplay } from '@/lib/dialer/phone';
 import type { Contact, ContactActivity, DialerCall, DialerCallDisposition, DialerSession, DialerSessionLead } from '@/types/database';
@@ -143,7 +143,7 @@ export function ContactDetailSheet({
   onSelectContact: (contact: Contact) => void;
 }) {
   const { currentWorkspaceId } = useWorkspace();
-  const device = useTwilioDevice();
+  const device = useDialerDevice();
   const tabIdRef = useRef<string>(typeof crypto !== 'undefined' ? crypto.randomUUID() : `contact-dialer-${Date.now()}`);
 
   const [activities, setActivities] = useState<ContactActivity[]>([]);
@@ -445,7 +445,10 @@ export function ContactDetailSheet({
 
       setActiveCallId(data.call.id);
       await refreshSession(prepared.sessionId);
-      await device.startCall(data.call.call_request_id);
+      await device.startCall(data.call.call_request_id, {
+        toNumber: data.call.to_number_e164,
+        fromNumber: data.call.from_number_e164,
+      });
     } catch (error) {
       console.error('[contact-detail] failed to place call', error);
       setMessage({

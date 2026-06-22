@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Resend } from 'resend';
-import twilio from 'twilio';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { resolveWorkspaceMembershipForUser, type MinimalSupabaseClient } from '@/app/api/_utils/workspace';
 import { createAdminClient } from '@/lib/supabase/server';
-import { buildPublicTwilioWebhookUrl, getWorkspaceDialerSettings } from '@/lib/dialer/server';
-import { getTwilioAccountSid, getTwilioAuthToken } from '@/lib/dialer/env';
-import { normalizePhoneNumber } from '@/lib/dialer/phone';
+import { getWorkspaceDialerSettings } from '@/lib/dialer/server';
+import { sendDialerSms } from '@/lib/dialer/provider';
+import { normalizePhoneNumber, phoneMarketFromCountryCode } from '@/lib/dialer/phone';
 import { getSalespersonDialerSettingsForUser } from '@/lib/dialer/salesperson-settings';
 import type { Contact, DialerSmsFollowup } from '@/types/database';
 
@@ -123,25 +122,25 @@ async function sendText(
   );
   if (!settings.defaultSmsFromNumber) {
     return NextResponse.json(
-      { error: 'Add a Twilio SMS-enabled number before sending texts.' },
+      { error: 'Add an SMS-enabled dialer number before sending texts.' },
       { status: 400 }
     );
   }
 
-  const normalizedPhone = normalizePhoneNumber(auth.contact.phone_e164 ?? auth.contact.phone);
+  const normalizedPhone = normalizePhoneNumber(
+    auth.contact.phone_e164 ?? auth.contact.phone,
+    phoneMarketFromCountryCode(auth.contact.phone_country_code)
+  );
   if (!normalizedPhone.e164) {
     return NextResponse.json({ error: 'This lead does not have a valid SMS number.' }, { status: 400 });
   }
 
   try {
-    const client = twilio(getTwilioAccountSid(), getTwilioAuthToken());
-    const statusCallback = buildPublicTwilioWebhookUrl(request, '/api/twilio/messaging/status');
     const now = new Date().toISOString();
-    const message = await client.messages.create({
+    const message = await sendDialerSms(request, {
       from: settings.defaultSmsFromNumber,
       to: normalizedPhone.e164,
       body,
-      statusCallback: statusCallback.toString(),
     });
 
     const insertPayload = {
@@ -149,15 +148,17 @@ async function sendText(
       call_id: null,
       contact_id: auth.contact.id,
       user_id: auth.requestUser.id,
-      twilio_message_sid: message.sid,
+      telecom_provider: message.provider,
+      provider_message_id: message.messageId,
+      twilio_message_sid: message.provider === 'twilio' ? message.messageId : null,
       from_number_e164: settings.defaultSmsFromNumber,
       to_number_e164: normalizedPhone.e164,
       body,
-      status: message.status ?? 'queued',
+      status: message.status,
       sent_at: now,
       status_payload: {
-        sid: message.sid,
-        status: message.status ?? 'queued',
+        ...message.raw,
+        provider: message.provider,
         source: 'contact_record',
       },
     };

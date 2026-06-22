@@ -80,7 +80,7 @@ export type PlacesLead = {
   longitude: number | null;
   businessStatus: string | null;
   confidenceScore: number;
-  leadCategory?: 'generic' | 'real_estate_team';
+  leadCategory?: 'generic' | 'real_estate_team' | 'real_estate_individual_agent' | 'real_estate_brokerage';
   evidenceSummary?: string;
   leadSource?: 'places' | 'job_signals';
   jobSignals?: PlacesCompanyJobSignal[];
@@ -100,7 +100,7 @@ export type PlacesLeadSearchOptions = {
   apiKey: string;
   city: string;
   industry: string;
-  leadIntent?: 'generic' | 'real_estate_agents' | 'real_estate_teams';
+  leadIntent?: 'generic' | 'real_estate_agents' | 'real_estate_individual_agents' | 'real_estate_teams' | 'real_estate_brokerages';
   countryCode?: string;
   region?: string;
   languageCode?: string;
@@ -126,12 +126,10 @@ const MAX_AUTO_QUERY_TERMS = 14;
 const REAL_ESTATE_TEAM_TERMS = [
   'real estate team',
   'realtor team',
-  'real estate group',
   'realtor group',
+  'real estate group',
   'real estate agents team',
   'residential real estate team',
-  'real estate collective',
-  'real estate associates',
   'homes team',
   'realty group',
 ] as const;
@@ -146,6 +144,31 @@ const REAL_ESTATE_AGENT_TERMS = [
   'homes for sale realtor',
   'buyer agent',
   'listing agent',
+] as const;
+
+const REAL_ESTATE_INDIVIDUAL_AGENT_TERMS = [
+  'realtor',
+  'real estate agent',
+  'real estate broker',
+  'real estate salesperson',
+  'residential realtor',
+  'local realtor',
+  'listing agent',
+  'buyer agent',
+  'solo realtor',
+  'independent realtor',
+] as const;
+
+const REAL_ESTATE_BROKERAGE_TERMS = [
+  'real estate brokerage',
+  'real estate office',
+  'realtor office',
+  'realty brokerage',
+  'realty office',
+  'real estate agency',
+  'brokerage office',
+  'real estate broker office',
+  'residential real estate brokerage',
 ] as const;
 
 const PLACES_API_RESTRICTION_MESSAGE =
@@ -390,10 +413,6 @@ function realEstateTeamEvidence(place: PlacesApiPlace, queryTerm: string): {
   const strongTeamSignals = [
     'team',
     'group',
-    'collective',
-    'associates',
-    'partners',
-    'real estate agents',
     'realtor group',
     'realty group',
   ];
@@ -450,8 +469,8 @@ function realEstateTeamEvidence(place: PlacesApiPlace, queryTerm: string): {
   if ((place.rating ?? 0) >= 4.5) score += 2;
 
   const matchedBrokerageSignals = brokerageOfficeSignals.filter((signal) => haystack.includes(signal));
-  if (matchedBrokerageSignals.length > 0 && matchedStrongSignals.length === 0) {
-    score -= 22;
+  if (matchedBrokerageSignals.length > 0) {
+    score -= 42;
     evidence.push(`brokerage-office signal: ${matchedBrokerageSignals[0]}`);
   }
 
@@ -479,7 +498,234 @@ function realEstateTeamEvidence(place: PlacesApiPlace, queryTerm: string): {
   const normalizedScore = Math.max(0, Math.min(100, score));
   return {
     score: normalizedScore,
-    isLikelyTeam: normalizedScore >= 55 && matchedStrongSignals.length > 0 && matchedIrrelevantSignals.length === 0,
+    isLikelyTeam:
+      normalizedScore >= 55 &&
+      matchedStrongSignals.length > 0 &&
+      matchedBrokerageSignals.length === 0 &&
+      matchedIrrelevantSignals.length === 0,
+    evidence,
+  };
+}
+
+function realEstateBrokerageEvidence(place: PlacesApiPlace, queryTerm: string): {
+  score: number;
+  isLikelyBrokerage: boolean;
+  evidence: string[];
+} {
+  const name = place.displayName?.text ?? '';
+  const primaryType = place.primaryTypeDisplayName?.text ?? place.primaryType ?? '';
+  const websiteDomain = domainFromUrl(place.websiteUri ?? '');
+  const haystack = normalizeText(`${name} ${primaryType} ${websiteDomain} ${queryTerm}`);
+  const evidence: string[] = [];
+  let score = 24;
+
+  const brokerageSignals = [
+    'brokerage',
+    'real estate office',
+    'realtor office',
+    'realty office',
+    'real estate agency',
+    'realty',
+    're max',
+    'remax',
+    'keller williams',
+    'royal lepage',
+    'century 21',
+    'coldwell banker',
+    'sotheby',
+    'sutton',
+    'exp realty',
+  ];
+  const matchedBrokerageSignals = brokerageSignals.filter((signal) => haystack.includes(signal));
+  if (matchedBrokerageSignals.length > 0) {
+    score += Math.min(46, matchedBrokerageSignals.length * 14);
+    evidence.push(`brokerage signal: ${matchedBrokerageSignals.slice(0, 2).join(', ')}`);
+  }
+
+  if (haystack.includes('real estate brokerage') || haystack.includes('brokerage office')) {
+    score += 18;
+    evidence.push('explicit brokerage phrase');
+  }
+
+  const teamSignals = ['team', 'group', 'collective', 'associates'];
+  const matchedTeamSignals = teamSignals.filter((signal) => haystack.includes(signal));
+  if (matchedTeamSignals.length > 0 && matchedBrokerageSignals.length === 0) {
+    score -= 18;
+    evidence.push(`team signal: ${matchedTeamSignals[0]}`);
+  }
+
+  const irrelevantSignals = [
+    'mortgage',
+    'property management',
+    'condo management',
+    'apartment',
+    'inspection',
+    'lawyer',
+    'notary',
+    'appraisal',
+  ];
+  const matchedIrrelevantSignals = irrelevantSignals.filter((signal) => haystack.includes(signal));
+  if (matchedIrrelevantSignals.length > 0) {
+    score -= 45;
+    evidence.push(`excluded signal: ${matchedIrrelevantSignals[0]}`);
+  }
+
+  if (place.websiteUri) score += 8;
+  if (place.nationalPhoneNumber || place.internationalPhoneNumber) score += 6;
+  if (place.businessStatus === 'OPERATIONAL') score += 5;
+  if ((place.userRatingCount ?? 0) >= 10) score += 4;
+  if ((place.rating ?? 0) >= 4.5) score += 2;
+
+  if (place.businessStatus && place.businessStatus !== 'OPERATIONAL') {
+    score -= 25;
+    evidence.push(`status: ${place.businessStatus}`);
+  }
+
+  const normalizedScore = Math.max(0, Math.min(100, score));
+  return {
+    score: normalizedScore,
+    isLikelyBrokerage: normalizedScore >= 55 && matchedBrokerageSignals.length > 0 && matchedIrrelevantSignals.length === 0,
+    evidence,
+  };
+}
+
+function hasLikelyFirstLastName(value: string): boolean {
+  const nameStopWords = new Set([
+    'and',
+    'agency',
+    'at',
+    'banker',
+    'broker',
+    'brokerage',
+    'century',
+    'coldwell',
+    'estate',
+    'exp',
+    'group',
+    'home',
+    'homes',
+    'inc',
+    'keller',
+    'llc',
+    'ltd',
+    'lepage',
+    'max',
+    'one',
+    'premier',
+    'properties',
+    'property',
+    'real',
+    'realtor',
+    'realty',
+    'remax',
+    'royal',
+    'sales',
+    'sotheby',
+    'sothebys',
+    'sutton',
+    'team',
+    'the',
+    'williams',
+  ]);
+  const tokens = value
+    .split(/\s+/)
+    .map((token) => token.replace(/^[^A-Za-z]+|[^A-Za-z'-]+$/g, ''))
+    .filter((token) => token.length >= 2);
+
+  for (let index = 0; index < tokens.length - 1; index += 1) {
+    const pair = tokens.slice(index, index + 2);
+    const normalizedPair = pair.map((token) => normalizeText(token));
+    if (normalizedPair.some((token) => !token || nameStopWords.has(token))) continue;
+    if (pair.every((token) => /^[A-Z][A-Za-z'-]+$/.test(token) || /^[A-Z]{2,}$/.test(token))) return true;
+  }
+
+  return false;
+}
+
+function realEstateIndividualAgentEvidence(place: PlacesApiPlace, queryTerm: string): {
+  score: number;
+  isLikelyIndividualAgent: boolean;
+  evidence: string[];
+} {
+  const name = place.displayName?.text ?? '';
+  const primaryType = place.primaryTypeDisplayName?.text ?? place.primaryType ?? '';
+  const websiteDomain = domainFromUrl(place.websiteUri ?? '');
+  const haystack = normalizeText(`${name} ${primaryType} ${websiteDomain} ${queryTerm}`);
+  const evidence: string[] = [];
+  let score = 16;
+
+  const hasPersonName = hasLikelyFirstLastName(name);
+  if (hasPersonName) {
+    score += 46;
+    evidence.push('first-last name in Google listing');
+  } else {
+    score -= 38;
+    evidence.push('missing first-last name');
+  }
+
+  const agentSignals = [
+    'realtor',
+    'real estate agent',
+    'real estate broker',
+    'real estate salesperson',
+    'listing agent',
+    'buyer agent',
+    'sales representative',
+  ];
+  const matchedAgentSignals = agentSignals.filter((signal) => haystack.includes(signal));
+  if (matchedAgentSignals.length > 0) {
+    score += Math.min(24, matchedAgentSignals.length * 8);
+    evidence.push(`agent signal: ${matchedAgentSignals.slice(0, 2).join(', ')}`);
+  }
+
+  const teamOrOfficeSignals = [
+    'team',
+    'group',
+    'collective',
+    'associates',
+    'partners',
+    'brokerage',
+    'office',
+    'branch',
+    'franchise',
+    'property management',
+  ];
+  const matchedTeamOrOfficeSignals = teamOrOfficeSignals.filter((signal) => haystack.includes(signal));
+  if (matchedTeamOrOfficeSignals.length > 0) {
+    score -= hasPersonName ? 18 : 36;
+    evidence.push(`team-office signal: ${matchedTeamOrOfficeSignals[0]}`);
+  }
+
+  const irrelevantSignals = [
+    'mortgage',
+    'condo management',
+    'apartment',
+    'inspection',
+    'lawyer',
+    'notary',
+    'appraisal',
+  ];
+  const matchedIrrelevantSignals = irrelevantSignals.filter((signal) => haystack.includes(signal));
+  if (matchedIrrelevantSignals.length > 0) {
+    score -= 45;
+    evidence.push(`excluded signal: ${matchedIrrelevantSignals[0]}`);
+  }
+
+  if (place.websiteUri) score += 6;
+  if (place.nationalPhoneNumber || place.internationalPhoneNumber) score += 8;
+  if (place.businessStatus === 'OPERATIONAL') score += 5;
+  if ((place.userRatingCount ?? 0) >= 10) score += 4;
+  if ((place.rating ?? 0) >= 4.5) score += 2;
+
+  if (place.businessStatus && place.businessStatus !== 'OPERATIONAL') {
+    score -= 25;
+    evidence.push(`status: ${place.businessStatus}`);
+  }
+
+  const normalizedScore = Math.max(0, Math.min(100, score));
+  return {
+    score: normalizedScore,
+    isLikelyIndividualAgent: normalizedScore >= 55 && hasPersonName && matchedIrrelevantSignals.length === 0,
     evidence,
   };
 }
@@ -499,6 +745,16 @@ function buildQueries(options: PlacesLeadSearchOptions): LeadSearchQuery[] {
             ...REAL_ESTATE_AGENT_TERMS,
             ...(options.relatedTerms ?? []),
           ]).slice(0, MAX_AUTO_QUERY_TERMS)
+        : options.leadIntent === 'real_estate_individual_agents'
+          ? uniqueNormalizedTerms([
+              ...REAL_ESTATE_INDIVIDUAL_AGENT_TERMS,
+              ...(options.relatedTerms ?? []),
+            ]).slice(0, MAX_AUTO_QUERY_TERMS)
+          : options.leadIntent === 'real_estate_brokerages'
+            ? uniqueNormalizedTerms([
+                ...REAL_ESTATE_BROKERAGE_TERMS,
+                ...(options.relatedTerms ?? []),
+              ]).slice(0, MAX_AUTO_QUERY_TERMS)
         : uniqueNormalizedTerms([
             industry,
             ...inferRelatedIndustryTerms(industry),
@@ -705,6 +961,12 @@ function serializeLead(
   const teamEvidence = options?.leadIntent === 'real_estate_teams'
     ? realEstateTeamEvidence(place, query.industry)
     : null;
+  const individualAgentEvidence = options?.leadIntent === 'real_estate_individual_agents'
+    ? realEstateIndividualAgentEvidence(place, query.industry)
+    : null;
+  const brokerageEvidence = options?.leadIntent === 'real_estate_brokerages'
+    ? realEstateBrokerageEvidence(place, query.industry)
+    : null;
 
   return {
     placeId: place.id ?? '',
@@ -723,19 +985,45 @@ function serializeLead(
     latitude: place.location?.latitude ?? null,
     longitude: place.location?.longitude ?? null,
     businessStatus: place.businessStatus ?? null,
-    confidenceScore: teamEvidence?.score ?? scoreLead(place, query.industry),
-    leadCategory: teamEvidence ? 'real_estate_team' : 'generic',
-    evidenceSummary: teamEvidence?.evidence.join('; ') || undefined,
+    confidenceScore: teamEvidence?.score ?? individualAgentEvidence?.score ?? brokerageEvidence?.score ?? scoreLead(place, query.industry),
+    leadCategory: teamEvidence
+      ? 'real_estate_team'
+      : individualAgentEvidence
+        ? 'real_estate_individual_agent'
+        : brokerageEvidence
+          ? 'real_estate_brokerage'
+          : 'generic',
+    evidenceSummary: teamEvidence?.evidence.join('; ') || individualAgentEvidence?.evidence.join('; ') || brokerageEvidence?.evidence.join('; ') || undefined,
   };
 }
 
 function shouldKeepLead(prospect: PlacesLead, options: PlacesLeadSearchOptions): boolean {
-  if (options.leadIntent !== 'real_estate_teams') return true;
-  if (prospect.leadCategory !== 'real_estate_team') return false;
-  if (prospect.confidenceScore < 55) return false;
+  if (options.leadIntent === 'real_estate_individual_agents') {
+    if (prospect.leadCategory !== 'real_estate_individual_agent') return false;
+    if (prospect.confidenceScore < 55) return false;
 
-  const evidence = normalizeText(prospect.evidenceSummary ?? '');
-  return evidence.includes('team signal') || evidence.includes('explicit team phrase') || evidence.includes('team branded business name');
+    const evidence = normalizeText(prospect.evidenceSummary ?? '');
+    return evidence.includes('first last name in google listing') && !evidence.includes('missing first last name');
+  }
+
+  if (options.leadIntent === 'real_estate_teams') {
+    if (prospect.leadCategory !== 'real_estate_team') return false;
+    if (prospect.confidenceScore < 55) return false;
+
+    const evidence = normalizeText(prospect.evidenceSummary ?? '');
+    if (evidence.includes('brokerage office signal') || evidence.includes('excluded signal')) return false;
+    return evidence.includes('team signal') || evidence.includes('explicit team phrase') || evidence.includes('team branded business name');
+  }
+
+  if (options.leadIntent === 'real_estate_brokerages') {
+    if (prospect.leadCategory !== 'real_estate_brokerage') return false;
+    if (prospect.confidenceScore < 55) return false;
+
+    const evidence = normalizeText(prospect.evidenceSummary ?? '');
+    return (evidence.includes('brokerage signal') || evidence.includes('explicit brokerage phrase')) && !evidence.includes('excluded signal');
+  }
+
+  return true;
 }
 
 function placeDedupeKey(prospect: PlacesLead): string {

@@ -64,6 +64,8 @@ export async function GET(request: NextRequest) {
     });
     const isAmbassador = !!approvedAmbassador;
     const isSalesperson = !!salesperson;
+    const salespersonDashboardEnabled = Boolean(access.workspaceId && isSalesperson && !access.isFounder);
+    const dashboardMode = salespersonDashboardEnabled ? 'salesperson' : 'default';
     if (!access.workspaceId) {
       return NextResponse.json({
         userId: requestUser.id,
@@ -80,7 +82,10 @@ export async function GET(request: NextRequest) {
         planBadgeLabel: isAmbassador ? 'AMBASSADOR' : null,
         isSalesperson,
         salesperson,
-        accessLevel: isSalesperson ? 'salesperson' : access.level,
+        salespersonId: salesperson?.id ?? null,
+        canUseSalespersonDashboard: salespersonDashboardEnabled,
+        dashboardMode,
+        accessLevel: salespersonDashboardEnabled ? 'salesperson' : access.level,
         onboardingComplete: false,
         memberCount: access.memberCount,
         workspaces: workspaceOptions,
@@ -105,7 +110,10 @@ export async function GET(request: NextRequest) {
         planBadgeLabel: isAmbassador ? 'AMBASSADOR' : null,
         isSalesperson,
         salesperson,
-        accessLevel: isSalesperson && !access.isFounder ? 'salesperson' : access.level,
+        salespersonId: salesperson?.id ?? null,
+        canUseSalespersonDashboard: salespersonDashboardEnabled,
+        dashboardMode,
+        accessLevel: salespersonDashboardEnabled ? 'salesperson' : access.level,
         onboardingComplete: false,
         memberCount: access.memberCount,
         workspaces: workspaceOptions,
@@ -172,7 +180,10 @@ export async function GET(request: NextRequest) {
       ambassadorApplicationId: approvedAmbassador?.id ?? null,
       isSalesperson,
       salesperson,
-      accessLevel: isSalesperson && !access.isFounder ? 'salesperson' : access.level,
+      salespersonId: salesperson?.id ?? null,
+      canUseSalespersonDashboard: salespersonDashboardEnabled,
+      dashboardMode,
+      accessLevel: salespersonDashboardEnabled ? 'salesperson' : access.level,
       onboardingComplete: !!workspace.onboarding_completed_at,
       memberCount: access.memberCount,
       workspaces: workspaceOptions,

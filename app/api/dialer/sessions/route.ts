@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import type { Contact, DialerCall, DialerSession, DialerSessionLead } from '@/types/database';
 import { getDialerRequestContext } from '@/lib/dialer/server';
-import { getTwilioDialerEnvIssues } from '@/lib/dialer/env';
-import { normalizePhoneNumber } from '@/lib/dialer/phone';
+import { getActiveDialerEnvIssues, getDialerTelecomProvider } from '@/lib/dialer/env';
+import { normalizePhoneNumber, phoneMarketFromCountryCode } from '@/lib/dialer/phone';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -54,6 +54,13 @@ function normalizeLegacyStatus(status?: string | null): Contact['status'] {
     return 'cold';
   }
   return 'new';
+}
+
+function normalizeContactPhone(contact: Contact) {
+  return normalizePhoneNumber(
+    (contact.phone_e164 ?? '').trim() || contact.phone,
+    phoneMarketFromCountryCode(contact.phone_country_code)
+  );
 }
 
 function buildContactInsertFromLegacy(
@@ -184,12 +191,13 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(response);
   } catch (error) {
     console.error('[dialer/sessions] failed to build session context', error);
-    const envIssues = getTwilioDialerEnvIssues();
+    const envIssues = getActiveDialerEnvIssues();
+    const provider = getDialerTelecomProvider();
     return NextResponse.json(
       {
         error:
           envIssues.length > 0
-            ? `Twilio is not configured. Missing or invalid: ${envIssues.join(', ')}`
+            ? `${provider === 'telnyx' ? 'Telnyx' : 'Twilio'} is not configured. Missing or invalid: ${envIssues.join(', ')}`
             : error instanceof Error
               ? error.message
               : 'Failed to load dialer session',
@@ -335,7 +343,7 @@ export async function POST(request: NextRequest) {
 
     const leadInserts: Array<Record<string, unknown>> = [];
     const contactUpdates = orderedContacts.map((contact, index) => {
-      const normalized = normalizePhoneNumber(contact.phone);
+      const normalized = normalizeContactPhone(contact);
       leadInserts.push({
         session_id: session.id,
         workspace_id: context.workspaceId,
@@ -349,6 +357,9 @@ export async function POST(request: NextRequest) {
         .from('contacts')
         .update({
           phone_e164: normalized.e164,
+          phone_country_code: normalized.countryCode,
+          phone_area_code: normalized.areaCode,
+          phone_area_label: normalized.areaLabel,
           phone_last_validated_at: now,
           phone_validation_error: normalized.error,
           updated_at: now,
@@ -375,12 +386,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(response, { status: 201 });
   } catch (error) {
     console.error('[dialer/sessions] failed to create session context', error);
-    const envIssues = getTwilioDialerEnvIssues();
+    const envIssues = getActiveDialerEnvIssues();
+    const provider = getDialerTelecomProvider();
     return NextResponse.json(
       {
         error:
           envIssues.length > 0
-            ? `Twilio is not configured. Missing or invalid: ${envIssues.join(', ')}`
+            ? `${provider === 'telnyx' ? 'Telnyx' : 'Twilio'} is not configured. Missing or invalid: ${envIssues.join(', ')}`
             : error instanceof Error
               ? error.message
               : 'Failed to create dialer session',

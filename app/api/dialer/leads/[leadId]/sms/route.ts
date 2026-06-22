@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import twilio from 'twilio';
 import type { DialerSmsFollowup, DiallerLead } from '@/types/database';
-import { buildPublicTwilioWebhookUrl, getDialerRequestContext } from '@/lib/dialer/server';
-import { getTwilioAccountSid, getTwilioAuthToken } from '@/lib/dialer/env';
-import { normalizePhoneNumber } from '@/lib/dialer/phone';
+import { getDialerRequestContext } from '@/lib/dialer/server';
+import { sendDialerSms } from '@/lib/dialer/provider';
+import { normalizePhoneNumber, phoneMarketFromCountryCode } from '@/lib/dialer/phone';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -11,6 +10,8 @@ export const dynamic = 'force-dynamic';
 type SendLeadSmsPayload = {
   workspaceId?: string;
   body?: string;
+  phone?: string;
+  name?: string;
 };
 
 const MAX_SMS_BODY_LENGTH = 1000;
@@ -19,10 +20,56 @@ function cleanText(value: string | null | undefined): string {
   return (value ?? '').trim();
 }
 
+function normalizeDiallerLeadPhone(lead: DiallerLead) {
+  return normalizePhoneNumber(
+    cleanText(lead.phone_e164) || lead.phone,
+    phoneMarketFromCountryCode(lead.phone_country_code)
+  );
+}
+
+async function sendFallbackLeadSms(
+  request: NextRequest,
+  context: Exclude<Awaited<ReturnType<typeof getDialerRequestContext>>, NextResponse>,
+  params: {
+    leadId: string;
+    phone?: string;
+    name?: string;
+    body: string;
+  }
+) {
+  const normalizedPhone = normalizePhoneNumber(params.phone);
+  if (!normalizedPhone.e164) {
+    return NextResponse.json({ error: 'This lead does not have a valid SMS number.' }, { status: 400 });
+  }
+
+  const message = await sendDialerSms(request, {
+    from: context.settings.defaultSmsFromNumber!,
+    to: normalizedPhone.e164,
+    body: params.body,
+  });
+
+  return NextResponse.json(
+    {
+      followup: null,
+      warning: null,
+      message: {
+        provider: message.provider,
+        messageId: message.messageId,
+        status: message.status,
+        to: normalizedPhone.e164,
+        from: context.settings.defaultSmsFromNumber,
+        leadId: params.leadId,
+        leadName: cleanText(params.name) || null,
+      },
+    },
+    { status: 201 }
+  );
+}
+
 async function findExistingContact(context: Awaited<ReturnType<typeof getDialerRequestContext>>, lead: DiallerLead) {
   if (context instanceof NextResponse) return null;
 
-  const normalizedPhone = normalizePhoneNumber(lead.phone);
+  const normalizedPhone = normalizeDiallerLeadPhone(lead);
   const lookups = [
     normalizedPhone.e164 ? { column: 'phone_e164', value: normalizedPhone.e164 } : null,
     cleanText(lead.phone) ? { column: 'phone', value: cleanText(lead.phone) } : null,
@@ -49,7 +96,7 @@ async function findExistingContact(context: Awaited<ReturnType<typeof getDialerR
 }
 
 async function upsertLeadContact(context: Exclude<Awaited<ReturnType<typeof getDialerRequestContext>>, NextResponse>, lead: DiallerLead) {
-  const normalizedPhone = normalizePhoneNumber(lead.phone);
+  const normalizedPhone = normalizeDiallerLeadPhone(lead);
   const existing = await findExistingContact(context, lead);
   const now = new Date().toISOString();
   const contactPayload = {
@@ -58,6 +105,9 @@ async function upsertLeadContact(context: Exclude<Awaited<ReturnType<typeof getD
     full_name: cleanText(lead.name) || 'Lead',
     phone: cleanText(lead.phone) || null,
     phone_e164: normalizedPhone.e164,
+    phone_country_code: normalizedPhone.countryCode,
+    phone_area_code: normalizedPhone.areaCode,
+    phone_area_label: normalizedPhone.areaLabel,
     phone_last_validated_at: now,
     phone_validation_error: normalizedPhone.error,
     email: cleanText(lead.email) || null,
@@ -113,7 +163,7 @@ export async function POST(
 
   if (!context.settings.defaultSmsFromNumber) {
     return NextResponse.json(
-      { error: 'Add a Twilio SMS-enabled number before sending texts.' },
+      { error: 'Add an SMS-enabled dialer number before sending texts.' },
       { status: 400 }
     );
   }
@@ -123,6 +173,7 @@ export async function POST(
     .select('*')
     .eq('id', leadId)
     .eq('workspace_id', context.workspaceId)
+    .eq('user_id', context.requestUser.id)
     .maybeSingle();
 
   if (leadError) {
@@ -131,11 +182,27 @@ export async function POST(
   }
 
   if (!lead) {
+    if (payload.phone) {
+      try {
+        return await sendFallbackLeadSms(request, context, {
+          leadId,
+          phone: payload.phone,
+          name: payload.name,
+          body: messageBody,
+        });
+      } catch (error) {
+        console.error('[dialer/lead-sms] failed to send fallback lead text', error);
+        return NextResponse.json(
+          { error: error instanceof Error ? error.message : 'Failed to send the text.' },
+          { status: 500 }
+        );
+      }
+    }
     return NextResponse.json({ error: 'Lead not found.' }, { status: 404 });
   }
 
   const diallerLead = lead as DiallerLead;
-  const normalizedPhone = normalizePhoneNumber(diallerLead.phone);
+  const normalizedPhone = normalizeDiallerLeadPhone(diallerLead);
   if (!normalizedPhone.e164) {
     return NextResponse.json({ error: 'This lead does not have a valid SMS number.' }, { status: 400 });
   }
@@ -151,14 +218,11 @@ export async function POST(
   }
 
   try {
-    const client = twilio(getTwilioAccountSid(), getTwilioAuthToken());
-    const statusCallback = buildPublicTwilioWebhookUrl(request, '/api/twilio/messaging/status');
     const now = new Date().toISOString();
-    const message = await client.messages.create({
+    const message = await sendDialerSms(request, {
       from: context.settings.defaultSmsFromNumber,
       to: normalizedPhone.e164,
       body: messageBody,
-      statusCallback: statusCallback.toString(),
     });
 
     const insertPayload = {
@@ -166,15 +230,17 @@ export async function POST(
       call_id: null,
       contact_id: contactId,
       user_id: context.requestUser.id,
-      twilio_message_sid: message.sid,
+      telecom_provider: message.provider,
+      provider_message_id: message.messageId,
+      twilio_message_sid: message.provider === 'twilio' ? message.messageId : null,
       from_number_e164: context.settings.defaultSmsFromNumber,
       to_number_e164: normalizedPhone.e164,
       body: messageBody,
-      status: message.status ?? 'queued',
+      status: message.status,
       sent_at: now,
       status_payload: {
-        sid: message.sid,
-        status: message.status ?? 'queued',
+        ...message.raw,
+        provider: message.provider,
         source: 'dialler_lead',
         diallerLeadId: diallerLead.id,
       },

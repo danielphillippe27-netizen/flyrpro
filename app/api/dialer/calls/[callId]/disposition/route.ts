@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import type { DialerCallDisposition } from '@/types/database';
 import { getDialerRequestContext } from '@/lib/dialer/server';
 import { DIALER_CALL_DISPOSITIONS } from '@/lib/dialer/constants';
+import { updateMasterLeadDispositionForCall } from '@/lib/sales-leads/master-list';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -233,6 +234,18 @@ export async function POST(
       .update({ status: 'completed', ended_at: now, updated_at: now })
       .eq('id', call.session_id);
   }
+
+  await updateMasterLeadDispositionForCall({
+    admin: context.admin,
+    workspaceId: context.workspaceId,
+    diallerLeadId: getPayloadText(call.status_payload, 'diallerLeadId') || null,
+    phone: getPayloadText(call.status_payload, 'diallerLeadPhone') || cleanText(call.to_number_raw),
+    email: getPayloadText(call.status_payload, 'diallerLeadEmail') || null,
+    name: getPayloadText(call.status_payload, 'diallerLeadName') || null,
+    disposition: body.disposition,
+    notes: body.note ?? null,
+    nextFollowUpAt: body.followUpAt ?? null,
+  });
 
   return NextResponse.json({ ok: true });
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -11,8 +11,10 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { SmartListsService } from '@/lib/services/SmartListsService';
 import { getIndustryCopy, type IndustryCopy } from '@/lib/industry-copy';
+import { PHONE_MARKET_LABELS, SUPPORTED_PHONE_MARKETS, phoneMarketFromCountryCode, type SupportedPhoneMarket } from '@/lib/dialer/phone';
 
 type ImportContactsDialogProps = {
   open: boolean;
@@ -44,6 +46,7 @@ export function ImportContactsDialog({
   const [loading, setLoading] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [listName, setListName] = useState('');
+  const [phoneMarket, setPhoneMarket] = useState<SupportedPhoneMarket>('US');
   const [result, setResult] = useState<ImportResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -70,10 +73,26 @@ export function ImportContactsDialog({
   const resetState = () => {
     setFile(null);
     setListName('');
+    setPhoneMarket('US');
     setResult(null);
     setErrorMessage(null);
     setLoading(false);
   };
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void fetch('/api/profile', { credentials: 'include' })
+      .then(async (response) => {
+        if (!response.ok) return;
+        const data = (await response.json().catch(() => ({}))) as { country_code?: string | null };
+        if (!cancelled) setPhoneMarket(phoneMarketFromCountryCode(data.country_code));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   const handleClose = () => {
     if (loading) return;
@@ -101,6 +120,7 @@ export function ImportContactsDialog({
       if (listName.trim()) {
         formData.append('listName', listName.trim());
       }
+      formData.append('phoneMarket', phoneMarket);
 
       const response = await fetch('/api/leads/import', {
         method: 'POST',
@@ -202,6 +222,25 @@ export function ImportContactsDialog({
             />
             <p className="text-xs text-muted-foreground">
               {copy.importDialog.helper}
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="lead-import-phone-market">Phone market</Label>
+            <Select value={phoneMarket} onValueChange={(value) => setPhoneMarket(value as SupportedPhoneMarket)} disabled={loading}>
+              <SelectTrigger id="lead-import-phone-market" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SUPPORTED_PHONE_MARKETS.map((market) => (
+                  <SelectItem key={market} value={market}>
+                    {PHONE_MARKET_LABELS[market]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Local phone numbers in the CSV will be interpreted using this country.
             </p>
           </div>
 

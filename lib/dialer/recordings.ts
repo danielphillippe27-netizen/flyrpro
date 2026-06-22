@@ -4,6 +4,7 @@ export type DialerCallRecording = {
   recordingSid: string;
   recordingUrl: string;
   mp3Url: string;
+  provider: string | null;
   status: string;
   durationSeconds: number | null;
   channels: number | null;
@@ -11,7 +12,7 @@ export type DialerCallRecording = {
   errorCode: string | null;
 };
 
-export function getDialerCallRecording(call: Pick<DialerCall, 'status_payload'>): DialerCallRecording | null {
+export function getDialerCallRecording(call: Pick<DialerCall, 'status_payload' | 'telecom_provider'>): DialerCallRecording | null {
   const recording = call.status_payload?.recording;
   if (!recording || typeof recording !== 'object') {
     return null;
@@ -30,6 +31,7 @@ export function getDialerCallRecording(call: Pick<DialerCall, 'status_payload'>)
     recordingSid,
     recordingUrl,
     mp3Url,
+    provider: typeof candidate.provider === 'string' ? candidate.provider : call.telecom_provider ?? null,
     status: typeof candidate.status === 'string' ? candidate.status : 'pending',
     durationSeconds:
       typeof candidate.durationSeconds === 'number'
@@ -49,7 +51,7 @@ export function getDialerCallRecording(call: Pick<DialerCall, 'status_payload'>)
 }
 
 export function getDialerCallRecordingSummary(
-  call: Pick<DialerCall, 'status_payload'>
+  call: Pick<DialerCall, 'status_payload' | 'telecom_provider'>
 ): DialerCallRecordingSummary | null {
   const recording = call.status_payload?.recording;
   if (!recording || typeof recording !== 'object') {

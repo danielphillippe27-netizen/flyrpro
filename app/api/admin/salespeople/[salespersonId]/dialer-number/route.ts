@@ -1,12 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import twilio from 'twilio';
-import type { LocalListInstanceOptions } from 'twilio/lib/rest/api/v2010/account/availablePhoneNumberCountry/local';
 import { requireFounderApi } from '@/app/api/admin/_utils/founder';
 import { getPublicAppUrl } from '@/app/lib/billing/stripe-products';
-import {
-  getTwilioAccountSid,
-  getTwilioAuthToken,
-} from '@/lib/dialer/env';
+import { getDialerTelecomProvider } from '@/lib/dialer/env';
+import { provisionDialerPhoneNumber } from '@/lib/dialer/provider';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -33,7 +29,7 @@ function getProvisionErrorMessage(error: unknown): string {
     if (message) return message;
   }
 
-  return 'Failed to provision a Twilio number.';
+  return 'Failed to provision a dialer number.';
 }
 
 export async function POST(
@@ -75,14 +71,14 @@ export async function POST(
 
     const { data: existingSettings } = await auth.admin
       .from('salesperson_dialer_settings')
-      .select('assigned_phone_number, twilio_incoming_phone_number_sid, number_status')
+      .select('assigned_phone_number, twilio_incoming_phone_number_sid, provider_phone_number_id, number_status')
       .eq('salesperson_id', row.id)
       .maybeSingle();
 
     if (
       existingSettings?.number_status === 'active' &&
       existingSettings?.assigned_phone_number &&
-      existingSettings?.twilio_incoming_phone_number_sid
+      (existingSettings?.twilio_incoming_phone_number_sid || existingSettings?.provider_phone_number_id)
     ) {
       return NextResponse.json(
         {
@@ -102,41 +98,28 @@ export async function POST(
         ? Number.parseInt(body.areaCode.trim(), 10)
         : undefined;
 
-    const client = twilio(getTwilioAccountSid(), getTwilioAuthToken());
-    const search: LocalListInstanceOptions =
-      areaCode && ['US', 'CA'].includes(countryCode)
-        ? { areaCode, limit: 1, smsEnabled: true, voiceEnabled: true }
-        : { limit: 1, smsEnabled: true, voiceEnabled: true };
-
-    const candidates = await client.availablePhoneNumbers(countryCode).local.list(search);
-    const candidate = candidates[0];
-    if (!candidate?.phoneNumber) {
-      return NextResponse.json(
-        { error: 'No available Twilio local numbers matched that search.' },
-        { status: 404 }
-      );
-    }
-
     const appUrl = getPublicAppUrl(request);
     if (!appUrl) {
       return NextResponse.json(
         {
           error:
-            'Set APP_BASE_URL or NEXT_PUBLIC_APP_URL to a public HTTPS app URL before claiming a Twilio number.',
+            'Set APP_BASE_URL or NEXT_PUBLIC_APP_URL to a public HTTPS app URL before claiming a dialer number.',
         },
         { status: 400 }
       );
     }
 
-    const purchasedNumber = await client.incomingPhoneNumbers.create({
-      phoneNumber: candidate.phoneNumber,
+    const activeProvider = getDialerTelecomProvider();
+    const voicePath = activeProvider === 'telnyx' ? '/api/telnyx/voice/incoming' : '/api/twilio/voice/incoming';
+    const smsPath = activeProvider === 'telnyx' ? '/api/telnyx/messaging/incoming' : '/api/twilio/messaging/incoming';
+    const statusPath = activeProvider === 'telnyx' ? '/api/telnyx/voice/status' : '/api/twilio/voice/incoming-status';
+    const purchasedNumber = await provisionDialerPhoneNumber({
+      countryCode,
+      areaCode,
       friendlyName: `FLYR ${row.full_name || row.id}`,
-      voiceUrl: new URL('/api/twilio/voice/incoming', appUrl).toString(),
-      voiceMethod: 'POST',
-      smsUrl: new URL('/api/twilio/messaging/incoming', appUrl).toString(),
-      smsMethod: 'POST',
-      statusCallback: new URL('/api/twilio/voice/incoming-status', appUrl).toString(),
-      statusCallbackMethod: 'POST',
+      voiceUrl: new URL(voicePath, appUrl).toString(),
+      smsUrl: new URL(smsPath, appUrl).toString(),
+      statusCallback: new URL(statusPath, appUrl).toString(),
     });
 
     const now = new Date().toISOString();
@@ -148,14 +131,19 @@ export async function POST(
           workspace_id: row.workspace_id,
           assigned_phone_number: purchasedNumber.phoneNumber,
           default_sms_from_number: purchasedNumber.phoneNumber,
-          twilio_incoming_phone_number_sid: purchasedNumber.sid,
+          telecom_provider: purchasedNumber.provider,
+          twilio_incoming_phone_number_sid: purchasedNumber.twilioIncomingPhoneNumberSid,
+          provider_phone_number_id: purchasedNumber.providerPhoneNumberId,
+          provider_number_order_id: purchasedNumber.providerNumberOrderId,
           number_status: 'active',
           number_assigned_at: now,
           provisioning_metadata: {
             countryCode,
             areaCode: areaCode ?? null,
-            locality: candidate.locality ?? null,
-            region: candidate.region ?? null,
+            locality: purchasedNumber.locality,
+            region: purchasedNumber.region,
+            provider: purchasedNumber.provider,
+            providerMetadata: purchasedNumber.metadata,
           },
           updated_at: now,
         },
@@ -169,7 +157,7 @@ export async function POST(
       return NextResponse.json(
         {
           error:
-            'The Twilio number was purchased, but FLYR failed to save the salesperson assignment.',
+            'The dialer number was purchased, but FLYR failed to save the salesperson assignment.',
           phoneNumber: purchasedNumber.phoneNumber,
         },
         { status: 500 }
@@ -181,7 +169,8 @@ export async function POST(
       salespersonId: row.id,
       workspaceId: row.workspace_id,
       phoneNumber: purchasedNumber.phoneNumber,
-      phoneNumberSid: purchasedNumber.sid,
+      phoneNumberSid: purchasedNumber.providerPhoneNumberId,
+      provider: purchasedNumber.provider,
       countryCode,
       areaCode: areaCode ?? null,
       settings,

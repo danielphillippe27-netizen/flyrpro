@@ -16,7 +16,12 @@ import type { PlacesLead } from '@/lib/scraper/googlePlacesLeadSearch';
 import {
   searchD2DJobSignals,
 } from '@/lib/scraper/d2dJobSignals';
-import { normalizePhoneNumber } from '@/lib/dialer/phone';
+import { normalizePhoneMarket, normalizePhoneNumber, type SupportedPhoneMarket } from '@/lib/dialer/phone';
+import {
+  attachDiallerLeadToMaster,
+  ensureSalespersonLeadMaster,
+  findSalespersonLeadMaster,
+} from '@/lib/sales-leads/master-list';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -36,6 +41,8 @@ type SavedScraperListResult = {
   dialerLeadIds: string[];
   dialerImportedCount: number;
   dialerSkippedCount: number;
+  masterAddedCount: number;
+  masterSkippedCount: number;
   warning: string | null;
 };
 
@@ -45,6 +52,9 @@ type ContactInsert = {
   full_name: string;
   phone?: string | null;
   phone_e164?: string | null;
+  phone_country_code?: string | null;
+  phone_area_code?: string | null;
+  phone_area_label?: string | null;
   phone_last_validated_at?: string;
   phone_validation_error?: string | null;
   email?: string | null;
@@ -59,6 +69,9 @@ const OPTIONAL_CONTACT_INSERT_COLUMNS = [
   'source',
   'tags',
   'phone_e164',
+  'phone_country_code',
+  'phone_area_code',
+  'phone_area_label',
   'phone_last_validated_at',
   'phone_validation_error',
 ] as const;
@@ -74,7 +87,7 @@ const requestSchema = z.object({
   marketId: z.string().uuid().optional(),
   industryId: z.string().uuid().optional(),
   leadSource: z.enum(['places', 'job_signals']).default('places'),
-  leadIntent: z.enum(['generic', 'real_estate_agents', 'real_estate_teams']).default('generic'),
+  leadIntent: z.enum(['generic', 'real_estate_agents', 'real_estate_individual_agents', 'real_estate_teams', 'real_estate_brokerages']).default('generic'),
 });
 
 async function resolveSalesperson(
@@ -148,8 +161,8 @@ function compactWhitespace(value: string): string {
   return value.trim().replace(/\s+/g, ' ');
 }
 
-function normalizedPhoneKey(value: string | null | undefined): string {
-  return normalizePhoneNumber(value).e164 || String(value ?? '').replace(/\D/g, '');
+function normalizedPhoneKey(value: string | null | undefined, phoneMarket: SupportedPhoneMarket = 'US'): string {
+  return normalizePhoneNumber(value, phoneMarket).e164 || String(value ?? '').replace(/\D/g, '');
 }
 
 function buildSavedListName(input: {
@@ -165,13 +178,17 @@ function buildSavedListName(input: {
   return `${base || 'Places leads'} - ${formatListDate()}`.slice(0, 120);
 }
 
-function contactSignature(lead: PlacesLead): string {
-  const normalizedPhone = normalizePhoneNumber(lead.phone).e164 || (lead.phone ?? '').trim();
+function contactSignature(lead: PlacesLead, phoneMarket: SupportedPhoneMarket = 'US'): string {
+  const normalizedPhone = normalizePhoneNumber(lead.phone, phoneMarket).e164 || (lead.phone ?? '').trim();
   return [
     compactWhitespace(lead.name || 'Lead').toLowerCase(),
     normalizedPhone,
     compactWhitespace(lead.formattedAddress ?? '').toLowerCase(),
   ].join('|');
+}
+
+function scraperLeadKey(lead: PlacesLead, phoneMarket: SupportedPhoneMarket = 'US'): string {
+  return normalizedPhoneKey(lead.phone, phoneMarket) || contactSignature(lead, phoneMarket);
 }
 
 function isMissingContactsColumn(error: unknown, column: string): boolean {
@@ -213,15 +230,18 @@ async function insertContactsWithFallback(
 async function saveScraperResults(params: {
   admin: ReturnType<typeof createAdminClient>;
   userId: string;
+  salespersonId?: string | null;
   workspaceId: string | null;
   leads: PlacesLead[];
   city: string;
   industry: string;
   region?: string;
+  countryCode: string;
   leadSource?: 'places' | 'job_signals';
 }): Promise<SavedScraperListResult | null> {
   if (!params.workspaceId || params.leads.length === 0) return null;
   const workspaceId = params.workspaceId;
+  const phoneMarket = normalizePhoneMarket(params.countryCode);
 
   const listName = buildSavedListName({
     city: params.city,
@@ -233,7 +253,7 @@ async function saveScraperResults(params: {
 
   const { data: existingContacts, error: existingContactsError } = await params.admin
     .from('contacts')
-    .select('id, full_name, phone, email, address')
+    .select('id, full_name, phone, phone_e164, email, address')
     .eq('workspace_id', workspaceId);
 
   if (existingContactsError) {
@@ -245,33 +265,64 @@ async function saveScraperResults(params: {
   for (const contact of existingContacts ?? []) {
     const signature = [
       compactWhitespace(String(contact.full_name ?? '')).toLowerCase(),
-      normalizePhoneNumber(contact.phone).e164 || String(contact.phone ?? '').trim(),
+      String((contact as { phone_e164?: unknown }).phone_e164 ?? '').trim() || normalizePhoneNumber(contact.phone, phoneMarket).e164 || String(contact.phone ?? '').trim(),
       compactWhitespace(String(contact.address ?? '')).toLowerCase(),
     ].join('|');
     if (typeof contact.id === 'string') {
       existingContactIdBySignature.set(signature, contact.id);
-      const phoneKey = normalizedPhoneKey(contact.phone);
+      const phoneKey = normalizedPhoneKey(contact.phone, phoneMarket);
       if (phoneKey) existingContactIdByPhone.set(phoneKey, contact.id);
     }
   }
 
   const uniqueLeads = new Map<string, PlacesLead>();
   for (const lead of params.leads) {
-    const phoneKey = normalizedPhoneKey(lead.phone);
-    const signature = phoneKey || contactSignature(lead);
+    const signature = scraperLeadKey(lead, phoneMarket);
     if (!uniqueLeads.has(signature)) uniqueLeads.set(signature, lead);
   }
 
+  const leadsToImport: PlacesLead[] = [];
+  const masterIdByLeadKey = new Map<string, string>();
+  const masterMetadataById = new Map<string, Record<string, unknown>>();
+  let masterAddedCount = 0;
+  let masterSkippedCount = 0;
+
+  for (const lead of uniqueLeads.values()) {
+    const existingMaster = await findSalespersonLeadMaster(params.admin, {
+      workspaceId,
+      name: compactWhitespace(lead.name || 'Lead'),
+      phone: lead.phone,
+      address: lead.formattedAddress,
+      source: params.leadSource === 'job_signals' ? 'd2d_job_signals' : 'google_places',
+      externalId: lead.placeId || null,
+    });
+
+    if (!existingMaster.available) {
+      warning = warning ?? existingMaster.warning;
+      leadsToImport.push(lead);
+      continue;
+    }
+
+    if (existingMaster.row) {
+      masterSkippedCount += 1;
+      continue;
+    }
+
+    leadsToImport.push(lead);
+  }
+
   const contactIds = new Set<string>();
-  const contactsToInsert = Array.from(uniqueLeads.values()).flatMap((lead) => {
-    const signature = contactSignature(lead);
-    const existingId = existingContactIdBySignature.get(signature) ?? existingContactIdByPhone.get(normalizedPhoneKey(lead.phone));
+  const contactIdByLeadKey = new Map<string, string>();
+  const contactsToInsert = leadsToImport.flatMap((lead) => {
+    const signature = contactSignature(lead, phoneMarket);
+    const existingId = existingContactIdBySignature.get(signature) ?? existingContactIdByPhone.get(normalizedPhoneKey(lead.phone, phoneMarket));
     if (existingId) {
       contactIds.add(existingId);
+      contactIdByLeadKey.set(scraperLeadKey(lead, phoneMarket), existingId);
       return [];
     }
 
-    const normalizedPhone = normalizePhoneNumber(lead.phone);
+    const normalizedPhone = normalizePhoneNumber(lead.phone, phoneMarket);
     const jobSignals = (lead.jobSignals ?? []).slice(0, 3);
     return [{
       user_id: params.userId,
@@ -279,6 +330,9 @@ async function saveScraperResults(params: {
       full_name: compactWhitespace(lead.name || 'Lead'),
       phone: lead.phone || null,
       phone_e164: normalizedPhone.e164,
+      phone_country_code: normalizedPhone.countryCode,
+      phone_area_code: normalizedPhone.areaCode,
+      phone_area_label: normalizedPhone.areaLabel,
       phone_last_validated_at: new Date().toISOString(),
       phone_validation_error: normalizedPhone.error,
       email: null,
@@ -301,9 +355,70 @@ async function saveScraperResults(params: {
     try {
       const insertedIds = await insertContactsWithFallback(params.admin, contactsToInsert);
       insertedIds.forEach((id) => contactIds.add(id));
+      insertedIds.forEach((id, index) => {
+        const lead = contactsToInsert[index];
+        if (lead) {
+          const key = scraperLeadKey({
+            name: lead.full_name,
+            phone: lead.phone ?? undefined,
+            formattedAddress: lead.address,
+          } as PlacesLead, phoneMarket);
+          contactIdByLeadKey.set(key, id);
+        }
+      });
     } catch (insertError) {
       console.warn('[salesperson/google-places] contact insert failed', insertError);
       warning = 'Added dialer rows, but could not save the contacts list.';
+    }
+  }
+
+  for (const lead of leadsToImport) {
+    const leadKey = scraperLeadKey(lead, phoneMarket);
+    const masterResult = await ensureSalespersonLeadMaster(params.admin, {
+      workspaceId,
+      assignedUserId: params.userId,
+      assignedSalespersonId: params.salespersonId,
+      createdByUserId: params.userId,
+      contactId: contactIdByLeadKey.get(leadKey) ?? null,
+      name: compactWhitespace(lead.name || 'Lead'),
+      company: compactWhitespace(lead.name || '') || null,
+      phone: normalizePhoneNumber(lead.phone, phoneMarket).e164 || lead.phone,
+      email: null,
+      website: lead.website,
+      websiteDomain: lead.websiteDomain,
+      address: lead.formattedAddress,
+      city: params.city,
+      region: params.region,
+      countryCode: params.countryCode,
+      source: params.leadSource === 'job_signals' ? 'd2d_job_signals' : 'google_places',
+      externalId: lead.placeId || null,
+      state: 'assigned',
+      notes: lead.evidenceSummary ?? null,
+      metadata: {
+        leadSource: params.leadSource ?? 'places',
+        listName,
+        leadCategory: lead.leadCategory ?? null,
+        primaryType: lead.primaryType ?? null,
+        confidenceScore: lead.confidenceScore,
+        googleMapsUrl: lead.googleMapsUrl ?? null,
+        jobSignals: lead.jobSignals ?? [],
+      },
+    });
+
+    if (!masterResult.available) {
+      warning = warning ?? masterResult.warning;
+    } else if (masterResult.created) {
+      masterAddedCount += 1;
+    } else if (masterResult.existing) {
+      masterSkippedCount += 1;
+    }
+
+    if (masterResult.row?.id) {
+      masterIdByLeadKey.set(leadKey, masterResult.row.id);
+      masterMetadataById.set(masterResult.row.id, {
+        ...(masterResult.row.metadata ?? {}),
+        listName,
+      });
     }
   }
 
@@ -335,14 +450,40 @@ async function saveScraperResults(params: {
     }
   }
 
-  const dialableLeads = Array.from(uniqueLeads.values()).flatMap((lead) => {
-    const normalizedPhone = normalizePhoneNumber(lead.phone);
-    if (!normalizedPhone.isValid) return [];
+  if (masterMetadataById.size > 0) {
+    await Promise.all(
+      Array.from(masterMetadataById.entries()).map(async ([masterId, metadata]) => {
+        const { error } = await params.admin
+          .from('salesperson_lead_master')
+          .update({
+            metadata: {
+              ...metadata,
+              listId,
+              listName,
+            },
+          })
+          .eq('id', masterId);
+
+        if (error) {
+          console.warn('[salesperson/google-places] failed to attach lead list metadata', error);
+        }
+      })
+    );
+  }
+
+  const dialableLeads = leadsToImport.flatMap((lead) => {
+    const normalizedPhone = normalizePhoneNumber(lead.phone, phoneMarket);
+    if (!normalizedPhone.isValid || !normalizedPhone.e164) return [];
     const jobSignals = (lead.jobSignals ?? []).slice(0, 2);
     return [{
       workspace_id: workspaceId,
+      user_id: params.userId,
       name: compactWhitespace(lead.name || 'Lead'),
-      phone: lead.phone ?? normalizedPhone.e164 ?? '',
+      phone: normalizedPhone.e164,
+      phone_e164: normalizedPhone.e164,
+      phone_country_code: normalizedPhone.countryCode,
+      phone_area_code: normalizedPhone.areaCode,
+      phone_area_label: normalizedPhone.areaLabel,
       company: compactWhitespace(lead.name || '') || null,
       email: null,
       disposition: null,
@@ -359,6 +500,7 @@ async function saveScraperResults(params: {
             .filter(Boolean)
             .join('\n'),
       called_at: null,
+      master_lead_id: masterIdByLeadKey.get(scraperLeadKey(lead, phoneMarket)) ?? null,
     }];
   });
 
@@ -369,7 +511,8 @@ async function saveScraperResults(params: {
     const { data: existingDialerRows, error: existingDialerError } = await params.admin
       .from('dialler_leads')
       .select('id, phone')
-      .eq('workspace_id', workspaceId);
+      .eq('workspace_id', workspaceId)
+      .eq('user_id', params.userId);
 
     if (existingDialerError) {
       console.warn('[salesperson/google-places] dialer lookup failed', existingDialerError);
@@ -378,7 +521,7 @@ async function saveScraperResults(params: {
       const existingIdByPhone = new Map(
         (existingDialerRows ?? [])
           .map((row) => [
-            normalizePhoneNumber(row.phone).e164 || String(row.phone ?? '').trim(),
+            normalizePhoneNumber(row.phone, phoneMarket).e164 || String(row.phone ?? '').trim(),
             String((row as { id?: unknown }).id ?? '').trim(),
           ] as const)
           .filter(([phone, id]) => Boolean(phone && id))
@@ -388,7 +531,7 @@ async function saveScraperResults(params: {
           .filter(Boolean)
       );
       const dialerInserts = dialableLeads.filter((lead) => {
-        const normalized = normalizePhoneNumber(lead.phone).e164 || lead.phone.trim();
+        const normalized = normalizePhoneNumber(lead.phone, phoneMarket).e164 || lead.phone.trim();
         if (existingPhones.has(normalized)) {
           dialerSkippedCount += 1;
           const existingId = existingIdByPhone.get(normalized);
@@ -400,10 +543,23 @@ async function saveScraperResults(params: {
       });
 
       if (dialerInserts.length > 0) {
+        const masterIdByPhone = new Map(
+          dialerInserts
+            .map((lead) => [
+              normalizePhoneNumber(lead.phone, phoneMarket).e164 || lead.phone.trim(),
+              (lead as { master_lead_id?: string | null }).master_lead_id ?? null,
+            ] as const)
+            .filter(([phone, masterId]) => Boolean(phone && masterId))
+        );
+        const insertPayload = dialerInserts.map((lead) => {
+          const payload = { ...lead };
+          delete (payload as { master_lead_id?: string | null }).master_lead_id;
+          return payload;
+        });
         const { data: insertedDialerRows, error: dialerInsertError } = await params.admin
           .from('dialler_leads')
-          .insert(dialerInserts)
-          .select('id');
+          .insert(insertPayload)
+          .select('id, phone');
 
         if (dialerInsertError) {
           console.warn('[salesperson/google-places] dialer insert failed', dialerInsertError);
@@ -413,6 +569,9 @@ async function saveScraperResults(params: {
           for (const row of insertedDialerRows ?? []) {
             const id = String((row as { id?: unknown }).id ?? '').trim();
             if (id) dialerLeadIds.push(id);
+            const phone = normalizePhoneNumber((row as { phone?: unknown }).phone as string | undefined, phoneMarket).e164
+              || String((row as { phone?: unknown }).phone ?? '').trim();
+            await attachDiallerLeadToMaster(params.admin, masterIdByPhone.get(phone), id);
           }
         }
       }
@@ -428,6 +587,8 @@ async function saveScraperResults(params: {
     dialerLeadIds,
     dialerImportedCount,
     dialerSkippedCount,
+    masterAddedCount,
+    masterSkippedCount,
     warning,
   };
 }
@@ -593,11 +754,13 @@ export async function POST(request: NextRequest) {
     const savedList = await saveScraperResults({
       admin,
       userId: requestUser.id,
+      salespersonId: salesperson?.id ?? null,
       workspaceId,
       leads: result.prospects,
       city: parsed.data.city,
       industry: parsed.data.industry,
       region: parsed.data.region,
+      countryCode: parsed.data.countryCode,
       leadSource: parsed.data.leadSource,
     });
     await recordProspectSearchRun({

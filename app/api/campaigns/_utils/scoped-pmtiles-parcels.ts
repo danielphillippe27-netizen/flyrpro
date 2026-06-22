@@ -98,6 +98,7 @@ const NON_RESIDENTIAL_PARCEL_TERMS = [
   'sidewalk',
   'storm',
   'stormwater',
+  'transport',
   'street',
   'substation',
   'trail',
@@ -444,6 +445,7 @@ export function isDisplayableParcelFeature(feature: GeoJSON.Feature): boolean {
     properties.subtype,
     properties.category,
     properties.feature_type,
+    properties.status,
     properties.description,
     properties.name,
     properties.road_name,
@@ -464,6 +466,7 @@ export function isResidentialParcelFeature(feature: GeoJSON.Feature): boolean {
     hasNonResidentialParcelTerm(properties.parcel_intent) ||
     hasNonResidentialParcelTerm(properties.appellation) ||
     hasNonResidentialParcelTerm(properties.statutory_actions) ||
+    hasNonResidentialParcelTerm(properties.status) ||
     hasNonResidentialParcelTerm(properties.zoning) ||
     hasNonResidentialParcelTerm(properties.land_use) ||
     hasNonResidentialParcelTerm(properties.use)

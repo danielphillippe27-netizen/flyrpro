@@ -27,7 +27,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { ContactsService } from '@/lib/services/ContactsService';
 import { createClient } from '@/lib/supabase/client';
 import { useWorkspace } from '@/lib/workspace-context';
-import { useTwilioDevice } from '@/lib/hooks/useTwilioDevice';
+import { useDialerDevice } from '@/lib/hooks/useDialerDevice';
 import { DIALER_DISPOSITION_LABELS, formatDialerCallStatus, isFinalCallStatus } from '@/lib/dialer/constants';
 import { formatPhoneDisplay, normalizePhoneNumber } from '@/lib/dialer/phone';
 import type { Contact, ContactActivity, DialerCall, DialerCallDisposition, DialerInboundMessage, DialerSession, DialerSessionLead } from '@/types/database';
@@ -130,7 +130,7 @@ function formatDuration(seconds?: number | null): string {
 export function LeadRecordPageView({ contactId }: { contactId: string }) {
   const router = useRouter();
   const { currentWorkspaceId } = useWorkspace();
-  const device = useTwilioDevice();
+  const device = useDialerDevice();
   const tabIdRef = useRef<string>(typeof crypto !== 'undefined' ? crypto.randomUUID() : `lead-record-${Date.now()}`);
 
   const [userId, setUserId] = useState<string | null>(null);
@@ -663,7 +663,10 @@ export function LeadRecordPageView({ contactId }: { contactId: string }) {
       setActiveCallId(data.call.id);
       setContactCalls((previous) => [data.call as DialerCall, ...previous.filter((call) => call.id !== data.call?.id)]);
       await refreshSession(contact.id, prepared.sessionId);
-      await device.startCall(data.call.call_request_id);
+      await device.startCall(data.call.call_request_id, {
+        toNumber: data.call.to_number_e164,
+        fromNumber: data.call.from_number_e164,
+      });
     } catch (error) {
       console.error('[lead-record] failed to place call', error);
       setMessage({

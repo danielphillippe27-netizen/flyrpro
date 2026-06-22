@@ -53,6 +53,7 @@ export type EntitlementPlan = 'free' | 'pro' | 'team' | 'ambassador';
 export type EntitlementSource = 'none' | 'stripe' | 'apple';
 export type WorkspaceBillingAddonStatus = 'inactive' | 'active' | 'past_due' | 'canceled';
 export type WorkspaceDialerNumberStatus = 'unassigned' | 'active' | 'released';
+export type DialerTelecomProvider = 'twilio' | 'telnyx';
 
 export interface Entitlement {
   user_id: string;
@@ -764,6 +765,9 @@ export interface Contact {
   full_name: string;
   phone?: string;
   phone_e164?: string;
+  phone_country_code?: string | null;
+  phone_area_code?: string | null;
+  phone_area_label?: string | null;
   phone_last_validated_at?: string;
   phone_validation_error?: string;
   email?: string;
@@ -884,6 +888,9 @@ export interface DialerCall {
   contact_id?: string | null;
   user_id: string;
   call_request_id: string;
+  telecom_provider?: DialerTelecomProvider;
+  provider_call_id?: string | null;
+  provider_parent_call_id?: string | null;
   twilio_call_sid?: string | null;
   twilio_parent_call_sid?: string | null;
   to_number_raw?: string | null;
@@ -918,6 +925,8 @@ export interface DialerSmsFollowup {
   call_id?: string | null;
   contact_id: string;
   user_id: string;
+  telecom_provider?: DialerTelecomProvider;
+  provider_message_id?: string | null;
   twilio_message_sid?: string | null;
   from_number_e164?: string | null;
   to_number_e164?: string | null;
@@ -937,6 +946,8 @@ export interface DialerInboundMessage {
   workspace_id: string;
   salesperson_id?: string | null;
   contact_id?: string | null;
+  telecom_provider?: DialerTelecomProvider;
+  provider_message_id?: string | null;
   twilio_message_sid?: string | null;
   from_number_e164: string;
   to_number_e164: string;
@@ -965,14 +976,34 @@ export interface DialerVoicemailDrop {
 
 export type DiallerLeadDisposition = 'interested' | 'callback' | 'not_now' | 'dnc';
 export type DiallerLeadCallOutcome = 'pending' | 'no_answer' | 'answered';
+export type SalespersonLeadMasterState =
+  | 'new'
+  | 'assigned'
+  | 'queued'
+  | 'attempting'
+  | 'contacted'
+  | 'no_answer'
+  | 'callback'
+  | 'interested'
+  | 'not_now'
+  | 'dnc'
+  | 'converted'
+  | 'archived';
 
 export interface DiallerLead {
   id: string;
   workspace_id: string;
+  user_id: string;
   name: string;
   phone: string;
+  phone_e164?: string | null;
+  phone_country_code?: string | null;
+  phone_area_code?: string | null;
+  phone_area_label?: string | null;
   company?: string | null;
   email?: string | null;
+  list_id?: string | null;
+  list_name?: string | null;
   follow_up_name?: string | null;
   follow_up_at?: string | null;
   demo_link_follow_up_id?: string | null;
@@ -984,8 +1015,45 @@ export interface DiallerLead {
   latest_call_ended_at?: string | null;
   latest_call_created_at?: string | null;
   latest_call_recording?: DialerCallRecordingSummary | null;
+  is_starred?: boolean;
   notes?: string | null;
   called_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SalespersonLeadMaster {
+  id: string;
+  workspace_id: string;
+  contact_id?: string | null;
+  dialler_lead_id?: string | null;
+  assigned_user_id: string;
+  assigned_salesperson_id?: string | null;
+  created_by_user_id?: string | null;
+  name: string;
+  company?: string | null;
+  phone?: string | null;
+  phone_e164?: string | null;
+  email?: string | null;
+  email_normalized?: string | null;
+  list_id?: string | null;
+  list_name?: string | null;
+  website?: string | null;
+  website_domain?: string | null;
+  address?: string | null;
+  city?: string | null;
+  region?: string | null;
+  country_code?: string | null;
+  source?: string | null;
+  external_id?: string | null;
+  lead_fingerprint?: string | null;
+  lead_state: SalespersonLeadMasterState;
+  attempt_count: number;
+  last_attempted_at?: string | null;
+  next_follow_up_at?: string | null;
+  disposition?: string | null;
+  notes?: string | null;
+  metadata?: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 }

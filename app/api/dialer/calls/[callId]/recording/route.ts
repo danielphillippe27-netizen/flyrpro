@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import type { DialerCall } from '@/types/database';
 import { getDialerRequestContext } from '@/lib/dialer/server';
-import { getTwilioAccountSid, getTwilioAuthToken } from '@/lib/dialer/env';
+import { getTelnyxApiKey, getTwilioAccountSid, getTwilioAuthToken } from '@/lib/dialer/env';
 import { getDialerCallRecording } from '@/lib/dialer/recordings';
 
 export const runtime = 'nodejs';
@@ -40,11 +40,13 @@ export async function GET(
     return NextResponse.json({ error: 'Recording is not available yet' }, { status: 404 });
   }
 
-  const basicAuth = Buffer.from(`${getTwilioAccountSid()}:${getTwilioAuthToken()}`).toString('base64');
+  const provider = (call as DialerCall).telecom_provider ?? recording.provider;
+  const headers =
+    provider === 'telnyx'
+      ? { Authorization: `Bearer ${getTelnyxApiKey()}` }
+      : { Authorization: `Basic ${Buffer.from(`${getTwilioAccountSid()}:${getTwilioAuthToken()}`).toString('base64')}` };
   const mediaResponse = await fetch(recording.mp3Url, {
-    headers: {
-      Authorization: `Basic ${basicAuth}`,
-    },
+    headers,
     cache: 'no-store',
   });
 

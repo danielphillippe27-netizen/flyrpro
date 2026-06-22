@@ -77,7 +77,11 @@ export async function resolveSalespersonForUser(
   }
 
   if (!byUser.error && byUser.data) {
-    return serializeSalesperson(byUser.data);
+    const salesperson = serializeSalesperson(byUser.data);
+    if (params.workspaceId && salesperson?.workspace_id && salesperson.workspace_id !== params.workspaceId) {
+      return null;
+    }
+    return salesperson;
   }
 
   const normalizedEmail = cleanEmail(params.email);
