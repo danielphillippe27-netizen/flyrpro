@@ -65,3 +65,5 @@ master_addresses_parquet/
 debug-*.js
 kimi-cli/node_modules/
 web/node_modules/
+
+.claude/
