@@ -25,7 +25,9 @@ const POLYGON_LINE_LAYER_ID = 'demo-b3-polygon-line';
 const BUILDINGS_SOURCE_ID = 'demo-b3-buildings-source';
 const BUILDINGS_LAYER_ID = 'demo-b3-buildings-extrusion';
 const FRESH_BUILDINGS_LAYER_ID = 'demo-b3-buildings-fresh-extrusion';
-const TARGET_ZOOM = 16.5;
+const DESKTOP_TARGET_ZOOM = 16.5;
+const MOBILE_TARGET_ZOOM = 15.5;
+const MOBILE_VIEWPORT_MAX_WIDTH = 767;
 const TARGET_PITCH = 45;
 const TERRITORY_RADIUS_METERS = 180;
 const ADDRESS_HIGHLIGHT_COLOR = '#6b7280';
@@ -82,6 +84,11 @@ function buildTerritoryRing(center: LngLat, radiusMeters: number): LngLat[] {
     const radius = radiusMeters * radiusMultipliers[index];
     return offsetMeters(center, Math.cos(radians) * radius, Math.sin(radians) * radius);
   });
+}
+
+function getTargetZoom() {
+  if (typeof window === 'undefined') return DESKTOP_TARGET_ZOOM;
+  return window.innerWidth <= MOBILE_VIEWPORT_MAX_WIDTH ? MOBILE_TARGET_ZOOM : DESKTOP_TARGET_ZOOM;
 }
 
 function mapPersonalizationLabel(company?: string, city?: string) {
@@ -423,11 +430,12 @@ function Beat3Map({
 
       buildingLayerIdRef.current = buildingLayerId;
       ringRef.current = buildTerritoryRing(center, TERRITORY_RADIUS_METERS);
+      const targetZoom = getTargetZoom();
 
       const map = new mapboxgl.Map({
         container: mapContainerRef.current,
         center: center as LngLatLike,
-        zoom: TARGET_ZOOM,
+        zoom: targetZoom,
         pitch: TARGET_PITCH,
         bearing: 0,
         interactive: false,
@@ -502,16 +510,27 @@ function Beat3Map({
             },
           });
 
-          map.setCenter(center as LngLatLike);
-          map.setZoom(TARGET_ZOOM);
-          map.setPitch(TARGET_PITCH);
-          map.once('idle', () => {
+          const markMapReady = () => {
             isMapReadyRef.current = true;
-            buildingsRef.current = queryBuildingFeatures();
             if (shouldRunSequenceRef.current) {
               shouldRunSequenceRef.current = false;
               runSequence();
             }
+          };
+
+          map.setCenter(center as LngLatLike);
+          map.setZoom(DESKTOP_TARGET_ZOOM);
+          map.setPitch(TARGET_PITCH);
+          map.once('idle', () => {
+            buildingsRef.current = queryBuildingFeatures();
+
+            if (targetZoom !== DESKTOP_TARGET_ZOOM) {
+              map.setZoom(targetZoom);
+              map.once('idle', markMapReady);
+              return;
+            }
+
+            markMapReady();
           });
         } catch (error) {
           console.error('[Beat3] Falling back to canvas after map setup failed:', error);
