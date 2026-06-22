@@ -11,6 +11,13 @@ import type {
 import { mulberry } from '@/lib/demo/canvas/cityModel';
 import { getInitialReducedMotion } from '@/lib/demo/canvas/useReducedMotion';
 import { track } from '@/lib/demo/analytics/track';
+import {
+  BEAT3_BUILDING_CASCADE_DURATION_MS,
+  BEAT3_POLYGON_DRAW_DURATION_MS,
+  BEAT3_TOTAL_REVEAL_DURATION_MS,
+  formatBeat3ElapsedTimer,
+  formatBeat3FinalTimer,
+} from '@/lib/demo/beat3Timing';
 import { findDemoBuildingLayerId, getDemoWhiteOutMapStyle } from '@/lib/demo/mapbox/demoMapStyle';
 import { getMapboxGl } from '@/lib/demo/mapbox/loadMapboxGl';
 import type { BeatCopy } from '@/lib/demo/payload';
@@ -343,8 +350,10 @@ function Beat3Map({
     if (!polygonSource) return;
     const polygonGeoJsonSource = polygonSource;
 
-    const drawDur = reducedRef.current ? 0 : 1100;
-    const cascadeDur = reducedRef.current ? 0 : 2600;
+    const drawDur = reducedRef.current ? 0 : BEAT3_POLYGON_DRAW_DURATION_MS;
+    const cascadeDur = reducedRef.current ? 0 : BEAT3_BUILDING_CASCADE_DURATION_MS;
+    const revealDur = reducedRef.current ? 0 : BEAT3_TOTAL_REVEAL_DURATION_MS;
+    const finalTimer = formatBeat3FinalTimer();
 
     if (reducedRef.current) {
       polygonGeoJsonSource.setData({
@@ -354,7 +363,7 @@ function Beat3Map({
       const buildings = queryBuildingFeatures();
       setBuildingData(buildings, Math.max(0, buildings.length - 40));
       setCount(buildings.length.toLocaleString());
-      setTimer(copy.b3FinalTimer);
+      setTimer(finalTimer);
       return;
     }
 
@@ -385,20 +394,20 @@ function Beat3Map({
       const n = Math.floor(buildings.length * eased);
       setBuildingData(buildings.slice(0, n), Math.max(0, n - 40));
       setCount(n.toLocaleString());
-      setTimer((Math.min(t, drawDur + cascadeDur) / 100).toFixed(1).padStart(4, '0') + ' s · unit splits included');
+      setTimer(formatBeat3ElapsedTimer(t, revealDur));
 
-      if (t < drawDur + cascadeDur + 200) {
+      if (t < revealDur) {
         animationRef.current = requestAnimationFrame(frame);
       } else {
         animationRef.current = null;
         setBuildingData(buildings, Math.max(0, buildings.length - 40));
         setCount(buildings.length.toLocaleString());
-        setTimer(copy.b3FinalTimer);
+        setTimer(finalTimer);
       }
     }
 
     animationRef.current = requestAnimationFrame(frame);
-  }, [cancelAnimation, copy.b3FinalTimer, queryBuildingFeatures, setBuildingData]);
+  }, [cancelAnimation, queryBuildingFeatures, setBuildingData]);
 
   const triggerAutoSequence = useCallback(() => {
     if (hasAutoRunRef.current) return;

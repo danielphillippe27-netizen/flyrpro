@@ -1,4 +1,5 @@
 import type { DemoPayload } from './payload';
+import { formatBeat3FinalTimer } from './beat3Timing';
 
 export const DEFAULT_PAYLOAD: DemoPayload = {
   slug: 'default',
@@ -26,7 +27,7 @@ export const DEFAULT_PAYLOAD: DemoPayload = {
       "Draw or import a polygon and every deliverable address inside it is provisioned from municipal records, house by house, unit splits included. Assign routes, run it as a one-day blitz or farm it for months. And when hail hits overnight, you're knocking by 8 AM while the other crew is still printing maps.",
     b3CounterLabel: 'Addresses provisioned',
     b3ReplayLabel: '↻ Redraw territory',
-    b3FinalTimer: '38.0 s real provisioning time · unit splits included',
+    b3FinalTimer: formatBeat3FinalTimer(),
     b4Headline: 'Every rep. Every door.\nLive.',
     b4Sub:
       'This is your dashboard at 2:30 on a Wednesday. GPS-tracked sessions, door-by-door outcomes, and a leaderboard your reps compete on all afternoon.',
