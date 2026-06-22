@@ -571,11 +571,17 @@ export function LeadRecordPageView({ contactId }: { contactId: string }) {
       }
 
       // Find the dialler_lead by phone to send SMS
-      const leadResponse = await fetch('/api/dialer/leads', {
+      const leadResponse = await fetch(`/api/dialer/leads?workspaceId=${currentWorkspaceId}`, {
         method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
       });
+
+      if (!leadResponse.ok) {
+        await copyDemoUrl(data.url);
+        setMessage({ type: 'success', text: 'Demo link created and copied to clipboard.' });
+        return;
+      }
+
       const leadsData = (await leadResponse.json().catch(() => ({ leads: [] }))) as { leads?: Array<{ id: string; phone: string }> };
       const matchingLead = leadsData.leads?.find(lead => lead.phone === contact.phone);
 
