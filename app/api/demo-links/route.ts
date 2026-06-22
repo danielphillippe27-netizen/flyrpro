@@ -3,6 +3,8 @@ import type { DemoPayload, DemoVertical } from '@/lib/demo/payload';
 import { DEFAULT_PAYLOAD } from '@/lib/demo/defaults';
 import { createAdminClient } from '@/lib/supabase/server';
 import { MapService } from '@/lib/services/MapService';
+import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
+import { hasFlyrDemoAdminAccess } from '@/lib/auth/flyrInternalWorkspace';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -63,6 +65,17 @@ async function uniqueSlug(admin: ReturnType<typeof createAdminClient>, preferred
 }
 
 export async function POST(request: NextRequest) {
+  const requestUser = await resolveUserFromRequest(request);
+  if (!requestUser) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const admin = createAdminClient();
+  const allowed = await hasFlyrDemoAdminAccess(admin, requestUser.id);
+  if (!allowed) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
+
   let body: DemoLinkRequestBody;
 
   try {
@@ -102,7 +115,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `Geocoding returned no result for: ${city}` }, { status: 400 });
     }
 
-    const admin = createAdminClient();
     const slug = await uniqueSlug(admin, requestedSlug || generatedSlug);
     const center: [number, number] = [geocoded.lon, geocoded.lat];
 

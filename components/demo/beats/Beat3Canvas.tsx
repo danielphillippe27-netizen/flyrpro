@@ -1,6 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  BEAT3_BUILDING_CASCADE_DURATION_MS,
+  BEAT3_POLYGON_DRAW_DURATION_MS,
+  BEAT3_TOTAL_REVEAL_DURATION_MS,
+  formatBeat3ElapsedTimer,
+  formatBeat3FinalTimer,
+} from '@/lib/demo/beat3Timing';
 import { buildCity, drawStreets, fitCanvas, mulberry, pointInPoly, type PolygonPoint } from '@/lib/demo/canvas/cityModel';
 import { getInitialReducedMotion } from '@/lib/demo/canvas/useReducedMotion';
 import { track } from '@/lib/demo/analytics/track';
@@ -57,8 +64,10 @@ export function Beat3Canvas({ copy }: { copy: BeatCopy }) {
       [inside[i], inside[j]] = [inside[j], inside[i]];
     }
     const total = inside.length;
-    const drawDur = reducedRef.current ? 0 : 1100;
-    const cascadeDur = reducedRef.current ? 0 : 2600;
+    const drawDur = reducedRef.current ? 0 : BEAT3_POLYGON_DRAW_DURATION_MS;
+    const cascadeDur = reducedRef.current ? 0 : BEAT3_BUILDING_CASCADE_DURATION_MS;
+    const revealDur = reducedRef.current ? 0 : BEAT3_TOTAL_REVEAL_DURATION_MS;
+    const finalTimer = formatBeat3FinalTimer();
     const start = performance.now();
     let perim = 0;
     const segs: { a: PolygonPoint; b: PolygonPoint; L: number }[] = [];
@@ -95,7 +104,7 @@ export function Beat3Canvas({ copy }: { copy: BeatCopy }) {
       inside.forEach((p) => ctx.fillRect(p.x - 1.5, p.y - 1.5, 3, 3));
       inside.slice(Math.max(0, total - 40)).forEach((p) => ctx.fillRect(p.x - 2.5, p.y - 2.5, 5, 5));
       setCount(total.toLocaleString());
-      setTimer(copy.b3FinalTimer);
+      setTimer(finalTimer);
     }
 
     if (reducedRef.current) {
@@ -146,16 +155,16 @@ export function Beat3Canvas({ copy }: { copy: BeatCopy }) {
         ctx.fillRect(p.x - 2.5, p.y - 2.5, 5, 5);
       }
       setCount(n.toLocaleString());
-      setTimer((Math.min(t, drawDur + cascadeDur) / 100).toFixed(1).padStart(4, '0') + ' s · unit splits included');
-      if (t < drawDur + cascadeDur + 200) animationRef.current = requestAnimationFrame(frame);
+      setTimer(formatBeat3ElapsedTimer(t, revealDur));
+      if (t < revealDur) animationRef.current = requestAnimationFrame(frame);
       else {
         animationRef.current = null;
-        setTimer(copy.b3FinalTimer);
+        setTimer(finalTimer);
       }
     }
 
     animationRef.current = requestAnimationFrame(frame);
-  }, [cancelAnimation, copy.b3FinalTimer]);
+  }, [cancelAnimation]);
 
   useEffect(() => {
     reducedRef.current = getInitialReducedMotion();

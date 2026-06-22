@@ -11,6 +11,13 @@ import type {
 import { mulberry } from '@/lib/demo/canvas/cityModel';
 import { getInitialReducedMotion } from '@/lib/demo/canvas/useReducedMotion';
 import { track } from '@/lib/demo/analytics/track';
+import {
+  BEAT3_BUILDING_CASCADE_DURATION_MS,
+  BEAT3_POLYGON_DRAW_DURATION_MS,
+  BEAT3_TOTAL_REVEAL_DURATION_MS,
+  formatBeat3ElapsedTimer,
+  formatBeat3FinalTimer,
+} from '@/lib/demo/beat3Timing';
 import { findDemoBuildingLayerId, getDemoWhiteOutMapStyle } from '@/lib/demo/mapbox/demoMapStyle';
 import { getMapboxGl } from '@/lib/demo/mapbox/loadMapboxGl';
 import type { BeatCopy } from '@/lib/demo/payload';
@@ -25,9 +32,11 @@ const POLYGON_LINE_LAYER_ID = 'demo-b3-polygon-line';
 const BUILDINGS_SOURCE_ID = 'demo-b3-buildings-source';
 const BUILDINGS_LAYER_ID = 'demo-b3-buildings-extrusion';
 const FRESH_BUILDINGS_LAYER_ID = 'demo-b3-buildings-fresh-extrusion';
-const TARGET_ZOOM = 16.5;
+const DESKTOP_TARGET_ZOOM = 16.5;
+const MOBILE_TARGET_ZOOM = 15.5;
+const MOBILE_VIEWPORT_MAX_WIDTH = 767;
 const TARGET_PITCH = 45;
-const TERRITORY_RADIUS_RATIO = 0.225;
+const TERRITORY_RADIUS_METERS = 180;
 const ADDRESS_HIGHLIGHT_COLOR = '#6b7280';
 const ADDRESS_EXTRUSION_HEIGHT_METERS = 12;
 const BUILDING_GEOMETRY_FILTER = ['match', ['geometry-type'], ['Polygon', 'MultiPolygon'], true, false];
@@ -74,16 +83,6 @@ function offsetMeters(center: LngLat, eastMeters: number, northMeters: number): 
   return [center[0] + lngDelta, center[1] + latDelta];
 }
 
-function metersPerPixelAtZoom(lat: number, zoom: number) {
-  return (156543.03392 * Math.cos((lat * Math.PI) / 180)) / Math.pow(2, zoom);
-}
-
-function territoryRadiusMeters(center: LngLat, stageEl: HTMLElement) {
-  const rect = stageEl.getBoundingClientRect();
-  const smallerStageDimension = Math.min(rect.width, rect.height);
-  return smallerStageDimension * TERRITORY_RADIUS_RATIO * metersPerPixelAtZoom(center[1], TARGET_ZOOM);
-}
-
 function buildTerritoryRing(center: LngLat, radiusMeters: number): LngLat[] {
   const bearings = [-118, -56, -6, 48, 111, 169, -164];
   const radiusMultipliers = [0.86, 1.12, 1.02, 0.91, 1.18, 0.96, 1.08];
@@ -92,6 +91,11 @@ function buildTerritoryRing(center: LngLat, radiusMeters: number): LngLat[] {
     const radius = radiusMeters * radiusMultipliers[index];
     return offsetMeters(center, Math.cos(radians) * radius, Math.sin(radians) * radius);
   });
+}
+
+function getTargetZoom() {
+  if (typeof window === 'undefined') return DESKTOP_TARGET_ZOOM;
+  return window.innerWidth <= MOBILE_VIEWPORT_MAX_WIDTH ? MOBILE_TARGET_ZOOM : DESKTOP_TARGET_ZOOM;
 }
 
 function mapPersonalizationLabel(company?: string, city?: string) {
@@ -346,8 +350,10 @@ function Beat3Map({
     if (!polygonSource) return;
     const polygonGeoJsonSource = polygonSource;
 
-    const drawDur = reducedRef.current ? 0 : 1100;
-    const cascadeDur = reducedRef.current ? 0 : 2600;
+    const drawDur = reducedRef.current ? 0 : BEAT3_POLYGON_DRAW_DURATION_MS;
+    const cascadeDur = reducedRef.current ? 0 : BEAT3_BUILDING_CASCADE_DURATION_MS;
+    const revealDur = reducedRef.current ? 0 : BEAT3_TOTAL_REVEAL_DURATION_MS;
+    const finalTimer = formatBeat3FinalTimer();
 
     if (reducedRef.current) {
       polygonGeoJsonSource.setData({
@@ -357,7 +363,7 @@ function Beat3Map({
       const buildings = queryBuildingFeatures();
       setBuildingData(buildings, Math.max(0, buildings.length - 40));
       setCount(buildings.length.toLocaleString());
-      setTimer(copy.b3FinalTimer);
+      setTimer(finalTimer);
       return;
     }
 
@@ -388,20 +394,20 @@ function Beat3Map({
       const n = Math.floor(buildings.length * eased);
       setBuildingData(buildings.slice(0, n), Math.max(0, n - 40));
       setCount(n.toLocaleString());
-      setTimer((Math.min(t, drawDur + cascadeDur) / 100).toFixed(1).padStart(4, '0') + ' s · unit splits included');
+      setTimer(formatBeat3ElapsedTimer(t, revealDur));
 
-      if (t < drawDur + cascadeDur + 200) {
+      if (t < revealDur) {
         animationRef.current = requestAnimationFrame(frame);
       } else {
         animationRef.current = null;
         setBuildingData(buildings, Math.max(0, buildings.length - 40));
         setCount(buildings.length.toLocaleString());
-        setTimer(copy.b3FinalTimer);
+        setTimer(finalTimer);
       }
     }
 
     animationRef.current = requestAnimationFrame(frame);
-  }, [cancelAnimation, copy.b3FinalTimer, queryBuildingFeatures, setBuildingData]);
+  }, [cancelAnimation, queryBuildingFeatures, setBuildingData]);
 
   const triggerAutoSequence = useCallback(() => {
     if (hasAutoRunRef.current) return;
@@ -432,12 +438,13 @@ function Beat3Map({
       }
 
       buildingLayerIdRef.current = buildingLayerId;
-      ringRef.current = buildTerritoryRing(center, territoryRadiusMeters(center, mapContainerRef.current));
+      ringRef.current = buildTerritoryRing(center, TERRITORY_RADIUS_METERS);
+      const targetZoom = getTargetZoom();
 
       const map = new mapboxgl.Map({
         container: mapContainerRef.current,
         center: center as LngLatLike,
-        zoom: TARGET_ZOOM,
+        zoom: targetZoom,
         pitch: TARGET_PITCH,
         bearing: 0,
         interactive: false,
@@ -512,16 +519,27 @@ function Beat3Map({
             },
           });
 
-          map.setCenter(center as LngLatLike);
-          map.setZoom(TARGET_ZOOM);
-          map.setPitch(TARGET_PITCH);
-          map.once('idle', () => {
+          const markMapReady = () => {
             isMapReadyRef.current = true;
-            buildingsRef.current = queryBuildingFeatures();
             if (shouldRunSequenceRef.current) {
               shouldRunSequenceRef.current = false;
               runSequence();
             }
+          };
+
+          map.setCenter(center as LngLatLike);
+          map.setZoom(DESKTOP_TARGET_ZOOM);
+          map.setPitch(TARGET_PITCH);
+          map.once('idle', () => {
+            buildingsRef.current = queryBuildingFeatures();
+
+            if (targetZoom !== DESKTOP_TARGET_ZOOM) {
+              map.setZoom(targetZoom);
+              map.once('idle', markMapReady);
+              return;
+            }
+
+            markMapReady();
           });
         } catch (error) {
           console.error('[Beat3] Falling back to canvas after map setup failed:', error);
