@@ -145,6 +145,10 @@ export function LeadRecordPageView({ contactId }: { contactId: string }) {
   const [noteDraft, setNoteDraft] = useState('');
   const [emailSubject, setEmailSubject] = useState('');
   const [editingContact, setEditingContact] = useState(false);
+  const [generatingDemoLink, setGeneratingDemoLink] = useState(false);
+  const [manualDemoOpen, setManualDemoOpen] = useState(false);
+  const [manualDemoCompany, setManualDemoCompany] = useState('');
+  const [manualDemoCity, setManualDemoCity] = useState('');
   const [contactDraft, setContactDraft] = useState<ContactDraft>({
     full_name: '',
     phone: '',
@@ -526,6 +530,92 @@ export function LeadRecordPageView({ contactId }: { contactId: string }) {
     }
   }, [contact, loadActivities, loadContacts, userId]);
 
+  const copyDemoUrl = useCallback(async (url: string) => {
+    await navigator.clipboard.writeText(url);
+    setMessage({ type: 'success', text: 'Link copied.' });
+  }, []);
+
+  const handleGenerateDemoLink = useCallback(async () => {
+    if (!contact || !currentWorkspaceId) return;
+
+    setGeneratingDemoLink(true);
+    setMessage(null);
+    try {
+      const response = await fetch('/api/demo-links/from-lead', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          workspaceId: currentWorkspaceId,
+          contactId: contact.id,
+        }),
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        url?: string;
+        error?: string;
+        needsManual?: boolean;
+        company?: string;
+        city?: string;
+      };
+
+      if (response.status === 404 && data.needsManual) {
+        setManualDemoCompany(data.company || contact.full_name || '');
+        setManualDemoCity(data.city || contact.address || '');
+        setManualDemoOpen(true);
+        return;
+      }
+
+      if (!response.ok || !data.url) {
+        throw new Error(data.error || 'Failed to generate demo link.');
+      }
+
+      await copyDemoUrl(data.url);
+    } catch (error) {
+      setMessage({
+        type: 'error',
+        text: error instanceof Error ? error.message : 'Failed to generate demo link.',
+      });
+    } finally {
+      setGeneratingDemoLink(false);
+    }
+  }, [contact, copyDemoUrl, currentWorkspaceId]);
+
+  const handleManualDemoLinkSubmit = useCallback(async () => {
+    if (!manualDemoCompany.trim() || !manualDemoCity.trim()) {
+      setMessage({ type: 'error', text: 'Company and city are required to generate a demo link.' });
+      return;
+    }
+
+    setGeneratingDemoLink(true);
+    setMessage(null);
+    try {
+      const response = await fetch('/api/demo-links/from-lead', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          company: manualDemoCompany,
+          city: manualDemoCity,
+          industry: '',
+        }),
+      });
+      const data = (await response.json().catch(() => ({}))) as { url?: string; error?: string };
+      if (!response.ok || !data.url) {
+        throw new Error(data.error || 'Failed to generate demo link.');
+      }
+
+      await copyDemoUrl(data.url);
+      setManualDemoOpen(false);
+    } catch (error) {
+      setMessage({
+        type: 'error',
+        text: error instanceof Error ? error.message : 'Failed to generate demo link.',
+      });
+    } finally {
+      setGeneratingDemoLink(false);
+    }
+  }, [copyDemoUrl, manualDemoCity, manualDemoCompany]);
+
   const handleLogActivity = useCallback(async (type: 'call' | 'note' | 'text' | 'email', note?: string) => {
     if (!contact || !userId) return;
     setSaving(true);
@@ -855,6 +945,16 @@ export function LeadRecordPageView({ contactId }: { contactId: string }) {
                     <Clock3 className="mr-1 h-3.5 w-3.5" />
                     Follow
                   </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-9 px-2 text-xs"
+                    onClick={() => void handleGenerateDemoLink()}
+                    disabled={!currentWorkspaceId || generatingDemoLink}
+                  >
+                    {generatingDemoLink ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Send className="mr-1 h-3.5 w-3.5" />}
+                    Send Demo
+                  </Button>
                 </div>
 
                 {editingContact ? (
@@ -958,6 +1058,62 @@ export function LeadRecordPageView({ contactId }: { contactId: string }) {
                 {message.text}
               </div>
             )}
+
+            {manualDemoOpen ? (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4">
+                <Card className="w-full max-w-md border-slate-200 bg-white shadow-xl dark:border-border dark:bg-card">
+                  <CardHeader className="flex flex-row items-start justify-between gap-3">
+                    <div>
+                      <CardTitle className="text-base">Generate demo link</CardTitle>
+                      <CardDescription>Confirm the company and city for this contact.</CardDescription>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 px-2"
+                      onClick={() => setManualDemoOpen(false)}
+                      disabled={generatingDemoLink}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="manual-demo-company" className="text-xs text-slate-500 dark:text-muted-foreground">
+                        Company
+                      </Label>
+                      <Input
+                        id="manual-demo-company"
+                        value={manualDemoCompany}
+                        onChange={(event) => setManualDemoCompany(event.target.value)}
+                        className="bg-white dark:bg-background"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="manual-demo-city" className="text-xs text-slate-500 dark:text-muted-foreground">
+                        City
+                      </Label>
+                      <Input
+                        id="manual-demo-city"
+                        value={manualDemoCity}
+                        onChange={(event) => setManualDemoCity(event.target.value)}
+                        placeholder="Oshawa, ON"
+                        className="bg-white dark:bg-background"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Button variant="outline" onClick={() => setManualDemoOpen(false)} disabled={generatingDemoLink}>
+                        Cancel
+                      </Button>
+                      <Button onClick={() => void handleManualDemoLinkSubmit()} disabled={generatingDemoLink}>
+                        {generatingDemoLink ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                        Generate
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            ) : null}
 
             <Card className="border-slate-200 bg-white shadow-sm dark:border-border dark:bg-card">
               <CardHeader className="flex flex-row items-center justify-between gap-3 p-5 pb-3">

@@ -23,6 +23,7 @@ import {
   ensureSalespersonReferralCode,
   normalizeSalespersonReferralCodeInput,
 } from '@/app/lib/billing/salespeople';
+import { generateDemoLinkForLead } from '@/lib/demo/generateDemoLinkForLead';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -471,13 +472,28 @@ async function sendDemoEmail(
   const from = `${senderName} <${handle}@${DEMO_EMAIL_DOMAIN}>`;
   const replyTo = cleanText(salesperson?.demo_email_reply_to) || cleanText(salesperson?.email) || cleanText(context.requestUser.email) || getEnv('RESEND_REPLY_TO');
   const cleanToken = cleanText(overrides?.demoLinkToken);
-  const demo = cleanToken
-    ? {
-        url: new URL(`/d/${encodeURIComponent(cleanToken)}`, getPublicOrigin(request)).toString(),
-        referralCode: normalizeSalespersonReferralCodeInput(salesperson?.referral_code ?? '') || null,
-        tracked: true,
-      }
-    : await buildTrackedDialerDemoUrl(request, context, salesperson, lead, contact);
+  let demo: { url: string; referralCode: string | null; tracked: boolean };
+  try {
+    const generated = await generateDemoLinkForLead({
+      admin: context.admin,
+      leadId: lead.id,
+      user: context.requestUser,
+    });
+    demo = {
+      url: generated.url,
+      referralCode: normalizeSalespersonReferralCodeInput(salesperson?.referral_code ?? '') || null,
+      tracked: false,
+    };
+  } catch (generateError) {
+    console.warn('[dialer/leads] demo engine link generation failed; falling back to legacy demo URL', generateError);
+    demo = cleanToken
+      ? {
+          url: new URL(`/d/${encodeURIComponent(cleanToken)}`, getPublicOrigin(request)).toString(),
+          referralCode: normalizeSalespersonReferralCodeInput(salesperson?.referral_code ?? '') || null,
+          tracked: true,
+        }
+      : await buildTrackedDialerDemoUrl(request, context, salesperson, lead, contact);
+  }
   const contactId = typeof contact?.id === 'string' ? contact.id : null;
   if (cleanToken) {
     const { error: linkUpdateError } = await context.admin
@@ -539,7 +555,20 @@ async function sendInterestedLink(
   const normalizedPhone = normalizePhoneNumber(lead.phone);
   if (!normalizedPhone.e164) return 'Lead saved, but the phone number is not valid for SMS.';
 
-  const demo = await buildDialerDemoUrl(request, context);
+  let demo = await buildDialerDemoUrl(request, context);
+  try {
+    const generated = await generateDemoLinkForLead({
+      admin: context.admin,
+      leadId: lead.id,
+      user: context.requestUser,
+    });
+    demo = {
+      url: generated.url,
+      referralCode: demo.referralCode,
+    };
+  } catch (generateError) {
+    console.warn('[dialer/leads] demo engine link generation failed; falling back to legacy SMS URL', generateError);
+  }
   const client = twilio(getTwilioAccountSid(), getTwilioAuthToken());
   const statusCallback = buildPublicTwilioWebhookUrl(request, '/api/twilio/messaging/status');
   const messageBody = buildInterestedLinkText(lead, demo.url);
