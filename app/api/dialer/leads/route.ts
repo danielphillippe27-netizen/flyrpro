@@ -26,6 +26,7 @@ import {
   ensureSalespersonReferralCode,
   normalizeSalespersonReferralCodeInput,
 } from '@/app/lib/billing/salespeople';
+import { generateDemoLinkForLead } from '@/lib/demo/generateDemoLinkForLead';
 import {
   attachDiallerLeadToMaster,
   ensureSalespersonLeadMaster,
@@ -533,13 +534,28 @@ async function sendDemoEmail(
   const from = `${senderName} <${handle}@${DEMO_EMAIL_DOMAIN}>`;
   const replyTo = cleanText(salesperson?.demo_email_reply_to) || cleanText(salesperson?.email) || cleanText(context.requestUser.email) || getEnv('RESEND_REPLY_TO');
   const cleanToken = cleanText(overrides?.demoLinkToken);
-  const demo = cleanToken
-    ? {
-        url: new URL(`/d/${encodeURIComponent(cleanToken)}`, getPublicOrigin(request)).toString(),
-        referralCode: normalizeSalespersonReferralCodeInput(salesperson?.referral_code ?? '') || null,
-        tracked: true,
-      }
-    : await buildTrackedDialerDemoUrl(request, context, salesperson, lead, contact);
+  let demo: { url: string; referralCode: string | null; tracked: boolean };
+  try {
+    const generated = await generateDemoLinkForLead({
+      admin: context.admin,
+      leadId: lead.id,
+      user: context.requestUser,
+    });
+    demo = {
+      url: generated.url,
+      referralCode: normalizeSalespersonReferralCodeInput(salesperson?.referral_code ?? '') || null,
+      tracked: false,
+    };
+  } catch (generateError) {
+    console.warn('[dialer/leads] demo engine link generation failed; falling back to legacy demo URL', generateError);
+    demo = cleanToken
+      ? {
+          url: new URL(`/d/${encodeURIComponent(cleanToken)}`, getPublicOrigin(request)).toString(),
+          referralCode: normalizeSalespersonReferralCodeInput(salesperson?.referral_code ?? '') || null,
+          tracked: true,
+        }
+      : await buildTrackedDialerDemoUrl(request, context, salesperson, lead, contact);
+  }
   const contactId = typeof contact?.id === 'string' ? contact.id : null;
   if (cleanToken) {
     const { error: linkUpdateError } = await context.admin

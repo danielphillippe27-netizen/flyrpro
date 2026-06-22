@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { ensureSalespersonReferralCode, normalizeSalespersonReferralCodeInput } from '@/app/lib/billing/salespeople';
 import { createTrackedDemoLink } from '@/lib/dialer/demo-link-tracking';
 import { getDialerRequestContext } from '@/lib/dialer/server';
+import { generateDemoLinkForLead } from '@/lib/demo/generateDemoLinkForLead';
 import type { DiallerLead } from '@/types/database';
 
 export const runtime = 'nodejs';
@@ -136,26 +137,37 @@ export async function POST(
     : null;
 
   const origin = getPublicOrigin(request);
-  const trackedLink = await createTrackedDemoLink({
-    admin: context.admin,
-    origin,
-    salesperson,
-    workspaceId: context.workspaceId,
-    lead: diallerLead,
-    referralCode,
-    source: 'salesperson',
-    campaign: 'power-dialer-demo',
-    destinationPath: DEMO_VIDEO_PATH,
-  });
-  const demoUrl = trackedLink?.url ?? buildSharedDemoUrl(origin, referralCode);
+  let demoUrl: string;
+  try {
+    const generated = await generateDemoLinkForLead({
+      admin: context.admin,
+      leadId,
+      user: context.requestUser,
+    });
+    demoUrl = generated.url;
+  } catch (generateError) {
+    console.warn('[dialer/demo-message] demo engine link generation failed; falling back to tracked demo link', generateError);
+    const trackedLink = await createTrackedDemoLink({
+      admin: context.admin,
+      origin,
+      salesperson,
+      workspaceId: context.workspaceId,
+      lead: diallerLead,
+      referralCode,
+      source: 'salesperson',
+      campaign: 'power-dialer-demo',
+      destinationPath: DEMO_VIDEO_PATH,
+    });
+    demoUrl = trackedLink?.url ?? buildSharedDemoUrl(origin, referralCode);
+  }
   const repName = getRepFirstName(salesperson?.full_name || context.requestUser.email);
 
   return NextResponse.json({
     demoUrl,
-    demoLinkToken: trackedLink?.token ?? null,
+    demoLinkToken: null,
     textBody: buildTextMessage(diallerLead, repName, demoUrl),
     emailSubject: 'Quick FLYR demo',
     emailBody: buildEmailBody(diallerLead, repName, demoUrl),
-    tracked: Boolean(trackedLink),
+    tracked: false,
   });
 }
