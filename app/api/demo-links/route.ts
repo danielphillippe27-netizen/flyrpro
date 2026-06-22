@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
   }
 
   const admin = createAdminClient();
-  const allowed = await hasFlyrDemoAdminAccess(admin, requestUser.id);
+  const allowed = await hasFlyrDemoAdminAccess(admin, requestUser.id, requestUser.email);
   if (!allowed) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
