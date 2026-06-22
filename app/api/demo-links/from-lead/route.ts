@@ -97,6 +97,11 @@ export async function POST(request: NextRequest) {
   }
 
   const admin = createAdminClient();
+  const allowed = await hasFlyrDemoAdminAccess(admin, user.id, user.email);
+  if (!allowed) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
+
   const body = (await request.json().catch(() => ({}))) as GenerateFromLeadBody;
   const leadId = text(body.leadId);
   const contactId = text(body.contactId);
@@ -159,9 +164,6 @@ export async function POST(request: NextRequest) {
       const generated = await generateDemoLinkForLead({ admin, leadId: lead.id, user });
       return NextResponse.json(generated);
     }
-
-    const allowed = await hasFlyrDemoAdminAccess(admin, user.id, user.email);
-    if (!allowed) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
     const company = text(body.company);
     const city = text(body.city);
