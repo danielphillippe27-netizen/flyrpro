@@ -46,28 +46,14 @@ type NotificationRow = {
   created_at: string;
 };
 
-type CalendarEventRow = {
-  id: string;
-  title: string;
-  notes: string | null;
-  event_type: string;
-  contact_id: string | null;
-  contact_name: string | null;
-  start_at: string;
-};
-
-const VALID_SOURCE_FILTERS = new Set(['all', 'email', 'sms', 'call', 'task', 'system']);
+const COMMUNICATION_SOURCES = new Set<InboxItemSource>(['email', 'sms', 'call']);
+const VALID_SOURCE_FILTERS = new Set(['all', 'email', 'sms', 'call']);
 const VALID_STATUS_FILTERS = new Set(['open', 'done', 'snoozed', 'archived', 'all']);
 
 function asPositiveLimit(value: string | null): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return 75;
   return Math.min(Math.floor(parsed), 150);
-}
-
-function cleanText(value: string | null | undefined): string | null {
-  const cleaned = (value ?? '').trim();
-  return cleaned || null;
 }
 
 function rowToInboxItem(row: InboxItem): ApiInboxItem {
@@ -142,29 +128,9 @@ function notificationToInboxItem(row: NotificationRow): ApiInboxItem {
   };
 }
 
-function taskToInboxItem(row: CalendarEventRow): ApiInboxItem {
-  return {
-    id: `task:${row.id}`,
-    source: 'task',
-    title: row.title,
-    preview: cleanText(row.notes) ?? (row.contact_name ? `Task for ${row.contact_name}` : row.event_type),
-    body: row.notes,
-    fromLabel: 'Task',
-    fromEmail: null,
-    fromPhone: null,
-    toLabel: row.contact_name,
-    toEmail: null,
-    toPhone: null,
-    status: 'open',
-    occurredAt: row.start_at,
-    readAt: null,
-    contactId: row.contact_id,
-    href: row.contact_id ? `/leads/${row.contact_id}` : `/calendar`,
-  };
-}
-
 function filterAndSort(items: ApiInboxItem[], sourceFilter: string, statusFilter: string, limit: number): ApiInboxItem[] {
   return items
+    .filter((item) => COMMUNICATION_SOURCES.has(item.source))
     .filter((item) => sourceFilter === 'all' || item.source === sourceFilter)
     .filter((item) => statusFilter === 'all' || item.status === statusFilter)
     .sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime())
@@ -191,20 +157,42 @@ export async function GET(request: NextRequest) {
       : 'open';
 
     const admin = createAdminClient();
-    const now = new Date();
-    const taskEnd = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: salesperson, error: salespersonError } = await admin
+      .from('salespeople')
+      .select('id')
+      .eq('workspace_id', workspaceId)
+      .eq('user_id', requestUser.id)
+      .limit(1)
+      .maybeSingle();
 
-    const [storedInbox, inboundTexts, notifications, tasks] = await Promise.all([
-      admin
-        .from('inbox_items')
-        .select('*')
-        .eq('workspace_id', workspaceId)
+    if (salespersonError && salespersonError.code !== 'PGRST116') {
+      return NextResponse.json({ error: salespersonError.message }, { status: 500 });
+    }
+
+    const salespersonId = typeof salesperson?.id === 'string' ? salesperson.id : null;
+    let storedInboxQuery = admin
+      .from('inbox_items')
+      .select('*')
+      .eq('workspace_id', workspaceId);
+    if (salespersonId) {
+      storedInboxQuery = storedInboxQuery.or(
+        `salesperson_id.eq.${salespersonId},owner_user_id.eq.${requestUser.id}`
+      );
+    }
+
+    let inboundTextsQuery = admin
+      .from('dialer_inbound_messages')
+      .select('id, contact_id, from_number_e164, to_number_e164, body, received_at, read_at')
+      .eq('workspace_id', workspaceId);
+    if (salespersonId) {
+      inboundTextsQuery = inboundTextsQuery.eq('salesperson_id', salespersonId);
+    }
+
+    const [storedInbox, inboundTexts, notifications] = await Promise.all([
+      storedInboxQuery
         .order('occurred_at', { ascending: false })
         .limit(limit),
-      admin
-        .from('dialer_inbound_messages')
-        .select('id, contact_id, from_number_e164, to_number_e164, body, received_at, read_at')
-        .eq('workspace_id', workspaceId)
+      inboundTextsQuery
         .order('received_at', { ascending: false })
         .limit(limit),
       admin
@@ -214,20 +202,9 @@ export async function GET(request: NextRequest) {
         .eq('user_id', requestUser.id)
         .order('created_at', { ascending: false })
         .limit(limit),
-      admin
-        .from('calendar_events')
-        .select('id, title, notes, event_type, contact_id, contact_name, start_at')
-        .eq('workspace_id', workspaceId)
-        .eq('user_id', requestUser.id)
-        .is('deleted_at', null)
-        .gte('start_at', now.toISOString())
-        .lte('start_at', taskEnd)
-        .in('event_type', ['follow_up', 'callback', 'task'])
-        .order('start_at', { ascending: true })
-        .limit(limit),
     ]);
 
-    for (const result of [storedInbox, inboundTexts, notifications, tasks]) {
+    for (const result of [storedInbox, inboundTexts, notifications]) {
       if (result.error) return NextResponse.json({ error: result.error.message }, { status: 500 });
     }
 
@@ -236,7 +213,6 @@ export async function GET(request: NextRequest) {
         ...((storedInbox.data ?? []) as InboxItem[]).map(rowToInboxItem),
         ...((inboundTexts.data ?? []) as DialerInboundMessageRow[]).map(smsToInboxItem),
         ...((notifications.data ?? []) as NotificationRow[]).map(notificationToInboxItem),
-        ...((tasks.data ?? []) as CalendarEventRow[]).map(taskToInboxItem),
       ],
       sourceFilter,
       statusFilter,

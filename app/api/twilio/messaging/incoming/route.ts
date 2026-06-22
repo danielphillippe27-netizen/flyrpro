@@ -12,6 +12,7 @@ export const dynamic = 'force-dynamic';
 type InboundNumberRoute = {
   workspaceId: string;
   salespersonId: string | null;
+  salespersonUserId: string | null;
 };
 
 function cleanText(value: string | null | undefined): string {
@@ -118,12 +119,30 @@ async function resolveInboundNumberRoute(
   }
 
   if (salespersonNumber?.workspace_id) {
+    const salespersonId =
+      typeof salespersonNumber.salesperson_id === 'string'
+        ? salespersonNumber.salesperson_id
+        : null;
+    let salespersonUserId: string | null = null;
+
+    if (salespersonId) {
+      const { data: salesperson, error: salespersonError } = await admin
+        .from('salespeople')
+        .select('user_id')
+        .eq('id', salespersonId)
+        .maybeSingle();
+
+      if (salespersonError && salespersonError.code !== 'PGRST116') {
+        console.warn('[twilio/messaging/incoming] salesperson user lookup failed', salespersonError);
+      }
+
+      salespersonUserId = typeof salesperson?.user_id === 'string' ? salesperson.user_id : null;
+    }
+
     return {
       workspaceId: salespersonNumber.workspace_id as string,
-      salespersonId:
-        typeof salespersonNumber.salesperson_id === 'string'
-          ? salespersonNumber.salesperson_id
-          : null,
+      salespersonId,
+      salespersonUserId,
     };
   }
 
@@ -139,14 +158,14 @@ async function resolveInboundNumberRoute(
   }
 
   if (data?.workspace_id) {
-    return { workspaceId: data.workspace_id as string, salespersonId: null };
+    return { workspaceId: data.workspace_id as string, salespersonId: null, salespersonUserId: null };
   }
 
   const sharedSmsNumber = getTwilioDefaultSmsFromNumber();
   const sharedVoiceNumber = getTwilioDefaultFromNumber();
   if (toNumber === sharedSmsNumber || toNumber === sharedVoiceNumber) {
     const workspaceId = getFallbackWorkspaceId();
-    return workspaceId ? { workspaceId, salespersonId: null } : null;
+    return workspaceId ? { workspaceId, salespersonId: null, salespersonUserId: null } : null;
   }
 
   return null;
@@ -229,36 +248,47 @@ async function findOrCreateContact(context: {
 async function notifyWorkspaceMembers(context: {
   admin: ReturnType<typeof createAdminClient>;
   workspaceId: string;
+  salespersonUserId: string | null;
 }, message: DialerInboundMessage, contactName: string | null): Promise<void> {
-  const { data: members, error } = await context.admin
-    .from('workspace_members')
-    .select('user_id')
-    .eq('workspace_id', context.workspaceId);
+  let recipientUserIds = context.salespersonUserId ? [context.salespersonUserId] : [];
 
-  if (error || !members?.length) {
-    if (error) console.warn('[twilio/messaging/incoming] member lookup failed', error);
+  if (recipientUserIds.length === 0) {
+    const { data: members, error } = await context.admin
+      .from('workspace_members')
+      .select('user_id')
+      .eq('workspace_id', context.workspaceId);
+
+    if (error || !members?.length) {
+      if (error) console.warn('[twilio/messaging/incoming] member lookup failed', error);
+      return;
+    }
+
+    recipientUserIds = (members ?? [])
+      .map((member) => (typeof member.user_id === 'string' ? member.user_id : null))
+      .filter((userId): userId is string => Boolean(userId));
+  }
+
+  if (recipientUserIds.length === 0) {
     return;
   }
 
   const title = contactName ? `New text from ${contactName}` : 'New dialler text';
-  const notificationRows = members.flatMap((member) => {
-    const userId = typeof member.user_id === 'string' ? member.user_id : null;
-    if (!userId) return [];
-    return [{
-      user_id: userId,
-      type: 'dialer_inbound_sms',
-      title,
-      message: message.body,
-      data: {
-        workspaceId: context.workspaceId,
-        inboundMessageId: message.id,
-        contactId: message.contact_id,
-        from: message.from_number_e164,
-        to: message.to_number_e164,
-      },
-      is_read: false,
-    }];
-  });
+  const notificationRows = Array.from(new Set(recipientUserIds)).map((userId) => ({
+    workspace_id: context.workspaceId,
+    user_id: userId,
+    type: 'dialer_inbound_sms',
+    title,
+    body: message.body,
+    data: {
+      workspaceId: context.workspaceId,
+      source: 'sms',
+      inboundMessageId: message.id,
+      contactId: message.contact_id,
+      from: message.from_number_e164,
+      to: message.to_number_e164,
+    },
+    read_at: null,
+  }));
 
   if (notificationRows.length === 0) return;
 
@@ -290,7 +320,7 @@ export async function POST(request: NextRequest) {
     console.warn('[twilio/messaging/incoming] no workspace matched inbound text', { toNumber });
     return NextResponse.json({ ok: true });
   }
-  const { workspaceId, salespersonId } = inboundRoute;
+  const { workspaceId, salespersonId, salespersonUserId } = inboundRoute;
 
   const contact = await findOrCreateContact({ admin, workspaceId }, fromNumber, body);
   const contactId = typeof contact?.id === 'string' ? contact.id : null;
@@ -300,6 +330,8 @@ export async function POST(request: NextRequest) {
     workspace_id: workspaceId,
     salesperson_id: salespersonId,
     contact_id: contactId,
+    telecom_provider: 'twilio',
+    provider_message_id: messageSid,
     twilio_message_sid: messageSid,
     from_number_e164: fromNumber,
     to_number_e164: toNumber,
@@ -339,7 +371,11 @@ export async function POST(request: NextRequest) {
   }
 
   const contactName = typeof contact?.full_name === 'string' ? contact.full_name : null;
-  await notifyWorkspaceMembers({ admin, workspaceId }, inboundMessage as DialerInboundMessage, contactName);
+  await notifyWorkspaceMembers(
+    { admin, workspaceId, salespersonUserId },
+    inboundMessage as DialerInboundMessage,
+    contactName
+  );
 
   return NextResponse.json({ ok: true });
 }

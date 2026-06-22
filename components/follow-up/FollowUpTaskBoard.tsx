@@ -1,31 +1,15 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useWorkspace } from '@/lib/workspace-context';
 import { cn } from '@/lib/utils';
-import { ChevronDown, Clock, Filter, RotateCcw, User } from 'lucide-react';
+import { Clock, User } from 'lucide-react';
 
 const PAGE_SIZE = 100;
 const FETCH_YEAR_SPAN = 15;
 
 type FollowUpBucket = 'today' | 'overdue' | 'future';
-type StatusFilter = 'all' | 'followup' | 'not_home' | 'warm';
-
-type ActivityMemberOption = {
-  user_id: string;
-  display_name: string;
-};
 
 type FollowUpEvent = {
   id: string;
@@ -48,8 +32,6 @@ type ActivityResponse = {
   events?: FollowUpEvent[];
   total?: number;
   nextOffset?: number | null;
-  canIncludeMembers?: boolean;
-  members?: ActivityMemberOption[];
 };
 
 const BUCKET_LABELS: Record<FollowUpBucket, string> = {
@@ -57,13 +39,6 @@ const BUCKET_LABELS: Record<FollowUpBucket, string> = {
   overdue: 'Overdue',
   future: 'Future',
 };
-
-const STATUS_FILTERS: Array<{ value: StatusFilter; label: string; statuses?: string[] }> = [
-  { value: 'all', label: 'All statuses' },
-  { value: 'followup', label: 'Follow up', statuses: ['follow_up', 'follow-up'] },
-  { value: 'not_home', label: 'Not home / no answer', statuses: ['not_home', 'no_answer'] },
-  { value: 'warm', label: 'Warm', statuses: ['warm'] },
-];
 
 function getFetchWindow(): { start: string; end: string } {
   const start = new Date();
@@ -137,34 +112,16 @@ function taskSummary(event: FollowUpEvent): string {
   return status ? `Follow up: ${status}` : `Follow up with ${name}`;
 }
 
-function statusMatches(event: FollowUpEvent, filter: StatusFilter): boolean {
-  if (filter === 'all') return true;
-  const normalized = event.payload.status?.trim().toLowerCase() ?? '';
-  const option = STATUS_FILTERS.find((item) => item.value === filter);
-  return option?.statuses?.includes(normalized) ?? true;
-}
-
-function memberLabel(memberId: string, members: ActivityMemberOption[]): string {
-  if (memberId === 'all') return 'All team members';
-  return members.find((member) => member.user_id === memberId)?.display_name ?? 'Team member';
-}
-
 export function FollowUpTaskBoard() {
   const { currentWorkspaceId } = useWorkspace();
   const [activeBucket, setActiveBucket] = useState<FollowUpBucket>('today');
   const [events, setEvents] = useState<FollowUpEvent[]>([]);
-  const [members, setMembers] = useState<ActivityMemberOption[]>([]);
-  const [canIncludeMembers, setCanIncludeMembers] = useState(false);
-  const [selectedMemberId, setSelectedMemberId] = useState('all');
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetchFollowUps = useCallback(async () => {
     if (!currentWorkspaceId) {
       setEvents([]);
-      setMembers([]);
-      setCanIncludeMembers(false);
       setError('No workspace selected');
       setLoading(false);
       return;
@@ -194,8 +151,6 @@ export function FollowUpTaskBoard() {
         const data = (await response.json()) as ActivityResponse;
 
         loaded.push(...(data.events ?? []));
-        if (data.canIncludeMembers !== undefined) setCanIncludeMembers(Boolean(data.canIncludeMembers));
-        if (Array.isArray(data.members)) setMembers(data.members);
 
         nextOffset = typeof data.nextOffset === 'number' ? data.nextOffset : null;
       }
@@ -213,37 +168,25 @@ export function FollowUpTaskBoard() {
     void fetchFollowUps();
   }, [fetchFollowUps]);
 
-  useEffect(() => {
-    if (selectedMemberId === 'all') return;
-    if (members.some((member) => member.user_id === selectedMemberId)) return;
-    setSelectedMemberId('all');
-  }, [members, selectedMemberId]);
-
-  const filteredEvents = useMemo(() => {
-    return events
-      .filter((event) => selectedMemberId === 'all' || event.user_id === selectedMemberId)
-      .filter((event) => statusMatches(event, statusFilter));
-  }, [events, selectedMemberId, statusFilter]);
-
   const counts = useMemo(() => {
-    return filteredEvents.reduce<Record<FollowUpBucket, number>>(
+    return events.reduce<Record<FollowUpBucket, number>>(
       (acc, event) => {
         acc[getBucket(event.event_time)] += 1;
         return acc;
       },
       { today: 0, overdue: 0, future: 0 }
     );
-  }, [filteredEvents]);
+  }, [events]);
 
   const activeEvents = useMemo(() => {
-    return filteredEvents
+    return events
       .filter((event) => getBucket(event.event_time) === activeBucket)
       .sort((left, right) => {
         const leftTime = new Date(left.event_time).getTime();
         const rightTime = new Date(right.event_time).getTime();
         return activeBucket === 'overdue' ? rightTime - leftTime : leftTime - rightTime;
       });
-  }, [activeBucket, filteredEvents]);
+  }, [activeBucket, events]);
 
   const groupedEvents = useMemo(() => {
     const groups = new Map<string, FollowUpEvent[]>();
@@ -255,9 +198,6 @@ export function FollowUpTaskBoard() {
     }
     return Array.from(groups.entries()).map(([date, items]) => ({ date, items }));
   }, [activeEvents]);
-
-  const activeStatusLabel = STATUS_FILTERS.find((filter) => filter.value === statusFilter)?.label ?? 'Filters';
-  const hasFilters = statusFilter !== 'all' || selectedMemberId !== 'all';
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 dark:bg-background dark:text-foreground">
@@ -280,68 +220,10 @@ export function FollowUpTaskBoard() {
                   <span className="text-slate-400 dark:text-muted-foreground">({counts[bucket]})</span>
                 )}
                 {activeBucket === bucket && (
-                  <span className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-sky-500" />
+                  <span className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-red-500" />
                 )}
               </button>
             ))}
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" className="h-10 gap-2 bg-slate-50">
-                  <Filter className="h-4 w-4" />
-                  Filters
-                  {statusFilter !== 'all' && <Badge variant="secondary">{activeStatusLabel}</Badge>}
-                  <ChevronDown className="h-4 w-4 opacity-60" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuLabel>Status</DropdownMenuLabel>
-                {STATUS_FILTERS.map((filter) => (
-                  <DropdownMenuCheckboxItem
-                    key={filter.value}
-                    checked={statusFilter === filter.value}
-                    onCheckedChange={() => setStatusFilter(filter.value)}
-                  >
-                    {filter.label}
-                  </DropdownMenuCheckboxItem>
-                ))}
-                {hasFilters && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="w-full justify-start gap-2"
-                      onClick={() => {
-                        setStatusFilter('all');
-                        setSelectedMemberId('all');
-                      }}
-                    >
-                      <RotateCcw className="h-3.5 w-3.5" />
-                      Reset filters
-                    </Button>
-                  </>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-
-            {canIncludeMembers && (
-              <Select value={selectedMemberId} onValueChange={setSelectedMemberId}>
-                <SelectTrigger className="h-10 w-[220px] bg-slate-50">
-                  <SelectValue>{memberLabel(selectedMemberId, members)}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All team members</SelectItem>
-                  {members.map((member) => (
-                    <SelectItem key={member.user_id} value={member.user_id}>
-                      {member.display_name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
           </div>
         </div>
       </div>
@@ -356,7 +238,7 @@ export function FollowUpTaskBoard() {
         <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-border dark:bg-card">
           <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-border">
             <div className="flex items-center gap-3">
-              <Clock className="h-5 w-5 text-slate-400" />
+              <Clock className="h-5 w-5 text-red-500 dark:text-red-400" />
               <h1 className="text-base font-semibold sm:text-lg">{BUCKET_LABELS[activeBucket]}</h1>
             </div>
             <Button variant="ghost" size="sm" onClick={() => void fetchFollowUps()} disabled={loading}>
@@ -367,12 +249,12 @@ export function FollowUpTaskBoard() {
           <div className="min-h-[320px] divide-y divide-slate-100 dark:divide-border/70">
             {loading && events.length === 0 ? (
               <div className="flex min-h-[320px] flex-col items-center justify-center gap-3 text-slate-400">
-                <Clock className="h-12 w-12 animate-pulse" />
+                <Clock className="h-12 w-12 animate-pulse text-red-500 dark:text-red-400" />
                 <p className="text-sm font-medium">Loading follow-ups...</p>
               </div>
             ) : groupedEvents.length === 0 ? (
               <div className="flex min-h-[320px] flex-col items-center justify-center gap-3 text-slate-400">
-                <Clock className="h-12 w-12" />
+                <Clock className="h-12 w-12 text-red-500 dark:text-red-400" />
                 <p className="text-sm font-medium">No tasks found, nice work!</p>
               </div>
             ) : (
@@ -401,7 +283,7 @@ export function FollowUpTaskBoard() {
                             {initials(name)}
                           </div>
                           <div className="min-w-0">
-                            <div className="truncate text-sm font-semibold text-sky-600 dark:text-sky-400">{name}</div>
+                            <div className="truncate text-sm font-semibold text-red-600 dark:text-red-400">{name}</div>
                             <div className="mt-0.5 truncate text-sm text-slate-700 dark:text-muted-foreground">
                               {taskSummary(event)}
                             </div>

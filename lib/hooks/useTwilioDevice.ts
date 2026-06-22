@@ -23,6 +23,46 @@ type VoiceDeviceLike = {
   destroy?: () => void;
 };
 
+type TelnyxCallLike = {
+  id?: string;
+  state?: string;
+  direction?: string;
+  localStream?: MediaStream;
+  remoteStream?: MediaStream;
+  options?: {
+    callerName?: string;
+    callerNumber?: string;
+    remoteCallerName?: string;
+    remoteCallerNumber?: string;
+    destinationNumber?: string;
+  };
+  telnyxIDs?: {
+    telnyxCallControlId?: string;
+    telnyxSessionId?: string;
+    telnyxLegId?: string;
+  };
+  answer?: (params?: { video?: boolean }) => Promise<void>;
+  hangup: () => Promise<void>;
+  muteAudio: () => void;
+  unmuteAudio: () => void;
+  isAudioMuted?: boolean;
+};
+
+type TelnyxClientLike = {
+  connect: () => Promise<void> | void;
+  disconnect: () => void;
+  newCall: (options: {
+    destinationNumber: string;
+    callerNumber?: string;
+    id?: string;
+    clientState?: string;
+    localStream?: MediaStream;
+    remoteElement?: HTMLMediaElement | string;
+    audio?: boolean | MediaTrackConstraints;
+  }) => TelnyxCallLike;
+  on: (eventName: string, listener: (...args: unknown[]) => void) => void;
+};
+
 type DeviceSetupState = 'idle' | 'initializing' | 'ready' | 'error';
 type CallPhase = 'idle' | 'connecting' | 'connected' | 'ended';
 type MicrophoneSelectionSource = 'stored' | 'preferred' | 'current' | 'default' | 'first';
@@ -37,12 +77,23 @@ type SelectedMicrophone = {
 type MicTrackState = 'idle' | 'live' | 'muted' | 'ended' | 'error';
 
 type TokenResponse = {
+  provider?: 'twilio' | 'telnyx';
   token: string;
   identity: string;
   expiresAt: string;
   fromNumber: string;
   smsFromNumber: string | null;
   allowSmsFollowup: boolean;
+};
+
+type StartCallOptions = {
+  toNumber?: string | null;
+  fromNumber?: string | null;
+};
+
+type IncomingCallInfo = {
+  name: string | null;
+  number: string | null;
 };
 
 const MICROPHONE_DEVICE_STORAGE_KEY = 'flyr.dialer.microphoneDeviceId';
@@ -78,6 +129,34 @@ function getTwilioErrorDetails(error: unknown) {
     originalError: record.originalError,
     solutions: record.solutions,
   };
+}
+
+function createTelnyxClientState(callRequestId: string) {
+  const payload = JSON.stringify({
+    callRequestId,
+    call_request_id: callRequestId,
+    role: 'lead',
+    direction: 'outbound',
+  });
+  return window.btoa(payload);
+}
+
+function getTelnyxNotificationCall(notification: unknown): TelnyxCallLike | null {
+  if (!notification || typeof notification !== 'object') return null;
+  const record = notification as Record<string, unknown>;
+  return record.call && typeof record.call === 'object' ? (record.call as TelnyxCallLike) : null;
+}
+
+function getTelnyxNotificationType(notification: unknown) {
+  if (!notification || typeof notification !== 'object') return null;
+  const type = (notification as Record<string, unknown>).type;
+  return typeof type === 'string' ? type : null;
+}
+
+function getTelnyxNotificationField(notification: unknown, field: 'displayName' | 'displayNumber' | 'displayDirection') {
+  if (!notification || typeof notification !== 'object') return null;
+  const value = (notification as Record<string, unknown>)[field];
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
 function getStoredMicrophoneDeviceId() {
@@ -162,14 +241,20 @@ function findTwilioInputDevice(device: VoiceDeviceLike, microphone: SelectedMicr
   return null;
 }
 
-export function useTwilioDevice() {
+export function useDialerDevice() {
   const deviceRef = useRef<VoiceDeviceLike | null>(null);
   const connectionRef = useRef<VoiceConnectionLike | null>(null);
+  const telnyxClientRef = useRef<TelnyxClientLike | null>(null);
+  const telnyxCallRef = useRef<TelnyxCallLike | null>(null);
+  const telnyxRemoteAudioRef = useRef<HTMLAudioElement | null>(null);
+  const telnyxTokenTimerRef = useRef<number | null>(null);
   const selectedInputStreamRef = useRef<MediaStream | null>(null);
   const micMeterRef = useRef<{ audioContext: AudioContext; intervalId: number } | null>(null);
   const workspaceIdRef = useRef<string | null>(null);
   const tabIdRef = useRef<string | null>(null);
   const hangUpRequestedRef = useRef(false);
+  const providerRef = useRef<'twilio' | 'telnyx'>('twilio');
+  const incomingCallRef = useRef<IncomingCallInfo | null>(null);
 
   const [setupState, setSetupState] = useState<DeviceSetupState>('idle');
   const [callPhase, setCallPhase] = useState<CallPhase>('idle');
@@ -181,10 +266,17 @@ export function useTwilioDevice() {
   const [fromNumber, setFromNumber] = useState<string | null>(null);
   const [smsFromNumber, setSmsFromNumber] = useState<string | null>(null);
   const [allowSmsFollowup, setAllowSmsFollowup] = useState(false);
+  const [provider, setProvider] = useState<'twilio' | 'telnyx'>('twilio');
+  const [incomingCall, setIncomingCall] = useState<IncomingCallInfo | null>(null);
   const [selectedMicrophone, setSelectedMicrophone] = useState<SelectedMicrophone | null>(null);
   const [micLevel, setMicLevel] = useState(0);
   const [micTrackLabel, setMicTrackLabel] = useState<string | null>(null);
   const [micTrackState, setMicTrackState] = useState<MicTrackState>('idle');
+
+  const updateIncomingCall = (nextIncomingCall: IncomingCallInfo | null) => {
+    incomingCallRef.current = nextIncomingCall;
+    setIncomingCall(nextIncomingCall);
+  };
 
   const stopMicMeter = () => {
     if (micMeterRef.current) {
@@ -249,14 +341,70 @@ export function useTwilioDevice() {
     }
   };
 
+  const clearTelnyxTokenTimer = () => {
+    if (telnyxTokenTimerRef.current) {
+      window.clearTimeout(telnyxTokenTimerRef.current);
+      telnyxTokenTimerRef.current = null;
+    }
+  };
+
+  const getTelnyxRemoteAudioElement = () => {
+    if (typeof document === 'undefined') return null;
+    if (telnyxRemoteAudioRef.current) return telnyxRemoteAudioRef.current;
+
+    const audio = document.createElement('audio');
+    audio.id = 'flyr-telnyx-remote-audio';
+    audio.autoplay = true;
+    (audio as HTMLAudioElement & { playsInline?: boolean }).playsInline = true;
+    audio.style.display = 'none';
+    document.body.appendChild(audio);
+    telnyxRemoteAudioRef.current = audio;
+    return audio;
+  };
+
+  const playTelnyxRemoteAudio = () => {
+    const audio = telnyxRemoteAudioRef.current;
+    if (!audio) return;
+    void audio.play().catch((error) => {
+      console.warn('[dialer/device] Telnyx remote audio autoplay was blocked', error);
+    });
+  };
+
+  const scheduleTelnyxTokenRefresh = (expiresAt: string, workspaceId: string, tabId: string) => {
+    clearTelnyxTokenTimer();
+    const expiresAtMs = Date.parse(expiresAt);
+    if (!Number.isFinite(expiresAtMs)) return;
+
+    const refreshInMs = Math.max(30_000, expiresAtMs - Date.now() - 5 * 60_000);
+    telnyxTokenTimerRef.current = window.setTimeout(() => {
+      if (providerRef.current !== 'telnyx') return;
+      if (telnyxCallRef.current || incomingCallRef.current) {
+        setDeviceError('Telnyx browser token is nearing expiry. Finish this call, then reinitialize the softphone.');
+        return;
+      }
+      void initialize(workspaceId, tabId);
+    }, refreshInMs);
+  };
+
   const destroyDevice = () => {
     connectionRef.current = null;
+    telnyxCallRef.current = null;
+    updateIncomingCall(null);
+    clearTelnyxTokenTimer();
     try {
       deviceRef.current?.destroy?.();
     } catch (error) {
       console.warn('[dialer/device] failed to destroy Twilio device', error);
     }
     deviceRef.current = null;
+    try {
+      telnyxClientRef.current?.disconnect();
+    } catch (error) {
+      console.warn('[dialer/device] failed to disconnect Telnyx client', error);
+    }
+    telnyxClientRef.current = null;
+    telnyxRemoteAudioRef.current?.remove();
+    telnyxRemoteAudioRef.current = null;
     stopMicMeter();
     stopMediaStream(selectedInputStreamRef.current);
     selectedInputStreamRef.current = null;
@@ -268,6 +416,8 @@ export function useTwilioDevice() {
     return () => {
       destroyDevice();
     };
+    // Device instances live in refs; cleanup should run only on unmount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchToken = async (workspaceId: string, tabId: string): Promise<TokenResponse> => {
@@ -277,7 +427,7 @@ export function useTwilioDevice() {
     );
     const data = (await response.json().catch(() => ({}))) as Partial<TokenResponse> & { error?: string };
     if (!response.ok || !data.token || !data.expiresAt) {
-      throw new Error(data.error || 'Failed to fetch a Twilio browser token');
+      throw new Error(data.error || 'Failed to fetch a browser calling token');
     }
     return data as TokenResponse;
   };
@@ -366,6 +516,131 @@ export function useTwilioDevice() {
       startMicMeter(selectedInputStream, microphone?.label ?? null);
 
       const tokenData = await fetchToken(workspaceId, tabId);
+      if (tokenData.provider === 'telnyx') {
+        providerRef.current = 'telnyx';
+        setProvider('telnyx');
+        getTelnyxRemoteAudioElement();
+        const sdk = await import('@telnyx/webrtc');
+        const TelnyxRTCCtor = (sdk.TelnyxRTC ?? sdk.default) as unknown as new (
+          options: Record<string, unknown>
+        ) => TelnyxClientLike;
+        const client = new TelnyxRTCCtor({
+          login_token: tokenData.token,
+          debug: false,
+          enableCallReports: true,
+          hangupOnBeforeUnload: true,
+        });
+
+        const readyPromise = new Promise<void>((resolve, reject) => {
+          let settled = false;
+          const timerId = window.setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            reject(new Error('Timed out connecting the Telnyx browser softphone.'));
+          }, 15000);
+
+          client.on('telnyx.ready', () => {
+            if (settled) return;
+            settled = true;
+            window.clearTimeout(timerId);
+            resolve();
+          });
+
+          client.on('telnyx.error', (error) => {
+            const message = getErrorMessage(error, 'A Telnyx browser softphone error occurred.');
+            console.error('[dialer/device] Telnyx client error', error);
+            setDeviceError(message);
+            if (!settled) {
+              settled = true;
+              window.clearTimeout(timerId);
+              reject(new Error(message));
+            }
+          });
+        });
+
+        client.on('telnyx.warning', (warning) => {
+          const message = getErrorMessage(warning, 'Telnyx browser softphone warning.');
+          console.warn('[dialer/device] Telnyx client warning', warning);
+          setDeviceError(message);
+        });
+
+        client.on('telnyx.notification', (notification) => {
+          const call = getTelnyxNotificationCall(notification);
+          const notificationType = getTelnyxNotificationType(notification);
+          const state = (call?.state ?? notificationType ?? '').toLowerCase();
+          const displayName =
+            getTelnyxNotificationField(notification, 'displayName') ??
+            call?.options?.remoteCallerName ??
+            call?.options?.callerName ??
+            null;
+          const displayNumber =
+            getTelnyxNotificationField(notification, 'displayNumber') ??
+            call?.options?.remoteCallerNumber ??
+            call?.options?.callerNumber ??
+            call?.options?.destinationNumber ??
+            null;
+          const direction = (
+            getTelnyxNotificationField(notification, 'displayDirection') ??
+            call?.direction ??
+            ''
+          ).toLowerCase();
+          const isInbound = direction.includes('inbound') || direction === 'in';
+          if (call) {
+            telnyxCallRef.current = call;
+          }
+
+          console.info('[dialer/device] Telnyx notification', {
+            type: notificationType,
+            state: call?.state,
+            direction,
+            displayName,
+            displayNumber,
+            telnyxIDs: call?.telnyxIDs,
+          });
+
+          if (state.includes('active') || state.includes('answer')) {
+            updateIncomingCall(null);
+            setCallPhase('connected');
+            startMicMeter(call?.localStream ?? selectedInputStreamRef.current, microphone?.label ?? null);
+            playTelnyxRemoteAudio();
+            setIsMuted(Boolean(call?.isAudioMuted));
+            return;
+          }
+
+          if (state.includes('ring') || state.includes('early') || state.includes('trying') || state.includes('requesting')) {
+            if (isInbound) {
+              updateIncomingCall({ name: displayName, number: displayNumber });
+              setCallPhase('idle');
+              return;
+            }
+            setCallPhase('connecting');
+            return;
+          }
+
+          if (state.includes('hangup') || state.includes('destroy') || state.includes('done')) {
+            telnyxCallRef.current = null;
+            updateIncomingCall(null);
+            setCallPhase('ended');
+            setIsMuted(false);
+            setEndedCount((count) => count + 1);
+          }
+        });
+
+        telnyxClientRef.current = client;
+        await Promise.resolve(client.connect());
+        await readyPromise;
+        setTokenExpiresAt(tokenData.expiresAt);
+        setFromNumber(tokenData.fromNumber);
+        setSmsFromNumber(tokenData.smsFromNumber);
+        setAllowSmsFollowup(tokenData.allowSmsFollowup);
+        scheduleTelnyxTokenRefresh(tokenData.expiresAt, workspaceId, tabId);
+        setSetupState('ready');
+        setCallPhase('idle');
+        return;
+      }
+
+      providerRef.current = 'twilio';
+      setProvider('twilio');
       const sdk = await import('@twilio/voice-sdk');
       const DeviceCtor = sdk.Device as unknown as new (token: string, options?: Record<string, unknown>) => VoiceDeviceLike;
       const device = new DeviceCtor(tokenData.token, {
@@ -486,7 +761,55 @@ export function useTwilioDevice() {
     }
   };
 
-  const startCall = async (callRequestId: string) => {
+  const startCall = async (callRequestId: string, options: StartCallOptions = {}) => {
+    if (providerRef.current === 'telnyx') {
+      if (!telnyxClientRef.current) {
+        throw new Error('Initialize the Telnyx browser softphone before placing a call.');
+      }
+      const destinationNumber = options.toNumber?.trim();
+      if (!destinationNumber) {
+        throw new Error('A destination phone number is required for Telnyx browser calling.');
+      }
+
+      setDeviceError(null);
+      setCallPhase('connecting');
+      hangUpRequestedRef.current = false;
+      try {
+        console.info('[dialer/device] starting Telnyx WebRTC call', {
+          callRequestId,
+          destinationNumber,
+          callerNumber: options.fromNumber ?? fromNumber,
+          selectedMicrophone,
+        });
+        const call = telnyxClientRef.current.newCall({
+          destinationNumber,
+          callerNumber: options.fromNumber ?? fromNumber ?? undefined,
+          id: callRequestId,
+          clientState: createTelnyxClientState(callRequestId),
+          localStream: selectedInputStreamRef.current ?? undefined,
+          remoteElement: getTelnyxRemoteAudioElement() ?? undefined,
+          audio: true,
+        });
+        telnyxCallRef.current = call;
+        startMicMeter(call.localStream ?? selectedInputStreamRef.current, selectedMicrophone?.label ?? null);
+        playTelnyxRemoteAudio();
+        if (hangUpRequestedRef.current) {
+          await call.hangup().catch(() => undefined);
+          telnyxCallRef.current = null;
+          setCallPhase('ended');
+          setEndedCount((count) => count + 1);
+          return;
+        }
+        setIsMuted(Boolean(call.isAudioMuted));
+      } catch (error) {
+        console.error('[dialer/device] failed to start Telnyx call', error);
+        setCallPhase('ended');
+        setDeviceError(getErrorMessage(error, 'Failed to start Telnyx browser call.'));
+        throw error;
+      }
+      return;
+    }
+
     if (!deviceRef.current) {
       throw new Error('Initialize the browser dialer before placing a call.');
     }
@@ -530,6 +853,21 @@ export function useTwilioDevice() {
 
   const hangUp = () => {
     hangUpRequestedRef.current = true;
+    if (providerRef.current === 'telnyx') {
+      const activeCall = telnyxCallRef.current;
+      try {
+        void activeCall?.hangup().catch((error) => {
+          console.warn('[dialer/device] failed to hang up Telnyx call', error);
+        });
+      } finally {
+        telnyxCallRef.current = null;
+        setCallPhase('ended');
+        setIsMuted(false);
+        setEndedCount((count) => count + 1);
+      }
+      return;
+    }
+
     try {
       connectionRef.current?.disconnect();
       deviceRef.current?.disconnectAll?.();
@@ -541,7 +879,49 @@ export function useTwilioDevice() {
     }
   };
 
+  const answerIncomingCall = async () => {
+    if (providerRef.current !== 'telnyx' || !telnyxCallRef.current?.answer) return;
+    setDeviceError(null);
+    setCallPhase('connecting');
+    try {
+      getTelnyxRemoteAudioElement();
+      await telnyxCallRef.current.answer({ video: false });
+      updateIncomingCall(null);
+      startMicMeter(telnyxCallRef.current.localStream ?? selectedInputStreamRef.current, selectedMicrophone?.label ?? null);
+      playTelnyxRemoteAudio();
+    } catch (error) {
+      console.error('[dialer/device] failed to answer Telnyx call', error);
+      setCallPhase('ended');
+      setDeviceError(getErrorMessage(error, 'Failed to answer Telnyx browser call.'));
+      throw error;
+    }
+  };
+
+  const rejectIncomingCall = () => {
+    if (providerRef.current !== 'telnyx') return;
+    const activeCall = telnyxCallRef.current;
+    updateIncomingCall(null);
+    telnyxCallRef.current = null;
+    setCallPhase('ended');
+    void activeCall?.hangup().catch((error) => {
+      console.warn('[dialer/device] failed to reject Telnyx incoming call', error);
+    });
+  };
+
   const toggleMute = () => {
+    if (providerRef.current === 'telnyx') {
+      const activeCall = telnyxCallRef.current;
+      if (!activeCall) return;
+      const nextMuted = !Boolean(activeCall.isAudioMuted);
+      if (nextMuted) {
+        activeCall.muteAudio();
+      } else {
+        activeCall.unmuteAudio();
+      }
+      setIsMuted(nextMuted);
+      return;
+    }
+
     if (!connectionRef.current) return;
     const nextMuted = !Boolean(connectionRef.current.isMuted?.());
     connectionRef.current.mute(nextMuted);
@@ -569,8 +949,13 @@ export function useTwilioDevice() {
     fromNumber,
     smsFromNumber,
     allowSmsFollowup,
+    provider,
+    incomingCall,
+    hasIncomingCall: Boolean(incomingCall),
     initialize,
     startCall,
+    answerIncomingCall,
+    rejectIncomingCall,
     hangUp,
     toggleMute,
     resetEndedPhase,
@@ -579,3 +964,5 @@ export function useTwilioDevice() {
     isInCall: callPhase === 'connecting' || callPhase === 'connected',
   };
 }
+
+export const useTwilioDevice = useDialerDevice;

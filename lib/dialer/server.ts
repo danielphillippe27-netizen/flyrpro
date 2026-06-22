@@ -10,8 +10,18 @@ import {
   getTwilioAuthToken,
   getTwilioDefaultFromNumber,
   getTwilioDefaultSmsFromNumber,
+  getTwilioIosPushCredentialSid,
   getTwilioTwiMLAppSid,
+  getDialerTelecomProvider,
+  getTelnyxDefaultFromNumber,
+  getTelnyxDefaultSmsFromNumber,
+  getTelnyxIosPushCredentialId,
+  getTelnyxIosTelephonyCredentialId,
+  getTelnyxSipPassword,
+  getTelnyxSipUsername,
+  type DialerTelecomProvider,
 } from '@/lib/dialer/env';
+import { createTelnyxVoiceToken } from '@/lib/dialer/telnyx';
 import {
   getDialerWorkspaceAccessError,
   isDialerFounderBypassEmail,
@@ -47,7 +57,10 @@ export type DialerRequestContext = {
     allowSmsFollowup: boolean;
     dialerAddonActive: boolean;
     dialerAddonStatus: WorkspaceBillingAddonStatus;
+    telecomProvider: DialerTelecomProvider;
     twilioIncomingPhoneNumberSid: string | null;
+    providerPhoneNumberId: string | null;
+    providerNumberOrderId: string | null;
     numberStatus: WorkspaceDialerNumberStatus;
     numberAssignedAt: string | null;
     usesSharedDefaultNumber: boolean;
@@ -169,13 +182,16 @@ export async function getWorkspaceDialerSettings(
     inbound_forward_to?: string | null;
   } | null
 ): Promise<DialerRequestContext['settings']> {
-  const envDefaultFromNumber = getTwilioDefaultFromNumber();
-  const envDefaultSmsFromNumber = getTwilioDefaultSmsFromNumber();
+  const activeProvider = getDialerTelecomProvider();
+  const envDefaultFromNumber =
+    activeProvider === 'telnyx' ? getTelnyxDefaultFromNumber() : getTwilioDefaultFromNumber();
+  const envDefaultSmsFromNumber =
+    activeProvider === 'telnyx' ? getTelnyxDefaultSmsFromNumber() : getTwilioDefaultSmsFromNumber();
 
   const { data } = await admin
     .from('workspace_dialer_settings')
     .select(
-      'enabled, default_from_number, default_sms_from_number, inbound_forward_to, allow_sms_followup, twilio_incoming_phone_number_sid, number_status, number_assigned_at'
+      'enabled, default_from_number, default_sms_from_number, inbound_forward_to, allow_sms_followup, telecom_provider, twilio_incoming_phone_number_sid, provider_phone_number_id, provider_number_order_id, number_status, number_assigned_at'
     )
     .eq('workspace_id', workspaceId)
     .maybeSingle();
@@ -204,7 +220,10 @@ export async function getWorkspaceDialerSettings(
     allowSmsFollowup: Boolean(data?.allow_sms_followup),
     dialerAddonActive: addon.status === 'active',
     dialerAddonStatus: addon.status,
+    telecomProvider: activeProvider,
     twilioIncomingPhoneNumberSid: data?.twilio_incoming_phone_number_sid ?? null,
+    providerPhoneNumberId: data?.provider_phone_number_id ?? null,
+    providerNumberOrderId: data?.provider_number_order_id ?? null,
     numberStatus:
       (data?.number_status as WorkspaceDialerNumberStatus | undefined) ?? 'unassigned',
     numberAssignedAt: data?.number_assigned_at ?? null,
@@ -213,14 +232,22 @@ export async function getWorkspaceDialerSettings(
 }
 
 export function buildDialerIdentity(workspaceId: string, userId: string, tabId: string): string {
-  const safeTabId = tabId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64) || 'web';
-  return `dialer:${workspaceId}:${userId}:${safeTabId}`;
+  const safeWorkspaceId = workspaceId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 32);
+  const safeUserId = userId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 32);
+  const safeTabId = tabId.replace(/[^a-zA-Z0-9_]/g, '_').slice(0, 32) || 'web';
+  return `d_${safeWorkspaceId}_${safeUserId}_${safeTabId}`.slice(0, 121);
 }
 
-export function createTwilioVoiceToken(identity: string): { token: string; expiresAt: string } {
+export function createTwilioVoiceToken(
+  identity: string,
+  options?: { allowIncoming?: boolean; includeIosPushCredential?: boolean }
+): { token: string; expiresAt: string; pushCredentialSid: string | null } {
   const AccessToken = twilio.jwt.AccessToken;
   const VoiceGrant = AccessToken.VoiceGrant;
   const ttlSeconds = 60 * 55;
+  const pushCredentialSid = options?.includeIosPushCredential
+    ? getTwilioIosPushCredentialSid()
+    : null;
 
   const token = new AccessToken(
     getTwilioAccountSid(),
@@ -231,13 +258,55 @@ export function createTwilioVoiceToken(identity: string): { token: string; expir
   token.addGrant(
     new VoiceGrant({
       outgoingApplicationSid: getTwilioTwiMLAppSid(),
-      incomingAllow: false,
+      incomingAllow: options?.allowIncoming ?? false,
+      ...(pushCredentialSid ? { pushCredentialSid } : {}),
     })
   );
 
   return {
     token: token.toJwt(),
     expiresAt: new Date(Date.now() + ttlSeconds * 1000).toISOString(),
+    pushCredentialSid,
+  };
+}
+
+export async function createDialerVoiceToken(
+  identity: string,
+  options?: { allowIncoming?: boolean; includeIosPushCredential?: boolean }
+): Promise<{
+  provider: DialerTelecomProvider;
+  token: string;
+  expiresAt: string;
+  pushCredentialSid: string | null;
+  telnyxTelephonyCredentialId?: string;
+  telnyxPushCredentialId?: string | null;
+  telnyxSipUsername?: string | null;
+  telnyxSipPassword?: string | null;
+}> {
+  if (getDialerTelecomProvider() === 'telnyx') {
+    const iosCredentialId = options?.includeIosPushCredential
+      ? getTelnyxIosTelephonyCredentialId()
+      : null;
+    const token = await createTelnyxVoiceToken({
+      telephonyCredentialId: iosCredentialId,
+    });
+    return {
+      provider: 'telnyx',
+      token: token.token,
+      expiresAt: token.expiresAt,
+      pushCredentialSid: null,
+      telnyxTelephonyCredentialId: token.telephonyCredentialId,
+      telnyxPushCredentialId: options?.includeIosPushCredential
+        ? getTelnyxIosPushCredentialId()
+        : null,
+      telnyxSipUsername: options?.includeIosPushCredential ? getTelnyxSipUsername() : null,
+      telnyxSipPassword: options?.includeIosPushCredential ? getTelnyxSipPassword() : null,
+    };
+  }
+
+  return {
+    provider: 'twilio',
+    ...createTwilioVoiceToken(identity, options),
   };
 }
 

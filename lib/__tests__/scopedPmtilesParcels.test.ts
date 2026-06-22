@@ -90,6 +90,8 @@ const tests: Array<[string, () => void]> = [
       assertTrue(isDisplayableParcelFeature(feature({ type: 'Point', coordinates: [0, 0] }, { name: 'Courtice Heights' })));
       assertTrue(isDisplayableParcelFeature(feature({ type: 'Point', coordinates: [0, 0] }, { street_name: 'Moyse Drive' })));
       assertFalse(isDisplayableParcelFeature(feature({ type: 'Point', coordinates: [0, 0] }, { parcel_intent: 'road allowance' })));
+      assertFalse(isDisplayableParcelFeature(feature({ type: 'Point', coordinates: [0, 0] }, { status: 'Road Type Parcel' })));
+      assertFalse(isDisplayableParcelFeature(feature({ type: 'Point', coordinates: [0, 0] }, { status: 'Transport Route' })));
       assertFalse(isDisplayableParcelFeature(feature({ type: 'Point', coordinates: [0, 0] }, { land_use: 'public park' })));
       assertFalse(isDisplayableParcelFeature(feature({ type: 'Point', coordinates: [0, 0] }, { raw_attributes: { COMMENT: 'stormwater management pond' } })));
       assertFalse(isDisplayableParcelFeature(feature({ type: 'Point', coordinates: [0, 0] }, {
@@ -104,6 +106,7 @@ const tests: Array<[string, () => void]> = [
       assertTrue(isResidentialParcelFeature(feature({ type: 'Point', coordinates: [0, 0] }, { parcel_intent: 'residential' })));
       assertTrue(isResidentialParcelFeature(feature({ type: 'Point', coordinates: [0, 0] }, {})));
       assertFalse(isResidentialParcelFeature(feature({ type: 'Point', coordinates: [0, 0] }, { parcel_intent: 'road allowance' })));
+      assertFalse(isResidentialParcelFeature(feature({ type: 'Point', coordinates: [0, 0] }, { status: 'Road Type Parcel' })));
       assertFalse(isResidentialParcelFeature(feature({ type: 'Point', coordinates: [0, 0] }, { topology_type: 'secondary' })));
     },
   ],

@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import type { Contact, DialerCall, DialerSession, DialerSessionLead, DiallerLead } from '@/types/database';
 import { getDialerRequestContext, type DialerRequestContext } from '@/lib/dialer/server';
-import { normalizePhoneNumber } from '@/lib/dialer/phone';
+import { getDialerTelecomProvider } from '@/lib/dialer/env';
+import { resolveOutboundCallerId } from '@/lib/dialer/caller-id';
+import { normalizePhoneNumber, phoneMarketFromCountryCode } from '@/lib/dialer/phone';
+import { incrementMasterLeadAttemptForDiallerLead } from '@/lib/sales-leads/master-list';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -17,11 +20,18 @@ function cleanText(value: string | null | undefined): string {
   return (value ?? '').trim();
 }
 
+function normalizeDiallerLeadPhone(lead: DiallerLead) {
+  return normalizePhoneNumber(
+    cleanText(lead.phone_e164) || lead.phone,
+    phoneMarketFromCountryCode(lead.phone_country_code)
+  );
+}
+
 async function findExistingContact(
   context: DialerRequestContext,
   lead: DiallerLead
 ): Promise<Contact | null> {
-  const normalizedPhone = normalizePhoneNumber(lead.phone);
+  const normalizedPhone = normalizeDiallerLeadPhone(lead);
   const lookups = [
     normalizedPhone.e164 ? { column: 'phone_e164', value: normalizedPhone.e164 } : null,
     cleanText(lead.phone) ? { column: 'phone', value: cleanText(lead.phone) } : null,
@@ -62,6 +72,7 @@ export async function POST(request: NextRequest) {
     .select('*')
     .eq('id', body.leadId)
     .eq('workspace_id', context.workspaceId)
+    .eq('user_id', context.requestUser.id)
     .maybeSingle();
 
   if (leadError) {
@@ -74,7 +85,7 @@ export async function POST(request: NextRequest) {
   }
 
   const diallerLead = lead as DiallerLead;
-  const normalized = normalizePhoneNumber(diallerLead.phone);
+  const normalized = normalizeDiallerLeadPhone(diallerLead);
   if (!normalized.isValid || !normalized.e164) {
     return NextResponse.json({ error: normalized.error ?? 'Phone number is invalid.' }, { status: 400 });
   }
@@ -125,6 +136,11 @@ export async function POST(request: NextRequest) {
   }
 
   const callRequestId = crypto.randomUUID();
+  const telecomProvider = getDialerTelecomProvider();
+  const fromNumber = resolveOutboundCallerId({
+    toNumber: normalized.e164,
+    defaultFromNumber: context.settings.defaultFromNumber,
+  });
   const { data: call, error: callError } = await context.admin
     .from('dialer_calls')
     .insert({
@@ -134,9 +150,10 @@ export async function POST(request: NextRequest) {
       contact_id: contactId,
       user_id: context.requestUser.id,
       call_request_id: callRequestId,
+      telecom_provider: telecomProvider,
       to_number_raw: diallerLead.phone,
       to_number_e164: normalized.e164,
-      from_number_e164: context.settings.defaultFromNumber,
+      from_number_e164: fromNumber,
       status: 'pending',
       direction: 'outbound',
       status_payload: {
@@ -145,6 +162,9 @@ export async function POST(request: NextRequest) {
         diallerLeadPhone: cleanText(diallerLead.phone),
         diallerLeadEmail: cleanText(diallerLead.email) || null,
         diallerLeadCompany: cleanText(diallerLead.company) || null,
+        destinationCountryCode: normalized.countryCode,
+        destinationAreaCode: normalized.areaCode,
+        destinationAreaLabel: normalized.areaLabel,
         salespersonId: context.salesperson?.id ?? null,
         doubleDial: body.doubleDial === true,
       },
@@ -157,13 +177,22 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to start outbound call.' }, { status: 500 });
   }
 
+  const activeCall = call as DialerCall;
+
   await context.admin
     .from('dialer_session_leads')
-    .update({ last_call_id: call.id, updated_at: now })
+    .update({ last_call_id: activeCall.id, updated_at: now })
     .eq('id', sessionLead.id);
 
+  await incrementMasterLeadAttemptForDiallerLead(
+    context.admin,
+    diallerLead,
+    now,
+    context.salesperson?.id ?? null
+  );
+
   return NextResponse.json({
-    call: call as DialerCall,
+    call: activeCall,
     contact: existingContact,
     session: session as DialerSession,
     sessionLead: sessionLead as DialerSessionLead,

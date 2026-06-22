@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { buildDialerIdentity, createTwilioVoiceToken, getDialerRequestContext } from '@/lib/dialer/server';
-import { getTwilioDialerEnvIssues } from '@/lib/dialer/env';
+import { buildDialerIdentity, createDialerVoiceToken, getDialerRequestContext } from '@/lib/dialer/server';
+import { getActiveDialerEnvIssues, getDialerTelecomProvider } from '@/lib/dialer/env';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -8,6 +8,8 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
   const workspaceId = request.nextUrl.searchParams.get('workspaceId');
   const tabId = request.nextUrl.searchParams.get('tabId') ?? 'web';
+  const platform = request.nextUrl.searchParams.get('platform');
+  const isIosVoiceClient = platform === 'ios';
 
   try {
     const context = await getDialerRequestContext(request, workspaceId);
@@ -15,13 +17,57 @@ export async function GET(request: NextRequest) {
       return context;
     }
 
-    const identity = buildDialerIdentity(context.workspaceId, context.requestUser.id, tabId);
-    const { token, expiresAt } = createTwilioVoiceToken(identity);
+    const activeProvider = getDialerTelecomProvider();
+    if (isIosVoiceClient && activeProvider !== 'twilio' && activeProvider !== 'telnyx') {
+      return NextResponse.json(
+        {
+          error: 'Native iOS calling requires a supported voice SDK provider.',
+          provider: activeProvider,
+        },
+        { status: 400 }
+      );
+    }
+
+    const identity = buildDialerIdentity(
+      context.workspaceId,
+      context.requestUser.id,
+      isIosVoiceClient ? 'ios' : tabId
+    );
+    const {
+      provider,
+      token,
+      expiresAt,
+      pushCredentialSid,
+      telnyxTelephonyCredentialId,
+      telnyxPushCredentialId,
+      telnyxSipUsername,
+      telnyxSipPassword,
+    } = await createDialerVoiceToken(identity, {
+      allowIncoming: isIosVoiceClient,
+      includeIosPushCredential: isIosVoiceClient,
+    });
 
     return NextResponse.json({
+      provider,
       token,
       identity,
       expiresAt,
+      incomingAllowed: isIosVoiceClient,
+      voipPushConfigured: provider === 'twilio'
+        ? Boolean(pushCredentialSid)
+        : Boolean(telnyxPushCredentialId),
+      telnyxTelephonyCredentialId: telnyxTelephonyCredentialId ?? null,
+      telnyxPushCredentialId: telnyxPushCredentialId ?? null,
+      telnyxSipUsername: isIosVoiceClient ? telnyxSipUsername ?? null : null,
+      telnyxSipPassword: isIosVoiceClient ? telnyxSipPassword ?? null : null,
+      requiresTelnyxVoiceSdk: provider === 'telnyx',
+      sdkTarget: provider === 'telnyx'
+        ? isIosVoiceClient
+          ? 'telnyx-ios'
+          : 'telnyx-webrtc-js'
+        : isIosVoiceClient
+          ? 'twilio-ios'
+          : 'twilio-voice-js',
       fromNumber: context.settings.defaultFromNumber,
       smsFromNumber: context.settings.defaultSmsFromNumber,
       allowSmsFollowup: context.settings.allowSmsFollowup,
@@ -29,16 +75,17 @@ export async function GET(request: NextRequest) {
       usesSharedDefaultNumber: context.settings.usesSharedDefaultNumber,
     });
   } catch (error) {
-    console.error('[dialer/token] failed to create Twilio token', error);
-    const envIssues = getTwilioDialerEnvIssues();
+    console.error('[dialer/token] failed to create dialer token', error);
+    const envIssues = getActiveDialerEnvIssues();
+    const provider = getDialerTelecomProvider();
     return NextResponse.json(
       {
         error:
           envIssues.length > 0
-            ? `Twilio is not configured. Missing or invalid: ${envIssues.join(', ')}`
+            ? `${provider === 'telnyx' ? 'Telnyx' : 'Twilio'} is not configured. Missing or invalid: ${envIssues.join(', ')}`
             : error instanceof Error
               ? error.message
-              : 'Twilio is not configured for this environment',
+              : `${provider === 'telnyx' ? 'Telnyx' : 'Twilio'} is not configured for this environment`,
       },
       { status: 500 }
     );

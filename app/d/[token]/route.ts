@@ -15,7 +15,7 @@ export async function GET(
 ) {
   const { token } = await context.params;
   const cleanToken = decodeURIComponent(token ?? '').trim();
-  const fallbackUrl = new URL('/demo1', request.nextUrl.origin);
+  const fallbackUrl = new URL('/demo-1', request.nextUrl.origin);
 
   if (!cleanToken) {
     return NextResponse.redirect(fallbackUrl);

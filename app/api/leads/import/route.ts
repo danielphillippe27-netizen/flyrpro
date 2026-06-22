@@ -3,11 +3,24 @@ import { parse } from 'csv-parse/sync';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { resolveWorkspaceIdForUser, type MinimalSupabaseClient } from '@/app/api/_utils/workspace';
+import { normalizePhoneMarket, normalizePhoneNumber, type SupportedPhoneMarket } from '@/lib/dialer/phone';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const OPTIONAL_CONTACT_COLUMNS = ['source', 'tags', 'last_contacted', 'follow_up_at', 'appointment_at'] as const;
+const OPTIONAL_CONTACT_COLUMNS = [
+  'source',
+  'tags',
+  'last_contacted',
+  'follow_up_at',
+  'appointment_at',
+  'phone_e164',
+  'phone_country_code',
+  'phone_area_code',
+  'phone_area_label',
+  'phone_last_validated_at',
+  'phone_validation_error',
+] as const;
 
 type CsvRow = Record<string, string | null | undefined>;
 
@@ -16,6 +29,12 @@ type ImportableContact = {
   workspace_id: string;
   full_name: string;
   phone?: string;
+  phone_e164?: string | null;
+  phone_country_code?: string | null;
+  phone_area_code?: string | null;
+  phone_area_label?: string | null;
+  phone_last_validated_at?: string;
+  phone_validation_error?: string | null;
   email?: string;
   address: string;
   campaign_id?: string;
@@ -89,10 +108,10 @@ function toIsoOrUndefined(value: string): string | undefined {
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
 }
 
-function contactSignature(contact: Pick<ImportableContact, 'full_name' | 'phone' | 'email' | 'address'>): string {
+function contactSignature(contact: Pick<ImportableContact, 'full_name' | 'phone' | 'phone_e164' | 'email' | 'address'>): string {
   return [
     contact.full_name.trim().toLowerCase(),
-    (contact.phone ?? '').trim(),
+    (contact.phone_e164 ?? contact.phone ?? '').trim(),
     (contact.email ?? '').trim().toLowerCase(),
     contact.address.trim().toLowerCase(),
   ].join('|');
@@ -155,6 +174,7 @@ export async function POST(request: NextRequest) {
     const file = formData.get('file');
     const requestedWorkspaceId = String(formData.get('workspaceId') ?? '').trim() || null;
     const listName = String(formData.get('listName') ?? '').trim();
+    const phoneMarket = normalizePhoneMarket(String(formData.get('phoneMarket') ?? ''));
 
     if (!(file instanceof File) || !file.size) {
       return NextResponse.json({ error: 'Choose a CSV file to import.' }, { status: 400 });
@@ -193,7 +213,7 @@ export async function POST(request: NextRequest) {
 
     const { data: existingContacts, error: existingContactsError } = await admin
       .from('contacts')
-      .select('id, full_name, phone, email, address')
+      .select('id, full_name, phone, phone_e164, email, address')
       .eq('workspace_id', workspaceResolution.workspaceId);
 
     if (existingContactsError) {
@@ -207,6 +227,7 @@ export async function POST(request: NextRequest) {
       const signature = contactSignature({
         full_name: String(contact.full_name ?? ''),
         phone: contact.phone ?? undefined,
+        phone_e164: contact.phone_e164 ?? null,
         email: contact.email ?? undefined,
         address: String(contact.address ?? ''),
       });
@@ -255,11 +276,18 @@ export async function POST(request: NextRequest) {
         return;
       }
 
+      const normalizedPhone = phone ? normalizePhoneNumber(phone, phoneMarket as SupportedPhoneMarket) : null;
       const nextContact: ImportableContact = {
         user_id: requestUser.id,
         workspace_id: workspaceResolution.workspaceId!,
         full_name: resolvedName,
         phone: phone || undefined,
+        phone_e164: normalizedPhone?.e164 ?? null,
+        phone_country_code: normalizedPhone?.countryCode ?? null,
+        phone_area_code: normalizedPhone?.areaCode ?? null,
+        phone_area_label: normalizedPhone?.areaLabel ?? null,
+        phone_last_validated_at: phone ? new Date().toISOString() : undefined,
+        phone_validation_error: normalizedPhone?.error ?? null,
         email: email || undefined,
         address: address || '',
         campaign_id: campaignId || undefined,

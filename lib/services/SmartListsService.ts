@@ -157,6 +157,30 @@ export class SmartListsService {
     return merged.sort((a, b) => b.created_at.localeCompare(a.created_at));
   }
 
+  static async fetchUserWorkspaceSmartLists(workspaceId: string, userId: string): Promise<WorkspaceSmartList[]> {
+    const localLists = this.readLocalWorkspaceSmartLists(workspaceId).filter(
+      (list) => list.created_by_user_id === userId || list.created_by_user_id === 'local'
+    );
+    const { data, error } = await this.client
+      .from('smart_lists')
+      .select('*')
+      .eq('workspace_id', workspaceId)
+      .eq('created_by_user_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      if (this.canFallbackToLocal(error)) {
+        return localLists;
+      }
+      throw error;
+    }
+
+    const remoteLists = (data ?? []).map((row) => this.normalizeRow(row as SmartListRow));
+    const seenIds = new Set(remoteLists.map((list) => list.id));
+    const merged = [...remoteLists, ...localLists.filter((list) => !seenIds.has(list.id))];
+    return merged.sort((a, b) => b.created_at.localeCompare(a.created_at));
+  }
+
   static async createWorkspaceSmartList(payload: CreateWorkspaceSmartListPayload): Promise<WorkspaceSmartList> {
     const { data, error } = await this.client
       .from('smart_lists')

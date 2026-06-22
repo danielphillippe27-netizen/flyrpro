@@ -378,13 +378,12 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="dark min-h-screen bg-gradient-to-br from-black to-[#262626] flex flex-col items-center justify-center p-4 relative overflow-hidden">
-      <div className="absolute inset-0 bg-gradient-to-b from-red-950/40 via-transparent to-black/80 pointer-events-none" />
-      <div className="relative w-full max-w-xl rounded-2xl border border-white/15 bg-white/[0.06] px-10 py-7 backdrop-blur-2xl shadow-[0_24px_70px_rgba(0,0,0,0.6),0_10px_30px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.2)]">
+    <div className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-white p-4 text-[#17181c]">
+      <div className="relative w-full max-w-xl rounded-2xl border border-[#d9dce2] bg-white px-10 py-7 shadow-[0_24px_70px_rgba(0,0,0,0.08),0_10px_30px_rgba(0,0,0,0.06)]">
         <div className="text-center space-y-2">
           <div className="flex justify-center">
             <Image
-              src="/flyr-logo-wide-dark.svg"
+              src="/flyr-logo-wide-light.svg"
               alt="FLYR"
               width={480}
               height={128}
@@ -392,7 +391,7 @@ export default function LoginPage() {
               priority
             />
           </div>
-          <p className="text-[#AAAAAA] text-lg">
+          <p className="text-lg font-semibold text-[#7b7f89]">
             {inviteMode
               ? `Sign in or create an account to join ${inviteInfo.workspaceName ?? 'this workspace'}`
               : authMode === 'recovery'
@@ -403,7 +402,7 @@ export default function LoginPage() {
 
         <form onSubmit={handleEmailSubmit} className="mt-6 space-y-4">
           <div className="space-y-1.5">
-            <Label htmlFor="email" className="text-white text-base">Email</Label>
+            <Label htmlFor="email" className="text-base font-semibold text-[#1f2024]">Email</Label>
             <Input
               id="email"
               type="email"
@@ -413,13 +412,13 @@ export default function LoginPage() {
               required
               readOnly={inviteMode && !!inviteInfo.email}
               disabled={loading || (inviteMode && inviteInfo.status === 'loading')}
-              className="h-12 text-base text-white bg-white/[0.08] border border-white/15 placeholder:text-gray-500 focus-visible:border-white/40 focus-visible:ring-2 focus-visible:ring-white/40 backdrop-blur-sm"
+              className="h-12 rounded-xl border-[#e2e5ea] bg-[#f4f5f7] text-base font-semibold text-[#3f444d] placeholder:text-[#b8bec8] shadow-none focus-visible:border-[#b8bec8] focus-visible:ring-2 focus-visible:ring-black/10 dark:bg-[#f4f5f7] dark:text-[#3f444d] dark:placeholder:text-[#b8bec8]"
             />
           </div>
           {authMode === 'sign-in' ? (
             <div className="space-y-1.5">
               <div className="flex items-center justify-between gap-3">
-                <Label htmlFor="password" className="text-white text-base">Password</Label>
+                <Label htmlFor="password" className="text-base font-semibold text-[#1f2024]">Password</Label>
                 <button
                   type="button"
                   onClick={() => {
@@ -427,7 +426,7 @@ export default function LoginPage() {
                     setMessage(null);
                   }}
                   disabled={loading}
-                  className="text-sm text-red-300 transition hover:text-red-200 disabled:opacity-50"
+                  className="text-sm font-semibold text-[#6f7480] transition hover:text-[#17181c] disabled:opacity-50"
                 >
                   Forgot password?
                 </button>
@@ -441,14 +440,14 @@ export default function LoginPage() {
                 required
                 minLength={6}
                 disabled={loading}
-                className="h-12 text-base text-white bg-white/[0.08] border border-white/15 placeholder:text-gray-500 focus-visible:border-white/40 focus-visible:ring-2 focus-visible:ring-white/40 backdrop-blur-sm"
+                className="h-12 rounded-xl border-[#e2e5ea] bg-[#f4f5f7] text-base font-semibold text-[#3f444d] placeholder:text-[#b8bec8] shadow-none focus-visible:border-[#b8bec8] focus-visible:ring-2 focus-visible:ring-black/10 dark:bg-[#f4f5f7] dark:text-[#3f444d] dark:placeholder:text-[#b8bec8]"
               />
             </div>
           ) : null}
           <Button
             type="submit"
             size="lg"
-            className="w-full h-12 text-base bg-[#dc2626] text-white hover:bg-[#b91c1c] border border-red-900/40"
+            className="h-12 w-full rounded-xl border border-[#09090b] bg-[#09090b] text-base font-semibold text-white hover:bg-[#27272a] hover:text-white"
             disabled={loading || (inviteMode && inviteInfo.status === 'loading')}
           >
             {loading
@@ -470,7 +469,7 @@ export default function LoginPage() {
                 setMessage(null);
               }}
               disabled={loading}
-              className="text-sm text-[#AAAAAA] transition hover:text-white disabled:opacity-50"
+              className="text-sm font-semibold text-[#6f7480] transition hover:text-[#17181c] disabled:opacity-50"
             >
               Back to sign in
             </button>
@@ -480,9 +479,9 @@ export default function LoginPage() {
         {authMode === 'sign-in' ? (
           <>
             <div className="relative mt-6 flex items-center gap-4">
-              <span className="flex-1 border-t border-zinc-600" />
-              <span className="text-sm uppercase leading-normal text-[#AAAAAA] shrink-0">Or continue with</span>
-              <span className="flex-1 border-t border-zinc-600" />
+              <span className="flex-1 border-t border-[#e3e5e8]" />
+              <span className="shrink-0 text-sm font-semibold uppercase leading-normal text-[#8a8f99]">Or continue with</span>
+              <span className="flex-1 border-t border-[#e3e5e8]" />
             </div>
 
             <div className="mt-6 grid gap-3">
@@ -490,7 +489,7 @@ export default function LoginPage() {
             type="button"
             variant="outline"
             size="lg"
-            className="w-full h-12 text-base border-red-900/50 bg-[#991b1b] hover:bg-[#7f1d1d] text-white"
+            className="h-12 w-full rounded-xl border-[#d9dce2] bg-white text-base font-semibold text-[#202124] hover:bg-[#f5f6f8] hover:text-[#202124]"
             onClick={handleGoogleSignIn}
             disabled={loading}
           >
@@ -518,7 +517,7 @@ export default function LoginPage() {
             type="button"
             variant="outline"
             size="lg"
-            className="w-full h-12 text-base border-red-900/50 bg-[#991b1b] hover:bg-[#7f1d1d] text-white"
+            className="h-12 w-full rounded-xl border-[#d9dce2] bg-white text-base font-semibold text-[#202124] hover:bg-[#f5f6f8] hover:text-[#202124]"
             onClick={handleAppleSignIn}
             disabled={loading}
           >
@@ -539,15 +538,15 @@ export default function LoginPage() {
           <div
             className={`mt-6 p-4 rounded-lg text-base ${
               message.type === 'success'
-                ? 'bg-emerald-950/50 text-emerald-200 border border-emerald-800/50'
-                : 'bg-red-500/10 text-red-400 border border-red-500/30'
+                ? 'border border-emerald-200 bg-emerald-50 text-emerald-800'
+                : 'border border-red-200 bg-red-50 text-red-600'
             }`}
           >
             {message.text}
           </div>
         )}
 
-        <p className="mt-5 text-sm text-center text-[#AAAAAA]">
+        <p className="mt-5 text-center text-sm font-semibold text-[#7b7f89]">
           By continuing, you agree to our Terms of Service and Privacy Policy
         </p>
       </div>

@@ -90,6 +90,8 @@ export async function POST(request: NextRequest) {
   await admin
     .from('dialer_calls')
     .update({
+      telecom_provider: 'twilio',
+      provider_parent_call_id: validation.params.CallSid ?? null,
       status: 'initiated',
       twilio_parent_call_sid: validation.params.CallSid ?? null,
       updated_at: new Date().toISOString(),

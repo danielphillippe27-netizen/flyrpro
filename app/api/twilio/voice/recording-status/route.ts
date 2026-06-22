@@ -65,6 +65,8 @@ export async function POST(request: NextRequest) {
   const { error: updateError } = await admin
     .from('dialer_calls')
     .update({
+      telecom_provider: 'twilio',
+      provider_call_id: callSid ?? call.provider_call_id,
       twilio_call_sid: callSid ?? call.twilio_call_sid,
       status_payload: nextPayload,
       updated_at: now,

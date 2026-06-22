@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { AlertCircle, CheckCircle2, ChevronRight, Clock, Download, ListPlus, Loader2, Mail, MessageSquare, Mic, Pause, PhoneOff, Play, Save, Send, Trash2, Upload, X } from 'lucide-react';
+import { AlertCircle, CheckCircle2, ChevronRight, Clock, Download, ListPlus, Loader2, Mail, MessageSquare, Mic, Pause, PhoneIncoming, PhoneOff, Play, Save, Send, Star, Trash2, Upload, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useDialerRuntime } from '@/components/dialer/DialerRuntimeProvider';
 import {
@@ -14,7 +15,15 @@ import {
   filterContactsBySmartList,
   type SmartListOption,
 } from '@/components/crm/smart-list-utils';
-import { formatPhoneDisplay, normalizePhoneNumber } from '@/lib/dialer/phone';
+import {
+  PHONE_MARKET_LABELS,
+  SUPPORTED_PHONE_MARKETS,
+  formatPhoneDisplay,
+  normalizePhoneNumber,
+  phoneMarketFromCountryCode,
+  type PhoneNormalizationResult,
+  type SupportedPhoneMarket,
+} from '@/lib/dialer/phone';
 import { cn } from '@/lib/utils';
 import { useWorkspace } from '@/lib/workspace-context';
 import { ContactsService } from '@/lib/services/ContactsService';
@@ -56,6 +65,17 @@ type PlaceCallOptions = {
   redialAfterEnd?: boolean;
 };
 type DiallerListOption = SmartListOption & {
+  contacts: Contact[];
+  count: number;
+  dialableCount: number;
+  areaOptions: DiallerAreaOption[];
+};
+type DiallerAreaOption = {
+  id: string;
+  label: string;
+  description: string;
+  countryCode: string | null;
+  areaCode: string | null;
   contacts: Contact[];
   count: number;
   dialableCount: number;
@@ -239,8 +259,8 @@ function findColumn(headers: string[], candidates: string[]): number {
   return headers.findIndex((header) => candidates.includes(header));
 }
 
-function hasDialablePhone(value: string | null | undefined): boolean {
-  return normalizePhoneNumber(value).isValid;
+function hasDialablePhone(value: string | null | undefined, phoneMarket: SupportedPhoneMarket = 'US'): boolean {
+  return normalizePhoneNumber(value, phoneMarket).isValid;
 }
 
 function isWorkedContact(contact: Contact): boolean {
@@ -259,12 +279,76 @@ function buildListCriteria(baseKind: SmartListCriteria['baseKind'], overrides?: 
   };
 }
 
+function getContactPhoneMetadata(contact: Contact, fallbackMarket: SupportedPhoneMarket): PhoneNormalizationResult {
+  return normalizePhoneNumber(
+    contact.phone_e164?.trim() || contact.phone,
+    contact.phone_country_code ? phoneMarketFromCountryCode(contact.phone_country_code) : fallbackMarket
+  );
+}
+
+function areaSortKey(contact: Contact, fallbackMarket: SupportedPhoneMarket): string {
+  const phone = getContactPhoneMetadata(contact, fallbackMarket);
+  return [
+    phone.countryCode ?? contact.phone_country_code ?? 'ZZ',
+    phone.areaCode ?? contact.phone_area_code ?? '999',
+    contact.full_name ?? '',
+  ].join('|');
+}
+
+function sortContactsByPhoneArea(contacts: Contact[], fallbackMarket: SupportedPhoneMarket): Contact[] {
+  return [...contacts].sort((a, b) => areaSortKey(a, fallbackMarket).localeCompare(areaSortKey(b, fallbackMarket)));
+}
+
+function buildAreaOptions(contacts: Contact[], fallbackMarket: SupportedPhoneMarket): DiallerAreaOption[] {
+  const groups = new Map<string, DiallerAreaOption>();
+
+  for (const contact of contacts) {
+    const phone = getContactPhoneMetadata(contact, fallbackMarket);
+    if (!phone.isValid) continue;
+    const countryCode = phone.countryCode ?? contact.phone_country_code ?? null;
+    const areaCode = phone.areaCode ?? contact.phone_area_code ?? null;
+    const label =
+      phone.areaLabel ??
+      contact.phone_area_label ??
+      ([countryCode, areaCode].filter(Boolean).join(' ') || 'Unknown area');
+    const key = `${countryCode ?? 'unknown'}:${areaCode ?? 'unknown'}`;
+    const existing = groups.get(key);
+    if (existing) {
+      existing.contacts.push(contact);
+      existing.count += 1;
+      existing.dialableCount += 1;
+      continue;
+    }
+    groups.set(key, {
+      id: key,
+      label,
+      description: [countryCode, areaCode].filter(Boolean).join(' / ') || 'Parsed phone area',
+      countryCode,
+      areaCode,
+      contacts: [contact],
+      count: 1,
+      dialableCount: 1,
+    });
+  }
+
+  return Array.from(groups.values())
+    .map((group) => ({
+      ...group,
+      contacts: sortContactsByPhoneArea(group.contacts, fallbackMarket),
+    }))
+    .sort((a, b) =>
+      [a.countryCode ?? 'ZZ', a.areaCode ?? '999'].join('|').localeCompare(
+        [b.countryCode ?? 'ZZ', b.areaCode ?? '999'].join('|')
+      )
+    );
+}
+
 function buildDiallerAllLeadsList(): SmartListOption {
   return {
     id: ALL_LEADS_LIST_ID,
     name: 'All Leads',
     kind: 'all',
-    description: 'People your team has actually contacted.',
+    description: 'People you have actually contacted.',
   };
 }
 
@@ -301,11 +385,11 @@ function parseFocusedLeadIds(value: string | null): string[] {
   ).slice(0, 100);
 }
 
-function scorePhoneColumn(rows: string[][], columnIndex: number): number {
-  return rows.reduce((score, row) => score + (hasDialablePhone(row[columnIndex]) ? 1 : 0), 0);
+function scorePhoneColumn(rows: string[][], columnIndex: number, phoneMarket: SupportedPhoneMarket): number {
+  return rows.reduce((score, row) => score + (hasDialablePhone(row[columnIndex], phoneMarket) ? 1 : 0), 0);
 }
 
-function findPhoneColumn(headers: string[], rows: string[][]): number {
+function findPhoneColumn(headers: string[], rows: string[][], phoneMarket: SupportedPhoneMarket): number {
   const exactPhoneIndex = findColumn(headers, [
     'phone',
     'phone_number',
@@ -319,7 +403,7 @@ function findPhoneColumn(headers: string[], rows: string[][]): number {
     'telephone',
     'tel',
   ]);
-  if (exactPhoneIndex >= 0 && scorePhoneColumn(rows, exactPhoneIndex) > 0) return exactPhoneIndex;
+  if (exactPhoneIndex >= 0 && scorePhoneColumn(rows, exactPhoneIndex, phoneMarket) > 0) return exactPhoneIndex;
 
   const fuzzyIndexes = headers.flatMap((header, index) =>
     header.includes('phone') || header.includes('mobile') || header.includes('cell') || header.includes('telephone') || header === 'tel'
@@ -327,21 +411,21 @@ function findPhoneColumn(headers: string[], rows: string[][]): number {
       : []
   );
   const scored = fuzzyIndexes
-    .map((index) => ({ index, score: scorePhoneColumn(rows, index) }))
+    .map((index) => ({ index, score: scorePhoneColumn(rows, index, phoneMarket) }))
     .filter((candidate) => candidate.score > 0)
     .sort((a, b) => b.score - a.score);
 
   return scored[0]?.index ?? -1;
 }
 
-function leadsFromCsv(text: string): Array<{ name: string; phone: string; company: string | null; email: string | null }> {
+function leadsFromCsv(text: string, phoneMarket: SupportedPhoneMarket): Array<{ name: string; phone: string; company: string | null; email: string | null }> {
   const rows = parseCsv(text);
   if (rows.length < 2) return [];
 
   const headers = rows[0].map(normalizeHeader);
   const nameIndex = findColumn(headers, ['name', 'full_name', 'contact', 'contact_name', 'lead', 'lead_name']);
   const dataRows = rows.slice(1);
-  const phoneIndex = findPhoneColumn(headers, dataRows);
+  const phoneIndex = findPhoneColumn(headers, dataRows, phoneMarket);
   const companyIndex = findColumn(headers, ['company', 'company_name', 'business', 'organization', 'account']);
   const emailIndex = findColumn(headers, ['email', 'email_address', 'mail']);
 
@@ -349,10 +433,11 @@ function leadsFromCsv(text: string): Array<{ name: string; phone: string; compan
 
   return dataRows.flatMap((row) => {
     const phone = row[phoneIndex]?.trim() ?? '';
-    if (!hasDialablePhone(phone)) return [];
+    const normalizedPhone = normalizePhoneNumber(phone, phoneMarket);
+    if (!normalizedPhone.e164) return [];
     return [{
       name: nameIndex >= 0 ? row[nameIndex]?.trim() || 'Lead' : 'Lead',
-      phone,
+      phone: normalizedPhone.e164,
       company: companyIndex >= 0 ? row[companyIndex]?.trim() || null : null,
       email: emailIndex >= 0 ? row[emailIndex]?.trim() || null : null,
     }];
@@ -395,6 +480,7 @@ export function PowerDialerPage() {
   const [email, setEmail] = useState('');
   const [followUpOpen, setFollowUpOpen] = useState(false);
   const [listPickerOpen, setListPickerOpen] = useState(false);
+  const [phoneMarket, setPhoneMarket] = useState<SupportedPhoneMarket>('US');
   const [leadListOptions, setLeadListOptions] = useState<DiallerListOption[]>([]);
   const [loadingLeadLists, setLoadingLeadLists] = useState(false);
   const [addingLeadListId, setAddingLeadListId] = useState<string | null>(null);
@@ -411,6 +497,7 @@ export function PowerDialerPage() {
   const [savingContact, setSavingContact] = useState(false);
   const [sendingDemoEmail, setSendingDemoEmail] = useState(false);
   const [removingList, setRemovingList] = useState(false);
+  const [starringLeadId, setStarringLeadId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isIphone, setIsIphone] = useState(false);
@@ -457,7 +544,7 @@ export function PowerDialerPage() {
   const statusChecks = [
     { label: 'Workspace selected', ok: Boolean(currentWorkspaceId) },
     { label: 'Microphone granted', ok: device.microphoneGranted },
-    { label: 'Twilio device ready', ok: device.isReady },
+    { label: `${device.provider === 'telnyx' ? 'Telnyx' : 'Legacy'} device ready`, ok: device.isReady },
     { label: 'Shared caller ID', ok: Boolean(dialerAccess?.sharedDefaultDialingEnabled || dialerAccess?.settings?.dedicatedFromNumber) },
   ];
 
@@ -542,6 +629,20 @@ export function PowerDialerPage() {
   }, [currentWorkspaceId, focusedWorkspaceId, setCurrentWorkspaceId]);
 
   useEffect(() => {
+    let cancelled = false;
+    void fetch('/api/profile', { credentials: 'include' })
+      .then(async (response) => {
+        if (!response.ok) return;
+        const data = (await response.json().catch(() => ({}))) as { country_code?: string | null };
+        if (!cancelled) setPhoneMarket(phoneMarketFromCountryCode(data.country_code));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!currentWorkspaceId) {
       setDialerAccess(null);
       setDialerAccessLoading(false);
@@ -612,6 +713,50 @@ export function PowerDialerPage() {
     await device.initialize(currentWorkspaceId, tabId);
   };
 
+  const handleToggleLeadStar = async (lead: DiallerLead) => {
+    if (!currentWorkspaceId || starringLeadId) return;
+    const nextStarred = !lead.is_starred;
+    setStarringLeadId(lead.id);
+    setLeads((currentLeads) =>
+      currentLeads.map((currentLead) =>
+        currentLead.id === lead.id ? { ...currentLead, is_starred: nextStarred } : currentLead
+      )
+    );
+    setError(null);
+
+    try {
+      const response = await fetch('/api/dialer/leads', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          workspaceId: currentWorkspaceId,
+          id: lead.id,
+          isStarred: nextStarred,
+        }),
+      });
+      const data = (await response.json().catch(() => ({}))) as { lead?: DiallerLead; error?: string };
+      if (!response.ok || !data.lead) {
+        throw new Error(data.error || 'Failed to update lead star.');
+      }
+      setLeads((currentLeads) =>
+        currentLeads.map((currentLead) =>
+          currentLead.id === lead.id ? { ...currentLead, is_starred: data.lead!.is_starred } : currentLead
+        )
+      );
+      setMessage(nextStarred ? 'Lead starred for recordings.' : 'Lead removed from starred recordings.');
+    } catch (toggleError) {
+      setLeads((currentLeads) =>
+        currentLeads.map((currentLead) =>
+          currentLead.id === lead.id ? { ...currentLead, is_starred: lead.is_starred } : currentLead
+        )
+      );
+      setError(toggleError instanceof Error ? toggleError.message : 'Failed to update lead star.');
+    } finally {
+      setStarringLeadId(null);
+    }
+  };
+
   const handleImportClick = () => {
     fileInputRef.current?.click();
   };
@@ -634,8 +779,9 @@ export function PowerDialerPage() {
         ContactsService.fetchContacts(user.id, currentWorkspaceId),
         CampaignsService.fetchCampaignsV2(user.id, currentWorkspaceId).catch(() => [] as CampaignV2[]),
         FarmService.fetchFarms(user.id, currentWorkspaceId).catch(() => [] as Farm[]),
-        SmartListsService.fetchWorkspaceSmartLists(currentWorkspaceId).catch(() => []),
+        SmartListsService.fetchUserWorkspaceSmartLists(currentWorkspaceId, user.id).catch(() => []),
       ]);
+      const userContacts = contactsData.filter((contact) => contact.user_id === user.id);
 
       const smartListOptions = [
         buildDiallerAllLeadsList(),
@@ -652,13 +798,15 @@ export function PowerDialerPage() {
         .map((list) => {
           const contactsForList =
             list.id === ALL_LEADS_LIST_ID
-              ? contactsData.filter(isWorkedContact)
-              : filterContactsBySmartList(contactsData, list);
+              ? userContacts.filter(isWorkedContact)
+              : filterContactsBySmartList(userContacts, list);
+          const areaOptions = buildAreaOptions(contactsForList, phoneMarket);
           return {
             ...list,
-            contacts: contactsForList,
+            contacts: sortContactsByPhoneArea(contactsForList, phoneMarket),
             count: contactsForList.length,
-            dialableCount: contactsForList.filter((contact) => hasDialablePhone(contact.phone)).length,
+            dialableCount: areaOptions.reduce((total, area) => total + area.dialableCount, 0),
+            areaOptions,
           };
         })
         .filter((list) => list.count > 0);
@@ -677,10 +825,14 @@ export function PowerDialerPage() {
     void loadLeadListOptions();
   };
 
-  const handleAddLeadListToDialler = async (list: DiallerListOption) => {
-    if (!currentWorkspaceId || list.dialableCount === 0) return;
+  const handleAddLeadListToDialler = async (list: DiallerListOption, area?: DiallerAreaOption) => {
+    const contactsForImport = area?.contacts ?? list.contacts;
+    const dialableContacts = sortContactsByPhoneArea(contactsForImport, phoneMarket)
+      .map((contact) => ({ contact, phone: getContactPhoneMetadata(contact, phoneMarket) }))
+      .filter((entry) => entry.phone.e164);
+    if (!currentWorkspaceId || dialableContacts.length === 0) return;
 
-    setAddingLeadListId(list.id);
+    setAddingLeadListId(area ? `${list.id}:${area.id}` : list.id);
     setError(null);
     setMessage(null);
 
@@ -691,14 +843,13 @@ export function PowerDialerPage() {
         credentials: 'include',
         body: JSON.stringify({
           workspaceId: currentWorkspaceId,
-          leads: list.contacts
-            .filter((contact) => hasDialablePhone(contact.phone))
-            .map((contact) => ({
-              name: contact.full_name?.trim() || 'Lead',
-              phone: contact.phone?.trim() || '',
-              company: contact.address?.trim() || null,
-              email: contact.email?.trim() || null,
-            })),
+          phoneMarket,
+          leads: dialableContacts.map(({ contact, phone }) => ({
+            name: contact.full_name?.trim() || 'Lead',
+            phone: phone.e164 || contact.phone?.trim() || '',
+            company: contact.address?.trim() || null,
+            email: contact.email?.trim() || null,
+          })),
         }),
       });
       const data = (await response.json().catch(() => ({}))) as DiallerImportResponse;
@@ -707,7 +858,7 @@ export function PowerDialerPage() {
       const importedLeads = data.leads ?? [];
       setLeads((currentLeads) => [...currentLeads, ...importedLeads]);
       setActiveLeadId((currentId) => currentId ?? importedLeads[0]?.id ?? null);
-      setMessage(`${data.importedCount ?? importedLeads.length} leads added from ${list.name}.`);
+      setMessage(`${data.importedCount ?? importedLeads.length} leads added from ${area ? `${list.name} - ${area.label}` : list.name}.`);
       setListPickerOpen(false);
     } catch (addError) {
       setError(addError instanceof Error ? addError.message : 'Failed to add this list to the dialler.');
@@ -725,7 +876,7 @@ export function PowerDialerPage() {
 
     try {
       const text = await file.text();
-      const parsedLeads = leadsFromCsv(text);
+      const parsedLeads = leadsFromCsv(text, phoneMarket);
       if (parsedLeads.length === 0) {
         throw new Error('CSV must include phone plus optional name and company columns.');
       }
@@ -736,6 +887,7 @@ export function PowerDialerPage() {
         credentials: 'include',
         body: JSON.stringify({
           workspaceId: currentWorkspaceId,
+          phoneMarket,
           leads: parsedLeads,
         }),
       });
@@ -761,7 +913,7 @@ export function PowerDialerPage() {
   const handleLoadTestLead = async () => {
     if (!currentWorkspaceId) return;
 
-    const testPhone = normalizePhoneNumber(TEST_LEAD.phone).e164;
+    const testPhone = normalizePhoneNumber(TEST_LEAD.phone, 'CA').e164;
     const existingTestLead = leads.find(
       (lead) => normalizePhoneNumber(lead.phone).e164 === testPhone && statusForLead(lead) === 'pending'
     );
@@ -783,6 +935,8 @@ export function PowerDialerPage() {
         credentials: 'include',
         body: JSON.stringify({
           workspaceId: currentWorkspaceId,
+          phoneMarket: 'CA',
+          testLead: true,
           leads: [TEST_LEAD],
         }),
       });
@@ -801,6 +955,46 @@ export function PowerDialerPage() {
       setLoadingTestLead(false);
     }
   };
+
+  const removeLeadFromDiallerQueue = useCallback(async (
+    leadId: string,
+    options?: { silent?: boolean }
+  ): Promise<boolean> => {
+    if (!currentWorkspaceId) return false;
+
+    try {
+      const response = await fetch('/api/dialer/leads', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          workspaceId: currentWorkspaceId,
+          id: leadId,
+        }),
+      });
+      const data = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) throw new Error(data.error || 'Failed to remove lead from the dialler.');
+
+      setLeads((currentLeads) => {
+        const removedIndex = currentLeads.findIndex((lead) => lead.id === leadId);
+        const nextLeads = currentLeads.filter((lead) => lead.id !== leadId);
+        setActiveLeadId((currentId) => {
+          if (currentId && currentId !== leadId && nextLeads.some((lead) => lead.id === currentId)) return currentId;
+          const laterPending = nextLeads.slice(Math.max(removedIndex, 0)).find((lead) => statusForLead(lead) === 'pending');
+          const firstPending = nextLeads.find((lead) => statusForLead(lead) === 'pending');
+          return laterPending?.id ?? firstPending?.id ?? nextLeads[0]?.id ?? null;
+        });
+        return nextLeads;
+      });
+      setActiveLeadSnapshot((snapshot) => (snapshot?.id === leadId ? null : snapshot));
+      return true;
+    } catch (removeError) {
+      if (!options?.silent) {
+        setError(removeError instanceof Error ? removeError.message : 'Failed to remove lead from the dialler.');
+      }
+      return false;
+    }
+  }, [currentWorkspaceId, setActiveLeadId, setActiveLeadSnapshot, setLeads]);
 
   const advanceToNextLead = useCallback((updatedLeads: DiallerLead[], currentLeadId: string) => {
     const currentIndex = updatedLeads.findIndex((lead) => lead.id === currentLeadId);
@@ -859,13 +1053,16 @@ export function PowerDialerPage() {
       const data = (await response.json().catch(() => ({}))) as { lead?: DiallerLead; error?: string; warning?: string | null };
       if (!response.ok || !data.lead) throw new Error(data.error || 'Failed to save lead.');
 
-      setLeads((currentLeads) => {
-        const updatedLeads = currentLeads.map((lead) => (lead.id === data.lead!.id ? data.lead! : lead));
-        if (!suppressAutoAdvance || forceAdvance) {
-          advanceToNextLead(updatedLeads, data.lead!.id);
-        }
-        return updatedLeads;
-      });
+      const removedFromQueue = await removeLeadFromDiallerQueue(data.lead.id, { silent: true });
+      if (!removedFromQueue) {
+        setLeads((currentLeads) => {
+          const updatedLeads = currentLeads.map((lead) => (lead.id === data.lead!.id ? data.lead! : lead));
+          if (!suppressAutoAdvance || forceAdvance) {
+            advanceToNextLead(updatedLeads, data.lead!.id);
+          }
+          return updatedLeads;
+        });
+      }
       setMessage(data.warning ?? successMessage);
       return true;
     } catch (saveError) {
@@ -1016,10 +1213,6 @@ export function PowerDialerPage() {
       }
       setActiveLeadId(leadToCall.id);
 
-      if (!device.isReady && device.setupState !== 'initializing') {
-        await device.initialize(currentWorkspaceId, tabId);
-      }
-
       const response = await fetch('/api/dialer/leads/call', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1040,8 +1233,18 @@ export function PowerDialerPage() {
       setActiveCallId(data.call.id);
       setDiallerRunning(true);
       setActiveCallIsDoubleDial(doubleDial);
-      setMessage(doubleDial ? (redialAfterEnd ? 'Double dial started. Will redial this lead once.' : 'Redial started.') : 'Call started.');
-      await device.startCall(data.call.call_request_id);
+      setMessage(
+        doubleDial
+          ? (redialAfterEnd ? 'Double dial started. Will redial this lead once.' : 'Redial started.')
+          : 'Call started.'
+      );
+      if (!device.isReady) {
+        await device.initialize(currentWorkspaceId, tabId);
+      }
+      await device.startCall(data.call.call_request_id, {
+        toNumber: data.call.to_number_e164,
+        fromNumber: data.call.from_number_e164,
+      });
     } catch (callError) {
       if (redialAfterEnd) {
         doubleDialRetryRef.current = null;
@@ -1060,6 +1263,7 @@ export function PowerDialerPage() {
     if (device.callPhase !== 'ended' || !activeCallId) return;
 
     const retry = doubleDialRetryRef.current;
+    const endedLeadId = activeLeadId;
     setDiallerRunning(false);
     setActiveCallId(null);
     setActiveCallIsDoubleDial(false);
@@ -1080,8 +1284,11 @@ export function PowerDialerPage() {
       return;
     }
 
+    if (endedLeadId) {
+      void removeLeadFromDiallerQueue(endedLeadId, { silent: true });
+    }
     setMessage((currentMessage) => currentMessage ?? 'Call ended.');
-  }, [activeCallId, device.callPhase, leads, setActiveCallId, setActiveCallIsDoubleDial, setDiallerRunning]);
+  }, [activeCallId, activeLeadId, device.callPhase, leads, removeLeadFromDiallerQueue, setActiveCallId, setActiveCallIsDoubleDial, setDiallerRunning]);
 
   const handleTextDrop = async () => {
     if (!activeLead || !currentWorkspaceId) return;
@@ -1306,6 +1513,15 @@ export function PowerDialerPage() {
     doubleDialRetryRef.current = null;
     if (device.isInCall) {
       device.hangUp();
+    } else if (activeCallId && currentWorkspaceId) {
+      void fetch(`/api/dialer/calls/${encodeURIComponent(activeCallId)}/hangup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ workspaceId: currentWorkspaceId }),
+      }).catch((error) => {
+        console.warn('[power-dialer] failed to hang up backend call', error);
+      });
     }
     setDiallerRunning(false);
     setActiveCallId(null);
@@ -1411,6 +1627,24 @@ export function PowerDialerPage() {
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-2">
+              {activeLead ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon-sm"
+                  onClick={() => void handleToggleLeadStar(activeLead)}
+                  disabled={starringLeadId !== null}
+                  className={cn('h-10 w-10 touch-manipulation sm:h-9 sm:w-9', DIALER_OUTLINE_BUTTON_CLASS)}
+                  title={activeLead.is_starred ? 'Remove from starred recordings' : 'Star lead for recordings'}
+                  aria-label={activeLead.is_starred ? 'Remove from starred recordings' : 'Star lead for recordings'}
+                >
+                  {starringLeadId === activeLead.id ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Star className={cn('h-4 w-4', activeLead.is_starred && 'fill-amber-400 text-amber-500')} />
+                  )}
+                </Button>
+              ) : null}
               {activeRecordingExportHref ? (
                 <Button
                   asChild
@@ -1595,11 +1829,43 @@ export function PowerDialerPage() {
           </div>
 
           <div className="sticky bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] z-20 mt-4 sm:static">
+            {device.hasIncomingCall ? (
+              <div className="mb-2 grid gap-2 rounded-lg border border-border bg-card p-2 shadow-lg shadow-neutral-200/60 sm:grid-cols-[1fr_140px_140px] dark:shadow-black/20">
+                <div className="min-w-0 px-2 py-1">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Incoming call</div>
+                  <div className="truncate text-sm font-semibold text-foreground">
+                    {device.incomingCall?.name?.trim() || device.incomingCall?.number || 'Telnyx caller'}
+                  </div>
+                  {device.incomingCall?.number ? (
+                    <div className="truncate text-xs text-muted-foreground">
+                      {formatPhoneDisplay(device.incomingCall.number)}
+                    </div>
+                  ) : null}
+                </div>
+                <Button
+                  type="button"
+                  onClick={() => void device.answerIncomingCall()}
+                  className={cn('h-[44px] min-h-[44px] touch-manipulation text-base font-semibold', DIALER_PRIMARY_BUTTON_CLASS)}
+                >
+                  <PhoneIncoming className="h-4 w-4" />
+                  Answer
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={device.rejectIncomingCall}
+                  className={cn('h-[44px] min-h-[44px] touch-manipulation text-base font-semibold', DIALER_OUTLINE_BUTTON_CLASS)}
+                >
+                  <PhoneOff className="h-4 w-4" />
+                  Decline
+                </Button>
+              </div>
+            ) : null}
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-[1fr_140px_140px]">
               <Button
                 type="button"
                 onClick={() => void handleStartPause()}
-                disabled={!hasActiveLead || device.setupState === 'initializing' || startingCall}
+                disabled={device.hasIncomingCall || !hasActiveLead || device.setupState === 'initializing' || startingCall}
                 className={cn('h-[52px] min-h-[52px] w-full touch-manipulation text-base font-semibold shadow-lg shadow-neutral-300/70 dark:shadow-black/25 sm:h-12 sm:min-h-12', DIALER_PRIMARY_BUTTON_CLASS)}
               >
                 {device.setupState === 'initializing' || startingCall ? (
@@ -1658,29 +1924,57 @@ export function PowerDialerPage() {
                 <div className="grid gap-2">
                   {leadListOptions.map((list) => {
                     const isAdding = addingLeadListId === list.id;
+                    const showAreaOptions = list.areaOptions.length > 1;
                     return (
-                      <Button
-                        key={list.id}
-                        type="button"
-                        variant="outline"
-                        onClick={() => void handleAddLeadListToDialler(list)}
-                        disabled={addingLeadListId !== null || list.dialableCount === 0}
-                        className={cn(
-                          'h-auto min-h-[68px] justify-between gap-3 px-3 py-3 text-left',
-                          DIALER_OUTLINE_BUTTON_CLASS
-                        )}
-                      >
-                        <span className="min-w-0">
-                          <span className="block truncate text-sm font-semibold text-foreground">{list.name}</span>
-                          <span className="mt-1 block truncate text-xs font-normal text-muted-foreground">
-                            {list.description}
+                      <div key={list.id} className="rounded-lg border border-border bg-background p-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => void handleAddLeadListToDialler(list)}
+                          disabled={addingLeadListId !== null || list.dialableCount === 0}
+                          className={cn(
+                            'h-auto min-h-[64px] w-full justify-between gap-3 px-3 py-3 text-left',
+                            DIALER_OUTLINE_BUTTON_CLASS
+                          )}
+                        >
+                          <span className="min-w-0">
+                            <span className="block truncate text-sm font-semibold text-foreground">{list.name}</span>
+                            <span className="mt-1 block truncate text-xs font-normal text-muted-foreground">
+                              {showAreaOptions ? 'All areas' : list.description}
+                            </span>
                           </span>
-                        </span>
-                        <span className="flex shrink-0 items-center gap-2 text-xs font-semibold text-muted-foreground">
-                          {isAdding ? <Loader2 className="h-4 w-4 animate-spin" /> : <ListPlus className="h-4 w-4" />}
-                          {list.dialableCount}/{list.count}
-                        </span>
-                      </Button>
+                          <span className="flex shrink-0 items-center gap-2 text-xs font-semibold text-muted-foreground">
+                            {isAdding ? <Loader2 className="h-4 w-4 animate-spin" /> : <ListPlus className="h-4 w-4" />}
+                            {list.dialableCount}/{list.count}
+                          </span>
+                        </Button>
+                        {showAreaOptions ? (
+                          <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
+                            {list.areaOptions.map((area) => {
+                              const areaAdding = addingLeadListId === `${list.id}:${area.id}`;
+                              return (
+                                <Button
+                                  key={area.id}
+                                  type="button"
+                                  variant="outline"
+                                  onClick={() => void handleAddLeadListToDialler(list, area)}
+                                  disabled={addingLeadListId !== null || area.dialableCount === 0}
+                                  className={cn('h-auto min-h-11 justify-between gap-2 px-3 py-2 text-left text-xs', DIALER_OUTLINE_BUTTON_CLASS)}
+                                >
+                                  <span className="min-w-0">
+                                    <span className="block truncate font-semibold text-foreground">{area.label}</span>
+                                    <span className="block truncate font-normal text-muted-foreground">{area.description}</span>
+                                  </span>
+                                  <span className="flex shrink-0 items-center gap-1.5 font-semibold text-muted-foreground">
+                                    {areaAdding ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ListPlus className="h-3.5 w-3.5" />}
+                                    {area.dialableCount}
+                                  </span>
+                                </Button>
+                              );
+                            })}
+                          </div>
+                        ) : null}
+                      </div>
                     );
                   })}
                 </div>
@@ -1782,14 +2076,14 @@ export function PowerDialerPage() {
         </Dialog>
 
         <section className="mt-2">
-            <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h2 className="text-base font-semibold text-foreground">People</h2>
                 <p className="text-sm text-muted-foreground">
                   {leads.length > 0 ? `${leads.length} leads loaded.` : 'Add a Leads list or import a CSV to begin.'}
                 </p>
               </div>
-              <div className="flex shrink-0 items-center gap-2">
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -1797,6 +2091,18 @@ export function PowerDialerPage() {
                   className="hidden"
                   onChange={(event) => void handleFileSelected(event.target.files?.[0] ?? null)}
                 />
+                <Select value={phoneMarket} onValueChange={(value) => setPhoneMarket(value as SupportedPhoneMarket)}>
+                  <SelectTrigger aria-label="Phone market" className={cn('h-11 w-[150px]', DIALER_OUTLINE_BUTTON_CLASS)}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SUPPORTED_PHONE_MARKETS.map((market) => (
+                      <SelectItem key={market} value={market}>
+                        {PHONE_MARKET_LABELS[market]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <Button
                   type="button"
                   variant="outline"
@@ -1849,10 +2155,26 @@ export function PowerDialerPage() {
                       <div
                         key={lead.id}
                         className={cn(
-                          'grid min-h-[64px] w-full gap-1.5 px-3 py-3 text-left transition hover:bg-muted/70 sm:grid-cols-[1.2fr_1fr_0.9fr_auto_auto] sm:items-center sm:gap-2 sm:px-4',
+                          'grid min-h-[64px] w-full gap-1.5 px-3 py-3 text-left transition hover:bg-muted/70 sm:grid-cols-[auto_1.2fr_1fr_0.9fr_auto_auto] sm:items-center sm:gap-2 sm:px-4',
                           isActive && 'bg-muted'
                         )}
                       >
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={() => void handleToggleLeadStar(lead)}
+                          disabled={starringLeadId !== null}
+                          className="h-8 w-8 justify-self-start text-muted-foreground hover:text-foreground"
+                          title={lead.is_starred ? 'Remove from starred recordings' : 'Star lead for recordings'}
+                          aria-label={lead.is_starred ? 'Remove from starred recordings' : 'Star lead for recordings'}
+                        >
+                          {starringLeadId === lead.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Star className={cn('h-4 w-4', lead.is_starred && 'fill-amber-400 text-amber-500')} />
+                          )}
+                        </Button>
                         <button
                           type="button"
                           onClick={() => setActiveLeadId(lead.id)}

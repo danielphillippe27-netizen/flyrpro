@@ -24,7 +24,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'FLYR Demo 1',
     description: 'Watch the demo and start a 14 day free trial. No credit card.',
-    url: 'https://flyr.software/demo-1',
+    url: 'https://www.flyrpro.app/demo-1',
   },
 };
 

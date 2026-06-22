@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import twilio from 'twilio';
 import type { DialerCall, DialerSmsFollowup } from '@/types/database';
-import { buildPublicTwilioWebhookUrl, getDialerRequestContext } from '@/lib/dialer/server';
-import { getTwilioAccountSid, getTwilioAuthToken } from '@/lib/dialer/env';
+import { getDialerRequestContext } from '@/lib/dialer/server';
+import { sendDialerSms } from '@/lib/dialer/provider';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -158,7 +157,7 @@ export async function POST(
 
   if (!context.settings.defaultSmsFromNumber) {
     return NextResponse.json(
-      { error: 'Add a Twilio SMS-enabled number before sending follow-up texts' },
+      { error: 'Add an SMS-enabled dialer number before sending follow-up texts' },
       { status: 400 }
     );
   }
@@ -168,19 +167,16 @@ export async function POST(
   }
 
   try {
-    const client = twilio(getTwilioAccountSid(), getTwilioAuthToken());
-    const statusCallback = buildPublicTwilioWebhookUrl(request, '/api/twilio/messaging/status');
     const now = new Date().toISOString();
     const contactId = await ensureContactForCallSms({ context, call, now });
     if (!contactId) {
       return NextResponse.json({ error: 'Could not save this lead before sending the text.' }, { status: 500 });
     }
 
-    const message = await client.messages.create({
+    const message = await sendDialerSms(request, {
       from: context.settings.defaultSmsFromNumber,
       to: call.to_number_e164,
       body: messageBody,
-      statusCallback: statusCallback.toString(),
     });
 
     const insertPayload = {
@@ -188,15 +184,17 @@ export async function POST(
       call_id: call.id,
       contact_id: contactId,
       user_id: context.requestUser.id,
-      twilio_message_sid: message.sid,
+      telecom_provider: message.provider,
+      provider_message_id: message.messageId,
+      twilio_message_sid: message.provider === 'twilio' ? message.messageId : null,
       from_number_e164: context.settings.defaultSmsFromNumber,
       to_number_e164: call.to_number_e164,
       body: messageBody,
-      status: message.status ?? 'queued',
+      status: message.status,
       sent_at: now,
       status_payload: {
-        sid: message.sid,
-        status: message.status ?? 'queued',
+        ...message.raw,
+        provider: message.provider,
       },
     };
 

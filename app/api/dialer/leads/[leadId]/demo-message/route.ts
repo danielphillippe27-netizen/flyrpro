@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ensureSalespersonReferralCode, normalizeSalespersonReferralCodeInput } from '@/app/lib/billing/salespeople';
+import { createTrackedDemoLink } from '@/lib/dialer/demo-link-tracking';
 import { getDialerRequestContext } from '@/lib/dialer/server';
 import { generateDemoLinkForLead } from '@/lib/demo/generateDemoLinkForLead';
 import type { DiallerLead } from '@/types/database';
@@ -12,6 +13,9 @@ type DemoMessagePayload = {
   email?: string | null;
 };
 
+const FALLBACK_PUBLIC_ORIGIN = 'https://www.flyrpro.app';
+const DEMO_VIDEO_PATH = '/demo-1';
+
 function cleanText(value: string | null | undefined): string {
   return (value ?? '').trim();
 }
@@ -22,6 +26,9 @@ function normalizePublicOrigin(value: string | null | undefined): string | null 
   try {
     const parsed = new URL(cleaned.startsWith('http') ? cleaned : `https://${cleaned}`);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    if (parsed.hostname.toLowerCase() === 'flyrpro.app') {
+      parsed.hostname = 'www.flyrpro.app';
+    }
     return parsed.origin;
   } catch {
     return null;
@@ -34,7 +41,7 @@ function getPublicOrigin(request: NextRequest): string {
     normalizePublicOrigin(process.env.APP_BASE_URL) ||
     normalizePublicOrigin(process.env.VERCEL_URL) ||
     normalizePublicOrigin(request.nextUrl.origin) ||
-    'https://flyr.software'
+    FALLBACK_PUBLIC_ORIGIN
   );
 }
 
@@ -47,12 +54,12 @@ function getRepFirstName(value: string | null | undefined): string {
 }
 
 function buildSharedDemoUrl(origin: string, referralCode: string | null): string {
-  if (!referralCode) return new URL('/demo1', origin).toString();
+  if (!referralCode) return new URL(DEMO_VIDEO_PATH, origin).toString();
 
   const url = new URL(`/s/${encodeURIComponent(referralCode)}`, origin);
   url.searchParams.set('source', 'salesperson');
   url.searchParams.set('campaign', 'power-dialer-demo');
-  url.searchParams.set('redirect', '/demo1');
+  url.searchParams.set('redirect', DEMO_VIDEO_PATH);
   return url.toString();
 }
 
@@ -99,6 +106,7 @@ export async function POST(
     .select('*')
     .eq('id', leadId)
     .eq('workspace_id', context.workspaceId)
+    .eq('user_id', context.requestUser.id)
     .maybeSingle();
 
   if (leadError) {
@@ -129,7 +137,7 @@ export async function POST(
     : null;
 
   const origin = getPublicOrigin(request);
-  let demoUrl = buildSharedDemoUrl(origin, referralCode);
+  let demoUrl: string;
   try {
     const generated = await generateDemoLinkForLead({
       admin: context.admin,
@@ -138,7 +146,19 @@ export async function POST(
     });
     demoUrl = generated.url;
   } catch (generateError) {
-    console.warn('[dialer/demo-message] demo engine link generation failed; falling back to legacy demo URL', generateError);
+    console.warn('[dialer/demo-message] demo engine link generation failed; falling back to tracked demo link', generateError);
+    const trackedLink = await createTrackedDemoLink({
+      admin: context.admin,
+      origin,
+      salesperson,
+      workspaceId: context.workspaceId,
+      lead: diallerLead,
+      referralCode,
+      source: 'salesperson',
+      campaign: 'power-dialer-demo',
+      destinationPath: DEMO_VIDEO_PATH,
+    });
+    demoUrl = trackedLink?.url ?? buildSharedDemoUrl(origin, referralCode);
   }
   const repName = getRepFirstName(salesperson?.full_name || context.requestUser.email);
 

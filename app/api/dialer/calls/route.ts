@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import type { Contact, DialerCall, DialerSessionLead } from '@/types/database';
 import { getDialerRequestContext } from '@/lib/dialer/server';
-import { normalizePhoneNumber } from '@/lib/dialer/phone';
+import { getDialerTelecomProvider } from '@/lib/dialer/env';
+import { resolveOutboundCallerId } from '@/lib/dialer/caller-id';
+import { normalizePhoneNumber, phoneMarketFromCountryCode } from '@/lib/dialer/phone';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -53,13 +55,20 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Lead not found in this workspace' }, { status: 404 });
   }
 
-  const normalized = normalizePhoneNumber((contact as Contact).phone);
+  const activeContact = contact as Contact;
+  const normalized = normalizePhoneNumber(
+    (activeContact.phone_e164 ?? '').trim() || activeContact.phone,
+    phoneMarketFromCountryCode(activeContact.phone_country_code)
+  );
   const now = new Date().toISOString();
 
   await context.admin
     .from('contacts')
     .update({
       phone_e164: normalized.e164,
+      phone_country_code: normalized.countryCode,
+      phone_area_code: normalized.areaCode,
+      phone_area_label: normalized.areaLabel,
       phone_last_validated_at: now,
       phone_validation_error: normalized.error,
       updated_at: now,
@@ -102,6 +111,11 @@ export async function POST(request: NextRequest) {
   }
 
   const callRequestId = crypto.randomUUID();
+  const telecomProvider = getDialerTelecomProvider();
+  const fromNumber = resolveOutboundCallerId({
+    toNumber: normalized.e164,
+    defaultFromNumber: context.settings.defaultFromNumber,
+  });
   const { data: call, error: callError } = await context.admin
     .from('dialer_calls')
     .insert({
@@ -111,11 +125,17 @@ export async function POST(request: NextRequest) {
       contact_id: body.contactId,
       user_id: context.requestUser.id,
       call_request_id: callRequestId,
-      to_number_raw: (contact as Contact).phone ?? null,
+      telecom_provider: telecomProvider,
+      to_number_raw: activeContact.phone ?? null,
       to_number_e164: normalized.e164,
-      from_number_e164: context.settings.defaultFromNumber,
+      from_number_e164: fromNumber,
       status: 'pending',
       direction: 'outbound',
+      status_payload: {
+        destinationCountryCode: normalized.countryCode,
+        destinationAreaCode: normalized.areaCode,
+        destinationAreaLabel: normalized.areaLabel,
+      },
     })
     .select('*')
     .single();
@@ -125,15 +145,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to start outbound call' }, { status: 500 });
   }
 
+  const activeCall = call as DialerCall;
+
   await context.admin
     .from('dialer_session_leads')
     .update({
       status: 'calling',
-      last_call_id: call.id,
+      last_call_id: activeCall.id,
       attempt_count: ((lead as DialerSessionLead).attempt_count ?? 0) + 1,
       updated_at: now,
     })
     .eq('id', lead.id);
 
-  return NextResponse.json({ call: call as DialerCall, contact });
+  return NextResponse.json({ call: activeCall, contact });
 }

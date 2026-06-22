@@ -45,6 +45,8 @@ export async function POST(request: NextRequest) {
   };
 
   const updatePayload: Record<string, unknown> = {
+    telecom_provider: 'twilio',
+    provider_message_id: messageSid,
     status: status ?? followup.status,
     error_code: validation.params.ErrorCode ?? followup.error_code,
     error_message: validation.params.ErrorMessage ?? followup.error_message,

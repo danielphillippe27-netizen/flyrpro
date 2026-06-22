@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import twilio from 'twilio';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import {
@@ -9,15 +8,12 @@ import {
 import { getWorkspacePowerDialerAddon } from '@/app/lib/billing/workspace-addons';
 import { getPublicAppUrl } from '@/app/lib/billing/stripe-products';
 import {
-  getTwilioAccountSid,
-  getTwilioAuthToken,
-} from '@/lib/dialer/env';
-import {
   getDialerWorkspaceAccessError,
   isDialerEnabledForWorkspace,
 } from '@/lib/dialer/feature-gate';
+import { provisionDialerPhoneNumber } from '@/lib/dialer/provider';
 import { getWorkspaceDialerSettings } from '@/lib/dialer/server';
-import type { LocalListInstanceOptions } from 'twilio/lib/rest/api/v2010/account/availablePhoneNumberCountry/local';
+import { getDialerTelecomProvider } from '@/lib/dialer/env';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -36,12 +32,10 @@ function getProvisionErrorMessage(error: unknown): string {
     typeof (error as { message?: unknown }).message === 'string'
   ) {
     const message = (error as { message: string }).message.trim();
-    if (message) {
-      return message;
-    }
+    if (message) return message;
   }
 
-  return 'Failed to provision a Twilio number.';
+  return 'Failed to provision a dialer number.';
 }
 
 export async function POST(request: NextRequest) {
@@ -91,7 +85,7 @@ export async function POST(request: NextRequest) {
     const settings = await getWorkspaceDialerSettings(admin, membership.workspaceId);
     if (
       settings.numberStatus === 'active' &&
-      settings.twilioIncomingPhoneNumberSid &&
+      (settings.twilioIncomingPhoneNumberSid || settings.providerPhoneNumberId) &&
       settings.dedicatedFromNumber
     ) {
       return NextResponse.json(
@@ -112,44 +106,28 @@ export async function POST(request: NextRequest) {
         ? Number.parseInt(body.areaCode.trim(), 10)
         : undefined;
 
-    const client = twilio(getTwilioAccountSid(), getTwilioAuthToken());
-    const search: LocalListInstanceOptions =
-      areaCode && ['US', 'CA'].includes(countryCode)
-        ? { areaCode, limit: 1, smsEnabled: true, voiceEnabled: true }
-        : { limit: 1, smsEnabled: true, voiceEnabled: true };
-
-    const candidates = await client.availablePhoneNumbers(countryCode).local.list(search);
-    const candidate = candidates[0];
-    if (!candidate?.phoneNumber) {
-      return NextResponse.json(
-        { error: 'No available Twilio local numbers matched that search' },
-        { status: 404 }
-      );
-    }
-
     const appUrl = getPublicAppUrl(request);
     if (!appUrl) {
       return NextResponse.json(
         {
           error:
-            'Set APP_BASE_URL or NEXT_PUBLIC_APP_URL to a public HTTPS app URL before claiming a Twilio number.',
+            'Set APP_BASE_URL or NEXT_PUBLIC_APP_URL to a public HTTPS app URL before claiming a dialer number.',
         },
         { status: 400 }
       );
     }
-    const voiceUrl = new URL('/api/twilio/voice/incoming', appUrl).toString();
-    const smsUrl = new URL('/api/twilio/messaging/incoming', appUrl).toString();
-    const statusCallback = new URL('/api/twilio/voice/incoming-status', appUrl).toString();
 
-    const purchasedNumber = await client.incomingPhoneNumbers.create({
-      phoneNumber: candidate.phoneNumber,
+    const activeProvider = getDialerTelecomProvider();
+    const voicePath = activeProvider === 'telnyx' ? '/api/telnyx/voice/incoming' : '/api/twilio/voice/incoming';
+    const smsPath = activeProvider === 'telnyx' ? '/api/telnyx/messaging/incoming' : '/api/twilio/messaging/incoming';
+    const statusPath = activeProvider === 'telnyx' ? '/api/telnyx/voice/status' : '/api/twilio/voice/incoming-status';
+    const purchasedNumber = await provisionDialerPhoneNumber({
+      countryCode,
+      areaCode,
       friendlyName: `FLYR ${membership.workspaceId}`,
-      voiceUrl,
-      voiceMethod: 'POST',
-      smsUrl,
-      smsMethod: 'POST',
-      statusCallback,
-      statusCallbackMethod: 'POST',
+      voiceUrl: new URL(voicePath, appUrl).toString(),
+      smsUrl: new URL(smsPath, appUrl).toString(),
+      statusCallback: new URL(statusPath, appUrl).toString(),
     });
 
     const now = new Date().toISOString();
@@ -160,14 +138,19 @@ export async function POST(request: NextRequest) {
           workspace_id: membership.workspaceId,
           default_from_number: purchasedNumber.phoneNumber,
           default_sms_from_number: purchasedNumber.phoneNumber,
-          twilio_incoming_phone_number_sid: purchasedNumber.sid,
+          telecom_provider: purchasedNumber.provider,
+          twilio_incoming_phone_number_sid: purchasedNumber.twilioIncomingPhoneNumberSid,
+          provider_phone_number_id: purchasedNumber.providerPhoneNumberId,
+          provider_number_order_id: purchasedNumber.providerNumberOrderId,
           number_status: 'active',
           number_assigned_at: now,
           provisioning_metadata: {
             countryCode,
             areaCode: areaCode ?? null,
-            locality: candidate.locality ?? null,
-            region: candidate.region ?? null,
+            locality: purchasedNumber.locality,
+            region: purchasedNumber.region,
+            provider: purchasedNumber.provider,
+            providerMetadata: purchasedNumber.metadata,
           },
           updated_at: now,
         },
@@ -179,7 +162,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           error:
-            'The Twilio number was purchased, but FLYR failed to save the workspace assignment. Please update the workspace dialer settings manually.',
+            'The dialer number was purchased, but FLYR failed to save the workspace assignment. Please update the workspace dialer settings manually.',
           phoneNumber: purchasedNumber.phoneNumber,
         },
         { status: 500 }
@@ -189,7 +172,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       workspaceId: membership.workspaceId,
       phoneNumber: purchasedNumber.phoneNumber,
-      phoneNumberSid: purchasedNumber.sid,
+      phoneNumberSid: purchasedNumber.providerPhoneNumberId,
+      provider: purchasedNumber.provider,
       countryCode,
       areaCode: areaCode ?? null,
     });

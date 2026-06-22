@@ -36,6 +36,7 @@ type ContactLike = {
 };
 
 const FOLLOW_UP_DELAY_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_DEMO_DESTINATION_PATH = '/demo-1';
 
 export function isMissingDemoLinkSchemaError(error: { message?: string } | null | undefined): boolean {
   const message = error?.message?.toLowerCase() ?? '';
@@ -58,7 +59,7 @@ function normalizeEmail(value: string | null | undefined): string | null {
 
 function normalizeDestinationPath(value: string): string {
   const trimmed = value.trim();
-  if (!trimmed.startsWith('/') || trimmed.startsWith('//')) return '/demo1';
+  if (!trimmed.startsWith('/') || trimmed.startsWith('//')) return DEFAULT_DEMO_DESTINATION_PATH;
   return trimmed;
 }
 
@@ -84,7 +85,7 @@ export async function createTrackedDemoLink(params: {
 }): Promise<{ url: string; token: string; linkId: string } | null> {
   if (!params.salesperson?.id || !params.referralCode) return null;
 
-  const destinationPath = normalizeDestinationPath(params.destinationPath ?? '/demo1');
+  const destinationPath = normalizeDestinationPath(params.destinationPath ?? DEFAULT_DEMO_DESTINATION_PATH);
   const source = sanitizeTrackingParam(params.source ?? 'salesperson');
   const campaign = sanitizeTrackingParam(params.campaign ?? 'power-dialer-demo');
 
