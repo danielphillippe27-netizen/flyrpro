@@ -163,10 +163,24 @@ export async function createDemoLinkFromFields(params: {
   let center: [number, number] | undefined;
   if (city) {
     try {
-      const geocoded = await MapService.geocodeAddress(city);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const geocoded = await Promise.race([
+        MapService.geocodeAddress(city),
+        new Promise<null>((_, reject) => {
+          controller.signal.addEventListener('abort', () => {
+            reject(new DOMException('Geocoding timed out', 'TimeoutError'));
+          });
+        }),
+      ]);
+      clearTimeout(timeoutId);
       if (geocoded) center = [geocoded.lon, geocoded.lat];
     } catch (error) {
-      console.warn('[demo-link-generator] geocoding failed; creating link without center', error);
+      if ((error as DOMException).name === 'TimeoutError') {
+        console.warn('[demo-link-generator] geocoding timed out after 5000ms; creating link without center');
+      } else {
+        console.warn('[demo-link-generator] geocoding failed; creating link without center', error);
+      }
     }
   }
 

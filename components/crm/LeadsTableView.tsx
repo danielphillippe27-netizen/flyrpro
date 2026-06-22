@@ -200,7 +200,9 @@ export function LeadsTableView({
                   <TableCell className="max-w-[260px]">
                     <div className="flex flex-wrap gap-1.5">
                       {(contactListLabelsById[contact.id] ?? []).length > 0 ? (
-                        (contactListLabelsById[contact.id] ?? []).map((label) => (
+                        (contactListLabelsById[contact.id] ?? [])
+                          .filter((label, i, arr) => arr.indexOf(label) === i)
+                          .map((label) => (
                           <Badge key={`${contact.id}-${label}`} variant="outline" className="rounded-full px-2 py-0 text-[11px]">
                             {label}
                           </Badge>
