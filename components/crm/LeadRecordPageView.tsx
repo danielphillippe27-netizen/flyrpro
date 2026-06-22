@@ -570,45 +570,12 @@ export function LeadRecordPageView({ contactId }: { contactId: string }) {
         throw new Error(data.error || 'Failed to generate demo link.');
       }
 
-      // Find the dialler_lead by phone to send SMS
-      const leadResponse = await fetch(`/api/dialer/leads?workspaceId=${currentWorkspaceId}`, {
-        method: 'GET',
-        credentials: 'include',
+      // Copy link to clipboard
+      await copyDemoUrl(data.url);
+      setMessage({
+        type: 'success',
+        text: `Demo link copied! ${contact.phone ? `Text to ${contact.phone}` : 'Ready to send'}`
       });
-
-      if (!leadResponse.ok) {
-        await copyDemoUrl(data.url);
-        setMessage({ type: 'success', text: 'Demo link created and copied to clipboard.' });
-        return;
-      }
-
-      const leadsData = (await leadResponse.json().catch(() => ({ leads: [] }))) as { leads?: Array<{ id: string; phone: string }> };
-      const matchingLead = leadsData.leads?.find(lead => lead.phone === contact.phone);
-
-      if (!matchingLead) {
-        await copyDemoUrl(data.url);
-        setMessage({ type: 'success', text: 'Demo link created and copied to clipboard (no matching lead found for SMS).' });
-        return;
-      }
-
-      // Send SMS with the demo link
-      const smsBody = `Hi! Check out this personalized demo: ${data.url}`;
-      const smsResponse = await fetch(`/api/dialer/leads/${matchingLead.id}/sms`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          workspaceId: currentWorkspaceId,
-          body: smsBody,
-        }),
-      });
-
-      if (!smsResponse.ok) {
-        const smsError = await smsResponse.json().catch(() => ({ error: 'Failed to send SMS' }));
-        throw new Error(smsError.error || 'Failed to send demo link via SMS.');
-      }
-
-      setMessage({ type: 'success', text: 'Demo link sent via text!' });
     } catch (error) {
       setMessage({
         type: 'error',
