@@ -1,35 +1,25 @@
 import { notFound, redirect } from 'next/navigation';
 import type { User } from '@supabase/supabase-js';
+import { resolveSalespersonForUser } from '@/lib/dialer/salesperson-settings';
 import { createAdminClient, getSupabaseServerClient } from '@/lib/supabase/server';
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
-function getFlyrInternalWorkspaceId(): string {
-  const workspaceId = process.env.FLYR_INTERNAL_WORKSPACE_ID?.trim();
-  if (!workspaceId) {
-    throw new Error('FLYR_INTERNAL_WORKSPACE_ID is required for demo admin access.');
-  }
-  return workspaceId;
-}
-
-export async function isFlyrInternalWorkspaceMember(
+export async function isFlyrSalesperson(
   admin: AdminClient,
-  userId: string
+  userId: string,
+  email?: string | null
 ): Promise<boolean> {
-  const workspaceId = getFlyrInternalWorkspaceId();
-  const { data, error } = await admin
-    .from('workspace_members')
-    .select('id')
-    .eq('user_id', userId)
-    .eq('workspace_id', workspaceId)
-    .maybeSingle();
-
-  if (error) {
-    console.error('[flyr-internal-auth] Workspace membership lookup failed:', error);
+  try {
+    const salesperson = await resolveSalespersonForUser(admin, {
+      userId,
+      email,
+    });
+    return Boolean(salesperson?.id);
+  } catch (error) {
+    console.error('[flyr-internal-auth] Salesperson lookup failed:', error);
     return false;
   }
-
-  return Boolean(data?.id);
 }
 
 export async function isFlyrFounder(
@@ -52,19 +42,20 @@ export async function isFlyrFounder(
 
 export async function hasFlyrDemoAdminAccess(
   admin: AdminClient,
-  userId: string
+  userId: string,
+  email?: string | null
 ): Promise<boolean> {
-  const [isInternalMember, isFounder] = await Promise.all([
-    isFlyrInternalWorkspaceMember(admin, userId),
+  const [isSalesperson, isFounder] = await Promise.all([
+    isFlyrSalesperson(admin, userId, email),
     isFlyrFounder(admin, userId),
   ]);
 
-  return isInternalMember || isFounder;
+  return isSalesperson || isFounder;
 }
 
 /**
  * Server-only guard for internal FLYR demo tooling.
- * Unauthenticated users go to login; authenticated non-members/non-founders get a 404.
+ * Unauthenticated users go to login; authenticated non-salespeople/non-founders get a 404.
  */
 export async function requireFlyrDemoAdminAccess(): Promise<{ user: User }> {
   const supabase = await getSupabaseServerClient();
@@ -78,7 +69,7 @@ export async function requireFlyrDemoAdminAccess(): Promise<{ user: User }> {
   }
 
   const admin = createAdminClient();
-  const allowed = await hasFlyrDemoAdminAccess(admin, user.id);
+  const allowed = await hasFlyrDemoAdminAccess(admin, user.id, user.email);
   if (!allowed) {
     notFound();
   }
