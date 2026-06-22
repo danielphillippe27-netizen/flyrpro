@@ -552,6 +552,7 @@ export function LeadRecordPageView({ contactId }: { contactId: string }) {
       });
       const data = (await response.json().catch(() => ({}))) as {
         url?: string;
+        slug?: string;
         error?: string;
         needsManual?: boolean;
         company?: string;
@@ -569,7 +570,39 @@ export function LeadRecordPageView({ contactId }: { contactId: string }) {
         throw new Error(data.error || 'Failed to generate demo link.');
       }
 
-      await copyDemoUrl(data.url);
+      // Find the dialler_lead by phone to send SMS
+      const leadResponse = await fetch('/api/dialer/leads', {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+      });
+      const leadsData = (await leadResponse.json().catch(() => ({ leads: [] }))) as { leads?: Array<{ id: string; phone: string }> };
+      const matchingLead = leadsData.leads?.find(lead => lead.phone === contact.phone);
+
+      if (!matchingLead) {
+        await copyDemoUrl(data.url);
+        setMessage({ type: 'success', text: 'Demo link created and copied to clipboard (no matching lead found for SMS).' });
+        return;
+      }
+
+      // Send SMS with the demo link
+      const smsBody = `Hi! Check out this personalized demo: ${data.url}`;
+      const smsResponse = await fetch(`/api/dialer/leads/${matchingLead.id}/sms`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          workspaceId: currentWorkspaceId,
+          body: smsBody,
+        }),
+      });
+
+      if (!smsResponse.ok) {
+        const smsError = await smsResponse.json().catch(() => ({ error: 'Failed to send SMS' }));
+        throw new Error(smsError.error || 'Failed to send demo link via SMS.');
+      }
+
+      setMessage({ type: 'success', text: 'Demo link sent via text!' });
     } catch (error) {
       setMessage({
         type: 'error',
@@ -953,7 +986,7 @@ export function LeadRecordPageView({ contactId }: { contactId: string }) {
                     disabled={!currentWorkspaceId || generatingDemoLink}
                   >
                     {generatingDemoLink ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Send className="mr-1 h-3.5 w-3.5" />}
-                    Send Demo
+                    Text Demo
                   </Button>
                 </div>
 
