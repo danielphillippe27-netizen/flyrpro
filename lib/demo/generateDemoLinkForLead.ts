@@ -41,6 +41,8 @@ export type GeneratedDemoLink = {
 };
 
 const DEMO_ORIGIN = 'https://flyr.software';
+const DEFAULT_CITY = 'Palo Alto, CA';
+const DEFAULT_CENTER: [number, number] = [-122.1430, 37.4419];
 
 function cleanText(value: string | null | undefined): string {
   return (value ?? '').trim();
@@ -165,19 +167,20 @@ export async function createDemoLinkFromFields(params: {
   const company = cleanText(params.fields.company);
   if (!company) throw new Error('Company is required.');
 
-  const city = cleanText(params.fields.city) || null;
+  const inputCity = cleanText(params.fields.city) || null;
+  const city = inputCity || DEFAULT_CITY;
   const vertical = params.fields.vertical ?? mapIndustryToDemoVertical(params.fields.industry);
   const ctaVariant = params.fields.ctaVariant ?? DEFAULT_PAYLOAD.ctaVariant;
   const ctaUrl = cleanText(params.fields.ctaUrl) || DEFAULT_PAYLOAD.ctaUrl;
   const slug = await uniqueDemoSlug(admin, slugifyDemoLink(company));
 
   let center: [number, number] | undefined;
-  if (city) {
+  if (inputCity) {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
       const geocoded = await Promise.race([
-        MapService.geocodeAddress(city),
+        MapService.geocodeAddress(inputCity),
         new Promise<null>((_, reject) => {
           controller.signal.addEventListener('abort', () => {
             reject(new DOMException('Geocoding timed out', 'TimeoutError'));
@@ -188,11 +191,16 @@ export async function createDemoLinkFromFields(params: {
       if (geocoded) center = [geocoded.lon, geocoded.lat];
     } catch (error) {
       if ((error as DOMException).name === 'TimeoutError') {
-        console.warn('[demo-link-generator] geocoding timed out after 5000ms; creating link without center');
+        console.warn('[demo-link-generator] geocoding timed out after 5000ms; using default center');
       } else {
-        console.warn('[demo-link-generator] geocoding failed; creating link without center', error);
+        console.warn('[demo-link-generator] geocoding failed; using default center', error);
       }
     }
+  }
+
+  // Use default center if no city was provided or geocoding failed
+  if (!center) {
+    center = DEFAULT_CENTER;
   }
 
   const { error } = await admin.from('demo_links').insert({
@@ -201,8 +209,8 @@ export async function createDemoLinkFromFields(params: {
     contact_name: cleanText(params.fields.contactName) || null,
     vertical,
     city,
-    center_lng: center?.[0] ?? null,
-    center_lat: center?.[1] ?? null,
+    center_lng: center[0],
+    center_lat: center[1],
     cta_variant: ctaVariant,
     cta_url: ctaUrl,
     navigation_mode: 'scroll',
