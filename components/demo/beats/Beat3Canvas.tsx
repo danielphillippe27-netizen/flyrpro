@@ -119,8 +119,8 @@ export function Beat3Canvas({ copy }: { copy: BeatCopy }) {
       ctx.fillStyle = 'rgba(12,12,10,.10)';
       city.addrs.forEach((p) => ctx.fillRect(p.x - 1, p.y - 1, 2, 2));
       const sp = reducedRef.current ? 1 : Math.min(1, t / drawDur);
-      const drawn = perim * sp,
-        acc = 0;
+      const drawn = perim * sp;
+      let acc = 0;
       ctx.strokeStyle = '#ff4d00';
       ctx.lineWidth = 2.5;
       ctx.setLineDash([8, 5]);

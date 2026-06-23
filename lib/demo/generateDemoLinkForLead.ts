@@ -41,6 +41,8 @@ export type GeneratedDemoLink = {
 };
 
 const DEMO_ORIGIN = 'https://flyr.software';
+const DEFAULT_CITY = 'Palo Alto, CA';
+const DEFAULT_CENTER: [number, number] = [-122.1430, 37.4419];
 
 function cleanText(value: string | null | undefined): string {
   return (value ?? '').trim();
@@ -87,6 +89,17 @@ async function uniqueDemoSlug(admin: AdminClient, preferredSlug: string): Promis
 function cityLabel(run: ProspectRunContext | null): string | null {
   if (!run?.city) return null;
   return [run.city, run.region].map(cleanText).filter(Boolean).join(', ') || run.city;
+}
+
+function parseCityFromNotes(notes: string | null | undefined): string | null {
+  const cleaned = cleanText(notes);
+  if (!cleaned) return null;
+
+  // Look for "List: City, Region - Industry" pattern
+  const match = cleaned.match(/(?:^|\n)List:\s*([^-\n]+?)(?:\s*-|$)/i);
+  if (!match) return null;
+
+  return cleanText(match[1]) || null;
 }
 
 async function loadProspectRunForLead(
@@ -154,19 +167,20 @@ export async function createDemoLinkFromFields(params: {
   const company = cleanText(params.fields.company);
   if (!company) throw new Error('Company is required.');
 
-  const city = cleanText(params.fields.city) || null;
+  const inputCity = cleanText(params.fields.city) || null;
+  const city = inputCity || DEFAULT_CITY;
   const vertical = params.fields.vertical ?? mapIndustryToDemoVertical(params.fields.industry);
   const ctaVariant = params.fields.ctaVariant ?? DEFAULT_PAYLOAD.ctaVariant;
   const ctaUrl = cleanText(params.fields.ctaUrl) || DEFAULT_PAYLOAD.ctaUrl;
   const slug = await uniqueDemoSlug(admin, slugifyDemoLink(company));
 
   let center: [number, number] | undefined;
-  if (city) {
+  if (inputCity) {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
       const geocoded = await Promise.race([
-        MapService.geocodeAddress(city),
+        MapService.geocodeAddress(inputCity),
         new Promise<null>((_, reject) => {
           controller.signal.addEventListener('abort', () => {
             reject(new DOMException('Geocoding timed out', 'TimeoutError'));
@@ -177,11 +191,16 @@ export async function createDemoLinkFromFields(params: {
       if (geocoded) center = [geocoded.lon, geocoded.lat];
     } catch (error) {
       if ((error as DOMException).name === 'TimeoutError') {
-        console.warn('[demo-link-generator] geocoding timed out after 5000ms; creating link without center');
+        console.warn('[demo-link-generator] geocoding timed out after 5000ms; using default center');
       } else {
-        console.warn('[demo-link-generator] geocoding failed; creating link without center', error);
+        console.warn('[demo-link-generator] geocoding failed; using default center', error);
       }
     }
+  }
+
+  // Use default center if no city was provided or geocoding failed
+  if (!center) {
+    center = DEFAULT_CENTER;
   }
 
   const { error } = await admin.from('demo_links').insert({
@@ -190,8 +209,8 @@ export async function createDemoLinkFromFields(params: {
     contact_name: cleanText(params.fields.contactName) || null,
     vertical,
     city,
-    center_lng: center?.[0] ?? null,
-    center_lat: center?.[1] ?? null,
+    center_lng: center[0],
+    center_lat: center[1],
     cta_variant: ctaVariant,
     cta_url: ctaUrl,
     navigation_mode: 'scroll',
@@ -234,12 +253,18 @@ export async function generateDemoLinkForLead(params: {
   const company = cleanText(lead.company) || cleanText(lead.name) || 'Lead';
   const contactName = cleanText(lead.name) && cleanText(lead.name) !== company ? cleanText(lead.name) : null;
 
+  // Try to get city from prospect run, fall back to parsing notes
+  let city = cityLabel(run);
+  if (!city) {
+    city = parseCityFromNotes(lead.notes);
+  }
+
   return createDemoLinkFromFields({
     admin,
     fields: {
       company,
       contactName,
-      city: cityLabel(run),
+      city,
       industry: run?.industry,
       vertical: mapIndustryToDemoVertical(run?.industry),
       ctaVariant: DEFAULT_PAYLOAD.ctaVariant,
