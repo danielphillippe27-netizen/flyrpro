@@ -4,6 +4,8 @@ import { formatBeat3FinalTimer } from './beat3Timing';
 export const DEFAULT_PAYLOAD: DemoPayload = {
   slug: 'default',
   vertical: 'generic',
+  city: 'Palo Alto, CA',
+  center: [-122.1430, 37.4419],
   ctaVariant: 'territory',
   ctaUrl: 'mailto:harry@flyrpro.app?subject=Show%20me%20my%20territory',
   navigationMode: 'scroll',
