@@ -184,6 +184,10 @@ const countryOptions = [
   { value: 'NZ', label: 'New Zealand' },
 ];
 
+const REIQ_DEFAULT_SEARCH_URL =
+  'https://members.reiq.com/REIQ/Shared_Content/Smart-Suite/Smart-Maps/Public/Find-an-Agent-and-Agency.aspx';
+const REIQ_PROFILE_URL_RE = /(?:Agent-Profile\.aspx|map-profile)\?ContactKey=/i;
+
 const canadianProvinceOptions = [
   { value: 'on', label: 'Ontario' },
   { value: 'bc', label: 'British Columbia' },
@@ -823,9 +827,10 @@ export function SalespersonPlacesLeadFinder() {
   const [relatedTerms, setRelatedTerms] = useState('');
   const [realEstateTarget, setRealEstateTarget] = useState<RealEstateTarget>('agents');
   const [scraperMode, setScraperMode] = useState<ScraperMode>('google_places');
-  const [reiqStartUrl, setReiqStartUrl] = useState('');
+  const [reiqStartUrl, setReiqStartUrl] = useState(REIQ_DEFAULT_SEARCH_URL);
+  const [reiqLocation, setReiqLocation] = useState('Brisbane');
   const [reiqMaxPages, setReiqMaxPages] = useState('3');
-  const [reiqMaxProfiles, setReiqMaxProfiles] = useState('50');
+  const [reiqMaxProfiles, setReiqMaxProfiles] = useState('500');
   const [realtorCity, setRealtorCity] = useState('Toronto');
   const [realtorProvinceCode, setRealtorProvinceCode] = useState('on');
   const [realtorCaptureJson, setRealtorCaptureJson] = useState('');
@@ -848,7 +853,7 @@ export function SalespersonPlacesLeadFinder() {
   const saveWorkspaceId = currentWorkspaceId ?? prospectingWorkspaceId;
   const canSubmit =
     scraperMode === 'australia_reiq'
-      ? reiqStartUrl.trim().length >= 12 && !loading
+      ? reiqStartUrl.trim().length >= 12 && (REIQ_PROFILE_URL_RE.test(reiqStartUrl) || reiqLocation.trim().length >= 2) && !loading
       : scraperMode === 'realtor_ca_screenshot'
         ? screenshotCity.trim().length >= 2 && screenshotFiles.length > 0 && !loading
       : scraperMode === 'realtor_ca'
@@ -1223,9 +1228,10 @@ export function SalespersonPlacesLeadFinder() {
           credentials: 'include',
           body: JSON.stringify({
             startUrl: reiqStartUrl.trim(),
+            location: REIQ_PROFILE_URL_RE.test(reiqStartUrl) ? undefined : reiqLocation.trim(),
             maxPages: Number.isFinite(maxPages) && maxPages > 0 ? maxPages : undefined,
             maxProfiles: Number.isFinite(maxProfiles) && maxProfiles > 0 ? maxProfiles : undefined,
-            delayMs: 1500,
+            delayMs: 250,
           }),
         });
         const payload = (await response.json().catch(() => ({}))) as PlacesLeadPayload;
@@ -1496,7 +1502,7 @@ export function SalespersonPlacesLeadFinder() {
         <form
           className={
             scraperMode === 'australia_reiq'
-              ? 'grid gap-3 lg:grid-cols-[minmax(320px,1fr)_120px_140px_auto]'
+              ? 'grid gap-3 lg:grid-cols-[minmax(280px,1fr)_220px_110px_130px_auto]'
               : scraperMode === 'realtor_ca_screenshot'
                 ? 'grid gap-3 lg:grid-cols-[minmax(180px,1fr)_180px_minmax(280px,1.4fr)_auto]'
               : scraperMode === 'realtor_ca'
@@ -1668,6 +1674,16 @@ export function SalespersonPlacesLeadFinder() {
                   value={reiqStartUrl}
                   onChange={(event) => setReiqStartUrl(event.target.value)}
                   placeholder="https://members.reiq.com/portal/..."
+                  autoComplete="off"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="reiq-location">Location</Label>
+                <Input
+                  id="reiq-location"
+                  value={reiqLocation}
+                  onChange={(event) => setReiqLocation(event.target.value)}
+                  placeholder="Brisbane"
                   autoComplete="off"
                 />
               </div>

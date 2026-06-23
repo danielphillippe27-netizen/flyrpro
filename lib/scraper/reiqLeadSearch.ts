@@ -32,6 +32,7 @@ export type ReiqLeadSearchResult = {
 
 type ReiqScrapeOptions = {
   startUrl: string;
+  location?: string;
   maxPages?: number;
   maxProfiles?: number;
   delayMs?: number;
@@ -39,13 +40,34 @@ type ReiqScrapeOptions = {
 
 type BrowserPage = Awaited<ReturnType<Awaited<ReturnType<typeof import('playwright').chromium.launch>>['newPage']>>;
 
-const PROFILE_URL_RE = /Agent-Profile\.aspx\?ContactKey=/i;
+const PROFILE_URL_RE = /(?:Agent-Profile\.aspx|map-profile)\?ContactKey=/i;
 const EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
 const PHONE_RE = /(?:\+?61\s?)?(?:0)?(?:\d[\s().-]?){8,12}\d/g;
 const POSTCODE_RE = /\b([A-Z]{2,3})\s+(\d{4})\b/;
 const PERSON_NAME_RE = /^[A-Z][a-zA-Z'’.-]+(?:\s+[A-Z][a-zA-Z'’.-]+){1,4}$/;
 const TEAM_RE = /\b(team|group|partners|collective)\b/i;
 const PROPERTY_MANAGEMENT_RE = /\b(property management|rentals?|tenanc(?:y|ies)|landlord|management rights|PM\b)\b/i;
+
+type ReiqMapItem = {
+  ContactKey?: string;
+  FullName?: string;
+  Company?: string;
+  JobTitle?: string;
+  Phone?: string;
+  Email?: string;
+  Website?: string;
+  FullAddress?: string;
+  LongLatAddress?: string;
+  Latitude?: number;
+  Longitude?: number;
+  IsCompany?: boolean;
+  [key: string]: unknown;
+};
+
+type ReiqProfileSeed = {
+  sourceUrl: string;
+  mapItem?: ReiqMapItem;
+};
 
 function compactSpaces(value: string | null | undefined): string {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -57,6 +79,10 @@ function normalizeUrl(url: string, baseUrl: string): string {
   return absolute.toString();
 }
 
+function reiqProfileUrl(contactKey: string): string {
+  return `https://members.reiq.com/map-profile?ContactKey=${encodeURIComponent(contactKey)}`;
+}
+
 function normalizePhone(value: string | null | undefined): string {
   return compactSpaces(value).replace('(0)', '0');
 }
@@ -64,6 +90,30 @@ function normalizePhone(value: string | null | undefined): string {
 function normalizeEmail(value: string | null | undefined): string {
   const match = String(value ?? '').match(EMAIL_RE);
   return match?.[0]?.toLowerCase() ?? '';
+}
+
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/&#160;|&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(Number.parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, decimal) => String.fromCodePoint(Number.parseInt(decimal, 10)));
+}
+
+function htmlToText(html: string): string {
+  return decodeHtmlEntities(
+    html
+      .replace(/<script[\s\S]*?<\/script>/gi, '\n')
+      .replace(/<style[\s\S]*?<\/style>/gi, '\n')
+      .replace(/<(?:br|\/p|\/div|\/li|\/h[1-6]|\/tr)\b[^>]*>/gi, '\n')
+      .replace(/<[^>]+>/g, '\n')
+  )
+    .replace(/\r\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n');
 }
 
 function websiteDomain(value: string): string {
@@ -212,10 +262,55 @@ async function collectProfileLinks(page: BrowserPage, baseUrl: string): Promise<
   const hrefs = await page.locator('a[href]').evaluateAll((links) =>
     links
       .map((link) => link.getAttribute('href') ?? '')
-      .filter((href) => /Agent-Profile\.aspx\?ContactKey=/i.test(href))
+      .filter((href) => /(?:Agent-Profile\.aspx|map-profile)\?ContactKey=/i.test(href))
   );
 
   return Array.from(new Set(hrefs.map((href) => normalizeUrl(href, baseUrl)))).sort();
+}
+
+async function searchReiqLocation(page: BrowserPage, location: string): Promise<ReiqProfileSeed[]> {
+  const searchText = compactSpaces(location);
+  if (!searchText) return [];
+
+  let mapDataText = '';
+  const mapDataResponse = page
+    .waitForResponse((response) => response.url().includes('Smart%20Maps%20API%20-%20Agent%20Map%20Data'), {
+      timeout: 45_000,
+    })
+    .then(async (response) => {
+      mapDataText = await response.text();
+    })
+    .catch(() => undefined);
+
+  const input = page.locator('#location-input-tab');
+  await input.waitFor({ state: 'visible', timeout: 20_000 });
+  await input.click();
+  await input.fill('');
+  await input.type(searchText, { delay: 35 });
+
+  const option = page.locator('[role="option"], li[id*="headlessui-combobox-option"]').first();
+  await option.waitFor({ state: 'visible', timeout: 15_000 });
+  await option.click();
+  await mapDataResponse;
+  await waitForPageSettle(page);
+
+  if (!mapDataText) {
+    const links = await collectProfileLinks(page, page.url());
+    return links.map((sourceUrl) => ({ sourceUrl }));
+  }
+
+  const parsed = JSON.parse(mapDataText) as {
+    Items?: {
+      $values?: ReiqMapItem[];
+    };
+  };
+  const items = Array.isArray(parsed.Items?.$values) ? parsed.Items.$values : [];
+  return items
+    .filter((item) => compactSpaces(item.ContactKey))
+    .map((item) => ({
+      sourceUrl: reiqProfileUrl(compactSpaces(item.ContactKey)),
+      mapItem: item,
+    }));
 }
 
 async function findNextHref(page: BrowserPage): Promise<string> {
@@ -242,13 +337,27 @@ async function findNextHref(page: BrowserPage): Promise<string> {
   `);
 }
 
-async function collectAllProfileUrls(page: BrowserPage, options: ReiqScrapeOptions): Promise<string[]> {
-  if (PROFILE_URL_RE.test(options.startUrl)) return [normalizeUrl(options.startUrl, options.startUrl)];
+async function collectProfileSeeds(page: BrowserPage, options: ReiqScrapeOptions): Promise<ReiqProfileSeed[]> {
+  if (PROFILE_URL_RE.test(options.startUrl)) {
+    return [{ sourceUrl: normalizeUrl(options.startUrl, options.startUrl) }];
+  }
 
   await page.goto(options.startUrl, { waitUntil: 'domcontentloaded' });
   await waitForPageSettle(page);
 
-  const urls: string[] = [];
+  if (options.location) {
+    const searchedSeeds = await searchReiqLocation(page, options.location);
+    if (searchedSeeds.length > 0) {
+      const seen = new Set<string>();
+      return searchedSeeds.filter((seed) => {
+        if (seen.has(seed.sourceUrl)) return false;
+        seen.add(seed.sourceUrl);
+        return true;
+      });
+    }
+  }
+
+  const seeds: ReiqProfileSeed[] = [];
   const seenPages = new Set<string>();
   let pageIndex = 0;
 
@@ -260,7 +369,7 @@ async function collectAllProfileUrls(page: BrowserPage, options: ReiqScrapeOptio
 
     const links = await collectProfileLinks(page, currentUrl);
     for (const link of links) {
-      if (!urls.includes(link)) urls.push(link);
+      if (!seeds.some((seed) => seed.sourceUrl === link)) seeds.push({ sourceUrl: link });
     }
 
     if (options.maxPages && pageIndex >= options.maxPages) break;
@@ -272,54 +381,51 @@ async function collectAllProfileUrls(page: BrowserPage, options: ReiqScrapeOptio
     await waitForPageSettle(page);
   }
 
-  return urls;
+  return seeds;
 }
 
-async function extractLabelMap(page: BrowserPage): Promise<Record<string, string>> {
-  return page.evaluate(`
-    (() => {
-    const norm = (value) => String(value ?? '').replace(/\\s+/g, ' ').trim();
-    const labels = ['Work Phone', 'Mobile Phone', 'Email', 'Website', 'Member Since'];
-    const output = {};
-
-    for (const element of Array.from(document.querySelectorAll('body *'))) {
-      const text = norm(element.textContent);
-      const cleanLabel = text.replace(/:$/, '');
-      if (!labels.includes(cleanLabel) || output[cleanLabel]) continue;
-      let sibling = element.nextElementSibling;
-      while (sibling && !norm(sibling.textContent)) sibling = sibling.nextElementSibling;
-      if (sibling) output[cleanLabel] = norm(sibling.textContent);
-    }
-
-    return output;
-    })()
-  `);
+function extractHeadingFromProfileText(rawText: string, mapItem?: ReiqMapItem): { heading: string; subheading: string } {
+  const lines = rawText
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => compactSpaces(line))
+    .filter(Boolean);
+  const contactIndex = lines.findIndex((line) => /^Contact Details$/i.test(line));
+  const beforeContact = (contactIndex >= 0 ? lines.slice(0, contactIndex) : lines).filter(
+    (line) =>
+      !/^Back to search$/i.test(line) &&
+      !/^Skip to main content$/i.test(line) &&
+      !/^REIQ$/i.test(line) &&
+      !/^Cart$/i.test(line) &&
+      !/^Search$/i.test(line) &&
+      !/^Sign in$/i.test(line) &&
+      !/^Toggle navigation$/i.test(line)
+  );
+  const heading = compactSpaces(mapItem?.FullName) || beforeContact[beforeContact.length - 2] || beforeContact[beforeContact.length - 1] || '';
+  const subheading = compactSpaces(mapItem?.Company) || beforeContact[beforeContact.length - 1] || '';
+  return { heading, subheading: subheading === heading ? '' : subheading };
 }
 
-async function extractProfile(page: BrowserPage, sourceUrl: string): Promise<ReiqLead> {
-  await page.goto(sourceUrl, { waitUntil: 'domcontentloaded' });
-  await waitForPageSettle(page);
+async function extractProfile(seed: ReiqProfileSeed): Promise<ReiqLead> {
+  const sourceUrl = seed.sourceUrl;
+  const response = await fetch(sourceUrl, {
+    headers: {
+      accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'user-agent':
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36',
+    },
+  });
+  if (!response.ok) throw new Error(`REIQ profile request failed (${response.status}) for ${sourceUrl}`);
 
-  const rawText = await page.locator('body').innerText({ timeout: 10_000 });
+  const rawText = htmlToText(await response.text());
   const pageText = compactSpaces(rawText);
-  const labelMap = await extractLabelMap(page);
-  const heading = compactSpaces(await page.locator('h1').first().innerText({ timeout: 5000 }).catch(() => ''));
-
-  let subheading = '';
-  for (const selector of ['h5', '.panel-title', 'h2', 'h3']) {
-    const locator = page.locator(selector);
-    if ((await locator.count()) === 0) continue;
-    const candidate = compactSpaces(await locator.first().innerText({ timeout: 3000 }).catch(() => ''));
-    if (candidate) {
-      subheading = candidate;
-      break;
-    }
-  }
+  const labelMap: Record<string, string> = {};
+  const { heading, subheading } = extractHeadingFromProfileText(rawText, seed.mapItem);
 
   const { fullName, agencyBusinessName } = splitNameAgency(heading, subheading);
-  const email = normalizeEmail(labelMap.Email || extractLabeledValue(pageText, 'Email') || pageText);
-  const website = compactSpaces(labelMap.Website || extractLabeledValue(pageText, 'Website'));
-  let workPhone = normalizePhone(labelMap['Work Phone'] || extractLabeledValue(pageText, 'Work Phone'));
+  const email = normalizeEmail(compactSpaces(seed.mapItem?.Email) || extractLabeledValue(pageText, 'Email') || pageText);
+  const website = compactSpaces(seed.mapItem?.Website) || compactSpaces(labelMap.Website || extractLabeledValue(pageText, 'Website'));
+  let workPhone = normalizePhone(seed.mapItem?.Phone as string | undefined) || normalizePhone(labelMap['Work Phone'] || extractLabeledValue(pageText, 'Work Phone'));
   let mobilePhone = normalizePhone(labelMap['Mobile Phone'] || extractLabeledValue(pageText, 'Mobile Phone'));
 
   const phones = Array.from(pageText.matchAll(PHONE_RE)).map((match) => normalizePhone(match[0]));
@@ -328,7 +434,9 @@ async function extractProfile(page: BrowserPage, sourceUrl: string): Promise<Rei
 
   const address =
     extractSectionValue(rawText, 'Address', ['Other Information', 'ABN', 'Back to search', 'Need help', 'Contact']) ||
-    extractLabeledValue(pageText, 'Address');
+    extractLabeledValue(pageText, 'Address') ||
+    compactSpaces(seed.mapItem?.FullAddress) ||
+    compactSpaces(seed.mapItem?.LongLatAddress);
   const addressParts = splitAddress(address);
   const phone = mobilePhone || workPhone;
   const name = fullName || agencyBusinessName || 'REIQ lead';
@@ -355,8 +463,8 @@ async function extractProfile(page: BrowserPage, sourceUrl: string): Promise<Rei
     googleMapsUrl: sourceUrl,
     rating: null,
     userRatingCount: null,
-    latitude: null,
-    longitude: null,
+    longitude: typeof seed.mapItem?.Longitude === 'number' ? seed.mapItem.Longitude : null,
+    latitude: typeof seed.mapItem?.Latitude === 'number' ? seed.mapItem.Latitude : null,
     businessStatus: null,
     confidenceScore: email || mobilePhone ? 90 : phone ? 75 : 60,
     leadCategory:
@@ -412,13 +520,18 @@ export async function scrapeReiqLeads(options: ReiqScrapeOptions): Promise<ReiqL
       viewport: { width: 1440, height: 1100 },
     });
 
-    const profileUrls = await collectAllProfileUrls(page, options);
-    const limitedUrls = options.maxProfiles ? profileUrls.slice(0, options.maxProfiles) : profileUrls;
+    const seeds = await collectProfileSeeds(page, options);
+    const limitedSeeds = options.maxProfiles ? seeds.slice(0, options.maxProfiles) : seeds;
     const leads: ReiqLead[] = [];
+    const batchSize = 5;
+    const delayMs = options.delayMs ?? 250;
 
-    for (const profileUrl of limitedUrls) {
-      leads.push(await extractProfile(page, profileUrl));
-      await page.waitForTimeout(options.delayMs ?? 1000);
+    for (let index = 0; index < limitedSeeds.length; index += batchSize) {
+      const batch = limitedSeeds.slice(index, index + batchSize);
+      leads.push(...(await Promise.all(batch.map((seed) => extractProfile(seed)))));
+      if (delayMs > 0 && index + batchSize < limitedSeeds.length) {
+        await page.waitForTimeout(delayMs);
+      }
     }
 
     const prospects = dedupeLeads(leads);
@@ -429,7 +542,7 @@ export async function scrapeReiqLeads(options: ReiqScrapeOptions): Promise<ReiqL
       rawResultCount: leads.length,
       uniqueResultCount: prospects.length,
       prospects,
-      profileUrls,
+      profileUrls: seeds.map((seed) => seed.sourceUrl),
     };
   } finally {
     await browser.close();

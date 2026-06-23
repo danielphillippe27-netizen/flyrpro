@@ -19,9 +19,10 @@ const requestSchema = z.object({
   startUrl: z.string().trim().url().refine((url) => url.includes('members.reiq.com'), {
     message: 'Enter a REIQ members search or profile URL.',
   }),
+  location: z.string().trim().min(2).max(120).optional(),
   maxPages: z.number().int().min(1).max(25).optional(),
   maxProfiles: z.number().int().min(1).max(500).optional(),
-  delayMs: z.number().int().min(0).max(10_000).default(1500),
+  delayMs: z.number().int().min(0).max(10_000).default(250),
 });
 
 async function resolveSalesperson(
