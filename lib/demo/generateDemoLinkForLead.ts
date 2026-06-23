@@ -89,6 +89,17 @@ function cityLabel(run: ProspectRunContext | null): string | null {
   return [run.city, run.region].map(cleanText).filter(Boolean).join(', ') || run.city;
 }
 
+function parseCityFromNotes(notes: string | null | undefined): string | null {
+  const cleaned = cleanText(notes);
+  if (!cleaned) return null;
+
+  // Look for "List: City, Region - Industry" pattern
+  const match = cleaned.match(/(?:^|\n)List:\s*([^-\n]+?)(?:\s*-|$)/i);
+  if (!match) return null;
+
+  return cleanText(match[1]) || null;
+}
+
 async function loadProspectRunForLead(
   admin: AdminClient,
   lead: DiallerLead
@@ -234,12 +245,18 @@ export async function generateDemoLinkForLead(params: {
   const company = cleanText(lead.company) || cleanText(lead.name) || 'Lead';
   const contactName = cleanText(lead.name) && cleanText(lead.name) !== company ? cleanText(lead.name) : null;
 
+  // Try to get city from prospect run, fall back to parsing notes
+  let city = cityLabel(run);
+  if (!city) {
+    city = parseCityFromNotes(lead.notes);
+  }
+
   return createDemoLinkFromFields({
     admin,
     fields: {
       company,
       contactName,
-      city: cityLabel(run),
+      city,
       industry: run?.industry,
       vertical: mapIndustryToDemoVertical(run?.industry),
       ctaVariant: DEFAULT_PAYLOAD.ctaVariant,
