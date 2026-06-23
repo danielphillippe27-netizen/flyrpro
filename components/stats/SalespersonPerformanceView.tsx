@@ -114,7 +114,7 @@ async function copyText(value: string): Promise<boolean> {
 
 export function SalespersonPerformanceView() {
   const { currentWorkspaceId, isLoading: workspaceLoading } = useWorkspace();
-  const [period, setPeriod] = useState<PeriodKey>('daily');
+  const [period, setPeriod] = useState<PeriodKey>('weekly');
   const [payload, setPayload] = useState<PerformancePayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

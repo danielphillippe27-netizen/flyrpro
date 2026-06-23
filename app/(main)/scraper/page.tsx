@@ -1,15 +1,5 @@
-import Link from 'next/link';
-import { Plus, Upload } from 'lucide-react';
+import { Plus, Settings2 } from 'lucide-react';
 import { SalespersonPlacesLeadFinder } from '@/components/scraper/SalespersonPlacesLeadFinder';
-
-const scraperActions = [
-  {
-    href: '/leads',
-    icon: Upload,
-    title: 'Import Leads',
-    description: 'Upload a CSV and map lead fields.',
-  },
-];
 
 export default function SalespersonScraperPage() {
   return (
@@ -23,24 +13,16 @@ export default function SalespersonScraperPage() {
               </div>
               <div>
                 <h1 className="text-2xl font-bold text-foreground">Add Leads</h1>
-                <p className="text-sm text-muted-foreground">Google Places lead finder for sales outreach</p>
+                <p className="text-sm text-muted-foreground">Lead finder modes for sales outreach</p>
               </div>
             </div>
-            <div className="flex flex-wrap gap-2">
-              {scraperActions.map((action) => {
-                const Icon = action.icon;
-                return (
-                  <Link
-                    key={action.href}
-                    href={action.href}
-                    className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border bg-background px-3 text-sm font-medium text-foreground shadow-xs transition-colors hover:bg-muted"
-                  >
-                    <Icon className="h-4 w-4" />
-                    {action.title}
-                  </Link>
-                );
-              })}
-            </div>
+            <a
+              href="#lead-config"
+              className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border bg-background px-3 text-sm font-medium text-foreground shadow-xs transition-colors hover:bg-muted"
+            >
+              <Settings2 className="h-4 w-4" />
+              Configuration
+            </a>
           </div>
         </div>
       </header>

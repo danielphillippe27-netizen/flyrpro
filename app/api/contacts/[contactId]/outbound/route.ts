@@ -7,6 +7,7 @@ import { getWorkspaceDialerSettings } from '@/lib/dialer/server';
 import { sendDialerSms } from '@/lib/dialer/provider';
 import { normalizePhoneNumber, phoneMarketFromCountryCode } from '@/lib/dialer/phone';
 import { getSalespersonDialerSettingsForUser } from '@/lib/dialer/salesperson-settings';
+import { resolveOutboundCallerId } from '@/lib/dialer/caller-id';
 import type { Contact, DialerSmsFollowup } from '@/types/database';
 
 export const runtime = 'nodejs';
@@ -137,8 +138,12 @@ async function sendText(
 
   try {
     const now = new Date().toISOString();
+    const fromNumber = resolveOutboundCallerId({
+      toNumber: normalizedPhone.e164,
+      defaultFromNumber: settings.defaultSmsFromNumber,
+    });
     const message = await sendDialerSms(request, {
-      from: settings.defaultSmsFromNumber,
+      from: fromNumber,
       to: normalizedPhone.e164,
       body,
     });
@@ -151,7 +156,7 @@ async function sendText(
       telecom_provider: message.provider,
       provider_message_id: message.messageId,
       twilio_message_sid: message.provider === 'twilio' ? message.messageId : null,
-      from_number_e164: settings.defaultSmsFromNumber,
+      from_number_e164: fromNumber,
       to_number_e164: normalizedPhone.e164,
       body,
       status: message.status,

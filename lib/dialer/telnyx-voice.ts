@@ -1,9 +1,10 @@
 import { NextRequest } from 'next/server';
-import { getTelnyxInboundForwardTo } from '@/lib/dialer/env';
+import { getTelnyxInboundForwardTo, getTelnyxSipUsername } from '@/lib/dialer/env';
 import { normalizePhoneNumber } from '@/lib/dialer/phone';
 import {
   buildPublicTelnyxWebhookUrl,
   dialTelnyxCall,
+  getTelnyxTelephonyCredential,
   type TelnyxDialResult,
 } from '@/lib/dialer/telnyx';
 
@@ -29,6 +30,29 @@ function getConfiguredForwardTo(): string | null {
 
 export function getTelnyxForwardToNumber(): string | null {
   return getConfiguredForwardTo();
+}
+
+function formatTelnyxSipDestination(username: string | null | undefined): string | null {
+  const cleaned = username?.trim();
+  if (!cleaned) return null;
+
+  const withoutScheme = cleaned.replace(/^sip:/i, '');
+  if (withoutScheme.includes('@')) return withoutScheme;
+  return `${withoutScheme}@sip.telnyx.com`;
+}
+
+export async function getTelnyxWebRtcClientDestination(): Promise<string | null> {
+  try {
+    const credential = await getTelnyxTelephonyCredential();
+    const destination = formatTelnyxSipDestination(credential.sipUsername);
+    if (destination) return destination;
+  } catch (error) {
+    console.warn('[dialer/telnyx-voice] failed to resolve Telephony Credential SIP username', error);
+  }
+
+  const username = getTelnyxSipUsername();
+  if (!username) return null;
+  return formatTelnyxSipDestination(username);
 }
 
 export async function launchTelnyxBridgeCall(params: TelnyxCallLaunchParams): Promise<TelnyxCallLaunchResult> {

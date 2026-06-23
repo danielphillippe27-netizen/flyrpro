@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { buildDialerIdentity, createDialerVoiceToken, getDialerRequestContext } from '@/lib/dialer/server';
 import { getActiveDialerEnvIssues, getDialerTelecomProvider } from '@/lib/dialer/env';
+import { getTelnyxWebRtcClientDestination } from '@/lib/dialer/telnyx-voice';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -33,6 +34,7 @@ export async function GET(request: NextRequest) {
       context.requestUser.id,
       isIosVoiceClient ? 'ios' : tabId
     );
+    const allowIncoming = activeProvider === 'telnyx' || isIosVoiceClient;
     const {
       provider,
       token,
@@ -43,16 +45,18 @@ export async function GET(request: NextRequest) {
       telnyxSipUsername,
       telnyxSipPassword,
     } = await createDialerVoiceToken(identity, {
-      allowIncoming: isIosVoiceClient,
+      allowIncoming,
       includeIosPushCredential: isIosVoiceClient,
     });
+    const telnyxWebRtcInboundConfigured =
+      provider === 'telnyx' ? Boolean(await getTelnyxWebRtcClientDestination()) : false;
 
     return NextResponse.json({
       provider,
       token,
       identity,
       expiresAt,
-      incomingAllowed: isIosVoiceClient,
+      incomingAllowed: provider === 'telnyx' ? telnyxWebRtcInboundConfigured || isIosVoiceClient : isIosVoiceClient,
       voipPushConfigured: provider === 'twilio'
         ? Boolean(pushCredentialSid)
         : Boolean(telnyxPushCredentialId),

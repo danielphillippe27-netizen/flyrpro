@@ -26,9 +26,12 @@ type DialerVideoLandingProps = {
   customerCode?: string;
   videoUid?: string;
   posterUrl?: string;
+  videoOrientation?: 'landscape' | 'portrait';
+  videoTitle?: string;
   onboardingHref: string;
   founderCallHref: string;
   redirectAtSeconds?: number;
+  mutedAutoplay?: boolean;
   referralCode?: string;
   trackingSource?: string;
   trackingCampaign?: string;
@@ -48,10 +51,17 @@ type DemoEventType =
   | 'founder_call_click'
   | 'page_exit';
 
-function buildStreamUrl(customerCode: string, videoUid: string, posterUrl?: string) {
-  const url = new URL(`https://customer-${customerCode}.cloudflarestream.com/${videoUid}/iframe`);
-  url.searchParams.set('autoplay', 'true');
-  url.searchParams.set('muted', 'true');
+function buildStreamUrl(
+  customerCode: string | undefined,
+  videoUid: string,
+  posterUrl?: string,
+  mutedAutoplay = true
+) {
+  const url = customerCode
+    ? new URL(`https://customer-${customerCode}.cloudflarestream.com/${videoUid}/iframe`)
+    : new URL(`https://iframe.videodelivery.net/${videoUid}`);
+  url.searchParams.set('autoplay', mutedAutoplay ? 'true' : 'false');
+  url.searchParams.set('muted', mutedAutoplay ? 'true' : 'false');
   url.searchParams.set('preload', 'auto');
   url.searchParams.set('primaryColor', '#dc2626');
   url.searchParams.set('letterboxColor', 'transparent');
@@ -66,9 +76,12 @@ export function DialerVideoLanding({
   customerCode,
   videoUid,
   posterUrl,
+  videoOrientation = 'landscape',
+  videoTitle = 'FLYR power dialer demo',
   onboardingHref,
   founderCallHref,
   redirectAtSeconds,
+  mutedAutoplay = true,
   referralCode,
   trackingSource,
   trackingCampaign,
@@ -86,6 +99,7 @@ export function DialerVideoLanding({
   const [scriptReady, setScriptReady] = useState(false);
   const [showEndCtas, setShowEndCtas] = useState(false);
   const [soundPromptVisible, setSoundPromptVisible] = useState(true);
+  const isPortraitVideo = videoOrientation === 'portrait';
 
   const getSessionId = useCallback(() => {
     if (!sessionIdRef.current) {
@@ -176,19 +190,19 @@ export function DialerVideoLanding({
   }, [sendOnce]);
 
   const streamUrl = useMemo(() => {
-    if (!customerCode || !videoUid) return null;
-    return buildStreamUrl(customerCode, videoUid, posterUrl);
-  }, [customerCode, posterUrl, videoUid]);
+    if (!videoUid) return null;
+    return buildStreamUrl(customerCode, videoUid, posterUrl, mutedAutoplay);
+  }, [customerCode, mutedAutoplay, posterUrl, videoUid]);
 
   useEffect(() => {
-    if (!videoUrl) return;
+    if (!videoUrl || !mutedAutoplay) return;
 
     const video = videoRef.current;
     if (!video) return;
 
     video.muted = true;
     video.play().catch(() => undefined);
-  }, [videoUrl]);
+  }, [mutedAutoplay, videoUrl]);
 
   useEffect(() => {
     sendOnce('page_view');
@@ -233,13 +247,15 @@ export function DialerVideoLanding({
 
     player.addEventListener('ended', handleEnded);
     player.addEventListener('timeupdate', handleTimeUpdate);
-    player
-      .play()
-      .then(() => sendOnce('video_started', { player: 'cloudflare_stream' }))
-      .catch(() => {
-        player.muted = true;
-        player.play().then(() => sendOnce('video_started', { player: 'cloudflare_stream' })).catch(() => undefined);
-      });
+    if (mutedAutoplay) {
+      player
+        .play()
+        .then(() => sendOnce('video_started', { player: 'cloudflare_stream' }))
+        .catch(() => {
+          player.muted = true;
+          player.play().then(() => sendOnce('video_started', { player: 'cloudflare_stream' })).catch(() => undefined);
+        });
+    }
 
     return () => {
       player.removeEventListener?.('ended', handleEnded);
@@ -248,7 +264,7 @@ export function DialerVideoLanding({
         streamPlayerRef.current = null;
       }
     };
-  }, [handlePlaybackProgress, redirectAtSeconds, scriptReady, sendOnce, showCtas, streamUrl, videoUrl]);
+  }, [handlePlaybackProgress, mutedAutoplay, redirectAtSeconds, scriptReady, sendOnce, showCtas, streamUrl, videoUrl]);
 
   const handleVideoTimeUpdate = () => {
     const video = videoRef.current;
@@ -326,9 +342,13 @@ export function DialerVideoLanding({
         />
       )}
 
-      <section className="relative min-h-[100svh] overflow-hidden bg-black">
-        <div className="dialer-portrait-rotator relative min-h-[100svh] bg-black">
-          <div className="absolute inset-x-0 top-0 z-20 flex items-center justify-end px-4 py-3 md:px-8 md:py-5">
+      <section className="relative min-h-[100dvh] overflow-hidden bg-black">
+        <div
+          className={`${
+            isPortraitVideo ? 'dialer-native-portrait' : 'dialer-portrait-rotator'
+          } relative min-h-[100dvh] bg-black`}
+        >
+          <div className="dialer-top-cta absolute inset-x-0 top-0 z-20 flex items-center justify-end px-4 py-3 md:px-8 md:py-5">
             <Link
               href={onboardingHref}
               onClick={() => sendDemoEvent('start_trial_click', { location: 'top' })}
@@ -339,19 +359,23 @@ export function DialerVideoLanding({
             </Link>
           </div>
 
-          <div className="dialer-video-viewport relative mx-auto flex min-h-[100svh] w-full items-center justify-center bg-black">
-            <div className="dialer-player-frame relative w-full">
+          <div className="dialer-video-viewport relative mx-auto flex min-h-[100dvh] w-full items-center justify-center bg-black">
+            <div
+              className={`${
+                isPortraitVideo ? 'dialer-player-frame-portrait' : 'dialer-player-frame'
+              } relative w-full`}
+            >
               <div className="dialer-aspect relative w-full bg-black pt-[56.25%]">
                 {videoUrl ? (
                   <video
                     ref={videoRef}
                     id="flyr-power-dialer-video"
-                    title="FLYR power dialer demo"
+                    title={videoTitle}
                     src={videoUrl}
                     poster={posterUrl}
                     className="absolute inset-0 h-full w-full bg-black object-contain"
-                    autoPlay
-                    muted
+                    autoPlay={mutedAutoplay}
+                    muted={mutedAutoplay}
                     playsInline
                     preload="auto"
                     controlsList="nodownload noplaybackrate noremoteplayback"
@@ -365,7 +389,7 @@ export function DialerVideoLanding({
                   <iframe
                     ref={iframeRef}
                     id="flyr-power-dialer-stream"
-                    title="FLYR power dialer demo"
+                    title={videoTitle}
                     src={streamUrl ?? undefined}
                     className="absolute inset-0 h-full w-full border-0"
                     allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;"
@@ -396,7 +420,13 @@ export function DialerVideoLanding({
         <style>{`
           .dialer-player-frame {
             aspect-ratio: 16 / 9;
-            width: min(100vw, calc(100svh * 16 / 9));
+            width: min(100vw, calc(100dvh * 16 / 9));
+          }
+
+          .dialer-player-frame-portrait {
+            aspect-ratio: 9 / 16;
+            width: min(100vw, calc(100dvh * 9 / 16));
+            max-height: 100dvh;
           }
 
           .dialer-aspect {
@@ -405,11 +435,26 @@ export function DialerVideoLanding({
           }
 
           @media (orientation: portrait) and (max-width: 767px) {
+            .dialer-native-portrait .dialer-top-cta {
+              display: none;
+            }
+
+            .dialer-native-portrait,
+            .dialer-native-portrait .dialer-video-viewport {
+              min-height: 100dvh;
+              height: 100dvh;
+            }
+
+            .dialer-native-portrait .dialer-player-frame-portrait {
+              height: min(100dvh, calc(100vw * 16 / 9));
+              width: min(100vw, calc(100dvh * 9 / 16));
+            }
+
             .dialer-portrait-rotator {
               position: fixed;
               left: 50%;
               top: 50%;
-              width: 100svh;
+              width: 100dvh;
               height: 100svw;
               min-height: 100svw;
               transform: translate(-50%, -50%) rotate(90deg);
@@ -422,7 +467,7 @@ export function DialerVideoLanding({
             }
 
             .dialer-player-frame {
-              width: min(100svh, calc(100svw * 16 / 9));
+              width: min(100dvh, calc(100svw * 16 / 9));
             }
           }
         `}</style>
@@ -443,7 +488,7 @@ export function DialerVideoLanding({
                   className="inline-flex min-h-14 items-center justify-center rounded-lg border border-white/15 bg-white px-5 text-sm font-black text-zinc-950 shadow-2xl shadow-black/30 transition hover:bg-zinc-100"
                 >
                   <CalendarDays className="mr-2 h-4 w-4 text-red-600" />
-                  Schedule a call with the founder
+                  Schedule a call
                 </a>
                 <Link
                   href={onboardingHref}

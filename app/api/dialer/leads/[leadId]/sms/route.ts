@@ -3,6 +3,7 @@ import type { DialerSmsFollowup, DiallerLead } from '@/types/database';
 import { getDialerRequestContext } from '@/lib/dialer/server';
 import { sendDialerSms } from '@/lib/dialer/provider';
 import { normalizePhoneNumber, phoneMarketFromCountryCode } from '@/lib/dialer/phone';
+import { resolveOutboundCallerId } from '@/lib/dialer/caller-id';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -42,8 +43,12 @@ async function sendFallbackLeadSms(
     return NextResponse.json({ error: 'This lead does not have a valid SMS number.' }, { status: 400 });
   }
 
+  const fromNumber = resolveOutboundCallerId({
+    toNumber: normalizedPhone.e164,
+    defaultFromNumber: context.settings.defaultSmsFromNumber!,
+  });
   const message = await sendDialerSms(request, {
-    from: context.settings.defaultSmsFromNumber!,
+    from: fromNumber,
     to: normalizedPhone.e164,
     body: params.body,
   });
@@ -57,7 +62,7 @@ async function sendFallbackLeadSms(
         messageId: message.messageId,
         status: message.status,
         to: normalizedPhone.e164,
-        from: context.settings.defaultSmsFromNumber,
+        from: fromNumber,
         leadId: params.leadId,
         leadName: cleanText(params.name) || null,
       },
@@ -219,8 +224,12 @@ export async function POST(
 
   try {
     const now = new Date().toISOString();
+    const fromNumber = resolveOutboundCallerId({
+      toNumber: normalizedPhone.e164,
+      defaultFromNumber: context.settings.defaultSmsFromNumber,
+    });
     const message = await sendDialerSms(request, {
-      from: context.settings.defaultSmsFromNumber,
+      from: fromNumber,
       to: normalizedPhone.e164,
       body: messageBody,
     });
@@ -233,7 +242,7 @@ export async function POST(
       telecom_provider: message.provider,
       provider_message_id: message.messageId,
       twilio_message_sid: message.provider === 'twilio' ? message.messageId : null,
-      from_number_e164: context.settings.defaultSmsFromNumber,
+      from_number_e164: fromNumber,
       to_number_e164: normalizedPhone.e164,
       body: messageBody,
       status: message.status,

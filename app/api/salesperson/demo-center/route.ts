@@ -35,10 +35,18 @@ function getPreferredReferralCode(
     : null;
 }
 
-function buildSegmentLink(origin: string, referralCode: string, campaign: string): string {
+function buildSegmentLink(
+  origin: string,
+  referralCode: string,
+  campaign: string,
+  redirectPath?: string
+): string {
   const url = new URL(`/s/${encodeURIComponent(referralCode)}`, origin);
   url.searchParams.set('source', 'salesperson');
   url.searchParams.set('campaign', campaign);
+  if (redirectPath) {
+    url.searchParams.set('redirect', redirectPath);
+  }
   return url.toString();
 }
 
@@ -132,8 +140,14 @@ export async function GET(request: NextRequest) {
         phoneForwardTo: dialerSettings?.inbound_forward_to ?? null,
       },
       links: {
-        realEstateAgentUrl: buildSegmentLink(origin, referralCode, 'real-estate-agent'),
-        realEstateTeamUrl: buildSegmentLink(origin, referralCode, 'real-estate-team'),
+        individualAgentListingUrl: buildSegmentLink(
+          origin,
+          referralCode,
+          'individual-agent-listing',
+          '/demo-2'
+        ),
+        realEstateAgentUrl: buildSegmentLink(origin, referralCode, 'real-estate-agent', '/demo-2'),
+        realEstateTeamUrl: buildSegmentLink(origin, referralCode, 'real-estate-team', '/demo-1'),
         roofingUrl: buildSegmentLink(origin, referralCode, 'roofing'),
         solarUrl: buildSegmentLink(origin, referralCode, 'solar'),
         homeServiceUrl: buildSegmentLink(origin, referralCode, 'home-service'),

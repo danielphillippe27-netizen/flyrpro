@@ -53,22 +53,21 @@ export default function PlansPage() {
               features={proFeatures}
               cta={
                 <>
-                  <div className="text-center text-base font-semibold text-zinc-800">
-                    <p className="text-xs uppercase tracking-[0.2em] text-emerald-600">
-                      50% off
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-center font-semibold text-zinc-800">
+                    <p className="inline-flex rounded-full bg-emerald-600 px-3 py-1 text-xs uppercase tracking-[0.18em] text-white">
+                      50% off launch pricing
                     </p>
-                    <p className="mt-1">
-                      <span className="mr-2 text-zinc-400 line-through">
-                        CA$80
-                      </span>
-                      CA$40 / month
+                    <p className="mt-4 text-3xl font-black text-zinc-950">
+                      $30 USD <span className="text-base font-bold text-zinc-700">/ month</span>
                     </p>
-                    <p className="text-sm text-zinc-500">
-                      or{' '}
-                      <span className="mr-1 text-zinc-400 line-through">
-                        $60 USD
+                    <p className="mt-1 text-sm text-zinc-600">
+                      Normally{' '}
+                      <span className="font-bold text-zinc-400 line-through">
+                        $60 USD / month
                       </span>
-                      $30 USD / month
+                    </p>
+                    <p className="mt-2 text-sm text-zinc-600">
+                      CA$40 / month, normally <span className="text-zinc-400 line-through">CA$80</span>
                     </p>
                   </div>
                   <Link

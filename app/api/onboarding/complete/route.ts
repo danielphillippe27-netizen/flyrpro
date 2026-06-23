@@ -225,6 +225,7 @@ export async function POST(request: NextRequest) {
       salespersonInviteToken?: string;
       clientSource?: string;
       teamMemberEmails?: string[];
+      openAppAfterCompletion?: boolean;
     };
 
     const admin = createAdminClient();
@@ -948,8 +949,9 @@ export async function POST(request: NextRequest) {
     const nextPath = hasAccess ? ownerInviteMembersPath : '/subscribe';
     const clientSource =
       typeof body?.clientSource === 'string' ? body.clientSource.trim().toLowerCase() : '';
+    const openAppAfterCompletion = body?.openAppAfterCompletion === true;
     const redirect =
-      clientSource === 'android'
+      openAppAfterCompletion || clientSource === 'android' || clientSource === 'dialer'
         ? nextPath
         : `/download-ios?stage=post-onboarding&next=${encodeURIComponent(nextPath)}`;
 

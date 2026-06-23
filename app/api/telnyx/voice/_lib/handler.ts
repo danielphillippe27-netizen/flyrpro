@@ -12,7 +12,29 @@ import {
   transferTelnyxCall,
   validateTelnyxWebhookRequest,
 } from '@/lib/dialer/telnyx';
-import { getTelnyxForwardToNumber } from '@/lib/dialer/telnyx-voice';
+import { getTelnyxForwardToNumber, getTelnyxWebRtcClientDestination } from '@/lib/dialer/telnyx-voice';
+
+type AdminClient = ReturnType<typeof createAdminClient>;
+
+type RecentDialerCall = {
+  user_id: string | null;
+};
+
+type ProfilePhone = {
+  id: string;
+  phone_number: string | null;
+};
+
+type SalespersonNumberRoute = {
+  workspace_id: string;
+  salesperson_id: string;
+  inbound_forward_to: string | null;
+};
+
+type WorkspaceNumberRoute = {
+  workspace_id: string;
+  inbound_forward_to: string | null;
+};
 
 type TelnyxVoiceEvent = {
   eventType: string | null;
@@ -172,6 +194,106 @@ async function findDialerCall(
   return query.order('created_at', { ascending: false }).limit(1).maybeSingle();
 }
 
+async function resolveRecentDialerAgentForwardTo(
+  admin: AdminClient,
+  callerNumber: string | null,
+  calledNumber: string | null
+): Promise<string | null> {
+  if (!callerNumber || !calledNumber) return null;
+
+  const { data: recentCalls, error: recentCallsError } = await admin
+    .from('dialer_calls')
+    .select('user_id')
+    .eq('direction', 'outbound')
+    .eq('to_number_e164', callerNumber)
+    .eq('from_number_e164', calledNumber)
+    .order('created_at', { ascending: false })
+    .limit(5);
+
+  if (recentCallsError) {
+    console.error('[telnyx/voice] failed to resolve recent dialer call', recentCallsError);
+    return null;
+  }
+
+  const userIds = Array.from(
+    new Set(
+      ((recentCalls ?? []) as RecentDialerCall[])
+        .map((call) => call.user_id)
+        .filter((userId): userId is string => Boolean(userId))
+    )
+  );
+  if (userIds.length === 0) return null;
+
+  const { data: profiles, error: profilesError } = await admin
+    .from('profiles')
+    .select('id, phone_number')
+    .in('id', userIds);
+
+  if (profilesError) {
+    console.error('[telnyx/voice] failed to load dialer agent profile phones', profilesError);
+    return null;
+  }
+
+  const phoneByUserId = new Map(
+    ((profiles ?? []) as ProfilePhone[]).map((profile) => [
+      profile.id,
+      normalizePhoneNumber(profile.phone_number).e164,
+    ])
+  );
+
+  for (const userId of userIds) {
+    const phone = phoneByUserId.get(userId);
+    if (phone) return phone;
+  }
+
+  return null;
+}
+
+async function resolveSalespersonNumberRoute(
+  admin: AdminClient,
+  calledNumber: string | null
+): Promise<SalespersonNumberRoute | null> {
+  if (!calledNumber) return null;
+
+  const { data, error } = await admin
+    .from('salesperson_dialer_settings')
+    .select('workspace_id, salesperson_id, inbound_forward_to')
+    .or(`assigned_phone_number.eq.${calledNumber},default_sms_from_number.eq.${calledNumber}`)
+    .eq('number_status', 'active')
+    .limit(1)
+    .maybeSingle();
+
+  if (error && error.code !== 'PGRST116') {
+    console.warn('[telnyx/voice] salesperson number lookup failed', error);
+    return null;
+  }
+
+  if (!data?.workspace_id || !data.salesperson_id) return null;
+  return data as SalespersonNumberRoute;
+}
+
+async function resolveWorkspaceNumberRoute(
+  admin: AdminClient,
+  calledNumber: string | null
+): Promise<WorkspaceNumberRoute | null> {
+  if (!calledNumber) return null;
+
+  const { data, error } = await admin
+    .from('workspace_dialer_settings')
+    .select('workspace_id, inbound_forward_to')
+    .or(`default_from_number.eq.${calledNumber},default_sms_from_number.eq.${calledNumber}`)
+    .limit(1)
+    .maybeSingle();
+
+  if (error && error.code !== 'PGRST116') {
+    console.warn('[telnyx/voice] workspace number lookup failed', error);
+    return null;
+  }
+
+  if (!data?.workspace_id) return null;
+  return data as WorkspaceNumberRoute;
+}
+
 async function dialLeadAfterAgentAnswer(params: {
   request: NextRequest;
   admin: ReturnType<typeof createAdminClient>;
@@ -241,6 +363,7 @@ async function dialLeadAfterAgentAnswer(params: {
 }
 
 async function handleInboundCall(params: {
+  admin: AdminClient;
   eventType: string | null;
   payload: Record<string, unknown>;
   callControlId: string | null;
@@ -249,9 +372,20 @@ async function handleInboundCall(params: {
   const direction = getString(params.payload, 'direction');
   if (direction !== 'incoming') return;
 
-  const from = normalizePhoneNumber(getString(params.payload, 'to')).e164;
-  const forwardTo = getTelnyxForwardToNumber();
-  if (!forwardTo) {
+  const calledNumber = normalizePhoneNumber(getString(params.payload, 'to')).e164;
+  const callerNumber = normalizePhoneNumber(getString(params.payload, 'from')).e164;
+  const salespersonRoute = await resolveSalespersonNumberRoute(params.admin, calledNumber);
+  const workspaceRoute = await resolveWorkspaceNumberRoute(params.admin, calledNumber);
+  const webRtcDestination = await getTelnyxWebRtcClientDestination();
+  const phoneForwardTo =
+    normalizePhoneNumber(salespersonRoute?.inbound_forward_to).e164 ||
+    (await resolveRecentDialerAgentForwardTo(params.admin, callerNumber, calledNumber)) ||
+    normalizePhoneNumber(workspaceRoute?.inbound_forward_to).e164 ||
+    getTelnyxForwardToNumber();
+  const primaryTransferTo = webRtcDestination || phoneForwardTo;
+  const primaryTransferTarget = webRtcDestination ? 'webrtc' : 'phone';
+
+  if (!calledNumber || !primaryTransferTo) {
     await hangupTelnyxCall(params.callControlId, { commandId: `${params.callControlId}:no-forward` });
     return;
   }
@@ -261,25 +395,43 @@ async function handleInboundCall(params: {
     clientState: {
       role: 'inbound',
       direction: 'inbound',
-      from,
-      to: normalizePhoneNumber(getString(params.payload, 'from')).e164,
-      forwardTo,
+      from: calledNumber,
+      to: callerNumber,
+      forwardTo: primaryTransferTo,
     },
   });
 
-  await transferTelnyxCall(params.callControlId, {
-    to: forwardTo,
-    from,
-    timeoutSecs: 45,
-    commandId: `${params.callControlId}:forward`,
-    clientState: {
-      role: 'inbound',
-      direction: 'inbound',
-      from,
-      to: normalizePhoneNumber(getString(params.payload, 'from')).e164,
-      forwardTo,
-    },
-  });
+  try {
+    await transferTelnyxCall(params.callControlId, {
+      to: primaryTransferTo,
+      from: calledNumber,
+      timeoutSecs: 45,
+      commandId: `${params.callControlId}:${primaryTransferTarget}`,
+      clientState: {
+        role: 'inbound',
+        direction: 'inbound',
+        from: calledNumber,
+        to: callerNumber,
+        forwardTo: primaryTransferTo,
+      },
+    });
+  } catch (error) {
+    if (!webRtcDestination || !phoneForwardTo) throw error;
+    console.warn('[telnyx/voice] WebRTC inbound transfer failed; falling back to phone forward', error);
+    await transferTelnyxCall(params.callControlId, {
+      to: phoneForwardTo,
+      from: calledNumber,
+      timeoutSecs: 45,
+      commandId: `${params.callControlId}:phone-fallback`,
+      clientState: {
+        role: 'inbound',
+        direction: 'inbound',
+        from: calledNumber,
+        to: callerNumber,
+        forwardTo: phoneForwardTo,
+      },
+    });
+  }
 }
 
 export async function handleTelnyxVoiceWebhook(request: NextRequest) {
@@ -291,15 +443,16 @@ export async function handleTelnyxVoiceWebhook(request: NextRequest) {
   const clientState = decodeTelnyxClientState(payload.client_state);
   const callRequestId = clientState.callRequestId ?? null;
 
+  const admin = createAdminClient();
+
   try {
-    await handleInboundCall({ eventType, payload, callControlId });
+    await handleInboundCall({ admin, eventType, payload, callControlId });
   } catch (error) {
     console.error('[telnyx/voice] failed to handle inbound call command', error, {
       message: getTelnyxInboundFallbackMessage(),
     });
   }
 
-  const admin = createAdminClient();
   const { data: call, error: callError } = await findDialerCall(admin, callRequestId, callControlId);
   if (callError) {
     console.error('[telnyx/voice] failed to load dialer call', callError);

@@ -27,6 +27,16 @@ function shouldBypassWorkspaceGate(next: string | null): boolean {
   return next?.startsWith('/reset-password') ?? false;
 }
 
+function shouldResumeOnboardingCompletion(next: string | null): boolean {
+  if (!next) return false;
+  try {
+    const nextURL = new URL(next, 'https://flyrpro.app');
+    return nextURL.pathname.startsWith('/onboarding') && nextURL.searchParams.get('resume') === 'complete';
+  } catch {
+    return false;
+  }
+}
+
 /** Preserve /onboarding and its query string when present; otherwise default onboarding URL. */
 function resolveOnboardingEntryPath(next: string | null): string {
   const normalized = normalizeNextPath(next);
@@ -71,6 +81,10 @@ export async function getPostAuthRedirectForUserId(
 
   if (inviteToken) {
     return { redirect: 'join', path: `/join?token=${encodeURIComponent(inviteToken)}` };
+  }
+
+  if (shouldResumeOnboardingCompletion(next)) {
+    return { redirect: 'onboarding', path: next ?? '/onboarding?resume=complete' };
   }
 
   const admin = createAdminClient();

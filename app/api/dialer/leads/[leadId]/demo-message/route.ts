@@ -11,10 +11,12 @@ export const dynamic = 'force-dynamic';
 type DemoMessagePayload = {
   workspaceId?: string;
   email?: string | null;
+  template?: 'default' | 'brokerage';
 };
 
 const FALLBACK_PUBLIC_ORIGIN = 'https://www.flyrpro.app';
 const DEMO_VIDEO_PATH = '/demo-1';
+const LISTING_DEMO_VIDEO_PATH = '/demo-2';
 
 function cleanText(value: string | null | undefined): string {
   return (value ?? '').trim();
@@ -53,14 +55,26 @@ function getRepFirstName(value: string | null | undefined): string {
   return getFirstName(value) || 'Daniel';
 }
 
-function buildSharedDemoUrl(origin: string, referralCode: string | null): string {
-  if (!referralCode) return new URL(DEMO_VIDEO_PATH, origin).toString();
+function buildSharedDemoUrl(
+  origin: string,
+  referralCode: string | null,
+  demoPath = DEMO_VIDEO_PATH,
+  campaign = 'power-dialer-demo'
+): string {
+  if (!referralCode) return new URL(demoPath, origin).toString();
 
   const url = new URL(`/s/${encodeURIComponent(referralCode)}`, origin);
   url.searchParams.set('source', 'salesperson');
-  url.searchParams.set('campaign', 'power-dialer-demo');
-  url.searchParams.set('redirect', DEMO_VIDEO_PATH);
+  url.searchParams.set('campaign', campaign);
+  url.searchParams.set('redirect', demoPath);
   return url.toString();
+}
+
+function isBrokerageLead(lead: DiallerLead): boolean {
+  const haystack = `${lead.name ?? ''} ${lead.company ?? ''}`.toLowerCase();
+  return ['brokerage', 'realty', 'real estate office', 'realtor office', 'broker'].some((signal) =>
+    haystack.includes(signal)
+  );
 }
 
 function buildTextMessage(lead: DiallerLead, repName: string, demoUrl: string): string {
@@ -84,6 +98,35 @@ function buildEmailBody(lead: DiallerLead, repName: string, demoUrl: string): st
     `Here is the quick 90-second FLYR demo I mentioned: ${demoUrl}`,
     '',
     'It shows how teams can automatically track field activity, manage leads, and keep agents accountable from one place.',
+    '',
+    'Reply here with any questions and I will get back to you.',
+    '',
+    'Thanks,',
+    repName,
+  ].join('\n');
+}
+
+function buildBrokerageEmailBody(
+  lead: DiallerLead,
+  repName: string,
+  teamDemoUrl: string,
+  listingDemoUrl: string,
+  signupUrl: string
+): string {
+  const firstName = getFirstName(lead.name) || 'there';
+  return [
+    `Hey ${firstName},`,
+    '',
+    'It was great connecting with you.',
+    '',
+    'I wanted to send over two quick FLYR demos that might be useful for your brokerage:',
+    '',
+    `Demo 1 - Teams: ${teamDemoUrl}`,
+    `Demo 2 - Individual Agent Listing: ${listingDemoUrl}`,
+    '',
+    `Agents can also start a free trial here: ${signupUrl}`,
+    '',
+    'I would be honoured if you shared this with any agents you think would benefit from it.',
     '',
     'Reply here with any questions and I will get back to you.',
     '',
@@ -137,37 +180,60 @@ export async function POST(
     : null;
 
   const origin = getPublicOrigin(request);
-  let demoUrl: string;
-  try {
-    const generated = await generateDemoLinkForLead({
-      admin: context.admin,
-      leadId,
-      user: context.requestUser,
-    });
-    demoUrl = generated.url;
-  } catch (generateError) {
-    console.warn('[dialer/demo-message] demo engine link generation failed; falling back to tracked demo link', generateError);
-    const trackedLink = await createTrackedDemoLink({
-      admin: context.admin,
-      origin,
-      salesperson,
-      workspaceId: context.workspaceId,
-      lead: diallerLead,
-      referralCode,
-      source: 'salesperson',
-      campaign: 'power-dialer-demo',
-      destinationPath: DEMO_VIDEO_PATH,
-    });
-    demoUrl = trackedLink?.url ?? buildSharedDemoUrl(origin, referralCode);
-  }
+  const demoResult = await (async (): Promise<{
+    demoUrl: string;
+    trackedLink: Awaited<ReturnType<typeof createTrackedDemoLink>> | null;
+  }> => {
+    try {
+      const generated = await generateDemoLinkForLead({
+        admin: context.admin,
+        leadId,
+        user: context.requestUser,
+      });
+      return { demoUrl: generated.url, trackedLink: null };
+    } catch (generateError) {
+      console.warn('[dialer/demo-message] demo engine link generation failed; falling back to tracked demo link', generateError);
+      const trackedLink = await createTrackedDemoLink({
+        admin: context.admin,
+        origin,
+        salesperson,
+        workspaceId: context.workspaceId,
+        lead: diallerLead,
+        referralCode,
+        source: 'salesperson',
+        campaign: 'power-dialer-demo',
+        destinationPath: DEMO_VIDEO_PATH,
+      });
+      return { demoUrl: trackedLink?.url ?? buildSharedDemoUrl(origin, referralCode), trackedLink };
+    }
+  })();
+  const { demoUrl, trackedLink } = demoResult;
+  const listingDemoUrl = buildSharedDemoUrl(
+    origin,
+    referralCode,
+    LISTING_DEMO_VIDEO_PATH,
+    'individual-agent-listing'
+  );
+  const signupUrl = new URL('/onboarding', origin);
+  signupUrl.searchParams.set('source', 'dialer');
+  signupUrl.searchParams.set('campaign', 'brokerage-demo');
+  if (referralCode) signupUrl.searchParams.set('referralCode', referralCode);
   const repName = getRepFirstName(salesperson?.full_name || context.requestUser.email);
+  const template = payload.template === 'brokerage' || isBrokerageLead(diallerLead)
+    ? 'brokerage'
+    : 'default';
 
   return NextResponse.json({
     demoUrl,
-    demoLinkToken: null,
+    listingDemoUrl,
+    demoLinkToken: trackedLink?.token ?? null,
     textBody: buildTextMessage(diallerLead, repName, demoUrl),
-    emailSubject: 'Quick FLYR demo',
-    emailBody: buildEmailBody(diallerLead, repName, demoUrl),
-    tracked: false,
+    emailSubject: template === 'brokerage'
+      ? 'Two quick FLYR demos for your agents'
+      : 'Quick FLYR demo',
+    emailBody: template === 'brokerage'
+      ? buildBrokerageEmailBody(diallerLead, repName, demoUrl, listingDemoUrl, signupUrl.toString())
+      : buildEmailBody(diallerLead, repName, demoUrl),
+    tracked: Boolean(trackedLink),
   });
 }

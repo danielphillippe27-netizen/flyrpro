@@ -27,6 +27,7 @@ type DemoCenterPayload = {
     phoneForwardTo: string | null;
   };
   links: {
+    individualAgentListingUrl?: string;
     realEstateAgentUrl: string;
     realEstateTeamUrl: string;
     roofingUrl: string;
@@ -125,8 +126,8 @@ export function SalespersonDemoCenter() {
     if (!payload) return [];
     return [
       {
-        title: 'Real Estate Agent LINK',
-        value: payload.links.realEstateAgentUrl,
+        title: 'Individual Agent - Listing LINK',
+        value: payload.links.individualAgentListingUrl ?? payload.links.realEstateAgentUrl,
         icon: <Link2 className="h-4 w-4" />,
       },
       {

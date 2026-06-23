@@ -40,6 +40,21 @@ function normalizeInviteEmail(value: string | null | undefined): string | null {
   return normalized.length > 0 ? normalized : null;
 }
 
+function isListingOnboardingResume(nextPath: string | null): boolean {
+  if (!nextPath?.startsWith('/')) return false;
+  try {
+    const parsed = new URL(nextPath, 'https://flyrpro.app');
+    return (
+      parsed.pathname === '/onboarding' &&
+      parsed.searchParams.get('resume') === 'complete' &&
+      parsed.searchParams.get('source') === 'dialer' &&
+      parsed.searchParams.get('campaign') === 'individual-agent-listing'
+    );
+  } catch {
+    return false;
+  }
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState('');
@@ -113,6 +128,23 @@ export default function LoginPage() {
     return `/gate?${params.toString()}`;
   };
   const gatePath = buildGatePath();
+  const isListingOnboardingCreateAccountFlow = isListingOnboardingResume(normalizedNext);
+  const emailSubmitLabel = isListingOnboardingCreateAccountFlow
+    ? 'Create account with Email'
+    : 'Continue with Email';
+  const googleAuthLabel = isListingOnboardingCreateAccountFlow
+    ? 'Create account with Google'
+    : 'Continue with Google';
+  const appleAuthLabel = isListingOnboardingCreateAccountFlow
+    ? 'Create account with Apple'
+    : 'Continue with Apple';
+  const loginIntroCopy = inviteMode
+    ? `Sign in or create an account to join ${inviteInfo.workspaceName ?? 'this workspace'}`
+    : authMode === 'recovery'
+      ? 'Enter your email and we will send a secure password reset link'
+      : isListingOnboardingCreateAccountFlow
+        ? 'Create an account to access your dashboard and finish onboarding'
+        : 'Sign in or create an account to access your dashboard or onboarding';
   const buildAuthCallbackURL = () => {
     const callbackURL = new URL('/auth/callback', window.location.origin);
     callbackURL.searchParams.set('next', normalizedNext);
@@ -326,7 +358,9 @@ export default function LoginPage() {
         type: 'success',
         text: inviteMode
           ? 'Check your email to confirm your account, then sign in to finish joining this workspace.'
-          : 'Check your email to confirm your account, then sign in with your password.',
+          : isListingOnboardingCreateAccountFlow
+            ? 'Check your email to confirm your account, then return here to finish onboarding.'
+            : 'Check your email to confirm your account, then sign in with your password.',
       });
     } catch (error: unknown) {
       console.error('❌ Auth error:', error);
@@ -392,11 +426,7 @@ export default function LoginPage() {
             />
           </div>
           <p className="text-lg font-semibold text-[#7b7f89]">
-            {inviteMode
-              ? `Sign in or create an account to join ${inviteInfo.workspaceName ?? 'this workspace'}`
-              : authMode === 'recovery'
-                ? 'Enter your email and we will send a secure password reset link'
-                : 'Sign in or create an account to access your dashboard or onboarding'}
+            {loginIntroCopy}
           </p>
         </div>
 
@@ -456,7 +486,7 @@ export default function LoginPage() {
                 : 'Continuing...'
               : authMode === 'recovery'
                 ? 'Send reset link'
-                : 'Continue with Email'}
+                : emailSubmitLabel}
           </Button>
         </form>
 
@@ -511,7 +541,7 @@ export default function LoginPage() {
                 d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
               />
             </svg>
-            Continue with Google
+            {googleAuthLabel}
           </Button>
           <Button
             type="button"
@@ -528,7 +558,7 @@ export default function LoginPage() {
             >
               <path d="M17.05 20.28c-.98.95-2.05.88-3.08.4-1.09-.5-2.08-.48-3.24 0-1.44.62-2.2.44-3.06-.4C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.54 4.09l.01-.01zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z" />
             </svg>
-            Continue with Apple
+            {appleAuthLabel}
           </Button>
             </div>
           </>

@@ -3,6 +3,10 @@ export const STARTER_SCRIPT_ID = "starter-flyr-sales-call-flow";
 export const REAL_ESTATE_QUICK_DEMO_SCRIPT_NAME =
   "Real Estate Teams - quick demo";
 export const REAL_ESTATE_QUICK_DEMO_SCRIPT_ID = "real-estate-teams-quick-demo";
+export const REAL_ESTATE_INDIVIDUAL_AGENT_SCRIPT_NAME =
+  "Real Estate Individual Agents - listing appointments";
+export const REAL_ESTATE_INDIVIDUAL_AGENT_SCRIPT_ID =
+  "real-estate-individual-agents-listing-appointments";
 
 export type StarterScriptFlowLine = {
   speaker: "rep" | "person";
@@ -410,6 +414,500 @@ REP RULES:
 3. Do not argue.
 4. Question first, value second.
 5. Always end with a next step: send demo, book follow-up, call later, or mark not interested.`;
+
+export const REAL_ESTATE_INDIVIDUAL_AGENT_SCRIPT_FLOW: StarterScriptFlowNode[] = [
+  {
+    id: "opening",
+    label: "Opening",
+    kind: "start",
+    title: "Founder opener",
+    say: "Hey [Name], it's Daniel. Reason for the call today is I'm the founder of a software company called FLYR. We help Realtors get more listing appointments using more of an old-school approach.\n\nI'd love to share a little more about the company, but first, how's business treating you so far this year?",
+    lines: [
+      {
+        speaker: "rep",
+        text: "Hey [Name], it's Daniel. Reason for the call today is I'm the founder of a software company called FLYR. We help Realtors get more listing appointments using more of an old-school approach.\n\nI'd love to share a little more about the company, but first, how's business treating you so far this year?",
+      },
+    ],
+    coach:
+      "Lead with the founder angle, then ask about their business. The first goal is a real conversation, not a feature dump.",
+    options: [
+      { label: "Business is good", nextId: "current-lead-source" },
+      { label: "Business is slow", nextId: "slow-business" },
+      { label: "Busy", nextId: "busy" },
+      { label: "Who's this?", nextId: "quick-intro" },
+      { label: "Not interested", nextId: "not-interested" },
+    ],
+  },
+  {
+    id: "quick-intro",
+    label: "Intro",
+    kind: "objection",
+    title: "Quick intro",
+    say: "Totally. I'm Daniel, the founder of FLYR. We help individual Realtors create more seller conversations and turn those into listing appointments using an old-school, relationship-based prospecting approach.",
+    lines: [
+      {
+        speaker: "rep",
+        text: "Totally. I'm Daniel, the founder of FLYR. We help individual Realtors create more seller conversations and turn those into listing appointments using an old-school, relationship-based prospecting approach.",
+      },
+    ],
+    coach:
+      "Answer directly, then get back to the business question. Keep the tone curious.",
+    options: [
+      { label: "Ask business question", nextId: "opening" },
+      { label: "Ask seller question", nextId: "seller-conversations" },
+    ],
+  },
+  {
+    id: "busy",
+    label: "Busy",
+    kind: "objection",
+    title: "If they are busy",
+    say: "No worries, I can be quick. FLYR helps Realtors create more listing appointments through a simple field-prospecting system. Before I let you go, are you currently looking for more seller conversations, or are you covered right now?",
+    lines: [
+      {
+        speaker: "rep",
+        text: "No worries, I can be quick. FLYR helps Realtors create more listing appointments through a simple field-prospecting system. Before I let you go, are you currently looking for more seller conversations, or are you covered right now?",
+      },
+    ],
+    coach:
+      "Respect the interruption. Ask one qualifying question, then either book a callback or move on.",
+    options: [
+      { label: "Needs sellers", nextId: "seller-conversations" },
+      { label: "Covered", nextId: "covered-right-now" },
+      { label: "Call later", nextId: "call-later" },
+      { label: "No", nextId: "graceful-close" },
+    ],
+  },
+  {
+    id: "not-interested",
+    label: "No interest",
+    kind: "objection",
+    title: "If they say not interested",
+    say: "Totally fair. Just so I don't follow up with something irrelevant, are you not focused on growing listings right now, or do you already have that side covered?",
+    lines: [
+      {
+        speaker: "rep",
+        text: "Totally fair. Just so I don't follow up with something irrelevant, are you not focused on growing listings right now, or do you already have that side covered?",
+      },
+    ],
+    coach:
+      "Do not argue. Try to learn whether the issue is timing, listings, or FLYR specifically.",
+    options: [
+      { label: "Not growing listings", nextId: "not-growing-listings" },
+      { label: "Already covered", nextId: "covered-right-now" },
+      { label: "No answer", nextId: "graceful-close" },
+    ],
+  },
+  {
+    id: "slow-business",
+    label: "Slow",
+    kind: "question",
+    title: "Business is slow",
+    say: "Got it. I'm hearing that from a lot of agents right now. Is the bigger challenge getting enough leads in general, or getting more listing appointments specifically?",
+    lines: [
+      {
+        speaker: "rep",
+        text: "Got it. I'm hearing that from a lot of agents right now. Is the bigger challenge getting enough leads in general, or getting more listing appointments specifically?",
+      },
+    ],
+    coach:
+      "Separate lead volume from seller appointment quality. FLYR is strongest when listings are the gap.",
+    options: [
+      { label: "Listing appointments", nextId: "seller-conversations" },
+      { label: "Leads in general", nextId: "current-lead-source" },
+      { label: "Not sure", nextId: "seller-conversations" },
+    ],
+  },
+  {
+    id: "current-lead-source",
+    label: "Lead source",
+    kind: "question",
+    title: "Ask where business comes from",
+    say: "That's good to hear. Are most of your opportunities coming from referrals, your database, online leads, open houses, or something else?",
+    lines: [
+      {
+        speaker: "rep",
+        text: "That's good to hear. Are most of your opportunities coming from referrals, your database, online leads, open houses, or something else?",
+      },
+    ],
+    coach:
+      "This keeps the call consultative. Listen for whether they already have seller demand or mostly buyer/referral activity.",
+    options: [
+      { label: "Referrals / database", nextId: "referral-fit" },
+      { label: "Online leads", nextId: "online-leads-fit" },
+      { label: "Open houses", nextId: "open-house-fit" },
+      { label: "Not much", nextId: "seller-conversations" },
+    ],
+  },
+  {
+    id: "seller-conversations",
+    label: "Seller question",
+    kind: "question",
+    title: "Find seller conversation gap",
+    say: "Got it. And what are you currently doing to create seller conversations or generate new listing opportunities?",
+    lines: [
+      {
+        speaker: "rep",
+        text: "Got it. And what are you currently doing to create seller conversations or generate new listing opportunities?",
+      },
+    ],
+    coach:
+      "This is the core question. Do not pitch until you know how they currently create seller conversations.",
+    options: [
+      { label: "Not much", nextId: "position-flyr" },
+      { label: "Referrals", nextId: "referral-fit" },
+      { label: "Door knocking / farming", nextId: "field-prospecting-fit" },
+      { label: "Paid leads", nextId: "online-leads-fit" },
+      { label: "Enough sellers", nextId: "covered-right-now" },
+    ],
+  },
+  {
+    id: "referral-fit",
+    label: "Referrals",
+    kind: "question",
+    title: "Referral-based business",
+    say: "That makes sense. Referrals are usually the best business. Do you feel like referrals are consistent enough right now, or would it help to have another way to create seller conversations in the background?",
+    lines: [
+      {
+        speaker: "rep",
+        text: "That makes sense. Referrals are usually the best business. Do you feel like referrals are consistent enough right now, or would it help to have another way to create seller conversations in the background?",
+      },
+    ],
+    coach:
+      "Do not position against referrals. Position FLYR as a consistent second channel.",
+    options: [
+      { label: "Needs another channel", nextId: "position-flyr" },
+      { label: "Referrals enough", nextId: "covered-right-now" },
+      { label: "Curious", nextId: "position-flyr" },
+    ],
+  },
+  {
+    id: "online-leads-fit",
+    label: "Paid leads",
+    kind: "question",
+    title: "Online or paid leads",
+    say: "Got it. Are those mostly buyer leads, or are they turning into consistent listing appointments too?",
+    lines: [
+      {
+        speaker: "rep",
+        text: "Got it. Are those mostly buyer leads, or are they turning into consistent listing appointments too?",
+      },
+    ],
+    coach:
+      "Many paid lead sources are buyer-heavy. Keep the contrast around listing appointments, not lead volume.",
+    options: [
+      { label: "Mostly buyers", nextId: "position-flyr" },
+      { label: "Some listings", nextId: "listing-volume-check" },
+      { label: "Enough listings", nextId: "covered-right-now" },
+    ],
+  },
+  {
+    id: "open-house-fit",
+    label: "Open houses",
+    kind: "question",
+    title: "Open house follow-up",
+    say: "Nice. Are you using open houses mostly for buyer conversations, or are you also using them to create seller conversations in the neighbourhood?",
+    lines: [
+      {
+        speaker: "rep",
+        text: "Nice. Are you using open houses mostly for buyer conversations, or are you also using them to create seller conversations in the neighbourhood?",
+      },
+    ],
+    coach:
+      "Open houses are a bridge to neighbourhood prospecting. Use that if they already like in-person activity.",
+    options: [
+      { label: "Mostly buyers", nextId: "position-flyr" },
+      { label: "Neighbourhood sellers", nextId: "field-prospecting-fit" },
+      { label: "Not sure", nextId: "position-flyr" },
+    ],
+  },
+  {
+    id: "field-prospecting-fit",
+    label: "Field work",
+    kind: "question",
+    title: "Already doing old-school prospecting",
+    say: "That's exactly the lane FLYR is built for. Are you tracking the homes you visit, who you spoke with, who needs follow-up, and which conversations could turn into listing appointments?",
+    lines: [
+      {
+        speaker: "rep",
+        text: "That's exactly the lane FLYR is built for. Are you tracking the homes you visit, who you spoke with, who needs follow-up, and which conversations could turn into listing appointments?",
+      },
+    ],
+    coach:
+      "If they already do field work, the pain is usually organization, follow-up, and consistency.",
+    options: [
+      { label: "Not really", nextId: "position-flyr" },
+      { label: "Manual tracking", nextId: "position-flyr" },
+      { label: "Already tracked", nextId: "existing-system" },
+    ],
+  },
+  {
+    id: "listing-volume-check",
+    label: "Listing volume",
+    kind: "question",
+    title: "Enough listing appointments?",
+    say: "That's good. Do you feel like you have enough listing opportunities coming in each month, or is that still something you are trying to improve?",
+    lines: [
+      {
+        speaker: "rep",
+        text: "That's good. Do you feel like you have enough listing opportunities coming in each month, or is that still something you are trying to improve?",
+      },
+    ],
+    coach:
+      "Use their own target as the gap. If they have enough, exit cleanly.",
+    options: [
+      { label: "Trying to improve", nextId: "position-flyr" },
+      { label: "Enough", nextId: "covered-right-now" },
+    ],
+  },
+  {
+    id: "existing-system",
+    label: "Existing system",
+    kind: "objection",
+    title: "They already track it",
+    say: "Makes sense. Most agents have something they use. FLYR is built specifically for old-school real estate prospecting, so the difference is that it maps the territory, keeps the follow-up organized, and helps turn conversations into listing appointments.",
+    lines: [
+      {
+        speaker: "rep",
+        text: "Makes sense. Most agents have something they use. FLYR is built specifically for old-school real estate prospecting, so the difference is that it maps the territory, keeps the follow-up organized, and helps turn conversations into listing appointments.",
+      },
+    ],
+    coach:
+      "Respect their current system. Position FLYR as the cleaner field layer.",
+    options: [
+      { label: "Ask for quick look", nextId: "demo-ask" },
+      { label: "Asks price", nextId: "pricing" },
+      { label: "Not interested", nextId: "graceful-close" },
+    ],
+  },
+  {
+    id: "position-flyr",
+    label: "Position",
+    kind: "question",
+    title: "Position FLYR",
+    say: "That is exactly why I reached out. FLYR helps individual Realtors create a repeatable way to get in front of homeowners, track the conversations, and turn the right ones into listing appointments. It is more old-school and relationship-based than just chasing internet leads.",
+    lines: [
+      {
+        speaker: "rep",
+        text: "That is exactly why I reached out. FLYR helps individual Realtors create a repeatable way to get in front of homeowners, track the conversations, and turn the right ones into listing appointments. It is more old-school and relationship-based than just chasing internet leads.",
+      },
+    ],
+    coach:
+      "Tie the pitch to what they just said. Keep it about seller conversations and appointments.",
+    options: [
+      { label: "Ask for quick look", nextId: "demo-ask" },
+      { label: "They ask pricing", nextId: "pricing" },
+      { label: "Need more info", nextId: "how-it-works" },
+    ],
+  },
+  {
+    id: "how-it-works",
+    label: "How it works",
+    kind: "question",
+    title: "Simple explanation",
+    say: "The simple version is: you choose the area you want to build listing inventory in, FLYR helps you work that area consistently, track every homeowner conversation, and make sure follow-up does not fall through the cracks.",
+    lines: [
+      {
+        speaker: "rep",
+        text: "The simple version is: you choose the area you want to build listing inventory in, FLYR helps you work that area consistently, track every homeowner conversation, and make sure follow-up does not fall through the cracks.",
+      },
+    ],
+    coach:
+      "Keep this practical. Do not explain every feature unless they ask.",
+    options: [
+      { label: "Ask for quick look", nextId: "demo-ask" },
+      { label: "Asks price", nextId: "pricing" },
+      { label: "Already covered", nextId: "covered-right-now" },
+    ],
+  },
+  {
+    id: "pricing",
+    label: "Pricing",
+    kind: "objection",
+    title: "Answer pricing",
+    say: "FLYR starts at $30 USD per user/month, which is about $40 CAD. The way I would think about it is simple: if it helps create even one extra listing appointment, it more than pays for itself.",
+    lines: [
+      {
+        speaker: "rep",
+        text: "FLYR starts at $30 USD per user/month, which is about $40 CAD. The way I would think about it is simple: if it helps create even one extra listing appointment, it more than pays for itself.",
+      },
+    ],
+    coach:
+      "Answer directly. Then return to the small next step instead of defending the price.",
+    options: [
+      { label: "Ask for quick look", nextId: "demo-ask" },
+      { label: "Book demo", nextId: "book-demo" },
+      { label: "No", nextId: "graceful-close" },
+    ],
+  },
+  {
+    id: "covered-right-now",
+    label: "Covered",
+    kind: "close",
+    title: "They are covered right now",
+    say: "That is great. Sounds like listings may not be the biggest gap for you right now. Would it still be okay if I sent over the quick demo so you have it in case that changes?",
+    lines: [
+      {
+        speaker: "rep",
+        text: "That is great. Sounds like listings may not be the biggest gap for you right now. Would it still be okay if I sent over the quick demo so you have it in case that changes?",
+      },
+    ],
+    coach:
+      "Do not force urgency. Convert to permission to send the demo or close cleanly.",
+    options: [
+      { label: "Send demo", nextId: "send-demo" },
+      { label: "No", nextId: "graceful-close" },
+    ],
+  },
+  {
+    id: "not-growing-listings",
+    label: "No listings focus",
+    kind: "close",
+    title: "Not focused on listings",
+    say: "Got it. Then this probably is not a priority today. Appreciate you taking the call.",
+    lines: [
+      {
+        speaker: "rep",
+        text: "Got it. Then this probably is not a priority today. Appreciate you taking the call.",
+      },
+    ],
+    coach:
+      "Exit cleanly when the problem is not active. Mark the call outcome and move on.",
+    options: [{ label: "Done", nextId: "done" }],
+  },
+  {
+    id: "demo-ask",
+    label: "Demo ask",
+    kind: "close",
+    title: "Book or send demo",
+    say: "Would it be worth taking 10 or 15 minutes so I can show you how it works and see if it makes sense for your market?",
+    lines: [
+      {
+        speaker: "rep",
+        text: "Would it be worth taking 10 or 15 minutes so I can show you how it works and see if it makes sense for your market?",
+      },
+    ],
+    coach:
+      "This is the main close. Keep the commitment small and tied to their market.",
+    options: [
+      { label: "Book demo", nextId: "book-demo" },
+      { label: "Send demo first", nextId: "send-demo" },
+      { label: "Call later", nextId: "call-later" },
+      { label: "No", nextId: "graceful-close" },
+    ],
+  },
+  {
+    id: "send-demo",
+    label: "Send demo",
+    kind: "close",
+    title: "Send the demo",
+    say: "Perfect. What is the best email or number to send it to? I will send the quick demo over, and if it looks useful we can book 10 minutes after.",
+    lines: [
+      {
+        speaker: "rep",
+        text: "Perfect. What is the best email or number to send it to? I will send the quick demo over, and if it looks useful we can book 10 minutes after.",
+      },
+    ],
+    coach:
+      "Confirm the destination, send it immediately, and create the follow-up task.",
+    options: [
+      { label: "Demo sent", nextId: "done" },
+      { label: "Book follow-up", nextId: "book-demo" },
+      { label: "Call later", nextId: "call-later" },
+    ],
+  },
+  {
+    id: "book-demo",
+    label: "Book demo",
+    kind: "close",
+    title: "Book the follow-up",
+    say: "Great. The easiest next step is 10 or 15 minutes. Does [Time 1] or [Time 2] work better?",
+    lines: [
+      {
+        speaker: "rep",
+        text: "Great. The easiest next step is 10 or 15 minutes. Does [Time 1] or [Time 2] work better?",
+      },
+    ],
+    coach:
+      "Offer two specific times. Do not leave the next step vague.",
+    options: [
+      { label: "Booked", nextId: "done" },
+      { label: "Send demo first", nextId: "send-demo" },
+      { label: "Call later", nextId: "call-later" },
+    ],
+  },
+  {
+    id: "call-later",
+    label: "Call later",
+    kind: "close",
+    title: "Schedule callback",
+    say: "No problem. I can call you back at [Time]. I will keep it focused on how you are creating seller conversations and whether FLYR could help.",
+    lines: [
+      {
+        speaker: "rep",
+        text: "No problem. I can call you back at [Time]. I will keep it focused on how you are creating seller conversations and whether FLYR could help.",
+      },
+    ],
+    coach:
+      "Set a real callback time and keep the reason specific.",
+    options: [
+      { label: "Callback set", nextId: "done" },
+      { label: "Send demo only", nextId: "send-demo" },
+    ],
+  },
+  {
+    id: "graceful-close",
+    label: "Close",
+    kind: "close",
+    title: "End cleanly",
+    say: "No problem at all. Appreciate your time.",
+    lines: [
+      {
+        speaker: "rep",
+        text: "No problem at all. Appreciate your time.",
+      },
+    ],
+    coach:
+      "Do not argue. Mark not interested or not a fit and move to the next call.",
+    options: [{ label: "Done", nextId: "done" }],
+  },
+  {
+    id: "done",
+    label: "Done",
+    kind: "done",
+    title: "Call complete",
+    say: "Log the outcome, add the follow-up, and move to the next call.",
+    coach:
+      "The call must end with a clear disposition: demo sent, booked, callback set, covered, no fit, or not interested.",
+    options: [{ label: "Start again", nextId: "opening" }],
+  },
+];
+
+export const REAL_ESTATE_INDIVIDUAL_AGENT_SCRIPT_BODY = `Real Estate Individual Agents - listing appointments
+
+OPENING:
+Hey [Name], it's Daniel. Reason for the call today is I'm the founder of a software company called FLYR. We help Realtors get more listing appointments using more of an old-school approach.
+
+I'd love to share a little more about the company, but first, how's business treating you so far this year?
+
+CORE DISCOVERY:
+Are most of your opportunities coming from referrals, your database, online leads, open houses, or something else?
+
+SELLER CONVERSATION QUESTION:
+What are you currently doing to create seller conversations or generate new listing opportunities?
+
+POSITION FLYR:
+That is exactly why I reached out. FLYR helps individual Realtors create a repeatable way to get in front of homeowners, track the conversations, and turn the right ones into listing appointments. It is more old-school and relationship-based than just chasing internet leads.
+
+CLOSE:
+Would it be worth taking 10 or 15 minutes so I can show you how it works and see if it makes sense for your market?
+
+REP RULES:
+1. Lead with curiosity before pitching.
+2. Keep the focus on seller conversations and listing appointments.
+3. Do not position against referrals; position FLYR as another consistent channel.
+4. If they are covered, ask permission to send the quick demo or close cleanly.
+5. Always end with a next step: book demo, send demo, set callback, or mark not interested.`;
 
 export const REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW: StarterScriptFlowNode[] = [
   {
@@ -1190,6 +1688,9 @@ export const REAL_ESTATE_QUICK_DEMO_SCRIPT_BODY = encodeScriptFlowBody(
   REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW,
 );
 
+export const REAL_ESTATE_INDIVIDUAL_AGENT_ENCODED_SCRIPT_BODY =
+  encodeScriptFlowBody(REAL_ESTATE_INDIVIDUAL_AGENT_SCRIPT_FLOW);
+
 export const BUILT_IN_SCRIPT_DEFINITIONS = [
   {
     id: STARTER_SCRIPT_ID,
@@ -1202,6 +1703,12 @@ export const BUILT_IN_SCRIPT_DEFINITIONS = [
     name: REAL_ESTATE_QUICK_DEMO_SCRIPT_NAME,
     body: REAL_ESTATE_QUICK_DEMO_SCRIPT_BODY,
     flow: REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW,
+  },
+  {
+    id: REAL_ESTATE_INDIVIDUAL_AGENT_SCRIPT_ID,
+    name: REAL_ESTATE_INDIVIDUAL_AGENT_SCRIPT_NAME,
+    body: REAL_ESTATE_INDIVIDUAL_AGENT_ENCODED_SCRIPT_BODY,
+    flow: REAL_ESTATE_INDIVIDUAL_AGENT_SCRIPT_FLOW,
   },
 ] as const;
 

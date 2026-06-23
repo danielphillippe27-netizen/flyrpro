@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FLYR REALTOR.ca Scraper</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="logo">FLYR</div>
+        <div>
+          <h1>REALTOR.ca Scraper</h1>
+          <p>Capture agents from the current REALTOR.ca tab.</p>
+        </div>
+      </header>
+
+      <label>
+        FLYR URL
+        <input id="flyrUrl" type="url" value="http://localhost:3000/scraper" />
+      </label>
+
+      <button id="scrape" type="button">Scrape REALTOR.ca</button>
+      <p id="status" role="status"></p>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

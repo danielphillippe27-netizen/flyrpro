@@ -110,6 +110,7 @@ const VALID_DISPOSITIONS = new Set<DiallerLeadDisposition>([
 ]);
 const FALLBACK_PUBLIC_ORIGIN = 'https://www.flyrpro.app';
 const DIALER_DEMO_VIDEO_PATH = '/demo-1';
+const LISTING_DEMO_VIDEO_PATH = '/demo-2';
 
 type DiallerLeadCallRow = {
   id: string;
@@ -369,15 +370,26 @@ async function buildDialerDemoUrl(request: NextRequest, context: DiallerContext)
   };
 }
 
-function buildSharedDialerDemoUrl(publicOrigin: string, referralCode: string | null): string {
-  const demoPath = DIALER_DEMO_VIDEO_PATH;
+function buildSharedDialerDemoUrl(
+  publicOrigin: string,
+  referralCode: string | null,
+  demoPath = DIALER_DEMO_VIDEO_PATH,
+  campaign = 'power-dialer-demo'
+): string {
   if (!referralCode) return new URL(demoPath, publicOrigin).toString();
 
   const url = new URL(`/s/${encodeURIComponent(referralCode)}`, publicOrigin);
   url.searchParams.set('source', 'salesperson');
-  url.searchParams.set('campaign', 'power-dialer-demo');
+  url.searchParams.set('campaign', campaign);
   url.searchParams.set('redirect', demoPath);
   return url.toString();
+}
+
+function isBrokerageLead(lead: DiallerLead): boolean {
+  const haystack = `${lead.name ?? ''} ${lead.company ?? ''}`.toLowerCase();
+  return ['brokerage', 'realty', 'real estate office', 'realtor office', 'broker'].some((signal) =>
+    haystack.includes(signal)
+  );
 }
 
 async function buildTrackedDialerDemoUrl(
@@ -435,15 +447,74 @@ function buildInterestedLinkText(lead: DiallerLead, demoUrl: string): string {
 }
 
 function buildEmailHtmlFromText(text: string): string {
+  const urlPattern = /(https?:\/\/[^\s<>"')]+)/g;
   return text
     .split(/\n{2,}/)
     .map((paragraph) => paragraph.trim())
     .filter(Boolean)
     .map((paragraph) => {
-      const escaped = escapeHtml(paragraph).replace(/\n/g, '<br />');
+      const escaped = escapeHtml(paragraph)
+        .replace(urlPattern, (url) => {
+          return `<a href="${url}" style="color:#dc2626;text-decoration:underline;">${url}</a>`;
+        })
+        .replace(/\n/g, '<br />');
       return `<p style="margin:0 0 16px;font-size:15px;line-height:1.65;color:#374151;">${escaped}</p>`;
     })
     .join('');
+}
+
+function extractEmailCtas(text: string, demoUrl: string): Array<{ label: string; url: string }> {
+  const seen = new Set<string>();
+  const ctas: Array<{ label: string; url: string }> = [];
+
+  for (const line of text.split('\n')) {
+    const url = line.match(/https?:\/\/[^\s<>"')]+/)?.[0];
+    if (!url || seen.has(url)) continue;
+
+    const lowerLine = line.toLowerCase();
+    let label = url === demoUrl ? 'Watch the demo' : 'Open link';
+    if (lowerLine.includes('demo 1')) label = 'Watch Demo 1 - Teams';
+    else if (lowerLine.includes('demo 2')) label = 'Watch Demo 2 - Listing';
+    else if (lowerLine.includes('free trial') || lowerLine.includes('sign up')) {
+      label = 'Start free trial';
+    }
+
+    seen.add(url);
+    ctas.push({ label, url });
+  }
+
+  return ctas.slice(0, 3);
+}
+
+function buildBrokerageDemoEmailBody(params: {
+  lead: DiallerLead;
+  senderName: string;
+  teamDemoUrl: string;
+  listingDemoUrl: string;
+  signupUrl: string;
+}): string {
+  const firstName = cleanText(params.lead.name).split(/\s+/)[0];
+  const greetingName = firstName || 'there';
+
+  return [
+    `Hey ${greetingName},`,
+    '',
+    'It was great connecting with you.',
+    '',
+    'I wanted to send over two quick FLYR demos that might be useful for your brokerage:',
+    '',
+    `Demo 1 - Teams: ${params.teamDemoUrl}`,
+    `Demo 2 - Individual Agent Listing: ${params.listingDemoUrl}`,
+    '',
+    `Agents can also start a free trial here: ${params.signupUrl}`,
+    '',
+    'I would be honoured if you shared this with any agents you think would benefit from it.',
+    '',
+    'Reply here with any questions and I will get back to you.',
+    '',
+    'Thanks,',
+    params.senderName,
+  ].join('\n');
 }
 
 function buildDemoEmailContent(
@@ -470,6 +541,19 @@ function buildDemoEmailContent(
     senderName,
   ].join('\n');
   const bodyHtml = buildEmailHtmlFromText(text);
+  const ctas = extractEmailCtas(text, demoUrl);
+  const ctaHtml = ctas
+    .map((cta, index) => {
+      const background = index === ctas.length - 1 && cta.label.includes('Start')
+        ? '#dc2626'
+        : '#111827';
+      return `<p style="margin:0 0 12px;">
+        <a href="${escapeHtml(cta.url)}" style="display:inline-block;background:${background};color:#ffffff;text-decoration:none;padding:12px 18px;border-radius:8px;font-size:15px;font-weight:700;">
+          ${escapeHtml(cta.label)}
+        </a>
+      </p>`;
+    })
+    .join('');
 
   const escapedGreetingName = escapeHtml(greetingName);
   const escapedDemoUrl = escapeHtml(demoUrl);
@@ -482,11 +566,11 @@ function buildDemoEmailContent(
         </div>
         <div style="padding:24px 28px;">
           ${bodyHtml || `<p style="margin:0 0 16px;font-size:15px;line-height:1.65;color:#374151;">Hey ${escapedGreetingName},</p>`}
-          ${text.includes(demoUrl) ? '' : `<p style="margin:0 0 22px;">
+          ${ctaHtml || (text.includes(demoUrl) ? '' : `<p style="margin:0 0 22px;">
             <a href="${escapedDemoUrl}" style="display:inline-block;background:#111827;color:#ffffff;text-decoration:none;padding:12px 18px;border-radius:8px;font-size:15px;font-weight:700;">
               Watch the demo
             </a>
-          </p>`}
+          </p>`)}
           <p style="margin:22px 0 0;font-size:12px;line-height:1.55;color:#6b7280;word-break:break-all;">
             If the button does not work, use this link: <a href="${escapedDemoUrl}" style="color:#374151;text-decoration:underline;">${escapedDemoUrl}</a>
           </p>
@@ -534,6 +618,7 @@ async function sendDemoEmail(
   const from = `${senderName} <${handle}@${DEMO_EMAIL_DOMAIN}>`;
   const replyTo = cleanText(salesperson?.demo_email_reply_to) || cleanText(salesperson?.email) || cleanText(context.requestUser.email) || getEnv('RESEND_REPLY_TO');
   const cleanToken = cleanText(overrides?.demoLinkToken);
+  const publicOrigin = getPublicOrigin(request);
   let demo: { url: string; referralCode: string | null; tracked: boolean };
   try {
     const generated = await generateDemoLinkForLead({
@@ -556,6 +641,25 @@ async function sendDemoEmail(
         }
       : await buildTrackedDialerDemoUrl(request, context, salesperson, lead, contact);
   }
+  const listingDemoUrl = buildSharedDialerDemoUrl(
+    publicOrigin,
+    demo.referralCode,
+    LISTING_DEMO_VIDEO_PATH,
+    'individual-agent-listing'
+  );
+  const signupUrl = new URL('/onboarding', publicOrigin);
+  signupUrl.searchParams.set('source', 'dialer');
+  signupUrl.searchParams.set('campaign', 'brokerage-demo');
+  if (demo.referralCode) signupUrl.searchParams.set('referralCode', demo.referralCode);
+  const fallbackBody = isBrokerageLead(lead)
+    ? buildBrokerageDemoEmailBody({
+        lead,
+        senderName,
+        teamDemoUrl: demo.url,
+        listingDemoUrl,
+        signupUrl: signupUrl.toString(),
+      })
+    : null;
   const contactId = typeof contact?.id === 'string' ? contact.id : null;
   if (cleanToken) {
     const { error: linkUpdateError } = await context.admin
@@ -572,8 +676,8 @@ async function sendDemoEmail(
     }
   }
   const content = buildDemoEmailContent(lead, demo.url, senderName, {
-    subject: overrides?.subject,
-    body: overrides?.body,
+    subject: overrides?.subject ?? (fallbackBody ? 'Two quick FLYR demos for your agents' : null),
+    body: overrides?.body ?? fallbackBody,
   });
   const resend = new Resend(apiKey);
   const { data, error } = await resend.emails.send({

@@ -9,7 +9,7 @@ import AppTopHeader from '@/components/layout/AppTopHeader';
 import { MainLayoutNavProvider, useMainLayoutNav } from '@/components/layout/MainLayoutNavContext';
 import { MainRouteGuard } from '@/components/guard/MainRouteGuard';
 import { DialerRuntimeProvider } from '@/components/dialer/DialerRuntimeProvider';
-import { Home, Trophy, Users, Settings, Target, Gauge, Plug, MessageCircle, Activity, Clock, CalendarDays, CornerDownRight, Plus, UserRoundPlus, BriefcaseBusiness, PhoneCall, Handshake, FileText, PlayCircle } from 'lucide-react';
+import { Home, Trophy, Users, Settings, Target, Gauge, Plug, MessageCircle, Activity, Clock, CalendarDays, CornerDownRight, Plus, UserRoundPlus, BriefcaseBusiness, PhoneCall, Handshake, FileText, PlayCircle, Inbox } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { DashboardAccessLevel } from '@/app/api/_utils/workspace';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
@@ -40,11 +40,11 @@ const salespeopleTab = { href: '/salespeople', icon: BriefcaseBusiness, label: '
 const salesLeaderboardTab = { href: '/sales-leaderboard', icon: Trophy, label: 'Sales Board' };
 const diallerTab = { href: '/dialer', icon: PhoneCall, label: 'Dialler' };
 const demoTab = { href: '/demo-center', icon: PlayCircle, label: 'Demo' };
-const salesFloorTab = { href: '/sales-floor', icon: MessageCircle, label: 'Sales Floor' };
+const inboxTab = { href: '/inbox', icon: Inbox, label: 'Inbox' };
 const settingsTab = { href: '/settings', icon: Settings, label: 'Settings' };
 const salespersonWorkspaceTabs = [
   { href: '/home', icon: Home, label: 'Home' },
-  salesFloorTab,
+  inboxTab,
   diallerTab,
   scriptsTab,
   { href: '/leads', icon: Users, label: 'Leads' },
@@ -55,7 +55,7 @@ const salespersonWorkspaceTabs = [
 ];
 const founderTabs = [
   ...baseTabs.filter((tab) => ['/home'].includes(tab.href)),
-  salesFloorTab,
+  inboxTab,
   ambassadorsTab,
   salespeopleTab,
   salesLeaderboardTab,

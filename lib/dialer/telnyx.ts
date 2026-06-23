@@ -55,6 +55,11 @@ export type TelnyxDialResult = {
   raw: Record<string, unknown>;
 };
 
+export type TelnyxTelephonyCredential = {
+  id: string;
+  sipUsername: string | null;
+};
+
 function normalizeBaseUrl(value: string | null | undefined): string | null {
   const cleaned = value?.trim().replace(/\/$/, '');
   if (!cleaned) return null;
@@ -259,6 +264,26 @@ export async function createTelnyxVoiceToken(options?: {
   expiresAt = expiresAt ?? new Date(Date.now() + 60 * 55 * 1000).toISOString();
 
   return { token, expiresAt, telephonyCredentialId: credentialId };
+}
+
+export async function getTelnyxTelephonyCredential(
+  telephonyCredentialId?: string | null
+): Promise<TelnyxTelephonyCredential> {
+  const credentialId = telephonyCredentialId || getTelnyxTelephonyCredentialId();
+  if (!credentialId) {
+    throw new Error('TELNYX_TELEPHONY_CREDENTIAL_ID is required to resolve Telnyx WebRTC routing.');
+  }
+
+  const data = await telnyxFetch<Record<string, unknown>>(
+    `/telephony_credentials/${encodeURIComponent(credentialId)}`
+  );
+
+  return {
+    id: String(data.id ?? credentialId),
+    sipUsername: typeof data.sip_username === 'string' && data.sip_username.trim()
+      ? data.sip_username.trim()
+      : null,
+  };
 }
 
 function parseTelnyxDialResult(data: Record<string, unknown>): TelnyxDialResult {

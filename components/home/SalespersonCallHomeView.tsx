@@ -7,14 +7,8 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useWorkspace } from '@/lib/workspace-context';
-import type { DiallerLead } from '@/types/database';
 import { HomeHeaderRow } from './HomeHeaderRow';
 import { SalespersonMessenger } from './SalespersonMessenger';
-
-type LeadsPayload = {
-  leads?: DiallerLead[];
-  error?: string;
-};
 
 type ProfilePayload = {
   first_name?: string | null;
@@ -27,36 +21,17 @@ type RevenueTotal = {
   revenueCents: number;
 };
 
-type MonthlyPerformancePayload = {
+type PerformancePayload = {
+  outreach?: {
+    calls?: number;
+    answers?: number;
+  };
   revenue?: {
     payingUsers?: number;
     revenueTotals?: RevenueTotal[];
   };
   error?: string;
 };
-
-function startOfWeekIso(): string {
-  const date = new Date();
-  const day = date.getDay();
-  const diff = date.getDate() - day + (day === 0 ? -6 : 1);
-  const monday = new Date(date);
-  monday.setDate(diff);
-  monday.setHours(0, 0, 0, 0);
-  return monday.toISOString();
-}
-
-function isCalled(lead: DiallerLead): boolean {
-  return Boolean(lead.called_at || lead.disposition);
-}
-
-function isConnected(lead: DiallerLead): boolean {
-  return lead.disposition === 'interested' || lead.disposition === 'callback';
-}
-
-function isThisWeek(value: string | null | undefined, weekStartIso: string): boolean {
-  if (!value) return false;
-  return value >= weekStartIso;
-}
 
 function CallMetricCard({
   icon: Icon,
@@ -111,9 +86,9 @@ function formatRevenue(totals: RevenueTotal[] | undefined): string {
 
 export function SalespersonCallHomeView() {
   const { currentWorkspaceId } = useWorkspace();
-  const [leads, setLeads] = useState<DiallerLead[]>([]);
   const [profile, setProfile] = useState<ProfilePayload | null>(null);
-  const [monthlyPerformance, setMonthlyPerformance] = useState<MonthlyPerformancePayload | null>(null);
+  const [weeklyPerformance, setWeeklyPerformance] = useState<PerformancePayload | null>(null);
+  const [monthlyPerformance, setMonthlyPerformance] = useState<PerformancePayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -123,8 +98,8 @@ export function SalespersonCallHomeView() {
     setLoading(true);
     setError(null);
     try {
-      const [leadsResponse, profileResponse, monthlyPerformanceResponse] = await Promise.all([
-        fetch(`/api/dialer/leads?workspaceId=${encodeURIComponent(currentWorkspaceId)}`, {
+      const [weeklyPerformanceResponse, profileResponse, monthlyPerformanceResponse] = await Promise.all([
+        fetch(`/api/salesperson/performance?period=weekly&workspaceId=${encodeURIComponent(currentWorkspaceId)}`, {
           credentials: 'include',
         }),
         fetch('/api/profile', { credentials: 'include' }),
@@ -133,23 +108,24 @@ export function SalespersonCallHomeView() {
         }),
       ]);
 
-      const leadsPayload = (await leadsResponse.json().catch(() => ({}))) as LeadsPayload;
-      if (!leadsResponse.ok) {
-        throw new Error(leadsPayload.error ?? 'Failed to load call activity.');
+      const weeklyPerformancePayload = (await weeklyPerformanceResponse.json().catch(() => ({}))) as PerformancePayload;
+      if (!weeklyPerformanceResponse.ok) {
+        throw new Error(weeklyPerformancePayload.error ?? 'Failed to load call activity.');
       }
 
-      setLeads(Array.isArray(leadsPayload.leads) ? leadsPayload.leads : []);
+      setWeeklyPerformance(weeklyPerformancePayload);
       if (profileResponse.ok) {
         setProfile((await profileResponse.json().catch(() => null)) as ProfilePayload | null);
       }
       if (monthlyPerformanceResponse.ok) {
         setMonthlyPerformance(
-          (await monthlyPerformanceResponse.json().catch(() => null)) as MonthlyPerformancePayload | null
+          (await monthlyPerformanceResponse.json().catch(() => null)) as PerformancePayload | null
         );
       } else {
         setMonthlyPerformance(null);
       }
     } catch (loadError) {
+      setWeeklyPerformance(null);
       setError(loadError instanceof Error ? loadError.message : 'Failed to load call activity.');
     } finally {
       setLoading(false);
@@ -161,20 +137,13 @@ export function SalespersonCallHomeView() {
   }, [load]);
 
   const stats = useMemo(() => {
-    const weekStartIso = startOfWeekIso();
-    const calledLeads = leads.filter(isCalled);
-    const callsThisWeek = calledLeads.filter((lead) => isThisWeek(lead.called_at, weekStartIso)).length;
-    const connectedThisWeek = leads.filter(
-      (lead) => isConnected(lead) && isThisWeek(lead.called_at ?? lead.updated_at, weekStartIso)
-    ).length;
-
     return {
-      callsThisWeek,
-      connectedThisWeek,
+      callsThisWeek: weeklyPerformance?.outreach?.calls ?? 0,
+      connectedThisWeek: weeklyPerformance?.outreach?.answers ?? 0,
     };
-  }, [leads]);
+  }, [weeklyPerformance]);
 
-  if (loading && leads.length === 0) {
+  if (loading && !weeklyPerformance) {
     return (
       <div className="max-w-7xl mx-auto pl-0 pr-4 sm:pr-6 lg:pr-8 py-6 space-y-6">
         <Skeleton className="h-16 rounded-xl" />
@@ -212,7 +181,7 @@ export function SalespersonCallHomeView() {
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <CallMetricCard icon={PhoneCall} label="Calls" value={formatCount(stats.callsThisWeek)} caption="this week" />
-        <CallMetricCard icon={Users} label="Connected" value={formatCount(stats.connectedThisWeek)} caption="this week" />
+        <CallMetricCard icon={Users} label="Answers" value={formatCount(stats.connectedThisWeek)} caption="this week" />
         <CallMetricCard
           icon={Users}
           label="Users"

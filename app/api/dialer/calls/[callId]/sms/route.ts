@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import type { DialerCall, DialerSmsFollowup } from '@/types/database';
 import { getDialerRequestContext } from '@/lib/dialer/server';
 import { sendDialerSms } from '@/lib/dialer/provider';
+import { resolveOutboundCallerId } from '@/lib/dialer/caller-id';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -173,8 +174,12 @@ export async function POST(
       return NextResponse.json({ error: 'Could not save this lead before sending the text.' }, { status: 500 });
     }
 
+    const fromNumber = resolveOutboundCallerId({
+      toNumber: call.to_number_e164,
+      defaultFromNumber: context.settings.defaultSmsFromNumber,
+    });
     const message = await sendDialerSms(request, {
-      from: context.settings.defaultSmsFromNumber,
+      from: fromNumber,
       to: call.to_number_e164,
       body: messageBody,
     });
@@ -187,7 +192,7 @@ export async function POST(
       telecom_provider: message.provider,
       provider_message_id: message.messageId,
       twilio_message_sid: message.provider === 'twilio' ? message.messageId : null,
-      from_number_e164: context.settings.defaultSmsFromNumber,
+      from_number_e164: fromNumber,
       to_number_e164: call.to_number_e164,
       body: messageBody,
       status: message.status,
