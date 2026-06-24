@@ -4,6 +4,10 @@ import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { resolveWorkspaceIdForUser, type MinimalSupabaseClient } from '@/app/api/_utils/workspace';
 import { normalizePhoneMarket, normalizePhoneNumber, type SupportedPhoneMarket } from '@/lib/dialer/phone';
+import {
+  bulkRegisterContactsInMaster,
+  findClaimedPhonesInWorkspace,
+} from '@/lib/sales-leads/master-list';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -317,15 +321,40 @@ export async function POST(request: NextRequest) {
       contactsToInsert.push(nextContact);
     });
 
-    if (contactsToInsert.length === 0) {
+    // Cross-rep collision check: drop any contact whose phone is already claimed
+    // by a different rep in this workspace's master list.
+    const phonesToCheck = contactsToInsert
+      .map((c) => c.phone_e164)
+      .filter((p): p is string => Boolean(p));
+
+    const claimedPhones = await findClaimedPhonesInWorkspace(
+      admin,
+      workspaceResolution.workspaceId!,
+      requestUser.id,
+      phonesToCheck,
+    );
+
+    let claimedByOtherRepCount = 0;
+    const finalContactsToInsert = contactsToInsert.filter((c) => {
+      if (c.phone_e164 && claimedPhones.has(c.phone_e164)) {
+        claimedByOtherRepCount += 1;
+        return false;
+      }
+      return true;
+    });
+
+    if (finalContactsToInsert.length === 0) {
       return NextResponse.json({
         success: true,
         imported: 0,
         skipped: skippedRows.length,
+        claimedByOtherRep: claimedByOtherRepCount,
         message:
-          listName && matchedListContactIds.size > 0
-            ? `No new leads were imported. Matched ${matchedListContactIds.size} existing lead${matchedListContactIds.size === 1 ? '' : 's'} for the "${listName}" list.`
-            : 'No new leads were imported.',
+          claimedByOtherRepCount > 0
+            ? `No leads imported — all ${claimedByOtherRepCount} lead${claimedByOtherRepCount === 1 ? ' is' : 's are'} already assigned to another rep.`
+            : listName && matchedListContactIds.size > 0
+              ? `No new leads were imported. Matched ${matchedListContactIds.size} existing lead${matchedListContactIds.size === 1 ? '' : 's'} for the "${listName}" list.`
+              : 'No new leads were imported.',
         skippedRows: skippedRows.slice(0, 20),
         createdListId: null,
         createdListName: null,
@@ -336,12 +365,45 @@ export async function POST(request: NextRequest) {
 
     const chunkSize = 200;
     const importedContactIds: string[] = [];
-    for (let start = 0; start < contactsToInsert.length; start += chunkSize) {
-      const chunk = contactsToInsert.slice(start, start + chunkSize);
+    // Track inserted contacts for master list registration (id → contact).
+    const insertedContactsForMaster: Array<{
+      contactId: string;
+      name: string;
+      phone?: string;
+      phoneE164?: string | null;
+      email?: string;
+      address?: string;
+    }> = [];
+
+    for (let start = 0; start < finalContactsToInsert.length; start += chunkSize) {
+      const chunk = finalContactsToInsert.slice(start, start + chunkSize);
       const insertedIds = await insertContactsWithFallback(admin, chunk);
       importedContactIds.push(...insertedIds);
       insertedIds.forEach((id) => matchedListContactIds.add(id));
+      insertedIds.forEach((id, idx) => {
+        const contact = chunk[idx];
+        if (contact) {
+          insertedContactsForMaster.push({
+            contactId: id,
+            name: contact.full_name,
+            phone: contact.phone,
+            phoneE164: contact.phone_e164,
+            email: contact.email,
+            address: contact.address,
+          });
+        }
+      });
     }
+
+    // Register new contacts in the master list so future imports (by any rep)
+    // will detect them as already claimed. Awaited so it completes before the
+    // response is sent — Vercel terminates the function on response.
+    await bulkRegisterContactsInMaster(admin, {
+      workspaceId: workspaceResolution.workspaceId!,
+      assignedUserId: requestUser.id,
+      listName: listName || null,
+      contacts: insertedContactsForMaster,
+    });
 
     let createdListId: string | null = null;
     let createdListWarning: string | null = null;
@@ -377,13 +439,20 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const importedCount = finalContactsToInsert.length;
+    const claimedNote = claimedByOtherRepCount > 0
+      ? ` ${claimedByOtherRepCount} lead${claimedByOtherRepCount === 1 ? ' was' : 's were'} skipped — already assigned to another rep.`
+      : '';
+
     return NextResponse.json({
       success: true,
-      imported: contactsToInsert.length,
+      imported: importedCount,
       skipped: skippedRows.length,
+      claimedByOtherRep: claimedByOtherRepCount,
       message:
-        `Imported ${contactsToInsert.length} lead${contactsToInsert.length === 1 ? '' : 's'}.` +
+        `Imported ${importedCount} lead${importedCount === 1 ? '' : 's'}.` +
         (listName && createdListId ? ` Created the "${listName}" list.` : '') +
+        claimedNote +
         (createdListWarning ?? ''),
       skippedRows: skippedRows.slice(0, 20),
       createdListId,

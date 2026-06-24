@@ -105,6 +105,113 @@ function shapeMasterPayload(input: MasterLeadInput) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Bulk helpers (for high-volume paths like CSV import)
+// ---------------------------------------------------------------------------
+
+export type BulkContactInput = {
+  contactId: string;
+  name: string;
+  phone?: string | null;
+  phoneE164?: string | null;
+  email?: string | null;
+  address?: string | null;
+};
+
+export type BulkMasterResult = {
+  /** Phone E.164 values already claimed by a different rep in this workspace. */
+  claimedPhones: Set<string>;
+  /** Number of contacts successfully registered in the master list. */
+  registeredCount: number;
+};
+
+/**
+ * One-shot cross-rep collision check for a batch of contacts.
+ * Returns the set of phone_e164 values that are already assigned to a DIFFERENT
+ * user in this workspace — callers should drop those rows before importing.
+ */
+export async function findClaimedPhonesInWorkspace(
+  admin: SupabaseAdmin,
+  workspaceId: string,
+  assignedUserId: string,
+  phoneE164s: string[],
+): Promise<Set<string>> {
+  if (!phoneE164s.length) return new Set();
+
+  const { data, error } = await admin
+    .from('salesperson_lead_master')
+    .select('phone_e164')
+    .eq('workspace_id', workspaceId)
+    .neq('assigned_user_id', assignedUserId)
+    .in('phone_e164', phoneE164s);
+
+  if (error) {
+    if (isMissingMasterTable(error)) return new Set();
+    console.warn('[sales-leads/master-list] bulk phone check failed', error);
+    return new Set();
+  }
+
+  const claimed = new Set<string>();
+  for (const row of data ?? []) {
+    if (row.phone_e164) claimed.add(row.phone_e164);
+  }
+  return claimed;
+}
+
+/**
+ * Bulk-upsert contacts into salesperson_lead_master after a CSV import.
+ * Uses a direct batch insert with conflict-ignore so it stays at O(1) queries
+ * instead of O(N*6) like the serial ensureSalespersonLeadMaster path.
+ * Non-fatal — master list failures never block the import itself.
+ */
+export async function bulkRegisterContactsInMaster(
+  admin: SupabaseAdmin,
+  params: {
+    workspaceId: string;
+    assignedUserId: string;
+    listName?: string | null;
+    contacts: BulkContactInput[];
+  },
+): Promise<number> {
+  if (!params.contacts.length) return 0;
+
+  const rows = params.contacts.map((contact) => ({
+    ...shapeMasterPayload({
+      workspaceId: params.workspaceId,
+      assignedUserId: params.assignedUserId,
+      contactId: contact.contactId,
+      name: contact.name,
+      phone: contact.phoneE164 ?? contact.phone,
+      email: contact.email,
+      address: contact.address,
+      source: 'csv_import',
+      state: 'assigned' as const,
+      metadata: params.listName ? { listName: params.listName } : {},
+    }),
+    // Override phone with pre-normalised E.164 when available so we don't
+    // re-normalise and potentially diverge from what was already stored.
+    phone_e164: contact.phoneE164 ?? null,
+  }));
+
+  // Chunk to stay within Supabase's default row limits per request.
+  const CHUNK = 200;
+  let registered = 0;
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const chunk = rows.slice(i, i + CHUNK);
+    const { error } = await admin
+      .from('salesperson_lead_master')
+      .upsert(chunk, { onConflict: 'lead_fingerprint', ignoreDuplicates: true });
+
+    if (error) {
+      if (isMissingMasterTable(error)) return registered;
+      console.warn('[sales-leads/master-list] bulk register failed', error);
+      continue;
+    }
+    registered += chunk.length;
+  }
+  return registered;
+}
+
 export async function findSalespersonLeadMaster(
   admin: SupabaseAdmin,
   input: Pick<MasterLeadInput, 'workspaceId' | 'contactId' | 'diallerLeadId' | 'name' | 'phone' | 'email' | 'address' | 'source' | 'externalId'>

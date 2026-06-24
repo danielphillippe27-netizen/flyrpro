@@ -1,5 +1,6 @@
 'use client';
 
+import React from 'react';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -12,6 +13,7 @@ import {
   Copy,
   Download,
   ExternalLink,
+  Layers,
   Loader2,
   MapPin,
   PhoneCall,
@@ -40,6 +42,7 @@ import {
   SALESPERSON_STRIPE_ONBOARDING_POLICY,
   SALESPERSON_STRIPE_PAYOUT_POLICY,
 } from '@/app/lib/billing/salesperson-stripe-policy';
+import type { SalespersonLeadMaster, SalespersonLeadMasterState } from '@/types/database';
 
 type SalespersonStatus = 'active' | 'paused' | 'inactive';
 
@@ -386,23 +389,38 @@ export function SalespeopleDashboard({ stripeNotice }: { stripeNotice: string | 
     completedAt: string | null;
   } | null>(null);
   const [placesProspects, setPlacesProspects] = useState<GooglePlacesProspect[]>([]);
+  const [masterLeads, setMasterLeads] = useState<SalespersonLeadMaster[]>([]);
+  const [masterLoading, setMasterLoading] = useState(false);
+  const [masterFilter, setMasterFilter] = useState('');
 
   const loadSalespeople = useCallback(async () => {
     const data = await readJson<SalespeoplePayload>('/api/admin/salespeople?limit=100');
     setPayload(data);
   }, []);
 
+  const loadMasterLeads = useCallback(async () => {
+    setMasterLoading(true);
+    try {
+      const data = await readJson<{ leads: SalespersonLeadMaster[] }>('/api/salesperson/leads');
+      setMasterLeads(data?.leads ?? []);
+    } catch {
+      // non-fatal — table may not be migrated yet
+    } finally {
+      setMasterLoading(false);
+    }
+  }, []);
+
   const loadAll = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      await loadSalespeople();
+      await Promise.all([loadSalespeople(), loadMasterLeads()]);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load salespeople.');
     } finally {
       setLoading(false);
     }
-  }, [loadSalespeople]);
+  }, [loadSalespeople, loadMasterLeads]);
 
   useEffect(() => {
     void loadAll();
@@ -1666,8 +1684,212 @@ export function SalespeopleDashboard({ stripeNotice }: { stripeNotice: string | 
               )}
             </CardContent>
           </Card>
+
+          {/* Master lead list — cross-rep dedup audit */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <Layers className="h-4 w-4" />
+                    Master lead list
+                  </CardTitle>
+                  <CardDescription className="mt-1">
+                    All companies across every rep. A company here means someone is already assigned to call them.
+                  </CardDescription>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground">{masterLeads.length.toLocaleString()} leads</span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void loadMasterLeads()}
+                    disabled={masterLoading}
+                  >
+                    <RefreshCw className="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
+              <div className="mt-3">
+                <Input
+                  placeholder="Filter by company, phone, city, or rep…"
+                  value={masterFilter}
+                  onChange={(e) => setMasterFilter(e.target.value)}
+                  className="max-w-sm"
+                />
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              {masterLoading ? (
+                <div className="flex items-center gap-2 px-6 py-8 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading…
+                </div>
+              ) : masterLeads.length === 0 ? (
+                <div className="px-6 py-8 text-sm text-muted-foreground">
+                  No leads in the master list yet. They appear here once a rep runs the scraper or imports leads to the dialer.
+                </div>
+              ) : (
+                <MasterLeadTable
+                  leads={masterLeads}
+                  salespeople={payload?.salespeople ?? []}
+                  filter={masterFilter}
+                />
+              )}
+            </CardContent>
+          </Card>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Master lead table — extracted to keep the parent component readable
+// ---------------------------------------------------------------------------
+
+type MasterLeadTableProps = {
+  leads: SalespersonLeadMaster[];
+  salespeople: Array<{ id: string; fullName: string; email: string }>;
+  filter: string;
+};
+
+function stateLabel(state: SalespersonLeadMasterState): string {
+  switch (state) {
+    case 'assigned': return 'Assigned';
+    case 'queued': return 'Queued';
+    case 'attempting': return 'Attempting';
+    case 'contacted': return 'Contacted';
+    case 'interested': return 'Interested';
+    case 'callback': return 'Callback';
+    case 'not_now': return 'Not now';
+    case 'dnc': return 'DNC';
+    default: return state;
+  }
+}
+
+function stateColor(state: SalespersonLeadMasterState): string {
+  switch (state) {
+    case 'interested': return 'text-green-700 bg-green-50';
+    case 'contacted': return 'text-blue-700 bg-blue-50';
+    case 'attempting': return 'text-amber-700 bg-amber-50';
+    case 'callback': return 'text-orange-700 bg-orange-50';
+    case 'dnc': return 'text-red-700 bg-red-50';
+    case 'not_now': return 'text-gray-600 bg-gray-100';
+    default: return 'text-gray-500 bg-gray-50';
+  }
+}
+
+function MasterLeadTable({ leads, salespeople, filter }: MasterLeadTableProps) {
+  const repNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const sp of salespeople) map.set(sp.id, sp.fullName);
+    return map;
+  }, [salespeople]);
+
+  const needle = filter.trim().toLowerCase();
+  const filtered = useMemo(() => {
+    if (!needle) return leads;
+    return leads.filter((lead) => {
+      const repName = (lead.assigned_salesperson_id ? repNameById.get(lead.assigned_salesperson_id) : null) ?? '';
+      return (
+        lead.company?.toLowerCase().includes(needle) ||
+        lead.name?.toLowerCase().includes(needle) ||
+        lead.phone?.includes(needle) ||
+        lead.city?.toLowerCase().includes(needle) ||
+        lead.list_name?.toLowerCase().includes(needle) ||
+        repName.toLowerCase().includes(needle)
+      );
+    });
+  }, [leads, needle, repNameById]);
+
+  // Group by list_name → assigned_salesperson_id
+  const groups = useMemo(() => {
+    const map = new Map<string, SalespersonLeadMaster[]>();
+    for (const lead of filtered) {
+      const key = lead.list_name ?? '(no list)';
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(lead);
+    }
+    return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b));
+  }, [filtered]);
+
+  if (filtered.length === 0) {
+    return (
+      <div className="px-6 py-8 text-sm text-muted-foreground">
+        No leads match that filter.
+      </div>
+    );
+  }
+
+  return (
+    <div className="overflow-hidden">
+      <div className="max-h-[600px] overflow-auto">
+        <table className="w-full min-w-[820px] text-sm">
+          <thead className="sticky top-0 z-10 border-b bg-background">
+            <tr className="text-left">
+              <th className="px-4 py-2 font-medium">Company</th>
+              <th className="px-4 py-2 font-medium">Phone</th>
+              <th className="px-4 py-2 font-medium">City</th>
+              <th className="px-4 py-2 font-medium">State</th>
+              <th className="px-4 py-2 font-medium text-center">Attempts</th>
+              <th className="px-4 py-2 font-medium">Assigned rep</th>
+              <th className="px-4 py-2 font-medium">List</th>
+            </tr>
+          </thead>
+          <tbody>
+            {groups.map(([listName, groupLeads]) => (
+              <React.Fragment key={`group-${listName}`}>
+                <tr>
+                  <td
+                    colSpan={7}
+                    className="bg-muted/50 px-4 py-1.5 text-xs font-medium text-muted-foreground"
+                  >
+                    {listName} · {groupLeads.length} lead{groupLeads.length !== 1 ? 's' : ''}
+                  </td>
+                </tr>
+                {groupLeads.map((lead) => (
+                  <tr key={lead.id} className="border-b last:border-0 hover:bg-muted/30">
+                    <td className="px-4 py-2.5">
+                      <div className="font-medium">{lead.company || lead.name}</div>
+                      {lead.company && lead.name !== lead.company && (
+                        <div className="text-xs text-muted-foreground">{lead.name}</div>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5 font-mono text-xs text-muted-foreground">
+                      {lead.phone_e164 ?? lead.phone ?? '—'}
+                    </td>
+                    <td className="px-4 py-2.5 text-muted-foreground">
+                      {[lead.city, lead.region].filter(Boolean).join(', ') || '—'}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium ${stateColor(lead.lead_state)}`}>
+                        {stateLabel(lead.lead_state)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2.5 text-center text-muted-foreground">
+                      {lead.attempt_count}
+                    </td>
+                    <td className="px-4 py-2.5 text-muted-foreground">
+                      {lead.assigned_salesperson_id
+                        ? (repNameById.get(lead.assigned_salesperson_id) ?? lead.assigned_salesperson_id.slice(0, 8))
+                        : '—'}
+                    </td>
+                    <td className="px-4 py-2.5 text-xs text-muted-foreground">
+                      {lead.list_name ?? '—'}
+                    </td>
+                  </tr>
+                ))}
+              </React.Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {filtered.length < leads.length && (
+        <div className="border-t px-4 py-2 text-xs text-muted-foreground">
+          Showing {filtered.length.toLocaleString()} of {leads.length.toLocaleString()} leads
+        </div>
+      )}
     </div>
   );
 }
