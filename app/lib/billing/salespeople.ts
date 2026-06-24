@@ -1,5 +1,6 @@
 import type { createAdminClient } from '@/lib/supabase/server';
 import type Stripe from 'stripe';
+import type { SalespersonReferral } from '@/types/database';
 
 type SupabaseAdminClient = ReturnType<typeof createAdminClient>;
 
@@ -13,22 +14,7 @@ type SalespersonRow = {
   stripe_payouts_enabled: boolean | null;
 };
 
-type SalespersonReferralRow = {
-  id: string;
-  salesperson_id: string;
-  referred_user_id: string;
-  referred_workspace_id: string;
-  referral_code: string;
-  stripe_customer_id: string | null;
-  stripe_subscription_id: string | null;
-  stripe_subscription_status: string | null;
-  commission_rate_bps: number;
-  commission_duration_months: number;
-  first_paid_at: string | null;
-  eligible_until: string | null;
-  last_paid_at: string | null;
-  status: 'attributed' | 'active' | 'expired' | 'canceled';
-};
+type SalespersonReferralRow = SalespersonReferral;
 
 type WorkspaceReferralRow = {
   id: string;
