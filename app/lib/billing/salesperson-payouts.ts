@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { stripe } from '@/lib/stripe';
 import { createAdminClient } from '@/lib/supabase/server';
+import type { SalespersonCommission, SalespersonPayoutBatch } from '@/types/database';
 
 export type SupabaseAdmin = ReturnType<typeof createAdminClient>;
 
@@ -12,31 +13,12 @@ type SalespersonPayoutCandidateRow = {
   stripe_payouts_enabled: boolean;
 };
 
-type SalespersonCommissionRow = {
-  id: string;
-  commission_amount_cents: number;
-  revenue_amount_cents: number;
-  currency: string;
-  earned_at: string;
-  status: 'pending' | 'paid' | 'voided';
-};
+type SalespersonCommissionRow = Pick<
+  SalespersonCommission,
+  'id' | 'commission_amount_cents' | 'revenue_amount_cents' | 'currency' | 'earned_at' | 'status'
+>;
 
-type SalespersonPayoutBatchRow = {
-  id: string;
-  salesperson_id: string | null;
-  created_by_user_id: string | null;
-  status: 'draft' | 'processing' | 'paid' | 'failed';
-  currency: string;
-  total_commission_cents: number;
-  note: string | null;
-  paid_at: string | null;
-  processed_at: string | null;
-  stripe_connect_account_id: string | null;
-  stripe_transfer_id: string | null;
-  transfer_group: string | null;
-  commission_snapshot_hash: string | null;
-  failure_reason: string | null;
-};
+type SalespersonPayoutBatchRow = SalespersonPayoutBatch;
 
 export type SalespersonPayoutResult =
   | {

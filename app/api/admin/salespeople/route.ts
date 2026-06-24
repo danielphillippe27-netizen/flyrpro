@@ -8,6 +8,7 @@ import {
   getInviteAppOrigin,
   sendSalespersonInviteEmail,
 } from '@/lib/email/resend';
+import type { SalespersonCommission, SalespersonPayoutBatch } from '@/types/database';
 
 type SalespersonRow = {
   id: string;
@@ -39,31 +40,33 @@ type SalespersonRow = {
   inactive_at: string | null;
 };
 
-type SalespersonCommissionRow = {
-  id: string;
-  salesperson_id: string;
-  referred_workspace_id: string;
-  referred_user_id: string;
-  stripe_invoice_id: string;
-  revenue_amount_cents: number;
-  commission_amount_cents: number;
-  commission_rate_bps: number;
-  currency: string;
-  earned_at: string;
-  status: 'pending' | 'paid' | 'voided';
-};
+type SalespersonCommissionRow = Pick<
+  SalespersonCommission,
+  | 'id'
+  | 'salesperson_id'
+  | 'referred_workspace_id'
+  | 'referred_user_id'
+  | 'stripe_invoice_id'
+  | 'revenue_amount_cents'
+  | 'commission_amount_cents'
+  | 'commission_rate_bps'
+  | 'currency'
+  | 'earned_at'
+  | 'status'
+>;
 
-type SalespersonPayoutBatchRow = {
-  id: string;
-  salesperson_id: string | null;
-  currency: string;
-  total_commission_cents: number;
-  status: 'draft' | 'processing' | 'paid' | 'failed';
-  paid_at: string | null;
-  created_at: string;
-  stripe_transfer_id: string | null;
-  failure_reason: string | null;
-};
+type SalespersonPayoutBatchRow = Pick<
+  SalespersonPayoutBatch,
+  | 'id'
+  | 'salesperson_id'
+  | 'currency'
+  | 'total_commission_cents'
+  | 'status'
+  | 'paid_at'
+  | 'created_at'
+  | 'stripe_transfer_id'
+  | 'failure_reason'
+>;
 
 type WorkspaceMemberRow = {
   workspace_id: string;

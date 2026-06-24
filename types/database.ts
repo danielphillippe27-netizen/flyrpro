@@ -1076,6 +1076,85 @@ export interface Salesperson {
   workspace_id?: string | null;
   demo_email_handle?: string | null;
   demo_email_reply_to?: string | null;
+  // Stripe Connect (added via migration)
+  stripe_connect_account_id?: string | null;
+  stripe_onboarding_completed?: boolean | null;
+  stripe_details_submitted?: boolean | null;
+  stripe_charges_enabled?: boolean | null;
+  stripe_payouts_enabled?: boolean | null;
+  // Invite / onboarding (added via migration)
+  founder_user_id?: string | null;
+  invite_token?: string | null;
+  invited_at?: string | null;
+  onboarding_completed_at?: string | null;
+  // Status timestamps
+  approved_at?: string | null;
+  paused_at?: string | null;
+  inactive_at?: string | null;
+}
+
+export type SalespersonReferralStatus = 'attributed' | 'active' | 'expired' | 'canceled';
+export type SalespersonCommissionStatus = 'pending' | 'paid' | 'voided';
+export type SalespersonPayoutBatchStatus = 'draft' | 'processing' | 'paid' | 'failed';
+
+export interface SalespersonReferral {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  salesperson_id: string;
+  referred_user_id: string;
+  referred_workspace_id: string;
+  referral_code: string;
+  stripe_customer_id?: string | null;
+  stripe_subscription_id?: string | null;
+  stripe_subscription_status?: string | null;
+  commission_rate_bps: number;
+  commission_duration_months: number;
+  first_paid_at?: string | null;
+  eligible_until?: string | null;
+  last_paid_at?: string | null;
+  status: SalespersonReferralStatus;
+}
+
+export interface SalespersonCommission {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  salesperson_referral_id: string;
+  salesperson_id: string;
+  referred_user_id: string;
+  referred_workspace_id: string;
+  stripe_customer_id?: string | null;
+  stripe_subscription_id: string;
+  stripe_invoice_id: string;
+  revenue_amount_cents: number;
+  commission_rate_bps: number;
+  commission_amount_cents: number;
+  currency: string;
+  earned_at: string;
+  status: SalespersonCommissionStatus;
+  paid_out_at?: string | null;
+  payout_batch_id?: string | null;
+  stripe_transfer_id?: string | null;
+}
+
+export interface SalespersonPayoutBatch {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  salesperson_id?: string | null;
+  created_by_user_id?: string | null;
+  status: SalespersonPayoutBatchStatus;
+  currency: string;
+  total_commission_cents: number;
+  note?: string | null;
+  paid_at?: string | null;
+  processed_at?: string | null;
+  stripe_connect_account_id?: string | null;
+  stripe_transfer_id?: string | null;
+  transfer_group?: string | null;
+  commission_snapshot_hash?: string | null;
+  failure_reason?: string | null;
 }
 
 export type InboxItemSource = 'email' | 'sms' | 'call' | 'task' | 'system';
