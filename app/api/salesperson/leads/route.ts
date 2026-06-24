@@ -98,13 +98,6 @@ async function resolveWorkspaceIdForLeads(params: {
   return resolution.workspaceId;
 }
 
-function isMissingMasterTable(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false;
-  const candidate = error as { code?: unknown; message?: unknown; details?: unknown };
-  const text = `${String(candidate.message ?? '')} ${String(candidate.details ?? '')}`.toLowerCase();
-  return candidate.code === '42P01' || text.includes('salesperson_lead_master');
-}
-
 export async function GET(request: NextRequest) {
   const requestUser = await resolveUserFromRequest(request);
   if (!requestUser) {
@@ -156,15 +149,7 @@ export async function GET(request: NextRequest) {
     // Founder with no salesperson row: no additional filter → all workspace leads
 
     const { data, error } = await query.limit(2000);
-    if (error) {
-      if (isMissingMasterTable(error)) {
-        return NextResponse.json(
-          { error: 'Lead master list is not ready yet. Run the latest Supabase migration.' },
-          { status: 500 }
-        );
-      }
-      throw error;
-    }
+    if (error) throw error;
 
     return NextResponse.json({
       leads: ((data ?? []) as SalespersonLeadMaster[]).map(withListMetadata),

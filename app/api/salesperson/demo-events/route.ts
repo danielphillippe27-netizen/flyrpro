@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import {
-  isMissingSalespeopleSchemaError,
   normalizeSalespersonReferralCodeInput,
   resolveActiveSalespersonReferralCode,
 } from '@/app/lib/billing/salespeople';
 import { hashRequestIp } from '@/app/lib/ambassador/tracking';
 import { sanitizeTrackingParam } from '@/app/lib/ambassador/portal';
-import { isMissingDemoLinkSchemaError, resolveDemoLinkForEvent } from '@/lib/dialer/demo-link-tracking';
+import { resolveDemoLinkForEvent } from '@/lib/dialer/demo-link-tracking';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -77,10 +76,7 @@ function normalizeMetadata(value: unknown): Record<string, string | number | boo
 function isMissingDemoEventsSchemaError(message: string | undefined): boolean {
   const normalized = message?.toLowerCase() ?? '';
   return (
-    isMissingSalespeopleSchemaError(message) ||
-    isMissingDemoLinkSchemaError({ message }) ||
     normalized.includes('salesperson_demo_video_events') ||
-    (normalized.includes('relation') && normalized.includes('does not exist')) ||
     (normalized.includes('schema cache') && normalized.includes('salesperson_demo_video_events'))
   );
 }

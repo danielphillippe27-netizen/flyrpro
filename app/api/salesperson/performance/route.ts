@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
-import { isMissingSalespeopleSchemaError } from '@/app/lib/billing/salespeople';
 
 type PeriodKey = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
@@ -112,7 +111,6 @@ function isPayingReferral(referral: ReferralRow, startIso: string, endIso: strin
 async function safeExactCount(query: CountQuery): Promise<number> {
   const { count, error } = await query;
   if (error) {
-    if (isMissingSalespeopleSchemaError(error.message)) return 0;
     throw new Error(error.message ?? 'Failed to load count');
   }
   return count ?? 0;
@@ -138,7 +136,6 @@ async function resolveSalesperson(
   if (userSalespersonError) {
     const message = userSalespersonError.message?.toLowerCase() ?? '';
     if (!message.includes('user_id') || !message.includes('salespeople')) {
-      if (isMissingSalespeopleSchemaError(userSalespersonError.message)) return null;
       throw new Error(userSalespersonError.message);
     }
   }
@@ -155,7 +152,6 @@ async function resolveSalesperson(
       .maybeSingle();
 
     if (error) {
-      if (isMissingSalespeopleSchemaError(error.message)) return null;
       throw new Error(error.message);
     }
     if (data) return data as SalespersonRow;
@@ -415,26 +411,9 @@ export async function GET(request: NextRequest) {
 
     if (callsRowsResponse.error) throw new Error(callsRowsResponse.error.message);
     if (contactRowsResponse.error) throw new Error(contactRowsResponse.error.message);
-    if (demoLinksResponse.error) {
-      const message = demoLinksResponse.error.message?.toLowerCase() ?? '';
-      if (
-        !message.includes('salesperson_demo_links') &&
-        !message.includes('does not exist') &&
-        !message.includes('schema cache')
-      ) {
-        throw new Error(demoLinksResponse.error.message);
-      }
-    }
-    if (referralsResponse.error) {
-      if (!isMissingSalespeopleSchemaError(referralsResponse.error.message)) {
-        throw new Error(referralsResponse.error.message);
-      }
-    }
-    if (commissionsResponse.error) {
-      if (!isMissingSalespeopleSchemaError(commissionsResponse.error.message)) {
-        throw new Error(commissionsResponse.error.message);
-      }
-    }
+    if (demoLinksResponse.error) throw new Error(demoLinksResponse.error.message);
+    if (referralsResponse.error) throw new Error(referralsResponse.error.message);
+    if (commissionsResponse.error) throw new Error(commissionsResponse.error.message);
     if (demoVideoEventsResponse.error) {
       const message = demoVideoEventsResponse.error.message?.toLowerCase() ?? '';
       if (

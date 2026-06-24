@@ -43,16 +43,6 @@ export type SalespersonReferralCodeStats = {
 const DEFAULT_COMMISSION_RATE_BPS = 2500;
 const DEFAULT_COMMISSION_DURATION_MONTHS = 12;
 
-export function isMissingSalespeopleSchemaError(message: string | undefined): boolean {
-  if (!message) return false;
-  const normalized = message.toLowerCase();
-  return (
-    normalized.includes('salespeople') ||
-    (normalized.includes('relation') && normalized.includes('does not exist')) ||
-    (normalized.includes('column') && normalized.includes('does not exist'))
-  );
-}
-
 export function normalizeSalespersonReferralCodeInput(value: string): string {
   return value
     .trim()
@@ -193,7 +183,6 @@ export async function resolveActiveSalespersonReferralCode(
   }
 
   if (response.error) {
-    if (isMissingSalespeopleSchemaError(response.error.message)) return null;
     throw new Error(response.error.message);
   }
 
@@ -290,7 +279,6 @@ export async function syncSalespersonReferralForSubscription(
     .maybeSingle();
 
   if (existingError) {
-    if (isMissingSalespeopleSchemaError(existingError.message)) return null;
     throw new Error(existingError.message);
   }
 
@@ -355,7 +343,6 @@ export async function syncSalespersonReferralForSubscription(
     .maybeSingle();
 
   if (insertError) {
-    if (isMissingSalespeopleSchemaError(insertError.message)) return null;
     throw new Error(insertError.message);
   }
 
@@ -439,7 +426,6 @@ export async function recordSalespersonCommissionForInvoice(
   );
 
   if (error) {
-    if (isMissingSalespeopleSchemaError(error.message)) return true;
     throw new Error(error.message);
   }
 

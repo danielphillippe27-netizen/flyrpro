@@ -9,10 +9,7 @@ import {
 } from '@/app/lib/billing/stripe-subscription-sync';
 import { getStripeWebhookSecret } from '@/app/lib/billing/stripe-env';
 import { recordAmbassadorCommissionForInvoice } from '@/app/lib/billing/ambassador-program';
-import {
-  isMissingSalespeopleSchemaError,
-  recordSalespersonCommissionForInvoice,
-} from '@/app/lib/billing/salespeople';
+import { recordSalespersonCommissionForInvoice } from '@/app/lib/billing/salespeople';
 import { markWorkspacePowerDialerAddonInactiveForUser } from '@/app/lib/billing/workspace-addons';
 
 const secret = getStripeWebhookSecret();
@@ -91,7 +88,7 @@ async function syncSalespersonStripeAccount(
     })
     .eq('stripe_connect_account_id', account.id);
 
-  if (error && !isMissingSalespeopleSchemaError(error.message)) {
+  if (error) {
     console.warn('[stripe webhook] failed syncing salesperson connect account', error);
   }
 }

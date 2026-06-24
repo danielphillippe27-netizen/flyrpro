@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireFounderApi } from '@/app/api/admin/_utils/founder';
-import { isMissingSalespeopleSchemaError } from '@/app/lib/billing/salespeople';
 
 export const dynamic = 'force-dynamic';
 
@@ -73,7 +72,6 @@ function buildRange(period: PeriodKey) {
 function isMissingRelationError(error: { message?: string } | null | undefined): boolean {
   const message = error?.message?.toLowerCase() ?? '';
   return (
-    isMissingSalespeopleSchemaError(error?.message) ||
     message.includes('does not exist') ||
     message.includes('could not find the table') ||
     message.includes('schema cache')

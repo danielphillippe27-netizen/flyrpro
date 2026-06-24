@@ -8,10 +8,7 @@ import {
   buildIndividualConnectPrefill,
   isMissingStripeConnectAccountError,
 } from '@/app/lib/billing/stripe-connect-prefill';
-import {
-  ensureSalespersonReferralCode,
-  isMissingSalespeopleSchemaError,
-} from '@/app/lib/billing/salespeople';
+import { ensureSalespersonReferralCode } from '@/app/lib/billing/salespeople';
 
 const stripeConnectPayloadSchema = z.object({
   referralCode: z.string().trim().max(20).optional().or(z.literal('')),
@@ -88,15 +85,6 @@ export async function POST(
       .maybeSingle();
 
     if (error) {
-      if (isMissingSalespeopleSchemaError(error.message)) {
-        return NextResponse.json(
-          {
-            error:
-              'Salespeople storage is not ready yet. Run the latest salespeople migration first.',
-          },
-          { status: 500 }
-        );
-      }
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
@@ -213,15 +201,6 @@ export async function POST(
     }
 
     if (updateError) {
-      if (isMissingSalespeopleSchemaError(updateError.message)) {
-        return NextResponse.json(
-          {
-            error:
-              'Salespeople storage is not ready yet. Run the latest salespeople migration first.',
-          },
-          { status: 500 }
-        );
-      }
       return NextResponse.json({ error: updateError.message }, { status: 500 });
     }
 
