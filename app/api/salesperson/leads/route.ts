@@ -147,12 +147,15 @@ export async function GET(request: NextRequest) {
       .order('created_at', { ascending: false });
 
     if (salesperson?.id) {
+      // Salesperson: scope to their own assigned leads only
       query = query.or(`assigned_user_id.eq.${requestUser.id},assigned_salesperson_id.eq.${salesperson.id}`);
-    } else {
+    } else if (!isFounder) {
+      // Non-salesperson, non-founder: shouldn't reach here (blocked above), but be safe
       query = query.eq('assigned_user_id', requestUser.id);
     }
+    // Founder with no salesperson row: no additional filter → all workspace leads
 
-    const { data, error } = await query.limit(500);
+    const { data, error } = await query.limit(2000);
     if (error) {
       if (isMissingMasterTable(error)) {
         return NextResponse.json(
