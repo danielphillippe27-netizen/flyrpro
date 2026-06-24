@@ -40,6 +40,7 @@ type ImportableContact = {
   campaign_id?: string;
   farm_id?: string;
   status: 'hot' | 'warm' | 'cold' | 'new';
+  lead_kind: 'field' | 'scraped';
   source?: string;
   tags?: string;
   last_contacted?: string;
@@ -293,6 +294,7 @@ export async function POST(request: NextRequest) {
         campaign_id: campaignId || undefined,
         farm_id: farmId || undefined,
         status,
+        lead_kind: 'scraped',
         source: source || undefined,
         tags: tags || undefined,
         last_contacted: lastContacted,

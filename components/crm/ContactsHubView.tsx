@@ -170,7 +170,7 @@ export function ContactsHubView() {
           return [] as Farm[];
         }),
         currentWorkspaceId
-          ? SmartListsService.fetchWorkspaceSmartLists(currentWorkspaceId)
+          ? SmartListsService.fetchUserWorkspaceSmartLists(currentWorkspaceId, currentUserId)
               .catch(() => [] as WorkspaceSmartList[])
           : Promise.resolve([] as WorkspaceSmartList[]),
       ]);
