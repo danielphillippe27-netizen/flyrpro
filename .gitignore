@@ -67,3 +67,6 @@ kimi-cli/node_modules/
 web/node_modules/
 
 .claude/
+memory/
+CLAUDE.md
+ROADMAP.md
