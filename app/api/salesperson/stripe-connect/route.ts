@@ -9,7 +9,6 @@ import {
 } from '@/app/lib/billing/stripe-connect-prefill';
 import { SALESPERSON_STRIPE_ONBOARDING_POLICY } from '@/app/lib/billing/salesperson-stripe-policy';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
-import { isMissingSalespeopleSchemaError } from '@/app/lib/billing/salespeople';
 
 type SalespersonRow = {
   id: string;
@@ -46,14 +45,6 @@ async function findActiveSalespersonForRequest(request: NextRequest) {
     .maybeSingle();
 
   if (error) {
-    if (isMissingSalespeopleSchemaError(error.message)) {
-      return {
-        error: NextResponse.json(
-          { error: 'Salesperson payout setup is not ready yet.' },
-          { status: 500 }
-        ),
-      };
-    }
     return { error: NextResponse.json({ error: error.message }, { status: 500 }) };
   }
 

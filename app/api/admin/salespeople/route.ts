@@ -3,10 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import type { PostgrestError } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { requireFounderApi, type FounderApiAuth } from '@/app/api/admin/_utils/founder';
-import {
-  ensureSalespersonReferralCode,
-  isMissingSalespeopleSchemaError,
-} from '@/app/lib/billing/salespeople';
+import { ensureSalespersonReferralCode } from '@/app/lib/billing/salespeople';
 import {
   getInviteAppOrigin,
   sendSalespersonInviteEmail,
@@ -486,34 +483,7 @@ export async function GET(request: NextRequest) {
       recentCommissionsRes.error,
       payoutBatchesRes.error,
     ].filter(Boolean);
-    const ledgerSetupRequired = ledgerErrors.some((error) =>
-      isMissingSalespeopleSchemaError(error?.message)
-    );
-    const possibleErrors = [...coreErrors, ...ledgerErrors.filter((error) =>
-      !isMissingSalespeopleSchemaError(error?.message)
-    )];
-
-    if (coreErrors.some((error) => isMissingSalespeopleSchemaError(error?.message))) {
-      return NextResponse.json({
-        setupRequired: true,
-        kpis: {
-          total: 0,
-          active: 0,
-          stripeLinked: 0,
-          payoutsReady: 0,
-        },
-        salespeople: [],
-        payoutQueue: {
-          readyTotals: [],
-          pendingSetupTotals: [],
-          readyCommissionCount: 0,
-          pendingSetupCommissionCount: 0,
-          readyBySalesperson: [],
-          recentCommissions: [],
-          payoutHistory: [],
-        },
-      });
-    }
+    const possibleErrors = [...coreErrors, ...ledgerErrors];
 
     const firstError = possibleErrors[0];
     if (firstError) {
@@ -535,7 +505,7 @@ export async function GET(request: NextRequest) {
             .in('salesperson_id', salespersonIds)
         : Promise.resolve({ data: [], error: null }),
     ]);
-    if (dialerSettingsRes.error && !isMissingSalespeopleSchemaError(dialerSettingsRes.error.message)) {
+    if (dialerSettingsRes.error) {
       console.warn('[api/admin/salespeople] dialer settings lookup failed:', dialerSettingsRes.error.message);
     }
     const dialerSettingsBySalespersonId = new Map(
@@ -552,15 +522,9 @@ export async function GET(request: NextRequest) {
         dialerSettingsBySalespersonId.get(row.id)
       )
     );
-    const pendingCommissions = ledgerSetupRequired
-      ? []
-      : ((pendingCommissionsRes.data ?? []) as SalespersonCommissionRow[]);
-    const recentCommissions = ledgerSetupRequired
-      ? []
-      : ((recentCommissionsRes.data ?? []) as SalespersonCommissionRow[]);
-    const payoutBatches = ledgerSetupRequired
-      ? []
-      : ((payoutBatchesRes.data ?? []) as SalespersonPayoutBatchRow[]);
+    const pendingCommissions = (pendingCommissionsRes.data ?? []) as SalespersonCommissionRow[];
+    const recentCommissions = (recentCommissionsRes.data ?? []) as SalespersonCommissionRow[];
+    const payoutBatches = (payoutBatchesRes.data ?? []) as SalespersonPayoutBatchRow[];
     const salespersonMap = new Map(salespeopleRows.map((row) => [row.id, row] as const));
 
     const readyCommissions = pendingCommissions.filter((commission) => {
@@ -657,7 +621,7 @@ export async function GET(request: NextRequest) {
     });
 
     return NextResponse.json({
-      setupRequired: ledgerSetupRequired,
+      setupRequired: false,
       kpis: {
         total: totalCountRes.count ?? salespeople.length,
         active: activeCountRes.count ?? 0,
@@ -710,15 +674,6 @@ export async function POST(request: NextRequest) {
       .maybeSingle();
 
     if (existingSalespersonError) {
-      if (isMissingSalespeopleSchemaError(existingSalespersonError.message)) {
-        return NextResponse.json(
-          {
-            error:
-              'Salespeople storage is not ready yet. Run the latest salespeople migration first.',
-          },
-          { status: 500 }
-        );
-      }
       return NextResponse.json({ error: existingSalespersonError.message }, { status: 500 });
     }
 
@@ -756,15 +711,6 @@ export async function POST(request: NextRequest) {
           .single();
 
     if (error) {
-      if (isMissingSalespeopleSchemaError(error.message)) {
-        return NextResponse.json(
-          {
-            error:
-              'Salespeople storage is not ready yet. Run the latest salespeople migration first.',
-          },
-          { status: 500 }
-        );
-      }
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 

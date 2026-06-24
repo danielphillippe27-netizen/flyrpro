@@ -38,16 +38,6 @@ type ContactLike = {
 const FOLLOW_UP_DELAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_DEMO_DESTINATION_PATH = '/demo-1';
 
-export function isMissingDemoLinkSchemaError(error: { message?: string } | null | undefined): boolean {
-  const message = error?.message?.toLowerCase() ?? '';
-  return (
-    message.includes('salesperson_demo_links') ||
-    message.includes('demo_link_id') ||
-    message.includes('demo_link_follow_up_id') ||
-    (message.includes('schema cache') && message.includes('demo_link'))
-  );
-}
-
 function cleanText(value: string | null | undefined): string | null {
   const trimmed = value?.trim();
   return trimmed || null;
@@ -115,9 +105,7 @@ export async function createTrackedDemoLink(params: {
     }
 
     if (error && !error.message?.toLowerCase().includes('duplicate')) {
-      if (!isMissingDemoLinkSchemaError(error)) {
-        console.warn('[demo-link-tracking] failed to create tracked demo link', error);
-      }
+      console.warn('[demo-link-tracking] failed to create tracked demo link', error);
       return null;
     }
   }
@@ -138,9 +126,7 @@ export async function resolveDemoLinkByToken(
     .maybeSingle();
 
   if (error) {
-    if (!isMissingDemoLinkSchemaError(error)) {
-      console.warn('[demo-link-tracking] failed to resolve demo link', error);
-    }
+    console.warn('[demo-link-tracking] failed to resolve demo link', error);
     return null;
   }
 
@@ -177,7 +163,7 @@ export async function recordDemoLinkOpen(params: {
     })
     .eq('id', params.link.id);
 
-  if (updateError && !isMissingDemoLinkSchemaError(updateError)) {
+  if (updateError) {
     console.warn('[demo-link-tracking] failed to update demo link open', updateError);
   }
 
@@ -194,7 +180,7 @@ export async function recordDemoLinkOpen(params: {
       referer: metadata.referer,
     })
     .then(({ error }) => {
-      if (error && !isMissingDemoLinkSchemaError(error)) {
+      if (error) {
         console.warn('[demo-link-tracking] failed to record click event', error);
       }
     });
@@ -212,7 +198,7 @@ export async function recordDemoLinkOpen(params: {
     .eq('id', params.link.dialler_lead_id)
     .is('follow_up_at', null);
 
-  if (leadError && !isMissingDemoLinkSchemaError(leadError)) {
+  if (leadError) {
     console.warn('[demo-link-tracking] failed to create demo open follow-up', leadError);
   }
 
@@ -230,7 +216,7 @@ export async function recordDemoLinkOpen(params: {
     .eq('id', params.link.contact_id)
     .is('follow_up_at', null);
 
-  if (contactError && !isMissingDemoLinkSchemaError(contactError)) {
+  if (contactError) {
     console.warn('[demo-link-tracking] failed to create contact follow-up', contactError);
   }
 
@@ -243,7 +229,7 @@ export async function recordDemoLinkOpen(params: {
       timestamp: now.toISOString(),
     })
     .then(({ error }) => {
-      if (error && !isMissingDemoLinkSchemaError(error)) {
+      if (error) {
         console.warn('[demo-link-tracking] failed to log demo open activity', error);
       }
     });
@@ -296,9 +282,7 @@ export async function markConvertedDemoLinks(params: {
     .limit(10);
 
   if (error) {
-    if (!isMissingDemoLinkSchemaError(error)) {
-      console.warn('[demo-link-tracking] failed to load links for conversion', error);
-    }
+    console.warn('[demo-link-tracking] failed to load links for conversion', error);
     return;
   }
 
@@ -320,7 +304,7 @@ export async function markConvertedDemoLinks(params: {
     })
     .in('id', linkIds);
 
-  if (updateError && !isMissingDemoLinkSchemaError(updateError)) {
+  if (updateError) {
     console.warn('[demo-link-tracking] failed to mark links converted', updateError);
   }
 
@@ -339,7 +323,7 @@ export async function markConvertedDemoLinks(params: {
       .in('id', leadIds)
       .in('demo_link_follow_up_id', linkIds);
 
-    if (clearError && !isMissingDemoLinkSchemaError(clearError)) {
+    if (clearError) {
       console.warn('[demo-link-tracking] failed to clear converted demo follow-up', clearError);
     }
   }
@@ -360,7 +344,7 @@ export async function markConvertedDemoLinks(params: {
     .in('id', contactIds)
     .in('demo_link_follow_up_id', linkIds);
 
-  if (clearContactError && !isMissingDemoLinkSchemaError(clearContactError)) {
+  if (clearContactError) {
     console.warn('[demo-link-tracking] failed to clear converted contact follow-up', clearContactError);
   }
 }

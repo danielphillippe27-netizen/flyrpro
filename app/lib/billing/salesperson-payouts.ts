@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import { stripe } from '@/lib/stripe';
 import { createAdminClient } from '@/lib/supabase/server';
-import { isMissingSalespeopleSchemaError } from '@/app/lib/billing/salespeople';
 
 export type SupabaseAdmin = ReturnType<typeof createAdminClient>;
 
@@ -449,14 +448,6 @@ export async function paySalespersonCommissions(params: {
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to process payout.';
-    if (isMissingSalespeopleSchemaError(message)) {
-      return {
-        ok: false,
-        code: 'schema_missing',
-        error: 'Salesperson payout storage is not ready yet. Run the latest salespeople migration first.',
-      };
-    }
-
     return { ok: false, code: 'unknown', error: message };
   }
 }

@@ -1,10 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { requireFounderApi } from '@/app/api/admin/_utils/founder';
-import {
-  ensureSalespersonReferralCode,
-  isMissingSalespeopleSchemaError,
-} from '@/app/lib/billing/salespeople';
+import { ensureSalespersonReferralCode } from '@/app/lib/billing/salespeople';
 
 type SalespersonRow = {
   id: string;
@@ -84,15 +81,6 @@ export async function PATCH(
       .maybeSingle();
 
     if (fetchError) {
-      if (isMissingSalespeopleSchemaError(fetchError.message)) {
-        return NextResponse.json(
-          {
-            error:
-              'Salespeople storage is not ready yet. Run the latest salespeople migration first.',
-          },
-          { status: 500 }
-        );
-      }
       return NextResponse.json({ error: fetchError.message }, { status: 500 });
     }
 
@@ -148,15 +136,6 @@ export async function PATCH(
       }
 
       if (updateError) {
-        if (isMissingSalespeopleSchemaError(updateError.message)) {
-          return NextResponse.json(
-            {
-              error:
-                'Salespeople storage is not ready yet. Run the latest salespeople migration first.',
-            },
-            { status: 500 }
-          );
-        }
         return NextResponse.json({ error: updateError.message }, { status: 500 });
       }
     }

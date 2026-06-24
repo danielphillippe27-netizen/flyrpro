@@ -1,10 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
-import {
-  ensureSalespersonReferralCode,
-  isMissingSalespeopleSchemaError,
-} from '@/app/lib/billing/salespeople';
+import { ensureSalespersonReferralCode } from '@/app/lib/billing/salespeople';
 import {
   getSalespersonDialerSettings,
   resolveSalespersonForUser,
@@ -15,7 +12,6 @@ import {
   resolveAvailableDemoEmailHandle,
   type HandleLookupClient,
 } from '@/lib/dialer/demo-email-handle';
-import { isMissingDemoLinkSchemaError } from '@/lib/dialer/demo-link-tracking';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -54,7 +50,7 @@ async function safeCount(
   query: PromiseLike<{ count: number | null; error: { message: string } | null }>
 ): Promise<number> {
   const { count, error } = await query;
-  if (error && !isMissingSalespeopleSchemaError(error.message) && !isMissingDemoLinkSchemaError(error)) {
+  if (error) {
     console.warn('[salesperson/demo-center] count failed', error);
   }
   return count ?? 0;

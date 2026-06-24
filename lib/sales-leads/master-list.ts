@@ -50,13 +50,6 @@ function normalizedEmail(value: string | null | undefined): string {
   return cleanText(value).toLowerCase();
 }
 
-function isMissingMasterTable(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false;
-  const candidate = error as { code?: unknown; message?: unknown; details?: unknown };
-  const text = `${String(candidate.message ?? '')} ${String(candidate.details ?? '')}`.toLowerCase();
-  return candidate.code === '42P01' || text.includes('salesperson_lead_master');
-}
-
 function leadFingerprint(input: {
   name?: string | null;
   phone?: string | null;
@@ -146,7 +139,6 @@ export async function findClaimedPhonesInWorkspace(
     .in('phone_e164', phoneE164s);
 
   if (error) {
-    if (isMissingMasterTable(error)) return new Set();
     console.warn('[sales-leads/master-list] bulk phone check failed', error);
     return new Set();
   }
@@ -203,7 +195,6 @@ export async function bulkRegisterContactsInMaster(
       .upsert(chunk, { onConflict: 'lead_fingerprint', ignoreDuplicates: true });
 
     if (error) {
-      if (isMissingMasterTable(error)) return registered;
       console.warn('[sales-leads/master-list] bulk register failed', error);
       continue;
     }
@@ -249,15 +240,6 @@ export async function findSalespersonLeadMaster(
       return { available: true, created: false, existing: true, row: data as SalespersonLeadMaster, warning: null };
     }
     if (error && error.code !== 'PGRST116') {
-      if (isMissingMasterTable(error)) {
-        return {
-          available: false,
-          created: false,
-          existing: false,
-          row: null,
-          warning: 'Lead master list is not ready yet. Run the latest Supabase migration.',
-        };
-      }
       console.warn('[sales-leads/master-list] lookup failed', error);
     }
   }
@@ -280,16 +262,6 @@ export async function ensureSalespersonLeadMaster(
 
   if (!error && data) {
     return { available: true, created: true, existing: false, row: data as SalespersonLeadMaster, warning: null };
-  }
-
-  if (isMissingMasterTable(error)) {
-    return {
-      available: false,
-      created: false,
-      existing: false,
-      row: null,
-      warning: 'Lead master list is not ready yet. Run the latest Supabase migration.',
-    };
   }
 
   const retry = await findSalespersonLeadMaster(admin, input);
@@ -319,7 +291,7 @@ export async function attachDiallerLeadToMaster(
     .update({ dialler_lead_id: leadId, lead_state: 'queued' })
     .eq('id', id);
 
-  if (error && !isMissingMasterTable(error)) {
+  if (error) {
     console.warn('[sales-leads/master-list] failed to attach dialler lead', error);
   }
 }
@@ -367,7 +339,7 @@ export async function incrementMasterLeadAttemptForDiallerLead(
     })
     .eq('id', row.id);
 
-  if (error && !isMissingMasterTable(error)) {
+  if (error) {
     console.warn('[sales-leads/master-list] failed to increment attempt count', error);
   }
 }
@@ -430,7 +402,7 @@ export async function updateMasterLeadDispositionForDiallerLead(params: {
     })
     .eq('id', existing.row.id);
 
-  if (error && !isMissingMasterTable(error)) {
+  if (error) {
     console.warn('[sales-leads/master-list] failed to update dialler disposition', error);
   }
 }
@@ -465,7 +437,7 @@ export async function updateMasterLeadDispositionForCall(params: {
     })
     .eq('id', existing.row.id);
 
-  if (error && !isMissingMasterTable(error)) {
+  if (error) {
     console.warn('[sales-leads/master-list] failed to update call disposition', error);
   }
 }

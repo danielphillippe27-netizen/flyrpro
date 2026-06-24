@@ -1,9 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
-import {
-  isMissingSalespeopleSchemaError,
-  resolveActiveSalespersonReferralCode,
-} from '@/app/lib/billing/salespeople';
+import { resolveActiveSalespersonReferralCode } from '@/app/lib/billing/salespeople';
 import { getTrackingMetadata } from '@/app/lib/ambassador/tracking';
 
 export async function GET(
@@ -48,7 +45,7 @@ export async function GET(
       referer: metadata.referer,
     })
     .then(({ error }) => {
-      if (error && !isMissingSalespeopleSchemaError(error.message)) {
+      if (error) {
         console.warn('[salesperson referral redirect] click tracking failed', error);
       }
     });
