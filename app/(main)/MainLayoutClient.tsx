@@ -309,14 +309,14 @@ function MainLayoutContent({
   })();
 
   return (
-    <MainRouteGuard>
-      <MainLayoutNavProvider>
-        <DialerRuntimeProvider>
+    <DialerRuntimeProvider>
+      <MainRouteGuard>
+        <MainLayoutNavProvider>
           <MainLayoutShell tabs={tabs} pathname={pathname} accessLevel={accessLevel}>
             {children}
           </MainLayoutShell>
-        </DialerRuntimeProvider>
-      </MainLayoutNavProvider>
-    </MainRouteGuard>
+        </MainLayoutNavProvider>
+      </MainRouteGuard>
+    </DialerRuntimeProvider>
   );
 }

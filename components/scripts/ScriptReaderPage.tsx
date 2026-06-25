@@ -139,10 +139,10 @@ function speakerClassName(speaker: StarterScriptFlowLine['speaker']): string {
 }
 
 const OBJECTION_LABEL_BY_NODE_ID: Record<string, string> = {
-  'quick-intro': "WHO'S THIS",
   busy: 'BUSY',
   'not-interested': 'NOT INTERESTED',
   'door-knock-objection': 'DONT DOORKNOCK',
+  'interrupting-homeowners-objection': 'INTERRUPTING',
   price: 'MONEY',
   pricing: 'MONEY',
   'price-objection': 'MONEY',
@@ -152,6 +152,24 @@ const OBJECTION_LABEL_BY_NODE_ID: Record<string, string> = {
   'tool-overlap-objection': 'CRM',
   'authority-objection': 'AUTHORITY',
   'hesitation-close': 'THINKING',
+};
+
+const OBJECTION_TRAY_EXCLUDED_NODE_IDS = new Set(['quick-intro']);
+
+const OBJECTION_TRAY_ORDER_BY_NODE_ID: Record<string, number> = {
+  'door-knock-objection': 0,
+  busy: 10,
+  price: 20,
+  pricing: 20,
+  'price-objection': 20,
+  'time-objection': 30,
+  'priority-objection': 40,
+  'belief-objection': 50,
+  'interrupting-homeowners-objection': 60,
+  'tool-overlap-objection': 70,
+  'authority-objection': 80,
+  'hesitation-close': 90,
+  'not-interested': 100,
 };
 
 function objectionOptionLabel(
@@ -306,10 +324,17 @@ export function ScriptReaderPage({ scriptId }: { scriptId: string }) {
     const seenNodeIds = new Set<string>();
     return flow
       .filter((node) => node.kind === 'objection' || node.id in OBJECTION_LABEL_BY_NODE_ID)
+      .filter((node) => !OBJECTION_TRAY_EXCLUDED_NODE_IDS.has(node.id))
       .filter((node) => {
         if (seenNodeIds.has(node.id)) return false;
         seenNodeIds.add(node.id);
         return true;
+      })
+      .sort((firstNode, secondNode) => {
+        const firstOrder = OBJECTION_TRAY_ORDER_BY_NODE_ID[firstNode.id] ?? 50;
+        const secondOrder = OBJECTION_TRAY_ORDER_BY_NODE_ID[secondNode.id] ?? 50;
+        if (firstOrder !== secondOrder) return firstOrder - secondOrder;
+        return firstNode.label.localeCompare(secondNode.label);
       })
       .map((targetNode) => ({
         option: {
@@ -823,7 +848,10 @@ export function ScriptReaderPage({ scriptId }: { scriptId: string }) {
                                 key={`${activeNode.id}-${option.nextId}-${option.label}`}
                                 type="button"
                                 variant="outline"
-                                className="h-auto min-h-14 w-full justify-between gap-3 whitespace-normal border-red-300 bg-white px-4 py-3 text-left text-sm font-bold text-red-700 shadow-sm hover:border-red-400 hover:bg-red-100 dark:border-red-500/50 dark:bg-background dark:text-red-300 dark:hover:bg-red-500/10"
+                                className={cn(
+                                  'h-auto min-h-14 w-full justify-between gap-3 whitespace-normal border-red-300 bg-white px-4 py-3 text-left text-sm font-bold text-red-700 shadow-sm hover:border-red-400 hover:bg-red-100 dark:border-red-500/50 dark:bg-background dark:text-red-300 dark:hover:bg-red-500/10',
+                                  option.nextId === 'not-interested' && 'lg:col-start-4'
+                                )}
                                 onClick={() => goToNode(option.nextId)}
                                 disabled={!nodeById.has(option.nextId)}
                               >

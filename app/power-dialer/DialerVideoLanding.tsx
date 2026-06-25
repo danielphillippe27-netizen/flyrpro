@@ -55,14 +55,14 @@ function buildStreamUrl(
   customerCode: string | undefined,
   videoUid: string,
   posterUrl?: string,
-  mutedAutoplay = true
+  mutedAutoplay = false
 ) {
   const url = customerCode
     ? new URL(`https://customer-${customerCode}.cloudflarestream.com/${videoUid}/iframe`)
     : new URL(`https://iframe.videodelivery.net/${videoUid}`);
   url.searchParams.set('autoplay', mutedAutoplay ? 'true' : 'false');
   url.searchParams.set('muted', mutedAutoplay ? 'true' : 'false');
-  url.searchParams.set('preload', 'auto');
+  url.searchParams.set('preload', mutedAutoplay ? 'auto' : 'metadata');
   url.searchParams.set('primaryColor', '#dc2626');
   url.searchParams.set('letterboxColor', 'transparent');
   if (posterUrl) {
@@ -81,7 +81,7 @@ export function DialerVideoLanding({
   onboardingHref,
   founderCallHref,
   redirectAtSeconds,
-  mutedAutoplay = true,
+  mutedAutoplay = false,
   referralCode,
   trackingSource,
   trackingCampaign,
@@ -377,7 +377,7 @@ export function DialerVideoLanding({
                     autoPlay={mutedAutoplay}
                     muted={mutedAutoplay}
                     playsInline
-                    preload="auto"
+                    preload={mutedAutoplay ? 'auto' : 'metadata'}
                     controlsList="nodownload noplaybackrate noremoteplayback"
                     disablePictureInPicture
                     disableRemotePlayback
@@ -399,7 +399,7 @@ export function DialerVideoLanding({
               </div>
 
               {soundPromptVisible && (
-                <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center px-5">
+                <div className="pointer-events-auto absolute inset-0 z-10 grid place-items-center px-5">
                   <button
                     type="button"
                     onClick={handleStartWithSound}

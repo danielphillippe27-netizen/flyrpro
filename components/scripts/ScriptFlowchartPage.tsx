@@ -73,10 +73,10 @@ const MIN_SCALE = 0.18;
 const MAX_SCALE = 1.75;
 
 const OBJECTION_LABEL_BY_NODE_ID: Record<string, string> = {
-  'quick-intro': "WHO'S THIS",
   busy: 'BUSY',
   'not-interested': 'NOT INTERESTED',
   'door-knock-objection': 'DONT DOORKNOCK',
+  'interrupting-homeowners-objection': 'INTERRUPTING',
   price: 'MONEY',
   pricing: 'MONEY',
   'price-objection': 'MONEY',

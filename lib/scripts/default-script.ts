@@ -964,18 +964,23 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
     label: "Busy",
     kind: "objection",
     title: "If they are busy",
-    say: "No worries, I will be quick. I built software that helps agents leverage a current listing to find the next one nearby. Can I send you the demo and trial access by text?",
+    say: "FLYR isn't really for when business is dead.\n\nIt's for when business is moving - because every listing you sell creates attention, curiosity, and warm conversations around it.\n\nThe problem is most agents are so focused on getting the deal closed that they miss the business sitting around the listing.\n\nThen 30, 60, 90 days later, they're back looking for the next deal from scratch.\n\nFLYR helps make sure the listing you just worked hard to sell actually feeds your pipeline instead of becoming a one-and-done transaction.\n\nSo it's not \"go door knock because you're not busy.\"\n\nIt's \"you're already creating attention - let's make sure you don't waste it.\"\n\nWould it be worth a quick look if I sent you the demo?",
     lines: [
       {
+        speaker: "person",
+        text: "I'm busy right now.",
+      },
+      {
         speaker: "rep",
-        text: "No worries, I will be quick. I built software that helps agents leverage a current listing to find the next one nearby. Can I send you the demo and trial access by text?",
+        text: "FLYR isn't really for when business is dead.\n\nIt's for when business is moving - because every listing you sell creates attention, curiosity, and warm conversations around it.\n\nThe problem is most agents are so focused on getting the deal closed that they miss the business sitting around the listing.\n\nThen 30, 60, 90 days later, they're back looking for the next deal from scratch.\n\nFLYR helps make sure the listing you just worked hard to sell actually feeds your pipeline instead of becoming a one-and-done transaction.\n\nSo it's not \"go door knock because you're not busy.\"\n\nIt's \"you're already creating attention - let's make sure you don't waste it.\"\n\nWould it be worth a quick look if I sent you the demo?",
       },
     ],
     coach:
-      "Respect the interruption. Make the ask smaller and get permission to text.",
+      "Reframe busy as the right moment to capture listing attention before it fades.",
     options: [
-      { label: "Yes", nextId: "close" },
+      { label: "Send demo", nextId: "close" },
       { label: "Call later", nextId: "call-later" },
+      { label: "Let me think", nextId: "hesitation-close" },
       { label: "No", nextId: "graceful-close" },
     ],
   },
@@ -1283,7 +1288,7 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
     label: "Priority",
     kind: "objection",
     title: "We're not focused on that right now",
-    say: "Totally hear you.\n\nWell, let me ask you this: when you sell a listing, do you think talking to homeowners around that property will create more listing opportunities?\n\nExactly. It's less about door knocking and more about not wasting the attention your listing already created.\n\nMost agents know talking to the neighbourhood after a sale can create more business. The reason they don't is because they don't have a simple system to execute it.\n\nThat's what FLYR is. It helps you turn every listing into a 3D prospecting campaign, map every home nearby, track the outreach, and follow up properly. So whether you door knock, call, mail, or have your team work the area - the point is having a system around the listing.\n\nWould it be worth a quick look if I sent you the demo?",
+    say: "Totally hear you.\n\nLet me ask you this - after you sell a listing, do you think that street is colder or warmer than it was before the sale?\n\nExactly.\n\nThat is the whole opportunity.\n\nYou already did the hard part. You won the listing, marketed it, got the result, and created curiosity in the neighbourhood.\n\nRight after the sale is when the community is paying the most attention. Homeowners nearby are wondering what their place is worth, who else might sell, and whether the market is moving.\n\nThose are some of the warmest listing conversations an agent can have.\n\nBut most agents miss that window. They sell the home, move on, and start prospecting from scratch again.\n\nThat is what FLYR helps with.\n\nIt turns every listing into a 3D prospecting campaign, maps every home nearby, tracks the outreach, and keeps the follow-up organized. Whether you door knock, call, mail, or have your team work the area, the point is having a system to capitalize on the attention your listing already created.\n\nWould it be worth a quick look if I sent you the demo?",
     lines: [
       {
         speaker: "person",
@@ -1291,7 +1296,7 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
       },
       {
         speaker: "rep",
-        text: "Totally hear you.\n\nWell, let me ask you this: when you sell a listing, do you think talking to homeowners around that property will create more listing opportunities?\n\nExactly. It's less about door knocking and more about not wasting the attention your listing already created.\n\nMost agents know talking to the neighbourhood after a sale can create more business. The reason they don't is because they don't have a simple system to execute it.\n\nThat's what FLYR is. It helps you turn every listing into a 3D prospecting campaign, map every home nearby, track the outreach, and follow up properly. So whether you door knock, call, mail, or have your team work the area - the point is having a system around the listing.\n\nWould it be worth a quick look if I sent you the demo?",
+        text: "Totally hear you.\n\nLet me ask you this - after you sell a listing, do you think that street is colder or warmer than it was before the sale?\n\nExactly.\n\nThat is the whole opportunity.\n\nYou already did the hard part. You won the listing, marketed it, got the result, and created curiosity in the neighbourhood.\n\nRight after the sale is when the community is paying the most attention. Homeowners nearby are wondering what their place is worth, who else might sell, and whether the market is moving.\n\nThose are some of the warmest listing conversations an agent can have.\n\nBut most agents miss that window. They sell the home, move on, and start prospecting from scratch again.\n\nThat is what FLYR helps with.\n\nIt turns every listing into a 3D prospecting campaign, maps every home nearby, tracks the outreach, and keeps the follow-up organized. Whether you door knock, call, mail, or have your team work the area, the point is having a system to capitalize on the attention your listing already created.\n\nWould it be worth a quick look if I sent you the demo?",
       },
     ],
     coach:
@@ -1299,6 +1304,31 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
     options: [
       { label: "Send demo", nextId: "close" },
       { label: "Need broker/team", nextId: "authority-objection" },
+      { label: "Let me think", nextId: "hesitation-close" },
+      { label: "No", nextId: "graceful-close" },
+    ],
+  },
+  {
+    id: "interrupting-homeowners-objection",
+    label: "Interrupting homeowners",
+    kind: "objection",
+    title: "Interrupting homeowners",
+    say: "Totally hear you - nobody wants to feel like they're bothering people at the door.\n\nBut the way I look at it is this:\n\nYou're not interrupting them with something random.\n\nYou just sold a house in their neighbourhood - and for most homeowners, their home is their most valuable asset.\n\nThey work every day, pay down the mortgage, build equity, and a sale on their street directly affects what their own home could be worth.\n\nSo when a property nearby sells, there is already natural curiosity.\n\nThey want to know what happened, what it sold for, how many buyers were interested, and what it could mean for their home.\n\nThe problem is most agents assume they're bothering people, so they never start the conversation.\n\nFLYR helps you turn that listing into a simple neighbourhood campaign so you can approach those homeowners with context, track who you spoke with, and follow up properly.\n\nIt's not just door knocking.\n\nIt's using the attention your listing already created to start relevant conversations.\n\nWould it be worth a quick look if I sent you the demo?",
+    lines: [
+      {
+        speaker: "person",
+        text: "I don't want to interrupt homeowners.",
+      },
+      {
+        speaker: "rep",
+        text: "Totally hear you - nobody wants to feel like they're bothering people at the door.\n\nBut the way I look at it is this:\n\nYou're not interrupting them with something random.\n\nYou just sold a house in their neighbourhood - and for most homeowners, their home is their most valuable asset.\n\nThey work every day, pay down the mortgage, build equity, and a sale on their street directly affects what their own home could be worth.\n\nSo when a property nearby sells, there is already natural curiosity.\n\nThey want to know what happened, what it sold for, how many buyers were interested, and what it could mean for their home.\n\nThe problem is most agents assume they're bothering people, so they never start the conversation.\n\nFLYR helps you turn that listing into a simple neighbourhood campaign so you can approach those homeowners with context, track who you spoke with, and follow up properly.\n\nIt's not just door knocking.\n\nIt's using the attention your listing already created to start relevant conversations.\n\nWould it be worth a quick look if I sent you the demo?",
+      },
+    ],
+    coach:
+      "Reframe the outreach as a relevant conversation created by the listing, not a random interruption.",
+    options: [
+      { label: "Send demo", nextId: "close" },
+      { label: "They ask price", nextId: "price" },
       { label: "Let me think", nextId: "hesitation-close" },
       { label: "No", nextId: "graceful-close" },
     ],
@@ -2429,10 +2459,13 @@ export function upgradeBuiltInScriptFlow(
 
         if (
           node.id === "not-interested" ||
+          node.id === "busy" ||
           node.id === "flyers-response" ||
           node.id === "social-media-response" ||
           node.id === "doorknock-response" ||
-          node.id === "door-knock-objection"
+          node.id === "priority-objection" ||
+          node.id === "door-knock-objection" ||
+          node.id === "interrupting-homeowners-objection"
         ) {
           return currentNodeById.get(node.id) ?? node;
         }
@@ -2477,10 +2510,16 @@ export function upgradeBuiltInScriptFlow(
       upgradedFlow,
     );
 
-    return appendAfter(
+    const withDoorKnockObjection = appendAfter(
       withOpenerMethodRoutes,
       "not-interested",
       currentNodeById.get("door-knock-objection"),
+    );
+
+    return appendAfter(
+      withDoorKnockObjection,
+      "door-knock-objection",
+      currentNodeById.get("interrupting-homeowners-objection"),
     );
   }
 

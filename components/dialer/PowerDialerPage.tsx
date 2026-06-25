@@ -80,7 +80,7 @@ type DiallerAreaOption = {
   count: number;
   dialableCount: number;
 };
-type DemoAudience = 'team' | 'solo' | 'brokerage';
+type DemoAudience = 'team' | 'solo';
 type DiallerImportResponse = {
   leads?: DiallerLead[];
   importedCount?: number;
@@ -103,10 +103,9 @@ const TEST_LEAD = {
   email: null,
 };
 const AUTO_NEXT_CALL_DELAY_MS = 1800;
-const DEMO_AUDIENCE_OPTIONS: Array<{ value: DemoAudience; label: string }> = [
-  { value: 'team', label: 'Team' },
-  { value: 'solo', label: 'Solo' },
-  { value: 'brokerage', label: 'Brokerage' },
+const DEMO_AUDIENCE_OPTIONS: Array<{ value: DemoAudience; label: string; description: string }> = [
+  { value: 'team', label: 'Team', description: 'Demo 1' },
+  { value: 'solo', label: 'Solo', description: 'Demo 2' },
 ];
 
 function formatCallClock(totalSeconds: number): string {
@@ -176,8 +175,6 @@ function buildTextDropBody(lead: DiallerLead, repName: string): string {
 function inferDemoAudience(lead: DiallerLead | null | undefined): DemoAudience {
   if (!lead) return 'team';
   const haystack = `${lead.name ?? ''} ${lead.company ?? ''} ${lead.notes ?? ''}`.toLowerCase();
-  if (haystack.includes('classification: agency') || haystack.includes('classification: brokerage')) return 'brokerage';
-  if (haystack.includes('real_estate_brokerage') || haystack.includes('brokerage')) return 'brokerage';
   if (haystack.includes('classification: individual_agent') || haystack.includes('individual_agent')) return 'solo';
   if (haystack.includes('real_estate_individual_agent')) return 'solo';
   return 'team';
@@ -1699,6 +1696,31 @@ export function PowerDialerPage() {
                   )}
                 </Button>
               ) : null}
+              <div
+                className="grid grid-cols-2 gap-1 rounded-md border border-border bg-muted p-1"
+                role="group"
+                aria-label="Demo audience"
+              >
+                {DEMO_AUDIENCE_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setSelectedDemoAudience(option.value)}
+                    disabled={!hasActiveLead || saving || savingContact || sendingDemoEmail || startingCall}
+                    aria-pressed={selectedDemoAudience === option.value}
+                    title={`${option.label} - ${option.description}`}
+                    className={cn(
+                      'h-8 min-w-16 rounded px-2 text-xs font-bold transition-colors',
+                      'text-muted-foreground hover:bg-background hover:text-foreground',
+                      'disabled:pointer-events-none disabled:opacity-60',
+                      selectedDemoAudience === option.value &&
+                        'bg-red-700 text-white shadow-sm ring-1 ring-red-400 hover:bg-red-700 hover:text-white'
+                    )}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
               {activeRecordingExportHref ? (
                 <Button
                   asChild
@@ -1744,30 +1766,7 @@ export function PowerDialerPage() {
             </div>
           </div>
 
-          <div className="mt-5 grid gap-2 sm:mt-6 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-center">
-            <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Send as</span>
-            <div className="grid grid-cols-3 gap-1 rounded-md border border-border bg-muted p-1">
-              {DEMO_AUDIENCE_OPTIONS.map((option) => (
-                <Button
-                  key={option.value}
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setSelectedDemoAudience(option.value)}
-                  disabled={!hasActiveLead || saving || savingContact || sendingDemoEmail || startingCall}
-                  className={cn(
-                    'h-8 touch-manipulation rounded text-xs font-semibold text-muted-foreground hover:bg-background hover:text-foreground',
-                    selectedDemoAudience === option.value &&
-                      'bg-background text-foreground shadow-sm hover:bg-background hover:text-foreground dark:bg-card'
-                  )}
-                >
-                  {option.label}
-                </Button>
-              ))}
-            </div>
-          </div>
-
-          <div className="mt-3 grid grid-cols-2 gap-2.5 sm:gap-3">
+          <div className="mt-5 grid grid-cols-2 gap-2.5 sm:mt-6 sm:gap-3">
             <Button
               type="button"
               variant="outline"

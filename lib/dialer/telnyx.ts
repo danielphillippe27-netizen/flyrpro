@@ -19,6 +19,16 @@ type TelnyxApiEnvelope<T> = {
   errors?: Array<{ title?: string; detail?: string; code?: string }>;
 };
 
+class TelnyxRequestError extends Error {
+  isAlphanumericSenderError: boolean;
+
+  constructor(message: string, options?: { isAlphanumericSenderError?: boolean }) {
+    super(message);
+    this.name = 'TelnyxRequestError';
+    this.isAlphanumericSenderError = Boolean(options?.isAlphanumericSenderError);
+  }
+}
+
 export type TelnyxSmsResult = {
   id: string;
   status: string;
@@ -80,10 +90,27 @@ function getTelnyxErrorMessage(payload: unknown, fallback: string): string {
   const envelope = payload as TelnyxApiEnvelope<unknown>;
   const error = envelope.errors?.[0];
   const message = error?.detail?.trim() || error?.title?.trim() || fallback;
-  if (error?.code === '40306' || message.toLowerCase().includes("doesn't have an associated alphanumeric sender id")) {
+  if (isTelnyxAlphanumericSenderError(payload, fallback)) {
     return 'Telnyx needs a registered alphanumeric sender ID on this messaging profile before FLYR can text this destination. Add it in Telnyx, then set TELNYX_ALPHANUMERIC_SENDER_ID.';
   }
   return message;
+}
+
+function isTelnyxAlphanumericSenderError(payload: unknown, fallback = ''): boolean {
+  const envelope = payload as TelnyxApiEnvelope<unknown>;
+  const errors = Array.isArray(envelope?.errors) ? envelope.errors : [];
+  const messages = [
+    fallback,
+    ...errors.flatMap((error) => [error?.title, error?.detail]),
+  ]
+    .filter((message): message is string => typeof message === 'string')
+    .map((message) => message.toLowerCase());
+
+  return errors.some((error) => error?.code === '40306') ||
+    messages.some((message) =>
+      message.includes('alphanumeric sender') &&
+      (message.includes('not registered') || message.includes('associated') || message.includes('sender id'))
+    );
 }
 
 function shouldUseAlphanumericSender(toNumber: string) {
@@ -102,7 +129,10 @@ async function telnyxFetch<T>(path: string, init?: RequestInit): Promise<T> {
   });
   const payload = (await response.json().catch(() => ({}))) as TelnyxApiEnvelope<T>;
   if (!response.ok) {
-    throw new Error(getTelnyxErrorMessage(payload, `Telnyx request failed with ${response.status}`));
+    const fallback = `Telnyx request failed with ${response.status}`;
+    throw new TelnyxRequestError(getTelnyxErrorMessage(payload, fallback), {
+      isAlphanumericSenderError: isTelnyxAlphanumericSenderError(payload, fallback),
+    });
   }
   return payload.data as T;
 }
@@ -125,7 +155,10 @@ async function telnyxFetchRaw(path: string, init?: RequestInit): Promise<string>
     } catch {
       payload = null;
     }
-    throw new Error(getTelnyxErrorMessage(payload, text || `Telnyx request failed with ${response.status}`));
+    const fallback = text || `Telnyx request failed with ${response.status}`;
+    throw new TelnyxRequestError(getTelnyxErrorMessage(payload, fallback), {
+      isAlphanumericSenderError: isTelnyxAlphanumericSenderError(payload, fallback),
+    });
   }
   return text;
 }
@@ -222,22 +255,53 @@ export async function sendTelnyxSms(params: {
     throw new Error('TELNYX_MESSAGING_PROFILE_ID is required to send international SMS with TELNYX_ALPHANUMERIC_SENDER_ID.');
   }
 
-  const data = await telnyxFetch<Record<string, unknown>>('/messages', {
-    method: 'POST',
-    body: JSON.stringify({
-      from: useAlphanumericSender && alphaSenderId ? alphaSenderId : params.from,
-      to: params.to,
-      text: params.body,
-      webhook_url: params.webhookUrl,
-      use_profile_webhooks: false,
-      ...(messagingProfileId ? { messaging_profile_id: messagingProfileId } : {}),
-    }),
+  const shouldTryAlphaSender = Boolean(useAlphanumericSender && alphaSenderId);
+  const buildPayload = (from: string) => ({
+    from,
+    to: params.to,
+    text: params.body,
+    webhook_url: params.webhookUrl,
+    use_profile_webhooks: false,
+    ...(messagingProfileId ? { messaging_profile_id: messagingProfileId } : {}),
   });
+  const send = (from: string) =>
+    telnyxFetch<Record<string, unknown>>('/messages', {
+      method: 'POST',
+      body: JSON.stringify(buildPayload(from)),
+    });
+
+  let data: Record<string, unknown>;
+  let finalFrom = shouldTryAlphaSender ? alphaSenderId! : params.from;
+  let alphaSenderFallback = false;
+
+  try {
+    data = await send(finalFrom);
+  } catch (error) {
+    if (!(shouldTryAlphaSender && error instanceof TelnyxRequestError && error.isAlphanumericSenderError)) {
+      throw error;
+    }
+
+    console.warn('[dialer/telnyx] alphanumeric sender rejected; retrying SMS with numeric sender', {
+      to: params.to,
+      alphanumericSenderId: alphaSenderId,
+    });
+    finalFrom = params.from;
+    alphaSenderFallback = true;
+    data = await send(finalFrom);
+  }
 
   return {
     id: String(data.id ?? data.message_id ?? ''),
     status: String(data.status ?? 'queued'),
-    raw: data,
+    raw: {
+      ...data,
+      flyr_sender: {
+        requested_from: shouldTryAlphaSender ? alphaSenderId : params.from,
+        final_from: finalFrom,
+        alphanumeric_sender_attempted: shouldTryAlphaSender,
+        alphanumeric_sender_fallback: alphaSenderFallback,
+      },
+    },
   };
 }
 

@@ -14,6 +14,9 @@ const ROUTES_SOURCE_ID = 'team-routes';
 const ROUTES_LAYER_ID = 'team-routes-layer';
 const KNOCKS_SOURCE_ID = 'team-knocks';
 const KNOCKS_LAYER_ID = 'team-knocks-layer';
+const LIVE_SOURCE_ID = 'team-live-presence';
+const LIVE_LAYER_ID = 'team-live-presence-layer';
+const LIVE_LABEL_LAYER_ID = 'team-live-presence-labels';
 
 type MapMember = { user_id: string; display_name: string; color: string };
 type MapSession = {
@@ -28,11 +31,29 @@ type MapSession = {
   flyers_delivered?: number;
   path_geojson?: string | null;
 };
+type LivePresence = {
+  user_id: string;
+  display_name: string;
+  color: string;
+  campaign_id: string;
+  campaign_name: string;
+  session_id: string | null;
+  lat: number;
+  lng: number;
+  status: string;
+  updated_at: string | null;
+  started_at: string | null;
+  active_seconds: number;
+  distance_meters: number;
+  doors_hit: number;
+  conversations: number;
+  flyers_delivered: number;
+};
 
 type TeamMapTabProps = {
   range: { start: string; end: string };
   memberIds: string[];
-  mapMode: 'routes' | 'knocked_homes';
+  mapMode: 'routes' | 'knocked_homes' | 'live';
 };
 
 function buildRoutesGeoJSON(
@@ -78,10 +99,12 @@ export function TeamMapTab({ range, memberIds, mapMode }: TeamMapTabProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const popupRef = useRef<mapboxgl.Popup | null>(null);
+  const liveFitKeyRef = useRef<string | null>(null);
 
   const [members, setMembers] = useState<MapMember[]>([]);
   const [sessions, setSessions] = useState<MapSession[]>([]);
   const [knockEvents, setKnockEvents] = useState<Array<{ payload?: { lat?: number; lng?: number; [k: string]: unknown }; display_name?: string; user_id?: string }>>([]);
+  const [livePresence, setLivePresence] = useState<LivePresence[]>([]);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -105,6 +128,12 @@ export function TeamMapTab({ range, memberIds, mapMode }: TeamMapTabProps) {
       const data = await res.json();
       setMembers(data.members ?? []);
       setSessions(data.sessions ?? []);
+      const liveRows = ((data.livePresence ?? []) as LivePresence[]).filter((row) => {
+        if (!Number.isFinite(row.lat) || !Number.isFinite(row.lng)) return false;
+        if (memberIds.length === 0) return true;
+        return memberIds.includes(row.user_id);
+      });
+      setLivePresence(liveRows);
       const points = (data.knockPoints ?? []) as Array<{ payload?: { lat?: number; lng?: number }; user_id?: string }>;
       setKnockEvents(
         points.filter((event) => {
@@ -118,6 +147,7 @@ export function TeamMapTab({ range, memberIds, mapMode }: TeamMapTabProps) {
       setMembers([]);
       setSessions([]);
       setKnockEvents([]);
+      setLivePresence([]);
     } finally {
       setLoading(false);
     }
@@ -126,6 +156,20 @@ export function TeamMapTab({ range, memberIds, mapMode }: TeamMapTabProps) {
   useEffect(() => {
     fetchMapData();
   }, [fetchMapData]);
+
+  useEffect(() => {
+    if (mapMode !== 'live') {
+      liveFitKeyRef.current = null;
+    }
+  }, [mapMode]);
+
+  useEffect(() => {
+    if (mapMode !== 'live') return;
+    const intervalId = window.setInterval(() => {
+      void fetchMapData();
+    }, 15000);
+    return () => window.clearInterval(intervalId);
+  }, [fetchMapData, mapMode]);
 
   // Map init
   useEffect(() => {
@@ -217,7 +261,12 @@ export function TeamMapTab({ range, memberIds, mapMode }: TeamMapTabProps) {
   // Knocked homes layer (points from activity payload)
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !mapLoaded || mapMode !== 'knocked_homes') return;
+    if (!map || !mapLoaded) return;
+    if (mapMode !== 'knocked_homes') {
+      const layer = map.getLayer(KNOCKS_LAYER_ID);
+      if (layer) map.setLayoutProperty(KNOCKS_LAYER_ID, 'visibility', 'none');
+      return;
+    }
 
     const memberMap = new Map(members.map((m) => [m.user_id, m]));
     const features: GeoJSON.Feature<GeoJSON.Point>[] = knockEvents.map((e, i) => ({
@@ -269,6 +318,105 @@ export function TeamMapTab({ range, memberIds, mapMode }: TeamMapTabProps) {
     else map.once('style.load', ensureKnocksLayer);
   }, [mapLoaded, mapMode, knockEvents, members]);
 
+  // Live agent puck layer
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+
+    const features: GeoJSON.Feature<GeoJSON.Point>[] = livePresence.map((row) => ({
+      type: 'Feature',
+      id: row.user_id,
+      properties: {
+        user_id: row.user_id,
+        display_name: row.display_name,
+        campaign_name: row.campaign_name,
+        color: row.color,
+        status: row.status,
+        updated_at: row.updated_at,
+        started_at: row.started_at,
+        active_seconds: row.active_seconds,
+        distance_meters: row.distance_meters,
+        doors_hit: row.doors_hit,
+        conversations: row.conversations,
+        flyers_delivered: row.flyers_delivered,
+      },
+      geometry: {
+        type: 'Point',
+        coordinates: [row.lng, row.lat],
+      },
+    }));
+
+    const geo: GeoJSON.FeatureCollection<GeoJSON.Point> = { type: 'FeatureCollection', features };
+    const ensureLiveLayer = () => {
+      if (!map.isStyleLoaded()) return;
+      try {
+        const existing = map.getSource(LIVE_SOURCE_ID);
+        if (existing && 'setData' in existing) {
+          (existing as mapboxgl.GeoJSONSource).setData(geo);
+        } else if (!existing) {
+          map.addSource(LIVE_SOURCE_ID, { type: 'geojson', data: geo });
+        }
+        if (!map.getLayer(LIVE_LAYER_ID)) {
+          map.addLayer({
+            id: LIVE_LAYER_ID,
+            type: 'circle',
+            source: LIVE_SOURCE_ID,
+            paint: {
+              'circle-radius': ['case', ['==', ['get', 'status'], 'paused'], 8, 10],
+              'circle-color': ['get', 'color'],
+              'circle-opacity': ['case', ['==', ['get', 'status'], 'paused'], 0.58, 0.95],
+              'circle-stroke-width': 3,
+              'circle-stroke-color': '#FFFFFF',
+            },
+          });
+        }
+        if (!map.getLayer(LIVE_LABEL_LAYER_ID)) {
+          map.addLayer({
+            id: LIVE_LABEL_LAYER_ID,
+            type: 'symbol',
+            source: LIVE_SOURCE_ID,
+            layout: {
+              'text-field': ['get', 'display_name'],
+              'text-size': 12,
+              'text-offset': [0, 1.45],
+              'text-anchor': 'top',
+              'text-allow-overlap': false,
+            },
+            paint: {
+              'text-color': '#111827',
+              'text-halo-color': '#FFFFFF',
+              'text-halo-width': 1.4,
+            },
+          });
+        }
+        const liveVisibility = mapMode === 'live' ? 'visible' : 'none';
+        map.setLayoutProperty(LIVE_LAYER_ID, 'visibility', liveVisibility);
+        map.setLayoutProperty(LIVE_LABEL_LAYER_ID, 'visibility', liveVisibility);
+      } catch (e) {
+        console.error('TeamMapTab live layer:', e);
+      }
+    };
+
+    if (map.isStyleLoaded()) ensureLiveLayer();
+    else map.once('style.load', ensureLiveLayer);
+  }, [livePresence, mapLoaded, mapMode]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded || mapMode !== 'live' || livePresence.length === 0) return;
+    const fitKey = livePresence
+      .map((row) => row.user_id)
+      .sort()
+      .join(',');
+    if (liveFitKeyRef.current === fitKey) return;
+    liveFitKeyRef.current = fitKey;
+    const bounds = new mapboxgl.LngLatBounds();
+    livePresence.forEach((row) => bounds.extend([row.lng, row.lat]));
+    if (!bounds.isEmpty()) {
+      map.fitBounds(bounds, { padding: 72, maxZoom: 15, duration: 600 });
+    }
+  }, [livePresence, mapLoaded, mapMode]);
+
   // Route click popup
   useEffect(() => {
     const map = mapRef.current;
@@ -304,6 +452,44 @@ export function TeamMapTab({ range, memberIds, mapMode }: TeamMapTabProps) {
     };
   }, [mapLoaded, mapMode]);
 
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded || mapMode !== 'live') return;
+
+    const onLiveClick = (e: mapboxgl.MapLayerMouseEvent) => {
+      const f = e.features?.[0];
+      if (!f?.properties) return;
+      popupRef.current?.remove();
+      const props = f.properties as Record<string, unknown>;
+      const doors = Number(props.doors_hit ?? 0) || 0;
+      const convos = Number(props.conversations ?? 0) || 0;
+      const flyers = Number(props.flyers_delivered ?? 0) || 0;
+      const distance = `${((Number(props.distance_meters ?? 0) || 0) / 1000).toFixed(2)} km`;
+      const elapsed = formatLiveDuration(props.started_at, props.active_seconds);
+      const updated = formatRelativeUpdate(props.updated_at);
+
+      popupRef.current = new mapboxgl.Popup({ closeButton: true, closeOnClick: false })
+        .setLngLat(e.lngLat)
+        .setHTML(
+          `<div class="p-2 min-w-[190px]">
+            <p class="font-semibold text-sm">${escapeHtml(String(props.display_name ?? 'Member'))}</p>
+            <p class="text-xs text-gray-500 mt-1">${escapeHtml(String(props.campaign_name ?? 'Campaign'))}</p>
+            <p class="text-xs text-gray-500">${escapeHtml(updated)} · ${escapeHtml(String(props.status ?? 'active'))}</p>
+            <p class="text-xs mt-2">Doors: ${doors} · Convos: ${convos} · Flyers: ${flyers}</p>
+            <p class="text-xs">Time: ${escapeHtml(elapsed)} · Distance: ${escapeHtml(distance)}</p>
+          </div>`
+        )
+        .addTo(map);
+    };
+
+    map.on('click', LIVE_LAYER_ID, onLiveClick);
+    return () => {
+      map.off('click', LIVE_LAYER_ID, onLiveClick);
+      popupRef.current?.remove();
+      popupRef.current = null;
+    };
+  }, [mapLoaded, mapMode]);
+
   return (
     <div className="space-y-4">
       {error && (
@@ -324,8 +510,33 @@ export function TeamMapTab({ range, memberIds, mapMode }: TeamMapTabProps) {
       {mapMode === 'knocked_homes' && knockEvents.length === 0 && !loading && (
         <p className="text-sm text-muted-foreground">No knock locations with coordinates in this period.</p>
       )}
+      {mapMode === 'live' && livePresence.length === 0 && !loading && (
+        <p className="text-sm text-muted-foreground">No agents are actively reporting location right now.</p>
+      )}
     </div>
   );
+}
+
+function formatLiveDuration(startedAt: unknown, activeSeconds: unknown): string {
+  const active = Number(activeSeconds ?? 0) || 0;
+  const started =
+    typeof startedAt === 'string' && startedAt
+      ? Math.max(0, Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000))
+      : 0;
+  const seconds = Math.max(active, started);
+  if (seconds <= 0) return '0 min';
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${Math.max(1, minutes)} min`;
+}
+
+function formatRelativeUpdate(value: unknown): string {
+  if (typeof value !== 'string' || !value) return 'No update time';
+  const seconds = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 1000));
+  if (seconds < 60) return `Updated ${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  return `Updated ${minutes}m ago`;
 }
 
 function escapeHtml(s: string): string {
