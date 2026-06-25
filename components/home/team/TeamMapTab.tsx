@@ -4,7 +4,6 @@ import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { useTheme } from '@/lib/theme-provider';
-import { useMapStyle } from '@/lib/map-style-provider';
 import { useWorkspace } from '@/lib/workspace-context';
 import { getMapboxToken } from '@/lib/mapbox';
 import { applyPresetVisualTweaks, applyResolvedMapStyle, getResolvedMapInitOptions, resolveMapStyle } from '@/lib/map-styles';
@@ -90,11 +89,10 @@ function buildRoutesGeoJSON(
 
 export function TeamMapTab({ range, memberIds, mapMode }: TeamMapTabProps) {
   const { theme } = useTheme();
-  const { preset: mapPreset } = useMapStyle();
   const { currentWorkspaceId } = useWorkspace();
   const resolvedMapStyle = useMemo(
-    () => resolveMapStyle(mapPreset, theme, 'v12'),
-    [mapPreset, theme],
+    () => resolveMapStyle('standard', theme, 'v12'),
+    [theme],
   );
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
@@ -114,6 +112,7 @@ export function TeamMapTab({ range, memberIds, mapMode }: TeamMapTabProps) {
       setMembers([]);
       setSessions([]);
       setKnockEvents([]);
+      setLivePresence([]);
       setError('No workspace selected');
       setLoading(false);
       return;

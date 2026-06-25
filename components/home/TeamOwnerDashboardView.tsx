@@ -102,7 +102,7 @@ export function TeamOwnerDashboardView() {
               value="map"
               className="operator-surface border border-transparent bg-transparent px-4 data-[state=active]:border-border data-[state=active]:bg-card data-[state=active]:shadow-none focus-visible:ring-0"
             >
-              Map
+              Live Map
             </TabsTrigger>
             <TabsTrigger
               value="activity"
@@ -127,6 +127,7 @@ export function TeamOwnerDashboardView() {
             <TeamDashboardTab
               range={range}
               memberIds={memberIds}
+              onViewLiveMap={() => handleTabChange('map')}
               onMemberClick={(m) => setSelectedMember({ ...m, color: m.color ?? '#3B82F6' })}
             />
           </TabsContent>

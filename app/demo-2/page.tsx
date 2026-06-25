@@ -7,7 +7,7 @@ const FOUNDER_CALL_HREF =
   'https://calendly.com/daniel-phillippe';
 const DEMO_TWO_STREAM_VIDEO_UID =
   process.env.NEXT_PUBLIC_DEMO_TWO_STREAM_VIDEO_UID ||
-  '382f4b31a98cb042967917532d5e70c1';
+  '244ac3821805b94bfa36585ba804d24e';
 const DEMO_TWO_CTA_AT_SECONDS = 77;
 
 export const metadata: Metadata = {

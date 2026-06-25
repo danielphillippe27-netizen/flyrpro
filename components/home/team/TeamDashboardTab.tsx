@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import type { ComponentType } from 'react';
 import { useWorkspace } from '@/lib/workspace-context';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -11,6 +12,7 @@ import {
   Clock,
   DoorOpen,
   Flame,
+  MapPin,
   MessageSquare,
   TimerReset,
   Trophy,
@@ -68,6 +70,7 @@ type TeamDashboardTabProps = {
   range: TeamControlsRange;
   memberIds: string[];
   onMemberClick?: (member: { user_id: string; display_name: string; color: string }) => void;
+  onViewLiveMap?: () => void;
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -151,7 +154,7 @@ function KpiCard({ icon: Icon, label, value, helper }: KpiCardProps) {
   );
 }
 
-export function TeamDashboardTab({ range, memberIds, onMemberClick }: TeamDashboardTabProps) {
+export function TeamDashboardTab({ range, memberIds, onMemberClick, onViewLiveMap }: TeamDashboardTabProps) {
   const { currentWorkspaceId } = useWorkspace();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [members, setMembers] = useState<MemberRow[]>([]);
@@ -417,7 +420,21 @@ export function TeamDashboardTab({ range, memberIds, onMemberClick }: TeamDashbo
                   <Users className="h-4 w-4 text-primary" />
                   <span>Live activity</span>
                 </div>
-                <span className="text-sm text-muted-foreground">{leaderboard.length} total</span>
+                <div className="flex items-center gap-2">
+                  {liveMembers.length > 0 && onViewLiveMap ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8 gap-1.5 px-2.5"
+                      onClick={onViewLiveMap}
+                    >
+                      <MapPin className="h-3.5 w-3.5" />
+                      <span>Live Map</span>
+                    </Button>
+                  ) : null}
+                  <span className="text-sm text-muted-foreground">{leaderboard.length} total</span>
+                </div>
               </div>
               <CardTitle className="text-2xl font-semibold tracking-tight">{liveMembers.length} reps in the field</CardTitle>
             </CardHeader>
