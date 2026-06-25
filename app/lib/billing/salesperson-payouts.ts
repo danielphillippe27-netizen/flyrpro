@@ -317,7 +317,7 @@ export async function paySalespersonCommissions(params: {
         alreadyPaid: true,
         batchId: batch.id,
         transferId: batch.stripe_transfer_id,
-        transferGroup: batch.transfer_group,
+        transferGroup: batch.transfer_group ?? null,
         currency,
         totalCommissionCents: batch.total_commission_cents,
         commissionCount: commissions.length,
