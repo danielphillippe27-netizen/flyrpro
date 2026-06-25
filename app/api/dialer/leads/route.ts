@@ -7,11 +7,9 @@ import {
 } from '@/app/api/_utils/workspace';
 import { createAdminClient } from '@/lib/supabase/server';
 import { isDialerFounderBypassEmail } from '@/lib/dialer/feature-gate';
-import {
-  getDialerTelecomProvider,
-  getTelnyxDefaultSmsFromNumber,
-  getTwilioDefaultSmsFromNumber,
-} from '@/lib/dialer/env';
+import { getWorkspaceDialerSettings } from '@/lib/dialer/server';
+import { getSalespersonDialerSettingsForUser } from '@/lib/dialer/salesperson-settings';
+import { resolveOutboundCallerId } from '@/lib/dialer/caller-id';
 import { normalizePhoneMarket, normalizePhoneNumber, phoneMarketFromCountryCode, type SupportedPhoneMarket } from '@/lib/dialer/phone';
 import { getDialerCallRecordingSummary } from '@/lib/dialer/recordings';
 import { sendDialerSms } from '@/lib/dialer/provider';
@@ -345,6 +343,30 @@ async function resolveSalespersonForDemoEmail(context: DiallerContext): Promise<
   }
 
   return data as SalespersonReferralRow | null;
+}
+
+async function resolveDiallerSmsFromNumber(
+  context: DiallerContext,
+  toNumber: string
+): Promise<string | null> {
+  const salespersonContext = await getSalespersonDialerSettingsForUser(context.admin, {
+    userId: context.requestUser.id,
+    email: context.requestUser.email,
+    workspaceId: context.workspaceId,
+  });
+  const settings = await getWorkspaceDialerSettings(
+    context.admin,
+    context.workspaceId,
+    salespersonContext.settings
+  );
+
+  if (!settings.defaultSmsFromNumber) return null;
+
+  return resolveOutboundCallerId({
+    toNumber,
+    defaultFromNumber: settings.defaultSmsFromNumber,
+    allowMarketOverride: !settings.salespersonSmsFromNumber,
+  });
 }
 
 async function buildDialerDemoUrl(
@@ -844,14 +866,10 @@ async function sendInterestedLink(
   lead: DiallerLead,
   demoAudience?: DemoAudience | null
 ): Promise<string | null> {
-  const from =
-    getDialerTelecomProvider() === 'telnyx'
-      ? getTelnyxDefaultSmsFromNumber()
-      : getTwilioDefaultSmsFromNumber();
-  if (!from) return 'Lead saved, but no SMS-enabled dialer number is configured.';
-
   const normalizedPhone = normalizeDiallerLeadPhone(lead);
   if (!normalizedPhone.e164) return 'Lead saved, but the phone number is not valid for SMS.';
+  const from = await resolveDiallerSmsFromNumber(context, normalizedPhone.e164);
+  if (!from) return 'Lead saved, but no SMS-enabled dialer number is configured.';
 
   const audience = normalizeDemoAudience(demoAudience, lead);
   const demo = await buildDialerDemoUrl(request, context, {
