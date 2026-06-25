@@ -46,6 +46,7 @@ async function sendFallbackLeadSms(
   const fromNumber = resolveOutboundCallerId({
     toNumber: normalizedPhone.e164,
     defaultFromNumber: context.settings.defaultSmsFromNumber!,
+    allowMarketOverride: !context.settings.salespersonSmsFromNumber,
   });
   const message = await sendDialerSms(request, {
     from: fromNumber,
@@ -227,6 +228,7 @@ export async function POST(
     const fromNumber = resolveOutboundCallerId({
       toNumber: normalizedPhone.e164,
       defaultFromNumber: context.settings.defaultSmsFromNumber,
+      allowMarketOverride: !context.settings.salespersonSmsFromNumber,
     });
     const message = await sendDialerSms(request, {
       from: fromNumber,

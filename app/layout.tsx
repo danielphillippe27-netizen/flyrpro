@@ -20,20 +20,20 @@ export const metadata: Metadata = {
     default: "FLYR",
     template: "%s | FLYR",
   },
-  description: "Door-to-door software",
+  description: "3D prospecting map",
   icons: {
     icon: "/favicon.ico",
     apple: "/apple-touch-icon.png",
   },
   openGraph: {
     title: "FLYR",
-    description: "Door-to-door software",
+    description: "3D prospecting map",
     images: ["/opengraph-image"],
   },
   twitter: {
     card: "summary_large_image",
     title: "FLYR",
-    description: "Door-to-door software",
+    description: "3D prospecting map",
     images: ["/twitter-image"],
   },
 };

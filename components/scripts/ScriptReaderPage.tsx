@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -112,13 +112,6 @@ function kindLabel(kind: StarterScriptFlowNode['kind']) {
   return 'Done';
 }
 
-function kindClassName(kind: StarterScriptFlowNode['kind']) {
-  if (kind === 'objection') return 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300';
-  if (kind === 'close') return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300';
-  if (kind === 'done') return 'border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-300';
-  return 'border-primary/40 bg-primary/10 text-primary';
-}
-
 function scriptLinesFromNode(node: StarterScriptFlowNode): StarterScriptFlowLine[] {
   return node.lines?.length ? node.lines : [{ speaker: 'rep', text: node.say }];
 }
@@ -130,14 +123,46 @@ function scriptLinesToSay(lines: StarterScriptFlowLine[]): string {
     .join('\n');
 }
 
+function compactNodeText(node: StarterScriptFlowNode): string {
+  const firstLine = scriptLinesFromNode(node)[0]?.text ?? node.say;
+  return firstLine.replace(/\s+/g, ' ').trim();
+}
+
 function speakerLabel(speaker: StarterScriptFlowLine['speaker']): string {
   return speaker === 'person' ? 'Person' : 'Rep';
 }
 
 function speakerClassName(speaker: StarterScriptFlowLine['speaker']): string {
   return speaker === 'person'
-    ? 'border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-300'
-    : 'border-primary/40 bg-primary/10 text-primary';
+    ? 'border-red-400 bg-red-50 text-red-700 dark:border-red-500/50 dark:bg-red-500/10 dark:text-red-300'
+    : 'border-zinc-400 bg-zinc-100 text-zinc-800 dark:border-zinc-500 dark:bg-zinc-800 dark:text-zinc-100';
+}
+
+const OBJECTION_LABEL_BY_NODE_ID: Record<string, string> = {
+  'quick-intro': "WHO'S THIS",
+  busy: 'BUSY',
+  'not-interested': 'NOT INTERESTED',
+  'door-knock-objection': 'DONT DOORKNOCK',
+  price: 'MONEY',
+  pricing: 'MONEY',
+  'price-objection': 'MONEY',
+  'time-objection': 'TIME',
+  'priority-objection': 'PRIORITY',
+  'belief-objection': 'BELIEF',
+  'tool-overlap-objection': 'CRM',
+  'authority-objection': 'AUTHORITY',
+  'hesitation-close': 'THINKING',
+};
+
+function objectionOptionLabel(
+  option: StarterScriptFlowNode['options'][number],
+  targetNode: StarterScriptFlowNode | undefined
+): string {
+  return (
+    OBJECTION_LABEL_BY_NODE_ID[option.nextId] ??
+    targetNode?.label?.trim().toUpperCase() ??
+    option.label.trim().toUpperCase()
+  );
 }
 
 function sanitizeDraftFlowForSave(flow: StarterScriptFlowNode[]): StarterScriptFlowNode[] {
@@ -179,10 +204,9 @@ export function ScriptReaderPage({ scriptId }: { scriptId: string }) {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [history, setHistory] = useState<string[]>(['start']);
+  const [history, setHistory] = useState<string[]>([]);
   const [draftFlow, setDraftFlow] = useState<StarterScriptFlowNode[]>(STARTER_SCRIPT_FLOW);
   const [nextLineSpeaker, setNextLineSpeaker] = useState<StarterScriptFlowLine['speaker']>('person');
-  const flowScrollerRef = useRef<HTMLDivElement | null>(null);
 
   const endpoint = useMemo(() => {
     if (typeof window === 'undefined') return `/api/scripts/${scriptId}`;
@@ -258,18 +282,43 @@ export function ScriptReaderPage({ scriptId }: { scriptId: string }) {
   }, [draftFlow, editing, script]);
 
   const canEditFlow = Boolean(script && (script.flow?.length || script.id === STARTER_SCRIPT_ID || script.name === STARTER_SCRIPT_NAME));
-  const flowPathSignature = useMemo(() => flow.map((node) => node.id).join('|'), [flow]);
-  const firstFlowId = flow[0]?.id;
-
-  useEffect(() => {
-    if (!firstFlowId) return;
-    setHistory([firstFlowId]);
-  }, [firstFlowId, flowPathSignature]);
-
-  const activeId = history[history.length - 1];
+  const flowSignature = useMemo(() => flow.map((node) => node.id).join('|'), [flow]);
   const nodeById = useMemo(() => new Map(flow.map((node) => [node.id, node])), [flow]);
-  const activeNode = nodeById.get(activeId) ?? flow[0] ?? null;
+  const activeId = history[history.length - 1] ?? flow[0]?.id ?? null;
+  const activeNode = activeId ? nodeById.get(activeId) ?? flow[0] ?? null : flow[0] ?? null;
+  const activeIndex = activeNode ? flow.findIndex((node) => node.id === activeNode.id) : -1;
   const pathNodes = history.map((id) => nodeById.get(id)).filter(Boolean) as StarterScriptFlowNode[];
+  const activeOptions = useMemo(
+    () =>
+      activeNode
+        ? activeNode.options.map((option, optionIndex) => ({
+            option,
+            optionIndex,
+            targetNode: nodeById.get(option.nextId),
+          }))
+        : [],
+    [activeNode, nodeById]
+  );
+  const answerOptions = activeOptions.filter(
+    ({ targetNode }) => !targetNode || targetNode.kind !== 'objection'
+  );
+  const objectionOptions = useMemo(() => {
+    const seenNodeIds = new Set<string>();
+    return flow
+      .filter((node) => node.kind === 'objection' || node.id in OBJECTION_LABEL_BY_NODE_ID)
+      .filter((node) => {
+        if (seenNodeIds.has(node.id)) return false;
+        seenNodeIds.add(node.id);
+        return true;
+      })
+      .map((targetNode) => ({
+        option: {
+          label: targetNode.label,
+          nextId: targetNode.id,
+        },
+        targetNode,
+      }));
+  }, [flow]);
   const activeDiallerLead = useMemo(
     () =>
       activeLeadSnapshot ??
@@ -286,22 +335,20 @@ export function ScriptReaderPage({ scriptId }: { scriptId: string }) {
   };
 
   useEffect(() => {
-    const scroller = flowScrollerRef.current;
-    if (!scroller || pathNodes.length <= 1) return;
-    window.requestAnimationFrame(() => {
-      scroller.scrollLeft = scroller.scrollWidth;
+    if (!flow[0]) return;
+    setHistory((current) => {
+      const currentActiveId = current[current.length - 1];
+      if (currentActiveId && nodeById.has(currentActiveId)) return current;
+      return [flow[0].id];
     });
-  }, [pathNodes.length]);
+  }, [flow, flowSignature, nodeById]);
 
   function goToNode(nextId: string) {
+    if (!nodeById.has(nextId)) return;
     setHistory((current) => {
       if (current[current.length - 1] === nextId) return current;
       return [...current, nextId];
     });
-  }
-
-  function focusPathStep(index: number) {
-    setHistory((current) => current.slice(0, index + 1));
   }
 
   function goBack() {
@@ -474,7 +521,7 @@ export function ScriptReaderPage({ scriptId }: { scriptId: string }) {
                     {script.name}
                   </h1>
                   <p className="text-sm text-muted-foreground">
-                    {pathNodes.map((node) => node.label).join(' -> ')}
+                    Lead: {leadFullName || 'No active dialler lead'} · Rep: {repFullName || 'Rep Name'}
                   </p>
                 </div>
               </div>
@@ -498,297 +545,313 @@ export function ScriptReaderPage({ scriptId }: { scriptId: string }) {
                     </Button>
                   )
                 ) : null}
-                <Button variant="outline" onClick={goBack} disabled={history.length <= 1}>
-                  <ArrowLeft className="size-4" />
-                  Back
-                </Button>
-                <Button variant="outline" onClick={restart}>
-                  <RotateCcw className="size-4" />
-                  Restart
-                </Button>
               </div>
             </div>
 
-            <section className="rounded-lg border border-border bg-card shadow-sm">
-              <div className="flex flex-col gap-2 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <h2 className="text-sm font-semibold text-card-foreground">Live call path</h2>
-                  <p className="text-xs text-muted-foreground">
-                    Click a response on the focused step to move the flow to the right.
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Lead: {leadFullName || 'No active dialler lead'} · Rep: {repFullName || 'Rep Name'}
-                  </p>
-                </div>
-                <Badge variant="outline" className="w-fit">
-                  Step {pathNodes.length}
-                </Badge>
-              </div>
-
-              <div ref={flowScrollerRef} className="overflow-x-auto px-4 py-5">
-                <div className="flex min-w-max items-stretch gap-3 pb-2">
-                  {pathNodes.map((node, index) => {
-                    const isActive = activeNode?.id === node.id && index === pathNodes.length - 1;
-                    const scriptLines = scriptLinesFromNode(node);
-                    return (
-                      <div key={`${node.id}-${index}`} className="flex items-stretch gap-3">
-                        <div
-                          role={isActive ? undefined : 'button'}
-                          tabIndex={isActive ? undefined : 0}
-                          onClick={() => {
-                            if (!isActive) focusPathStep(index);
-                          }}
-                          onKeyDown={(event) => {
-                            if (isActive) return;
-                            if (event.key === 'Enter' || event.key === ' ') {
-                              event.preventDefault();
-                              focusPathStep(index);
-                            }
-                          }}
-                          aria-current={isActive ? 'step' : undefined}
-                          className={cn(
-                            'flex min-h-[34rem] flex-col rounded-lg border bg-background text-left shadow-sm transition-colors',
-                            isActive
-                              ? 'w-[min(78vw,36rem)] border-primary/50 ring-2 ring-primary/15'
-                              : 'w-[18rem] border-border hover:border-primary/40 hover:bg-accent/30'
-                          )}
+            {activeNode ? (
+              <section className="space-y-4">
+                {pathNodes.length > 1 ? (
+                  <div className="overflow-x-auto pb-2">
+                    <div className="flex min-w-max items-stretch gap-3">
+                      {pathNodes.slice(0, -1).map((node, index) => (
+                        <button
+                          key={`${node.id}-${index}`}
+                          type="button"
+                          onClick={() => setHistory((current) => current.slice(0, index + 1))}
+                          className="flex w-64 shrink-0 flex-col rounded-lg border border-border bg-card p-3 text-left text-card-foreground opacity-70 shadow-sm transition hover:border-primary/40 hover:opacity-100"
                         >
-                          <div className="border-b border-border p-4">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <Badge variant="outline" className={kindClassName(node.kind)}>
-                                {kindLabel(node.kind)}
-                              </Badge>
-                              <span className="text-xs font-medium uppercase text-muted-foreground">
-                                {node.label}
-                              </span>
-                            </div>
-                            <h3
+                          <div className="mb-3 flex items-center gap-2">
+                            <Badge variant="outline" className="border-zinc-300 bg-zinc-100 text-zinc-800 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100">
+                              {node.label || kindLabel(node.kind)}
+                            </Badge>
+                            <span className="truncate text-xs font-medium text-muted-foreground">
+                              Step {index + 1}
+                            </span>
+                          </div>
+                          <div className="line-clamp-3 text-sm leading-6 text-muted-foreground">
+                            {personalizeScriptText(compactNodeText(node), scriptReplacements)}
+                          </div>
+                        </button>
+                      ))}
+                      <div className="flex w-72 shrink-0 flex-col rounded-lg border border-primary/40 bg-card p-3 text-left text-card-foreground shadow-sm ring-2 ring-primary/10">
+                        <div className="mb-3 flex items-center gap-2">
+                          <Badge variant="outline" className="border-zinc-300 bg-zinc-100 text-zinc-800 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100">
+                            {activeNode.label || kindLabel(activeNode.kind)}
+                          </Badge>
+                          <span className="truncate text-xs font-medium text-muted-foreground">
+                            Current
+                          </span>
+                        </div>
+                        <div className="line-clamp-3 text-sm font-medium leading-6">
+                          {personalizeScriptText(compactNodeText(activeNode), scriptReplacements)}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                <article className="rounded-lg border border-border bg-card p-4 shadow-sm">
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <Badge variant="outline" className="border-zinc-300 bg-zinc-100 text-zinc-800 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100">
+                        {activeNode.label || kindLabel(activeNode.kind)}
+                      </Badge>
+                      <span className="truncate text-sm font-medium text-muted-foreground">
+                        {activeNode.title}
+                      </span>
+                    </div>
+                    {editing ? (
+                      <div className="flex items-center gap-2">
+                        <div className="flex rounded-md border border-border bg-background p-1">
+                          {(['rep', 'person'] as const).map((speaker) => (
+                            <button
+                              key={speaker}
+                              type="button"
+                              onClick={() => setNextLineSpeaker(speaker)}
                               className={cn(
-                                'mt-3 font-semibold text-foreground',
-                                isActive && editing ? 'sr-only' : isActive ? 'text-2xl' : 'line-clamp-2 text-base'
+                                'rounded px-2.5 py-1 text-xs font-semibold transition-colors',
+                                nextLineSpeaker === speaker
+                                  ? speakerClassName(speaker)
+                                  : 'text-muted-foreground hover:bg-accent'
                               )}
                             >
-                              {node.title}
-                            </h3>
-                            {isActive && editing ? (
-                              <div className="mt-3 space-y-2">
-                                <Label htmlFor={`script-title-${node.id}`}>Title</Label>
-                                <Input
-                                  id={`script-title-${node.id}`}
-                                  value={node.title}
-                                  onChange={(event) => updateDraftNode(node.id, { title: event.target.value })}
-                                  maxLength={2000}
-                                />
-                              </div>
-                            ) : null}
-                          </div>
+                              {speakerLabel(speaker)}
+                            </button>
+                          ))}
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => addDraftLine(activeNode.id)}
+                        >
+                          <MessageSquarePlus className="size-4" />
+                          Add line
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
 
-                          <div className="flex flex-1 flex-col p-4">
-                            <div className="rounded-md border border-border bg-card p-4">
-                              {isActive && editing ? (
-                                <div className="space-y-3">
-                                  <div className="flex flex-wrap items-center justify-between gap-3">
-                                    <Label>Script lines</Label>
-                                    <div className="flex items-center gap-2">
-                                      <div className="flex rounded-md border border-border bg-background p-1">
-                                        {(['rep', 'person'] as const).map((speaker) => (
-                                          <button
-                                            key={speaker}
-                                            type="button"
-                                            onClick={() => setNextLineSpeaker(speaker)}
-                                            className={cn(
-                                              'rounded px-3 py-1.5 text-xs font-semibold transition-colors',
-                                              nextLineSpeaker === speaker
-                                                ? speakerClassName(speaker)
-                                                : 'text-muted-foreground hover:bg-accent'
-                                            )}
-                                          >
-                                            {speakerLabel(speaker)}
-                                          </button>
-                                        ))}
-                                      </div>
-                                      <Button
-                                        type="button"
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => addDraftLine(node.id)}
-                                      >
-                                        <MessageSquarePlus className="size-4" />
-                                        Add line
-                                      </Button>
-                                    </div>
-                                  </div>
+                  {editing ? (
+                    <div className="mb-4 space-y-2">
+                      <Label htmlFor={`script-title-${activeNode.id}`}>Title</Label>
+                      <Input
+                        id={`script-title-${activeNode.id}`}
+                        value={activeNode.title}
+                        onChange={(event) => updateDraftNode(activeNode.id, { title: event.target.value })}
+                        maxLength={2000}
+                      />
+                    </div>
+                  ) : null}
 
-                                  {scriptLines.map((line, lineIndex) => (
-                                    <div
-                                      key={`${node.id}-line-${lineIndex}`}
-                                      className={cn(
-                                        'space-y-2 rounded-md border p-3',
-                                        line.speaker === 'person'
-                                          ? 'border-red-500/30 bg-red-500/5'
-                                          : 'border-border bg-background'
-                                      )}
-                                    >
-                                      <div className="flex items-center justify-between gap-2">
-                                        <Badge variant="outline" className={speakerClassName(line.speaker)}>
-                                          {speakerLabel(line.speaker)}
-                                        </Badge>
-                                        <div className="flex items-center gap-1">
-                                          <Button
-                                            type="button"
-                                            variant="ghost"
-                                            size="icon"
-                                            className="size-8"
-                                            aria-label="Switch speaker"
-                                            title="Switch speaker"
-                                            onClick={() =>
-                                              updateDraftLine(node.id, lineIndex, {
-                                                speaker: line.speaker === 'person' ? 'rep' : 'person',
-                                              })
-                                            }
-                                          >
-                                            <Repeat2 className="size-4" />
-                                          </Button>
-                                          {scriptLines.length > 1 ? (
-                                            <Button
-                                              type="button"
-                                              variant="ghost"
-                                              size="icon"
-                                              className="size-8 text-muted-foreground hover:text-destructive"
-                                              aria-label="Remove line"
-                                              title="Remove line"
-                                              onClick={() => removeDraftLine(node.id, lineIndex)}
-                                            >
-                                              <Trash2 className="size-4" />
-                                            </Button>
-                                          ) : null}
-                                        </div>
-                                      </div>
-                                      <Textarea
-                                        value={line.text}
-                                        onChange={(event) =>
-                                          updateDraftLine(node.id, lineIndex, { text: event.target.value })
-                                        }
-                                        className={cn(
-                                          'min-h-24 resize-y text-base leading-7',
-                                          line.speaker === 'person' &&
-                                            'border-red-500/30 text-red-700 focus-visible:ring-red-500 dark:text-red-300'
-                                        )}
-                                        maxLength={2000}
-                                      />
-                                    </div>
-                                  ))}
-                                </div>
-                              ) : (
-                                <>
-                                  <div className="text-xs font-semibold uppercase text-muted-foreground">
-                                    Say
-                                  </div>
-                                  <div
-                                    className={cn(
-                                      'mt-3 space-y-3',
-                                      !isActive && 'line-clamp-6'
-                                    )}
-                                  >
-                                    {scriptLines.map((line, lineIndex) => (
-                                      <p
-                                        key={`${node.id}-read-line-${lineIndex}`}
-                                        className={cn(
-                                          'whitespace-pre-wrap',
-                                          isActive ? 'text-xl leading-8' : 'text-sm leading-6',
-                                          line.speaker === 'person'
-                                            ? 'font-medium text-red-700 dark:text-red-300'
-                                            : 'text-foreground'
-                                        )}
-                                      >
-                                        {line.speaker === 'person' ? (
-                                          <span className="mr-2 text-xs font-semibold uppercase tracking-normal text-red-500">
-                                            Person
-                                          </span>
-                                        ) : null}
-                                        {personalizeScriptText(line.text, scriptReplacements)}
-                                      </p>
-                                    ))}
-                                  </div>
-                                </>
-                              )}
+                  <div className="space-y-3">
+                    {scriptLinesFromNode(activeNode).map((line, lineIndex, scriptLines) => (
+                      <div
+                        key={`${activeNode.id}-line-${lineIndex}`}
+                        className={cn(
+                          'rounded-lg border p-4',
+                          line.speaker === 'person'
+                            ? 'border-red-300 bg-red-50/70 dark:border-red-500/40 dark:bg-red-500/10'
+                            : 'border-border bg-background'
+                        )}
+                      >
+                        <div className="mb-3 flex items-center justify-between gap-3">
+                          <Badge variant="outline" className={speakerClassName(line.speaker)}>
+                            {speakerLabel(line.speaker)}
+                          </Badge>
+                          {editing ? (
+                            <div className="flex items-center gap-1">
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="size-8"
+                                aria-label="Switch speaker"
+                                title="Switch speaker"
+                                onClick={() =>
+                                  updateDraftLine(activeNode.id, lineIndex, {
+                                    speaker: line.speaker === 'person' ? 'rep' : 'person',
+                                  })
+                                }
+                              >
+                                <Repeat2 className="size-4" />
+                              </Button>
+                              {scriptLines.length > 1 ? (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="size-8 text-muted-foreground hover:text-destructive"
+                                  aria-label="Remove line"
+                                  title="Remove line"
+                                  onClick={() => removeDraftLine(activeNode.id, lineIndex)}
+                                >
+                                  <Trash2 className="size-4" />
+                                </Button>
+                              ) : null}
                             </div>
-
-                            {isActive && editing ? (
-                              <div className="mt-4 space-y-2 rounded-md border border-border bg-muted/30 p-4">
-                                <Label htmlFor={`script-coach-${node.id}`}>Coach</Label>
-                                <Textarea
-                                  id={`script-coach-${node.id}`}
-                                  value={node.coach ?? ''}
-                                  onChange={(event) => updateDraftNode(node.id, { coach: event.target.value })}
-                                  className="min-h-24 resize-y"
-                                  maxLength={2000}
-                                />
-                              </div>
-                            ) : node.coach && isActive ? (
-                              <div className="mt-4 rounded-md border border-border bg-muted/30 p-4 text-sm leading-6 text-muted-foreground">
-                                {personalizeScriptText(node.coach, scriptReplacements)}
-                              </div>
-                            ) : null}
-
-                            <div className="mt-auto pt-5">
-                              {isActive ? (
-                                <div className="grid gap-2 sm:grid-cols-2">
-                                  {node.options.map((option, optionIndex) =>
-                                    editing ? (
-                                      <div
-                                        key={`${node.id}-${option.nextId}-${optionIndex}`}
-                                        className="space-y-2 rounded-md border border-border bg-card p-3"
-                                      >
-                                        <Label htmlFor={`script-option-${node.id}-${optionIndex}`}>
-                                          Response {optionIndex + 1}
-                                        </Label>
-                                        <Input
-                                          id={`script-option-${node.id}-${optionIndex}`}
-                                          value={option.label}
-                                          onChange={(event) =>
-                                            updateDraftOption(node.id, optionIndex, event.target.value)
-                                          }
-                                          maxLength={120}
-                                        />
-                                      </div>
-                                    ) : (
-                                      <Button
-                                        key={`${node.id}-${option.nextId}-${option.label}`}
-                                        type="button"
-                                        variant={node.kind === 'done' ? 'default' : 'outline'}
-                                        className="h-auto justify-between whitespace-normal px-4 py-3 text-left"
-                                        onClick={(event) => {
-                                          event.stopPropagation();
-                                          goToNode(option.nextId);
-                                        }}
-                                      >
-                                        <span>{option.label}</span>
-                                        <ArrowRight className="size-4" />
-                                      </Button>
-                                    )
-                                  )}
-                                </div>
-                            ) : (
-                              <p className="text-xs text-muted-foreground">
-                                Click to return to this step.
-                              </p>
-                              )}
-                            </div>
-                          </div>
+                          ) : null}
                         </div>
 
-                        {index < pathNodes.length - 1 ? (
-                          <div className="flex w-8 shrink-0 items-center justify-center text-muted-foreground">
-                            <ArrowRight className="size-5" />
+                        {editing ? (
+                          <Textarea
+                            value={line.text}
+                            onChange={(event) =>
+                              updateDraftLine(activeNode.id, lineIndex, { text: event.target.value })
+                            }
+                            className={cn(
+                              'min-h-32 resize-y rounded-md bg-white text-lg leading-7 shadow-sm dark:bg-background',
+                              line.speaker === 'person' &&
+                                'border-red-300 bg-red-50/60 text-red-700 focus-visible:ring-red-500 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300'
+                            )}
+                            maxLength={2000}
+                          />
+                        ) : (
+                          <div
+                            className={cn(
+                              'min-h-24 whitespace-pre-wrap rounded-md border border-border bg-white p-4 text-lg leading-8 shadow-sm dark:bg-background',
+                              line.speaker === 'person' &&
+                                'border-red-300 bg-red-50/60 text-red-700 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300'
+                            )}
+                          >
+                            {personalizeScriptText(line.text, scriptReplacements)}
                           </div>
-                        ) : null}
+                        )}
                       </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </section>
+                    ))}
+                  </div>
+
+                  <div className="mt-4 rounded-lg border border-border bg-background p-4">
+                    <Badge variant="outline" className="mb-3 border-zinc-300 bg-zinc-100 text-zinc-800 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100">
+                      Coach
+                    </Badge>
+                    {editing ? (
+                      <Textarea
+                        id={`script-coach-${activeNode.id}`}
+                        value={activeNode.coach ?? ''}
+                        onChange={(event) => updateDraftNode(activeNode.id, { coach: event.target.value })}
+                        className="min-h-24 resize-y bg-white dark:bg-background"
+                        maxLength={2000}
+                      />
+                    ) : (
+                      <p className="whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
+                        {activeNode.coach
+                          ? personalizeScriptText(activeNode.coach, scriptReplacements)
+                          : 'No coaching note.'}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="mt-4 text-xs font-medium text-muted-foreground">
+                    Step {activeIndex + 1} of {flow.length}
+                    {pathNodes.length > 1 ? ` · ${pathNodes.map((node) => node.label).join(' -> ')}` : ''}
+                  </div>
+                </article>
+
+                <aside className="rounded-lg border border-border bg-card p-4 shadow-sm">
+                  <div className="mb-4 flex items-center justify-between gap-2">
+                    <div>
+                      <h2 className="text-sm font-semibold text-card-foreground">Answers</h2>
+                      <p className="text-xs text-muted-foreground">Click one to move right.</p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      aria-label="Restart script"
+                      title="Restart script"
+                      onClick={restart}
+                    >
+                      <RotateCcw className="size-4" />
+                    </Button>
+                  </div>
+
+                  {editing ? (
+                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                      {activeOptions.map(({ option, optionIndex }) => (
+                        <div
+                          key={`${activeNode.id}-${option.nextId}-${optionIndex}`}
+                          className="space-y-2 rounded-lg border border-border bg-background p-3"
+                        >
+                          <Label htmlFor={`script-option-${activeNode.id}-${optionIndex}`}>
+                            Response {optionIndex + 1}
+                          </Label>
+                          <Input
+                            id={`script-option-${activeNode.id}-${optionIndex}`}
+                            value={option.label}
+                            onChange={(event) =>
+                              updateDraftOption(activeNode.id, optionIndex, event.target.value)
+                            }
+                            maxLength={120}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {answerOptions.length > 0 ? (
+                        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                          {answerOptions.map(({ option }) => (
+                            <Button
+                              key={`${activeNode.id}-${option.nextId}-${option.label}`}
+                              type="button"
+                              variant={activeNode.kind === 'done' ? 'default' : 'outline'}
+                              className="h-auto min-h-16 w-full justify-between gap-3 whitespace-normal px-4 py-3 text-left text-base font-semibold"
+                              onClick={() => goToNode(option.nextId)}
+                              disabled={!nodeById.has(option.nextId)}
+                            >
+                              <span>{option.label}</span>
+                              <ArrowRight className="size-4 shrink-0" />
+                            </Button>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      {objectionOptions.length > 0 ? (
+                        <div className="rounded-lg border border-red-300 bg-red-50/70 p-3 dark:border-red-500/40 dark:bg-red-500/10">
+                          <div className="mb-3 flex items-center gap-2">
+                            <Badge variant="outline" className="border-red-400 bg-white text-red-700 dark:border-red-500/60 dark:bg-red-500/10 dark:text-red-300">
+                              Objections
+                            </Badge>
+                            <span className="text-xs font-medium text-red-700/80 dark:text-red-300/80">
+                              Handle without leaving the flow.
+                            </span>
+                          </div>
+                          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                            {objectionOptions.map(({ option, targetNode }) => (
+                              <Button
+                                key={`${activeNode.id}-${option.nextId}-${option.label}`}
+                                type="button"
+                                variant="outline"
+                                className="h-auto min-h-14 w-full justify-between gap-3 whitespace-normal border-red-300 bg-white px-4 py-3 text-left text-sm font-bold text-red-700 shadow-sm hover:border-red-400 hover:bg-red-100 dark:border-red-500/50 dark:bg-background dark:text-red-300 dark:hover:bg-red-500/10"
+                                onClick={() => goToNode(option.nextId)}
+                                disabled={!nodeById.has(option.nextId)}
+                              >
+                                <span>{objectionOptionLabel(option, targetNode)}</span>
+                                <ArrowRight className="size-4 shrink-0" />
+                              </Button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  )}
+
+                  <div className="mt-4 border-t border-border pt-4">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full justify-start sm:w-auto"
+                      onClick={goBack}
+                      disabled={history.length <= 1}
+                    >
+                      <ArrowLeft className="size-4" />
+                      Back
+                    </Button>
+                  </div>
+                </aside>
+              </section>
+            ) : null}
           </div>
         ) : null}
       </main>

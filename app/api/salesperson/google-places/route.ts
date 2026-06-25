@@ -84,6 +84,7 @@ const requestSchema = z.object({
   pageSize: z.number().int().min(1).max(20).default(12),
   relatedTerms: z.array(z.string().trim().min(2).max(120)).max(12).optional(),
   workspaceId: z.string().uuid().optional(),
+  listName: z.string().trim().min(1).max(120).optional(),
   marketId: z.string().uuid().optional(),
   industryId: z.string().uuid().optional(),
   leadSource: z.enum(['places', 'job_signals']).default('places'),
@@ -191,6 +192,14 @@ function scraperLeadKey(lead: PlacesLead, phoneMarket: SupportedPhoneMarket = 'U
   return normalizedPhoneKey(lead.phone, phoneMarket) || contactSignature(lead, phoneMarket);
 }
 
+function masterBelongsToRequester(
+  row: { assigned_user_id?: string | null; assigned_salesperson_id?: string | null },
+  userId: string,
+  salespersonId?: string | null
+): boolean {
+  return row.assigned_user_id === userId || Boolean(salespersonId && row.assigned_salesperson_id === salespersonId);
+}
+
 function isMissingContactsColumn(error: unknown, column: string): boolean {
   if (!error || typeof error !== 'object' || !('message' in error)) return false;
   const message = String((error as { message?: unknown }).message ?? '').toLowerCase();
@@ -237,23 +246,26 @@ async function saveScraperResults(params: {
   industry: string;
   region?: string;
   countryCode: string;
+  listName?: string;
   leadSource?: 'places' | 'job_signals';
 }): Promise<SavedScraperListResult | null> {
   if (!params.workspaceId || params.leads.length === 0) return null;
   const workspaceId = params.workspaceId;
   const phoneMarket = normalizePhoneMarket(params.countryCode);
 
-  const listName = buildSavedListName({
-    city: params.city,
-    industry: params.industry,
-    region: params.region,
-    leadSource: params.leadSource,
-  });
+  const listName =
+    params.listName?.trim().replace(/\s+/g, ' ').slice(0, 120) ||
+    buildSavedListName({
+      city: params.city,
+      industry: params.industry,
+      region: params.region,
+      leadSource: params.leadSource,
+    });
   let warning: string | null = null;
 
   const { data: existingContacts, error: existingContactsError } = await params.admin
     .from('contacts')
-    .select('id, full_name, phone, phone_e164, email, address')
+    .select('id, user_id, full_name, phone, phone_e164, email, address')
     .eq('workspace_id', workspaceId);
 
   if (existingContactsError) {
@@ -262,16 +274,21 @@ async function saveScraperResults(params: {
 
   const existingContactIdBySignature = new Map<string, string>();
   const existingContactIdByPhone = new Map<string, string>();
+  const currentUserContactIds = new Set<string>();
   for (const contact of existingContacts ?? []) {
+    const contactId = typeof contact.id === 'string' ? contact.id : '';
+    if (!contactId || (contact as { user_id?: unknown }).user_id !== params.userId) continue;
+
+    currentUserContactIds.add(contactId);
     const signature = [
       compactWhitespace(String(contact.full_name ?? '')).toLowerCase(),
       String((contact as { phone_e164?: unknown }).phone_e164 ?? '').trim() || normalizePhoneNumber(contact.phone, phoneMarket).e164 || String(contact.phone ?? '').trim(),
       compactWhitespace(String(contact.address ?? '')).toLowerCase(),
     ].join('|');
-    if (typeof contact.id === 'string') {
-      existingContactIdBySignature.set(signature, contact.id);
+    if (contactId) {
+      existingContactIdBySignature.set(signature, contactId);
       const phoneKey = normalizedPhoneKey(contact.phone, phoneMarket);
-      if (phoneKey) existingContactIdByPhone.set(phoneKey, contact.id);
+      if (phoneKey) existingContactIdByPhone.set(phoneKey, contactId);
     }
   }
 
@@ -282,12 +299,17 @@ async function saveScraperResults(params: {
   }
 
   const leadsToImport: PlacesLead[] = [];
+  const leadsNeedingContact = new Map<string, PlacesLead>();
+  const leadsForDialer = new Map<string, PlacesLead>();
   const masterIdByLeadKey = new Map<string, string>();
   const masterMetadataById = new Map<string, Record<string, unknown>>();
+  const contactIds = new Set<string>();
+  const contactIdByLeadKey = new Map<string, string>();
   let masterAddedCount = 0;
   let masterSkippedCount = 0;
 
   for (const lead of uniqueLeads.values()) {
+    const leadKey = scraperLeadKey(lead, phoneMarket);
     const existingMaster = await findSalespersonLeadMaster(params.admin, {
       workspaceId,
       name: compactWhitespace(lead.name || 'Lead'),
@@ -300,20 +322,44 @@ async function saveScraperResults(params: {
     if (!existingMaster.available) {
       warning = warning ?? existingMaster.warning;
       leadsToImport.push(lead);
+      leadsNeedingContact.set(leadKey, lead);
+      leadsForDialer.set(leadKey, lead);
       continue;
     }
 
     if (existingMaster.row) {
       masterSkippedCount += 1;
+      if (masterBelongsToRequester(existingMaster.row, params.userId, params.salespersonId)) {
+        masterIdByLeadKey.set(leadKey, existingMaster.row.id);
+        masterMetadataById.set(existingMaster.row.id, {
+          ...(existingMaster.row.metadata ?? {}),
+          listName,
+        });
+        leadsForDialer.set(leadKey, lead);
+
+        const existingOwnContactId =
+          (existingMaster.row.contact_id && currentUserContactIds.has(existingMaster.row.contact_id)
+            ? existingMaster.row.contact_id
+            : null) ??
+          existingContactIdBySignature.get(contactSignature(lead, phoneMarket)) ??
+          existingContactIdByPhone.get(normalizedPhoneKey(lead.phone, phoneMarket));
+
+        if (existingOwnContactId) {
+          contactIds.add(existingOwnContactId);
+          contactIdByLeadKey.set(leadKey, existingOwnContactId);
+        } else {
+          leadsNeedingContact.set(leadKey, lead);
+        }
+      }
       continue;
     }
 
     leadsToImport.push(lead);
+    leadsNeedingContact.set(leadKey, lead);
+    leadsForDialer.set(leadKey, lead);
   }
 
-  const contactIds = new Set<string>();
-  const contactIdByLeadKey = new Map<string, string>();
-  const contactsToInsert = leadsToImport.flatMap((lead) => {
+  const contactsToInsert = Array.from(leadsNeedingContact.values()).flatMap((lead) => {
     const signature = contactSignature(lead, phoneMarket);
     const existingId = existingContactIdBySignature.get(signature) ?? existingContactIdByPhone.get(normalizedPhoneKey(lead.phone, phoneMarket));
     if (existingId) {
@@ -471,7 +517,7 @@ async function saveScraperResults(params: {
     );
   }
 
-  const dialableLeads = leadsToImport.flatMap((lead) => {
+  const dialableLeads = Array.from(leadsForDialer.values()).flatMap((lead) => {
     const normalizedPhone = normalizePhoneNumber(lead.phone, phoneMarket);
     if (!normalizedPhone.isValid || !normalizedPhone.e164) return [];
     const jobSignals = (lead.jobSignals ?? []).slice(0, 2);
@@ -761,6 +807,7 @@ export async function POST(request: NextRequest) {
       industry: parsed.data.industry,
       region: parsed.data.region,
       countryCode: parsed.data.countryCode,
+      listName: parsed.data.listName,
       leadSource: parsed.data.leadSource,
     });
     await recordProspectSearchRun({

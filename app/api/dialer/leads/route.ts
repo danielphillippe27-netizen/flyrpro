@@ -7,11 +7,9 @@ import {
 } from '@/app/api/_utils/workspace';
 import { createAdminClient } from '@/lib/supabase/server';
 import { isDialerFounderBypassEmail } from '@/lib/dialer/feature-gate';
-import {
-  getDialerTelecomProvider,
-  getTelnyxDefaultSmsFromNumber,
-  getTwilioDefaultSmsFromNumber,
-} from '@/lib/dialer/env';
+import { getWorkspaceDialerSettings } from '@/lib/dialer/server';
+import { getSalespersonDialerSettingsForUser } from '@/lib/dialer/salesperson-settings';
+import { resolveOutboundCallerId } from '@/lib/dialer/caller-id';
 import { normalizePhoneMarket, normalizePhoneNumber, phoneMarketFromCountryCode, type SupportedPhoneMarket } from '@/lib/dialer/phone';
 import { getDialerCallRecordingSummary } from '@/lib/dialer/recordings';
 import { sendDialerSms } from '@/lib/dialer/provider';
@@ -76,12 +74,15 @@ type UpdateLeadPayload = {
   demoEmailSubject?: string | null;
   demoEmailBody?: string | null;
   demoLinkToken?: string | null;
+  demoAudience?: DemoAudience | null;
   sendLink?: boolean;
   followUpName?: string | null;
   followUpAt?: string | null;
   createNotification?: boolean;
   saveContact?: boolean;
 };
+
+type DemoAudience = 'team' | 'solo' | 'brokerage';
 
 type DiallerContext = {
   admin: ReturnType<typeof createAdminClient>;
@@ -344,13 +345,45 @@ async function resolveSalespersonForDemoEmail(context: DiallerContext): Promise<
   return data as SalespersonReferralRow | null;
 }
 
-async function buildDialerDemoUrl(request: NextRequest, context: DiallerContext): Promise<{
+async function resolveDiallerSmsFromNumber(
+  context: DiallerContext,
+  toNumber: string
+): Promise<string | null> {
+  const salespersonContext = await getSalespersonDialerSettingsForUser(context.admin, {
+    userId: context.requestUser.id,
+    email: context.requestUser.email,
+    workspaceId: context.workspaceId,
+  });
+  const settings = await getWorkspaceDialerSettings(
+    context.admin,
+    context.workspaceId,
+    salespersonContext.settings
+  );
+
+  if (!settings.defaultSmsFromNumber) return null;
+
+  return resolveOutboundCallerId({
+    toNumber,
+    defaultFromNumber: settings.defaultSmsFromNumber,
+    allowMarketOverride: !settings.salespersonSmsFromNumber,
+  });
+}
+
+async function buildDialerDemoUrl(
+  request: NextRequest,
+  context: DiallerContext,
+  options?: {
+    demoPath?: string;
+    campaign?: string;
+  }
+): Promise<{
   url: string;
   referralCode: string | null;
 }> {
   const publicOrigin = getPublicOrigin(request);
   const referralCode = await resolveSalespersonReferralCode(context);
-  const demoPath = DIALER_DEMO_VIDEO_PATH;
+  const demoPath = options?.demoPath ?? DIALER_DEMO_VIDEO_PATH;
+  const campaign = options?.campaign ?? 'power-dialer-demo';
 
   if (!referralCode) {
     return {
@@ -361,13 +394,37 @@ async function buildDialerDemoUrl(request: NextRequest, context: DiallerContext)
 
   const url = new URL(`/s/${encodeURIComponent(referralCode)}`, publicOrigin);
   url.searchParams.set('source', 'salesperson');
-  url.searchParams.set('campaign', 'power-dialer-demo');
+  url.searchParams.set('campaign', campaign);
   url.searchParams.set('redirect', demoPath);
 
   return {
     url: url.toString(),
     referralCode,
   };
+}
+
+function normalizeDemoAudience(value: unknown, lead?: DiallerLead | null): DemoAudience {
+  if (value === 'team' || value === 'solo' || value === 'brokerage') return value;
+  if (!lead) return 'team';
+
+  const haystack = `${lead.name ?? ''} ${lead.company ?? ''} ${lead.notes ?? ''}`.toLowerCase();
+  if (haystack.includes('classification: agency') || haystack.includes('classification: brokerage')) return 'brokerage';
+  if (haystack.includes('real_estate_brokerage') || haystack.includes('brokerage')) return 'brokerage';
+  if (haystack.includes('classification: individual_agent') || haystack.includes('individual_agent')) return 'solo';
+  if (haystack.includes('real_estate_individual_agent')) return 'solo';
+  if (haystack.includes('classification: team') || haystack.includes('real_estate_team')) return 'team';
+
+  return 'team';
+}
+
+function getDemoAudienceCampaign(audience: DemoAudience): string {
+  if (audience === 'solo') return 'individual-agent-listing';
+  if (audience === 'brokerage') return 'brokerage-demo';
+  return 'power-dialer-demo';
+}
+
+function getDemoAudiencePath(audience: DemoAudience): string {
+  return audience === 'solo' ? LISTING_DEMO_VIDEO_PATH : DIALER_DEMO_VIDEO_PATH;
 }
 
 function buildSharedDialerDemoUrl(
@@ -385,11 +442,12 @@ function buildSharedDialerDemoUrl(
   return url.toString();
 }
 
-function isBrokerageLead(lead: DiallerLead): boolean {
-  const haystack = `${lead.name ?? ''} ${lead.company ?? ''}`.toLowerCase();
-  return ['brokerage', 'realty', 'real estate office', 'realtor office', 'broker'].some((signal) =>
-    haystack.includes(signal)
-  );
+function buildBrokerageSignupUrl(publicOrigin: string, referralCode: string | null): string {
+  const signupUrl = new URL('/onboarding', publicOrigin);
+  signupUrl.searchParams.set('source', 'dialer');
+  signupUrl.searchParams.set('campaign', 'brokerage-demo');
+  if (referralCode) signupUrl.searchParams.set('referralCode', referralCode);
+  return signupUrl.toString();
 }
 
 async function buildTrackedDialerDemoUrl(
@@ -441,6 +499,53 @@ function buildInterestedLinkText(lead: DiallerLead, demoUrl: string): string {
     'Take a look when you get the chance. I’m confident you’ll see how powerful this could be for your team, especially around tracking activity, managing leads, and keeping agents accountable in the field.',
     '',
     'If you have any questions at all, just text or call me.',
+    '',
+    'Thanks again!',
+  ].join('\n');
+}
+
+function buildSoloInterestedLinkText(lead: DiallerLead, demoUrl: string): string {
+  const firstName = cleanText(lead.name).split(/\s+/)[0];
+  const greeting = firstName ? `Hey ${firstName},` : 'Hey,';
+
+  return [
+    greeting,
+    '',
+    'Great connecting with you.',
+    '',
+    'I’ve attached the quick individual-agent listing demo I mentioned.',
+    '',
+    demoUrl,
+    '',
+    'Take a look when you get the chance. It shows how an agent can use FLYR around listings, follow-up, and field prospecting.',
+    '',
+    'If you have any questions at all, just text or call me.',
+    '',
+    'Thanks again!',
+  ].join('\n');
+}
+
+function buildBrokerageInterestedLinkText(params: {
+  lead: DiallerLead;
+  teamDemoUrl: string;
+  listingDemoUrl: string;
+  signupUrl: string;
+}): string {
+  const firstName = cleanText(params.lead.name).split(/\s+/)[0];
+  const greeting = firstName ? `Hey ${firstName},` : 'Hey,';
+
+  return [
+    greeting,
+    '',
+    'Great connecting with you.',
+    '',
+    'Here are the quick FLYR links for your brokerage:',
+    '',
+    `Teams demo: ${params.teamDemoUrl}`,
+    `Individual agent listing demo: ${params.listingDemoUrl}`,
+    `Free trial: ${params.signupUrl}`,
+    '',
+    'If you know agents who could use this, feel free to share it with them.',
     '',
     'Thanks again!',
   ].join('\n');
@@ -517,6 +622,32 @@ function buildBrokerageDemoEmailBody(params: {
   ].join('\n');
 }
 
+function buildSoloDemoEmailBody(params: {
+  lead: DiallerLead;
+  senderName: string;
+  demoUrl: string;
+}): string {
+  const firstName = cleanText(params.lead.name).split(/\s+/)[0];
+  const greetingName = firstName || 'there';
+
+  return [
+    `Hey ${greetingName},`,
+    '',
+    'It was great connecting with you.',
+    '',
+    'Here is the quick FLYR listing demo I mentioned:',
+    '',
+    params.demoUrl,
+    '',
+    'It shows how an individual agent can use FLYR around listings, follow-up, and field prospecting.',
+    '',
+    'Reply here with any questions and I will get back to you.',
+    '',
+    `Thanks,`,
+    params.senderName,
+  ].join('\n');
+}
+
 function buildDemoEmailContent(
   lead: DiallerLead,
   demoUrl: string,
@@ -587,7 +718,12 @@ async function sendDemoEmail(
   context: DiallerContext,
   lead: DiallerLead,
   contact: Record<string, unknown> | null,
-  overrides?: { subject?: string | null; body?: string | null; demoLinkToken?: string | null }
+  overrides?: {
+    subject?: string | null;
+    body?: string | null;
+    demoLinkToken?: string | null;
+    demoAudience?: DemoAudience | null;
+  }
 ): Promise<string | null> {
   const recipient = cleanText(lead.email);
   if (!recipient) return 'Lead saved, but no email address was added.';
@@ -619,27 +755,42 @@ async function sendDemoEmail(
   const replyTo = cleanText(salesperson?.demo_email_reply_to) || cleanText(salesperson?.email) || cleanText(context.requestUser.email) || getEnv('RESEND_REPLY_TO');
   const cleanToken = cleanText(overrides?.demoLinkToken);
   const publicOrigin = getPublicOrigin(request);
+  const audience = normalizeDemoAudience(overrides?.demoAudience, lead);
   let demo: { url: string; referralCode: string | null; tracked: boolean };
-  try {
-    const generated = await generateDemoLinkForLead({
-      admin: context.admin,
-      leadId: lead.id,
-      user: context.requestUser,
-    });
+  if (audience === 'solo') {
+    const referralCode = normalizeSalespersonReferralCodeInput(salesperson?.referral_code ?? '') || (await resolveSalespersonReferralCode(context));
     demo = {
-      url: generated.url,
-      referralCode: normalizeSalespersonReferralCodeInput(salesperson?.referral_code ?? '') || null,
+      url: buildSharedDialerDemoUrl(
+        publicOrigin,
+        referralCode,
+        LISTING_DEMO_VIDEO_PATH,
+        getDemoAudienceCampaign('solo')
+      ),
+      referralCode,
       tracked: false,
     };
-  } catch (generateError) {
-    console.warn('[dialer/leads] demo engine link generation failed; falling back to legacy demo URL', generateError);
-    demo = cleanToken
-      ? {
-          url: new URL(`/d/${encodeURIComponent(cleanToken)}`, getPublicOrigin(request)).toString(),
-          referralCode: normalizeSalespersonReferralCodeInput(salesperson?.referral_code ?? '') || null,
-          tracked: true,
-        }
-      : await buildTrackedDialerDemoUrl(request, context, salesperson, lead, contact);
+  } else {
+    try {
+      const generated = await generateDemoLinkForLead({
+        admin: context.admin,
+        leadId: lead.id,
+        user: context.requestUser,
+      });
+      demo = {
+        url: generated.url,
+        referralCode: normalizeSalespersonReferralCodeInput(salesperson?.referral_code ?? '') || null,
+        tracked: false,
+      };
+    } catch (generateError) {
+      console.warn('[dialer/leads] demo engine link generation failed; falling back to legacy demo URL', generateError);
+      demo = cleanToken
+        ? {
+            url: new URL(`/d/${encodeURIComponent(cleanToken)}`, publicOrigin).toString(),
+            referralCode: normalizeSalespersonReferralCodeInput(salesperson?.referral_code ?? '') || null,
+            tracked: true,
+          }
+        : await buildTrackedDialerDemoUrl(request, context, salesperson, lead, contact);
+    }
   }
   const listingDemoUrl = buildSharedDialerDemoUrl(
     publicOrigin,
@@ -647,19 +798,18 @@ async function sendDemoEmail(
     LISTING_DEMO_VIDEO_PATH,
     'individual-agent-listing'
   );
-  const signupUrl = new URL('/onboarding', publicOrigin);
-  signupUrl.searchParams.set('source', 'dialer');
-  signupUrl.searchParams.set('campaign', 'brokerage-demo');
-  if (demo.referralCode) signupUrl.searchParams.set('referralCode', demo.referralCode);
-  const fallbackBody = isBrokerageLead(lead)
+  const signupUrl = buildBrokerageSignupUrl(publicOrigin, demo.referralCode);
+  const fallbackBody = audience === 'brokerage'
     ? buildBrokerageDemoEmailBody({
         lead,
         senderName,
         teamDemoUrl: demo.url,
         listingDemoUrl,
-        signupUrl: signupUrl.toString(),
+        signupUrl,
       })
-    : null;
+    : audience === 'solo'
+      ? buildSoloDemoEmailBody({ lead, senderName, demoUrl: demo.url })
+      : null;
   const contactId = typeof contact?.id === 'string' ? contact.id : null;
   if (cleanToken) {
     const { error: linkUpdateError } = await context.admin
@@ -676,7 +826,7 @@ async function sendDemoEmail(
     }
   }
   const content = buildDemoEmailContent(lead, demo.url, senderName, {
-    subject: overrides?.subject ?? (fallbackBody ? 'Two quick FLYR demos for your agents' : null),
+    subject: overrides?.subject ?? (audience === 'brokerage' ? 'Two quick FLYR demos for your agents' : audience === 'solo' ? 'Quick FLYR listing demo' : null),
     body: overrides?.body ?? fallbackBody,
   });
   const resend = new Resend(apiKey);
@@ -713,19 +863,37 @@ async function sendDemoEmail(
 async function sendInterestedLink(
   request: NextRequest,
   context: DiallerContext,
-  lead: DiallerLead
+  lead: DiallerLead,
+  demoAudience?: DemoAudience | null
 ): Promise<string | null> {
-  const from =
-    getDialerTelecomProvider() === 'telnyx'
-      ? getTelnyxDefaultSmsFromNumber()
-      : getTwilioDefaultSmsFromNumber();
-  if (!from) return 'Lead saved, but no SMS-enabled dialer number is configured.';
-
   const normalizedPhone = normalizeDiallerLeadPhone(lead);
   if (!normalizedPhone.e164) return 'Lead saved, but the phone number is not valid for SMS.';
+  const from = await resolveDiallerSmsFromNumber(context, normalizedPhone.e164);
+  if (!from) return 'Lead saved, but no SMS-enabled dialer number is configured.';
 
-  const demo = await buildDialerDemoUrl(request, context);
-  const messageBody = buildInterestedLinkText(lead, demo.url);
+  const audience = normalizeDemoAudience(demoAudience, lead);
+  const demo = await buildDialerDemoUrl(request, context, {
+    demoPath: getDemoAudiencePath(audience),
+    campaign: getDemoAudienceCampaign(audience),
+  });
+  const publicOrigin = getPublicOrigin(request);
+  const listingDemoUrl = buildSharedDialerDemoUrl(
+    publicOrigin,
+    demo.referralCode,
+    LISTING_DEMO_VIDEO_PATH,
+    getDemoAudienceCampaign('solo')
+  );
+  const signupUrl = buildBrokerageSignupUrl(publicOrigin, demo.referralCode);
+  const messageBody = audience === 'brokerage'
+    ? buildBrokerageInterestedLinkText({
+        lead,
+        teamDemoUrl: demo.url,
+        listingDemoUrl,
+        signupUrl,
+      })
+    : audience === 'solo'
+      ? buildSoloInterestedLinkText(lead, demo.url)
+      : buildInterestedLinkText(lead, demo.url);
   const message = await sendDialerSms(request, {
     from,
     to: normalizedPhone.e164,
@@ -764,7 +932,9 @@ async function sendInterestedLink(
     context.admin.from('contact_activities').insert({
       contact_id: contactId,
       type: 'text',
-      note: `Demo SMS sent: ${demo.url}`,
+      note: audience === 'brokerage'
+        ? `Brokerage demo SMS sent:\n${demo.url}\n${listingDemoUrl}\n${signupUrl}`
+        : `Demo SMS sent: ${demo.url}`,
       timestamp: now,
     }),
   ]);
@@ -1430,6 +1600,7 @@ export async function PATCH(request: NextRequest) {
         subject: body.demoEmailSubject,
         body: body.demoEmailBody,
         demoLinkToken: body.demoLinkToken,
+        demoAudience: body.demoAudience,
       });
       warning = warning ?? emailWarning;
     } catch (sendError) {
@@ -1473,7 +1644,7 @@ export async function PATCH(request: NextRequest) {
   let warning: string | null = null;
   if (body.sendLink) {
     try {
-      warning = await sendInterestedLink(request, context, data as DiallerLead);
+      warning = await sendInterestedLink(request, context, data as DiallerLead, body.demoAudience);
     } catch (sendError) {
       console.error('[dialer/leads] failed to send interested link', sendError);
       warning = sendError instanceof Error ? sendError.message : 'Lead saved, but the link text could not be sent.';

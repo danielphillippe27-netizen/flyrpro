@@ -80,6 +80,7 @@ type DiallerAreaOption = {
   count: number;
   dialableCount: number;
 };
+type DemoAudience = 'team' | 'solo' | 'brokerage';
 type DiallerImportResponse = {
   leads?: DiallerLead[];
   importedCount?: number;
@@ -101,6 +102,12 @@ const TEST_LEAD = {
   company: 'Test Lead',
   email: null,
 };
+const AUTO_NEXT_CALL_DELAY_MS = 1800;
+const DEMO_AUDIENCE_OPTIONS: Array<{ value: DemoAudience; label: string }> = [
+  { value: 'team', label: 'Team' },
+  { value: 'solo', label: 'Solo' },
+  { value: 'brokerage', label: 'Brokerage' },
+];
 
 function formatCallClock(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60);
@@ -164,6 +171,16 @@ function formatRecordingDuration(totalSeconds: number | null | undefined): strin
 function buildTextDropBody(lead: DiallerLead, repName: string): string {
   const firstName = getFirstName(lead.name);
   return `Hey ${firstName || 'there'}, its ${repName} with FLYR can you give me a call back when you get a chance !`;
+}
+
+function inferDemoAudience(lead: DiallerLead | null | undefined): DemoAudience {
+  if (!lead) return 'team';
+  const haystack = `${lead.name ?? ''} ${lead.company ?? ''} ${lead.notes ?? ''}`.toLowerCase();
+  if (haystack.includes('classification: agency') || haystack.includes('classification: brokerage')) return 'brokerage';
+  if (haystack.includes('real_estate_brokerage') || haystack.includes('brokerage')) return 'brokerage';
+  if (haystack.includes('classification: individual_agent') || haystack.includes('individual_agent')) return 'solo';
+  if (haystack.includes('real_estate_individual_agent')) return 'solo';
+  return 'team';
 }
 
 function getTwoDayFollowUpAt(): string {
@@ -489,6 +506,7 @@ export function PowerDialerPage() {
   const [followUpTime, setFollowUpTime] = useState('');
   const [followUpChoice, setFollowUpChoice] = useState<'today' | 'tomorrow' | 'custom'>('today');
   const [textBody, setTextBody] = useState('');
+  const [selectedDemoAudience, setSelectedDemoAudience] = useState<DemoAudience>('team');
   const [sendingText, setSendingText] = useState(false);
   const [loadingLeads, setLoadingLeads] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -684,6 +702,7 @@ export function PowerDialerPage() {
       setEmail('');
       setTextBody('');
       setSelectedDisposition('interested');
+      setSelectedDemoAudience('team');
       return;
     }
     if (hydratedLeadIdRef.current === activeLead.id) return;
@@ -692,6 +711,7 @@ export function PowerDialerPage() {
     setEmail(activeLead.email ?? '');
     setTextBody(buildTextDropBody(activeLead, repFirstName));
     setSelectedDisposition(activeLead.disposition ?? 'interested');
+    setSelectedDemoAudience(inferDemoAudience(activeLead));
   }, [activeLead, repFirstName]);
 
   useEffect(() => {
@@ -1045,6 +1065,7 @@ export function PowerDialerPage() {
           notes: notesOverride ?? (targetLead.id === activeLead?.id ? notes : targetLead.notes ?? ''),
           email: targetLead.id === activeLead?.id ? email : targetLead.email ?? '',
           sendLink,
+          demoAudience: targetLead.id === activeLead?.id ? selectedDemoAudience : inferDemoAudience(targetLead),
           followUpName: followUpNameOverride,
           followUpAt,
           createNotification,
@@ -1078,7 +1099,9 @@ export function PowerDialerPage() {
     const laterPending = updatedLeads
       .slice(Math.max(currentIndex + 1, 0))
       .find((lead) => statusForLead(lead) === 'pending' && hasDialablePhone(lead.phone));
-    const firstPending = updatedLeads.find((lead) => statusForLead(lead) === 'pending' && hasDialablePhone(lead.phone));
+    const firstPending = updatedLeads.find(
+      (lead) => lead.id !== currentLeadId && statusForLead(lead) === 'pending' && hasDialablePhone(lead.phone)
+    );
     return laterPending ?? firstPending ?? null;
   };
 
@@ -1264,9 +1287,10 @@ export function PowerDialerPage() {
 
     const retry = doubleDialRetryRef.current;
     const endedLeadId = activeLeadId;
-    setDiallerRunning(false);
+    const shouldKeepDiallerRunning = diallerRunning;
     setActiveCallId(null);
     setActiveCallIsDoubleDial(false);
+    device.resetEndedPhase();
 
     if (retry && retry.remaining > 0) {
       const retryLead = leads.find((lead) => lead.id === retry.leadId);
@@ -1276,19 +1300,46 @@ export function PowerDialerPage() {
         setMessage('Redialing same lead...');
         window.setTimeout(() => {
           void placeCurrentCallRef.current?.({ doubleDial: true, forceLeadId: retry.leadId });
-        }, 700);
+        }, AUTO_NEXT_CALL_DELAY_MS);
         return;
       }
 
+      setDiallerRunning(false);
       setMessage('Double dial stopped. Lead is no longer pending or dialable.');
       return;
     }
 
+    const nextLead = endedLeadId ? findNextDialableLead(leads, endedLeadId) : null;
     if (endedLeadId) {
       void removeLeadFromDiallerQueue(endedLeadId, { silent: true });
     }
+
+    if (shouldKeepDiallerRunning) {
+      if (nextLead) {
+        setMessage(`Calling ${nextLead.name || 'next lead'}...`);
+        window.setTimeout(() => {
+          void placeCurrentCallRef.current?.({ forceLeadId: nextLead.id });
+        }, AUTO_NEXT_CALL_DELAY_MS);
+        return;
+      }
+
+      setDiallerRunning(false);
+      setMessage('No valid pending leads left.');
+      return;
+    }
+
     setMessage((currentMessage) => currentMessage ?? 'Call ended.');
-  }, [activeCallId, activeLeadId, device.callPhase, leads, removeLeadFromDiallerQueue, setActiveCallId, setActiveCallIsDoubleDial, setDiallerRunning]);
+  }, [
+    activeCallId,
+    activeLeadId,
+    device,
+    diallerRunning,
+    leads,
+    removeLeadFromDiallerQueue,
+    setActiveCallId,
+    setActiveCallIsDoubleDial,
+    setDiallerRunning,
+  ]);
 
   const handleTextDrop = async () => {
     if (!activeLead || !currentWorkspaceId) return;
@@ -1417,6 +1468,7 @@ export function PowerDialerPage() {
           email,
           saveContact: true,
           sendDemoEmail: true,
+          demoAudience: selectedDemoAudience,
         }),
       });
       const data = (await response.json().catch(() => ({}))) as {
@@ -1596,15 +1648,17 @@ export function PowerDialerPage() {
           </div>
         )}
 
-        {(message || error || device.deviceError) && (
+        {(message || error || device.deviceError || device.deviceWarning) && (
           <div
             className={`rounded-md border px-3 py-2 text-sm ${
               error || device.deviceError
                 ? 'border-border bg-muted text-foreground'
+                : device.deviceWarning
+                  ? 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300'
                 : 'border-border bg-card text-foreground'
             }`}
           >
-            {error || device.deviceError || message}
+            {error || device.deviceError || device.deviceWarning || message}
           </div>
         )}
 
@@ -1690,7 +1744,30 @@ export function PowerDialerPage() {
             </div>
           </div>
 
-          <div className="mt-5 grid grid-cols-2 gap-2.5 sm:mt-6 sm:gap-3">
+          <div className="mt-5 grid gap-2 sm:mt-6 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-center">
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Send as</span>
+            <div className="grid grid-cols-3 gap-1 rounded-md border border-border bg-muted p-1">
+              {DEMO_AUDIENCE_OPTIONS.map((option) => (
+                <Button
+                  key={option.value}
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setSelectedDemoAudience(option.value)}
+                  disabled={!hasActiveLead || saving || savingContact || sendingDemoEmail || startingCall}
+                  className={cn(
+                    'h-8 touch-manipulation rounded text-xs font-semibold text-muted-foreground hover:bg-background hover:text-foreground',
+                    selectedDemoAudience === option.value &&
+                      'bg-background text-foreground shadow-sm hover:bg-background hover:text-foreground dark:bg-card'
+                  )}
+                >
+                  {option.label}
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-3 grid grid-cols-2 gap-2.5 sm:gap-3">
             <Button
               type="button"
               variant="outline"

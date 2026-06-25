@@ -32,6 +32,7 @@ type DialerEnvName =
   | 'TELNYX_INBOUND_FORWARD_TO'
   | 'TELNYX_INBOUND_FALLBACK_MESSAGE'
   | 'TELNYX_MESSAGING_PROFILE_ID'
+  | 'TELNYX_ALPHANUMERIC_SENDER_ID'
   | 'TELNYX_CONNECTION_ID'
   | 'TELNYX_OUTBOUND_VOICE_PROFILE_ID'
   | 'TELNYX_TELEPHONY_CREDENTIAL_ID'
@@ -98,6 +99,8 @@ function getEnvIssue(name: DialerEnvName): 'missing' | 'invalid' | null {
     case 'DIALER_TELECOM_PROVIDER':
     case 'DIALER_PROVIDER':
       return value === 'twilio' || value === 'telnyx' ? null : 'invalid';
+    case 'TELNYX_ALPHANUMERIC_SENDER_ID':
+      return /^(?=.*[A-Za-z])[A-Za-z0-9 ]{1,11}$/.test(value) ? null : 'invalid';
     default:
       return null;
   }
@@ -232,6 +235,10 @@ export function getTelnyxInboundFallbackMessage(): string {
 
 export function getTelnyxMessagingProfileId(): string | null {
   return optionalEnv('TELNYX_MESSAGING_PROFILE_ID');
+}
+
+export function getTelnyxAlphanumericSenderId(): string | null {
+  return optionalEnv('TELNYX_ALPHANUMERIC_SENDER_ID');
 }
 
 export function getTelnyxConnectionId(): string | null {

@@ -141,6 +141,7 @@ async function sendText(
     const fromNumber = resolveOutboundCallerId({
       toNumber: normalizedPhone.e164,
       defaultFromNumber: settings.defaultSmsFromNumber,
+      allowMarketOverride: !settings.salespersonSmsFromNumber,
     });
     const message = await sendDialerSms(request, {
       from: fromNumber,

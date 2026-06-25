@@ -177,6 +177,7 @@ export async function POST(
     const fromNumber = resolveOutboundCallerId({
       toNumber: call.to_number_e164,
       defaultFromNumber: context.settings.defaultSmsFromNumber,
+      allowMarketOverride: !context.settings.salespersonSmsFromNumber,
     });
     const message = await sendDialerSms(request, {
       from: fromNumber,

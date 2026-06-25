@@ -36,6 +36,36 @@ type SavedBrowserCaptureList = {
   warning: string | null;
 };
 
+type ContactInsert = {
+  user_id: string;
+  workspace_id: string;
+  full_name: string;
+  phone?: string | null;
+  phone_e164?: string | null;
+  phone_country_code?: string | null;
+  phone_area_code?: string | null;
+  phone_area_label?: string | null;
+  phone_last_validated_at?: string;
+  phone_validation_error?: string | null;
+  email?: string | null;
+  address: string;
+  status: 'new';
+  source?: string;
+  tags?: string;
+  notes?: string | null;
+};
+
+const OPTIONAL_CONTACT_INSERT_COLUMNS = [
+  'source',
+  'tags',
+  'phone_e164',
+  'phone_country_code',
+  'phone_area_code',
+  'phone_area_label',
+  'phone_last_validated_at',
+  'phone_validation_error',
+] as const;
+
 const leadSchema = z.object({
   placeId: z.string().optional().nullable(),
   name: z.string().trim().min(1).max(180),
@@ -58,6 +88,7 @@ const leadSchema = z.object({
 
 const requestSchema = z.object({
   workspaceId: z.string().uuid().optional(),
+  listName: z.string().trim().min(1).max(120).optional(),
   city: z.string().trim().min(1).max(100).default(''),
   provinceCode: z.string().trim().min(2).max(3).default('on'),
   leads: z.array(leadSchema).max(10000),
@@ -65,6 +96,14 @@ const requestSchema = z.object({
 
 function cleanText(value: unknown): string {
   return String(value ?? '').trim().replace(/\s+/g, ' ');
+}
+
+function masterBelongsToRequester(
+  row: { assigned_user_id?: string | null; assigned_salesperson_id?: string | null },
+  userId: string,
+  salespersonId?: string | null
+): boolean {
+  return row.assigned_user_id === userId || Boolean(salespersonId && row.assigned_salesperson_id === salespersonId);
 }
 
 function formatListDate(): string {
@@ -81,6 +120,42 @@ function buildListName(city: string, provinceCode: string): string {
 
 function phoneKey(value: string | null | undefined): string {
   return normalizePhoneNumber(value, 'CA').e164 || String(value ?? '').replace(/\D/g, '');
+}
+
+function isMissingContactsColumn(error: unknown, column: string): boolean {
+  if (!error || typeof error !== 'object' || !('message' in error)) return false;
+  const message = String((error as { message?: unknown }).message ?? '').toLowerCase();
+  return (
+    message.includes(`column contacts.${column}`) ||
+    message.includes(`column "${column}"`) ||
+    message.includes(`${column} does not exist`) ||
+    message.includes(`could not find the '${column}' column`)
+  );
+}
+
+async function insertContactsWithFallback(
+  admin: ReturnType<typeof createAdminClient>,
+  rows: ContactInsert[]
+): Promise<string[]> {
+  let payload = rows.map((row) => ({ ...row }));
+
+  while (true) {
+    const { data, error } = await admin.from('contacts').insert(payload).select('id');
+    if (!error) {
+      return (data ?? [])
+        .map((row) => String((row as { id?: unknown }).id ?? '').trim())
+        .filter(Boolean);
+    }
+
+    const missingColumn = OPTIONAL_CONTACT_INSERT_COLUMNS.find((column) => isMissingContactsColumn(error, column));
+    if (!missingColumn) throw error;
+
+    payload = payload.map((row) => {
+      const nextRow = { ...row } as Partial<ContactInsert>;
+      delete nextRow[missingColumn];
+      return nextRow as ContactInsert;
+    });
+  }
 }
 
 async function resolveSalesperson(
@@ -148,6 +223,7 @@ async function saveBrowserCaptureLeads(params: {
   userId: string;
   salespersonId?: string | null;
   workspaceId: string | null;
+  listName?: string;
   city: string;
   provinceCode: string;
   leads: z.infer<typeof leadSchema>[];
@@ -155,7 +231,7 @@ async function saveBrowserCaptureLeads(params: {
   if (!params.workspaceId || params.leads.length === 0) return null;
 
   const workspaceId = params.workspaceId;
-  const listName = buildListName(params.city, params.provinceCode);
+  const listName = cleanText(params.listName).slice(0, 120) || buildListName(params.city, params.provinceCode);
   let warning: string | null = null;
 
   const uniqueLeads = new Map<string, z.infer<typeof leadSchema>>();
@@ -166,7 +242,7 @@ async function saveBrowserCaptureLeads(params: {
 
   const { data: existingContacts, error: existingContactsError } = await params.admin
     .from('contacts')
-    .select('id, phone, phone_e164')
+    .select('id, user_id, phone, phone_e164')
     .eq('workspace_id', workspaceId);
 
   if (existingContactsError) {
@@ -174,18 +250,29 @@ async function saveBrowserCaptureLeads(params: {
   }
 
   const contactIdByPhone = new Map<string, string>();
+  const currentUserContactIds = new Set<string>();
   for (const contact of existingContacts ?? []) {
+    const id = String((contact as { id?: unknown }).id ?? '').trim();
+    if (!id || (contact as { user_id?: unknown }).user_id !== params.userId) continue;
+
+    currentUserContactIds.add(id);
     const key = String((contact as { phone_e164?: unknown }).phone_e164 ?? '').trim()
       || phoneKey(String((contact as { phone?: unknown }).phone ?? ''));
-    const id = String((contact as { id?: unknown }).id ?? '').trim();
     if (key && id) contactIdByPhone.set(key, id);
   }
 
   const leadsToImport: z.infer<typeof leadSchema>[] = [];
+  const leadsNeedingContact = new Map<string, z.infer<typeof leadSchema>>();
+  const leadsForDialer = new Map<string, z.infer<typeof leadSchema>>();
+  const contactIds = new Set<string>();
+  const contactIdByLeadPhone = new Map<string, string>();
+  const masterIdByPhone = new Map<string, string>();
+  const masterMetadataById = new Map<string, Record<string, unknown>>();
   let masterSkippedCount = 0;
   let masterAddedCount = 0;
 
   for (const lead of uniqueLeads.values()) {
+    const key = phoneKey(lead.phone);
     const existingMaster = await findSalespersonLeadMaster(params.admin, {
       workspaceId,
       name: cleanText(lead.name),
@@ -199,20 +286,42 @@ async function saveBrowserCaptureLeads(params: {
     if (!existingMaster.available) {
       warning = warning ?? existingMaster.warning;
       leadsToImport.push(lead);
+      leadsNeedingContact.set(key, lead);
+      leadsForDialer.set(key, lead);
       continue;
     }
 
     if (existingMaster.row) {
       masterSkippedCount += 1;
+      if (masterBelongsToRequester(existingMaster.row, params.userId, params.salespersonId)) {
+        masterIdByPhone.set(key, existingMaster.row.id);
+        masterMetadataById.set(existingMaster.row.id, {
+          ...(existingMaster.row.metadata ?? {}),
+          listName,
+        });
+        leadsForDialer.set(key, lead);
+
+        const existingOwnContactId =
+          (existingMaster.row.contact_id && currentUserContactIds.has(existingMaster.row.contact_id)
+            ? existingMaster.row.contact_id
+            : null) ?? contactIdByPhone.get(key);
+
+        if (existingOwnContactId) {
+          contactIds.add(existingOwnContactId);
+          contactIdByLeadPhone.set(key, existingOwnContactId);
+        } else {
+          leadsNeedingContact.set(key, lead);
+        }
+      }
       continue;
     }
 
     leadsToImport.push(lead);
+    leadsNeedingContact.set(key, lead);
+    leadsForDialer.set(key, lead);
   }
 
-  const contactIds = new Set<string>();
-  const contactIdByLeadPhone = new Map<string, string>();
-  const contactsToInsert = leadsToImport.flatMap((lead) => {
+  const contactsToInsert: ContactInsert[] = Array.from(leadsNeedingContact.values()).flatMap((lead) => {
     const key = phoneKey(lead.phone);
     const existingContactId = contactIdByPhone.get(key);
     if (existingContactId) {
@@ -247,26 +356,21 @@ async function saveBrowserCaptureLeads(params: {
   });
 
   if (contactsToInsert.length > 0) {
-    const { data: insertedContacts, error } = await params.admin
-      .from('contacts')
-      .insert(contactsToInsert)
-      .select('id, phone, phone_e164');
-
-    if (error) {
-      console.warn('[salesperson/realtor-ca-browser] contact insert failed', error);
+    try {
+      const insertedIds = await insertContactsWithFallback(params.admin, contactsToInsert);
+      insertedIds.forEach((id) => contactIds.add(id));
+      insertedIds.forEach((id, index) => {
+        const lead = contactsToInsert[index];
+        if (!lead) return;
+        const key = phoneKey(lead.phone);
+        if (key) contactIdByLeadPhone.set(key, id);
+      });
+    } catch (insertError) {
+      console.warn('[salesperson/realtor-ca-browser] contact insert failed', insertError);
       warning = 'Added master leads where possible, but could not save all contact rows.';
-    } else {
-      for (const contact of insertedContacts ?? []) {
-        const id = String((contact as { id?: unknown }).id ?? '').trim();
-        const key = String((contact as { phone_e164?: unknown }).phone_e164 ?? '').trim()
-          || phoneKey(String((contact as { phone?: unknown }).phone ?? ''));
-        if (id) contactIds.add(id);
-        if (id && key) contactIdByLeadPhone.set(key, id);
-      }
     }
   }
 
-  const masterIdByPhone = new Map<string, string>();
   for (const lead of leadsToImport) {
     const normalized = normalizePhoneNumber(lead.phone, 'CA');
     const key = phoneKey(lead.phone);
@@ -308,7 +412,13 @@ async function saveBrowserCaptureLeads(params: {
       masterSkippedCount += 1;
     }
 
-    if (master.row?.id) masterIdByPhone.set(key, master.row.id);
+    if (master.row?.id) {
+      masterIdByPhone.set(key, master.row.id);
+      masterMetadataById.set(master.row.id, {
+        ...(master.row.metadata ?? {}),
+        listName,
+      });
+    }
   }
 
   let listId: string | null = null;
@@ -339,6 +449,27 @@ async function saveBrowserCaptureLeads(params: {
     }
   }
 
+  if (masterMetadataById.size > 0) {
+    await Promise.all(
+      Array.from(masterMetadataById.entries()).map(async ([masterId, metadata]) => {
+        const { error } = await params.admin
+          .from('salesperson_lead_master')
+          .update({
+            metadata: {
+              ...metadata,
+              listId,
+              listName,
+            },
+          })
+          .eq('id', masterId);
+
+        if (error) {
+          console.warn('[salesperson/realtor-ca-browser] failed to attach lead list metadata', error);
+        }
+      })
+    );
+  }
+
   const { data: existingDialerRows, error: existingDialerError } = await params.admin
     .from('dialler_leads')
     .select('id, phone')
@@ -362,7 +493,7 @@ async function saveBrowserCaptureLeads(params: {
         .filter(([phone, id]) => Boolean(phone && id))
     );
     const seenDialerPhones = new Set(existingDialerIdByPhone.keys());
-    const dialerInserts = leadsToImport.flatMap((lead) => {
+    const dialerInserts = Array.from(leadsForDialer.values()).flatMap((lead) => {
       const normalized = normalizePhoneNumber(lead.phone, 'CA');
       const key = normalized.e164 || phoneKey(lead.phone);
       if (!normalized.isValid || !key) return [];
@@ -483,6 +614,7 @@ export async function POST(request: NextRequest) {
       userId: requestUser.id,
       salespersonId: salesperson?.id ?? null,
       workspaceId,
+      listName: parsed.data.listName,
       city: parsed.data.city,
       provinceCode: parsed.data.provinceCode,
       leads: parsed.data.leads,

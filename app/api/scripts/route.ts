@@ -11,12 +11,15 @@ import {
   parseScriptFlowBody,
   upgradeBuiltInScriptFlow,
 } from "@/lib/scripts/default-script";
+import {
+  WORKSPACE_SCRIPT_MAX_BODY_LENGTH,
+  WORKSPACE_SCRIPT_MAX_NAME_LENGTH,
+} from "@/lib/scripts/limits";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const MAX_NAME_LENGTH = 120;
-const MAX_BODY_LENGTH = 50000;
+const LEGACY_WORKSPACE_SCRIPT_MAX_BODY_LENGTH = 12000;
 
 type WorkspaceScriptRow = {
   id: string;
@@ -83,6 +86,20 @@ function isMissingScriptsStorage(
   );
 }
 
+function isScriptBodyConstraintError(
+  error: { code?: string; message?: string } | null | undefined,
+): boolean {
+  const message = error?.message?.toLowerCase() ?? "";
+  return (
+    error?.code === "23514" ||
+    message.includes("workspace_scripts_body_check")
+  );
+}
+
+function scriptBodyConstraintMessage() {
+  return "Supabase script storage needs the latest workspace scripts migration before it can save long scripts.";
+}
+
 async function resolveWorkspaceForRequest(
   request: NextRequest,
   requestedWorkspaceId?: unknown,
@@ -138,10 +155,21 @@ async function ensureBuiltInScripts(
     return { rows, error: null };
   }
 
+  const persistableScripts = missingScripts.filter(
+    (script) => script.body.length <= LEGACY_WORKSPACE_SCRIPT_MAX_BODY_LENGTH,
+  );
+  const virtualBuiltIns = missingScripts.filter(
+    (script) => script.body.length > LEGACY_WORKSPACE_SCRIPT_MAX_BODY_LENGTH,
+  );
+
+  if (persistableScripts.length === 0) {
+    return { rows, virtualBuiltIns, error: null };
+  }
+
   const { data: createdRows, error: createError } = await admin
     .from("workspace_scripts")
     .insert(
-      missingScripts.map((script) => ({
+      persistableScripts.map((script) => ({
         workspace_id: workspaceId,
         created_by: userId,
         name: script.name,
@@ -150,9 +178,15 @@ async function ensureBuiltInScripts(
     )
     .select("id, name, body, created_at, updated_at");
 
-  if (createError) return { rows: null, error: createError };
+  if (createError) {
+    if (isScriptBodyConstraintError(createError)) {
+      return { rows, virtualBuiltIns: missingScripts, error: null };
+    }
+    return { rows: null, error: createError };
+  }
   return {
     rows: [...((createdRows ?? []) as WorkspaceScriptRow[]), ...rows],
+    virtualBuiltIns,
     error: null,
   };
 }
@@ -182,8 +216,11 @@ export async function GET(request: NextRequest) {
   }
 
   return NextResponse.json({
-    scripts: (result.rows ?? []).map(serializeScript),
-    storageReady: true,
+    scripts: [
+      ...((result.virtualBuiltIns ?? []).map(builtInScript)),
+      ...((result.rows ?? []).map(serializeScript)),
+    ],
+    storageReady: (result.virtualBuiltIns ?? []).length === 0,
   });
 }
 
@@ -202,15 +239,15 @@ export async function POST(request: NextRequest) {
 
   const name = typeof payload.name === "string" ? payload.name.trim() : "";
   const body = typeof payload.body === "string" ? payload.body.trim() : "";
-  if (!name || name.length > MAX_NAME_LENGTH) {
+  if (!name || name.length > WORKSPACE_SCRIPT_MAX_NAME_LENGTH) {
     return NextResponse.json(
-      { error: `Name must be 1-${MAX_NAME_LENGTH} characters.` },
+      { error: `Name must be 1-${WORKSPACE_SCRIPT_MAX_NAME_LENGTH} characters.` },
       { status: 400 },
     );
   }
-  if (!body || body.length > MAX_BODY_LENGTH) {
+  if (!body || body.length > WORKSPACE_SCRIPT_MAX_BODY_LENGTH) {
     return NextResponse.json(
-      { error: `Body must be 1-${MAX_BODY_LENGTH} characters.` },
+      { error: `Body must be 1-${WORKSPACE_SCRIPT_MAX_BODY_LENGTH} characters.` },
       { status: 400 },
     );
   }
@@ -233,6 +270,12 @@ export async function POST(request: NextRequest) {
           error:
             "Supabase script storage is not ready. Run the workspace scripts migration first.",
         },
+        { status: 503 },
+      );
+    }
+    if (isScriptBodyConstraintError(error)) {
+      return NextResponse.json(
+        { error: scriptBodyConstraintMessage() },
         { status: 503 },
       );
     }

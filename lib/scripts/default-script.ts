@@ -7,6 +7,14 @@ export const REAL_ESTATE_INDIVIDUAL_AGENT_SCRIPT_NAME =
   "Real Estate Individual Agents - listing appointments";
 export const REAL_ESTATE_INDIVIDUAL_AGENT_SCRIPT_ID =
   "real-estate-individual-agents-listing-appointments";
+export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_NAME =
+  "Individual Realtors - listing leverage trial";
+export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_ID =
+  "individual-realtors-listing-leverage-trial";
+export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_V2_SCRIPT_NAME =
+  "Individual Realtors - listing leverage trial V2";
+export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_V2_SCRIPT_ID =
+  "individual-realtors-listing-leverage-trial-v2";
 
 export type StarterScriptFlowLine = {
   speaker: "rep" | "person";
@@ -909,6 +917,654 @@ REP RULES:
 4. If they are covered, ask permission to send the quick demo or close cleanly.
 5. Always end with a next step: book demo, send demo, set callback, or mark not interested.`;
 
+export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowNode[] = [
+  {
+    id: "opener",
+    label: "Opener",
+    kind: "start",
+    title: "Quick opener",
+    say: "Hey [Name], this is Daniel calling from FLYR. How are you?",
+    lines: [
+      {
+        speaker: "rep",
+        text: "Hey [Name], this is Daniel calling from FLYR. How are you?",
+      },
+    ],
+    coach:
+      "Use a downward inflection on the last line. Keep it calm and familiar.",
+    options: [
+      { label: "Not interested", nextId: "not-interested" },
+      { label: "Dont doorknock", nextId: "door-knock-objection" },
+      { label: "FLYERS", nextId: "flyers-response" },
+      { label: "SOCIAL MEDIA", nextId: "social-media-response" },
+      { label: "DOORKNOCK", nextId: "doorknock-response" },
+    ],
+  },
+  {
+    id: "quick-intro",
+    label: "Intro",
+    kind: "objection",
+    title: "If they ask who is calling",
+    say: "It's Daniel from FLYR. I built software for real estate agents to help turn a current listing into the next listing nearby.",
+    lines: [
+      {
+        speaker: "rep",
+        text: "It's Daniel from FLYR. I built software for real estate agents to help turn a current listing into the next listing nearby.",
+      },
+    ],
+    coach:
+      "Answer directly, then return to the value statement. Do not over-explain.",
+    options: [
+      { label: "Continue", nextId: "value-statement" },
+      { label: "Not interested", nextId: "not-interested" },
+    ],
+  },
+  {
+    id: "busy",
+    label: "Busy",
+    kind: "objection",
+    title: "If they are busy",
+    say: "No worries, I will be quick. I built software that helps agents leverage a current listing to find the next one nearby. Can I send you the demo and trial access by text?",
+    lines: [
+      {
+        speaker: "rep",
+        text: "No worries, I will be quick. I built software that helps agents leverage a current listing to find the next one nearby. Can I send you the demo and trial access by text?",
+      },
+    ],
+    coach:
+      "Respect the interruption. Make the ask smaller and get permission to text.",
+    options: [
+      { label: "Yes", nextId: "close" },
+      { label: "Call later", nextId: "call-later" },
+      { label: "No", nextId: "graceful-close" },
+    ],
+  },
+  {
+    id: "flyers-response",
+    label: "Flyers",
+    kind: "question",
+    title: "They use flyers",
+    say: "That is awesome.\n\nHave you considered the opportunity to speak to the homeowners around the listing?\n\nFLYR turns that same listing area into a trackable campaign, so the map, flyer drops, conversations, and follow-up all stay organized in one place.\n\nWould it be worth a quick look if I sent you the demo?",
+    lines: [
+      {
+        speaker: "rep",
+        text: "That is awesome.\n\nHave you considered the opportunity to speak to the homeowners around the listing?\n\nFLYR turns that same listing area into a trackable campaign, so the map, flyer drops, conversations, and follow-up all stay organized in one place.\n\nWould it be worth a quick look if I sent you the demo?",
+      },
+    ],
+    coach:
+      "Affirm what they already do, then point toward homeowner conversations around the listing.",
+    options: [
+      { label: "Send demo", nextId: "close" },
+      { label: "They ask how it works", nextId: "how-it-works" },
+      { label: "Product info", nextId: "product-info" },
+      { label: "They ask price", nextId: "price" },
+      { label: "No time", nextId: "time-objection" },
+      { label: "No", nextId: "graceful-close" },
+    ],
+  },
+  {
+    id: "social-media-response",
+    label: "Social media",
+    kind: "question",
+    title: "They use social media",
+    say: "That is awesome.\n\nHave you considered the opportunity to speak to the homeowners around the listing?\n\nFLYR gives you the map and pipeline around the listing, so the attention from social can turn into actual homeowner conversations.\n\nWould it be worth a quick look if I sent you the demo?",
+    lines: [
+      {
+        speaker: "rep",
+        text: "That is awesome.\n\nHave you considered the opportunity to speak to the homeowners around the listing?\n\nFLYR gives you the map and pipeline around the listing, so the attention from social can turn into actual homeowner conversations.\n\nWould it be worth a quick look if I sent you the demo?",
+      },
+    ],
+    coach:
+      "Affirm what they already do, then point toward homeowner conversations around the listing.",
+    options: [
+      { label: "Send demo", nextId: "close" },
+      { label: "They ask how it works", nextId: "how-it-works" },
+      { label: "Product info", nextId: "product-info" },
+      { label: "They ask price", nextId: "price" },
+      { label: "No time", nextId: "time-objection" },
+      { label: "No", nextId: "graceful-close" },
+    ],
+  },
+  {
+    id: "doorknock-response",
+    label: "Doorknock",
+    kind: "question",
+    title: "They already door knock",
+    say: "Love that - that means you already believe in the activity, you're just doing it manually. Our software does the same canvassing, it just tracks every door, every conversation, and builds the 3D map automatically so you're not carrying a clipboard or losing data when you switch streets. You'd plug straight into what you're already doing. Want me to send the trial link now so you can run it on your current listing?",
+    lines: [
+      {
+        speaker: "rep",
+        text: "Love that - that means you already believe in the activity, you're just doing it manually. Our software does the same canvassing, it just tracks every door, every conversation, and builds the 3D map automatically so you're not carrying a clipboard or losing data when you switch streets. You'd plug straight into what you're already doing. Want me to send the trial link now so you can run it on your current listing?",
+      },
+    ],
+    coach:
+      "This is the strongest fit path. Reinforce the work they already do and make FLYR the system around it.",
+    options: [
+      { label: "Send demo", nextId: "close" },
+      { label: "They ask how it works", nextId: "how-it-works" },
+      { label: "Product info", nextId: "product-info" },
+      { label: "They ask price", nextId: "price" },
+      { label: "Already has CRM", nextId: "tool-overlap-objection" },
+      { label: "No", nextId: "graceful-close" },
+    ],
+  },
+  {
+    id: "not-interested",
+    label: "No interest",
+    kind: "objection",
+    title: "If they say not interested",
+    say: "Totally fair. Before I let you go, can I send you a 90 second demo if you ever change your mind?",
+    lines: [
+      {
+        speaker: "rep",
+        text: "Totally fair. Before I let you go, can I send you a 90 second demo if you ever change your mind?",
+      },
+    ],
+    coach:
+      "Keep it low pressure. The goal is only permission to send the short demo.",
+    options: [
+      { label: "Yes", nextId: "close" },
+      { label: "No", nextId: "graceful-close" },
+    ],
+  },
+  {
+    id: "value-statement",
+    label: "Value",
+    kind: "question",
+    title: "30-second value statement",
+    say: "Reason I'm calling - I built a software for real estate agents that creates a 3D map of every house around your listing and automatically tracks the doors and conversations you have so you can leverage your current listing to find your next one.\n\nWe're currently offering free trials to agents in [city], and by the end of this call I'd like to send you the software to try out for yourself.",
+    lines: [
+      {
+        speaker: "rep",
+        text: "Reason I'm calling - I built a software for real estate agents that creates a 3D map of every house around your listing and automatically tracks the doors and conversations you have so you can leverage your current listing to find your next one.\n\nWe're currently offering free trials to agents in [city], and by the end of this call I'd like to send you the software to try out for yourself.",
+      },
+    ],
+    coach:
+      "Keep this around 30 seconds. Say it cleanly, then move straight into the qualifier.",
+    options: [
+      { label: "They ask how it works", nextId: "how-it-works" },
+      { label: "Product info", nextId: "product-info" },
+      { label: "They ask price", nextId: "price" },
+      { label: "No time", nextId: "time-objection" },
+      { label: "Does it work?", nextId: "belief-objection" },
+      { label: "Not a priority", nextId: "priority-objection" },
+      { label: "Already has CRM", nextId: "tool-overlap-objection" },
+    ],
+  },
+  {
+    id: "qualifier",
+    label: "Qualifier",
+    kind: "question",
+    title: "Ask how they leverage listings",
+    say: "How are you currently leveraging your listing for new business?",
+    lines: [
+      {
+        speaker: "rep",
+        text: "How are you currently leveraging your listing for new business?",
+      },
+    ],
+    coach:
+      "Listen fully and respond naturally to their answer. The question should feel curious, not like a checklist.",
+    options: [
+      { label: "They doorknock / farm", nextId: "field-fit" },
+      { label: "Open houses / signs / social", nextId: "natural-response" },
+      { label: "Not much right now", nextId: "natural-response" },
+      { label: "No time", nextId: "time-objection" },
+      { label: "Not a priority", nextId: "priority-objection" },
+      { label: "Already wants demo", nextId: "close" },
+    ],
+  },
+  {
+    id: "field-fit",
+    label: "Field fit",
+    kind: "question",
+    title: "They already prospect around listings",
+    say: "That is exactly where FLYR fits. If you are already talking to people around the listing, the software gives you the map, tracks each door and conversation, and keeps the follow-up organized so none of that activity disappears.",
+    lines: [
+      {
+        speaker: "rep",
+        text: "That is exactly where FLYR fits. If you are already talking to people around the listing, the software gives you the map, tracks each door and conversation, and keeps the follow-up organized so none of that activity disappears.",
+      },
+    ],
+    coach:
+      "Connect FLYR to what they already do. Make it feel like leverage, not a new job.",
+    options: [
+      { label: "Close for text", nextId: "close" },
+      { label: "They ask how it works", nextId: "how-it-works" },
+      { label: "Product info", nextId: "product-info" },
+      { label: "They ask price", nextId: "price" },
+      { label: "No time", nextId: "time-objection" },
+      { label: "Does it work?", nextId: "belief-objection" },
+      { label: "Already has CRM", nextId: "tool-overlap-objection" },
+    ],
+  },
+  {
+    id: "natural-response",
+    label: "Bridge",
+    kind: "question",
+    title: "Respond naturally, then bridge",
+    say: "That makes sense. Most agents are doing pieces of it already - signs, open houses, social posts, maybe a few conversations nearby. FLYR just makes the neighbourhood around the listing visible and trackable so you can turn that listing into a repeatable source of new conversations.",
+    lines: [
+      {
+        speaker: "rep",
+        text: "That makes sense. Most agents are doing pieces of it already - signs, open houses, social posts, maybe a few conversations nearby. FLYR just makes the neighbourhood around the listing visible and trackable so you can turn that listing into a repeatable source of new conversations.",
+      },
+    ],
+    coach:
+      "Mirror their answer first. Then make the close simple: send the demo and trial access.",
+    options: [
+      { label: "Close for text", nextId: "close" },
+      { label: "They ask how it works", nextId: "how-it-works" },
+      { label: "Product info", nextId: "product-info" },
+      { label: "They ask price", nextId: "price" },
+      { label: "No time", nextId: "time-objection" },
+      { label: "Does it work?", nextId: "belief-objection" },
+      { label: "Not a priority", nextId: "priority-objection" },
+      { label: "Already has CRM", nextId: "tool-overlap-objection" },
+    ],
+  },
+  {
+    id: "how-it-works",
+    label: "How it works",
+    kind: "question",
+    title: "Simple product explanation",
+    say: "The simple version is: you pick the listing, FLYR maps the surrounding homes in 3D, you work the doors or conversations around it, and the app tracks who you spoke to, what happened, and who needs follow-up.",
+    lines: [
+      {
+        speaker: "rep",
+        text: "The simple version is: you pick the listing, FLYR maps the surrounding homes in 3D, you work the doors or conversations around it, and the app tracks who you spoke to, what happened, and who needs follow-up.",
+      },
+    ],
+    coach:
+      "Keep this practical. Do not turn the product explanation into a full demo on the call.",
+    options: [
+      { label: "Close for text", nextId: "close" },
+      { label: "Ask qualifier", nextId: "qualifier" },
+      { label: "Product info", nextId: "product-info" },
+      { label: "They ask price", nextId: "price" },
+      { label: "Does it work?", nextId: "belief-objection" },
+      { label: "Already has CRM", nextId: "tool-overlap-objection" },
+    ],
+  },
+  {
+    id: "product-info",
+    label: "Product",
+    kind: "question",
+    title: "Product info snippet",
+    say: "Quick product example: on the web, you create a campaign by drawing the territory around your listing. FLYR then creates a 3D map of the homes in that area, with different colours for different states.\n\nThen on the iOS app, when you're walking the neighbourhood, you can update each home as you go: not home, answered, lead, follow-up, or whatever state makes sense for your process. So the map becomes the system for organizing every conversation around the listing.\n\nTwo cool things worth mentioning: FLYR automatically tracks every house you hit using GPS, so you don't have to pull out your phone as much, and it has auto-recorded notes so you can keep detailed notes fast without writing messy notes in a spreadsheet.\n\nWould it be worth a quick look if I sent you the demo?",
+    lines: [
+      {
+        speaker: "rep",
+        text: "Quick product example: on the web, you create a campaign by drawing the territory around your listing. FLYR then creates a 3D map of the homes in that area, with different colours for different states.\n\nThen on the iOS app, when you're walking the neighbourhood, you can update each home as you go: not home, answered, lead, follow-up, or whatever state makes sense for your process. So the map becomes the system for organizing every conversation around the listing.\n\nTwo cool things worth mentioning: FLYR automatically tracks every house you hit using GPS, so you don't have to pull out your phone as much, and it has auto-recorded notes so you can keep detailed notes fast without writing messy notes in a spreadsheet.\n\nWould it be worth a quick look if I sent you the demo?",
+      },
+    ],
+    coach:
+      "Use this when they ask what the product actually does. Keep it practical: draw territory on web, work and update the map from the iOS app.",
+    options: [
+      { label: "Send demo", nextId: "close" },
+      { label: "They ask price", nextId: "price" },
+      { label: "Already has CRM", nextId: "tool-overlap-objection" },
+      { label: "Let me think", nextId: "hesitation-close" },
+    ],
+  },
+  {
+    id: "price",
+    label: "Price",
+    kind: "objection",
+    title: "If they ask pricing",
+    say: "Totally fair question.\n\nRight now we're giving agents free trial access so they can actually see it before making a decision.\n\nBut before we get to price, can I ask: if one listing campaign helped you create one listing, on average what would that be worth in terms of commission?\n\nOk cool. Well, I'm not a mathematician, but with FLYR costing $300 for the year, if it brings one listing it will pay itself off for the next 3 decades, right?\n\nRight. The scary part is if you implement this, you'll see much more than one listing per year. It will go down as the single best return on investment you'll ever make.\n\nDo you want to see the free trial?",
+    lines: [
+      {
+        speaker: "rep",
+        text: "Totally fair question.\n\nRight now we're giving agents free trial access so they can actually see it before making a decision.\n\nBut before we get to price, can I ask: if one listing campaign helped you create one listing, on average what would that be worth in terms of commission?\n\nOk cool. Well, I'm not a mathematician, but with FLYR costing $300 for the year, if it brings one listing it will pay itself off for the next 3 decades, right?\n\nRight. The scary part is if you implement this, you'll see much more than one listing per year. It will go down as the single best return on investment you'll ever make.\n\nDo you want to see the free trial?",
+      },
+    ],
+    coach:
+      "Use the free trial first, then anchor the annual cost against the value of one listing.",
+    options: [
+      { label: "Close for text", nextId: "close" },
+      { label: "Need broker/team", nextId: "authority-objection" },
+      { label: "Let me think", nextId: "hesitation-close" },
+      { label: "No", nextId: "graceful-close" },
+    ],
+  },
+  {
+    id: "time-objection",
+    label: "Time",
+    kind: "objection",
+    title: "We don't have time",
+    say: "Totally hear you - most agents don't have extra time.\n\nBut let me ask you this: when you do have limited time to prospect, would you rather spend it randomly, or around a listing where the neighbours are already paying attention?\n\nExactly.\n\nThat's the whole reason we built FLYR. Most agents know the area around a listing is one of the warmest places to create conversations, but it usually gets missed because there's no simple system to execute it.\n\nFLYR turns the listing into a visual 3D campaign, shows you every home nearby, tracks the outreach, and keeps the follow-up organized. So it's not about adding more work - it's about making the work you already should be doing easier to execute.\n\nWould it be worth a quick look if I sent you the demo?",
+    lines: [
+      {
+        speaker: "person",
+        text: "We don't have time.",
+      },
+      {
+        speaker: "rep",
+        text: "Totally hear you - most agents don't have extra time.\n\nBut let me ask you this: when you do have limited time to prospect, would you rather spend it randomly, or around a listing where the neighbours are already paying attention?\n\nExactly.\n\nThat's the whole reason we built FLYR. Most agents know the area around a listing is one of the warmest places to create conversations, but it usually gets missed because there's no simple system to execute it.\n\nFLYR turns the listing into a visual 3D campaign, shows you every home nearby, tracks the outreach, and keeps the follow-up organized. So it's not about adding more work - it's about making the work you already should be doing easier to execute.\n\nWould it be worth a quick look if I sent you the demo?",
+      },
+    ],
+    coach:
+      "Reframe time around leverage. The pitch is not more prospecting; it is using the warmest area first.",
+    options: [
+      { label: "Send demo", nextId: "close" },
+      { label: "Need broker/team", nextId: "authority-objection" },
+      { label: "Let me think", nextId: "hesitation-close" },
+      { label: "No", nextId: "graceful-close" },
+    ],
+  },
+  {
+    id: "belief-objection",
+    label: "Belief",
+    kind: "objection",
+    title: "Does this actually work?",
+    say: "Totally fair.\n\nLet me ask you this: when a home sells in a neighbourhood, do you think the surrounding homeowners notice?\n\nExactly.\n\nThey see the sign, the open house, the sold sign, and they naturally start thinking about what their own home might be worth. Speaking to homeowners at that time makes sense. The issue is most agents don't have a system to actually capitalize on that attention.\n\nThat's what FLYR gives you. A 3D prospecting map around the listing, door tracking, notes, conversations, and follow-up - all organized in one place. So it's not magic. It's just helping agents execute a strategy they already know works.\n\nWould it be worth a quick look if I sent you the demo?",
+    lines: [
+      {
+        speaker: "person",
+        text: "Does this actually work?",
+      },
+      {
+        speaker: "rep",
+        text: "Totally fair.\n\nLet me ask you this: when a home sells in a neighbourhood, do you think the surrounding homeowners notice?\n\nExactly.\n\nThey see the sign, the open house, the sold sign, and they naturally start thinking about what their own home might be worth. Speaking to homeowners at that time makes sense. The issue is most agents don't have a system to actually capitalize on that attention.\n\nThat's what FLYR gives you. A 3D prospecting map around the listing, door tracking, notes, conversations, and follow-up - all organized in one place. So it's not magic. It's just helping agents execute a strategy they already know works.\n\nWould it be worth a quick look if I sent you the demo?",
+      },
+    ],
+    coach:
+      "Make the strategy feel obvious. FLYR is the execution system, not a magic promise.",
+    options: [
+      { label: "Send demo", nextId: "close" },
+      { label: "They ask price", nextId: "price" },
+      { label: "Let me think", nextId: "hesitation-close" },
+      { label: "No", nextId: "graceful-close" },
+    ],
+  },
+  {
+    id: "priority-objection",
+    label: "Priority",
+    kind: "objection",
+    title: "We're not focused on that right now",
+    say: "Totally hear you.\n\nWell, let me ask you this: when you sell a listing, do you think talking to homeowners around that property will create more listing opportunities?\n\nExactly. It's less about door knocking and more about not wasting the attention your listing already created.\n\nMost agents know talking to the neighbourhood after a sale can create more business. The reason they don't is because they don't have a simple system to execute it.\n\nThat's what FLYR is. It helps you turn every listing into a 3D prospecting campaign, map every home nearby, track the outreach, and follow up properly. So whether you door knock, call, mail, or have your team work the area - the point is having a system around the listing.\n\nWould it be worth a quick look if I sent you the demo?",
+    lines: [
+      {
+        speaker: "person",
+        text: "We're not focused on that right now.",
+      },
+      {
+        speaker: "rep",
+        text: "Totally hear you.\n\nWell, let me ask you this: when you sell a listing, do you think talking to homeowners around that property will create more listing opportunities?\n\nExactly. It's less about door knocking and more about not wasting the attention your listing already created.\n\nMost agents know talking to the neighbourhood after a sale can create more business. The reason they don't is because they don't have a simple system to execute it.\n\nThat's what FLYR is. It helps you turn every listing into a 3D prospecting campaign, map every home nearby, track the outreach, and follow up properly. So whether you door knock, call, mail, or have your team work the area - the point is having a system around the listing.\n\nWould it be worth a quick look if I sent you the demo?",
+      },
+    ],
+    coach:
+      "Reposition the issue as capturing attention that already exists around a listing.",
+    options: [
+      { label: "Send demo", nextId: "close" },
+      { label: "Need broker/team", nextId: "authority-objection" },
+      { label: "Let me think", nextId: "hesitation-close" },
+      { label: "No", nextId: "graceful-close" },
+    ],
+  },
+  {
+    id: "door-knock-objection",
+    label: "Dont doorknock",
+    kind: "objection",
+    title: "I don't door knock",
+    say: "Totally hear you.\n\nLet me ask you this: when you sell a listing, do you think talking to homeowners around that property will create more listing opportunities?\n\nExactly. It's less about door knocking and more about not wasting the attention your listing already created.\n\nMost agents know talking to the neighbourhood after a sale can create more business. The reason they don't is because they don't have a simple system to execute it.\n\nThat's what FLYR is. It helps you turn every listing into a 3D prospecting campaign, map every home nearby, track the outreach, and follow up properly. So whether you door knock, call, mail, or have your team work the area - the point is having a system around the listing.\n\nWould it be worth a quick look if I sent you the demo?",
+    lines: [
+      {
+        speaker: "person",
+        text: "I don't door knock.",
+      },
+      {
+        speaker: "rep",
+        text: "Totally hear you.\n\nLet me ask you this: when you sell a listing, do you think talking to homeowners around that property will create more listing opportunities?\n\nExactly. It's less about door knocking and more about not wasting the attention your listing already created.\n\nMost agents know talking to the neighbourhood after a sale can create more business. The reason they don't is because they don't have a simple system to execute it.\n\nThat's what FLYR is. It helps you turn every listing into a 3D prospecting campaign, map every home nearby, track the outreach, and follow up properly. So whether you door knock, call, mail, or have your team work the area - the point is having a system around the listing.\n\nWould it be worth a quick look if I sent you the demo?",
+      },
+    ],
+    coach:
+      "Use the door-knock objection route. Reframe the point as capturing listing attention, not forcing one outreach method.",
+    options: [
+      { label: "Send demo", nextId: "close" },
+      { label: "They ask price", nextId: "price" },
+      { label: "Let me think", nextId: "hesitation-close" },
+      { label: "No", nextId: "graceful-close" },
+    ],
+  },
+  {
+    id: "tool-overlap-objection",
+    label: "CRM",
+    kind: "objection",
+    title: "I already use a CRM",
+    say: "Let me ask you this though: does your CRM tell you which homes around your listing haven't been talked to yet, or does it just store leads after you already have them?\n\nExactly.\n\nThat's the difference. FLYR isn't competing with your CRM - it's what feeds it. Your CRM organizes leads you already have. FLYR is what finds and tracks the leads around your listing before they exist anywhere else.\n\nWould it be worth a quick look if I sent you the demo?",
+    lines: [
+      {
+        speaker: "person",
+        text: "I already use a CRM. I don't need another tool.",
+      },
+      {
+        speaker: "rep",
+        text: "Let me ask you this though: does your CRM tell you which homes around your listing haven't been talked to yet, or does it just store leads after you already have them?\n\nExactly.\n\nThat's the difference. FLYR isn't competing with your CRM - it's what feeds it. Your CRM organizes leads you already have. FLYR is what finds and tracks the leads around your listing before they exist anywhere else.\n\nWould it be worth a quick look if I sent you the demo?",
+      },
+    ],
+    coach:
+      "Do not compete with the CRM. Position FLYR as the pre-lead field layer that feeds the CRM.",
+    options: [
+      { label: "Send demo", nextId: "close" },
+      { label: "They ask price", nextId: "price" },
+      { label: "Let me think", nextId: "hesitation-close" },
+      { label: "No", nextId: "graceful-close" },
+    ],
+  },
+  {
+    id: "authority-objection",
+    label: "Authority",
+    kind: "objection",
+    title: "Need to run it by team or broker",
+    say: "Totally makes sense.\n\nQuick question: when you bring it to them, would it help more if you already had the demo in hand, or would you rather I send something both of you can look at together?\n\nExactly. Let me send you the demo now so you've got something concrete to show them - way easier than trying to explain it from memory.\n\nWhat's the best number to text it to?",
+    lines: [
+      {
+        speaker: "person",
+        text: "I'd need to run this by my team or broker.",
+      },
+      {
+        speaker: "rep",
+        text: "Totally makes sense.\n\nQuick question: when you bring it to them, would it help more if you already had the demo in hand, or would you rather I send something both of you can look at together?\n\nExactly. Let me send you the demo now so you've got something concrete to show them - way easier than trying to explain it from memory.\n\nWhat's the best number to text it to?",
+      },
+    ],
+    coach:
+      "Agree with the approval step, then make the demo the thing they can forward or show.",
+    options: [
+      { label: "Number captured", nextId: "send-trial" },
+      { label: "Email instead", nextId: "email-instead" },
+      { label: "No", nextId: "graceful-close" },
+    ],
+  },
+  {
+    id: "hesitation-close",
+    label: "Think",
+    kind: "objection",
+    title: "Let me think about it",
+    say: "Totally fair, no pressure.\n\nCan I ask what specifically you'd want to think through - is it whether it'll work for your business, or just timing?\n\nEither way, the easiest way to actually think it through is having the demo in front of you instead of trying to remember this call. Mind if I send it over?",
+    lines: [
+      {
+        speaker: "person",
+        text: "Let me think about it.",
+      },
+      {
+        speaker: "rep",
+        text: "Totally fair, no pressure.\n\nCan I ask what specifically you'd want to think through - is it whether it'll work for your business, or just timing?\n\nEither way, the easiest way to actually think it through is having the demo in front of you instead of trying to remember this call. Mind if I send it over?",
+      },
+    ],
+    coach:
+      "Find the real hesitation, then reduce the decision to reviewing the demo.",
+    options: [
+      { label: "Send demo", nextId: "close" },
+      { label: "Timing", nextId: "call-later" },
+      { label: "No", nextId: "graceful-close" },
+    ],
+  },
+  {
+    id: "close",
+    label: "Close",
+    kind: "close",
+    title: "Text demo and trial access",
+    say: "What's the best number to text that demo and trial access to?",
+    lines: [
+      {
+        speaker: "rep",
+        text: "What's the best number to text that demo and trial access to?",
+      },
+    ],
+    coach:
+      "This is the goal of the call. Ask, then stop talking and let them give the number.",
+    options: [
+      { label: "Number captured", nextId: "send-trial" },
+      { label: "Email instead", nextId: "email-instead" },
+      { label: "Call later", nextId: "call-later" },
+      { label: "Need broker/team", nextId: "authority-objection" },
+      { label: "Let me think", nextId: "hesitation-close" },
+      { label: "No", nextId: "graceful-close" },
+    ],
+  },
+  {
+    id: "email-instead",
+    label: "Email",
+    kind: "close",
+    title: "If they prefer email",
+    say: "No problem. What is the best email to send the demo and trial access to?",
+    lines: [
+      {
+        speaker: "rep",
+        text: "No problem. What is the best email to send the demo and trial access to?",
+      },
+    ],
+    coach:
+      "Capture the email, confirm spelling, and send the access immediately.",
+    options: [{ label: "Email captured", nextId: "send-trial" }],
+  },
+  {
+    id: "call-later",
+    label: "Later",
+    kind: "close",
+    title: "Schedule callback",
+    say: "No problem. When is a better time for me to call back and send you the demo?",
+    lines: [
+      {
+        speaker: "rep",
+        text: "No problem. When is a better time for me to call back and send you the demo?",
+      },
+    ],
+    coach:
+      "Set a real callback time. If they will allow it, send the demo before the callback.",
+    options: [
+      { label: "Callback set", nextId: "done" },
+      { label: "Send trial now", nextId: "send-trial" },
+    ],
+  },
+  {
+    id: "send-trial",
+    label: "Send",
+    kind: "done",
+    title: "Send access",
+    say: "Text the demo and trial access, log the number, and set the follow-up.",
+    lines: [
+      {
+        speaker: "rep",
+        text: "Text the demo and trial access, log the number, and set the follow-up.",
+      },
+    ],
+    coach:
+      "Complete the handoff before moving to the next lead.",
+    options: [{ label: "Start again", nextId: "opener" }],
+  },
+  {
+    id: "graceful-close",
+    label: "Close",
+    kind: "close",
+    title: "End cleanly",
+    say: "No problem at all. Appreciate your time.",
+    lines: [
+      {
+        speaker: "rep",
+        text: "No problem at all. Appreciate your time.",
+      },
+    ],
+    coach:
+      "Do not argue. Mark the outcome and move on.",
+    options: [{ label: "Done", nextId: "done" }],
+  },
+  {
+    id: "done",
+    label: "Done",
+    kind: "done",
+    title: "Call complete",
+    say: "Log the call outcome, add any follow-up, and move to the next call.",
+    lines: [
+      {
+        speaker: "rep",
+        text: "Log the call outcome, add any follow-up, and move to the next call.",
+      },
+    ],
+    coach:
+      "The desired outcome is demo and trial access sent by text.",
+    options: [{ label: "Start again", nextId: "opener" }],
+  },
+];
+
+export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_BODY = `Individual Realtors - listing leverage trial
+
+OPENER:
+Hey [Name], this is Daniel calling from FLYR. How are you?
+
+VALUE STATEMENT:
+Reason I'm calling - I built a software for real estate agents that creates a 3D map of every house around your listing and automatically tracks the doors and conversations you have so you can leverage your current listing to find your next one.
+
+We're currently offering free trials to agents in [city], and by the end of this call I'd like to send you the software to try out for yourself.
+
+QUALIFIER:
+How are you currently leveraging your listing for new business?
+
+Listen, then respond naturally to their answer.
+
+CLOSE:
+What's the best number to text that demo and trial access to?
+
+PRODUCT INFO SNIPPET:
+Quick product example: on the web, you create a campaign by drawing the territory around your listing. FLYR then creates a 3D map of the homes in that area, with different colours for different states.
+
+Then on the iOS app, when you're walking the neighbourhood, you can update each home as you go: not home, answered, lead, follow-up, or whatever state makes sense for your process. So the map becomes the system for organizing every conversation around the listing.
+
+Two cool things worth mentioning: FLYR automatically tracks every house you hit using GPS, so you don't have to pull out your phone as much, and it has auto-recorded notes so you can keep detailed notes fast without writing messy notes in a spreadsheet.
+
+Would it be worth a quick look if I sent you the demo?
+
+OBJECTION HANDLES:
+Time:
+Totally hear you - most agents don't have extra time. When you do have limited time to prospect, would you rather spend it randomly, or around a listing where the neighbours are already paying attention?
+
+Money:
+Right now we're giving agents free trial access so they can actually see it before making a decision. If one listing campaign helped you create one listing, what would that be worth in commission? FLYR costs $300 for the year, so one listing pays it off for years.
+
+Belief:
+When a home sells in a neighbourhood, the surrounding homeowners notice. FLYR is not magic; it helps agents execute a strategy they already know works with a 3D map, door tracking, notes, conversations, and follow-up.
+
+Priority:
+It is less about door knocking and more about not wasting the attention your listing already created. FLYR gives you a system around the listing whether you knock, call, mail, or have your team work the area.
+
+CRM overlap:
+Your CRM organizes leads you already have. FLYR finds and tracks the leads around your listing before they exist anywhere else.
+
+Authority:
+Let me send you the demo now so you have something concrete to show your team or broker.
+
+Hesitation:
+The easiest way to think it through is having the demo in front of you instead of trying to remember this call.
+
+REP RULES:
+1. Use downward inflection on the opener.
+2. Keep the value statement around 30 seconds.
+3. Ask the qualifier before explaining more.
+4. Mirror their answer naturally before closing.
+5. The goal is to text the demo and trial access.`;
+
 export const REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW: StarterScriptFlowNode[] = [
   {
     id: "opening",
@@ -1691,6 +2347,9 @@ export const REAL_ESTATE_QUICK_DEMO_SCRIPT_BODY = encodeScriptFlowBody(
 export const REAL_ESTATE_INDIVIDUAL_AGENT_ENCODED_SCRIPT_BODY =
   encodeScriptFlowBody(REAL_ESTATE_INDIVIDUAL_AGENT_SCRIPT_FLOW);
 
+export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_ENCODED_SCRIPT_BODY =
+  encodeScriptFlowBody(INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW);
+
 export const BUILT_IN_SCRIPT_DEFINITIONS = [
   {
     id: STARTER_SCRIPT_ID,
@@ -1710,6 +2369,18 @@ export const BUILT_IN_SCRIPT_DEFINITIONS = [
     body: REAL_ESTATE_INDIVIDUAL_AGENT_ENCODED_SCRIPT_BODY,
     flow: REAL_ESTATE_INDIVIDUAL_AGENT_SCRIPT_FLOW,
   },
+  {
+    id: INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_ID,
+    name: INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_NAME,
+    body: INDIVIDUAL_REALTOR_LISTING_LEVERAGE_ENCODED_SCRIPT_BODY,
+    flow: INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW,
+  },
+  {
+    id: INDIVIDUAL_REALTOR_LISTING_LEVERAGE_V2_SCRIPT_ID,
+    name: INDIVIDUAL_REALTOR_LISTING_LEVERAGE_V2_SCRIPT_NAME,
+    body: INDIVIDUAL_REALTOR_LISTING_LEVERAGE_ENCODED_SCRIPT_BODY,
+    flow: INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW,
+  },
 ] as const;
 
 export function getBuiltInScriptById(scriptId: string) {
@@ -1728,6 +2399,91 @@ export function upgradeBuiltInScriptFlow(
   scriptName: string,
   flow: StarterScriptFlowNode[] | null,
 ): StarterScriptFlowNode[] | null {
+  if (
+    (scriptName === INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_NAME ||
+      scriptName === INDIVIDUAL_REALTOR_LISTING_LEVERAGE_V2_SCRIPT_NAME) &&
+    flow
+  ) {
+    const currentNodeById = new Map(
+      INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW.map((node) => [
+        node.id,
+        node,
+      ]),
+    );
+
+    const upgradedFlow = flow
+      .filter((node) => node.id !== "interested-demo-ask")
+      .map((node) => {
+        if (node.id === "opener") {
+          return {
+            ...node,
+            options: [
+              { label: "Not interested", nextId: "not-interested" },
+              { label: "Dont doorknock", nextId: "door-knock-objection" },
+              { label: "FLYERS", nextId: "flyers-response" },
+              { label: "SOCIAL MEDIA", nextId: "social-media-response" },
+              { label: "DOORKNOCK", nextId: "doorknock-response" },
+            ],
+          };
+        }
+
+        if (
+          node.id === "not-interested" ||
+          node.id === "flyers-response" ||
+          node.id === "social-media-response" ||
+          node.id === "doorknock-response" ||
+          node.id === "door-knock-objection"
+        ) {
+          return currentNodeById.get(node.id) ?? node;
+        }
+
+        if (node.id !== "value-statement") return node;
+        return {
+          ...node,
+          options: node.options.filter(
+            (option) =>
+              option.nextId !== "qualifier" &&
+              option.nextId !== "not-interested" &&
+              option.label !== "Ask qualifier" &&
+              option.label !== "Not interested",
+          ),
+        };
+      });
+
+    const appendAfter = (
+      nodes: StarterScriptFlowNode[],
+      anchorId: string,
+      nodeToAdd: StarterScriptFlowNode | undefined,
+    ) => {
+      if (!nodeToAdd || nodes.some((node) => node.id === nodeToAdd.id)) {
+        return nodes;
+      }
+      const anchorIndex = nodes.findIndex((node) => node.id === anchorId);
+      if (anchorIndex === -1) return [...nodes, nodeToAdd];
+      return [
+        ...nodes.slice(0, anchorIndex + 1),
+        nodeToAdd,
+        ...nodes.slice(anchorIndex + 1),
+      ];
+    };
+
+    const withOpenerMethodRoutes = [
+      "doorknock-response",
+      "social-media-response",
+      "flyers-response",
+    ].reduce(
+      (nodes, nodeId) =>
+        appendAfter(nodes, "opener", currentNodeById.get(nodeId)),
+      upgradedFlow,
+    );
+
+    return appendAfter(
+      withOpenerMethodRoutes,
+      "not-interested",
+      currentNodeById.get("door-knock-objection"),
+    );
+  }
+
   if (scriptName !== REAL_ESTATE_QUICK_DEMO_SCRIPT_NAME || !flow) return flow;
 
   const isCurrentTrackingNode = (node: StarterScriptFlowNode) =>

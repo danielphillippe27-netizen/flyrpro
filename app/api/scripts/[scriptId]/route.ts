@@ -15,6 +15,10 @@ import {
   type StarterScriptFlowLine,
   type StarterScriptFlowNode,
 } from "@/lib/scripts/default-script";
+import {
+  WORKSPACE_SCRIPT_MAX_BODY_LENGTH,
+  WORKSPACE_SCRIPT_MAX_NAME_LENGTH,
+} from "@/lib/scripts/limits";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,8 +37,6 @@ type ScriptUpdatePayload = {
   flow?: unknown;
 };
 
-const MAX_NAME_LENGTH = 120;
-const MAX_BODY_LENGTH = 50000;
 const MAX_STEP_TEXT_LENGTH = 2000;
 const MAX_OPTION_LABEL_LENGTH = 120;
 const MAX_SCRIPT_LINE_LENGTH = 2000;
@@ -76,6 +78,20 @@ function isMissingScriptsStorage(
     (message.includes("does not exist") ||
       message.includes("could not find the table"))
   );
+}
+
+function isScriptBodyConstraintError(
+  error: { code?: string; message?: string } | null | undefined,
+): boolean {
+  const message = error?.message?.toLowerCase() ?? "";
+  return (
+    error?.code === "23514" ||
+    message.includes("workspace_scripts_body_check")
+  );
+}
+
+function scriptBodyConstraintMessage() {
+  return "Supabase script storage needs the latest workspace scripts migration before it can save long scripts.";
 }
 
 export async function GET(
@@ -296,10 +312,10 @@ export async function PATCH(
       return NextResponse.json({ error: "Flow is invalid." }, { status: 400 });
     }
     const body = encodeScriptFlowBody(flow);
-    if (body.length > MAX_BODY_LENGTH) {
+    if (body.length > WORKSPACE_SCRIPT_MAX_BODY_LENGTH) {
       return NextResponse.json(
         {
-          error: `Script is too long. Keep the saved body under ${MAX_BODY_LENGTH} characters.`,
+          error: `Script is too long. Keep the saved body under ${WORKSPACE_SCRIPT_MAX_BODY_LENGTH} characters.`,
         },
         { status: 400 },
       );
@@ -307,9 +323,9 @@ export async function PATCH(
     updates.body = body;
   } else if (payload.body !== undefined) {
     const body = typeof payload.body === "string" ? payload.body.trim() : "";
-    if (!body || body.length > MAX_BODY_LENGTH) {
+    if (!body || body.length > WORKSPACE_SCRIPT_MAX_BODY_LENGTH) {
       return NextResponse.json(
-        { error: `Body must be 1-${MAX_BODY_LENGTH} characters.` },
+        { error: `Body must be 1-${WORKSPACE_SCRIPT_MAX_BODY_LENGTH} characters.` },
         { status: 400 },
       );
     }
@@ -318,9 +334,9 @@ export async function PATCH(
 
   if (!builtIn && payload.name !== undefined) {
     const name = typeof payload.name === "string" ? payload.name.trim() : "";
-    if (!name || name.length > MAX_NAME_LENGTH) {
+    if (!name || name.length > WORKSPACE_SCRIPT_MAX_NAME_LENGTH) {
       return NextResponse.json(
-        { error: `Name must be 1-${MAX_NAME_LENGTH} characters.` },
+        { error: `Name must be 1-${WORKSPACE_SCRIPT_MAX_NAME_LENGTH} characters.` },
         { status: 400 },
       );
     }
@@ -349,6 +365,12 @@ export async function PATCH(
           { status: 503 },
         );
       }
+      if (isScriptBodyConstraintError(existingError)) {
+        return NextResponse.json(
+          { error: scriptBodyConstraintMessage() },
+          { status: 503 },
+        );
+      }
       return NextResponse.json(
         { error: existingError.message },
         { status: 500 },
@@ -367,8 +389,15 @@ export async function PATCH(
         .select("id, name, body, created_at, updated_at")
         .single();
 
-      if (error)
+      if (error) {
+        if (isScriptBodyConstraintError(error)) {
+          return NextResponse.json(
+            { error: scriptBodyConstraintMessage() },
+            { status: 503 },
+          );
+        }
         return NextResponse.json({ error: error.message }, { status: 500 });
+      }
       return NextResponse.json({
         script: serializeScript(data as WorkspaceScriptRow),
       });
@@ -382,8 +411,15 @@ export async function PATCH(
       .select("id, name, body, created_at, updated_at")
       .single();
 
-    if (error)
+    if (error) {
+      if (isScriptBodyConstraintError(error)) {
+        return NextResponse.json(
+          { error: scriptBodyConstraintMessage() },
+          { status: 503 },
+        );
+      }
       return NextResponse.json({ error: error.message }, { status: 500 });
+    }
     return NextResponse.json({
       script: serializeScript(data as WorkspaceScriptRow),
     });
@@ -404,6 +440,12 @@ export async function PATCH(
           error:
             "Supabase script storage is not ready. Run the workspace scripts migration first.",
         },
+        { status: 503 },
+      );
+    }
+    if (isScriptBodyConstraintError(error)) {
+      return NextResponse.json(
+        { error: scriptBodyConstraintMessage() },
         { status: 503 },
       );
     }

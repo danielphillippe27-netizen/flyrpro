@@ -6,7 +6,12 @@ const CANADA_CALLER_ID_COUNTRIES = new Set(['CA', 'AU', 'NZ', 'ZA']);
 export function resolveOutboundCallerId(params: {
   toNumber: string | null | undefined;
   defaultFromNumber: string;
+  allowMarketOverride?: boolean;
 }): string {
+  if (params.allowMarketOverride === false) {
+    return params.defaultFromNumber;
+  }
+
   const destination = normalizePhoneNumber(params.toNumber);
 
   if (destination.countryCode && CANADA_CALLER_ID_COUNTRIES.has(destination.countryCode)) {
