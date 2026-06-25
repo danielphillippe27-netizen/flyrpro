@@ -4,14 +4,14 @@ const statusEl = document.getElementById('status');
 
 async function loadSettings() {
   const settings = await chrome.storage.sync.get({
-    flyrUrl: 'http://localhost:3000/scraper',
+    flyrUrl: 'https://www.flyr.software/scraper',
   });
   flyrUrlInput.value = settings.flyrUrl;
 }
 
 async function saveSettings() {
   await chrome.storage.sync.set({
-    flyrUrl: flyrUrlInput.value.trim() || 'http://localhost:3000/scraper',
+    flyrUrl: flyrUrlInput.value.trim() || 'https://www.flyr.software/scraper',
   });
 }
 
@@ -24,7 +24,7 @@ scrapeButton.addEventListener('click', async () => {
     const response = await chrome.runtime.sendMessage({
       type: 'FLYR_START_REALTOR_SCRAPE',
       options: {
-        flyrUrl: flyrUrlInput.value.trim() || 'http://localhost:3000/scraper',
+        flyrUrl: flyrUrlInput.value.trim() || 'https://www.flyr.software/scraper',
       },
     });
 

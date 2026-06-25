@@ -7,6 +7,8 @@
   "host_permissions": [
     "https://www.realtor.ca/*",
     "https://realtor.ca/*",
+    "https://flyr.software/*",
+    "https://*.flyr.software/*",
     "http://localhost/*",
     "http://127.0.0.1/*"
   ],
@@ -24,7 +26,12 @@
       "run_at": "document_idle"
     },
     {
-      "matches": ["http://localhost/*", "http://127.0.0.1/*"],
+      "matches": [
+        "https://flyr.software/*",
+        "https://*.flyr.software/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ],
       "js": ["content-flyr.js"],
       "run_at": "document_idle"
     }

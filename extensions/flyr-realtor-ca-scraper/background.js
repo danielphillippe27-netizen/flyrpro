@@ -86,7 +86,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!scrapeResponse?.ok) throw new Error(scrapeResponse?.error || 'REALTOR.ca scrape failed.');
 
     await chrome.storage.local.set({ lastRealtorCapture: scrapeResponse.payload });
-    await sendToFlyr(message.options.flyrUrl || 'http://localhost:3000/scraper', scrapeResponse.payload);
+    await sendToFlyr(message.options.flyrUrl || 'https://www.flyr.software/scraper', scrapeResponse.payload);
     sendResponse({
       ok: true,
       count: scrapeResponse.payload?.leads?.length ?? 0,
