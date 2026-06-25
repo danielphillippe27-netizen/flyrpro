@@ -1,12 +1,14 @@
 {
   "manifest_version": 3,
   "name": "FLYR REALTOR.ca Scraper",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Capture REALTOR.ca agent leads from your normal Chrome session and send them to FLYR.",
   "permissions": ["activeTab", "scripting", "storage", "tabs"],
   "host_permissions": [
     "https://www.realtor.ca/*",
     "https://realtor.ca/*",
+    "https://flyrpro.app/*",
+    "https://*.flyrpro.app/*",
     "https://flyr.software/*",
     "https://*.flyr.software/*",
     "http://localhost/*",
@@ -27,6 +29,8 @@
     },
     {
       "matches": [
+        "https://flyrpro.app/*",
+        "https://*.flyrpro.app/*",
         "https://flyr.software/*",
         "https://*.flyr.software/*",
         "http://localhost/*",
