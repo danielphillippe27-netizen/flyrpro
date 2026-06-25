@@ -115,6 +115,7 @@ export async function POST(request: NextRequest) {
   const fromNumber = resolveOutboundCallerId({
     toNumber: normalized.e164,
     defaultFromNumber: context.settings.defaultFromNumber,
+    allowMarketOverride: !context.settings.salespersonFromNumber,
   });
   const { data: call, error: callError } = await context.admin
     .from('dialer_calls')
