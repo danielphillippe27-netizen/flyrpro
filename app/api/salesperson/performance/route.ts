@@ -108,6 +108,16 @@ function isPayingReferral(referral: ReferralRow, startIso: string, endIso: strin
   );
 }
 
+function isMissingSalespeopleSchemaError(message: string | undefined): boolean {
+  if (!message) return false;
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes('salespeople') ||
+    (normalized.includes('relation') && normalized.includes('does not exist')) ||
+    (normalized.includes('column') && normalized.includes('does not exist'))
+  );
+}
+
 function describeSupabaseError(
   error: { message?: string; code?: string; details?: string; hint?: string } | null | undefined
 ): string {

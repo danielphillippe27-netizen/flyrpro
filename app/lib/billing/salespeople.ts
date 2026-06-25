@@ -272,8 +272,8 @@ export async function syncSalespersonReferralForSubscription(
   if (existingReferral) {
     const nextStatus = deriveReferralStatus(
       subscription.status,
-      existingReferral.first_paid_at,
-      existingReferral.eligible_until
+      existingReferral.first_paid_at ?? null,
+      existingReferral.eligible_until ?? null
     );
 
     const { data: updated, error: updateError } = await admin

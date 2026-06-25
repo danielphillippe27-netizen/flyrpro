@@ -205,7 +205,8 @@ export class ContactsService {
 
     if (workspaceId) {
       query = query.eq('workspace_id', workspaceId);
-    } else {
+    }
+    if (userId) {
       query = query.eq('user_id', userId);
     }
 
