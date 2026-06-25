@@ -8,6 +8,7 @@ export interface SmartListCriteria {
   campaignIds?: string[];
   farmIds?: string[];
   contactIds?: string[];
+  masterLeadIds?: string[];
 }
 
 export interface WorkspaceSmartList {

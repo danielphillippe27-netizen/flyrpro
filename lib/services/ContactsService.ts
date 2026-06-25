@@ -30,6 +30,8 @@ type LinkedCalendarSourceKind = 'contact_appointment' | 'contact_follow_up';
 
 export class ContactsService {
   private static client = createClient();
+  private static readonly contactsPageSize = 1000;
+  private static readonly contactsMaxRows = 10000;
 
   private static getErrorMessage(error: unknown): string {
     if (error instanceof Error) return error.message;
@@ -102,6 +104,50 @@ export class ContactsService {
       (contact.address ?? '').trim().toLowerCase(),
       (contact.campaign_id ?? '').trim(),
     ].join('|');
+  }
+
+  private static async fetchContactRows(userId: string, workspaceId?: string | null, filters?: {
+    status?: string;
+    campaignId?: string;
+    farmId?: string;
+  }): Promise<Contact[]> {
+    const rows: Contact[] = [];
+
+    for (let from = 0; from < this.contactsMaxRows; from += this.contactsPageSize) {
+      let query = this.client
+        .from('contacts')
+        .select('*');
+
+      if (workspaceId) {
+        query = query.eq('workspace_id', workspaceId);
+      }
+      if (userId) {
+        query = query.eq('user_id', userId);
+      }
+
+      if (filters?.status) {
+        query = query.eq('status', filters.status);
+      }
+      if (filters?.campaignId) {
+        query = query.eq('campaign_id', filters.campaignId);
+      }
+      if (filters?.farmId) {
+        query = query.eq('farm_id', filters.farmId);
+      }
+
+      const { data, error } = await query
+        .order('created_at', { ascending: false })
+        .range(from, from + this.contactsPageSize - 1);
+
+      if (error) throw error;
+
+      const page = (data ?? []) as unknown as Contact[];
+      rows.push(...page);
+
+      if (page.length < this.contactsPageSize) break;
+    }
+
+    return rows;
   }
 
   private static async linkedCalendarEventId(
@@ -199,31 +245,7 @@ export class ContactsService {
     campaignId?: string;
     farmId?: string;
   }): Promise<Contact[]> {
-    let query = this.client
-      .from('contacts')
-      .select('*');
-
-    if (workspaceId) {
-      query = query.eq('workspace_id', workspaceId);
-    }
-    if (userId) {
-      query = query.eq('user_id', userId);
-    }
-
-    if (filters?.status) {
-      query = query.eq('status', filters.status);
-    }
-    if (filters?.campaignId) {
-      query = query.eq('campaign_id', filters.campaignId);
-    }
-    if (filters?.farmId) {
-      query = query.eq('farm_id', filters.farmId);
-    }
-
-    const { data, error } = await query.order('created_at', { ascending: false }).limit(500);
-
-    if (error) throw error;
-    const contacts = (data ?? []) as unknown as Contact[];
+    const contacts = await this.fetchContactRows(userId, workspaceId, filters);
 
     // iOS compatibility: if legacy field_leads still receives writes, merge it so Leads remains populated.
     try {

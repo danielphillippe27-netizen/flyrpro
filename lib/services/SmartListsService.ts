@@ -113,6 +113,9 @@ export class SmartListsService {
     const contactIds = Array.isArray(record.contactIds)
       ? record.contactIds.map((id) => String(id).trim()).filter(Boolean)
       : [];
+    const masterLeadIds = Array.isArray(record.masterLeadIds)
+      ? record.masterLeadIds.map((id) => String(id).trim()).filter(Boolean)
+      : [];
 
     return {
       baseKind: validBaseKind,
@@ -121,6 +124,7 @@ export class SmartListsService {
       campaignIds,
       farmIds,
       contactIds,
+      masterLeadIds,
     };
   }
 

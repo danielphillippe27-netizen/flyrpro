@@ -106,6 +106,10 @@ function masterBelongsToRequester(
   return row.assigned_user_id === userId || Boolean(salespersonId && row.assigned_salesperson_id === salespersonId);
 }
 
+function masterIsUnassigned(row: { assigned_user_id?: string | null; assigned_salesperson_id?: string | null }): boolean {
+  return !row.assigned_user_id && !row.assigned_salesperson_id;
+}
+
 function formatListDate(): string {
   return new Intl.DateTimeFormat('en-US', {
     month: 'short',
@@ -268,6 +272,7 @@ async function saveBrowserCaptureLeads(params: {
   const contactIdByLeadPhone = new Map<string, string>();
   const masterIdByPhone = new Map<string, string>();
   const masterMetadataById = new Map<string, Record<string, unknown>>();
+  const masterIds = new Set<string>();
   let masterSkippedCount = 0;
   let masterAddedCount = 0;
 
@@ -293,7 +298,26 @@ async function saveBrowserCaptureLeads(params: {
 
     if (existingMaster.row) {
       masterSkippedCount += 1;
-      if (masterBelongsToRequester(existingMaster.row, params.userId, params.salespersonId)) {
+      const belongsToRequester = masterBelongsToRequester(existingMaster.row, params.userId, params.salespersonId);
+      const canClaimMaster = !belongsToRequester && masterIsUnassigned(existingMaster.row);
+      if (belongsToRequester || canClaimMaster) {
+        if (canClaimMaster) {
+          const { error: claimError } = await params.admin
+            .from('salesperson_lead_master')
+            .update({
+              assigned_user_id: params.userId,
+              assigned_salesperson_id: params.salespersonId ?? null,
+            })
+            .eq('id', existingMaster.row.id);
+
+          if (claimError) {
+            console.warn('[salesperson/realtor-ca-browser] failed to claim unassigned master lead', claimError);
+            warning = warning ?? 'Some existing leads could not be assigned to your sales account.';
+            continue;
+          }
+        }
+
+        masterIds.add(existingMaster.row.id);
         masterIdByPhone.set(key, existingMaster.row.id);
         masterMetadataById.set(existingMaster.row.id, {
           ...(existingMaster.row.metadata ?? {}),
@@ -413,6 +437,7 @@ async function saveBrowserCaptureLeads(params: {
     }
 
     if (master.row?.id) {
+      masterIds.add(master.row.id);
       masterIdByPhone.set(key, master.row.id);
       masterMetadataById.set(master.row.id, {
         ...(master.row.metadata ?? {}),
@@ -422,7 +447,7 @@ async function saveBrowserCaptureLeads(params: {
   }
 
   let listId: string | null = null;
-  if (contactIds.size > 0) {
+  if (contactIds.size > 0 || masterIds.size > 0) {
     const { data: createdList, error } = await params.admin
       .from('smart_lists')
       .insert({
@@ -436,6 +461,7 @@ async function saveBrowserCaptureLeads(params: {
           campaignIds: [],
           farmIds: [],
           contactIds: Array.from(contactIds),
+          masterLeadIds: Array.from(masterIds),
         },
       })
       .select('id')
@@ -459,6 +485,8 @@ async function saveBrowserCaptureLeads(params: {
               ...metadata,
               listId,
               listName,
+              list_id: listId,
+              list_name: listName,
             },
           })
           .eq('id', masterId);

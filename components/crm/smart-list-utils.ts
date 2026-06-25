@@ -132,9 +132,13 @@ export function buildCustomSmartListOption(list: WorkspaceSmartList | LegacySmar
   const contactIds = list.criteria.contactIds ?? [];
   const campaignIds = list.criteria.campaignIds ?? [];
   const farmIds = list.criteria.farmIds ?? [];
+  const masterLeadIds = list.criteria.masterLeadIds ?? [];
 
   if (contactIds.length > 0) {
     details.push(`${contactIds.length} imported lead${contactIds.length === 1 ? '' : 's'}`);
+  }
+  if (contactIds.length === 0 && masterLeadIds.length > 0) {
+    details.push(`${masterLeadIds.length} saved lead${masterLeadIds.length === 1 ? '' : 's'}`);
   }
   if (campaignIds.length > 0) {
     details.push(`${campaignIds.length} campaign${campaignIds.length === 1 ? '' : 's'}`);
@@ -167,6 +171,7 @@ export function buildSmartListSignature(list: { name: string; criteria: SmartLis
   const campaignIds = [...(list.criteria.campaignIds ?? [])].map(normalizeToken).sort();
   const farmIds = [...(list.criteria.farmIds ?? [])].map(normalizeToken).sort();
   const contactIds = [...(list.criteria.contactIds ?? [])].map(normalizeToken).sort();
+  const masterLeadIds = [...(list.criteria.masterLeadIds ?? [])].map(normalizeToken).sort();
   return [
     normalizeToken(list.name),
     list.criteria.baseKind,
@@ -175,6 +180,7 @@ export function buildSmartListSignature(list: { name: string; criteria: SmartLis
     campaignIds.join(','),
     farmIds.join(','),
     contactIds.join(','),
+    masterLeadIds.join(','),
   ].join('|');
 }
 
@@ -206,6 +212,9 @@ export function normalizeStoredCustomSmartLists(value: unknown): LegacySmartList
     const contactIds = Array.isArray(candidate.criteria?.contactIds)
       ? candidate.criteria.contactIds.map((id) => String(id).trim()).filter(Boolean)
       : [];
+    const masterLeadIds = Array.isArray(candidate.criteria?.masterLeadIds)
+      ? candidate.criteria.masterLeadIds.map((id) => String(id).trim()).filter(Boolean)
+      : [];
 
     if (!id || !name) return [];
 
@@ -221,6 +230,7 @@ export function normalizeStoredCustomSmartLists(value: unknown): LegacySmartList
           campaignIds,
           farmIds,
           contactIds,
+          masterLeadIds,
         },
       },
     ];
