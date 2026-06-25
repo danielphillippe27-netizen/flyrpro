@@ -1,4 +1,4 @@
-import { ScriptReaderPage } from '@/components/scripts/ScriptReaderPage';
+import { ScriptRouteClient } from '@/components/scripts/ScriptRouteClient';
 
 export default async function ScriptRoute({
   params,
@@ -6,5 +6,5 @@ export default async function ScriptRoute({
   params: Promise<{ scriptId: string }>;
 }) {
   const { scriptId } = await params;
-  return <ScriptReaderPage scriptId={scriptId} />;
+  return <ScriptRouteClient scriptId={scriptId} />;
 }

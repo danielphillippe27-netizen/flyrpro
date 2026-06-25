@@ -57,7 +57,7 @@ type DemoVideoEventRow = {
 
 type CountQuery = PromiseLike<{
   count: number | null;
-  error: { message?: string } | null;
+  error: { message?: string; code?: string; details?: string; hint?: string } | null;
 }>;
 
 const PERIOD_DAYS: Record<PeriodKey, number> = {
@@ -108,10 +108,37 @@ function isPayingReferral(referral: ReferralRow, startIso: string, endIso: strin
   );
 }
 
-async function safeExactCount(query: CountQuery): Promise<number> {
+function describeSupabaseError(
+  error: { message?: string; code?: string; details?: string; hint?: string } | null | undefined
+): string {
+  if (!error) return 'Unknown Supabase error';
+  return [
+    error.message?.trim(),
+    error.details?.trim(),
+    error.hint?.trim(),
+    error.code ? `code ${error.code}` : null,
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join(' | ') || 'Supabase returned an empty error message';
+}
+
+function isMissingOptionalPerformanceSchemaError(description: string, tableNames: string[]): boolean {
+  const text = description.toLowerCase();
+  return (
+    isMissingSalespeopleSchemaError(description) ||
+    text.includes('does not exist') ||
+    text.includes('schema cache') ||
+    tableNames.some((tableName) => text.includes(tableName.toLowerCase()))
+  );
+}
+
+async function safeExactCount(query: CountQuery, label = 'count'): Promise<number> {
   const { count, error } = await query;
   if (error) {
-    throw new Error(error.message ?? 'Failed to load count');
+    const description = describeSupabaseError(error);
+    if (isMissingSalespeopleSchemaError(description)) return 0;
+    console.warn(`[salesperson performance] ${label} count failed`, error);
+    return 0;
   }
   return count ?? 0;
 }
@@ -183,9 +210,9 @@ async function countInboundMessages(
 
   if (!attributed.error) return attributed.count ?? 0;
 
-  const message = attributed.error.message?.toLowerCase() ?? '';
+  const message = describeSupabaseError(attributed.error).toLowerCase();
   if (!message.includes('salesperson_id') && !message.includes('schema cache')) {
-    throw new Error(attributed.error.message ?? 'Failed to load inbound messages');
+    console.warn('[salesperson performance] inbound message count failed', attributed.error);
   }
 
   return 0;
@@ -331,7 +358,8 @@ export async function GET(request: NextRequest) {
           .eq('workspace_id', effectiveWorkspaceId)
           .in('user_id', outreachUserIds)
           .gte('created_at', startIso)
-          .lt('created_at', endIso)
+          .lt('created_at', endIso),
+        'dialer_calls'
       ),
       admin
         .from('dialer_calls')
@@ -348,7 +376,8 @@ export async function GET(request: NextRequest) {
           .eq('workspace_id', effectiveWorkspaceId)
           .in('user_id', outreachUserIds)
           .gte('created_at', startIso)
-          .lt('created_at', endIso)
+          .lt('created_at', endIso),
+        'dialer_sms_followups'
       ),
       countInboundMessages(admin, {
         workspaceId: effectiveWorkspaceId,
@@ -376,7 +405,8 @@ export async function GET(request: NextRequest) {
           .select('id', { count: 'exact', head: true })
           .eq('salesperson_id', salesperson.id)
           .gte('created_at', startIso)
-          .lt('created_at', endIso)
+          .lt('created_at', endIso),
+        'salesperson_click_events'
       ),
       referralCode
         ? safeExactCount(
@@ -385,7 +415,8 @@ export async function GET(request: NextRequest) {
               .select('id', { count: 'exact', head: true })
               .ilike('referral_code_used', referralCode)
               .gte('created_at', startIso)
-              .lt('created_at', endIso)
+              .lt('created_at', endIso),
+            'workspace_referral_signups'
           )
         : Promise.resolve(0),
       admin
@@ -409,19 +440,37 @@ export async function GET(request: NextRequest) {
         .range(0, 9999),
     ]);
 
-    if (callsRowsResponse.error) throw new Error(callsRowsResponse.error.message);
+    if (callsRowsResponse.error) {
+      const description = describeSupabaseError(callsRowsResponse.error);
+      if (isMissingOptionalPerformanceSchemaError(description, ['dialer_calls'])) {
+        console.warn('[salesperson performance] dialer_calls rows unavailable', callsRowsResponse.error);
+      } else {
+        throw new Error(description);
+      }
+    }
     if (contactRowsResponse.error) throw new Error(contactRowsResponse.error.message);
-    if (demoLinksResponse.error) throw new Error(demoLinksResponse.error.message);
-    if (referralsResponse.error) throw new Error(referralsResponse.error.message);
-    if (commissionsResponse.error) throw new Error(commissionsResponse.error.message);
+    if (demoLinksResponse.error) {
+      const description = describeSupabaseError(demoLinksResponse.error);
+      if (!isMissingOptionalPerformanceSchemaError(description, ['salesperson_demo_links'])) {
+        throw new Error(description);
+      }
+    }
+    if (referralsResponse.error) {
+      const description = describeSupabaseError(referralsResponse.error);
+      if (!isMissingOptionalPerformanceSchemaError(description, ['salesperson_referrals'])) {
+        throw new Error(description);
+      }
+    }
+    if (commissionsResponse.error) {
+      const description = describeSupabaseError(commissionsResponse.error);
+      if (!isMissingOptionalPerformanceSchemaError(description, ['salesperson_commissions'])) {
+        throw new Error(description);
+      }
+    }
     if (demoVideoEventsResponse.error) {
-      const message = demoVideoEventsResponse.error.message?.toLowerCase() ?? '';
-      if (
-        !message.includes('salesperson_demo_video_events') &&
-        !message.includes('does not exist') &&
-        !message.includes('schema cache')
-      ) {
-        throw new Error(demoVideoEventsResponse.error.message);
+      const description = describeSupabaseError(demoVideoEventsResponse.error);
+      if (!isMissingOptionalPerformanceSchemaError(description, ['salesperson_demo_video_events'])) {
+        throw new Error(description);
       }
     }
 
@@ -434,11 +483,12 @@ export async function GET(request: NextRequest) {
             .eq('type', 'email')
             .in('contact_id', contactIds)
             .gte('timestamp', startIso)
-            .lt('timestamp', endIso)
+            .lt('timestamp', endIso),
+          'contact_activities_email'
         )
       : 0;
 
-    const calls = ((callsRowsResponse.data ?? []) as CallRow[]);
+    const calls = (callsRowsResponse.error ? [] : ((callsRowsResponse.data ?? []) as CallRow[]));
     const answeredCalls = calls.filter(isAnsweredCall).length;
     const demoEmailLinks = ((demoLinksResponse.data ?? []) as DemoLinkRow[])
       .filter((link) => Boolean(link.recipient_email?.trim())).length;
@@ -481,7 +531,9 @@ export async function GET(request: NextRequest) {
       demoVideo: summarizeDemoVideoEvents(demoVideoEvents),
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to load salesperson performance';
+    const message = error instanceof Error && error.message.trim()
+      ? error.message
+      : 'Failed to load salesperson performance';
     console.error('[salesperson performance] failed', error);
     return NextResponse.json({ error: message }, { status: 500 });
   }

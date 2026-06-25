@@ -20,6 +20,14 @@ import {
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -43,6 +51,7 @@ import {
   MapboxAutocompleteService,
   type CitySuggestion,
 } from '@/lib/services/MapboxAutocompleteService';
+import { cn } from '@/lib/utils';
 import { useWorkspace } from '@/lib/workspace-context';
 
 type PlacesLeadPayload = {
@@ -55,7 +64,7 @@ type PlacesLeadPayload = {
   jobSignalCount?: number;
   jobSignalRawCount?: number;
   jobSignalProvider?: string | null;
-  leadSource?: 'places' | 'job_signals' | 'australia_reiq' | 'realtor_ca' | 'realtor_ca_browser_capture' | 'realtor_ca_screenshot';
+  leadSource?: 'places' | 'job_signals' | 'australia_reiq' | 'australia_reinsw' | 'realtor_ca' | 'realtor_ca_browser_capture' | 'realtor_ca_screenshot';
   prospects?: LeadResult[];
   profileUrls?: string[];
   screenshotCount?: number;
@@ -75,7 +84,7 @@ type PlacesLeadPayload = {
   error?: string;
 };
 
-type ScraperMode = 'google_places' | 'australia_reiq' | 'realtor_ca' | 'realtor_ca_screenshot';
+type ScraperMode = 'google_places' | 'australia_reiq' | 'australia_reinsw' | 'realtor_ca' | 'realtor_ca_screenshot';
 
 type LeadResult = PlacesLead & {
   email?: string;
@@ -186,7 +195,8 @@ const countryOptions = [
 
 const REIQ_DEFAULT_SEARCH_URL =
   'https://members.reiq.com/REIQ/Shared_Content/Smart-Suite/Smart-Maps/Public/Find-an-Agent-and-Agency.aspx';
-const REIQ_PROFILE_URL_RE = /(?:Agent-Profile\.aspx|map-profile)\?ContactKey=/i;
+const REIQ_INTERACTIVE_PROFILE_LIMIT = 250;
+const REINSW_INTERACTIVE_PROFILE_LIMIT = 500;
 
 const canadianProvinceOptions = [
   { value: 'on', label: 'Ontario' },
@@ -464,6 +474,7 @@ function splitCanadianAddress(address: string): {
 }
 
 function buildRealtorCaCaptureBookmarklet(): string {
+  const flyrOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://flyr.software';
   const script = `(async () => {
     const compact = (value) => String(value ?? '').replace(/\\s+/g, ' ').trim();
     const phoneRe = /(?:\\+?1[\\s.-]?)?\\(?\\d{3}\\)?[\\s.-]?\\d{3}[\\s.-]?\\d{4}/;
@@ -539,6 +550,43 @@ function buildRealtorCaCaptureBookmarklet(): string {
         return /next|›|»/i.test(label) && !element.disabled && element.getAttribute('aria-disabled') !== 'true';
       });
     };
+    const hashParams = () => new URLSearchParams(String(location.hash || '').replace(/^#/, ''));
+    const currentHashPage = () => {
+      const value = Number.parseInt(hashParams().get('page') || '1', 10);
+      return Number.isFinite(value) && value > 0 ? value : 1;
+    };
+    const setHashPage = (page) => {
+      const params = hashParams();
+      params.set('page', String(page));
+      location.hash = params.toString();
+    };
+    const resultRange = () => {
+      const text = compact(document.body.innerText);
+      const match = text.match(/Results:\\s*(\\d+)\\s*-\\s*(\\d+)\\s*of\\s*(\\d+)\\s*REALTORS/i);
+      if (!match) return null;
+      return {
+        start: Number.parseInt(match[1], 10),
+        end: Number.parseInt(match[2], 10),
+        total: Number.parseInt(match[3], 10)
+      };
+    };
+    const maxPaginationPage = () => {
+      return Array.from(document.querySelectorAll('a,button'))
+        .map((element) => Number.parseInt(compact(element.textContent), 10))
+        .filter((value) => Number.isFinite(value) && value > 0 && value < 1000)
+        .reduce((max, value) => Math.max(max, value), 1);
+    };
+    const inferTotalPages = () => {
+      const range = resultRange();
+      const page = currentHashPage();
+      const fromPagination = maxPaginationPage();
+      if (!range || !range.total) return fromPagination;
+      const visibleCount = Math.max(1, range.end - range.start + 1);
+      const inferredPageSize = page > 1
+        ? Math.max(visibleCount, Math.round((range.start - 1) / (page - 1)))
+        : visibleCount;
+      return Math.max(fromPagination, Math.ceil(range.total / Math.max(1, inferredPageSize)));
+    };
     const waitForPageChange = async (beforeUrl, beforeText) => {
       for (let attempt = 0; attempt < 30; attempt += 1) {
         await wait(500);
@@ -547,28 +595,51 @@ function buildRealtorCaCaptureBookmarklet(): string {
       }
       return false;
     };
+    const waitForPage = async (page, beforeText) => {
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        await wait(400);
+        const range = resultRange();
+        const currentText = compact(document.body.innerText).slice(0, 4000);
+        const hasLinks = document.querySelectorAll('a[href*="/agent/"]').length > 0;
+        const expectedStart = range && page > 1 ? range.start > 1 : true;
+        if (currentHashPage() === page && hasLinks && currentText !== beforeText && expectedStart) return true;
+        if (currentHashPage() === page && hasLinks && !beforeText) return true;
+      }
+      return false;
+    };
+    const goToPage = async (page) => {
+      const beforeText = compact(document.body.innerText).slice(0, 4000);
+      if (currentHashPage() !== page) {
+        setHashPage(page);
+        await waitForPage(page, beforeText);
+      }
+      window.scrollTo(0, document.body.scrollHeight);
+      await wait(900);
+      window.scrollTo(0, 0);
+      await wait(600);
+    };
     const existing = JSON.parse(localStorage.getItem(storageKey) || '{"leads":[]}');
     const capturedPages = [];
-    let pageNumber = 1;
-    while (true) {
-      window.scrollTo(0, document.body.scrollHeight);
-      await wait(700);
-      window.scrollTo(0, 0);
-      await wait(500);
+    await goToPage(1);
+    let totalPages = inferTotalPages();
+    for (let pageNumber = 1; pageNumber <= totalPages; pageNumber += 1) {
+      await goToPage(pageNumber);
+      totalPages = Math.max(totalPages, inferTotalPages());
       const pageLeads = captureCurrentPage(pageNumber);
-      capturedPages.push({ pageUrl: location.href, count: pageLeads.length });
+      capturedPages.push({ pageNumber, pageUrl: location.href, count: pageLeads.length, range: resultRange() });
       if (pageLeads.length) {
         existing.leads = [...(Array.isArray(existing.leads) ? existing.leads : []), ...pageLeads];
       }
-      const next = findNextButton();
-      if (!next) break;
-      const beforeUrl = location.href;
-      const beforeText = compact(document.body.innerText).slice(0, 4000);
-      next.click();
-      const moved = await waitForPageChange(beforeUrl, beforeText);
-      if (!moved) break;
-      await wait(1200);
-      pageNumber += 1;
+      if (pageNumber >= totalPages) {
+        const next = findNextButton();
+        if (!next) break;
+        const beforeUrl = location.href;
+        const beforeText = compact(document.body.innerText).slice(0, 4000);
+        next.click();
+        const moved = await waitForPageChange(beforeUrl, beforeText);
+        if (!moved) break;
+        totalPages = Math.max(totalPages, currentHashPage(), inferTotalPages());
+      }
     }
     const byKey = new Map();
     (Array.isArray(existing.leads) ? existing.leads : []).forEach((lead) => {
@@ -589,7 +660,19 @@ function buildRealtorCaCaptureBookmarklet(): string {
     };
     localStorage.setItem(storageKey, JSON.stringify(payload));
     const json = JSON.stringify(payload, null, 2);
-    const done = () => alert('FLYR captured ' + payload.leads.length + ' total agents across ' + capturedPages.length + ' page(s). Paste the JSON into FLYR.');
+    const notifyFlyr = () => {
+      try {
+        if (window.opener && !window.opener.closed) {
+          window.opener.postMessage({ type: 'FLYR_REALTOR_CA_CAPTURE', payload }, ${JSON.stringify(flyrOrigin)});
+          return true;
+        }
+      } catch {}
+      return false;
+    };
+    const done = () => {
+      const sent = notifyFlyr();
+      alert('FLYR captured ' + payload.leads.length + ' total agents across ' + capturedPages.length + ' page(s). ' + (sent ? 'FLYR is importing it now.' : 'Return to FLYR and the list will populate automatically.'));
+    };
     const fallback = () => {
       const box = document.createElement('textarea');
       box.value = json;
@@ -738,7 +821,8 @@ function formatRunDate(value: string | null | undefined): string {
 }
 
 function modeLeadLabel(scraperMode: ScraperMode): string {
-  if (scraperMode === 'australia_reiq') return 'Australia leads';
+  if (scraperMode === 'australia_reiq') return 'REIQ Queensland leads';
+  if (scraperMode === 'australia_reinsw') return 'REINSW NSW leads';
   if (scraperMode === 'realtor_ca') return 'Captured REALTOR.ca agents';
   if (scraperMode === 'realtor_ca_screenshot') return 'Screenshot agents';
   return 'Places leads';
@@ -746,9 +830,48 @@ function modeLeadLabel(scraperMode: ScraperMode): string {
 
 function modeLoadingLabel(scraperMode: ScraperMode): string {
   if (scraperMode === 'australia_reiq') return 'Scraping REIQ profiles';
+  if (scraperMode === 'australia_reinsw') return 'Scraping REINSW profiles';
   if (scraperMode === 'realtor_ca') return 'Importing browser capture';
   if (scraperMode === 'realtor_ca_screenshot') return 'Extracting screenshot agents';
   return 'Searching Google Places';
+}
+
+function formatListDate(): string {
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+  }).format(new Date());
+}
+
+function buildDefaultListName(input: {
+  scraperMode: ScraperMode;
+  city: string;
+  industry: string;
+  region?: string;
+  provinceCode?: string;
+}): string {
+  const date = formatListDate();
+  if (input.scraperMode === 'realtor_ca') {
+    const location = [compactSpaces(input.city), compactSpaces(input.provinceCode).toUpperCase()]
+      .filter(Boolean)
+      .join(', ');
+    return `${location || 'REALTOR.ca'} agents - ${date}`.slice(0, 120);
+  }
+  if (input.scraperMode === 'australia_reiq') {
+    return `${compactSpaces(input.city) || 'Queensland'} REIQ leads - ${date}`.slice(0, 120);
+  }
+  if (input.scraperMode === 'australia_reinsw') {
+    return `${compactSpaces(input.city) || 'NSW'} REINSW leads - ${date}`.slice(0, 120);
+  }
+
+  const location = [compactSpaces(input.city), compactSpaces(input.region)].filter(Boolean).join(', ');
+  const industry = compactSpaces(input.industry);
+  const base = [location, industry].filter(Boolean).join(' - ');
+  return `${base || 'Places leads'} - ${date}`.slice(0, 120);
+}
+
+function cleanListName(value: string): string {
+  return value.trim().replace(/\s+/g, ' ').slice(0, 120);
 }
 
 function provinceCodeForRegion(region: string): string | null {
@@ -827,10 +950,9 @@ export function SalespersonPlacesLeadFinder() {
   const [relatedTerms, setRelatedTerms] = useState('');
   const [realEstateTarget, setRealEstateTarget] = useState<RealEstateTarget>('agents');
   const [scraperMode, setScraperMode] = useState<ScraperMode>('google_places');
-  const [reiqStartUrl, setReiqStartUrl] = useState(REIQ_DEFAULT_SEARCH_URL);
+  const [reiqStartUrl] = useState(REIQ_DEFAULT_SEARCH_URL);
   const [reiqLocation, setReiqLocation] = useState('Brisbane');
-  const [reiqMaxPages, setReiqMaxPages] = useState('3');
-  const [reiqMaxProfiles, setReiqMaxProfiles] = useState('500');
+  const [reinswLocation, setReinswLocation] = useState('Sydney');
   const [realtorCity, setRealtorCity] = useState('Toronto');
   const [realtorProvinceCode, setRealtorProvinceCode] = useState('on');
   const [realtorCaptureJson, setRealtorCaptureJson] = useState('');
@@ -844,16 +966,33 @@ export function SalespersonPlacesLeadFinder() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [listNameDraft, setListNameDraft] = useState('');
+  const [listNameError, setListNameError] = useState<string | null>(null);
+  const [editingLeadKey, setEditingLeadKey] = useState<string | null>(null);
+  const [editingLeadName, setEditingLeadName] = useState('');
+  const [savingLeadNameKey, setSavingLeadNameKey] = useState<string | null>(null);
   const cityAbortRef = useRef<AbortController | null>(null);
   const cityBlurRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const realtorCityBlurRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const screenshotCityBlurRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const realtorAutoCapturePendingRef = useRef(false);
+  const realtorAutoImportingRef = useRef(false);
+  const realtorLastImportedCaptureRef = useRef('');
+  const skipNextLeadNameCommitRef = useRef(false);
 
   const realEstateMode = isRealEstateIndustry(industry);
   const saveWorkspaceId = currentWorkspaceId ?? prospectingWorkspaceId;
+  const searchCreatesList =
+    scraperMode === 'google_places' ||
+    scraperMode === 'realtor_ca' ||
+    scraperMode === 'australia_reiq' ||
+    scraperMode === 'australia_reinsw';
   const canSubmit =
     scraperMode === 'australia_reiq'
-      ? reiqStartUrl.trim().length >= 12 && (REIQ_PROFILE_URL_RE.test(reiqStartUrl) || reiqLocation.trim().length >= 2) && !loading
+      ? reiqLocation.trim().length >= 2 && !loading
+      : scraperMode === 'australia_reinsw'
+      ? reinswLocation.trim().length >= 2 && !loading
       : scraperMode === 'realtor_ca_screenshot'
         ? screenshotCity.trim().length >= 2 && screenshotFiles.length > 0 && !loading
       : scraperMode === 'realtor_ca'
@@ -889,6 +1028,34 @@ export function SalespersonPlacesLeadFinder() {
     () => buildRealtorCaDirectoryUrl(realtorCity, realtorProvinceCode),
     [realtorCity, realtorProvinceCode]
   );
+  const defaultSaveListName = useMemo(
+    () =>
+      buildDefaultListName({
+        scraperMode,
+        city:
+          scraperMode === 'realtor_ca'
+            ? realtorCity
+            : scraperMode === 'australia_reiq'
+              ? reiqLocation
+              : scraperMode === 'australia_reinsw'
+                ? reinswLocation
+                : city,
+        industry,
+        region,
+        provinceCode: realtorProvinceCode,
+      }),
+    [city, industry, realtorCity, realtorProvinceCode, region, reiqLocation, reinswLocation, scraperMode]
+  );
+  const primaryActionLabel = useMemo(() => {
+    if (loading) {
+      if (scraperMode === 'realtor_ca') return realtorCaptureJson.trim() ? 'Saving Capture' : 'Opening REALTOR.ca';
+      return scraperMode === 'google_places' ? 'Searching' : 'Scraping';
+    }
+
+    if (scraperMode === 'google_places') return 'Search';
+    if (scraperMode === 'realtor_ca') return realtorCaptureJson.trim() ? 'Save Capture' : 'Open REALTOR.ca';
+    return 'Scrape';
+  }, [loading, realtorCaptureJson, scraperMode]);
 
   const loadProspectingOptions = useCallback(async () => {
     try {
@@ -1034,8 +1201,87 @@ export function SalespersonPlacesLeadFinder() {
     screenshotCityAutocomplete.setSuggestions([]);
   }
 
+  function leadRowKey(lead: LeadResult, index: number): string {
+    return (
+      lead.placeId ||
+      normalizePhoneDigits(lead.mobilePhone || lead.phone) ||
+      lead.sourceUrl ||
+      `${normalizeInput(lead.name)}|${normalizeInput(lead.agencyBusinessName ?? '')}|${index}`
+    );
+  }
+
+  function replaceLeadName(rowKey: string, nextName: string) {
+    setProspects((rows) =>
+      rows.map((lead, index) =>
+        leadRowKey(lead, index) === rowKey
+          ? { ...lead, name: nextName }
+          : lead
+      )
+    );
+    setSummary((current) =>
+      current
+        ? {
+            ...current,
+            prospects: current.prospects?.map((lead, index) =>
+              leadRowKey(lead, index) === rowKey
+                ? { ...lead, name: nextName }
+                : lead
+            ),
+          }
+        : current
+    );
+  }
+
+  function beginLeadNameEdit(lead: LeadResult, rowKey: string) {
+    setEditingLeadKey(rowKey);
+    setEditingLeadName(lead.name);
+  }
+
+  async function commitLeadNameEdit(lead: LeadResult, rowKey: string, value: string) {
+    if (skipNextLeadNameCommitRef.current) {
+      skipNextLeadNameCommitRef.current = false;
+      return;
+    }
+
+    const nextName = value.trim().replace(/\s+/g, ' ').slice(0, 180);
+    const previousName = lead.name;
+
+    setEditingLeadKey(null);
+    setEditingLeadName('');
+
+    if (!nextName || nextName === previousName) return;
+
+    replaceLeadName(rowKey, nextName);
+    setSavingLeadNameKey(rowKey);
+    setError(null);
+
+    try {
+      const response = await fetch('/api/salesperson/scraper-lead-name', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          workspaceId: saveWorkspaceId ?? undefined,
+          name: nextName,
+          phone: lead.phone || lead.mobilePhone || lead.workPhone || null,
+          sourceUrl: lead.sourceUrl || null,
+          placeId: lead.placeId || null,
+          countryCode: scraperMode === 'australia_reiq' || scraperMode === 'australia_reinsw' ? 'AU' : scraperMode === 'realtor_ca' || scraperMode === 'realtor_ca_screenshot' ? 'CA' : countryCode,
+        }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) throw new Error(payload.error || 'Could not save lead name.');
+      setStatus(`Updated ${nextName}.`);
+    } catch (saveError) {
+      replaceLeadName(rowKey, previousName);
+      setError(saveError instanceof Error ? saveError.message : 'Could not save lead name.');
+    } finally {
+      setSavingLeadNameKey(null);
+    }
+  }
+
   const importBrowserCaptureText = useCallback(
-    async (captureText: string, options?: { city?: string; provinceCode?: string; source?: string }) => {
+    async (captureText: string, options?: { city?: string; provinceCode?: string; source?: string; listName?: string }) => {
       const capturedRows = parseBrowserCaptureJson(captureText);
       const captureCity = compactSpaces(options?.city) || realtorCity.trim();
       const captureProvinceCode = compactSpaces(options?.provinceCode) || realtorProvinceCode;
@@ -1076,6 +1322,7 @@ export function SalespersonPlacesLeadFinder() {
           credentials: 'include',
           body: JSON.stringify({
             workspaceId: saveWorkspaceId ?? undefined,
+            listName: options?.listName,
             city: captureCity,
             provinceCode: captureProvinceCode,
             leads: nextProspects,
@@ -1104,19 +1351,110 @@ export function SalespersonPlacesLeadFinder() {
     [realtorCity, realtorProvinceCode, saveWorkspaceId]
   );
 
+  const maybeAutoImportRealtorClipboard = useCallback(
+    async (source = 'browser capture') => {
+      if (
+        scraperMode !== 'realtor_ca' ||
+        loading ||
+        realtorAutoImportingRef.current ||
+        typeof navigator === 'undefined' ||
+        !navigator.clipboard?.readText ||
+        (typeof document !== 'undefined' && document.visibilityState === 'hidden')
+      ) {
+        return false;
+      }
+
+      const captureText = (await navigator.clipboard.readText().catch(() => '')).trim();
+      if (
+        !captureText ||
+        captureText === realtorLastImportedCaptureRef.current ||
+        /^javascript:/i.test(captureText)
+      ) {
+        return false;
+      }
+
+      try {
+        const capturedRows = parseBrowserCaptureJson(captureText);
+        if (capturedRows.length === 0) return false;
+      } catch {
+        return false;
+      }
+
+      realtorAutoImportingRef.current = true;
+      realtorLastImportedCaptureRef.current = captureText;
+      setLoading(true);
+      setError(null);
+      setStatus('Captured REALTOR.ca results detected. Importing automatically...');
+
+      try {
+        await importBrowserCaptureText(captureText, {
+          source,
+          listName: defaultSaveListName,
+        });
+        realtorAutoCapturePendingRef.current = false;
+        return true;
+      } catch (importError) {
+        realtorLastImportedCaptureRef.current = '';
+        setError(importError instanceof Error ? importError.message : 'Could not auto-import REALTOR.ca capture.');
+        return false;
+      } finally {
+        realtorAutoImportingRef.current = false;
+        setLoading(false);
+      }
+    },
+    [defaultSaveListName, importBrowserCaptureText, loading, scraperMode]
+  );
+
+  useEffect(() => {
+    if (scraperMode !== 'realtor_ca') return;
+
+    const tryImport = () => {
+      if (realtorAutoCapturePendingRef.current) {
+        void maybeAutoImportRealtorClipboard();
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') tryImport();
+    };
+
+    window.addEventListener('focus', tryImport);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    const interval = window.setInterval(tryImport, 2500);
+
+    return () => {
+      window.removeEventListener('focus', tryImport);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.clearInterval(interval);
+    };
+  }, [maybeAutoImportRealtorClipboard, scraperMode]);
+
   useEffect(() => {
     function handleExtensionMessage(event: MessageEvent) {
-      if (event.source !== window) return;
+      const isSameWindowMessage = event.source === window;
+      const isRealtorCaMessage = /^https:\/\/([^/]+\.)?realtor\.ca$/i.test(event.origin);
+      if (!isSameWindowMessage && !isRealtorCaMessage) return;
       const data = event.data as { type?: unknown; payload?: BrowserCapturePayload } | null;
       if (!data || data.type !== 'FLYR_REALTOR_CA_CAPTURE') return;
       const payload = data.payload;
       if (!payload || !Array.isArray(payload.leads)) return;
 
       try {
-        void importBrowserCaptureText(JSON.stringify(payload, null, 2), {
-          city: typeof payload.city === 'string' ? payload.city : undefined,
-          provinceCode: typeof payload.provinceCode === 'string' ? payload.provinceCode : undefined,
-          source: 'Chrome extension',
+        const payloadCity = typeof payload.city === 'string' ? payload.city : undefined;
+        const payloadProvinceCode = typeof payload.provinceCode === 'string' ? payload.provinceCode : undefined;
+        const captureJson = JSON.stringify(payload, null, 2);
+        realtorAutoCapturePendingRef.current = false;
+        realtorLastImportedCaptureRef.current = captureJson;
+        void importBrowserCaptureText(captureJson, {
+          city: payloadCity,
+          provinceCode: payloadProvinceCode,
+          source: isRealtorCaMessage ? 'REALTOR.ca helper' : 'Chrome extension',
+          listName: buildDefaultListName({
+            scraperMode: 'realtor_ca',
+            city: payloadCity ?? realtorCity,
+            industry: 'Real estate',
+            provinceCode: payloadProvinceCode ?? realtorProvinceCode,
+          }),
         }).catch((messageError) => {
           setError(messageError instanceof Error ? messageError.message : 'Chrome extension import failed.');
         });
@@ -1127,10 +1465,39 @@ export function SalespersonPlacesLeadFinder() {
 
     window.addEventListener('message', handleExtensionMessage);
     return () => window.removeEventListener('message', handleExtensionMessage);
-  }, [importBrowserCaptureText]);
+  }, [importBrowserCaptureText, realtorCity, realtorProvinceCode]);
 
-  async function runSearch(event: FormEvent<HTMLFormElement>) {
+  function handleSearchSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (loading) return;
+    if (scraperMode === 'realtor_ca' && !realtorCaptureJson.trim()) {
+      void runSearch();
+      return;
+    }
+    if (searchCreatesList) {
+      setListNameDraft(defaultSaveListName);
+      setListNameError(null);
+      setSaveDialogOpen(true);
+      return;
+    }
+
+    void runSearch();
+  }
+
+  function handleSaveListSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const listName = cleanListName(listNameDraft);
+    if (!listName) {
+      setListNameError('Name this list before saving.');
+      return;
+    }
+
+    setListNameError(null);
+    setSaveDialogOpen(false);
+    void runSearch(listName);
+  }
+
+  async function runSearch(listName?: string) {
     if (loading) return;
     if (scraperMode === 'realtor_ca_screenshot') {
       if (screenshotCity.trim().length < 2 || screenshotFiles.length === 0) return;
@@ -1184,20 +1551,22 @@ export function SalespersonPlacesLeadFinder() {
           : await navigator.clipboard?.readText?.().catch(() => '');
         const captureText = realtorCaptureJson.trim() || clipboardText || '';
         if (!captureText.trim()) {
-          await copyRealtorCaptureHelper();
-          if (typeof window !== 'undefined') window.open(realtorDirectoryUrl, '_blank', 'noopener,noreferrer');
-          setStatus('Scraper helper copied. Run it on REALTOR.ca; when it finishes, come back and click Scraper again.');
+          const copied = await copyRealtorCaptureHelper();
+          if (copied) realtorAutoCapturePendingRef.current = true;
+          if (typeof window !== 'undefined') window.open(realtorDirectoryUrl, '_blank');
+          setStatus('Scraper helper copied. Run it on REALTOR.ca; when it finishes, return here and FLYR will import it automatically.');
           return;
         }
 
         try {
-          await importBrowserCaptureText(captureText, { source: 'browser capture' });
+          await importBrowserCaptureText(captureText, { source: 'browser capture', listName });
         } catch (parseError) {
           const message = parseError instanceof Error ? parseError.message : '';
           if (/page URL|helper script|Paste the JSON/i.test(message)) {
-            await copyRealtorCaptureHelper();
-            if (typeof window !== 'undefined') window.open(realtorDirectoryUrl, '_blank', 'noopener,noreferrer');
-            setStatus('Scraper helper copied. Run it on REALTOR.ca; when it finishes, come back and click Scraper again.');
+            const copied = await copyRealtorCaptureHelper();
+            if (copied) realtorAutoCapturePendingRef.current = true;
+            if (typeof window !== 'undefined') window.open(realtorDirectoryUrl, '_blank');
+            setStatus('Scraper helper copied. Run it on REALTOR.ca; when it finishes, return here and FLYR will import it automatically.');
             return;
           }
           throw parseError;
@@ -1212,41 +1581,49 @@ export function SalespersonPlacesLeadFinder() {
       return;
     }
 
-    if (scraperMode === 'australia_reiq') {
-      if (reiqStartUrl.trim().length < 12) return;
+    if (scraperMode === 'australia_reiq' || scraperMode === 'australia_reinsw') {
+      const source = scraperMode === 'australia_reinsw' ? 'reinsw' : 'reiq';
+      const sourceLabel = source === 'reinsw' ? 'REINSW' : 'REIQ';
+      const location = source === 'reinsw' ? reinswLocation.trim() : reiqLocation.trim();
+      const maxProfiles =
+        source === 'reinsw' ? REINSW_INTERACTIVE_PROFILE_LIMIT : REIQ_INTERACTIVE_PROFILE_LIMIT;
+      if (location.length < 2) return;
 
       setLoading(true);
       setError(null);
-      setStatus(null);
+      setStatus(`Scraping up to ${maxProfiles.toLocaleString()} ${sourceLabel} profiles for ${location}...`);
 
       try {
-        const maxPages = Number.parseInt(reiqMaxPages, 10);
-        const maxProfiles = Number.parseInt(reiqMaxProfiles, 10);
         const response = await fetch('/api/salesperson/reiq', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           body: JSON.stringify({
-            startUrl: reiqStartUrl.trim(),
-            location: REIQ_PROFILE_URL_RE.test(reiqStartUrl) ? undefined : reiqLocation.trim(),
-            maxPages: Number.isFinite(maxPages) && maxPages > 0 ? maxPages : undefined,
-            maxProfiles: Number.isFinite(maxProfiles) && maxProfiles > 0 ? maxProfiles : undefined,
-            delayMs: 250,
+            source,
+            startUrl: source === 'reiq' ? reiqStartUrl.trim() : undefined,
+            location,
+            maxPages: 10,
+            maxProfiles,
+            delayMs: source === 'reinsw' ? 150 : 250,
+            workspaceId: saveWorkspaceId ?? undefined,
+            listName,
           }),
         });
         const payload = (await response.json().catch(() => ({}))) as PlacesLeadPayload;
         if (!response.ok) {
-          throw new Error(payload.error || 'Australia REIQ lead search failed.');
+          throw new Error(payload.error || `${sourceLabel} lead search failed.`);
         }
 
         const nextProspects = payload.prospects ?? [];
         setProspects(nextProspects);
         setSummary(payload);
         setStatus(
-          `${nextProspects.length.toLocaleString()} Australia REIQ leads found from ${(payload.profileUrls?.length ?? nextProspects.length).toLocaleString()} profile URLs.`
+          payload.savedList
+            ? `${nextProspects.length.toLocaleString()} ${sourceLabel} leads found. ${payload.savedList.contactCount.toLocaleString()} saved to "${payload.savedList.listName}".`
+            : `${nextProspects.length.toLocaleString()} ${sourceLabel} leads found from ${(payload.profileUrls?.length ?? nextProspects.length).toLocaleString()} profile URLs.`
         );
       } catch (e) {
-        const message = e instanceof Error ? e.message : 'Australia REIQ lead search failed.';
+        const message = e instanceof Error ? e.message : `${sourceLabel} lead search failed.`;
         setError(message);
         setStatus(null);
       } finally {
@@ -1298,6 +1675,7 @@ export function SalespersonPlacesLeadFinder() {
           countryCode,
           region: region.trim() || undefined,
           workspaceId: saveWorkspaceId ?? undefined,
+          listName,
           relatedTerms: uniqueTerms([...teamTerms, ...brokerageTerms, ...safeRelatedTerms]).slice(0, 12),
           pageSize: 20,
           marketId: selectedMarketId || undefined,
@@ -1342,7 +1720,9 @@ export function SalespersonPlacesLeadFinder() {
     const anchor = document.createElement('a');
     const baseName =
       scraperMode === 'australia_reiq'
-        ? 'australia-reiq-leads'
+        ? `reiq-${slugifyFilenamePart(reiqLocation, 'city')}`
+        : scraperMode === 'australia_reinsw'
+        ? `reinsw-${slugifyFilenamePart(reinswLocation, 'city')}`
         : scraperMode === 'realtor_ca_screenshot'
           ? `realtor-ca-screenshots-${slugifyFilenamePart(screenshotCity, 'city')}`
         : scraperMode === 'realtor_ca'
@@ -1376,7 +1756,9 @@ export function SalespersonPlacesLeadFinder() {
     const anchor = document.createElement('a');
     const baseName =
       scraperMode === 'australia_reiq'
-        ? 'australia-reiq-leads'
+        ? `reiq-${slugifyFilenamePart(reiqLocation, 'city')}`
+        : scraperMode === 'australia_reinsw'
+        ? `reinsw-${slugifyFilenamePart(reinswLocation, 'city')}`
         : scraperMode === 'realtor_ca_screenshot'
           ? `realtor-ca-screenshots-${slugifyFilenamePart(screenshotCity, 'city')}`
         : scraperMode === 'realtor_ca'
@@ -1405,9 +1787,10 @@ export function SalespersonPlacesLeadFinder() {
     setStatus(copied ? `${lead.name} copied.` : 'Copy failed.');
   }
 
-  async function copyRealtorCaptureHelper() {
+  async function copyRealtorCaptureHelper(): Promise<boolean> {
     const copied = await copyText(buildRealtorCaCaptureBookmarklet());
     setStatus(copied ? 'REALTOR.ca auto-capture helper copied.' : 'Copy failed.');
+    return copied;
   }
 
   function handleScreenshotFilesChange(files: FileList | null) {
@@ -1445,6 +1828,7 @@ export function SalespersonPlacesLeadFinder() {
     if (
       value !== 'google_places' &&
       value !== 'australia_reiq' &&
+      value !== 'australia_reinsw' &&
       value !== 'realtor_ca' &&
       value !== 'realtor_ca_screenshot'
     ) return;
@@ -1453,8 +1837,11 @@ export function SalespersonPlacesLeadFinder() {
     setSummary(null);
     setError(null);
     setStatus(null);
-    if (value !== 'realtor_ca') setRealtorCaptureJson('');
-    if (value === 'australia_reiq') {
+    if (value !== 'realtor_ca') {
+      realtorAutoCapturePendingRef.current = false;
+      setRealtorCaptureJson('');
+    }
+    if (value === 'australia_reiq' || value === 'australia_reinsw') {
       setCountryCode('AU');
       setIndustry('Real estate');
       setSelectedIndustryId('');
@@ -1475,7 +1862,8 @@ export function SalespersonPlacesLeadFinder() {
   }
 
   return (
-    <div className="space-y-5">
+    <>
+    <div className={cn('space-y-5 transition duration-200', saveDialogOpen && 'blur-[2px]')}>
       <section id="lead-config" className="rounded-md border border-border bg-card p-4 shadow-sm">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0">
@@ -1488,9 +1876,10 @@ export function SalespersonPlacesLeadFinder() {
             </p>
           </div>
           <Tabs value={scraperMode} onValueChange={handleScraperModeChange}>
-            <TabsList className="grid w-full grid-cols-4 lg:w-[680px]">
+            <TabsList className="grid w-full grid-cols-5 lg:w-[820px]">
               <TabsTrigger value="google_places">Google Places</TabsTrigger>
-              <TabsTrigger value="australia_reiq">Australia</TabsTrigger>
+              <TabsTrigger value="australia_reiq">REIQ QLD</TabsTrigger>
+              <TabsTrigger value="australia_reinsw">NSW</TabsTrigger>
               <TabsTrigger value="realtor_ca">Browser Capture</TabsTrigger>
               <TabsTrigger value="realtor_ca_screenshot">Upload</TabsTrigger>
             </TabsList>
@@ -1501,15 +1890,15 @@ export function SalespersonPlacesLeadFinder() {
       <section className="rounded-md border border-border bg-card p-4 shadow-sm">
         <form
           className={
-            scraperMode === 'australia_reiq'
-              ? 'grid gap-3 lg:grid-cols-[minmax(280px,1fr)_220px_110px_130px_auto]'
+            scraperMode === 'australia_reiq' || scraperMode === 'australia_reinsw'
+              ? 'grid gap-3 lg:grid-cols-[minmax(260px,1fr)_auto]'
               : scraperMode === 'realtor_ca_screenshot'
                 ? 'grid gap-3 lg:grid-cols-[minmax(180px,1fr)_180px_minmax(280px,1.4fr)_auto]'
               : scraperMode === 'realtor_ca'
                 ? 'grid gap-3 lg:grid-cols-[minmax(180px,1fr)_180px_auto]'
               : 'grid gap-3 lg:grid-cols-[minmax(220px,1fr)_minmax(220px,1fr)_180px_auto_auto]'
           }
-          onSubmit={runSearch}
+          onSubmit={handleSearchSubmit}
         >
           {scraperMode === 'google_places' && selectedRun ? (
             <div className="rounded-md border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200 lg:col-span-full">
@@ -1668,45 +2057,26 @@ export function SalespersonPlacesLeadFinder() {
           ) : scraperMode === 'australia_reiq' ? (
             <>
               <div className="space-y-2">
-                <Label htmlFor="reiq-start-url">REIQ results or profile URL</Label>
-                <Input
-                  id="reiq-start-url"
-                  value={reiqStartUrl}
-                  onChange={(event) => setReiqStartUrl(event.target.value)}
-                  placeholder="https://members.reiq.com/portal/..."
-                  autoComplete="off"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="reiq-location">Location</Label>
+                <Label htmlFor="reiq-location">Queensland city</Label>
                 <Input
                   id="reiq-location"
                   value={reiqLocation}
                   onChange={(event) => setReiqLocation(event.target.value)}
-                  placeholder="Brisbane"
+                  placeholder="Brisbane, Gold Coast, Cairns..."
                   autoComplete="off"
                 />
               </div>
+            </>
+          ) : scraperMode === 'australia_reinsw' ? (
+            <>
               <div className="space-y-2">
-                <Label htmlFor="reiq-max-pages">Pages</Label>
+                <Label htmlFor="reinsw-location">NSW city</Label>
                 <Input
-                  id="reiq-max-pages"
-                  type="number"
-                  min={1}
-                  max={25}
-                  value={reiqMaxPages}
-                  onChange={(event) => setReiqMaxPages(event.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="reiq-max-profiles">Profiles</Label>
-                <Input
-                  id="reiq-max-profiles"
-                  type="number"
-                  min={1}
-                  max={500}
-                  value={reiqMaxProfiles}
-                  onChange={(event) => setReiqMaxProfiles(event.target.value)}
+                  id="reinsw-location"
+                  value={reinswLocation}
+                  onChange={(event) => setReinswLocation(event.target.value)}
+                  placeholder="Sydney, Newcastle, Wollongong..."
+                  autoComplete="off"
                 />
               </div>
             </>
@@ -1864,7 +2234,7 @@ export function SalespersonPlacesLeadFinder() {
           <div className={scraperMode === 'realtor_ca' ? 'flex items-end lg:col-start-3 lg:row-start-1' : 'flex items-end'}>
             <Button type="submit" disabled={!canSubmit} className="w-full">
               {loading ? <Loader2 className="animate-spin" /> : <Search />}
-              {scraperMode === 'google_places' ? 'Search' : scraperMode === 'realtor_ca' ? 'Scraper' : 'Scrape'}
+              {primaryActionLabel}
             </Button>
           </div>
           <div className="flex items-end gap-2 lg:col-span-full">
@@ -1969,11 +2339,50 @@ export function SalespersonPlacesLeadFinder() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {prospects.map((lead) => (
-                <TableRow key={lead.placeId || `${lead.name}-${lead.formattedAddress}`}>
+              {prospects.map((lead, index) => {
+                const rowKey = leadRowKey(lead, index);
+                const isEditingName = editingLeadKey === rowKey;
+                const isSavingName = savingLeadNameKey === rowKey;
+                return (
+                <TableRow key={rowKey}>
                   <TableCell className="px-4 whitespace-normal">
                     <div className="max-w-[340px]">
-                      <p className="font-medium text-foreground">{lead.name}</p>
+                      {isEditingName ? (
+                        <Input
+                          value={editingLeadName}
+                          onChange={(event) => setEditingLeadName(event.target.value)}
+                          onBlur={(event) => void commitLeadNameEdit(lead, rowKey, event.currentTarget.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') {
+                              event.preventDefault();
+                              event.currentTarget.blur();
+                            }
+                            if (event.key === 'Escape') {
+                              event.preventDefault();
+                              skipNextLeadNameCommitRef.current = true;
+                              setEditingLeadKey(null);
+                              setEditingLeadName('');
+                            }
+                          }}
+                          aria-label={`Edit name for ${lead.name}`}
+                          className="h-8 max-w-full px-2 text-sm font-medium"
+                          autoFocus
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          className="block w-full rounded-sm text-left font-medium text-foreground hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          onClick={() => beginLeadNameEdit(lead, rowKey)}
+                          title="Click to edit name"
+                          aria-label={`Edit name for ${lead.name}`}
+                          disabled={isSavingName}
+                        >
+                          {lead.name}
+                          {isSavingName ? (
+                            <Loader2 className="ml-2 inline h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                          ) : null}
+                        </button>
+                      )}
                       <p className="mt-1 text-xs text-muted-foreground">
                         {lead.agencyBusinessName || lead.primaryType || lead.industry}
                       </p>
@@ -2100,7 +2509,8 @@ export function SalespersonPlacesLeadFinder() {
                     </div>
                   </TableCell>
                 </TableRow>
-              ))}
+              );
+              })}
             </TableBody>
           </Table>
         ) : (
@@ -2110,5 +2520,71 @@ export function SalespersonPlacesLeadFinder() {
         )}
       </section>
     </div>
+    <Dialog
+      open={saveDialogOpen}
+      onOpenChange={(open) => {
+        if (loading) return;
+        setSaveDialogOpen(open);
+        if (!open) setListNameError(null);
+      }}
+    >
+      <DialogContent className="overflow-hidden rounded-xl border-border p-0 shadow-xl sm:max-w-md">
+        <form onSubmit={handleSaveListSubmit}>
+          <DialogHeader className="border-b border-border px-5 py-4">
+            <div className="flex items-start gap-3 text-left">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+                <ListChecks className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <DialogTitle>Save lead list</DialogTitle>
+                <DialogDescription className="mt-1">
+                  Name this list before FLYR saves the leads.
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+
+          <div className="space-y-3 px-5 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="scraper-list-name">List name</Label>
+              <Input
+                id="scraper-list-name"
+                value={listNameDraft}
+                onChange={(event) => {
+                  setListNameDraft(event.target.value);
+                  if (listNameError) setListNameError(null);
+                }}
+                placeholder={defaultSaveListName}
+                autoFocus
+                maxLength={120}
+              />
+            </div>
+            {listNameError ? (
+              <p className="text-sm font-medium text-destructive">{listNameError}</p>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Uses the same naming style as your saved lead lists.
+              </p>
+            )}
+          </div>
+
+          <DialogFooter className="border-t border-border px-5 py-4">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setSaveDialogOpen(false)}
+              disabled={loading}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={loading}>
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ListChecks className="h-4 w-4" />}
+              Save leads
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }

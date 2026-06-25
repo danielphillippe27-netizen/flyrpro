@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { asUuid, getWorkspaceRole } from '@/app/api/routes/_lib';
+import { normalizePhoneNumber } from '@/lib/dialer/phone';
 import { createAdminClient } from '@/lib/supabase/server';
 import type { InboxItem, InboxItemSource, InboxItemStatus } from '@/types/database';
 
@@ -34,6 +35,13 @@ type DialerInboundMessageRow = {
   body: string;
   received_at: string;
   read_at: string | null;
+};
+
+type ContactSummaryRow = {
+  id: string;
+  full_name: string | null;
+  phone: string | null;
+  phone_e164: string | null;
 };
 
 type NotificationRow = {
@@ -77,14 +85,47 @@ function rowToInboxItem(row: InboxItem): ApiInboxItem {
   };
 }
 
-function smsToInboxItem(row: DialerInboundMessageRow): ApiInboxItem {
+function normalizedPhoneKey(value: string | null | undefined): string | null {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (!raw) return null;
+  const e164 = normalizePhoneNumber(raw).e164;
+  if (e164) return e164;
+  const digits = raw.replace(/\D/g, '');
+  if (digits) return `digits:${digits}`;
+  return `raw:${raw.toLowerCase()}`;
+}
+
+function displayContactName(contact: ContactSummaryRow | null | undefined, fallbackPhone: string): string {
+  const name = contact?.full_name?.trim();
+  if (name && normalizedPhoneKey(name) !== normalizedPhoneKey(fallbackPhone)) return name;
+  return fallbackPhone;
+}
+
+function smsConversationKey(
+  row: DialerInboundMessageRow,
+  phoneContactIds: Map<string, string>
+): string {
+  if (row.contact_id) return `contact:${row.contact_id}`;
+  const phoneKey = normalizedPhoneKey(row.from_number_e164);
+  const contactId = phoneKey ? phoneContactIds.get(phoneKey) : null;
+  if (contactId) return `contact:${contactId}`;
+  return phoneKey ? `phone:${phoneKey}` : `sms:${row.id}`;
+}
+
+function smsToInboxItem(
+  row: DialerInboundMessageRow,
+  contactsById: Map<string, ContactSummaryRow>,
+  readAt: string | null = row.read_at
+): ApiInboxItem {
+  const contact = row.contact_id ? contactsById.get(row.contact_id) : null;
+  const fromLabel = displayContactName(contact, row.from_number_e164);
   return {
     id: `sms:${row.id}`,
     source: 'sms',
-    title: 'Inbound text',
+    title: fromLabel,
     preview: row.body,
     body: row.body,
-    fromLabel: row.from_number_e164,
+    fromLabel,
     fromEmail: null,
     fromPhone: row.from_number_e164,
     toLabel: null,
@@ -92,10 +133,40 @@ function smsToInboxItem(row: DialerInboundMessageRow): ApiInboxItem {
     toPhone: row.to_number_e164,
     status: 'open',
     occurredAt: row.received_at,
-    readAt: row.read_at,
+    readAt,
     contactId: row.contact_id,
     href: row.contact_id ? `/leads/${row.contact_id}` : null,
   };
+}
+
+function collapseSmsConversations(
+  rows: DialerInboundMessageRow[],
+  contactsById: Map<string, ContactSummaryRow>
+): ApiInboxItem[] {
+  const phoneContactIds = new Map<string, string>();
+  for (const row of rows) {
+    const phoneKey = normalizedPhoneKey(row.from_number_e164);
+    if (phoneKey && row.contact_id && !phoneContactIds.has(phoneKey)) {
+      phoneContactIds.set(phoneKey, row.contact_id);
+    }
+  }
+
+  const groups = new Map<string, DialerInboundMessageRow[]>();
+  for (const row of rows) {
+    const key = smsConversationKey(row, phoneContactIds);
+    groups.set(key, [...(groups.get(key) ?? []), row]);
+  }
+
+  return Array.from(groups.values()).map((group) => {
+    const latest = group.reduce((current, candidate) =>
+      new Date(candidate.received_at).getTime() > new Date(current.received_at).getTime()
+        ? candidate
+        : current
+    );
+    const contactId = latest.contact_id ?? group.find((row) => row.contact_id)?.contact_id ?? null;
+    const readAt = group.every((row) => row.read_at) ? latest.read_at : null;
+    return smsToInboxItem({ ...latest, contact_id: contactId }, contactsById, readAt);
+  });
 }
 
 function notificationToInboxItem(row: NotificationRow): ApiInboxItem {
@@ -126,6 +197,15 @@ function notificationToInboxItem(row: NotificationRow): ApiInboxItem {
     contactId,
     href: contactId ? `/leads/${contactId}` : null,
   };
+}
+
+function notificationHasBackedInboxItem(row: NotificationRow): boolean {
+  const data = row.data ?? {};
+  return (
+    row.type === 'dialer_inbound_sms' ||
+    typeof data.inboundMessageId === 'string' ||
+    typeof data.inboxItemId === 'string'
+  );
 }
 
 function filterAndSort(items: ApiInboxItem[], sourceFilter: string, statusFilter: string, limit: number): ApiInboxItem[] {
@@ -170,6 +250,8 @@ export async function GET(request: NextRequest) {
     }
 
     const salespersonId = typeof salesperson?.id === 'string' ? salesperson.id : null;
+    const sourceIsSms = sourceFilter === 'all' || sourceFilter === 'sms';
+    const inboundTextLimit = sourceIsSms ? Math.min(limit * 5, 500) : limit;
     let storedInboxQuery = admin
       .from('inbox_items')
       .select('*')
@@ -194,7 +276,7 @@ export async function GET(request: NextRequest) {
         .limit(limit),
       inboundTextsQuery
         .order('received_at', { ascending: false })
-        .limit(limit),
+        .limit(inboundTextLimit),
       admin
         .from('notifications')
         .select('id, type, title, body, data, read_at, created_at')
@@ -208,11 +290,32 @@ export async function GET(request: NextRequest) {
       if (result.error) return NextResponse.json({ error: result.error.message }, { status: 500 });
     }
 
+    const inboundTextRows = (inboundTexts.data ?? []) as DialerInboundMessageRow[];
+    const contactIds = Array.from(new Set(
+      inboundTextRows
+        .map((row) => row.contact_id)
+        .filter((value): value is string => Boolean(value))
+    ));
+    let contactsById = new Map<string, ContactSummaryRow>();
+    if (contactIds.length > 0) {
+      const { data: contacts, error: contactsError } = await admin
+        .from('contacts')
+        .select('id, full_name, phone, phone_e164')
+        .in('id', contactIds);
+
+      if (contactsError) return NextResponse.json({ error: contactsError.message }, { status: 500 });
+      contactsById = new Map(
+        ((contacts ?? []) as ContactSummaryRow[]).map((contact) => [contact.id, contact])
+      );
+    }
+
     const items = filterAndSort(
       [
         ...((storedInbox.data ?? []) as InboxItem[]).map(rowToInboxItem),
-        ...((inboundTexts.data ?? []) as DialerInboundMessageRow[]).map(smsToInboxItem),
-        ...((notifications.data ?? []) as NotificationRow[]).map(notificationToInboxItem),
+        ...collapseSmsConversations(inboundTextRows, contactsById),
+        ...((notifications.data ?? []) as NotificationRow[])
+          .filter((row) => !notificationHasBackedInboxItem(row))
+          .map(notificationToInboxItem),
       ],
       sourceFilter,
       statusFilter,
@@ -276,11 +379,34 @@ export async function PATCH(request: NextRequest) {
     }
 
     if (kind === 'sms') {
-      const { error } = await admin
+      const { data: message, error: messageError } = await admin
+        .from('dialer_inbound_messages')
+        .select('id, contact_id, from_number_e164')
+        .eq('workspace_id', workspaceId)
+        .eq('id', id)
+        .maybeSingle();
+
+      if (messageError) return NextResponse.json({ error: messageError.message }, { status: 500 });
+      if (!message) return NextResponse.json({ error: 'Inbox item not found' }, { status: 404 });
+
+      let updateQuery = admin
         .from('dialer_inbound_messages')
         .update({ read_at: now })
-        .eq('workspace_id', workspaceId)
-        .eq('id', id);
+        .eq('workspace_id', workspaceId);
+
+      const contactId = typeof message.contact_id === 'string' ? message.contact_id : null;
+      const fromNumber = typeof message.from_number_e164 === 'string' ? message.from_number_e164 : null;
+      if (contactId && fromNumber) {
+        updateQuery = updateQuery.or(`contact_id.eq.${contactId},from_number_e164.eq.${fromNumber}`);
+      } else if (contactId) {
+        updateQuery = updateQuery.eq('contact_id', contactId);
+      } else if (fromNumber) {
+        updateQuery = updateQuery.eq('from_number_e164', fromNumber);
+      } else {
+        updateQuery = updateQuery.eq('id', id);
+      }
+
+      const { error } = await updateQuery;
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
       return NextResponse.json({ ok: true });
     }

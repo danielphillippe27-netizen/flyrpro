@@ -37,8 +37,8 @@ function formatTelnyxSipDestination(username: string | null | undefined): string
   if (!cleaned) return null;
 
   const withoutScheme = cleaned.replace(/^sip:/i, '');
-  if (withoutScheme.includes('@')) return withoutScheme;
-  return `${withoutScheme}@sip.telnyx.com`;
+  const destination = withoutScheme.includes('@') ? withoutScheme : `${withoutScheme}@sip.telnyx.com`;
+  return `sip:${destination}`;
 }
 
 export async function getTelnyxWebRtcClientDestination(): Promise<string | null> {

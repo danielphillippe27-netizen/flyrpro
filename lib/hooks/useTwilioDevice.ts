@@ -98,6 +98,8 @@ type IncomingCallInfo = {
 
 const MICROPHONE_DEVICE_STORAGE_KEY = 'flyr.dialer.microphoneDeviceId';
 const PREFERRED_MICROPHONE_LABELS = ['logitech zone 300', 'zone 300'];
+const BLUETOOTH_MICROPHONE_REOPEN_ATTEMPTS = 4;
+const MICROPHONE_REOPEN_RETRY_MS = 750;
 
 function formatMediaDevice(device: MediaDeviceInfo) {
   return {
@@ -108,12 +110,43 @@ function formatMediaDevice(device: MediaDeviceInfo) {
   };
 }
 
-function getErrorMessage(error: unknown, fallback: string) {
-  return error instanceof Error ? error.message : fallback;
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string' && error.trim()) return error.trim();
+  if (!error || typeof error !== 'object') return fallback;
+
+  const record = error as Record<string, unknown>;
+  for (const field of ['message', 'description', 'reason', 'detail']) {
+    const value = record[field];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+
+  if (typeof record.error === 'string' && record.error.trim()) return record.error.trim();
+  if (record.error && typeof record.error === 'object') {
+    const message = getErrorMessage(record.error, '');
+    if (message) return message;
+  }
+
+  if (record.warning && typeof record.warning === 'object') {
+    const message = getErrorMessage(record.warning, '');
+    if (message) return message;
+  }
+
+  return fallback;
 }
 
 function stopMediaStream(stream: MediaStream | null) {
   stream?.getTracks().forEach((track) => track.stop());
+}
+
+function isLiveAudioStream(stream: MediaStream | null) {
+  return stream?.getAudioTracks().some((track) => track.readyState === 'live') ?? false;
+}
+
+function wait(ms: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
 }
 
 function getTwilioErrorDetails(error: unknown) {
@@ -157,6 +190,24 @@ function getTelnyxNotificationField(notification: unknown, field: 'displayName' 
   if (!notification || typeof notification !== 'object') return null;
   const value = (notification as Record<string, unknown>)[field];
   return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function isTelnyxInboundRingingUpdate(options: {
+  call: TelnyxCallLike | null;
+  notificationType: string | null;
+  state: string;
+  direction: string;
+}) {
+  const isRingingState =
+    options.state.includes('ring') ||
+    options.state.includes('early') ||
+    options.state.includes('trying') ||
+    options.state.includes('requesting');
+  if (!options.call || !isRingingState) return false;
+  if (options.direction.includes('outbound') || options.direction === 'out') return false;
+  if (options.direction.includes('inbound') || options.direction === 'in') return true;
+
+  return options.notificationType === 'callUpdate' && options.state.includes('ring');
 }
 
 function getStoredMicrophoneDeviceId() {
@@ -222,6 +273,16 @@ function chooseMicrophone(
   };
 }
 
+function isSameMicrophoneLabel(deviceLabel: string, selectedLabel: string) {
+  const normalizedDeviceLabel = deviceLabel.toLowerCase();
+  const normalizedSelectedLabel = selectedLabel.toLowerCase();
+  return Boolean(normalizedDeviceLabel) && (
+    normalizedDeviceLabel === normalizedSelectedLabel ||
+    normalizedDeviceLabel.includes(normalizedSelectedLabel) ||
+    normalizedSelectedLabel.includes(normalizedDeviceLabel)
+  );
+}
+
 function getTwilioInputDevices(device: VoiceDeviceLike) {
   return Array.from(device.audio?.availableInputDevices?.values() ?? []);
 }
@@ -261,6 +322,7 @@ export function useDialerDevice() {
   const [isMuted, setIsMuted] = useState(false);
   const [microphoneGranted, setMicrophoneGranted] = useState(false);
   const [deviceError, setDeviceError] = useState<string | null>(null);
+  const [deviceWarning, setDeviceWarning] = useState<string | null>(null);
   const [tokenExpiresAt, setTokenExpiresAt] = useState<string | null>(null);
   const [endedCount, setEndedCount] = useState(0);
   const [fromNumber, setFromNumber] = useState<string | null>(null);
@@ -370,6 +432,106 @@ export function useDialerDevice() {
     });
   };
 
+  const resolveCurrentMicrophone = async (): Promise<SelectedMicrophone | null> => {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const audioInputs = devices.filter((device) => device.kind === 'audioinput');
+    const selectedDevice = selectedMicrophone?.deviceId
+      ? audioInputs.find((device) => device.deviceId === selectedMicrophone.deviceId)
+      : null;
+    if (selectedDevice && selectedMicrophone) {
+      return {
+        ...selectedMicrophone,
+        label: selectedDevice.label || selectedMicrophone.label,
+      };
+    }
+
+    const selectedLabel = selectedMicrophone?.label ?? '';
+    const labelMatchedDevice = selectedLabel
+      ? audioInputs.find((device) => isSameMicrophoneLabel(device.label, selectedLabel))
+      : null;
+    const preferredDevice = audioInputs.find((device) => {
+      const label = device.label.toLowerCase();
+      return PREFERRED_MICROPHONE_LABELS.some((preferredLabel) => label.includes(preferredLabel));
+    });
+    const nextDevice = labelMatchedDevice ?? preferredDevice ?? null;
+    if (!nextDevice) return selectedMicrophone;
+
+    const nextMicrophone: SelectedMicrophone = {
+      deviceId: nextDevice.deviceId,
+      label: nextDevice.label || selectedMicrophone?.label || 'Selected microphone',
+      source: selectedMicrophone?.source ?? 'preferred',
+      browserTrackDeviceId: selectedMicrophone?.browserTrackDeviceId ?? null,
+    };
+    try {
+      window.localStorage.setItem(MICROPHONE_DEVICE_STORAGE_KEY, nextMicrophone.deviceId);
+    } catch {
+      // Local storage is a convenience for headset stickiness.
+    }
+    setSelectedMicrophone(nextMicrophone);
+    return nextMicrophone;
+  };
+
+  const ensureSelectedInputStream = async (reason: string): Promise<MediaStream | null> => {
+    const currentStream = selectedInputStreamRef.current;
+    if (isLiveAudioStream(currentStream)) return currentStream;
+    if (typeof window === 'undefined' || !navigator.mediaDevices?.getUserMedia) return currentStream;
+
+    if (currentStream) {
+      stopMicMeter();
+      stopMediaStream(currentStream);
+      selectedInputStreamRef.current = null;
+    }
+
+    const microphone = await resolveCurrentMicrophone();
+    const isBluetoothLike = (microphone?.label ?? '').toLowerCase().includes('bluetooth') ||
+      PREFERRED_MICROPHONE_LABELS.some((preferredLabel) => (microphone?.label ?? '').toLowerCase().includes(preferredLabel));
+    const attempts = isBluetoothLike ? BLUETOOTH_MICROPHONE_REOPEN_ATTEMPTS : 1;
+    let lastError: unknown = null;
+
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      if (attempt > 1) await wait(MICROPHONE_REOPEN_RETRY_MS);
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: microphone?.deviceId
+            ? {
+                deviceId: { exact: microphone.deviceId },
+              }
+            : true,
+        });
+        selectedInputStreamRef.current = stream;
+        setMicrophoneGranted(true);
+        setDeviceWarning(null);
+        startMicMeter(stream, microphone?.label ?? null);
+        console.info('[dialer/device] microphone stream refreshed', {
+          reason,
+          attempt,
+          selectedMicrophone: microphone,
+          track: stream.getAudioTracks()[0]
+            ? {
+                label: stream.getAudioTracks()[0].label,
+                readyState: stream.getAudioTracks()[0].readyState,
+                settings: stream.getAudioTracks()[0].getSettings(),
+              }
+            : null,
+        });
+        return stream;
+      } catch (error) {
+        lastError = error;
+        console.warn('[dialer/device] failed to refresh microphone stream', {
+          reason,
+          attempt,
+          selectedMicrophone: microphone,
+          error: getTwilioErrorDetails(error),
+        });
+      }
+    }
+
+    const microphoneLabel = microphone?.label || 'selected microphone';
+    const message = `Could not reopen ${microphoneLabel} for the next call: ${getErrorMessage(lastError, 'microphone unavailable')}`;
+    setDeviceWarning(message);
+    throw new Error(message);
+  };
+
   const scheduleTelnyxTokenRefresh = (expiresAt: string, workspaceId: string, tabId: string) => {
     clearTelnyxTokenTimer();
     const expiresAtMs = Date.parse(expiresAt);
@@ -435,6 +597,7 @@ export function useDialerDevice() {
   const initialize = async (workspaceId: string, tabId: string) => {
     setSetupState('initializing');
     setDeviceError(null);
+    setDeviceWarning(null);
     setSelectedMicrophone(null);
 
     if (typeof window === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
@@ -561,7 +724,7 @@ export function useDialerDevice() {
         client.on('telnyx.warning', (warning) => {
           const message = getErrorMessage(warning, 'Telnyx browser softphone warning.');
           console.warn('[dialer/device] Telnyx client warning', warning);
-          setDeviceError(message);
+          setDeviceWarning(message);
         });
 
         client.on('telnyx.notification', (notification) => {
@@ -584,7 +747,12 @@ export function useDialerDevice() {
             call?.direction ??
             ''
           ).toLowerCase();
-          const isInbound = direction.includes('inbound') || direction === 'in';
+          const isInboundRinging = isTelnyxInboundRingingUpdate({
+            call,
+            notificationType,
+            state,
+            direction,
+          });
           if (call) {
             telnyxCallRef.current = call;
           }
@@ -608,7 +776,7 @@ export function useDialerDevice() {
           }
 
           if (state.includes('ring') || state.includes('early') || state.includes('trying') || state.includes('requesting')) {
-            if (isInbound) {
+            if (isInboundRinging) {
               updateIncomingCall({ name: displayName, number: displayNumber });
               setCallPhase('idle');
               return;
@@ -757,6 +925,7 @@ export function useDialerDevice() {
       stopMediaStream(selectedInputStreamRef.current);
       selectedInputStreamRef.current = null;
       setSetupState('error');
+      setDeviceWarning(null);
       setDeviceError(getErrorMessage(error, 'Failed to initialize browser calling.'));
     }
   };
@@ -772,9 +941,11 @@ export function useDialerDevice() {
       }
 
       setDeviceError(null);
+      setDeviceWarning(null);
       setCallPhase('connecting');
       hangUpRequestedRef.current = false;
       try {
+        const callInputStream = await ensureSelectedInputStream('telnyx outbound call');
         console.info('[dialer/device] starting Telnyx WebRTC call', {
           callRequestId,
           destinationNumber,
@@ -786,12 +957,12 @@ export function useDialerDevice() {
           callerNumber: options.fromNumber ?? fromNumber ?? undefined,
           id: callRequestId,
           clientState: createTelnyxClientState(callRequestId),
-          localStream: selectedInputStreamRef.current ?? undefined,
+          localStream: callInputStream ?? undefined,
           remoteElement: getTelnyxRemoteAudioElement() ?? undefined,
           audio: true,
         });
         telnyxCallRef.current = call;
-        startMicMeter(call.localStream ?? selectedInputStreamRef.current, selectedMicrophone?.label ?? null);
+        startMicMeter(call.localStream ?? callInputStream, selectedMicrophone?.label ?? null);
         playTelnyxRemoteAudio();
         if (hangUpRequestedRef.current) {
           await call.hangup().catch(() => undefined);
@@ -815,10 +986,13 @@ export function useDialerDevice() {
     }
 
     setDeviceError(null);
+    setDeviceWarning(null);
     setCallPhase('connecting');
     hangUpRequestedRef.current = false;
     let connection: VoiceConnectionLike;
+    let callInputStream: MediaStream | null = null;
     try {
+      callInputStream = await ensureSelectedInputStream('Twilio outbound call');
       console.info('[dialer/device] starting Twilio call', {
         callRequestId,
         selectedMicrophone,
@@ -826,6 +1000,14 @@ export function useDialerDevice() {
           ? formatMediaDevice(deviceRef.current.audio.inputDevice)
           : null,
       });
+      if (selectedMicrophone?.deviceId && deviceRef.current.audio?.setInputDevice) {
+        await deviceRef.current.audio.setInputDevice(selectedMicrophone.deviceId).catch((error) => {
+          console.warn('[dialer/device] Twilio setInputDevice failed while refreshing stream', {
+            error: getTwilioErrorDetails(error),
+            selectedMicrophone,
+          });
+        });
+      }
       connection = await deviceRef.current.connect({
         params: {
           To: callRequestId,
@@ -840,7 +1022,7 @@ export function useDialerDevice() {
       throw error;
     }
     connectionRef.current = connection;
-    startMicMeter(connection.getLocalStream?.() ?? selectedInputStreamRef.current, selectedMicrophone?.label ?? null);
+    startMicMeter(connection.getLocalStream?.() ?? callInputStream, selectedMicrophone?.label ?? null);
     if (hangUpRequestedRef.current) {
       connection.disconnect();
       connectionRef.current = null;
@@ -882,6 +1064,7 @@ export function useDialerDevice() {
   const answerIncomingCall = async () => {
     if (providerRef.current !== 'telnyx' || !telnyxCallRef.current?.answer) return;
     setDeviceError(null);
+    setDeviceWarning(null);
     setCallPhase('connecting');
     try {
       getTelnyxRemoteAudioElement();
@@ -944,6 +1127,7 @@ export function useDialerDevice() {
     micTrackLabel,
     micTrackState,
     deviceError,
+    deviceWarning,
     tokenExpiresAt,
     endedCount,
     fromNumber,

@@ -19,12 +19,19 @@ const DIALER_VIDEO_CTA_AT_SECONDS =
     : 85;
 
 export const metadata: Metadata = {
-  title: 'Demo 1 | FLYR',
+  title: 'FLYR: Real estate team demo',
   description: 'Watch the FLYR demo and start a 14 day free trial. No credit card.',
   openGraph: {
-    title: 'FLYR Demo 1',
+    title: 'FLYR: Real estate team demo',
     description: 'Watch the demo and start a 14 day free trial. No credit card.',
     url: 'https://www.flyrpro.app/demo-1',
+    images: ['/opengraph-image'],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'FLYR: Real estate team demo',
+    description: 'Watch the demo and start a 14 day free trial. No credit card.',
+    images: ['/twitter-image'],
   },
 };
 

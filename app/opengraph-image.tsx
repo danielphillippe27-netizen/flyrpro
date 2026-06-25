@@ -1,6 +1,6 @@
 import { ImageResponse } from 'next/og';
 
-export const alt = 'FLYR';
+export const alt = 'FLYR 3D prospecting map';
 export const size = {
   width: 1200,
   height: 630,
@@ -52,7 +52,7 @@ export default function OpenGraphImage() {
               color: 'rgba(255,255,255,0.78)',
             }}
           >
-            Door-to-door software
+            3D prospecting map
           </div>
         </div>
       </div>

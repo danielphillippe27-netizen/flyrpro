@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import {
+  getTelnyxAlphanumericSenderId,
   getTelnyxApiKey,
   getTelnyxConnectionId,
   getTelnyxMessagingProfileId,
@@ -8,6 +9,7 @@ import {
   getTelnyxTelephonyCredentialId,
   getTelnyxWebhookBaseUrl,
 } from '@/lib/dialer/env';
+import { normalizePhoneNumber } from '@/lib/dialer/phone';
 
 const TELNYX_API_BASE_URL = 'https://api.telnyx.com/v2';
 const ED25519_SPKI_DER_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
@@ -77,7 +79,16 @@ function normalizeBaseUrl(value: string | null | undefined): string | null {
 function getTelnyxErrorMessage(payload: unknown, fallback: string): string {
   const envelope = payload as TelnyxApiEnvelope<unknown>;
   const error = envelope.errors?.[0];
-  return error?.detail?.trim() || error?.title?.trim() || fallback;
+  const message = error?.detail?.trim() || error?.title?.trim() || fallback;
+  if (error?.code === '40306' || message.toLowerCase().includes("doesn't have an associated alphanumeric sender id")) {
+    return 'Telnyx needs a registered alphanumeric sender ID on this messaging profile before FLYR can text this destination. Add it in Telnyx, then set TELNYX_ALPHANUMERIC_SENDER_ID.';
+  }
+  return message;
+}
+
+function shouldUseAlphanumericSender(toNumber: string) {
+  const countryCode = normalizePhoneNumber(toNumber).countryCode;
+  return Boolean(countryCode && !['US', 'CA', 'PR'].includes(countryCode));
 }
 
 async function telnyxFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -204,15 +215,22 @@ export async function sendTelnyxSms(params: {
   body: string;
   webhookUrl: string;
 }): Promise<TelnyxSmsResult> {
+  const messagingProfileId = getTelnyxMessagingProfileId();
+  const alphaSenderId = getTelnyxAlphanumericSenderId();
+  const useAlphanumericSender = shouldUseAlphanumericSender(params.to);
+  if (useAlphanumericSender && alphaSenderId && !messagingProfileId) {
+    throw new Error('TELNYX_MESSAGING_PROFILE_ID is required to send international SMS with TELNYX_ALPHANUMERIC_SENDER_ID.');
+  }
+
   const data = await telnyxFetch<Record<string, unknown>>('/messages', {
     method: 'POST',
     body: JSON.stringify({
-      from: params.from,
+      from: useAlphanumericSender && alphaSenderId ? alphaSenderId : params.from,
       to: params.to,
       text: params.body,
       webhook_url: params.webhookUrl,
       use_profile_webhooks: false,
-      ...(getTelnyxMessagingProfileId() ? { messaging_profile_id: getTelnyxMessagingProfileId() } : {}),
+      ...(messagingProfileId ? { messaging_profile_id: messagingProfileId } : {}),
     }),
   });
 
@@ -224,6 +242,13 @@ export async function sendTelnyxSms(params: {
 }
 
 export async function createTelnyxVoiceToken(): Promise<{
+  token: string;
+  expiresAt: string;
+  telephonyCredentialId: string;
+}>;
+export async function createTelnyxVoiceToken(options: {
+  telephonyCredentialId?: string | null;
+}): Promise<{
   token: string;
   expiresAt: string;
   telephonyCredentialId: string;

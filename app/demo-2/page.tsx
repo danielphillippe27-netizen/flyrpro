@@ -11,12 +11,19 @@ const DEMO_TWO_STREAM_VIDEO_UID =
 const DEMO_TWO_CTA_AT_SECONDS = 77;
 
 export const metadata: Metadata = {
-  title: 'Demo 2 | Individual Agent - Listing | FLYR',
+  title: 'FLYR: Realtor Demo',
   description: 'Watch the FLYR individual agent listing demo and start a 14 day free trial. No credit card.',
   openGraph: {
-    title: 'FLYR Demo 2: Individual Agent - Listing',
+    title: 'FLYR: Realtor Demo',
     description: 'Watch the individual agent listing demo and start a 14 day free trial. No credit card.',
     url: 'https://www.flyrpro.app/demo-2',
+    images: ['/opengraph-image'],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'FLYR: Realtor Demo',
+    description: 'Watch the individual agent listing demo and start a 14 day free trial. No credit card.',
+    images: ['/twitter-image'],
   },
 };
 

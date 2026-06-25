@@ -36,17 +36,40 @@ type ReiqScrapeOptions = {
   maxPages?: number;
   maxProfiles?: number;
   delayMs?: number;
+  excludeSourceUrls?: string[];
 };
 
-type BrowserPage = Awaited<ReturnType<Awaited<ReturnType<typeof import('playwright').chromium.launch>>['newPage']>>;
-
 const PROFILE_URL_RE = /(?:Agent-Profile\.aspx|map-profile)\?ContactKey=/i;
+const REIQ_SEARCH_URL =
+  'https://members.reiq.com/REIQ/Shared_Content/Smart-Suite/Smart-Maps/Public/Find-an-Agent-and-Agency.aspx';
+const REIQ_API_ORIGIN = 'https://members.reiq.com';
+const REIQ_USER_AGENT =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36';
 const EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
 const PHONE_RE = /(?:\+?61\s?)?(?:0)?(?:\d[\s().-]?){8,12}\d/g;
 const POSTCODE_RE = /\b([A-Z]{2,3})\s+(\d{4})\b/;
 const PERSON_NAME_RE = /^[A-Z][a-zA-Z'’.-]+(?:\s+[A-Z][a-zA-Z'’.-]+){1,4}$/;
 const TEAM_RE = /\b(team|group|partners|collective)\b/i;
 const PROPERTY_MANAGEMENT_RE = /\b(property management|rentals?|tenanc(?:y|ies)|landlord|management rights|PM\b)\b/i;
+const REIQ_QUERY_PAGE_SIZE = 500;
+const REIQ_FETCH_TIMEOUT_MS = 15_000;
+const REIQ_PROFILE_BATCH_SIZE = 12;
+
+const AUSTRALIA_LOCATION_BOUNDS: Record<string, { minLng: number; maxLng: number; minLat: number; maxLat: number }> = {
+  qld: { minLng: 137, maxLng: 154.2, minLat: -29.3, maxLat: -9 },
+  queensland: { minLng: 137, maxLng: 154.2, minLat: -29.3, maxLat: -9 },
+  brisbane: { minLng: 152.7, maxLng: 153.3, minLat: -27.8, maxLat: -27.1 },
+  'gold coast': { minLng: 153.1, maxLng: 153.7, minLat: -28.3, maxLat: -27.7 },
+  'sunshine coast': { minLng: 152.7, maxLng: 153.4, minLat: -27.1, maxLat: -26.3 },
+  toowoomba: { minLng: 151.75, maxLng: 152.15, minLat: -27.75, maxLat: -27.35 },
+  cairns: { minLng: 145.5, maxLng: 146.1, minLat: -17.2, maxLat: -16.6 },
+  townsville: { minLng: 146.55, maxLng: 147.1, minLat: -19.55, maxLat: -18.95 },
+  mackay: { minLng: 148.9, maxLng: 149.35, minLat: -21.35, maxLat: -20.95 },
+  rockhampton: { minLng: 150.3, maxLng: 150.75, minLat: -23.6, maxLat: -23.1 },
+  bundaberg: { minLng: 152.1, maxLng: 152.55, minLat: -24.95, maxLat: -24.65 },
+  ipswich: { minLng: 152.55, maxLng: 153.0, minLat: -27.85, maxLat: -27.45 },
+  logan: { minLng: 152.85, maxLng: 153.25, minLat: -27.85, maxLat: -27.55 },
+};
 
 type ReiqMapItem = {
   ContactKey?: string;
@@ -67,6 +90,17 @@ type ReiqMapItem = {
 type ReiqProfileSeed = {
   sourceUrl: string;
   mapItem?: ReiqMapItem;
+};
+
+type ReiqApiSession = {
+  cookie: string;
+  requestVerificationToken: string;
+  contentKey: string;
+  contentItemKey: string;
+};
+
+type ReiqMapSettings = {
+  mapsDataIqa?: string;
 };
 
 function compactSpaces(value: string | null | undefined): string {
@@ -127,6 +161,189 @@ function websiteDomain(value: string): string {
 
 function normalizeText(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function extractInputValue(html: string, id: string): string {
+  const idPattern = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = html.match(new RegExp(`id=["']${idPattern}["'][^>]*value=["']([^"']*)["']`, 'i'));
+  return decodeHtmlEntities(match?.[1] ?? '');
+}
+
+function getSetCookieHeaders(headers: Headers): string[] {
+  const headerWithCookieApi = headers as Headers & { getSetCookie?: () => string[] };
+  const values = headerWithCookieApi.getSetCookie?.();
+  if (values?.length) return values;
+
+  const combined = headers.get('set-cookie');
+  if (!combined) return [];
+  return combined.split(/,(?=\s*[^;,=\s]+=[^;,]+)/g);
+}
+
+function cookieHeaderFromSetCookie(headers: Headers): string {
+  return getSetCookieHeaders(headers)
+    .map((value) => value.split(';')[0]?.trim())
+    .filter(Boolean)
+    .join('; ');
+}
+
+function jsonListValues<T = unknown>(value: unknown): T[] {
+  const items = (value as { Items?: { $values?: T[] } } | null)?.Items?.$values;
+  return Array.isArray(items) ? items : [];
+}
+
+async function fetchWithTimeout(url: string | URL, init: RequestInit = {}, timeoutMs = REIQ_FETCH_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error(`REIQ request timed out after ${Math.round(timeoutMs / 1000)}s.`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function resolveLocationBounds(location: string | null | undefined) {
+  const normalized = normalizeText(location ?? '');
+  if (!normalized) return AUSTRALIA_LOCATION_BOUNDS.queensland;
+
+  const exact = AUSTRALIA_LOCATION_BOUNDS[normalized];
+  if (exact) return exact;
+
+  const matchingKey = Object.keys(AUSTRALIA_LOCATION_BOUNDS).find((key) => normalized.includes(key));
+  return matchingKey ? AUSTRALIA_LOCATION_BOUNDS[matchingKey] : AUSTRALIA_LOCATION_BOUNDS.queensland;
+}
+
+async function fetchReiqSearchSession(startUrl: string): Promise<ReiqApiSession> {
+  const response = await fetchWithTimeout(PROFILE_URL_RE.test(startUrl) ? REIQ_SEARCH_URL : startUrl, {
+    headers: {
+      accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'user-agent': REIQ_USER_AGENT,
+    },
+  });
+  if (!response.ok) throw new Error(`REIQ search page request failed (${response.status}).`);
+
+  const html = await response.text();
+  const requestVerificationToken = extractInputValue(html, '__RequestVerificationToken');
+  const contentKey = extractInputValue(html, 'x-contentKey');
+  const contentItemKey = extractInputValue(html, 'x-contentItemKey');
+  const cookie = cookieHeaderFromSetCookie(response.headers);
+
+  if (!requestVerificationToken || !contentKey || !contentItemKey || !cookie) {
+    throw new Error('REIQ search page did not return the map session details.');
+  }
+
+  return { cookie, requestVerificationToken, contentKey, contentItemKey };
+}
+
+async function fetchReiqJson<T>(path: string, session: ReiqApiSession, params: Record<string, string>): Promise<T> {
+  const url = new URL(path, REIQ_API_ORIGIN);
+  for (const [key, value] of Object.entries(params)) {
+    if (value) url.searchParams.set(key, value);
+  }
+
+  const response = await fetchWithTimeout(url, {
+    headers: {
+      accept: 'application/json, text/plain, */*',
+      cookie: session.cookie,
+      referer: REIQ_SEARCH_URL,
+      requestverificationtoken: session.requestVerificationToken,
+      'user-agent': REIQ_USER_AGENT,
+    },
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`REIQ data request failed (${response.status})${text ? `: ${compactSpaces(text).slice(0, 180)}` : ''}`);
+  }
+
+  return response.json() as Promise<T>;
+}
+
+async function fetchReiqMapSettings(session: ReiqApiSession): Promise<ReiqMapSettings> {
+  const payload = await fetchReiqJson<unknown>('/api/contentitem', session, {
+    contentKey: session.contentKey,
+    contentItemKey: session.contentItemKey,
+  });
+  const [contentItem] = jsonListValues<{ Data?: { Settings?: ReiqMapSettings } }>(payload);
+  const settings = contentItem?.Data?.Settings;
+  if (!settings?.mapsDataIqa) throw new Error('REIQ map settings did not include a lead query.');
+  return settings;
+}
+
+async function fetchReiqMapItems(
+  session: ReiqApiSession,
+  queryName: string,
+  bounds: ReturnType<typeof resolveLocationBounds>,
+  options: ReiqScrapeOptions
+): Promise<{ items: ReiqMapItem[]; queryCount: number }> {
+  const maxPages = Math.max(1, options.maxPages ?? 1);
+  const maxProfiles = Math.max(1, options.maxProfiles ?? REIQ_QUERY_PAGE_SIZE);
+  const excludedSourceUrls = new Set((options.excludeSourceUrls ?? []).map(compactSpaces).filter(Boolean));
+  const items: ReiqMapItem[] = [];
+  let queryCount = 0;
+
+  for (let pageIndex = 0; pageIndex < maxPages && items.length < maxProfiles; pageIndex += 1) {
+    const limit = excludedSourceUrls.size > 0 ? REIQ_QUERY_PAGE_SIZE : Math.min(REIQ_QUERY_PAGE_SIZE, maxProfiles - items.length);
+    const payload = await fetchReiqJson<unknown>('/api/query', session, {
+      queryname: queryName,
+      Longitude: `between:"${bounds.minLng}""${bounds.maxLng}"`,
+      Latitude: `between:"${bounds.minLat}""${bounds.maxLat}"`,
+      limit: String(limit),
+      offset: String(pageIndex * REIQ_QUERY_PAGE_SIZE),
+    });
+    queryCount += 1;
+
+    const pageItems = jsonListValues<ReiqMapItem>(payload);
+    for (const item of pageItems) {
+      const contactKey = compactSpaces(item.ContactKey);
+      if (!contactKey) continue;
+      if (excludedSourceUrls.has(reiqProfileUrl(contactKey))) continue;
+      items.push(item);
+      if (items.length >= maxProfiles) break;
+    }
+
+    const hasNext = Boolean((payload as { HasNext?: boolean } | null)?.HasNext);
+    if (!hasNext || pageItems.length === 0) break;
+  }
+
+  return { items, queryCount };
+}
+
+async function collectProfileSeedsWithReiqApi(options: ReiqScrapeOptions): Promise<{
+  seeds: ReiqProfileSeed[];
+  queryCount: number;
+}> {
+  if (PROFILE_URL_RE.test(options.startUrl)) {
+    return { seeds: [{ sourceUrl: normalizeUrl(options.startUrl, options.startUrl) }], queryCount: 1 };
+  }
+
+  const session = await fetchReiqSearchSession(options.startUrl);
+  const settings = await fetchReiqMapSettings(session);
+  const bounds = resolveLocationBounds(options.location);
+  const { items, queryCount } = await fetchReiqMapItems(session, settings.mapsDataIqa ?? '', bounds, options);
+  const excludedSourceUrls = new Set((options.excludeSourceUrls ?? []).map(compactSpaces).filter(Boolean));
+  const seen = new Set<string>();
+  const seeds = items
+    .filter((item) => compactSpaces(item.ContactKey))
+    .map((item) => ({
+      sourceUrl: reiqProfileUrl(compactSpaces(item.ContactKey)),
+      mapItem: item,
+    }))
+    .filter((seed) => {
+      if (excludedSourceUrls.has(seed.sourceUrl)) return false;
+      if (seen.has(seed.sourceUrl)) return false;
+      seen.add(seed.sourceUrl);
+      return true;
+    });
+
+  return { seeds, queryCount };
 }
 
 function splitNameAgency(title: string, subheading: string): { fullName: string; agencyBusinessName: string } {
@@ -249,141 +466,6 @@ function classifyLead(lead: Partial<ReiqLead>, pageText: string): ReiqLeadClassi
   return lead.agencyBusinessName && !lead.name ? 'agency' : 'individual_agent';
 }
 
-async function waitForPageSettle(page: BrowserPage): Promise<void> {
-  try {
-    await page.waitForLoadState('networkidle', { timeout: 10_000 });
-  } catch {
-    // Some ASP.NET pages keep background requests open; a short settle wait is enough.
-  }
-  await page.waitForTimeout(750);
-}
-
-async function collectProfileLinks(page: BrowserPage, baseUrl: string): Promise<string[]> {
-  const hrefs = await page.locator('a[href]').evaluateAll((links) =>
-    links
-      .map((link) => link.getAttribute('href') ?? '')
-      .filter((href) => /(?:Agent-Profile\.aspx|map-profile)\?ContactKey=/i.test(href))
-  );
-
-  return Array.from(new Set(hrefs.map((href) => normalizeUrl(href, baseUrl)))).sort();
-}
-
-async function searchReiqLocation(page: BrowserPage, location: string): Promise<ReiqProfileSeed[]> {
-  const searchText = compactSpaces(location);
-  if (!searchText) return [];
-
-  let mapDataText = '';
-  const mapDataResponse = page
-    .waitForResponse((response) => response.url().includes('Smart%20Maps%20API%20-%20Agent%20Map%20Data'), {
-      timeout: 45_000,
-    })
-    .then(async (response) => {
-      mapDataText = await response.text();
-    })
-    .catch(() => undefined);
-
-  const input = page.locator('#location-input-tab');
-  await input.waitFor({ state: 'visible', timeout: 20_000 });
-  await input.click();
-  await input.fill('');
-  await input.type(searchText, { delay: 35 });
-
-  const option = page.locator('[role="option"], li[id*="headlessui-combobox-option"]').first();
-  await option.waitFor({ state: 'visible', timeout: 15_000 });
-  await option.click();
-  await mapDataResponse;
-  await waitForPageSettle(page);
-
-  if (!mapDataText) {
-    const links = await collectProfileLinks(page, page.url());
-    return links.map((sourceUrl) => ({ sourceUrl }));
-  }
-
-  const parsed = JSON.parse(mapDataText) as {
-    Items?: {
-      $values?: ReiqMapItem[];
-    };
-  };
-  const items = Array.isArray(parsed.Items?.$values) ? parsed.Items.$values : [];
-  return items
-    .filter((item) => compactSpaces(item.ContactKey))
-    .map((item) => ({
-      sourceUrl: reiqProfileUrl(compactSpaces(item.ContactKey)),
-      mapItem: item,
-    }));
-}
-
-async function findNextHref(page: BrowserPage): Promise<string> {
-  return page.evaluate(`
-    (() => {
-    const norm = (value) => String(value ?? '').replace(/\\s+/g, ' ').trim().toLowerCase();
-    for (const anchor of Array.from(document.querySelectorAll('a[href]'))) {
-      const text = norm(anchor.textContent);
-      const aria = norm(anchor.getAttribute('aria-label'));
-      const title = norm(anchor.getAttribute('title'));
-      const rel = norm(anchor.getAttribute('rel'));
-      const href = anchor.getAttribute('href') ?? '';
-      const isNext =
-        rel.includes('next') ||
-        text === 'next' ||
-        text === '>' ||
-        text === '›' ||
-        aria.includes('next') ||
-        title.includes('next');
-      if (isNext && href && !href.startsWith('#') && !href.toLowerCase().startsWith('javascript:')) return href;
-    }
-    return '';
-    })()
-  `);
-}
-
-async function collectProfileSeeds(page: BrowserPage, options: ReiqScrapeOptions): Promise<ReiqProfileSeed[]> {
-  if (PROFILE_URL_RE.test(options.startUrl)) {
-    return [{ sourceUrl: normalizeUrl(options.startUrl, options.startUrl) }];
-  }
-
-  await page.goto(options.startUrl, { waitUntil: 'domcontentloaded' });
-  await waitForPageSettle(page);
-
-  if (options.location) {
-    const searchedSeeds = await searchReiqLocation(page, options.location);
-    if (searchedSeeds.length > 0) {
-      const seen = new Set<string>();
-      return searchedSeeds.filter((seed) => {
-        if (seen.has(seed.sourceUrl)) return false;
-        seen.add(seed.sourceUrl);
-        return true;
-      });
-    }
-  }
-
-  const seeds: ReiqProfileSeed[] = [];
-  const seenPages = new Set<string>();
-  let pageIndex = 0;
-
-  while (true) {
-    pageIndex += 1;
-    const currentUrl = page.url();
-    if (seenPages.has(currentUrl)) break;
-    seenPages.add(currentUrl);
-
-    const links = await collectProfileLinks(page, currentUrl);
-    for (const link of links) {
-      if (!seeds.some((seed) => seed.sourceUrl === link)) seeds.push({ sourceUrl: link });
-    }
-
-    if (options.maxPages && pageIndex >= options.maxPages) break;
-    const nextHref = await findNextHref(page);
-    if (!nextHref) break;
-
-    await page.waitForTimeout(options.delayMs ?? 1000);
-    await page.goto(normalizeUrl(nextHref, currentUrl), { waitUntil: 'domcontentloaded' });
-    await waitForPageSettle(page);
-  }
-
-  return seeds;
-}
-
 function extractHeadingFromProfileText(rawText: string, mapItem?: ReiqMapItem): { heading: string; subheading: string } {
   const lines = rawText
     .replace(/\r\n/g, '\n')
@@ -408,7 +490,7 @@ function extractHeadingFromProfileText(rawText: string, mapItem?: ReiqMapItem): 
 
 async function extractProfile(seed: ReiqProfileSeed): Promise<ReiqLead> {
   const sourceUrl = seed.sourceUrl;
-  const response = await fetch(sourceUrl, {
+  const response = await fetchWithTimeout(sourceUrl, {
     headers: {
       accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       'user-agent':
@@ -510,41 +592,35 @@ function dedupeLeads(leads: ReiqLead[]): ReiqLead[] {
 
 export async function scrapeReiqLeads(options: ReiqScrapeOptions): Promise<ReiqLeadSearchResult> {
   const startedAt = new Date().toISOString();
-  const { chromium } = await import('playwright');
-  const browser = await chromium.launch({ headless: true });
+  const { seeds, queryCount } = await collectProfileSeedsWithReiqApi(options);
+  const limitedSeeds = options.maxProfiles ? seeds.slice(0, options.maxProfiles) : seeds;
+  const leads: ReiqLead[] = [];
+  const batchSize = REIQ_PROFILE_BATCH_SIZE;
+  const delayMs = options.delayMs ?? 250;
 
-  try {
-    const page = await browser.newPage({
-      userAgent:
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36',
-      viewport: { width: 1440, height: 1100 },
-    });
-
-    const seeds = await collectProfileSeeds(page, options);
-    const limitedSeeds = options.maxProfiles ? seeds.slice(0, options.maxProfiles) : seeds;
-    const leads: ReiqLead[] = [];
-    const batchSize = 5;
-    const delayMs = options.delayMs ?? 250;
-
-    for (let index = 0; index < limitedSeeds.length; index += batchSize) {
-      const batch = limitedSeeds.slice(index, index + batchSize);
-      leads.push(...(await Promise.all(batch.map((seed) => extractProfile(seed)))));
-      if (delayMs > 0 && index + batchSize < limitedSeeds.length) {
-        await page.waitForTimeout(delayMs);
+  for (let index = 0; index < limitedSeeds.length; index += batchSize) {
+    const batch = limitedSeeds.slice(index, index + batchSize);
+    const batchResults = await Promise.allSettled(batch.map((seed) => extractProfile(seed)));
+    for (const result of batchResults) {
+      if (result.status === 'fulfilled') {
+        leads.push(result.value);
+      } else {
+        console.warn('[reiqLeadSearch] profile scrape failed', result.reason);
       }
     }
-
-    const prospects = dedupeLeads(leads);
-    return {
-      startedAt,
-      completedAt: new Date().toISOString(),
-      queryCount: Math.max(1, options.maxPages ?? 1),
-      rawResultCount: leads.length,
-      uniqueResultCount: prospects.length,
-      prospects,
-      profileUrls: seeds.map((seed) => seed.sourceUrl),
-    };
-  } finally {
-    await browser.close();
+    if (delayMs > 0 && index + batchSize < limitedSeeds.length) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
   }
+
+  const prospects = dedupeLeads(leads);
+  return {
+    startedAt,
+    completedAt: new Date().toISOString(),
+    queryCount,
+    rawResultCount: leads.length,
+    uniqueResultCount: prospects.length,
+    prospects,
+    profileUrls: seeds.map((seed) => seed.sourceUrl),
+  };
 }
