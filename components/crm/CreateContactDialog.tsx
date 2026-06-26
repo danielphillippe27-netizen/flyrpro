@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { toast } from 'sonner';
 import {
   Dialog,
   DialogContent,
@@ -111,6 +112,8 @@ export function CreateContactDialog({
         ...(showSecondContact ? [secondContact] : []),
       ];
 
+      let lastCrmSync: Array<{ provider: string; displayName: string; status: string; ms?: number }> = [];
+
       for (const contact of contactsToCreate) {
         const payload = {
           first_name: contact.first_name.trim(),
@@ -129,18 +132,26 @@ export function CreateContactDialog({
           appointment_at: toIsoString(formData.appointment_at),
         };
 
+        let result;
         if (initialAddressId) {
-          await ContactsService.createContactWithAddress(
+          result = await ContactsService.createContactWithAddress(
             userId,
-            {
-              ...payload,
-              address_id: initialAddressId,
-            },
+            { ...payload, address_id: initialAddressId },
             workspaceId
           );
         } else {
-          await ContactsService.createContact(userId, payload, workspaceId);
+          result = await ContactsService.createContact(userId, payload, workspaceId);
         }
+        if (result?.crmSync) lastCrmSync = result.crmSync;
+      }
+
+      // Show CRM sync confirmation toast
+      const synced = lastCrmSync.filter((r) => r.status === 'synced');
+      if (synced.length > 0) {
+        const label = synced.length === 1
+          ? `Synced → ${synced[0].displayName}${synced[0].ms != null ? ` · ${(synced[0].ms / 1000).toFixed(1)}s` : ''}`
+          : `Synced → ${synced.map((r) => r.displayName).join(', ')}`;
+        toast.success(`✓ ${label}`);
       }
 
       // Reset form

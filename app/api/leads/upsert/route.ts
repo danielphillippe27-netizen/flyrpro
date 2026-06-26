@@ -3,6 +3,7 @@ import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { resolveWorkspaceIdForUser } from '@/app/api/_utils/workspace';
 import type { MinimalSupabaseClient } from '@/app/api/_utils/workspace';
 import { createAdminClient } from '@/lib/supabase/server';
+import { pushLeadToConnectedCrms, type CrmPushResult } from '@/lib/integrations/auto-push';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -109,10 +110,29 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // Auto-push to connected CRMs immediately after save
+  let crmSync: CrmPushResult[] = [];
+  if (workspace.workspaceId) {
+    try {
+      crmSync = await pushLeadToConnectedCrms(admin, requestUser.id, workspace.workspaceId, {
+        id: result.data.id,
+        full_name: result.data.full_name ?? fullName,
+        phone: cleanedString(body.phone),
+        email: cleanedString(body.email),
+        address: cleanedString(body.address),
+        notes: cleanedString(body.notes),
+        campaign_id: result.data.campaign_id ?? campaignId,
+      });
+    } catch (err) {
+      console.warn('[api/leads/upsert] CRM auto-push failed', err);
+    }
+  }
+
   return NextResponse.json({
     id: result.data.id,
     campaignId: result.data.campaign_id ?? campaignId,
     fullName: result.data.full_name ?? fullName,
     outcome: result.data.status ?? outcome,
+    crmSync,
   }, { status: 201 });
 }

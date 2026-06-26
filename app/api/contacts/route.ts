@@ -3,6 +3,7 @@ import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { resolveWorkspaceIdForUser } from '@/app/api/_utils/workspace';
 import type { MinimalSupabaseClient } from '@/app/api/_utils/workspace';
 import { createAdminClient } from '@/lib/supabase/server';
+import { pushLeadToConnectedCrms, type CrmPushResult } from '@/lib/integrations/auto-push';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -225,5 +226,25 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: getErrorMessage(insert.error, 'Failed to create contact') }, { status: 500 });
   }
 
-  return NextResponse.json(mapContact(insert.data as ContactRow), { status: 201 });
+  const savedContact = insert.data as ContactRow;
+
+  // Auto-push to connected CRMs immediately after save
+  let crmSync: CrmPushResult[] = [];
+  if (workspace.workspaceId) {
+    try {
+      crmSync = await pushLeadToConnectedCrms(admin, requestUser.id, workspace.workspaceId, {
+        id: savedContact.id,
+        full_name: savedContact.full_name ?? null,
+        phone: savedContact.phone ?? null,
+        email: savedContact.email ?? null,
+        address: savedContact.address ?? null,
+        notes: savedContact.notes ?? null,
+        campaign_id: savedContact.campaign_id ?? null,
+      });
+    } catch (err) {
+      console.warn('[api/contacts] CRM auto-push failed', err);
+    }
+  }
+
+  return NextResponse.json({ ...mapContact(savedContact), crmSync }, { status: 201 });
 }
