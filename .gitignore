@@ -70,3 +70,4 @@ web/node_modules/
 memory/
 CLAUDE.md
 ROADMAP.md
+.graphifyignore
