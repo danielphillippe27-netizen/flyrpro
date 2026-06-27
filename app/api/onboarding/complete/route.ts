@@ -1,6 +1,9 @@
+import crypto from 'crypto';
 import { after, NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
+import { getCrmEncryptionKey } from '@/app/api/integrations/_lib/env';
+import { normalizeIntegrationProvider } from '@/lib/integrations/catalog';
 import {
   buildJoinUrl,
   createWorkspaceInviteRecord,
@@ -355,6 +358,7 @@ export async function POST(request: NextRequest) {
       brokerage,
       brokerageId,
       teamMemberEmails,
+      crmConnections,
     } = body as {
       firstName?: string;
       lastName?: string;
@@ -376,6 +380,7 @@ export async function POST(request: NextRequest) {
       openCampaignCreateAfterCompletion?: boolean;
       resumeCampaignAfterOnboarding?: boolean;
       selfServeCampaignDraft?: unknown;
+      crmConnections?: Array<{ provider: string; apiKey: string }>;
     };
     const clientSource =
       typeof body?.clientSource === 'string' ? body.clientSource.trim().toLowerCase() : '';
@@ -1068,8 +1073,54 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const ownerInviteMembersPath = '/home?tab=settings&invite=members';
-    const nextPath = ownerInviteMembersPath;
+    // Save CRM connections collected during onboarding (api_key / webhook providers only)
+    let crmSaved = 0;
+    if (Array.isArray(crmConnections) && crmConnections.length > 0) {
+      const encryptSecret = (plaintext: string): string => {
+        const key = Buffer.from(getCrmEncryptionKey().slice(0, 32));
+        const iv = crypto.randomBytes(12);
+        const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+        let enc = cipher.update(plaintext, 'utf8', 'base64');
+        enc += cipher.final('base64');
+        return `${iv.toString('base64')}:${cipher.getAuthTag().toString('base64')}:${enc}`;
+      };
+
+      const now = new Date().toISOString();
+      for (const { provider: rawProvider, apiKey } of crmConnections) {
+        const provider = normalizeIntegrationProvider(rawProvider);
+        if (!provider || typeof apiKey !== 'string' || !apiKey.trim()) continue;
+        try {
+          const encrypted = encryptSecret(apiKey.trim());
+          const { data: existing } = await admin
+            .from('crm_connections')
+            .select('id')
+            .eq('workspace_id', workspaceId)
+            .eq('provider', provider)
+            .maybeSingle();
+          if (existing?.id) {
+            await admin
+              .from('crm_connections')
+              .update({ api_key_encrypted: encrypted, status: 'connected', updated_at: now, last_error: null })
+              .eq('id', existing.id);
+          } else {
+            await admin.from('crm_connections').insert({
+              user_id: userId,
+              workspace_id: workspaceId,
+              provider,
+              api_key_encrypted: encrypted,
+              status: 'connected',
+              last_tested_at: now,
+            });
+          }
+          crmSaved++;
+        } catch (crmErr) {
+          console.warn(`[onboarding/complete] CRM connection save failed for ${rawProvider}:`, crmErr);
+        }
+      }
+    }
+
+    const ownerInviteMembersPath = '/settings/integrations?onboarding=1';
+    const nextPath = hasAccess ? ownerInviteMembersPath : '/subscribe';
     const openAppAfterCompletion = body?.openAppAfterCompletion === true;
     const openCampaignCreateAfterCompletion = body?.openCampaignCreateAfterCompletion === true;
     const resumeCampaignAfterOnboarding = body?.resumeCampaignAfterOnboarding === true;
@@ -1167,6 +1218,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       redirect,
+      crmConnected: crmSaved,
       invites: {
         attempted: normalizedTeamInviteEmails.length,
         sent: inviteResults.filter((result) => result.sent).length,
