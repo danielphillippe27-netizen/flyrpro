@@ -1,4 +1,4 @@
-import type { CampaignAddress, CampaignContact } from '@/types/database';
+import type { CampaignAddress } from '@/types/database';
 import type { CampaignStats } from '@/lib/services/CampaignsService';
 import { normalizeAddressStatus } from '@/lib/constants/mapStatus';
 
@@ -116,7 +116,7 @@ export function getScannedAddressCount(addresses: CampaignAddress[]): number {
 
 export function deriveCampaignStats(
   addresses: CampaignAddress[],
-  contacts: CampaignContact[]
+  contacts: readonly unknown[]
 ): CampaignStats {
   const totalAddresses = addresses.length;
   const visited = addresses.filter(isVisitedCampaignAddress).length;

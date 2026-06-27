@@ -19,7 +19,7 @@ import { RecipientsTable } from '@/components/RecipientsTable';
 import { StatsHeader } from '@/components/StatsHeader';
 import { PaywallGuard } from '@/components/PaywallGuard';
 import { MissingQRModal } from '@/components/modals/MissingQRModal';
-import type { CampaignV2, CampaignAddress, CampaignContact } from '@/types/database';
+import type { CampaignV2, CampaignAddress, Contact } from '@/types/database';
 import type { CampaignRoadMetadata } from '@/types/campaign-roads';
 import {
   ArrowRight,
@@ -87,16 +87,9 @@ const CampaignDetailMapView = dynamic(
   { ssr: false, loading: () => <MapPanelSkeleton /> }
 );
 
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { ContactsService } from '@/lib/services/ContactsService';
+import { CreateContactDialog } from '@/components/crm/CreateContactDialog';
 
 type CampaignWithLegacyDescription = CampaignV2 & {
   description?: string | null;
@@ -393,94 +386,71 @@ function buildAssignmentScope(payload: unknown): AssignmentScopeState | null {
   };
 }
 
-function CampaignContactsList({
+function getLinkQualityBanner(campaign: CampaignV2 | null): {
+  badgeVariant: 'default' | 'secondary' | 'outline' | 'destructive';
+  badgeLabel: string;
+  message: string;
+} | null {
+  const status = campaign?.link_quality_status ?? 'unknown';
+  const score = campaign?.link_quality_score;
+  const reason = campaign?.link_quality_reason;
+
+  if (status === 'unknown') return null;
+
+  if (status === 'healthy') {
+    return {
+      badgeVariant: 'outline',
+      badgeLabel: `Data Quality${typeof score === 'number' ? ` ${score}` : ''}`,
+      message: 'Address and building coverage are within target thresholds.',
+    };
+  }
+
+  if (status === 'repairing') {
+    return {
+      badgeVariant: 'secondary',
+      badgeLabel: 'Data Repair Queued',
+      message: reason || 'A background repair pass is queued to improve campaign data quality.',
+    };
+  }
+
+  return {
+    badgeVariant: status === 'failed' ? 'destructive' : 'secondary',
+    badgeLabel: 'Data Quality Review',
+    message: reason || 'This campaign has degraded data quality and may need review.',
+  };
+}
+
+function CampaignLeadsTab({
   contacts,
   campaignId,
+  userId,
+  workspaceId,
   onRefresh,
 }: {
-  contacts: CampaignContact[];
+  contacts: Contact[];
   campaignId: string;
+  userId: string | null;
+  workspaceId: string | null | undefined;
   onRefresh: () => void;
 }) {
   const [searchQuery, setSearchQuery] = useState('');
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editingContact, setEditingContact] = useState<CampaignContact | null>(null);
-  const [formName, setFormName] = useState('');
-  const [formPhone, setFormPhone] = useState('');
-  const [formEmail, setFormEmail] = useState('');
-  const [formAddress, setFormAddress] = useState('');
-  const [formLastContacted, setFormLastContacted] = useState('');
-  const [formInterestLevel, setFormInterestLevel] = useState('');
-  const [saving, setSaving] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
 
   const filtered = contacts.filter((c) => {
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
-    const name = (c.name || '').toLowerCase();
-    const phone = (c.phone || '').toLowerCase();
-    const email = (c.email || '').toLowerCase();
-    const address = (c.address || '').toLowerCase();
-    return name.includes(q) || phone.includes(q) || email.includes(q) || address.includes(q);
+    return (
+      (c.full_name || '').toLowerCase().includes(q) ||
+      (c.phone || '').toLowerCase().includes(q) ||
+      (c.email || '').toLowerCase().includes(q) ||
+      (c.address || '').toLowerCase().includes(q)
+    );
   });
-
-  const openAdd = () => {
-    setEditingContact(null);
-    setFormName('');
-    setFormPhone('');
-    setFormEmail('');
-    setFormAddress('');
-    setFormLastContacted('');
-    setFormInterestLevel('');
-    setModalOpen(true);
-  };
-
-  const openEdit = (c: CampaignContact) => {
-    setEditingContact(c);
-    setFormName(c.name ?? '');
-    setFormPhone(c.phone ?? '');
-    setFormEmail(c.email ?? '');
-    setFormAddress(c.address ?? '');
-    setFormLastContacted(c.last_contacted_at ? c.last_contacted_at.slice(0, 10) : '');
-    setFormInterestLevel(c.interest_level ?? '');
-    setModalOpen(true);
-  };
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      if (editingContact) {
-        await CampaignsService.updateCampaignContact(editingContact.id, {
-          name: formName || null,
-          phone: formPhone || null,
-          email: formEmail || null,
-          address: formAddress || null,
-          last_contacted_at: formLastContacted ? `${formLastContacted}T00:00:00Z` : null,
-          interest_level: formInterestLevel || null,
-        });
-      } else {
-        await CampaignsService.createCampaignContact(campaignId, {
-          name: formName || null,
-          phone: formPhone || null,
-          email: formEmail || null,
-          address: formAddress || null,
-          last_contacted_at: formLastContacted ? `${formLastContacted}T00:00:00Z` : null,
-          interest_level: formInterestLevel || null,
-        });
-      }
-      setModalOpen(false);
-      onRefresh();
-    } catch (e) {
-      console.error('Save contact:', e);
-      alert(e instanceof Error ? e.message : 'Failed to save contact');
-    } finally {
-      setSaving(false);
-    }
-  };
 
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this contact?')) return;
     try {
-      await CampaignsService.deleteCampaignContact(id);
+      await ContactsService.deleteContact(id);
       onRefresh();
     } catch (e) {
       console.error('Delete contact:', e);
@@ -499,30 +469,27 @@ function CampaignContactsList({
       <div className="bg-card p-4 rounded-xl border border-border">
         <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
           <div className="flex items-center gap-2">
-            <Users className="w-4 h-4 text-muted-foreground" />
             <h2 className="text-sm font-semibold text-foreground">Campaign Leads</h2>
             <Badge variant="secondary" className="text-xs">{contacts.length}</Badge>
           </div>
-          <Button size="sm" onClick={openAdd}>
+          <Button size="sm" onClick={() => setAddOpen(true)}>
             <Plus className="w-4 h-4 mr-1" />
             Add contact
           </Button>
         </div>
 
         <div className="relative mb-4">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <input
             type="text"
             placeholder="Search by name, phone, email, or address..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 rounded-lg border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            className="w-full pl-3 pr-3 py-2 rounded-lg border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
           />
         </div>
 
         {filtered.length === 0 ? (
           <div className="text-center py-8">
-            <MapPin className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
             <p className="text-sm text-muted-foreground">
               {searchQuery ? 'No contacts match your search.' : 'No contacts yet. Add a contact to get started.'}
             </p>
@@ -537,38 +504,28 @@ function CampaignContactsList({
                   <th className="pb-2 pr-3 font-medium">Email</th>
                   <th className="pb-2 pr-3 font-medium">Address</th>
                   <th className="pb-2 pr-3 font-medium">Last contacted</th>
-                  <th className="pb-2 pr-3 font-medium">Interest level</th>
-                  <th className="pb-2 w-20 font-medium">Actions</th>
+                  <th className="pb-2 pr-3 font-medium">Status</th>
+                  <th className="pb-2 w-16 font-medium">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((c) => (
                   <tr key={c.id} className="border-b border-border/50">
-                    <td className="py-2 pr-3 text-foreground">{c.name || '—'}</td>
+                    <td className="py-2 pr-3 text-foreground">{c.full_name || '—'}</td>
                     <td className="py-2 pr-3 text-foreground">{c.phone || '—'}</td>
                     <td className="py-2 pr-3 text-foreground">{c.email || '—'}</td>
                     <td className="py-2 pr-3 text-foreground max-w-[180px] truncate" title={c.address || undefined}>{c.address || '—'}</td>
-                    <td className="py-2 pr-3 text-foreground">{formatDate(c.last_contacted_at)}</td>
-                    <td className="py-2 pr-3 text-foreground">{c.interest_level || '—'}</td>
+                    <td className="py-2 pr-3 text-foreground">{formatDate(c.last_contacted)}</td>
+                    <td className="py-2 pr-3 text-foreground">{c.status || '—'}</td>
                     <td className="py-2">
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => openEdit(c)}
-                          className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted"
-                          aria-label="Edit"
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(c.id)}
-                          className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-muted"
-                          aria-label="Delete"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(c.id)}
+                        className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-muted text-xs"
+                        aria-label="Delete"
+                      >
+                        Delete
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -578,81 +535,16 @@ function CampaignContactsList({
         )}
       </div>
 
-      <Dialog open={modalOpen} onOpenChange={setModalOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>{editingContact ? 'Edit contact' : 'Add contact'}</DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-3 py-2">
-            <div>
-              <Label htmlFor="contact-name">Name</Label>
-              <Input
-                id="contact-name"
-                value={formName}
-                onChange={(e) => setFormName(e.target.value)}
-                placeholder="Full name"
-                className="mt-1"
-              />
-            </div>
-            <div>
-              <Label htmlFor="contact-phone">Phone</Label>
-              <Input
-                id="contact-phone"
-                type="tel"
-                value={formPhone}
-                onChange={(e) => setFormPhone(e.target.value)}
-                placeholder="Phone number"
-                className="mt-1"
-              />
-            </div>
-            <div>
-              <Label htmlFor="contact-email">Email</Label>
-              <Input
-                id="contact-email"
-                type="email"
-                value={formEmail}
-                onChange={(e) => setFormEmail(e.target.value)}
-                placeholder="Email"
-                className="mt-1"
-              />
-            </div>
-            <div>
-              <Label htmlFor="contact-address">Address</Label>
-              <Input
-                id="contact-address"
-                value={formAddress}
-                onChange={(e) => setFormAddress(e.target.value)}
-                placeholder="Street, city, etc."
-                className="mt-1"
-              />
-            </div>
-            <div>
-              <Label htmlFor="contact-last">Last contacted</Label>
-              <Input
-                id="contact-last"
-                type="date"
-                value={formLastContacted}
-                onChange={(e) => setFormLastContacted(e.target.value)}
-                className="mt-1"
-              />
-            </div>
-            <div>
-              <Label htmlFor="contact-interest">Interest level</Label>
-              <Input
-                id="contact-interest"
-                value={formInterestLevel}
-                onChange={(e) => setFormInterestLevel(e.target.value)}
-                placeholder="e.g. High, Medium, Low"
-                className="mt-1"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setModalOpen(false)}>Cancel</Button>
-            <Button onClick={handleSave} disabled={saving}>{saving ? 'Saving...' : 'Save'}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {userId && (
+        <CreateContactDialog
+          open={addOpen}
+          onClose={() => setAddOpen(false)}
+          onSuccess={() => { setAddOpen(false); onRefresh(); }}
+          userId={userId}
+          workspaceId={workspaceId ?? undefined}
+          initialCampaignId={campaignId}
+        />
+      )}
     </div>
   );
 }
@@ -673,7 +565,8 @@ export default function CampaignDetailPage() {
 
   const [campaign, setCampaign] = useState<CampaignV2 | null>(null);
   const [addresses, setAddresses] = useState<CampaignAddress[]>([]);
-  const [contacts, setContacts] = useState<CampaignContact[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [addressesLoading, setAddressesLoading] = useState(false);
@@ -789,11 +682,7 @@ export default function CampaignDetailPage() {
         setAddressesLoading(false);
       });
 
-    const contactsRequest = assignmentScopeRequest
-      .then((scope) => {
-        const addressIds = scope?.scopedToAssignedZone ? scope.addressIds ?? [] : null;
-        return CampaignsService.fetchCampaignContacts(campaignId, { addressIds });
-      })
+    const contactsRequest = ContactsService.fetchContacts(userId ?? '', currentWorkspaceId, { campaignId })
       .then((contactsData) => {
         setContacts(contactsData);
       })
@@ -936,6 +825,13 @@ export default function CampaignDetailPage() {
     loadData,
     searchParams,
   ]);
+
+  useEffect(() => {
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) setUserId(user.id);
+    });
+  }, []);
 
   // Poll road metadata when status is fetching
   useEffect(() => {
@@ -1708,7 +1604,7 @@ export default function CampaignDetailPage() {
                 />
               </div>
             ) : (
-              <CampaignContactsList contacts={contacts} campaignId={campaignId} onRefresh={loadData} />
+              <CampaignLeadsTab contacts={contacts} campaignId={campaignId} userId={userId} workspaceId={currentWorkspaceId} onRefresh={loadSecondaryData} />
             )}
           </TabsContent>
 
