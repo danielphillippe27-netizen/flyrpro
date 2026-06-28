@@ -5,7 +5,7 @@
 // refactor Beat1/Beat3/Beat4's existing scroll logic until click-mode
 // is actually being built.
 
-export type DemoVertical = 'roofing' | 'lawncare' | 'hvac' | 'solar' | 'political' | 'generic';
+export type DemoVertical = 'roofing' | 'lawncare' | 'hvac' | 'solar' | 'political' | 'real_estate' | 'generic';
 
 export type BeatCopy = {
   b1Headline: string;

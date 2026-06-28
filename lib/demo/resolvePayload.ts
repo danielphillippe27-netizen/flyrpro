@@ -1,5 +1,6 @@
 import { DEFAULT_PAYLOAD } from './defaults';
 import type { DemoPayload, DemoVertical } from './payload';
+import { getVerticalCopyOverrides } from './verticals';
 import { createAdminClient } from '@/lib/supabase/server';
 
 type DemoLinkRow = {
@@ -15,7 +16,7 @@ type DemoLinkRow = {
   navigation_mode: string | null;
 };
 
-const DEMO_VERTICALS: DemoVertical[] = ['roofing', 'lawncare', 'hvac', 'solar', 'political', 'generic'];
+const DEMO_VERTICALS: DemoVertical[] = ['roofing', 'lawncare', 'hvac', 'solar', 'political', 'real_estate', 'generic'];
 const CTA_VARIANTS: DemoPayload['ctaVariant'][] = ['book', 'reply', 'territory'];
 const NAVIGATION_MODES: DemoPayload['navigationMode'][] = ['scroll', 'click'];
 
@@ -88,6 +89,10 @@ export async function resolvePayloadForSlug(slug: string): Promise<DemoPayload> 
       typeof data.center_lng === 'number' && typeof data.center_lat === 'number'
         ? [data.center_lng, data.center_lat]
         : undefined;
+
+    // Apply vertical-specific copy overrides on top of the default copy.
+    const overrides = getVerticalCopyOverrides(payload.vertical);
+    payload.copy = { ...payload.copy, ...overrides };
 
     if (city) {
       payload.copy.b3Sub = withCityInBeat3Sub(payload.copy.b3Sub, city);
