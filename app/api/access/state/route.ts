@@ -64,7 +64,14 @@ export async function GET(request: NextRequest) {
     });
     const isAmbassador = !!approvedAmbassador;
     const isSalesperson = !!salesperson;
-    const salespersonDashboardEnabled = Boolean(access.workspaceId && isSalesperson && !access.isFounder);
+    // Workspace owners/admins are never salespersons, even if their email appears in the salespeople table
+    const salespersonDashboardEnabled = Boolean(
+      access.workspaceId &&
+      isSalesperson &&
+      !access.isFounder &&
+      access.role !== 'owner' &&
+      access.role !== 'admin'
+    );
     const dashboardMode = salespersonDashboardEnabled ? 'salesperson' : 'default';
     if (!access.workspaceId) {
       return NextResponse.json({

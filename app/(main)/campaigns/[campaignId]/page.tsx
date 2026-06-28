@@ -1281,7 +1281,7 @@ export default function CampaignDetailPage() {
   const contactsByLogicalAddress = new Map<string, Set<string>>();
 
   for (const contact of contacts) {
-    const contactLabel = contact.name?.trim() || contact.email?.trim() || contact.phone?.trim();
+    const contactLabel = contact.full_name?.trim() || contact.email?.trim() || contact.phone?.trim();
     if (!contactLabel) continue;
 
     const matchedLogicalKeys = new Set<string>();

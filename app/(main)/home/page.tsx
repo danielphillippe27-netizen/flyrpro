@@ -22,7 +22,11 @@ export default async function HomePage() {
         .eq('status', 'active')
         .maybeSingle()
     : { data: null };
-  const accessLevel = salesperson && !access.isFounder ? 'salesperson' : access.level;
+  // Workspace owners/admins are never salespersons, even if their email appears in the salespeople table
+  const accessLevel =
+    salesperson && !access.isFounder && access.role !== 'owner' && access.role !== 'admin'
+      ? 'salesperson'
+      : access.level;
 
   if (access.level === 'founder') {
     redirect('/admin');
