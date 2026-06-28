@@ -17,7 +17,7 @@ type DemoLinkRow = {
 };
 
 const DEMO_VERTICALS: DemoVertical[] = ['roofing', 'lawncare', 'hvac', 'solar', 'political', 'real_estate', 'generic'];
-const CTA_VARIANTS: DemoPayload['ctaVariant'][] = ['book', 'reply', 'territory'];
+const CTA_VARIANTS: DemoPayload['ctaVariant'][] = ['a', 'b'];
 const NAVIGATION_MODES: DemoPayload['navigationMode'][] = ['scroll', 'click'];
 
 function cloneDefaultPayload(slug: string): DemoPayload {

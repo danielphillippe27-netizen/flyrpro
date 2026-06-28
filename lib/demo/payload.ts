@@ -56,7 +56,7 @@ export type DemoPayload = {
   city?: string;
   center?: [number, number];
   copy: BeatCopy;
-  ctaVariant: 'book' | 'reply' | 'territory';
+  ctaVariant: 'a' | 'b';
   ctaUrl: string;
   navigationMode: 'scroll' | 'click';
 };

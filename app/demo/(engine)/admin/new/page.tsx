@@ -4,11 +4,10 @@ import { type CSSProperties, FormEvent, useMemo, useState } from 'react';
 import type { DemoPayload, DemoVertical } from '@/lib/demo/payload';
 
 const VERTICALS: DemoVertical[] = ['roofing', 'lawncare', 'hvac', 'solar', 'political', 'real_estate', 'generic'];
-const CTA_VARIANTS: DemoPayload['ctaVariant'][] = ['book', 'reply', 'territory'];
+const CTA_VARIANTS: DemoPayload['ctaVariant'][] = ['a', 'b'];
 
 type FormState = {
   company: string;
-  contactName: string;
   vertical: DemoVertical;
   city: string;
   ctaVariant: DemoPayload['ctaVariant'];
@@ -24,10 +23,9 @@ type CreateResult = {
 
 const initialForm: FormState = {
   company: '',
-  contactName: '',
   vertical: 'roofing',
   city: '',
-  ctaVariant: 'book',
+  ctaVariant: 'a',
   ctaUrl: '',
   slug: '',
 };
@@ -66,7 +64,6 @@ export default function NewDemoLinkPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           company: form.company,
-          contactName: form.contactName,
           vertical: form.vertical,
           city: form.city,
           ctaVariant: form.ctaVariant,
@@ -122,16 +119,6 @@ export default function NewDemoLinkPage() {
           </label>
 
           <label style={styles.label}>
-            Contact name
-            <input
-              value={form.contactName}
-              onChange={(event) => setField('contactName', event.target.value)}
-              style={styles.input}
-              autoComplete="name"
-            />
-          </label>
-
-          <label style={styles.label}>
             Vertical
             <select
               value={form.vertical}
@@ -153,7 +140,7 @@ export default function NewDemoLinkPage() {
               value={form.city}
               onChange={(event) => setField('city', event.target.value)}
               style={styles.input}
-              placeholder="Oshawa, ON"
+              placeholder="Oshawa"
               autoComplete="address-level2"
             />
           </label>
