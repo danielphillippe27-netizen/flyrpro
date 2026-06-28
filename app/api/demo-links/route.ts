@@ -19,7 +19,7 @@ type DemoLinkRequestBody = {
   slug?: unknown;
 };
 
-const DEMO_VERTICALS: DemoVertical[] = ['roofing', 'lawncare', 'hvac', 'solar', 'political', 'generic'];
+const DEMO_VERTICALS: DemoVertical[] = ['roofing', 'lawncare', 'hvac', 'solar', 'political', 'real_estate', 'generic'];
 const CTA_VARIANTS: DemoPayload['ctaVariant'][] = ['book', 'reply', 'territory'];
 
 function slugify(value: string) {
