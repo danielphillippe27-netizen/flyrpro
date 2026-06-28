@@ -15,18 +15,18 @@ const VERTICAL_COPY: Partial<Record<DemoVertical, Partial<BeatCopy>>> = {
 
     b2Headline: "You're paying for prospecting\nyou can't see.",
     b2Sub:
-      'Ten agents left at 9 AM to farm the neighbourhood. Right now the knock record is a group chat and an afternoon check-in.',
+      'Five agents left at 9 AM to farm the neighbourhood. Right now the knock record is a group chat and an afternoon check-in.',
     b2Strikes: ['Paper route sheets', 'The group chat', '"Trust me, boss"'],
     b2Math: [
-      { key: 'Agents', value: '10' },
+      { key: 'Agents', value: '5' },
       { key: 'Rate', value: '$30/hr' },
       { key: 'Hours', value: '4' },
-      { key: 'Paid on faith, daily', value: '$1,200', hot: true },
+      { key: 'Paid on faith, daily', value: '$600', hot: true },
     ],
 
     b3Headline: 'Draw a farm.\nGet every door.',
     b3Sub:
-      'Draw or import a polygon and every deliverable address inside it is provisioned from municipal records, house by house, unit splits included. Assign agents to farms, run a just-listed blitz, or cultivate the same neighbourhood for months. And when a property hits the market overnight, your team is knocking by 8 AM while the competition is still printing maps.',
+      'Draw or import a polygon and every deliverable address inside it is provisioned from municipal records, house by house, unit splits included. Assign agents to farms, run a just-listed blitz, or cultivate the same neighbourhood for months.',
 
     b4Headline: 'Every agent. Every door.\nLive.',
     b4Sub:
@@ -53,7 +53,7 @@ const VERTICAL_COPY: Partial<Record<DemoVertical, Partial<BeatCopy>>> = {
       { key: 'Phone', value: '(604) 555-0132' },
       { key: 'Note', value: 'Thinking of selling, wants CMA' },
     ],
-    b5SyncText: '✓ Synced → Follow Up Boss · 0.4s',
+    b5SyncText: '✓ Synced → Follow Up Boss',
 
     b6Headline: 'One listing pays\nfor the year.',
     b6Price: '$40/agent/mo.',

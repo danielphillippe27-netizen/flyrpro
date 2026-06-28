@@ -168,6 +168,30 @@ await test("real estate copy: b5SyncText mentions a real estate CRM", async () =
   );
 });
 
+await test("real estate copy: b2Sub says five agents (not ten)", async () => {
+  const src = await read('lib/demo/verticals/index.ts');
+  assert.ok(src.includes('Five agents'), 'b2Sub should say "Five agents"');
+  assert.ok(!src.includes('Ten agents'), 'b2Sub should not say "Ten agents"');
+});
+
+await test("real estate copy: b2Math value is 5 agents", async () => {
+  const src = await read('lib/demo/verticals/index.ts');
+  assert.ok(src.includes("value: '5'"), "b2Math Agents value should be '5'");
+});
+
+await test("real estate copy: b3Sub does not mention property hitting market", async () => {
+  const src = await read('lib/demo/verticals/index.ts');
+  assert.ok(!src.includes('property hits the market'), 'removed sentence still present in b3Sub');
+});
+
+await test("real estate copy: b5SyncText fits on one line (no · bullet)", async () => {
+  const src = await read('lib/demo/verticals/index.ts');
+  // We removed the · 0.4s suffix to prevent line wrapping inside the phone mock
+  const match = src.match(/b5SyncText:\s*'([^']+)'/);
+  assert.ok(match, 'b5SyncText not found');
+  assert.ok(match![1].length <= 32, `b5SyncText too long (${match![1].length} chars): "${match![1]}"`);
+});
+
 await test("real estate copy: b6Headline mentions listing (not roof)", async () => {
   const src = await read('lib/demo/verticals/index.ts');
   assert.ok(src.includes('listing'), 'b6Headline should mention listing');
