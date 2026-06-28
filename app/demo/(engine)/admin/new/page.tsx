@@ -3,7 +3,7 @@
 import { type CSSProperties, FormEvent, useMemo, useState } from 'react';
 import type { DemoPayload, DemoVertical } from '@/lib/demo/payload';
 
-const VERTICALS: DemoVertical[] = ['roofing', 'lawncare', 'hvac', 'solar', 'political', 'generic'];
+const VERTICALS: DemoVertical[] = ['roofing', 'lawncare', 'hvac', 'solar', 'political', 'real_estate', 'generic'];
 const CTA_VARIANTS: DemoPayload['ctaVariant'][] = ['book', 'reply', 'territory'];
 
 type FormState = {
