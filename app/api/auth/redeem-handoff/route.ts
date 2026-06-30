@@ -68,7 +68,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const response = NextResponse.json({ ok: true });
+    const { data: authUser, error: authUserError } = await admin.auth.admin.getUserById(
+      redeemed.user_id
+    );
+    if (authUserError || !authUser?.user) {
+      return NextResponse.json({ error: 'Failed to resolve handoff user' }, { status: 500 });
+    }
+
+    const response = NextResponse.json({
+      ok: true,
+      user: {
+        id: authUser.user.id,
+        email: authUser.user.email ?? null,
+      },
+    });
     const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
       cookies: {
         getAll() {

@@ -42,6 +42,14 @@ type OnboardingCompletionResponse = {
   redirect?: string;
   error?: string;
 };
+type HandoffRedeemResponse = {
+  ok?: boolean;
+  user?: {
+    id?: string | null;
+    email?: string | null;
+  };
+  error?: string;
+};
 
 const INDUSTRIES_TOP = ['Real Estate', 'Solar', 'Roofing & Exteriors'];
 
@@ -63,6 +71,22 @@ const MAX_SEATS = 200;
 const FINAL_ONBOARDING_STEP = 5;
 const EXCLUSIVE_ONBOARDING_AUTH_DRAFT_KEY = 'flyr.exclusiveOnboardingAuthDraft';
 const ONBOARDING_DRAFT_KEY = 'flyr.onboardingDraft';
+const MOBILE_RETURN_URL_PARAMS = [
+  'returnUrl',
+  'return_url',
+  'redirectTo',
+  'redirect_to',
+  'cancelUrl',
+  'cancel_url',
+  'skipUrl',
+  'skip_url',
+  'successUrl',
+  'success_url',
+  'checkoutSuccessUrl',
+  'checkout_success_url',
+  'checkoutCancelUrl',
+  'checkout_cancel_url',
+];
 
 type OnboardingDraft = {
   firstName: string;
@@ -155,6 +179,15 @@ function readOnboardingDraft(): OnboardingDraft | null {
   }
 }
 
+function mobileReturnUrlFromSearchParams(searchParams: URLSearchParams): string | null {
+  for (const param of MOBILE_RETURN_URL_PARAMS) {
+    const value = searchParams.get(param)?.trim();
+    if (!value) continue;
+    if (value.startsWith('flyr://')) return value;
+  }
+  return null;
+}
+
 function LogoutDoorEmblem({ className }: { className?: string }) {
   return (
     <svg
@@ -234,6 +267,7 @@ function OnboardingContent() {
   const partnerOfferToken = searchParams.get('partnerOfferToken');
   const salespersonInviteToken = searchParams.get('salespersonInvite');
   const handoffCode = searchParams.get('code')?.trim() ?? '';
+  const mobileReturnUrl = mobileReturnUrlFromSearchParams(searchParams);
   const partnerExclusiveParam = searchParams.get('partnerExclusive');
   const challenge30FromUrl = searchParams.get('challenge30') === '1';
   const isExclusivePartnerOnboarding =
@@ -366,6 +400,7 @@ function OnboardingContent() {
   const [handoffRedeemError, setHandoffRedeemError] = useState<string>('');
   const [pendingResumeDraft, setPendingResumeDraft] = useState<OnboardingDraft | null>(null);
   const resumeCompletionStarted = useRef(false);
+  const handoffAuthenticatedRef = useRef(false);
 
   useEffect(() => {
     if (demoPrefillApplied.current || searchParams.get('source') !== 'demo') return;
@@ -414,8 +449,8 @@ function OnboardingContent() {
     })
       .then(async (response) => {
         if (cancelled) return;
+        const payload = (await response.json().catch(() => ({}))) as HandoffRedeemResponse;
         if (!response.ok) {
-          const payload = await response.json().catch(() => ({}));
           setHandoffRedeemState('error');
           setHandoffRedeemError(
             typeof payload?.error === 'string'
@@ -424,6 +459,19 @@ function OnboardingContent() {
           );
           return;
         }
+
+        const email =
+          typeof payload?.user?.email === 'string' && payload.user.email.trim()
+            ? payload.user.email.trim().toLowerCase()
+            : null;
+        setAuthenticatedEmail(email);
+        if (email) {
+          handoffAuthenticatedRef.current = true;
+          setWorkEmail((current) => current.trim() || email);
+        }
+        setAuthSessionChecked(true);
+        setHandoffRedeemState('idle');
+        setHandoffRedeemError('');
 
         const params = new URLSearchParams(searchParams.toString());
         params.delete('code');
@@ -544,6 +592,10 @@ function OnboardingContent() {
           typeof user?.email === 'string' && user.email.trim()
             ? user.email.trim().toLowerCase()
             : null;
+        if (!email && handoffAuthenticatedRef.current) {
+          setAuthSessionChecked(true);
+          return;
+        }
         setAuthenticatedEmail(email);
         if (email) {
           setWorkEmail((current) => current.trim() || email);
@@ -552,6 +604,10 @@ function OnboardingContent() {
       })
       .catch(() => {
         if (!cancelled) {
+          if (handoffAuthenticatedRef.current) {
+            setAuthSessionChecked(true);
+            return;
+          }
           setAuthenticatedEmail(null);
           setAuthSessionChecked(true);
         }
@@ -876,6 +932,14 @@ function OnboardingContent() {
   };
 
   const redirectAfterOnboarding = (redirect?: string | null) => {
+    if (mobileReturnUrl) {
+      if (typeof window !== 'undefined') {
+        window.localStorage.removeItem(EXCLUSIVE_ONBOARDING_AUTH_DRAFT_KEY);
+        window.localStorage.removeItem(ONBOARDING_DRAFT_KEY);
+        window.location.href = mobileReturnUrl;
+      }
+      return;
+    }
     const destination = redirect || postOnboardingRedirect;
     if (!destination) return;
     if (typeof window !== 'undefined') {
