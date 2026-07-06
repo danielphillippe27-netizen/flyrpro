@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import { requireFounder } from '@/lib/auth/requireFounder';
 import { SalespeopleDashboard } from '@/components/admin/SalespeopleDashboard';
 
@@ -19,5 +20,9 @@ export default async function SalespeoplePage({ searchParams }: SalespeoplePageP
         ? 'That Stripe onboarding link expired or was already used. Create a fresh link for the salesperson.'
         : null;
 
-  return <SalespeopleDashboard stripeNotice={stripeNotice} />;
+  return (
+    <Suspense fallback={null}>
+      <SalespeopleDashboard stripeNotice={stripeNotice} />
+    </Suspense>
+  );
 }
