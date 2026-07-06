@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { ensureCampaignAccess } from '@/app/api/campaigns/_utils/access';
+import { queueCampaignGeometryRebuild } from '@/lib/diamond/geometryStage';
 import { resolveCampaignRegion } from '@/lib/geo/regionResolver';
 import { bboxFromPolygon } from '@/lib/services/provisionHelpers';
 
@@ -301,6 +302,27 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         return NextResponse.json({ error: error.message }, { status: 500 });
       }
       updatedCampaign = data;
+    }
+
+    if (hasTerritoryBoundary) {
+      try {
+        const geometryQueue = await queueCampaignGeometryRebuild(admin, campaignId, {
+          reason: 'campaign_territory_updated',
+          source: 'campaign_patch',
+        });
+        if (geometryQueue.trigger.status !== 'queued') {
+          console.warn('[PATCH /api/campaigns/[campaignId]] PMTiles rebuild was not queued:', {
+            campaign_id: campaignId,
+            trigger: geometryQueue.trigger,
+            snapshotStatus: geometryQueue.snapshotStatus,
+          });
+        }
+      } catch (queueError) {
+        console.warn('[PATCH /api/campaigns/[campaignId]] Failed to queue PMTiles rebuild:', {
+          campaign_id: campaignId,
+          error: queueError instanceof Error ? queueError.message : String(queueError),
+        });
+      }
     }
 
     return NextResponse.json({

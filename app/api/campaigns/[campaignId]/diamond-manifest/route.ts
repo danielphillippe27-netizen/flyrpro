@@ -87,6 +87,21 @@ function numberMetric(metrics: Record<string, unknown> | null | undefined, key: 
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
+function boolMetric(metrics: Record<string, unknown> | null | undefined, key: string): boolean {
+  return metrics?.[key] === true;
+}
+
+function geometryBuildFields(snapshot: CampaignSnapshotRow | null) {
+  return {
+    geometry_build_status: stringMetric(snapshot?.tile_metrics, 'geometry_build_status') ?? (snapshot ? 'ready' : 'pending'),
+    geometry_stage: stringMetric(snapshot?.tile_metrics, 'geometry_stage') ?? 'production',
+    geometry_stage_prefix: stringMetric(snapshot?.tile_metrics, 'geometry_stage_prefix'),
+    stale_geometry: boolMetric(snapshot?.tile_metrics, 'stale_geometry'),
+    geometry_build_reason: stringMetric(snapshot?.tile_metrics, 'geometry_build_reason'),
+    geometry_build_source: stringMetric(snapshot?.tile_metrics, 'geometry_build_source'),
+  };
+}
+
 function normalizeBounds(value: unknown): Bounds | null {
   if (!Array.isArray(value) || value.length !== 4) return null;
   const bounds = value.map((entry) => Number(entry));
@@ -197,6 +212,7 @@ export async function GET(
     return manifestJson({
       campaign_id: campaignId,
       map_status: artifact.mapStatus,
+      ...geometryBuildFields(snapshotRow),
       artifact_type: 'basic',
       diamond_mode: false,
       geometry_provider: 'address_points',
@@ -261,6 +277,7 @@ export async function GET(
     return manifestJson({
       campaign_id: campaignId,
       map_status: artifact.mapStatus,
+      ...geometryBuildFields(snapshotRow),
       artifact_type: 'diamond',
       diamond_mode: true,
       geometry_provider: 'pmtiles_addresses',
@@ -397,6 +414,7 @@ export async function GET(
   return manifestJson({
     campaign_id: campaignId,
     map_status: artifact.mapStatus,
+    ...geometryBuildFields(snapshotRow),
     artifact_type: artifactType,
     diamond_mode: true,
     geometry_provider: artifact.geometryProvider,

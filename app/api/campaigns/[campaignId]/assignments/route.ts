@@ -7,6 +7,7 @@ import {
   type CampaignAssignmentMode,
   type ZoneAssignmentInput,
 } from '@/lib/campaignAssignments';
+import { queueCampaignGeometryRebuild } from '@/lib/diamond/geometryStage';
 import { sendCampaignAssignmentEmail } from '@/lib/email/campaignAssignments';
 
 type RouteContext = { params: Promise<{ campaignId: string }> };
@@ -286,7 +287,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: cancelError.message || 'Failed to cancel previous assignments' }, { status: 500 });
     }
 
-    const assignmentInserts =
+    const assignmentInserts: Array<Record<string, unknown>> =
       mode === 'zone_split'
         ? normalizedZones.map((zone) => ({
             campaign_id: campaignId,
@@ -419,6 +420,28 @@ export async function POST(request: NextRequest, context: RouteContext) {
       viewerUserId: requestUser.id,
       canManage: true,
     });
+
+    try {
+      const geometryQueue = await queueCampaignGeometryRebuild(admin, campaignId, {
+        reason: 'campaign_assignments_updated',
+        source: 'campaign_assignments',
+        addressCount: campaignAddressIds.length,
+      });
+      if (geometryQueue.trigger.status !== 'queued') {
+        warnings.push('Campaign map PMTiles rebuild was not queued; existing map geometry remains available.');
+        console.warn('[api/campaigns/:campaignId/assignments] PMTiles rebuild was not queued:', {
+          campaignId,
+          trigger: geometryQueue.trigger,
+          snapshotStatus: geometryQueue.snapshotStatus,
+        });
+      }
+    } catch (queueError) {
+      warnings.push('Campaign map PMTiles rebuild could not be queued; existing map geometry remains available.');
+      console.warn('[api/campaigns/:campaignId/assignments] Failed to queue PMTiles rebuild:', {
+        campaignId,
+        error: queueError instanceof Error ? queueError.message : String(queueError),
+      });
+    }
 
     return NextResponse.json({ assignments, warnings });
   } catch (error) {

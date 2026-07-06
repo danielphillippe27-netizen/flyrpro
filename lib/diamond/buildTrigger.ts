@@ -5,6 +5,7 @@ type DiamondBuildTriggerPayload = {
   addressCount?: number;
   buildingCount?: number;
   mapMode?: string;
+  geometryStagePrefix?: string | null;
 };
 
 type DiamondBuildTriggerResult =

@@ -8,6 +8,7 @@
  * Usage:
  *   npx tsx scripts/build-diamond-pmtiles.ts <campaign-id>
  *   npx tsx scripts/build-diamond-pmtiles.ts <campaign-id> --dry-run --keep-workdir
+ *   npx tsx scripts/build-diamond-pmtiles.ts <campaign-id> --stage-prefix=staging
  */
 
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
@@ -107,6 +108,8 @@ const SNAPSHOT_BUILDING_PADDING_METERS = Number(
 const minzoom = Number(readFlag('minzoom') ?? '13');
 const maxzoom = Number(readFlag('maxzoom') ?? '18');
 const MAX_NEARBY_BUILDING_METERS = Number(readFlag('max-nearby-meters') ?? '55');
+const geometryStagePrefix = normalizeStagePrefix(readFlag('stage-prefix') ?? process.env.GEOMETRY_STAGE_PREFIX);
+const geometryStage = process.env.GEOMETRY_STAGE?.trim() || geometryStagePrefix || 'production';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -175,7 +178,7 @@ async function main() {
     }
 
     const bounds = normalizeBounds(campaign.bbox) ?? calculateBounds([...buildings.features, ...addresses.features, ...parcels.features]);
-    const prefix = `campaigns/${campaignId}`;
+    const prefix = withGeometryStagePrefix(`campaigns/${campaignId}`);
     const pmtilesKey = `${prefix}/buildings.pmtiles`;
     const tilejsonKey = `${prefix}/buildings.json`;
     const geojsonKey = `${prefix}/buildings.geojson.gz`;
@@ -270,6 +273,19 @@ async function main() {
 function readFlag(name: string) {
   const prefix = `--${name}=`;
   return args.find((arg) => arg.startsWith(prefix))?.slice(prefix.length);
+}
+
+function normalizeStagePrefix(value: string | undefined) {
+  const trimmed = value?.trim().replace(/^\/+|\/+$/g, '') ?? '';
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function withGeometryStagePrefix(key: string) {
+  const normalizedKey = key.replace(/^\/+/, '');
+  if (!geometryStagePrefix) return normalizedKey;
+  return normalizedKey.startsWith(`${geometryStagePrefix}/`)
+    ? normalizedKey
+    : `${geometryStagePrefix}/${normalizedKey}`;
 }
 
 async function loadCampaignContext(id: string) {
@@ -1315,6 +1331,11 @@ async function upsertCampaignSnapshot(options: {
     pmtiles_etag: options.pmtilesEtag,
     pmtiles_sha256: options.pmtilesSha256,
     pmtiles_size_bytes: options.pmtilesSizeBytes,
+    geometry_stage: geometryStage,
+    geometry_stage_prefix: geometryStagePrefix,
+    geometry_build_status: 'ready',
+    stale_geometry: false,
+    geometry_build_completed_at: new Date().toISOString(),
     tilejson_key: options.tilejsonKey,
     geojson_key: fallbackGeojsonKey,
     source_layers: {

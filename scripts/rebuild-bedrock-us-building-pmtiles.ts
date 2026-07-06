@@ -36,6 +36,7 @@ type CliOptions = {
   minZoom: number;
   bucket: string;
   prefix: string;
+  stagePrefix?: string;
   concurrency: number;
   workdir?: string;
   uploadExisting: boolean;
@@ -163,9 +164,10 @@ function parseArgs(): CliOptions {
     dryRun: false,
     keepWorkdir: false,
     maxZoom: 16,
-    minZoom: 12,
+    minZoom: 8,
     bucket: DEFAULT_BUCKET,
     prefix: DEFAULT_PREFIX,
+    stagePrefix: normalizeStagePrefix(process.env.GEOMETRY_STAGE_PREFIX) ?? undefined,
     concurrency: PMTILES_TILE_FETCH_CONCURRENCY,
     uploadExisting: false,
     strictMaxZoom: false,
@@ -185,6 +187,7 @@ function parseArgs(): CliOptions {
     else if (key === '--min-zoom') options.minZoom = Number(value);
     else if (key === '--bucket') options.bucket = value;
     else if (key === '--prefix') options.prefix = value.replace(/^\/+|\/+$/g, '');
+    else if (key === '--stage-prefix') options.stagePrefix = normalizeStagePrefix(value) ?? undefined;
     else if (key === '--concurrency') options.concurrency = Math.max(1, Number(value));
     else if (key === '--workdir') options.workdir = value;
     else if (key === '--upload-existing') options.uploadExisting = true;
@@ -221,6 +224,8 @@ Options:
   --all            Rebuild every region in scripts/regions.json.
   --version=NAME   Version prefix under bedrock/usa/<version>.
   --promote        Copy passing artifacts into bedrock/usa/current.
+  --stage-prefix=path
+                  Publish artifacts under path/bedrock/usa while reading source parquet from bedrock/usa/current.
   --dry-run        Count source buildings only; do not write PMTiles.
   --keep-workdir   Keep local temp files after completion.
   --workdir=PATH   Reuse an existing workdir containing STATE-source-ids.raw.txt and STATE-buildings.geojsonseq.
@@ -241,6 +246,15 @@ function jsonStringify(value: unknown) {
     (_key, item) => (typeof item === 'bigint' ? item.toString() : item),
     2
   );
+}
+
+function normalizeStagePrefix(value: string | undefined) {
+  const trimmed = value?.trim().replace(/^\/+|\/+$/g, '') ?? '';
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function stagedPrefix(options: CliOptions) {
+  return options.stagePrefix ? `${options.stagePrefix}/${options.prefix}` : options.prefix;
 }
 
 function sqlString(value: string) {
@@ -327,11 +341,11 @@ function parquetKeyForState(options: CliOptions, state: string) {
 }
 
 function versionedStatePrefix(options: CliOptions, state: string) {
-  return `${options.prefix}/${options.version}/buildings/pmtiles_by_state/state=${state}`;
+  return `${stagedPrefix(options)}/${options.version}/buildings/pmtiles_by_state/state=${state}`;
 }
 
 function currentStatePrefix(options: CliOptions, state: string) {
-  return `${options.prefix}/current/buildings/pmtiles_by_state/state=${state}`;
+  return `${stagedPrefix(options)}/current/buildings/pmtiles_by_state/state=${state}`;
 }
 
 function s3Path(bucket: string, key: string) {
@@ -867,6 +881,10 @@ function tileJsonForState(options: CliOptions, state: string, maxZoom: number) {
     ],
     metadata: {
       geometry_provider: 'pmtiles_static',
+      geometry_stage: options.stagePrefix ? 'staging' : 'production',
+      geometry_stage_prefix: options.stagePrefix ?? null,
+      overview_minzoom: options.minZoom,
+      footprint_minzoom: 13,
       pmtiles_key: key,
       source_parquet_key: parquetKeyForState(options, state),
       generated_at: new Date().toISOString(),

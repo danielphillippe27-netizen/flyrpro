@@ -35,6 +35,12 @@ export type CampaignMapGeometryResponse = {
 
   // Compatibility fields consumed by the existing web and iOS map renderers.
   map_status: CampaignMapGeometryStatus;
+  geometry_build_status: string;
+  geometry_stage: string;
+  geometry_stage_prefix: string | null;
+  stale_geometry: boolean;
+  geometry_build_reason: string | null;
+  geometry_build_source: string | null;
   artifact_type: 'diamond' | 'white_gold' | 'basic';
   diamond_mode: boolean;
   geometry_provider: string | null;
@@ -140,6 +146,21 @@ function objectMetric(metrics: Record<string, unknown> | null | undefined, key: 
     : null;
 }
 
+function boolMetric(metrics: Record<string, unknown> | null | undefined, key: string): boolean {
+  return metrics?.[key] === true;
+}
+
+function geometryBuildFields(snapshot: CampaignMapSnapshotRow | null) {
+  return {
+    geometry_build_status: stringMetric(snapshot?.tile_metrics, 'geometry_build_status') ?? (snapshot ? 'ready' : 'pending'),
+    geometry_stage: stringMetric(snapshot?.tile_metrics, 'geometry_stage') ?? 'production',
+    geometry_stage_prefix: stringMetric(snapshot?.tile_metrics, 'geometry_stage_prefix'),
+    stale_geometry: boolMetric(snapshot?.tile_metrics, 'stale_geometry'),
+    geometry_build_reason: stringMetric(snapshot?.tile_metrics, 'geometry_build_reason'),
+    geometry_build_source: stringMetric(snapshot?.tile_metrics, 'geometry_build_source'),
+  };
+}
+
 function normalizeBounds(value: unknown): [number, number, number, number] | null {
   if (!Array.isArray(value) || value.length !== 4) return null;
   const bounds = value.map((entry) => Number(entry));
@@ -212,6 +233,7 @@ function pendingResponse(options: BuildCampaignMapGeometryOptions): CampaignMapG
     layers: {},
     issues: failed ? ['campaign_provision_failed'] : ['campaign_geometry_pending'],
     map_status: status,
+    ...geometryBuildFields(null),
     artifact_type: 'basic',
     diamond_mode: false,
     geometry_provider: 'address_points',
@@ -448,6 +470,7 @@ export async function buildCampaignMapGeometry(
     layers,
     issues,
     map_status: status,
+    ...geometryBuildFields(snapshot),
     artifact_type: 'diamond',
     diamond_mode: Object.keys(layers).length > 0,
     geometry_provider: geometryProvider,

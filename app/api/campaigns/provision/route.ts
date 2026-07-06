@@ -23,6 +23,7 @@ import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { fetchScopedPmtilesBuildingFeatures } from '@/app/api/campaigns/_utils/scoped-pmtiles-buildings';
 import { fetchAllInPages } from '@/lib/supabase/fetchAllInPages';
 import type { CampaignSnapshotRow } from '@/lib/diamond/geometry';
+import { queueCampaignGeometryRebuild } from '@/lib/diamond/geometryStage';
 import {
   ParcelEnrichmentService,
 } from '@/lib/services/ParcelEnrichmentService';
@@ -1613,6 +1614,21 @@ export async function POST(request: NextRequest) {
             building_link_confidence: 0,
             map_mode: (staticParcelCount > 0 || scopedParcelCount > 0) ? 'hybrid' : mapMode,
           });
+
+          const geometryQueue = await queueCampaignGeometryRebuild(supabase, campaignId!, {
+            reason: 'campaign_provision_map_ready',
+            source: 'campaign_provision',
+            addressCount: finalAddressCount,
+            buildingCount: scopedBuildingCount ?? effectiveBuildingCount,
+            mapMode: (staticParcelCount > 0 || scopedParcelCount > 0) ? 'hybrid' : mapMode,
+          });
+          if (geometryQueue.trigger.status !== 'queued') {
+            console.warn('[Provision] Campaign PMTiles rebuild was not queued:', {
+              campaignId,
+              trigger: geometryQueue.trigger,
+              snapshotStatus: geometryQueue.snapshotStatus,
+            });
+          }
 
 	          console.log('[Provision] Initial map-ready bundle published; backend linking will optimize the canonical bundle in background.', {
 	            campaignId,

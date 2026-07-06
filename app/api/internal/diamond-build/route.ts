@@ -1,5 +1,10 @@
 import { spawn } from 'node:child_process';
 import { NextRequest, NextResponse } from 'next/server';
+import { createAdminClient } from '@/lib/supabase/server';
+import {
+  markCampaignGeometryBuildFailed,
+  markCampaignGeometryBuildPending,
+} from '@/lib/diamond/geometryStage';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -8,6 +13,9 @@ type DiamondBuildRequest = {
   campaignId?: unknown;
   campaign_id?: unknown;
   dryRun?: unknown;
+  geometryStagePrefix?: unknown;
+  reason?: unknown;
+  source?: unknown;
 };
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -52,21 +60,59 @@ export async function POST(request: NextRequest) {
   }
 
   const customCommand = process.env.DIAMOND_BUILD_COMMAND?.trim() || null;
-  const args = body?.dryRun === true ? [campaignId, '--dry-run'] : [campaignId];
+  const stagePrefix =
+    typeof body?.geometryStagePrefix === 'string' && body.geometryStagePrefix.trim()
+      ? body.geometryStagePrefix.trim()
+      : process.env.GEOMETRY_STAGE_PREFIX?.trim() || null;
+  const args = [
+    campaignId,
+    ...(body?.dryRun === true ? ['--dry-run'] : []),
+    ...(stagePrefix ? [`--stage-prefix=${stagePrefix}`] : []),
+  ];
+  const buildReason = typeof body?.reason === 'string' && body.reason.trim() ? body.reason.trim() : 'manual';
+  const buildSource = typeof body?.source === 'string' && body.source.trim() ? body.source.trim() : 'internal_diamond_build';
+
+  try {
+    await markCampaignGeometryBuildPending(createAdminClient(), campaignId, {
+      reason: buildReason,
+      source: buildSource,
+    });
+  } catch (metadataError) {
+    console.warn('[DiamondBuild] Failed to mark geometry build pending:', {
+      campaignId,
+      error: metadataError instanceof Error ? metadataError.message : String(metadataError),
+    });
+  }
+
   const child = customCommand
     ? spawn(`${customCommand} ${args.join(' ')}`, {
         cwd: process.cwd(),
         detached: true,
-        env: process.env,
+        env: { ...process.env, ...(stagePrefix ? { GEOMETRY_STAGE_PREFIX: stagePrefix } : {}) },
         shell: true,
         stdio: 'ignore',
       })
     : spawn('npm', ['run', 'diamond:build', '--', ...args], {
         cwd: process.cwd(),
         detached: true,
-        env: process.env,
+        env: { ...process.env, ...(stagePrefix ? { GEOMETRY_STAGE_PREFIX: stagePrefix } : {}) },
         stdio: 'ignore',
       });
+
+  child.once('error', async (error) => {
+    try {
+      await markCampaignGeometryBuildFailed(createAdminClient(), campaignId, {
+        reason: buildReason,
+        source: buildSource,
+        error: error.message,
+      });
+    } catch (metadataError) {
+      console.warn('[DiamondBuild] Failed to mark geometry build failed:', {
+        campaignId,
+        error: metadataError instanceof Error ? metadataError.message : String(metadataError),
+      });
+    }
+  });
 
   child.unref();
 
@@ -75,6 +121,7 @@ export async function POST(request: NextRequest) {
     pid: child.pid,
     command: commandDescription(customCommand),
     dryRun: body?.dryRun === true,
+    stagePrefix,
   });
 
   return NextResponse.json(
@@ -84,6 +131,7 @@ export async function POST(request: NextRequest) {
       campaign_id: campaignId,
       pid: child.pid ?? null,
       command: commandDescription(customCommand),
+      geometry_stage_prefix: stagePrefix,
     },
     { status: 202 }
   );
