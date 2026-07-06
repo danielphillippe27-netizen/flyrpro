@@ -72,7 +72,7 @@ const EMPTY_FEATURE_COLLECTION: FeatureCollection = {
   features: [],
 };
 
-export const MAP_BUNDLE_RENDER_VERSION = '2026-06-01-strict-pmtiles-building-scope-v1';
+export const MAP_BUNDLE_RENDER_VERSION = '2026-07-06-pmtiles-backed-map-bundle-v1';
 const MIN_RENDERABLE_BUILDING_AREA_SQM = 30;
 const PARCEL_LABEL_OFFSET_METERS = 4;
 const SCOPED_GEOMETRY_CACHE_TTL_MS = 30_000;
@@ -225,7 +225,51 @@ function bundleRenderVersion(row: CurrentCampaignMapBundleRow | null): string | 
 }
 
 export function campaignMapBundleNeedsRebuild(row: CurrentCampaignMapBundleRow | null): boolean {
-  return !row || bundleRenderVersion(row) !== MAP_BUNDLE_RENDER_VERSION;
+  if (!row) return true;
+  if (bundleRenderVersion(row) !== MAP_BUNDLE_RENDER_VERSION) return true;
+  if (!row.expires_at) return false;
+  const expiresAt = Date.parse(row.expires_at);
+  return Number.isFinite(expiresAt) && expiresAt <= Date.now();
+}
+
+function snapshotMetric(snapshot: CampaignSnapshotRow | null, key: string): unknown {
+  return snapshot?.tile_metrics?.[key];
+}
+
+function snapshotString(snapshot: CampaignSnapshotRow | null, key: string): string | null {
+  const value = snapshotMetric(snapshot, key);
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function snapshotHasPmtilesGeometry(snapshot: CampaignSnapshotRow | null): boolean {
+  if (!snapshot?.bucket) return false;
+  return [
+    snapshotString(snapshot, 'pmtiles_key'),
+    snapshotString(snapshot, 'addresses_pmtiles_key'),
+    snapshotString(snapshot, 'parcels_pmtiles_key'),
+    snapshot.buildings_key,
+    snapshot.addresses_key,
+  ].some((key) => typeof key === 'string' && key.toLowerCase().endsWith('.pmtiles'));
+}
+
+function mapBundleGeometrySourceVersion(baseSourceVersion: string, snapshot: CampaignSnapshotRow | null) {
+  if (!snapshotHasPmtilesGeometry(snapshot)) return baseSourceVersion;
+
+  return stableHash({
+    base_source_version: baseSourceVersion,
+    render_version: MAP_BUNDLE_RENDER_VERSION,
+    bucket: snapshot?.bucket ?? null,
+    prefix: snapshot?.prefix ?? null,
+    buildings_key: snapshot?.buildings_key ?? null,
+    addresses_key: snapshot?.addresses_key ?? null,
+    metadata_key: snapshot?.metadata_key ?? null,
+    created_at: snapshot?.created_at ?? null,
+    geometry_version: snapshotMetric(snapshot, 'geometry_version') ?? snapshotMetric(snapshot, 'pmtiles_version') ?? null,
+    geometry_etag: snapshotMetric(snapshot, 'geometry_etag') ?? snapshotMetric(snapshot, 'pmtiles_etag') ?? null,
+    pmtiles_key: snapshotString(snapshot, 'pmtiles_key'),
+    addresses_pmtiles_key: snapshotString(snapshot, 'addresses_pmtiles_key'),
+    parcels_pmtiles_key: snapshotString(snapshot, 'parcels_pmtiles_key'),
+  });
 }
 
 function normalizedWorkflowStatus(value: unknown): string {
@@ -1608,7 +1652,7 @@ export async function prebuildCampaignMapBundle(
     measure('snapshot', recordTiming, async () =>
       await supabase
         .from('campaign_snapshots')
-        .select('bucket, prefix, buildings_key, buildings_url, metadata_key, buildings_count, created_at, tile_metrics')
+        .select('bucket, prefix, buildings_key, addresses_key, buildings_url, metadata_key, buildings_count, created_at, tile_metrics')
         .eq('campaign_id', campaignId)
         .maybeSingle()
     ),
@@ -1632,9 +1676,13 @@ export async function prebuildCampaignMapBundle(
   }
 
   const bundle = (data ?? pendingCampaignMapBundleResponse(campaignId)) as JsonRecord;
-  const sourceVersion = await measure('signature', recordTiming, () =>
+  const baseSourceVersion = await measure('signature', recordTiming, () =>
     getSourceVersion(supabase, campaignId, bundle)
   );
+  const snapshotRow = snapshot as CampaignSnapshotRow | null;
+  const campaignScopeRow = campaignRow as { bbox?: unknown; territory_boundary?: unknown } | null;
+  const pmtilesBackedBundle = snapshotHasPmtilesGeometry(snapshotRow);
+  const sourceVersion = mapBundleGeometrySourceVersion(baseSourceVersion, snapshotRow);
 
   if (
     !options?.scopedGeometry &&
@@ -1648,18 +1696,19 @@ export async function prebuildCampaignMapBundle(
   const rawAddresses = normalizeAddressLabels(asFeatureCollection(bundle.addresses));
   const baseBuildings = asFeatureCollection(bundle.buildings);
   const baseParcels = asFeatureCollection(bundle.parcels);
-  const useRawScopedParcels = options?.parcelDisplayMode === 'raw';
-  const filteredBaseParcels = !useRawScopedParcels && baseParcels.features.length > 0
+  const filteredBaseParcels = options?.parcelDisplayMode !== 'raw' && baseParcels.features.length > 0
     ? await measure('parcel_display_filter', recordTiming, () =>
         filterBundleParcelsForDisplay(supabase, campaignId, baseParcels)
       )
     : baseParcels;
   const roads = asFeatureCollection(bundle.roads);
-  const snapshotRow = snapshot as CampaignSnapshotRow | null;
-  const campaignScopeRow = campaignRow as { bbox?: unknown; territory_boundary?: unknown } | null;
   const needsScopedGeometry = Boolean(
     snapshotRow?.bucket &&
-    (baseBuildings.features.length === 0 || baseParcels.features.length === 0)
+    (
+      pmtilesBackedBundle ||
+      baseBuildings.features.length === 0 ||
+      baseParcels.features.length === 0
+    )
   );
   if (options?.scopedGeometry) {
     recordTiming?.('scoped_geometry_reused', 0);
@@ -1675,13 +1724,9 @@ export async function prebuildCampaignMapBundle(
   const rawBuildings = scopedGeometry?.buildings?.features.length
     ? scopedGeometry.buildings
     : baseBuildings;
-  const parcels = useRawScopedParcels && scopedGeometry?.parcels?.features.length
+  const parcels = scopedGeometry?.parcels?.features.length
     ? scopedGeometry.parcels
-    : filteredBaseParcels.features.length > 0
-    ? filteredBaseParcels
-    : scopedGeometry?.parcels?.features.length
-      ? scopedGeometry.parcels
-      : filteredBaseParcels;
+    : filteredBaseParcels;
   const renderableBuildings = filterRenderableBuildingCollection(campaignId, rawBuildings);
   const links = await measure('links', recordTiming, () => fetchCanonicalLinks(supabase, campaignId));
   const addressOrphans = await measure('address_orphans', recordTiming, () =>
@@ -1719,6 +1764,8 @@ export async function prebuildCampaignMapBundle(
   const linksStatus = typeof options?.linksStatusOverride === 'string' && options.linksStatusOverride.trim()
     ? normalizedWorkflowStatus(options.linksStatusOverride)
     : computedLinksStatus;
+  const buildingGeometrySource = scopedGeometry?.buildings?.features.length ? 'pmtiles_snapshot' : 'rpc_bundle';
+  const parcelGeometrySource = scopedGeometry?.parcels?.features.length ? 'pmtiles_snapshot' : 'rpc_bundle';
 	  const counts: JsonRecord = {
 	    ...(bundle.counts && typeof bundle.counts === 'object' ? bundle.counts as JsonRecord : {}),
 	    addresses: featureCollectionCount(addresses),
@@ -1729,7 +1776,12 @@ export async function prebuildCampaignMapBundle(
 	    link_classification: links.length > 0 ? 'linked' : 'no_links_needed',
 	    parcel_links: parcelOwnership.length,
     source_version: sourceVersion,
+    base_source_version: baseSourceVersion,
     render_version: MAP_BUNDLE_RENDER_VERSION,
+    geometry_source: pmtilesBackedBundle ? 'pmtiles_snapshot' : 'rpc_bundle',
+    building_geometry_source: buildingGeometrySource,
+    parcel_geometry_source: parcelGeometrySource,
+    pmtiles_backed_bundle: pmtilesBackedBundle,
     label_version: 'parcel-owned-house-number-label-v2',
   };
   const assetSignature = stableHash({
@@ -1752,6 +1804,8 @@ export async function prebuildCampaignMapBundle(
     buildings: nowIso,
     parcels: nowIso,
     roads: nowIso,
+    buildings_source: buildingGeometrySource,
+    parcels_source: parcelGeometrySource,
   };
   const displayModeHint = buildings.features.length > 0 ? 'buildings' : 'addresses';
 

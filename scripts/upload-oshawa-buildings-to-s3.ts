@@ -553,7 +553,7 @@ async function upsertCampaignSnapshot(options: {
       parcels: 'parcels',
     },
     promote_ids: {
-      buildings: 'address_id',
+      buildings: 'building_id',
       parcels: 'parcel_id',
     },
     join_key: 'address_id',

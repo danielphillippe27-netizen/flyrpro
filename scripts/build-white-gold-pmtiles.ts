@@ -832,7 +832,7 @@ async function upsertCampaignSnapshot(options: {
       address_building_links: 'address_building_links',
     },
     promote_ids: {
-      buildings: 'address_id',
+      buildings: 'building_id',
       addresses: 'address_id',
       address_building_links: 'address_id',
     },

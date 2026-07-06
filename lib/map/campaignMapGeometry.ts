@@ -356,7 +356,7 @@ export async function buildCampaignMapGeometry(
   const buildingSourceLayer = stringMetric(sourceLayers, 'buildings') ?? 'buildings';
   const addressSourceLayer = stringMetric(sourceLayers, 'addresses') ?? (addressKey ? 'addresses' : null);
   const parcelSourceLayer = stringMetric(sourceLayers, 'parcels') ?? (parcelKey ? 'parcels' : null);
-  const buildingPromoteId = stringMetric(promoteIds, 'buildings') ?? 'building_id';
+  const buildingPromoteId = 'building_id';
   const addressPromoteId = stringMetric(promoteIds, 'addresses') ?? 'address_id';
   const parcelPromoteId = stringMetric(promoteIds, 'parcels') ?? 'parcel_id';
 
@@ -520,7 +520,7 @@ export async function buildCampaignMapGeometry(
       address_building_links: stringMetric(promoteIds, 'address_building_links'),
     },
     join_key: stringMetric(metrics, 'join_key') ?? addressPromoteId,
-    primary_state_layer: hasBuildings ? 'buildings' : 'addresses',
+    primary_state_layer: 'addresses',
     bounds,
     minzoom: hasBuildings ? minzoom : addressMinzoom,
     maxzoom: hasBuildings ? maxzoom : addressMaxzoom,
