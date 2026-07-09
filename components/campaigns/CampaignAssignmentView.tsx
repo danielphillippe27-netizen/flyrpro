@@ -2218,11 +2218,15 @@ function AssignmentMapEditorDialog({
           if (cancelled) return;
           const currentContainer = mapContainerRef.current;
           if (!currentContainer) return;
-          if (!hasUsableMapContainerSize(currentContainer) && attempt < 20) {
-            sizeRetryId = window.setTimeout(() => createEditorMap(attempt + 1), 50);
+          if (!hasUsableMapContainerSize(currentContainer)) {
+            if (attempt === 20) {
+              setMapError('Map is still loading.');
+            }
+            sizeRetryId = window.setTimeout(() => createEditorMap(attempt + 1), attempt < 20 ? 50 : 120);
             return;
           }
 
+          setMapError(null);
           const map = new mapboxgl.Map({
             container: currentContainer,
             ...initOptions,
