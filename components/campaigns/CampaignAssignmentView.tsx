@@ -253,28 +253,63 @@ function demoHouseNumber(address: AssignmentAddress): number | null {
   return match ? Number(match[0]) : null;
 }
 
-function getAddressCoords(address: CampaignAddress): { lat: number; lon: number } | null {
-  const coordinate = address.coordinate;
-  if (coordinate && typeof coordinate.lat === 'number' && typeof coordinate.lon === 'number') {
-    return { lat: coordinate.lat, lon: coordinate.lon };
-  }
+function finiteNumber(value: unknown): number | null {
+  const numeric = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
 
-  const geomJson = address as CampaignAddress & { geom_json?: { coordinates?: [number, number] } };
-  if (geomJson.geom_json?.coordinates) {
-    const [lon, lat] = geomJson.geom_json.coordinates;
-    if (Number.isFinite(lat) && Number.isFinite(lon)) return { lat, lon };
-  }
+function pointCoordsFromGeometry(value: unknown): { lat: number; lon: number } | null {
+  if (!value) return null;
 
-  if (typeof address.geom === 'string' && address.geom.trim().startsWith('{')) {
+  let geometry = value;
+  if (typeof geometry === 'string') {
+    const trimmed = geometry.trim();
+    const wktMatch = trimmed.match(/^POINT\s*\(\s*(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s*\)$/i);
+    if (wktMatch) {
+      const lon = finiteNumber(wktMatch[1]);
+      const lat = finiteNumber(wktMatch[2]);
+      return lon === null || lat === null ? null : { lat, lon };
+    }
+
+    if (!trimmed.startsWith('{')) return null;
     try {
-      const parsed = JSON.parse(address.geom) as { coordinates?: [number, number] };
-      const coordinates = parsed.coordinates;
-      if (!coordinates) return null;
-      const [lon, lat] = coordinates;
-      if (Number.isFinite(lat) && Number.isFinite(lon)) return { lat, lon };
+      geometry = JSON.parse(trimmed);
     } catch {
       return null;
     }
+  }
+
+  if (typeof geometry !== 'object') return null;
+  const candidate = geometry as { type?: unknown; coordinates?: unknown };
+  if (candidate.type !== 'Point' || !Array.isArray(candidate.coordinates)) return null;
+  const lon = finiteNumber(candidate.coordinates[0]);
+  const lat = finiteNumber(candidate.coordinates[1]);
+  return lon === null || lat === null ? null : { lat, lon };
+}
+
+function getAddressCoords(address: CampaignAddress): { lat: number; lon: number } | null {
+  const coordinate = address.coordinate;
+  if (coordinate) {
+    const lat = finiteNumber(coordinate.lat);
+    const lon = finiteNumber(coordinate.lon);
+    if (lat !== null && lon !== null) return { lat, lon };
+  }
+
+  const addressWithGeometry = address as CampaignAddress & { geom_json?: unknown; geometry?: unknown };
+  const geomJsonCoords = pointCoordsFromGeometry(addressWithGeometry.geom_json);
+  if (geomJsonCoords) return geomJsonCoords;
+
+  const geometryCoords = pointCoordsFromGeometry(addressWithGeometry.geometry);
+  if (geometryCoords) return geometryCoords;
+
+  const geomCoords = pointCoordsFromGeometry(address.geom);
+  if (geomCoords) return geomCoords;
+
+  const rawGeomJson = addressWithGeometry.geom_json as { coordinates?: unknown } | null;
+  if (Array.isArray(rawGeomJson?.coordinates)) {
+    const lon = finiteNumber(rawGeomJson.coordinates[0]);
+    const lat = finiteNumber(rawGeomJson.coordinates[1]);
+    if (lat !== null && lon !== null) return { lat, lon };
   }
 
   return null;
@@ -468,6 +503,12 @@ function syncMapSize(map: mapboxgl.Map) {
   } catch {
     // Ignore transient resize errors while the dialog is opening or closing.
   }
+}
+
+function hasUsableMapContainerSize(container: HTMLElement | null) {
+  if (!container) return false;
+  const rect = container.getBoundingClientRect();
+  return rect.width >= 80 && rect.height >= 80;
 }
 
 function enableFreeMapCamera(map: mapboxgl.Map) {
@@ -2129,6 +2170,7 @@ function AssignmentMapEditorDialog({
   const initialLat = initialPoint?.lat ?? null;
   const hasRenderableAssignmentMap = Boolean(mapLoaded || buildingRenderState?.hasVisibleFeatures);
   const showMapError = Boolean(mapError && !hasRenderableAssignmentMap);
+  const showMissingCoordinateMessage = open && assignmentAddresses.length > 0 && previewPoints.length === 0;
 
   useEffect(() => {
     if (buildingRenderState?.hasVisibleFeatures) {
@@ -2147,89 +2189,107 @@ function AssignmentMapEditorDialog({
     }
 
     let cancelled = false;
+    let sizeRetryId: number | null = null;
+    const resizeTimerIds: number[] = [];
     setMapError(null);
     setMapLoaded(false);
     mapboxgl.accessToken = token;
 
     void getResolvedMapInitOptions(resolvedMapStyle)
       .then((initOptions) => {
-        if (cancelled || !mapContainerRef.current) return;
-
-        const map = new mapboxgl.Map({
-          container: mapContainerRef.current,
-          ...initOptions,
-          center: [initialLon, initialLat],
-          zoom: 15,
-          pitch: 45,
-          attributionControl: false,
-          pitchWithRotate: true,
-          dragRotate: true,
-        });
-        mapRef.current = map;
-        enableFreeMapCamera(map);
-        map.addControl(new mapboxgl.NavigationControl({ showCompass: true, visualizePitch: true }), 'bottom-right');
-
-        const scheduleMapResize = () => {
+        const scheduleMapResize = (map: mapboxgl.Map) => {
           [0, 50, 150, 300, 600].forEach((delay) => {
-            window.setTimeout(() => {
+            const timerId = window.setTimeout(() => {
               if (!cancelled && mapRef.current === map) syncMapSize(map);
             }, delay);
+            resizeTimerIds.push(timerId);
           });
         };
 
-        const handleMapReady = () => {
-          applyPresetVisualTweaks(map, resolvedMapStyle, {
-            preserveLayerPrefixes: ['map-buildings-', 'campaign-', 'flyr-'],
-          });
-          syncMapSize(map);
-          scheduleMapResize();
-        };
-
-        const handleStyleLoad = () => {
+        const createEditorMap = (attempt = 0) => {
           if (cancelled) return;
-          handleMapReady();
-          setMapLoaded(true);
-          setMapError(null);
-        };
-
-        map.on('style.load', handleStyleLoad);
-        map.on('load', () => {
-          if (cancelled) return;
-          handleMapReady();
-          setMapLoaded(true);
-          setMapError(null);
-          window.requestAnimationFrame(() => syncMapSize(map));
-        });
-        map.on('error', () => {
-          if (cancelled) return;
-          if (hasRenderableMapStyle(map)) {
-            setMapError(null);
+          const currentContainer = mapContainerRef.current;
+          if (!currentContainer) return;
+          if (!hasUsableMapContainerSize(currentContainer) && attempt < 20) {
+            sizeRetryId = window.setTimeout(() => createEditorMap(attempt + 1), 50);
             return;
           }
 
-          window.setTimeout(() => {
-            if (cancelled || mapRef.current !== map) return;
+          const map = new mapboxgl.Map({
+            container: currentContainer,
+            ...initOptions,
+            center: [initialLon, initialLat],
+            zoom: 15,
+            pitch: 45,
+            attributionControl: false,
+            pitchWithRotate: true,
+            dragRotate: true,
+          });
+          mapRef.current = map;
+          enableFreeMapCamera(map);
+          map.addControl(new mapboxgl.NavigationControl({ showCompass: true, visualizePitch: true }), 'bottom-right');
+          scheduleMapResize(map);
+
+          const handleMapReady = () => {
+            applyPresetVisualTweaks(map, resolvedMapStyle, {
+              preserveLayerPrefixes: ['map-buildings-', 'campaign-', 'flyr-'],
+            });
+            syncMapSize(map);
+            scheduleMapResize(map);
+          };
+
+          const handleStyleLoad = () => {
+            if (cancelled) return;
+            handleMapReady();
+            setMapLoaded(true);
+            setMapError(null);
+          };
+
+          map.on('style.load', handleStyleLoad);
+          map.on('load', () => {
+            if (cancelled) return;
+            handleMapReady();
+            setMapLoaded(true);
+            setMapError(null);
+            window.requestAnimationFrame(() => syncMapSize(map));
+          });
+          map.on('idle', () => {
+            if (!cancelled && mapRef.current === map) syncMapSize(map);
+          });
+          map.on('error', () => {
+            if (cancelled) return;
             if (hasRenderableMapStyle(map)) {
               setMapError(null);
               return;
             }
-            setMapError('Map unavailable.');
-          }, 1000);
-        });
 
-        const cleanupMapEvents = () => {
-          map.off('style.load', handleStyleLoad);
+            window.setTimeout(() => {
+              if (cancelled || mapRef.current !== map) return;
+              if (hasRenderableMapStyle(map)) {
+                setMapError(null);
+                return;
+              }
+              setMapError('Map unavailable.');
+            }, 1000);
+          });
+
+          const cleanupMapEvents = () => {
+            map.off('style.load', handleStyleLoad);
+          };
+          map.once('remove', cleanupMapEvents);
+          if (map.isStyleLoaded()) {
+            handleStyleLoad();
+          } else {
+            window.setTimeout(() => {
+              if (!cancelled && mapRef.current === map && map.isStyleLoaded()) {
+                handleStyleLoad();
+              }
+            }, 0);
+          }
         };
-        map.once('remove', cleanupMapEvents);
-        if (map.isStyleLoaded()) {
-          handleStyleLoad();
-        } else {
-          window.setTimeout(() => {
-            if (!cancelled && mapRef.current === map && map.isStyleLoaded()) {
-              handleStyleLoad();
-            }
-          }, 0);
-        }
+
+        if (cancelled || !mapContainerRef.current) return;
+        createEditorMap();
       })
       .catch(() => {
         if (!cancelled) setMapError('Map unavailable.');
@@ -2237,6 +2297,8 @@ function AssignmentMapEditorDialog({
 
     return () => {
       cancelled = true;
+      if (sizeRetryId !== null) window.clearTimeout(sizeRetryId);
+      resizeTimerIds.forEach((timerId) => window.clearTimeout(timerId));
       setMapLoaded(false);
       if (mapRef.current) {
         removeMapboxMapWhenSafe(mapRef.current);
@@ -2244,6 +2306,12 @@ function AssignmentMapEditorDialog({
       }
     };
   }, [editorVisible, initialLat, initialLon, resolvedMapStyle]);
+
+  useEffect(() => {
+    if (!showMissingCoordinateMessage) return;
+    setMapLoaded(false);
+    setMapError('No mappable homes found for this assignment.');
+  }, [showMissingCoordinateMessage]);
 
   useEffect(() => {
     if (!editorVisible) return;
@@ -2267,9 +2335,11 @@ function AssignmentMapEditorDialog({
     if (!map || !mapLoaded || previewPoints.length === 0) return;
     if (editorMapFittedRef.current) return;
     editorMapFittedRef.current = true;
+    syncMapSize(map);
 
     if (previewPoints.length === 1) {
       map.easeTo({ center: [previewPoints[0].lon, previewPoints[0].lat], zoom: 17, pitch: 45, duration: 450 });
+      window.setTimeout(() => syncMapSize(map), 500);
       return;
     }
 
@@ -2282,6 +2352,7 @@ function AssignmentMapEditorDialog({
         pitch: 45,
         duration: 450,
       });
+      window.setTimeout(() => syncMapSize(map), 500);
     }
   }, [mapLoaded, previewPoints]);
 
