@@ -249,6 +249,7 @@ export function TeamMapTab({ range, memberIds, mapMode, demoLive = false, campai
   const [knockEvents, setKnockEvents] = useState<Array<{ payload?: { lat?: number; lng?: number; [k: string]: unknown }; display_name?: string; user_id?: string }>>([]);
   const [livePresence, setLivePresence] = useState<LivePresence[]>([]);
   const [demoArea, setDemoArea] = useState<DemoArea | null>(null);
+  const [demoAreaResolved, setDemoAreaResolved] = useState(false);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -262,6 +263,12 @@ export function TeamMapTab({ range, memberIds, mapMode, demoLive = false, campai
       })));
       setSessions([]);
       setKnockEvents([]);
+      if (campaignId && !demoAreaResolved) {
+        setLivePresence([]);
+        setError(null);
+        setLoading(true);
+        return;
+      }
       setLivePresence(buildDemoLivePresence(0, demoArea));
       setError(null);
       setLoading(false);
@@ -310,33 +317,48 @@ export function TeamMapTab({ range, memberIds, mapMode, demoLive = false, campai
     } finally {
       setLoading(false);
     }
-  }, [currentWorkspaceId, demoArea, demoLive, range.start, range.end, mapMode, memberIds]);
+  }, [campaignId, currentWorkspaceId, demoArea, demoAreaResolved, demoLive, range.start, range.end, mapMode, memberIds]);
 
   useEffect(() => {
     if (!demoLive || !campaignId) {
       setDemoArea(null);
+      setDemoAreaResolved(demoLive);
       return;
     }
 
     let cancelled = false;
+    setDemoAreaResolved(false);
     fetch(`/api/campaigns/${encodeURIComponent(campaignId)}`, {
       credentials: 'include',
       cache: 'no-store',
     })
       .then((response) => (response.ok ? response.json() : null))
       .then((campaign) => {
-        if (cancelled || !campaign) return;
+        if (cancelled) return;
+        if (!campaign) {
+          setDemoArea(null);
+          setDemoAreaResolved(true);
+          return;
+        }
         const polygon =
           campaign.territory_boundary?.type === 'Polygon'
             ? (campaign.territory_boundary as GeoJSON.Polygon)
             : null;
         const bbox = normalizeBbox(campaign.bbox) ?? bboxFromPolygon(polygon);
-        if (!bbox) return;
+        if (!bbox) {
+          setDemoArea(null);
+          setDemoAreaResolved(true);
+          return;
+        }
         setDemoArea({ bbox, polygon });
+        setDemoAreaResolved(true);
         liveFitKeyRef.current = null;
       })
       .catch(() => {
-        if (!cancelled) setDemoArea(null);
+        if (!cancelled) {
+          setDemoArea(null);
+          setDemoAreaResolved(true);
+        }
       });
 
     return () => {
@@ -346,13 +368,14 @@ export function TeamMapTab({ range, memberIds, mapMode, demoLive = false, campai
 
   useEffect(() => {
     if (!demoLive || mapMode !== 'live') return;
+    if (campaignId && !demoAreaResolved) return;
     let tick = 1;
     const interval = window.setInterval(() => {
       setLivePresence(buildDemoLivePresence(tick, demoArea));
       tick += 1;
     }, 1400);
     return () => window.clearInterval(interval);
-  }, [demoArea, demoLive, mapMode]);
+  }, [campaignId, demoArea, demoAreaResolved, demoLive, mapMode]);
 
   useEffect(() => {
     fetchMapData();
@@ -418,6 +441,15 @@ export function TeamMapTab({ range, memberIds, mapMode, demoLive = false, campai
       });
     });
   }, [mapLoaded, resolvedMapStyle]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded || !demoLive || !demoArea) return;
+    const [minLng, minLat, maxLng, maxLat] = demoArea.bbox;
+    const bounds = new mapboxgl.LngLatBounds([minLng, minLat], [maxLng, maxLat]);
+    if (bounds.isEmpty()) return;
+    map.fitBounds(bounds, { padding: 64, maxZoom: 15, duration: 0 });
+  }, [demoArea, demoLive, mapLoaded]);
 
   // Routes layer
   useEffect(() => {

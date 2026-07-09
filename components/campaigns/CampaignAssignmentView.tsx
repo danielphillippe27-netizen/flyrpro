@@ -1882,7 +1882,7 @@ function CampaignAssignmentZonePreviewMap({
       : 'relative h-[360px] min-h-[320px] w-full';
 
   return (
-    <div className={wrapperClassName}>
+    <div className={wrapperClassName} data-self-serve-demo-allow="true">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-background/85 px-3 py-2">
         <div className="flex min-w-0 items-center gap-2">
           <MapPinned className="h-4 w-4 text-muted-foreground" />
@@ -2513,6 +2513,7 @@ function AssignmentMapEditorDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className="left-0 top-0 grid h-[100dvh] w-[100vw] max-w-none translate-x-0 translate-y-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden rounded-none border-0 p-0 sm:max-w-none"
+        data-self-serve-demo-allow="true"
         showCloseButton={false}
         style={{
           inset: 0,

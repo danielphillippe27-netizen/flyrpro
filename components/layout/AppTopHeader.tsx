@@ -260,6 +260,16 @@ export default function AppTopHeader() {
     return () => window.clearInterval(intervalId);
   }, [currentWorkspace?.id, loadNotifications]);
 
+  useEffect(() => {
+    const openFeedback = () => {
+      setFeedbackError(null);
+      setFeedbackSuccess(null);
+      setFeedbackOpen(true);
+    };
+    window.addEventListener('flyr:open-feedback', openFeedback);
+    return () => window.removeEventListener('flyr:open-feedback', openFeedback);
+  }, []);
+
   const markNotificationRead = useCallback(
     async (notificationId: string) => {
       if (!currentWorkspace?.id) return;
@@ -343,7 +353,7 @@ export default function AppTopHeader() {
           message: trimmed,
           workspaceId: currentWorkspace?.id ?? null,
           role: currentRole ?? null,
-          page: typeof window !== 'undefined' ? window.location.pathname : null,
+          page: typeof window !== 'undefined' ? window.location.href : null,
         }),
       });
 
@@ -359,6 +369,7 @@ export default function AppTopHeader() {
 
       setFeedbackSuccess('Thanks for the feedback. We received your message.');
       setFeedbackMessage('');
+      window.dispatchEvent(new CustomEvent('flyr:feedback-submitted', { detail: { message: trimmed } }));
     } catch {
       setFeedbackError('Failed to send feedback. Please check your connection and try again.');
     } finally {
@@ -438,6 +449,7 @@ export default function AppTopHeader() {
                 size="sm"
                 onClick={() => setFeedbackOpen(true)}
                 className="px-2 sm:px-3"
+                data-self-serve-demo-flow="true"
               >
                 <span>Feedback ?</span>
               </Button>
@@ -550,7 +562,7 @@ export default function AppTopHeader() {
           }
         }}
       >
-        <DialogContent>
+        <DialogContent data-self-serve-demo-allow="true">
           <DialogHeader>
             <DialogTitle>Send Feedback</DialogTitle>
             <DialogDescription>

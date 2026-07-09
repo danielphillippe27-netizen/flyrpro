@@ -21,6 +21,8 @@ const SIDEBAR_EXPANDED_W = 160;   // 10rem – icons + labels
 const DEMO_FLOW_LOCK_MESSAGE = 'follow the 5 simple steps to unlock the rest of the dashboard';
 const DEMO_FLOW_INTERACTIVE_SELECTOR =
   'a[href], button, input, textarea, select, [role="button"], [role="link"], [role="tab"], [data-demo-lockable]';
+const DEMO_FLOW_ALLOWED_INTERACTIVE_SELECTOR =
+  '[data-self-serve-demo-flow="true"], [data-self-serve-demo-allow="true"], .mapboxgl-map, .mapboxgl-control-container, .mapboxgl-popup';
 
 const scriptsTab = { href: '/scripts', icon: FileText, label: 'Scripts' };
 
@@ -293,7 +295,7 @@ function DemoFlowClickGuard({
     if (!active) return;
 
     const target = event.target instanceof Element ? event.target : null;
-    if (!target || target.closest('[data-self-serve-demo-flow="true"]')) return;
+    if (!target || target.closest(DEMO_FLOW_ALLOWED_INTERACTIVE_SELECTOR)) return;
 
     const interactiveTarget = target.closest(DEMO_FLOW_INTERACTIVE_SELECTOR);
     if (!interactiveTarget) return;

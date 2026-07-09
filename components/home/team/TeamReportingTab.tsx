@@ -403,7 +403,8 @@ export function TeamReportingTab({ memberIds, demoReport = false }: TeamReportin
     setSelectedPeriodStart(null);
   };
 
-  const printableReport = report?.period_start ? report : null;
+  const effectiveReport = demoReport ? DEMO_TEAM_REPORT : report;
+  const printableReport = effectiveReport?.period_start ? effectiveReport : null;
   const totals = printableReport?.totals;
   const deltas = printableReport?.deltas;
 
@@ -431,7 +432,7 @@ export function TeamReportingTab({ memberIds, demoReport = false }: TeamReportin
   };
 
   const notifyReport = async () => {
-    if (!currentWorkspaceId || !report?.period_start) return;
+    if (demoReport || !currentWorkspaceId || !report?.period_start) return;
     setNotifying(true);
     try {
       const res = await fetch(`/api/team/reports?workspaceId=${encodeURIComponent(currentWorkspaceId)}`, {
@@ -469,7 +470,7 @@ export function TeamReportingTab({ memberIds, demoReport = false }: TeamReportin
   };
 
   const emailReportLead = async () => {
-    if (!currentWorkspaceId || !report?.period_start) return;
+    if (demoReport || !currentWorkspaceId || !report?.period_start) return;
     setEmailing(true);
     try {
       const res = await fetch(`/api/team/reports?workspaceId=${encodeURIComponent(currentWorkspaceId)}`, {
@@ -504,7 +505,7 @@ export function TeamReportingTab({ memberIds, demoReport = false }: TeamReportin
     }
   };
 
-  if (loading && !report) {
+  if (loading && !effectiveReport) {
     return (
       <div className="space-y-6">
         <Skeleton className="h-28 rounded-2xl" />
@@ -518,7 +519,7 @@ export function TeamReportingTab({ memberIds, demoReport = false }: TeamReportin
     );
   }
 
-  const availablePeriods = report?.availablePeriods?.length ? report.availablePeriods : [];
+  const availablePeriods = effectiveReport?.availablePeriods?.length ? effectiveReport.availablePeriods : [];
   const hasReport = Boolean(printableReport && totals && deltas);
   const missingCount = printableReport?.coverage.missing_member_ids.length ?? 0;
 
@@ -541,7 +542,7 @@ export function TeamReportingTab({ memberIds, demoReport = false }: TeamReportin
             </Select>
 
             <Select
-              value={selectedPeriodStart ?? report?.period_start ?? ''}
+              value={selectedPeriodStart ?? effectiveReport?.period_start ?? ''}
               onValueChange={(value) => setSelectedPeriodStart(value)}
               disabled={availablePeriods.length === 0}
             >

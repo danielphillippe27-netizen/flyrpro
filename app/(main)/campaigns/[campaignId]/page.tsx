@@ -1597,7 +1597,7 @@ export default function CampaignDetailPage() {
             <TabsTrigger value="notes">Notes</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="map" className="mt-4 space-y-4">
+          <TabsContent value="map" className="mt-4 space-y-4" data-self-serve-demo-allow="true">
             {roadMetadataLoading ? (
               <p className="text-xs text-muted-foreground">Loading road metadata…</p>
             ) : roadMetadataError ? (
@@ -1858,7 +1858,7 @@ export default function CampaignDetailPage() {
             />
           </TabsContent>
 
-          <TabsContent value="assignments" className="mt-4">
+          <TabsContent value="assignments" className="mt-4" data-self-serve-demo-allow="true">
             <CampaignAssignmentView
               campaignId={campaignId}
               campaignName={campaign?.name ?? undefined}
