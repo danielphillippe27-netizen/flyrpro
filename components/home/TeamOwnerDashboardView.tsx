@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ArrowRight, BarChart3, MessageSquare } from 'lucide-react';
+import { ArrowRight, BarChart3, MessageSquare, Users } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -99,7 +99,7 @@ export function TeamOwnerDashboardView() {
     if (!isSelfServeDemo) return null;
     if (activeTab === 'map') {
       return {
-        eyebrow: 'Next step 3 of 5',
+        eyebrow: 'Next step 3 of 6',
         title: 'Review the team after they hit the doors',
         description: 'The live map shows the 4 demo reps in the field. Next, open reporting to see the weekly performance.',
         button: 'Open reporting',
@@ -117,10 +117,28 @@ export function TeamOwnerDashboardView() {
     }
     if (activeTab === 'reporting') {
       return {
-        eyebrow: 'Next step 5 of 5',
-        title: 'Leave a demo review or ask us anything',
-        description: 'Open Feedback ? and send a quick note to unlock the full dashboard.',
-        button: 'Open Feedback ?',
+        eyebrow: 'Next step 4 of 6',
+        title: 'Review weekly performance',
+        description: 'The demo report shows doors, flyers, conversations, leads, appointments, field time, and rep breakdowns. Next, show team settings.',
+        button: 'Open team settings',
+        icon: Users,
+        action: () => {
+          const params = new URLSearchParams(searchParams.toString());
+          params.set('tab', 'settings');
+          params.set('source', 'self-serve-demo');
+          params.set('demoReport', '1');
+          if (campaignId) params.set('campaign', campaignId);
+          router.replace(`/home?${params.toString()}`, { scroll: false });
+          setActiveTab('settings');
+        },
+      };
+    }
+    if (activeTab === 'settings') {
+      return {
+        eyebrow: 'Next step 5 of 6',
+        title: 'Manage invites, members, and roles',
+        description: 'This is where owners invite teammates, remove access, open member details, and manage team administration before the final feedback step.',
+        button: 'Open final feedback',
         icon: MessageSquare,
         action: () => {
           window.dispatchEvent(new CustomEvent('flyr:open-feedback'));
@@ -218,7 +236,7 @@ export function TeamOwnerDashboardView() {
           <TabsContent value="reporting">
             <TeamReportingTab memberIds={memberIds} demoReport={showDemoReport} />
           </TabsContent>
-          <TabsContent value="settings">
+          <TabsContent value="settings" data-self-serve-demo-allow="true">
             <TeamSettingsTab
               range={range}
               onMemberClick={(m) => setSelectedMember({ ...m, color: m.color ?? '#3B82F6' })}

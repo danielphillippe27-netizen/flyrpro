@@ -24,18 +24,17 @@ export default function PricingPage() {
   const [loading, setLoading] = useState(true);
   const isSelfServeDemo = searchParams.get('source') === 'self-serve-demo';
   const campaignId = searchParams.get('campaign');
-  const demoFeedbackParams = new URLSearchParams({
-    tab: 'reporting',
+  const demoSettingsParams = new URLSearchParams({
+    tab: 'settings',
     source: 'self-serve-demo',
     demoReport: '1',
-    demoFeedback: '1',
   });
 
   if (campaignId) {
-    demoFeedbackParams.set('campaign', campaignId);
+    demoSettingsParams.set('campaign', campaignId);
   }
 
-  const demoFeedbackHref = `/home?${demoFeedbackParams.toString()}`;
+  const demoSettingsHref = `/home?${demoSettingsParams.toString()}`;
 
   useEffect(() => {
     fetch('/api/billing/prices')
@@ -65,14 +64,14 @@ export default function PricingPage() {
           <div className="mx-auto flex max-w-5xl flex-col gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-left shadow-sm dark:border-red-900/50 dark:bg-red-950/20 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <Badge variant="outline" className="border-red-200 bg-white text-red-700 dark:border-red-900/70 dark:bg-background dark:text-red-300">
-                Step 4 of 5
+                Step 4 of 6
               </Badge>
               <p className="mt-2 text-sm font-medium text-slate-950 dark:text-white">
-                Pricing is ready. Continue the demo to unlock the full dashboard.
+                Pricing is ready. Next, show team settings before the final feedback step.
               </p>
             </div>
             <Button asChild className="shrink-0">
-              <Link href={demoFeedbackHref} data-self-serve-demo-flow="true">
+              <Link href={demoSettingsHref} data-self-serve-demo-flow="true">
                 Continue to step 5
                 <ArrowRight className="h-4 w-4" />
               </Link>

@@ -108,7 +108,7 @@ type CampaignTabValue = (typeof CAMPAIGN_TAB_VALUES)[number];
 const SELF_SERVE_DEMO_NEXT_STEPS = [
   {
     id: 'assign',
-    eyebrow: 'Next step 1 of 5',
+    eyebrow: 'Next step 1 of 6',
     title: 'Split the campaign across 4 reps',
     description: 'Assign Maya, Leo, Ava, and Noah so each person gets a clear zone.',
     tab: 'assignments',
@@ -116,7 +116,7 @@ const SELF_SERVE_DEMO_NEXT_STEPS = [
   },
   {
     id: 'live-map',
-    eyebrow: 'Next step 2 of 5',
+    eyebrow: 'Next step 2 of 6',
     title: 'Watch the live team map',
     description: 'See the 4 demo reps hitting doors across the campaign in real time.',
     tab: 'assignments',
@@ -124,7 +124,7 @@ const SELF_SERVE_DEMO_NEXT_STEPS = [
   },
   {
     id: 'reporting',
-    eyebrow: 'Next step 3 of 5',
+    eyebrow: 'Next step 3 of 6',
     title: 'Review weekly performance',
     description: 'Open the weekly report with mock visits, callbacks, leads, and rep performance.',
     tab: 'activity',
@@ -132,22 +132,30 @@ const SELF_SERVE_DEMO_NEXT_STEPS = [
   },
   {
     id: 'pricing',
-    eyebrow: 'Next step 4 of 5',
+    eyebrow: 'Next step 4 of 6',
     title: 'Pricing is ready',
     description: 'Review the stats, then pricing is ready when they understand the campaign workflow.',
     tab: 'activity',
     button: 'Go to pricing',
   },
   {
+    id: 'settings',
+    eyebrow: 'Next step 5 of 6',
+    title: 'Manage the team',
+    description: 'Show invites, member removal, admin roles, and team goals before they unlock the dashboard.',
+    tab: 'activity',
+    button: 'Open team settings',
+  },
+  {
     id: 'feedback',
-    eyebrow: 'Next step 5 of 5',
+    eyebrow: 'Next step 6 of 6',
     title: 'Review the demo and ask questions',
     description: 'Use the Feedback ? button in the top-right header to tell us what you thought of the demo or ask anything before unlocking the full dashboard.',
     tab: 'activity',
     button: 'Open feedback step',
   },
 ] as const satisfies ReadonlyArray<{
-  id: 'assign' | 'live-map' | 'reporting' | 'pricing' | 'feedback';
+  id: 'assign' | 'live-map' | 'reporting' | 'pricing' | 'settings' | 'feedback';
   eyebrow: string;
   title: string;
   description: string;
@@ -1019,8 +1027,12 @@ export default function CampaignDetailPage() {
       window.location.href = `/home?tab=reporting&source=self-serve-demo&demoReport=1&campaign=${encodeURIComponent(campaignId)}`;
       return;
     }
+    if (step.id === 'settings') {
+      window.location.href = `/home?tab=settings&source=self-serve-demo&demoReport=1&campaign=${encodeURIComponent(campaignId)}`;
+      return;
+    }
     if (step.id === 'feedback') {
-      window.location.href = `/home?tab=reporting&source=self-serve-demo&demoReport=1&demoFeedback=1&campaign=${encodeURIComponent(campaignId)}`;
+      window.location.href = `/home?tab=settings&source=self-serve-demo&demoReport=1&demoFeedback=1&campaign=${encodeURIComponent(campaignId)}`;
       return;
     }
 
@@ -1542,6 +1554,26 @@ export default function CampaignDetailPage() {
                     </div>
                   ) : null}
 
+                  {demoNextStep.id === 'settings' ? (
+                    <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-border dark:bg-card">
+                      <p className="mb-2 text-xs font-medium text-slate-600 dark:text-muted-foreground">Team administration</p>
+                      <div className="grid grid-cols-3 gap-2 text-center">
+                        <div>
+                          <p className="text-lg font-bold text-slate-950 dark:text-foreground">Invite</p>
+                          <p className="text-[11px] text-slate-600 dark:text-muted-foreground">members</p>
+                        </div>
+                        <div>
+                          <p className="text-lg font-bold text-slate-950 dark:text-foreground">Remove</p>
+                          <p className="text-[11px] text-slate-600 dark:text-muted-foreground">access</p>
+                        </div>
+                        <div>
+                          <p className="text-lg font-bold text-slate-950 dark:text-foreground">Admin</p>
+                          <p className="text-[11px] text-slate-600 dark:text-muted-foreground">roles</p>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+
                   <Button
                     type="button"
                     className="mt-4 w-full"
@@ -1551,6 +1583,7 @@ export default function CampaignDetailPage() {
                     {demoNextStep.id === 'assign' ? <Users className="h-4 w-4" /> : null}
                     {demoNextStep.id === 'live-map' ? <MapPin className="h-4 w-4" /> : null}
                     {demoNextStep.id === 'reporting' ? <BarChart3 className="h-4 w-4" /> : null}
+                    {demoNextStep.id === 'settings' ? <Users className="h-4 w-4" /> : null}
                     {demoNextStep.button}
                     <ArrowRight className="h-4 w-4" />
                   </Button>
