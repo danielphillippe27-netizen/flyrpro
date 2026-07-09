@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowRight, BarChart3, MessageSquare, Users } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -46,6 +46,7 @@ export function TeamOwnerDashboardView() {
   const [memberIds, setMemberIds] = useState<string[]>([]);
   const [members, setMembers] = useState<{ user_id: string; display_name: string; color?: string }[]>([]);
   const [selectedMember, setSelectedMember] = useState<{ user_id: string; display_name: string; color: string } | null>(null);
+  const handledDemoFeedbackRef = useRef(false);
 
   const fetchMembers = useCallback(async () => {
     if (!currentWorkspaceId) {
@@ -82,6 +83,14 @@ export function TeamOwnerDashboardView() {
     window.addEventListener('flyr:feedback-submitted', unlockDemo);
     return () => window.removeEventListener('flyr:feedback-submitted', unlockDemo);
   }, [isSelfServeDemo, router]);
+
+  useEffect(() => {
+    if (!isSelfServeDemo || searchParams.get('demoFeedback') !== '1' || handledDemoFeedbackRef.current) return;
+    handledDemoFeedbackRef.current = true;
+    window.setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('flyr:open-feedback'));
+    }, 100);
+  }, [isSelfServeDemo, searchParams]);
 
   const handleTabChange = (value: string) => {
     setActiveTab(value);
@@ -127,6 +136,7 @@ export function TeamOwnerDashboardView() {
           params.set('tab', 'settings');
           params.set('source', 'self-serve-demo');
           params.set('demoReport', '1');
+          params.set('invite', 'members');
           if (campaignId) params.set('campaign', campaignId);
           router.replace(`/home?${params.toString()}`, { scroll: false });
           setActiveTab('settings');

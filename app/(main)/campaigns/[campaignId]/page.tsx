@@ -1028,7 +1028,7 @@ export default function CampaignDetailPage() {
       return;
     }
     if (step.id === 'settings') {
-      window.location.href = `/home?tab=settings&source=self-serve-demo&demoReport=1&campaign=${encodeURIComponent(campaignId)}`;
+      window.location.href = `/home?tab=settings&source=self-serve-demo&demoReport=1&invite=members&campaign=${encodeURIComponent(campaignId)}`;
       return;
     }
     if (step.id === 'feedback') {

@@ -20,7 +20,9 @@ export function HomePageClient({ accessLevel }: HomePageClientProps) {
   const resolvedAccessLevel = workspaceAccessLevel ?? accessLevel;
   const showSelfServeTeamDemo =
     searchParams.get('source') === 'self-serve-demo' &&
-    (searchParams.get('tab') === 'map' || searchParams.get('tab') === 'reporting');
+    (searchParams.get('tab') === 'map' ||
+      searchParams.get('tab') === 'reporting' ||
+      searchParams.get('tab') === 'settings');
 
   useEffect(() => {
     const code = searchParams.get('code');
