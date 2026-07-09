@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Loader2, PhoneCall, Plus, Upload } from 'lucide-react';
+import { Plus, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -34,12 +34,6 @@ type TeamMemberOption = {
 
 type TeamRosterResponse = {
   members?: TeamMemberOption[];
-};
-
-type DiallerImportResponse = {
-  leads?: Array<{ id: string }>;
-  importedCount?: number;
-  error?: string;
 };
 
 const LEAD_RECORD_NAV_STORAGE_KEY = 'flyr:leads:record-contact-ids';
@@ -125,8 +119,6 @@ export function ContactsHubView() {
   const [loadError, setLoadError] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
-  const [sendingToDialler, setSendingToDialler] = useState(false);
-  const [diallerError, setDiallerError] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [teamMembers, setTeamMembers] = useState<TeamMemberOption[]>([]);
   const [selectedMemberId, setSelectedMemberId] = useState<string>('all');
@@ -370,53 +362,6 @@ export function ContactsHubView() {
     setSelectedContactIds((current) => current.filter((id) => visibleIds.has(id)));
   }, [visibleContacts]);
 
-  const handleSendListToDialler = async () => {
-    if (!currentWorkspaceId || visibleContacts.length === 0) return;
-
-    const diallerRows = visibleContacts
-      .map((contact) => ({
-        name: contact.full_name?.trim() || 'Lead',
-        phone: contact.phone?.trim() || '',
-        company: contact.address?.trim() || null,
-        email: contact.email?.trim() || null,
-      }))
-      .filter((row) => row.phone.length > 0);
-
-    if (diallerRows.length === 0) {
-      setDiallerError('This list does not have any phone numbers to send to the dialler.');
-      return;
-    }
-
-    setSendingToDialler(true);
-    setDiallerError(null);
-
-    try {
-      const response = await fetch('/api/dialer/leads', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          workspaceId: currentWorkspaceId,
-          leads: diallerRows,
-        }),
-      });
-      const data = (await response.json().catch(() => ({}))) as DiallerImportResponse;
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to move this list to the dialler.');
-      }
-
-      const leadIds = (data.leads ?? []).map((lead) => lead.id).filter(Boolean);
-      const params = new URLSearchParams();
-      if (leadIds.length > 0) params.set('leadIds', leadIds.join(','));
-      params.set('listName', selectedList.name);
-      router.push(`/dialer?${params.toString()}`);
-    } catch (error) {
-      setDiallerError(error instanceof Error ? error.message : 'Failed to move this list to the dialler.');
-    } finally {
-      setSendingToDialler(false);
-    }
-  };
-
   const handleToggleContactSelection = (contactId: string, checked: boolean) => {
     setSelectedContactIds((current) => {
       if (checked) {
@@ -520,18 +465,6 @@ export function ContactsHubView() {
                 </Select>
               )}
 
-              <Button
-                variant="outline"
-                onClick={handleSendListToDialler}
-                disabled={loading || sendingToDialler || !currentWorkspaceId || visibleContacts.length === 0}
-              >
-                {sendingToDialler ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <PhoneCall className="mr-2 h-4 w-4" />
-                )}
-                {sendingToDialler ? 'Moving...' : copy.actions.sendToDialer}
-              </Button>
               <Button variant="outline" onClick={() => setImportDialogOpen(true)}>
                 <Upload className="mr-2 h-4 w-4" />
                 {copy.actions.importLeads}
@@ -543,12 +476,6 @@ export function ContactsHubView() {
             </div>
           </div>
         </section>
-
-        {diallerError && (
-          <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3">
-            <p className="text-sm font-medium text-destructive">{diallerError}</p>
-          </div>
-        )}
 
         {loadError && contacts.length === 0 && (
           <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3">
