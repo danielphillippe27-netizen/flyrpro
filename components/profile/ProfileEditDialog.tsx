@@ -27,14 +27,13 @@ import { COUNTRY_OPTIONS, countryCodeToFlag } from '@/lib/countries';
 type BrokerageSuggestion = { id: string; name: string };
 
 const INDUSTRIES = [
-  'Real Estate',
+  'Home service',
   'Solar',
   'Roofing & Exteriors',
-  'Financing',
-  'Home Health Care',
-  'HVAC & Plumbing',
+  'HVAC',
+  'Real Estate',
   'Insurance',
-  'Landscaping & Snow',
+  'Landscaping',
   'Pest Control',
   'Political / Canvassing',
   'Pool Service',

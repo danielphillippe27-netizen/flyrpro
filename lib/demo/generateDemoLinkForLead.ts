@@ -240,7 +240,7 @@ export async function generateDemoLinkForLead(params: {
   if (!params.user?.id) throw new Error('User is required.');
 
   const { data: leadRow, error } = await admin
-    .from('dialler_leads')
+    .from('sales_leads')
     .select('*')
     .eq('id', leadId)
     .maybeSingle();

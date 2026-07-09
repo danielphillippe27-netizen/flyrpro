@@ -65,7 +65,7 @@ export const DEFAULT_PAYLOAD: DemoPayload = {
     b6Price: '$40/rep/mo.',
     b6Sub: '',
     b6FounderLine:
-      "No account manager. No ticket queue. 24/7 support. Contact us to claim a free trial.",
+      "No account manager. No ticket queue. 24/7 support. Contact us to claim your included campaign.",
     ctaPrimary: 'See it on your territory →',
     ctaSecondary: 'flyrpro.app',
   },

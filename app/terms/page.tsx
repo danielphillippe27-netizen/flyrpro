@@ -13,7 +13,7 @@ const linkClass = "font-medium text-red-600 underline underline-offset-4 hover:t
 export const metadata: Metadata = {
   title: "Terms of Service | FLYR",
   description:
-    "Terms of Service for FLYR and FLYR Pro, including subscriptions, free trials, billing, acceptable use, and contact information.",
+    "Terms of Service for FLYR and FLYR Pro, including subscriptions, included campaign access, billing, acceptable use, and contact information.",
   alternates: {
     canonical: "/terms",
   },
@@ -136,16 +136,16 @@ export default function TermsPage() {
       </section>
 
       <section className="space-y-4">
-        <h2 className={sectionTitleClass}>Free Trials</h2>
+        <h2 className={sectionTitleClass}>Included And Promotional Access</h2>
         <p className={paragraphClass}>
-          We may offer free trials or promotional access to certain paid plans. Unless we
-          clearly state otherwise at signup, a free trial converts to a paid subscription
-          automatically when the trial ends unless you cancel before the end of the trial
-          period.
+          We may offer one included campaign or promotional access to certain paid plans.
+          Unless we clearly state otherwise at signup, promotional access converts to a paid
+          subscription only when you provide payment details and authorize the subscription.
         </p>
         <p className={paragraphClass}>
-          Trial eligibility, duration, and included features may vary. We may modify or end
-          a trial offer at any time to the extent permitted by law.
+          Included campaign access, promotional eligibility, and included features may vary.
+          We may modify or end included access or a promotional offer at any time to the
+          extent permitted by law.
         </p>
       </section>
 

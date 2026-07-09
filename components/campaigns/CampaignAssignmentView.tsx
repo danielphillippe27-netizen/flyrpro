@@ -4,22 +4,19 @@ import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } fro
 import Link from 'next/link';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
-import type MapboxDraw from '@mapbox/mapbox-gl-draw';
-import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css';
 import {
   ArrowLeft,
   Check,
   Clapperboard,
   Compass,
-  Eraser,
   Expand,
   Film,
   Loader2,
   MapPinned,
   Maximize2,
+  MousePointer2,
   Palette,
   Pencil,
-  PenLine,
   Play,
   RotateCcw,
   RotateCw,
@@ -49,7 +46,7 @@ import {
   sanitizeManualOverrides,
   shallowRecordEqual,
 } from '@/lib/campaignAssignmentDraft';
-import { selectedAddressIdsFromDraw } from '@/lib/campaignAssignmentMapSelection';
+import { selectedAddressIdsFromFeatures } from '@/lib/campaignAssignmentMapSelection';
 import {
   buildBalancedBlockClusters,
   buildSmartTerritoryClusters,
@@ -62,6 +59,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 
 type TeamMember = {
   user_id: string;
@@ -87,18 +85,38 @@ type CampaignAssignmentViewProps = {
   campaignId: string;
   campaignName?: string;
   addresses: CampaignAddress[];
+  demoMode?: boolean;
+  demoLivePlaybackToken?: number;
+  onDemoSplitComplete?: () => void;
 };
 
 type AssignmentAddress = BuildRouteAddress & {
   sequence: number;
 };
 
-const COLORS = ['#ef4444', '#22c55e', '#3b82f6', '#8b5cf6', '#d946ef', '#f97316'];
+const COLORS = ['#ef4444', '#14b8a6', '#3b82f6', '#8b5cf6', '#d946ef', '#f97316'];
+const SELF_SERVE_DEMO_MEMBERS: TeamMember[] = [
+  { user_id: 'demo-maya', display_name: 'Maya', role: 'member' },
+  { user_id: 'demo-leo', display_name: 'Leo', role: 'member' },
+  { user_id: 'demo-ava', display_name: 'Ava', role: 'member' },
+  { user_id: 'demo-noah', display_name: 'Noah', role: 'member' },
+];
 const DEMO_GREEN_COLOR = '#22c55e';
-const DEMO_RANDOM_COLORS = ['#22c55e', '#3b82f6', '#ef4444', '#8b5cf6', '#f97316', '#06b6d4', '#eab308'];
+const DEMO_RANDOM_COLORS = ['#ffffff', '#3b82f6', '#ef4444', '#8b5cf6', '#f97316', '#06b6d4', '#eab308'];
 const DEMO_CAMERA_PITCH_STREET_DEGREES = 68;
 const DEMO_CAMERA_PITCH_3D_DEGREES = 62;
 const DEMO_CAMERA_ZOOM_STREET = 18.15;
+const ASSIGNMENT_LIVE_DEMO_ROUTE_SOURCE_ID = 'assignment-live-demo-routes';
+const ASSIGNMENT_LIVE_DEMO_ROUTE_LAYER_ID = 'assignment-live-demo-route-lines';
+const ASSIGNMENT_LIVE_DEMO_REP_SOURCE_ID = 'assignment-live-demo-reps';
+const ASSIGNMENT_LIVE_DEMO_REP_LAYER_ID = 'assignment-live-demo-rep-pucks';
+const ASSIGNMENT_LIVE_DEMO_REP_LABEL_LAYER_ID = 'assignment-live-demo-rep-labels';
+const ASSIGNMENT_ZONE_LABEL_SOURCE_ID = 'assignment-zone-labels';
+const ASSIGNMENT_ZONE_LABEL_CIRCLE_LAYER_ID = 'assignment-zone-label-circles';
+const ASSIGNMENT_ZONE_LABEL_TEXT_LAYER_ID = 'assignment-zone-label-text';
+const ASSIGNMENT_LASSO_SOURCE_ID = 'assignment-editor-lasso';
+const ASSIGNMENT_LASSO_FILL_LAYER_ID = 'assignment-editor-lasso-fill';
+const ASSIGNMENT_LASSO_LINE_LAYER_ID = 'assignment-editor-lasso-line';
 
 type ZonePreviewMember = {
   user_id: string;
@@ -110,8 +128,23 @@ type ZonePreviewPoint = {
   lon: number;
   lat: number;
 };
+type AssignmentCampaignReportRow = {
+  id: string;
+  name: string;
+  color: string;
+  zoneLabel: string;
+  sent: boolean;
+  assignedHomes: number;
+  workedHomes: number;
+  conversations: number;
+  leads: number;
+  appointments: number;
+  remainingHomes: number;
+  dueAt: string | null;
+};
 
 type DemoColorMode = 'zones' | 'allGreen' | 'random';
+type AssignmentEditorSelectionTool = 'click' | 'lasso';
 type DemoCameraShot =
   | 'orbit'
   | 'birdToStreet'
@@ -137,6 +170,20 @@ type DemoAddressTarget = {
   streetKey: string;
   streetLabel: string;
   houseNumber: number | null;
+};
+type AssignmentLiveDemoSnapshot = {
+  colorOverrides: Record<string, string>;
+  routes: GeoJSON.FeatureCollection<GeoJSON.LineString>;
+  reps: GeoJSON.FeatureCollection<GeoJSON.Point>;
+  hitHomeCount: number;
+  totalHomes: number;
+};
+type AssignmentDemoControl = {
+  disabled?: boolean;
+  hitHomes: number;
+  isPlaying: boolean;
+  onToggle: () => void;
+  totalHomes: number;
 };
 
 function deterministicColorIndex(seed: string, paletteLength: number): number {
@@ -312,6 +359,109 @@ function formatMode(mode: CampaignAssignmentMode): string {
   return mode === 'zone_split' ? 'Zone split' : 'Whole team';
 }
 
+function getCampaignAddressStatus(address?: CampaignAddress | null): string {
+  return String(address?.address_status ?? '').trim().toLowerCase();
+}
+
+function didWorkCampaignAddress(address?: CampaignAddress | null): boolean {
+  if (!address) return false;
+  if (address.visited) return true;
+  return [
+    'delivered',
+    'talked',
+    'lead',
+    'interested',
+    'appointment',
+    'follow_up',
+    'appointment_set',
+    'callback_requested',
+    'do_not_knock',
+    'future_seller',
+    'hot_lead',
+    'no_answer',
+    'not_home',
+  ].includes(getCampaignAddressStatus(address));
+}
+
+function didHaveConversation(address?: CampaignAddress | null): boolean {
+  return [
+    'talked',
+    'lead',
+    'interested',
+    'appointment',
+    'follow_up',
+    'appointment_set',
+    'callback_requested',
+    'future_seller',
+    'hot_lead',
+  ].includes(getCampaignAddressStatus(address));
+}
+
+function didCreateLead(address?: CampaignAddress | null): boolean {
+  return [
+    'lead',
+    'interested',
+    'appointment',
+    'follow_up',
+    'appointment_set',
+    'callback_requested',
+    'future_seller',
+    'hot_lead',
+  ].includes(getCampaignAddressStatus(address));
+}
+
+function didSetAppointment(address?: CampaignAddress | null): boolean {
+  return ['appointment', 'appointment_set'].includes(getCampaignAddressStatus(address));
+}
+
+function formatAssignmentPercent(value: number, total: number): string {
+  if (total <= 0) return '0%';
+  return `${Math.round((value / total) * 100)}%`;
+}
+
+function campaignAddressLabel(address: AssignmentAddress | CampaignAddress): string {
+  return address.formatted || address.street_name || ('address' in address ? address.address : '') || address.id.slice(0, 8);
+}
+
+function buildZoneLabelFeatureCollection(
+  members: ZonePreviewMember[],
+  zones: Map<string, AssignmentAddress[]>
+): GeoJSON.FeatureCollection<GeoJSON.Point> {
+  const features = members.flatMap((member, index) => {
+    const zoneHomes = (zones.get(member.user_id) ?? []).filter((address) => {
+      return Number.isFinite(address.lon) && Number.isFinite(address.lat) && !(address.lon === 0 && address.lat === 0);
+    });
+    if (zoneHomes.length === 0) return [];
+
+    const center = zoneHomes.reduce(
+      (sum, address) => ({
+        lon: sum.lon + address.lon / zoneHomes.length,
+        lat: sum.lat + address.lat / zoneHomes.length,
+      }),
+      { lon: 0, lat: 0 }
+    );
+
+    return [{
+      type: 'Feature' as const,
+      id: member.user_id,
+      properties: {
+        user_id: member.user_id,
+        display_name: member.display_name,
+        homes: zoneHomes.length,
+        label: `${member.display_name}\n${zoneHomes.length} homes`,
+        color: member.color,
+        zone: `Zone ${index + 1}`,
+      },
+      geometry: {
+        type: 'Point' as const,
+        coordinates: [center.lon, center.lat],
+      },
+    }];
+  });
+
+  return { type: 'FeatureCollection', features };
+}
+
 function syncMapSize(map: mapboxgl.Map) {
   try {
     map.resize();
@@ -337,6 +487,299 @@ function hasRenderableMapStyle(map: mapboxgl.Map) {
   } catch {
     return false;
   }
+}
+
+function orderedAssignmentHomes(addresses: AssignmentAddress[]) {
+  return [...addresses]
+    .filter((address) => Number.isFinite(address.lon) && Number.isFinite(address.lat) && !(address.lon === 0 && address.lat === 0))
+    .sort((left, right) => {
+      const leftStreet = demoStreetLabel(left).toLowerCase();
+      const rightStreet = demoStreetLabel(right).toLowerCase();
+      if (leftStreet !== rightStreet) return leftStreet.localeCompare(rightStreet);
+      const leftNumber = demoHouseNumber(left);
+      const rightNumber = demoHouseNumber(right);
+      if (leftNumber !== null && rightNumber !== null && leftNumber !== rightNumber) return leftNumber - rightNumber;
+      return left.sequence - right.sequence;
+    });
+}
+
+function setMapGeoJsonSource<T extends GeoJSON.Geometry>(
+  map: mapboxgl.Map,
+  sourceId: string,
+  data: GeoJSON.FeatureCollection<T>
+) {
+  const existing = map.getSource(sourceId);
+  if (existing && 'setData' in existing) {
+    (existing as mapboxgl.GeoJSONSource).setData(data);
+    return;
+  }
+  if (!existing) {
+    map.addSource(sourceId, { type: 'geojson', data });
+  }
+}
+
+function removeAssignmentLiveDemoLayers(map: mapboxgl.Map) {
+  [
+    ASSIGNMENT_LIVE_DEMO_REP_LABEL_LAYER_ID,
+    ASSIGNMENT_LIVE_DEMO_REP_LAYER_ID,
+    ASSIGNMENT_LIVE_DEMO_ROUTE_LAYER_ID,
+  ].forEach((layerId) => {
+    try {
+      if (map.getLayer(layerId)) map.removeLayer(layerId);
+    } catch {
+      // Ignore transient style changes while the map is reloading.
+    }
+  });
+
+  [
+    ASSIGNMENT_LIVE_DEMO_REP_SOURCE_ID,
+    ASSIGNMENT_LIVE_DEMO_ROUTE_SOURCE_ID,
+  ].forEach((sourceId) => {
+    try {
+      if (map.getSource(sourceId)) map.removeSource(sourceId);
+    } catch {
+      // Ignore transient style changes while the map is reloading.
+    }
+  });
+}
+
+function buildAssignmentLiveDemoSnapshot(
+  members: ZonePreviewMember[],
+  zones: Map<string, AssignmentAddress[]>,
+  elapsedMs: number
+): AssignmentLiveDemoSnapshot {
+  const colorOverrides: Record<string, string> = {};
+  const routeFeatures: GeoJSON.Feature<GeoJSON.LineString>[] = [];
+  const repFeatures: GeoJSON.Feature<GeoJSON.Point>[] = [];
+  const homeIntervalMs = 520;
+  const memberStaggerMs = 700;
+  let hitHomes = 0;
+  let totalHomes = 0;
+
+  members.forEach((member, memberIndex) => {
+    const homes = orderedAssignmentHomes(zones.get(member.user_id) ?? []);
+    if (homes.length === 0) return;
+
+    totalHomes += homes.length;
+    homes.forEach((home) => {
+      colorOverrides[home.id] = member.color;
+    });
+
+    const rawStep = Math.max(0, Math.floor((elapsedMs - memberIndex * memberStaggerMs) / homeIntervalMs));
+    const hitCount = Math.min(homes.length, rawStep);
+    const activeIndex = Math.min(Math.max(0, hitCount), homes.length - 1);
+    const activeHome = homes[activeIndex];
+    const visitedHomes = homes.slice(0, hitCount);
+    const routeHomes = homes.slice(0, Math.max(1, activeIndex + 1));
+    const routeCoordinates = routeHomes.map((home) => [home.lon, home.lat] as [number, number]);
+
+    hitHomes += hitCount;
+    visitedHomes.forEach((home) => {
+      colorOverrides[home.id] = DEMO_GREEN_COLOR;
+    });
+
+    routeFeatures.push({
+      type: 'Feature',
+      id: `${member.user_id}-route`,
+      properties: {
+        user_id: member.user_id,
+        display_name: member.display_name,
+        color: member.color,
+      },
+      geometry: {
+        type: 'LineString',
+        coordinates:
+          routeCoordinates.length > 1
+            ? routeCoordinates
+            : [routeCoordinates[0], routeCoordinates[0]],
+      },
+    });
+
+    repFeatures.push({
+      type: 'Feature',
+      id: member.user_id,
+      properties: {
+        user_id: member.user_id,
+        display_name: member.display_name,
+        color: member.color,
+        hitHomes: hitCount,
+        totalHomes: homes.length,
+      },
+      geometry: {
+        type: 'Point',
+        coordinates: [activeHome.lon, activeHome.lat],
+      },
+    });
+  });
+
+  return {
+    colorOverrides,
+    routes: { type: 'FeatureCollection', features: routeFeatures },
+    reps: { type: 'FeatureCollection', features: repFeatures },
+    hitHomeCount: hitHomes,
+    totalHomes,
+  };
+}
+
+function useAssignmentLiveCampaignDemo({
+  mapRef,
+  mapLoaded,
+  members,
+  zones,
+  previewPoints,
+  enabled,
+}: {
+  mapRef: RefObject<mapboxgl.Map | null>;
+  mapLoaded: boolean;
+  members: ZonePreviewMember[];
+  zones: Map<string, AssignmentAddress[]>;
+  previewPoints: ZonePreviewPoint[];
+  enabled: boolean;
+}) {
+  const [snapshot, setSnapshot] = useState<AssignmentLiveDemoSnapshot | null>(null);
+  const frameRef = useRef<number | null>(null);
+  const startedAtRef = useRef<number | null>(null);
+  const lastSnapshotAtRef = useRef(0);
+  const cycleDurationMs = useMemo(() => {
+    const longestZone = Math.max(1, ...members.map((member) => (zones.get(member.user_id) ?? []).length));
+    return longestZone * 520 + members.length * 700 + 2600;
+  }, [members, zones]);
+
+  const stop = useCallback(() => {
+    if (frameRef.current !== null) {
+      window.cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
+    }
+    startedAtRef.current = null;
+    lastSnapshotAtRef.current = 0;
+    setSnapshot(null);
+    const map = mapRef.current;
+    if (map) removeAssignmentLiveDemoLayers(map);
+  }, [mapRef]);
+
+  const play = useCallback(() => {
+    const map = mapRef.current;
+    if (!enabled || !map || !mapLoaded || members.length === 0) return;
+
+    if (frameRef.current !== null) {
+      window.cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
+    }
+
+    if (previewPoints.length > 0) {
+      const bounds = new mapboxgl.LngLatBounds();
+      previewPoints.forEach((point) => bounds.extend([point.lon, point.lat]));
+      if (!bounds.isEmpty()) {
+        map.fitBounds(bounds, {
+          padding: { top: 72, right: 72, bottom: 92, left: 72 },
+          maxZoom: 17.4,
+          bearing: map.getBearing(),
+          pitch: map.getPitch(),
+          duration: 600,
+        });
+      }
+    }
+
+    startedAtRef.current = performance.now();
+    lastSnapshotAtRef.current = 0;
+    const animate = (now: number) => {
+      const startedAt = startedAtRef.current ?? now;
+      const elapsed = (now - startedAt) % cycleDurationMs;
+      if (lastSnapshotAtRef.current === 0 || now - lastSnapshotAtRef.current >= 140) {
+        lastSnapshotAtRef.current = now;
+        setSnapshot(buildAssignmentLiveDemoSnapshot(members, zones, elapsed));
+      }
+      frameRef.current = window.requestAnimationFrame(animate);
+    };
+    frameRef.current = window.requestAnimationFrame(animate);
+  }, [cycleDurationMs, enabled, mapLoaded, mapRef, members, previewPoints, zones]);
+
+  useEffect(() => {
+    if (enabled) return;
+    stop();
+  }, [enabled, stop]);
+
+  useEffect(() => stop, [stop]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded || !snapshot) return;
+
+    const addOrUpdateLayers = () => {
+      if (!map.isStyleLoaded()) return;
+      try {
+        setMapGeoJsonSource(map, ASSIGNMENT_LIVE_DEMO_ROUTE_SOURCE_ID, snapshot.routes);
+        setMapGeoJsonSource(map, ASSIGNMENT_LIVE_DEMO_REP_SOURCE_ID, snapshot.reps);
+
+        if (!map.getLayer(ASSIGNMENT_LIVE_DEMO_ROUTE_LAYER_ID)) {
+          map.addLayer({
+            id: ASSIGNMENT_LIVE_DEMO_ROUTE_LAYER_ID,
+            type: 'line',
+            source: ASSIGNMENT_LIVE_DEMO_ROUTE_SOURCE_ID,
+            layout: { 'line-join': 'round', 'line-cap': 'round' },
+            paint: {
+              'line-color': ['get', 'color'],
+              'line-width': ['interpolate', ['linear'], ['zoom'], 10, 2, 16, 5],
+              'line-opacity': 0.78,
+              'line-dasharray': [0.6, 1.2],
+            },
+          });
+        }
+
+        if (!map.getLayer(ASSIGNMENT_LIVE_DEMO_REP_LAYER_ID)) {
+          map.addLayer({
+            id: ASSIGNMENT_LIVE_DEMO_REP_LAYER_ID,
+            type: 'circle',
+            source: ASSIGNMENT_LIVE_DEMO_REP_SOURCE_ID,
+            paint: {
+              'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 7, 16, 12],
+              'circle-color': ['get', 'color'],
+              'circle-opacity': 0.98,
+              'circle-stroke-width': 3,
+              'circle-stroke-color': '#ffffff',
+            },
+          });
+        }
+
+        if (!map.getLayer(ASSIGNMENT_LIVE_DEMO_REP_LABEL_LAYER_ID)) {
+          map.addLayer({
+            id: ASSIGNMENT_LIVE_DEMO_REP_LABEL_LAYER_ID,
+            type: 'symbol',
+            source: ASSIGNMENT_LIVE_DEMO_REP_SOURCE_ID,
+            layout: {
+              'text-field': ['get', 'display_name'],
+              'text-size': 12,
+              'text-offset': [0, 1.45],
+              'text-anchor': 'top',
+              'text-allow-overlap': false,
+            },
+            paint: {
+              'text-color': '#111827',
+              'text-halo-color': '#ffffff',
+              'text-halo-width': 1.4,
+            },
+          });
+        }
+      } catch (error) {
+        console.error('Assignment live demo layers:', error);
+      }
+    };
+
+    addOrUpdateLayers();
+    map.on('style.load', addOrUpdateLayers);
+    return () => {
+      map.off('style.load', addOrUpdateLayers);
+    };
+  }, [mapLoaded, mapRef, snapshot]);
+
+  return {
+    colorOverrides: snapshot?.colorOverrides ?? null,
+    hitHomes: snapshot?.hitHomeCount ?? 0,
+    isPlaying: snapshot !== null,
+    play,
+    stop,
+    totalHomes: snapshot?.totalHomes ?? members.reduce((sum, member) => sum + (zones.get(member.user_id) ?? []).length, 0),
+  };
 }
 
 function useAssignmentDemoCamera({
@@ -836,6 +1279,7 @@ function useAssignmentDemoCamera({
 
 function AssignmentDemoCameraControls({
   activeDemoCameraShot,
+  assignmentDemo,
   demoCameraSpeed,
   demoColorMode,
   demoSegmentCameraAngle,
@@ -850,6 +1294,7 @@ function AssignmentDemoCameraControls({
   showDemoControls,
 }: {
   activeDemoCameraShot: DemoCameraShot | null;
+  assignmentDemo?: AssignmentDemoControl;
   demoCameraSpeed: DemoCameraSpeed;
   demoColorMode: DemoColorMode;
   demoSegmentCameraAngle: DemoSegmentCameraAngle;
@@ -884,6 +1329,28 @@ function AssignmentDemoCameraControls({
       </button>
       {showDemoControls ? (
         <div className="pointer-events-auto max-h-[calc(100dvh-8rem)] w-[min(22rem,calc(100vw-1.5rem))] overflow-y-auto rounded-lg border border-gray-200 bg-white/94 p-2 shadow-lg backdrop-blur-sm dark:border-gray-700 dark:bg-black/86">
+          {assignmentDemo ? (
+            <button
+              type="button"
+              onClick={assignmentDemo.onToggle}
+              disabled={assignmentDemo.disabled}
+              className={`mb-1.5 flex h-9 w-full min-w-0 items-center justify-between gap-2 rounded-md px-2 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                assignmentDemo.isPlaying
+                  ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
+                  : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
+              }`}
+              aria-pressed={assignmentDemo.isPlaying}
+              title={assignmentDemo.isPlaying ? 'Stop assignment demo' : 'Run assignment demo'}
+            >
+              <span className="flex min-w-0 items-center gap-1.5">
+                {assignmentDemo.isPlaying ? <Square className="h-3.5 w-3.5 shrink-0" /> : <Play className="h-3.5 w-3.5 shrink-0" />}
+                <span className="truncate">{assignmentDemo.isPlaying ? 'Stop assignment' : 'Assignment demo'}</span>
+              </span>
+              <span className="shrink-0 text-[11px] opacity-70">
+                {assignmentDemo.hitHomes}/{assignmentDemo.totalHomes}
+              </span>
+            </button>
+          ) : null}
           <div className="grid grid-cols-3 gap-1">
             {[
               { mode: 'zones' as DemoColorMode, label: 'Zones', icon: Palette },
@@ -1017,118 +1484,6 @@ function buildAssignmentPreviewAddresses(
     .filter((address): address is CampaignAddress => Boolean(address));
 }
 
-function AssignmentAddressMarkerLayer({
-  map,
-  mapLoaded,
-  assignmentAddresses,
-  members,
-  zones,
-  colorOverrides,
-}: {
-  map: mapboxgl.Map | null;
-  mapLoaded: boolean;
-  assignmentAddresses: AssignmentAddress[];
-  members: ZonePreviewMember[];
-  zones: Map<string, AssignmentAddress[]>;
-  colorOverrides?: Record<string, string>;
-}) {
-  const colorByAddressId = useMemo(
-    () =>
-      members.reduce<Record<string, string>>((colors, member) => {
-        (zones.get(member.user_id) ?? []).forEach((address) => {
-          colors[address.id] = member.color;
-        });
-        return colors;
-      }, {}),
-    [members, zones]
-  );
-  const markerData = useMemo<GeoJSON.FeatureCollection<GeoJSON.Point>>(
-    () => ({
-      type: 'FeatureCollection',
-      features: assignmentAddresses.flatMap((address, index) => {
-        if (!Number.isFinite(address.lon) || !Number.isFinite(address.lat)) return [];
-        if (address.lon === 0 && address.lat === 0) return [];
-        return [{
-          type: 'Feature' as const,
-          geometry: {
-            type: 'Point' as const,
-            coordinates: [address.lon, address.lat],
-          },
-          properties: {
-            id: address.id,
-            color: colorOverrides?.[address.id] ?? colorByAddressId[address.id] ?? COLORS[index % COLORS.length],
-            label: address.house_number ?? '',
-          },
-        }];
-      }),
-    }),
-    [assignmentAddresses, colorByAddressId, colorOverrides]
-  );
-
-  useEffect(() => {
-    if (!map || !mapLoaded || markerData.features.length === 0) return;
-
-    const sourceId = 'assignment-address-markers-source';
-    const circleLayerId = 'assignment-address-markers-circle';
-
-    const removeLayers = () => {
-      [circleLayerId].forEach((layerId) => {
-        try {
-          if (map.getLayer(layerId)) map.removeLayer(layerId);
-        } catch {
-          // Ignore transient style errors while Mapbox is swapping styles.
-        }
-      });
-      try {
-        if (map.getSource(sourceId)) map.removeSource(sourceId);
-      } catch {
-        // Ignore transient style errors while Mapbox is swapping styles.
-      }
-    };
-
-    const addOrUpdateLayers = () => {
-      if (!map.isStyleLoaded()) return;
-
-      const source = map.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined;
-      if (source) {
-        source.setData(markerData);
-      } else {
-        map.addSource(sourceId, {
-          type: 'geojson',
-          data: markerData,
-        });
-      }
-
-      if (!map.getLayer(circleLayerId)) {
-        map.addLayer({
-          id: circleLayerId,
-          type: 'circle',
-          source: sourceId,
-          paint: {
-            'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 3, 16, 6],
-            'circle-color': ['coalesce', ['get', 'color'], '#ef4444'],
-            'circle-opacity': 0.9,
-            'circle-stroke-color': '#ffffff',
-            'circle-stroke-width': 1,
-          },
-        });
-      }
-    };
-
-    addOrUpdateLayers();
-    map.on('style.load', addOrUpdateLayers);
-    map.on('idle', addOrUpdateLayers);
-
-    return () => {
-      map.off('style.load', addOrUpdateLayers);
-      map.off('idle', addOrUpdateLayers);
-      removeLayers();
-    };
-  }, [map, mapLoaded, markerData]);
-
-  return null;
-}
-
 function CampaignAssignmentZonePreviewMap({
   campaignId,
   addresses,
@@ -1139,6 +1494,8 @@ function CampaignAssignmentZonePreviewMap({
   manualOverrides,
   showAssignmentColors,
   editable,
+  liveDemoPlaybackToken,
+  layout = 'inline',
   onApplyManualOverrides,
 }: {
   campaignId: string;
@@ -1150,6 +1507,9 @@ function CampaignAssignmentZonePreviewMap({
   manualOverrides: Record<string, string>;
   showAssignmentColors: boolean;
   editable: boolean;
+  liveDemoEnabled?: boolean;
+  liveDemoPlaybackToken?: number;
+  layout?: 'inline' | 'hero';
   onApplyManualOverrides: (overrides: Record<string, string>) => void;
 }) {
   const { theme } = useTheme();
@@ -1167,7 +1527,7 @@ function CampaignAssignmentZonePreviewMap({
   const [buildingRenderState, setBuildingRenderState] = useState<MapBuildingsRenderState | null>(null);
   const [expandedOpen, setExpandedOpen] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
-  const [editorStartDraw, setEditorStartDraw] = useState(false);
+  const [selectedZoneMemberId, setSelectedZoneMemberId] = useState<string | null>(null);
   const addressById = useMemo(() => new Map(addresses.map((address) => [address.id, address])), [addresses]);
 
   const previewPoints = useMemo<ZonePreviewPoint[]>(
@@ -1204,19 +1564,34 @@ function CampaignAssignmentZonePreviewMap({
     baseColorByAddressId: showAssignmentColors ? assignmentColorByAddressId : undefined,
     enabled: movieMapControlsEnabled,
   });
+  const liveDemoControlsEnabled = movieMapControlsEnabled;
+  const liveCampaignDemo = useAssignmentLiveCampaignDemo({
+    mapRef,
+    mapLoaded,
+    members,
+    zones,
+    previewPoints,
+    enabled: liveDemoControlsEnabled,
+  });
+  const assignmentMapColorOverrides = liveCampaignDemo.colorOverrides ?? demoCamera.demoColorByAddressId;
+  const playLiveCampaignDemo = liveCampaignDemo.play;
+  const stopDemoCameraPlayback = demoCamera.stopDemoCamera;
+  const zoneLabelFeatures = useMemo(
+    () => buildZoneLabelFeatureCollection(members, zones),
+    [members, zones]
+  );
   const previewAddresses = useMemo(
     () => buildAssignmentPreviewAddresses(addressById, assignmentAddresses, zones, members),
     [addressById, assignmentAddresses, members, zones]
   );
+  const selectedZoneMember = selectedZoneMemberId
+    ? members.find((member) => member.user_id === selectedZoneMemberId) ?? null
+    : null;
+  const selectedZoneAddresses = selectedZoneMember ? zones.get(selectedZoneMember.user_id) ?? [] : [];
 
   const initialPoint = previewPoints[0] ?? null;
   const initialLon = initialPoint?.lon ?? null;
   const initialLat = initialPoint?.lat ?? null;
-  const showFallbackMarkers = Boolean(
-    buildingRenderState &&
-    !buildingRenderState.isFetching &&
-    !buildingRenderState.hasVisibleFeatures
-  );
   const hasRenderableAssignmentMap = Boolean(mapLoaded || buildingRenderState?.hasVisibleFeatures);
   const showMapError = Boolean(mapError && !hasRenderableAssignmentMap);
 
@@ -1310,7 +1685,13 @@ function CampaignAssignmentZonePreviewMap({
     if (!map || !mapLoaded || previewPoints.length === 0) return;
 
     if (previewPoints.length === 1) {
-      map.easeTo({ center: [previewPoints[0].lon, previewPoints[0].lat], zoom: 17, pitch: 45, duration: 450 });
+      map.easeTo({
+        center: [previewPoints[0].lon, previewPoints[0].lat],
+        zoom: 17,
+        bearing: map.getBearing(),
+        pitch: map.getPitch(),
+        duration: 450,
+      });
       return;
     }
 
@@ -1320,11 +1701,99 @@ function CampaignAssignmentZonePreviewMap({
       map.fitBounds(bounds, {
         padding: { top: 44, right: 44, bottom: 44, left: 44 },
         maxZoom: 17,
-        pitch: 45,
+        bearing: map.getBearing(),
+        pitch: map.getPitch(),
         duration: 450,
       });
     }
   }, [mapLoaded, previewPoints]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+
+    const addOrUpdateZoneLabels = () => {
+      if (!map.isStyleLoaded()) return;
+      try {
+        setMapGeoJsonSource(map, ASSIGNMENT_ZONE_LABEL_SOURCE_ID, zoneLabelFeatures);
+
+        if (!map.getLayer(ASSIGNMENT_ZONE_LABEL_CIRCLE_LAYER_ID)) {
+          map.addLayer({
+            id: ASSIGNMENT_ZONE_LABEL_CIRCLE_LAYER_ID,
+            type: 'circle',
+            source: ASSIGNMENT_ZONE_LABEL_SOURCE_ID,
+            paint: {
+              'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 18, 16, 28],
+              'circle-color': ['get', 'color'],
+              'circle-opacity': 0.92,
+              'circle-stroke-width': 3,
+              'circle-stroke-color': '#ffffff',
+            },
+          });
+        }
+
+        if (!map.getLayer(ASSIGNMENT_ZONE_LABEL_TEXT_LAYER_ID)) {
+          map.addLayer({
+            id: ASSIGNMENT_ZONE_LABEL_TEXT_LAYER_ID,
+            type: 'symbol',
+            source: ASSIGNMENT_ZONE_LABEL_SOURCE_ID,
+            layout: {
+              'text-field': ['get', 'label'],
+              'text-size': ['interpolate', ['linear'], ['zoom'], 10, 10, 16, 13],
+              'text-line-height': 1.08,
+              'text-anchor': 'center',
+              'text-allow-overlap': true,
+            },
+            paint: {
+              'text-color': '#111827',
+              'text-halo-color': '#ffffff',
+              'text-halo-width': 1.3,
+            },
+          });
+        }
+      } catch (error) {
+        console.error('Assignment zone labels:', error);
+      }
+    };
+
+    const handleClick = (event: mapboxgl.MapLayerMouseEvent) => {
+      const userId = event.features?.[0]?.properties?.user_id;
+      if (typeof userId === 'string') setSelectedZoneMemberId(userId);
+    };
+    const handleMouseEnter = () => {
+      map.getCanvas().style.cursor = 'pointer';
+    };
+    const handleMouseLeave = () => {
+      map.getCanvas().style.cursor = '';
+    };
+
+    addOrUpdateZoneLabels();
+    map.on('style.load', addOrUpdateZoneLabels);
+    map.on('click', ASSIGNMENT_ZONE_LABEL_CIRCLE_LAYER_ID, handleClick);
+    map.on('click', ASSIGNMENT_ZONE_LABEL_TEXT_LAYER_ID, handleClick);
+    map.on('mouseenter', ASSIGNMENT_ZONE_LABEL_CIRCLE_LAYER_ID, handleMouseEnter);
+    map.on('mouseenter', ASSIGNMENT_ZONE_LABEL_TEXT_LAYER_ID, handleMouseEnter);
+    map.on('mouseleave', ASSIGNMENT_ZONE_LABEL_CIRCLE_LAYER_ID, handleMouseLeave);
+    map.on('mouseleave', ASSIGNMENT_ZONE_LABEL_TEXT_LAYER_ID, handleMouseLeave);
+
+    return () => {
+      try {
+        map.off('style.load', addOrUpdateZoneLabels);
+        if (map.getLayer(ASSIGNMENT_ZONE_LABEL_CIRCLE_LAYER_ID)) {
+          map.off('click', ASSIGNMENT_ZONE_LABEL_CIRCLE_LAYER_ID, handleClick);
+          map.off('mouseenter', ASSIGNMENT_ZONE_LABEL_CIRCLE_LAYER_ID, handleMouseEnter);
+          map.off('mouseleave', ASSIGNMENT_ZONE_LABEL_CIRCLE_LAYER_ID, handleMouseLeave);
+        }
+        if (map.getLayer(ASSIGNMENT_ZONE_LABEL_TEXT_LAYER_ID)) {
+          map.off('click', ASSIGNMENT_ZONE_LABEL_TEXT_LAYER_ID, handleClick);
+          map.off('mouseenter', ASSIGNMENT_ZONE_LABEL_TEXT_LAYER_ID, handleMouseEnter);
+          map.off('mouseleave', ASSIGNMENT_ZONE_LABEL_TEXT_LAYER_ID, handleMouseLeave);
+        }
+      } catch {
+        // Mapbox can be mid-style teardown when the roster changes.
+      }
+    };
+  }, [mapLoaded, zoneLabelFeatures]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1370,21 +1839,47 @@ function CampaignAssignmentZonePreviewMap({
     };
   }, [expandedOpen, mapLoaded]);
 
+  useEffect(() => {
+    if (!liveDemoControlsEnabled || !liveDemoPlaybackToken || !mapLoaded) return;
+    stopDemoCameraPlayback();
+    playLiveCampaignDemo();
+  }, [liveDemoControlsEnabled, liveDemoPlaybackToken, mapLoaded, playLiveCampaignDemo, stopDemoCameraPlayback]);
+
+  const assignmentDemoControl: AssignmentDemoControl | undefined = liveDemoControlsEnabled
+    ? {
+        disabled: !mapLoaded,
+        hitHomes: liveCampaignDemo.hitHomes,
+        isPlaying: liveCampaignDemo.isPlaying,
+        onToggle: () => {
+          if (liveCampaignDemo.isPlaying) {
+            liveCampaignDemo.stop();
+            return;
+          }
+          demoCamera.stopDemoCamera();
+          liveCampaignDemo.play();
+        },
+        totalHomes: liveCampaignDemo.totalHomes,
+      }
+    : undefined;
+
   if (previewPoints.length === 0) {
     return null;
   }
 
-  const openEditor = (startDraw: boolean) => {
-    setEditorStartDraw(startDraw);
+  const openEditor = () => {
     setEditorOpen(true);
   };
 
   const wrapperClassName = expandedOpen
     ? 'fixed inset-0 z-[70] grid h-[100dvh] w-[100vw] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-none border-0 bg-background'
-    : 'overflow-hidden rounded-lg border border-border bg-muted/20';
+    : layout === 'hero'
+      ? 'grid h-full min-h-[560px] grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-lg border border-border bg-muted/20'
+      : 'overflow-hidden rounded-lg border border-border bg-muted/20';
   const mapFrameClassName = expandedOpen
     ? 'relative h-full min-h-0 w-full'
-    : 'relative h-[360px] min-h-[320px] w-full';
+    : layout === 'hero'
+      ? 'relative h-full min-h-[520px] w-full'
+      : 'relative h-[360px] min-h-[320px] w-full';
 
   return (
     <div className={wrapperClassName}>
@@ -1401,14 +1896,14 @@ function CampaignAssignmentZonePreviewMap({
             </Button>
           )}
           {editable ? (
-            <Button type="button" variant="secondary" size="sm" onClick={() => openEditor(false)}>
+            <Button type="button" variant="secondary" size="sm" onClick={openEditor}>
               <Pencil className="h-3.5 w-3.5" />
               Edit map
             </Button>
           ) : null}
           {members.map((member) => (
             <span key={member.user_id} className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-              <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: member.color }} />
+              <span className="h-2.5 w-2.5 rounded-full border border-border" style={{ backgroundColor: member.color }} />
               <span className="max-w-[140px] truncate">{member.display_name}</span>
             </span>
           ))}
@@ -1418,21 +1913,11 @@ function CampaignAssignmentZonePreviewMap({
         <div ref={mapContainerRef} className="h-full w-full" />
         {mapRef.current && mapLoaded ? (
           <>
-            {showFallbackMarkers ? (
-              <AssignmentAddressMarkerLayer
-                map={mapRef.current}
-                mapLoaded={mapLoaded}
-                assignmentAddresses={assignmentAddresses}
-                members={members}
-                zones={zones}
-                colorOverrides={demoCamera.demoColorByAddressId}
-              />
-            ) : null}
             <MapBuildingsLayer
               map={mapRef.current}
               campaignId={campaignId}
               addressStateOverrides={previewAddresses}
-              assignmentColorByAddressId={demoCamera.demoColorByAddressId}
+              assignmentColorByAddressId={assignmentMapColorOverrides}
               visibleAddressIds={assignmentAddresses.map((address) => address.id)}
               showAddressLabels={false}
               footprintStatusColors
@@ -1443,19 +1928,57 @@ function CampaignAssignmentZonePreviewMap({
         ) : null}
         <AssignmentDemoCameraControls
           activeDemoCameraShot={demoCamera.activeDemoCameraShot}
+          assignmentDemo={assignmentDemoControl}
           demoCameraSpeed={demoCamera.demoCameraSpeed}
           demoColorMode={demoCamera.demoColorMode}
           demoSegmentCameraAngle={demoCamera.demoSegmentCameraAngle}
           disabled={!mapLoaded}
           enabled={movieMapControlsEnabled}
           onColorModeChange={demoCamera.handleDemoColorModeChange}
-          onPlayShot={demoCamera.playDemoCamera}
+          onPlayShot={(shot) => {
+            if (!liveCampaignDemo.isPlaying) {
+              demoCamera.stopDemoCamera();
+              liveCampaignDemo.play();
+            }
+            demoCamera.playDemoCamera(shot);
+          }}
           onSegmentCameraAngleChange={demoCamera.setDemoSegmentCameraAngle}
           onSpeedChange={demoCamera.setDemoCameraSpeed}
           onStop={demoCamera.stopDemoCamera}
           setShowDemoControls={demoCamera.setShowDemoControls}
           showDemoControls={demoCamera.showDemoControls}
         />
+        {liveCampaignDemo.isPlaying ? (
+          <div className="pointer-events-none absolute left-3 top-3 z-20 rounded-lg border border-white/70 bg-white/92 px-3 py-2 text-xs font-medium text-gray-900 shadow-sm backdrop-blur-sm dark:border-gray-800 dark:bg-black/82 dark:text-white">
+            {liveCampaignDemo.hitHomes}/{liveCampaignDemo.totalHomes} homes green
+          </div>
+        ) : null}
+        {selectedZoneMember ? (
+          <div className="absolute bottom-3 left-3 z-20 max-h-[min(300px,calc(100%-1.5rem))] w-[min(360px,calc(100%-1.5rem))] overflow-hidden rounded-lg border border-border bg-background/95 shadow-xl backdrop-blur">
+            <div className="flex items-start justify-between gap-3 border-b border-border px-3 py-2">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold">{selectedZoneMember.display_name}</p>
+                <p className="text-xs text-muted-foreground">{selectedZoneAddresses.length} homes assigned</p>
+              </div>
+              <Button type="button" variant="ghost" size="sm" onClick={() => setSelectedZoneMemberId(null)}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="max-h-56 overflow-y-auto px-3 py-2">
+              {selectedZoneAddresses.slice(0, 24).map((address, index) => (
+                <div key={address.id} className="flex items-start gap-2 py-1.5 text-xs">
+                  <span className="mt-0.5 w-5 shrink-0 text-muted-foreground">{index + 1}</span>
+                  <span className="min-w-0 truncate">{campaignAddressLabel(address)}</span>
+                </div>
+              ))}
+              {selectedZoneAddresses.length > 24 ? (
+                <p className="py-1 text-xs text-muted-foreground">
+                  +{selectedZoneAddresses.length - 24} more homes
+                </p>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
         {showMapError ? (
           <div className="absolute inset-0 flex items-center justify-center bg-background/90 p-4 text-center text-sm text-muted-foreground">
             {mapError}
@@ -1473,7 +1996,6 @@ function CampaignAssignmentZonePreviewMap({
       ) : null}
       <AssignmentMapEditorDialog
         open={editorOpen}
-        startInDrawMode={editorStartDraw}
         editable
         campaignId={campaignId}
         addresses={addresses}
@@ -1492,7 +2014,6 @@ function CampaignAssignmentZonePreviewMap({
 
 function AssignmentMapEditorDialog({
   open,
-  startInDrawMode,
   editable,
   campaignId,
   addresses,
@@ -1506,7 +2027,6 @@ function AssignmentMapEditorDialog({
   onOpenChange,
 }: {
   open: boolean;
-  startInDrawMode: boolean;
   editable: boolean;
   campaignId: string;
   addresses: CampaignAddress[];
@@ -1536,22 +2056,28 @@ function AssignmentMapEditorDialog({
   const autoAssignmentByAddress = useMemo(() => buildAssignmentByAddressId(autoZones), [autoZones]);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
-  const drawRef = useRef<MapboxDraw | null>(null);
+  const editorMapFittedRef = useRef(false);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
   const [buildingRenderState, setBuildingRenderState] = useState<MapBuildingsRenderState | null>(null);
   const [selectedAddressIds, setSelectedAddressIds] = useState<string[]>([]);
   const [draftOverrides, setDraftOverrides] = useState<Record<string, string>>({});
   const [activeMemberId, setActiveMemberId] = useState<string>('');
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectionTool, setSelectionTool] = useState<AssignmentEditorSelectionTool>('click');
+  const lassoCoordinatesRef = useRef<[number, number][]>([]);
 
   useEffect(() => {
     if (!open) return;
     setSelectedAddressIds([]);
     setDraftOverrides(appliedManualOverrides);
+    setSelectMode(editable);
+    setSelectionTool('click');
+    editorMapFittedRef.current = false;
     setActiveMemberId((current) =>
       current && memberIds.includes(current) ? current : memberIds[0] ?? ''
     );
-  }, [appliedManualOverrides, memberIds, open]);
+  }, [appliedManualOverrides, editable, memberIds, open]);
 
   const editorZones = useMemo(
     () =>
@@ -1589,6 +2115,7 @@ function AssignmentMapEditorDialog({
       }),
     [assignmentAddresses]
   );
+  const editorVisible = open && previewPoints.length > 0;
   const demoCamera = useAssignmentDemoCamera({
     mapRef,
     mapLoaded,
@@ -1600,11 +2127,6 @@ function AssignmentMapEditorDialog({
   const initialPoint = previewPoints[0] ?? null;
   const initialLon = initialPoint?.lon ?? null;
   const initialLat = initialPoint?.lat ?? null;
-  const showFallbackMarkers = Boolean(
-    buildingRenderState &&
-    !buildingRenderState.isFetching &&
-    !buildingRenderState.hasVisibleFeatures
-  );
   const hasRenderableAssignmentMap = Boolean(mapLoaded || buildingRenderState?.hasVisibleFeatures);
   const showMapError = Boolean(mapError && !hasRenderableAssignmentMap);
 
@@ -1616,7 +2138,7 @@ function AssignmentMapEditorDialog({
 
   useEffect(() => {
     const container = mapContainerRef.current;
-    if (!open || !container || initialLon === null || initialLat === null) return;
+    if (!editorVisible || !container || initialLon === null || initialLat === null) return;
 
     const token = getMapboxToken();
     if (!token) {
@@ -1629,11 +2151,8 @@ function AssignmentMapEditorDialog({
     setMapLoaded(false);
     mapboxgl.accessToken = token;
 
-    void Promise.all([
-      getResolvedMapInitOptions(resolvedMapStyle),
-      editable ? import('@mapbox/mapbox-gl-draw') : Promise.resolve(null),
-    ])
-      .then(([initOptions, drawModule]) => {
+    void getResolvedMapInitOptions(resolvedMapStyle)
+      .then((initOptions) => {
         if (cancelled || !mapContainerRef.current) return;
 
         const map = new mapboxgl.Map({
@@ -1650,28 +2169,20 @@ function AssignmentMapEditorDialog({
         enableFreeMapCamera(map);
         map.addControl(new mapboxgl.NavigationControl({ showCompass: true, visualizePitch: true }), 'bottom-right');
 
-        const draw = drawModule
-          ? new drawModule.default({
-              displayControlsDefault: false,
-              controls: {},
-            })
-          : null;
-        drawRef.current = draw;
-
-        const updateSelectionFromDraw = () => {
-          if (!drawRef.current) return;
-          setSelectedAddressIds(selectedAddressIdsFromDraw(drawRef.current, assignmentAddresses));
-        };
-        const drawMap = map as mapboxgl.Map & {
-          on(type: string, listener: () => void): mapboxgl.Map;
-          off(type: string, listener: () => void): mapboxgl.Map;
+        const scheduleMapResize = () => {
+          [0, 50, 150, 300, 600].forEach((delay) => {
+            window.setTimeout(() => {
+              if (!cancelled && mapRef.current === map) syncMapSize(map);
+            }, delay);
+          });
         };
 
         const handleMapReady = () => {
           applyPresetVisualTweaks(map, resolvedMapStyle, {
-            preserveLayerPrefixes: ['map-buildings-', 'campaign-', 'flyr-', 'gl-draw-'],
+            preserveLayerPrefixes: ['map-buildings-', 'campaign-', 'flyr-'],
           });
           syncMapSize(map);
+          scheduleMapResize();
         };
 
         const handleStyleLoad = () => {
@@ -1684,24 +2195,7 @@ function AssignmentMapEditorDialog({
         map.on('style.load', handleStyleLoad);
         map.on('load', () => {
           if (cancelled) return;
-          try {
-            handleMapReady();
-            if (!draw) {
-              setMapLoaded(true);
-              setMapError(null);
-              window.requestAnimationFrame(() => syncMapSize(map));
-              return;
-            }
-            map.addControl(draw);
-            drawMap.on('draw.create', updateSelectionFromDraw);
-            drawMap.on('draw.update', updateSelectionFromDraw);
-            drawMap.on('draw.delete', updateSelectionFromDraw);
-            if (startInDrawMode) {
-              window.setTimeout(() => draw.changeMode('draw_polygon'), 0);
-            }
-          } catch {
-            // The map remains useful for click editing if Draw cannot attach.
-          }
+          handleMapReady();
           setMapLoaded(true);
           setMapError(null);
           window.requestAnimationFrame(() => syncMapSize(map));
@@ -1723,13 +2217,19 @@ function AssignmentMapEditorDialog({
           }, 1000);
         });
 
-        const cleanupDrawEvents = () => {
-          drawMap.off('draw.create', updateSelectionFromDraw);
-          drawMap.off('draw.update', updateSelectionFromDraw);
-          drawMap.off('draw.delete', updateSelectionFromDraw);
+        const cleanupMapEvents = () => {
           map.off('style.load', handleStyleLoad);
         };
-        map.once('remove', cleanupDrawEvents);
+        map.once('remove', cleanupMapEvents);
+        if (map.isStyleLoaded()) {
+          handleStyleLoad();
+        } else {
+          window.setTimeout(() => {
+            if (!cancelled && mapRef.current === map && map.isStyleLoaded()) {
+              handleStyleLoad();
+            }
+          }, 0);
+        }
       })
       .catch(() => {
         if (!cancelled) setMapError('Map unavailable.');
@@ -1739,21 +2239,34 @@ function AssignmentMapEditorDialog({
       cancelled = true;
       setMapLoaded(false);
       if (mapRef.current) {
-        try {
-          if (drawRef.current) mapRef.current.removeControl(drawRef.current);
-        } catch {
-          // Mapbox can already be mid-disposal here.
-        }
         removeMapboxMapWhenSafe(mapRef.current);
         mapRef.current = null;
-        drawRef.current = null;
       }
     };
-  }, [assignmentAddresses, editable, initialLat, initialLon, open, resolvedMapStyle, startInDrawMode]);
+  }, [editorVisible, initialLat, initialLon, resolvedMapStyle]);
+
+  useEffect(() => {
+    if (!editorVisible) return;
+
+    const map = mapRef.current;
+    if (!map) return;
+
+    const timerIds = [0, 80, 180, 360, 700].map((delay) =>
+      window.setTimeout(() => {
+        syncMapSize(map);
+      }, delay)
+    );
+
+    return () => {
+      timerIds.forEach((timerId) => window.clearTimeout(timerId));
+    };
+  }, [editorVisible]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded || previewPoints.length === 0) return;
+    if (editorMapFittedRef.current) return;
+    editorMapFittedRef.current = true;
 
     if (previewPoints.length === 1) {
       map.easeTo({ center: [previewPoints[0].lon, previewPoints[0].lat], zoom: 17, pitch: 45, duration: 450 });
@@ -1775,7 +2288,7 @@ function AssignmentMapEditorDialog({
   useEffect(() => {
     const map = mapRef.current;
     const container = mapContainerRef.current;
-    if (!open || !map || !container || !mapLoaded) return;
+    if (!editorVisible || !map || !container || !mapLoaded) return;
 
     let frameId: number | null = null;
     const resizeMap = () => {
@@ -1801,18 +2314,152 @@ function AssignmentMapEditorDialog({
       settleTimers.forEach((timerId) => window.clearTimeout(timerId));
       if (frameId !== null) cancelAnimationFrame(frameId);
     };
-  }, [mapLoaded, open]);
+  }, [editorVisible, mapLoaded]);
 
-  const drawPolygon = () => {
-    const draw = drawRef.current;
-    if (!draw) return;
-    draw.deleteAll();
-    setSelectedAddressIds([]);
-    draw.changeMode('draw_polygon');
-  };
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!editable || !selectMode || selectionTool !== 'lasso' || !map) return;
+
+    let drawing = false;
+    let styleReady = false;
+    const emptyData: GeoJSON.FeatureCollection<GeoJSON.Polygon> = {
+      type: 'FeatureCollection',
+      features: [],
+    };
+
+    const removeLassoLayers = () => {
+      [ASSIGNMENT_LASSO_FILL_LAYER_ID, ASSIGNMENT_LASSO_LINE_LAYER_ID].forEach((layerId) => {
+        try {
+          if (map.getLayer(layerId)) map.removeLayer(layerId);
+        } catch {
+          // Ignore style swaps while closing the editor.
+        }
+      });
+      try {
+        if (map.getSource(ASSIGNMENT_LASSO_SOURCE_ID)) map.removeSource(ASSIGNMENT_LASSO_SOURCE_ID);
+      } catch {
+        // Ignore style swaps while closing the editor.
+      }
+    };
+
+    const getLassoSource = () => {
+      const source = map.getSource(ASSIGNMENT_LASSO_SOURCE_ID);
+      return source && 'setData' in source ? source as mapboxgl.GeoJSONSource : null;
+    };
+
+    const lassoFeature = (coordinates: [number, number][]): GeoJSON.FeatureCollection<GeoJSON.Polygon> => {
+      if (coordinates.length < 3) return emptyData;
+      const ring = [...coordinates, coordinates[0]];
+      return {
+        type: 'FeatureCollection',
+        features: [{
+          type: 'Feature',
+          properties: {},
+          geometry: {
+            type: 'Polygon',
+            coordinates: [ring],
+          },
+        }],
+      };
+    };
+
+    const syncLasso = () => {
+      const source = getLassoSource();
+      if (!source) return;
+      source.setData(lassoFeature(lassoCoordinatesRef.current));
+    };
+
+    const ensureLassoLayers = () => {
+      if (!map.isStyleLoaded()) return;
+      styleReady = true;
+      if (!map.getSource(ASSIGNMENT_LASSO_SOURCE_ID)) {
+        map.addSource(ASSIGNMENT_LASSO_SOURCE_ID, { type: 'geojson', data: emptyData });
+      }
+      if (!map.getLayer(ASSIGNMENT_LASSO_FILL_LAYER_ID)) {
+        map.addLayer({
+          id: ASSIGNMENT_LASSO_FILL_LAYER_ID,
+          type: 'fill',
+          source: ASSIGNMENT_LASSO_SOURCE_ID,
+          paint: {
+            'fill-color': '#111111',
+            'fill-opacity': 0.16,
+          },
+        });
+      }
+      if (!map.getLayer(ASSIGNMENT_LASSO_LINE_LAYER_ID)) {
+        map.addLayer({
+          id: ASSIGNMENT_LASSO_LINE_LAYER_ID,
+          type: 'line',
+          source: ASSIGNMENT_LASSO_SOURCE_ID,
+          paint: {
+            'line-color': '#111111',
+            'line-width': 2.5,
+            'line-opacity': 0.9,
+          },
+        });
+      }
+    };
+
+    const finishLasso = () => {
+      if (!drawing) return;
+      drawing = false;
+      map.dragPan.enable();
+      map.getCanvas().style.cursor = 'crosshair';
+      const featureCollection = lassoFeature(lassoCoordinatesRef.current);
+      const lassoSelectedIds = selectedAddressIdsFromFeatures(featureCollection.features, assignmentAddresses);
+      lassoCoordinatesRef.current = [];
+      getLassoSource()?.setData(emptyData);
+      if (lassoSelectedIds.length === 0) return;
+      setSelectedAddressIds((current) => Array.from(new Set([...current, ...lassoSelectedIds])));
+    };
+
+    const handleMouseDown = (event: mapboxgl.MapMouseEvent) => {
+      const originalEvent = event.originalEvent as MouseEvent | undefined;
+      if (originalEvent && originalEvent.button !== 0) return;
+      event.preventDefault();
+      ensureLassoLayers();
+      if (!styleReady) return;
+      drawing = true;
+      map.dragPan.disable();
+      map.getCanvas().style.cursor = 'crosshair';
+      lassoCoordinatesRef.current = [[event.lngLat.lng, event.lngLat.lat]];
+      syncLasso();
+    };
+
+    const handleMouseMove = (event: mapboxgl.MapMouseEvent) => {
+      if (!drawing) return;
+      lassoCoordinatesRef.current = [
+        ...lassoCoordinatesRef.current,
+        [event.lngLat.lng, event.lngLat.lat],
+      ];
+      syncLasso();
+    };
+
+    const handleMouseUp = () => {
+      finishLasso();
+    };
+
+    ensureLassoLayers();
+    map.getCanvas().style.cursor = 'crosshair';
+    map.on('style.load', ensureLassoLayers);
+    map.on('mousedown', handleMouseDown);
+    map.on('mousemove', handleMouseMove);
+    map.on('mouseup', handleMouseUp);
+
+    return () => {
+      finishLasso();
+      map.off('style.load', ensureLassoLayers);
+      map.off('mousedown', handleMouseDown);
+      map.off('mousemove', handleMouseMove);
+      map.off('mouseup', handleMouseUp);
+      map.dragPan.enable();
+      map.getCanvas().style.cursor = '';
+      lassoCoordinatesRef.current = [];
+      removeLassoLayers();
+    };
+  }, [assignmentAddresses, editable, selectMode, selectionTool]);
 
   const clearSelection = () => {
-    drawRef.current?.deleteAll();
     setSelectedAddressIds([]);
   };
 
@@ -1835,6 +2482,7 @@ function AssignmentMapEditorDialog({
 
   const assignSelectionToMember = () => {
     assignAddressIdsToMember(selectedAddressIds, activeMemberId);
+    setSelectedAddressIds([]);
   };
 
   const resetEdits = () => {
@@ -1850,22 +2498,16 @@ function AssignmentMapEditorDialog({
 
   const handleBuildingClick = useCallback((
     _buildingId: string,
-    addressId?: string,
-    options?: { additive?: boolean }
+    addressId?: string
   ) => {
+    if (!selectMode) return;
+    if (selectionTool !== 'click') return;
     if (!addressId || !assignmentAddressIdSet.has(addressId)) return;
-    const memberId = activeMemberId;
     setSelectedAddressIds((current) => {
       const exists = current.includes(addressId);
-      if (options?.additive) {
-        return exists ? current.filter((id) => id !== addressId) : [...current, addressId];
-      }
-      return [addressId];
+      return exists ? current.filter((id) => id !== addressId) : [...current, addressId];
     });
-    if (memberId && !options?.additive) {
-      assignAddressIdsToMember([addressId], memberId);
-    }
-  }, [activeMemberId, assignAddressIdsToMember, assignmentAddressIdSet]);
+  }, [assignmentAddressIdSet, selectMode, selectionTool]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1891,33 +2533,56 @@ function AssignmentMapEditorDialog({
               {editable ? <p className="text-xs text-muted-foreground">{selectedAddressIds.length} selected</p> : null}
             </div>
           </div>
-          {editable ? (
-            <div className="flex flex-wrap items-center gap-2">
-              <Button type="button" variant="outline" size="sm" onClick={drawPolygon}>
-                <PenLine className="h-3.5 w-3.5" />
-                Draw polygon
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={clearSelection}
-                disabled={selectedAddressIds.length === 0}
-              >
-                <Eraser className="h-3.5 w-3.5" />
-                Clear selection
-              </Button>
-            </div>
-          ) : null}
         </div>
 
-        <div className="relative min-h-0">
-          <div ref={mapContainerRef} className="h-full min-h-0 w-full" />
+        <div className="relative h-full min-h-[360px] w-full overflow-hidden">
+          <div ref={mapContainerRef} className="absolute inset-0 h-full w-full" />
           {editable ? (
-            <div className="absolute left-4 top-4 z-10 max-h-[calc(100%-2rem)] w-[min(340px,calc(100vw-2rem))] overflow-y-auto rounded-lg border border-border bg-background/95 p-3 shadow-xl backdrop-blur">
-              <div className="space-y-3">
-                <div className="space-y-2">
-                  <Label>Assign to</Label>
+            <div className="absolute left-4 top-4 z-10 max-h-[calc(100%-2rem)] w-[min(360px,calc(100vw-2rem))] overflow-y-auto rounded-lg border border-border bg-background/95 p-3 shadow-xl backdrop-blur">
+              <div className="space-y-4">
+                <section className="space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Step 1</p>
+                      <p className="text-sm font-semibold">Select houses</p>
+                    </div>
+                    <Badge variant={selectedAddressIds.length > 0 ? 'default' : 'secondary'}>
+                      {selectedAddressIds.length} selected
+                    </Badge>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      type="button"
+                      variant={selectMode && selectionTool === 'click' ? 'default' : 'outline'}
+                      aria-pressed={selectMode && selectionTool === 'click'}
+                      onClick={() => {
+                        setSelectMode(true);
+                        setSelectionTool('click');
+                      }}
+                    >
+                      <MousePointer2 className="h-4 w-4" />
+                      Click
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={selectMode && selectionTool === 'lasso' ? 'default' : 'outline'}
+                      aria-pressed={selectMode && selectionTool === 'lasso'}
+                      onClick={() => {
+                        setSelectMode(true);
+                        setSelectionTool('lasso');
+                      }}
+                    >
+                      <Pencil className="h-4 w-4" />
+                      Lasso
+                    </Button>
+                  </div>
+                </section>
+
+                <section className="space-y-2 border-t border-border pt-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Step 2</p>
+                    <Label>Assign to member</Label>
+                  </div>
                   <div className="space-y-2">
                     {members.map((member) => {
                       const active = activeMemberId === member.user_id;
@@ -1930,12 +2595,12 @@ function AssignmentMapEditorDialog({
                           onClick={() => setActiveMemberId(member.user_id)}
                           className={`flex w-full items-center justify-between gap-3 rounded-md border px-3 py-2 text-left transition-colors ${
                             active
-                              ? 'border-foreground bg-background text-foreground'
+                              ? 'border-foreground bg-foreground text-background'
                               : 'border-border bg-background/70 text-muted-foreground hover:bg-background'
                           }`}
                         >
                           <span className="flex min-w-0 items-center gap-2">
-                            <span className="h-3 w-3 rounded-full" style={{ backgroundColor: member.color }} />
+                            <span className="h-3 w-3 rounded-full border border-border" style={{ backgroundColor: member.color }} />
                             <span className="truncate text-sm font-medium">{member.display_name}</span>
                           </span>
                           <span className="shrink-0 text-xs">
@@ -1945,17 +2610,16 @@ function AssignmentMapEditorDialog({
                       );
                     })}
                   </div>
-                </div>
-
-                <Button
-                  type="button"
-                  className="w-full"
-                  onClick={assignSelectionToMember}
-                  disabled={!activeMemberId || selectedAddressIds.length === 0}
-                >
-                  <Check className="h-4 w-4" />
-                  Assign selected
-                </Button>
+                  <Button
+                    type="button"
+                    className="w-full"
+                    onClick={assignSelectionToMember}
+                    disabled={!activeMemberId || selectedAddressIds.length === 0}
+                  >
+                    <Check className="h-4 w-4" />
+                    Assign selected
+                  </Button>
+                </section>
 
                 <Button type="button" variant="outline" className="w-full" onClick={resetEdits}>
                   <RotateCcw className="h-4 w-4" />
@@ -1964,28 +2628,19 @@ function AssignmentMapEditorDialog({
               </div>
             </div>
           ) : null}
-          {mapRef.current && mapLoaded ? (
+          {mapRef.current ? (
             <>
-              {showFallbackMarkers ? (
-                <AssignmentAddressMarkerLayer
-                  map={mapRef.current}
-                  mapLoaded={mapLoaded}
-                  assignmentAddresses={assignmentAddresses}
-                  members={members}
-                  zones={editorZones}
-                  colorOverrides={demoCamera.demoColorByAddressId}
-                />
-              ) : null}
               <MapBuildingsLayer
                 map={mapRef.current}
                 campaignId={campaignId}
                 addressStateOverrides={previewAddresses}
-                assignmentColorByAddressId={demoCamera.demoColorByAddressId}
+                assignmentColorByAddressId={assignmentColorByAddressId}
                 selectedAddressIds={selectedAddressIds}
                 visibleAddressIds={assignmentAddresses.map((address) => address.id)}
                 showAddressLabels={false}
                 footprintStatusColors
                 isDarkMap={theme === 'dark'}
+                selectionOnly={editable}
                 onBuildingClick={editable ? handleBuildingClick : undefined}
                 onRenderStateChange={setBuildingRenderState}
               />
@@ -2039,11 +2694,18 @@ function AssignmentMapEditorDialog({
   );
 }
 
-export function CampaignAssignmentView({ campaignId, campaignName, addresses }: CampaignAssignmentViewProps) {
+export function CampaignAssignmentView({
+  campaignId,
+  campaignName,
+  addresses,
+  demoMode = false,
+  demoLivePlaybackToken = 0,
+  onDemoSplitComplete,
+}: CampaignAssignmentViewProps) {
   const { currentWorkspace, membershipsByWorkspaceId } = useWorkspace();
   const currentWorkspaceId = currentWorkspace?.id ?? null;
   const currentRole = currentWorkspaceId ? membershipsByWorkspaceId[currentWorkspaceId] : null;
-  const canManage = currentRole === 'owner' || currentRole === 'admin';
+  const canManage = demoMode || currentRole === 'owner' || currentRole === 'admin';
 
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
@@ -2057,6 +2719,7 @@ export function CampaignAssignmentView({ campaignId, campaignName, addresses }: 
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
+  const [assignmentMapRevealed, setAssignmentMapRevealed] = useState(false);
 
   const assignmentAddresses = useMemo(() => toAssignmentAddresses(addresses), [addresses]);
   const autoZones = useMemo(
@@ -2067,10 +2730,6 @@ export function CampaignAssignmentView({ campaignId, campaignName, addresses }: 
     () => applyManualOverridesToZones(autoZones, assignmentAddresses, selectedMemberIds, appliedManualOverrides),
     [appliedManualOverrides, assignmentAddresses, autoZones, selectedMemberIds]
   );
-  const manualOverrideCountByMemberId = useMemo(
-    () => countManualOverridesByMember(appliedManualOverrides, assignmentAddresses, selectedMemberIds, autoZones),
-    [appliedManualOverrides, assignmentAddresses, autoZones, selectedMemberIds]
-  );
   const previewZones = useMemo(() => {
     if (mode === 'zone_split') return zones;
 
@@ -2078,6 +2737,23 @@ export function CampaignAssignmentView({ campaignId, campaignName, addresses }: 
     if (selectedMemberIds[0]) wholeTeamZones.set(selectedMemberIds[0], assignmentAddresses);
     return wholeTeamZones;
   }, [assignmentAddresses, mode, selectedMemberIds, zones]);
+  const assignmentMapKey = useMemo(
+    () => [mode, splitMode, ...selectedMemberIds].join(':'),
+    [mode, selectedMemberIds, splitMode]
+  );
+
+  const toggleSelectedMember = useCallback((memberId: string) => {
+    const removingMember = selectedMemberIds.includes(memberId);
+    if (removingMember) {
+      setAppliedManualOverrides({});
+    }
+    setAssignmentMapRevealed(false);
+    setSelectedMemberIds((current) => {
+      if (removingMember) return current.filter((id) => id !== memberId);
+      if (current.includes(memberId)) return current;
+      return [...current, memberId];
+    });
+  }, [selectedMemberIds]);
 
   useEffect(() => {
     setAppliedManualOverrides((current) => {
@@ -2087,6 +2763,12 @@ export function CampaignAssignmentView({ campaignId, campaignName, addresses }: 
   }, [assignmentAddresses, autoZones, selectedMemberIds]);
 
   const loadAssignments = useCallback(async () => {
+    if (demoMode) {
+      setAssignments([]);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     try {
       const response = await fetch(`/api/campaigns/${campaignId}/assignments`, {
@@ -2107,13 +2789,20 @@ export function CampaignAssignmentView({ campaignId, campaignName, addresses }: 
     } finally {
       setLoading(false);
     }
-  }, [campaignId]);
+  }, [campaignId, demoMode]);
 
   useEffect(() => {
     void loadAssignments();
   }, [loadAssignments]);
 
   useEffect(() => {
+    if (demoMode) {
+      setMembers(SELF_SERVE_DEMO_MEMBERS);
+      setSelectedMemberIds(SELF_SERVE_DEMO_MEMBERS.map((member) => member.user_id));
+      setLoading(false);
+      return;
+    }
+
     if (!canManage || !currentWorkspaceId) {
       setMembers([]);
       return;
@@ -2143,7 +2832,7 @@ export function CampaignAssignmentView({ campaignId, campaignName, addresses }: 
     return () => {
       mounted = false;
     };
-  }, [canManage, currentWorkspaceId]);
+  }, [canManage, currentWorkspaceId, demoMode]);
 
   const selectedMembers = useMemo(
     () => members.filter((member) => selectedMemberIds.includes(member.user_id)),
@@ -2158,8 +2847,128 @@ export function CampaignAssignmentView({ campaignId, campaignName, addresses }: 
       })),
     [selectedMembers]
   );
+  const addressById = useMemo(() => new Map(addresses.map((address) => [address.id, address])), [addresses]);
+  const assignmentReportRows = useMemo<AssignmentCampaignReportRow[]>(() => {
+    const buildMetrics = (homes: CampaignAddress[]) => {
+      const workedHomes = homes.filter(didWorkCampaignAddress).length;
+      const conversations = homes.filter(didHaveConversation).length;
+      const leads = homes.filter(didCreateLead).length;
+      const appointments = homes.filter(didSetAppointment).length;
+      return { workedHomes, conversations, leads, appointments };
+    };
+
+    if (assignments.length > 0) {
+      return assignments.map((assignment, index) => {
+        const assignmentHomes = (assignment.homes ?? [])
+          .map((home) => addressById.get(home.campaign_address_id))
+          .filter((address): address is CampaignAddress => Boolean(address));
+        const scopedHomes = assignmentHomes.length > 0 || assignment.mode === 'zone_split' ? assignmentHomes : addresses;
+        const assignedHomes = assignment.goal_homes || scopedHomes.length;
+        const metrics = buildMetrics(scopedHomes);
+        const selectedIndex = selectedMemberIds.indexOf(assignment.assigned_to_user_id);
+
+        return {
+          id: assignment.id,
+          name: assignment.assignee?.display_name ?? assignment.assigned_to_user_id.slice(0, 8),
+          color: COLORS[(selectedIndex >= 0 ? selectedIndex : index) % COLORS.length],
+          zoneLabel: assignment.mode === 'zone_split' && assignment.zone_index !== null
+            ? `Zone ${assignment.zone_index + 1}`
+            : 'Shared map',
+          sent: true,
+          assignedHomes,
+          workedHomes: metrics.workedHomes,
+          conversations: metrics.conversations,
+          leads: metrics.leads,
+          appointments: metrics.appointments,
+          remainingHomes: Math.max(0, assignedHomes - metrics.workedHomes),
+          dueAt: assignment.due_at,
+        };
+      });
+    }
+
+    return selectedMembers.map((member, index) => {
+      const zoneHomes = mode === 'zone_split' ? zones.get(member.user_id) ?? [] : assignmentAddresses;
+      const campaignHomes = zoneHomes
+        .map((address) => addressById.get(address.id))
+        .filter((address): address is CampaignAddress => Boolean(address));
+      const metrics = buildMetrics(campaignHomes);
+
+      return {
+        id: member.user_id,
+        name: member.display_name,
+        color: COLORS[index % COLORS.length],
+        zoneLabel: mode === 'zone_split' ? `Zone ${index + 1}` : 'Shared map',
+        sent: false,
+        assignedHomes: zoneHomes.length,
+        workedHomes: metrics.workedHomes,
+        conversations: metrics.conversations,
+        leads: metrics.leads,
+        appointments: metrics.appointments,
+        remainingHomes: Math.max(0, zoneHomes.length - metrics.workedHomes),
+        dueAt: dueAt ? `${dueAt}T23:59:59` : null,
+      };
+    });
+  }, [
+    addressById,
+    addresses,
+    assignmentAddresses,
+    assignments,
+    dueAt,
+    mode,
+    selectedMemberIds,
+    selectedMembers,
+    zones,
+  ]);
+  const assignmentWasSent = assignments.length > 0;
+  const assignmentReportTotalHomes = addresses.length;
+  const assignmentReportWorkedHomes = addresses.filter(didWorkCampaignAddress).length;
+  const assignmentReportAssignees = assignmentReportRows.map((row) => row.name).join(', ');
 
   const handleSave = useCallback(async () => {
+    if (demoMode) {
+      if (selectedMemberIds.length === 0) {
+        setMessage('Select at least one demo member.');
+        return;
+      }
+      if (mode === 'zone_split' && selectedMemberIds.length > assignmentAddresses.length) {
+        setMessage('Not enough homes to give every demo member a zone.');
+        return;
+      }
+
+      setSaving(true);
+      setMessage(null);
+      setWarnings([]);
+      setAssignmentMapRevealed(false);
+      window.setTimeout(() => {
+        const nextAssignments: AssignmentRow[] = selectedMemberIds.map((memberId, index) => {
+          const zoneHomes = mode === 'zone_split' ? zones.get(memberId) ?? [] : assignmentAddresses;
+          const member = SELF_SERVE_DEMO_MEMBERS.find((candidate) => candidate.user_id === memberId);
+          return {
+            id: `demo-assignment-${memberId}`,
+            assigned_to_user_id: memberId,
+            mode,
+            goal_homes: zoneHomes.length,
+            zone_index: mode === 'zone_split' ? index : null,
+            due_at: dueAt ? `${dueAt}T23:59:59` : null,
+            notes: notes || 'Demo team route preview',
+            assignee: { display_name: member?.display_name ?? memberId },
+            homes: zoneHomes.map((address, sequence) => ({
+              campaign_address_id: address.id,
+              sequence,
+            })),
+          };
+        });
+        setAssignments(nextAssignments);
+        setMessage('Assignment sent to demo reps.');
+        setNotes('');
+        setDueAt('');
+        setAssignmentMapRevealed(true);
+        setSaving(false);
+        onDemoSplitComplete?.();
+      }, 250);
+      return;
+    }
+
     if (!currentWorkspaceId) {
       setMessage('No workspace selected.');
       return;
@@ -2176,6 +2985,7 @@ export function CampaignAssignmentView({ campaignId, campaignName, addresses }: 
     setSaving(true);
     setMessage(null);
     setWarnings([]);
+    setAssignmentMapRevealed(false);
 
     const zoneAssignments =
       mode === 'zone_split'
@@ -2211,21 +3021,24 @@ export function CampaignAssignmentView({ campaignId, campaignName, addresses }: 
 
       setAssignments(Array.isArray(payload?.assignments) ? payload.assignments : []);
       setWarnings(Array.isArray(payload?.warnings) ? payload.warnings : []);
-      setMessage('Campaign assigned.');
+      setMessage('Assignment sent to assignees.');
       setNotes('');
       setDueAt('');
+      setAssignmentMapRevealed(true);
     } catch {
       setMessage('Failed to assign campaign.');
     } finally {
       setSaving(false);
     }
   }, [
-    assignmentAddresses.length,
+    assignmentAddresses,
     campaignId,
     currentWorkspaceId,
+    demoMode,
     dueAt,
     mode,
     notes,
+    onDemoSplitComplete,
     selectedMemberIds,
     splitMode,
     zones,
@@ -2266,124 +3079,131 @@ export function CampaignAssignmentView({ campaignId, campaignName, addresses }: 
 
   return (
     <div className="space-y-4">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Users className="h-4 w-4" />
-            Assign Campaign
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-3 md:grid-cols-2">
+      <div className="grid min-h-[620px] gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
+        <aside className="flex min-h-0 flex-col rounded-lg border border-border bg-background">
+          <div className="border-b border-border p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold">Assign campaign</h2>
+                <p className="text-sm text-muted-foreground">{addresses.length} homes</p>
+              </div>
+              <Users className="mt-1 h-5 w-5 text-muted-foreground" />
+            </div>
+          </div>
+
+          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
             <div className="space-y-2">
-              <Label>Assignment mode</Label>
-              <div className="inline-flex rounded-lg border border-border bg-muted/20 p-1">
-                <button
-                  type="button"
-                  onClick={() => setMode('zone_split')}
-                  className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                    mode === 'zone_split' ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-background/80'
-                  }`}
-                >
-                  Zone split
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMode('whole_team')}
-                  className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                    mode === 'whole_team' ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-background/80'
-                  }`}
-                >
-                  Whole team
-                </button>
+              <Label>Reps</Label>
+              <div className="grid grid-cols-2 gap-2">
+                {members.map((member, index) => {
+                  const selected = selectedMemberIds.includes(member.user_id);
+                  return (
+                    <button
+                      key={member.user_id}
+                      type="button"
+                      onClick={() => toggleSelectedMember(member.user_id)}
+                      disabled={saving}
+                      className={`flex min-h-9 w-full items-center justify-between gap-2 rounded-md border px-2.5 py-1.5 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                        selected
+                          ? 'border-foreground bg-foreground text-background'
+                          : 'border-border bg-background text-muted-foreground hover:bg-muted/40'
+                      }`}
+                    >
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span
+                          className="h-2.5 w-2.5 shrink-0 rounded-full border border-border"
+                          style={{ backgroundColor: COLORS[index % COLORS.length] }}
+                        />
+                        <span className="truncate">{member.display_name}</span>
+                      </span>
+                      {selected ? <Check className="h-3.5 w-3.5 shrink-0" /> : null}
+                    </button>
+                  );
+                })}
               </div>
             </div>
-            {mode === 'zone_split' ? (
-              <div className="space-y-2">
-                <Label>Split logic</Label>
-                <div className="inline-flex rounded-lg border border-border bg-muted/20 p-1">
+
+            <div className="space-y-2">
+              <Label>Split</Label>
+              <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Split type">
+                {[
+                  { id: 'smart', label: 'Smart zones', active: mode === 'zone_split' && splitMode === 'smart' },
+                  { id: 'balanced', label: 'Even split', active: mode === 'zone_split' && splitMode === 'balanced' },
+                  { id: 'shared', label: 'Shared map', active: mode === 'whole_team' },
+                ].map((option) => (
                   <button
+                    key={option.id}
                     type="button"
-                    onClick={() => setSplitMode('smart')}
-                    className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                      splitMode === 'smart' ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-background/80'
+                    role="radio"
+                    aria-checked={option.active}
+                    onClick={() => {
+                      if (option.id === 'shared') {
+                        setMode('whole_team');
+                        return;
+                      }
+                      setMode('zone_split');
+                      setSplitMode(option.id === 'balanced' ? 'balanced' : 'smart');
+                    }}
+                    className={`flex min-h-9 w-full min-w-0 items-center justify-center gap-1.5 rounded-md border px-2 py-1.5 text-center text-xs font-medium transition-colors ${
+                      option.active
+                        ? 'border-foreground bg-muted/60 text-foreground'
+                        : 'border-border bg-background text-muted-foreground hover:bg-muted/40'
                     }`}
                   >
-                    Smart Territory Split
+                    <span className={`h-2.5 w-2.5 shrink-0 rounded-full border ${option.active ? 'border-foreground bg-foreground' : 'border-muted-foreground'}`} />
+                    <span className="truncate">{option.label}</span>
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setSplitMode('balanced')}
-                    className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                      splitMode === 'balanced' ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-background/80'
-                    }`}
-                  >
-                    Equal Count
-                  </button>
-                </div>
+                ))}
               </div>
-            ) : null}
-          </div>
-
-          <div className="space-y-2">
-            <Label>Members</Label>
-            <div className="flex flex-wrap gap-2">
-              {members.map((member) => {
-                const selected = selectedMemberIds.includes(member.user_id);
-                return (
-                  <Button
-                    key={member.user_id}
-                    type="button"
-                    size="sm"
-                    variant={selected ? 'default' : 'outline'}
-                    onClick={() =>
-                      setSelectedMemberIds((current) =>
-                        current.includes(member.user_id)
-                          ? current.filter((id) => id !== member.user_id)
-                          : [...current, member.user_id]
-                      )
-                    }
-                    disabled={saving}
-                  >
-                    {member.display_name}
-                  </Button>
-                );
-              })}
             </div>
-          </div>
 
-          <div className="grid gap-3 md:grid-cols-2">
-            <div>
+            <div className="space-y-2">
               <Label htmlFor="campaign-assignment-due">Due date</Label>
               <Input
                 id="campaign-assignment-due"
                 type="date"
                 value={dueAt}
                 onChange={(event) => setDueAt(event.target.value)}
-                className="mt-1"
                 disabled={saving}
               />
             </div>
-            <div>
-              <Label htmlFor="campaign-assignment-notes">Notes</Label>
-              <Input
+
+            <div className="space-y-2">
+              <Label htmlFor="campaign-assignment-notes">Instructions</Label>
+              <Textarea
                 id="campaign-assignment-notes"
                 value={notes}
                 onChange={(event) => setNotes(event.target.value)}
-                placeholder="Instructions for the team"
-                className="mt-1"
+                placeholder="Optional"
+                rows={1}
+                className="min-h-9 resize-none overflow-hidden py-1.5"
                 disabled={saving}
               />
             </div>
+
+            {message ? <p className="text-sm text-muted-foreground">{message}</p> : null}
+            {warnings.length > 0 ? (
+              <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+                {warnings.slice(0, 3).map((warning) => (
+                  <p key={warning}>{warning}</p>
+                ))}
+              </div>
+            ) : null}
           </div>
 
-          <div className="text-xs text-muted-foreground">
-            {addresses.length} campaign homes ready for assignment.
+          <div className="border-t border-border p-4">
+            <Button className="w-full" onClick={() => void handleSave()} disabled={saving || selectedMemberIds.length === 0}>
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              Send Assignment
+            </Button>
           </div>
+        </aside>
 
-          {zonePreviewMembers.length > 0 ? (
-            <CampaignAssignmentZonePreviewMap
-              campaignId={campaignId}
+        <div className="min-h-[560px]">
+	          {zonePreviewMembers.length > 0 ? (
+	            <CampaignAssignmentZonePreviewMap
+	              key={assignmentMapKey}
+	              campaignId={campaignId}
               addresses={addresses}
               assignmentAddresses={assignmentAddresses}
               members={zonePreviewMembers}
@@ -2392,95 +3212,90 @@ export function CampaignAssignmentView({ campaignId, campaignName, addresses }: 
               manualOverrides={appliedManualOverrides}
               showAssignmentColors={mode === 'zone_split'}
               editable={mode === 'zone_split'}
+              layout="hero"
               onApplyManualOverrides={setAppliedManualOverrides}
+              liveDemoEnabled={demoMode}
+              liveDemoPlaybackToken={demoLivePlaybackToken || (assignmentMapRevealed ? 1 : 0)}
             />
-          ) : null}
-
-          {message ? <p className="text-sm text-muted-foreground">{message}</p> : null}
-          {warnings.length > 0 ? (
-            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
-              {warnings.slice(0, 3).map((warning) => (
-                <p key={warning}>{warning}</p>
-              ))}
+          ) : (
+            <div className="flex h-full min-h-[560px] items-center justify-center rounded-lg border border-border bg-muted/20 p-6 text-center text-sm text-muted-foreground">
+              Select at least one rep to preview assignment zones.
             </div>
-          ) : null}
-
-          <Button className="w-full" onClick={() => void handleSave()} disabled={saving || selectedMemberIds.length === 0}>
-            {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-            Assign Campaign
-          </Button>
-        </CardContent>
-      </Card>
-
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {selectedMembers.map((member, index) => {
-          const zoneHomes = zones.get(member.user_id) ?? [];
-          const goal = mode === 'zone_split' ? zoneHomes.length : addresses.length;
-          const manualCount = manualOverrideCountByMemberId.get(member.user_id) ?? 0;
-          return (
-            <Card key={member.user_id}>
-              <CardHeader className="p-3 pb-2">
-                <div className="flex items-center justify-between gap-3">
-                  <CardTitle className="truncate text-sm">{member.display_name}</CardTitle>
-                  <div className="flex shrink-0 items-center gap-1.5">
-                    {mode === 'zone_split' && manualCount > 0 ? (
-                      <Badge variant="outline">{manualCount} edited</Badge>
-                    ) : null}
-                    <Badge variant="secondary">{goal} homes</Badge>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="p-3 pt-0">
-                <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
-                  <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
-                  {mode === 'zone_split' ? `Zone ${index + 1}` : 'Whole campaign'}
-                </div>
-                {mode === 'zone_split' ? (
-                  <p className="line-clamp-2 text-xs text-muted-foreground">
-                    {zoneHomes
-                      .slice(0, 4)
-                      .map((address) => address.formatted || address.street_name || address.id.slice(0, 8))
-                      .join(', ')}
-                    {zoneHomes.length > 4 ? '...' : ''}
-                  </p>
-                ) : (
-                  <p className="text-xs text-muted-foreground">No exclusive zone. The selected team works the campaign together.</p>
-                )}
-              </CardContent>
-            </Card>
-          );
-        })}
+          )}
+        </div>
       </div>
 
-      {assignments.length > 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Current Assignments</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {assignments.map((assignment) => (
-              <div key={assignment.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-3 py-2">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">{assignment.assignee?.display_name ?? assignment.assigned_to_user_id.slice(0, 8)}</p>
-                  <p className="text-xs text-muted-foreground">{formatMode(assignment.mode)}</p>
+      <section className="rounded-lg border border-border bg-background p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="max-w-3xl">
+            <div className="mb-2 flex items-center gap-2">
+              <h3 className="text-base font-semibold">Assignment note</h3>
+              <Badge variant={assignmentWasSent ? 'default' : 'secondary'}>
+                {assignmentWasSent ? 'Sent' : 'Draft'}
+              </Badge>
+            </div>
+            <p className="text-sm leading-6 text-muted-foreground">
+              {assignmentWasSent
+                ? `Sent ${campaignName ?? 'this campaign'} to ${assignmentReportAssignees || 'the selected assignees'}. Reporting below is scoped to this campaign assignment.`
+                : `Draft preview for ${campaignName ?? 'this campaign'}. Send it to create assignee-specific reporting for this campaign.`}
+            </p>
+          </div>
+          {assignmentWasSent ? (
+            <Link href={`/campaigns/${campaignId}`} className="text-sm font-medium text-primary hover:underline">
+              Open campaign
+            </Link>
+          ) : null}
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <div className="rounded-md bg-muted/35 px-3 py-2">
+            <p className="text-xs text-muted-foreground">Assigned homes</p>
+            <p className="text-lg font-semibold">{assignmentReportTotalHomes}</p>
+          </div>
+          <div className="rounded-md bg-muted/35 px-3 py-2">
+            <p className="text-xs text-muted-foreground">Attempted homes</p>
+            <p className="text-lg font-semibold">{assignmentReportWorkedHomes}</p>
+          </div>
+          <div className="rounded-md bg-muted/35 px-3 py-2">
+            <p className="text-xs text-muted-foreground">Completion</p>
+            <p className="text-lg font-semibold">{formatAssignmentPercent(assignmentReportWorkedHomes, assignmentReportTotalHomes)}</p>
+          </div>
+        </div>
+
+        <div className="mt-4 overflow-x-auto">
+          <div className="min-w-[760px] overflow-hidden rounded-md border border-border">
+            <div className="grid grid-cols-[1.3fr_0.8fr_repeat(6,0.7fr)] gap-0 border-b border-border bg-muted/35 px-3 py-2 text-xs font-medium text-muted-foreground">
+              <span>Assignee</span>
+              <span>Zone</span>
+              <span>Homes</span>
+              <span>Attempted</span>
+              <span>Talked</span>
+              <span>Leads</span>
+              <span>Appts</span>
+              <span>Done</span>
+            </div>
+            {assignmentReportRows.length > 0 ? (
+              assignmentReportRows.map((row) => (
+                <div key={row.id} className="grid grid-cols-[1.3fr_0.8fr_repeat(6,0.7fr)] gap-0 border-b border-border px-3 py-2 text-sm last:border-b-0">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="h-2.5 w-2.5 shrink-0 rounded-full border border-border" style={{ backgroundColor: row.color }} />
+                    <span className="truncate">{row.name}</span>
+                  </span>
+                  <span className="text-muted-foreground">{row.zoneLabel}</span>
+                  <span>{row.assignedHomes}</span>
+                  <span>{row.workedHomes}</span>
+                  <span>{row.conversations}</span>
+                  <span>{row.leads}</span>
+                  <span>{row.appointments}</span>
+                  <span>{formatAssignmentPercent(row.workedHomes, row.assignedHomes)}</span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Badge variant="secondary">{assignment.goal_homes} homes</Badge>
-                  <Link href={`/campaigns/${campaignId}`} className="text-xs font-medium text-primary hover:underline">
-                    Open
-                  </Link>
-                </div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      ) : (
-        <Card>
-          <CardContent className="p-4 text-sm text-muted-foreground">
-            No assignments yet. Use the form above to assign this campaign to a team member.
-          </CardContent>
-        </Card>
-      )}
+              ))
+            ) : (
+              <div className="px-3 py-4 text-sm text-muted-foreground">No assignees selected.</div>
+            )}
+          </div>
+        </div>
+      </section>
     </div>
   );
 }

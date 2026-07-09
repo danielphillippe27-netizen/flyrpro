@@ -8,11 +8,11 @@ export const REAL_ESTATE_INDIVIDUAL_AGENT_SCRIPT_NAME =
 export const REAL_ESTATE_INDIVIDUAL_AGENT_SCRIPT_ID =
   "real-estate-individual-agents-listing-appointments";
 export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_NAME =
-  "Individual Realtors - listing leverage trial";
+  "Individual Realtors - listing leverage campaign";
 export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_ID =
   "individual-realtors-listing-leverage-trial";
 export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_V2_SCRIPT_NAME =
-  "Individual Realtors - listing leverage trial V2";
+  "Individual Realtors - listing leverage campaign V2";
 export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_V2_SCRIPT_ID =
   "individual-realtors-listing-leverage-trial-v2";
 
@@ -1035,11 +1035,11 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
     label: "Doorknock",
     kind: "question",
     title: "They already door knock",
-    say: "Love that - that means you already believe in the activity, you're just doing it manually. Our software does the same canvassing, it just tracks every door, every conversation, and builds the 3D map automatically so you're not carrying a clipboard or losing data when you switch streets. You'd plug straight into what you're already doing. Want me to send the trial link now so you can run it on your current listing?",
+    say: "Love that - that means you already believe in the activity, you're just doing it manually. Our software does the same canvassing, it just tracks every door, every conversation, and builds the 3D map automatically so you're not carrying a clipboard or losing data when you switch streets. You'd plug straight into what you're already doing. Want me to send the included campaign link now so you can run it on your current listing?",
     lines: [
       {
         speaker: "rep",
-        text: "Love that - that means you already believe in the activity, you're just doing it manually. Our software does the same canvassing, it just tracks every door, every conversation, and builds the 3D map automatically so you're not carrying a clipboard or losing data when you switch streets. You'd plug straight into what you're already doing. Want me to send the trial link now so you can run it on your current listing?",
+        text: "Love that - that means you already believe in the activity, you're just doing it manually. Our software does the same canvassing, it just tracks every door, every conversation, and builds the 3D map automatically so you're not carrying a clipboard or losing data when you switch streets. You'd plug straight into what you're already doing. Want me to send the included campaign link now so you can run it on your current listing?",
       },
     ],
     coach:
@@ -1077,11 +1077,11 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
     label: "Value",
     kind: "question",
     title: "30-second value statement",
-    say: "Reason I'm calling - I built a software for real estate agents that creates a 3D map of every house around your listing and automatically tracks the doors and conversations you have so you can leverage your current listing to find your next one.\n\nWe're currently offering free trials to agents in [city], and by the end of this call I'd like to send you the software to try out for yourself.",
+    say: "Reason I'm calling - I built a software for real estate agents that creates a 3D map of every house around your listing and automatically tracks the doors and conversations you have so you can leverage your current listing to find your next one.\n\nWe're currently offering one included campaign to agents in [city], and by the end of this call I'd like to send you the software to try out for yourself.",
     lines: [
       {
         speaker: "rep",
-        text: "Reason I'm calling - I built a software for real estate agents that creates a 3D map of every house around your listing and automatically tracks the doors and conversations you have so you can leverage your current listing to find your next one.\n\nWe're currently offering free trials to agents in [city], and by the end of this call I'd like to send you the software to try out for yourself.",
+        text: "Reason I'm calling - I built a software for real estate agents that creates a 3D map of every house around your listing and automatically tracks the doors and conversations you have so you can leverage your current listing to find your next one.\n\nWe're currently offering one included campaign to agents in [city], and by the end of this call I'd like to send you the software to try out for yourself.",
       },
     ],
     coach:
@@ -1156,7 +1156,7 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
       },
     ],
     coach:
-      "Mirror their answer first. Then make the close simple: send the demo and trial access.",
+      "Mirror their answer first. Then make the close simple: send the demo and included campaign.",
     options: [
       { label: "Close for text", nextId: "close" },
       { label: "They ask how it works", nextId: "how-it-works" },
@@ -1217,15 +1217,15 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
     label: "Price",
     kind: "objection",
     title: "If they ask pricing",
-    say: "Totally fair question.\n\nRight now we're giving agents free trial access so they can actually see it before making a decision.\n\nBut before we get to price, can I ask: if one listing campaign helped you create one listing, on average what would that be worth in terms of commission?\n\nOk cool. Well, I'm not a mathematician, but with FLYR costing $300 for the year, if it brings one listing it will pay itself off for the next 3 decades, right?\n\nRight. The scary part is if you implement this, you'll see much more than one listing per year. It will go down as the single best return on investment you'll ever make.\n\nDo you want to see the free trial?",
+    say: "Totally fair question.\n\nRight now we're giving agents one included campaign so they can actually see it before making a decision.\n\nBut before we get to price, can I ask: if one listing campaign helped you create one listing, on average what would that be worth in terms of commission?\n\nOk cool. Well, I'm not a mathematician, but with FLYR costing $300 for the year, if it brings one listing it will pay itself off for the next 3 decades, right?\n\nRight. The scary part is if you implement this, you'll see much more than one listing per year. It will go down as the single best return on investment you'll ever make.\n\nDo you want to see the included campaign?",
     lines: [
       {
         speaker: "rep",
-        text: "Totally fair question.\n\nRight now we're giving agents free trial access so they can actually see it before making a decision.\n\nBut before we get to price, can I ask: if one listing campaign helped you create one listing, on average what would that be worth in terms of commission?\n\nOk cool. Well, I'm not a mathematician, but with FLYR costing $300 for the year, if it brings one listing it will pay itself off for the next 3 decades, right?\n\nRight. The scary part is if you implement this, you'll see much more than one listing per year. It will go down as the single best return on investment you'll ever make.\n\nDo you want to see the free trial?",
+        text: "Totally fair question.\n\nRight now we're giving agents one included campaign so they can actually see it before making a decision.\n\nBut before we get to price, can I ask: if one listing campaign helped you create one listing, on average what would that be worth in terms of commission?\n\nOk cool. Well, I'm not a mathematician, but with FLYR costing $300 for the year, if it brings one listing it will pay itself off for the next 3 decades, right?\n\nRight. The scary part is if you implement this, you'll see much more than one listing per year. It will go down as the single best return on investment you'll ever make.\n\nDo you want to see the included campaign?",
       },
     ],
     coach:
-      "Use the free trial first, then anchor the annual cost against the value of one listing.",
+      "Use the included campaign first, then anchor the annual cost against the value of one listing.",
     options: [
       { label: "Close for text", nextId: "close" },
       { label: "Need broker/team", nextId: "authority-objection" },
@@ -1435,12 +1435,12 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
     id: "close",
     label: "Close",
     kind: "close",
-    title: "Text demo and trial access",
-    say: "What's the best number to text that demo and trial access to?",
+    title: "Text demo and included campaign",
+    say: "What's the best number to text that demo and included campaign to?",
     lines: [
       {
         speaker: "rep",
-        text: "What's the best number to text that demo and trial access to?",
+        text: "What's the best number to text that demo and included campaign to?",
       },
     ],
     coach:
@@ -1459,11 +1459,11 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
     label: "Email",
     kind: "close",
     title: "If they prefer email",
-    say: "No problem. What is the best email to send the demo and trial access to?",
+    say: "No problem. What is the best email to send the demo and included campaign to?",
     lines: [
       {
         speaker: "rep",
-        text: "No problem. What is the best email to send the demo and trial access to?",
+        text: "No problem. What is the best email to send the demo and included campaign to?",
       },
     ],
     coach:
@@ -1486,7 +1486,7 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
       "Set a real callback time. If they will allow it, send the demo before the callback.",
     options: [
       { label: "Callback set", nextId: "done" },
-      { label: "Send trial now", nextId: "send-trial" },
+      { label: "Send campaign now", nextId: "send-trial" },
     ],
   },
   {
@@ -1494,11 +1494,11 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
     label: "Send",
     kind: "done",
     title: "Send access",
-    say: "Text the demo and trial access, log the number, and set the follow-up.",
+    say: "Text the demo and included campaign, log the number, and set the follow-up.",
     lines: [
       {
         speaker: "rep",
-        text: "Text the demo and trial access, log the number, and set the follow-up.",
+        text: "Text the demo and included campaign, log the number, and set the follow-up.",
       },
     ],
     coach:
@@ -1534,12 +1534,12 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
       },
     ],
     coach:
-      "The desired outcome is demo and trial access sent by text.",
+      "The desired outcome is demo and included campaign sent by text.",
     options: [{ label: "Start again", nextId: "opener" }],
   },
 ];
 
-export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_BODY = `Individual Realtors - listing leverage trial
+export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_BODY = `Individual Realtors - listing leverage campaign
 
 OPENER:
 Hey [Name], this is Daniel calling from FLYR. How are you?
@@ -1547,7 +1547,7 @@ Hey [Name], this is Daniel calling from FLYR. How are you?
 VALUE STATEMENT:
 Reason I'm calling - I built a software for real estate agents that creates a 3D map of every house around your listing and automatically tracks the doors and conversations you have so you can leverage your current listing to find your next one.
 
-We're currently offering free trials to agents in [city], and by the end of this call I'd like to send you the software to try out for yourself.
+We're currently offering one included campaign to agents in [city], and by the end of this call I'd like to send you the software to try out for yourself.
 
 QUALIFIER:
 How are you currently leveraging your listing for new business?
@@ -1555,7 +1555,7 @@ How are you currently leveraging your listing for new business?
 Listen, then respond naturally to their answer.
 
 CLOSE:
-What's the best number to text that demo and trial access to?
+What's the best number to text that demo and included campaign to?
 
 PRODUCT INFO SNIPPET:
 Quick product example: on the web, you create a campaign by drawing the territory around your listing. FLYR then creates a 3D map of the homes in that area, with different colours for different states.
@@ -1571,7 +1571,7 @@ Time:
 Totally hear you - most agents don't have extra time. When you do have limited time to prospect, would you rather spend it randomly, or around a listing where the neighbours are already paying attention?
 
 Money:
-Right now we're giving agents free trial access so they can actually see it before making a decision. If one listing campaign helped you create one listing, what would that be worth in commission? FLYR costs $300 for the year, so one listing pays it off for years.
+Right now we're giving agents one included campaign so they can actually see it before making a decision. If one listing campaign helped you create one listing, what would that be worth in commission? FLYR costs $300 for the year, so one listing pays it off for years.
 
 Belief:
 When a home sells in a neighbourhood, the surrounding homeowners notice. FLYR is not magic; it helps agents execute a strategy they already know works with a 3D map, door tracking, notes, conversations, and follow-up.
@@ -1593,7 +1593,7 @@ REP RULES:
 2. Keep the value statement around 30 seconds.
 3. Ask the qualifier before explaining more.
 4. Mirror their answer naturally before closing.
-5. The goal is to text the demo and trial access.`;
+5. The goal is to text the demo and included campaign.`;
 
 export const REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW: StarterScriptFlowNode[] = [
   {
@@ -2341,16 +2341,16 @@ export const REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW: StarterScriptFlowNode[] = [
     id: "trial-close",
     label: "Close",
     kind: "close",
-    title: "Send trial access",
-    say: "Perfect. I will email that over now.\nI will also include access to a free trial so you can test it out with your team.\nIf you have any questions after watching it, feel free to reach out anytime.",
+    title: "Send included campaign access",
+    say: "Perfect. I will email that over now.\nI will also include access to one included campaign so you can test it out with your team.\nIf you have any questions after watching it, feel free to reach out anytime.",
     lines: [
       {
         speaker: "rep",
-        text: "Perfect. I will email that over now.\n\nI will also include access to a free trial so you can test it out with your team.\n\nIf you have any questions after watching it, feel free to reach out anytime.",
+        text: "Perfect. I will email that over now.\n\nI will also include access to one included campaign so you can test it out with your team.\n\nIf you have any questions after watching it, feel free to reach out anytime.",
       },
     ],
     coach:
-      "End cleanly, then email the video and trial link before moving to the next lead.",
+      "End cleanly, then email the video and included campaign link before moving to the next lead.",
     options: [{ label: "Done", nextId: "done" }],
   },
   {
@@ -2358,14 +2358,14 @@ export const REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW: StarterScriptFlowNode[] = [
     label: "Done",
     kind: "done",
     title: "Call complete",
-    say: "Log the outcome, email the 90-second video, include trial access, and set a follow-up.",
+    say: "Log the outcome, email the 90-second video, include campaign access, and set a follow-up.",
     lines: [
       {
         speaker: "rep",
-        text: "Log the outcome, email the 90-second video, include trial access, and set a follow-up.",
+        text: "Log the outcome, email the 90-second video, include campaign access, and set a follow-up.",
       },
     ],
-    coach: "The call outcome should be demo emailed with trial access.",
+    coach: "The call outcome should be demo emailed with included campaign access.",
     options: [{ label: "Start again", nextId: "opening" }],
   },
 ];

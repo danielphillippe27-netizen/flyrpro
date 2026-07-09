@@ -1,17 +1,12 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { LeaderboardService } from '@/lib/services/LeaderboardService';
 import type {
   LeaderboardEntry,
   LeaderboardSortBy,
 } from '@/types/database';
 import { LeaderboardView } from './LeaderboardView';
-import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
 import { useWorkspace } from '@/lib/workspace-context';
-
-type LeaderboardScope = 'global' | 'team';
 
 type TeamLeaderboardRow = {
   user_id: string;
@@ -29,11 +24,6 @@ type TeamLeaderboardDiagnostics = {
   source?: 'sessions' | 'user_stats_fallback';
   message?: string | null;
 };
-
-const SCOPES: { value: LeaderboardScope; label: string }[] = [
-  { value: 'global', label: 'Global' },
-  { value: 'team', label: 'Team' },
-];
 
 function getMetricValue(
   entry: Pick<LeaderboardEntry, 'doorknocks' | 'conversations' | 'leads' | 'distance'>,
@@ -129,7 +119,6 @@ function mapTeamRows(rows: TeamLeaderboardRow[]): LeaderboardEntry[] {
 export function LeaderboardContentView() {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [sortBy, setSortBy] = useState<LeaderboardSortBy>('doorknocks');
-  const [scope, setScope] = useState<LeaderboardScope>('global');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [teamNotice, setTeamNotice] = useState<string | null>(null);
@@ -142,13 +131,10 @@ export function LeaderboardContentView() {
 
   const currentRole = currentWorkspaceId ? membershipsByWorkspaceId[currentWorkspaceId] : null;
   const canViewTeamLeaderboard = Boolean(currentWorkspaceId && currentRole);
-  const visibleScopes = canViewTeamLeaderboard
-    ? SCOPES
-    : SCOPES.filter((option) => option.value === 'global');
-  const effectiveLoading = loading || (scope === 'team' && workspaceLoading);
+  const effectiveLoading = loading || workspaceLoading;
 
   const loadLeaderboard = useCallback(async () => {
-    if (scope === 'team' && workspaceLoading) {
+    if (workspaceLoading) {
       return;
     }
 
@@ -156,38 +142,32 @@ export function LeaderboardContentView() {
     setError(null);
     setTeamNotice(null);
     try {
-      if (scope === 'team') {
-        if (!currentWorkspaceId) {
-          setEntries([]);
-          setError('Select a workspace to view the team leaderboard.');
-          return;
-        }
-
-        if (!canViewTeamLeaderboard) {
-          setScope('global');
-          return;
-        }
-
-        const response = await fetch(
-          `/api/team/leaderboard?workspaceId=${encodeURIComponent(currentWorkspaceId)}`
-        );
-        const payload = (await response.json().catch(() => null)) as
-          | { rows?: TeamLeaderboardRow[]; diagnostics?: TeamLeaderboardDiagnostics; error?: string }
-          | null;
-
-        if (!response.ok) {
-          throw new Error(payload?.error ?? 'Could not load team leaderboard.');
-        }
-
-        const teamEntries = dedupeAndRankLeaderboardEntries(mapTeamRows(payload?.rows ?? []), sortBy);
-        setEntries(teamEntries);
-        setTeamNotice(payload?.diagnostics?.message ?? null);
+      if (!currentWorkspaceId) {
+        setEntries([]);
+        setError('Select a workspace to view the leaderboard.');
         return;
       }
 
-      const data = await LeaderboardService.fetchLeaderboard(sortBy, 100, 0, 'all_time');
-      setEntries(dedupeAndRankLeaderboardEntries(data, sortBy));
-      setTeamNotice(null);
+      if (!canViewTeamLeaderboard) {
+        setEntries([]);
+        setError('You do not have access to this workspace leaderboard yet.');
+        return;
+      }
+
+      const response = await fetch(
+        `/api/team/leaderboard?workspaceId=${encodeURIComponent(currentWorkspaceId)}`
+      );
+      const payload = (await response.json().catch(() => null)) as
+        | { rows?: TeamLeaderboardRow[]; diagnostics?: TeamLeaderboardDiagnostics; error?: string }
+        | null;
+
+      if (!response.ok) {
+        throw new Error(payload?.error ?? 'Could not load team leaderboard.');
+      }
+
+      const teamEntries = dedupeAndRankLeaderboardEntries(mapTeamRows(payload?.rows ?? []), sortBy);
+      setEntries(teamEntries);
+      setTeamNotice(payload?.diagnostics?.message ?? null);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes('JWT') || msg.includes('401') || msg.includes('auth') || msg.includes('Unauthorized')) {
@@ -204,18 +184,11 @@ export function LeaderboardContentView() {
     } finally {
       setLoading(false);
     }
-  }, [canViewTeamLeaderboard, currentWorkspaceId, scope, sortBy, workspaceLoading]);
+  }, [canViewTeamLeaderboard, currentWorkspaceId, sortBy, workspaceLoading]);
 
   useEffect(() => {
     void loadLeaderboard();
   }, [loadLeaderboard]);
-
-  useEffect(() => {
-    if (scope !== 'team') return;
-    if (workspaceLoading) return;
-    if (canViewTeamLeaderboard) return;
-    setScope('global');
-  }, [canViewTeamLeaderboard, scope, workspaceLoading]);
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-5">
@@ -225,28 +198,8 @@ export function LeaderboardContentView() {
             Leaderboard
           </h1>
           <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            {scope === 'global'
-              ? 'See how everyone stacks up across the platform.'
-              : `Track performance inside ${currentWorkspace?.name ?? 'your workspace'}.`}
+            Track performance inside {currentWorkspace?.name ?? 'your workspace'}.
           </p>
-        </div>
-
-        <div className="inline-flex w-full rounded-full border border-zinc-200 bg-white p-1 dark:border-white/10 dark:bg-white/[0.04] sm:w-auto">
-          {visibleScopes.map((option) => (
-            <Button
-              key={option.value}
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setScope(option.value)}
-              className={cn(
-                'flex-1 rounded-full px-4 text-sm text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-white/10 dark:hover:text-white sm:flex-none',
-                scope === option.value && 'bg-zinc-900 text-white hover:bg-zinc-900 hover:text-white dark:bg-white dark:text-black dark:hover:bg-white dark:hover:text-black'
-              )}
-            >
-              {option.label}
-            </Button>
-          ))}
         </div>
       </div>
 
@@ -258,7 +211,7 @@ export function LeaderboardContentView() {
         sortBy={sortBy}
         onSortChange={setSortBy}
       />
-      {scope === 'team' && teamNotice ? (
+      {teamNotice ? (
         <p className="text-xs text-zinc-400">{teamNotice}</p>
       ) : null}
     </div>

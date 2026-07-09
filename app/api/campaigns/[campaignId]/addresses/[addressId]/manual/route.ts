@@ -50,6 +50,19 @@ async function ensureCampaignAccess(
   return false;
 }
 
+async function invalidateCampaignMapBundle(
+  supabase: SupabaseClient,
+  campaignId: string
+): Promise<void> {
+  const { error } = await supabase
+    .from("campaign_map_bundles")
+    .delete()
+    .eq("campaign_id", campaignId);
+  if (error) {
+    console.warn("[manual-address] map bundle invalidation skipped:", error.message);
+  }
+}
+
 export async function DELETE(request: Request, context: RouteContext): Promise<Response> {
   try {
     const token = getAuthToken(request);
@@ -102,6 +115,8 @@ export async function DELETE(request: Request, context: RouteContext): Promise<R
         { status: 409 }
       );
     }
+
+    await invalidateCampaignMapBundle(supabase, campaignId);
 
     return NextResponse.json({ deleted: true, address_id: addressId });
   } catch (error) {

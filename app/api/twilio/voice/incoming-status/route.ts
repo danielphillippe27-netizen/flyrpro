@@ -98,6 +98,84 @@ async function findContactByPhone(
   return (data as Record<string, unknown> | null) ?? null;
 }
 
+async function resolveInboundLeadOwner(params: {
+  admin: ReturnType<typeof createAdminClient>;
+  workspaceId: string;
+  salespersonUserId: string | null;
+}): Promise<string | null> {
+  if (params.salespersonUserId) return params.salespersonUserId;
+
+  const { data: ownerMember } = await params.admin
+    .from('workspace_members')
+    .select('user_id')
+    .eq('workspace_id', params.workspaceId)
+    .in('role', ['owner', 'admin'])
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  return typeof ownerMember?.user_id === 'string' ? ownerMember.user_id : null;
+}
+
+async function findOrCreateSalesLeadByPhone(params: {
+  admin: ReturnType<typeof createAdminClient>;
+  workspaceId: string;
+  salespersonId: string | null;
+  salespersonUserId: string | null;
+  callerNumber: string | null;
+}): Promise<Record<string, unknown> | null> {
+  if (!params.callerNumber) return null;
+
+  const now = new Date().toISOString();
+  const { data: existing, error } = await params.admin
+    .from('sales_leads')
+    .select('*')
+    .eq('workspace_id', params.workspaceId)
+    .or(`phone_e164.eq.${params.callerNumber},phone.eq.${params.callerNumber}`)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error && error.code !== 'PGRST116') {
+    console.warn('[twilio/incoming-status] sales lead lookup failed', error);
+  }
+
+  if (existing) return existing as Record<string, unknown>;
+
+  const assignedUserId = await resolveInboundLeadOwner(params);
+  if (!assignedUserId) return null;
+
+  const { data: created, error: createError } = await params.admin
+    .from('sales_leads')
+    .insert({
+      workspace_id: params.workspaceId,
+      user_id: assignedUserId,
+      assigned_user_id: assignedUserId,
+      assigned_salesperson_id: params.salespersonId,
+      created_by_user_id: assignedUserId,
+      name: params.callerNumber,
+      phone: params.callerNumber,
+      phone_e164: params.callerNumber,
+      source: 'salesperson_inbound_call',
+      lead_state: 'callback',
+      next_follow_up_at: now,
+      last_touch_at: now,
+      last_touch_summary: 'Missed inbound call',
+      metadata: { inboundProvider: 'twilio' },
+      created_at: now,
+      updated_at: now,
+    })
+    .select('*')
+    .single();
+
+  if (createError) {
+    console.warn('[twilio/incoming-status] sales lead create failed', createError);
+    return null;
+  }
+
+  return created as Record<string, unknown>;
+}
+
 async function notifyWorkspaceMembers(context: {
   admin: ReturnType<typeof createAdminClient>;
   workspaceId: string;
@@ -105,6 +183,7 @@ async function notifyWorkspaceMembers(context: {
   inboxItemId: string;
   callerNumber: string | null;
   contactId: string | null;
+  salesLeadId: string | null;
 }) {
   let recipientUserIds = context.salespersonUserId ? [context.salespersonUserId] : [];
 
@@ -139,6 +218,7 @@ async function notifyWorkspaceMembers(context: {
       source: 'call',
       from: context.callerNumber,
       contactId: context.contactId,
+      salesLeadId: context.salesLeadId,
     },
     read_at: null,
   }));
@@ -171,11 +251,21 @@ export async function POST(request: NextRequest) {
   }
   const { workspaceId, salespersonId, salespersonUserId } = inboundRoute;
 
-  const contact = await findContactByPhone(admin, workspaceId, callerNumber);
+  const isSalespersonInbound = Boolean(salespersonId || salespersonUserId);
+  const salesLead = isSalespersonInbound
+    ? await findOrCreateSalesLeadByPhone({ admin, workspaceId, salespersonId, salespersonUserId, callerNumber })
+    : null;
+  const contact = isSalespersonInbound ? null : await findContactByPhone(admin, workspaceId, callerNumber);
+  const salesLeadId = typeof salesLead?.id === 'string' ? salesLead.id : null;
   const contactId = typeof contact?.id === 'string' ? contact.id : null;
   const now = new Date().toISOString();
-  const title = contact?.full_name
-    ? `Missed call from ${contact.full_name}`
+  const displayName = typeof salesLead?.name === 'string'
+    ? salesLead.name
+    : typeof contact?.full_name === 'string'
+      ? contact.full_name
+      : null;
+  const title = displayName
+    ? `Missed call from ${displayName}`
     : callerNumber
       ? `Missed call from ${callerNumber}`
       : 'Missed inbound call';
@@ -186,13 +276,14 @@ export async function POST(request: NextRequest) {
       workspace_id: workspaceId,
       salesperson_id: salespersonId,
       contact_id: contactId,
+      sales_lead_id: salesLeadId,
       source: 'call',
       source_table: 'twilio_incoming_calls',
       source_id: callSid,
       external_id: callSid,
       title,
       preview: callerNumber ? `Call back ${callerNumber}` : 'Call back this lead',
-      from_label: typeof contact?.full_name === 'string' ? contact.full_name : callerNumber,
+      from_label: displayName ?? callerNumber,
       from_phone: callerNumber,
       to_phone: calledNumber,
       status: 'open',
@@ -215,6 +306,7 @@ export async function POST(request: NextRequest) {
     inboxItemId: String(inboxItem.id),
     callerNumber,
     contactId,
+    salesLeadId,
   });
 
   return NextResponse.json({ ok: true });

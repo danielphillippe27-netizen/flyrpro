@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -13,7 +13,6 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
 import { TerritoryDrawHint } from '@/components/territory/TerritoryCreateFlow';
 import { getDrawnPolygon } from '@/lib/territory/create-polygon';
 import {
@@ -39,18 +38,20 @@ import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css';
 import { AddressAutocomplete } from '@/components/address/AddressAutocomplete';
 import { MapInfoButton } from '@/components/map/MapInfoButton';
 import { UserLocationLayer } from '@/components/map/UserLocationLayer';
+import { PaywallGuard } from '@/components/PaywallGuard';
 import type { AddressSuggestion } from '@/lib/services/MapboxAutocompleteService';
-import { CalendarDays, CircleAlert, Map, Pencil, Search, Satellite, Trash2, TriangleAlert, Users } from 'lucide-react';
+import { CalendarDays, CircleAlert, Map, Minus, Pencil, Plus, Search, Satellite, Trash2, TriangleAlert, Users } from 'lucide-react';
 import * as turf from '@turf/turf';
 import Lottie from 'lottie-react';
 
 const MAP_USABLE_PHASES = new Set(['map_ready', 'linker_ready', 'optimizing', 'optimized']);
 const MAP_READY_TIMEOUT_MS = 5 * 60 * 1000;
 const MAP_BUNDLE_TIMEOUT_MS = 45 * 1000;
+const SELF_SERVE_CAMPAIGN_DRAFT_KEY = 'flyr.selfServeCampaignDraft';
+const DEFAULT_SELF_SERVE_CAMPAIGN_NAME = 'FIRST CAMPAIGN';
 const CAMPAIGN_OVERLAY_SOURCE_ID = 'campaign-territory-overlays';
 const CAMPAIGN_OVERLAY_FILL_LAYER_ID = 'campaign-territory-overlays-fill';
 const CAMPAIGN_OVERLAY_LINE_LAYER_ID = 'campaign-territory-overlays-line';
-const CAMPAIGN_OVERLAY_STORAGE_PREFIX = 'flyr:create-map:show-campaign-overlays';
 const CAMPAIGN_OVERLAY_LAYER_IDS = [CAMPAIGN_OVERLAY_FILL_LAYER_ID, CAMPAIGN_OVERLAY_LINE_LAYER_ID] as const;
 
 type TeamMember = {
@@ -79,6 +80,16 @@ type TerritoryOverlaysPayload = {
   error?: string;
 };
 
+function isWorkspaceCampaignLimitResponse(payload: unknown): boolean {
+  if (!payload || typeof payload !== 'object') return false;
+  const candidate = payload as { code?: unknown; error?: unknown; message?: unknown };
+  return (
+    candidate.code === 'workspace_campaign_limit_reached' ||
+    (typeof candidate.error === 'string' && candidate.error.includes('included campaign')) ||
+    (typeof candidate.message === 'string' && candidate.message.includes('workspace_campaign_limit_reached'))
+  );
+}
+
 type CreateCampaignDialogTone = 'default' | 'warning' | 'destructive';
 
 type CreateCampaignDialogState = {
@@ -88,6 +99,16 @@ type CreateCampaignDialogState = {
   actionLabel: string;
 };
 
+type SelfServeCampaignDraft = {
+  name: string;
+  polygon: GeoJSON.Polygon;
+  bbox?: number[];
+  referralCode?: string | null;
+  createdAt: string;
+};
+
+type SelfServeLocationState = 'idle' | 'requesting' | 'centered' | 'prompt' | 'dismissed';
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -95,10 +116,6 @@ function escapeHtml(value: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
-}
-
-function campaignOverlayStorageKey(workspaceId: string): string {
-  return `${CAMPAIGN_OVERLAY_STORAGE_PREFIX}:${workspaceId}`;
 }
 
 function removeCampaignOverlayLayers(mapInstance: mapboxgl.Map) {
@@ -186,6 +203,63 @@ function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function calculateBboxForPolygon(polygon: GeoJSON.Polygon): number[] | undefined {
+  try {
+    const turfPolygon = turf.polygon(polygon.coordinates);
+    const calculatedBbox = turf.bbox(turfPolygon);
+    return [calculatedBbox[0], calculatedBbox[1], calculatedBbox[2], calculatedBbox[3]];
+  } catch (bboxError) {
+    console.error('Error calculating bbox from polygon:', bboxError);
+    return undefined;
+  }
+}
+
+function readSelfServeCampaignDraft(): SelfServeCampaignDraft | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(SELF_SERVE_CAMPAIGN_DRAFT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<SelfServeCampaignDraft>;
+    if (!parsed.name || parsed.polygon?.type !== 'Polygon' || !Array.isArray(parsed.polygon.coordinates)) return null;
+    return {
+      name: parsed.name,
+      polygon: parsed.polygon,
+      bbox: Array.isArray(parsed.bbox) ? parsed.bbox : undefined,
+      referralCode: typeof parsed.referralCode === 'string' ? parsed.referralCode : null,
+      createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : new Date().toISOString(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeSelfServeCampaignDraft(draft: SelfServeCampaignDraft) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(SELF_SERVE_CAMPAIGN_DRAFT_KEY, JSON.stringify(draft));
+}
+
+function clearSelfServeCampaignDraft() {
+  if (typeof window === 'undefined') return;
+  window.localStorage.removeItem(SELF_SERVE_CAMPAIGN_DRAFT_KEY);
+}
+
+function buildSelfServeOnboardingPath(searchParams: { get(name: string): string | null }): string {
+  const onboardingParams = new URLSearchParams({
+    source: 'self-serve-demo',
+    campaign: 'self-serve-campaign',
+    resumeCampaign: '1',
+  });
+  const referralCode = searchParams.get('referralCode') ?? searchParams.get('ref');
+  if (referralCode) onboardingParams.set('referralCode', referralCode);
+  return `/onboarding?${onboardingParams.toString()}`;
+}
+
+function isCampaignHomeLimitMessage(message: string): boolean {
+  return /1,000 homes|2,000 homes|too big|too large|smaller block|campaign_home_limit|campaign_too_large/i.test(
+    message
+  );
+}
+
 async function waitForCampaignMapReady(campaignId: string, onProgress?: (message: string) => void) {
   const startedAt = Date.now();
 
@@ -266,15 +340,20 @@ async function prewarmCampaignMapBundleForOpen(campaignId: string) {
 
 export default function CreateCampaignPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { theme } = useTheme();
   const { currentWorkspace, currentWorkspaceId, membershipsByWorkspaceId } = useWorkspace();
-  const copy = getIndustryCopy(currentWorkspace?.industry);
-  const resolvedMapStyle = useMemo(() => resolveMapStyle('standard', theme, 'v11'), [theme]);
+  const isSelfServeDemo = searchParams.get('source') === 'self-serve-demo';
+  const copy = getIndustryCopy(isSelfServeDemo ? undefined : currentWorkspace?.industry);
+  const shouldResumeSelfServeCampaign = isSelfServeDemo && searchParams.get('resumeCampaign') === '1';
+  const mapTheme = isSelfServeDemo ? 'light' : theme;
+  const resolvedMapStyle = useMemo(() => resolveMapStyle('standard', mapTheme, 'v11'), [mapTheme]);
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
   const [provisioning, setProvisioning] = useState(false);
   const [provisionProgress, setProvisionProgress] = useState<string>('');
   const [generatingAddresses, setGeneratingAddresses] = useState(false);
+  const [showPaywall, setShowPaywall] = useState(false);
   const [loadingAnimationData, setLoadingAnimationData] = useState<object | null>(null);
   const [addressCount, setAddressCount] = useState<number | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
@@ -286,12 +365,11 @@ export default function CreateCampaignPage() {
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
   const [assignmentDeadline, setAssignmentDeadline] = useState('');
   const [loadingTeamMembers, setLoadingTeamMembers] = useState(false);
-  const [showCampaignOverlays, setShowCampaignOverlays] = useState(false);
-  const [overlayPreferenceLoadedFor, setOverlayPreferenceLoadedFor] = useState<string | null>(null);
+  const showCampaignOverlays = false;
   const [campaignOverlays, setCampaignOverlays] = useState<TerritoryOverlayCampaign[]>([]);
-  const [campaignOverlaysLoading, setCampaignOverlaysLoading] = useState(false);
-  const [campaignOverlaysError, setCampaignOverlaysError] = useState<string | null>(null);
   const [feedbackDialog, setFeedbackDialog] = useState<CreateCampaignDialogState | null>(null);
+  const [selfServeLocationState, setSelfServeLocationState] = useState<SelfServeLocationState>('idle');
+  const [selfServeLocationError, setSelfServeLocationError] = useState<string | null>(null);
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const drawRef = useRef<MapboxDraw | null>(null);
@@ -300,7 +378,13 @@ export default function CreateCampaignPage() {
   const appliedBaseStyleKeyRef = useRef<string | null>(null);
   const hasCenteredOnUserLocationRef = useRef(false);
   const feedbackDialogResolveRef = useRef<(() => void) | null>(null);
-  const isDark = theme === 'dark';
+  const pendingSelfServeDraftRef = useRef<SelfServeCampaignDraft | null>(null);
+  const freeCampaignLimitCheckedRef = useRef(false);
+  const selfServeDraftRestoredRef = useRef(false);
+  const selfServeDraftSubmitStartedRef = useRef(false);
+  const selfServeTerritoryHandoffStartedRef = useRef(false);
+  const selfServeLocationRequestStartedRef = useRef(false);
+  const isDark = mapTheme === 'dark';
   const lottieSrc = useMemo(() => (isDark ? '/loading/white.json' : '/loading/black.json'), [isDark]);
   const { phase, setPhase, startCreating } = useTerritoryCreatePhase({
     map,
@@ -308,11 +392,42 @@ export default function CreateCampaignPage() {
   });
   const isBusy = loading || provisioning || generatingAddresses;
   const currentWorkspaceRole = currentWorkspaceId ? membershipsByWorkspaceId[currentWorkspaceId] : null;
-  const canAssignOnCreate = currentWorkspaceRole === 'owner' || currentWorkspaceRole === 'admin';
+  const canAssignOnCreate = !isSelfServeDemo && (currentWorkspaceRole === 'owner' || currentWorkspaceRole === 'admin');
   const selectedTeamMembers = useMemo(
     () => teamMembers.filter((member) => selectedMemberIds.includes(member.user_id)),
     [selectedMemberIds, teamMembers],
   );
+  const createButtonLabel = isSelfServeDemo ? 'Create Prospecting Map' : copy.actions.createCampaign;
+  const campaignNameLabel = isSelfServeDemo ? 'Prospecting map name' : copy.campaigns.nameLabel;
+  const campaignNamePlaceholder = isSelfServeDemo ? 'My neighborhood prospecting map' : copy.campaigns.namePlaceholder;
+
+  useEffect(() => {
+    if (isSelfServeDemo || !currentWorkspaceId || freeCampaignLimitCheckedRef.current) return;
+    freeCampaignLimitCheckedRef.current = true;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const [accessResponse, campaignsResponse] = await Promise.all([
+          fetch('/api/access/state', { credentials: 'include' }),
+          fetch(`/api/campaigns?workspaceId=${encodeURIComponent(currentWorkspaceId)}`, { credentials: 'include' }),
+        ]);
+        if (cancelled || !accessResponse.ok || !campaignsResponse.ok) return;
+        const access = (await accessResponse.json().catch(() => null)) as { plan?: string | null } | null;
+        const campaigns = (await campaignsResponse.json().catch(() => [])) as unknown;
+        if (access?.plan === 'free' && Array.isArray(campaigns) && campaigns.length > 0) {
+          setShowPaywall(true);
+        }
+      } catch {
+        // Creation still performs the authoritative server-side limit check.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentWorkspaceId, isSelfServeDemo]);
+
   const campaignOverlayFeatureCollection = useMemo<GeoJSON.FeatureCollection<GeoJSON.Polygon | GeoJSON.MultiPolygon>>(
     () => ({
       type: 'FeatureCollection',
@@ -345,57 +460,61 @@ export default function CreateCampaignPage() {
   }, []);
 
   useEffect(() => {
-    if (!currentWorkspaceId) {
-      setShowCampaignOverlays(false);
-      setOverlayPreferenceLoadedFor(null);
+    if (!shouldResumeSelfServeCampaign || !userId || !mapLoaded || !drawRef.current || selfServeDraftRestoredRef.current) {
       return;
     }
 
-    const stored = window.localStorage.getItem(campaignOverlayStorageKey(currentWorkspaceId));
-    setShowCampaignOverlays(stored === 'true');
-    setOverlayPreferenceLoadedFor(currentWorkspaceId);
-  }, [currentWorkspaceId]);
+    const draft = readSelfServeCampaignDraft();
+    if (!draft) return;
 
-  useEffect(() => {
-    if (!currentWorkspaceId || overlayPreferenceLoadedFor !== currentWorkspaceId) return;
-    window.localStorage.setItem(campaignOverlayStorageKey(currentWorkspaceId), String(showCampaignOverlays));
-  }, [currentWorkspaceId, overlayPreferenceLoadedFor, showCampaignOverlays]);
+    const featureCollection: GeoJSON.FeatureCollection<GeoJSON.Polygon> = {
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          properties: {},
+          geometry: draft.polygon,
+        },
+      ],
+    };
+
+    pendingSelfServeDraftRef.current = draft;
+    selfServeDraftRestoredRef.current = true;
+    setName(draft.name || DEFAULT_SELF_SERVE_CAMPAIGN_NAME);
+    setPhase('drawing');
+    savedFeaturesRef.current = featureCollection;
+    drawRef.current.set(featureCollection);
+    drawRef.current.changeMode('simple_select');
+  }, [mapLoaded, setPhase, shouldResumeSelfServeCampaign, userId]);
 
   useEffect(() => {
     if (!showCampaignOverlays || !currentWorkspaceId) {
       setCampaignOverlays([]);
-      setCampaignOverlaysLoading(false);
-      setCampaignOverlaysError(null);
       return;
     }
 
-    const controller = new AbortController();
-    setCampaignOverlaysLoading(true);
-    setCampaignOverlaysError(null);
+    let cancelled = false;
 
     fetch(`/api/campaigns/territory-overlays?workspaceId=${encodeURIComponent(currentWorkspaceId)}`, {
       credentials: 'include',
       cache: 'no-store',
-      signal: controller.signal,
     })
       .then(async (response) => {
         const payload = (await response.json().catch(() => ({}))) as TerritoryOverlaysPayload;
+        if (cancelled) return;
         if (!response.ok) {
           throw new Error(payload.error || 'Failed to load campaign overlays.');
         }
         setCampaignOverlays(Array.isArray(payload.campaigns) ? payload.campaigns : []);
       })
       .catch((error) => {
-        if (controller.signal.aborted) return;
+        if (cancelled) return;
         setCampaignOverlays([]);
-        setCampaignOverlaysError(error instanceof Error ? error.message : 'Failed to load campaign overlays.');
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setCampaignOverlaysLoading(false);
+        console.warn('[CreateCampaignPage] Failed to load campaign territory overlays:', error);
       });
 
     return () => {
-      controller.abort();
+      cancelled = true;
     };
   }, [currentWorkspaceId, showCampaignOverlays]);
 
@@ -480,15 +599,17 @@ export default function CreateCampaignPage() {
     };
   }, [canAssignOnCreate, currentWorkspaceId]);
 
-  const currentStepText = generatingAddresses
-    ? 'Step 3/5: Fetching addresses'
-    : provisionProgress.includes('Scanning')
-      ? 'Step 4/5: Fetching buildings'
-      : provisionProgress.includes('Matching') || provisionProgress.includes('Linking')
-        ? 'Step 4/5: Linking addresses to buildings'
-        : provisionProgress.includes('Finalizing')
-          ? 'Step 5/5: Preparing optimized route'
-          : 'Step 5/5: Finishing setup';
+  const currentStepText = isSelfServeDemo
+    ? provisionProgress || 'We are building your custom prospecting map...'
+    : generatingAddresses
+      ? 'Step 3/5: Fetching addresses'
+      : provisionProgress.includes('Scanning')
+        ? 'Step 4/5: Fetching buildings'
+        : provisionProgress.includes('Matching') || provisionProgress.includes('Linking')
+          ? 'Step 4/5: Linking addresses to buildings'
+          : provisionProgress.includes('Finalizing')
+            ? 'Step 5/5: Preparing optimized route'
+            : 'Step 5/5: Finishing setup';
 
   /** Add residential-only 2D building footprints from Mapbox vector tiles.
    *  Hides built-in style buildings and renders residential buildings with theme-aware slate at 80% opacity.
@@ -860,6 +981,33 @@ export default function CreateCampaignPage() {
   }, [mapLoaded, phase]);
 
   useEffect(() => {
+    if (!isSelfServeDemo || phase !== 'naming') return;
+    setPhase('drawing');
+    drawRef.current?.changeMode('simple_select');
+  }, [isSelfServeDemo, phase, setPhase]);
+
+  useEffect(() => {
+    if (!isSelfServeDemo || !mapLoaded || !map.current) return;
+    const mapInstance = map.current;
+
+    const handleSelfServeDrawCreate = () => {
+      if (selfServeTerritoryHandoffStartedRef.current) return;
+      const polygon = getDrawnPolygon(drawRef.current);
+      if (!polygon) return;
+      selfServeTerritoryHandoffStartedRef.current = true;
+      drawRef.current?.changeMode('simple_select');
+      void createSelfServeCampaignInBackground(polygon, calculateBboxForPolygon(polygon), {
+        handoffStarted: true,
+      });
+    };
+
+    mapInstance.on('draw.create', handleSelfServeDrawCreate);
+    return () => {
+      mapInstance.off('draw.create', handleSelfServeDrawCreate);
+    };
+  }, [isSelfServeDemo, mapLoaded]);
+
+  useEffect(() => {
     if (!mapLoaded || !map.current) return;
 
     if (!showCampaignOverlays || campaignOverlayFeatureCollection.features.length === 0) {
@@ -961,6 +1109,93 @@ export default function CreateCampaignPage() {
     };
   }, [mapLoaded, phase]);
 
+  const requestSelfServeUserLocation = async (source: 'auto' | 'manual' = 'manual') => {
+    if (!isSelfServeDemo || !map.current || !mapLoaded || typeof navigator === 'undefined') return;
+
+    if (!navigator.geolocation) {
+      if (source === 'manual') {
+        setSelfServeLocationError('This browser did not expose location access. Search an address to start.');
+        setSelfServeLocationState('prompt');
+      } else {
+        setSelfServeLocationState('prompt');
+      }
+      return;
+    }
+
+    if (source === 'manual' && navigator.permissions?.query) {
+      try {
+        const permission = await navigator.permissions.query({ name: 'geolocation' });
+        if (permission.state === 'denied') {
+          setSelfServeLocationError(
+            'Location is blocked for this site. Allow location in your browser settings, then tap Enable location again.'
+          );
+          setSelfServeLocationState('prompt');
+          return;
+        }
+      } catch {
+        // Some browsers support geolocation but not querying its permission state.
+      }
+    }
+
+    setSelfServeLocationError(null);
+    setSelfServeLocationState('requesting');
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { longitude, latitude } = position.coords;
+        hasCenteredOnUserLocationRef.current = true;
+        setSelfServeLocationError(null);
+        setSelfServeLocationState('centered');
+        map.current?.flyTo({
+          center: [longitude, latitude],
+          zoom: 17,
+          pitch: 0,
+          bearing: 0,
+          duration: source === 'auto' ? 1400 : 900,
+        });
+      },
+      (error) => {
+        console.warn('[CreateCampaignPage] Self-serve location unavailable:', error);
+        if (source === 'manual') {
+          const message =
+            error.code === error.PERMISSION_DENIED
+              ? 'Location is blocked for this site. Allow location in your browser settings, then tap Enable location again.'
+              : error.code === error.TIMEOUT
+                ? 'Location lookup timed out. Search an address to start.'
+                : 'Could not get your location here. Search an address to start.';
+          setSelfServeLocationError(message);
+          setSelfServeLocationState('prompt');
+          return;
+        }
+        setSelfServeLocationState('prompt');
+      },
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 },
+    );
+  };
+
+  const focusSelfServeSearch = () => {
+    setSelfServeLocationState('dismissed');
+    window.requestAnimationFrame(() => {
+      document.getElementById('campaign-map-search')?.focus();
+    });
+  };
+
+  useEffect(() => {
+    if (
+      !isSelfServeDemo ||
+      shouldResumeSelfServeCampaign ||
+      !mapLoaded ||
+      !map.current ||
+      selfServeLocationRequestStartedRef.current
+    ) {
+      return;
+    }
+
+    selfServeLocationRequestStartedRef.current = true;
+    setSelfServeLocationState('prompt');
+    // This intentionally runs once when the self-serve map first becomes usable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSelfServeDemo, mapLoaded, shouldResumeSelfServeCampaign]);
+
   // Keep map fully sized when surrounding layout (e.g. campaign sidebar) collapses/expands.
   useEffect(() => {
     if (!mapLoaded || !map.current || !mapContainer.current) return;
@@ -1001,9 +1236,18 @@ export default function CreateCampaignPage() {
     setIsSatellite(!isSatellite);
   };
 
+  const handleZoomIn = () => {
+    map.current?.zoomIn({ duration: 220 });
+  };
+
+  const handleZoomOut = () => {
+    map.current?.zoomOut({ duration: 220 });
+  };
+
   const handleStartCreating = () => {
     drawRef.current?.deleteAll();
     savedFeaturesRef.current = null;
+    selfServeTerritoryHandoffStartedRef.current = false;
     startCreating();
     drawRef.current?.changeMode('draw_polygon');
   };
@@ -1024,8 +1268,27 @@ export default function CreateCampaignPage() {
         });
         return;
       }
+      if (isSelfServeDemo) {
+        drawRef.current?.changeMode('simple_select');
+        void createSelfServeCampaignInBackground(polygon, calculateBboxForPolygon(polygon));
+        return;
+      }
       setPhase('naming');
       drawRef.current?.changeMode('simple_select');
+      return;
+    }
+
+    if (isSelfServeDemo) {
+      const polygon = getDrawnPolygon(drawRef.current);
+      if (!polygon) {
+        void showFeedbackDialog({
+          title: 'Finish the territory boundary',
+          description: 'Draw a territory boundary first. Double-click to finish your shape.',
+          tone: 'warning',
+        });
+        return;
+      }
+      void createSelfServeCampaignInBackground(polygon, calculateBboxForPolygon(polygon));
       return;
     }
 
@@ -1033,6 +1296,7 @@ export default function CreateCampaignPage() {
   };
 
   const clearDrawing = () => {
+    selfServeTerritoryHandoffStartedRef.current = false;
     const nextPhase = clearTerritoryDrawing(drawRef.current, phase);
     setPhase(nextPhase);
   };
@@ -1061,9 +1325,116 @@ export default function CreateCampaignPage() {
     });
   };
 
+  const startSelfServeCampaignProvision = async (campaignId: string) => {
+    const response = await fetch('/api/campaigns/provision', {
+      method: 'POST',
+      credentials: 'include',
+      keepalive: true,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ campaign_id: campaignId }),
+    });
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(
+        typeof payload?.error === 'string' && payload.error.trim()
+          ? payload.error
+          : `Provision kickoff failed (${response.status})`
+      );
+    }
+
+    try {
+      window.sessionStorage.setItem(`flyr-self-serve-provision-started:${campaignId}`, '1');
+    } catch {
+      // Session storage is best-effort; the detail page can still poll campaign status.
+    }
+  };
+
+  const openSelfServeCampaignWhenReady = async (campaignId: string) => {
+    setProvisioning(true);
+    setProvisionProgress('Starting your prospecting map...');
+    clearSelfServeCampaignDraft();
+    window.dispatchEvent(new CustomEvent('flyr-campaigns-refresh'));
+    await startSelfServeCampaignProvision(campaignId);
+    setProvisionProgress('Opening your prospecting map...');
+    router.push(`/campaigns/${campaignId}?source=self-serve-demo`);
+  };
+
+  const createSelfServeCampaignInBackground = async (
+    polygon: GeoJSON.Polygon,
+    bbox?: number[],
+    options?: { handoffStarted?: boolean },
+  ) => {
+    if (!options?.handoffStarted) {
+      if (selfServeTerritoryHandoffStartedRef.current) return;
+      selfServeTerritoryHandoffStartedRef.current = true;
+    }
+    const campaignName = name.trim() || DEFAULT_SELF_SERVE_CAMPAIGN_NAME;
+
+    if (!shouldResumeSelfServeCampaign || !userId) {
+      writeSelfServeCampaignDraft({
+        name: campaignName,
+        polygon,
+        bbox,
+        referralCode: searchParams.get('referralCode') ?? searchParams.get('ref') ?? null,
+        createdAt: new Date().toISOString(),
+      });
+      router.push(buildSelfServeOnboardingPath(searchParams));
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const createRes = await fetch('/api/campaigns', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: campaignName,
+          type: 'prospecting',
+          address_source: 'map',
+          workspace_id: currentWorkspaceId ?? undefined,
+          description: 'Self-serve prospecting map created from the demo flow.',
+          tags: 'self-serve-demo,prospecting-map',
+        }),
+      });
+      if (!createRes.ok) {
+        const err = await createRes.json().catch(() => ({}));
+        throw new Error(err.error || `Failed to create prospecting map (${createRes.status})`);
+      }
+
+      const campaign = await createRes.json();
+      const boundaryResponse = await fetch(`/api/campaigns/${campaign.id}`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          territory_boundary: polygon,
+          bbox,
+        }),
+      });
+      if (!boundaryResponse.ok) {
+        const error = await boundaryResponse.json().catch(() => ({}));
+        throw new Error(error.error || `Failed to save territory boundary (${boundaryResponse.status})`);
+      }
+
+      await openSelfServeCampaignWhenReady(campaign.id);
+    } catch (error: unknown) {
+      selfServeTerritoryHandoffStartedRef.current = false;
+      console.error('Error creating self-serve prospecting map:', error);
+      const errorMessage = error instanceof Error && error.message ? error.message : 'Unknown error occurred';
+      await showFeedbackDialog({
+        title: 'Failed to create prospecting map',
+        description: errorMessage,
+        tone: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSubmit = async (e?: React.FormEvent | React.MouseEvent) => {
     e?.preventDefault();
-    if (!userId) return;
     if (!name.trim()) {
       await showFeedbackDialog({
         title: `${copy.nouns.campaign.charAt(0).toUpperCase()}${copy.nouns.campaign.slice(1)} name required`,
@@ -1092,15 +1463,19 @@ export default function CreateCampaignPage() {
       return;
     }
 
-    let bbox: number[] | undefined;
+    const bbox = calculateBboxForPolygon(polygon);
 
-    // Calculate bbox from polygon using turf
-    try {
-      const turfPolygon = turf.polygon(polygon.coordinates);
-      const calculatedBbox = turf.bbox(turfPolygon);
-      bbox = [calculatedBbox[0], calculatedBbox[1], calculatedBbox[2], calculatedBbox[3]];
-    } catch (bboxError) {
-      console.error('Error calculating bbox from polygon:', bboxError);
+    if (!userId) {
+      if (!isSelfServeDemo) return;
+      writeSelfServeCampaignDraft({
+        name: name.trim() || DEFAULT_SELF_SERVE_CAMPAIGN_NAME,
+        polygon,
+        bbox,
+        referralCode: searchParams.get('referralCode') ?? searchParams.get('ref') ?? null,
+        createdAt: new Date().toISOString(),
+      });
+      router.push(buildSelfServeOnboardingPath(searchParams));
+      return;
     }
 
     setLoading(true);
@@ -1111,14 +1486,20 @@ export default function CreateCampaignPage() {
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name,
-          type: 'flyer',
+          name: isSelfServeDemo ? name.trim() || DEFAULT_SELF_SERVE_CAMPAIGN_NAME : name,
+          type: isSelfServeDemo ? 'prospecting' : 'flyer',
           address_source: 'map',
           workspace_id: currentWorkspaceId ?? undefined,
+          description: isSelfServeDemo ? 'Self-serve prospecting map created from the demo flow.' : undefined,
+          tags: isSelfServeDemo ? 'self-serve-demo,prospecting-map' : undefined,
         }),
       });
       if (!createRes.ok) {
         const err = await createRes.json().catch(() => ({}));
+        if (isWorkspaceCampaignLimitResponse(err)) {
+          setShowPaywall(true);
+          return;
+        }
         throw new Error(err.error || `Failed to create campaign (${createRes.status})`);
       }
       const campaign = await createRes.json();
@@ -1126,7 +1507,9 @@ export default function CreateCampaignPage() {
 
       if (polygon) {
         setProvisioning(true);
-        setProvisionProgress('Saving territory boundary...');
+        setProvisionProgress(
+          isSelfServeDemo ? 'We are building your custom prospecting map...' : 'Saving territory boundary...'
+        );
         try {
           let campaignReadyForAssignment = false;
           const boundaryResponse = await fetch(`/api/campaigns/${campaign.id}`, {
@@ -1143,9 +1526,19 @@ export default function CreateCampaignPage() {
             throw new Error(error.error || `Failed to save territory boundary (${boundaryResponse.status})`);
           }
 
-          setProvisionProgress('Scanning 3D Shapes...');
+          if (isSelfServeDemo) {
+            await openSelfServeCampaignWhenReady(campaign.id);
+            return;
+          }
+
+          setProvisionProgress(isSelfServeDemo ? 'Finding homes in your neighborhood...' : 'Scanning 3D Shapes...');
           const progressInterval = setInterval(() => {
             setProvisionProgress((prev) => {
+              if (isSelfServeDemo) {
+                if (prev === 'Finding homes in your neighborhood...') return 'Matching addresses to 3D homes...';
+                if (prev === 'Matching addresses to 3D homes...') return 'Finalizing your prospecting map...';
+                return prev;
+              }
               if (prev === 'Scanning 3D Shapes...') return 'Matching Addresses...';
               if (prev === 'Matching Addresses...') return 'Finalizing Mission Territory...';
               return prev;
@@ -1163,7 +1556,7 @@ export default function CreateCampaignPage() {
             });
 
             clearInterval(progressInterval);
-            setProvisionProgress('Finalizing Mission Territory...');
+            setProvisionProgress(isSelfServeDemo ? 'Finalizing your prospecting map...' : 'Finalizing Mission Territory...');
 
             if (!provisionResponse.ok) {
               const error = await provisionResponse.json().catch(() => ({}));
@@ -1205,9 +1598,9 @@ export default function CreateCampaignPage() {
               if (addresses_saved > 0 && links_created > 0 && links_created < addresses_saved) {
                 setProvisionProgress(`Linking: ${links_created} / ${addresses_saved} addresses...`);
               }
-              setProvisionProgress('Waiting for map geometry...');
+              setProvisionProgress(isSelfServeDemo ? 'We are building your custom prospecting map...' : 'Waiting for map geometry...');
               await waitForCampaignMapReady(campaign.id, setProvisionProgress);
-              setProvisionProgress('Preparing map bundle...');
+              setProvisionProgress('Preparing your 3D homes...');
               const bundle = await prewarmCampaignMapBundleForOpen(campaign.id);
               const bundleAddressCount = mapBundleAddressCount(bundle);
               if (bundleAddressCount > 0) {
@@ -1255,10 +1648,18 @@ export default function CreateCampaignPage() {
           }
         } catch (provisionError) {
           console.error('Error provisioning campaign:', provisionError);
+          const provisionMessage =
+            provisionError instanceof Error && provisionError.message.trim()
+              ? provisionError.message
+              : 'Campaign created but provisioning failed. Please try again.';
+          const isHomeLimitError = isCampaignHomeLimitMessage(provisionMessage);
           await showFeedbackDialog({
-            title: 'Provisioning failed',
-            description: 'Campaign created but provisioning failed. You can provision later.',
-            tone: 'destructive',
+            title: isHomeLimitError ? 'Territory is too large' : 'Provisioning failed',
+            description: isHomeLimitError
+              ? provisionMessage
+              : `Campaign created but provisioning failed: ${provisionMessage}`,
+            tone: isHomeLimitError ? 'warning' : 'destructive',
+            actionLabel: isHomeLimitError ? 'Back to drawing' : 'OK',
           });
         } finally {
           setProvisioning(false);
@@ -1266,7 +1667,10 @@ export default function CreateCampaignPage() {
         }
       }
 
-      router.push(`/campaigns/${campaign.id}`);
+      if (isSelfServeDemo) {
+        clearSelfServeCampaignDraft();
+      }
+      router.push(`/campaigns/${campaign.id}${isSelfServeDemo ? '?source=self-serve-demo' : ''}`);
       window.dispatchEvent(new CustomEvent('flyr-campaigns-refresh'));
     } catch (error: unknown) {
       console.error('Error creating campaign:', error);
@@ -1293,8 +1697,44 @@ export default function CreateCampaignPage() {
     }
   };
 
+  useEffect(() => {
+    const draft = pendingSelfServeDraftRef.current;
+    if (
+      !draft ||
+      selfServeDraftSubmitStartedRef.current ||
+      !shouldResumeSelfServeCampaign ||
+      !userId ||
+      !mapLoaded ||
+      !drawRef.current ||
+      phase !== 'drawing'
+    ) {
+      return;
+    }
+
+    selfServeDraftSubmitStartedRef.current = true;
+    const timeoutId = window.setTimeout(() => {
+      void createSelfServeCampaignInBackground(draft.polygon, draft.bbox);
+    }, 250);
+    return () => window.clearTimeout(timeoutId);
+  }, [mapLoaded, phase, shouldResumeSelfServeCampaign, userId]);
+
+  const selfServeSurfaceClass = isSelfServeDemo
+    ? 'border-slate-200 bg-white/95 text-slate-950 shadow-[0_18px_60px_rgba(0,0,0,0.22)] backdrop-blur-md'
+    : 'border-white/10 bg-background/92 shadow-2xl backdrop-blur-md';
+  const selfServeSoftSurfaceClass = isSelfServeDemo
+    ? 'border-slate-200 bg-white/90 text-slate-700'
+    : 'border-border bg-card/80 text-muted-foreground';
+  const selfServeInputClass = isSelfServeDemo
+    ? 'h-11 border-slate-200 bg-white text-slate-950 placeholder:text-slate-400 dark:bg-white dark:text-slate-950'
+    : 'h-11 bg-background';
+  const selfServeControlButtonClass = isSelfServeDemo
+    ? 'border-slate-200 bg-white text-slate-800 hover:bg-slate-50'
+    : 'border-border bg-card text-foreground hover:bg-muted/50';
+  const selfServeDividerClass = isSelfServeDemo ? 'border-slate-200' : 'border-white/10';
+  const isSelfServeLocationBlocked = selfServeLocationError?.startsWith('Location is blocked') ?? false;
+
   return (
-    <div className="h-full min-h-0 flex flex-col bg-gray-50 dark:bg-background overflow-hidden">
+    <div className={`h-full min-h-0 flex flex-col overflow-hidden ${isSelfServeDemo ? 'bg-white' : 'bg-gray-50 dark:bg-background'}`}>
       <div className="relative min-h-0 flex-1">
         <div ref={mapContainer} className="absolute inset-0 h-full w-full" />
         <MapInfoButton show={mapLoaded} />
@@ -1302,7 +1742,7 @@ export default function CreateCampaignPage() {
           <UserLocationLayer
             map={map.current}
             mapLoaded={mapLoaded}
-            showUserLocation={true}
+            showUserLocation={!isSelfServeDemo}
             onLocationFound={(lng, lat) => {
               if (!hasCenteredOnUserLocationRef.current) {
                 hasCenteredOnUserLocationRef.current = true;
@@ -1317,35 +1757,99 @@ export default function CreateCampaignPage() {
           />
         )}
 
+        {isSelfServeDemo && !shouldResumeSelfServeCampaign && selfServeLocationState === 'requesting' ? (
+          <div className="absolute left-1/2 top-5 z-20 -translate-x-1/2 rounded-full border border-slate-200 bg-white/95 px-4 py-2 text-sm font-semibold text-slate-900 shadow-xl backdrop-blur-md">
+            Finding your neighborhood...
+          </div>
+        ) : null}
+
+        {isSelfServeDemo && !shouldResumeSelfServeCampaign && selfServeLocationState === 'prompt' ? (
+          <div className="absolute left-5 top-24 z-20 w-[min(20rem,calc(100vw-2.5rem))] rounded-2xl border border-slate-200 bg-white/95 p-4 text-slate-950 shadow-2xl backdrop-blur-md">
+            <div className="space-y-3">
+              <div>
+                <p className="text-sm font-semibold text-slate-950">Start with your neighborhood</p>
+                <p className="mt-1 text-xs font-medium text-slate-600">
+                  {selfServeLocationError || 'Use your location so FLYR opens the map near you.'}
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isSelfServeLocationBlocked) {
+                      focusSelfServeSearch();
+                      return;
+                    }
+                    void requestSelfServeUserLocation('manual');
+                  }}
+                  className="flex-1 rounded-xl bg-red-500 px-3 py-2 text-sm font-semibold text-white transition hover:bg-red-600"
+                >
+                  {isSelfServeLocationBlocked ? 'Search address' : 'Enable location'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isSelfServeLocationBlocked) {
+                      void requestSelfServeUserLocation('manual');
+                      return;
+                    }
+                    focusSelfServeSearch();
+                  }}
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 transition hover:bg-slate-50"
+                >
+                  {isSelfServeLocationBlocked ? 'Try location again' : 'Search instead'}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         {mapLoaded ? (
-          <div className="absolute right-5 top-5 z-20 w-[min(22rem,calc(100vw-2.5rem))] overflow-hidden rounded-2xl border border-white/10 bg-background/92 shadow-2xl backdrop-blur-md">
+          <div className="absolute bottom-10 right-5 z-20 flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl ring-1 ring-black/5">
+            <button
+              type="button"
+              onClick={handleZoomIn}
+              className="flex h-14 w-14 items-center justify-center text-slate-950 transition hover:bg-slate-50 active:bg-slate-100"
+              aria-label="Zoom in"
+            >
+              <Plus className="h-7 w-7" strokeWidth={3} />
+            </button>
+            <div className="h-px bg-slate-200" />
+            <button
+              type="button"
+              onClick={handleZoomOut}
+              className="flex h-14 w-14 items-center justify-center text-slate-950 transition hover:bg-slate-50 active:bg-slate-100"
+              aria-label="Zoom out"
+            >
+              <Minus className="h-7 w-7" strokeWidth={3} />
+            </button>
+          </div>
+        ) : null}
+
+        <div className={`absolute right-5 top-5 z-20 w-[min(22rem,calc(100vw-2.5rem))] overflow-hidden rounded-2xl border ${selfServeSurfaceClass}`}>
             <div className="space-y-4 p-4">
-              <button
-                type="button"
-                disabled={isBusy}
-                onClick={handlePrimaryCreateAction}
-                className="flex h-16 w-full items-center justify-center gap-3 rounded-2xl bg-red-500 px-5 text-lg font-semibold text-white shadow-xl transition hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <span className="text-2xl leading-none">+</span>
-                <span>{isBusy ? 'Creating...' : copy.actions.createCampaign}</span>
-              </button>
+              {!mapLoaded ? (
+                <div className={`rounded-xl border px-3 py-3 text-sm font-medium ${selfServeSoftSurfaceClass}`}>
+                  Loading map...
+                </div>
+              ) : null}
 
               {phase === 'naming' ? (
                 <div className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="campaign-name">{copy.campaigns.nameLabel}</Label>
+                    <Label htmlFor="campaign-name">{campaignNameLabel}</Label>
                     <Input
                       id="campaign-name"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
-                      placeholder={copy.campaigns.namePlaceholder}
+                      placeholder={campaignNamePlaceholder}
                       autoFocus
-                      className="h-11 bg-background"
+                      className={selfServeInputClass}
                     />
                   </div>
 
                   {canAssignOnCreate ? (
-                    <div className="space-y-3 rounded-xl border border-border bg-card/80 p-3">
+                    <div className={`space-y-3 rounded-xl border p-3 ${selfServeSoftSurfaceClass}`}>
                       <div className="flex items-center justify-between gap-3">
                         <Label className="flex items-center gap-2 text-sm">
                           <Users className="h-4 w-4" />
@@ -1380,7 +1884,9 @@ export default function CreateCampaignPage() {
                               className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
                                 selected
                                   ? 'border-red-500 bg-red-500 text-white'
-                                  : 'border-border bg-background text-foreground hover:bg-muted/70'
+                                  : isSelfServeDemo
+                                    ? 'border-slate-200 bg-white text-slate-800 hover:bg-slate-50'
+                                    : 'border-border bg-background text-foreground hover:bg-muted/70'
                               }`}
                             >
                               {member.display_name}
@@ -1400,7 +1906,7 @@ export default function CreateCampaignPage() {
                           value={assignmentDeadline}
                           onChange={(e) => setAssignmentDeadline(e.target.value)}
                           disabled={isBusy || selectedMemberIds.length === 0}
-                          className="h-10 bg-background"
+                          className={isSelfServeDemo ? 'h-10 border-slate-200 bg-white text-slate-950 dark:bg-white dark:text-slate-950' : 'h-10 bg-background'}
                         />
                       </div>
                     </div>
@@ -1423,6 +1929,7 @@ export default function CreateCampaignPage() {
                   Search address
                 </Label>
                 <AddressAutocomplete
+                  inputId="campaign-map-search"
                   value={mapSearchQuery}
                   onChange={setMapSearchQuery}
                   onSelect={(suggestion) => {
@@ -1430,44 +1937,25 @@ export default function CreateCampaignPage() {
                   }}
                   placeholder="Search an address..."
                   className="flex-1"
-                  inputClassName="h-11 bg-background"
+                  inputClassName={selfServeInputClass}
                 />
-              </div>
-
-              <div className="rounded-xl border border-border bg-card px-3 py-3">
-                <div className="flex items-center justify-between gap-3">
-                  <Label htmlFor="show-campaign-overlays" className="text-sm font-medium">
-                    Show other campaigns
-                  </Label>
-                  <Switch
-                    id="show-campaign-overlays"
-                    checked={showCampaignOverlays}
-                    onCheckedChange={setShowCampaignOverlays}
-                    disabled={!currentWorkspaceId}
-                    aria-label="Show other campaign polygons"
-                  />
-                </div>
-                {showCampaignOverlays && campaignOverlaysLoading ? (
-                  <p className="mt-2 text-xs text-muted-foreground">Loading campaign polygons...</p>
-                ) : null}
-                {showCampaignOverlays && !campaignOverlaysLoading && campaignOverlaysError ? (
-                  <p className="mt-2 text-xs text-red-500">{campaignOverlaysError}</p>
-                ) : null}
               </div>
 
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
+                  disabled={!mapLoaded}
                   onClick={toggleSatelliteView}
-                  className="flex h-11 items-center justify-center gap-2 rounded-xl border border-border bg-card px-3 text-sm font-medium text-foreground transition hover:bg-muted/50"
+                  className={`flex h-11 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${selfServeControlButtonClass}`}
                 >
                   {isSatellite ? <Map className="h-5 w-5" /> : <Satellite className="h-5 w-5" />}
                   <span>{isSatellite ? 'Map' : 'Satellite'}</span>
                 </button>
                 <button
                   type="button"
+                  disabled={!mapLoaded}
                   onClick={startDrawing}
-                  className="flex h-11 items-center justify-center gap-2 rounded-xl border border-red-600 bg-red-500 px-3 text-sm font-medium text-white transition hover:bg-red-600"
+                  className="flex h-11 items-center justify-center gap-2 rounded-xl border border-red-600 bg-red-500 px-3 text-sm font-medium text-white transition hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Pencil className="h-5 w-5" />
                   <span>Draw</span>
@@ -1477,15 +1965,26 @@ export default function CreateCampaignPage() {
               <button
                 type="button"
                 onClick={clearDrawing}
-                disabled={phase === 'idle'}
-                className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-border bg-card px-3 text-sm font-medium text-foreground transition hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={!mapLoaded || phase === 'idle'}
+                className={`flex h-11 w-full items-center justify-center gap-2 rounded-xl border px-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${selfServeControlButtonClass}`}
               >
                 <Trash2 className="h-5 w-5" />
                 <span>Clear boundary</span>
               </button>
+
+              <div className={`border-t pt-4 ${selfServeDividerClass}`}>
+                <button
+                  type="button"
+                  disabled={!mapLoaded || isBusy}
+                  onClick={handlePrimaryCreateAction}
+                  className="flex h-16 w-full items-center justify-center gap-3 rounded-2xl bg-red-500 px-5 text-lg font-semibold text-white shadow-xl transition hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <span className="text-2xl leading-none">+</span>
+                  <span>{!mapLoaded ? 'Loading map...' : isBusy ? 'Creating...' : createButtonLabel}</span>
+                </button>
+              </div>
             </div>
           </div>
-        ) : null}
 
         <TerritoryDrawHint visible={mapLoaded && phase === 'drawing'} />
       </div>
@@ -1506,7 +2005,9 @@ export default function CreateCampaignPage() {
               )}
             </div>
             <div className="pt-3">
-              <h3 className="text-lg font-semibold text-white mb-3">{copy.campaigns.generatingTitle}</h3>
+              <h3 className="text-lg font-semibold text-white mb-3">
+                {isSelfServeDemo ? 'We are building your custom prospecting map' : copy.campaigns.generatingTitle}
+              </h3>
               <div className="space-y-2">
                 <p className="text-sm font-medium text-white/95">{currentStepText}</p>
                 <p className="text-sm text-white/90">Syncing property data...</p>
@@ -1556,6 +2057,7 @@ export default function CreateCampaignPage() {
           ) : null}
         </DialogContent>
       </Dialog>
+      <PaywallGuard open={showPaywall} onClose={() => setShowPaywall(false)} />
     </div>
   );
 }

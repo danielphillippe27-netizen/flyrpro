@@ -224,7 +224,8 @@ function isAddressPointFallbackFeature(feature: unknown): boolean {
   return (
     properties?.source === 'address_point' ||
     properties?.feature_type === 'address_point' ||
-    properties?.feature_status === 'address_point'
+    properties?.feature_status === 'address_point' ||
+    properties?.feature_type === 'manual_pin'
   );
 }
 
@@ -246,6 +247,113 @@ function filterAddressPointFallbackFeatures(
   return {
     ...featureCollection,
     features: featureCollection.features.filter(isAddressPointFallbackFeature),
+  };
+}
+
+async function fieldManualPinAddressIds(
+  supabase: ReturnType<typeof createAdminClient>,
+  campaignId: string
+): Promise<Set<string>> {
+  const { data, error } = await supabase
+    .from('campaign_addresses')
+    .select('id')
+    .eq('campaign_id', campaignId)
+    .eq('match_source', 'field_manual_pin');
+
+  if (error) {
+    console.warn('[API] Failed to load field manual pin ids:', error.message);
+    return new Set();
+  }
+
+  return new Set(
+    ((data ?? []) as Array<{ id?: string | null }>)
+      .map((row) => row.id?.trim().toLowerCase())
+      .filter((id): id is string => Boolean(id))
+  );
+}
+
+function featureAddressId(feature: FeatureLike): string | null {
+  const raw = feature.properties?.address_id ?? feature.properties?.id ?? feature.id;
+  return typeof raw === 'string' && raw.trim() ? raw.trim().toLowerCase() : null;
+}
+
+function decorateFieldManualPinFeatures(
+  featureCollection: FeatureCollectionLike | null | undefined,
+  pinAddressIds: Set<string>
+): FeatureCollectionLike | null {
+  if (!featureCollection || !Array.isArray(featureCollection.features) || pinAddressIds.size === 0) {
+    return featureCollection ?? null;
+  }
+
+  return {
+    ...featureCollection,
+    features: featureCollection.features.map((feature) => {
+      const addressId = featureAddressId(feature);
+      const isFieldPin =
+        addressId !== null &&
+        pinAddressIds.has(addressId) &&
+        feature.geometry?.type === 'Point';
+      if (!isFieldPin) return feature;
+      return {
+        ...feature,
+        properties: {
+          ...(feature.properties ?? {}),
+          source: 'manual',
+          feature_type: 'manual_pin',
+          feature_status: 'manual_pin',
+          render_kind: 'manual_pin',
+          match_method: 'field_manual_pin',
+        },
+      };
+    }),
+  };
+}
+
+async function withFieldManualPinFeatures(
+  supabase: ReturnType<typeof createAdminClient>,
+  campaignId: string,
+  featureCollection: FeatureCollectionLike,
+  campaignBoundary: GeoJSON.Polygon | GeoJSON.MultiPolygon | null
+): Promise<FeatureCollectionLike> {
+  const pinAddressIds = await fieldManualPinAddressIds(supabase, campaignId);
+  if (pinAddressIds.size === 0) return featureCollection;
+
+  const decorated = decorateFieldManualPinFeatures(featureCollection, pinAddressIds) ?? featureCollection;
+  const existingPinIds = new Set(
+    decorated.features
+      ?.map((feature) => featureAddressId(feature))
+      .filter((id): id is string => typeof id === 'string' && pinAddressIds.has(id)) ?? []
+  );
+  if (existingPinIds.size >= pinAddressIds.size) return decorated;
+
+  const { data: campaignFeatures, error } = await supabase.rpc(
+    'rpc_get_campaign_full_features',
+    { p_campaign_id: campaignId }
+  );
+  if (error || !campaignFeatures || typeof campaignFeatures !== 'object') {
+    if (error) console.warn('[API] Failed to append field manual pins:', error.message);
+    return decorated;
+  }
+
+  const rpcFeatures = filterCampaignBoundaryFeatures(
+    decorateFieldManualPinFeatures(campaignFeatures as FeatureCollectionLike, pinAddressIds),
+    campaignBoundary
+  );
+  const pinsToAppend = (rpcFeatures?.features ?? []).filter((feature) => {
+    const addressId = featureAddressId(feature);
+    return (
+      addressId !== null &&
+      pinAddressIds.has(addressId) &&
+      !existingPinIds.has(addressId) &&
+      feature.properties?.feature_type === 'manual_pin' &&
+      feature.geometry?.type === 'Point'
+    );
+  });
+
+  if (pinsToAppend.length === 0) return decorated;
+  return {
+    ...decorated,
+    features: [...(decorated.features ?? []), ...pinsToAppend],
   };
 }
 
@@ -2007,10 +2115,16 @@ export async function GET(
           campaignId,
           snapshotBuildings
         );
+        const snapshotWithFieldPins = await withFieldManualPinFeatures(
+          supabase,
+          campaignId,
+          decoratedSnapshotBuildings,
+          campaignBoundary
+        );
         console.log(
           `[API] Returning ${snapshotBuildingCount} campaign-scoped snapshot buildings in ${Date.now() - requestStartedAt}ms`
         );
-        return buildingsJsonResponse(decoratedSnapshotBuildings, requestStartedAt, 'pmtiles');
+        return buildingsJsonResponse(snapshotWithFieldPins, requestStartedAt, 'pmtiles');
       }
     } else if (snapshotError) {
       console.warn('[API] Snapshot lookup failed:', snapshotError.message);
@@ -2036,8 +2150,13 @@ export async function GET(
         { p_campaign_id: campaignId }
       );
       const normalizedCampaignFeatures = (campaignFeatures ?? null) as FeatureCollectionLike | null;
-      const visibleCampaignFeatures = filterCampaignBoundaryFeatures(
-        filterHiddenBuildingFeatures(normalizedCampaignFeatures, hiddenBuildingIds),
+      const visibleCampaignFeatures = await withFieldManualPinFeatures(
+        supabase,
+        campaignId,
+        filterCampaignBoundaryFeatures(
+          filterHiddenBuildingFeatures(normalizedCampaignFeatures, hiddenBuildingIds),
+          campaignBoundary
+        ) ?? { type: 'FeatureCollection', features: [] },
         campaignBoundary
       );
       visibleFallbackFeatures = filterAddressPointFallbackFeatures(visibleCampaignFeatures);

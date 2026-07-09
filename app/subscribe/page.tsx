@@ -14,9 +14,8 @@ type AccessState = {
   maxSeats?: number;
   billableSeats?: number;
   hasAccess: boolean;
+  plan?: string | null;
   reason?: string;
-  subscriptionStatus?: string | null;
-  trialEndsAt?: string | null;
 };
 
 type ReferralPreview = {
@@ -51,12 +50,13 @@ const formatPrice = (amount: number, currency: 'USD' | 'CAD') => {
   return currency === 'CAD' ? `CA$${formatted}` : `$${formatted}`;
 };
 
-const hasExpiredTrial = (state: AccessState, queryReason: string | null) => {
-  if (queryReason === 'trial-ended' || state.reason === 'trial-ended') return true;
-  if (state.subscriptionStatus !== 'trialing' || !state.trialEndsAt) return false;
-  const trialEnd = new Date(state.trialEndsAt).getTime();
-  return Number.isFinite(trialEnd) && trialEnd <= Date.now();
-};
+function isCampaignLimitReason(reason: string | null | undefined): boolean {
+  return (
+    reason === 'campaign-limit' ||
+    reason === 'workspace-campaign-limit' ||
+    reason === 'workspace_campaign_limit_reached'
+  );
+}
 
 function SubscribeContent() {
 
@@ -166,7 +166,7 @@ function SubscribeContent() {
             // Non-blocking; checkout route still applies referral server-side.
           }
 
-          if (data.hasAccess) {
+          if (data.hasAccess && !isCampaignLimitReason(reason) && !isCampaignLimitReason(data.reason)) {
             // Brief delay so post-onboarding workspace update is visible to the gate when /home loads
             redirectTimer = setTimeout(() => {
               if (mounted) router.replace('/home');
@@ -183,9 +183,9 @@ function SubscribeContent() {
       mounted = false;
       if (redirectTimer) clearTimeout(redirectTimer);
     };
-  }, [router]);
+  }, [reason, router]);
 
-  const handleStartTrial = async () => {
+  const handleCheckout = async () => {
     setCheckoutError(null);
     setCheckoutLoading(true);
     try {
@@ -220,7 +220,7 @@ function SubscribeContent() {
     );
   }
 
-  if (state.hasAccess) {
+  if (state.hasAccess && !isCampaignLimitReason(reason) && !isCampaignLimitReason(state.reason)) {
     return null;
   }
 
@@ -228,7 +228,7 @@ function SubscribeContent() {
     reason === 'member-inactive' ||
     state.reason === 'member-inactive' ||
     (state.role !== 'owner' && !state.hasAccess);
-  const isTrialEnded = hasExpiredTrial(state, reason);
+  const isCampaignLimit = isCampaignLimitReason(reason) || isCampaignLimitReason(state.reason);
 
   if (isMemberInactive) {
     return (
@@ -288,11 +288,11 @@ function SubscribeContent() {
 
         <div className="relative z-10 text-center space-y-3">
           <h1 className="text-5xl font-bold text-white">
-            {isTrialEnded ? 'TRIAL ended' : 'Track your outreach.'}
+            {isCampaignLimit ? 'Upgrade to create more campaigns.' : 'Track your outreach.'}
           </h1>
           <p className="text-[#AAAAAA] text-xl">
-            {isTrialEnded
-              ? "Continue reaching your business's potential by choosing a payment plan."
+            {isCampaignLimit
+              ? 'Your first workspace campaign is included. Choose a plan when you are ready to scale.'
               : 'Your business will reward you.'}
           </p>
         </div>
@@ -452,7 +452,7 @@ function SubscribeContent() {
           )}
           <Button
             size="lg"
-            onClick={handleStartTrial}
+            onClick={handleCheckout}
             disabled={checkoutLoading}
             className="w-full bg-[#ef4444] text-white hover:bg-[#dc2626] border-0"
           >
@@ -460,9 +460,7 @@ function SubscribeContent() {
               ? 'Redirecting…'
               : isFreeForeverOffer
                 ? 'Activate free partner subscription'
-                : isTrialEnded
-                  ? 'Continue with payment'
-                  : 'Continue to checkout'}
+                : 'Continue to checkout'}
           </Button>
           <p className="text-xs text-[#AAAAAA] text-center">
             {isFreeForeverOffer ? 'Free forever with your FLYR Partner offer.' : 'Recurring billing. Cancel anytime.'}

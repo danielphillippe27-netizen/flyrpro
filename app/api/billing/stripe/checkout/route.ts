@@ -16,7 +16,6 @@ import {
   isStripeNoSuchCustomerError,
 } from '@/app/lib/billing/stripe-errors';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
-import { WORKSPACE_TRIAL_DAYS } from '@/app/lib/billing/workspace-trial';
 import { getSeatUsage } from '@/app/api/team/_lib/manage';
 
 export async function POST(request: NextRequest) {
@@ -65,22 +64,13 @@ export async function POST(request: NextRequest) {
     let workspaceSeats = 1;
     let minimumBillableSeats = 1;
     let workspaceReferralCode: string | null = null;
-    let workspaceSubscriptionStatus: string | null = null;
-    let workspaceTrialEndsAt: string | null = null;
     if (ownerMembership?.workspace_id) {
       const { data: workspace } = await admin
         .from('workspaces')
-        .select('max_seats, referral_code_used, subscription_status, trial_ends_at')
+        .select('max_seats, referral_code_used')
         .eq('id', ownerMembership.workspace_id)
         .maybeSingle();
       const workspaceMaxSeats = Math.max(1, workspace?.max_seats ?? 1);
-      const workspaceTrialEnd = workspace?.trial_ends_at
-        ? new Date(workspace.trial_ends_at)
-        : null;
-      const isWorkspaceTrialExpired =
-        workspace?.subscription_status === 'trialing' &&
-        !!workspaceTrialEnd &&
-        workspaceTrialEnd.getTime() <= Date.now();
       minimumBillableSeats = await getSeatUsage(admin, ownerMembership.workspace_id, {
         maxSeats: workspace?.max_seats ?? null,
       })
@@ -89,21 +79,11 @@ export async function POST(request: NextRequest) {
           console.warn('[billing/stripe/checkout] seat usage lookup failed; falling back to workspace max seats', error);
           return workspaceMaxSeats;
         });
-      workspaceSeats = isWorkspaceTrialExpired
-        ? minimumBillableSeats
-        : Math.max(workspaceMaxSeats, minimumBillableSeats);
+      workspaceSeats = Math.max(workspaceMaxSeats, minimumBillableSeats);
       workspaceReferralCode =
         typeof workspace?.referral_code_used === 'string' &&
         workspace.referral_code_used.trim().length > 0
           ? workspace.referral_code_used.trim()
-          : null;
-      workspaceSubscriptionStatus =
-        typeof workspace?.subscription_status === 'string'
-          ? workspace.subscription_status
-          : null;
-      workspaceTrialEndsAt =
-        typeof workspace?.trial_ends_at === 'string'
-          ? workspace.trial_ends_at
           : null;
     }
 
@@ -148,13 +128,6 @@ export async function POST(request: NextRequest) {
     const isUsd = price.currency?.toLowerCase() === 'usd';
     const resolvedReferral = await resolveReferralDiscount(workspaceReferralCode);
     const discounts = resolvedReferral?.discounts;
-    const workspaceTrialEnd = workspaceTrialEndsAt ? new Date(workspaceTrialEndsAt) : null;
-    const shouldHonorWorkspaceTrial =
-      !entitlement.stripe_subscription_id &&
-      workspaceSubscriptionStatus?.toLowerCase() === 'trialing' &&
-      !!workspaceTrialEnd &&
-      !Number.isNaN(workspaceTrialEnd.getTime()) &&
-      workspaceTrialEnd.getTime() > Date.now();
     let session;
     try {
       const sessionParams: Stripe.Checkout.SessionCreateParams = {
@@ -186,20 +159,6 @@ export async function POST(request: NextRequest) {
           },
         },
       };
-
-      if (shouldHonorWorkspaceTrial && workspaceTrialEnd) {
-        const maxTrialEnd = new Date(
-          Date.now() + WORKSPACE_TRIAL_DAYS * 24 * 60 * 60 * 1000
-        );
-        const effectiveTrialEnd = new Date(
-          Math.min(workspaceTrialEnd.getTime(), maxTrialEnd.getTime())
-        );
-        if (effectiveTrialEnd.getTime() > Date.now()) {
-          sessionParams.subscription_data = {
-            trial_end: Math.floor(effectiveTrialEnd.getTime() / 1000),
-          };
-        }
-      }
 
       if (discounts?.length) {
         sessionParams.discounts = discounts;

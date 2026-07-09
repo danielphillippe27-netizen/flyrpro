@@ -4,8 +4,8 @@ export const AMBASSADOR_LANDING_DEFAULTS = {
     'I use FLYR to organize field prospecting, track doors, and turn real-world activity into measurable results.',
   introMessage:
     'I use FLYR to organize field prospecting, track doors, and turn real-world activity into measurable results.',
-  ctaText: 'Start 14 day free trial',
-  offerText: 'Use my link to get 14 days free and see how FLYR tracks real field activity.',
+  ctaText: 'Start with one campaign included',
+  offerText: 'Use my link to get one workspace campaign included and see how FLYR tracks real field activity.',
 } as const;
 
 export const FLYR_PUBLIC_ORIGIN = 'https://flyr.software';
@@ -19,7 +19,7 @@ export const AMBASSADOR_RE_TEAM_LANDING_COPY = {
   introMessage:
     'Give every agent a clear territory, track every door, and turn real-world prospecting into team visibility.',
   offerText:
-    'Watch the demo, then start a 14 day free trial with this ambassador link.',
+    'Watch the demo, then start with one workspace campaign included through this ambassador link.',
 } as const;
 
 export const AMBASSADOR_RESERVED_SLUGS = new Set([

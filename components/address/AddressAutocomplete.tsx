@@ -18,6 +18,7 @@ interface AddressAutocompleteProps {
   disabled?: boolean;
   className?: string;
   inputClassName?: string;
+  inputId?: string;
 }
 
 export function AddressAutocomplete({
@@ -28,6 +29,7 @@ export function AddressAutocomplete({
   disabled = false,
   className,
   inputClassName,
+  inputId,
 }: AddressAutocompleteProps) {
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -195,6 +197,7 @@ export function AddressAutocomplete({
       <div className="relative">
         <Input
           ref={inputRef}
+          id={inputId}
           type="text"
           value={value}
           onChange={handleInputChange}

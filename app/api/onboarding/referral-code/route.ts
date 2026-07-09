@@ -1,9 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
-import {
-  AMBASSADOR_TRIAL_DAYS,
-  WORKSPACE_TRIAL_DAYS,
-} from '@/app/lib/billing/workspace-trial';
 import { validateAmbassadorReferralCodeForOnboarding } from '@/app/lib/billing/ambassador-program';
 import {
   normalizeSalespersonReferralCodeInput,
@@ -23,7 +19,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         valid: true,
         referralCode: result.referralCode,
-        trialDays: AMBASSADOR_TRIAL_DAYS,
+        includedCampaigns: 1,
         partnerName: result.ambassador.full_name,
         ambassadorName: result.ambassador.full_name,
         referralType: 'ambassador',
@@ -55,7 +51,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         valid: true,
         referralCode: salesperson.referral_code.trim().toUpperCase(),
-        trialDays: WORKSPACE_TRIAL_DAYS,
+        includedCampaigns: 1,
         partnerName: salesperson.full_name,
         salespersonName: salesperson.full_name,
         referralType: 'salesperson',

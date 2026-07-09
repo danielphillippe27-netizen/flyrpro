@@ -175,7 +175,7 @@ export async function POST(
   }
 
   const { data: lead, error: leadError } = await context.admin
-    .from('dialler_leads')
+    .from('sales_leads')
     .select('*')
     .eq('id', leadId)
     .eq('workspace_id', context.workspaceId)
@@ -213,16 +213,6 @@ export async function POST(
     return NextResponse.json({ error: 'This lead does not have a valid SMS number.' }, { status: 400 });
   }
 
-  const contactSave = await upsertLeadContact(context, diallerLead);
-  if (!contactSave.contact) {
-    return NextResponse.json({ error: contactSave.error }, { status: 500 });
-  }
-
-  const contactId = typeof contactSave.contact.id === 'string' ? contactSave.contact.id : null;
-  if (!contactId) {
-    return NextResponse.json({ error: 'Could not prepare the contact before sending the text.' }, { status: 500 });
-  }
-
   try {
     const now = new Date().toISOString();
     const fromNumber = resolveOutboundCallerId({
@@ -239,7 +229,8 @@ export async function POST(
     const insertPayload = {
       workspace_id: context.workspaceId,
       call_id: null,
-      contact_id: contactId,
+      contact_id: null,
+      sales_lead_id: diallerLead.id,
       user_id: context.requestUser.id,
       telecom_provider: message.provider,
       provider_message_id: message.messageId,
@@ -259,11 +250,13 @@ export async function POST(
 
     const [{ data: followup, error: insertError }, { error: activityError }] = await Promise.all([
       context.admin.from('dialer_sms_followups').insert(insertPayload).select('*').single(),
-      context.admin.from('contact_activities').insert({
-        contact_id: contactId,
-        type: 'text',
+      context.admin.from('sales_activities').insert({
+        workspace_id: context.workspaceId,
+        sales_lead_id: diallerLead.id,
+        actor_user_id: context.requestUser.id,
+        activity_type: 'text',
         note: `Dialler text: ${messageBody}`,
-        timestamp: now,
+        occurred_at: now,
       }),
     ]);
 

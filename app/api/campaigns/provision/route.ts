@@ -53,8 +53,8 @@ import {
 import {
   APP_LIMIT_SCAN_COUNT,
   CampaignHomeLimitError,
+  MAX_CAMPAIGN_HOMES,
   campaignHomeLimitErrorPayload,
-  validateCampaignHomeCount,
 } from '@/lib/services/campaignHomeLimits';
 
 export const runtime = 'nodejs';
@@ -566,7 +566,8 @@ function addressesForInitialHydration(
     return [];
   }
 
-  return addresses.length <= staticGeometryAddressHydrationLimit() ? addresses : [];
+  const cappedAddresses = addresses.slice(0, MAX_CAMPAIGN_HOMES);
+  return cappedAddresses.length <= staticGeometryAddressHydrationLimit() ? cappedAddresses : [];
 }
 
 function stringFeatureValue(properties: Record<string, unknown>, ...keys: string[]) {
@@ -1497,11 +1498,14 @@ export async function POST(request: NextRequest) {
           } = resolvedProvision;
           let snapshot = rawSnapshot;
           let addressesToInsert = resolvedAddresses;
-          validateCampaignHomeCount(resolvedHomeCount);
+          const homeCapNotice = resolvedHomeCount > MAX_CAMPAIGN_HOMES
+            ? `This territory has more than ${MAX_CAMPAIGN_HOMES.toLocaleString()} homes. The free demo loaded the first ${MAX_CAMPAIGN_HOMES.toLocaleString()} homes so your map opens quickly.`
+            : null;
 
           await updateCampaignProvision(supabase, campaignId!, {
             provision_source: dbProvisionSource(addressSource),
             provision_phase: 'source_probed',
+            data_quality_reason: homeCapNotice,
           });
 
           let finalAddressCount = existingAddressCount;
@@ -1509,7 +1513,7 @@ export async function POST(request: NextRequest) {
             provision_phase: 'addresses_loading',
           });
 
-          addressesToInsert = deduplicateAddresses(addressesToInsert);
+          addressesToInsert = deduplicateAddresses(addressesToInsert).slice(0, MAX_CAMPAIGN_HOMES);
           const hasResolvedAddresses = addressesToInsert.length > 0;
           if (hasResolvedAddresses) {
             finalAddressCount = await bulkInsertAddresses(supabase, campaignId!, addressesToInsert);
@@ -1556,19 +1560,20 @@ export async function POST(request: NextRequest) {
               source: addressSource,
               regionCode,
             });
-            validateCampaignHomeCount(proxyAddresses.length);
-            if (proxyAddresses.length > 0) {
+            const cappedProxyAddresses = proxyAddresses.slice(0, MAX_CAMPAIGN_HOMES);
+            if (cappedProxyAddresses.length > 0) {
               console.warn('[Provision] PMTiles address scope produced zero addresses; using scoped building proxy door targets.', {
                 campaignId,
                 buildings: scopedGeometry.buildings?.features.length ?? 0,
-                proxyAddresses: proxyAddresses.length,
+                proxyAddresses: cappedProxyAddresses.length,
                 source: addressSource,
               });
-              finalAddressCount = await bulkInsertAddresses(supabase, campaignId!, proxyAddresses);
+              finalAddressCount = await bulkInsertAddresses(supabase, campaignId!, cappedProxyAddresses);
               snapshot = snapshotWithProxyAddressCount(snapshot, finalAddressCount);
               await updateCampaignProvision(supabase, campaignId!, {
                 provision_phase: 'addresses_ready',
                 addresses_ready_at: new Date().toISOString(),
+                data_quality_reason: homeCapNotice,
               });
             }
           }
@@ -1596,6 +1601,7 @@ export async function POST(request: NextRequest) {
             building_link_confidence: buildingLinkConfidence,
             map_mode: staticParcelCount > 0 ? 'hybrid' : mapMode,
             parcel_enrichment_status: parcelEnrichmentStatus,
+            data_quality_reason: homeCapNotice,
           });
 
           const initialMapReadyAt = new Date().toISOString();
@@ -1612,6 +1618,7 @@ export async function POST(request: NextRequest) {
             has_parcels: staticParcelCount > 0 || scopedParcelCount > 0,
             building_link_confidence: 0,
             map_mode: (staticParcelCount > 0 || scopedParcelCount > 0) ? 'hybrid' : mapMode,
+            data_quality_reason: homeCapNotice,
           });
 
 	          console.log('[Provision] Initial map-ready bundle published; backend linking will optimize the canonical bundle in background.', {
@@ -1697,7 +1704,7 @@ export async function POST(request: NextRequest) {
               overture_release: snapshot.metadata?.overture_release,
               tile_metrics: snapshot.metadata?.tile_metrics,
 	            },
-	            warning: snapshot.warning ?? null,
+	            warning: homeCapNotice ?? snapshot.warning ?? null,
 	            message:
 	              `${addressSource === 'diamond' ? 'Diamond' : 'Bedrock'} campaign is map-ready: ` +
 	              `${finalAddressCount} leads loaded. ` +

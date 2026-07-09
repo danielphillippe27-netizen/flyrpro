@@ -13,8 +13,6 @@ type AccessState = {
   billableSeats?: number;
   hasAccess: boolean;
   reason?: string;
-  subscriptionStatus?: string | null;
-  trialEndsAt?: string | null;
 };
 
 const FEATURES = [
@@ -27,13 +25,6 @@ const FEATURES = [
   { icon: Map, label: 'Optimized routes' },
   { icon: MoreHorizontal, label: '& much more' },
 ] as const;
-
-const hasExpiredTrial = (state: AccessState, queryReason: string | null) => {
-  if (queryReason === 'trial-ended' || state.reason === 'trial-ended') return true;
-  if (state.subscriptionStatus !== 'trialing' || !state.trialEndsAt) return false;
-  const trialEnd = new Date(state.trialEndsAt).getTime();
-  return Number.isFinite(trialEnd) && trialEnd <= Date.now();
-};
 
 export function PaywallOverlay() {
   const router = useRouter();
@@ -92,7 +83,7 @@ export function PaywallOverlay() {
     };
   }, []);
 
-  const handleStartTrial = async () => {
+  const handleCheckout = async () => {
     setCheckoutError(null);
     setCheckoutLoading(true);
     try {
@@ -136,7 +127,6 @@ export function PaywallOverlay() {
   const isMemberInactive =
     state.reason === 'member-inactive' ||
     (state.role !== 'owner' && !state.hasAccess);
-  const isTrialEnded = hasExpiredTrial(state, searchParams.get('reason'));
 
   return (
     <div
@@ -171,12 +161,10 @@ export function PaywallOverlay() {
           <>
             <div className="text-center space-y-3">
               <h1 id="paywall-title" className="text-5xl font-bold text-foreground">
-                {isTrialEnded ? 'TRIAL ended' : 'Track your outreach.'}
+                Upgrade to create more campaigns.
               </h1>
               <p className="text-muted-foreground text-xl">
-                {isTrialEnded
-                  ? "Continue reaching your business's potential by choosing a payment plan."
-                  : 'Your business will reward you.'}
+                Your first workspace campaign is included. Choose a plan when you are ready to scale.
               </p>
             </div>
 
@@ -269,15 +257,11 @@ export function PaywallOverlay() {
               )}
               <Button
                 size="lg"
-                onClick={handleStartTrial}
+                onClick={handleCheckout}
                 disabled={checkoutLoading}
                 className="w-full bg-primary hover:bg-primary/90"
               >
-                {checkoutLoading
-                  ? 'Redirecting…'
-                  : isTrialEnded
-                    ? 'Continue with payment'
-                    : 'Start trial'}
+                {checkoutLoading ? 'Redirecting…' : 'Continue to checkout'}
               </Button>
               <p className="text-xs text-muted-foreground text-center">
                 Recurring billing. Cancel anytime.

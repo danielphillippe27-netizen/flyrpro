@@ -99,6 +99,28 @@ function formatPercent(value: number): string {
   return `${Math.round(value * 100)}%`;
 }
 
+async function getActivityFetchError(response: Response): Promise<string> {
+  const fallback = `Failed to load activity (${response.status})`;
+  const contentType = response.headers.get('content-type') ?? '';
+
+  if (contentType.includes('application/json')) {
+    const payload = await response.json().catch(() => null) as { error?: unknown; message?: unknown } | null;
+    const message = typeof payload?.error === 'string'
+      ? payload.error
+      : typeof payload?.message === 'string'
+        ? payload.message
+        : null;
+    return message || fallback;
+  }
+
+  const text = await response.text().catch(() => '');
+  if (text.trim().startsWith('<!DOCTYPE') || text.includes('<html')) {
+    return fallback;
+  }
+
+  return text.trim() || fallback;
+}
+
 export function TeamActivityTab({ range, memberIds }: TeamActivityTabProps) {
   const { currentWorkspaceId } = useWorkspace();
   const [typeFilter, setTypeFilter] = useState<string>('');
@@ -137,7 +159,7 @@ export function TeamActivityTab({ range, memberIds }: TeamActivityTabProps) {
         if (typeFilter) params.set('type', typeFilter);
         if (memberIds.length === 1) params.set('memberId', memberIds[0]);
         const res = await fetch(`/api/team/activity?${params}`);
-        if (!res.ok) throw new Error(await res.text());
+        if (!res.ok) throw new Error(await getActivityFetchError(res));
         const data = await res.json();
         let list = (data.events ?? []) as ActivityEvent[];
         if (memberIds.length > 1) {

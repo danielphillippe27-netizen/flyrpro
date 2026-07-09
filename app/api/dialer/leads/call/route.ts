@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import type { Contact, DialerCall, DialerSession, DialerSessionLead, DiallerLead } from '@/types/database';
+import type { DialerCall, DialerSession, DialerSessionLead, DiallerLead } from '@/types/database';
 import { getDialerRequestContext, type DialerRequestContext } from '@/lib/dialer/server';
 import { getDialerTelecomProvider } from '@/lib/dialer/env';
 import { resolveOutboundCallerId } from '@/lib/dialer/caller-id';
@@ -27,36 +27,6 @@ function normalizeDiallerLeadPhone(lead: DiallerLead) {
   );
 }
 
-async function findExistingContact(
-  context: DialerRequestContext,
-  lead: DiallerLead
-): Promise<Contact | null> {
-  const normalizedPhone = normalizeDiallerLeadPhone(lead);
-  const lookups = [
-    normalizedPhone.e164 ? { column: 'phone_e164', value: normalizedPhone.e164 } : null,
-    cleanText(lead.phone) ? { column: 'phone', value: cleanText(lead.phone) } : null,
-    cleanText(lead.email) ? { column: 'email', value: cleanText(lead.email) } : null,
-  ].filter((lookup): lookup is { column: string; value: string } => Boolean(lookup));
-
-  for (const lookup of lookups) {
-    const { data, error } = await context.admin
-      .from('contacts')
-      .select('*')
-      .eq('workspace_id', context.workspaceId)
-      .eq(lookup.column, lookup.value)
-      .order('updated_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (!error && data) return data as Contact;
-    if (error && error.code !== 'PGRST116') {
-      console.warn('[dialer/leads/call] contact lookup failed', error);
-    }
-  }
-
-  return null;
-}
-
 export async function POST(request: NextRequest) {
   const body = (await request.json().catch(() => ({}))) as DiallerLeadCallPayload;
 
@@ -68,7 +38,7 @@ export async function POST(request: NextRequest) {
   if (context instanceof NextResponse) return context;
 
   const { data: lead, error: leadError } = await context.admin
-    .from('dialler_leads')
+    .from('sales_leads')
     .select('*')
     .eq('id', body.leadId)
     .eq('workspace_id', context.workspaceId)
@@ -91,8 +61,6 @@ export async function POST(request: NextRequest) {
   }
 
   const now = new Date().toISOString();
-  const existingContact = await findExistingContact(context, diallerLead);
-  const contactId = existingContact?.id ?? null;
   const { data: session, error: sessionError } = await context.admin
     .from('dialer_sessions')
     .insert({
@@ -101,8 +69,9 @@ export async function POST(request: NextRequest) {
       name: body.doubleDial ? 'Founder Dialler Double Dial' : 'Founder Dialler',
       status: 'active',
       source_filter: {
-        source: 'dialler_leads',
+        source: 'sales_leads',
         dialler_lead_id: diallerLead.id,
+        sales_lead_id: diallerLead.id,
         double_dial: body.doubleDial === true,
       },
       started_at: now,
@@ -121,7 +90,8 @@ export async function POST(request: NextRequest) {
     .insert({
       session_id: session.id,
       workspace_id: context.workspaceId,
-      contact_id: contactId,
+      contact_id: null,
+      sales_lead_id: diallerLead.id,
       position: 1,
       status: 'calling',
       attempt_count: 1,
@@ -148,7 +118,8 @@ export async function POST(request: NextRequest) {
       workspace_id: context.workspaceId,
       session_id: session.id,
       session_lead_id: sessionLead.id,
-      contact_id: contactId,
+      contact_id: null,
+      sales_lead_id: diallerLead.id,
       user_id: context.requestUser.id,
       call_request_id: callRequestId,
       telecom_provider: telecomProvider,
@@ -194,7 +165,7 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json({
     call: activeCall,
-    contact: existingContact,
+    contact: null,
     session: session as DialerSession,
     sessionLead: sessionLead as DialerSessionLead,
   });

@@ -155,6 +155,7 @@ export async function POST(
   };
 
   const contactId = cleanText(call.contact_id);
+  const salesLeadId = cleanText((call as { sales_lead_id?: unknown }).sales_lead_id);
   const contactStatus = dispositionToContactStatus(body.disposition);
   const resolvedFollowUpAt = body.followUpAt || (body.disposition === 'follow_up' || body.disposition === 'callback_requested' ? now : null);
   const resolvedAppointmentAt = body.appointmentAt || null;
@@ -166,7 +167,7 @@ export async function POST(
     updated_at: now,
   };
 
-  const createdContactId = contactId
+  const createdContactId = contactId || salesLeadId
     ? null
     : await createContactForScheduledDisposition({
         context,
@@ -182,10 +183,35 @@ export async function POST(
   const leadStatus = body.disposition === 'bad_number' ? 'invalid' : body.disposition === 'do_not_call' ? 'skipped' : 'completed';
   const leadSkipReason = body.disposition === 'bad_number' ? 'Bad number' : body.disposition === 'do_not_call' ? 'Do not call' : null;
 
-  const [{ error: updatedCallError }, contactResult, { error: updatedLeadError }, activityResult] = await Promise.all([
+  const salesLeadUpdate = salesLeadId
+    ? {
+        disposition: body.disposition,
+        lead_state:
+          body.disposition === 'appointment_set' || body.disposition === 'connected'
+            ? 'contacted'
+            : body.disposition === 'follow_up' || body.disposition === 'callback_requested' || body.disposition === 'left_voicemail'
+              ? 'callback'
+              : body.disposition === 'do_not_call'
+                ? 'dnc'
+                : body.disposition === 'bad_number' || body.disposition === 'not_interested'
+                  ? 'not_now'
+                  : 'no_answer',
+        notes: body.note?.trim() || null,
+        follow_up_at: resolvedFollowUpAt,
+        next_follow_up_at: resolvedFollowUpAt,
+        last_attempted_at: now,
+        called_at: now,
+        updated_at: now,
+      }
+    : null;
+
+  const [{ error: updatedCallError }, contactResult, salesLeadResult, { error: updatedLeadError }, activityResult] = await Promise.all([
     context.admin.from('dialer_calls').update(callUpdate).eq('id', callId),
     contactId
       ? context.admin.from('contacts').update(contactUpdate).eq('id', contactId)
+      : Promise.resolve({ error: null }),
+    salesLeadUpdate
+      ? context.admin.from('sales_leads').update(salesLeadUpdate).eq('id', salesLeadId)
       : Promise.resolve({ error: null }),
     context.admin
       .from('dialer_session_leads')
@@ -207,15 +233,30 @@ export async function POST(
           }),
           timestamp: now,
         })
+      : salesLeadId
+        ? context.admin.from('sales_activities').insert({
+            workspace_id: context.workspaceId,
+            sales_lead_id: salesLeadId,
+            actor_user_id: context.requestUser.id,
+            activity_type: 'call',
+            note: buildActivityNote({
+              disposition: body.disposition,
+              durationSeconds: call.duration_seconds,
+              note: body.note,
+            }),
+            occurred_at: now,
+          })
       : Promise.resolve({ error: null }),
   ]);
   const updatedContactError = contactResult.error;
+  const updatedSalesLeadError = salesLeadResult.error;
   const activityError = activityResult.error;
 
-  if (updatedCallError || updatedContactError || updatedLeadError || activityError) {
+  if (updatedCallError || updatedContactError || updatedSalesLeadError || updatedLeadError || activityError) {
     console.error('[dialer/disposition] failed to persist disposition', {
       updatedCallError,
       updatedContactError,
+      updatedSalesLeadError,
       updatedLeadError,
       activityError,
     });

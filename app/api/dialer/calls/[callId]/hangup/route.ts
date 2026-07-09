@@ -8,6 +8,7 @@ export const dynamic = 'force-dynamic';
 
 type HangupPayload = {
   workspaceId?: string;
+  outcome?: 'connected' | 'completed';
 };
 
 export async function POST(
@@ -36,26 +37,28 @@ export async function POST(
   }
 
   const activeCall = call as DialerCall;
-  if (activeCall.telecom_provider !== 'telnyx') {
-    return NextResponse.json({ error: 'Only Telnyx backend calls can be hung up through this endpoint.' }, { status: 400 });
-  }
 
   const callControlIds = Array.from(
     new Set([activeCall.provider_call_id, activeCall.provider_parent_call_id].filter((id): id is string => Boolean(id)))
   );
 
-  await Promise.allSettled(
-    callControlIds.map((callControlId) =>
-      hangupTelnyxCall(callControlId, { commandId: `${activeCall.call_request_id}:hangup:${callControlId}` })
-    )
-  );
+  if (activeCall.telecom_provider === 'telnyx' && callControlIds.length > 0) {
+    await Promise.allSettled(
+      callControlIds.map((callControlId) =>
+        hangupTelnyxCall(callControlId, { commandId: `${activeCall.call_request_id}:hangup:${callControlId}` })
+      )
+    );
+  }
 
   const now = new Date().toISOString();
+  const wasConnected = body.outcome === 'connected' || Boolean(activeCall.answered_at);
   const { data: updatedCall, error: updateError } = await context.admin
     .from('dialer_calls')
     .update({
-      status: activeCall.answered_at ? 'completed' : 'canceled',
+      status: wasConnected ? 'completed' : 'canceled',
+      answered_at: wasConnected ? activeCall.answered_at ?? now : activeCall.answered_at,
       ended_at: activeCall.ended_at ?? now,
+      disposition: body.outcome === 'connected' ? activeCall.disposition ?? 'connected' : activeCall.disposition,
       updated_at: now,
     })
     .eq('id', activeCall.id)
@@ -66,6 +69,15 @@ export async function POST(
     console.error('[dialer/calls/hangup] failed to update call', updateError);
     return NextResponse.json({ error: 'Call hangup was requested, but the row was not updated.' }, { status: 500 });
   }
+
+  await context.admin
+    .from('dialer_session_leads')
+    .update({
+      status: 'completed',
+      completed_at: now,
+      updated_at: now,
+    })
+    .eq('id', activeCall.session_lead_id);
 
   return NextResponse.json({ call: updatedCall as DialerCall });
 }

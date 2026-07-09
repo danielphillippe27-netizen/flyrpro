@@ -39,6 +39,28 @@ function isCampaignTypeConstraintError(error: unknown): boolean {
   );
 }
 
+function isWorkspaceCampaignLimitError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const candidate = error as { code?: string; message?: string; details?: string | null; hint?: string | null };
+  return (
+    candidate.code === 'P0001' &&
+    (candidate.message?.includes('workspace_campaign_limit_reached') ||
+      candidate.details?.includes('included campaign') ||
+      candidate.hint?.includes('workspace_campaign_limit_reached') ||
+      false)
+  );
+}
+
+function isMissingCampaignAllowanceRpc(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const candidate = error as { code?: string; message?: string; details?: string | null; hint?: string | null };
+  const combined = [candidate.message, candidate.details, candidate.hint].filter(Boolean).join(' ');
+  return (
+    candidate.code === 'PGRST202' ||
+    (combined.includes('workspace_can_create_campaign') && combined.includes('schema cache'))
+  );
+}
+
 interface CreateCampaignBody {
   name: string;
   description?: string;
@@ -230,6 +252,29 @@ export async function POST(request: NextRequest) {
       targetWorkspaceId = fallbackResolution.workspaceId;
     }
 
+    const { data: canCreateCampaign, error: campaignAllowanceError } = await admin.rpc(
+      'workspace_can_create_campaign',
+      {
+        p_workspace_id: targetWorkspaceId,
+        p_owner_id: requestUser.id,
+      }
+    );
+    if (campaignAllowanceError && isMissingCampaignAllowanceRpc(campaignAllowanceError)) {
+      console.warn('[POST /api/campaigns] workspace_can_create_campaign RPC missing; allowing create in local fallback', {
+        workspace_id: targetWorkspaceId,
+      });
+    } else if (campaignAllowanceError) {
+      return NextResponse.json({ error: campaignAllowanceError.message }, { status: 500 });
+    } else if (!canCreateCampaign) {
+      return NextResponse.json(
+        {
+          error: 'This workspace already has its included campaign. Upgrade to create more campaigns.',
+          code: 'workspace_campaign_limit_reached',
+        },
+        { status: 403 }
+      );
+    }
+
     const regionResolution = await resolveCampaignRegion({
       currentRegion: region,
       polygon: territory_boundary ?? null,
@@ -310,6 +355,15 @@ export async function POST(request: NextRequest) {
     }
 
     if (insertError) {
+      if (isWorkspaceCampaignLimitError(insertError)) {
+        return NextResponse.json(
+          {
+            error: 'This workspace already has its included campaign. Upgrade to create more campaigns.',
+            code: 'workspace_campaign_limit_reached',
+          },
+          { status: 403 }
+        );
+      }
       console.error('[POST /api/campaigns] Insert error:', insertError);
       return NextResponse.json(
         { error: insertError.message },

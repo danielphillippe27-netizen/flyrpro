@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
+import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { CampaignListSidebar } from '@/components/campaigns/CampaignListSidebar';
 import { CampaignsPageHeader } from '@/components/campaigns/CampaignsPageHeader';
 import { CampaignsService } from '@/lib/services/CampaignsService';
@@ -52,9 +52,11 @@ export default function CampaignsLayout({
 }) {
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [collapsed, setCollapsed] = useState(false);
   const headerTitle = useCampaignHeaderTitle();
   const isCreatePage = pathname === '/campaigns/create';
+  const isSelfServeCreatePage = isCreatePage && searchParams.get('source') === 'self-serve-demo';
 
   useEffect(() => {
     try {
@@ -81,12 +83,14 @@ export default function CampaignsLayout({
 
   return (
     <div className="flex flex-1 h-full min-h-0 w-full overflow-hidden">
-      <CampaignListSidebar
-        onNewCampaign={() => router.push('/campaigns/create')}
-        collapsed={collapsed}
-        onToggleCollapse={() => setCollapsedPersisted(!collapsed)}
-        width={SIDEBAR_WIDTH}
-      />
+      {!isSelfServeCreatePage ? (
+        <CampaignListSidebar
+          onNewCampaign={() => router.push('/campaigns/create')}
+          collapsed={collapsed}
+          onToggleCollapse={() => setCollapsedPersisted(!collapsed)}
+          width={SIDEBAR_WIDTH}
+        />
+      ) : null}
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden bg-background">
         {!isCreatePage && <CampaignsPageHeader title={headerTitle} />}
         <div

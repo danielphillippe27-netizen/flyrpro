@@ -305,7 +305,7 @@ export function YouViewContent({ userId, authChecked = false }: { userId: string
   // Still resolving auth or loading stats
   if (!authChecked || (userId && loading && !stats && !error)) {
     return (
-      <div className="flex items-center justify-center min-h-[200px] py-8 text-gray-600 dark:text-gray-400">
+      <div className="flex items-center justify-center min-h-[200px] py-8 text-muted-foreground">
         Loading…
       </div>
     );
@@ -314,7 +314,7 @@ export function YouViewContent({ userId, authChecked = false }: { userId: string
   if (error && !stats) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[200px] py-12 gap-4">
-        <p className="text-center text-gray-600 dark:text-gray-400 max-w-sm">{error}</p>
+        <p className="text-center text-muted-foreground max-w-sm">{error}</p>
         <button
           type="button"
           onClick={loadStats}
@@ -330,7 +330,7 @@ export function YouViewContent({ userId, authChecked = false }: { userId: string
   if (!userId) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[200px] py-12">
-        <p className="text-center text-gray-600 dark:text-gray-400">Please sign in to view your stats</p>
+        <p className="text-center text-muted-foreground">Please sign in to view your stats</p>
       </div>
     );
   }
@@ -339,7 +339,7 @@ export function YouViewContent({ userId, authChecked = false }: { userId: string
     <div className="space-y-6">
       <div className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-xl font-bold text-white">{heading}</p>
+          <p className="text-xl font-bold text-foreground">{heading}</p>
           {canViewTeamMetrics && (
             <div className="flex items-center gap-2">
               <Button

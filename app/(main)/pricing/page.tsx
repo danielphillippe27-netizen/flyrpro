@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Zap, MapPin, QrCode, BarChart3 } from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
+import { ArrowRight, Zap, MapPin, QrCode, BarChart3 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { PricingCard } from '@/components/pricing/PricingCard';
@@ -18,8 +19,23 @@ interface PriceOption {
 }
 
 export default function PricingPage() {
+  const searchParams = useSearchParams();
   const [, setPrices] = useState<PriceOption[]>([]);
   const [loading, setLoading] = useState(true);
+  const isSelfServeDemo = searchParams.get('source') === 'self-serve-demo';
+  const campaignId = searchParams.get('campaign');
+  const demoFeedbackParams = new URLSearchParams({
+    tab: 'reporting',
+    source: 'self-serve-demo',
+    demoReport: '1',
+    demoFeedback: '1',
+  });
+
+  if (campaignId) {
+    demoFeedbackParams.set('campaign', campaignId);
+  }
+
+  const demoFeedbackHref = `/home?${demoFeedbackParams.toString()}`;
 
   useEffect(() => {
     fetch('/api/billing/prices')
@@ -43,6 +59,27 @@ export default function PricingPage() {
           Create campaigns, map territories, generate QR codes, and track scans—all in one place. Upgrade to Pro for unlimited QR codes and advanced features.
         </p>
       </section>
+
+      {isSelfServeDemo ? (
+        <section className="border-b bg-background px-6 py-4">
+          <div className="mx-auto flex max-w-5xl flex-col gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-left shadow-sm dark:border-red-900/50 dark:bg-red-950/20 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <Badge variant="outline" className="border-red-200 bg-white text-red-700 dark:border-red-900/70 dark:bg-background dark:text-red-300">
+                Step 4 of 5
+              </Badge>
+              <p className="mt-2 text-sm font-medium text-slate-950 dark:text-white">
+                Pricing is ready. Continue the demo to unlock the full dashboard.
+              </p>
+            </div>
+            <Button asChild className="shrink-0">
+              <Link href={demoFeedbackHref} data-self-serve-demo-flow="true">
+                Continue to step 5
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+            </Button>
+          </div>
+        </section>
+      ) : null}
 
       {/* Benefits */}
       <section className="px-6 py-12">
@@ -76,7 +113,31 @@ export default function PricingPage() {
             Loading plans…
           </div>
         ) : (
-          <div className="mx-auto mt-12 grid max-w-4xl gap-8 sm:grid-cols-2">
+          <div className="mx-auto mt-12 grid max-w-6xl gap-8 lg:grid-cols-3">
+            <PricingCard
+              title="Free"
+              subtitle="Create your first FLYR map and see the workflow."
+              features={[
+                { text: 'One campaign', bold: true },
+                { text: 'One prospecting map' },
+                { text: 'Campaign dashboard preview' },
+                { text: 'Mock members and assignments' },
+                { text: 'Basic reporting tour' },
+              ]}
+              cta={
+                <>
+                  <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-center text-sm font-semibold text-zinc-700">
+                    <p className="text-3xl font-black text-zinc-950">
+                      $0 <span className="text-base font-bold text-zinc-700">/ forever</span>
+                    </p>
+                    <p className="mt-1 text-zinc-600">Upgrade when you need more campaigns.</p>
+                  </div>
+                  <Button className="w-full" variant="outline" asChild>
+                    <Link href="/demo-1">Create FREE FLYR Map</Link>
+                  </Button>
+                </>
+              }
+            />
             <PricingCard
               title="Pro"
               subtitle="For serious flyer volume."

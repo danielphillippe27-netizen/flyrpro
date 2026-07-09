@@ -867,6 +867,7 @@ export interface DialerSessionLead {
   session_id: string;
   workspace_id: string;
   contact_id?: string | null;
+  sales_lead_id?: string | null;
   position: number;
   status: DialerSessionLeadStatus;
   attempt_count: number;
@@ -886,6 +887,7 @@ export interface DialerCall {
   session_id: string;
   session_lead_id: string;
   contact_id?: string | null;
+  sales_lead_id?: string | null;
   user_id: string;
   call_request_id: string;
   telecom_provider?: DialerTelecomProvider;
@@ -923,7 +925,8 @@ export interface DialerSmsFollowup {
   id: string;
   workspace_id: string;
   call_id?: string | null;
-  contact_id: string;
+  contact_id?: string | null;
+  sales_lead_id?: string | null;
   user_id: string;
   telecom_provider?: DialerTelecomProvider;
   provider_message_id?: string | null;
@@ -946,6 +949,7 @@ export interface DialerInboundMessage {
   workspace_id: string;
   salesperson_id?: string | null;
   contact_id?: string | null;
+  sales_lead_id?: string | null;
   telecom_provider?: DialerTelecomProvider;
   provider_message_id?: string | null;
   twilio_message_sid?: string | null;
@@ -976,7 +980,7 @@ export interface DialerVoicemailDrop {
 
 export type DiallerLeadDisposition = 'interested' | 'callback' | 'not_now' | 'dnc';
 export type DiallerLeadCallOutcome = 'pending' | 'no_answer' | 'answered';
-export type SalespersonLeadMasterState =
+export type SalesLeadState =
   | 'new'
   | 'assigned'
   | 'queued'
@@ -989,6 +993,43 @@ export type SalespersonLeadMasterState =
   | 'dnc'
   | 'converted'
   | 'archived';
+
+/** @deprecated Use SalesLeadState. */
+export type SalespersonLeadMasterState = SalesLeadState;
+export type SalesPipelineStage =
+  | 'new_lead'
+  | 'attempting_contact'
+  | 'connected'
+  | 'demo_sent'
+  | 'trial_sent'
+  | 'trial_active'
+  | 'closing'
+  | 'won'
+  | 'lost'
+  | 'nurture';
+export type SalesPipelinePriority = 'low' | 'normal' | 'high' | 'hot';
+export type SalesPipelineTaskType =
+  | 'call'
+  | 'text'
+  | 'email'
+  | 'dm'
+  | 'demo_follow_up'
+  | 'trial_check_in'
+  | 'close_ask'
+  | 'nurture';
+export type SalesLeadMatchConfidence = 'strong' | 'medium' | 'weak' | 'ambiguous';
+export type SalesLeadActivityType =
+  | 'note'
+  | 'call'
+  | 'text'
+  | 'email'
+  | 'stage_change'
+  | 'task_change'
+  | 'demo_opened'
+  | 'signup'
+  | 'usage_milestone'
+  | 'match_review';
+export type SalesLeadMatchMethod = 'invite_link' | 'email' | 'phone';
 
 export interface DiallerLead {
   id: string;
@@ -1048,14 +1089,223 @@ export interface SalespersonLeadMaster {
   external_id?: string | null;
   lead_fingerprint?: string | null;
   lead_state: SalespersonLeadMasterState;
+  pipeline_stage?: SalesPipelineStage;
+  pipeline_owner_id?: string | null;
+  pipeline_priority?: SalesPipelinePriority;
+  seat_count?: number;
+  estimated_monthly_value_cents?: number;
   attempt_count: number;
   last_attempted_at?: string | null;
+  next_task_title?: string | null;
+  next_task_type?: SalesPipelineTaskType | null;
   next_follow_up_at?: string | null;
+  last_touch_at?: string | null;
+  last_touch_summary?: string | null;
+  objection?: string | null;
+  trial_status?: string | null;
+  trial_started_at?: string | null;
+  signed_up_user_id?: string | null;
+  signed_up_workspace_id?: string | null;
+  last_product_active_at?: string | null;
+  usage_summary?: Record<string, unknown> | null;
+  match_confidence?: SalesLeadMatchConfidence | null;
   disposition?: string | null;
   notes?: string | null;
   metadata?: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface SalesRep {
+  id: string;
+  workspace_id?: string | null;
+  user_id?: string | null;
+  legacy_salesperson_id?: string | null;
+  full_name: string;
+  email: string;
+  phone?: string | null;
+  role?: string | null;
+  territory?: string | null;
+  status: 'active' | 'paused' | 'inactive';
+  metadata?: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SalesContact {
+  id: string;
+  workspace_id: string;
+  sales_rep_id?: string | null;
+  user_id?: string | null;
+  name: string;
+  company?: string | null;
+  phone?: string | null;
+  phone_e164?: string | null;
+  email?: string | null;
+  email_normalized?: string | null;
+  website?: string | null;
+  website_domain?: string | null;
+  address?: string | null;
+  city?: string | null;
+  region?: string | null;
+  country_code?: string | null;
+  source?: string | null;
+  external_id?: string | null;
+  metadata?: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SalesLead {
+  id: string;
+  workspace_id: string;
+  sales_contact_id?: string | null;
+  user_id?: string | null;
+  assigned_user_id: string;
+  assigned_sales_rep_id?: string | null;
+  assigned_salesperson_id?: string | null;
+  created_by_user_id?: string | null;
+  converted_contact_id?: string | null;
+  contact_id?: string | null;
+  dialler_lead_id?: string | null;
+  legacy_contact_id?: string | null;
+  legacy_dialler_lead_id?: string | null;
+  legacy_master_lead_id?: string | null;
+  name: string;
+  company?: string | null;
+  phone?: string | null;
+  phone_e164?: string | null;
+  phone_country_code?: string | null;
+  phone_area_code?: string | null;
+  phone_area_label?: string | null;
+  email?: string | null;
+  email_normalized?: string | null;
+  list_id?: string | null;
+  list_name?: string | null;
+  website?: string | null;
+  website_domain?: string | null;
+  address?: string | null;
+  city?: string | null;
+  region?: string | null;
+  country_code?: string | null;
+  source?: string | null;
+  external_id?: string | null;
+  lead_fingerprint?: string | null;
+  lead_state: SalesLeadState;
+  pipeline_stage?: SalesPipelineStage;
+  pipeline_owner_id?: string | null;
+  pipeline_priority?: SalesPipelinePriority;
+  seat_count?: number;
+  estimated_monthly_value_cents?: number;
+  attempt_count: number;
+  called_at?: string | null;
+  last_attempted_at?: string | null;
+  next_task_title?: string | null;
+  next_task_type?: SalesPipelineTaskType | null;
+  follow_up_at?: string | null;
+  next_follow_up_at?: string | null;
+  last_touch_at?: string | null;
+  last_touch_summary?: string | null;
+  objection?: string | null;
+  trial_status?: string | null;
+  trial_started_at?: string | null;
+  signed_up_user_id?: string | null;
+  signed_up_workspace_id?: string | null;
+  last_product_active_at?: string | null;
+  usage_summary?: Record<string, unknown> | null;
+  match_confidence?: SalesLeadMatchConfidence | null;
+  follow_up_name?: string | null;
+  demo_link_follow_up_id?: string | null;
+  disposition?: string | null;
+  is_starred?: boolean;
+  notes?: string | null;
+  metadata?: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SalesDeal {
+  id: string;
+  workspace_id: string;
+  sales_lead_id?: string | null;
+  sales_contact_id?: string | null;
+  assigned_user_id?: string | null;
+  assigned_sales_rep_id?: string | null;
+  name: string;
+  stage: string;
+  value_cents?: number | null;
+  currency?: string | null;
+  expected_close_at?: string | null;
+  closed_at?: string | null;
+  notes?: string | null;
+  metadata?: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SalesTask {
+  id: string;
+  workspace_id: string;
+  sales_lead_id?: string | null;
+  sales_contact_id?: string | null;
+  sales_deal_id?: string | null;
+  assigned_user_id?: string | null;
+  assigned_sales_rep_id?: string | null;
+  task_type: string;
+  title: string;
+  status: 'open' | 'completed' | 'dismissed';
+  due_at?: string | null;
+  completed_at?: string | null;
+  notes?: string | null;
+  metadata?: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SalesActivity {
+  id: string;
+  workspace_id: string;
+  sales_lead_id?: string | null;
+  sales_contact_id?: string | null;
+  sales_task_id?: string | null;
+  actor_user_id?: string | null;
+  activity_type: string;
+  note?: string | null;
+  occurred_at: string;
+  metadata?: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface SalespersonLeadActivity {
+  id: string;
+  lead_id: string;
+  workspace_id: string;
+  actor_user_id?: string | null;
+  salesperson_id?: string | null;
+  activity_type: SalesLeadActivityType;
+  title: string;
+  body?: string | null;
+  metadata?: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface SalespersonLeadAppMatch {
+  id: string;
+  lead_id: string;
+  workspace_id: string;
+  matched_user_id?: string | null;
+  matched_workspace_id?: string | null;
+  demo_link_id?: string | null;
+  salesperson_id?: string | null;
+  match_method: SalesLeadMatchMethod;
+  match_confidence: SalesLeadMatchConfidence;
+  matched_email?: string | null;
+  matched_phone_e164?: string | null;
+  evidence?: Record<string, unknown> | null;
+  auto_applied: boolean;
+  reviewed_at?: string | null;
+  reviewed_by_user_id?: string | null;
+  created_at: string;
 }
 
 export interface Salesperson {
@@ -1167,6 +1417,7 @@ export interface InboxItem {
   owner_user_id?: string | null;
   salesperson_id?: string | null;
   contact_id?: string | null;
+  sales_lead_id?: string | null;
   source: InboxItemSource;
   source_table?: string | null;
   source_id?: string | null;

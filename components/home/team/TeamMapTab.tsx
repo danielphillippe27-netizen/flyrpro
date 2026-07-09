@@ -53,7 +53,152 @@ type TeamMapTabProps = {
   range: { start: string; end: string };
   memberIds: string[];
   mapMode: 'routes' | 'knocked_homes' | 'live';
+  demoLive?: boolean;
+  campaignId?: string | null;
 };
+
+type DemoArea = {
+  bbox: [number, number, number, number];
+  polygon: GeoJSON.Polygon | null;
+};
+
+type DemoPathMember = {
+  user_id: string;
+  display_name: string;
+  color: string;
+  path: Array<[number, number]>;
+};
+
+const FALLBACK_DEMO_PATHS = [
+  {
+    user_id: 'demo-maya',
+    display_name: 'Maya',
+    color: '#EF4444',
+    path: [
+      [-79.3928, 43.7047],
+      [-79.3918, 43.7049],
+      [-79.3907, 43.7052],
+      [-79.3898, 43.7055],
+      [-79.3889, 43.7058],
+    ],
+  },
+  {
+    user_id: 'demo-leo',
+    display_name: 'Leo',
+    color: '#2563EB',
+    path: [
+      [-79.3971, 43.7066],
+      [-79.3961, 43.7068],
+      [-79.3952, 43.7071],
+      [-79.3941, 43.7074],
+      [-79.3931, 43.7076],
+    ],
+  },
+  {
+    user_id: 'demo-ava',
+    display_name: 'Ava',
+    color: '#16A34A',
+    path: [
+      [-79.4003, 43.7029],
+      [-79.3993, 43.7032],
+      [-79.3984, 43.7035],
+      [-79.3973, 43.7038],
+      [-79.3962, 43.704],
+    ],
+  },
+  {
+    user_id: 'demo-noah',
+    display_name: 'Noah',
+    color: '#7C3AED',
+    path: [
+      [-79.3949, 43.7016],
+      [-79.3939, 43.7019],
+      [-79.3928, 43.7022],
+      [-79.3917, 43.7025],
+      [-79.3906, 43.7028],
+    ],
+  },
+] as const satisfies ReadonlyArray<DemoPathMember>;
+
+const DEMO_LIVE_MEMBERS = FALLBACK_DEMO_PATHS.map(({ user_id, display_name, color }) => ({
+  user_id,
+  display_name,
+  color,
+}));
+
+function normalizeBbox(value: unknown): [number, number, number, number] | null {
+  if (!Array.isArray(value) || value.length !== 4) return null;
+  const bbox = value.map((entry) => Number(entry));
+  if (!bbox.every(Number.isFinite)) return null;
+  if (bbox[0] >= bbox[2] || bbox[1] >= bbox[3]) return null;
+  return bbox as [number, number, number, number];
+}
+
+function bboxFromPolygon(polygon: GeoJSON.Polygon | null | undefined): [number, number, number, number] | null {
+  if (!polygon?.coordinates?.length) return null;
+  const points = polygon.coordinates.flat();
+  const lngs = points.map((point) => point[0]).filter(Number.isFinite);
+  const lats = points.map((point) => point[1]).filter(Number.isFinite);
+  if (!lngs.length || !lats.length) return null;
+  return [Math.min(...lngs), Math.min(...lats), Math.max(...lngs), Math.max(...lats)];
+}
+
+function lerp(start: number, end: number, amount: number): number {
+  return start + (end - start) * amount;
+}
+
+function buildDemoPaths(area?: DemoArea | null): DemoPathMember[] {
+  if (!area) return FALLBACK_DEMO_PATHS.map((member) => ({
+    ...member,
+    path: [...member.path],
+  }));
+  const [minLng, minLat, maxLng, maxLat] = area.bbox;
+  const lngSpan = Math.max(maxLng - minLng, 0.0012);
+  const latSpan = Math.max(maxLat - minLat, 0.0012);
+  const safeMinLng = minLng + lngSpan * 0.16;
+  const safeMaxLng = maxLng - lngSpan * 0.16;
+  const safeMinLat = minLat + latSpan * 0.16;
+  const safeMaxLat = maxLat - latSpan * 0.16;
+  const rows = [0.72, 0.56, 0.38, 0.24];
+  const startColumns = [0.18, 0.34, 0.52, 0.68];
+
+  return DEMO_LIVE_MEMBERS.map((member, memberIndex) => ({
+    ...member,
+    path: Array.from({ length: 5 }, (_, step) => {
+      const progress = (startColumns[memberIndex] + step * 0.08) % 0.82;
+      const wiggle = Math.sin((step + memberIndex) * 1.35) * 0.045;
+      const lng = lerp(safeMinLng, safeMaxLng, progress);
+      const lat = lerp(safeMinLat, safeMaxLat, Math.min(0.92, Math.max(0.08, rows[memberIndex] + wiggle)));
+      return [lng, lat] as [number, number];
+    }),
+  }));
+}
+
+function buildDemoLivePresence(tick: number, area?: DemoArea | null): LivePresence[] {
+  const now = new Date().toISOString();
+  return buildDemoPaths(area).map((member, index) => {
+    const coordinate = member.path[(tick + index) % member.path.length];
+    const [lng, lat] = coordinate;
+    return {
+      user_id: member.user_id,
+      display_name: member.display_name,
+      color: member.color,
+      campaign_id: 'self-serve-demo',
+      campaign_name: 'FIRST CAMPAIGN',
+      session_id: `demo-session-${member.user_id}`,
+      lat,
+      lng,
+      status: 'active',
+      updated_at: now,
+      started_at: new Date(Date.now() - (18 + index * 4) * 60_000).toISOString(),
+      active_seconds: 18 * 60 + tick * 18 + index * 45,
+      distance_meters: 850 + tick * 18 + index * 110,
+      doors_hit: 18 + tick + index * 6,
+      conversations: 5 + Math.floor(tick / 2) + index,
+      flyers_delivered: 18 + tick + index * 6,
+    };
+  });
+}
 
 function buildRoutesGeoJSON(
   sessions: MapSession[],
@@ -87,7 +232,7 @@ function buildRoutesGeoJSON(
   return { type: 'FeatureCollection', features };
 }
 
-export function TeamMapTab({ range, memberIds, mapMode }: TeamMapTabProps) {
+export function TeamMapTab({ range, memberIds, mapMode, demoLive = false, campaignId = null }: TeamMapTabProps) {
   const { theme } = useTheme();
   const { currentWorkspaceId } = useWorkspace();
   const resolvedMapStyle = useMemo(
@@ -103,11 +248,26 @@ export function TeamMapTab({ range, memberIds, mapMode }: TeamMapTabProps) {
   const [sessions, setSessions] = useState<MapSession[]>([]);
   const [knockEvents, setKnockEvents] = useState<Array<{ payload?: { lat?: number; lng?: number; [k: string]: unknown }; display_name?: string; user_id?: string }>>([]);
   const [livePresence, setLivePresence] = useState<LivePresence[]>([]);
+  const [demoArea, setDemoArea] = useState<DemoArea | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetchMapData = useCallback(async () => {
+    if (demoLive) {
+      setMembers(DEMO_LIVE_MEMBERS.map((member) => ({
+        user_id: member.user_id,
+        display_name: member.display_name,
+        color: member.color,
+      })));
+      setSessions([]);
+      setKnockEvents([]);
+      setLivePresence(buildDemoLivePresence(0, demoArea));
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
     if (!currentWorkspaceId) {
       setMembers([]);
       setSessions([]);
@@ -150,7 +310,49 @@ export function TeamMapTab({ range, memberIds, mapMode }: TeamMapTabProps) {
     } finally {
       setLoading(false);
     }
-  }, [currentWorkspaceId, range.start, range.end, mapMode, memberIds]);
+  }, [currentWorkspaceId, demoArea, demoLive, range.start, range.end, mapMode, memberIds]);
+
+  useEffect(() => {
+    if (!demoLive || !campaignId) {
+      setDemoArea(null);
+      return;
+    }
+
+    let cancelled = false;
+    fetch(`/api/campaigns/${encodeURIComponent(campaignId)}`, {
+      credentials: 'include',
+      cache: 'no-store',
+    })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((campaign) => {
+        if (cancelled || !campaign) return;
+        const polygon =
+          campaign.territory_boundary?.type === 'Polygon'
+            ? (campaign.territory_boundary as GeoJSON.Polygon)
+            : null;
+        const bbox = normalizeBbox(campaign.bbox) ?? bboxFromPolygon(polygon);
+        if (!bbox) return;
+        setDemoArea({ bbox, polygon });
+        liveFitKeyRef.current = null;
+      })
+      .catch(() => {
+        if (!cancelled) setDemoArea(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [campaignId, demoLive]);
+
+  useEffect(() => {
+    if (!demoLive || mapMode !== 'live') return;
+    let tick = 1;
+    const interval = window.setInterval(() => {
+      setLivePresence(buildDemoLivePresence(tick, demoArea));
+      tick += 1;
+    }, 1400);
+    return () => window.clearInterval(interval);
+  }, [demoArea, demoLive, mapMode]);
 
   useEffect(() => {
     fetchMapData();

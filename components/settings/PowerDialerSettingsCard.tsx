@@ -65,7 +65,11 @@ type DialerSettingsStatus = {
 
 const inFlightDialerSettingsWorkspaceIds = new Set<string>();
 
-export function PowerDialerSettingsCard() {
+type PowerDialerSettingsCardProps = {
+  mode?: 'workspace' | 'salesperson';
+};
+
+export function PowerDialerSettingsCard({ mode = 'workspace' }: PowerDialerSettingsCardProps) {
   const { currentWorkspaceId } = useWorkspace();
   const voicemailFileInputRef = useRef<HTMLInputElement | null>(null);
   const [dialerSettingsStatus, setDialerSettingsStatus] = useState<DialerSettingsStatus | null>(null);
@@ -91,6 +95,11 @@ export function PowerDialerSettingsCard() {
     ? `${dialerSettingsStatus.offer.currency === 'CAD' ? 'CA$' : '$'}${dialerSettingsStatus.offer.amount}${dialerSettingsStatus.offer.currency === 'USD' ? ' USD' : ''}${dialerSettingsStatus.offer.period}`
     : 'CA$19.99/month';
   const activeVoicemailDrop = voicemailDrops.find((drop) => drop.is_active) ?? null;
+  const isSalespersonMode = mode === 'salesperson';
+  const salespersonDialerReady = Boolean(dialerSettingsStatus?.salesperson?.id);
+  const dialerAccessActive = Boolean(
+    dialerSettingsStatus?.addon?.isActive && (!isSalespersonMode || salespersonDialerReady)
+  );
 
   const formatRecordingDuration = (seconds: number | null | undefined) => {
     if (!seconds || seconds < 1) return null;
@@ -442,7 +451,9 @@ export function PowerDialerSettingsCard() {
             <div>
               <CardTitle>Power Dialer</CardTitle>
               <CardDescription>
-                Purchase the add-on, claim a workspace number, and manage dialer setup from Settings.
+                {isSalespersonMode
+                  ? 'Manage your sales dialer setup, voicemail drops, and call recordings.'
+                  : 'Purchase the add-on, claim a workspace number, and manage dialer setup from Settings.'}
               </CardDescription>
             </div>
           </div>
@@ -468,7 +479,9 @@ export function PowerDialerSettingsCard() {
         )}
 
         <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300">
-          Configure the Telnyx environment values for this deployment, then launch the dialer from Leads when you are ready to call.
+          {isSalespersonMode
+            ? 'Launch the dialer from Leads when you are ready to call.'
+            : 'Configure the Telnyx environment values for this deployment, then launch the dialer from Leads when you are ready to call.'}
         </div>
 
         {loading ? (
@@ -479,13 +492,19 @@ export function PowerDialerSettingsCard() {
           <div className="rounded-lg border border-gray-200 p-4 space-y-3 dark:border-gray-700">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm font-medium dark:text-white">Dialer Add-On</p>
+                <p className="text-sm font-medium dark:text-white">
+                  {isSalespersonMode ? 'Sales dialer access' : 'Dialer Add-On'}
+                </p>
                 <p className="text-xs text-gray-500 dark:text-gray-400">
-                  Purchase this workspace add-on here. Current offer: {dialerOfferLabel}.
+                  {isSalespersonMode
+                    ? salespersonDialerReady
+                      ? 'Your salesperson account has Power Dialer access.'
+                      : 'Salesperson access is required for the Power Dialer.'
+                    : `Purchase this workspace add-on here. Current offer: ${dialerOfferLabel}.`}
                 </p>
               </div>
-              <Badge variant={dialerSettingsStatus?.addon?.isActive ? 'default' : 'outline'}>
-                {dialerSettingsStatus?.addon?.isActive ? 'Active' : 'Inactive'}
+              <Badge variant={dialerAccessActive ? 'default' : 'outline'}>
+                {dialerAccessActive ? 'Active' : 'Inactive'}
               </Badge>
             </div>
 
@@ -507,7 +526,7 @@ export function PowerDialerSettingsCard() {
               )}
             </div>
 
-            {dialerSettingsStatus?.canManage && (
+            {!isSalespersonMode && dialerSettingsStatus?.canManage && (
               <div className="space-y-2 rounded-lg border border-gray-200 p-3 dark:border-gray-700">
                 <Label htmlFor="settings-inbound-forward-to">Forward inbound calls</Label>
                 <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
@@ -531,7 +550,7 @@ export function PowerDialerSettingsCard() {
               </div>
             )}
 
-            <div className="space-y-3 rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+            {!isSalespersonMode ? <div className="space-y-3 rounded-lg border border-gray-200 p-3 dark:border-gray-700">
               <div className="flex items-center gap-2">
                 <Mail className="h-4 w-4 text-gray-500 dark:text-gray-400" />
                 <Label htmlFor="settings-demo-email-handle">Demo email sender</Label>
@@ -570,9 +589,9 @@ export function PowerDialerSettingsCard() {
               <p className="text-xs text-gray-500 dark:text-gray-400">
                 Sends from {demoEmailHandle || 'demo'}@{dialerSettingsStatus?.salesperson?.demoEmailDomain ?? 'flyr.software'}, saves replies in FLYR Inbox, and forwards replies to {demoEmailReplyTo || 'the rep email'}.
               </p>
-            </div>
+            </div> : null}
 
-            {!dialerSettingsStatus?.addon?.isActive && dialerSettingsStatus?.canManage && (
+            {!isSalespersonMode && !dialerSettingsStatus?.addon?.isActive && dialerSettingsStatus?.canManage && (
               <Button
                 variant="outline"
                 onClick={handleEnableDialerAddon}
@@ -584,7 +603,7 @@ export function PowerDialerSettingsCard() {
               </Button>
             )}
 
-            {!dialerSettingsStatus?.addon?.isActive && !dialerSettingsStatus?.canManage && (
+            {!isSalespersonMode && !dialerSettingsStatus?.addon?.isActive && !dialerSettingsStatus?.canManage && (
               <p className="text-sm text-amber-600 dark:text-amber-400">
                 An owner or admin needs to purchase the Power Dialer add-on for this workspace.
               </p>
@@ -803,7 +822,7 @@ export function PowerDialerSettingsCard() {
           )}
         </div>
 
-        <div className="rounded-lg border border-gray-200 p-4 text-sm text-gray-600 space-y-1 dark:border-gray-700 dark:text-gray-300">
+        {!isSalespersonMode ? <div className="rounded-lg border border-gray-200 p-4 text-sm text-gray-600 space-y-1 dark:border-gray-700 dark:text-gray-300">
           <p>1. Set `TELNYX_API_KEY`, `TELNYX_PUBLIC_KEY`, `TELNYX_CONNECTION_ID`, and `TELNYX_TELEPHONY_CREDENTIAL_ID`.</p>
           <p>2. Set `TELNYX_DEFAULT_FROM_NUMBER` as the shared fallback caller ID until each workspace claims its own number.</p>
           <p>3. Optional: set `TELNYX_DEFAULT_SMS_FROM_NUMBER` if you want post-call SMS follow-up from the dialer.</p>
@@ -812,7 +831,7 @@ export function PowerDialerSettingsCard() {
           <p>6. Point Telnyx messaging webhooks at `/api/telnyx/messaging/incoming` and `/api/telnyx/messaging/status`.</p>
           <p>7. Browser calling uses Telnyx WebRTC tokens from `/api/dialer/token`.</p>
           <p>8. Open Leads, send a list to the dialer, initialize microphone access, and start a workspace queue.</p>
-        </div>
+        </div> : null}
       </CardContent>
     </Card>
   );

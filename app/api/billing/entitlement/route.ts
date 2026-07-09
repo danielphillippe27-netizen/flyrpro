@@ -22,26 +22,7 @@ function workspaceHasAccess(workspace: WorkspaceBilling | null): boolean {
   if (!workspace) return false;
 
   const status = (workspace.subscription_status ?? '').toLowerCase();
-  if (status === 'active') return true;
-  if (status !== 'trialing') return false;
-  if (!workspace.trial_ends_at) return true;
-
-  const trialEnd = new Date(workspace.trial_ends_at);
-  return !Number.isNaN(trialEnd.getTime()) && trialEnd > new Date();
-}
-
-function workspaceTrialDaysRemaining(workspace: WorkspaceBilling | null): number | null {
-  if (!workspace || workspace.subscription_status?.toLowerCase() !== 'trialing') {
-    return null;
-  }
-  if (!workspace.trial_ends_at) {
-    return null;
-  }
-  const trialEnd = new Date(workspace.trial_ends_at);
-  if (Number.isNaN(trialEnd.getTime())) {
-    return null;
-  }
-  return Math.max(0, Math.ceil((trialEnd.getTime() - Date.now()) / (24 * 60 * 60 * 1000)));
+  return status === 'active';
 }
 
 async function resolvePrimaryWorkspaceBilling(userId: string): Promise<WorkspaceBilling | null> {
@@ -99,9 +80,7 @@ export async function GET(request: NextRequest) {
     const workspace = await resolvePrimaryWorkspaceBilling(requestUser.id);
     const workspaceAccess = workspaceHasAccess(workspace);
     const effectiveAccess = entitlement.is_active || workspaceAccess || isAmbassador;
-    const effectivePeriodEnd =
-      entitlement.current_period_end ??
-      (workspaceAccess ? workspace?.trial_ends_at ?? null : null);
+    const effectivePeriodEnd = entitlement.current_period_end ?? null;
     const dialerOffer = getPowerDialerAddonOffer(getRequestBillingCurrency(request));
     const workspaceId = workspace?.id ?? null;
     let dialerAddon = null;
@@ -138,7 +117,7 @@ export async function GET(request: NextRequest) {
       current_period_end: effectivePeriodEnd,
       subscription_status: workspace?.subscription_status ?? null,
       trial_ends_at: workspace?.trial_ends_at ?? null,
-      trial_days_remaining: workspaceTrialDaysRemaining(workspace),
+      trial_days_remaining: null,
       dialer_offer: {
         price_id: dialerOffer.priceId || null,
         amount: dialerOffer.amount,

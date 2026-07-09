@@ -99,6 +99,19 @@ function pointGeoJSON(longitude: number, latitude: number) {
   return { type: "Point", coordinates: [longitude, latitude] as [number, number] };
 }
 
+async function invalidateCampaignMapBundle(
+  supabase: SupabaseClient,
+  campaignId: string
+): Promise<void> {
+  const { error } = await supabase
+    .from("campaign_map_bundles")
+    .delete()
+    .eq("campaign_id", campaignId);
+  if (error) {
+    console.warn("[manual-address] map bundle invalidation skipped:", error.message);
+  }
+}
+
 export async function POST(request: Request, context: RouteContext): Promise<Response> {
   try {
     const token = getAuthToken(request);
@@ -143,6 +156,9 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
 
     const requestedBuildingId = String(
       (body as { building_id?: unknown }).building_id ?? ""
+    ).trim();
+    const addressProvenance = String(
+      (body as { address_provenance?: unknown }).address_provenance ?? ""
     ).trim();
     const resolvedBuilding = requestedBuildingId
       ? await resolveBuilding(supabase, requestedBuildingId)
@@ -213,6 +229,8 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
           }
         }
 
+        await invalidateCampaignMapBundle(supabase, campaignId);
+
         return NextResponse.json({
           address: existingAddress,
           linked_building_id: resolvedBuilding?.publicId ?? null,
@@ -238,6 +256,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         p_postal_code: String((body as { postal_code?: unknown }).postal_code ?? "").trim() || null,
         p_source: "manual",
         p_building_gers_id: resolvedBuilding?.publicId ?? null,
+        p_address_provenance: addressProvenance || null,
         p_geom_json: JSON.stringify(geoJsonPoint),
         p_coordinate: { lat: latitude, lon: longitude },
         p_visited: false,
@@ -279,6 +298,8 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         );
       }
     }
+
+    await invalidateCampaignMapBundle(supabase, campaignId);
 
     return NextResponse.json({
       address: addressRow,

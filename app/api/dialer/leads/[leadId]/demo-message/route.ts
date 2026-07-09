@@ -124,7 +124,7 @@ function buildBrokerageEmailBody(
     `Demo 1 - Teams: ${teamDemoUrl}`,
     `Demo 2 - Individual Agent Listing: ${listingDemoUrl}`,
     '',
-    `Agents can also start a free trial here: ${signupUrl}`,
+    `Agents can also start with one included campaign here: ${signupUrl}`,
     '',
     'I would be honoured if you shared this with any agents you think would benefit from it.',
     '',
@@ -145,7 +145,7 @@ export async function POST(
   if (context instanceof NextResponse) return context;
 
   const { data: lead, error: leadError } = await context.admin
-    .from('dialler_leads')
+    .from('sales_leads')
     .select('*')
     .eq('id', leadId)
     .eq('workspace_id', context.workspaceId)
@@ -190,7 +190,19 @@ export async function POST(
         leadId,
         user: context.requestUser,
       });
-      return { demoUrl: generated.url, trackedLink: null };
+      const destination = new URL(generated.url);
+      const trackedLink = await createTrackedDemoLink({
+        admin: context.admin,
+        origin,
+        salesperson,
+        workspaceId: context.workspaceId,
+        lead: diallerLead,
+        referralCode,
+        source: 'salesperson',
+        campaign: 'power-dialer-demo',
+        destinationPath: destination.pathname,
+      });
+      return { demoUrl: trackedLink?.url ?? generated.url, trackedLink };
     } catch (generateError) {
       console.warn('[dialer/demo-message] demo engine link generation failed; falling back to tracked demo link', generateError);
       const trackedLink = await createTrackedDemoLink({

@@ -125,6 +125,9 @@ export async function GET(request: NextRequest) {
       (await resolveAvailableDemoEmailHandle(admin as unknown as HandleLookupClient, salesperson, requestUser.email)) ||
       buildFallbackDemoEmailHandle(salesperson, requestUser.email);
 
+    const soloDemoUrl = buildSegmentLink(origin, referralCode, 'real-estate-agent', '/demo-2');
+    const teamDemoUrl = buildSegmentLink(origin, referralCode, 'real-estate-team', '/demo-1');
+
     return NextResponse.json({
       salesperson: {
         id: salesperson.id,
@@ -136,14 +139,16 @@ export async function GET(request: NextRequest) {
         phoneForwardTo: dialerSettings?.inbound_forward_to ?? null,
       },
       links: {
+        soloDemoUrl,
+        teamDemoUrl,
         individualAgentListingUrl: buildSegmentLink(
           origin,
           referralCode,
           'individual-agent-listing',
           '/demo-2'
         ),
-        realEstateAgentUrl: buildSegmentLink(origin, referralCode, 'real-estate-agent', '/demo-2'),
-        realEstateTeamUrl: buildSegmentLink(origin, referralCode, 'real-estate-team', '/demo-1'),
+        realEstateAgentUrl: soloDemoUrl,
+        realEstateTeamUrl: teamDemoUrl,
         roofingUrl: buildSegmentLink(origin, referralCode, 'roofing'),
         solarUrl: buildSegmentLink(origin, referralCode, 'solar'),
         homeServiceUrl: buildSegmentLink(origin, referralCode, 'home-service'),

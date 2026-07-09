@@ -239,7 +239,7 @@ async function loadExistingLeadExternalIds(params: {
   const pageSize = 1000;
   for (let from = 0; ; from += pageSize) {
     const { data, error } = await params.admin
-      .from('salesperson_lead_master')
+      .from('sales_leads')
       .select('external_id')
       .eq('workspace_id', params.workspaceId)
       .eq('source', params.source)
@@ -412,6 +412,9 @@ async function saveReiqLeads(params: {
     }];
   });
 
+  // Sales/prospecting imports must stay out of regular FLYR contacts.
+  contactsToInsert.length = 0;
+
   if (contactsToInsert.length > 0) {
     try {
       const insertedIds = await insertContactsWithFallback(params.admin, contactsToInsert);
@@ -513,8 +516,8 @@ async function saveReiqLeads(params: {
   if (masterMetadataById.size > 0) {
     await Promise.all(
       Array.from(masterMetadataById.entries()).map(async ([masterId, metadata]) => {
-        const { error } = await params.admin
-          .from('salesperson_lead_master')
+      const { error } = await params.admin
+          .from('sales_leads')
           .update({
             metadata: {
               ...metadata,
@@ -532,7 +535,7 @@ async function saveReiqLeads(params: {
   }
 
   const { data: existingDialerRows, error: existingDialerError } = await params.admin
-    .from('dialler_leads')
+    .from('sales_leads')
     .select('id, phone')
     .eq('workspace_id', workspaceId)
     .eq('user_id', params.userId);
@@ -587,6 +590,9 @@ async function saveReiqLeads(params: {
       }];
     });
 
+    // sales_leads is now the dialer queue for salesperson/prospecting leads.
+    dialerInserts.length = 0;
+
     if (dialerInserts.length > 0) {
       const masterIdByDialerPhone = new Map(
         dialerInserts
@@ -599,7 +605,7 @@ async function saveReiqLeads(params: {
         return payload;
       });
       const { data: insertedDialerRows, error } = await params.admin
-        .from('dialler_leads')
+        .from('sales_leads')
         .insert(insertPayload)
         .select('id, phone');
 

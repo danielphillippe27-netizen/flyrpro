@@ -113,7 +113,7 @@ export function PublicAmbassadorLanding({
             href={ctaPath}
             className="inline-flex min-h-12 items-center rounded-md bg-red-500 px-6 text-sm font-semibold text-white transition-colors hover:bg-red-600"
           >
-            Start 14 day free trial
+            Start with one campaign included
           </Link>
         </div>
       </section>

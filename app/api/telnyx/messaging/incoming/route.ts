@@ -186,6 +186,96 @@ async function findOrCreateContact(context: {
   return created as Record<string, unknown>;
 }
 
+async function resolveInboundLeadOwner(context: {
+  admin: ReturnType<typeof createAdminClient>;
+  workspaceId: string;
+  salespersonUserId: string | null;
+}): Promise<string | null> {
+  if (context.salespersonUserId) return context.salespersonUserId;
+
+  const { data: ownerMember } = await context.admin
+    .from('workspace_members')
+    .select('user_id')
+    .eq('workspace_id', context.workspaceId)
+    .in('role', ['owner', 'admin'])
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  return typeof ownerMember?.user_id === 'string' ? ownerMember.user_id : null;
+}
+
+async function findOrCreateSalesLead(context: {
+  admin: ReturnType<typeof createAdminClient>;
+  workspaceId: string;
+  salespersonId: string | null;
+  salespersonUserId: string | null;
+}, fromNumber: string, body: string): Promise<Record<string, unknown> | null> {
+  const now = new Date().toISOString();
+  const { data: existing } = await context.admin
+    .from('sales_leads')
+    .select('*')
+    .eq('workspace_id', context.workspaceId)
+    .or(`phone_e164.eq.${fromNumber},phone.eq.${fromNumber}`)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (existing) {
+    const { data: updated } = await context.admin
+      .from('sales_leads')
+      .update({
+        phone_e164: fromNumber,
+        lead_state: 'contacted',
+        last_attempted_at: now,
+        called_at: now,
+        last_touch_at: now,
+        last_touch_summary: 'Inbound SMS received',
+        updated_at: now,
+      })
+      .eq('id', existing.id)
+      .select('*')
+      .single();
+
+    return (updated ?? existing) as Record<string, unknown>;
+  }
+
+  const assignedUserId = await resolveInboundLeadOwner(context);
+  if (!assignedUserId) return null;
+
+  const { data: created, error: createError } = await context.admin
+    .from('sales_leads')
+    .insert({
+      workspace_id: context.workspaceId,
+      user_id: assignedUserId,
+      assigned_user_id: assignedUserId,
+      assigned_salesperson_id: context.salespersonId,
+      created_by_user_id: assignedUserId,
+      name: fromNumber,
+      phone: fromNumber,
+      phone_e164: fromNumber,
+      source: 'salesperson_inbound_sms',
+      lead_state: 'contacted',
+      notes: `Inbound SMS: ${body}`,
+      last_attempted_at: now,
+      called_at: now,
+      last_touch_at: now,
+      last_touch_summary: 'Inbound SMS received',
+      metadata: { inboundProvider: 'telnyx' },
+      created_at: now,
+      updated_at: now,
+    })
+    .select('*')
+    .single();
+
+  if (createError) {
+    console.warn('[telnyx/messaging/incoming] sales lead create failed', createError);
+    return null;
+  }
+
+  return created as Record<string, unknown>;
+}
+
 async function notifyWorkspaceMembers(context: {
   admin: ReturnType<typeof createAdminClient>;
   workspaceId: string;
@@ -214,6 +304,7 @@ async function notifyWorkspaceMembers(context: {
       source: 'sms',
       inboundMessageId: message.id,
       contactId: message.contact_id,
+      salesLeadId: message.sales_lead_id,
       from: message.from_number_e164,
       to: message.to_number_e164,
     },
@@ -283,13 +374,26 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
-  const contact = await findOrCreateContact({ admin, workspaceId: inboundRoute.workspaceId }, fromNumber, body);
+  const isSalespersonInbound = Boolean(inboundRoute.salespersonId || inboundRoute.salespersonUserId);
+  const salesLead = isSalespersonInbound
+    ? await findOrCreateSalesLead({
+        admin,
+        workspaceId: inboundRoute.workspaceId,
+        salespersonId: inboundRoute.salespersonId,
+        salespersonUserId: inboundRoute.salespersonUserId,
+      }, fromNumber, body)
+    : null;
+  const contact = isSalespersonInbound
+    ? null
+    : await findOrCreateContact({ admin, workspaceId: inboundRoute.workspaceId }, fromNumber, body);
+  const salesLeadId = typeof salesLead?.id === 'string' ? salesLead.id : null;
   const contactId = typeof contact?.id === 'string' ? contact.id : null;
   const now = new Date().toISOString();
   const insertPayload = {
     workspace_id: inboundRoute.workspaceId,
     salesperson_id: inboundRoute.salespersonId,
     contact_id: contactId,
+    sales_lead_id: salesLeadId,
     telecom_provider: 'telnyx',
     provider_message_id: messageId,
     twilio_message_sid: null,
@@ -311,7 +415,23 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
-  if (contactId) {
+  if (salesLeadId) {
+    const { error } = await admin.from('sales_activities').insert({
+      workspace_id: inboundRoute.workspaceId,
+      sales_lead_id: salesLeadId,
+      actor_user_id: inboundRoute.salespersonUserId,
+      activity_type: 'text',
+      note: `Inbound SMS: ${body}`,
+      occurred_at: now,
+      metadata: {
+        provider: 'telnyx',
+        messageId,
+        from: fromNumber,
+        to: toNumber,
+      },
+    });
+    if (error) console.warn('[telnyx/messaging/incoming] sales activity create failed', error);
+  } else if (contactId) {
     const { error } = await admin.from('contact_activities').insert({
       contact_id: contactId,
       type: 'text',
@@ -321,7 +441,12 @@ export async function POST(request: NextRequest) {
     if (error) console.warn('[telnyx/messaging/incoming] contact activity create failed', error);
   }
 
-  const contactName = typeof contact?.full_name === 'string' ? contact.full_name : null;
+  const contactName =
+    typeof salesLead?.name === 'string'
+      ? salesLead.name
+      : typeof contact?.full_name === 'string'
+        ? contact.full_name
+        : null;
   await notifyWorkspaceMembers(
     { admin, workspaceId: inboundRoute.workspaceId, salespersonUserId: inboundRoute.salespersonUserId },
     inboundMessage as DialerInboundMessage,

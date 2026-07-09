@@ -63,7 +63,7 @@ export async function GET(request: NextRequest) {
   const leadsById = new Map<string, DiallerLead>();
   if (leadIds.length > 0) {
     const { data: leads, error: leadsError } = await context.admin
-      .from('dialler_leads')
+      .from('sales_leads')
       .select('*')
       .eq('workspace_id', context.workspaceId)
       .eq('user_id', context.requestUser.id)

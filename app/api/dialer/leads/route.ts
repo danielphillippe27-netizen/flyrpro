@@ -58,6 +58,8 @@ type DiallerLeadInsert = {
   company: string | null;
   email: string | null;
   disposition: null;
+  lead_state?: 'queued';
+  source?: string;
   notes: null;
   called_at: null;
   master_lead_id?: string | null;
@@ -67,6 +69,7 @@ type UpdateLeadPayload = {
   workspaceId?: string;
   id?: string;
   isStarred?: boolean;
+  markCalled?: boolean;
   disposition?: DiallerLeadDisposition | null;
   notes?: string | null;
   email?: string | null;
@@ -580,8 +583,8 @@ function extractEmailCtas(text: string, demoUrl: string): Array<{ label: string;
     let label = url === demoUrl ? 'Watch the demo' : 'Open link';
     if (lowerLine.includes('demo 1')) label = 'Watch Demo 1 - Teams';
     else if (lowerLine.includes('demo 2')) label = 'Watch Demo 2 - Listing';
-    else if (lowerLine.includes('free trial') || lowerLine.includes('sign up')) {
-      label = 'Start free trial';
+    else if (lowerLine.includes('included campaign') || lowerLine.includes('sign up')) {
+      label = 'Start with one campaign included';
     }
 
     seen.add(url);
@@ -611,7 +614,7 @@ function buildBrokerageDemoEmailBody(params: {
     `Demo 1 - Teams: ${params.teamDemoUrl}`,
     `Demo 2 - Individual Agent Listing: ${params.listingDemoUrl}`,
     '',
-    `Agents can also start a free trial here: ${params.signupUrl}`,
+    `Agents can also start with one included campaign here: ${params.signupUrl}`,
     '',
     'I would be honoured if you shared this with any agents you think would benefit from it.',
     '',
@@ -776,10 +779,23 @@ async function sendDemoEmail(
         leadId: lead.id,
         user: context.requestUser,
       });
-      demo = {
-        url: generated.url,
+      const generatedDestination = new URL(generated.url);
+      const trackedLink = await createTrackedDemoLink({
+        admin: context.admin,
+        origin: publicOrigin,
+        salesperson,
+        workspaceId: context.workspaceId,
+        lead,
+        contact,
         referralCode: normalizeSalespersonReferralCodeInput(salesperson?.referral_code ?? '') || null,
-        tracked: false,
+        source: 'salesperson',
+        campaign: 'power-dialer-demo',
+        destinationPath: generatedDestination.pathname,
+      });
+      demo = {
+        url: trackedLink?.url ?? generated.url,
+        referralCode: normalizeSalespersonReferralCodeInput(salesperson?.referral_code ?? '') || null,
+        tracked: Boolean(trackedLink),
       };
     } catch (generateError) {
       console.warn('[dialer/leads] demo engine link generation failed; falling back to legacy demo URL', generateError);
@@ -901,17 +917,12 @@ async function sendInterestedLink(
   });
 
   const now = new Date().toISOString();
-  const contactSave = await upsertDiallerContact(context, lead, cleanText(lead.notes) || null);
-  const contactId = typeof contactSave.contact?.id === 'string' ? contactSave.contact.id : null;
-  if (!contactId) {
-    return contactSave.warning ?? 'Demo sent, but FLYR could not save the text record.';
-  }
-
   const [{ error: insertError }, { error: activityError }] = await Promise.all([
     context.admin.from('dialer_sms_followups').insert({
       workspace_id: context.workspaceId,
       call_id: null,
-      contact_id: contactId,
+      contact_id: null,
+      sales_lead_id: lead.id,
       user_id: context.requestUser.id,
       telecom_provider: message.provider,
       provider_message_id: message.messageId,
@@ -929,13 +940,15 @@ async function sendInterestedLink(
         referralCode: demo.referralCode,
       },
     }),
-    context.admin.from('contact_activities').insert({
-      contact_id: contactId,
-      type: 'text',
+    context.admin.from('sales_activities').insert({
+      workspace_id: context.workspaceId,
+      sales_lead_id: lead.id,
+      actor_user_id: context.requestUser.id,
+      activity_type: 'text',
       note: audience === 'brokerage'
         ? `Brokerage demo SMS sent:\n${demo.url}\n${listingDemoUrl}\n${signupUrl}`
         : `Demo SMS sent: ${demo.url}`,
-      timestamp: now,
+      occurred_at: now,
     }),
   ]);
 
@@ -949,7 +962,7 @@ async function sendInterestedLink(
   }
 
   return demo.referralCode
-    ? contactSave.warning
+    ? null
     : 'Demo sent, but no active salesperson referral code was found for this account.';
 }
 
@@ -995,7 +1008,7 @@ async function findReusableDiallerLeadForMaster(context: DiallerContext, masterL
 
   if (masterLead.dialler_lead_id) {
     const { data, error } = await context.admin
-      .from('dialler_leads')
+      .from('sales_leads')
       .select('*')
       .eq('id', masterLead.dialler_lead_id)
       .eq('workspace_id', context.workspaceId)
@@ -1276,8 +1289,8 @@ async function createFollowUpNotification(context: {
 
 function shapeMissingTableError(error: { message?: string; code?: string } | null | undefined) {
   if (!error) return null;
-  if (error.code === '42P01' || error.message?.toLowerCase().includes('dialler_leads')) {
-    return 'dialler_leads is not ready yet. Run the latest Supabase migration.';
+  if (error.code === '42P01' || error.message?.toLowerCase().includes('sales_leads')) {
+    return 'sales_leads is not ready yet. Run the latest Supabase migration.';
   }
   return null;
 }
@@ -1289,7 +1302,7 @@ export async function GET(request: NextRequest) {
   if (context instanceof NextResponse) return context;
 
   let query = context.admin
-    .from('dialler_leads')
+    .from('sales_leads')
     .select('*')
     .eq('workspace_id', context.workspaceId)
     .eq('user_id', context.requestUser.id)
@@ -1311,16 +1324,14 @@ export async function GET(request: NextRequest) {
   if (requestedIds.length === 0) {
     const leadsWithOutcomes = await attachLatestCallOutcomes(context, leads);
     return NextResponse.json({
-      leads: leadsWithOutcomes
-        .filter(shouldKeepDiallerLeadInQueue)
-        .map(withDiallerListMetadata),
+      leads: leadsWithOutcomes.map(withDiallerListMetadata),
     });
   }
 
   const orderById = new Map(requestedIds.map((id, index) => [id, index]));
   if (leads.length === 0) {
     const { data: fallbackData, error: fallbackError } = await context.admin
-      .from('dialler_leads')
+      .from('sales_leads')
       .select('*')
       .in('id', requestedIds)
       .eq('user_id', context.requestUser.id);
@@ -1345,9 +1356,7 @@ export async function GET(request: NextRequest) {
           if (accessibleLeads.length > 0) {
             const accessibleLeadsWithOutcomes = await attachLatestCallOutcomes(fallbackContext, accessibleLeads);
             return NextResponse.json({
-              leads: accessibleLeadsWithOutcomes
-                .filter(shouldKeepDiallerLeadInQueue)
-                .map(withDiallerListMetadata),
+              leads: accessibleLeadsWithOutcomes.map(withDiallerListMetadata),
               focusedLeadIds: requestedIds,
               resolvedWorkspaceId: fallbackContext.workspaceId,
             });
@@ -1364,9 +1373,7 @@ export async function GET(request: NextRequest) {
     [...leads].sort((a, b) => (orderById.get(a.id) ?? 9999) - (orderById.get(b.id) ?? 9999))
   );
   return NextResponse.json({
-    leads: focusedLeadsWithOutcomes
-      .filter(shouldKeepDiallerLeadInQueue)
-      .map(withDiallerListMetadata),
+    leads: focusedLeadsWithOutcomes.map(withDiallerListMetadata),
     focusedLeadIds: requestedIds,
     resolvedWorkspaceId: context.workspaceId,
   });
@@ -1404,7 +1411,7 @@ export async function POST(request: NextRequest) {
           email: cleanText(row.email) || null,
           countryCode: normalizedPhone.countryCode,
           source: 'dialler_import',
-          state: 'assigned',
+          state: 'queued',
         });
 
     if (masterResult) {
@@ -1416,12 +1423,21 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        const reusableLead = await findReusableDiallerLeadForMaster(context, masterResult.row);
+        const reusableLead =
+          ((masterResult.row as unknown as DiallerLead | null) &&
+          shouldKeepDiallerLeadInQueue(masterResult.row as unknown as DiallerLead))
+            ? (masterResult.row as unknown as DiallerLead)
+            : await findReusableDiallerLeadForMaster(context, masterResult.row);
         if (reusableLead) {
           reusedLeads.push(reusableLead);
           reusedMasterCount += 1;
           continue;
         }
+      }
+
+      if (masterResult.created && masterResult.row && isMasterLeadAssignedToCurrentUser(context, masterResult.row)) {
+        reusedLeads.push(masterResult.row as unknown as DiallerLead);
+        continue;
       }
     }
 
@@ -1437,6 +1453,8 @@ export async function POST(request: NextRequest) {
       company: cleanText(row.company) || null,
       email: cleanText(row.email) || null,
       disposition: null,
+      lead_state: 'queued',
+      source: 'dialler_import',
       notes: null,
       called_at: null,
       master_lead_id: masterResult?.row?.id ?? null,
@@ -1484,7 +1502,7 @@ export async function POST(request: NextRequest) {
     return payload;
   });
   const { data, error } = await context.admin
-    .from('dialler_leads')
+    .from('sales_leads')
     .insert(insertPayload)
     .select('*');
 
@@ -1522,7 +1540,7 @@ export async function PATCH(request: NextRequest) {
 
   if (typeof body.isStarred === 'boolean') {
     const { data, error } = await context.admin
-      .from('dialler_leads')
+      .from('sales_leads')
       .update({
         is_starred: body.isStarred,
         updated_at: new Date().toISOString(),
@@ -1542,9 +1560,40 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ lead: data as DiallerLead });
   }
 
+  if (body.markCalled) {
+    const updatePayload: {
+      called_at: string;
+      updated_at: string;
+      notes?: string | null;
+      email?: string | null;
+    } = {
+      called_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    if (typeof body.notes === 'string') updatePayload.notes = cleanText(body.notes) || null;
+    if (typeof body.email === 'string') updatePayload.email = cleanText(body.email) || null;
+
+    const { data, error } = await context.admin
+      .from('sales_leads')
+      .update(updatePayload)
+      .eq('id', body.id)
+      .eq('workspace_id', context.workspaceId)
+      .eq('user_id', context.requestUser.id)
+      .select('*')
+      .single();
+
+    if (error) {
+      const tableError = shapeMissingTableError(error);
+      console.error('[dialer/leads] failed to mark dialler lead called', error);
+      return NextResponse.json({ error: tableError ?? 'Failed to mark lead called' }, { status: 500 });
+    }
+
+    return NextResponse.json({ lead: data as DiallerLead });
+  }
+
   if (body.saveContact) {
     const { data: existingLead, error: existingLeadError } = await context.admin
-      .from('dialler_leads')
+      .from('sales_leads')
       .select('*')
       .eq('id', body.id)
       .eq('workspace_id', context.workspaceId)
@@ -1562,7 +1611,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     const { data, error } = await context.admin
-      .from('dialler_leads')
+      .from('sales_leads')
       .update({
         notes: cleanText(body.notes) || null,
         email: cleanText(body.email) || null,
@@ -1588,15 +1637,9 @@ export async function PATCH(request: NextRequest) {
       });
     }
 
-    const contactSave = await upsertDiallerContact(
-      context,
-      data as DiallerLead,
-      cleanText(body.notes) || null
-    );
-
-    let warning = contactSave.warning;
+    let warning: string | null = null;
     try {
-      const emailWarning = await sendDemoEmail(request, context, data as DiallerLead, contactSave.contact, {
+      const emailWarning = await sendDemoEmail(request, context, data as DiallerLead, null, {
         subject: body.demoEmailSubject,
         body: body.demoEmailBody,
         demoLinkToken: body.demoLinkToken,
@@ -1610,7 +1653,7 @@ export async function PATCH(request: NextRequest) {
 
     return NextResponse.json({
       lead: data as DiallerLead,
-      contact: contactSave.contact,
+      contact: null,
       warning,
     });
   }
@@ -1620,7 +1663,7 @@ export async function PATCH(request: NextRequest) {
   }
 
   const { data, error } = await context.admin
-    .from('dialler_leads')
+    .from('sales_leads')
     .update({
       disposition: body.disposition,
       notes: cleanText(body.notes) || null,
@@ -1653,19 +1696,13 @@ export async function PATCH(request: NextRequest) {
 
   if (body.createNotification) {
     const followUpAt = cleanIsoDate(body.followUpAt);
-    const contactWarning = await upsertContactFollowUp(
-      context,
-      data as DiallerLead,
-      followUpAt,
-      cleanText(body.notes) || null
-    );
     const notificationWarning = await createFollowUpNotification(
       context,
       data as DiallerLead,
       cleanText(body.followUpName) || null,
       followUpAt
     );
-    warning = warning ?? contactWarning ?? notificationWarning;
+    warning = warning ?? notificationWarning;
   }
 
   await updateMasterLeadDispositionForDiallerLead({
@@ -1694,7 +1731,7 @@ export async function DELETE(request: NextRequest) {
       ? Array.from(new Set(body.ids.map((id) => id.trim()).filter((id) => UUID_PATTERN.test(id)))).slice(0, 100)
       : [];
     let query = context.admin
-      .from('dialler_leads')
+      .from('sales_leads')
       .delete()
       .eq('workspace_id', context.workspaceId)
       .eq('user_id', context.requestUser.id);
@@ -1719,7 +1756,7 @@ export async function DELETE(request: NextRequest) {
   }
 
   const { error } = await context.admin
-    .from('dialler_leads')
+    .from('sales_leads')
     .delete()
     .eq('id', body.id)
     .eq('workspace_id', context.workspaceId)

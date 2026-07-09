@@ -46,10 +46,9 @@ export function PaywallGuard({ open, onClose }: PaywallGuardProps) {
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-[500px] rounded-2xl">
         <DialogHeader>
-          <DialogTitle>Upgrade to Pro</DialogTitle>
+          <DialogTitle>Upgrade to create more campaigns</DialogTitle>
           <DialogDescription>
-            You&apos;ve reached the free limit of 100 QR codes per month. 
-            Upgrade to Pro for unlimited QR code generation.
+            Your free workspace includes one campaign. Upgrade when you are ready to create another campaign and scale the workflow.
           </DialogDescription>
         </DialogHeader>
         <div className="py-6">
@@ -58,10 +57,10 @@ export function PaywallGuard({ open, onClose }: PaywallGuardProps) {
             <div className="text-3xl font-bold mb-4">$29<span className="text-lg text-gray-600">/month</span></div>
             <ul className="space-y-2 text-sm">
               <li className="flex items-center">
-                <span className="mr-2">✓</span> Unlimited QR code generation
+                <span className="mr-2">✓</span> Unlimited campaigns
               </li>
               <li className="flex items-center">
-                <span className="mr-2">✓</span> Unlimited campaigns
+                <span className="mr-2">✓</span> Advanced QR codes
               </li>
               <li className="flex items-center">
                 <span className="mr-2">✓</span> Advanced analytics

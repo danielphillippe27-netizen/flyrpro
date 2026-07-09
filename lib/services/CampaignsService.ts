@@ -26,6 +26,18 @@ function formatError(error: unknown): string {
   return parts.length > 0 ? parts.join(', ') : JSON.stringify(error);
 }
 
+function isWorkspaceCampaignLimitError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const e = error as { code?: string; message?: string; details?: string; hint?: string };
+  return (
+    e.code === 'P0001' &&
+    (e.message?.includes('workspace_campaign_limit_reached') ||
+      e.details?.includes('included campaign') ||
+      e.hint?.includes('workspace_campaign_limit_reached') ||
+      false)
+  );
+}
+
 type CampaignAddressBaseState = {
   building_id: string | null;
   building_gers_id: string | null;
@@ -161,7 +173,14 @@ export class CampaignsService {
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) {
+      if (isWorkspaceCampaignLimitError(error)) {
+        const limitError = new Error('This workspace already has its included campaign. Upgrade to create more campaigns.');
+        (limitError as Error & { code?: string }).code = 'workspace_campaign_limit_reached';
+        throw limitError;
+      }
+      throw error;
+    }
 
     // If addresses provided, bulk add them
     if (payload.addresses && payload.addresses.length > 0) {

@@ -18,6 +18,7 @@ import {
   Globe,
   Plug,
   Flag,
+  Layers,
   WalletCards,
   Clapperboard,
   Loader2,
@@ -129,6 +130,8 @@ function SettingsPageContent() {
   const currentWorkspaceRole = currentWorkspaceId ? membershipsByWorkspaceId[currentWorkspaceId] : null;
   const canManageWorkspaceSettings =
     currentWorkspaceRole === 'owner' || currentWorkspaceRole === 'admin';
+  const canViewMasterListSettings =
+    isSalespersonSettings || accessState?.accessLevel === 'founder';
 
   const applySalespersonStripeStatus = (payload: SalespersonStripeStatusPayload | null) => {
     if (!payload) return;
@@ -875,10 +878,10 @@ function SettingsPageContent() {
               <CardHeader>
                 <div className="flex items-center gap-2">
                   <Clapperboard className="w-5 h-5" />
-                  <CardTitle>Map controls</CardTitle>
+                  <CardTitle>Map demo controls</CardTitle>
                 </div>
                 <CardDescription>
-                  Show cinematic clapperboard controls on campaign and assignment maps.
+                  Show cinematic clapperboard controls and the assignment map Run demo button.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -895,9 +898,9 @@ function SettingsPageContent() {
                 ) : null}
                 <div className="flex items-center justify-between gap-4">
                   <div>
-                    <p className="text-base font-medium dark:text-white mb-1">Movie controls</p>
+                    <p className="text-base font-medium dark:text-white mb-1">Demo controls</p>
                     <p className="text-sm text-gray-500 dark:text-gray-400">
-                      Show cinematic clapperboard controls on campaign and assignment maps.
+                      Show cinematic clapperboard controls and the assignment map Run demo button.
                     </p>
                   </div>
                   <Switch
@@ -917,7 +920,39 @@ function SettingsPageContent() {
             </Card>
           ) : null}
 
-          {!isSalespersonSettings ? <PowerDialerSettingsCard /> : null}
+          {isSalespersonSettings ? <PowerDialerSettingsCard mode="salesperson" /> : null}
+
+          {canViewMasterListSettings ? (
+            <Card>
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <Layers className="w-5 h-5" />
+                  <CardTitle>Master lead list</CardTitle>
+                </div>
+                <CardDescription>
+                  View every shared lead row and filter assignments by member.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-base font-medium dark:text-white mb-1">Workspace master list</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      Review assigned companies, call states, lists, and member ownership in one place.
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => router.push('/settings/master-list')}
+                  >
+                    <Layers className="w-4 h-4 mr-2" />
+                    Open
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
 
           {!isSalespersonSettings ? (
             <>

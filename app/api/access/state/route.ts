@@ -35,8 +35,8 @@ export async function GET(request: NextRequest) {
     );
     const { data: workspaceRows } = workspaceIds.length
       ? await admin
-          .from('workspaces')
-          .select('id, name, industry, subscription_status, trial_ends_at, max_seats, onboarding_completed_at')
+        .from('workspaces')
+          .select('id, name, industry, subscription_status, trial_ends_at, max_seats, onboarding_completed_at, referral_code_used')
           .in('id', workspaceIds)
       : { data: [] };
     const workspaceOptions = (workspaceRows ?? []).map((workspace) => {
@@ -121,16 +121,9 @@ export async function GET(request: NextRequest) {
     }
 
     const status = workspace.subscription_status ?? 'inactive';
-    const trialEnd = workspace.trial_ends_at
-      ? new Date(workspace.trial_ends_at)
-      : null;
-    const nowDate = new Date();
-    const trialExpired =
-      status === 'trialing' && !!trialEnd && trialEnd <= nowDate;
-    const subscriptionAccess =
-      status === 'active' ||
-      (status === 'trialing' && (!trialEnd || trialEnd > nowDate));
-    const hasAccess = subscriptionAccess || access.isFounder || isAmbassador;
+    const isSelfServeDemoWorkspace = workspace.referral_code_used === 'SELF_SERVE_DEMO';
+    const paidWorkspaceAccess = status === 'active';
+    const hasAccess = true;
     const billableSeats = await getSeatUsage(admin, workspace.id, {
       maxSeats: workspace.max_seats ?? null,
     })
@@ -139,22 +132,17 @@ export async function GET(request: NextRequest) {
         console.warn('[access/state] seat usage lookup failed; falling back to workspace max seats', error);
         return Math.max(1, workspace.max_seats ?? 1);
       });
-    const now = Date.now();
-    const trialDaysRemaining =
-      status === 'trialing' && trialEnd && trialEnd.getTime() > now
-        ? Math.max(0, Math.ceil((trialEnd.getTime() - now) / (24 * 60 * 60 * 1000)))
-        : null;
     const planBadgeLabel =
       isAmbassador
         ? 'AMBASSADOR'
+        : isSelfServeDemoWorkspace
+          ? 'FREE'
         : status === 'active'
         ? 'PRO'
-        : trialDaysRemaining != null
-          ? `${trialDaysRemaining} day trial`
-          : null;
+        : '1 CAMPAIGN';
     const plan = isAmbassador
       ? 'ambassador'
-      : status === 'active' || subscriptionAccess
+      : paidWorkspaceAccess
         ? 'pro'
         : 'free';
 
@@ -166,14 +154,12 @@ export async function GET(request: NextRequest) {
       workspaceName: workspace.name,
       industry: workspace.industry ?? null,
       maxSeats: workspace.max_seats ?? 1,
-      billableSeats: trialExpired
-        ? billableSeats
-        : Math.max(1, workspace.max_seats ?? 1, billableSeats),
+      billableSeats: Math.max(1, workspace.max_seats ?? 1, billableSeats),
       hasAccess,
       plan,
       subscriptionStatus: status,
       trialEndsAt: workspace.trial_ends_at ?? null,
-      trialDaysRemaining,
+      trialDaysRemaining: null,
       planBadgeLabel,
       isFounder: access.isFounder,
       isAmbassador,
@@ -187,11 +173,7 @@ export async function GET(request: NextRequest) {
       onboardingComplete: !!workspace.onboarding_completed_at,
       memberCount: access.memberCount,
       workspaces: workspaceOptions,
-      reason: trialExpired
-        ? 'trial-ended'
-        : access.level === 'member' && !hasAccess
-          ? 'member-inactive'
-          : undefined,
+      reason: undefined,
     });
   } catch (e) {
     console.error('Access state error:', e);

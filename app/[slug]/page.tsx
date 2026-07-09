@@ -38,7 +38,7 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
         title: ambassadorLanding.headline || 'FLYR Partner Offer',
         description:
           ambassadorLanding.intro_message ||
-          'Start your 14 day free trial with a FLYR ambassador link.',
+          'Start with one included campaign through a FLYR ambassador link.',
       };
     }
 

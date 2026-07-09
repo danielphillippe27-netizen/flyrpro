@@ -3413,17 +3413,7 @@ export function CampaignDetailMapView({
                 <Minus className="h-4 w-4" />
               </button>
             </div>
-            <div className="pointer-events-auto flex overflow-hidden rounded-lg border border-gray-200 bg-white/92 shadow-sm backdrop-blur-sm dark:border-gray-700 dark:bg-black/82">
-              <button
-                type="button"
-                onClick={toggleMapPitch}
-                className="flex h-8 w-8 items-center justify-center text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
-                aria-label="Toggle map tilt"
-                title="Toggle map tilt"
-              >
-                <Compass className="h-4 w-4" />
-              </button>
-              <div className="w-px bg-gray-200 dark:bg-gray-700" />
+            <div className="pointer-events-auto flex flex-col overflow-hidden rounded-lg border border-gray-200 bg-white/92 shadow-sm backdrop-blur-sm dark:border-gray-700 dark:bg-black/82">
               <button
                 type="button"
                 onClick={rotateMapClockwise}
@@ -3432,6 +3422,16 @@ export function CampaignDetailMapView({
                 title="Rotate map"
               >
                 <RotateCw className="h-4 w-4" />
+              </button>
+              <div className="h-px bg-gray-200 dark:bg-gray-700" />
+              <button
+                type="button"
+                onClick={toggleMapPitch}
+                className="flex h-8 w-8 items-center justify-center text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+                aria-label="Toggle map tilt"
+                title="Toggle map tilt"
+              >
+                <Compass className="h-4 w-4" />
               </button>
             </div>
           </div>

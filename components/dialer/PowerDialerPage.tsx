@@ -58,7 +58,7 @@ type DialerAccessResponse = {
   } | null;
 };
 
-type DiallerLeadStatus = 'pending' | 'no_answer' | 'answered' | 'skipped';
+type DiallerLeadStatus = 'pending' | 'completed' | 'no_answer' | 'answered' | 'skipped';
 type PlaceCallOptions = {
   doubleDial?: boolean;
   forceLeadId?: string;
@@ -190,9 +190,10 @@ function getTwoDayFollowUpAt(): string {
 function statusForLead(lead: DiallerLead): DiallerLeadStatus {
   if (lead.disposition === 'dnc') return 'skipped';
   if (lead.latest_call_outcome === 'answered') return 'answered';
-  if (lead.latest_call_outcome === 'no_answer') return 'no_answer';
   if (lead.disposition === 'interested' || lead.disposition === 'callback') return 'answered';
   if (lead.disposition === 'not_now') return 'no_answer';
+  if (lead.called_at) return 'completed';
+  if (lead.latest_call_outcome === 'no_answer') return 'no_answer';
   return 'pending';
 }
 
@@ -204,6 +205,8 @@ function leadStatusLabel(status: DiallerLeadStatus): string {
       return 'Answered';
     case 'skipped':
       return 'Skipped';
+    case 'completed':
+      return 'Completed';
     default:
       return 'Pending';
   }
@@ -216,6 +219,8 @@ function leadStatusPillClass(status: DiallerLeadStatus): string {
     case 'no_answer':
     case 'skipped':
       return 'border-red-500/40 bg-red-500/15 text-red-700 dark:text-red-200';
+    case 'completed':
+      return 'border-sky-500/40 bg-sky-500/15 text-sky-700 dark:text-sky-200';
     default:
       return 'border-border bg-muted text-muted-foreground';
   }
@@ -486,6 +491,7 @@ export function PowerDialerPage() {
   const doubleDialRetryRef = useRef<{ leadId: string; remaining: number } | null>(null);
   const placeCurrentCallRef = useRef<((options?: PlaceCallOptions) => Promise<void>) | null>(null);
   const hydratedLeadIdRef = useRef<string | null>(null);
+  const callWasConnectedRef = useRef(false);
 
   const [dialerAccess, setDialerAccess] = useState<DialerAccessResponse | null>(null);
   const [dialerAccessLoading, setDialerAccessLoading] = useState(true);
@@ -524,21 +530,29 @@ export function PowerDialerPage() {
   const focusedListName = searchParams.get('listName')?.trim() || '';
   const focusedWorkspaceId = searchParams.get('workspaceId')?.trim() || '';
   const hasFocusedDialerList = focusedLeadIds.length > 0;
+  const pendingLeads = useMemo(
+    () => leads.filter((lead) => statusForLead(lead) === 'pending'),
+    [leads]
+  );
+  const completedLeads = useMemo(
+    () => leads.filter((lead) => statusForLead(lead) !== 'pending'),
+    [leads]
+  );
 
   const activeLead = useMemo(
     () =>
       leads.find((lead) => lead.id === activeLeadId) ??
-      leads.find((lead) => statusForLead(lead) === 'pending') ??
+      pendingLeads[0] ??
       leads[0] ??
       null,
-    [activeLeadId, leads]
+    [activeLeadId, leads, pendingLeads]
   );
   const hasActiveLead = Boolean(activeLead);
   const activeRecordingExportHref = getLeadRecordingExportHref(activeLead, currentWorkspaceId);
   const activeRecordingDuration = formatRecordingDuration(activeLead?.latest_call_recording?.duration_seconds);
-  const calledCount = leads.filter((lead) => statusForLead(lead) !== 'pending').length;
-  const connectedCount = leads.filter((lead) => statusForLead(lead) === 'answered').length;
-  const remainingCount = leads.filter((lead) => statusForLead(lead) === 'pending').length;
+  const calledCount = completedLeads.length;
+  const connectedCount = completedLeads.filter((lead) => statusForLead(lead) === 'answered').length;
+  const remainingCount = pendingLeads.length;
   const repFirstName = getRepFirstName(dialerAccess);
   const micLevelPercent = Math.round(device.micLevel * 100);
   const micSignalActive = device.micLevel > 0.03;
@@ -631,6 +645,16 @@ export function PowerDialerPage() {
       window.clearInterval(interval);
     };
   }, [activeCallId, currentWorkspaceId, device.callPhase, diallerRunning, leads.length, loadDiallerLeads]);
+
+  useEffect(() => {
+    if (!activeCallId) {
+      callWasConnectedRef.current = false;
+      return;
+    }
+    if (device.callPhase === 'connected') {
+      callWasConnectedRef.current = true;
+    }
+  }, [activeCallId, device.callPhase]);
 
   useEffect(() => {
     const userAgent = window.navigator.userAgent;
@@ -973,45 +997,87 @@ export function PowerDialerPage() {
     }
   };
 
-  const removeLeadFromDiallerQueue = useCallback(async (
+  const markLeadCalledInDiallerQueue = useCallback(async (
     leadId: string,
-    options?: { silent?: boolean }
+    options?: { silent?: boolean; callId?: string | null; connected?: boolean }
   ): Promise<boolean> => {
     if (!currentWorkspaceId) return false;
 
     try {
+      let updatedCall: DialerCall | null = null;
+      if (options?.callId) {
+        const callResponse = await fetch(`/api/dialer/calls/${encodeURIComponent(options.callId)}/hangup`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            workspaceId: currentWorkspaceId,
+            outcome: options.connected ? 'connected' : 'completed',
+          }),
+        });
+        const callData = (await callResponse.json().catch(() => ({}))) as { call?: DialerCall };
+        if (callResponse.ok && callData.call) {
+          updatedCall = callData.call;
+        }
+      }
+
       const response = await fetch('/api/dialer/leads', {
-        method: 'DELETE',
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
           workspaceId: currentWorkspaceId,
           id: leadId,
+          markCalled: true,
         }),
       });
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
-      if (!response.ok) throw new Error(data.error || 'Failed to remove lead from the dialler.');
+      const data = (await response.json().catch(() => ({}))) as { lead?: DiallerLead; error?: string };
+      if (!response.ok || !data.lead) throw new Error(data.error || 'Failed to mark lead completed.');
 
       setLeads((currentLeads) => {
-        const removedIndex = currentLeads.findIndex((lead) => lead.id === leadId);
-        const nextLeads = currentLeads.filter((lead) => lead.id !== leadId);
+        const currentIndex = currentLeads.findIndex((lead) => lead.id === leadId);
+        const nextLeads = currentLeads.map((lead) =>
+          lead.id === leadId
+            ? {
+                ...lead,
+                ...data.lead,
+                latest_call_id: updatedCall?.id ?? lead.latest_call_id,
+                latest_call_status: updatedCall?.status ?? lead.latest_call_status,
+                latest_call_outcome: options?.connected
+                  ? 'answered'
+                  : updatedCall
+                  ? updatedCall.answered_at || updatedCall.status === 'answered' || updatedCall.status === 'in-progress'
+                    ? 'answered'
+                    : updatedCall.status === 'completed'
+                      ? updatedCall.answered_at
+                        ? 'answered'
+                        : 'no_answer'
+                      : ['no-answer', 'busy', 'failed', 'canceled'].includes(updatedCall.status ?? '')
+                        ? 'no_answer'
+                        : lead.latest_call_outcome
+                  : lead.latest_call_outcome,
+                latest_call_answered_at: updatedCall?.answered_at ?? lead.latest_call_answered_at,
+                latest_call_ended_at: updatedCall?.ended_at ?? lead.latest_call_ended_at,
+                latest_call_created_at: updatedCall?.created_at ?? lead.latest_call_created_at,
+              }
+            : lead
+        );
         setActiveLeadId((currentId) => {
           if (currentId && currentId !== leadId && nextLeads.some((lead) => lead.id === currentId)) return currentId;
-          const laterPending = nextLeads.slice(Math.max(removedIndex, 0)).find((lead) => statusForLead(lead) === 'pending');
+          const laterPending = nextLeads.slice(Math.max(currentIndex + 1, 0)).find((lead) => statusForLead(lead) === 'pending');
           const firstPending = nextLeads.find((lead) => statusForLead(lead) === 'pending');
           return laterPending?.id ?? firstPending?.id ?? nextLeads[0]?.id ?? null;
         });
         return nextLeads;
       });
-      setActiveLeadSnapshot((snapshot) => (snapshot?.id === leadId ? null : snapshot));
       return true;
     } catch (removeError) {
       if (!options?.silent) {
-        setError(removeError instanceof Error ? removeError.message : 'Failed to remove lead from the dialler.');
+        setError(removeError instanceof Error ? removeError.message : 'Failed to mark lead completed.');
       }
       return false;
     }
-  }, [currentWorkspaceId, setActiveLeadId, setActiveLeadSnapshot, setLeads]);
+  }, [currentWorkspaceId, setActiveLeadId, setLeads]);
 
   const advanceToNextLead = useCallback((updatedLeads: DiallerLead[], currentLeadId: string) => {
     const currentIndex = updatedLeads.findIndex((lead) => lead.id === currentLeadId);
@@ -1071,16 +1137,13 @@ export function PowerDialerPage() {
       const data = (await response.json().catch(() => ({}))) as { lead?: DiallerLead; error?: string; warning?: string | null };
       if (!response.ok || !data.lead) throw new Error(data.error || 'Failed to save lead.');
 
-      const removedFromQueue = await removeLeadFromDiallerQueue(data.lead.id, { silent: true });
-      if (!removedFromQueue) {
-        setLeads((currentLeads) => {
-          const updatedLeads = currentLeads.map((lead) => (lead.id === data.lead!.id ? data.lead! : lead));
-          if (!suppressAutoAdvance || forceAdvance) {
-            advanceToNextLead(updatedLeads, data.lead!.id);
-          }
-          return updatedLeads;
-        });
-      }
+      setLeads((currentLeads) => {
+        const updatedLeads = currentLeads.map((lead) => (lead.id === data.lead!.id ? data.lead! : lead));
+        if (!suppressAutoAdvance || forceAdvance) {
+          advanceToNextLead(updatedLeads, data.lead!.id);
+        }
+        return updatedLeads;
+      });
       setMessage(data.warning ?? successMessage);
       return true;
     } catch (saveError) {
@@ -1285,8 +1348,10 @@ export function PowerDialerPage() {
     const retry = doubleDialRetryRef.current;
     const endedLeadId = activeLeadId;
     const shouldKeepDiallerRunning = diallerRunning;
+    const wasConnected = callWasConnectedRef.current;
     setActiveCallId(null);
     setActiveCallIsDoubleDial(false);
+    callWasConnectedRef.current = false;
     device.resetEndedPhase();
 
     if (retry && retry.remaining > 0) {
@@ -1308,7 +1373,7 @@ export function PowerDialerPage() {
 
     const nextLead = endedLeadId ? findNextDialableLead(leads, endedLeadId) : null;
     if (endedLeadId) {
-      void removeLeadFromDiallerQueue(endedLeadId, { silent: true });
+      void markLeadCalledInDiallerQueue(endedLeadId, { silent: true, callId: activeCallId, connected: wasConnected });
     }
 
     if (shouldKeepDiallerRunning) {
@@ -1332,7 +1397,7 @@ export function PowerDialerPage() {
     device,
     diallerRunning,
     leads,
-    removeLeadFromDiallerQueue,
+    markLeadCalledInDiallerQueue,
     setActiveCallId,
     setActiveCallIsDoubleDial,
     setDiallerRunning,
@@ -1548,6 +1613,13 @@ export function PowerDialerPage() {
     if (!activeLead) return;
 
     doubleDialRetryRef.current = null;
+    if (statusForLead(activeLead) === 'pending') {
+      await markLeadCalledInDiallerQueue(activeLead.id, {
+        silent: true,
+        callId: activeCallId,
+        connected: callWasConnectedRef.current,
+      });
+    }
     const result = await placeNextDiallerCall();
     if (result.ok) {
       setError(null);
@@ -1560,14 +1632,27 @@ export function PowerDialerPage() {
 
   const handleHangUp = () => {
     doubleDialRetryRef.current = null;
+    const leadToComplete = activeLead;
+    const callIdToComplete = activeCallId;
+    const wasConnected = callWasConnectedRef.current || device.callPhase === 'connected';
     if (device.isInCall) {
       device.hangUp();
-    } else if (activeCallId && currentWorkspaceId) {
-      void fetch(`/api/dialer/calls/${encodeURIComponent(activeCallId)}/hangup`, {
+    }
+    if (leadToComplete && statusForLead(leadToComplete) === 'pending') {
+      void markLeadCalledInDiallerQueue(leadToComplete.id, {
+        silent: true,
+        callId: callIdToComplete,
+        connected: wasConnected,
+      });
+    } else if (callIdToComplete && currentWorkspaceId) {
+      void fetch(`/api/dialer/calls/${encodeURIComponent(callIdToComplete)}/hangup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ workspaceId: currentWorkspaceId }),
+        body: JSON.stringify({
+          workspaceId: currentWorkspaceId,
+          outcome: wasConnected ? 'connected' : 'completed',
+        }),
       }).catch((error) => {
         console.warn('[power-dialer] failed to hang up backend call', error);
       });
@@ -1575,7 +1660,87 @@ export function PowerDialerPage() {
     setDiallerRunning(false);
     setActiveCallId(null);
     setActiveCallIsDoubleDial(false);
+    callWasConnectedRef.current = false;
     setMessage('Call hung up.');
+  };
+
+  const renderLeadRow = (lead: DiallerLead) => {
+    const status = statusForLead(lead);
+    const isActive = lead.id === activeLead?.id;
+    const recordingHref = getLeadRecordingExportHref(lead, currentWorkspaceId);
+    const recordingDuration = formatRecordingDuration(lead.latest_call_recording?.duration_seconds);
+    return (
+      <div
+        key={lead.id}
+        className={cn(
+          'grid min-h-[64px] w-full gap-1.5 px-3 py-3 text-left transition hover:bg-muted/70 sm:grid-cols-[auto_1.2fr_1fr_0.9fr_auto_auto] sm:items-center sm:gap-2 sm:px-4',
+          isActive && 'bg-muted'
+        )}
+      >
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          onClick={() => void handleToggleLeadStar(lead)}
+          disabled={starringLeadId !== null}
+          className="h-8 w-8 justify-self-start text-muted-foreground hover:text-foreground"
+          title={lead.is_starred ? 'Remove from starred recordings' : 'Star lead for recordings'}
+          aria-label={lead.is_starred ? 'Remove from starred recordings' : 'Star lead for recordings'}
+        >
+          {starringLeadId === lead.id ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Star className={cn('h-4 w-4', lead.is_starred && 'fill-amber-400 text-amber-500')} />
+          )}
+        </Button>
+        <button
+          type="button"
+          onClick={() => setActiveLeadId(lead.id)}
+          className="min-w-0 truncate text-left text-sm font-medium text-foreground"
+        >
+          {lead.name || 'Lead'}
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveLeadId(lead.id)}
+          className="min-w-0 truncate text-left text-sm text-muted-foreground"
+        >
+          {lead.company || '-'}
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveLeadId(lead.id)}
+          className="text-left text-sm text-muted-foreground"
+        >
+          {formatPhoneDisplay(lead.phone)}
+        </button>
+        <Badge
+          variant="outline"
+          className={cn('w-fit sm:justify-self-end', leadStatusPillClass(status))}
+        >
+          {leadStatusLabel(status)}
+        </Badge>
+        {recordingHref ? (
+          <Button
+            asChild
+            variant="outline"
+            size="icon-sm"
+            className={cn('h-8 w-8 sm:justify-self-end', DIALER_OUTLINE_BUTTON_CLASS)}
+          >
+            <a
+              href={recordingHref}
+              download
+              title={recordingDuration ? `Export recording (${recordingDuration})` : 'Export recording'}
+              aria-label={recordingDuration ? `Export recording (${recordingDuration})` : 'Export recording'}
+            >
+              <Download className="h-4 w-4" />
+            </a>
+          </Button>
+        ) : (
+          <span className="hidden h-8 w-8 sm:block" aria-hidden="true" />
+        )}
+      </div>
+    );
   };
 
   return (
@@ -1873,21 +2038,21 @@ export function PowerDialerPage() {
                   onChange={(event) => setNotes(event.target.value)}
                   disabled={!hasActiveLead || saving || savingContact || sendingDemoEmail}
                   placeholder="Add note"
-                  className={cn('min-h-12 resize-none pl-9 text-base sm:min-h-12', DIALER_INPUT_CLASS)}
+                  className={cn('min-h-[88px] resize-y pl-9 text-base leading-6', DIALER_INPUT_CLASS)}
                 />
               </div>
             </div>
             <div className="rounded-md border border-border bg-muted px-3 py-2">
-              <div className="grid min-h-12 gap-2 sm:grid-cols-[minmax(0,1fr)_132px] sm:items-center">
-                <label className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-3">
-                  <span className="shrink-0 text-xs font-medium uppercase text-muted-foreground">Text drop</span>
+              <div className="grid min-h-12 gap-2 sm:grid-cols-[minmax(0,1fr)_132px] sm:items-start">
+                <label className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-3">
+                  <span className="shrink-0 pt-2 text-xs font-medium uppercase text-muted-foreground">Text drop</span>
                   <textarea
                     value={textBody}
                     onChange={(event) => handleTextBodyChange(event.target.value)}
                     disabled={!hasActiveLead || sendingText || saving}
                     placeholder={activeLead ? 'Write a text message...' : `Hey there, its ${repFirstName} with FLYR can you give me a call back when you get a chance !`}
-                    rows={1}
-                    className="h-6 min-h-6 w-full resize-none overflow-hidden border-0 bg-transparent p-0 text-base leading-6 text-foreground outline-none placeholder:text-muted-foreground focus:ring-0 disabled:cursor-not-allowed disabled:text-muted-foreground disabled:opacity-100"
+                    rows={3}
+                    className="min-h-[72px] w-full resize-y overflow-y-auto border-0 bg-transparent p-0 py-2 text-base leading-6 text-foreground outline-none placeholder:text-muted-foreground focus:ring-0 disabled:cursor-not-allowed disabled:text-muted-foreground disabled:opacity-100"
                   />
                 </label>
                 <Button
@@ -2156,7 +2321,9 @@ export function PowerDialerPage() {
               <div>
                 <h2 className="text-base font-semibold text-foreground">People</h2>
                 <p className="text-sm text-muted-foreground">
-                  {leads.length > 0 ? `${leads.length} leads loaded.` : 'Add a Leads list or import a CSV to begin.'}
+                  {leads.length > 0
+                    ? `${pendingLeads.length} pending, ${completedLeads.length} completed.`
+                    : 'Add a Leads list or import a CSV to begin.'}
                 </p>
               </div>
               <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -2215,91 +2382,42 @@ export function PowerDialerPage() {
               </div>
             </div>
 
-            <div className="max-h-[22rem] overflow-y-auto rounded-xl border border-border bg-card">
+            <div className="max-h-[28rem] overflow-y-auto rounded-xl border border-border bg-card">
               {leads.length === 0 ? (
                 <div className="px-4 py-8 text-sm text-muted-foreground">
                   No leads loaded.
                 </div>
               ) : (
-                <div className="divide-y divide-border">
-                  {leads.map((lead) => {
-                    const status = statusForLead(lead);
-                    const isActive = lead.id === activeLead?.id;
-                    const recordingHref = getLeadRecordingExportHref(lead, currentWorkspaceId);
-                    const recordingDuration = formatRecordingDuration(lead.latest_call_recording?.duration_seconds);
-                    return (
-                      <div
-                        key={lead.id}
-                        className={cn(
-                          'grid min-h-[64px] w-full gap-1.5 px-3 py-3 text-left transition hover:bg-muted/70 sm:grid-cols-[auto_1.2fr_1fr_0.9fr_auto_auto] sm:items-center sm:gap-2 sm:px-4',
-                          isActive && 'bg-muted'
-                        )}
-                      >
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          onClick={() => void handleToggleLeadStar(lead)}
-                          disabled={starringLeadId !== null}
-                          className="h-8 w-8 justify-self-start text-muted-foreground hover:text-foreground"
-                          title={lead.is_starred ? 'Remove from starred recordings' : 'Star lead for recordings'}
-                          aria-label={lead.is_starred ? 'Remove from starred recordings' : 'Star lead for recordings'}
-                        >
-                          {starringLeadId === lead.id ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Star className={cn('h-4 w-4', lead.is_starred && 'fill-amber-400 text-amber-500')} />
-                          )}
-                        </Button>
-                        <button
-                          type="button"
-                          onClick={() => setActiveLeadId(lead.id)}
-                          className="min-w-0 truncate text-left text-sm font-medium text-foreground"
-                        >
-                          {lead.name || 'Lead'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setActiveLeadId(lead.id)}
-                          className="min-w-0 truncate text-left text-sm text-muted-foreground"
-                        >
-                          {lead.company || '—'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setActiveLeadId(lead.id)}
-                          className="text-left text-sm text-muted-foreground"
-                        >
-                          {formatPhoneDisplay(lead.phone)}
-                        </button>
-                        <Badge
-                          variant="outline"
-                          className={cn('w-fit sm:justify-self-end', leadStatusPillClass(status))}
-                        >
-                          {leadStatusLabel(status)}
-                        </Badge>
-                        {recordingHref ? (
-                          <Button
-                            asChild
-                            variant="outline"
-                            size="icon-sm"
-                            className={cn('h-8 w-8 sm:justify-self-end', DIALER_OUTLINE_BUTTON_CLASS)}
-                          >
-                            <a
-                              href={recordingHref}
-                              download
-                              title={recordingDuration ? `Export recording (${recordingDuration})` : 'Export recording'}
-                              aria-label={recordingDuration ? `Export recording (${recordingDuration})` : 'Export recording'}
-                            >
-                              <Download className="h-4 w-4" />
-                            </a>
-                          </Button>
-                        ) : (
-                          <span className="hidden h-8 w-8 sm:block" aria-hidden="true" />
-                        )}
-                      </div>
-                    );
-                  })}
+                <div>
+                  <div className="border-b border-border bg-muted/40 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Pending calls ({pendingLeads.length})
+                  </div>
+                  {pendingLeads.length > 0 ? (
+                    <div className="divide-y divide-border">
+                      {pendingLeads.map(renderLeadRow)}
+                    </div>
+                  ) : (
+                    <div className="px-4 py-5 text-sm text-muted-foreground">
+                      No pending calls.
+                    </div>
+                  )}
+
+                  <div className="border-y border-border bg-background px-4 py-3">
+                    <div className="h-px bg-border" />
+                  </div>
+
+                  <div className="border-b border-border bg-muted/40 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Completed calls ({completedLeads.length})
+                  </div>
+                  {completedLeads.length > 0 ? (
+                    <div className="divide-y divide-border">
+                      {completedLeads.map(renderLeadRow)}
+                    </div>
+                  ) : (
+                    <div className="px-4 py-5 text-sm text-muted-foreground">
+                      Completed calls will appear here.
+                    </div>
+                  )}
                 </div>
               )}
             </div>

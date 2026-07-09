@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useWorkspace } from '@/lib/workspace-context';
+import { getClientAsync } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -263,8 +264,18 @@ export function ActivityPageView({
           params.set('memberId', selectedMemberId);
         }
         if (campaignId) params.set('campaignId', campaignId);
-        const res = await fetch(`/api/activity?${params}`);
-        if (!res.ok) throw new Error(await res.text());
+        const sessionResult = await getClientAsync()
+          .then((supabase) => supabase.auth.getSession())
+          .catch(() => null);
+        const accessToken = sessionResult?.data.session?.access_token ?? null;
+        const res = await fetch(`/api/activity?${params.toString()}`, {
+          credentials: 'include',
+          headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+        });
+        if (!res.ok) {
+          const payload = (await res.json().catch(() => null)) as { error?: string; message?: string } | null;
+          throw new Error(payload?.error || payload?.message || `Failed to load activity (${res.status})`);
+        }
         const data = (await res.json()) as ActivityResponse;
         const list = (data.events ?? []) as ActivityEvent[];
         setEvents((prev) => (append ? [...prev, ...list] : list));

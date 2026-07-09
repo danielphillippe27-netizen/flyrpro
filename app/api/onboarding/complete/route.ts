@@ -1,11 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { after, NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
-import {
-  AMBASSADOR_TRIAL_DAYS,
-  PARTNER_EXCLUSIVE_TRIAL_DAYS,
-  WORKSPACE_TRIAL_DAYS,
-} from '@/app/lib/billing/workspace-trial';
 import {
   buildJoinUrl,
   createWorkspaceInviteRecord,
@@ -38,16 +33,16 @@ import {
 import { normalizeCountryCode } from '@/lib/countries';
 import { sanitizeTrackingParam } from '@/app/lib/ambassador/portal';
 import { markConvertedDemoLinks } from '@/lib/dialer/demo-link-tracking';
+import { seedStarterCampaignForWorkspace } from '@/lib/onboarding/demo';
 
 const INDUSTRIES = [
-  'Real Estate',
+  'Home service',
   'Solar',
   'Roofing & Exteriors',
-  'Financing',
-  'Home Health Care',
-  'HVAC & Plumbing',
+  'HVAC',
+  'Real Estate',
   'Insurance',
-  'Landscaping & Snow',
+  'Landscaping',
   'Pest Control',
   'Political / Canvassing',
   'Pool Service',
@@ -55,6 +50,7 @@ const INDUSTRIES = [
 ] as const;
 
 const INVITE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const SELF_SERVE_CAMPAIGN_NAME = 'FIRST CAMPAIGN';
 
 type SalespersonInviteRow = {
   id: string;
@@ -69,6 +65,156 @@ type SalespersonInviteRow = {
   onboarding_completed_at: string | null;
   stripe_connect_account_id: string | null;
 };
+
+function isCampaignTypeConstraintError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const candidate = error as { code?: string; message?: string; details?: string | null };
+  return (
+    candidate.code === '23514' ||
+    candidate.message?.includes('campaigns_type_check') ||
+    candidate.details?.includes('campaigns_type_check') ||
+    false
+  );
+}
+
+async function findFirstWorkspaceCampaign(
+  admin: ReturnType<typeof createAdminClient>,
+  workspaceId: string
+): Promise<string | null> {
+  const { data } = await admin
+    .from('campaigns')
+    .select('id')
+    .eq('workspace_id', workspaceId)
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  return data?.id ?? null;
+}
+
+async function createSelfServeCampaignFallback(params: {
+  admin: ReturnType<typeof createAdminClient>;
+  workspaceId: string;
+  userId: string;
+  name?: string | null;
+  region?: string | null;
+  polygon?: GeoJSON.Polygon | null;
+  bbox?: number[] | null;
+}): Promise<string> {
+  const existingCampaignId = await findFirstWorkspaceCampaign(params.admin, params.workspaceId);
+  if (existingCampaignId) return existingCampaignId;
+
+  const campaignName =
+    typeof params.name === 'string' && params.name.trim()
+      ? `${params.name.trim()} Campaign`
+      : SELF_SERVE_CAMPAIGN_NAME;
+  const basePayload = {
+    owner_id: params.userId,
+    workspace_id: params.workspaceId,
+    name: campaignName,
+    title: campaignName,
+    description: params.polygon
+      ? 'Self-serve prospecting map created from the demo flow.'
+      : 'Campaign created from the self-serve first campaign setup.',
+    type: 'prospecting',
+    address_source: 'map',
+    region: params.region || null,
+    seed_query: null,
+    tags: params.polygon ? 'self-serve-demo,prospecting-map' : 'self-serve-demo',
+    bbox: params.bbox ?? null,
+    territory_boundary: params.polygon ?? null,
+    total_flyers: 0,
+    scans: 0,
+    conversions: 0,
+    status: 'draft',
+    provision_status: params.polygon ? 'pending' : null,
+    provision_phase: params.polygon ? 'created' : null,
+    provision_source: null,
+    provisioned_at: null,
+    addresses_ready_at: null,
+    map_ready_at: null,
+    optimized_at: null,
+    has_parcels: false,
+    building_link_confidence: 0,
+    map_mode: 'standard_pins',
+    parcel_enrichment_status: 'not_started',
+    link_quality_status: 'unknown',
+    link_quality_score: 0,
+    link_quality_reason: null,
+    link_quality_checked_at: null,
+    link_quality_metrics: {},
+  };
+
+  let { data: campaign, error } = await params.admin
+    .from('campaigns')
+    .insert(basePayload)
+    .select('id')
+    .single();
+
+  if (error && isCampaignTypeConstraintError(error)) {
+    const retry = await params.admin
+      .from('campaigns')
+      .insert({
+        ...basePayload,
+        type: 'flyer',
+      })
+      .select('id')
+      .single();
+    campaign = retry.data;
+    error = retry.error;
+  }
+
+  if (error || !campaign?.id) {
+    console.error('[onboarding/complete] self-serve fallback campaign insert failed:', error);
+    throw new Error('Failed to create starter campaign.');
+  }
+
+  return campaign.id;
+}
+
+function isFiniteNumberArray(value: unknown, expectedLength: number): value is number[] {
+  return (
+    Array.isArray(value) &&
+    value.length === expectedLength &&
+    value.every((item) => typeof item === 'number' && Number.isFinite(item))
+  );
+}
+
+function normalizeSelfServeCampaignDraft(value: unknown): {
+  name: string | null;
+  polygon: GeoJSON.Polygon;
+  bbox: number[] | null;
+} | null {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as {
+    name?: unknown;
+    polygon?: unknown;
+    bbox?: unknown;
+  };
+  const polygon = candidate.polygon as GeoJSON.Polygon | null;
+  if (
+    !polygon ||
+    polygon.type !== 'Polygon' ||
+    !Array.isArray(polygon.coordinates) ||
+    polygon.coordinates.length === 0
+  ) {
+    return null;
+  }
+
+  const hasUsableRing = polygon.coordinates.some(
+    (ring) =>
+      Array.isArray(ring) &&
+      ring.length >= 4 &&
+      ring.every((point) => isFiniteNumberArray(point, 2))
+  );
+  if (!hasUsableRing) return null;
+
+  return {
+    name: typeof candidate.name === 'string' && candidate.name.trim() ? candidate.name.trim() : null,
+    polygon,
+    bbox: isFiniteNumberArray(candidate.bbox, 4) ? candidate.bbox : null,
+  };
+}
 
 function normalizeEmailArray(values: unknown): string[] {
   if (!Array.isArray(values)) return [];
@@ -186,6 +332,7 @@ async function createSalespersonStripeOnboardingRedirect(params: {
 }
 
 export async function POST(request: NextRequest) {
+  let requestedClientSource = '';
   try {
     const requestUser = await resolveUserFromRequest(request);
     if (!requestUser) {
@@ -226,7 +373,17 @@ export async function POST(request: NextRequest) {
       clientSource?: string;
       teamMemberEmails?: string[];
       openAppAfterCompletion?: boolean;
+      openCampaignCreateAfterCompletion?: boolean;
+      resumeCampaignAfterOnboarding?: boolean;
+      selfServeCampaignDraft?: unknown;
     };
+    const clientSource =
+      typeof body?.clientSource === 'string' ? body.clientSource.trim().toLowerCase() : '';
+    requestedClientSource = clientSource;
+    const isSelfServeDemoCompletion = clientSource === 'self-serve-demo';
+    const selfServeCampaignDraft = isSelfServeDemoCompletion
+      ? normalizeSelfServeCampaignDraft(body?.selfServeCampaignDraft)
+      : null;
 
     const admin = createAdminClient();
 
@@ -603,9 +760,9 @@ export async function POST(request: NextRequest) {
       workspaceId = newWorkspace.id;
     }
 
-    const { data: currentWorkspace, error: currentWorkspaceError } = await admin
+    const { error: currentWorkspaceError } = await admin
       .from('workspaces')
-      .select('subscription_status, trial_ends_at, onboarding_completed_at')
+      .select('onboarding_completed_at')
       .eq('id', workspaceId)
       .maybeSingle();
 
@@ -616,12 +773,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const currentSubscriptionStatus = currentWorkspace?.subscription_status ?? 'inactive';
-    const currentTrialEndsAt =
-      typeof currentWorkspace?.trial_ends_at === 'string'
-        ? currentWorkspace.trial_ends_at
-        : null;
-    const onboardingWasComplete = !!currentWorkspace?.onboarding_completed_at;
     const partnerOfferToken =
       typeof body?.partnerOfferToken === 'string' && body.partnerOfferToken.trim()
         ? body.partnerOfferToken.trim()
@@ -709,22 +860,10 @@ export async function POST(request: NextRequest) {
 
       updates.referral_code_used = normalizedReferralCode;
     }
+    if (isSelfServeDemoCompletion) {
+      updates.referral_code_used = 'SELF_SERVE_DEMO';
+    }
 
-    const trialDays = onboardingAmbassadorReferral
-      ? AMBASSADOR_TRIAL_DAYS
-      : isValidPartnerExclusiveOffer
-        ? PARTNER_EXCLUSIVE_TRIAL_DAYS
-        : WORKSPACE_TRIAL_DAYS;
-
-    const shouldStartTrial =
-      !onboardingWasComplete &&
-      currentSubscriptionStatus === 'inactive' &&
-      !currentTrialEndsAt;
-    const startedTrialEndsAt = shouldStartTrial
-      ? new Date(
-          Date.now() + trialDays * 24 * 60 * 60 * 1000
-        ).toISOString()
-      : null;
     if (maxSeats !== undefined || useCase !== undefined) {
       const requestedSeats =
         Number.isFinite(maxSeats) && typeof maxSeats === 'number'
@@ -737,11 +876,6 @@ export async function POST(request: NextRequest) {
       } else if (useCase === 'solo') {
         updates.max_seats = 1;
       }
-    }
-
-    if (shouldStartTrial && startedTrialEndsAt) {
-      updates.subscription_status = 'trialing';
-      updates.trial_ends_at = startedTrialEndsAt;
     }
 
     // Brokerage: persist brokerage_id when selected, else try template match or store custom brokerage_name
@@ -819,17 +953,6 @@ export async function POST(request: NextRequest) {
         convertedWorkspaceId: workspaceId,
       });
     }
-
-    const resultingSubscriptionStatus = shouldStartTrial
-      ? 'trialing'
-      : currentSubscriptionStatus;
-    const resultingTrialEndsAt = shouldStartTrial
-      ? startedTrialEndsAt
-      : currentTrialEndsAt;
-    const hasAccess =
-      resultingSubscriptionStatus === 'active' ||
-      (resultingSubscriptionStatus === 'trialing' &&
-        (!resultingTrialEndsAt || new Date(resultingTrialEndsAt) > new Date()));
 
     const normalizedTeamInviteEmails = normalizeEmailArray(teamMemberEmails);
     const inviteResults: Array<{ email: string; sent: boolean; error?: string }> = [];
@@ -946,14 +1069,100 @@ export async function POST(request: NextRequest) {
     }
 
     const ownerInviteMembersPath = '/home?tab=settings&invite=members';
-    const nextPath = hasAccess ? ownerInviteMembersPath : '/subscribe';
-    const clientSource =
-      typeof body?.clientSource === 'string' ? body.clientSource.trim().toLowerCase() : '';
+    const nextPath = ownerInviteMembersPath;
     const openAppAfterCompletion = body?.openAppAfterCompletion === true;
+    const openCampaignCreateAfterCompletion = body?.openCampaignCreateAfterCompletion === true;
+    const resumeCampaignAfterOnboarding = body?.resumeCampaignAfterOnboarding === true;
+    let selfServeDemoSeed: Awaited<ReturnType<typeof seedStarterCampaignForWorkspace>> | null = null;
+    let selfServeCampaignId: string | null = null;
+    let selfServeProvisionCampaignId: string | null = null;
+    if (clientSource === 'self-serve-demo' && !openCampaignCreateAfterCompletion) {
+      if (selfServeCampaignDraft) {
+        selfServeCampaignId = await createSelfServeCampaignFallback({
+          admin,
+          workspaceId,
+          userId,
+          name: selfServeCampaignDraft.name ?? (typeof workspaceName === 'string' ? workspaceName : null),
+          region: normalizedCountryCode,
+          polygon: selfServeCampaignDraft.polygon,
+          bbox: selfServeCampaignDraft.bbox,
+        });
+        selfServeProvisionCampaignId = selfServeCampaignId;
+      } else {
+        try {
+          selfServeDemoSeed = await seedStarterCampaignForWorkspace(admin, {
+            workspaceId,
+            userId,
+            role: 'owner',
+            memberCount: 1 + normalizedTeamInviteEmails.length,
+            maxSeats:
+              typeof updates.max_seats === 'number'
+                ? updates.max_seats
+                : typeof maxSeats === 'number'
+                  ? maxSeats
+                  : 1,
+          });
+          selfServeCampaignId = selfServeDemoSeed.campaignId;
+        } catch (seedError) {
+          console.warn('[onboarding/complete] self-serve replay seed failed; creating fallback campaign', seedError);
+          selfServeCampaignId = await createSelfServeCampaignFallback({
+            admin,
+            workspaceId,
+            userId,
+            name: typeof workspaceName === 'string' ? workspaceName : null,
+            region: normalizedCountryCode,
+          });
+        }
+      }
+    }
+    if (selfServeProvisionCampaignId) {
+      const provisionCampaignId = selfServeProvisionCampaignId;
+      const origin = request.nextUrl.origin;
+      const cookie = request.headers.get('cookie') ?? '';
+      const { data: provisionState } = await admin
+        .from('campaigns')
+        .select('provision_status, provision_phase, map_ready_at')
+        .eq('id', provisionCampaignId)
+        .maybeSingle();
+      const shouldStartProvision =
+        !provisionState?.map_ready_at &&
+        provisionState?.provision_status !== 'ready' &&
+        (!provisionState?.provision_phase ||
+          provisionState.provision_phase === 'created' ||
+          provisionState.provision_phase === 'failed');
+
+      if (shouldStartProvision) after(async () => {
+        try {
+          const response = await fetch(`${origin}/api/campaigns/provision`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(cookie ? { cookie } : {}),
+            },
+            body: JSON.stringify({ campaign_id: provisionCampaignId }),
+          });
+          if (!response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            console.warn(
+              '[onboarding/complete] self-serve background provision failed:',
+              payload?.error ?? response.statusText
+            );
+          }
+        } catch (provisionError) {
+          console.warn('[onboarding/complete] self-serve background provision failed:', provisionError);
+        }
+      });
+    }
     const redirect =
-      openAppAfterCompletion || clientSource === 'android' || clientSource === 'dialer'
-        ? nextPath
-        : `/download-ios?stage=post-onboarding&next=${encodeURIComponent(nextPath)}`;
+      openCampaignCreateAfterCompletion
+        ? `/campaigns/create?source=self-serve-demo&campaign=self-serve-campaign${
+            resumeCampaignAfterOnboarding ? '&resumeCampaign=1' : ''
+          }`
+        : selfServeCampaignId
+        ? `/campaigns/${selfServeCampaignId}?source=self-serve-demo`
+        : openAppAfterCompletion || clientSource === 'android' || clientSource === 'dialer'
+          ? nextPath
+          : `/download-ios?stage=post-onboarding&next=${encodeURIComponent(nextPath)}`;
 
     return NextResponse.json({
       success: true,
@@ -963,9 +1172,16 @@ export async function POST(request: NextRequest) {
         sent: inviteResults.filter((result) => result.sent).length,
         results: inviteResults,
       },
+      starterCampaign: selfServeDemoSeed,
     });
   } catch (e) {
     console.error('Onboarding complete error:', e);
+    if (requestedClientSource === 'self-serve-demo') {
+      return NextResponse.json(
+        { error: 'We could not create your starter campaign. Please try again.' },
+        { status: 500 }
+      );
+    }
     return NextResponse.json(
       { error: 'Something went wrong' },
       { status: 500 }

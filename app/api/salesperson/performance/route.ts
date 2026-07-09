@@ -71,10 +71,20 @@ function parsePeriod(value: string | null): PeriodKey {
   return value === 'weekly' || value === 'monthly' || value === 'yearly' ? value : 'daily';
 }
 
+function startOfIsoWeekUtc(reference: Date): Date {
+  const start = new Date(reference);
+  start.setUTCHours(0, 0, 0, 0);
+  const daysSinceMonday = (start.getUTCDay() + 6) % 7;
+  start.setUTCDate(start.getUTCDate() - daysSinceMonday);
+  return start;
+}
+
 function buildRange(period: PeriodKey) {
   const end = new Date();
-  const start = new Date(end);
-  start.setUTCDate(start.getUTCDate() - PERIOD_DAYS[period]);
+  const start = period === 'weekly' ? startOfIsoWeekUtc(end) : new Date(end);
+  if (period !== 'weekly') {
+    start.setUTCDate(start.getUTCDate() - PERIOD_DAYS[period]);
+  }
   return {
     startIso: start.toISOString(),
     endIso: end.toISOString(),

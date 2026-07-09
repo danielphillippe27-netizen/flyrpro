@@ -29,7 +29,11 @@ type DialerVideoLandingProps = {
   videoOrientation?: 'landscape' | 'portrait';
   videoTitle?: string;
   onboardingHref: string;
+  primaryCtaLabel?: string;
   founderCallHref: string;
+  endCtaEyebrow?: string;
+  endCtaTitle?: string;
+  showFounderCallButton?: boolean;
   redirectAtSeconds?: number;
   mutedAutoplay?: boolean;
   referralCode?: string;
@@ -79,7 +83,11 @@ export function DialerVideoLanding({
   videoOrientation = 'landscape',
   videoTitle = 'FLYR power dialer demo',
   onboardingHref,
+  primaryCtaLabel = 'Start with one campaign included',
   founderCallHref,
+  endCtaEyebrow = 'Your map starts here',
+  endCtaTitle = 'Create your custom 3D prospecting map.',
+  showFounderCallButton = true,
   redirectAtSeconds,
   mutedAutoplay = false,
   referralCode,
@@ -307,6 +315,11 @@ export function DialerVideoLanding({
     setSoundPromptVisible(false);
   };
 
+  const handleStartTrialClick = (location: 'top' | 'end_modal') => {
+    sendDemoEvent('start_trial_click', { location });
+    window.location.assign(onboardingHref);
+  };
+
   if (!videoUrl && !streamUrl) {
     return (
       <main className="min-h-screen bg-zinc-950 px-5 py-8 text-white md:px-8">
@@ -349,14 +362,17 @@ export function DialerVideoLanding({
           } relative min-h-[100dvh] bg-black`}
         >
           <div className="dialer-top-cta absolute inset-x-0 top-0 z-20 flex items-center justify-end px-4 py-3 md:px-8 md:py-5">
-            <Link
+            <a
               href={onboardingHref}
-              onClick={() => sendDemoEvent('start_trial_click', { location: 'top' })}
-              className="inline-flex h-10 items-center rounded-lg bg-red-600 px-4 text-sm font-semibold text-white shadow-lg shadow-red-950/30 transition hover:bg-red-500 md:h-11 md:px-5"
+              onClick={(event) => {
+                event.preventDefault();
+                handleStartTrialClick('top');
+              }}
+              className="inline-flex min-h-11 max-w-[min(92vw,34rem)] items-center justify-center rounded-lg bg-red-600 px-4 py-2 text-center text-sm font-semibold leading-snug text-white shadow-lg shadow-red-950/30 transition hover:bg-red-500 md:min-h-12 md:px-5"
             >
-              Start free trial
-              <ArrowRight className="ml-2 h-4 w-4" />
-            </Link>
+              {primaryCtaLabel}
+              <ArrowRight className="ml-2 h-4 w-4 shrink-0" />
+            </a>
           </div>
 
           <div className="dialer-video-viewport relative mx-auto flex min-h-[100dvh] w-full items-center justify-center bg-black">
@@ -476,28 +492,33 @@ export function DialerVideoLanding({
           <div className="fixed inset-0 z-50 grid place-items-center bg-zinc-950/92 px-6 text-center backdrop-blur">
             <div className="w-full max-w-xl">
               <p className="text-sm font-semibold uppercase tracking-[0.18em] text-red-300">
-                Ready when you are
+                {endCtaEyebrow}
               </p>
               <p className="mt-3 text-3xl font-black leading-tight md:text-5xl">
-                Start with FLYR or talk it through with the founder.
+                {endCtaTitle}
               </p>
-              <div className="mt-8 grid gap-3 sm:grid-cols-2">
+              <div className={`mt-8 grid gap-3 ${showFounderCallButton ? 'sm:grid-cols-2' : 'sm:grid-cols-1'}`}>
+                {showFounderCallButton ? (
+                  <a
+                    href={founderCallHref}
+                    onClick={() => sendDemoEvent('founder_call_click', { location: 'end_modal' })}
+                    className="inline-flex min-h-14 items-center justify-center rounded-lg border border-white/15 bg-white px-5 text-sm font-black text-zinc-950 shadow-2xl shadow-black/30 transition hover:bg-zinc-100"
+                  >
+                    <CalendarDays className="mr-2 h-4 w-4 text-red-600" />
+                    Schedule a call
+                  </a>
+                ) : null}
                 <a
-                  href={founderCallHref}
-                  onClick={() => sendDemoEvent('founder_call_click', { location: 'end_modal' })}
-                  className="inline-flex min-h-14 items-center justify-center rounded-lg border border-white/15 bg-white px-5 text-sm font-black text-zinc-950 shadow-2xl shadow-black/30 transition hover:bg-zinc-100"
-                >
-                  <CalendarDays className="mr-2 h-4 w-4 text-red-600" />
-                  Schedule a call
-                </a>
-                <Link
                   href={onboardingHref}
-                  onClick={() => sendDemoEvent('start_trial_click', { location: 'end_modal' })}
-                  className="inline-flex min-h-14 items-center justify-center rounded-lg bg-red-600 px-5 text-sm font-black text-white shadow-2xl shadow-red-950/30 transition hover:bg-red-500"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    handleStartTrialClick('end_modal');
+                  }}
+                  className="inline-flex min-h-14 items-center justify-center rounded-lg bg-red-600 px-5 py-3 text-center text-sm font-black leading-snug text-white shadow-2xl shadow-red-950/30 transition hover:bg-red-500"
                 >
-                  Start free trial
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </Link>
+                  {primaryCtaLabel}
+                  <ArrowRight className="ml-2 h-4 w-4 shrink-0" />
+                </a>
               </div>
             </div>
           </div>

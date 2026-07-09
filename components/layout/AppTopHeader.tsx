@@ -229,7 +229,11 @@ export default function AppTopHeader() {
       const response = await fetch(
         `/api/notifications?workspaceId=${encodeURIComponent(currentWorkspace.id)}&limit=30`,
         { credentials: 'include' }
-      );
+      ).catch(() => null);
+      if (!response) {
+        setNotificationsError('Could not load notifications.');
+        return;
+      }
       const payload = (await response.json().catch(() => null)) as
         | { notifications?: AppNotification[]; unreadCount?: number; error?: string }
         | null;

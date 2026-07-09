@@ -1,15 +1,16 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { useState } from 'react';
+import { usePathname, useSearchParams } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import type { MouseEvent, ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { WorkspaceProvider, useWorkspace } from '@/lib/workspace-context';
 import AppTopHeader from '@/components/layout/AppTopHeader';
 import { MainLayoutNavProvider, useMainLayoutNav } from '@/components/layout/MainLayoutNavContext';
 import { MainRouteGuard } from '@/components/guard/MainRouteGuard';
 import { DialerRuntimeProvider } from '@/components/dialer/DialerRuntimeProvider';
-import { Home, Trophy, Users, Settings, Target, Gauge, Plug, MessageCircle, Activity, Clock, CalendarDays, CornerDownRight, Plus, UserRoundPlus, BriefcaseBusiness, PhoneCall, Handshake, FileText, PlayCircle, Inbox } from 'lucide-react';
+import { Home, Trophy, Users, Settings, Target, Gauge, Plug, MessageCircle, Activity, Clock, CalendarDays, CornerDownRight, Plus, UserRoundPlus, BriefcaseBusiness, PhoneCall, Handshake, FileText, PlayCircle, Inbox, KanbanSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { DashboardAccessLevel } from '@/app/api/_utils/workspace';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
@@ -17,6 +18,9 @@ import { getIndustryCopy } from '@/lib/industry-copy';
 
 const SIDEBAR_COLLAPSED_W = 48;   // 3rem – icons only
 const SIDEBAR_EXPANDED_W = 160;   // 10rem – icons + labels
+const DEMO_FLOW_LOCK_MESSAGE = 'follow the 5 simple steps to unlock the rest of the dashboard';
+const DEMO_FLOW_INTERACTIVE_SELECTOR =
+  'a[href], button, input, textarea, select, [role="button"], [role="link"], [role="tab"], [data-demo-lockable]';
 
 const scriptsTab = { href: '/scripts', icon: FileText, label: 'Scripts' };
 
@@ -41,10 +45,12 @@ const salesLeaderboardTab = { href: '/sales-leaderboard', icon: Trophy, label: '
 const diallerTab = { href: '/dialer', icon: PhoneCall, label: 'Dialler' };
 const demoTab = { href: '/demo-center', icon: PlayCircle, label: 'Demo' };
 const inboxTab = { href: '/inbox', icon: Inbox, label: 'Inbox' };
+const salesPipelineTab = { href: '/sales/pipeline', icon: KanbanSquare, label: 'Pipeline' };
 const settingsTab = { href: '/settings', icon: Settings, label: 'Settings' };
 const salespersonWorkspaceTabs = [
   { href: '/home', icon: Home, label: 'Home' },
   inboxTab,
+  salesPipelineTab,
   diallerTab,
   scriptsTab,
   { href: '/leads', icon: Users, label: 'Leads' },
@@ -56,6 +62,7 @@ const salespersonWorkspaceTabs = [
 const founderTabs = [
   ...baseTabs.filter((tab) => ['/home'].includes(tab.href)),
   inboxTab,
+  salesPipelineTab,
   ambassadorsTab,
   salespeopleTab,
   salesLeaderboardTab,
@@ -186,7 +193,7 @@ function MainLayoutShell({
   pathname,
   accessLevel,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   tabs: TabDef[];
   pathname: string | null;
   accessLevel: DashboardAccessLevel | null;
@@ -267,10 +274,64 @@ function MainLayoutShell({
   );
 }
 
+function DemoFlowClickGuard({
+  active,
+  children,
+}: {
+  active: boolean;
+  children: ReactNode;
+}) {
+  const [messagePosition, setMessagePosition] = useState<{ x: number; y: number; id: number } | null>(null);
+
+  useEffect(() => {
+    if (!messagePosition) return undefined;
+    const timer = window.setTimeout(() => setMessagePosition(null), 2400);
+    return () => window.clearTimeout(timer);
+  }, [messagePosition]);
+
+  const handleClickCapture = (event: MouseEvent<HTMLDivElement>) => {
+    if (!active) return;
+
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target || target.closest('[data-self-serve-demo-flow="true"]')) return;
+
+    const interactiveTarget = target.closest(DEMO_FLOW_INTERACTIVE_SELECTOR);
+    if (!interactiveTarget) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const bubbleWidth = 304;
+    const bubbleHeight = 72;
+    const maxX = Math.max(12, window.innerWidth - bubbleWidth - 12);
+    const maxY = Math.max(12, window.innerHeight - bubbleHeight - 12);
+    const nextX = Math.min(Math.max(event.clientX + 14, 12), maxX);
+    const nextY = Math.min(Math.max(event.clientY + 14, 12), maxY);
+    setMessagePosition({ x: nextX, y: nextY, id: Date.now() });
+  };
+
+  return (
+    <div className="contents" onClickCapture={handleClickCapture}>
+      {children}
+      {messagePosition ? (
+        <div
+          key={messagePosition.id}
+          role="status"
+          aria-live="polite"
+          className="pointer-events-none fixed z-[10000] max-w-[19rem] rounded-xl border border-red-200 bg-white px-3 py-2 text-sm font-semibold leading-5 text-slate-950 shadow-2xl ring-1 ring-black/5 dark:border-red-900/50 dark:bg-slate-950 dark:text-white"
+          style={{ left: messagePosition.x, top: messagePosition.y }}
+        >
+          {DEMO_FLOW_LOCK_MESSAGE}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export default function MainLayoutClient({
   children,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <WorkspaceProvider>
@@ -282,10 +343,14 @@ export default function MainLayoutClient({
 function MainLayoutContent({
   children,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { accessLevel, isAmbassador } = useWorkspace();
+  const isSelfServeDemoFlow = searchParams.get('source') === 'self-serve-demo';
+  const isSelfServeCampaignCreate =
+    pathname === '/campaigns/create' && isSelfServeDemoFlow;
 
   const tabs: TabDef[] = (() => {
     const withAmbassadorPortal = (items: TabDef[]) => {
@@ -308,13 +373,25 @@ function MainLayoutContent({
     return withAmbassadorPortal([...baseTabs, settingsTab]);
   })();
 
+  if (isSelfServeCampaignCreate) {
+    return (
+      <DialerRuntimeProvider>
+        <div className="h-screen min-h-screen overflow-hidden bg-background">
+          {children}
+        </div>
+      </DialerRuntimeProvider>
+    );
+  }
+
   return (
     <DialerRuntimeProvider>
       <MainRouteGuard>
         <MainLayoutNavProvider>
-          <MainLayoutShell tabs={tabs} pathname={pathname} accessLevel={accessLevel}>
-            {children}
-          </MainLayoutShell>
+          <DemoFlowClickGuard active={isSelfServeDemoFlow}>
+            <MainLayoutShell tabs={tabs} pathname={pathname} accessLevel={accessLevel}>
+              {children}
+            </MainLayoutShell>
+          </DemoFlowClickGuard>
         </MainLayoutNavProvider>
       </MainRouteGuard>
     </DialerRuntimeProvider>

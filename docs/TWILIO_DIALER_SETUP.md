@@ -98,13 +98,13 @@ This adds:
 
 1. Open `/dialer`
 2. Initialize the browser device and allow microphone access
-3. Start a queue from workspace contacts
+3. Start a queue from `sales_leads` for salesperson/prospecting calls, or from regular `contacts` only for customer CRM calls
 4. The client fetches a Twilio browser token from `/api/dialer/token`
 5. Outbound call requests are created in `/api/dialer/calls`
 6. Twilio requests TwiML from `/api/twilio/voice/outgoing`
 7. Twilio sends status updates to `/api/twilio/voice/status`
 8. Twilio posts call recording updates to `/api/twilio/voice/recording-status`
-9. The user saves a disposition, which writes back into `contacts` and `contact_activities`
+9. The user saves a salesperson/prospecting disposition, which writes back into `sales_leads` and `sales_activities`; regular customer CRM calls still use `contacts` and `contact_activities`
 10. If SMS follow-up is enabled, the post-call modal can queue a Twilio text and track delivery updates from `/api/twilio/messaging/status`
 11. Owners/admins can enable the CA$20/month Power Dialer add-on from Billing
 12. After the add-on is active, owners/admins can claim a dedicated Twilio number for the workspace from Integrations
@@ -116,7 +116,7 @@ This adds:
 
 - Outbound browser calling only
 - One active browser call at a time
-- Queueing from existing `contacts`
+- Queueing salesperson/prospecting leads from `sales_leads`
 - Automatic call recording metadata with in-app playback
 - One-tap voicemail drop during a live call
 - Post-call disposition logging
@@ -124,7 +124,7 @@ This adds:
 - Workspace-level dialer billing add-on and dedicated Twilio number assignment
 - Optional inbound call forwarding to another phone number
 - Salesperson-owned inbound calls can ring the iOS app through Twilio Voice, PushKit, and CallKit when `TWILIO_IOS_PUSH_CREDENTIAL_SID` is configured
-- Follow-up and appointment writeback into the existing CRM model
+- Follow-up and appointment writeback into `sales_leads` for salesperson/prospecting queues, with manual conversion into `contacts` only when a prospect becomes a regular FLYR customer lead
 
 Not included yet:
 

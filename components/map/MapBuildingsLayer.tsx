@@ -49,6 +49,7 @@ interface MapBuildingsLayerProps {
   /** When false, footprints use a neutral gray (not status colors); roads unchanged. Default true. */
   footprintStatusColors?: boolean;
   isDarkMap?: boolean;
+  selectionOnly?: boolean;
   onBuildingClick?: (
     buildingId: string,
     addressId?: string,
@@ -92,8 +93,15 @@ const POLYGON_GEOMETRY_FILTER: FilterSpecification = [
 ] as FilterSpecification;
 const POINT_GEOMETRY_FILTER: FilterSpecification = ['==', ['geometry-type'], 'Point'];
 const SELECTED_ASSIGNMENT_FILTER: FilterSpecification = ['==', ['get', 'assignment_selected'], true];
+const ASSIGNMENT_SELECTED_COLOR = '#050505';
+const ASSIGNMENT_SELECTED_STROKE_COLOR = '#ffffff';
 const INFERRED_BUILDING_LINK_MAX_DISTANCE_M = 45;
 const EMPTY_SELECTED_ADDRESS_IDS: string[] = [];
+
+function describeRequestError(error: unknown): string {
+  if (error instanceof Error) return `${error.name}: ${error.message}`;
+  return String(error);
+}
 
 type CampaignMapBundleResponse = {
   asset_signature?: string | null;
@@ -112,6 +120,10 @@ function asBuildingFeatureCollection(value: unknown): BuildingFeatureCollection 
     return candidate as BuildingFeatureCollection;
   }
   return { type: 'FeatureCollection', features: [] } as BuildingFeatureCollection;
+}
+
+function createRealtimeChannelTopic(baseTopic: string): string {
+  return `${baseTopic}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 /**
@@ -655,6 +667,7 @@ export function MapBuildingsLayer({
   showAddressLabels = true,
   footprintStatusColors = true,
   isDarkMap = false,
+  selectionOnly = false,
   onBuildingClick,
   onAddToCRM,
   onRenderStateChange,
@@ -911,6 +924,7 @@ export function MapBuildingsLayer({
   const getColorExpression = (): ExpressionSpecification => {
     // Helper expressions - check feature-state first (real-time), then source properties (initial load)
     const getAssignmentColor = () => ['coalesce', ['feature-state', 'assignment_color'], ['get', 'assignment_color'], ''];
+    const getAssignmentSelected = () => ['coalesce', ['feature-state', 'assignment_selected'], ['get', 'assignment_selected'], false];
     const getStatusValue = () => ['downcase', ['to-string', ['coalesce', ['feature-state', 'status'], ['get', 'status'], 'not_visited']]];
     const getAddressStatus = () => ['downcase', ['to-string', ['coalesce', ['feature-state', 'address_status'], ['get', 'address_status'], 'none']]];
     const getScansTotal = () => ['to-number', ['coalesce', ['feature-state', 'scans_total'], ['get', 'scans_total'], 0], 0];
@@ -930,6 +944,9 @@ export function MapBuildingsLayer({
     
     return [
       'case',
+      ['any', ['==', getAssignmentSelected(), true], ['==', getAssignmentSelected(), 'true']],
+      ASSIGNMENT_SELECTED_COLOR,
+
       ['!=', getAssignmentColor(), ''],
       getAssignmentColor(),
 
@@ -1048,7 +1065,31 @@ export function MapBuildingsLayer({
           Accept: 'application/json',
           ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         },
+      }).catch((error: unknown) => {
+        console.warn('[MapBuildingsLayer] Campaign map-bundle request failed:', describeRequestError(error));
+        return null;
       });
+
+      if (!response) {
+        setBuildingsDebug({
+          source: 'campaign-map-bundle',
+          campaignId,
+          bundleStatus: 'request_failed',
+          featureCount: 0,
+        });
+        onRenderStateChangeRef.current?.({
+          isFetching: false,
+          hasData: false,
+          hasVisibleFeatures: false,
+          hasBuildingPolygons: false,
+          buildingsUnavailable: true,
+          featureCount: 0,
+          visibleFeatureCount: 0,
+          zoomLevel,
+        });
+        setFeatures({ type: 'FeatureCollection', features: [] } as BuildingFeatureCollection);
+        return;
+      }
 
       if (!response.ok) {
         throw new Error(`Campaign map-bundle request failed with status ${response.status}`);
@@ -1107,9 +1148,19 @@ export function MapBuildingsLayer({
         }, retryDelay);
       }
     } catch (err) {
-      console.error('[MapBuildingsLayer] Error in fetchCampaignData:', err);
+      console.warn('[MapBuildingsLayer] Campaign map-bundle unavailable:', describeRequestError(err));
       campaignDataLoadedRef.current = null;
       setFeatures({ type: 'FeatureCollection', features: [] } as BuildingFeatureCollection);
+      onRenderStateChangeRef.current?.({
+        isFetching: false,
+        hasData: false,
+        hasVisibleFeatures: false,
+        hasBuildingPolygons: false,
+        buildingsUnavailable: true,
+        featureCount: 0,
+        visibleFeatureCount: 0,
+        zoomLevel,
+      });
     } finally {
       if (isMountedRef.current) {
         setIsFetching(false);
@@ -1358,7 +1409,7 @@ export function MapBuildingsLayer({
         setFeatures(parsedData as BuildingFeatureCollection);
       }
     } catch (err) {
-      console.error('[MapBuildingsLayer] Error fetching buildings:', err);
+      console.warn('[MapBuildingsLayer] Viewport buildings unavailable:', describeRequestError(err));
     }
   }, [getSupabase]);
 
@@ -1913,7 +1964,7 @@ export function MapBuildingsLayer({
                 combineMapFilters(filterExpr, SELECTED_ASSIGNMENT_FILTER)
               ),
               paint: {
-                'line-color': '#fde047',
+                'line-color': ASSIGNMENT_SELECTED_COLOR,
                 'line-width': [
                   'interpolate',
                   ['linear'],
@@ -1987,10 +2038,10 @@ export function MapBuildingsLayer({
                   18,
                   16,
                 ],
-                'circle-color': '#fde047',
-                'circle-opacity': 0.22,
+                'circle-color': ASSIGNMENT_SELECTED_COLOR,
+                'circle-opacity': 0.95,
                 'circle-stroke-width': 2.5,
-                'circle-stroke-color': '#fefce8',
+                'circle-stroke-color': ASSIGNMENT_SELECTED_STROKE_COLOR,
               },
             };
             map.addLayer(selectedCircleLayerConfig);
@@ -2101,6 +2152,15 @@ export function MapBuildingsLayer({
           console.log('[MapBuildingsLayer] Building clicked, raw props:', props);
           
           const gersId = props.gers_id || props.building_id || props.id;
+
+          if (selectionOnly && onBuildingClick) {
+            const buildingId = String(gersId || props.id || '').trim();
+            const addressId = String(props.address_id || '').trim() || undefined;
+            if (buildingId || addressId) {
+              onBuildingClick(buildingId || addressId || '', addressId, { additive: additiveSelection });
+            }
+            return;
+          }
           
           // UNIT MODE: If this is a unit slice, pass address_id to show specific unit
           if (props.unit_id && props.address_id && onBuildingClick) {
@@ -2362,7 +2422,7 @@ export function MapBuildingsLayer({
               minzoom: CAMPAIGN_BUILDING_MIN_ZOOM,
               filter: selectedPolygonFilter,
               paint: {
-                'line-color': '#fde047',
+                'line-color': ASSIGNMENT_SELECTED_COLOR,
                 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 3, 18, 6],
                 'line-opacity': 0.96,
                 'line-blur': 1.2,
@@ -2385,10 +2445,10 @@ export function MapBuildingsLayer({
               filter: selectedPointFilter,
               paint: {
                 'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 10, 18, 16],
-                'circle-color': '#fde047',
-                'circle-opacity': 0.22,
+                'circle-color': ASSIGNMENT_SELECTED_COLOR,
+                'circle-opacity': 0.95,
                 'circle-stroke-width': 2.5,
-                'circle-stroke-color': '#fefce8',
+                'circle-stroke-color': ASSIGNMENT_SELECTED_STROKE_COLOR,
               },
             });
           }
@@ -2547,7 +2607,7 @@ export function MapBuildingsLayer({
       }
       cleanupLayerInteractionHandlers?.();
     };
-  }, [map, features, zoomLevel, onBuildingClick, statusFilters, campaignId, getSupabase, onAddToCRM, showOrphans, showAddressLabels, footprintStatusColors, addressStateOverrides, isDarkMap, assignmentColorByAddressId, selectedAddressIds, selectedCircleLayerId, selectedOutlineLayerId]);
+  }, [map, features, zoomLevel, onBuildingClick, statusFilters, campaignId, getSupabase, onAddToCRM, showOrphans, showAddressLabels, footprintStatusColors, addressStateOverrides, isDarkMap, assignmentColorByAddressId, selectedAddressIds, selectedCircleLayerId, selectedOutlineLayerId, selectionOnly]);
 
   // Update color and filter when statusFilters or campaignId changes
   useEffect(() => {
@@ -2722,7 +2782,7 @@ export function MapBuildingsLayer({
 
     const supabase = getSupabase();
     const channel = supabase
-      .channel(`building-stats-realtime-${campaignId}`)
+      .channel(createRealtimeChannelTopic(`building-stats-realtime-${campaignId}`))
       .on(
         'postgres_changes',
         {
@@ -2804,7 +2864,7 @@ export function MapBuildingsLayer({
 
     const supabase = getSupabase();
     const channel = supabase
-      .channel(`scan-events-realtime-${campaignId}`)
+      .channel(createRealtimeChannelTopic(`scan-events-realtime-${campaignId}`))
       .on(
         'postgres_changes',
         {
@@ -2872,7 +2932,7 @@ export function MapBuildingsLayer({
 
     const supabase = getSupabase();
     const channel = supabase
-      .channel(`building-links-realtime-${campaignId}`)
+      .channel(createRealtimeChannelTopic(`building-links-realtime-${campaignId}`))
       .on(
         'postgres_changes',
         {

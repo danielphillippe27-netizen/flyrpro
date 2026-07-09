@@ -45,7 +45,7 @@ const INITIAL_STATE: ApplicationState = {
 
 const PROGRAM_BULLETS = [
   '25% recurring commission for 12 months on paid users you refer',
-  '14-day free trial for your audience with your custom link and code',
+  'One included campaign for your audience with your custom link and code',
   'Cash bonuses at key milestones for top-performing partners',
   'Monthly payouts with a clear Stripe-based payout path for approved ambassadors',
 ];
@@ -174,7 +174,7 @@ export function AmbassadorProgramSection() {
               <p className="text-sm font-semibold uppercase tracking-[0.06em] text-zinc-500">
                 Audience Offer
               </p>
-              <p className="mt-3 text-2xl font-black text-zinc-900">14 days free</p>
+              <p className="mt-3 text-2xl font-black text-zinc-900">1 campaign included</p>
               <p className="mt-2 text-sm text-zinc-600">Custom link and code for every approved partner</p>
             </div>
             <div className="border border-zinc-200 p-5">

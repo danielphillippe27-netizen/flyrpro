@@ -4,8 +4,8 @@ import type {
   DialerCallDisposition,
   DiallerLead,
   DiallerLeadDisposition,
-  SalespersonLeadMaster,
-  SalespersonLeadMasterState,
+  SalesLead,
+  SalesLeadState,
 } from '@/types/database';
 
 type SupabaseAdmin = Pick<SupabaseClient, 'from'>;
@@ -29,7 +29,7 @@ export type MasterLeadInput = {
   countryCode?: string | null;
   source?: string | null;
   externalId?: string | null;
-  state?: SalespersonLeadMasterState;
+  state?: SalesLeadState;
   notes?: string | null;
   metadata?: Record<string, unknown> | null;
 };
@@ -38,7 +38,7 @@ export type MasterLeadResult = {
   available: boolean;
   created: boolean;
   existing: boolean;
-  row: SalespersonLeadMaster | null;
+  row: SalesLead | null;
   warning: string | null;
 };
 
@@ -67,15 +67,52 @@ function leadFingerprint(input: {
     .join('|');
 }
 
+async function resolveSalesRepId(
+  admin: SupabaseAdmin,
+  input: Pick<MasterLeadInput, 'workspaceId' | 'assignedSalespersonId' | 'assignedUserId'>
+): Promise<string | null> {
+  const candidate = cleanText(input.assignedSalespersonId);
+
+  if (candidate) {
+    const { data, error } = await admin
+      .from('sales_reps')
+      .select('id')
+      .eq('workspace_id', input.workspaceId)
+      .or(`id.eq.${candidate},legacy_salesperson_id.eq.${candidate}`)
+      .limit(1)
+      .maybeSingle();
+
+    if (!error && data?.id) return String(data.id);
+    if (error && error.code !== 'PGRST116') {
+      console.warn('[sales-leads/master-list] sales rep lookup failed', error);
+    }
+  }
+
+  const { data, error } = await admin
+    .from('sales_reps')
+    .select('id')
+    .eq('workspace_id', input.workspaceId)
+    .eq('user_id', input.assignedUserId)
+    .limit(1)
+    .maybeSingle();
+
+  if (!error && data?.id) return String(data.id);
+  if (error && error.code !== 'PGRST116') {
+    console.warn('[sales-leads/master-list] sales rep user lookup failed', error);
+  }
+
+  return null;
+}
+
 function shapeMasterPayload(input: MasterLeadInput) {
   const normalizedPhone = normalizePhoneNumber(input.phone);
   const email = cleanText(input.email) || null;
   return {
     workspace_id: input.workspaceId,
-    contact_id: cleanText(input.contactId) || null,
-    dialler_lead_id: cleanText(input.diallerLeadId) || null,
+    legacy_contact_id: cleanText(input.contactId) || null,
+    legacy_dialler_lead_id: cleanText(input.diallerLeadId) || null,
     assigned_user_id: input.assignedUserId,
-    assigned_salesperson_id: cleanText(input.assignedSalespersonId) || null,
+    assigned_sales_rep_id: cleanText(input.assignedSalespersonId) || null,
     created_by_user_id: cleanText(input.createdByUserId) || input.assignedUserId,
     name: cleanText(input.name) || 'Lead',
     company: cleanText(input.company) || null,
@@ -132,7 +169,7 @@ export async function findClaimedPhonesInWorkspace(
   if (!phoneE164s.length) return new Set();
 
   const { data, error } = await admin
-    .from('salesperson_lead_master')
+    .from('sales_leads')
     .select('phone_e164')
     .eq('workspace_id', workspaceId)
     .neq('assigned_user_id', assignedUserId)
@@ -151,7 +188,7 @@ export async function findClaimedPhonesInWorkspace(
 }
 
 /**
- * Bulk-upsert contacts into salesperson_lead_master after a CSV import.
+ * Bulk-upsert imported sales leads into sales_leads after a CSV import.
  * Uses a direct batch insert with conflict-ignore so it stays at O(1) queries
  * instead of O(N*6) like the serial ensureSalespersonLeadMaster path.
  * Non-fatal — master list failures never block the import itself.
@@ -191,7 +228,7 @@ export async function bulkRegisterContactsInMaster(
   for (let i = 0; i < rows.length; i += CHUNK) {
     const chunk = rows.slice(i, i + CHUNK);
     const { error } = await admin
-      .from('salesperson_lead_master')
+      .from('sales_leads')
       .upsert(chunk, { onConflict: 'lead_fingerprint', ignoreDuplicates: true });
 
     if (error) {
@@ -211,8 +248,8 @@ export async function findSalespersonLeadMaster(
   const emailKey = normalizedEmail(input.email);
   const fingerprint = leadFingerprint(input);
   const lookups = [
-    cleanText(input.diallerLeadId) ? { column: 'dialler_lead_id', value: cleanText(input.diallerLeadId) } : null,
-    cleanText(input.contactId) ? { column: 'contact_id', value: cleanText(input.contactId) } : null,
+    cleanText(input.diallerLeadId) ? { column: 'legacy_dialler_lead_id', value: cleanText(input.diallerLeadId) } : null,
+    cleanText(input.contactId) ? { column: 'legacy_contact_id', value: cleanText(input.contactId) } : null,
     phoneE164 ? { column: 'phone_e164', value: phoneE164 } : null,
     emailKey ? { column: 'email_normalized', value: emailKey } : null,
     cleanText(input.source) && cleanText(input.externalId)
@@ -223,7 +260,7 @@ export async function findSalespersonLeadMaster(
 
   for (const lookup of lookups) {
     let query = admin
-      .from('salesperson_lead_master')
+      .from('sales_leads')
       .select('*')
       .eq('workspace_id', input.workspaceId)
       .limit(1);
@@ -237,7 +274,7 @@ export async function findSalespersonLeadMaster(
 
     const { data, error } = await query.maybeSingle();
     if (!error && data) {
-      return { available: true, created: false, existing: true, row: data as SalespersonLeadMaster, warning: null };
+      return { available: true, created: false, existing: true, row: data as SalesLead, warning: null };
     }
     if (error && error.code !== 'PGRST116') {
       console.warn('[sales-leads/master-list] lookup failed', error);
@@ -255,13 +292,16 @@ export async function ensureSalespersonLeadMaster(
   if (!existing.available || existing.row) return existing;
 
   const { data, error } = await admin
-    .from('salesperson_lead_master')
-    .insert(shapeMasterPayload(input))
+    .from('sales_leads')
+    .insert(shapeMasterPayload({
+      ...input,
+      assignedSalespersonId: await resolveSalesRepId(admin, input),
+    }))
     .select('*')
     .single();
 
   if (!error && data) {
-    return { available: true, created: true, existing: false, row: data as SalespersonLeadMaster, warning: null };
+    return { available: true, created: true, existing: false, row: data as SalesLead, warning: null };
   }
 
   const retry = await findSalespersonLeadMaster(admin, input);
@@ -287,8 +327,8 @@ export async function attachDiallerLeadToMaster(
   if (!id || !leadId) return;
 
   const { error } = await admin
-    .from('salesperson_lead_master')
-    .update({ dialler_lead_id: leadId, lead_state: 'queued' })
+    .from('sales_leads')
+    .update({ legacy_dialler_lead_id: leadId, lead_state: 'queued' })
     .eq('id', id);
 
   if (error) {
@@ -331,7 +371,7 @@ export async function incrementMasterLeadAttemptForDiallerLead(
   if (!row?.id) return;
 
   const { error } = await admin
-    .from('salesperson_lead_master')
+    .from('sales_leads')
     .update({
       attempt_count: (row.attempt_count ?? 0) + 1,
       last_attempted_at: attemptedAt,
@@ -344,7 +384,7 @@ export async function incrementMasterLeadAttemptForDiallerLead(
   }
 }
 
-function diallerDispositionToMasterState(disposition: DiallerLeadDisposition): SalespersonLeadMasterState {
+function diallerDispositionToMasterState(disposition: DiallerLeadDisposition): SalesLeadState {
   switch (disposition) {
     case 'interested':
       return 'interested';
@@ -357,7 +397,7 @@ function diallerDispositionToMasterState(disposition: DiallerLeadDisposition): S
   }
 }
 
-function callDispositionToMasterState(disposition: DialerCallDisposition): SalespersonLeadMasterState {
+function callDispositionToMasterState(disposition: DialerCallDisposition): SalesLeadState {
   switch (disposition) {
     case 'connected':
     case 'appointment_set':
@@ -393,7 +433,7 @@ export async function updateMasterLeadDispositionForDiallerLead(params: {
   if (!existing.row?.id) return;
 
   const { error } = await params.admin
-    .from('salesperson_lead_master')
+    .from('sales_leads')
     .update({
       lead_state: diallerDispositionToMasterState(params.disposition),
       disposition: params.disposition,
@@ -428,7 +468,7 @@ export async function updateMasterLeadDispositionForCall(params: {
   if (!existing.row?.id) return;
 
   const { error } = await params.admin
-    .from('salesperson_lead_master')
+    .from('sales_leads')
     .update({
       lead_state: callDispositionToMasterState(params.disposition),
       disposition: params.disposition,

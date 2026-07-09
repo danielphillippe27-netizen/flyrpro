@@ -169,8 +169,9 @@ export async function POST(
 
   try {
     const now = new Date().toISOString();
-    const contactId = await ensureContactForCallSms({ context, call, now });
-    if (!contactId) {
+    const salesLeadId = cleanText((call as { sales_lead_id?: unknown }).sales_lead_id);
+    const contactId = salesLeadId ? cleanText(call.contact_id) || null : await ensureContactForCallSms({ context, call, now });
+    if (!contactId && !salesLeadId) {
       return NextResponse.json({ error: 'Could not save this lead before sending the text.' }, { status: 500 });
     }
 
@@ -189,6 +190,7 @@ export async function POST(
       workspace_id: context.workspaceId,
       call_id: call.id,
       contact_id: contactId,
+      sales_lead_id: salesLeadId || null,
       user_id: context.requestUser.id,
       telecom_provider: message.provider,
       provider_message_id: message.messageId,
@@ -206,13 +208,24 @@ export async function POST(
 
     const [{ data: followup, error: insertError }, { error: activityError }, { error: contactError }] = await Promise.all([
       context.admin.from('dialer_sms_followups').insert(insertPayload).select('*').single(),
-      context.admin.from('contact_activities').insert({
-        contact_id: contactId,
-        type: 'text',
-        note: `Dialer SMS follow-up: ${messageBody}`,
-        timestamp: now,
-      }),
-      context.admin.from('contacts').update({ last_contacted: now, updated_at: now }).eq('id', contactId),
+      contactId
+        ? context.admin.from('contact_activities').insert({
+            contact_id: contactId,
+            type: 'text',
+            note: `Dialer SMS follow-up: ${messageBody}`,
+            timestamp: now,
+          })
+        : context.admin.from('sales_activities').insert({
+            workspace_id: context.workspaceId,
+            sales_lead_id: salesLeadId,
+            actor_user_id: context.requestUser.id,
+            activity_type: 'text',
+            note: `Dialer SMS follow-up: ${messageBody}`,
+            occurred_at: now,
+          }),
+      contactId
+        ? context.admin.from('contacts').update({ last_contacted: now, updated_at: now }).eq('id', contactId)
+        : context.admin.from('sales_leads').update({ last_attempted_at: now, called_at: now, updated_at: now }).eq('id', salesLeadId),
     ]);
 
     if (insertError) {

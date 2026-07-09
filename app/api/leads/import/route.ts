@@ -4,53 +4,44 @@ import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { resolveWorkspaceIdForUser, type MinimalSupabaseClient } from '@/app/api/_utils/workspace';
 import { normalizePhoneMarket, normalizePhoneNumber, type SupportedPhoneMarket } from '@/lib/dialer/phone';
-import {
-  bulkRegisterContactsInMaster,
-  findClaimedPhonesInWorkspace,
-} from '@/lib/sales-leads/master-list';
+import { findClaimedPhonesInWorkspace } from '@/lib/sales-leads/master-list';
+import type { SalesLeadState } from '@/types/database';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const OPTIONAL_CONTACT_COLUMNS = [
+const OPTIONAL_SALES_LEAD_COLUMNS = [
   'source',
-  'tags',
-  'last_contacted',
-  'follow_up_at',
-  'appointment_at',
   'phone_e164',
   'phone_country_code',
   'phone_area_code',
   'phone_area_label',
-  'phone_last_validated_at',
-  'phone_validation_error',
+  'next_follow_up_at',
+  'metadata',
+  'list_name',
 ] as const;
 
 type CsvRow = Record<string, string | null | undefined>;
 
-type ImportableContact = {
-  user_id: string;
+type ImportableSalesLead = {
   workspace_id: string;
-  full_name: string;
+  assigned_user_id: string;
+  created_by_user_id: string;
+  name: string;
   phone?: string;
   phone_e164?: string | null;
   phone_country_code?: string | null;
   phone_area_code?: string | null;
   phone_area_label?: string | null;
-  phone_last_validated_at?: string;
-  phone_validation_error?: string | null;
   email?: string;
-  address: string;
-  campaign_id?: string;
-  farm_id?: string;
-  status: 'hot' | 'warm' | 'cold' | 'new';
-  lead_kind: 'field' | 'scraped';
+  email_normalized?: string | null;
+  address?: string | null;
+  lead_state: SalesLeadState;
   source?: string;
-  tags?: string;
-  last_contacted?: string;
   notes?: string;
-  follow_up_at?: string;
-  appointment_at?: string;
+  next_follow_up_at?: string;
+  list_name?: string | null;
+  metadata?: Record<string, unknown>;
 };
 
 function mergeTags(rowTags: string, defaultTags: string): string {
@@ -92,19 +83,19 @@ function getValue(row: CsvRow, aliases: string[]): string {
   return '';
 }
 
-function normalizeStatus(value: string): ImportableContact['status'] {
+function normalizeStatus(value: string): SalesLeadState {
   const normalized = value.trim().toLowerCase();
-  if (normalized === 'hot' || normalized === 'warm' || normalized === 'cold' || normalized === 'new') {
-    return normalized;
-  }
-  if (['interested', 'appointment', 'talked', 'converted'].includes(normalized)) return 'hot';
+  if (normalized === 'new') return 'new';
+  if (normalized === 'hot' || ['interested', 'appointment', 'talked', 'converted'].includes(normalized)) return 'interested';
   if (['follow_up', 'follow-up', 'follow up', 'contacted', 'callback', 'left_voicemail', 'left voicemail'].includes(normalized)) {
-    return 'warm';
+    return 'callback';
   }
   if (['not_interested', 'not interested', 'bad_number', 'bad number', 'dnc', 'do_not_call', 'do not call'].includes(normalized)) {
-    return 'cold';
+    return normalized.includes('dnc') || normalized.includes('do_not_call') || normalized.includes('do not call') ? 'dnc' : 'not_now';
   }
-  return 'new';
+  if (normalized === 'warm') return 'callback';
+  if (normalized === 'cold') return 'not_now';
+  return 'assigned';
 }
 
 function toIsoOrUndefined(value: string): string | undefined {
@@ -113,49 +104,49 @@ function toIsoOrUndefined(value: string): string | undefined {
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
 }
 
-function contactSignature(contact: Pick<ImportableContact, 'full_name' | 'phone' | 'phone_e164' | 'email' | 'address'>): string {
+function leadSignature(lead: Pick<ImportableSalesLead, 'name' | 'phone' | 'phone_e164' | 'email' | 'address'>): string {
   return [
-    contact.full_name.trim().toLowerCase(),
-    (contact.phone_e164 ?? contact.phone ?? '').trim(),
-    (contact.email ?? '').trim().toLowerCase(),
-    contact.address.trim().toLowerCase(),
+    lead.name.trim().toLowerCase(),
+    (lead.phone_e164 ?? lead.phone ?? '').trim(),
+    (lead.email ?? '').trim().toLowerCase(),
+    (lead.address ?? '').trim().toLowerCase(),
   ].join('|');
 }
 
-function isMissingContactsColumn(error: unknown, column: string): boolean {
+function isMissingSalesLeadColumn(error: unknown, column: string): boolean {
   if (!error || typeof error !== 'object' || !('message' in error)) return false;
   const message = String((error as { message?: unknown }).message ?? '').toLowerCase();
   return (
-    message.includes(`column contacts.${column}`) ||
+    message.includes(`column sales_leads.${column}`) ||
     message.includes(`column "${column}"`) ||
     message.includes(`${column} does not exist`) ||
     message.includes(`could not find the '${column}' column`)
   );
 }
 
-async function insertContactsWithFallback(
+async function insertSalesLeadsWithFallback(
   admin: ReturnType<typeof createAdminClient>,
-  rows: ImportableContact[]
+  rows: ImportableSalesLead[]
 ) {
   let payload = rows.map((row) => ({ ...row }));
 
   while (true) {
-    const { data, error } = await admin.from('contacts').insert(payload).select('id');
+    const { data, error } = await admin.from('sales_leads').insert(payload).select('id');
     if (!error) {
       return (data ?? [])
         .map((row) => String((row as { id?: unknown }).id ?? '').trim())
         .filter(Boolean);
     }
 
-    const missingColumn = OPTIONAL_CONTACT_COLUMNS.find((column) => isMissingContactsColumn(error, column));
+    const missingColumn = OPTIONAL_SALES_LEAD_COLUMNS.find((column) => isMissingSalesLeadColumn(error, column));
     if (!missingColumn) {
       throw error;
     }
 
     payload = payload.map((row) => {
-      const nextRow = { ...row } as Partial<ImportableContact>;
+      const nextRow = { ...row } as Partial<ImportableSalesLead>;
       delete nextRow[missingColumn];
-      return nextRow as ImportableContact;
+      return nextRow as ImportableSalesLead;
     });
   }
 }
@@ -216,35 +207,36 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'The CSV file is empty.' }, { status: 400 });
     }
 
-    const { data: existingContacts, error: existingContactsError } = await admin
-      .from('contacts')
-      .select('id, full_name, phone, phone_e164, email, address')
-      .eq('workspace_id', workspaceResolution.workspaceId);
+    const { data: existingSalesLeads, error: existingSalesLeadsError } = await admin
+      .from('sales_leads')
+      .select('id, name, phone, phone_e164, email, address')
+      .eq('workspace_id', workspaceResolution.workspaceId)
+      .eq('assigned_user_id', requestUser.id);
 
-    if (existingContactsError) {
-      throw existingContactsError;
+    if (existingSalesLeadsError) {
+      throw existingSalesLeadsError;
     }
 
-    const existingContactIdBySignature = new Map<string, string>();
+    const existingSalesLeadIdBySignature = new Map<string, string>();
     const seenSignatures = new Set<string>();
 
-    (existingContacts ?? []).forEach((contact) => {
-      const signature = contactSignature({
-        full_name: String(contact.full_name ?? ''),
-        phone: contact.phone ?? undefined,
-        phone_e164: contact.phone_e164 ?? null,
-        email: contact.email ?? undefined,
-        address: String(contact.address ?? ''),
+    (existingSalesLeads ?? []).forEach((lead) => {
+      const signature = leadSignature({
+        name: String(lead.name ?? ''),
+        phone: lead.phone ?? undefined,
+        phone_e164: lead.phone_e164 ?? null,
+        email: lead.email ?? undefined,
+        address: String(lead.address ?? ''),
       });
       seenSignatures.add(signature);
-      if (contact.id) {
-        existingContactIdBySignature.set(signature, String(contact.id));
+      if (lead.id) {
+        existingSalesLeadIdBySignature.set(signature, String(lead.id));
       }
     });
 
-    const contactsToInsert: ImportableContact[] = [];
+    const salesLeadsToInsert: ImportableSalesLead[] = [];
     const skippedRows: string[] = [];
-    const matchedListContactIds = new Set<string>();
+    const matchedListSalesLeadIds = new Set<string>();
 
     parsedRows.forEach((row, index) => {
       const fullName = getValue(row, ['full_name', 'fullname', 'name', 'contact_name', 'lead_name']);
@@ -259,14 +251,8 @@ export async function POST(request: NextRequest) {
       const source = getValue(row, ['source', 'lead_source', 'origin', 'channel']);
       const tags = mergeTags(getValue(row, ['tags', 'tag', 'labels']), '');
       const status = normalizeStatus(getValue(row, ['status', 'lead_status', 'interest_level', 'temperature']));
-      const lastContacted = toIsoOrUndefined(
-        getValue(row, ['last_contacted', 'last_contacted_at', 'last_contact', 'last_touch'])
-      );
       const followUpAt = toIsoOrUndefined(
         getValue(row, ['follow_up_at', 'follow_up', 'followup', 'reminder_date', 'next_contact'])
-      );
-      const appointmentAt = toIsoOrUndefined(
-        getValue(row, ['appointment_at', 'appointment', 'meeting_at', 'meeting'])
       );
 
       const resolvedName =
@@ -282,48 +268,50 @@ export async function POST(request: NextRequest) {
       }
 
       const normalizedPhone = phone ? normalizePhoneNumber(phone, phoneMarket as SupportedPhoneMarket) : null;
-      const nextContact: ImportableContact = {
-        user_id: requestUser.id,
+      const nextLead: ImportableSalesLead = {
         workspace_id: workspaceResolution.workspaceId!,
-        full_name: resolvedName,
+        assigned_user_id: requestUser.id,
+        created_by_user_id: requestUser.id,
+        name: resolvedName,
         phone: phone || undefined,
         phone_e164: normalizedPhone?.e164 ?? null,
         phone_country_code: normalizedPhone?.countryCode ?? null,
         phone_area_code: normalizedPhone?.areaCode ?? null,
         phone_area_label: normalizedPhone?.areaLabel ?? null,
-        phone_last_validated_at: phone ? new Date().toISOString() : undefined,
-        phone_validation_error: normalizedPhone?.error ?? null,
         email: email || undefined,
-        address: address || '',
-        campaign_id: campaignId || undefined,
-        farm_id: farmId || undefined,
-        status,
-        lead_kind: 'scraped',
+        email_normalized: email ? email.toLowerCase() : null,
+        address: address || null,
+        lead_state: status,
         source: source || undefined,
-        tags: tags || undefined,
-        last_contacted: lastContacted,
         notes: notes || undefined,
-        follow_up_at: followUpAt,
-        appointment_at: appointmentAt,
+        next_follow_up_at: followUpAt,
+        list_name: listName || null,
+        metadata: {
+          importSource: 'csv',
+          tags: tags || null,
+          campaignId: campaignId || null,
+          farmId: farmId || null,
+          phoneValidationError: normalizedPhone?.error ?? null,
+        },
       };
 
-      const signature = contactSignature(nextContact);
+      const signature = leadSignature(nextLead);
       if (seenSignatures.has(signature)) {
-        const existingId = existingContactIdBySignature.get(signature);
+        const existingId = existingSalesLeadIdBySignature.get(signature);
         if (existingId) {
-          matchedListContactIds.add(existingId);
+          matchedListSalesLeadIds.add(existingId);
         }
         skippedRows.push(`Row ${index + 2}: duplicate lead skipped`);
         return;
       }
 
       seenSignatures.add(signature);
-      contactsToInsert.push(nextContact);
+      salesLeadsToInsert.push(nextLead);
     });
 
-    // Cross-rep collision check: drop any contact whose phone is already claimed
-    // by a different rep in this workspace's master list.
-    const phonesToCheck = contactsToInsert
+    // Cross-rep collision check: drop any sales lead whose phone is already claimed
+    // by a different rep in this workspace.
+    const phonesToCheck = salesLeadsToInsert
       .map((c) => c.phone_e164)
       .filter((p): p is string => Boolean(p));
 
@@ -335,7 +323,7 @@ export async function POST(request: NextRequest) {
     );
 
     let claimedByOtherRepCount = 0;
-    const finalContactsToInsert = contactsToInsert.filter((c) => {
+    const finalSalesLeadsToInsert = salesLeadsToInsert.filter((c) => {
       if (c.phone_e164 && claimedPhones.has(c.phone_e164)) {
         claimedByOtherRepCount += 1;
         return false;
@@ -343,7 +331,7 @@ export async function POST(request: NextRequest) {
       return true;
     });
 
-    if (finalContactsToInsert.length === 0) {
+    if (finalSalesLeadsToInsert.length === 0) {
       return NextResponse.json({
         success: true,
         imported: 0,
@@ -352,94 +340,28 @@ export async function POST(request: NextRequest) {
         message:
           claimedByOtherRepCount > 0
             ? `No leads imported — all ${claimedByOtherRepCount} lead${claimedByOtherRepCount === 1 ? ' is' : 's are'} already assigned to another rep.`
-            : listName && matchedListContactIds.size > 0
-              ? `No new leads were imported. Matched ${matchedListContactIds.size} existing lead${matchedListContactIds.size === 1 ? '' : 's'} for the "${listName}" list.`
+            : listName && matchedListSalesLeadIds.size > 0
+              ? `No new leads were imported. Matched ${matchedListSalesLeadIds.size} existing lead${matchedListSalesLeadIds.size === 1 ? '' : 's'} for the "${listName}" list.`
               : 'No new leads were imported.',
         skippedRows: skippedRows.slice(0, 20),
         createdListId: null,
         createdListName: null,
         requestedListName: listName || null,
-        importedContactIds: listName ? Array.from(matchedListContactIds) : [],
+        importedSalesLeadIds: listName ? Array.from(matchedListSalesLeadIds) : [],
       });
     }
 
     const chunkSize = 200;
-    const importedContactIds: string[] = [];
-    // Track inserted contacts for master list registration (id → contact).
-    const insertedContactsForMaster: Array<{
-      contactId: string;
-      name: string;
-      phone?: string;
-      phoneE164?: string | null;
-      email?: string;
-      address?: string;
-    }> = [];
+    const importedSalesLeadIds: string[] = [];
 
-    for (let start = 0; start < finalContactsToInsert.length; start += chunkSize) {
-      const chunk = finalContactsToInsert.slice(start, start + chunkSize);
-      const insertedIds = await insertContactsWithFallback(admin, chunk);
-      importedContactIds.push(...insertedIds);
-      insertedIds.forEach((id) => matchedListContactIds.add(id));
-      insertedIds.forEach((id, idx) => {
-        const contact = chunk[idx];
-        if (contact) {
-          insertedContactsForMaster.push({
-            contactId: id,
-            name: contact.full_name,
-            phone: contact.phone,
-            phoneE164: contact.phone_e164,
-            email: contact.email,
-            address: contact.address,
-          });
-        }
-      });
+    for (let start = 0; start < finalSalesLeadsToInsert.length; start += chunkSize) {
+      const chunk = finalSalesLeadsToInsert.slice(start, start + chunkSize);
+      const insertedIds = await insertSalesLeadsWithFallback(admin, chunk);
+      importedSalesLeadIds.push(...insertedIds);
+      insertedIds.forEach((id) => matchedListSalesLeadIds.add(id));
     }
 
-    // Register new contacts in the master list so future imports (by any rep)
-    // will detect them as already claimed. Awaited so it completes before the
-    // response is sent — Vercel terminates the function on response.
-    await bulkRegisterContactsInMaster(admin, {
-      workspaceId: workspaceResolution.workspaceId!,
-      assignedUserId: requestUser.id,
-      listName: listName || null,
-      contacts: insertedContactsForMaster,
-    });
-
-    let createdListId: string | null = null;
-    let createdListWarning: string | null = null;
-
-    if (listName && matchedListContactIds.size > 0) {
-      try {
-        const { data: createdList, error: smartListError } = await admin
-          .from('smart_lists')
-          .insert({
-            workspace_id: workspaceResolution.workspaceId,
-            created_by_user_id: requestUser.id,
-            name: listName,
-            criteria: {
-              baseKind: 'custom',
-              source: '',
-              tags: [],
-              campaignIds: [],
-              farmIds: [],
-              contactIds: Array.from(matchedListContactIds),
-            },
-          })
-          .select('id')
-          .single();
-
-        if (smartListError) {
-          throw smartListError;
-        }
-
-        createdListId = String((createdList as { id?: unknown })?.id ?? '').trim() || null;
-      } catch (smartListError) {
-        console.error('[leads/import] list creation failed', smartListError);
-        createdListWarning = ` Imported leads were saved, but the "${listName}" list could not be created.`;
-      }
-    }
-
-    const importedCount = finalContactsToInsert.length;
+    const importedCount = finalSalesLeadsToInsert.length;
     const claimedNote = claimedByOtherRepCount > 0
       ? ` ${claimedByOtherRepCount} lead${claimedByOtherRepCount === 1 ? ' was' : 's were'} skipped — already assigned to another rep.`
       : '';
@@ -451,14 +373,14 @@ export async function POST(request: NextRequest) {
       claimedByOtherRep: claimedByOtherRepCount,
       message:
         `Imported ${importedCount} lead${importedCount === 1 ? '' : 's'}.` +
-        (listName && createdListId ? ` Created the "${listName}" list.` : '') +
-        claimedNote +
-        (createdListWarning ?? ''),
+        (listName ? ` Tagged them with the "${listName}" sales list.` : '') +
+        claimedNote,
       skippedRows: skippedRows.slice(0, 20),
-      createdListId,
-      createdListName: createdListId ? listName : null,
+      createdListId: null,
+      createdListName: listName || null,
       requestedListName: listName || null,
-      importedContactIds: listName ? Array.from(matchedListContactIds) : [],
+      importedSalesLeadIds: listName ? Array.from(matchedListSalesLeadIds) : importedSalesLeadIds,
+      importedContactIds: [],
     });
   } catch (error) {
     console.error('[leads/import] import failed', error);

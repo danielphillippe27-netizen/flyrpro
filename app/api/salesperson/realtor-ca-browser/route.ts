@@ -303,7 +303,7 @@ async function saveBrowserCaptureLeads(params: {
       if (belongsToRequester || canClaimMaster) {
         if (canClaimMaster) {
           const { error: claimError } = await params.admin
-            .from('salesperson_lead_master')
+            .from('sales_leads')
             .update({
               assigned_user_id: params.userId,
               assigned_salesperson_id: params.salespersonId ?? null,
@@ -378,6 +378,9 @@ async function saveBrowserCaptureLeads(params: {
       ].filter(Boolean).join('\n') || null,
     }];
   });
+
+  // Sales/prospecting imports must stay out of regular FLYR contacts.
+  contactsToInsert.length = 0;
 
   if (contactsToInsert.length > 0) {
     try {
@@ -479,7 +482,7 @@ async function saveBrowserCaptureLeads(params: {
     await Promise.all(
       Array.from(masterMetadataById.entries()).map(async ([masterId, metadata]) => {
         const { error } = await params.admin
-          .from('salesperson_lead_master')
+          .from('sales_leads')
           .update({
             metadata: {
               ...metadata,
@@ -499,7 +502,7 @@ async function saveBrowserCaptureLeads(params: {
   }
 
   const { data: existingDialerRows, error: existingDialerError } = await params.admin
-    .from('dialler_leads')
+    .from('sales_leads')
     .select('id, phone')
     .eq('workspace_id', workspaceId)
     .eq('user_id', params.userId);
@@ -554,6 +557,9 @@ async function saveBrowserCaptureLeads(params: {
       }];
     });
 
+    // sales_leads is now the dialer queue for salesperson/prospecting leads.
+    dialerInserts.length = 0;
+
     if (dialerInserts.length > 0) {
       const masterIdByDialerPhone = new Map(
         dialerInserts
@@ -566,7 +572,7 @@ async function saveBrowserCaptureLeads(params: {
         return payload;
       });
       const { data: insertedDialerRows, error } = await params.admin
-        .from('dialler_leads')
+        .from('sales_leads')
         .insert(insertPayload)
         .select('id, phone');
 

@@ -56,6 +56,44 @@ function cleanText(value: string | null | undefined): string {
   return (value ?? '').trim();
 }
 
+function getErrorText(error: unknown): string {
+  if (!error) return '';
+  if (typeof error === 'string') return error.toLowerCase();
+  if (error instanceof Error) return error.message.toLowerCase();
+  if (typeof error !== 'object') return String(error).toLowerCase();
+
+  return ['code', 'message', 'details', 'hint']
+    .map((key) => {
+      const value = (error as Record<string, unknown>)[key];
+      return typeof value === 'string' ? value : '';
+    })
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+}
+
+function isSchemaMissingError(error: unknown, columns: string[]): boolean {
+  const text = getErrorText(error);
+  return (
+    columns.some((column) => text.includes(column.toLowerCase())) &&
+    (
+      text.includes('could not find') ||
+      text.includes('does not exist') ||
+      text.includes('schema cache') ||
+      text.includes('column')
+    )
+  );
+}
+
+function isDemoEmailHandleConflictError(error: unknown): boolean {
+  const text = getErrorText(error);
+  return (
+    text.includes('23505') ||
+    text.includes('salespeople_demo_email_handle_lower_idx') ||
+    (text.includes('duplicate') && text.includes('demo_email_handle'))
+  );
+}
+
 function buildSalespersonSettingsResponse(
   salesperson: DialerSalespersonRow | null,
   dialerSettings: SalespersonDialerSettingsRow | null,
@@ -158,7 +196,16 @@ async function buildSettingsResponse(
     getWorkspacePowerDialerAddon(admin, workspaceId),
   ]);
   const offer = getPowerDialerAddonOffer(getRequestBillingCurrency(request));
-  const addonStatus = founderBypassEnabled ? 'active' : addon.status;
+  const addonStatus = founderBypassEnabled || salespersonFeatureEnabled ? 'active' : addon.status;
+  const effectiveSettings =
+    founderBypassEnabled || salespersonFeatureEnabled
+      ? {
+          ...settings,
+          dialerAddonActive: true,
+          dialerAddonStatus: 'active' as const,
+          usesSharedDefaultNumber: !settings.salespersonFromNumber && settings.usesSharedDefaultNumber,
+        }
+      : settings;
 
   return {
     workspaceId,
@@ -180,7 +227,7 @@ async function buildSettingsResponse(
       currency: addon.currency ?? null,
     },
     salesperson: salespersonResponse,
-    settings,
+    settings: effectiveSettings,
   };
 }
 
@@ -270,6 +317,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     const updates: Record<string, unknown> = {};
+    let requestedDemoEmailHandle: string | null | undefined;
     if (body.demoEmailHandle !== undefined) {
       const handle = normalizeDemoEmailHandle(body.demoEmailHandle);
       if (handle && !DEMO_EMAIL_HANDLE_PATTERN.test(handle)) {
@@ -278,6 +326,7 @@ export async function PATCH(request: NextRequest) {
           { status: 400 }
         );
       }
+      requestedDemoEmailHandle = handle;
       updates.demo_email_handle = handle;
     }
 
@@ -289,6 +338,31 @@ export async function PATCH(request: NextRequest) {
       updates.demo_email_reply_to = replyTo || null;
     }
 
+    if (requestedDemoEmailHandle) {
+      const { data: existingHandleOwner, error: handleLookupError } = await admin
+        .from('salespeople')
+        .select('id')
+        .eq('demo_email_handle', requestedDemoEmailHandle)
+        .neq('id', salespersonForUpdates.id)
+        .limit(1)
+        .maybeSingle();
+
+      if (handleLookupError) {
+        console.error('[dialer/settings] failed to check demo email handle availability', handleLookupError);
+        const message = isSchemaMissingError(handleLookupError, ['demo_email_handle'])
+          ? 'Sales email settings are not ready yet. Run the latest Supabase migration first.'
+          : 'Could not check whether that sales email is available.';
+        return NextResponse.json({ error: message }, { status: 500 });
+      }
+
+      if (existingHandleOwner) {
+        return NextResponse.json(
+          { error: `${requestedDemoEmailHandle}@${DEMO_EMAIL_DOMAIN} is already in use. Try another sender.` },
+          { status: 409 }
+        );
+      }
+    }
+
     if (Object.keys(updates).length > 0) {
       const { error } = await admin
         .from('salespeople')
@@ -298,8 +372,24 @@ export async function PATCH(request: NextRequest) {
 
       if (error) {
         console.error('[dialer/settings] failed to update salesperson demo email settings', error);
+        if (isDemoEmailHandleConflictError(error)) {
+          const handle = requestedDemoEmailHandle || normalizeDemoEmailHandle(body.demoEmailHandle);
+          const message = handle
+            ? `${handle}@${DEMO_EMAIL_DOMAIN} is already in use. Try another sender.`
+            : 'That sales email sender is already in use. Try another sender.';
+          return NextResponse.json(
+            { error: message },
+            { status: 409 }
+          );
+        }
+        if (isSchemaMissingError(error, ['demo_email_handle', 'demo_email_reply_to'])) {
+          return NextResponse.json(
+            { error: 'Sales email settings are not ready yet. Run the latest Supabase migration first.' },
+            { status: 500 }
+          );
+        }
         return NextResponse.json(
-          { error: 'Failed to save demo email settings. Run the latest Supabase migration first.' },
+          { error: 'Failed to save demo email settings.' },
           { status: 500 }
         );
       }

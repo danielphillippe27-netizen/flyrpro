@@ -93,17 +93,17 @@ type AccessStateRow = {
   isSalesperson?: boolean | null;
   planBadgeLabel?: string | null;
   reason?: string | null;
-  subscriptionStatus?: string | null;
-  trialEndsAt?: string | null;
   onboardingComplete?: boolean | null;
   unauthorized?: boolean;
 };
 
-function accessStateHasExpiredTrial(state: AccessStateRow): boolean {
-  if (state.reason === 'trial-ended') return true;
-  if (state.subscriptionStatus !== 'trialing' || !state.trialEndsAt) return false;
-  const trialEnd = new Date(state.trialEndsAt).getTime();
-  return Number.isFinite(trialEnd) && trialEnd <= Date.now();
+function isSelfServeCampaignCreatePath(pathname: string): boolean {
+  try {
+    const url = new URL(pathname, 'http://localhost');
+    return url.pathname === '/campaigns/create' && url.searchParams.get('source') === 'self-serve-demo';
+  } catch {
+    return false;
+  }
 }
 
 type WorkspacePreferenceRow = {
@@ -111,6 +111,7 @@ type WorkspacePreferenceRow = {
 };
 
 function computeRedirectPath(state: AccessStateRow, pathname: string): string | null {
+  if (isSelfServeCampaignCreatePath(pathname)) return null;
   if (pathname.startsWith('/reset-password')) return null;
 
   const url = new URL(pathname, 'http://localhost');
@@ -135,7 +136,7 @@ function computeRedirectPath(state: AccessStateRow, pathname: string): string | 
   }
 
   if (!state.hasAccess) {
-    return accessStateHasExpiredTrial(state) ? '/subscribe?reason=trial-ended' : '/subscribe';
+    return '/subscribe';
   }
 
   return null;
@@ -184,7 +185,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         setIsFounder(false);
         setIsAmbassador(false);
         setPlanBadgeLabel(null);
-        setRedirectPath('/login');
+        setRedirectPath(isSelfServeCampaignCreatePath(currentPathWithSearch()) ? null : '/login');
         return;
       }
 

@@ -296,7 +296,7 @@ function DashboardGrid() {
 function TrustLines() {
   return (
     <div className="space-y-2">
-      {['Free onboarding call', 'Dedicated support', '14-day free trial'].map((line) => (
+      {['Free onboarding call', 'Dedicated support', 'One campaign included'].map((line) => (
         <div key={line} className="flex items-center gap-3 rounded-lg border border-white/10 bg-white/[0.035] px-4 py-3">
           <Check className="h-4 w-4 text-emerald-300" />
           <span className="text-sm font-bold text-white/85">{line}</span>
@@ -378,7 +378,7 @@ function TrialForm({ onSubmit }: { onSubmit: (data: { firstName: string; lastNam
         type="submit"
         className="mt-4 h-14 w-full rounded-md border border-red-400/70 bg-red-500 px-5 text-base font-black text-white shadow-[0_14px_42px_rgba(239,68,68,0.22)] transition hover:bg-red-400 focus:outline-none focus:ring-2 focus:ring-red-300/70"
       >
-        Start my free trial →
+        Start with one campaign included →
       </button>
     </form>
   );
@@ -454,7 +454,7 @@ export function DemoFunnel() {
     {
       headline: 'We built this for you.',
       body: 'FLYR is built for teams that need real field accountability without adding more admin work. Start with a guided trial and see the workflow with your team.',
-      cta: 'Claim my free trial →',
+      cta: 'Claim my included campaign →',
       render: () => (
         <div className="space-y-4">
           <VideoPlaceholder label="From the founder — 2 min" />

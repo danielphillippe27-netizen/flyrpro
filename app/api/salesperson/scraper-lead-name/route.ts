@@ -93,8 +93,8 @@ async function resolveWorkspaceIdForEdit(params: {
 
 async function updateByPhone(params: {
   admin: ReturnType<typeof createAdminClient>;
-  table: 'contacts' | 'dialler_leads';
-  column: 'full_name' | 'name';
+  table: 'sales_leads';
+  column: 'name';
   workspaceId: string;
   userId: string;
   name: string;
@@ -108,7 +108,7 @@ async function updateByPhone(params: {
       .from(params.table)
       .update({ [params.column]: params.name, updated_at: new Date().toISOString() })
       .eq('workspace_id', params.workspaceId)
-      .eq('user_id', params.userId)
+      .eq('assigned_user_id', params.userId)
       .eq(phoneColumn, value)
       .select('id');
 
@@ -137,7 +137,7 @@ async function findMasterIds(params: {
   const collect = async (column: 'phone' | 'phone_e164' | 'external_id', value: string | null) => {
     if (!value) return;
     let query = params.admin
-      .from('salesperson_lead_master')
+      .from('sales_leads')
       .select('id')
       .eq('workspace_id', params.workspaceId)
       .eq(column, value);
@@ -215,23 +215,11 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'A phone or source URL is required to edit this lead.' }, { status: 400 });
     }
 
-    const [contactCount, dialerCount, masterIds] = await Promise.all([
+    const [salesLeadCount, masterIds] = await Promise.all([
       phone
         ? updateByPhone({
             admin,
-            table: 'contacts',
-            column: 'full_name',
-            workspaceId,
-            userId: requestUser.id,
-            name: parsed.data.name,
-            phone,
-            phoneE164: normalizedPhone.e164 || null,
-          })
-        : 0,
-      phone
-        ? updateByPhone({
-            admin,
-            table: 'dialler_leads',
+            table: 'sales_leads',
             column: 'name',
             workspaceId,
             userId: requestUser.id,
@@ -254,7 +242,7 @@ export async function PATCH(request: NextRequest) {
     let masterCount = 0;
     if (masterIds.length > 0) {
       const { data, error } = await admin
-        .from('salesperson_lead_master')
+        .from('sales_leads')
         .update({ name: parsed.data.name })
         .in('id', masterIds)
         .select('id');
@@ -267,8 +255,9 @@ export async function PATCH(request: NextRequest) {
       ok: true,
       name: parsed.data.name,
       updated: {
-        contacts: contactCount,
-        dialerLeads: dialerCount,
+        contacts: 0,
+        dialerLeads: salesLeadCount,
+        salesLeads: salesLeadCount,
         masterLeads: masterCount,
       },
     });

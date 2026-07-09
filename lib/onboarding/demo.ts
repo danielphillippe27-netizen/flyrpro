@@ -148,6 +148,19 @@ function normalizeState(row: DemoStateRow, starterContactCount = 0): DemoState {
   };
 }
 
+function transientDemoState(options: StateOptions, rolePath: DemoRolePath, seededCampaignId: string | null): DemoState {
+  return {
+    id: deterministicDemoUuid(`flyr-demo:state:${options.workspaceId}:${options.userId}`),
+    workspace_id: options.workspaceId,
+    user_id: options.userId,
+    role_path: rolePath,
+    seeded_campaign_id: seededCampaignId,
+    completed_items: {},
+    dismissed_at: null,
+    starter_contact_count: 0,
+  };
+}
+
 function isIgnorableMissingSchemaError(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
   const candidate = error as { code?: string; message?: string; details?: string | null };
@@ -314,6 +327,17 @@ async function findStarterCampaign(admin: SupabaseClient, workspaceId: string): 
   return starter?.id ?? null;
 }
 
+async function findAnyWorkspaceCampaign(admin: SupabaseClient, workspaceId: string): Promise<string | null> {
+  const { data } = await admin
+    .from('campaigns')
+    .select('id')
+    .eq('workspace_id', workspaceId)
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  return data?.id ?? null;
+}
+
 async function resolveValidSeededCampaignId(
   admin: SupabaseClient,
   workspaceId: string,
@@ -362,6 +386,9 @@ async function upsertDemoState(admin: SupabaseClient, options: StateOptions): Pr
     )
     .select('*')
     .single();
+  if (error && isIgnorableMissingSchemaError(error)) {
+    return transientDemoState(options, rolePath, existingStarterId);
+  }
   if (error) throw error;
   return normalizeState(data as DemoStateRow, await starterContactCount(admin, existingStarterId));
 }
@@ -393,6 +420,9 @@ export async function getDemoStateForUser(admin: SupabaseClient, options: StateO
       .eq('id', data.id)
       .select('*')
       .single();
+    if (updateError && isIgnorableMissingSchemaError(updateError)) {
+      return transientDemoState(options, rolePath, seededCampaignId);
+    }
     if (updateError) throw updateError;
     return normalizeState(updated as DemoStateRow, await starterContactCount(admin, seededCampaignId));
   }
@@ -423,6 +453,7 @@ export async function patchDemoStateForUser(admin: SupabaseClient, options: Patc
     .eq('user_id', options.userId)
     .select('*')
     .single();
+  if (error && isIgnorableMissingSchemaError(error)) return current;
   if (error) throw error;
   return normalizeState(data as DemoStateRow, await starterContactCount(admin, current.seeded_campaign_id));
 }
@@ -474,6 +505,22 @@ export async function seedStarterCampaignForWorkspace(admin: SupabaseClient, opt
     if (existing?.id) {
       return { seeded: false, skipped: false, campaignId: existing.id, rolePath };
     }
+  }
+
+  const existingWorkspaceCampaignId = await findAnyWorkspaceCampaign(admin, options.workspaceId);
+  if (existingWorkspaceCampaignId) {
+    await getDemoStateForUser(admin, {
+      ...options,
+      role,
+      seededCampaignId: existingWorkspaceCampaignId,
+    });
+    return {
+      seeded: false,
+      skipped: true,
+      campaignId: existingWorkspaceCampaignId,
+      rolePath,
+      reason: 'workspace_campaign_limit_reached',
+    };
   }
 
   const now = new Date().toISOString();

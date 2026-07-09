@@ -18,6 +18,9 @@ export function HomePageClient({ accessLevel }: HomePageClientProps) {
   const searchParams = useSearchParams();
   const { accessLevel: workspaceAccessLevel } = useWorkspace();
   const resolvedAccessLevel = workspaceAccessLevel ?? accessLevel;
+  const showSelfServeTeamDemo =
+    searchParams.get('source') === 'self-serve-demo' &&
+    (searchParams.get('tab') === 'map' || searchParams.get('tab') === 'reporting');
 
   useEffect(() => {
     const code = searchParams.get('code');
@@ -28,7 +31,7 @@ export function HomePageClient({ accessLevel }: HomePageClientProps) {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-background">
-      {resolvedAccessLevel === 'team_leader' ? (
+      {showSelfServeTeamDemo || resolvedAccessLevel === 'team_leader' ? (
         <TeamOwnerDashboardView />
       ) : resolvedAccessLevel === 'salesperson' ? (
         <SalespersonCallHomeView />

@@ -33,6 +33,19 @@ type AssignmentRow = {
   updated_at: string;
 };
 
+type AssignmentInsertRow = {
+  campaign_id: string;
+  workspace_id: string;
+  assigned_to_user_id: string;
+  assigned_by_user_id: string;
+  mode: CampaignAssignmentMode;
+  goal_homes: number;
+  zone_index: number | null;
+  status: 'assigned';
+  due_at: string | null;
+  notes: string | null;
+};
+
 type ProfileRow = {
   user_id: string;
   first_name: string | null;
@@ -286,7 +299,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: cancelError.message || 'Failed to cancel previous assignments' }, { status: 500 });
     }
 
-    const assignmentInserts =
+    const assignmentInserts: AssignmentInsertRow[] =
       mode === 'zone_split'
         ? normalizedZones.map((zone) => ({
             campaign_id: campaignId,
@@ -300,14 +313,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
             due_at: dueAt,
             notes,
           }))
-        : memberIds.map((memberId, index) => ({
+        : memberIds.map((memberId) => ({
             campaign_id: campaignId,
             workspace_id: workspaceId,
             assigned_to_user_id: memberId,
             assigned_by_user_id: requestUser.id,
             mode,
             goal_homes: wholeTeamGoalHomes,
-            zone_index: index + 1,
+            zone_index: null,
             status: 'assigned',
             due_at: dueAt,
             notes,

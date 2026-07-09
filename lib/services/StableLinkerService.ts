@@ -15,8 +15,10 @@
 
 import { SupabaseClient } from '@supabase/supabase-js';
 import { fetchAllInPages } from '@/lib/supabase/fetchAllInPages';
+import { retryWithBackoff } from '@/lib/utils/retryWithBackoff';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const GOLD_ADDRESS_UPDATE_BATCH_SIZE = 50;
 
 // Match result types
 export interface MatchResult {
@@ -1315,23 +1317,40 @@ export class StableLinkerService {
     }
 
     if (persistenceMode === 'gold') {
-      const addressUpdates = validMatches.map((match) =>
-        this.supabase
-          .from('campaign_addresses')
-          .update({
-            building_id: UUID_PATTERN.test(match.buildingId) ? match.buildingId : null,
-            building_gers_id: match.buildingId,
-            match_source: this.toGoldMatchSource(match.matchType),
-            confidence: match.confidence,
-          })
-          .eq('id', match.addressId)
-          .eq('campaign_id', campaignId)
-      );
-      const results = await Promise.all(addressUpdates);
-      const firstError = results.find((result) => result.error)?.error;
-      if (firstError) {
-        console.error('[StableLinker] Error saving Gold address assignments:', firstError.message);
-        throw new Error(`Failed to save Gold address assignments: ${firstError.message}`);
+      for (let i = 0; i < validMatches.length; i += GOLD_ADDRESS_UPDATE_BATCH_SIZE) {
+        const batch = validMatches.slice(i, i + GOLD_ADDRESS_UPDATE_BATCH_SIZE);
+        try {
+          await Promise.all(
+            batch.map((match) =>
+              retryWithBackoff(
+                async () => {
+                  const { error } = await this.supabase
+                    .from('campaign_addresses')
+                    .update({
+                      building_id: UUID_PATTERN.test(match.buildingId) ? match.buildingId : null,
+                      building_gers_id: match.buildingId,
+                      match_source: this.toGoldMatchSource(match.matchType),
+                      confidence: match.confidence,
+                    })
+                    .eq('id', match.addressId)
+                    .eq('campaign_id', campaignId);
+
+                  if (error) {
+                    throw new Error(error.message || 'Unknown Supabase update error');
+                  }
+                },
+                { maxAttempts: 4, baseDelayMs: 500 }
+              )
+            )
+          );
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.error(
+            `[StableLinker] Error saving Gold address assignments batch ${i / GOLD_ADDRESS_UPDATE_BATCH_SIZE + 1}:`,
+            message
+          );
+          throw new Error(`Failed to save Gold address assignments: ${message}`);
+        }
       }
     }
 

@@ -145,7 +145,9 @@ export async function getDialerRequestContext(
     membership.workspaceId,
     salespersonContext.settings
   );
-  if (!settings.dialerAddonActive && !founderBypassEnabled) {
+  const hasDialerAccessOverride = founderBypassEnabled || salespersonFeatureEnabled;
+
+  if (!settings.dialerAddonActive && !hasDialerAccessOverride) {
     return NextResponse.json(
       { error: 'Power Dialer add-on is not active for this workspace' },
       { status: 403 }
@@ -162,12 +164,12 @@ export async function getDialerRequestContext(
     workspaceId: membership.workspaceId,
     role: membership.role,
     salesperson: salespersonContext.salesperson,
-    settings: founderBypassEnabled
+    settings: hasDialerAccessOverride
       ? {
           ...settings,
           dialerAddonActive: true,
           dialerAddonStatus: 'active',
-          usesSharedDefaultNumber: true,
+          usesSharedDefaultNumber: !settings.salespersonFromNumber && settings.usesSharedDefaultNumber,
         }
       : settings,
   };

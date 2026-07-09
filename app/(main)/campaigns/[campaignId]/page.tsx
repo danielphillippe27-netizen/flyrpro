@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
@@ -21,7 +21,19 @@ import { PaywallGuard } from '@/components/PaywallGuard';
 import { MissingQRModal } from '@/components/modals/MissingQRModal';
 import type { CampaignV2, CampaignAddress, CampaignContact } from '@/types/database';
 import type { CampaignRoadMetadata } from '@/types/campaign-roads';
-import { Users, MapPin, Search, Plus, Pencil, Trash2, Paperclip, FileText, X } from 'lucide-react';
+import {
+  ArrowRight,
+  BarChart3,
+  Users,
+  MapPin,
+  Search,
+  Plus,
+  Pencil,
+  Trash2,
+  Paperclip,
+  FileText,
+  X,
+} from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { createClient } from '@/lib/supabase/client';
 import { useWorkspace } from '@/lib/workspace-context';
@@ -33,6 +45,7 @@ import {
   isMissingCampaignColumnErrorMessage,
   parseLegacyCampaignText,
 } from '@/lib/campaignLegacyFields';
+import { useTheme } from '@/lib/theme-provider';
 
 const FLYER_MAX_SIZE_MB = 10;
 
@@ -88,6 +101,59 @@ import { Textarea } from '@/components/ui/textarea';
 type CampaignWithLegacyDescription = CampaignV2 & {
   description?: string | null;
 };
+
+const CAMPAIGN_TAB_VALUES = ['map', 'activity', 'addresses', 'contacts', 'qr', 'finance', 'assignments', 'notes'] as const;
+type CampaignTabValue = (typeof CAMPAIGN_TAB_VALUES)[number];
+
+const SELF_SERVE_DEMO_NEXT_STEPS = [
+  {
+    id: 'assign',
+    eyebrow: 'Next step 1 of 5',
+    title: 'Split the campaign across 4 reps',
+    description: 'Assign Maya, Leo, Ava, and Noah so each person gets a clear zone.',
+    tab: 'assignments',
+    button: 'Go to split',
+  },
+  {
+    id: 'live-map',
+    eyebrow: 'Next step 2 of 5',
+    title: 'Watch the live team map',
+    description: 'See the 4 demo reps hitting doors across the campaign in real time.',
+    tab: 'assignments',
+    button: 'Watch live map',
+  },
+  {
+    id: 'reporting',
+    eyebrow: 'Next step 3 of 5',
+    title: 'Review weekly performance',
+    description: 'Open the weekly report with mock visits, callbacks, leads, and rep performance.',
+    tab: 'activity',
+    button: 'Show weekly report',
+  },
+  {
+    id: 'pricing',
+    eyebrow: 'Next step 4 of 5',
+    title: 'Pricing is ready',
+    description: 'Review the stats, then pricing is ready when they understand the campaign workflow.',
+    tab: 'activity',
+    button: 'Go to pricing',
+  },
+  {
+    id: 'feedback',
+    eyebrow: 'Next step 5 of 5',
+    title: 'Review the demo and ask questions',
+    description: 'Use the Feedback ? button in the top-right header to tell us what you thought of the demo or ask anything before unlocking the full dashboard.',
+    tab: 'activity',
+    button: 'Open feedback step',
+  },
+] as const satisfies ReadonlyArray<{
+  id: 'assign' | 'live-map' | 'reporting' | 'pricing' | 'feedback';
+  eyebrow: string;
+  title: string;
+  description: string;
+  tab: CampaignTabValue;
+  button: string;
+}>;
 
 // Keep this prefix compatible with the farm notes timeline because farm notes are stored on campaigns.
 const CAMPAIGN_NOTE_TIMELINE_PREFIX = '__FLYR_FARM_NOTE_TIMELINE_V1__';
@@ -316,40 +382,6 @@ function buildAssignmentScope(payload: unknown): AssignmentScopeState | null {
     label: 'Assigned',
     description: `${totalHomes} home goal · shared campaign view`,
     scopedToAssignedZone: false,
-  };
-}
-
-function getLinkQualityBanner(campaign: CampaignV2 | null): {
-  badgeVariant: 'default' | 'secondary' | 'outline' | 'destructive';
-  badgeLabel: string;
-  message: string;
-} | null {
-  const status = campaign?.link_quality_status ?? 'unknown';
-  const score = campaign?.link_quality_score;
-  const reason = campaign?.link_quality_reason;
-
-  if (status === 'unknown') return null;
-
-  if (status === 'healthy') {
-    return {
-      badgeVariant: 'outline',
-      badgeLabel: `Data Quality${typeof score === 'number' ? ` ${score}` : ''}`,
-      message: 'Address and building coverage are within target thresholds.',
-    };
-  }
-
-  if (status === 'repairing') {
-    return {
-      badgeVariant: 'secondary',
-      badgeLabel: 'Data Repair Queued',
-      message: reason || 'A background repair pass is queued to improve campaign data quality.',
-    };
-  }
-
-  return {
-    badgeVariant: status === 'failed' ? 'destructive' : 'secondary',
-    badgeLabel: 'Data Quality Review',
-    message: reason || 'This campaign has degraded data quality and may need review.',
   };
 }
 
@@ -622,7 +654,14 @@ export default function CampaignDetailPage() {
   const searchParams = useSearchParams();
   const campaignId = params.campaignId as string;
   const { currentWorkspaceId, membershipsByWorkspaceId } = useWorkspace();
+  const { setTheme } = useTheme();
   const currentWorkspaceRole = currentWorkspaceId ? membershipsByWorkspaceId[currentWorkspaceId] ?? null : null;
+  const isSelfServeDemo = searchParams.get('source') === 'self-serve-demo';
+  const requestedTab = searchParams.get('tab');
+  const initialTab: CampaignTabValue =
+    requestedTab && CAMPAIGN_TAB_VALUES.includes(requestedTab as CampaignTabValue)
+      ? (requestedTab as CampaignTabValue)
+      : 'map';
 
   const [campaign, setCampaign] = useState<CampaignV2 | null>(null);
   const [addresses, setAddresses] = useState<CampaignAddress[]>([]);
@@ -653,6 +692,12 @@ export default function CampaignDetailPage() {
   const [qrScanEventsCount, setQrScanEventsCount] = useState<number | null>(null);
   const [roadMetadata, setRoadMetadata] = useState<CampaignRoadMetadata | null>(null);
   const [assignmentScope, setAssignmentScope] = useState<AssignmentScopeState | null>(null);
+  const [activeTab, setActiveTab] = useState<CampaignTabValue>(initialTab);
+  const [demoGuideOpen, setDemoGuideOpen] = useState(
+    isSelfServeDemo && searchParams.get('tour') !== '0'
+  );
+  const [demoNextStepIndex, setDemoNextStepIndex] = useState(0);
+  const selfServeProvisionStartedRef = useRef(false);
   const campaignStats: CampaignStats = useMemo(
     () => deriveCampaignStats(addresses, contacts),
     [addresses, contacts]
@@ -831,6 +876,59 @@ export default function CampaignDetailPage() {
     loadData();
   }, [loadData]);
 
+  useEffect(() => {
+    if (!isSelfServeDemo || !campaign?.id || !campaign.territory_boundary) return;
+    if (selfServeProvisionStartedRef.current || campaign.provision_status === 'ready') return;
+
+    let alreadyStartedFromCreate = false;
+    try {
+      alreadyStartedFromCreate =
+        window.sessionStorage.getItem(`flyr-self-serve-provision-started:${campaign.id}`) === '1';
+    } catch {
+      alreadyStartedFromCreate = false;
+    }
+    if (alreadyStartedFromCreate && campaign.provision_status === 'pending') {
+      selfServeProvisionStartedRef.current = true;
+      return;
+    }
+
+    const shouldStartProvision =
+      searchParams.get('building') === '1' ||
+      (!addressesLoading && addresses.length === 0 && campaign.provision_status !== 'pending');
+    if (!shouldStartProvision) return;
+
+    selfServeProvisionStartedRef.current = true;
+    void fetch('/api/campaigns/provision', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ campaign_id: campaign.id }),
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          console.warn(
+            '[CampaignDetailPage] Self-serve provision kickoff failed:',
+            payload?.error ?? response.statusText
+          );
+        }
+        await loadData();
+      })
+      .catch((error) => {
+        selfServeProvisionStartedRef.current = false;
+        console.warn('[CampaignDetailPage] Self-serve provision kickoff failed:', error);
+      });
+  }, [
+    addresses.length,
+    addressesLoading,
+    campaign?.id,
+    campaign?.provision_status,
+    campaign?.territory_boundary,
+    isSelfServeDemo,
+    loadData,
+    searchParams,
+  ]);
+
   // Poll road metadata when status is fetching
   useEffect(() => {
     if (roadMetadata?.roads_status !== 'fetching' || !campaignId) return;
@@ -847,10 +945,13 @@ export default function CampaignDetailPage() {
     const provisionStatus = campaign?.provision_status;
     const provisionPhase = campaign?.provision_phase;
     const shouldPollParcelStatus = parcelStatus === 'queued' || parcelStatus === 'processing';
+    const shouldPollSelfServeBuild =
+      isSelfServeDemo && searchParams.get('building') === '1' && provisionStatus !== 'ready';
     const shouldPollProvisionStage =
       provisionStatus === 'pending' ||
       provisionPhase === 'map_ready' ||
-      provisionPhase === 'optimizing';
+      provisionPhase === 'optimizing' ||
+      shouldPollSelfServeBuild;
 
     if (!campaignId || (!shouldPollParcelStatus && !shouldPollProvisionStage)) return;
 
@@ -859,7 +960,15 @@ export default function CampaignDetailPage() {
     }, 5000);
 
     return () => clearInterval(interval);
-  }, [campaignId, campaign?.parcel_enrichment_status, campaign?.provision_status, campaign?.provision_phase, loadData]);
+  }, [
+    campaignId,
+    campaign?.parcel_enrichment_status,
+    campaign?.provision_status,
+    campaign?.provision_phase,
+    isSelfServeDemo,
+    loadData,
+    searchParams,
+  ]);
 
   useEffect(() => {
     if (campaign?.video_url) setDestinationUrl(campaign.video_url);
@@ -872,6 +981,58 @@ export default function CampaignDetailPage() {
     }
     setNotes(legacyCampaignText.notes ?? '');
   }, [campaign?.notes, legacyCampaignText.notes]);
+
+  useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab]);
+
+  useEffect(() => {
+    if (isSelfServeDemo) setTheme('light');
+  }, [isSelfServeDemo, setTheme]);
+
+  useEffect(() => {
+    if (isSelfServeDemo && searchParams.get('tour') === '1') {
+      setDemoGuideOpen(true);
+    }
+  }, [isSelfServeDemo, searchParams]);
+
+  const focusCampaignTabs = useCallback(() => {
+    window.setTimeout(() => {
+      document.getElementById('campaign-demo-tabs')?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      });
+    }, 50);
+  }, []);
+
+  const handleDemoNextStep = useCallback(() => {
+    const step = SELF_SERVE_DEMO_NEXT_STEPS[demoNextStepIndex] ?? SELF_SERVE_DEMO_NEXT_STEPS[0];
+    if (step.id === 'pricing') {
+      window.location.href = `/pricing?source=self-serve-demo&campaign=${encodeURIComponent(campaignId)}`;
+      return;
+    }
+    if (step.id === 'live-map') {
+      window.location.href = `/home?tab=map&source=self-serve-demo&demoLive=1&campaign=${encodeURIComponent(campaignId)}`;
+      return;
+    }
+    if (step.id === 'reporting') {
+      window.location.href = `/home?tab=reporting&source=self-serve-demo&demoReport=1&campaign=${encodeURIComponent(campaignId)}`;
+      return;
+    }
+    if (step.id === 'feedback') {
+      window.location.href = `/home?tab=reporting&source=self-serve-demo&demoReport=1&demoFeedback=1&campaign=${encodeURIComponent(campaignId)}`;
+      return;
+    }
+
+    setActiveTab(step.tab);
+    setDemoNextStepIndex((current) => Math.min(current + 1, SELF_SERVE_DEMO_NEXT_STEPS.length - 1));
+    setDemoGuideOpen(true);
+    focusCampaignTabs();
+  }, [campaignId, demoNextStepIndex, focusCampaignTabs]);
+
+  const handleDemoSplitComplete = useCallback(() => {
+    window.location.href = `/home?tab=map&source=self-serve-demo&demoLive=1&campaign=${encodeURIComponent(campaignId)}`;
+  }, [campaignId]);
 
   const saveLegacyCampaignText = useCallback(
     async (updates: { notes?: string; scripts?: string; flyerUrl?: string }) => {
@@ -1278,15 +1439,16 @@ export default function CampaignDetailPage() {
     };
   });
   const hasGeneratedAdvancedQr = formattedRecipients.some((recipient) => Boolean(recipient.qr_code_base64));
-  const linkQualityBanner = getLinkQualityBanner(campaign);
-  const requestedTab = searchParams.get('tab');
-  const initialTab =
-    requestedTab && ['map', 'activity', 'addresses', 'contacts', 'qr', 'finance', 'assignments', 'notes'].includes(requestedTab)
-      ? requestedTab
-      : 'map';
+  const selfServeHomeCapNotice =
+    isSelfServeDemo &&
+    typeof campaign?.data_quality_reason === 'string' &&
+    campaign.data_quality_reason.includes('free demo loaded')
+      ? campaign.data_quality_reason
+      : null;
+  const demoNextStep = SELF_SERVE_DEMO_NEXT_STEPS[demoNextStepIndex] ?? SELF_SERVE_DEMO_NEXT_STEPS[0];
 
   return (
-    <div className="min-h-full bg-muted/30 dark:bg-background relative">
+    <div className={isSelfServeDemo ? 'relative min-h-full bg-background text-foreground' : 'min-h-full bg-muted/30 dark:bg-background relative'}>
       {/* Progress bar only – campaign name is in layout header */}
       {campaignStats.addresses > 0 && campaignStats.progress_pct > 0 && (
         <div className="bg-card border-b border-border px-4 sm:px-6 lg:px-8 py-2">
@@ -1303,17 +1465,127 @@ export default function CampaignDetailPage() {
 
       <main className="w-full px-4 sm:px-6 lg:px-8 py-6 space-y-6">
         <StatsHeader stats={campaignStats} />
-        {linkQualityBanner ? (
-          <div className="rounded-xl border border-border bg-card px-4 py-3">
-            <div className="flex flex-wrap items-start gap-3">
-              <Badge variant={linkQualityBanner.badgeVariant}>{linkQualityBanner.badgeLabel}</Badge>
-              <div className="min-w-0 space-y-1">
-                <p className="text-sm text-muted-foreground">{linkQualityBanner.message}</p>
-              </div>
+        {isSelfServeDemo ? (
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 shadow-sm dark:border-border dark:bg-card">
+            <div className="flex flex-col">
+              {demoGuideOpen ? (
+                <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-border dark:bg-background">
+                  <div className="mb-3 flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-muted-foreground">
+                        {demoNextStep.eyebrow}
+                      </p>
+                      <h2 className="mt-1 text-base font-semibold text-slate-950 dark:text-foreground">{demoNextStep.title}</h2>
+                    </div>
+                    <button
+                      type="button"
+                      className="rounded-md p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-950 dark:text-muted-foreground dark:hover:bg-muted dark:hover:text-foreground"
+                      aria-label="Close next steps"
+                      onClick={() => setDemoGuideOpen(false)}
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  <p className="text-sm leading-5 text-slate-700 dark:text-muted-foreground">{demoNextStep.description}</p>
+
+                  {demoNextStep.id === 'assign' ? (
+                    <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-border dark:bg-card">
+                      <p className="text-xs font-medium text-slate-600 dark:text-muted-foreground">Mock members</p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {['Maya', 'Leo', 'Ava', 'Noah'].map((member) => (
+                          <span
+                            key={member}
+                            className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-900 dark:border-border dark:bg-background dark:text-foreground"
+                          >
+                            {member}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {demoNextStep.id === 'live-map' ? (
+                    <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-border dark:bg-card">
+                        <p className="text-lg font-bold text-slate-950 dark:text-foreground">{totalHomesInCampaign.toLocaleString()}</p>
+                        <p className="text-[11px] text-slate-600 dark:text-muted-foreground">homes</p>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-border dark:bg-card">
+                        <p className="text-lg font-bold text-slate-950 dark:text-foreground">4</p>
+                        <p className="text-[11px] text-slate-600 dark:text-muted-foreground">members</p>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-border dark:bg-card">
+                        <p className="text-lg font-bold text-slate-950 dark:text-foreground">Live</p>
+                        <p className="text-[11px] text-slate-600 dark:text-muted-foreground">map</p>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {demoNextStep.id === 'reporting' || demoNextStep.id === 'pricing' ? (
+                    <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-border dark:bg-card">
+                      <p className="mb-2 text-xs font-medium text-slate-600 dark:text-muted-foreground">Reporting snapshot</p>
+                      <div className="grid grid-cols-3 gap-2 text-center">
+                        <div>
+                          <p className="text-lg font-bold text-slate-950 dark:text-foreground">12</p>
+                          <p className="text-[11px] text-slate-600 dark:text-muted-foreground">visits</p>
+                        </div>
+                        <div>
+                          <p className="text-lg font-bold text-slate-950 dark:text-foreground">4</p>
+                          <p className="text-[11px] text-slate-600 dark:text-muted-foreground">callbacks</p>
+                        </div>
+                        <div>
+                          <p className="text-lg font-bold text-slate-950 dark:text-foreground">2</p>
+                          <p className="text-[11px] text-slate-600 dark:text-muted-foreground">leads</p>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <Button
+                    type="button"
+                    className="mt-4 w-full"
+                    onClick={handleDemoNextStep}
+                    data-self-serve-demo-flow="true"
+                  >
+                    {demoNextStep.id === 'assign' ? <Users className="h-4 w-4" /> : null}
+                    {demoNextStep.id === 'live-map' ? <MapPin className="h-4 w-4" /> : null}
+                    {demoNextStep.id === 'reporting' ? <BarChart3 className="h-4 w-4" /> : null}
+                    {demoNextStep.button}
+                    <ArrowRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full border-slate-200 bg-white text-slate-950 hover:bg-slate-50 dark:border-border dark:bg-background dark:text-foreground dark:hover:bg-muted"
+                  onClick={() => setDemoGuideOpen(true)}
+                  data-self-serve-demo-flow="true"
+                >
+                  Next steps
+                  <ArrowRight className="h-4 w-4" />
+                </Button>
+              )}
             </div>
           </div>
         ) : null}
-        <Tabs defaultValue={initialTab} className="w-full">
+        {selfServeHomeCapNotice ? (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+            <div className="flex flex-wrap items-start gap-3">
+              <Badge variant="outline" className="border-amber-300 bg-white text-amber-900 dark:border-amber-800 dark:bg-background dark:text-amber-100">
+                Free demo
+              </Badge>
+              <p className="min-w-0 flex-1">{selfServeHomeCapNotice}</p>
+            </div>
+          </div>
+        ) : null}
+        <Tabs
+          value={activeTab}
+          onValueChange={(value) => setActiveTab(value as CampaignTabValue)}
+          className="w-full"
+          id="campaign-demo-tabs"
+        >
           <TabsList>
             <TabsTrigger value="map">Map</TabsTrigger>
             <TabsTrigger value="activity">Activity</TabsTrigger>
@@ -1428,67 +1700,69 @@ export default function CampaignDetailPage() {
               </p>
             </div>
 
-            <div className="bg-card p-4 rounded-xl border border-border">
-              <div className="flex flex-wrap gap-6 items-start justify-between">
-                <div className="flex flex-col gap-3">
-                  <h3 className="text-sm font-semibold text-foreground">Basic QR Code</h3>
-                  <p className="text-xs text-muted-foreground max-w-md">
-                    One QR code for the whole campaign. Each scan is tracked in campaign analytics, but not tied to any specific address.
-                  </p>
-                  <div className="flex flex-wrap gap-3">
-                    <Button
-                      onClick={handleGenerateBasicQr}
-                      disabled={generatingBasicQr}
-                    >
-                      {generatingBasicQr ? 'Generating...' : 'Generate QR'}
-                    </Button>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="bg-card p-4 rounded-xl border border-border">
+                <div className="flex flex-wrap gap-6 items-start justify-between">
+                  <div className="flex flex-col gap-3">
+                    <h3 className="text-sm font-semibold text-foreground">Basic QR Code</h3>
+                    <p className="text-xs text-muted-foreground max-w-md">
+                      One QR code for the whole campaign. Each scan is tracked in campaign analytics, but not tied to any specific address.
+                    </p>
+                    <div className="flex flex-wrap gap-3">
+                      <Button
+                        onClick={handleGenerateBasicQr}
+                        disabled={generatingBasicQr}
+                      >
+                        {generatingBasicQr ? 'Generating...' : 'Generate QR'}
+                      </Button>
+                    </div>
                   </div>
+                  {basicQrBase64 && (
+                    <div className="flex flex-col gap-2 items-center shrink-0">
+                      <img
+                        src={basicQrBase64}
+                        alt="Campaign basic QR code"
+                        className="w-48 h-48 rounded-lg border border-border bg-white object-contain"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleDownloadBasicQr}
+                        className="text-sm font-medium text-red-600 hover:text-red-500 underline underline-offset-2"
+                      >
+                        Download PNG
+                      </button>
+                    </div>
+                  )}
                 </div>
-                {basicQrBase64 && (
-                  <div className="flex flex-col gap-2 items-center shrink-0">
-                    <img
-                      src={basicQrBase64}
-                      alt="Campaign basic QR code"
-                      className="w-48 h-48 rounded-lg border border-border bg-white object-contain"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleDownloadBasicQr}
-                      className="text-sm font-medium text-red-600 hover:text-red-500 underline underline-offset-2"
-                    >
-                      Download PNG
-                    </button>
-                  </div>
-                )}
               </div>
-            </div>
 
-            <div className="bg-card p-4 rounded-xl border border-border">
-              <h2 className="text-sm font-semibold text-foreground mb-3">Advanced QR Code</h2>
-              <p className="text-xs text-muted-foreground mb-3">
-                Unique QR codes for every home in the campaign. Scans are tied to addresses and each PNG includes the home address for print matching.
-              </p>
-              {!addressesLoading && formattedRecipients.length === 0 ? (
-                <p className="mb-3 text-xs text-muted-foreground">
-                  Add addresses to this campaign before generating QR codes.
+              <div className="bg-card p-4 rounded-xl border border-border">
+                <h2 className="text-sm font-semibold text-foreground mb-3">Advanced QR Code</h2>
+                <p className="text-xs text-muted-foreground mb-3">
+                  Unique QR codes for every home in the campaign. Scans are tied to addresses and each PNG includes the home address for print matching.
                 </p>
-              ) : !addressesLoading && !hasGeneratedAdvancedQr ? (
-                <p className="mb-3 text-xs text-muted-foreground">
-                  QR codes have not been generated yet.
-                </p>
-              ) : null}
-              <div className="flex flex-wrap gap-3">
-                <Button
-                  onClick={() => handleGenerateQRs(true)}
-                  disabled={generating || addressesLoading || formattedRecipients.length === 0}
-                >
-                  {generating ? 'Generating...' : 'Generate QR Codes'}
-                </Button>
-                {generating ? (
-                  <p className="text-xs text-muted-foreground">
-                    Generating QR codes, this may take up to 30 seconds...
+                {!addressesLoading && formattedRecipients.length === 0 ? (
+                  <p className="mb-3 text-xs text-muted-foreground">
+                    Add addresses to this campaign before generating QR codes.
+                  </p>
+                ) : !addressesLoading && !hasGeneratedAdvancedQr ? (
+                  <p className="mb-3 text-xs text-muted-foreground">
+                    QR codes have not been generated yet.
                   </p>
                 ) : null}
+                <div className="flex flex-wrap gap-3">
+                  <Button
+                    onClick={() => handleGenerateQRs(true)}
+                    disabled={generating || addressesLoading || formattedRecipients.length === 0}
+                  >
+                    {generating ? 'Generating...' : 'Generate QR Codes'}
+                  </Button>
+                  {generating ? (
+                    <p className="text-xs text-muted-foreground">
+                      Generating QR codes, this may take up to 30 seconds...
+                    </p>
+                  ) : null}
+                </div>
               </div>
             </div>
 
@@ -1589,6 +1863,8 @@ export default function CampaignDetailPage() {
               campaignId={campaignId}
               campaignName={campaign?.name ?? undefined}
               addresses={addresses}
+              demoMode={isSelfServeDemo}
+              onDemoSplitComplete={handleDemoSplitComplete}
             />
           </TabsContent>
 

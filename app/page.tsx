@@ -165,7 +165,7 @@ export default function LandingPage() {
                 href="/login"
                 className="inline-flex h-12 items-center rounded-2xl bg-red-600 px-6 text-base font-semibold text-white transition hover:bg-red-500"
               >
-                Start your free trial
+                Start with one campaign included
               </Link>
             </div>
           </div>

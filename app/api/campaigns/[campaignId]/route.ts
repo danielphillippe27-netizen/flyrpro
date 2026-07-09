@@ -122,7 +122,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
     const { data: campaign, error } = await admin
       .from('campaigns')
       .select(
-        'id, name, title, status, type, provision_status, provision_phase, provision_source, map_ready_at, optimized_at, map_mode, building_link_confidence, data_quality_reason, link_quality_reason, updated_at',
+        'id, name, title, status, type, provision_status, provision_phase, provision_source, map_ready_at, optimized_at, map_mode, building_link_confidence, data_quality_reason, link_quality_reason, bbox, territory_boundary, updated_at',
       )
       .eq('id', campaignId)
       .single();
@@ -145,6 +145,8 @@ export async function GET(request: NextRequest, context: RouteContext) {
       building_link_confidence: campaign.building_link_confidence ?? null,
       data_quality_reason: campaign.data_quality_reason ?? null,
       link_quality_reason: campaign.link_quality_reason ?? null,
+      bbox: campaign.bbox ?? null,
+      territory_boundary: campaign.territory_boundary ?? null,
       updated_at: campaign.updated_at ?? null,
     });
   } catch (err) {

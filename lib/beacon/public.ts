@@ -39,6 +39,22 @@ export type BeaconHeartbeat = {
   recorded_at: string;
 };
 
+export type BeaconSessionDoor = {
+  address_id: string;
+  formatted?: string | null;
+  house_number?: string | null;
+  street_name?: string | null;
+  lat: number;
+  lon: number;
+  status?: string | null;
+  map_status?: string | null;
+  feature_type?: string | null;
+  source?: string | null;
+  address_provenance?: string | null;
+  event_type?: string | null;
+  created_at: string;
+};
+
 export type PublicBeaconPayload = {
   active: boolean;
   reason?: string;
@@ -53,6 +69,7 @@ export type PublicBeaconPayload = {
   latest_heartbeat?: BeaconHeartbeat | null;
   breadcrumbs?: BeaconBreadcrumb[];
   safety_events?: BeaconSafetyEvent[];
+  session_doors?: BeaconSessionDoor[];
 };
 
 export async function getPublicBeaconByToken(token: string): Promise<PublicBeaconPayload> {

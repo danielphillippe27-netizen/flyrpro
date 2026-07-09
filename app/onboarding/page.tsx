@@ -9,11 +9,10 @@ import {
   Select,
   SelectContent,
   SelectItem,
-  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Check, ChevronDown, User, Users, Building2, Plus } from 'lucide-react';
+import { Check, ChevronDown, User, Users, Building2, Plus, Minus } from 'lucide-react';
 import { ExclusiveOfferArcadeEmbed } from '@/components/landing/ExclusiveOfferArcadeEmbed';
 import { getClientAsync } from '@/lib/supabase/client';
 import { COUNTRY_OPTIONS } from '@/lib/countries';
@@ -30,7 +29,6 @@ type SalespersonInviteHint = {
 };
 type ReferralValidation = {
   referralCode: string;
-  trialDays: number;
   ambassadorName?: string | null;
   partnerName?: string | null;
   salespersonName?: string | null;
@@ -51,14 +49,11 @@ type HandoffRedeemResponse = {
   error?: string;
 };
 
-const INDUSTRIES_TOP = ['Real Estate', 'Solar', 'Roofing & Exteriors'];
+const INDUSTRIES_TOP = ['Home service', 'Solar', 'Roofing & Exteriors', 'HVAC', 'Real Estate'];
 
 const INDUSTRIES_REST = [
-  'Financing',
-  'Home Health Care',
-  'HVAC & Plumbing',
   'Insurance',
-  'Landscaping & Snow',
+  'Landscaping',
   'Pest Control',
   'Political / Canvassing',
   'Pool Service',
@@ -71,6 +66,7 @@ const MAX_SEATS = 200;
 const FINAL_ONBOARDING_STEP = 5;
 const EXCLUSIVE_ONBOARDING_AUTH_DRAFT_KEY = 'flyr.exclusiveOnboardingAuthDraft';
 const ONBOARDING_DRAFT_KEY = 'flyr.onboardingDraft';
+const SELF_SERVE_CAMPAIGN_DRAFT_KEY = 'flyr.selfServeCampaignDraft';
 const MOBILE_RETURN_URL_PARAMS = [
   'returnUrl',
   'return_url',
@@ -104,6 +100,12 @@ type OnboardingDraft = {
   teamInviteEmails: string[];
   checkoutSeats: number;
   checkoutUseCase: 'solo' | 'team';
+};
+
+type SelfServeCampaignDraft = {
+  name: string;
+  polygon: GeoJSON.Polygon;
+  bbox?: number[];
 };
 
 function getBillingCurrency(): BillingCurrency {
@@ -173,6 +175,23 @@ function readOnboardingDraft(): OnboardingDraft | null {
         : [''],
       checkoutSeats,
       checkoutUseCase,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function readSelfServeCampaignDraft(): SelfServeCampaignDraft | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(SELF_SERVE_CAMPAIGN_DRAFT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<SelfServeCampaignDraft>;
+    if (!parsed.name || parsed.polygon?.type !== 'Polygon' || !Array.isArray(parsed.polygon.coordinates)) return null;
+    return {
+      name: parsed.name,
+      polygon: parsed.polygon,
+      bbox: Array.isArray(parsed.bbox) ? parsed.bbox : undefined,
     };
   } catch {
     return null;
@@ -284,8 +303,16 @@ function OnboardingContent() {
     typeof salespersonInviteToken === 'string' && salespersonInviteToken.trim().length > 0;
   const isDialerOnboarding =
     searchParams.get('source') === 'dialer' || searchParams.get('campaign') === 'power-dialer';
-  const requiresOnboardingAuth = isExclusivePartnerOnboarding || isSalespersonOnboarding || isDialerOnboarding;
-  const requiresStepOneAuth = false;
+  const isSelfServeDemoOnboarding =
+    searchParams.get('source') === 'self-serve-demo' ||
+    searchParams.get('campaign') === 'self-serve-campaign';
+  const onboardingFinalStep = FINAL_ONBOARDING_STEP;
+  const requiresOnboardingAuth =
+    isExclusivePartnerOnboarding ||
+    isSalespersonOnboarding ||
+    isDialerOnboarding ||
+    isSelfServeDemoOnboarding;
+  const requiresStepOneAuth = isSelfServeDemoOnboarding;
   const isResumeCompletion = searchParams.get('resume') === 'complete';
 
   useEffect(() => {
@@ -349,6 +376,7 @@ function OnboardingContent() {
 
   const hideExclusiveStep1Demo = challenge30FromUrl || hintChallenge30 === true;
   const shouldShowReferralStep =
+    !isSelfServeDemoOnboarding &&
     !isSalespersonOnboarding &&
     !(isExclusivePartnerOnboarding && isExclusivePartnerTeamLayout);
 
@@ -401,6 +429,7 @@ function OnboardingContent() {
   const [pendingResumeDraft, setPendingResumeDraft] = useState<OnboardingDraft | null>(null);
   const resumeCompletionStarted = useRef(false);
   const handoffAuthenticatedRef = useRef(false);
+  const onboardingAccessTokenRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (demoPrefillApplied.current || searchParams.get('source') !== 'demo') return;
@@ -586,7 +615,7 @@ function OnboardingContent() {
     setAuthSessionChecked(false);
     getClientAsync()
       .then((supabase) => supabase.auth.getUser())
-      .then(({ data: { user } }) => {
+      .then(async ({ data: { user } }) => {
         if (cancelled) return;
         const email =
           typeof user?.email === 'string' && user.email.trim()
@@ -600,6 +629,10 @@ function OnboardingContent() {
         if (email) {
           setWorkEmail((current) => current.trim() || email);
         }
+        const {
+          data: { session },
+        } = await getClientAsync().then((supabase) => supabase.auth.getSession());
+        onboardingAccessTokenRef.current = session?.access_token ?? null;
         setAuthSessionChecked(true);
       })
       .catch(() => {
@@ -652,12 +685,14 @@ function OnboardingContent() {
   const canStep1 =
     firstName.trim().length > 0 &&
     lastName.trim().length > 0 &&
-    countryCode.length > 0 &&
+    (isSelfServeDemoOnboarding || countryCode.length > 0) &&
     (!requiresStepOneAuth ||
       hasAuthenticatedOnboardingSession ||
       (normalizedWorkEmail.length > 0 && accountPassword.trim().length >= 6));
   const canStep3 =
-    workspaceName.trim().length > 0 && industry.length > 0;
+    workspaceName.trim().length > 0 &&
+    industry.length > 0 &&
+    (!isSelfServeDemoOnboarding || countryCode.length > 0);
   const selectedCountry = COUNTRY_OPTIONS.find((country) => country.code === countryCode);
   const filteredCountries = useMemo(() => {
     const query = countrySearchQuery.trim().toLowerCase();
@@ -668,14 +703,44 @@ function OnboardingContent() {
   }, [countrySearchQuery]);
   const billingCurrency = getBillingCurrency();
   const seatPricing = getSeatPricing();
-  const selectedSeatCount = useCase === 'team' ? Math.max(TEAM_MIN_SEATS, seats) : SOLO_SEATS;
+  const normalizedTeamInviteEmails = normalizeEmailList(teamInviteEmails);
+  const selectedSeatCount =
+    useCase === 'team'
+      ? Math.max(TEAM_MIN_SEATS, seats, normalizedTeamInviteEmails.length + 1)
+      : SOLO_SEATS;
   const pricingCards = [
+    {
+      id: 'free',
+      title: 'Free',
+      seatCount: SOLO_SEATS,
+      priceLabel: '$0',
+      priceSuffix: '',
+      billingLabel: 'No credit card required.',
+      description: '1 free campaign to build your first map and try FLYR.',
+      features: ['1 free campaign', 'Campaign planning', 'Route preview', 'Lead follow-up'],
+      buttonLabel: 'Start free',
+      showLaunchPricing: false,
+    },
     {
       id: 'simple-pro',
       title: 'FLYR Pro',
       seatCount: selectedSeatCount,
-      description: 'Everything you need to run campaigns, track routes, and follow up with leads.',
-      features: ['Campaign planning', 'Route tracking', 'Lead follow-up', 'Team seats when you need them'],
+      priceLabel: formatPlanPrice(seatPricing.seatMonthlyDisplay, billingCurrency),
+      priceSuffix: '/seat/month',
+      billingLabel: `${selectedSeatCount} seat${selectedSeatCount === 1 ? '' : 's'} selected. Billed monthly.`,
+      description: 'Unlimited campaigns to run your team, track routes, and follow up with leads.',
+      features: [
+        'Unlimited campaigns',
+        '3D prospecting maps',
+        'GPS door tracking',
+        'Rep assignments',
+        'Lead capture',
+        'Team dashboard',
+        'QR code tools',
+        '& much more',
+      ],
+      buttonLabel: 'Select Pro',
+      showLaunchPricing: true,
     },
   ] as const;
 
@@ -833,10 +898,6 @@ function OnboardingContent() {
         setReferralCode(validatedCode);
         setReferralValidation({
           referralCode: validatedCode,
-          trialDays:
-            typeof payload.trialDays === 'number' && Number.isFinite(payload.trialDays)
-              ? payload.trialDays
-              : 30,
           ambassadorName:
             typeof payload.ambassadorName === 'string' ? payload.ambassadorName : null,
           partnerName:
@@ -886,9 +947,18 @@ function OnboardingContent() {
             : typeof draft?.seats === 'number' && Number.isFinite(draft.seats)
               ? draft.seats
               : seats;
+      const selfServeCampaignDraft = isSelfServeDemoOnboarding ? readSelfServeCampaignDraft() : null;
+      const sessionResult = await getClientAsync()
+        .then((supabase) => supabase.auth.getSession())
+        .catch(() => null);
+      const accessToken = onboardingAccessTokenRef.current ?? sessionResult?.data.session?.access_token ?? null;
+      onboardingAccessTokenRef.current = accessToken;
       const res = await fetch('/api/onboarding/complete', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        },
         credentials: 'include',
         body: JSON.stringify({
           firstName: (draft?.firstName ?? firstName).trim(),
@@ -897,21 +967,34 @@ function OnboardingContent() {
           workspaceName: (draft?.workspaceName ?? workspaceName).trim(),
           industry: (draft?.industry ?? industry).trim(),
           referralCode: shouldShowReferralStep ? (draft?.referralCode ?? referralCode).trim() || null : null,
-          referralSource: draft?.referralSource ?? referralSource,
-          referralCampaign: draft?.referralCampaign ?? referralCampaign,
+          referralSource: isSelfServeDemoOnboarding
+            ? 'self-serve-demo'
+            : draft?.referralSource ?? referralSource,
+          referralCampaign: isSelfServeDemoOnboarding
+            ? 'self-serve-campaign'
+            : draft?.referralCampaign ?? referralCampaign,
           brokerage: (draft?.brokerage ?? brokerage).trim() || undefined,
           brokerageId: draft?.brokerageId ?? brokerageId ?? undefined,
-          useCase: isExclusivePartnerTeamLayout ? 'team' : completionUseCase,
-          maxSeats: isExclusivePartnerTeamLayout
+          useCase: isExclusivePartnerTeamLayout
+            ? 'team'
+            : completionUseCase,
+          maxSeats: completionUseCase === 'team' || isExclusivePartnerTeamLayout
             ? Math.max(TEAM_MIN_SEATS, normalizedInviteEmails.length + 1, completionSeats)
-            : completionUseCase === 'team'
-              ? Math.max(TEAM_MIN_SEATS, completionSeats)
-              : SOLO_SEATS,
+            : SOLO_SEATS,
           partnerOfferToken: isExclusivePartnerOnboarding ? partnerOfferToken : undefined,
           salespersonInviteToken: isSalespersonOnboarding ? salespersonInviteToken : undefined,
-          clientSource: searchParams.get('source') ?? undefined,
-          teamMemberEmails: isExclusivePartnerTeamLayout ? normalizedInviteEmails : undefined,
+          clientSource: isSelfServeDemoOnboarding
+            ? 'self-serve-demo'
+            : searchParams.get('source') ?? undefined,
+          selfServeCampaignDraft,
+          teamMemberEmails:
+            completionUseCase === 'team' || isExclusivePartnerTeamLayout
+              ? normalizedInviteEmails
+              : undefined,
           openAppAfterCompletion: true,
+          openCampaignCreateAfterCompletion: isSelfServeDemoOnboarding && !selfServeCampaignDraft,
+          resumeCampaignAfterOnboarding:
+            isSelfServeDemoOnboarding && !selfServeCampaignDraft && searchParams.get('resumeCampaign') === '1',
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -920,6 +1003,14 @@ function OnboardingContent() {
           setPostOnboardingRedirect(data.redirect);
         }
         return data as OnboardingCompletionResponse;
+      }
+      if (res.status === 401 && requiresOnboardingAuth) {
+        onboardingAccessTokenRef.current = null;
+        setAuthenticatedEmail(null);
+        setStep(1);
+        setAuthError('Create or sign in to your account so we can save this campaign.');
+        setError(null);
+        return null;
       }
       setError(data?.error ?? 'Something went wrong. Please try again.');
       return null;
@@ -931,11 +1022,21 @@ function OnboardingContent() {
     }
   };
 
+  const refreshOnboardingAccessToken = useCallback(async (): Promise<string | null> => {
+    const sessionResult = await getClientAsync()
+      .then((supabase) => supabase.auth.getSession())
+      .catch(() => null);
+    const accessToken = sessionResult?.data.session?.access_token ?? null;
+    onboardingAccessTokenRef.current = accessToken;
+    return accessToken;
+  }, []);
+
   const redirectAfterOnboarding = (redirect?: string | null) => {
     if (mobileReturnUrl) {
       if (typeof window !== 'undefined') {
         window.localStorage.removeItem(EXCLUSIVE_ONBOARDING_AUTH_DRAFT_KEY);
         window.localStorage.removeItem(ONBOARDING_DRAFT_KEY);
+        window.localStorage.removeItem(SELF_SERVE_CAMPAIGN_DRAFT_KEY);
         window.location.href = mobileReturnUrl;
       }
       return;
@@ -945,6 +1046,7 @@ function OnboardingContent() {
     if (typeof window !== 'undefined') {
       window.localStorage.removeItem(EXCLUSIVE_ONBOARDING_AUTH_DRAFT_KEY);
       window.localStorage.removeItem(ONBOARDING_DRAFT_KEY);
+      window.localStorage.removeItem(SELF_SERVE_CAMPAIGN_DRAFT_KEY);
       window.location.href = destination;
     }
   };
@@ -955,7 +1057,24 @@ function OnboardingContent() {
   }) => {
     const checkoutSeats = options?.checkoutSeats ?? selectedSeatCount;
     const checkoutUseCase = options?.checkoutUseCase ?? (checkoutSeats > SOLO_SEATS ? 'team' : 'solo');
-    if (!authenticatedEmail) {
+    const currentAccessToken = onboardingAccessTokenRef.current ?? await refreshOnboardingAccessToken();
+    let authSatisfied =
+      (hasAuthenticatedOnboardingSession && Boolean(currentAccessToken)) ||
+      (!requiresOnboardingAuth && Boolean(authenticatedEmail));
+    if (!authSatisfied) {
+      if (isSelfServeDemoOnboarding || requiresOnboardingAuth) {
+        authSatisfied = await ensureExclusiveAuth();
+        if (!authSatisfied) {
+          if (isSelfServeDemoOnboarding) setStep(1);
+          return;
+        }
+      } else if (!authenticatedEmail) {
+        redirectToLoginForCompletion(checkoutSeats, checkoutUseCase);
+        return;
+      }
+    }
+
+    if (!authSatisfied && !isSelfServeDemoOnboarding) {
       redirectToLoginForCompletion(checkoutSeats, checkoutUseCase);
       return;
     }
@@ -968,6 +1087,11 @@ function OnboardingContent() {
   const handleContinueToApp = async (checkoutSeats: number) => {
     const checkoutUseCase = checkoutSeats > SOLO_SEATS ? 'team' : 'solo';
     if (!authenticatedEmail) {
+      if (isSelfServeDemoOnboarding) {
+        setStep(1);
+        setAuthError('Create your account first so we can save this campaign in your dashboard.');
+        return;
+      }
       redirectToLoginForCompletion(checkoutSeats, checkoutUseCase);
       return;
     }
@@ -998,9 +1122,9 @@ function OnboardingContent() {
     setReferralCampaign(draft.referralCampaign);
     setSeats(draft.seats);
     setTeamInviteEmails(draft.teamInviteEmails.length > 0 ? draft.teamInviteEmails : ['']);
-    setStep(FINAL_ONBOARDING_STEP);
+    setStep(onboardingFinalStep);
     setPendingResumeDraft(draft);
-  }, [isResumeCompletion, router]);
+  }, [isResumeCompletion, onboardingFinalStep, router]);
 
   useEffect(() => {
     if (!isResumeCompletion || !pendingResumeDraft || resumeCompletionStarted.current || !authSessionChecked) return;
@@ -1036,6 +1160,7 @@ function OnboardingContent() {
     try {
       const supabase = await getClientAsync();
       await supabase.auth.signOut();
+      onboardingAccessTokenRef.current = null;
       router.push('/login');
     } catch {
       setSigningOut(false);
@@ -1047,7 +1172,8 @@ function OnboardingContent() {
     const normalizedEmail = normalizedWorkEmail;
     if (!normalizedEmail || accountPassword.trim().length < 6) {
       if (hasAuthenticatedOnboardingSession) {
-        return true;
+        const accessToken = onboardingAccessTokenRef.current ?? await refreshOnboardingAccessToken();
+        if (accessToken) return true;
       }
       setAuthError('Enter a valid work email and a password (6+ characters), or continue with Google or Apple.');
       return false;
@@ -1065,11 +1191,48 @@ function OnboardingContent() {
         currentUser?.email &&
         currentUser.email.toLowerCase() === normalizedEmail
       ) {
-        return true;
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          onboardingAccessTokenRef.current = session.access_token;
+          setAuthenticatedEmail(normalizedEmail);
+          return true;
+        }
       }
 
       if (currentUser) {
         await supabase.auth.signOut();
+        onboardingAccessTokenRef.current = null;
+      }
+
+      if (isSelfServeDemoOnboarding) {
+        const createAccountResponse = await fetch('/api/onboarding/self-serve-account', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            firstName: firstName.trim(),
+            lastName: lastName.trim(),
+            countryCode,
+            email: normalizedEmail,
+            password: accountPassword,
+            selfServeCampaignDraft: readSelfServeCampaignDraft(),
+          }),
+        }).catch(() => null);
+        if (!createAccountResponse) {
+          setAuthError('Could not reach authentication service. Please try again.');
+          return false;
+        }
+        const createAccountData = await createAccountResponse.json().catch(() => ({}));
+        if (!createAccountResponse.ok) {
+          setAuthError(
+            typeof createAccountData?.error === 'string'
+              ? createAccountData.error
+              : 'Failed to create account.'
+          );
+          return false;
+        }
       }
 
       const signInResult = await supabase.auth.signInWithPassword({
@@ -1077,6 +1240,8 @@ function OnboardingContent() {
         password: accountPassword,
       });
       if (!signInResult.error && signInResult.data?.session) {
+        onboardingAccessTokenRef.current = signInResult.data.session.access_token;
+        setAuthenticatedEmail(normalizedEmail);
         return true;
       }
 
@@ -1093,8 +1258,19 @@ function OnboardingContent() {
         return false;
       }
 
+      if (isSelfServeDemoOnboarding) {
+        setAuthError('This email already has an account. Use the right password or try another email.');
+        return false;
+      }
+
       const nextQs = new URLSearchParams();
-      if (isDialerOnboarding) {
+      if (isSelfServeDemoOnboarding) {
+        nextQs.set('source', 'self-serve-demo');
+        nextQs.set('campaign', 'self-serve-campaign');
+        if (searchParams.get('resumeCampaign') === '1') {
+          nextQs.set('resumeCampaign', '1');
+        }
+      } else if (isDialerOnboarding) {
         nextQs.set('source', 'dialer');
         nextQs.set('campaign', 'power-dialer');
       } else if (isSalespersonOnboarding && salespersonInviteToken) {
@@ -1134,6 +1310,8 @@ function OnboardingContent() {
       }
 
       if (signUpResult.data?.session) {
+        onboardingAccessTokenRef.current = signUpResult.data.session.access_token;
+        setAuthenticatedEmail(normalizedEmail);
         return true;
       }
 
@@ -1155,6 +1333,7 @@ function OnboardingContent() {
     requiresOnboardingAuth,
     isDialerOnboarding,
     isSalespersonOnboarding,
+    isSelfServeDemoOnboarding,
     lastName,
     countryCode,
     challenge30FromUrl,
@@ -1162,6 +1341,8 @@ function OnboardingContent() {
     onboardingEntryPath,
     partnerExclusiveParam,
     partnerOfferToken,
+    refreshOnboardingAccessToken,
+    searchParams,
     salespersonInviteToken,
     normalizedWorkEmail,
   ]);
@@ -1212,7 +1393,7 @@ function OnboardingContent() {
 
   const labelClass = 'text-sm font-semibold text-[#1f2024]';
   const inputClass =
-    'h-14 rounded-xl border-[#d9dce2] bg-white text-base font-semibold text-[#17181c] placeholder:text-[#8a8f99] shadow-none focus-visible:border-[#17181c] focus-visible:ring-2 focus-visible:ring-black/10 dark:bg-white dark:text-[#17181c] dark:placeholder:text-[#8a8f99]';
+    '!h-14 min-h-14 rounded-xl border-[#d9dce2] bg-white text-base font-semibold text-[#17181c] placeholder:text-[#8a8f99] shadow-none focus-visible:border-[#17181c] focus-visible:ring-2 focus-visible:ring-black/10 dark:bg-white dark:text-[#17181c] dark:placeholder:text-[#8a8f99]';
   const outlineButtonClass =
     'h-12 rounded-xl border-[#d9dce2] bg-white text-[#202124] hover:bg-[#f5f6f8] hover:text-[#202124] dark:border-[#d9dce2] dark:bg-white dark:text-[#202124] dark:hover:bg-[#f5f6f8] dark:hover:text-[#202124]';
   const onboardingNavButtonClass =
@@ -1222,27 +1403,43 @@ function OnboardingContent() {
 
   const heading =
     step === 1
-      ? 'Help us personalize your experience'
+      ? isSelfServeDemoOnboarding
+        ? searchParams.get('resumeCampaign') === '1'
+          ? 'Your 3D map is building'
+          : 'Build your first 3D prospecting map'
+        : 'Help us personalize your experience'
       : step === 2
         ? 'How will you use FLYR?'
         : step === 3
           ? 'Set up your workspace'
           : step === 4
             ? 'Ambassador referral code'
-            : 'Do more with FLYR';
+            : 'Reach your potential with FLYR';
 
   const subheading =
     step === 1
-      ? null
+      ? isSelfServeDemoOnboarding
+        ? searchParams.get('resumeCampaign') === '1'
+          ? 'Create your free account while we prepare the homes in your neighborhood.'
+          : 'Create a free account to get started'
+        : null
       : step === 2
         ? isExclusivePartnerTeamLayout
           ? 'Team mode is pre-selected for this exclusive offer.'
           : 'Choose solo or team so we can tailor your workspace.'
-        : step === 3
-          ? 'Name your business and tell us your industry.'
+      : step === 3
+        ? isSelfServeDemoOnboarding
+          ? 'Finish setup and we will open your 3D homes as soon as the map is ready.'
+          : 'Name your business and tell us your industry.'
           : step === 4
             ? 'Enter an ambassador code to unlock your offer, or skip this step.'
             : 'Select a plan based on your needs';
+
+  useEffect(() => {
+    if (step > onboardingFinalStep) {
+      setStep(onboardingFinalStep);
+    }
+  }, [onboardingFinalStep, step]);
 
   if (isResumeCompletion && (loading || !authSessionChecked || pendingResumeDraft)) {
     return (
@@ -1285,7 +1482,7 @@ function OnboardingContent() {
     <div className="min-h-screen bg-white text-[#17181c] flex flex-col items-center justify-center overflow-x-hidden px-5 py-10">
       <main
         className={`w-full min-w-0 ${
-          step === FINAL_ONBOARDING_STEP ? 'max-w-[1280px]' : 'max-w-[720px]'
+          step === FINAL_ONBOARDING_STEP ? 'max-w-[1120px]' : 'max-w-[720px]'
         }`}
       >
         <div className={step === FINAL_ONBOARDING_STEP ? 'mb-10 text-center' : 'mb-8 text-center'}>
@@ -1309,14 +1506,14 @@ function OnboardingContent() {
                   : 'Exclusive offer'}
             </p>
             <p className="mt-1 text-lg font-bold text-[#17181c]">
-              {isSalespersonOnboarding ? 'Set up your FLYR sales workspace' : '30-day exclusive offer unlocked'}
+              {isSalespersonOnboarding ? 'Set up your FLYR sales workspace' : 'Exclusive included campaign unlocked'}
             </p>
             <p className="mt-1 text-sm text-[#6f7480]">
               {isSalespersonOnboarding
                 ? 'Create your account with the invited email. Your workspace will be nested under FLYR / Salespeople.'
                 : hideExclusiveStep1Demo
-                  ? 'Finish onboarding to activate your 30-day trial.'
-                  : 'Finish onboarding to activate your 30-day trial and watch the demo if you have not already.'}
+                  ? 'Finish onboarding to activate your included workspace campaign.'
+                  : 'Finish onboarding to activate your included workspace campaign and watch the demo if you have not already.'}
             </p>
             {!isSalespersonOnboarding && !hideExclusiveStep1Demo ? (
               <div className="mt-4 overflow-hidden rounded-lg border border-[#d9dce2] bg-white">
@@ -1379,59 +1576,63 @@ function OnboardingContent() {
                   />
                 </div>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="countryCode" className={labelClass}>Country</Label>
-                <div className="relative">
-                  <button
-                    id="countryCode"
-                    type="button"
-                    onClick={() => setCountrySearchOpen((open) => !open)}
-                    className="flex h-14 w-full items-center justify-between rounded-xl border border-[#d9dce2] bg-white px-4 text-left text-base font-semibold text-[#17181c] outline-none transition focus:border-[#17181c] focus:ring-2 focus:ring-black/10"
-                    aria-haspopup="listbox"
-                    aria-expanded={countrySearchOpen}
-                  >
-                    <span>{selectedCountry?.label ?? 'Select your country'}</span>
-                    <ChevronDown className="h-5 w-5 text-[#7b7f89]" />
-                  </button>
-                  {countrySearchOpen ? (
-                    <div className="absolute z-50 mt-2 w-full overflow-hidden rounded-xl border border-[#d9dce2] bg-white shadow-xl">
-                      <Input
-                        value={countrySearchQuery}
-                        onChange={(event) => setCountrySearchQuery(event.target.value)}
-                        placeholder="Search countries..."
-                        className="h-12 rounded-none border-0 border-b border-[#e3e5e8] bg-white text-[#17181c] placeholder:text-[#8a8f99] focus-visible:ring-0"
-                      />
-                      <div className="max-h-64 overflow-y-auto" role="listbox" aria-label="Countries">
-                        {filteredCountries.length > 0 ? (
-                          filteredCountries.map((country) => (
-                            <button
-                              key={country.code}
-                              type="button"
-                              role="option"
-                              aria-selected={country.code === countryCode}
-                              onClick={() => {
-                                setCountryCode(country.code);
-                                setCountrySearchOpen(false);
-                                setCountrySearchQuery('');
-                              }}
-                              className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-semibold text-[#17181c] hover:bg-[#f5f6f8]"
-                            >
-                              <span>{country.label}</span>
-                              {country.code === countryCode ? <Check className="h-4 w-4" /> : null}
-                            </button>
-                          ))
-                        ) : (
-                          <p className="px-4 py-3 text-sm text-[#6f7480]">No countries found.</p>
-                        )}
+              {!isSelfServeDemoOnboarding ? (
+                <div className="space-y-2">
+                  <Label htmlFor="countryCode" className={labelClass}>Country</Label>
+                  <div className="relative">
+                    <button
+                      id="countryCode"
+                      type="button"
+                      onClick={() => setCountrySearchOpen((open) => !open)}
+                      className="flex h-14 min-h-14 w-full items-center justify-between rounded-xl border border-[#d9dce2] bg-white px-4 text-left text-base font-semibold text-[#17181c] outline-none transition focus:border-[#17181c] focus:ring-2 focus:ring-black/10"
+                      aria-haspopup="listbox"
+                      aria-expanded={countrySearchOpen}
+                    >
+                      <span>{selectedCountry?.label ?? 'Select your country'}</span>
+                      <ChevronDown className="h-5 w-5 text-[#7b7f89]" />
+                    </button>
+                    {countrySearchOpen ? (
+                      <div className="absolute z-50 mt-2 w-full overflow-hidden rounded-xl border border-[#d9dce2] bg-white shadow-xl">
+                        <Input
+                          value={countrySearchQuery}
+                          onChange={(event) => setCountrySearchQuery(event.target.value)}
+                          placeholder="Search countries..."
+                          className="h-12 rounded-none border-0 border-b border-[#e3e5e8] bg-[#f6f7f9] text-[#17181c] placeholder:text-[#9aa0aa] focus-visible:ring-0"
+                        />
+                        <div className="max-h-64 overflow-y-auto" role="listbox" aria-label="Countries">
+                          {filteredCountries.length > 0 ? (
+                            filteredCountries.map((country) => (
+                              <button
+                                key={country.code}
+                                type="button"
+                                role="option"
+                                aria-selected={country.code === countryCode}
+                                onClick={() => {
+                                  setCountryCode(country.code);
+                                  setCountrySearchOpen(false);
+                                  setCountrySearchQuery('');
+                                }}
+                                className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-semibold text-[#17181c] hover:bg-[#f5f6f8]"
+                              >
+                                <span>{country.label}</span>
+                                {country.code === countryCode ? <Check className="h-4 w-4" /> : null}
+                              </button>
+                            ))
+                          ) : (
+                            <p className="px-4 py-3 text-sm text-[#6f7480]">No countries found.</p>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ) : null}
+                    ) : null}
+                  </div>
                 </div>
-              </div>
+              ) : null}
               {requiresStepOneAuth ? (
                 <div className="space-y-5">
                   <div className="space-y-2">
-                    <Label htmlFor="workEmail" className={labelClass}>Work email</Label>
+                    <Label htmlFor="workEmail" className={labelClass}>
+                      {isSelfServeDemoOnboarding ? 'Email' : 'Work email'}
+                    </Label>
                     <Input
                       id="workEmail"
                       type="email"
@@ -1455,14 +1656,24 @@ function OnboardingContent() {
                   <p className={`text-xs ${hasAuthenticatedOnboardingSession ? 'text-emerald-700' : 'text-[#6f7480]'}`}>
                     {hasAuthenticatedOnboardingSession
                       ? `Signed in as ${authenticatedEmail}.`
-                      : 'We will sign in or create this account before continuing.'}
+                      : isSelfServeDemoOnboarding
+                        ? 'Create an account so your first campaign is saved in your dashboard.'
+                        : 'We will sign in or create this account before continuing.'}
                   </p>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <Button type="button" variant="outline" className={outlineButtonClass} onClick={() => void handleExclusiveOAuthSignIn('google')} disabled={authLoading}>
-                      {authLoading && authMode === 'google' ? 'Continuing with Google...' : 'Continue with Google'}
+                      {authLoading && authMode === 'google'
+                        ? 'Continuing with Google...'
+                        : isSelfServeDemoOnboarding
+                          ? 'Create with Google'
+                          : 'Continue with Google'}
                     </Button>
                     <Button type="button" variant="outline" className={outlineButtonClass} onClick={() => void handleExclusiveOAuthSignIn('apple')} disabled={authLoading}>
-                      {authLoading && authMode === 'apple' ? 'Continuing with Apple...' : 'Continue with Apple'}
+                      {authLoading && authMode === 'apple'
+                        ? 'Continuing with Apple...'
+                        : isSelfServeDemoOnboarding
+                          ? 'Create with Apple'
+                          : 'Continue with Apple'}
                     </Button>
                   </div>
                 </div>
@@ -1539,6 +1750,57 @@ function OnboardingContent() {
 
           {step === 3 && (
             <div className="space-y-4">
+              {isSelfServeDemoOnboarding ? (
+                <div className="space-y-2">
+                  <Label htmlFor="countryCode" className={labelClass}>Country</Label>
+                  <div className="relative">
+                    <button
+                      id="countryCode"
+                      type="button"
+                      onClick={() => setCountrySearchOpen((open) => !open)}
+                      className="flex h-14 min-h-14 w-full items-center justify-between rounded-xl border border-[#d9dce2] bg-white px-4 text-left text-base font-semibold text-[#17181c] outline-none transition focus:border-[#17181c] focus:ring-2 focus:ring-black/10"
+                      aria-haspopup="listbox"
+                      aria-expanded={countrySearchOpen}
+                    >
+                      <span>{selectedCountry?.label ?? 'Select your country'}</span>
+                      <ChevronDown className="h-5 w-5 text-[#7b7f89]" />
+                    </button>
+                    {countrySearchOpen ? (
+                      <div className="absolute z-50 mt-2 w-full overflow-hidden rounded-xl border border-[#d9dce2] bg-white shadow-xl">
+                        <Input
+                          value={countrySearchQuery}
+                          onChange={(event) => setCountrySearchQuery(event.target.value)}
+                          placeholder="Search countries..."
+                          className="h-12 rounded-none border-0 border-b border-[#e3e5e8] bg-[#f6f7f9] text-[#17181c] placeholder:text-[#9aa0aa] focus-visible:ring-0"
+                        />
+                        <div className="max-h-64 overflow-y-auto" role="listbox" aria-label="Countries">
+                          {filteredCountries.length > 0 ? (
+                            filteredCountries.map((country) => (
+                              <button
+                                key={country.code}
+                                type="button"
+                                role="option"
+                                aria-selected={country.code === countryCode}
+                                onClick={() => {
+                                  setCountryCode(country.code);
+                                  setCountrySearchOpen(false);
+                                  setCountrySearchQuery('');
+                                }}
+                                className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-semibold text-[#17181c] hover:bg-[#f5f6f8]"
+                              >
+                                <span>{country.label}</span>
+                                {country.code === countryCode ? <Check className="h-4 w-4" /> : null}
+                              </button>
+                            ))
+                          ) : (
+                            <p className="px-4 py-3 text-sm text-[#6f7480]">No countries found.</p>
+                          )}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
               <div className="space-y-2">
                 <Label htmlFor="workspaceName" className={labelClass}>Business or team name</Label>
                 <Input id="workspaceName" value={workspaceName} onChange={(e) => setWorkspaceName(e.target.value)} placeholder="XYZ Group" autoFocus className={inputClass} />
@@ -1557,14 +1819,13 @@ function OnboardingContent() {
                     }
                   }}
                 >
-                  <SelectTrigger id="industry" className="h-14 w-full rounded-xl border-[#d9dce2] bg-white text-base font-semibold text-[#17181c] data-[placeholder]:text-[#8a8f99] dark:bg-white dark:text-[#17181c] dark:data-[placeholder]:text-[#8a8f99]">
+                  <SelectTrigger id="industry" className="!h-14 min-h-14 w-full rounded-xl border-[#d9dce2] bg-white px-4 py-0 text-base font-semibold text-[#17181c] data-[placeholder]:text-[#8a8f99] dark:bg-white dark:text-[#17181c] dark:data-[placeholder]:text-[#8a8f99]">
                     <SelectValue placeholder="Select industry" />
                   </SelectTrigger>
                   <SelectContent className="max-h-[220px] overflow-y-auto rounded-xl border-[#d9dce2] bg-white text-[#17181c] dark:bg-white dark:text-[#17181c]">
                     {INDUSTRIES_TOP.map((ind) => (
                       <SelectItem key={ind} value={ind} className="text-base font-semibold text-[#17181c] focus:bg-[#f5f6f8] focus:text-[#17181c] dark:text-[#17181c] dark:focus:bg-[#f5f6f8] dark:focus:text-[#17181c]">{ind}</SelectItem>
                     ))}
-                    <SelectSeparator className="mx-3 my-1.5 h-px rounded-full bg-[#e3e5e8]" />
                     {INDUSTRIES_REST.map((ind) => (
                       <SelectItem key={ind} value={ind} className="text-base font-semibold text-[#17181c] focus:bg-[#f5f6f8] focus:text-[#17181c] dark:text-[#17181c] dark:focus:bg-[#f5f6f8] dark:focus:text-[#17181c]">{ind}</SelectItem>
                     ))}
@@ -1632,26 +1893,41 @@ function OnboardingContent() {
                 </div>
               )}
               {useCase === 'team' && (
-                <div className="space-y-2">
-                  <Label htmlFor="teamSeats" className={labelClass}>Members</Label>
-                  <Input
-                    id="teamSeats"
-                    type="number"
-                    min={TEAM_MIN_SEATS}
-                    max={MAX_SEATS}
-                    inputMode="numeric"
-                    value={seats}
-                    onChange={(event) => {
-                      const requestedSeats = Number.parseInt(event.target.value, 10);
-                      if (!Number.isFinite(requestedSeats)) {
-                        setSeats(TEAM_MIN_SEATS);
-                        return;
-                      }
-                      setSeats(Math.min(MAX_SEATS, Math.max(TEAM_MIN_SEATS, requestedSeats)));
-                    }}
-                    onFocus={(event) => event.currentTarget.select()}
-                    className={`${inputClass} tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none`}
-                  />
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label id="teamSeatsLabel" htmlFor="teamSeats" className={labelClass}>Members</Label>
+                    <div
+                      className="grid h-14 min-h-14 grid-cols-[3.5rem_1fr_3.5rem] overflow-hidden rounded-xl border border-[#d9dce2] bg-white"
+                      role="group"
+                      aria-labelledby="teamSeatsLabel"
+                    >
+                      <Button
+                        type="button"
+                        aria-label="Decrease members"
+                        disabled={seats <= TEAM_MIN_SEATS}
+                        onClick={() => setSeats((current) => Math.max(TEAM_MIN_SEATS, current - 1))}
+                        className="h-full rounded-none border-0 border-r border-[#d9dce2] bg-white p-0 text-[#17181c] shadow-none hover:bg-[#f5f6f8] hover:text-[#17181c] disabled:opacity-40"
+                      >
+                        <Minus className="h-5 w-5" />
+                      </Button>
+                      <div
+                        id="teamSeats"
+                        className="flex h-full items-center justify-center px-4 text-center text-lg font-bold tabular-nums text-[#17181c]"
+                        aria-live="polite"
+                      >
+                        {seats}
+                      </div>
+                      <Button
+                        type="button"
+                        aria-label="Increase members"
+                        disabled={seats >= MAX_SEATS}
+                        onClick={() => setSeats((current) => Math.min(MAX_SEATS, current + 1))}
+                        className="h-full rounded-none border-0 border-l border-[#d9dce2] bg-white p-0 text-[#17181c] shadow-none hover:bg-[#f5f6f8] hover:text-[#17181c] disabled:opacity-40"
+                      >
+                        <Plus className="h-5 w-5" />
+                      </Button>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -1680,7 +1956,7 @@ function OnboardingContent() {
               </div>
               {referralValidation ? (
                 <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
-                  {referralValidation.trialDays}-day trial unlocked
+                  Included workspace campaign unlocked
                   {referralValidation.partnerName || referralValidation.ambassadorName || referralValidation.salespersonName
                     ? ` with ${referralValidation.partnerName || referralValidation.ambassadorName || referralValidation.salespersonName}`
                     : ''}
@@ -1695,7 +1971,7 @@ function OnboardingContent() {
 
           {step === FINAL_ONBOARDING_STEP && (
             <div className="space-y-8">
-              <div className="mx-auto grid max-w-xl gap-6">
+              <div className="mx-auto grid max-w-none gap-6 md:grid-cols-2">
                 {pricingCards.map((card) => {
                   return (
                     <div
@@ -1703,25 +1979,38 @@ function OnboardingContent() {
                       className="flex min-h-[520px] flex-col rounded-[26px] border border-[#d9dce2] bg-white p-8 shadow-[0_18px_45px_rgba(0,0,0,0.08)]"
                     >
                       <h2 className="text-3xl font-bold text-[#17181c]">{card.title}</h2>
-                      <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
-                        <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-700">
-                          50% off launch pricing
-                        </p>
-                        <p className="mt-1 text-sm font-semibold text-[#17181c]">
-                          Normally{' '}
-                          <span className="text-[#8c919c] line-through">
-                            {formatPlanPrice(seatPricing.originalSeatMonthlyDisplay, billingCurrency)} /seat/month
-                          </span>
-                        </p>
-                      </div>
+                      {card.showLaunchPricing ? (
+                        <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+                          <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-700">
+                            50% off launch pricing
+                          </p>
+                          <p className="mt-1 text-sm font-semibold text-[#17181c]">
+                            Normally{' '}
+                            <span className="text-[#8c919c] line-through">
+                              {formatPlanPrice(seatPricing.originalSeatMonthlyDisplay, billingCurrency)} /seat/month
+                            </span>
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="mt-5 rounded-xl border border-[#d9dce2] bg-[#fafafa] px-4 py-3">
+                          <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#6f7480]">
+                            Starter plan
+                          </p>
+                          <p className="mt-1 text-sm font-semibold text-[#17181c]">
+                            Includes 1 free campaign
+                          </p>
+                        </div>
+                      )}
                       <div className="mt-7">
                         <span className="text-5xl font-bold text-[#050505]">
-                          {formatPlanPrice(seatPricing.seatMonthlyDisplay, billingCurrency)}
+                          {card.priceLabel}
                         </span>
-                        <span className="text-2xl font-medium text-[#17181c]">/seat/month</span>
+                        {card.priceSuffix ? (
+                          <span className="text-2xl font-medium text-[#17181c]">{card.priceSuffix}</span>
+                        ) : null}
                       </div>
                       <p className="mt-2 text-sm font-semibold text-[#7b7f89]">
-                        {card.seatCount} seat{card.seatCount === 1 ? '' : 's'} selected. Billed monthly.
+                        {card.billingLabel}
                       </p>
                       <p className="mt-6 text-lg font-semibold leading-7 text-[#7b7f89]">
                         {card.description}
@@ -1749,7 +2038,7 @@ function OnboardingContent() {
                         }}
                         className="mt-8 h-12 w-full rounded-xl border-[#d9dce2] bg-[#09090b] text-base font-bold text-white hover:bg-[#27272a] hover:text-white dark:border-[#09090b] dark:bg-[#09090b] dark:text-white dark:hover:bg-[#27272a] dark:hover:text-white"
                       >
-                        {loading ? 'Opening...' : 'Select plan'}
+                        {loading ? 'Opening...' : card.buttonLabel}
                       </Button>
                     </div>
                   );
@@ -1767,14 +2056,14 @@ function OnboardingContent() {
               <Button
                 type="button"
                 variant="ghost"
-                onClick={() => setStep((s) => (!shouldShowReferralStep && s === 5 ? 3 : s - 1))}
+                onClick={() => setStep((s) => (!shouldShowReferralStep && s === FINAL_ONBOARDING_STEP ? 3 : s - 1))}
                 className={onboardingNavButtonClass}
                 disabled={loading || authLoading}
               >
                 Back
               </Button>
             ) : null}
-            {step < FINAL_ONBOARDING_STEP ? (
+            {step < onboardingFinalStep ? (
               <Button
                 type="button"
                 variant="ghost"
@@ -1807,6 +2096,8 @@ function OnboardingContent() {
                         : 'Verifying account...'
                     : referralValidationLoading && step === 4
                       ? 'Checking code...'
+                    : isSelfServeDemoOnboarding && step === 1
+                        ? 'Next'
                       : 'Next'}
               </Button>
             ) : (
@@ -1814,12 +2105,15 @@ function OnboardingContent() {
                 type="button"
                 variant="ghost"
                 onClick={async () => {
-                  await handleContinueToApp(selectedSeatCount);
+                  await handleSubmit({
+                    checkoutSeats: selectedSeatCount,
+                    checkoutUseCase: useCase,
+                  });
                 }}
-                disabled={loading || authLoading}
+                disabled={loading || authLoading || (step === 3 && !canStep3)}
                 className={onboardingNavButtonClass}
               >
-                {loading ? 'Saving...' : 'Skip'}
+                {loading ? 'Creating...' : isSelfServeDemoOnboarding ? 'Show my map' : 'Skip'}
               </Button>
             )}
           </div>
@@ -1827,7 +2121,7 @@ function OnboardingContent() {
       </main>
 
       <div className="fixed bottom-7 left-0 right-0 z-20 flex justify-center gap-2 pointer-events-none px-4">
-        {Array.from({ length: FINAL_ONBOARDING_STEP }, (_, index) => (
+        {Array.from({ length: onboardingFinalStep }, (_, index) => (
           <span key={index} className={index + 1 === step ? activeDotClass : inactiveDotClass} />
         ))}
       </div>

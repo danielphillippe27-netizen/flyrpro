@@ -13,6 +13,7 @@ import {
   NO_ONE_HOME_ADDRESS_STATUSES,
   TOUCHED_ADDRESS_STATUSES,
   UNTOUCHED_ADDRESS_STATUSES,
+  getMapUntouchedColor,
   type StatusFilters,
 } from '@/lib/constants/mapStatus';
 import {
@@ -44,6 +45,7 @@ type CampaignAddressPmtilesLayerProps = {
   campaignBoundary?: GeoJSON.Polygon | null;
   campaignBbox?: [number, number, number, number] | null;
   styleKey?: string;
+  isDarkMap?: boolean;
   allowFallbackFetches?: boolean;
   onAddressClick?: (
     addressId: string,
@@ -83,7 +85,8 @@ const ADDRESS_ID_EXPRESSION: mapboxgl.Expression = [
 ];
 const NO_FEATURES_FILTER: mapboxgl.Expression = ['==', ['literal', 1], 0];
 
-function buildAddressStatusColorExpression(statusFilters: StatusFilters): mapboxgl.Expression {
+function buildAddressStatusColorExpression(statusFilters: StatusFilters, isDarkMap: boolean): mapboxgl.Expression {
+  const untouchedAddressColor = getMapUntouchedColor(isDarkMap);
   const getAddressStatus = () => [
     'downcase',
     ['to-string', ['coalesce', ['feature-state', 'address_status'], ['get', 'address_status'], ['get', 'status'], 'none']],
@@ -116,7 +119,7 @@ function buildAddressStatusColorExpression(statusFilters: StatusFilters): mapbox
     ['all', isTouched, statusFilters.TOUCHED],
     MAP_STATUS_CONFIG.TOUCHED.color,
     ['all', isUntouched, statusFilters.UNTOUCHED],
-    MAP_STATUS_CONFIG.UNTOUCHED.color,
+    untouchedAddressColor,
     ADDRESS_CYLINDER_COLOR,
   ] as mapboxgl.Expression;
 }
@@ -419,6 +422,7 @@ export function CampaignAddressPmtilesLayer({
   deletedAddressIds = [],
   campaignBoundary,
   styleKey,
+  isDarkMap = false,
   allowFallbackFetches = true,
   onAddressClick,
 }: CampaignAddressPmtilesLayerProps) {
@@ -427,8 +431,8 @@ export function CampaignAddressPmtilesLayer({
   const onAddressClickRef = useRef(onAddressClick);
   const renderAddresses = addresses.length > 0 ? addresses : apiFallbackAddresses;
   const addressColorExpression = useMemo(
-    () => buildAddressStatusColorExpression(statusFilters),
-    [statusFilters]
+    () => buildAddressStatusColorExpression(statusFilters, isDarkMap),
+    [statusFilters, isDarkMap]
   );
   const deletedAddressSet = useMemo(
     () => new Set(deletedAddressIds.map((id) => String(id ?? '').trim()).filter(Boolean)),

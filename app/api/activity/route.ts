@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createAdminClient, getSupabaseServerClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/server';
+import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 
 function toBool(value: string | null): boolean {
   if (!value) return false;
@@ -732,9 +733,8 @@ function extractCampaignId(
 
 export async function GET(request: NextRequest) {
   try {
-    const authClient = await getSupabaseServerClient();
-    const { data: { user }, error: userError } = await authClient.auth.getUser();
-    if (userError || !user) {
+    const requestUser = await resolveUserFromRequest(request);
+    if (!requestUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -755,14 +755,25 @@ export async function GET(request: NextRequest) {
     const { data: membership, error: membershipError } = await admin
       .from('workspace_members')
       .select('role')
-      .eq('user_id', user.id)
+      .eq('user_id', requestUser.id)
       .eq('workspace_id', workspaceId)
       .maybeSingle();
 
+    let userRole = String(membership?.role ?? '');
     if (membershipError || !membership) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      const { data: ownedWorkspace, error: ownerLookupError } = await admin
+        .from('workspaces')
+        .select('id')
+        .eq('id', workspaceId)
+        .eq('owner_id', requestUser.id)
+        .maybeSingle();
+
+      if (ownerLookupError || !ownedWorkspace) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      }
+
+      userRole = 'owner';
     }
-    const userRole = String(membership.role ?? '');
 
     const rawCampaignId = (searchParams.get('campaignId') || '').trim();
     let scopedCampaignId: string | null = null;
@@ -787,6 +798,9 @@ export async function GET(request: NextRequest) {
 
     const workspaceMemberRows = (workspaceMembers ?? []) as WorkspaceMemberActivityRow[];
     const workspaceUserIds = new Set<string>(workspaceMemberRows.map((m) => m.user_id));
+    if (userRole === 'owner') {
+      workspaceUserIds.add(requestUser.id);
+    }
     if (requestedMemberId) {
       if (!canIncludeMembers) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
@@ -801,8 +815,8 @@ export async function GET(request: NextRequest) {
         ? [requestedMemberId]
         : includeMembersRequested
           ? Array.from(workspaceUserIds)
-          : [user.id]
-      : [user.id];
+          : [requestUser.id]
+      : [requestUser.id];
     const scopedUserIdSet = new Set(scopedUserIds);
     const includeMembers = canIncludeMembers && (includeMembersRequested || Boolean(requestedMemberId));
     const memberOptionsPromise = canIncludeMembers
@@ -832,7 +846,7 @@ export async function GET(request: NextRequest) {
               admin,
               workspaceId,
               scopedUserIds,
-              requestedMemberId ?? user.id,
+              requestedMemberId ?? requestUser.id,
               start,
               end
             ),

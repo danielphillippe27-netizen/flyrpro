@@ -35,7 +35,7 @@ type PartnerOfferLandingProps = {
   expiresAt: string;
   ctaLabel: string | null;
   offerToken: string;
-  /** Team Partner template uses forced team onboarding; DM / 30-day use standard flow + 30-day trial. */
+  /** Team Partner template uses forced team onboarding; DM / included-campaign offers use standard flow. */
   partnerOnboardingTeamStyle: boolean;
 };
 
@@ -198,7 +198,7 @@ function JustListedDmOfferLanding({
                 onClick={onGetStarted}
                 className="inline-flex min-h-14 w-full items-center justify-center rounded-2xl bg-white px-5 text-base font-semibold text-zinc-950 transition hover:bg-zinc-100"
               >
-                Continue for free trial
+                Continue with one campaign included
                 <ArrowRight className="ml-2 h-4 w-4" />
               </button>
             </div>

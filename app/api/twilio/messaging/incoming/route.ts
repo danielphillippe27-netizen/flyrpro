@@ -245,6 +245,112 @@ async function findOrCreateContact(context: {
   return created as Record<string, unknown>;
 }
 
+async function resolveInboundLeadOwner(context: {
+  admin: ReturnType<typeof createAdminClient>;
+  workspaceId: string;
+  salespersonUserId: string | null;
+}): Promise<string | null> {
+  if (context.salespersonUserId) return context.salespersonUserId;
+
+  const { data: ownerMember, error } = await context.admin
+    .from('workspace_members')
+    .select('user_id')
+    .eq('workspace_id', context.workspaceId)
+    .in('role', ['owner', 'admin'])
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (error && error.code !== 'PGRST116') {
+    console.warn('[twilio/messaging/incoming] sales lead owner lookup failed', error);
+  }
+
+  return typeof ownerMember?.user_id === 'string' ? ownerMember.user_id : null;
+}
+
+async function findOrCreateSalesLead(context: {
+  admin: ReturnType<typeof createAdminClient>;
+  workspaceId: string;
+  salespersonId: string | null;
+  salespersonUserId: string | null;
+}, fromNumber: string, body: string): Promise<Record<string, unknown> | null> {
+  const now = new Date().toISOString();
+  const { data: existing, error: existingError } = await context.admin
+    .from('sales_leads')
+    .select('*')
+    .eq('workspace_id', context.workspaceId)
+    .or(`phone_e164.eq.${fromNumber},phone.eq.${fromNumber}`)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (existingError && existingError.code !== 'PGRST116') {
+    console.warn('[twilio/messaging/incoming] sales lead lookup failed', existingError);
+  }
+
+  if (existing) {
+    const { data: updated, error: updateError } = await context.admin
+      .from('sales_leads')
+      .update({
+        phone_e164: fromNumber,
+        lead_state: 'contacted',
+        last_attempted_at: now,
+        called_at: now,
+        last_touch_at: now,
+        last_touch_summary: 'Inbound SMS received',
+        updated_at: now,
+      })
+      .eq('id', existing.id)
+      .select('*')
+      .single();
+
+    if (updateError) {
+      console.warn('[twilio/messaging/incoming] sales lead update failed', updateError);
+      return existing as Record<string, unknown>;
+    }
+
+    return updated as Record<string, unknown>;
+  }
+
+  const assignedUserId = await resolveInboundLeadOwner(context);
+  if (!assignedUserId) {
+    console.warn('[twilio/messaging/incoming] no owner found for inbound sales lead');
+    return null;
+  }
+
+  const { data: created, error: createError } = await context.admin
+    .from('sales_leads')
+    .insert({
+      workspace_id: context.workspaceId,
+      user_id: assignedUserId,
+      assigned_user_id: assignedUserId,
+      assigned_salesperson_id: context.salespersonId,
+      created_by_user_id: assignedUserId,
+      name: fromNumber,
+      phone: fromNumber,
+      phone_e164: fromNumber,
+      source: 'salesperson_inbound_sms',
+      lead_state: 'contacted',
+      notes: `Inbound SMS: ${body}`,
+      last_attempted_at: now,
+      called_at: now,
+      last_touch_at: now,
+      last_touch_summary: 'Inbound SMS received',
+      metadata: { inboundProvider: 'twilio' },
+      created_at: now,
+      updated_at: now,
+    })
+    .select('*')
+    .single();
+
+  if (createError) {
+    console.warn('[twilio/messaging/incoming] sales lead create failed', createError);
+    return null;
+  }
+
+  return created as Record<string, unknown>;
+}
+
 async function notifyWorkspaceMembers(context: {
   admin: ReturnType<typeof createAdminClient>;
   workspaceId: string;
@@ -284,6 +390,7 @@ async function notifyWorkspaceMembers(context: {
       source: 'sms',
       inboundMessageId: message.id,
       contactId: message.contact_id,
+      salesLeadId: message.sales_lead_id,
       from: message.from_number_e164,
       to: message.to_number_e164,
     },
@@ -322,7 +429,12 @@ export async function POST(request: NextRequest) {
   }
   const { workspaceId, salespersonId, salespersonUserId } = inboundRoute;
 
-  const contact = await findOrCreateContact({ admin, workspaceId }, fromNumber, body);
+  const isSalespersonInbound = Boolean(salespersonId || salespersonUserId);
+  const salesLead = isSalespersonInbound
+    ? await findOrCreateSalesLead({ admin, workspaceId, salespersonId, salespersonUserId }, fromNumber, body)
+    : null;
+  const contact = isSalespersonInbound ? null : await findOrCreateContact({ admin, workspaceId }, fromNumber, body);
+  const salesLeadId = typeof salesLead?.id === 'string' ? salesLead.id : null;
   const contactId = typeof contact?.id === 'string' ? contact.id : null;
   const now = new Date().toISOString();
 
@@ -330,6 +442,7 @@ export async function POST(request: NextRequest) {
     workspace_id: workspaceId,
     salesperson_id: salespersonId,
     contact_id: contactId,
+    sales_lead_id: salesLeadId,
     telecom_provider: 'twilio',
     provider_message_id: messageSid,
     twilio_message_sid: messageSid,
@@ -357,7 +470,26 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
-  if (contactId) {
+  if (salesLeadId) {
+    const { error: activityError } = await admin.from('sales_activities').insert({
+      workspace_id: workspaceId,
+      sales_lead_id: salesLeadId,
+      actor_user_id: salespersonUserId,
+      activity_type: 'text',
+      note: `Inbound SMS: ${body}`,
+      occurred_at: now,
+      metadata: {
+        provider: 'twilio',
+        messageSid,
+        from: fromNumber,
+        to: toNumber,
+      },
+    });
+
+    if (activityError) {
+      console.warn('[twilio/messaging/incoming] sales activity create failed', activityError);
+    }
+  } else if (contactId) {
     const { error: activityError } = await admin.from('contact_activities').insert({
       contact_id: contactId,
       type: 'text',
@@ -370,7 +502,12 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const contactName = typeof contact?.full_name === 'string' ? contact.full_name : null;
+  const contactName =
+    typeof salesLead?.name === 'string'
+      ? salesLead.name
+      : typeof contact?.full_name === 'string'
+        ? contact.full_name
+        : null;
   await notifyWorkspaceMembers(
     { admin, workspaceId, salespersonUserId },
     inboundMessage as DialerInboundMessage,

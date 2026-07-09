@@ -600,6 +600,7 @@ export function FlyrMapView() {
             statusFilters={statusFilters}
             campaignBoundary={(selectedCampaign?.territory_boundary as GeoJSON.Polygon | null | undefined) ?? null}
             styleKey={resolvedMapStyle.key}
+            isDarkMap={theme === 'dark'}
             onAddressClick={(addressId, buildingId) => {
               handleBuildingClick(buildingId ?? addressId, addressId);
             }}

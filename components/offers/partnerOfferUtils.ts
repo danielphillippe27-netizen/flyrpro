@@ -251,7 +251,7 @@ export function buildOutreachCopy(offer: PartnerOffer) {
   const igDmReplyText = justListedDm ? 'Thank you!' : '';
 
   const igDmLinkText = justListedDm
-    ? `Use FLYR to flyer the area, knock the surrounding homes, and turn listing attention into your next seller and buyer opportunities.\n\nI've attached a free trial and demo on how it works: ${offer.shareUrl}`
+    ? `Use FLYR to flyer the area, knock the surrounding homes, and turn listing attention into your next seller and buyer opportunities.\n\nI've attached one included campaign and a demo on how it works: ${offer.shareUrl}`
     : `Perfect. Here is your private FLYR offer link for ${partner}: ${offer.shareUrl}\n\nIt expires ${expires}.`;
 
   const igDmText = justListedDm

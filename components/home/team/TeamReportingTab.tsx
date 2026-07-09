@@ -104,6 +104,7 @@ type ReportResponse = {
 
 type TeamReportingTabProps = {
   memberIds: string[];
+  demoReport?: boolean;
 };
 
 const PERIOD_OPTIONS: { value: ReportPeriod; label: string }[] = [
@@ -113,6 +114,93 @@ const PERIOD_OPTIONS: { value: ReportPeriod; label: string }[] = [
 ];
 
 const SURFACE_CLASS = 'operator-surface rounded-2xl border border-border/70 bg-card shadow-none';
+
+function makeDelta(abs: number, pct: number | null = null): Delta {
+  return {
+    abs,
+    pct,
+    trend: abs > 0 ? 'up' : abs < 0 ? 'down' : 'flat',
+  };
+}
+
+function makeMetrics(input: Partial<Metrics>): Metrics {
+  return {
+    doors_knocked: input.doors_knocked ?? 0,
+    flyers_delivered: input.flyers_delivered ?? input.doors_knocked ?? 0,
+    conversations: input.conversations ?? 0,
+    leads_created: input.leads_created ?? 0,
+    appointments_set: input.appointments_set ?? 0,
+    time_spent_seconds: input.time_spent_seconds ?? 0,
+    sessions_count: input.sessions_count ?? 0,
+  };
+}
+
+function makeDeltas(metrics: Metrics): Record<MetricKey, Delta> {
+  return {
+    doors_knocked: makeDelta(Math.round(metrics.doors_knocked * 0.18), 18),
+    flyers_delivered: makeDelta(Math.round(metrics.flyers_delivered * 0.16), 16),
+    conversations: makeDelta(Math.round(metrics.conversations * 0.22), 22),
+    leads_created: makeDelta(Math.max(1, Math.round(metrics.leads_created * 0.2)), 20),
+    appointments_set: makeDelta(Math.max(1, Math.round(metrics.appointments_set * 0.25)), 25),
+    time_spent_seconds: makeDelta(Math.round(metrics.time_spent_seconds * 0.12), 12),
+    sessions_count: makeDelta(Math.max(1, Math.round(metrics.sessions_count * 0.15)), 15),
+  };
+}
+
+function makeRates(metrics: Metrics) {
+  return {
+    conversations_per_door: metrics.doors_knocked > 0 ? metrics.conversations / metrics.doors_knocked : 0,
+    leads_per_conversation: metrics.conversations > 0 ? metrics.leads_created / metrics.conversations : 0,
+    appointments_per_conversation: metrics.conversations > 0 ? metrics.appointments_set / metrics.conversations : 0,
+  };
+}
+
+const DEMO_REPORT_MEMBERS = [
+  { user_id: 'demo-maya', display_name: 'Maya', role: 'Demo rep', color: '#EF4444', metrics: makeMetrics({ doors_knocked: 86, conversations: 24, leads_created: 4, appointments_set: 2, time_spent_seconds: 7200, sessions_count: 3 }) },
+  { user_id: 'demo-leo', display_name: 'Leo', role: 'Demo rep', color: '#2563EB', metrics: makeMetrics({ doors_knocked: 79, conversations: 21, leads_created: 3, appointments_set: 2, time_spent_seconds: 6900, sessions_count: 3 }) },
+  { user_id: 'demo-ava', display_name: 'Ava', role: 'Demo rep', color: '#16A34A', metrics: makeMetrics({ doors_knocked: 75, conversations: 18, leads_created: 2, appointments_set: 1, time_spent_seconds: 6300, sessions_count: 3 }) },
+  { user_id: 'demo-noah', display_name: 'Noah', role: 'Demo rep', color: '#7C3AED', metrics: makeMetrics({ doors_knocked: 72, conversations: 19, leads_created: 2, appointments_set: 1, time_spent_seconds: 6600, sessions_count: 3 }) },
+].map<ReportMember>((member) => ({
+  ...member,
+  has_report: true,
+  deltas: makeDeltas(member.metrics),
+  rates: makeRates(member.metrics),
+}));
+
+const DEMO_REPORT_TOTALS = makeMetrics({
+  doors_knocked: 312,
+  conversations: 82,
+  leads_created: 11,
+  appointments_set: 6,
+  time_spent_seconds: 27_000,
+  sessions_count: 12,
+});
+
+const DEMO_TEAM_REPORT: ReportResponse = {
+  period: 'weekly',
+  period_start: '2026-07-01T00:00:00.000Z',
+  period_end: '2026-07-08T00:00:00.000Z',
+  source: 'team_snapshot',
+  generated_at: '2026-07-07T19:00:00.000Z',
+  availablePeriods: [
+    {
+      period_start: '2026-07-01T00:00:00.000Z',
+      period_end: '2026-07-08T00:00:00.000Z',
+      created_at: '2026-07-07T19:00:00.000Z',
+      report_count: 4,
+    },
+  ],
+  totals: DEMO_REPORT_TOTALS,
+  deltas: makeDeltas(DEMO_REPORT_TOTALS),
+  rates: makeRates(DEMO_REPORT_TOTALS),
+  members: DEMO_REPORT_MEMBERS,
+  coverage: {
+    expected_member_count: 4,
+    covered_member_count: 4,
+    missing_member_ids: [],
+    invalid_member_ids: [],
+  },
+};
 
 function formatNumber(value: number): string {
   return new Intl.NumberFormat().format(Math.round(value));
@@ -252,7 +340,7 @@ function buildCsv(report: ReportResponse): string {
   return rows.map((row) => row.map((cell) => escapeCsv(cell ?? '')).join(',')).join('\n');
 }
 
-export function TeamReportingTab({ memberIds }: TeamReportingTabProps) {
+export function TeamReportingTab({ memberIds, demoReport = false }: TeamReportingTabProps) {
   const { currentWorkspaceId } = useWorkspace();
   const [period, setPeriod] = useState<ReportPeriod>('weekly');
   const [selectedPeriodStart, setSelectedPeriodStart] = useState<string | null>(null);
@@ -263,6 +351,15 @@ export function TeamReportingTab({ memberIds }: TeamReportingTabProps) {
   const [emailing, setEmailing] = useState(false);
 
   const fetchReport = useCallback(async () => {
+    if (demoReport) {
+      setPeriod('weekly');
+      setSelectedPeriodStart(DEMO_TEAM_REPORT.period_start);
+      setReport(DEMO_TEAM_REPORT);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
     if (!currentWorkspaceId) {
       setReport(null);
       setError('No workspace selected');
@@ -295,7 +392,7 @@ export function TeamReportingTab({ memberIds }: TeamReportingTabProps) {
     } finally {
       setLoading(false);
     }
-  }, [currentWorkspaceId, memberIds, period, selectedPeriodStart]);
+  }, [currentWorkspaceId, demoReport, memberIds, period, selectedPeriodStart]);
 
   useEffect(() => {
     fetchReport();
@@ -461,14 +558,15 @@ export function TeamReportingTab({ memberIds }: TeamReportingTabProps) {
             </Select>
 
             {printableReport ? <Badge variant="outline">{sourceLabel(printableReport.source)}</Badge> : null}
+            {demoReport ? <Badge variant="outline">Demo report</Badge> : null}
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" className="gap-2" onClick={emailReportLead} disabled={!hasReport || emailing}>
+            <Button variant="outline" size="sm" className="gap-2" onClick={emailReportLead} disabled={!hasReport || emailing || demoReport}>
               <Mail className="h-4 w-4" />
               {emailing ? 'Emailing' : 'Email lead'}
             </Button>
-            <Button variant="outline" size="sm" className="gap-2" onClick={notifyReport} disabled={!hasReport || notifying}>
+            <Button variant="outline" size="sm" className="gap-2" onClick={notifyReport} disabled={!hasReport || notifying || demoReport}>
               <Bell className="h-4 w-4" />
               {notifying ? 'Notifying' : 'Notify'}
             </Button>

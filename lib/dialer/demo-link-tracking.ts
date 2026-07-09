@@ -3,6 +3,11 @@ import { NextRequest } from 'next/server';
 import { getTrackingMetadata } from '@/app/lib/ambassador/tracking';
 import { sanitizeTrackingParam } from '@/app/lib/ambassador/portal';
 import { createAdminClient } from '@/lib/supabase/server';
+import {
+  applyDemoLinkSignupMatches,
+  applyEmailSignupMatch,
+  recordDemoOpenInPipeline,
+} from '@/lib/sales-pipeline/server';
 import type { DiallerLead } from '@/types/database';
 
 type AdminClient = ReturnType<typeof createAdminClient>;
@@ -185,10 +190,17 @@ export async function recordDemoLinkOpen(params: {
       }
     });
 
+  await recordDemoOpenInPipeline({
+    admin: params.admin,
+    link: params.link,
+    followUpDueAt,
+    openedAt: now.toISOString(),
+  });
+
   if (!shouldCreateFollowUp || !params.link.dialler_lead_id) return;
 
   const { error: leadError } = await params.admin
-    .from('dialler_leads')
+    .from('sales_leads')
     .update({
       follow_up_name: 'Opened demo, no signup',
       follow_up_at: followUpDueAt,
@@ -201,6 +213,26 @@ export async function recordDemoLinkOpen(params: {
   if (leadError) {
     console.warn('[demo-link-tracking] failed to create demo open follow-up', leadError);
   }
+
+  await params.admin
+    .from('sales_activities')
+    .insert({
+      sales_lead_id: params.link.dialler_lead_id,
+      workspace_id: params.link.workspace_id,
+      activity_type: 'demo_opened',
+      note: `Opened tracked demo link. Auto follow-up scheduled for ${new Date(followUpDueAt).toLocaleString()}.`,
+      occurred_at: now.toISOString(),
+      metadata: {
+        demoLinkId: params.link.id,
+        followUpDueAt,
+        legacyContactId: params.link.contact_id,
+      },
+    })
+    .then(({ error }) => {
+      if (error) {
+        console.warn('[demo-link-tracking] failed to log demo open sales activity', error);
+      }
+    });
 
   if (!params.link.contact_id) return;
 
@@ -233,6 +265,7 @@ export async function recordDemoLinkOpen(params: {
         console.warn('[demo-link-tracking] failed to log demo open activity', error);
       }
     });
+
 }
 
 export function buildDemoLinkDestination(link: DemoLinkRow, request: NextRequest): URL {
@@ -274,7 +307,7 @@ export async function markConvertedDemoLinks(params: {
 
   const { data, error } = await params.admin
     .from('salesperson_demo_links')
-    .select('id, dialler_lead_id, contact_id')
+    .select('id, salesperson_id, workspace_id, dialler_lead_id, contact_id, referral_code, recipient_email')
     .eq('referral_code', referralCode)
     .eq('recipient_email', recipientEmail)
     .is('converted_at', null)
@@ -288,10 +321,23 @@ export async function markConvertedDemoLinks(params: {
 
   const links = ((data ?? []) as Array<{
     id: string;
+    salesperson_id?: string | null;
+    workspace_id?: string | null;
     dialler_lead_id: string | null;
     contact_id: string | null;
+    referral_code?: string | null;
+    recipient_email?: string | null;
   }>).filter((link) => link.id);
-  if (!links.length) return;
+  if (!links.length) {
+    await applyEmailSignupMatch({
+      admin: params.admin,
+      referralCode,
+      recipientEmail,
+      convertedUserId: params.convertedUserId,
+      convertedWorkspaceId: params.convertedWorkspaceId,
+    });
+    return;
+  }
 
   const linkIds = links.map((link) => link.id);
   const now = new Date().toISOString();
@@ -312,8 +358,8 @@ export async function markConvertedDemoLinks(params: {
     .map((link) => link.dialler_lead_id)
     .filter((leadId): leadId is string => Boolean(leadId));
   if (leadIds.length) {
-    const { error: clearError } = await params.admin
-      .from('dialler_leads')
+  const { error: clearError } = await params.admin
+      .from('sales_leads')
       .update({
         follow_up_name: null,
         follow_up_at: null,
@@ -331,20 +377,44 @@ export async function markConvertedDemoLinks(params: {
   const contactIds = links
     .map((link) => link.contact_id)
     .filter((contactId): contactId is string => Boolean(contactId));
-  if (!contactIds.length) return;
+  if (contactIds.length) {
+    const { error: clearContactError } = await params.admin
+      .from('contacts')
+      .update({
+        follow_up_at: null,
+        reminder_date: null,
+        demo_link_follow_up_id: null,
+        updated_at: now,
+      })
+      .in('id', contactIds)
+      .in('demo_link_follow_up_id', linkIds);
 
-  const { error: clearContactError } = await params.admin
-    .from('contacts')
-    .update({
-      follow_up_at: null,
-      reminder_date: null,
-      demo_link_follow_up_id: null,
-      updated_at: now,
-    })
-    .in('id', contactIds)
-    .in('demo_link_follow_up_id', linkIds);
-
-  if (clearContactError) {
-    console.warn('[demo-link-tracking] failed to clear converted contact follow-up', clearContactError);
+    if (clearContactError) {
+      console.warn('[demo-link-tracking] failed to clear converted contact follow-up', clearContactError);
+    }
   }
+
+  await applyDemoLinkSignupMatches({
+    admin: params.admin,
+    links: links.map((link) => ({
+      id: link.id,
+      salesperson_id: link.salesperson_id ?? '',
+      workspace_id: link.workspace_id ?? null,
+      dialler_lead_id: link.dialler_lead_id,
+      contact_id: link.contact_id,
+      referral_code: link.referral_code ?? referralCode,
+      recipient_email: link.recipient_email ?? recipientEmail,
+    })),
+    convertedUserId: params.convertedUserId,
+    convertedWorkspaceId: params.convertedWorkspaceId,
+    recipientEmail,
+  });
+
+  await applyEmailSignupMatch({
+    admin: params.admin,
+    referralCode,
+    recipientEmail,
+    convertedUserId: params.convertedUserId,
+    convertedWorkspaceId: params.convertedWorkspaceId,
+  });
 }

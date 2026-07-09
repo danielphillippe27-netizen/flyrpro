@@ -104,6 +104,7 @@ function formatCallClock(totalSeconds: number): string {
 function statusForLead(lead: DiallerLead): 'pending' | 'called' | 'skipped' {
   if (lead.disposition === 'dnc') return 'skipped';
   if (lead.latest_call_outcome === 'answered' || lead.latest_call_outcome === 'no_answer') return 'called';
+  if (lead.called_at) return 'called';
   if (!lead.disposition) return 'pending';
   return 'called';
 }
@@ -159,7 +160,8 @@ export function DialerRuntimeProvider({ children }: { children: ReactNode }) {
   const [isPlacingNextCall, setIsPlacingNextCall] = useState(false);
   const autoDoubleDialCallIdsRef = useRef<Set<string>>(new Set());
   const autoDoubleDialTimeoutRef = useRef<number | null>(null);
-  const removedDiallerLeadIdsRef = useRef<Set<string>>(new Set());
+  const completedDiallerLeadIdsRef = useRef<Set<string>>(new Set());
+  const callWasConnectedRef = useRef(false);
 
   useEffect(() => {
     if (!device.isInCall) {
@@ -187,15 +189,93 @@ export function DialerRuntimeProvider({ children }: { children: ReactNode }) {
     }
   }, [activeLeadSnapshot]);
 
+  useEffect(() => {
+    if (!activeCallId) {
+      callWasConnectedRef.current = false;
+      return;
+    }
+    if (device.callPhase === 'connected') {
+      callWasConnectedRef.current = true;
+    }
+  }, [activeCallId, device.callPhase]);
+
+  const markDiallerLeadCalled = useCallback(async (
+    leadId: string,
+    options?: { connected?: boolean; callId?: string | null }
+  ): Promise<void> => {
+    if (!currentWorkspaceId || completedDiallerLeadIdsRef.current.has(leadId)) return;
+    completedDiallerLeadIdsRef.current.add(leadId);
+
+    try {
+      if (options?.callId) {
+        await fetch(`/api/dialer/calls/${encodeURIComponent(options.callId)}/hangup`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            workspaceId: currentWorkspaceId,
+            outcome: options.connected ? 'connected' : 'completed',
+          }),
+        }).catch((error) => {
+          console.warn('[dialer/runtime] failed to hang up backend call', error);
+        });
+      }
+
+      const response = await fetch('/api/dialer/leads', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          workspaceId: currentWorkspaceId,
+          id: leadId,
+          markCalled: true,
+        }),
+      });
+      const data = (await response.json().catch(() => ({}))) as { lead?: DiallerLead };
+      if (!response.ok || !data.lead) throw new Error('Failed to mark dialler lead called.');
+
+      setDiallerLeads((currentLeads) => {
+        const currentIndex = currentLeads.findIndex((lead) => lead.id === leadId);
+        const nextLeads = currentLeads.map((lead) =>
+          lead.id === leadId
+            ? {
+                ...lead,
+                ...data.lead,
+                latest_call_outcome: options?.connected ? 'answered' : lead.latest_call_outcome,
+              }
+            : lead
+        );
+        setActiveLeadId((currentId) => {
+          if (currentId && currentId !== leadId && nextLeads.some((lead) => lead.id === currentId)) return currentId;
+          const laterPending = nextLeads.slice(Math.max(currentIndex + 1, 0)).find((lead) => statusForLead(lead) === 'pending');
+          const firstPending = nextLeads.find((lead) => statusForLead(lead) === 'pending');
+          return laterPending?.id ?? firstPending?.id ?? nextLeads[0]?.id ?? null;
+        });
+        return nextLeads;
+      });
+    } catch {
+      completedDiallerLeadIdsRef.current.delete(leadId);
+    }
+  }, [currentWorkspaceId]);
+
   const hangUpActiveCall = useCallback(() => {
+    const leadIdToComplete = activeLeadId;
+    const callIdToComplete = activeCallId;
+    const wasConnected = callWasConnectedRef.current || device.callPhase === 'connected';
     if (device.isInCall) {
       device.hangUp();
-    } else if (activeCallId && currentWorkspaceId) {
-      void fetch(`/api/dialer/calls/${encodeURIComponent(activeCallId)}/hangup`, {
+    }
+    if (leadIdToComplete) {
+      void markDiallerLeadCalled(leadIdToComplete, { connected: wasConnected, callId: callIdToComplete });
+    } else if (callIdToComplete && currentWorkspaceId) {
+      void fetch(`/api/dialer/calls/${encodeURIComponent(callIdToComplete)}/hangup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ workspaceId: currentWorkspaceId }),
+        body: JSON.stringify({
+          workspaceId: currentWorkspaceId,
+          outcome: wasConnected ? 'connected' : 'completed',
+        }),
       }).catch((error) => {
         console.warn('[dialer/runtime] failed to hang up backend call', error);
       });
@@ -203,41 +283,8 @@ export function DialerRuntimeProvider({ children }: { children: ReactNode }) {
     setDiallerRunning(false);
     setActiveCallId(null);
     setActiveCallIsDoubleDial(false);
-  }, [activeCallId, currentWorkspaceId, device]);
-
-  const removeDiallerLeadFromQueue = useCallback(async (leadId: string): Promise<void> => {
-    if (!currentWorkspaceId || removedDiallerLeadIdsRef.current.has(leadId)) return;
-    removedDiallerLeadIdsRef.current.add(leadId);
-
-    try {
-      const response = await fetch('/api/dialer/leads', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          workspaceId: currentWorkspaceId,
-          id: leadId,
-        }),
-      });
-      if (!response.ok) throw new Error('Failed to remove dialler lead.');
-    } catch {
-      removedDiallerLeadIdsRef.current.delete(leadId);
-      return;
-    }
-
-    setDiallerLeads((currentLeads) => {
-      const removedIndex = currentLeads.findIndex((lead) => lead.id === leadId);
-      const nextLeads = currentLeads.filter((lead) => lead.id !== leadId);
-      setActiveLeadId((currentId) => {
-        if (currentId && currentId !== leadId && nextLeads.some((lead) => lead.id === currentId)) return currentId;
-        const laterPending = nextLeads.slice(Math.max(removedIndex, 0)).find((lead) => statusForLead(lead) === 'pending');
-        const firstPending = nextLeads.find((lead) => statusForLead(lead) === 'pending');
-        return laterPending?.id ?? firstPending?.id ?? nextLeads[0]?.id ?? null;
-      });
-      return nextLeads;
-    });
-    setActiveLeadSnapshot((snapshot) => (snapshot?.id === leadId ? null : snapshot));
-  }, [currentWorkspaceId]);
+    callWasConnectedRef.current = false;
+  }, [activeCallId, activeLeadId, currentWorkspaceId, device, markDiallerLeadCalled]);
 
   const placeDiallerLeadCall = useCallback(async ({
     leadId,
@@ -342,8 +389,15 @@ export function DialerRuntimeProvider({ children }: { children: ReactNode }) {
       return { ok: false, message: 'No other valid pending leads left.' };
     }
 
+    if (currentLead && statusForLead(currentLead) === 'pending') {
+      void markDiallerLeadCalled(currentLead.id, {
+        connected: callWasConnectedRef.current,
+        callId: activeCallId,
+      });
+    }
+
     return placeDiallerLeadCall({ leadId: nextLead.id });
-  }, [activeLeadId, diallerLeads, placeDiallerLeadCall]);
+  }, [activeCallId, activeLeadId, diallerLeads, markDiallerLeadCalled, placeDiallerLeadCall]);
 
   useEffect(() => {
     return () => {
@@ -375,7 +429,7 @@ export function DialerRuntimeProvider({ children }: { children: ReactNode }) {
           !autoDoubleDialCallIdsRef.current.has(data.call.id);
 
         if (leadId && isTerminalDialerCall(data.call) && getCallOutcome(data.call) !== 'pending' && !shouldRedial) {
-          void removeDiallerLeadFromQueue(leadId);
+          void markDiallerLeadCalled(leadId, { connected: getCallOutcome(data.call) === 'answered' });
         } else if (leadId) {
           setDiallerLeads((currentLeads) =>
             currentLeads.map((lead) =>
@@ -422,7 +476,7 @@ export function DialerRuntimeProvider({ children }: { children: ReactNode }) {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [activeCallId, activeLeadId, currentWorkspaceId, device, diallerRunning, placeDiallerLeadCall, removeDiallerLeadFromQueue]);
+  }, [activeCallId, activeLeadId, currentWorkspaceId, device, diallerRunning, markDiallerLeadCalled, placeDiallerLeadCall]);
 
 
   const value = useMemo<DialerRuntimeContextValue>(

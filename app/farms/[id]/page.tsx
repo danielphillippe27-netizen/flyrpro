@@ -2225,55 +2225,57 @@ export default function FarmPage() {
                 </p>
               </div>
 
-              <div className="rounded-xl border border-border bg-card p-4">
-                <div className="flex flex-wrap items-start justify-between gap-6">
-                  <div className="flex flex-col gap-3">
-                    <h3 className="text-sm font-semibold text-foreground">Basic QR Code</h3>
-                    <p className="max-w-md text-xs text-muted-foreground">
-                      One QR code for the whole farm. Scans count toward farm totals, but not a specific home.
-                    </p>
-                    <div className="flex flex-wrap gap-3">
-                      <Button onClick={handleGenerateBasicQr} disabled={generatingBasicQr}>
-                        {generatingBasicQr ? 'Generating...' : 'Generate QR'}
-                      </Button>
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div className="rounded-xl border border-border bg-card p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-6">
+                    <div className="flex flex-col gap-3">
+                      <h3 className="text-sm font-semibold text-foreground">Basic QR Code</h3>
+                      <p className="max-w-md text-xs text-muted-foreground">
+                        One QR code for the whole farm. Scans count toward farm totals, but not a specific home.
+                      </p>
+                      <div className="flex flex-wrap gap-3">
+                        <Button onClick={handleGenerateBasicQr} disabled={generatingBasicQr}>
+                          {generatingBasicQr ? 'Generating...' : 'Generate QR'}
+                        </Button>
+                      </div>
                     </div>
+                    {basicQrBase64 ? (
+                      <div className="flex shrink-0 flex-col items-center gap-2">
+                        <img
+                          src={basicQrBase64}
+                          alt="Farm basic QR code"
+                          className="h-48 w-48 rounded-lg border border-border bg-white object-contain"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleDownloadBasicQr}
+                          className="text-sm font-medium text-red-600 underline underline-offset-2 hover:text-red-500"
+                        >
+                          Download PNG
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
-                  {basicQrBase64 ? (
-                    <div className="flex shrink-0 flex-col items-center gap-2">
-                      <img
-                        src={basicQrBase64}
-                        alt="Farm basic QR code"
-                        className="h-48 w-48 rounded-lg border border-border bg-white object-contain"
-                      />
-                      <button
-                        type="button"
-                        onClick={handleDownloadBasicQr}
-                        className="text-sm font-medium text-red-600 underline underline-offset-2 hover:text-red-500"
-                      >
-                        Download PNG
-                      </button>
-                    </div>
-                  ) : null}
                 </div>
-              </div>
 
-              <div className="rounded-xl border border-border bg-card p-4">
-                <h2 className="mb-3 text-sm font-semibold text-foreground">Advanced QR Codes</h2>
-                <p className="mb-3 text-xs text-muted-foreground">
-                  Unique QR codes for each home in this farm. Scans are tied to addresses for print matching and follow-up tracking.
-                </p>
-                <div className="flex flex-wrap items-center gap-3">
-                  <Button
-                    onClick={() => void handleGenerateAdvancedQrs()}
-                    disabled={generatingQrCodes || dedupedLinkedCampaignAddresses.length === 0}
-                  >
-                    {generatingQrCodes ? 'Generating...' : 'Generate QR Codes'}
-                  </Button>
-                  {dedupedLinkedCampaignAddresses.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">
-                      No linked campaign homes are available yet.
-                    </p>
-                  ) : null}
+                <div className="rounded-xl border border-border bg-card p-4">
+                  <h2 className="mb-3 text-sm font-semibold text-foreground">Advanced QR Codes</h2>
+                  <p className="mb-3 text-xs text-muted-foreground">
+                    Unique QR codes for each home in this farm. Scans are tied to addresses for print matching and follow-up tracking.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Button
+                      onClick={() => void handleGenerateAdvancedQrs()}
+                      disabled={generatingQrCodes || dedupedLinkedCampaignAddresses.length === 0}
+                    >
+                      {generatingQrCodes ? 'Generating...' : 'Generate QR Codes'}
+                    </Button>
+                    {dedupedLinkedCampaignAddresses.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">
+                        No linked campaign homes are available yet.
+                      </p>
+                    ) : null}
+                  </div>
                 </div>
               </div>
 

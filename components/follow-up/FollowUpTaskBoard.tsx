@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useWorkspace } from '@/lib/workspace-context';
-import { cn } from '@/lib/utils';
 import { Clock, User } from 'lucide-react';
 
 const PAGE_SIZE = 100;
@@ -35,7 +34,7 @@ type ActivityResponse = {
 };
 
 const BUCKET_LABELS: Record<FollowUpBucket, string> = {
-  today: "Today's Tasks",
+  today: 'Today',
   overdue: 'Overdue',
   future: 'Future',
 };
@@ -200,62 +199,45 @@ export function FollowUpTaskBoard() {
   }, [activeEvents]);
 
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-900 dark:bg-background dark:text-foreground">
-      <div className="sticky top-0 z-20 border-b border-slate-200 bg-white dark:border-border dark:bg-card">
-        <div className="mx-auto flex w-full max-w-7xl flex-col gap-3 px-4 py-3 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8">
-          <div className="flex min-w-0 overflow-x-auto">
-            {(['today', 'overdue', 'future'] as const).map((bucket) => (
-              <button
-                key={bucket}
-                type="button"
-                onClick={() => setActiveBucket(bucket)}
-                className={cn(
-                  'relative flex h-12 shrink-0 items-center gap-2 px-4 text-sm font-semibold text-slate-600 transition-colors sm:text-base',
-                  'hover:text-slate-950 dark:text-muted-foreground dark:hover:text-foreground',
-                  activeBucket === bucket && 'text-slate-950 dark:text-foreground'
-                )}
-              >
-                <span>{BUCKET_LABELS[bucket]}</span>
-                {counts[bucket] > 0 && (
-                  <span className="text-slate-400 dark:text-muted-foreground">({counts[bucket]})</span>
-                )}
-                {activeBucket === bucket && (
-                  <span className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-red-500" />
-                )}
-              </button>
-            ))}
-          </div>
+    <div className="min-h-screen bg-gray-50 text-slate-900 dark:bg-background dark:text-foreground">
+      <header className="sticky top-0 z-10 border-b border-border bg-white dark:bg-card">
+        <div className="mx-auto w-full max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
+          <h1 className="text-2xl font-bold text-foreground">Follow Up</h1>
+          <p className="mt-1 text-muted-foreground">All follow-ups across your activity feed</p>
         </div>
-      </div>
+      </header>
 
-      <main className="mx-auto w-full max-w-5xl px-4 py-7 sm:px-6 lg:px-8">
+      <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          <span className="text-sm text-muted-foreground">Period:</span>
+          {(['today', 'overdue', 'future'] as const).map((bucket) => (
+            <Button
+              key={bucket}
+              variant={activeBucket === bucket ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setActiveBucket(bucket)}
+            >
+              {BUCKET_LABELS[bucket]}
+              {counts[bucket] > 0 ? ` (${counts[bucket]})` : ''}
+            </Button>
+          ))}
+        </div>
+
         {error && (
           <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">
             {error}
           </div>
         )}
 
-        <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-border dark:bg-card">
-          <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-border">
-            <div className="flex items-center gap-3">
-              <Clock className="h-5 w-5 text-red-500 dark:text-red-400" />
-              <h1 className="text-base font-semibold sm:text-lg">{BUCKET_LABELS[activeBucket]}</h1>
-            </div>
-            <Button variant="ghost" size="sm" onClick={() => void fetchFollowUps()} disabled={loading}>
-              {loading ? 'Loading...' : 'Refresh'}
-            </Button>
-          </div>
-
-          <div className="min-h-[320px] divide-y divide-slate-100 dark:divide-border/70">
+        <section className="min-h-[300px] divide-y divide-border rounded-xl border border-border bg-card">
+          <div className="min-h-[300px] divide-y divide-slate-100 dark:divide-border/70">
             {loading && events.length === 0 ? (
-              <div className="flex min-h-[320px] flex-col items-center justify-center gap-3 text-slate-400">
-                <Clock className="h-12 w-12 animate-pulse text-red-500 dark:text-red-400" />
-                <p className="text-sm font-medium">Loading follow-ups...</p>
+              <div className="p-8 text-center text-muted-foreground">
+                Loading follow-ups...
               </div>
             ) : groupedEvents.length === 0 ? (
-              <div className="flex min-h-[320px] flex-col items-center justify-center gap-3 text-slate-400">
-                <Clock className="h-12 w-12 text-red-500 dark:text-red-400" />
-                <p className="text-sm font-medium">No tasks found, nice work!</p>
+              <div className="p-8 text-center text-muted-foreground">
+                No tasks found, nice work!
               </div>
             ) : (
               groupedEvents.map((group) => (

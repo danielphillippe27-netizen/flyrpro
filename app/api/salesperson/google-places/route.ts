@@ -397,6 +397,9 @@ async function saveScraperResults(params: {
     }];
   });
 
+  // Sales/prospecting imports must stay out of regular FLYR contacts.
+  contactsToInsert.length = 0;
+
   if (contactsToInsert.length > 0) {
     try {
       const insertedIds = await insertContactsWithFallback(params.admin, contactsToInsert);
@@ -500,7 +503,7 @@ async function saveScraperResults(params: {
     await Promise.all(
       Array.from(masterMetadataById.entries()).map(async ([masterId, metadata]) => {
         const { error } = await params.admin
-          .from('salesperson_lead_master')
+          .from('sales_leads')
           .update({
             metadata: {
               ...metadata,
@@ -553,9 +556,10 @@ async function saveScraperResults(params: {
   let dialerImportedCount = 0;
   let dialerSkippedCount = 0;
   const dialerLeadIds: string[] = [];
-  if (dialableLeads.length > 0) {
+  // sales_leads is now the dialer queue for salesperson/prospecting leads.
+  if (false && dialableLeads.length > 0) {
     const { data: existingDialerRows, error: existingDialerError } = await params.admin
-      .from('dialler_leads')
+      .from('sales_leads')
       .select('id, phone')
       .eq('workspace_id', workspaceId)
       .eq('user_id', params.userId);
@@ -588,6 +592,9 @@ async function saveScraperResults(params: {
         return true;
       });
 
+      // sales_leads is now the dialer queue for salesperson/prospecting leads.
+      dialerInserts.length = 0;
+
       if (dialerInserts.length > 0) {
         const masterIdByPhone = new Map(
           dialerInserts
@@ -603,7 +610,7 @@ async function saveScraperResults(params: {
           return payload;
         });
         const { data: insertedDialerRows, error: dialerInsertError } = await params.admin
-          .from('dialler_leads')
+          .from('sales_leads')
           .insert(insertPayload)
           .select('id, phone');
 

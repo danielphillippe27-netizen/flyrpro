@@ -38,7 +38,7 @@ export async function GET(
   }
 
   const { data: lead, error: leadError } = await context.admin
-    .from('dialler_leads')
+    .from('sales_leads')
     .select('*')
     .eq('id', leadId)
     .eq('workspace_id', context.workspaceId)

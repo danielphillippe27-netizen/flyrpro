@@ -9,8 +9,11 @@ import {
   generateDemoLinkForLead,
   mapIndustryToDemoVertical,
 } from '@/lib/demo/generateDemoLinkForLead';
+import { ensureSalespersonReferralCode, normalizeSalespersonReferralCodeInput } from '@/app/lib/billing/salespeople';
 import { hasFlyrDemoAdminAccess } from '@/lib/auth/flyrInternalWorkspace';
 import { normalizePhoneNumber } from '@/lib/dialer/phone';
+import { createTrackedDemoLink } from '@/lib/dialer/demo-link-tracking';
+import { resolveSalespersonForUser } from '@/lib/dialer/salesperson-settings';
 import { createAdminClient } from '@/lib/supabase/server';
 import type { Contact, DiallerLead } from '@/types/database';
 
@@ -28,6 +31,55 @@ type GenerateFromLeadBody = {
 
 function text(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+async function maybeTrackGeneratedLink(params: {
+  admin: ReturnType<typeof createAdminClient>;
+  request: NextRequest;
+  user: { id: string; email?: string | null };
+  workspaceId: string;
+  lead: DiallerLead;
+  contact?: Contact | null;
+  generated: { url: string };
+}) {
+  const salesperson = await resolveSalespersonForUser(params.admin, {
+    userId: params.user.id,
+    email: params.user.email ?? null,
+    workspaceId: params.workspaceId,
+  }).catch((error) => {
+    console.warn('[demo-links/from-lead] salesperson lookup failed', error);
+    return null;
+  });
+
+  const referralCode = salesperson?.id
+    ? normalizeSalespersonReferralCodeInput(salesperson.referral_code ?? '') ||
+      (await ensureSalespersonReferralCode(params.admin, {
+        salespersonId: salesperson.id,
+        fullName: salesperson.full_name || salesperson.email || params.user.email || 'Salesperson',
+        existingReferralCode: salesperson.referral_code,
+      }).catch((error) => {
+        console.warn('[demo-links/from-lead] referral code generation failed', error);
+        return null;
+      }))
+    : null;
+
+  if (!salesperson?.id || !referralCode) return params.generated;
+
+  const destination = new URL(params.generated.url);
+  const tracked = await createTrackedDemoLink({
+    admin: params.admin,
+    origin: params.request.nextUrl.origin,
+    salesperson,
+    workspaceId: params.workspaceId,
+    lead: params.lead,
+    contact: params.contact ?? null,
+    referralCode,
+    source: 'salesperson',
+    campaign: 'crm-demo-link',
+    destinationPath: destination.pathname,
+  });
+
+  return tracked?.url ? { ...params.generated, url: tracked.url } : params.generated;
 }
 
 async function assertWorkspaceAccess(params: {
@@ -56,7 +108,7 @@ async function findDiallerLeadForContact(params: {
 
   for (const phone of phoneCandidates) {
     const { data, error } = await params.admin
-      .from('dialler_leads')
+      .from('sales_leads')
       .select('*')
       .eq('workspace_id', params.workspaceId)
       .eq('phone', phone)
@@ -73,7 +125,7 @@ async function findDiallerLeadForContact(params: {
   const email = text(params.contact.email).toLowerCase();
   if (email) {
     const { data, error } = await params.admin
-      .from('dialler_leads')
+      .from('sales_leads')
       .select('*')
       .eq('workspace_id', params.workspaceId)
       .ilike('email', email)
@@ -110,7 +162,7 @@ export async function POST(request: NextRequest) {
   try {
     if (leadId) {
       const { data: lead, error } = await admin
-        .from('dialler_leads')
+        .from('sales_leads')
         .select('id, workspace_id')
         .eq('id', leadId)
         .maybeSingle();
@@ -124,7 +176,15 @@ export async function POST(request: NextRequest) {
       if (!allowed) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
       const generated = await generateDemoLinkForLead({ admin, leadId, user });
-      return NextResponse.json(generated);
+      const tracked = await maybeTrackGeneratedLink({
+        admin,
+        request,
+        user,
+        workspaceId: lead.workspace_id as string,
+        lead: lead as DiallerLead,
+        generated,
+      });
+      return NextResponse.json(tracked);
     }
 
     if (contactId) {
@@ -162,7 +222,16 @@ export async function POST(request: NextRequest) {
       }
 
       const generated = await generateDemoLinkForLead({ admin, leadId: lead.id, user });
-      return NextResponse.json(generated);
+      const tracked = await maybeTrackGeneratedLink({
+        admin,
+        request,
+        user,
+        workspaceId: resolvedWorkspaceId,
+        lead,
+        contact,
+        generated,
+      });
+      return NextResponse.json(tracked);
     }
 
     const company = text(body.company);

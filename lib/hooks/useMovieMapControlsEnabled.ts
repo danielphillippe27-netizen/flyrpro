@@ -23,8 +23,9 @@ export function useMovieMapControlsEnabled(workspaceId: string | null | undefine
       credentials: 'include',
       cache: 'no-store',
     })
+      .catch(() => null)
       .then(async (response) => {
-        if (!response.ok) return null;
+        if (!response?.ok) return null;
         return (await response.json().catch(() => null)) as MapSettingsResponse | null;
       })
       .then((payload) => {

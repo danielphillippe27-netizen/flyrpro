@@ -5,7 +5,7 @@ import {
   type MinimalSupabaseClient,
 } from '@/app/api/_utils/workspace';
 import { createAdminClient } from '@/lib/supabase/server';
-import type { SalespersonLeadMaster } from '@/types/database';
+import type { SalesLead } from '@/types/database';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -18,7 +18,7 @@ type SalespersonRow = {
 };
 
 type LeadListResponse = {
-  leads: SalespersonLeadMaster[];
+  leads: SalesLead[];
   workspaceId: string | null;
 };
 
@@ -26,7 +26,7 @@ function readString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
-function withListMetadata(row: SalespersonLeadMaster): SalespersonLeadMaster {
+function withListMetadata(row: SalesLead): SalesLead {
   const metadata = row.metadata && typeof row.metadata === 'object'
     ? row.metadata as Record<string, unknown>
     : {};
@@ -132,16 +132,16 @@ export async function GET(request: NextRequest) {
     }
 
     let query = admin
-      .from('salesperson_lead_master')
+      .from('sales_leads')
       .select(
-        'id, workspace_id, contact_id, dialler_lead_id, assigned_user_id, assigned_salesperson_id, created_by_user_id, name, company, phone, phone_e164, email, email_normalized, website, website_domain, address, city, region, country_code, source, external_id, lead_fingerprint, lead_state, attempt_count, last_attempted_at, next_follow_up_at, disposition, notes, metadata, created_at, updated_at'
+        'id, workspace_id, sales_contact_id, converted_contact_id, legacy_contact_id, legacy_dialler_lead_id, legacy_master_lead_id, assigned_user_id, assigned_sales_rep_id, created_by_user_id, name, company, phone, phone_e164, email, email_normalized, list_id, list_name, website, website_domain, address, city, region, country_code, source, external_id, lead_fingerprint, lead_state, attempt_count, last_attempted_at, next_follow_up_at, follow_up_name, demo_link_follow_up_id, disposition, is_starred, notes, metadata, created_at, updated_at'
       )
       .eq('workspace_id', workspaceId)
       .order('created_at', { ascending: false });
 
     if (salesperson?.id) {
       // Salesperson: scope to their own assigned leads only
-      query = query.or(`assigned_user_id.eq.${requestUser.id},assigned_salesperson_id.eq.${salesperson.id}`);
+      query = query.eq('assigned_user_id', requestUser.id);
     } else if (!isFounder) {
       // Non-salesperson, non-founder: shouldn't reach here (blocked above), but be safe
       query = query.eq('assigned_user_id', requestUser.id);
@@ -152,7 +152,7 @@ export async function GET(request: NextRequest) {
     if (error) throw error;
 
     return NextResponse.json({
-      leads: ((data ?? []) as SalespersonLeadMaster[]).map(withListMetadata),
+      leads: ((data ?? []) as SalesLead[]).map(withListMetadata),
       workspaceId,
     } satisfies LeadListResponse);
   } catch (error) {
