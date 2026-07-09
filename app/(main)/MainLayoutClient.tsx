@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import type { MouseEvent, ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { WorkspaceProvider, useWorkspace } from '@/lib/workspace-context';
@@ -335,7 +335,9 @@ export default function MainLayoutClient({
 }) {
   return (
     <WorkspaceProvider>
-      <MainLayoutContent>{children}</MainLayoutContent>
+      <Suspense fallback={<div className="min-h-screen bg-background" />}>
+        <MainLayoutContent>{children}</MainLayoutContent>
+      </Suspense>
     </WorkspaceProvider>
   );
 }
