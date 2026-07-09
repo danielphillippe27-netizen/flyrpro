@@ -1908,7 +1908,15 @@ function CampaignAssignmentZonePreviewMap({
   }
 
   const openEditor = () => {
-    setEditorOpen(true);
+    if (!expandedOpen) {
+      setEditorOpen(true);
+      return;
+    }
+
+    setExpandedOpen(false);
+    window.requestAnimationFrame(() => {
+      setEditorOpen(true);
+    });
   };
 
   const wrapperClassName = expandedOpen
