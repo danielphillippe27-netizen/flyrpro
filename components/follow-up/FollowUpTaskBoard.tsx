@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useWorkspace } from '@/lib/workspace-context';
 import { Clock, User } from 'lucide-react';
 
@@ -31,6 +32,14 @@ type ActivityResponse = {
   events?: FollowUpEvent[];
   total?: number;
   nextOffset?: number | null;
+  canIncludeMembers?: boolean;
+  members?: ActivityMemberOption[];
+};
+
+type ActivityMemberOption = {
+  user_id: string;
+  display_name: string;
+  color?: string | null;
 };
 
 const BUCKET_LABELS: Record<FollowUpBucket, string> = {
@@ -114,6 +123,9 @@ function taskSummary(event: FollowUpEvent): string {
 export function FollowUpTaskBoard() {
   const { currentWorkspaceId } = useWorkspace();
   const [activeBucket, setActiveBucket] = useState<FollowUpBucket>('today');
+  const [selectedMemberId, setSelectedMemberId] = useState('all');
+  const [teamMembers, setTeamMembers] = useState<ActivityMemberOption[]>([]);
+  const [canIncludeMembers, setCanIncludeMembers] = useState(false);
   const [events, setEvents] = useState<FollowUpEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -138,18 +150,33 @@ export function FollowUpTaskBoard() {
         const params = new URLSearchParams({
           workspaceId: currentWorkspaceId,
           type: 'followup',
-          includeMembers: 'true',
           start,
           end,
           limit: String(PAGE_SIZE),
           offset: String(nextOffset),
         });
+        if (selectedMemberId === 'all') {
+          params.set('includeMembers', 'true');
+        } else {
+          params.set('memberId', selectedMemberId);
+        }
 
-        const response = await fetch(`/api/activity?${params.toString()}`);
+        const response = await fetch(`/api/activity?${params.toString()}`, { credentials: 'include' });
         if (!response.ok) throw new Error(await response.text());
         const data = (await response.json()) as ActivityResponse;
 
         loaded.push(...(data.events ?? []));
+        if (data.canIncludeMembers !== undefined) {
+          const nextCanIncludeMembers = Boolean(data.canIncludeMembers);
+          setCanIncludeMembers(nextCanIncludeMembers);
+          if (!nextCanIncludeMembers) {
+            setTeamMembers([]);
+            setSelectedMemberId('all');
+          }
+        }
+        if (Array.isArray(data.members)) {
+          setTeamMembers(data.members);
+        }
 
         nextOffset = typeof data.nextOffset === 'number' ? data.nextOffset : null;
       }
@@ -161,11 +188,17 @@ export function FollowUpTaskBoard() {
     } finally {
       setLoading(false);
     }
-  }, [currentWorkspaceId]);
+  }, [currentWorkspaceId, selectedMemberId]);
 
   useEffect(() => {
     void fetchFollowUps();
   }, [fetchFollowUps]);
+
+  useEffect(() => {
+    if (selectedMemberId === 'all') return;
+    if (teamMembers.some((member) => member.user_id === selectedMemberId)) return;
+    setSelectedMemberId('all');
+  }, [selectedMemberId, teamMembers]);
 
   const counts = useMemo(() => {
     return events.reduce<Record<FollowUpBucket, number>>(
@@ -221,6 +254,24 @@ export function FollowUpTaskBoard() {
               {counts[bucket] > 0 ? ` (${counts[bucket]})` : ''}
             </Button>
           ))}
+          {canIncludeMembers ? (
+            <>
+              <span className="ml-2 text-sm text-muted-foreground">|</span>
+              <Select value={selectedMemberId} onValueChange={setSelectedMemberId}>
+                <SelectTrigger size="sm" className="w-[220px]">
+                  <SelectValue placeholder="All team members" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All team members</SelectItem>
+                  {teamMembers.map((member) => (
+                    <SelectItem key={member.user_id} value={member.user_id}>
+                      {member.display_name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </>
+          ) : null}
         </div>
 
         {error && (
