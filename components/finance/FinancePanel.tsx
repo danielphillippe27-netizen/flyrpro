@@ -574,16 +574,16 @@ export function FinancePanel({
         </div>
       ) : null}
 
-      <div className="grid gap-4 xl:grid-cols-2 2xl:grid-cols-3">
-        <Card>
+      <div className="grid items-stretch gap-4 xl:grid-cols-3">
+        <Card className="flex h-full flex-col">
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2">
               <Calculator className="w-4 h-4" />
               Postal Drop Estimator
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <CardContent className="flex flex-1 flex-col space-y-3">
+            <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
               <div className="space-y-2">
                 <Label htmlFor="postal-code-input">Postal code</Label>
                 <Input
@@ -627,7 +627,7 @@ export function FinancePanel({
                 : 'Enter a postal code to count matching homes in this area.'}
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
               <div className="space-y-2">
                 <Label htmlFor="postal-date">Date</Label>
                 <Input
@@ -682,7 +682,7 @@ export function FinancePanel({
               </div>
             ) : null}
 
-            <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_220px] xl:items-end">
+            <div className="grid gap-3 2xl:grid-cols-[minmax(0,1fr)_180px] 2xl:items-end">
               <div className="space-y-2">
                 <Label htmlFor="postal-notes">Notes</Label>
                 <Textarea
@@ -702,7 +702,7 @@ export function FinancePanel({
               </div>
             </div>
 
-            <div className="flex justify-end">
+            <div className="mt-auto flex justify-end">
               <Button onClick={savePostalDrop} disabled={savingPostal}>
                 {savingPostal ? 'Saving...' : 'Save Postal Drop'}
               </Button>
@@ -710,15 +710,15 @@ export function FinancePanel({
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="flex h-full flex-col">
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2">
               <BarChart3 className="w-4 h-4" />
               Meta / Social Ads
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <CardContent className="flex flex-1 flex-col space-y-3">
+            <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
               <div className="space-y-2">
                 <Label>Platform</Label>
                 <Select value={socialAdPlatform} onValueChange={setSocialAdPlatform}>
@@ -760,7 +760,7 @@ export function FinancePanel({
                   onChange={(event) => setSocialAdDate(event.target.value)}
                 />
               </div>
-              <div className="space-y-2 sm:col-span-2 xl:col-span-3">
+              <div className="space-y-2 sm:col-span-2 2xl:col-span-3">
                 <Label htmlFor="social-ad-campaign">Campaign or ad name</Label>
                 <Input
                   id="social-ad-campaign"
@@ -818,7 +818,7 @@ export function FinancePanel({
               </div>
             </div>
 
-            <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-end">
+            <div className="mt-auto grid gap-3 2xl:grid-cols-[minmax(0,1fr)_auto] 2xl:items-end">
               <div className="space-y-2">
                 <Label htmlFor="social-ad-notes">Notes</Label>
                 <Textarea
@@ -838,15 +838,15 @@ export function FinancePanel({
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="flex h-full flex-col">
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2">
               <ReceiptText className="w-4 h-4" />
               Manual Expense
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <CardContent className="flex flex-1 flex-col space-y-3">
+            <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
               <div className="space-y-2">
                 <Label>Category</Label>
                 <Select value={expenseCategory} onValueChange={(value) => setExpenseCategory(value as FinanceEntryCategory)}>
@@ -871,7 +871,7 @@ export function FinancePanel({
                   onChange={(event) => setExpenseDate(event.target.value)}
                 />
               </div>
-              <div className="space-y-2 sm:col-span-2 xl:col-span-3">
+              <div className="space-y-2 sm:col-span-2 2xl:col-span-3">
                 <Label htmlFor="expense-description">Description</Label>
                 <Input
                   id="expense-description"
@@ -937,7 +937,7 @@ export function FinancePanel({
               </div>
             </div>
 
-            <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-end">
+            <div className="mt-auto grid gap-3 2xl:grid-cols-[minmax(0,1fr)_auto] 2xl:items-end">
               <div className="space-y-2">
                 <Label htmlFor="expense-notes">Notes</Label>
                 <Textarea
