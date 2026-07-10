@@ -24,7 +24,7 @@ export type TeamManagementContext =
 type AdminClient = ReturnType<typeof createAdminClient>;
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const FREE_SEAT_ROLES: WorkspaceRole[] = ['admin'];
+const FREE_SEAT_ROLES: WorkspaceRole[] = ['owner', 'admin'];
 const INVITE_SELECT_BASE = 'id, email, role, status, token, created_at, expires_at';
 
 function getErrorMessage(error: unknown): string {
