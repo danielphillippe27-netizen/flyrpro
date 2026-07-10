@@ -1,7 +1,9 @@
+import { requireSalesperson } from '@/lib/auth/requireSalesperson';
 import { Plus, Settings2 } from 'lucide-react';
 import { SalespersonPlacesLeadFinder } from '@/components/scraper/SalespersonPlacesLeadFinder';
 
-export default function SalespersonScraperPage() {
+export default async function SalespersonScraperPage() {
+  await requireSalesperson();
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-background">
       <header className="border-b border-border bg-white dark:bg-card">

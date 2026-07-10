@@ -63,6 +63,7 @@ export function mapIndustryToDemoVertical(industry: string | null | undefined): 
   if (normalized.includes('solar')) return 'solar';
   if (normalized.includes('lawn')) return 'lawncare';
   if (normalized.includes('hvac')) return 'hvac';
+  if (normalized.includes('real estate') || normalized.includes('realtor') || normalized.includes('realty') || normalized.includes('brokerage')) return 'real_estate';
   return 'generic';
 }
 

@@ -312,7 +312,7 @@ export class ContactsService {
     userId: string,
     payload: CreateContactPayload,
     workspaceId?: string | null
-  ): Promise<Contact> {
+  ): Promise<Contact & { crmSync?: Array<{ provider: string; displayName: string; status: string; ms?: number }> }> {
     // Concatenate first_name and last_name into full_name
     const full_name = payload.last_name
       ? `${payload.first_name.trim()} ${payload.last_name.trim()}`.trim()
@@ -350,7 +350,7 @@ export class ContactsService {
       throw new Error(this.getErrorMessage(data) || this.getResponseFallbackMessage(response, responseText));
     }
 
-    const contact = data as Contact;
+    const contact = data as Contact & { crmSync?: Array<{ provider: string; displayName: string; status: string; ms?: number }> };
     await this.syncContactCalendarEvents(contact);
     return contact;
   }
@@ -497,7 +497,7 @@ export class ContactsService {
     userId: string,
     payload: CreateContactPayload & { address_id?: string },
     workspaceId?: string | null
-  ): Promise<Contact> {
+  ): Promise<Contact & { crmSync?: Array<{ provider: string; displayName: string; status: string; ms?: number }> }> {
     const contact = await this.createContact(userId, payload, workspaceId);
 
     if (payload.address_id) {

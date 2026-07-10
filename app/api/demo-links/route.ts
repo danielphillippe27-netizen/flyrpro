@@ -19,8 +19,8 @@ type DemoLinkRequestBody = {
   slug?: unknown;
 };
 
-const DEMO_VERTICALS: DemoVertical[] = ['roofing', 'lawncare', 'hvac', 'solar', 'political', 'generic'];
-const CTA_VARIANTS: DemoPayload['ctaVariant'][] = ['book', 'reply', 'territory'];
+const DEMO_VERTICALS: DemoVertical[] = ['roofing', 'lawncare', 'hvac', 'solar', 'political', 'real_estate', 'generic'];
+const CTA_VARIANTS: DemoPayload['ctaVariant'][] = ['a', 'b'];
 
 function slugify(value: string) {
   return value
@@ -88,7 +88,7 @@ export async function POST(request: NextRequest) {
   const contactName = text(body.contactName);
   const city = text(body.city);
   const rawVertical = text(body.vertical) || 'generic';
-  const rawCtaVariant = text(body.ctaVariant) || 'book';
+  const rawCtaVariant = text(body.ctaVariant) || 'a';
   const ctaUrl = text(body.ctaUrl) || DEFAULT_PAYLOAD.ctaUrl;
   const requestedSlug = slugify(text(body.slug));
   const generatedSlug = slugify(company);

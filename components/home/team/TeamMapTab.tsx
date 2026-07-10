@@ -581,7 +581,6 @@ export function TeamMapTab({ range, memberIds, mapMode, demoLive = false, campai
 
     const geo: GeoJSON.FeatureCollection<GeoJSON.Point> = { type: 'FeatureCollection', features };
     const ensureLiveLayer = () => {
-      if (!map.isStyleLoaded()) return;
       try {
         const existing = map.getSource(LIVE_SOURCE_ID);
         if (existing && 'setData' in existing) {
@@ -630,8 +629,15 @@ export function TeamMapTab({ range, memberIds, mapMode, demoLive = false, campai
       }
     };
 
-    if (map.isStyleLoaded()) ensureLiveLayer();
-    else map.once('style.load', ensureLiveLayer);
+    // Mapbox GL JS v3: isStyleLoaded() is unreliable immediately after the load
+    // event. Try immediately (works if style is ready), then retry on idle as
+    // a guaranteed fallback once all tiles and style resources have settled.
+    ensureLiveLayer();
+    map.once('idle', ensureLiveLayer);
+
+    return () => {
+      map.off('idle', ensureLiveLayer);
+    };
   }, [livePresence, mapLoaded, mapMode]);
 
   useEffect(() => {

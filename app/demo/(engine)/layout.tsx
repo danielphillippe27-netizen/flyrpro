@@ -40,6 +40,7 @@ export default function DemoLayout({ children }: { children: ReactNode }) {
 
         html {
           scroll-behavior: smooth;
+          overflow-x: hidden;
         }
 
         body {

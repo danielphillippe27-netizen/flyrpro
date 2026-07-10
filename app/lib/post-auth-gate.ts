@@ -129,7 +129,8 @@ export async function getPostAuthRedirectForUserId(
     return { redirect: 'dashboard', path: founderPath };
   }
 
-  if (isSalesperson) {
+  // Workspace owners/admins are never salespersons, even if their email appears in the salespeople table
+  if (isSalesperson && access.role !== 'owner' && access.role !== 'admin') {
     return { redirect: 'dashboard', path: next || '/home' };
   }
 

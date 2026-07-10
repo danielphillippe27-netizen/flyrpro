@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/client';
 import { fetchAllInPages } from '@/lib/supabase/fetchAllInPages';
-import type { CampaignV2, CampaignAddress, CampaignContact, QRCode } from '@/types/database';
+import type { CampaignV2, CampaignAddress, QRCode } from '@/types/database';
 import type { CreateCampaignPayload } from '@/types/campaigns';
 import { QRCodeService } from '@/lib/services/QRCodeService';
 import type { QRCodeWithScanStatus } from '@/lib/services/QRCodeService';
@@ -272,66 +272,6 @@ export class CampaignsService {
       // Gracefully handle errors - return empty array instead of crashing
       return [];
     }
-  }
-
-  static async fetchCampaignContacts(campaignId: string, options: CampaignAddressFetchOptions = {}): Promise<CampaignContact[]> {
-    const scopedAddressIds = normalizeAddressIdFilter(options.addressIds);
-    if (scopedAddressIds && scopedAddressIds.length === 0) return [];
-
-    let query = this.client
-      .from('campaign_contacts')
-      .select('*')
-      .eq('campaign_id', campaignId);
-    if (scopedAddressIds) query = query.in('address_id', scopedAddressIds);
-    const { data, error } = await query
-      .order('updated_at', { ascending: false });
-
-    if (error) {
-      console.warn('fetchCampaignContacts:', formatError(error));
-      return [];
-    }
-    return (data || []) as CampaignContact[];
-  }
-
-  static async createCampaignContact(
-    campaignId: string,
-    contact: Omit<CampaignContact, 'id' | 'campaign_id' | 'created_at' | 'updated_at'>
-  ): Promise<CampaignContact> {
-    const { data, error } = await this.client
-      .from('campaign_contacts')
-      .insert({
-        campaign_id: campaignId,
-        name: contact.name ?? null,
-        phone: contact.phone ?? null,
-        email: contact.email ?? null,
-        address: contact.address ?? null,
-        address_id: contact.address_id ?? null,
-        last_contacted_at: contact.last_contacted_at ?? null,
-        interest_level: contact.interest_level ?? null,
-        updated_at: new Date().toISOString(),
-      })
-      .select()
-      .single();
-
-    if (error) throw error;
-    return data as CampaignContact;
-  }
-
-  static async updateCampaignContact(
-    id: string,
-    updates: Partial<Pick<CampaignContact, 'name' | 'phone' | 'email' | 'address' | 'last_contacted_at' | 'interest_level' | 'address_id'>>
-  ): Promise<void> {
-    const { error } = await this.client
-      .from('campaign_contacts')
-      .update({ ...updates, updated_at: new Date().toISOString() })
-      .eq('id', id);
-
-    if (error) throw error;
-  }
-
-  static async deleteCampaignContact(id: string): Promise<void> {
-    const { error } = await this.client.from('campaign_contacts').delete().eq('id', id);
-    if (error) throw error;
   }
 
   /**

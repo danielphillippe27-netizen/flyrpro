@@ -151,7 +151,7 @@ function titleCaseName(value: string): string {
 function getRepFirstName(dialerAccess: DialerAccessResponse | null): string {
   const fullName = dialerAccess?.salesperson?.fullName?.trim();
   const emailName = dialerAccess?.salesperson?.email?.split('@')[0]?.split(/[._+-]/)[0]?.trim();
-  return titleCaseName(getFirstName(fullName) || emailName || 'Daniel');
+  return titleCaseName(getFirstName(fullName) || emailName || '');
 }
 
 function getLeadRecordingExportHref(lead: DiallerLead | null | undefined, workspaceId: string | null | undefined): string | null {
@@ -168,8 +168,8 @@ function formatRecordingDuration(totalSeconds: number | null | undefined): strin
 }
 
 function buildTextDropBody(lead: DiallerLead, repName: string): string {
-  const firstName = getFirstName(lead.name);
-  return `Hey ${firstName || 'there'}, its ${repName} with FLYR can you give me a call back when you get a chance !`;
+  const rep = repName || 'your FLYR rep';
+  return `Hey there, its ${rep} with FLYR can you give me a call back when you get a chance !`;
 }
 
 function inferDemoAudience(lead: DiallerLead | null | undefined): DemoAudience {
@@ -2050,7 +2050,7 @@ export function PowerDialerPage() {
                     value={textBody}
                     onChange={(event) => handleTextBodyChange(event.target.value)}
                     disabled={!hasActiveLead || sendingText || saving}
-                    placeholder={activeLead ? 'Write a text message...' : `Hey there, its ${repFirstName} with FLYR can you give me a call back when you get a chance !`}
+                    placeholder={activeLead ? 'Write a text message...' : `Hey there, its ${repFirstName || 'your FLYR rep'} with FLYR can you give me a call back when you get a chance !`}
                     rows={3}
                     className="min-h-[72px] w-full resize-y overflow-y-auto border-0 bg-transparent p-0 py-2 text-base leading-6 text-foreground outline-none placeholder:text-muted-foreground focus:ring-0 disabled:cursor-not-allowed disabled:text-muted-foreground disabled:opacity-100"
                   />

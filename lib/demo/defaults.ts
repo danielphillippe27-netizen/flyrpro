@@ -6,7 +6,7 @@ export const DEFAULT_PAYLOAD: DemoPayload = {
   vertical: 'generic',
   city: 'Palo Alto, CA',
   center: [-122.1430, 37.4419],
-  ctaVariant: 'territory',
+  ctaVariant: 'a',
   ctaUrl: 'mailto:harry@flyrpro.app?subject=Show%20me%20my%20territory',
   navigationMode: 'scroll',
   copy: {

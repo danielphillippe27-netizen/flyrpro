@@ -73,3 +73,4 @@ CLAUDE.md
 ROADMAP.md
 .graphifyignore
 graphify-out/
+kimi-cli/templates/**/node_modules/

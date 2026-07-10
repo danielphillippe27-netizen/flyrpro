@@ -123,13 +123,15 @@ export function LeadsTableView({
 
   return (
     <div className="space-y-6">
-      {/* Metric cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label={copy.leads.totalLabel} value={loading ? '…' : totalCalls} />
-        <StatCard label={copy.leads.newThisWeekLabel} value={loading ? '…' : (callStats?.newCallsThisWeek ?? 0)} />
-        <StatCard label={copy.leads.conversionRateLabel} value={loading ? '…' : connectedCallRate} />
-        <StatCard label="Connected calls" value={loading ? '…' : connectedCalls} />
-      </div>
+      {/* Dialer metric cards — only for salesperson users */}
+      {callStats !== null && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatCard label={copy.leads.totalLabel} value={loading ? '…' : totalCalls} />
+          <StatCard label={copy.leads.newThisWeekLabel} value={loading ? '…' : (callStats?.newCallsThisWeek ?? 0)} />
+          <StatCard label={copy.leads.conversionRateLabel} value={loading ? '…' : connectedCallRate} />
+          <StatCard label="Connected calls" value={loading ? '…' : connectedCalls} />
+        </div>
+      )}
 
       {/* Table */}
       <div className="rounded-xl border border-border overflow-hidden bg-card">

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { 
   ArrowLeft, 
@@ -69,6 +69,8 @@ export default function IntegrationsPage() {
   const integrationLogoContainerClass = 'w-10 h-10 rounded-lg flex items-center justify-center';
   const integrationLogoIconClass = 'w-5 h-5';
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const isOnboarding = searchParams.get('onboarding') === '1';
   const { currentWorkspaceId, currentWorkspace } = useWorkspace();
   const defaultIntegrationGroup: IntegrationGroup =
     !currentWorkspace?.industry || isRealEstateIndustry(currentWorkspace.industry)
@@ -1143,18 +1145,35 @@ export default function IntegrationsPage() {
     <div className="min-h-screen bg-gray-50 dark:bg-background">
       <header className="bg-white dark:bg-card border-b border-border sticky top-0 z-10">
         <div className="mx-auto w-full max-w-4xl px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center gap-4">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => router.push('/settings')}
-              className="gap-2"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              Back
-            </Button>
-            <h1 className="text-2xl font-bold dark:text-white">Integrations</h1>
-          </div>
+          {isOnboarding ? (
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-widest text-[#6f7480]">Last step</p>
+                <h1 className="text-2xl font-bold text-[#17181c] dark:text-white">Connect your CRM</h1>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => router.push('/home')}
+                className="text-[#6f7480] hover:text-[#17181c]"
+              >
+                Skip for now →
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-4">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => router.push('/settings')}
+                className="gap-2"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                Back
+              </Button>
+              <h1 className="text-2xl font-bold dark:text-white">Integrations</h1>
+            </div>
+          )}
         </div>
       </header>
       
