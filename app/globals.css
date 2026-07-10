@@ -204,6 +204,23 @@
   box-shadow: none !important;
 }
 
+.mapboxgl-popup-close-button {
+  width: 28px;
+  height: 28px;
+  font-size: 18px;
+  line-height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: #6b7280;
+}
+
+.mapboxgl-popup-close-button:hover {
+  background: #f3f4f6;
+  color: #111827;
+}
+
 .flyr-territory-draw-cursor .mapboxgl-canvas-container.mapboxgl-interactive,
 .flyr-territory-draw-cursor .mapboxgl-canvas-container.mapboxgl-interactive:active {
   cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Cg fill='none' stroke-linecap='square'%3E%3Cpath d='M16 4v8.5M16 19.5V28M4 16h8.5M19.5 16H28' stroke='%23101010' stroke-width='3' opacity='0.7'/%3E%3Ccircle cx='16' cy='16' r='5' stroke='%23101010' stroke-width='3' opacity='0.55'/%3E%3Cpath d='M16 4v8.5M16 19.5V28M4 16h8.5M19.5 16H28' stroke='%23fff' stroke-width='1.25'/%3E%3Ccircle cx='16' cy='16' r='5' stroke='%23fff' stroke-width='1.25'/%3E%3C/g%3E%3C/svg%3E") 16 16, crosshair !important;

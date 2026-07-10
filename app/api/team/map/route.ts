@@ -124,9 +124,16 @@ async function loadLivePresence(
 
   const sessionById = new Map(((sessions ?? []) as Array<Record<string, unknown>>).map((session) => [String(session.id), session]));
 
+  // Only surface agents who have a currently active (non-ended) session.
+  // The presence write endpoint already requires a sessionId, so null means
+  // legacy/test data — exclude it here too.
+  const presenceWithActiveSession = validPresence.filter(
+    (row) => typeof row.session_id === 'string' && row.session_id.length > 0 && sessionById.has(row.session_id)
+  );
+
   return {
     members,
-    livePresence: validPresence.map((row) => {
+    livePresence: presenceWithActiveSession.map((row) => {
       const member = memberByUserId.get(row.user_id);
       const campaign = campaignById.get(row.campaign_id);
       const session = row.session_id ? sessionById.get(row.session_id) : null;
