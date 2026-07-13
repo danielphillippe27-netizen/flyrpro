@@ -121,9 +121,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
     const { data: campaign, error } = await admin
       .from('campaigns')
-      .select(
-        'id, name, title, status, type, provision_status, provision_phase, provision_source, map_ready_at, optimized_at, map_mode, building_link_confidence, data_quality_reason, link_quality_reason, bbox, territory_boundary, updated_at',
-      )
+      .select('*')
       .eq('id', campaignId)
       .single();
 
@@ -132,22 +130,9 @@ export async function GET(request: NextRequest, context: RouteContext) {
     }
 
     return NextResponse.json({
-      id: campaign.id,
+      ...campaign,
       name: campaign.title || campaign.name || 'Untitled Campaign',
       status: campaign.status || campaign.provision_status || 'draft',
-      type: campaign.type ?? null,
-      provision_status: campaign.provision_status ?? null,
-      provision_phase: campaign.provision_phase ?? null,
-      provision_source: campaign.provision_source ?? null,
-      map_ready_at: campaign.map_ready_at ?? null,
-      optimized_at: campaign.optimized_at ?? null,
-      map_mode: campaign.map_mode ?? null,
-      building_link_confidence: campaign.building_link_confidence ?? null,
-      data_quality_reason: campaign.data_quality_reason ?? null,
-      link_quality_reason: campaign.link_quality_reason ?? null,
-      bbox: campaign.bbox ?? null,
-      territory_boundary: campaign.territory_boundary ?? null,
-      updated_at: campaign.updated_at ?? null,
     });
   } catch (err) {
     console.error('[GET /api/campaigns/[campaignId]] Unhandled error:', err);

@@ -59,6 +59,18 @@ type CampaignAddressFetchOptions = {
   addressIds?: string[] | null;
 };
 
+type CampaignAssignmentVisibilityRow = {
+  campaign_id?: string | null;
+};
+
+type WorkspaceRoleRow = {
+  role?: string | null;
+};
+
+function isWorkspaceManagerRole(role: string | null | undefined): boolean {
+  return role === 'owner' || role === 'admin';
+}
+
 function normalizeAddressIdFilter(addressIds: string[] | null | undefined): string[] | null {
   if (!Array.isArray(addressIds)) return null;
   return Array.from(
@@ -73,44 +85,157 @@ function normalizeAddressIdFilter(addressIds: string[] | null | undefined): stri
 export class CampaignsService {
   private static client = createClient();
 
-  static async fetchCampaignsV2(userId: string, workspaceId?: string | null): Promise<CampaignV2[]> {
+  private static normalizeCampaign(campaign: Record<string, unknown>): CampaignV2 {
+    const totalFlyers = Number(campaign.total_flyers || 0);
+    const scans = Number(campaign.scans || 0);
+    const progress = totalFlyers > 0 ? scans / totalFlyers : 0;
+    const progressPct = Math.round(progress * 100);
+
+    return {
+      ...campaign,
+      owner_id: String(campaign.owner_id || campaign.user_id || ''),
+      name: String(campaign.title || campaign.name || 'Unnamed Campaign'),
+      type: (campaign.type || 'flyer') as CampaignV2['type'],
+      progress,
+      progress_pct: progressPct,
+    } as CampaignV2;
+  }
+
+  private static async fetchAssignedCampaignIds(userId: string, workspaceId?: string | null): Promise<string[]> {
     let query = this.client
+      .from('campaign_assignments')
+      .select('campaign_id')
+      .eq('assigned_to_user_id', userId)
+      .neq('status', 'cancelled')
+      .limit(1000);
+
+    if (workspaceId) {
+      query = query.eq('workspace_id', workspaceId);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      const message = formatError(error);
+      if (message.includes('campaign_assignments')) {
+        console.warn('fetchAssignedCampaignIds:', message);
+        return [];
+      }
+      throw error;
+    }
+
+    return Array.from(
+      new Set(
+        ((data ?? []) as CampaignAssignmentVisibilityRow[])
+          .map((assignment) => assignment.campaign_id)
+          .filter((id): id is string => Boolean(id))
+      )
+    );
+  }
+
+  private static async fetchWorkspaceRole(userId: string, workspaceId: string): Promise<string | null> {
+    const { data, error } = await this.client
+      .from('workspace_members')
+      .select('role')
+      .eq('workspace_id', workspaceId)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (error) {
+      console.warn('fetchWorkspaceRole:', formatError(error));
+      return null;
+    }
+
+    return ((data as WorkspaceRoleRow | null)?.role ?? null) || null;
+  }
+
+  static async fetchCampaignsV2(userId: string, workspaceId?: string | null): Promise<CampaignV2[]> {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams();
+      if (workspaceId) params.set('workspaceId', workspaceId);
+      const response = await fetch(`/api/campaigns${params.size > 0 ? `?${params.toString()}` : ''}`, {
+        credentials: 'include',
+        cache: 'no-store',
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.error ?? 'Failed to fetch campaigns');
+      }
+
+      const data = await response.json();
+      return Array.isArray(data)
+        ? data.map((campaign) => this.normalizeCampaign(campaign as Record<string, unknown>))
+        : [];
+    }
+
+    const campaignRows = new Map<string, Record<string, unknown>>();
+    const workspaceRole = workspaceId ? await this.fetchWorkspaceRole(userId, workspaceId) : null;
+
+    let baseQuery = this.client
       .from('campaigns')
       .select('*')
       .order('created_at', { ascending: false });
 
-    // Workspace scope is the new source of truth.
-    // Keep owner fallback when workspace context is not available yet.
     if (workspaceId) {
-      query = query.eq('workspace_id', workspaceId);
+      baseQuery = baseQuery.eq('workspace_id', workspaceId);
+      if (!isWorkspaceManagerRole(workspaceRole)) {
+        baseQuery = baseQuery.eq('owner_id', userId);
+      }
     } else {
-      query = query.eq('owner_id', userId);
+      baseQuery = baseQuery.eq('owner_id', userId);
     }
 
-    const { data, error } = await query;
+    const { data: ownOrManagedCampaigns, error: ownError } = await baseQuery;
+    if (ownError) throw ownError;
 
-    if (error) throw error;
+    for (const campaign of ownOrManagedCampaigns ?? []) {
+      campaignRows.set(campaign.id, campaign as Record<string, unknown>);
+    }
 
-    // Compute progress for each campaign
-    return (data || []).map((campaign) => {
-      const totalFlyers = campaign.total_flyers || 0;
-      const scans = campaign.scans || 0;
-      const progress = totalFlyers > 0 ? scans / totalFlyers : 0;
-      const progressPct = Math.round(progress * 100);
+    if (!workspaceId || !isWorkspaceManagerRole(workspaceRole)) {
+      const assignedCampaignIds = await this.fetchAssignedCampaignIds(userId, workspaceId);
+      const missingAssignedIds = assignedCampaignIds.filter((id) => !campaignRows.has(id));
 
-      return {
-        ...campaign,
-        // Map title to name if title exists (for backward compatibility)
-        name: campaign.title || campaign.name || 'Unnamed Campaign',
-        // Provide default type if missing
-        type: campaign.type || 'flyer',
-        progress,
-        progress_pct: progressPct,
-      } as CampaignV2;
-    });
+      if (missingAssignedIds.length > 0) {
+        const { data: assignedCampaigns, error: assignedError } = await this.client
+          .from('campaigns')
+          .select('*')
+          .in('id', missingAssignedIds)
+          .order('created_at', { ascending: false });
+
+        if (assignedError) throw assignedError;
+        for (const campaign of assignedCampaigns ?? []) {
+          campaignRows.set(campaign.id, campaign as Record<string, unknown>);
+        }
+      }
+    }
+
+    return Array.from(campaignRows.values())
+      .map((campaign) => this.normalizeCampaign(campaign))
+      .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
   }
 
   static async fetchCampaign(id: string): Promise<CampaignV2 | null> {
+    if (typeof window !== 'undefined') {
+      const response = await fetch(`/api/campaigns/${encodeURIComponent(id)}`, {
+        credentials: 'include',
+        cache: 'no-store',
+      });
+
+      if (response.status === 404) {
+        console.warn('Campaign not found:', id);
+        return null;
+      }
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.error ?? `Failed to fetch campaign ${id}`);
+      }
+
+      const data = await response.json();
+      return this.normalizeCampaign(data as Record<string, unknown>);
+    }
+
     const { data, error } = await this.client
       .from('campaigns')
       .select('*')
@@ -133,22 +258,7 @@ export class CampaignsService {
       return null;
     }
 
-    const totalFlyers = data.total_flyers || 0;
-    const scans = data.scans || 0;
-    const progress = totalFlyers > 0 ? scans / totalFlyers : 0;
-    const progressPct = Math.round(progress * 100);
-
-    return {
-      ...data,
-      // Map user_id to owner_id if needed for compatibility (database may have either)
-      owner_id: data.owner_id || data.user_id || '',
-      // Map title to name if title exists (for backward compatibility)
-      name: data.title || data.name || 'Unnamed Campaign',
-      // Provide default type if missing
-      type: data.type || 'flyer',
-      progress,
-      progress_pct: progressPct,
-    } as CampaignV2;
+    return this.normalizeCampaign(data as Record<string, unknown>);
   }
 
   static async createV2(userId: string, payload: CreateCampaignPayload, workspaceId?: string | null): Promise<CampaignV2> {

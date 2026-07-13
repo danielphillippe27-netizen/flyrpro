@@ -373,6 +373,7 @@ function CampaignList({
           {campaigns.map((campaign) => {
             const isActive = activeId === campaign.id;
             const assignmentLabel = assignmentLabelsByCampaignId[campaign.id];
+            const canDeleteCampaign = Boolean(userId && campaign.owner_id === userId);
             return (
               <li key={campaign.id} className="group">
                 <div
@@ -398,18 +399,20 @@ function CampaignList({
                       {assignmentLabel.label}
                     </Badge>
                   ) : null}
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6 shrink-0 opacity-60 group-hover:opacity-100 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      setDeleteTarget(campaign);
-                    }}
-                    aria-label={`Delete ${campaign.name || copy.nouns.campaign}`}
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </Button>
+                  {canDeleteCampaign ? (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 shrink-0 opacity-60 group-hover:opacity-100 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        setDeleteTarget(campaign);
+                      }}
+                      aria-label={`Delete ${campaign.name || copy.nouns.campaign}`}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                  ) : null}
                 </div>
               </li>
             );

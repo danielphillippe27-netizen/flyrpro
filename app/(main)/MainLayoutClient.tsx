@@ -22,7 +22,7 @@ const DEMO_FLOW_LOCK_MESSAGE = 'follow the 5 simple steps to unlock the rest of 
 const DEMO_FLOW_INTERACTIVE_SELECTOR =
   'a[href], button, input, textarea, select, [role="button"], [role="link"], [role="tab"], [data-demo-lockable]';
 const DEMO_FLOW_ALLOWED_INTERACTIVE_SELECTOR =
-  '[data-self-serve-demo-flow="true"], [data-self-serve-demo-allow="true"], .mapboxgl-map, .mapboxgl-control-container, .mapboxgl-popup';
+  '[data-self-serve-demo-flow="true"], [data-self-serve-demo-allow="true"], [data-slot="dialog-content"], [data-slot="dialog-overlay"], .mapboxgl-map, .mapboxgl-control-container, .mapboxgl-popup';
 
 const scriptsTab = { href: '/scripts', icon: FileText, label: 'Scripts' };
 

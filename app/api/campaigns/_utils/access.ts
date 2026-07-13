@@ -24,33 +24,39 @@ export async function ensureCampaignAccess(
     return false;
   }
 
-  const { data: member } = await supabase
-    .from('workspace_members')
-    .select('user_id')
-    .eq('workspace_id', row.workspace_id)
-    .eq('user_id', userId)
-    .maybeSingle();
-
-  if (member) {
-    return true;
-  }
-
-  const { data: campaignMember } = await supabase
-    .from('campaign_members')
-    .select('user_id')
-    .eq('campaign_id', campaignId)
-    .eq('user_id', userId)
-    .maybeSingle();
-
-  if (campaignMember) {
-    return true;
-  }
-
   const { data: workspace } = await supabase
     .from('workspaces')
     .select('owner_id')
     .eq('id', row.workspace_id)
     .maybeSingle();
 
-  return Boolean(workspace && (workspace as { owner_id: string }).owner_id === userId);
+  if (workspace && (workspace as { owner_id: string }).owner_id === userId) {
+    return true;
+  }
+
+  const { data: manager } = await supabase
+    .from('workspace_members')
+    .select('role')
+    .eq('workspace_id', row.workspace_id)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  const managerRole = String((manager as { role?: string | null } | null)?.role ?? '').toLowerCase();
+  if (managerRole === 'owner' || managerRole === 'admin') {
+    return true;
+  }
+
+  const { data: assignment } = await supabase
+    .from('campaign_assignments')
+    .select('id')
+    .eq('campaign_id', campaignId)
+    .eq('assigned_to_user_id', userId)
+    .neq('status', 'cancelled')
+    .maybeSingle();
+
+  if (assignment) {
+    return true;
+  }
+
+  return false;
 }

@@ -117,6 +117,7 @@ const ASSIGNMENT_ZONE_LABEL_TEXT_LAYER_ID = 'assignment-zone-label-text';
 const ASSIGNMENT_LASSO_SOURCE_ID = 'assignment-editor-lasso';
 const ASSIGNMENT_LASSO_FILL_LAYER_ID = 'assignment-editor-lasso-fill';
 const ASSIGNMENT_LASSO_LINE_LAYER_ID = 'assignment-editor-lasso-line';
+const ASSIGNMENT_EDITOR_BUILDING_LAYER_IDS = ['map-buildings-extrusion', 'map-buildings-extrusion-points'];
 
 type ZonePreviewMember = {
   user_id: string;
@@ -178,6 +179,61 @@ type AssignmentLiveDemoSnapshot = {
   hitHomeCount: number;
   totalHomes: number;
 };
+
+function stringValue(value: unknown): string | null {
+  if (typeof value === 'string' && value.trim().length > 0) return value.trim();
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return null;
+}
+
+function collectGeometryPositions(coordinates: unknown, positions: Array<[number, number]>) {
+  if (!Array.isArray(coordinates)) return;
+  if (
+    coordinates.length >= 2 &&
+    typeof coordinates[0] === 'number' &&
+    typeof coordinates[1] === 'number'
+  ) {
+    positions.push([coordinates[0], coordinates[1]]);
+    return;
+  }
+  coordinates.forEach((child) => collectGeometryPositions(child, positions));
+}
+
+function geometryCenterPoint(geometry: GeoJSON.Geometry | null | undefined): [number, number] | null {
+  if (!geometry || geometry.type === 'GeometryCollection') return null;
+  const positions: Array<[number, number]> = [];
+  collectGeometryPositions(geometry.coordinates, positions);
+  const validPositions = positions.filter(([lon, lat]) => Number.isFinite(lon) && Number.isFinite(lat));
+  if (validPositions.length === 0) return null;
+
+  let minLon = Infinity;
+  let minLat = Infinity;
+  let maxLon = -Infinity;
+  let maxLat = -Infinity;
+  validPositions.forEach(([lon, lat]) => {
+    minLon = Math.min(minLon, lon);
+    minLat = Math.min(minLat, lat);
+    maxLon = Math.max(maxLon, lon);
+    maxLat = Math.max(maxLat, lat);
+  });
+
+  return [(minLon + maxLon) / 2, (minLat + maxLat) / 2];
+}
+
+function screenPointInPolygon(point: { x: number; y: number }, polygon: Array<{ x: number; y: number }>): boolean {
+  if (polygon.length < 3) return false;
+  let inside = false;
+  for (let current = 0, previous = polygon.length - 1; current < polygon.length; previous = current, current += 1) {
+    const currentPoint = polygon[current];
+    const previousPoint = polygon[previous];
+    const crosses =
+      (currentPoint.y > point.y) !== (previousPoint.y > point.y) &&
+      point.x < ((previousPoint.x - currentPoint.x) * (point.y - currentPoint.y)) /
+        (previousPoint.y - currentPoint.y || Number.EPSILON) + currentPoint.x;
+    if (crosses) inside = !inside;
+  }
+  return inside;
+}
 type AssignmentDemoControl = {
   disabled?: boolean;
   hitHomes: number;
@@ -528,6 +584,11 @@ function hasRenderableMapStyle(map: mapboxgl.Map) {
   } catch {
     return false;
   }
+}
+
+function isMapboxMapActive(map: mapboxgl.Map | null): map is mapboxgl.Map {
+  if (!map) return false;
+  return !Boolean((map as unknown as { _removed?: boolean })._removed);
 }
 
 function orderedAssignmentHomes(addresses: AssignmentAddress[]) {
@@ -2102,8 +2163,26 @@ function AssignmentMapEditorDialog({
     () => new Set(assignmentAddresses.map((address) => address.id)),
     [assignmentAddresses]
   );
+  const addressIdByMapIdentifier = useMemo(() => {
+    const identifiers = new Map<string, string>();
+    assignmentAddresses.forEach((address) => {
+      const mapAddress = address as AssignmentAddress & Partial<CampaignAddress>;
+      [
+        address.id,
+        mapAddress.gers_id,
+        mapAddress.building_id,
+        mapAddress.building_gers_id,
+        mapAddress.source_id,
+      ].forEach((value) => {
+        const key = stringValue(value);
+        if (key) identifiers.set(key, address.id);
+      });
+    });
+    return identifiers;
+  }, [assignmentAddresses]);
   const autoAssignmentByAddress = useMemo(() => buildAssignmentByAddressId(autoZones), [autoZones]);
   const mapContainerRef = useRef<HTMLDivElement>(null);
+  const [mapContainerElement, setMapContainerElement] = useState<HTMLDivElement | null>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const editorMapFittedRef = useRef(false);
   const [mapLoaded, setMapLoaded] = useState(false);
@@ -2115,6 +2194,8 @@ function AssignmentMapEditorDialog({
   const [selectMode, setSelectMode] = useState(false);
   const [selectionTool, setSelectionTool] = useState<AssignmentEditorSelectionTool>('click');
   const lassoCoordinatesRef = useRef<[number, number][]>([]);
+  const lassoScreenPointsRef = useRef<Array<{ x: number; y: number }>>([]);
+  const lastSelectionClickRef = useRef<{ addressId: string; at: number } | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -2180,6 +2261,113 @@ function AssignmentMapEditorDialog({
   const showMapError = Boolean(mapError && !hasRenderableAssignmentMap);
   const showMissingCoordinateMessage = open && assignmentAddresses.length > 0 && previewPoints.length === 0;
 
+  const setEditorMapContainerRef = useCallback((node: HTMLDivElement | null) => {
+    mapContainerRef.current = node;
+    setMapContainerElement(node);
+  }, []);
+
+  const getEditorBuildingLayers = useCallback((map: mapboxgl.Map) => (
+    ASSIGNMENT_EDITOR_BUILDING_LAYER_IDS.filter((layerId) => {
+      try {
+        return Boolean(map.getLayer(layerId));
+      } catch {
+        return false;
+      }
+    })
+  ), []);
+
+  const resolveFeatureAddressId = useCallback((feature: mapboxgl.MapboxGeoJSONFeature): string | null => {
+    const props = feature.properties ?? {};
+    const directAddressId =
+      stringValue(props.address_id) ??
+      stringValue(props.campaign_address_id) ??
+      stringValue(props.feature_id);
+    if (directAddressId && assignmentAddressIdSet.has(directAddressId)) return directAddressId;
+
+    for (const value of [
+      props.address_id,
+      props.campaign_address_id,
+      props.feature_id,
+      props.gers_id,
+      props.building_id,
+      props.id,
+      feature.id,
+    ]) {
+      const key = stringValue(value);
+      if (!key) continue;
+      const addressId = addressIdByMapIdentifier.get(key);
+      if (addressId) return addressId;
+    }
+
+    return null;
+  }, [addressIdByMapIdentifier, assignmentAddressIdSet]);
+
+  const toggleSelectedAddressId = useCallback((addressId: string) => {
+    if (!assignmentAddressIdSet.has(addressId)) return;
+
+    const now = Date.now();
+    const lastClick = lastSelectionClickRef.current;
+    if (lastClick?.addressId === addressId && now - lastClick.at < 120) return;
+    lastSelectionClickRef.current = { addressId, at: now };
+
+    setSelectedAddressIds((current) => {
+      const exists = current.includes(addressId);
+      return exists ? current.filter((id) => id !== addressId) : [...current, addressId];
+    });
+  }, [assignmentAddressIdSet]);
+
+  const selectedAddressIdsFromRenderedLasso = useCallback((
+    map: mapboxgl.Map,
+    screenPolygon: Array<{ x: number; y: number }>
+  ) => {
+    if (screenPolygon.length < 2) return [];
+    const layers = getEditorBuildingLayers(map);
+    if (layers.length === 0) return [];
+
+    const padding = 12;
+    const minX = Math.min(...screenPolygon.map((point) => point.x)) - padding;
+    const maxX = Math.max(...screenPolygon.map((point) => point.x)) + padding;
+    const minY = Math.min(...screenPolygon.map((point) => point.y)) - padding;
+    const maxY = Math.max(...screenPolygon.map((point) => point.y)) + padding;
+
+    let features: mapboxgl.MapboxGeoJSONFeature[] = [];
+    try {
+      features = map.queryRenderedFeatures({ layers });
+    } catch {
+      return [];
+    }
+
+    const selectedIds = new Set<string>();
+    features.forEach((feature) => {
+      const addressId = resolveFeatureAddressId(feature);
+      if (!addressId) return;
+
+      const center = geometryCenterPoint(feature.geometry);
+      if (!center) return;
+
+      let projected: mapboxgl.Point;
+      try {
+        projected = map.project(center);
+      } catch {
+        return;
+      }
+      const projectedPoint = { x: projected.x, y: projected.y };
+      const insideDrawnPolygon =
+        screenPolygon.length >= 3 && screenPointInPolygon(projectedPoint, screenPolygon);
+      const insideDrawnBounds =
+        projectedPoint.x >= minX &&
+        projectedPoint.x <= maxX &&
+        projectedPoint.y >= minY &&
+        projectedPoint.y <= maxY;
+
+      if (insideDrawnPolygon || insideDrawnBounds) {
+        selectedIds.add(addressId);
+      }
+    });
+
+    return Array.from(selectedIds);
+  }, [getEditorBuildingLayers, resolveFeatureAddressId]);
+
   useEffect(() => {
     if (buildingRenderState?.hasVisibleFeatures) {
       setMapError(null);
@@ -2187,7 +2375,7 @@ function AssignmentMapEditorDialog({
   }, [buildingRenderState?.hasVisibleFeatures]);
 
   useEffect(() => {
-    const container = mapContainerRef.current;
+    const container = mapContainerElement;
     if (!editorVisible || !container || initialLon === null || initialLat === null) return;
 
     const token = getMapboxToken();
@@ -2227,16 +2415,23 @@ function AssignmentMapEditorDialog({
           }
 
           setMapError(null);
-          const map = new mapboxgl.Map({
-            container: currentContainer,
-            ...initOptions,
-            center: [initialLon, initialLat],
-            zoom: 15,
-            pitch: 45,
-            attributionControl: false,
-            pitchWithRotate: true,
-            dragRotate: true,
-          });
+          let map: mapboxgl.Map;
+          try {
+            map = new mapboxgl.Map({
+              container: currentContainer,
+              ...initOptions,
+              center: [initialLon, initialLat],
+              zoom: 15,
+              pitch: 45,
+              attributionControl: false,
+              pitchWithRotate: true,
+              dragRotate: true,
+            });
+          } catch (error) {
+            console.error('Assignment map editor init:', error);
+            setMapError('Map unavailable.');
+            return;
+          }
           mapRef.current = map;
           enableFreeMapCamera(map);
           map.addControl(new mapboxgl.NavigationControl({ showCompass: true, visualizePitch: true }), 'bottom-right');
@@ -2317,7 +2512,7 @@ function AssignmentMapEditorDialog({
         mapRef.current = null;
       }
     };
-  }, [editorVisible, initialLat, initialLon, resolvedMapStyle]);
+  }, [editorVisible, initialLat, initialLon, mapContainerElement, resolvedMapStyle]);
 
   useEffect(() => {
     if (!showMissingCoordinateMessage) return;
@@ -2401,7 +2596,66 @@ function AssignmentMapEditorDialog({
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!editable || !selectMode || selectionTool !== 'lasso' || !map) return;
+    if (!editable || !selectMode || selectionTool !== 'click' || !isMapboxMapActive(map) || !mapLoaded) return;
+
+    const selectAtMapPoint = (point: mapboxgl.PointLike) => {
+      if (!isMapboxMapActive(map)) return;
+      const layers = getEditorBuildingLayers(map);
+      if (layers.length === 0) return;
+
+      let features: mapboxgl.MapboxGeoJSONFeature[] = [];
+      try {
+        features = map.queryRenderedFeatures(point, { layers });
+      } catch {
+        return;
+      }
+
+      const addressId = features.map(resolveFeatureAddressId).find((id): id is string => Boolean(id));
+      if (addressId) {
+        toggleSelectedAddressId(addressId);
+      }
+    };
+
+    const handleMapClick = (event: mapboxgl.MapMouseEvent) => {
+      event.preventDefault();
+      selectAtMapPoint(event.point);
+    };
+
+    const handleNativeClick = (event: MouseEvent) => {
+      const rect = map.getCanvas().getBoundingClientRect();
+      selectAtMapPoint([event.clientX - rect.left, event.clientY - rect.top]);
+    };
+
+    let canvasContainer: HTMLElement | null = null;
+    try {
+      canvasContainer = map.getCanvasContainer();
+    } catch {
+      canvasContainer = null;
+    }
+
+    map.on('click', handleMapClick);
+    canvasContainer?.addEventListener('click', handleNativeClick, true);
+    return () => {
+      try {
+        if (isMapboxMapActive(map)) map.off('click', handleMapClick);
+      } catch {
+        // Ignore teardown races while the editor is closing.
+      }
+      canvasContainer?.removeEventListener('click', handleNativeClick, true);
+    };
+  }, [
+    editable,
+    getEditorBuildingLayers,
+    mapLoaded,
+    resolveFeatureAddressId,
+    selectMode,
+    selectionTool,
+    toggleSelectedAddressId,
+  ]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!editable || !selectMode || selectionTool !== 'lasso' || !isMapboxMapActive(map)) return;
 
     let drawing = false;
     let styleReady = false;
@@ -2411,6 +2665,7 @@ function AssignmentMapEditorDialog({
     };
 
     const removeLassoLayers = () => {
+      if (!isMapboxMapActive(map)) return;
       [ASSIGNMENT_LASSO_FILL_LAYER_ID, ASSIGNMENT_LASSO_LINE_LAYER_ID].forEach((layerId) => {
         try {
           if (map.getLayer(layerId)) map.removeLayer(layerId);
@@ -2426,8 +2681,13 @@ function AssignmentMapEditorDialog({
     };
 
     const getLassoSource = () => {
-      const source = map.getSource(ASSIGNMENT_LASSO_SOURCE_ID);
-      return source && 'setData' in source ? source as mapboxgl.GeoJSONSource : null;
+      if (!isMapboxMapActive(map)) return null;
+      try {
+        const source = map.getSource(ASSIGNMENT_LASSO_SOURCE_ID);
+        return source && 'setData' in source ? source as mapboxgl.GeoJSONSource : null;
+      } catch {
+        return null;
+      }
     };
 
     const lassoFeature = (coordinates: [number, number][]): GeoJSON.FeatureCollection<GeoJSON.Polygon> => {
@@ -2449,51 +2709,106 @@ function AssignmentMapEditorDialog({
     const syncLasso = () => {
       const source = getLassoSource();
       if (!source) return;
-      source.setData(lassoFeature(lassoCoordinatesRef.current));
+      try {
+        source.setData(lassoFeature(lassoCoordinatesRef.current));
+      } catch {
+        // Ignore source updates after the map has started closing.
+      }
     };
 
+    const addRenderedSelectionFromScreenPolygon = (screenPolygon: Array<{ x: number; y: number }>) => {
+      const renderedSelectedIds = selectedAddressIdsFromRenderedLasso(map, screenPolygon);
+      if (renderedSelectedIds.length === 0) return false;
+      setSelectedAddressIds((current) => Array.from(new Set([...current, ...renderedSelectedIds])));
+      return true;
+    };
+
+    const selectionBoxAroundPoint = (point: [number, number], radius = 56) => ([
+      { x: point[0] - radius, y: point[1] - radius },
+      { x: point[0] + radius, y: point[1] - radius },
+      { x: point[0] + radius, y: point[1] + radius },
+      { x: point[0] - radius, y: point[1] + radius },
+    ]);
+
     const ensureLassoLayers = () => {
-      if (!map.isStyleLoaded()) return;
+      if (!isMapboxMapActive(map)) return;
+      try {
+        if (!map.isStyleLoaded()) return;
+      } catch {
+        return;
+      }
       styleReady = true;
-      if (!map.getSource(ASSIGNMENT_LASSO_SOURCE_ID)) {
-        map.addSource(ASSIGNMENT_LASSO_SOURCE_ID, { type: 'geojson', data: emptyData });
-      }
-      if (!map.getLayer(ASSIGNMENT_LASSO_FILL_LAYER_ID)) {
-        map.addLayer({
-          id: ASSIGNMENT_LASSO_FILL_LAYER_ID,
-          type: 'fill',
-          source: ASSIGNMENT_LASSO_SOURCE_ID,
-          paint: {
-            'fill-color': '#111111',
-            'fill-opacity': 0.16,
-          },
-        });
-      }
-      if (!map.getLayer(ASSIGNMENT_LASSO_LINE_LAYER_ID)) {
-        map.addLayer({
-          id: ASSIGNMENT_LASSO_LINE_LAYER_ID,
-          type: 'line',
-          source: ASSIGNMENT_LASSO_SOURCE_ID,
-          paint: {
-            'line-color': '#111111',
-            'line-width': 2.5,
-            'line-opacity': 0.9,
-          },
-        });
+      try {
+        if (!map.getSource(ASSIGNMENT_LASSO_SOURCE_ID)) {
+          map.addSource(ASSIGNMENT_LASSO_SOURCE_ID, { type: 'geojson', data: emptyData });
+        }
+        if (!map.getLayer(ASSIGNMENT_LASSO_FILL_LAYER_ID)) {
+          map.addLayer({
+            id: ASSIGNMENT_LASSO_FILL_LAYER_ID,
+            type: 'fill',
+            source: ASSIGNMENT_LASSO_SOURCE_ID,
+            paint: {
+              'fill-color': '#111111',
+              'fill-opacity': 0.16,
+            },
+          });
+        }
+        if (!map.getLayer(ASSIGNMENT_LASSO_LINE_LAYER_ID)) {
+          map.addLayer({
+            id: ASSIGNMENT_LASSO_LINE_LAYER_ID,
+            type: 'line',
+            source: ASSIGNMENT_LASSO_SOURCE_ID,
+            paint: {
+              'line-color': '#111111',
+              'line-width': 2.5,
+              'line-opacity': 0.9,
+            },
+          });
+        }
+      } catch {
+        styleReady = false;
       }
     };
 
     const finishLasso = () => {
       if (!drawing) return;
       drawing = false;
-      map.dragPan.enable();
-      map.getCanvas().style.cursor = 'crosshair';
+      if (!isMapboxMapActive(map)) return;
+      try {
+        map.dragPan.enable();
+        map.getCanvas().style.cursor = 'crosshair';
+      } catch {
+        return;
+      }
       const featureCollection = lassoFeature(lassoCoordinatesRef.current);
-      const lassoSelectedIds = selectedAddressIdsFromFeatures(featureCollection.features, assignmentAddresses);
+      const renderedSelectedIds = selectedAddressIdsFromRenderedLasso(map, lassoScreenPointsRef.current);
+      const lassoSelectedIds = renderedSelectedIds.length > 0
+        ? renderedSelectedIds
+        : selectedAddressIdsFromFeatures(featureCollection.features, assignmentAddresses);
       lassoCoordinatesRef.current = [];
+      lassoScreenPointsRef.current = [];
       getLassoSource()?.setData(emptyData);
       if (lassoSelectedIds.length === 0) return;
       setSelectedAddressIds((current) => Array.from(new Set([...current, ...lassoSelectedIds])));
+    };
+
+    const mapPointFromMouseEvent = (event: MouseEvent): [number, number] => {
+      const rect = map.getCanvas().getBoundingClientRect();
+      return [event.clientX - rect.left, event.clientY - rect.top];
+    };
+
+    const appendLassoPoint = (point: [number, number]) => {
+      if (!isMapboxMapActive(map)) return;
+      const lngLat = map.unproject(point);
+      lassoCoordinatesRef.current = [
+        ...lassoCoordinatesRef.current,
+        [lngLat.lng, lngLat.lat],
+      ];
+      lassoScreenPointsRef.current = [
+        ...lassoScreenPointsRef.current,
+        { x: point[0], y: point[1] },
+      ];
+      syncLasso();
     };
 
     const handleMouseDown = (event: mapboxgl.MapMouseEvent) => {
@@ -2506,41 +2821,103 @@ function AssignmentMapEditorDialog({
       map.dragPan.disable();
       map.getCanvas().style.cursor = 'crosshair';
       lassoCoordinatesRef.current = [[event.lngLat.lng, event.lngLat.lat]];
+      lassoScreenPointsRef.current = [{ x: event.point.x, y: event.point.y }];
       syncLasso();
     };
 
     const handleMouseMove = (event: mapboxgl.MapMouseEvent) => {
       if (!drawing) return;
-      lassoCoordinatesRef.current = [
-        ...lassoCoordinatesRef.current,
-        [event.lngLat.lng, event.lngLat.lat],
-      ];
-      syncLasso();
+      appendLassoPoint([event.point.x, event.point.y]);
     };
 
     const handleMouseUp = () => {
       finishLasso();
     };
 
+    const handleMapClick = (event: mapboxgl.MapMouseEvent) => {
+      addRenderedSelectionFromScreenPolygon(selectionBoxAroundPoint([event.point.x, event.point.y]));
+    };
+
+    const handleNativeMouseDown = (event: MouseEvent) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      ensureLassoLayers();
+      if (!styleReady) return;
+      const point = mapPointFromMouseEvent(event);
+      const lngLat = map.unproject(point);
+      drawing = true;
+      map.dragPan.disable();
+      map.getCanvas().style.cursor = 'crosshair';
+      lassoCoordinatesRef.current = [[lngLat.lng, lngLat.lat]];
+      lassoScreenPointsRef.current = [{ x: point[0], y: point[1] }];
+      syncLasso();
+    };
+
+    const handleNativeMouseMove = (event: MouseEvent) => {
+      if (!drawing) return;
+      event.preventDefault();
+      appendLassoPoint(mapPointFromMouseEvent(event));
+    };
+
+    const handleNativeMouseUp = (event: MouseEvent) => {
+      if (!drawing) return;
+      event.preventDefault();
+      finishLasso();
+    };
+
+    const handleNativeClick = (event: MouseEvent) => {
+      const point = mapPointFromMouseEvent(event);
+      addRenderedSelectionFromScreenPolygon(selectionBoxAroundPoint(point));
+    };
+
     ensureLassoLayers();
-    map.getCanvas().style.cursor = 'crosshair';
+    let canvasContainer: HTMLElement | null = null;
+    try {
+      canvasContainer = map.getCanvasContainer();
+      map.getCanvas().style.cursor = 'crosshair';
+    } catch {
+      canvasContainer = null;
+    }
     map.on('style.load', ensureLassoLayers);
+    map.on('click', handleMapClick);
     map.on('mousedown', handleMouseDown);
     map.on('mousemove', handleMouseMove);
     map.on('mouseup', handleMouseUp);
+    canvasContainer?.addEventListener('mousedown', handleNativeMouseDown, true);
+    canvasContainer?.addEventListener('mousemove', handleNativeMouseMove, true);
+    canvasContainer?.addEventListener('click', handleNativeClick, true);
+    window.addEventListener('mouseup', handleNativeMouseUp, true);
 
     return () => {
       finishLasso();
-      map.off('style.load', ensureLassoLayers);
-      map.off('mousedown', handleMouseDown);
-      map.off('mousemove', handleMouseMove);
-      map.off('mouseup', handleMouseUp);
-      map.dragPan.enable();
-      map.getCanvas().style.cursor = '';
+      try {
+        if (isMapboxMapActive(map)) {
+          map.off('style.load', ensureLassoLayers);
+          map.off('click', handleMapClick);
+          map.off('mousedown', handleMouseDown);
+          map.off('mousemove', handleMouseMove);
+          map.off('mouseup', handleMouseUp);
+        }
+      } catch {
+        // Ignore teardown races while the editor is closing.
+      }
+      canvasContainer?.removeEventListener('mousedown', handleNativeMouseDown, true);
+      canvasContainer?.removeEventListener('mousemove', handleNativeMouseMove, true);
+      canvasContainer?.removeEventListener('click', handleNativeClick, true);
+      window.removeEventListener('mouseup', handleNativeMouseUp, true);
+      try {
+        if (isMapboxMapActive(map)) {
+          map.dragPan.enable();
+          map.getCanvas().style.cursor = '';
+        }
+      } catch {
+        // Ignore teardown races while the editor is closing.
+      }
       lassoCoordinatesRef.current = [];
+      lassoScreenPointsRef.current = [];
       removeLassoLayers();
     };
-  }, [assignmentAddresses, editable, selectMode, selectionTool]);
+  }, [assignmentAddresses, editable, selectMode, selectedAddressIdsFromRenderedLasso, selectionTool]);
 
   const clearSelection = () => {
     setSelectedAddressIds([]);
@@ -2586,11 +2963,8 @@ function AssignmentMapEditorDialog({
     if (!selectMode) return;
     if (selectionTool !== 'click') return;
     if (!addressId || !assignmentAddressIdSet.has(addressId)) return;
-    setSelectedAddressIds((current) => {
-      const exists = current.includes(addressId);
-      return exists ? current.filter((id) => id !== addressId) : [...current, addressId];
-    });
-  }, [assignmentAddressIdSet, selectMode, selectionTool]);
+    toggleSelectedAddressId(addressId);
+  }, [assignmentAddressIdSet, selectMode, selectionTool, toggleSelectedAddressId]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -2620,7 +2994,7 @@ function AssignmentMapEditorDialog({
         </div>
 
         <div className="relative h-full min-h-[360px] w-full overflow-hidden">
-          <div ref={mapContainerRef} className="absolute inset-0 h-full w-full" />
+          <div ref={setEditorMapContainerRef} className="absolute inset-0 h-full w-full" />
           {editable ? (
             <div className="absolute left-4 top-4 z-10 max-h-[calc(100%-2rem)] w-[min(360px,calc(100vw-2rem))] overflow-y-auto rounded-lg border border-border bg-background/95 p-3 shadow-xl backdrop-blur">
               <div className="space-y-4">
@@ -2712,7 +3086,7 @@ function AssignmentMapEditorDialog({
               </div>
             </div>
           ) : null}
-          {mapRef.current ? (
+          {mapRef.current && mapLoaded ? (
             <>
               <MapBuildingsLayer
                 map={mapRef.current}
@@ -2827,17 +3201,25 @@ export function CampaignAssignmentView({
   );
 
   const toggleSelectedMember = useCallback((memberId: string) => {
-    const removingMember = selectedMemberIds.includes(memberId);
-    if (removingMember) {
-      setAppliedManualOverrides({});
-    }
-    setAssignmentMapRevealed(false);
     setSelectedMemberIds((current) => {
-      if (removingMember) return current.filter((id) => id !== memberId);
-      if (current.includes(memberId)) return current;
+      const removingMember = current.includes(memberId);
+
+      if (removingMember && current.length <= 1) {
+        setMessage('Keep at least one rep selected.');
+        return current;
+      }
+
+      setAssignmentMapRevealed(false);
+      setMessage(null);
+
+      if (removingMember) {
+        setAppliedManualOverrides({});
+        return current.filter((id) => id !== memberId);
+      }
+
       return [...current, memberId];
     });
-  }, [selectedMemberIds]);
+  }, []);
 
   useEffect(() => {
     setAppliedManualOverrides((current) => {

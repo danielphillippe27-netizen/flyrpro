@@ -10,6 +10,27 @@ function getEnv(name: string): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function stripWrappingQuotes(value: string): string {
+  let next = value.trim();
+  for (let index = 0; index < 3; index += 1) {
+    const first = next[0];
+    const last = next[next.length - 1];
+    const wraps =
+      (first === '"' && last === '"') ||
+      (first === "'" && last === "'") ||
+      (first === '`' && last === '`');
+    if (!wraps) break;
+    next = next.slice(1, -1).trim();
+  }
+  return next.replace(/\\"/g, '"').replace(/\\'/g, "'");
+}
+
+function normalizeEmailSender(value: string | null): string | null {
+  if (!value) return null;
+  const normalized = stripWrappingQuotes(value);
+  return normalized || null;
+}
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -98,7 +119,7 @@ export async function sendCampaignAssignmentEmail(
 
   const resend = new Resend(apiKey);
   const { data, error } = await resend.emails.send({
-    from: getEnv('RESEND_FROM_EMAIL') || DEFAULT_FROM_EMAIL,
+    from: normalizeEmailSender(getEnv('RESEND_FROM_EMAIL')) || DEFAULT_FROM_EMAIL,
     to: input.to,
     replyTo: DEFAULT_REPLY_TO,
     subject:

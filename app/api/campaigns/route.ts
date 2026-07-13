@@ -74,28 +74,55 @@ interface CreateCampaignBody {
   territory_boundary?: { type: 'Polygon'; coordinates: number[][][] };
 }
 
-async function workspaceIdsForUser(admin: ReturnType<typeof createAdminClient>, userId: string) {
-  const workspaceIds = new Set<string>();
+function isWorkspaceManagerRole(role: string | null | undefined): boolean {
+  return role === 'owner' || role === 'admin';
+}
 
-  const { data: memberships } = await admin
+function asString(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
+}
+
+async function workspaceRoleForUser(
+  admin: ReturnType<typeof createAdminClient>,
+  workspaceId: string,
+  userId: string
+): Promise<string | null> {
+  const { data } = await admin
     .from('workspace_members')
-    .select('workspace_id')
-    .eq('user_id', userId);
-  for (const membership of memberships ?? []) {
-    const workspaceId = (membership as { workspace_id?: string | null }).workspace_id;
-    if (workspaceId) workspaceIds.add(workspaceId);
+    .select('role')
+    .eq('workspace_id', workspaceId)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  return ((data as { role?: string | null } | null)?.role ?? null) || null;
+}
+
+async function assignedCampaignIdsForUser(
+  admin: ReturnType<typeof createAdminClient>,
+  userId: string,
+  workspaceId?: string | null
+): Promise<string[]> {
+  let query = admin
+    .from('campaign_assignments')
+    .select('campaign_id')
+    .eq('assigned_to_user_id', userId)
+    .neq('status', 'cancelled')
+    .limit(1000);
+
+  if (workspaceId) {
+    query = query.eq('workspace_id', workspaceId);
   }
 
-  const { data: ownedWorkspaces } = await admin
-    .from('workspaces')
-    .select('id')
-    .eq('owner_id', userId);
-  for (const workspace of ownedWorkspaces ?? []) {
-    const workspaceId = (workspace as { id?: string | null }).id;
-    if (workspaceId) workspaceIds.add(workspaceId);
-  }
+  const { data, error } = await query;
+  if (error) throw error;
 
-  return [...workspaceIds];
+  return Array.from(
+    new Set(
+      ((data ?? []) as { campaign_id?: string | null }[])
+        .map((assignment) => assignment.campaign_id)
+        .filter((id): id is string => Boolean(id))
+    )
+  );
 }
 
 export async function GET(request: NextRequest) {
@@ -105,7 +132,6 @@ export async function GET(request: NextRequest) {
   }
 
   const admin = createAdminClient();
-  let workspaceIds = await workspaceIdsForUser(admin, requestUser.id);
   const requestedWorkspaceId = request.nextUrl.searchParams.get('workspaceId')?.trim() || null;
   if (requestedWorkspaceId) {
     const workspace = await resolveWorkspaceIdForUser(
@@ -119,49 +145,71 @@ export async function GET(request: NextRequest) {
         { status: workspace.status ?? 400 }
       );
     }
-    workspaceIds = [workspace.workspaceId];
   }
-  const campaignRows = new Map<string, { id: string; name?: string | null; title?: string | null; status?: string | null; provision_status?: string | null; updated_at?: string | null }>();
+  const campaignRows = new Map<string, Record<string, unknown>>();
+  const requestedWorkspaceRole = requestedWorkspaceId
+    ? await workspaceRoleForUser(admin, requestedWorkspaceId, requestUser.id)
+    : null;
 
-  if (!requestedWorkspaceId) {
-    const { data: ownedCampaigns, error: ownedError } = await admin
-      .from('campaigns')
-      .select('id, name, title, status, provision_status, updated_at')
-      .eq('owner_id', requestUser.id)
-      .order('updated_at', { ascending: false })
-      .limit(100);
-    if (ownedError) {
-      return NextResponse.json({ error: ownedError.message }, { status: 500 });
-    }
-    for (const campaign of ownedCampaigns ?? []) {
-      campaignRows.set(campaign.id, campaign);
+  let ownedQuery = admin
+    .from('campaigns')
+    .select('*')
+    .order('updated_at', { ascending: false })
+    .limit(100);
+
+  if (requestedWorkspaceId && isWorkspaceManagerRole(requestedWorkspaceRole)) {
+    ownedQuery = ownedQuery.eq('workspace_id', requestedWorkspaceId);
+  } else {
+    ownedQuery = ownedQuery.eq('owner_id', requestUser.id);
+    if (requestedWorkspaceId) {
+      ownedQuery = ownedQuery.eq('workspace_id', requestedWorkspaceId);
     }
   }
 
-  if (workspaceIds.length > 0) {
-    const { data: workspaceCampaigns, error: workspaceError } = await admin
-      .from('campaigns')
-      .select('id, name, title, status, provision_status, updated_at')
-      .in('workspace_id', workspaceIds)
-      .order('updated_at', { ascending: false })
-      .limit(100);
-    if (workspaceError) {
-      return NextResponse.json({ error: workspaceError.message }, { status: 500 });
+  const { data: ownedCampaigns, error: ownedError } = await ownedQuery;
+  if (ownedError) {
+    return NextResponse.json({ error: ownedError.message }, { status: 500 });
+  }
+  for (const campaign of ownedCampaigns ?? []) {
+    campaignRows.set(campaign.id, campaign);
+  }
+
+  if (!requestedWorkspaceId || !isWorkspaceManagerRole(requestedWorkspaceRole)) {
+    let assignedCampaignIds: string[];
+    try {
+      assignedCampaignIds = await assignedCampaignIdsForUser(admin, requestUser.id, requestedWorkspaceId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to load assigned campaigns';
+      return NextResponse.json({ error: message }, { status: 500 });
     }
-    for (const campaign of workspaceCampaigns ?? []) {
-      campaignRows.set(campaign.id, campaign);
+
+    const missingAssignedIds = assignedCampaignIds.filter((id) => !campaignRows.has(id));
+    if (missingAssignedIds.length > 0) {
+      const { data: assignedCampaigns, error: assignedError } = await admin
+        .from('campaigns')
+        .select('*')
+        .in('id', missingAssignedIds)
+        .order('updated_at', { ascending: false })
+        .limit(100);
+      if (assignedError) {
+        return NextResponse.json({ error: assignedError.message }, { status: 500 });
+      }
+      for (const campaign of assignedCampaigns ?? []) {
+        campaignRows.set(campaign.id, campaign);
+      }
     }
   }
 
   const rows = [...campaignRows.values()].sort((a, b) => {
-    const aTime = Date.parse(a.updated_at ?? '');
-    const bTime = Date.parse(b.updated_at ?? '');
+    const aTime = Date.parse(asString(a.updated_at) ?? '');
+    const bTime = Date.parse(asString(b.updated_at) ?? '');
     return (Number.isNaN(bTime) ? 0 : bTime) - (Number.isNaN(aTime) ? 0 : aTime);
   });
 
   return NextResponse.json(
     rows.map((campaign) => ({
-      id: campaign.id,
+      ...campaign,
+      id: asString(campaign.id) ?? '',
       name: campaign.title || campaign.name || 'Untitled Campaign',
       status: campaign.status || campaign.provision_status || 'draft',
     }))

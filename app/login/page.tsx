@@ -129,20 +129,21 @@ export default function LoginPage() {
   };
   const gatePath = buildGatePath();
   const isListingOnboardingCreateAccountFlow = isListingOnboardingResume(normalizedNext);
-  const emailSubmitLabel = isListingOnboardingCreateAccountFlow
+  const isCreateAccountFlow = inviteMode || isListingOnboardingCreateAccountFlow;
+  const emailSubmitLabel = isCreateAccountFlow
     ? 'Create account with Email'
     : 'Continue with Email';
-  const googleAuthLabel = isListingOnboardingCreateAccountFlow
+  const googleAuthLabel = isCreateAccountFlow
     ? 'Create account with Google'
     : 'Continue with Google';
-  const appleAuthLabel = isListingOnboardingCreateAccountFlow
+  const appleAuthLabel = isCreateAccountFlow
     ? 'Create account with Apple'
     : 'Continue with Apple';
   const loginIntroCopy = inviteMode
-    ? `Sign in or create an account to join ${inviteInfo.workspaceName ?? 'this workspace'}`
+    ? `Create an account to join ${inviteInfo.workspaceName ?? 'this workspace'}`
     : authMode === 'recovery'
       ? 'Enter your email and we will send a secure password reset link'
-      : isListingOnboardingCreateAccountFlow
+      : isCreateAccountFlow
         ? 'Create an account to access your dashboard and finish onboarding'
         : 'Sign in or create an account to access your dashboard or onboarding';
   const buildAuthCallbackURL = () => {

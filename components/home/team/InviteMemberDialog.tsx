@@ -95,7 +95,7 @@ export function InviteMemberDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent data-self-serve-demo-allow="true">
         <DialogHeader>
           <DialogTitle>Add members</DialogTitle>
           <DialogDescription>
