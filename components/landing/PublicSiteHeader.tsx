@@ -20,17 +20,17 @@ export function PublicSiteHeader({ active, showAmbassador = true }: PublicSiteHe
           <Image
             src="/brand/wolfgrid-logo-text.svg"
             alt="WolfGrid"
-            width={180}
-            height={90}
-            className="h-12 w-auto dark:hidden"
+            width={210}
+            height={105}
+            className="h-14 w-auto dark:hidden"
             priority
           />
           <Image
             src="/brand/wolfgrid-logo-white.svg"
             alt="WolfGrid"
-            width={180}
-            height={90}
-            className="hidden h-12 w-auto dark:block"
+            width={210}
+            height={105}
+            className="hidden h-14 w-auto dark:block"
             priority
           />
         </Link>
