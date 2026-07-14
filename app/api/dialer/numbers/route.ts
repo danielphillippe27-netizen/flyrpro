@@ -124,7 +124,7 @@ export async function POST(request: NextRequest) {
     const purchasedNumber = await provisionDialerPhoneNumber({
       countryCode,
       areaCode,
-      friendlyName: `FLYR ${membership.workspaceId}`,
+      friendlyName: `WolfGrid ${membership.workspaceId}`,
       voiceUrl: new URL(voicePath, appUrl).toString(),
       smsUrl: new URL(smsPath, appUrl).toString(),
       statusCallback: new URL(statusPath, appUrl).toString(),
@@ -162,7 +162,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           error:
-            'The dialer number was purchased, but FLYR failed to save the workspace assignment. Please update the workspace dialer settings manually.',
+            'The dialer number was purchased, but WolfGrid failed to save the workspace assignment. Please update the workspace dialer settings manually.',
           phoneNumber: purchasedNumber.phoneNumber,
         },
         { status: 500 }

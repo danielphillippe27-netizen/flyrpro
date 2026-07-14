@@ -1,4 +1,4 @@
-# FLYR Leaderboard (Web)
+# WolfGrid Leaderboard (Web)
 
 React + Vite app that shows the global leaderboard using the same Supabase RPC as the iOS app.
 

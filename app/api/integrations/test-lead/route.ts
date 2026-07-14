@@ -121,8 +121,8 @@ export async function POST(request: NextRequest) {
       email: `test-${uniqueSuffix}@example.com`,
       phone: '(555) 123-4567',
       address: '123 Test Street',
-      notes: 'Test lead from FLYR Integrations to verify CRM setup.',
-      source: 'FLYR Integration Test',
+      notes: 'Test lead from WolfGrid Integrations to verify CRM setup.',
+      source: 'WolfGrid Integration Test',
     };
     const appointmentDate = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 
@@ -136,10 +136,10 @@ export async function POST(request: NextRequest) {
         }
 
         const payload = {
-          source: 'FLYR',
-          system: 'FLYR',
+          source: 'WolfGrid',
+          system: 'WolfGrid',
           type: 'General Inquiry',
-          message: 'Test lead from FLYR Integration - This is a test to verify your connection is working',
+          message: 'Test lead from WolfGrid Integration - This is a test to verify your connection is working',
           person: {
             firstName: 'Test',
             lastName: 'Lead',
@@ -149,7 +149,7 @@ export async function POST(request: NextRequest) {
           metadata: {
             testLead: true,
             sentAt: new Date().toISOString(),
-            source: 'FLYR Integration Test',
+            source: 'WolfGrid Integration Test',
           },
         };
 
@@ -205,7 +205,7 @@ export async function POST(request: NextRequest) {
         const appointmentNote = buildBoldTrailAppointmentNote({
           title: 'Integration Test Appointment',
           date: appointmentDate,
-          notes: 'This is a placeholder appointment note created by FLYR because kvCORE/BoldTrail does not expose a native appointment action in the public API.',
+          notes: 'This is a placeholder appointment note created by WolfGrid because kvCORE/BoldTrail does not expose a native appointment action in the public API.',
         });
 
         const noteWarnings: string[] = [];
@@ -297,7 +297,7 @@ export async function POST(request: NextRequest) {
 
         try {
           await hubSpotClient.createTask(accessToken, result.contactId, {
-            title: 'FLYR Test Follow-up',
+            title: 'WolfGrid Test Follow-up',
             due_date: appointmentDate,
             body: 'Follow up with this test lead to confirm the integration is writing HubSpot tasks correctly.',
           });
@@ -310,9 +310,9 @@ export async function POST(request: NextRequest) {
         try {
           await hubSpotClient.createAppointment(accessToken, result.contactId, {
             date: appointmentDate,
-            title: 'FLYR Test Appointment',
-            notes: 'This is a test appointment created by FLYR to verify the HubSpot appointment integration.',
-            location: 'FLYR Integration Test',
+            title: 'WolfGrid Test Appointment',
+            notes: 'This is a test appointment created by WolfGrid to verify the HubSpot appointment integration.',
+            location: 'WolfGrid Integration Test',
           });
         } catch (error) {
           hubSpotWarnings.push(

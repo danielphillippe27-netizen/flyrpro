@@ -162,7 +162,7 @@ export async function POST(
     }
 
     // TODO(ads_management): reuse this link as the read model for future campaign creation.
-    // TODO(meta-objectives): map Meta campaign objectives to FLYR farm campaign types.
+    // TODO(meta-objectives): map Meta campaign objectives to WolfGrid farm campaign types.
     // TODO(special-ad-category): handle housing/real-estate special ad category rules before any write scopes.
     const { data: link, error } = await authorized.admin
       .from('farm_meta_campaign_links')

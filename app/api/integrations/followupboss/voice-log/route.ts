@@ -338,8 +338,8 @@ export async function POST(request: NextRequest) {
     }
 
     const eventPayload = {
-      source: 'FLYR',
-      system: 'FLYR',
+      source: 'WolfGrid',
+      system: 'WolfGrid',
       type: 'General Inquiry',
       message: aiJson.note || aiJson.summary,
       person: {

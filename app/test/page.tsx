@@ -1,7 +1,7 @@
 export default function TestPage() {
   return (
     <div style={{ padding: '20px', fontFamily: 'Arial, sans-serif' }}>
-      <h1>FLYR PRO - Test Page</h1>
+      <h1>WolfGrid - Test Page</h1>
       <p>If you can see this, the basic Next.js app is working!</p>
       <p>Environment check:</p>
       <ul>

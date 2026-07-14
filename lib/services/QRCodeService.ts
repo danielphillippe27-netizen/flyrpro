@@ -143,7 +143,7 @@ export class QRCodeService {
 
   /**
    * Link QR code to landing page with optional variant and slug
-   * Updates qr_url to match the slug format: https://flyrpro.app/q/<slug>
+   * Updates qr_url to match the slug format: https://wolfgrid.app/q/<slug>
    */
   static async linkToLandingPage(
     qrCodeId: string,
@@ -176,7 +176,7 @@ export class QRCodeService {
     }
 
     updateData.slug = slug;
-    updateData.qr_url = `https://flyrpro.app/q/${slug}`;
+    updateData.qr_url = `https://wolfgrid.app/q/${slug}`;
 
     if (options?.qrVariant) {
       updateData.qr_variant = options.qrVariant;
@@ -309,7 +309,7 @@ export class QRCodeService {
     }
 
     const slug = await this.generateUniqueSlugServer(supabase);
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://flyrpro.app';
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://wolfgrid.app';
     const qrUrl = `${baseUrl}/q/${slug}`;
 
     const { data, error } = await supabase

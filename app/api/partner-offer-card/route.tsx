@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
   }
 
   const origin = request.nextUrl.origin;
-  const logoUrl = `${origin}/flyr-download-icon.png`;
+  const logoUrl = `${origin}/wolfgrid-icon-1024.png`;
 
   return new ImageResponse(
     (
@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={logoUrl}
-          alt="FLYR logo"
+          alt="WolfGrid logo"
           width="220"
           height="220"
           style={{

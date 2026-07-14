@@ -31,7 +31,7 @@ function normalizeLead(body: PushLeadBody): ZapierLeadPayload {
     phone: cleaned(body.phone),
     email: cleaned(body.email),
     address: cleaned(body.address),
-    source: cleaned(body.source) || 'FLYR',
+    source: cleaned(body.source) || 'WolfGrid',
     notes: cleaned(body.notes),
     campaignId: cleaned(body.campaignId) ?? cleaned(body.campaign_id),
     createdAt: cleaned(body.createdAt) ?? cleaned(body.created_at),

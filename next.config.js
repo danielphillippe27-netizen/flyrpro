@@ -89,6 +89,13 @@ const nextConfig = {
           { key: "Cache-Control", value: "public, max-age=300, must-revalidate" },
         ],
       },
+      {
+        source: "/.well-known/assetlinks.json",
+        headers: [
+          { key: "Content-Type", value: "application/json" },
+          { key: "Cache-Control", value: "public, max-age=300, must-revalidate" },
+        ],
+      },
     ];
   },
   async rewrites() {
@@ -97,7 +104,7 @@ const nextConfig = {
     // - Environments where the app route is not used
     // - Support for q subdomain if present
     // - Backward compatibility with existing production behavior
-    // The Edge Function then redirects to https://flyrpro.app/l/<landing_page_slug>
+    // The Edge Function then redirects to https://wolfgrid.app/l/<landing_page_slug>
     // Landing pages at /l/<slug> are handled by Next.js route
     return supabaseFunctionsBaseUrl
       ? [

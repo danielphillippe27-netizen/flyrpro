@@ -1,5 +1,5 @@
 -- Global / team challenge templates and leaderboard RPC for rolling onboarding challenges.
--- Seeds "Your First 30 Days on FLYR" (slug: first-30-days).
+-- Seeds "Your First 30 Days on WolfGrid" (slug: first-30-days).
 
 BEGIN;
 
@@ -242,8 +242,8 @@ INSERT INTO public.challenge_templates (
 )
 VALUES (
   'first-30-days',
-  'Your First 30 Days on FLYR',
-  'Every new member gets 30 days to compete, build momentum, and see how they stack up on FLYR.',
+  'Your First 30 Days on WolfGrid',
+  'Every new member gets 30 days to compete, build momentum, and see how they stack up on WolfGrid.',
   'global',
   'rolling_onboarding',
   'homes_reached',

@@ -30,7 +30,7 @@ type OfferResponse = {
   error?: string;
 };
 
-const PARTNER_OFFER_FROM_LABEL = 'Daniel Phillippe <daniel@flyr.software>';
+const PARTNER_OFFER_FROM_LABEL = 'Daniel Phillippe <daniel@wolfgrid.app>';
 
 function parseExpiryPickerValue(value: string): Date | null {
   const t = value.trim();
@@ -371,7 +371,7 @@ export function PartnerOfferCreateForm() {
       emailStatus: 'not_requested',
       status: 'active',
       vanitySlug: vanitySlug || null,
-      shareUrl: draftOffer?.shareUrl || `https://flyr.software/${vanitySlug || 'companyname'}`,
+      shareUrl: draftOffer?.shareUrl || `https://wolfgrid.app/${vanitySlug || 'companyname'}`,
     }),
     [ctaLabel, draftOffer?.id, draftOffer?.shareUrl, expiresAt, messageBody, partnerName, recipientEmail, recipientName, subject, vanitySlug]
   );
@@ -484,7 +484,7 @@ export function PartnerOfferCreateForm() {
                 <div className="space-y-2">
                   <Label htmlFor="vanitySlug">Custom link</Label>
                   <div className="flex min-w-0 items-center rounded-lg border border-input bg-background px-3">
-                    <span className="shrink-0 text-xs text-muted-foreground">flyr.software/</span>
+                    <span className="shrink-0 text-xs text-muted-foreground">wolfgrid.app/</span>
                     <Input
                       id="vanitySlug"
                       value={vanitySlug}
@@ -505,7 +505,7 @@ export function PartnerOfferCreateForm() {
                   id="subject"
                   value={subject}
                   onChange={(event) => setSubject(event.target.value)}
-                  placeholder="Private FLYR page (expands with Company when sent)"
+                  placeholder="Private WolfGrid page (expands with Company when sent)"
                 />
               </div>
 

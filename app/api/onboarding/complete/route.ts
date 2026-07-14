@@ -249,7 +249,7 @@ async function createSalespersonStripeOnboardingRedirect(params: {
     });
     const businessProfile = buildConnectBusinessProfilePrefill({
       origin: params.origin,
-      productDescription: 'FLYR direct sales commissions and salesperson payouts',
+      productDescription: 'WolfGrid direct sales commissions and salesperson payouts',
     });
 
     const createAccount = async () => {

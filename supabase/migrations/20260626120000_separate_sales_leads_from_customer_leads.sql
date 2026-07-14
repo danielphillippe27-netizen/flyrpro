@@ -1,7 +1,7 @@
 BEGIN;
 
 -- Canonical sales/prospecting tables. These live in the same database as the
--- FLYR app tables, but keep internal sales data out of customer lead tables.
+-- WolfGrid app tables, but keep internal sales data out of customer lead tables.
 
 CREATE TABLE IF NOT EXISTS public.sales_reps (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -908,15 +908,15 @@ WHERE c.lead_kind = 'scraped'
     WHERE sl.legacy_contact_id = c.id
   );
 
--- Stop the old mixed-table sync. Regular FLYR app contacts must not
+-- Stop the old mixed-table sync. Regular WolfGrid app contacts must not
 -- automatically appear in sales/prospecting tables.
 DROP TRIGGER IF EXISTS sync_contact_to_salesperson_lead_master ON public.contacts;
 
 COMMENT ON TABLE public.sales_leads IS
-  'Canonical internal sales/prospecting leads. Regular FLYR customer leads remain in contacts/campaign_contacts.';
+  'Canonical internal sales/prospecting leads. Regular WolfGrid customer leads remain in contacts/campaign_contacts.';
 
 COMMENT ON COLUMN public.sales_leads.converted_contact_id IS
-  'Regular FLYR contact created only by an explicit manual conversion from a sales lead.';
+  'Regular WolfGrid contact created only by an explicit manual conversion from a sales lead.';
 
 COMMENT ON COLUMN public.sales_leads.legacy_contact_id IS
   'Former contacts.id for migrated scraped/salesperson rows. Kept only for migration traceability.';

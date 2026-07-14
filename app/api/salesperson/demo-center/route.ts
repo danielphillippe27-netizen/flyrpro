@@ -18,7 +18,7 @@ export const dynamic = 'force-dynamic';
 
 function getPublicOrigin(request: NextRequest): string {
   void request;
-  return 'https://flyr.software';
+  return 'https://wolfgrid.app';
 }
 
 function getPreferredReferralCode(

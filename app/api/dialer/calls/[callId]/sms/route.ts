@@ -231,7 +231,7 @@ export async function POST(
     if (insertError) {
       console.error('[dialer/sms] failed to save follow-up text', insertError);
       return NextResponse.json(
-        { followup: null, warning: 'Text sent, but FLYR could not save the follow-up record.' },
+        { followup: null, warning: 'Text sent, but WolfGrid could not save the follow-up record.' },
         { status: 201 }
       );
     }

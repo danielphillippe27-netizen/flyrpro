@@ -22,8 +22,8 @@ function json<T>(body: T, init?: ResponseInit) {
 
 function apiBaseUrl(request: NextRequest) {
   const configured = request.nextUrl.origin.replace(/\/+$/, '');
-  return configured === 'https://flyrpro.app'
-    ? 'https://www.flyrpro.app'
+  return configured === 'https://wolfgrid.app'
+    ? 'https://wolfgrid.app'
     : configured;
 }
 

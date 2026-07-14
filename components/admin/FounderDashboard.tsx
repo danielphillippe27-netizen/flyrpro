@@ -1450,7 +1450,7 @@ export function FounderDashboard({
           />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="manual-ambassador-why">Why FLYR</Label>
+          <Label htmlFor="manual-ambassador-why">Why WolfGrid</Label>
           <Textarea
             id="manual-ambassador-why"
             value={manualAmbassadorDraft.whyFlyr}

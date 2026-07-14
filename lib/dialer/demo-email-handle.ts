@@ -1,4 +1,4 @@
-export const DEMO_EMAIL_DOMAIN = 'flyr.software';
+export const DEMO_EMAIL_DOMAIN = 'wolfgrid.app';
 export const DEMO_EMAIL_HANDLE_PATTERN = /^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$/;
 
 export type DemoEmailSalesperson = {

@@ -131,8 +131,8 @@ export function BeaconPageClient({ token, initialPayload }: Props) {
       <header className="border-b border-white/15 bg-black">
         <div className="mx-auto flex w-full max-w-md items-center justify-between px-4 py-4">
           <Image
-            src="/flyr-logo-white.svg"
-            alt="FLYR"
+            src="/brand/wolfgrid-logo-white.svg"
+            alt="WolfGrid"
             width={86}
             height={32}
             className="h-8 w-auto"

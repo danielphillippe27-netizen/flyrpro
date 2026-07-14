@@ -204,12 +204,12 @@ export async function POST(request: NextRequest) {
         if (c.phone) person.phones = [{ value: c.phone }];
         if (c.address) person.addresses = [{ street: c.address, city: '', state: '', code: '' }];
         const eventPayload = {
-          source: 'FLYR',
-          system: 'FLYR',
+          source: 'WolfGrid',
+          system: 'WolfGrid',
           type: 'General Inquiry',
           message: c.notes
-            ? `FLYR lead${c.campaign_id ? ` (campaign ${c.campaign_id})` : ''}: ${c.notes}`
-            : `Lead from FLYR${c.campaign_id ? ` campaign ${c.campaign_id}` : ''}`,
+            ? `WolfGrid lead${c.campaign_id ? ` (campaign ${c.campaign_id})` : ''}: ${c.notes}`
+            : `Lead from WolfGrid${c.campaign_id ? ` campaign ${c.campaign_id}` : ''}`,
           person,
         };
         const fubRes = await fetch('https://api.followupboss.com/v1/events', {
@@ -394,7 +394,7 @@ export async function POST(request: NextRequest) {
               phone: contact.phone,
               address: contact.address,
               notes: contact.notes,
-              source: 'FLYR',
+              source: 'WolfGrid',
               campaignId: contact.campaign_id,
             });
             synced++;
@@ -569,7 +569,7 @@ async function syncContactToMonday(
     mapping: Record<string, MondayColumnMappingEntry>;
   }
 ) {
-  const itemName = contact.full_name?.trim() || contact.email?.trim() || contact.phone?.trim() || 'FLYR Lead';
+  const itemName = contact.full_name?.trim() || contact.email?.trim() || contact.phone?.trim() || 'WolfGrid Lead';
   const columnValues = buildMondayColumnValues(
     {
       phone: contact.phone,
@@ -631,7 +631,7 @@ async function syncContactToBoldTrail(
       phone: contact.phone,
       email: contact.email,
       address: contact.address,
-      source: 'FLYR',
+      source: 'WolfGrid',
       notes: contact.notes,
     });
   } else {
@@ -641,7 +641,7 @@ async function syncContactToBoldTrail(
       phone: contact.phone,
       email: contact.email,
       address: contact.address,
-      source: 'FLYR',
+      source: 'WolfGrid',
       notes: contact.notes,
     });
     remoteContactId = created.contactId;
@@ -689,7 +689,7 @@ async function syncContactToHubSpot(
         email: contact.email,
         address: contact.address,
         notes: contact.notes,
-        source: 'FLYR',
+        source: 'WolfGrid',
       })
     : await hubSpotClient.createContact(accessToken, {
         id: contact.id,
@@ -698,7 +698,7 @@ async function syncContactToHubSpot(
         email: contact.email,
         address: contact.address,
         notes: contact.notes,
-        source: 'FLYR',
+        source: 'WolfGrid',
       });
 
   await upsertHubSpotLink(supabase, userId, contact.id, result.contactId);
@@ -728,7 +728,7 @@ async function syncContactToContractor(
     phone: contact.phone,
     address: contact.address,
     notes: contact.notes,
-    source: 'FLYR',
+    source: 'WolfGrid',
     campaignId: contact.campaign_id,
   });
 

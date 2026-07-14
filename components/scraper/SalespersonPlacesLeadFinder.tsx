@@ -474,7 +474,7 @@ function splitCanadianAddress(address: string): {
 }
 
 function buildRealtorCaCaptureBookmarklet(): string {
-  const flyrOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://flyr.software';
+  const flyrOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://wolfgrid.app';
   const script = `(async () => {
     const compact = (value) => String(value ?? '').replace(/\\s+/g, ' ').trim();
     const phoneRe = /(?:\\+?1[\\s.-]?)?\\(?\\d{3}\\)?[\\s.-]?\\d{3}[\\s.-]?\\d{4}/;
@@ -671,7 +671,7 @@ function buildRealtorCaCaptureBookmarklet(): string {
     };
     const done = () => {
       const sent = notifyFlyr();
-      alert('FLYR captured ' + payload.leads.length + ' total agents across ' + capturedPages.length + ' page(s). ' + (sent ? 'FLYR is importing it now.' : 'Return to FLYR and the list will populate automatically.'));
+      alert('WolfGrid captured ' + payload.leads.length + ' total agents across ' + capturedPages.length + ' page(s). ' + (sent ? 'WolfGrid is importing it now.' : 'Return to WolfGrid and the list will populate automatically.'));
     };
     const fallback = () => {
       const box = document.createElement('textarea');
@@ -703,13 +703,13 @@ function parseBrowserCaptureJson(value: string): BrowserCaptureLead[] {
   try {
     parsed = JSON.parse(clean);
   } catch {
-    throw new Error('Paste the JSON copied by the FLYR capture helper. It should start with {"source":"realtor.ca","leads":[...]}');
+    throw new Error('Paste the JSON copied by the WolfGrid capture helper. It should start with {"source":"realtor.ca","leads":[...]}');
   }
   if (Array.isArray(parsed)) return parsed as BrowserCaptureLead[];
   if (parsed && typeof parsed === 'object' && Array.isArray((parsed as { leads?: unknown }).leads)) {
     return (parsed as { leads: BrowserCaptureLead[] }).leads;
   }
-  throw new Error('Paste the JSON copied by the FLYR REALTOR.ca capture helper.');
+  throw new Error('Paste the JSON copied by the WolfGrid REALTOR.ca capture helper.');
 }
 
 function browserCaptureLeadToResult(lead: BrowserCaptureLead, city: string, provinceCode: string, index: number): LeadResult | null {
@@ -1554,7 +1554,7 @@ export function SalespersonPlacesLeadFinder() {
           const copied = await copyRealtorCaptureHelper();
           if (copied) realtorAutoCapturePendingRef.current = true;
           if (typeof window !== 'undefined') window.open(realtorDirectoryUrl, '_blank');
-          setStatus('Scraper helper copied. Run it on REALTOR.ca; when it finishes, return here and FLYR will import it automatically.');
+          setStatus('Scraper helper copied. Run it on REALTOR.ca; when it finishes, return here and WolfGrid will import it automatically.');
           return;
         }
 
@@ -1566,7 +1566,7 @@ export function SalespersonPlacesLeadFinder() {
             const copied = await copyRealtorCaptureHelper();
             if (copied) realtorAutoCapturePendingRef.current = true;
             if (typeof window !== 'undefined') window.open(realtorDirectoryUrl, '_blank');
-            setStatus('Scraper helper copied. Run it on REALTOR.ca; when it finishes, return here and FLYR will import it automatically.');
+            setStatus('Scraper helper copied. Run it on REALTOR.ca; when it finishes, return here and WolfGrid will import it automatically.');
             return;
           }
           throw parseError;
@@ -2538,7 +2538,7 @@ export function SalespersonPlacesLeadFinder() {
               <div className="min-w-0">
                 <DialogTitle>Save lead list</DialogTitle>
                 <DialogDescription className="mt-1">
-                  Name this list before FLYR saves the leads.
+                  Name this list before WolfGrid saves the leads.
                 </DialogDescription>
               </div>
             </div>

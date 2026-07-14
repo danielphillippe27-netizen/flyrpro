@@ -1769,7 +1769,7 @@ export default function CreateCampaignPage() {
               <div>
                 <p className="text-sm font-semibold text-slate-950">Start with your neighborhood</p>
                 <p className="mt-1 text-xs font-medium text-slate-600">
-                  {selfServeLocationError || 'Use your location so FLYR opens the map near you.'}
+                  {selfServeLocationError || 'Use your location so WolfGrid opens the map near you.'}
                 </p>
               </div>
               <div className="flex gap-2">

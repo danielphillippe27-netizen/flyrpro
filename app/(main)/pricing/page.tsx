@@ -115,7 +115,7 @@ export default function PricingPage() {
           <div className="mx-auto mt-12 grid max-w-6xl gap-8 lg:grid-cols-3">
             <PricingCard
               title="Free"
-              subtitle="Create your first FLYR map and see the workflow."
+              subtitle="Create your first WolfGrid map and see the workflow."
               features={[
                 { text: 'One campaign', bold: true },
                 { text: 'One prospecting map' },
@@ -132,7 +132,7 @@ export default function PricingPage() {
                     <p className="mt-1 text-zinc-600">Upgrade when you need more campaigns.</p>
                   </div>
                   <Button className="w-full" variant="outline" asChild>
-                    <Link href="/demo-1">Create FREE FLYR Map</Link>
+                    <Link href="/demo-1">Create FREE WolfGrid Map</Link>
                   </Button>
                 </>
               }

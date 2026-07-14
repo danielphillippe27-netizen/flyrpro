@@ -1,7 +1,7 @@
 import { Resend } from 'resend';
 
-const DEFAULT_FROM_EMAIL = 'Daniel Phillippe <daniel@flyr.software>';
-const DEFAULT_REPLY_TO = 'daniel@flyr.software';
+const DEFAULT_FROM_EMAIL = 'Daniel Phillippe <daniel@wolfgrid.app>';
+const DEFAULT_REPLY_TO = 'daniel@wolfgrid.app';
 
 export type TeamReportPeriod = 'weekly' | 'monthly' | 'yearly';
 
@@ -195,7 +195,7 @@ function buildHtml(input: TeamLeadReportEmailInput): string {
     <div style="margin:0;padding:32px 18px;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#0f172a;">
       <div style="max-width:760px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:14px;overflow:hidden;">
         <div style="padding:28px 30px 22px;border-bottom:1px solid #e2e8f0;">
-          <div style="font-size:28px;line-height:1;font-weight:800;color:#111827;">FLYR</div>
+          <div style="font-size:28px;line-height:1;font-weight:800;color:#111827;">WolfGrid</div>
           <h1 style="margin:16px 0 6px;font-size:26px;line-height:1.25;color:#111827;font-weight:800;">${escapeHtml(periodLabel)} team report</h1>
           <p style="margin:0;color:#475569;font-size:15px;">${safeWorkspaceName} - ${safeDateRange}</p>
           ${generated ? `<p style="margin:8px 0 0;color:#64748b;font-size:13px;">Generated ${escapeHtml(generated)}</p>` : ''}

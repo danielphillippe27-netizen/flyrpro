@@ -7,12 +7,12 @@ export const DEFAULT_PAYLOAD: DemoPayload = {
   city: 'Palo Alto, CA',
   center: [-122.1430, 37.4419],
   ctaVariant: 'a',
-  ctaUrl: 'mailto:harry@flyrpro.app?subject=Show%20me%20my%20territory',
+  ctaUrl: 'mailto:harry@wolfgrid.app?subject=Show%20me%20my%20territory',
   navigationMode: 'scroll',
   copy: {
     b1Headline: 'Your crew is on the doors',
     b1Sub:
-      'FLYR PRO runs door-to-door field teams: territories, routes, reps, and every knock, verified.',
+      'WolfGrid runs door-to-door field teams: territories, routes, reps, and every knock, verified.',
     b1Accent: 'Prove it.',
     b2Headline: "You're paying for work\nyou can't see.",
     b2Sub:
@@ -44,7 +44,7 @@ export const DEFAULT_PAYLOAD: DemoPayload = {
       'Zero signal? Full offline database. Syncs the moment coverage returns.',
       'Reps keep stats and shareable performance cards, they want to log doors.',
     ],
-    b5AppbarText: 'FLYR',
+    b5AppbarText: 'WolfGrid',
     b5AppbarAccent: ' · LIVE SESSION',
     b5AppbarTime: '2:31 PM',
     b5DoorAddress: '112 Larkspur Crt',
@@ -67,6 +67,6 @@ export const DEFAULT_PAYLOAD: DemoPayload = {
     b6FounderLine:
       "No account manager. No ticket queue. 24/7 support. Contact us to claim your included campaign.",
     ctaPrimary: 'See it on your territory →',
-    ctaSecondary: 'flyrpro.app',
+    ctaSecondary: 'wolfgrid.app',
   },
 };

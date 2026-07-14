@@ -82,7 +82,7 @@ export async function POST(request: NextRequest) {
       slug,
       qr_url: qrUrl,
       destination_type: 'directLink',
-      direct_url: 'https://flyrpro.app',
+      direct_url: 'https://wolfgrid.app',
       metadata: {
         title,
         owner_user_id: requestUser.id,

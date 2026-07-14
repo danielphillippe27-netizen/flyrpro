@@ -116,7 +116,7 @@ export async function POST(
     const purchasedNumber = await provisionDialerPhoneNumber({
       countryCode,
       areaCode,
-      friendlyName: `FLYR ${row.full_name || row.id}`,
+      friendlyName: `WolfGrid ${row.full_name || row.id}`,
       voiceUrl: new URL(voicePath, appUrl).toString(),
       smsUrl: new URL(smsPath, appUrl).toString(),
       statusCallback: new URL(statusPath, appUrl).toString(),
@@ -157,7 +157,7 @@ export async function POST(
       return NextResponse.json(
         {
           error:
-            'The dialer number was purchased, but FLYR failed to save the salesperson assignment.',
+            'The dialer number was purchased, but WolfGrid failed to save the salesperson assignment.',
           phoneNumber: purchasedNumber.phoneNumber,
         },
         { status: 500 }

@@ -7,7 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
  * Access this route in your browser to explore the full API interactively.
  *
  * Available at: http://localhost:3000/api/docs (local)
- *               https://flyrpro.app/api/docs (production)
+ *               https://wolfgrid.app/api/docs (production)
  */
 
 export async function GET(request: NextRequest) {
@@ -19,8 +19,8 @@ export async function GET(request: NextRequest) {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>FLYR PRO API Docs</title>
-  <meta name="description" content="FLYR PRO REST API documentation" />
+  <title>WolfGrid API Docs</title>
+  <meta name="description" content="WolfGrid REST API documentation" />
   <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
   <style>
     body { margin: 0; background: #fafafa; }

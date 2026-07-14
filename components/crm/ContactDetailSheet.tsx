@@ -518,9 +518,9 @@ export function ContactDetailSheet({
           phone: contact.phone || undefined,
           address: contact.address || undefined,
           message: leadNotes
-            ? `FLYR lead: ${leadNotes}`
-            : 'Lead from FLYR',
-          source: 'FLYR',
+            ? `WolfGrid lead: ${leadNotes}`
+            : 'Lead from WolfGrid',
+          source: 'WolfGrid',
           campaignId: contact.campaign_id || undefined,
         }),
       });

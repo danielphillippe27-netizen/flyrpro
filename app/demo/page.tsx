@@ -2,8 +2,8 @@ import type { Metadata } from 'next';
 import { DemoFunnel } from '@/components/landing/DemoFunnel';
 
 export const metadata: Metadata = {
-  title: 'Mobile Demo | FLYR',
-  description: 'See how FLYR helps canvassing and field sales teams launch campaigns, track reps, and follow up faster.',
+  title: 'Mobile Demo | WolfGrid',
+  description: 'See how WolfGrid helps canvassing and field sales teams launch campaigns, track reps, and follow up faster.',
   alternates: {
     canonical: '/demo',
   },

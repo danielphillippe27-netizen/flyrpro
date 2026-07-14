@@ -12,9 +12,9 @@ export default async function AmbassadorPage({ searchParams }: AmbassadorPagePro
   const stripeOnboarding = params?.stripeOnboarding;
   const stripeNotice =
     stripeOnboarding === 'complete'
-      ? 'Stripe onboarding received. We will review payout readiness and follow up from FLYR.'
+      ? 'Stripe onboarding received. We will review payout readiness and follow up from WolfGrid.'
       : stripeOnboarding === 'refresh'
-        ? 'That Stripe onboarding link expired or was already used. Please ask FLYR for a fresh link.'
+        ? 'That Stripe onboarding link expired or was already used. Please ask WolfGrid for a fresh link.'
         : null;
 
   return (

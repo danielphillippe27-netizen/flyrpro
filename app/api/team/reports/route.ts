@@ -703,7 +703,7 @@ async function buildEmailReportPayload(params: {
 
   return {
     ok: true,
-    workspaceName: workspace?.name?.trim() || 'FLYR team',
+    workspaceName: workspace?.name?.trim() || 'WolfGrid team',
     leadEmails,
     report: {
       period,

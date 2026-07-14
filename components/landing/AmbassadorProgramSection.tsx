@@ -85,7 +85,7 @@ export function AmbassadorProgramSection() {
     if (!form.primaryNiche.trim()) return 'Please enter your primary niche.';
     if (!form.primaryPlatform.trim()) return 'Please choose your primary platform.';
     if (form.whyFlyr.trim().length < 20) {
-      return 'Please add at least 20 characters about why you want to partner with FLYR.';
+      return 'Please add at least 20 characters about why you want to partner with WolfGrid.';
     }
 
     return '';
@@ -150,7 +150,7 @@ export function AmbassadorProgramSection() {
           </h2>
           <p className="mt-5 max-w-2xl text-lg text-zinc-600">
             Built for real estate creators, team leaders, coaches, and field-sales voices who can
-            actually move people into FLYR.
+            actually move people into WolfGrid.
           </p>
 
           <div className="mt-8 space-y-4">
@@ -211,7 +211,7 @@ export function AmbassadorProgramSection() {
             <div>
               <h3 className="text-2xl font-black text-zinc-900">Apply to the program</h3>
               <p className="mt-2 text-sm text-zinc-600">
-                We review fit, audience trust, and how well your niche lines up with FLYR.
+                We review fit, audience trust, and how well your niche lines up with WolfGrid.
               </p>
             </div>
             <ArrowRight className="hidden h-5 w-5 shrink-0 text-red-600 md:block" />
@@ -375,13 +375,13 @@ export function AmbassadorProgramSection() {
             </div>
 
             <div className="md:col-span-2">
-              <Label htmlFor="ambassador-why-flyr">Why do you want to partner with FLYR?</Label>
+              <Label htmlFor="ambassador-why-flyr">Why do you want to partner with WolfGrid?</Label>
               <Textarea
                 id="ambassador-why-flyr"
                 value={form.whyFlyr}
                 onChange={(event) => handleChange('whyFlyr', event.target.value)}
                 className={TALL_TEXTAREA_FIELD_CLASS}
-                placeholder="Share why your audience is a fit and how you would position FLYR."
+                placeholder="Share why your audience is a fit and how you would position WolfGrid."
                 minLength={20}
                 required
               />

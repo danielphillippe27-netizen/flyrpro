@@ -59,7 +59,7 @@ test('returns pending when no snapshot exists', async () => {
     campaignId: 'campaign-1',
     snapshot: null,
     campaign: { ...campaign, provision_status: 'pending' },
-    baseUrl: 'https://www.flyrpro.app',
+    baseUrl: 'https://wolfgrid.app',
     stateCursor: 'cursor',
   });
 
@@ -80,7 +80,7 @@ test('normalizes Diamond buildings, addresses, and parcels', async () => {
       promote_ids: { buildings: 'building_id', addresses: 'address_id', parcels: 'parcel_id' },
     }),
     campaign,
-    baseUrl: 'https://www.flyrpro.app',
+    baseUrl: 'https://wolfgrid.app',
     stateCursor: 'cursor',
   });
 
@@ -88,7 +88,7 @@ test('normalizes Diamond buildings, addresses, and parcels', async () => {
   assertEqual(result.provider, 'diamond');
   assertEqual(result.buildings_render_mode, 'geojson');
   assertEqual(result.layers.buildings?.kind, 'geojson');
-  assertEqual(result.layers.buildings?.url, 'https://www.flyrpro.app/api/campaigns/campaign-1/buildings');
+  assertEqual(result.layers.buildings?.url, 'https://wolfgrid.app/api/campaigns/campaign-1/buildings');
   assertEqual(result.layers.buildings?.vectorTileUrlTemplate, null);
   assertEqual(result.pmtiles_url, null);
   assertTrue(result.layers.addresses?.vectorTileUrlTemplate);
@@ -110,7 +110,7 @@ test('does not depend on Bedrock building counts', async () => {
       buildings_count: 0,
     },
     campaign,
-    baseUrl: 'https://www.flyrpro.app',
+    baseUrl: 'https://wolfgrid.app',
     stateCursor: 'cursor',
   });
 
@@ -134,7 +134,7 @@ test('keeps US Bedrock PMTiles as scoped building source', async () => {
       source_layers: { buildings: 'buildings', addresses: 'addresses', parcels: 'parcels' },
     }),
     campaign: { ...campaign, region: 'FL' },
-    baseUrl: 'https://www.flyrpro.app',
+    baseUrl: 'https://wolfgrid.app',
     stateCursor: 'cursor',
   });
 
@@ -146,7 +146,7 @@ test('keeps US Bedrock PMTiles as scoped building source', async () => {
   );
   assertEqual(
     result.layers.buildings?.url,
-    'https://www.flyrpro.app/api/campaigns/campaign-1/buildings'
+    'https://wolfgrid.app/api/campaigns/campaign-1/buildings'
   );
   assertEqual(result.buildings_render_mode, 'geojson');
   assertTrue(result.layers.addresses);
@@ -166,7 +166,7 @@ test('normalizes Australia Bedrock PMTiles for GeoJSON rendering', async () => {
       promote_ids: { buildings: 'building_id', addresses: 'address_detail_pid' },
     }),
     campaign: { ...campaign, region: 'AU' },
-    baseUrl: 'https://www.flyrpro.app',
+    baseUrl: 'https://wolfgrid.app',
     stateCursor: 'cursor',
   });
 
@@ -190,7 +190,7 @@ test('normalizes New Zealand Bedrock PMTiles with parcels for GeoJSON rendering'
       source_layers: { buildings: 'buildings', addresses: 'addresses', parcels: 'parcels' },
     }),
     campaign: { ...campaign, region: 'NZ' },
-    baseUrl: 'https://www.flyrpro.app',
+    baseUrl: 'https://wolfgrid.app',
     stateCursor: 'cursor',
   });
 
@@ -214,7 +214,7 @@ test('normalizes South Africa Bedrock PMTiles for GeoJSON rendering', async () =
       source_layers: { buildings: 'buildings', addresses: 'addresses' },
     }),
     campaign: { ...campaign, region: 'ZA' },
-    baseUrl: 'https://www.flyrpro.app',
+    baseUrl: 'https://wolfgrid.app',
     stateCursor: 'cursor',
   });
 
@@ -241,7 +241,7 @@ test('normalizes UK Bedrock buildings and addresses without parcels', async () =
       prefix: 'bedrock/uk/current',
     },
     campaign: { ...campaign, region: 'GB' },
-    baseUrl: 'https://www.flyrpro.app',
+    baseUrl: 'https://wolfgrid.app',
     stateCursor: 'cursor',
   });
 

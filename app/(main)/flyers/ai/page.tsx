@@ -143,7 +143,7 @@ function AIFlyerContent() {
 
   const handleSelectDesign = (designId: string) => {
     setSelectedDesignId(designId);
-    // TODO: Load design into FLYR editor
+    // TODO: Load design into WolfGrid editor
     // For now, just log; later we'll navigate to the editor
     console.log('Selected design', designId);
   };
@@ -548,7 +548,7 @@ Campaign Details:
                 <div className="flex gap-2">
                   <Button
                     onClick={() => {
-                      // TODO: Load image into FLYR editor
+                      // TODO: Load image into WolfGrid editor
                       console.log('Loading image into editor:', flyerImageUrl);
                     }}
                     className="flex-1"
@@ -643,7 +643,7 @@ Campaign Details:
               ))}
             </div>
             <p className="text-sm text-muted-foreground text-center mt-4">
-              Next step: load this into the FLYR editor (to be implemented).
+              Next step: load this into the WolfGrid editor (to be implemented).
             </p>
           </div>
         )}

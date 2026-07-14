@@ -716,14 +716,14 @@ function OnboardingContent() {
       priceLabel: '$0',
       priceSuffix: '',
       billingLabel: 'No credit card required.',
-      description: '1 free campaign to build your first map and try FLYR.',
+      description: '1 free campaign to build your first map and try WolfGrid.',
       features: ['1 free campaign', 'Campaign planning', 'Route preview', 'Lead follow-up'],
       buttonLabel: 'Start free',
       showLaunchPricing: false,
     },
     {
       id: 'simple-pro',
-      title: 'FLYR Pro',
+      title: 'WolfGrid',
       seatCount: selectedSeatCount,
       priceLabel: formatPlanPrice(seatPricing.seatMonthlyDisplay, billingCurrency),
       priceSuffix: '/seat/month',
@@ -1409,12 +1409,12 @@ function OnboardingContent() {
           : 'Build your first 3D prospecting map'
         : 'Help us personalize your experience'
       : step === 2
-        ? 'How will you use FLYR?'
+        ? 'How will you use WolfGrid?'
         : step === 3
           ? 'Set up your workspace'
           : step === 4
             ? 'Ambassador referral code'
-            : 'Reach your potential with FLYR';
+            : 'Reach your potential with WolfGrid';
 
   const subheading =
     step === 1
@@ -1444,7 +1444,7 @@ function OnboardingContent() {
   if (isResumeCompletion && (loading || !authSessionChecked || pendingResumeDraft)) {
     return (
       <div className="min-h-screen bg-white flex flex-col items-center justify-center p-6">
-        <p className="text-[#6f7480]">Opening FLYR...</p>
+        <p className="text-[#6f7480]">Opening WolfGrid...</p>
       </div>
     );
   }
@@ -1506,11 +1506,11 @@ function OnboardingContent() {
                   : 'Exclusive offer'}
             </p>
             <p className="mt-1 text-lg font-bold text-[#17181c]">
-              {isSalespersonOnboarding ? 'Set up your FLYR sales workspace' : 'Exclusive included campaign unlocked'}
+              {isSalespersonOnboarding ? 'Set up your WolfGrid sales workspace' : 'Exclusive included campaign unlocked'}
             </p>
             <p className="mt-1 text-sm text-[#6f7480]">
               {isSalespersonOnboarding
-                ? 'Create your account with the invited email. Your workspace will be nested under FLYR / Salespeople.'
+                ? 'Create your account with the invited email. Your workspace will be nested under WolfGrid / Salespeople.'
                 : hideExclusiveStep1Demo
                   ? 'Finish onboarding to activate your included workspace campaign.'
                   : 'Finish onboarding to activate your included workspace campaign and watch the demo if you have not already.'}

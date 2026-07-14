@@ -30,7 +30,7 @@ export default function GlobalError({
               <AlertTriangle className="h-6 w-6" aria-hidden="true" />
             </div>
             <div className="mb-6 space-y-3">
-              <p className="text-sm font-semibold uppercase tracking-wide text-destructive">FLYR</p>
+              <p className="text-sm font-semibold uppercase tracking-wide text-destructive">WolfGrid</p>
               <h1 className="text-2xl font-semibold tracking-tight">Something went wrong</h1>
               <p className="text-sm leading-6 text-muted-foreground">
                 An unexpected error occurred. Please refresh the page or contact support if the

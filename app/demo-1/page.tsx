@@ -19,17 +19,17 @@ const DIALER_VIDEO_CTA_AT_SECONDS =
     : 85;
 
 export const metadata: Metadata = {
-  title: 'FLYR: Real estate team demo',
-  description: 'Watch the FLYR demo and start with one campaign included. No credit card.',
+  title: 'WolfGrid: Real estate team demo',
+  description: 'Watch the WolfGrid demo and start with one campaign included. No credit card.',
   openGraph: {
-    title: 'FLYR: Real estate team demo',
+    title: 'WolfGrid: Real estate team demo',
     description: 'Watch the demo and start with one campaign included. No credit card.',
-    url: 'https://www.flyrpro.app/demo-1',
+    url: 'https://wolfgrid.app/demo-1',
     images: ['/opengraph-image'],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'FLYR: Real estate team demo',
+    title: 'WolfGrid: Real estate team demo',
     description: 'Watch the demo and start with one campaign included. No credit card.',
     images: ['/twitter-image'],
   },
@@ -82,9 +82,9 @@ export default async function DemoOnePage({ searchParams }: DemoOnePageProps) {
       videoUid={DIALER_STREAM_VIDEO_UID}
       posterUrl={process.env.NEXT_PUBLIC_DIALER_STREAM_POSTER_URL}
       onboardingHref={await buildOnboardingHref(searchParams)}
-      primaryCtaLabel="Create FREE FLYR Map"
+      primaryCtaLabel="Create FREE WolfGrid Map"
       founderCallHref={FOUNDER_CALL_HREF}
-      endCtaEyebrow="Try FLYR for free today"
+      endCtaEyebrow="Try WolfGrid for free today"
       endCtaTitle="Create your first 3D prospecting map"
       showFounderCallButton={false}
       redirectAtSeconds={DIALER_VIDEO_CTA_AT_SECONDS}

@@ -81,7 +81,7 @@ export function DialerVideoLanding({
   videoUid,
   posterUrl,
   videoOrientation = 'landscape',
-  videoTitle = 'FLYR power dialer demo',
+  videoTitle = 'WolfGrid power dialer demo',
   onboardingHref,
   primaryCtaLabel = 'Start with one campaign included',
   founderCallHref,
@@ -324,9 +324,7 @@ export function DialerVideoLanding({
     return (
       <main className="min-h-screen bg-zinc-950 px-5 py-8 text-white md:px-8">
         <div className="mx-auto flex max-w-5xl flex-col gap-8">
-          <Link href="/" className="text-4xl font-black leading-none tracking-tight text-red-500">
-            FLYR
-          </Link>
+          <Link href="/" className="text-4xl font-black leading-none tracking-tight text-red-500">WolfGrid</Link>
           <section className="rounded-lg border border-white/10 bg-white/[0.04] p-6">
             <p className="text-sm font-semibold uppercase tracking-[0.18em] text-red-300">
               Power dialer video

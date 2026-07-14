@@ -112,7 +112,7 @@ const VALID_DISPOSITIONS = new Set<DiallerLeadDisposition>([
   'not_now',
   'dnc',
 ]);
-const FALLBACK_PUBLIC_ORIGIN = 'https://www.flyrpro.app';
+const FALLBACK_PUBLIC_ORIGIN = 'https://wolfgrid.app';
 const DIALER_DEMO_VIDEO_PATH = '/demo-1';
 const LISTING_DEMO_VIDEO_PATH = '/demo-2';
 
@@ -219,7 +219,7 @@ function escapeHtml(value: string): string {
 }
 
 function formatDemoSenderName(salesperson: SalespersonReferralRow | null, userEmail: string | null): string {
-  return cleanText(salesperson?.full_name) || cleanText(userEmail).split('@')[0] || 'FLYR';
+  return cleanText(salesperson?.full_name) || cleanText(userEmail).split('@')[0] || 'WolfGrid';
 }
 
 function parseUuidList(value: string | null | undefined): string[] {
@@ -239,8 +239,8 @@ function normalizePublicOrigin(value: string | null | undefined): string | null 
   try {
     const parsed = new URL(cleaned.startsWith('http') ? cleaned : `https://${cleaned}`);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
-    if (parsed.hostname.toLowerCase() === 'flyrpro.app') {
-      parsed.hostname = 'www.flyrpro.app';
+    if (parsed.hostname.toLowerCase() === 'wolfgrid.app') {
+      parsed.hostname = 'wolfgrid.app';
     }
     return parsed.origin;
   } catch {
@@ -520,7 +520,7 @@ function buildSoloInterestedLinkText(lead: DiallerLead, demoUrl: string): string
     '',
     demoUrl,
     '',
-    'Take a look when you get the chance. It shows how an agent can use FLYR around listings, follow-up, and field prospecting.',
+    'Take a look when you get the chance. It shows how an agent can use WolfGrid around listings, follow-up, and field prospecting.',
     '',
     'If you have any questions at all, just text or call me.',
     '',
@@ -542,7 +542,7 @@ function buildBrokerageInterestedLinkText(params: {
     '',
     'Great connecting with you.',
     '',
-    'Here are the quick FLYR links for your brokerage:',
+    'Here are the quick WolfGrid links for your brokerage:',
     '',
     `Teams demo: ${params.teamDemoUrl}`,
     `Individual agent listing demo: ${params.listingDemoUrl}`,
@@ -609,7 +609,7 @@ function buildBrokerageDemoEmailBody(params: {
     '',
     'It was great connecting with you.',
     '',
-    'I wanted to send over two quick FLYR demos that might be useful for your brokerage:',
+    'I wanted to send over two quick WolfGrid demos that might be useful for your brokerage:',
     '',
     `Demo 1 - Teams: ${params.teamDemoUrl}`,
     `Demo 2 - Individual Agent Listing: ${params.listingDemoUrl}`,
@@ -638,11 +638,11 @@ function buildSoloDemoEmailBody(params: {
     '',
     'It was great connecting with you.',
     '',
-    'Here is the quick FLYR listing demo I mentioned:',
+    'Here is the quick WolfGrid listing demo I mentioned:',
     '',
     params.demoUrl,
     '',
-    'It shows how an individual agent can use FLYR around listings, follow-up, and field prospecting.',
+    'It shows how an individual agent can use WolfGrid around listings, follow-up, and field prospecting.',
     '',
     'Reply here with any questions and I will get back to you.',
     '',
@@ -659,11 +659,11 @@ function buildDemoEmailContent(
 ): { subject: string; text: string; html: string } {
   const firstName = cleanText(lead.name).split(/\s+/)[0];
   const greetingName = firstName || 'there';
-  const subject = cleanText(overrides?.subject) || 'Quick FLYR demo';
+  const subject = cleanText(overrides?.subject) || 'Quick WolfGrid demo';
   const text = cleanText(overrides?.body) || [
     `Hey ${greetingName},`,
     '',
-    `It was great connecting with you. Here is the quick FLYR demo I mentioned:`,
+    `It was great connecting with you. Here is the quick WolfGrid demo I mentioned:`,
     '',
     demoUrl,
     '',
@@ -695,7 +695,7 @@ function buildDemoEmailContent(
     <div style="margin:0;padding:28px 18px;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#111827;">
       <div style="max-width:580px;margin:0 auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;">
         <div style="padding:24px 28px 14px;border-bottom:1px solid #e5e7eb;">
-          <div style="font-size:26px;line-height:1;font-weight:800;color:#111827;">FLYR</div>
+          <div style="font-size:26px;line-height:1;font-weight:800;color:#111827;">WolfGrid</div>
           <h1 style="margin:12px 0 0;font-size:22px;line-height:1.25;color:#111827;font-weight:700;">Quick demo</h1>
         </div>
         <div style="padding:24px 28px;">
@@ -842,7 +842,7 @@ async function sendDemoEmail(
     }
   }
   const content = buildDemoEmailContent(lead, demo.url, senderName, {
-    subject: overrides?.subject ?? (audience === 'brokerage' ? 'Two quick FLYR demos for your agents' : audience === 'solo' ? 'Quick FLYR listing demo' : null),
+    subject: overrides?.subject ?? (audience === 'brokerage' ? 'Two quick WolfGrid demos for your agents' : audience === 'solo' ? 'Quick WolfGrid listing demo' : null),
     body: overrides?.body ?? fallbackBody,
   });
   const resend = new Resend(apiKey);
@@ -958,7 +958,7 @@ async function sendInterestedLink(
 
   if (insertError) {
     console.error('[dialer/leads] failed to save interested link text', insertError);
-    return 'Demo sent, but FLYR could not save the text record.';
+    return 'Demo sent, but WolfGrid could not save the text record.';
   }
 
   return demo.referralCode

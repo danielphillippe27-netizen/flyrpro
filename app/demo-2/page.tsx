@@ -11,17 +11,17 @@ const DEMO_TWO_STREAM_VIDEO_UID =
 const DEMO_TWO_CTA_AT_SECONDS = 77;
 
 export const metadata: Metadata = {
-  title: 'FLYR: Realtor Demo',
-  description: 'Watch the FLYR individual agent listing demo and start with one campaign included. No credit card.',
+  title: 'WolfGrid: Realtor Demo',
+  description: 'Watch the WolfGrid individual agent listing demo and start with one campaign included. No credit card.',
   openGraph: {
-    title: 'FLYR: Realtor Demo',
+    title: 'WolfGrid: Realtor Demo',
     description: 'Watch the individual agent listing demo and start with one campaign included. No credit card.',
-    url: 'https://www.flyrpro.app/demo-2',
+    url: 'https://wolfgrid.app/demo-2',
     images: ['/opengraph-image'],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'FLYR: Realtor Demo',
+    title: 'WolfGrid: Realtor Demo',
     description: 'Watch the individual agent listing demo and start with one campaign included. No credit card.',
     images: ['/twitter-image'],
   },
@@ -72,7 +72,7 @@ export default async function DemoTwoPage({ searchParams }: DemoTwoPageProps) {
       videoUid={DEMO_TWO_STREAM_VIDEO_UID}
       posterUrl={process.env.NEXT_PUBLIC_DEMO_TWO_STREAM_POSTER_URL}
       videoOrientation="portrait"
-      videoTitle="FLYR individual agent listing demo"
+      videoTitle="WolfGrid individual agent listing demo"
       redirectAtSeconds={DEMO_TWO_CTA_AT_SECONDS}
       mutedAutoplay={false}
       onboardingHref={await buildOnboardingHref(searchParams)}

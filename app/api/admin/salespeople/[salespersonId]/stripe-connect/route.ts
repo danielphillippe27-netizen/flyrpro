@@ -108,7 +108,7 @@ export async function POST(
     });
     const businessProfile = buildConnectBusinessProfilePrefill({
       origin: request.nextUrl.origin,
-      productDescription: 'FLYR direct sales commissions and salesperson payouts',
+      productDescription: 'WolfGrid direct sales commissions and salesperson payouts',
     });
 
     const createAccount = async () => {

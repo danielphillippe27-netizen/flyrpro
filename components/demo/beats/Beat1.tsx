@@ -48,8 +48,7 @@ export function Beat1({ copy, center }: Beat1Props) {
 
   return (
     <section id="b1">
-      <div className="wordmark">
-        FLYR<b>PRO</b>
+      <div className="wordmark">WolfGrid<b>PRO</b>
       </div>
       <div className="coords" id="coords">
         {coords.split('\n').map((line, index) => (

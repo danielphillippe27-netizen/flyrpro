@@ -46,7 +46,7 @@ export default function MainError({
       <aside className="hidden w-16 shrink-0 border-r border-border bg-sidebar px-2 py-3 md:flex md:flex-col md:items-center md:gap-3">
         <Link
           href="/home"
-          aria-label="FLYR dashboard"
+          aria-label="WolfGrid dashboard"
           className="mb-2 flex h-9 w-9 items-center justify-center rounded-md bg-red-500 text-sm font-bold text-white"
         >
           F
@@ -72,7 +72,7 @@ export default function MainError({
             <AlertTriangle className="h-6 w-6" aria-hidden="true" />
           </div>
           <div className="mb-6 space-y-3">
-            <p className="text-sm font-semibold uppercase tracking-wide text-destructive">FLYR</p>
+            <p className="text-sm font-semibold uppercase tracking-wide text-destructive">WolfGrid</p>
             <h1 className="text-2xl font-semibold tracking-tight">Something went wrong</h1>
             <p className="text-sm leading-6 text-muted-foreground">
               An unexpected error occurred. Please try again or return to your dashboard.

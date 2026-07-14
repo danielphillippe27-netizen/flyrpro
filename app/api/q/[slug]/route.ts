@@ -55,7 +55,7 @@ export async function GET(
         );
       }
 
-      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://flyrpro.app';
+      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://wolfgrid.app';
       redirectUrl = `${baseUrl}/l/${landingPage.slug}`;
 
       // Call increment_landing_page_views RPC (non-blocking)

@@ -37,13 +37,13 @@ function DownloadIosContent() {
   const content =
     stage === 'post-onboarding'
       ? {
-          title: 'Download the FLYR iPhone app',
+          title: 'Download the WolfGrid iPhone app',
           description: 'Your onboarding is complete. Install the app to start knocking doors, tracking activity, and working leads on the go.',
           primaryCta: 'Download on the App Store',
-          secondaryCta: 'Continue to FLYR on web',
+          secondaryCta: 'Continue to WolfGrid on web',
         }
       : {
-          title: 'Get FLYR on iPhone',
+          title: 'Get WolfGrid on iPhone',
           description: 'Download the app for the best experience, then continue setup on the web.',
           primaryCta: 'Download on the App Store',
           secondaryCta: 'Continue setup on web',
@@ -55,8 +55,8 @@ function DownloadIosContent() {
         <div className="flex flex-col items-center text-center space-y-6">
           <div className="flex shrink-0 justify-center px-2">
             <Image
-              src="/flyr-download-icon.png"
-              alt="FLYR"
+              src="/wolfgrid-icon-1024.png"
+              alt="WolfGrid"
               width={160}
               height={160}
               className="h-36 w-auto max-w-[200px] object-contain"

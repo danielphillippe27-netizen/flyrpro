@@ -267,7 +267,7 @@ export async function POST(
     if (insertError) {
       console.error('[dialer/lead-sms] failed to save text follow-up', insertError);
       return NextResponse.json(
-        { followup: null, warning: 'Text sent, but FLYR could not save the text record.' },
+        { followup: null, warning: 'Text sent, but WolfGrid could not save the text record.' },
         { status: 201 }
       );
     }

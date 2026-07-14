@@ -14,7 +14,7 @@ type DemoMessagePayload = {
   template?: 'default' | 'brokerage';
 };
 
-const FALLBACK_PUBLIC_ORIGIN = 'https://www.flyrpro.app';
+const FALLBACK_PUBLIC_ORIGIN = 'https://wolfgrid.app';
 const DEMO_VIDEO_PATH = '/demo-1';
 const LISTING_DEMO_VIDEO_PATH = '/demo-2';
 
@@ -28,8 +28,8 @@ function normalizePublicOrigin(value: string | null | undefined): string | null 
   try {
     const parsed = new URL(cleaned.startsWith('http') ? cleaned : `https://${cleaned}`);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
-    if (parsed.hostname.toLowerCase() === 'flyrpro.app') {
-      parsed.hostname = 'www.flyrpro.app';
+    if (parsed.hostname.toLowerCase() === 'wolfgrid.app') {
+      parsed.hostname = 'wolfgrid.app';
     }
     return parsed.origin;
   } catch {
@@ -80,7 +80,7 @@ function isBrokerageLead(lead: DiallerLead): boolean {
 function buildTextMessage(lead: DiallerLead, repName: string, demoUrl: string): string {
   const firstName = getFirstName(lead.name) || 'there';
   return [
-    `Hey ${firstName}, it's ${repName} with FLYR.`,
+    `Hey ${firstName}, it's ${repName} with WolfGrid.`,
     '',
     `Here's the quick 90-second demo I mentioned: ${demoUrl}`,
     '',
@@ -95,7 +95,7 @@ function buildEmailBody(lead: DiallerLead, repName: string, demoUrl: string): st
     '',
     'It was great connecting with you.',
     '',
-    `Here is the quick 90-second FLYR demo I mentioned: ${demoUrl}`,
+    `Here is the quick 90-second WolfGrid demo I mentioned: ${demoUrl}`,
     '',
     'It shows how teams can automatically track field activity, manage leads, and keep agents accountable from one place.',
     '',
@@ -119,7 +119,7 @@ function buildBrokerageEmailBody(
     '',
     'It was great connecting with you.',
     '',
-    'I wanted to send over two quick FLYR demos that might be useful for your brokerage:',
+    'I wanted to send over two quick WolfGrid demos that might be useful for your brokerage:',
     '',
     `Demo 1 - Teams: ${teamDemoUrl}`,
     `Demo 2 - Individual Agent Listing: ${listingDemoUrl}`,
@@ -241,8 +241,8 @@ export async function POST(
     demoLinkToken: trackedLink?.token ?? null,
     textBody: buildTextMessage(diallerLead, repName, demoUrl),
     emailSubject: template === 'brokerage'
-      ? 'Two quick FLYR demos for your agents'
-      : 'Quick FLYR demo',
+      ? 'Two quick WolfGrid demos for your agents'
+      : 'Quick WolfGrid demo',
     emailBody: template === 'brokerage'
       ? buildBrokerageEmailBody(diallerLead, repName, demoUrl, listingDemoUrl, signupUrl.toString())
       : buildEmailBody(diallerLead, repName, demoUrl),

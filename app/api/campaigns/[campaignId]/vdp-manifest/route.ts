@@ -143,7 +143,7 @@ export async function GET(
     };
 
     // Generate CSV rows
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_BASE_URL || 'https://flyrpro.app';
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_BASE_URL || 'https://wolfgrid.app';
     const rows = addresses.map((address, index) => {
       // qr_url for the CSV: use the purl column which contains the exact
       // URL already encoded in the printed QR image (/api/scan?id={address_id}).

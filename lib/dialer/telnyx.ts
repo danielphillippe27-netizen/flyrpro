@@ -91,7 +91,7 @@ function getTelnyxErrorMessage(payload: unknown, fallback: string): string {
   const error = envelope.errors?.[0];
   const message = error?.detail?.trim() || error?.title?.trim() || fallback;
   if (isTelnyxAlphanumericSenderError(payload, fallback)) {
-    return 'Telnyx needs a registered alphanumeric sender ID on this messaging profile before FLYR can text this destination. Add it in Telnyx, then set TELNYX_ALPHANUMERIC_SENDER_ID.';
+    return 'Telnyx needs a registered alphanumeric sender ID on this messaging profile before WolfGrid can text this destination. Add it in Telnyx, then set TELNYX_ALPHANUMERIC_SENDER_ID.';
   }
   return message;
 }
@@ -185,7 +185,7 @@ export function buildPublicTelnyxWebhookUrl(request: NextRequest, path: string):
     normalizeBaseUrl(process.env.APP_BASE_URL) ||
     normalizeBaseUrl(process.env.VERCEL_URL) ||
     normalizeBaseUrl(request.nextUrl.origin) ||
-    'https://flyrpro.app';
+    'https://wolfgrid.app';
 
   return new URL(path, baseUrl);
 }

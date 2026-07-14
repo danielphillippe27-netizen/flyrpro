@@ -110,7 +110,7 @@ function SettingsPageContent() {
   const [stripeConnectNotice, setStripeConnectNotice] = useState<string | null>(null);
   const [salesEmailHandle, setSalesEmailHandle] = useState('');
   const [salesEmailForwardTo, setSalesEmailForwardTo] = useState('');
-  const [salesEmailDomain, setSalesEmailDomain] = useState('flyr.software');
+  const [salesEmailDomain, setSalesEmailDomain] = useState('wolfgrid.app');
   const [salesAssignedPhoneNumber, setSalesAssignedPhoneNumber] = useState('');
   const [salesPhoneForwardTo, setSalesPhoneForwardTo] = useState('');
   const [salesPhoneNumberStatus, setSalesPhoneNumberStatus] = useState('unassigned');
@@ -288,7 +288,7 @@ function SettingsPageContent() {
         if (cancelled) return;
         setSalesEmailHandle(data.salesperson?.demoEmailHandle ?? '');
         setSalesEmailForwardTo(data.salesperson?.demoEmailReplyTo ?? data.salesperson?.email ?? user?.email ?? '');
-        setSalesEmailDomain(data.salesperson?.demoEmailDomain ?? 'flyr.software');
+        setSalesEmailDomain(data.salesperson?.demoEmailDomain ?? 'wolfgrid.app');
         setSalesAssignedPhoneNumber(data.salesperson?.assignedPhoneNumber ?? '');
         setSalesPhoneForwardTo(data.salesperson?.phoneForwardTo ?? '');
         setSalesPhoneNumberStatus(data.salesperson?.phoneNumberStatus ?? 'unassigned');
@@ -471,7 +471,7 @@ function SettingsPageContent() {
 
       setSalesEmailHandle(data.salesperson?.demoEmailHandle ?? '');
       setSalesEmailForwardTo(data.salesperson?.demoEmailReplyTo ?? data.salesperson?.email ?? user?.email ?? '');
-      setSalesEmailDomain(data.salesperson?.demoEmailDomain ?? 'flyr.software');
+      setSalesEmailDomain(data.salesperson?.demoEmailDomain ?? 'wolfgrid.app');
       setSalesEmailMessage({ type: 'success', text: 'Sales email saved.' });
     } catch (error) {
       setSalesEmailMessage({
@@ -627,7 +627,7 @@ function SettingsPageContent() {
                     <CardTitle>Stripe Connect</CardTitle>
                   </div>
                   <CardDescription>
-                    Set up your payout account for FLYR sales commissions
+                    Set up your payout account for WolfGrid sales commissions
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -649,10 +649,10 @@ function SettingsPageContent() {
                         {salespersonPayoutsReady
                           ? 'Stripe has confirmed your payout account is ready.'
                           : salespersonDetailsSubmitted
-                            ? 'Stripe has your details. FLYR will wait for Stripe to enable payouts before commissions are paid.'
+                            ? 'Stripe has your details. WolfGrid will wait for Stripe to enable payouts before commissions are paid.'
                             : salespersonStripeStarted
                               ? 'Continue Stripe onboarding to finish identity and bank details.'
-                              : 'Connect Stripe so FLYR can pay your salesperson commissions.'}
+                              : 'Connect Stripe so WolfGrid can pay your salesperson commissions.'}
                       </p>
                       <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
                         <div className="flex items-start gap-2">
@@ -701,7 +701,7 @@ function SettingsPageContent() {
                     <CardTitle>Sales email</CardTitle>
                   </div>
                   <CardDescription>
-                    Create your FLYR sender and choose where replies forward
+                    Create your WolfGrid sender and choose where replies forward
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -754,7 +754,7 @@ function SettingsPageContent() {
                     </Button>
                   </div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">
-                    Sends demos from {salesEmailHandle || 'demo'}@{salesEmailDomain}, saves replies in FLYR Inbox, and forwards replies to {salesEmailForwardTo || 'your email'}.
+                    Sends demos from {salesEmailHandle || 'demo'}@{salesEmailDomain}, saves replies in WolfGrid Inbox, and forwards replies to {salesEmailForwardTo || 'your email'}.
                   </p>
                 </CardContent>
               </Card>
@@ -766,7 +766,7 @@ function SettingsPageContent() {
                     <CardTitle>Sales phone</CardTitle>
                   </div>
                   <CardDescription>
-                    Forward calls from your FLYR sales number to your phone
+                    Forward calls from your WolfGrid sales number to your phone
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -810,7 +810,7 @@ function SettingsPageContent() {
                     </Button>
                   </div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">
-                    Status: {salesPhoneNumberStatus}. Incoming calls to {salesAssignedPhoneNumber || 'your assigned FLYR number'} forward to {salesPhoneForwardTo || 'your phone once saved'}.
+                    Status: {salesPhoneNumberStatus}. Incoming calls to {salesAssignedPhoneNumber || 'your assigned WolfGrid number'} forward to {salesPhoneForwardTo || 'your phone once saved'}.
                   </p>
                 </CardContent>
               </Card>
@@ -845,7 +845,7 @@ function SettingsPageContent() {
                       {entitlementError
                         ? 'Could not load plan details.'
                         : entitlement?.isAmbassador
-                        ? 'You have Pro-level access through the FLYR Ambassador Program.'
+                        ? 'You have Pro-level access through the WolfGrid Ambassador Program.'
                         : entitlement?.is_active
                         ? 'You have access to all Pro features'
                         : 'Upgrade to Pro for unlimited QR codes and advanced features'}

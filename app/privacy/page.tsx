@@ -3,7 +3,7 @@ import Link from "next/link";
 
 import { LegalPageLayout } from "@/components/legal/LegalPageLayout";
 
-const EFFECTIVE_DATE = "March 16, 2026";
+const EFFECTIVE_DATE = "July 13, 2026";
 
 const sectionTitleClass = "text-2xl font-bold tracking-tight text-zinc-950";
 const paragraphClass = "text-zinc-700";
@@ -11,16 +11,16 @@ const listClass = "list-disc space-y-2 pl-5 text-zinc-700";
 const linkClass = "font-medium text-red-600 underline underline-offset-4 hover:text-red-700";
 
 export const metadata: Metadata = {
-  title: "Privacy Policy | FLYR",
-  description: "Privacy Policy for FLYR and FLYR Pro.",
+  title: "Privacy Policy | WolfGrid",
+  description: "Privacy Policy for WolfGrid.",
   alternates: {
     canonical: "/privacy",
   },
   openGraph: {
-    title: "Privacy Policy | FLYR",
-    description: "Read the Privacy Policy for FLYR and FLYR Pro.",
-    url: "https://www.flyrpro.app/privacy",
-    siteName: "FLYR",
+    title: "Privacy Policy | WolfGrid",
+    description: "Read the Privacy Policy for WolfGrid.",
+    url: "https://wolfgrid.app/privacy",
+    siteName: "WolfGrid",
     type: "website",
   },
   robots: {
@@ -34,21 +34,21 @@ export default function PrivacyPage() {
     <LegalPageLayout
       currentPage="privacy"
       title="Privacy Policy"
-      description="This Privacy Policy explains how FLYR Pro collects, uses, stores, and shares information when you use our services."
+      description="This Privacy Policy explains how WolfGrid collects, uses, stores, and shares information when you use our services."
       effectiveDate={EFFECTIVE_DATE}
     >
       <section className="space-y-4">
         <h2 className={sectionTitleClass}>Introduction</h2>
         <p className={paragraphClass}>
-          Welcome to FLYR Pro (&quot;we,&quot; &quot;our,&quot; or &quot;us&quot;). We are
+          Welcome to WolfGrid (&quot;we,&quot; &quot;our,&quot; or &quot;us&quot;). We are
           committed to protecting your privacy and ensuring you have a positive experience
           while using our application. This Privacy Policy explains how we collect, use,
-          disclose, and safeguard your information when you use FLYR Pro, a mobile and web
+          disclose, and safeguard your information when you use WolfGrid, a mobile and web
           application designed for real estate agents to track flyer drops, build farming
           campaigns, generate QR codes, and manage leads.
         </p>
         <p className={paragraphClass}>
-          By using FLYR Pro, you agree to the collection and use of information in
+          By using WolfGrid, you agree to the collection and use of information in
           accordance with this policy. If you do not agree with our policies and practices,
           please do not use our application.
         </p>
@@ -58,7 +58,7 @@ export default function PrivacyPage() {
         <h2 className={sectionTitleClass}>Information We Collect</h2>
         <p className={paragraphClass}>
           We collect information that you provide directly to us and information that is
-          automatically collected when you use FLYR Pro.
+          automatically collected when you use WolfGrid.
         </p>
         <ul className={listClass}>
           <li>
@@ -70,8 +70,7 @@ export default function PrivacyPage() {
             use location-based features.
           </li>
           <li>
-            <strong>Product Interaction Data:</strong> Information about how you use FLYR
-            Pro, including features, campaigns, QR codes, and leads.
+            <strong>Product Interaction Data:</strong> Information about how you use WolfGrid, including features, campaigns, QR codes, and leads.
           </li>
           <li>
             <strong>Crash Data:</strong> Technical diagnostics about app crashes and errors.
@@ -119,7 +118,7 @@ export default function PrivacyPage() {
       <section className="space-y-4">
         <h2 className={sectionTitleClass}>Location Data</h2>
         <p className={paragraphClass}>
-          FLYR Pro collects precise location data to provide location-based features,
+          WolfGrid collects precise location data to provide location-based features,
           including:
         </p>
         <ul className={listClass}>
@@ -138,7 +137,7 @@ export default function PrivacyPage() {
       <section className="space-y-4">
         <h2 className={sectionTitleClass}>Contact and Lead Data</h2>
         <p className={paragraphClass}>
-          When you add contacts and leads to FLYR Pro, you are responsible for ensuring you
+          When you add contacts and leads to WolfGrid, you are responsible for ensuring you
           have the permissions needed to collect and store that information.
         </p>
         <ul className={listClass}>
@@ -148,7 +147,7 @@ export default function PrivacyPage() {
           <li>Generate reports and analytics about your pipeline.</li>
         </ul>
         <p className={paragraphClass}>
-          You retain ownership of contact and lead data you add to FLYR Pro. We do not use
+          You retain ownership of contact and lead data you add to WolfGrid. We do not use
           that data for any purpose other than providing the Services.
         </p>
       </section>
@@ -156,7 +155,7 @@ export default function PrivacyPage() {
       <section className="space-y-4">
         <h2 className={sectionTitleClass}>QR Codes and Campaign Data</h2>
         <p className={paragraphClass}>
-          FLYR Pro allows you to generate QR codes and create farming campaigns. We store:
+          WolfGrid allows you to generate QR codes and create farming campaigns. We store:
         </p>
         <ul className={listClass}>
           <li>QR codes you generate, including associated URLs and metadata.</li>
@@ -213,7 +212,7 @@ export default function PrivacyPage() {
       <section className="space-y-4">
         <h2 className={sectionTitleClass}>Cookies</h2>
         <p className={paragraphClass}>
-          FLYR Pro uses minimal cookies and similar technologies. We use essential cookies
+          WolfGrid uses minimal cookies and similar technologies. We use essential cookies
           needed for authentication and core service functionality. We do not use cookies
           for advertising purposes.
         </p>
@@ -254,7 +253,7 @@ export default function PrivacyPage() {
       <section className="space-y-4">
         <h2 className={sectionTitleClass}>Children&apos;s Privacy</h2>
         <p className={paragraphClass}>
-          FLYR Pro is not intended for children under 13, or the applicable age of consent
+          WolfGrid is not intended for children under 13, or the applicable age of consent
           in your jurisdiction. We do not knowingly collect personal information from
           children under that age.
         </p>
@@ -276,17 +275,17 @@ export default function PrivacyPage() {
           data practices, contact us:
         </p>
         <div className="rounded-3xl border border-zinc-200 bg-zinc-50 p-5 text-zinc-700">
-          <p className="font-semibold text-zinc-950">FLYR Pro</p>
+          <p className="font-semibold text-zinc-950">WolfGrid</p>
           <p>
             Email:{" "}
-            <a href="mailto:privacy@flyrpro.app" className={linkClass}>
-              privacy@flyrpro.app
+            <a href="mailto:privacy@wolfgrid.app" className={linkClass}>
+              privacy@wolfgrid.app
             </a>
           </p>
           <p>
             Website:{" "}
-            <a href="https://www.flyrpro.app" className={linkClass}>
-              www.flyrpro.app
+            <a href="https://wolfgrid.app" className={linkClass}>
+              wolfgrid.app
             </a>
           </p>
           <p>

@@ -58,10 +58,10 @@ export const OFFER_TEMPLATES: OfferTemplate[] = [
   },
   {
     id: 'flyr-partner-free-forever',
-    label: 'FLYR Partner Free Forever',
-    title: 'FLYR Partner Offer',
+    label: 'WolfGrid Partner Free Forever',
+    title: 'WolfGrid Partner Offer',
     message:
-      'Private FLYR Partner access for your team. Complete onboarding through this invite and your workspace will be set up with FLYR Pro free forever.',
+      'Private WolfGrid Partner access for your team. Complete onboarding through this invite and your workspace will be set up with WolfGrid free forever.',
     ctaLabel: 'Claim free partner access',
   },
   {
@@ -93,7 +93,7 @@ export const OFFER_TEMPLATES: OfferTemplate[] = [
     label: 'Just Listed DM Template',
     title: 'Use this listing to win the neighbourhood.',
     message:
-      "You've already got the listing.\n\nNow use FLYR to turn it into more exposure, more conversations, and your next client.\n\nUse flyers and doorknocking around your listing to create local buzz, uncover buyers, and meet nearby sellers before this window closes.",
+      "You've already got the listing.\n\nNow use WolfGrid to turn it into more exposure, more conversations, and your next client.\n\nUse flyers and doorknocking around your listing to create local buzz, uncover buyers, and meet nearby sellers before this window closes.",
     ctaLabel: 'See the listing play',
   },
 ];
@@ -122,7 +122,7 @@ export function isPartnerOfferTeamExclusiveOnboarding(
 
   const title = offerTitle.trim();
   if (title === PARTNER_OFFER_EMAIL_SUBJECT_SENTINEL) return true;
-  if (/^FLYR is Built for\b/i.test(title)) return true;
+  if (/^WolfGrid is Built for\b/i.test(title)) return true;
   return false;
 }
 
@@ -141,7 +141,7 @@ export function isFlyrPartnerFreeForeverOffer(
   offerMessage: string | null | undefined
 ): boolean {
   const content = `${offerTitle}\n${offerMessage ?? ''}`;
-  return /FLYR Partner Offer/i.test(offerTitle) || /free forever/i.test(content);
+  return /WolfGrid Partner Offer/i.test(offerTitle) || /free forever/i.test(content);
 }
 
 export function formatLongDate(value: string): string {
@@ -210,13 +210,13 @@ export function buildOutreachCopy(offer: PartnerOffer) {
     /team/i.test(offer.offerTitle) || /30\s*day\s*challenge/i.test(offer.offerTitle);
 
   const emailSubject = justListedDm
-    ? `Just listed: a FLYR listing play for ${partner}`
-    : `Exclusive FLYR Partner Offer for ${partner}`;
+    ? `Just listed: a WolfGrid listing play for ${partner}`
+    : `Exclusive WolfGrid Partner Offer for ${partner}`;
   const emailBody = justListedDm
     ? [
         `Hi ${recipient},`,
         '',
-        `Just listed: I made a FLYR listing play for ${partner}.`,
+        `Just listed: I made a WolfGrid listing play for ${partner}.`,
         `Open it here: ${offer.shareUrl}`,
         '',
         `${offer.offerMessage || 'Use this listing to create more local exposure, more conversations, and more seller opportunities while the listing is fresh.'}`,
@@ -229,7 +229,7 @@ export function buildOutreachCopy(offer: PartnerOffer) {
     : [
         `Hi ${recipient},`,
         '',
-        `I created a private FLYR offer page for ${partner}.`,
+        `I created a private WolfGrid offer page for ${partner}.`,
         `This link is invite-only and not public: ${offer.shareUrl}`,
         '',
         `${offer.offerMessage || 'You can review the details and next steps on that page.'}`,
@@ -241,18 +241,18 @@ export function buildOutreachCopy(offer: PartnerOffer) {
       ].join('\n');
 
   const smsText = justListedDm
-    ? `Hey ${recipient} — just listed. Here is the FLYR listing play for ${partner}: ${offer.shareUrl} (expires ${expires}).`
-    : `Hey ${recipient} — here is your private FLYR offer link for ${partner}: ${offer.shareUrl} (expires ${expires}).`;
+    ? `Hey ${recipient} — just listed. Here is the WolfGrid listing play for ${partner}: ${offer.shareUrl} (expires ${expires}).`
+    : `Hey ${recipient} — here is your private WolfGrid offer link for ${partner}: ${offer.shareUrl} (expires ${expires}).`;
 
   const igDmIntroText = justListedDm
     ? `Hey ${recipient}! Congrats on the listing.`
-    : `Hey ${recipient}! I made an invite-only FLYR offer page for ${partner}. Want me to send the link?`;
+    : `Hey ${recipient}! I made an invite-only WolfGrid offer page for ${partner}. Want me to send the link?`;
 
   const igDmReplyText = justListedDm ? 'Thank you!' : '';
 
   const igDmLinkText = justListedDm
-    ? `Use FLYR to flyer the area, knock the surrounding homes, and turn listing attention into your next seller and buyer opportunities.\n\nI've attached one included campaign and a demo on how it works: ${offer.shareUrl}`
-    : `Perfect. Here is your private FLYR offer link for ${partner}: ${offer.shareUrl}\n\nIt expires ${expires}.`;
+    ? `Use WolfGrid to flyer the area, knock the surrounding homes, and turn listing attention into your next seller and buyer opportunities.\n\nI've attached one included campaign and a demo on how it works: ${offer.shareUrl}`
+    : `Perfect. Here is your private WolfGrid offer link for ${partner}: ${offer.shareUrl}\n\nIt expires ${expires}.`;
 
   const igDmText = justListedDm
     ? `${igDmIntroText}\n\n${igDmReplyText}\n\n${igDmLinkText}`
@@ -261,14 +261,14 @@ export function buildOutreachCopy(offer: PartnerOffer) {
   const teamOfferEmailHtml = includeArcadeEmbed
     ? [
         `<p>Hi ${recipient},</p>`,
-        `<p>I created a private FLYR offer page for ${partner}. This link is invite-only and not public: <a href="${offer.shareUrl}" target="_blank" rel="noopener noreferrer">${offer.shareUrl}</a></p>`,
+        `<p>I created a private WolfGrid offer page for ${partner}. This link is invite-only and not public: <a href="${offer.shareUrl}" target="_blank" rel="noopener noreferrer">${offer.shareUrl}</a></p>`,
         `<p>${offer.offerMessage || 'You can review the details and next steps on that page.'}</p>`,
         `<p><strong>Offer expires:</strong> ${expires}</p>`,
         `<div style="margin-top:16px;margin-bottom:16px;">`,
         `<div style="position: relative; padding-bottom: calc(64.94708994708994% + 41px); height: 0; width: 100%;">`,
         `<iframe`,
         `  src="https://demo.arcade.software/nbvH4JKdrqCGt8a0O8pi?embed&embed_mobile=tab&embed_desktop=inline&show_copy_link=true"`,
-        `  title="FLYR: Team Prospecting Dashboard"`,
+        `  title="WolfGrid: Team Prospecting Dashboard"`,
         `  frameborder="0"`,
         `  loading="lazy"`,
         `  allowfullscreen`,

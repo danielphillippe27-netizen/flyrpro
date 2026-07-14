@@ -1,6 +1,6 @@
 import { Resend } from 'resend';
 
-const DEFAULT_APP_ORIGIN = 'https://flyrpro.app';
+const DEFAULT_APP_ORIGIN = 'https://wolfgrid.app';
 const PERSONAL_INBOX_DOMAINS = new Set([
   'aol.com',
   'gmail.com',
@@ -84,7 +84,7 @@ function getInviteFromEmailValidationError(): string | null {
   const address = extractEmailAddress(from);
 
   if (!address) {
-    return 'Invite was created, but email was not sent. Set RESEND_FROM_EMAIL to a sender on your verified domain (e.g. FLYR <noreply@yourdomain.com>).';
+    return 'Invite was created, but email was not sent. Set RESEND_FROM_EMAIL to a sender on your verified domain (e.g. WolfGrid <noreply@yourdomain.com>).';
   }
 
   const domain = address.split('@')[1]?.trim().toLowerCase();
@@ -93,7 +93,7 @@ function getInviteFromEmailValidationError(): string | null {
   }
 
   if (PERSONAL_INBOX_DOMAINS.has(domain)) {
-    return `Invite was created, but email was not sent. Resend cannot send from personal inboxes (${address}). Verify your domain at resend.com/domains, then set the sender to an address on that domain (for example FLYR <invites@yourdomain.com>).`;
+    return `Invite was created, but email was not sent. Resend cannot send from personal inboxes (${address}). Verify your domain at resend.com/domains, then set the sender to an address on that domain (for example WolfGrid <invites@yourdomain.com>).`;
   }
 
   return null;
@@ -200,11 +200,11 @@ export async function sendAmbassadorStripeOnboardingEmail(
     ? `Your ambassador referral code is ${input.referralCode}.`
     : 'Your ambassador referral code will be shared separately.';
   const text = [
-    'Complete your FLYR ambassador payout setup',
+    'Complete your WolfGrid ambassador payout setup',
     '',
     `Hi ${firstName},`,
     '',
-    'Your FLYR ambassador application has been approved.',
+    'Your WolfGrid ambassador application has been approved.',
     'Please complete Stripe onboarding so Stripe can securely collect your payout and identity details.',
     referralLine,
     '',
@@ -217,12 +217,12 @@ export async function sendAmbassadorStripeOnboardingEmail(
     <div style="margin:0;padding:32px 18px;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#0f172a;">
       <div style="max-width:580px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:14px;overflow:hidden;">
         <div style="padding:28px 30px 18px;border-bottom:1px solid #e2e8f0;">
-          <div style="font-size:28px;line-height:1;font-weight:800;color:#111827;">FLYR</div>
+          <div style="font-size:28px;line-height:1;font-weight:800;color:#111827;">WolfGrid</div>
           <h1 style="margin:14px 0 0;font-size:24px;line-height:1.25;color:#111827;font-weight:700;">Ambassador payout setup</h1>
         </div>
         <div style="padding:28px 30px;">
           <p style="margin:0 0 16px;font-size:15px;line-height:1.65;color:#334155;">Hi ${escapedFirstName},</p>
-          <p style="margin:0 0 16px;font-size:15px;line-height:1.65;color:#334155;">Your FLYR ambassador application has been approved.</p>
+          <p style="margin:0 0 16px;font-size:15px;line-height:1.65;color:#334155;">Your WolfGrid ambassador application has been approved.</p>
           <p style="margin:0 0 22px;font-size:15px;line-height:1.65;color:#334155;">Please complete Stripe onboarding so Stripe can securely collect your payout and identity details.</p>
           <p style="margin:0 0 24px;">
             <a href="${escapedOnboardingUrl}" style="display:inline-block;background:#111827;color:#ffffff;text-decoration:none;padding:13px 20px;border-radius:10px;font-size:15px;font-weight:700;">
@@ -243,7 +243,7 @@ export async function sendAmbassadorStripeOnboardingEmail(
   const { data, error } = await resend.emails.send({
     from,
     to: input.to,
-    subject: 'Complete your FLYR ambassador payout setup',
+    subject: 'Complete your WolfGrid ambassador payout setup',
     html,
     text,
     ...(replyTo ? { replyTo } : {}),
@@ -295,11 +295,11 @@ export async function sendSalespersonInviteEmail(
     : 'Your referral code will be generated after setup.';
 
   const text = [
-    'You have been invited to sell with FLYR',
+    'You have been invited to sell with WolfGrid',
     '',
     `Hi ${firstName},`,
     '',
-    'You have been invited to join the FLYR sales program.',
+    'You have been invited to join the WolfGrid sales program.',
     `${referralLine} Your commission rate is ${commissionLabel}.`,
     '',
     `Complete setup: ${input.onboardingUrl}`,
@@ -311,12 +311,12 @@ export async function sendSalespersonInviteEmail(
     <div style="margin:0;padding:32px 18px;background:#06090f;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#e5e7eb;">
       <div style="max-width:580px;margin:0 auto;background:#11151f;border:1px solid #222938;border-radius:18px;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.45);">
         <div style="padding:30px 30px 22px;border-bottom:1px solid #222938;background:linear-gradient(180deg,#161c29 0%,#11151f 100%);">
-          <div style="font-size:30px;line-height:1;font-weight:800;letter-spacing:.02em;color:#ffffff;">FLYR</div>
+          <div style="font-size:30px;line-height:1;font-weight:800;letter-spacing:.02em;color:#ffffff;">WolfGrid</div>
           <h1 style="margin:12px 0 0;font-size:28px;line-height:1.2;color:#f9fafb;font-weight:700;">Salesperson setup</h1>
         </div>
         <div style="padding:30px;">
           <p style="margin:0 0 16px;font-size:16px;line-height:1.65;color:#c6cfdf;">Hi ${escapedFirstName},</p>
-          <p style="margin:0 0 16px;font-size:16px;line-height:1.65;color:#c6cfdf;">You have been invited to join the FLYR sales program.</p>
+          <p style="margin:0 0 16px;font-size:16px;line-height:1.65;color:#c6cfdf;">You have been invited to join the WolfGrid sales program.</p>
           <p style="margin:0 0 24px;font-size:15px;line-height:1.65;color:#aab4c6;">${escapeHtml(referralLine)} Your commission rate is ${escapeHtml(commissionLabel)}.</p>
           <p style="margin:0 0 24px;">
             <a href="${escapedOnboardingUrl}" style="display:inline-block;background:#ef4444;color:#ffffff;text-decoration:none;padding:13px 22px;border-radius:11px;font-size:15px;font-weight:700;letter-spacing:.01em;">
@@ -337,7 +337,7 @@ export async function sendSalespersonInviteEmail(
   const { data, error } = await resend.emails.send({
     from,
     to: input.to,
-    subject: 'You have been invited to sell with FLYR',
+    subject: 'You have been invited to sell with WolfGrid',
     html,
     text,
     ...(replyTo ? { replyTo } : {}),
@@ -424,7 +424,7 @@ export async function sendSalespersonMessengerEmail(
     <div style="margin:0;padding:32px 18px;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#0f172a;">
       <div style="max-width:580px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;">
         <div style="padding:28px 30px 18px;border-bottom:1px solid #e2e8f0;">
-          <div style="font-size:28px;line-height:1;font-weight:800;color:#111827;">FLYR</div>
+          <div style="font-size:28px;line-height:1;font-weight:800;color:#111827;">WolfGrid</div>
           <h1 style="margin:14px 0 0;font-size:24px;line-height:1.25;color:#111827;font-weight:700;">New Sales Floor message</h1>
         </div>
         <div style="padding:28px 30px;">
@@ -504,7 +504,7 @@ export async function sendWorkspaceInviteEmail(input: WorkspaceInviteEmailInput)
   const roleLabel = input.role === 'admin' ? 'admin' : 'member';
   const previewText = input.previewText?.trim() || '';
   const text = [
-    `${input.subjectPrefix?.trim() ? `${input.subjectPrefix.trim()} ` : ''}Join ${workspaceName} on FLYR`,
+    `${input.subjectPrefix?.trim() ? `${input.subjectPrefix.trim()} ` : ''}Join ${workspaceName} on WolfGrid`,
     '',
     ...(previewText ? [previewText, ''] : []),
     `${input.inviterEmail ?? 'Someone on your team'} invited you to join ${workspaceName} as a ${roleLabel}.`,
@@ -518,7 +518,7 @@ export async function sendWorkspaceInviteEmail(input: WorkspaceInviteEmailInput)
     <div style="margin:0;padding:32px 18px;background:#06090f;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#e5e7eb;">
       <div style="max-width:580px;margin:0 auto;background:#11151f;border:1px solid #222938;border-radius:18px;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.45);">
         <div style="padding:30px 30px 22px;border-bottom:1px solid #222938;background:linear-gradient(180deg,#161c29 0%,#11151f 100%);">
-          <div style="font-size:30px;line-height:1;font-weight:800;letter-spacing:.02em;color:#ffffff;">FLYR</div>
+          <div style="font-size:30px;line-height:1;font-weight:800;letter-spacing:.02em;color:#ffffff;">WolfGrid</div>
           <h1 style="margin:12px 0 0;font-size:28px;line-height:1.2;color:#f9fafb;font-weight:700;">Join ${escapedWorkspaceName}</h1>
         </div>
         <div style="padding:30px;">
@@ -526,7 +526,7 @@ export async function sendWorkspaceInviteEmail(input: WorkspaceInviteEmailInput)
             ? `<p style="margin:0 0 18px;font-size:13px;line-height:1.6;color:#fecaca;background:#341819;border:1px solid #5e2427;border-radius:10px;padding:12px 14px;">${escapeHtml(previewText)}</p>`
             : ''}
           <p style="margin:0 0 16px;font-size:16px;line-height:1.65;color:#c6cfdf;">
-            ${inviterLine} to join <strong style="color:#ffffff;">${escapedWorkspaceName}</strong> on FLYR as a ${roleLabel}.
+            ${inviterLine} to join <strong style="color:#ffffff;">${escapedWorkspaceName}</strong> on WolfGrid as a ${roleLabel}.
           </p>
           <p style="margin:0 0 26px;font-size:15px;line-height:1.65;color:#aab4c6;">
             Use the same email address this invite was sent to when you sign in or create your account.
@@ -551,7 +551,7 @@ export async function sendWorkspaceInviteEmail(input: WorkspaceInviteEmailInput)
 
   const resend = new Resend(apiKey);
   const replyTo = getInviteReplyToEmail();
-  const subject = `${input.subjectPrefix?.trim() ? `${input.subjectPrefix.trim()} ` : ''}You're invited to join ${workspaceName} on FLYR`;
+  const subject = `${input.subjectPrefix?.trim() ? `${input.subjectPrefix.trim()} ` : ''}You're invited to join ${workspaceName} on WolfGrid`;
 
   const { data, error } = await resend.emails.send({
     from,
@@ -572,7 +572,7 @@ export async function sendWorkspaceInviteEmail(input: WorkspaceInviteEmailInput)
       )
     ) {
       throw new Error(
-        'Invite was created, but email was not sent to this address. Resend test mode only delivers to your account email. Set RESEND_FROM_EMAIL to a sender on your verified domain (e.g. FLYR <noreply@yourdomain.com>).'
+        'Invite was created, but email was not sent to this address. Resend test mode only delivers to your account email. Set RESEND_FROM_EMAIL to a sender on your verified domain (e.g. WolfGrid <noreply@yourdomain.com>).'
       );
     }
 

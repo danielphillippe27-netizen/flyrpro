@@ -171,7 +171,7 @@ export default function ResetPasswordPage() {
         return;
       }
 
-      setMessage({ type: 'success', text: 'Password updated. Redirecting you back into FLYR...' });
+      setMessage({ type: 'success', text: 'Password updated. Redirecting you back into WolfGrid...' });
       router.replace('/gate');
     } catch (error) {
       console.error('Failed to update password:', error);
@@ -191,8 +191,8 @@ export default function ResetPasswordPage() {
         <div className="text-center space-y-2">
           <div className="flex justify-center">
             <Image
-              src="/flyr-logo-wide-dark.svg"
-              alt="FLYR"
+              src="/brand/wolfgrid-logo-white.svg"
+              alt="WolfGrid"
               width={480}
               height={128}
               className="h-32 w-auto"

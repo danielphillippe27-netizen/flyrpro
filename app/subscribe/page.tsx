@@ -463,7 +463,7 @@ function SubscribeContent() {
                 : 'Continue to checkout'}
           </Button>
           <p className="text-xs text-[#AAAAAA] text-center">
-            {isFreeForeverOffer ? 'Free forever with your FLYR Partner offer.' : 'Recurring billing. Cancel anytime.'}
+            {isFreeForeverOffer ? 'Free forever with your WolfGrid Partner offer.' : 'Recurring billing. Cancel anytime.'}
           </p>
         </div>
 

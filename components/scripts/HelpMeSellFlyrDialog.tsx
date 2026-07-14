@@ -29,9 +29,9 @@ const sections: SalesHelpSection[] = [
   {
     id: 'what',
     label: 'What',
-    title: 'What is FLYR?',
+    title: 'What is WolfGrid?',
     lines: [
-      'FLYR is a door-knocking and territory management platform for real estate teams.',
+      'WolfGrid is a door-knocking and territory management platform for real estate teams.',
       'It lets team leads assign areas, track which doors agents knocked, see activity in real time, and organize every lead from the field in one place.',
       'Instead of agents working randomly, your team works a system.',
     ],
@@ -41,7 +41,7 @@ const sections: SalesHelpSection[] = [
     label: 'Why',
     title: 'Why do teams love it?',
     lines: [
-      'Teams love FLYR because it gives leaders visibility.',
+      'Teams love WolfGrid because it gives leaders visibility.',
       'You can see who is working, what streets are covered, what doors were knocked, and where leads are coming from.',
       'It keeps agents accountable and helps the team stop missing opportunities after listings, sales, open houses, or farming campaigns.',
     ],
@@ -61,9 +61,9 @@ const sections: SalesHelpSection[] = [
     label: 'Pricing',
     title: 'How much is it?',
     lines: [
-      'FLYR is currently available with early access pricing.',
+      'WolfGrid is currently available with early access pricing.',
       'Teams can start at $30 USD per user/month, which is about $40 CAD.',
-      'The goal is simple: if FLYR helps your team create even one extra deal, it more than pays for itself.',
+      'The goal is simple: if WolfGrid helps your team create even one extra deal, it more than pays for itself.',
     ],
   },
   {
@@ -86,10 +86,10 @@ const sections: SalesHelpSection[] = [
     label: 'Objections',
     title: 'Objection answers',
     lines: [
-      'Busy: No worries. I will be quick. FLYR helps real estate team leads track door knocking, agent activity, and leads from the field. Would it be okay if I text you a 90-second demo?',
+      'Busy: No worries. I will be quick. WolfGrid helps real estate team leads track door knocking, agent activity, and leads from the field. Would it be okay if I text you a 90-second demo?',
       'Not interested: Totally understand. Before I let you go, would it be okay if I sent the 90-second demo just so you can see the concept?',
-      'Already track it: Makes sense. Most teams have some kind of system. FLYR is built specifically for real estate field prospecting, so it is more visual and team-focused than spreadsheets or scattered notes.',
-      'Using another tool: Totally. A lot of tools are general canvassing platforms. FLYR is focused on real estate teams: territories, agent accountability, neighbourhood coverage, and lead follow-up.',
+      'Already track it: Makes sense. Most teams have some kind of system. WolfGrid is built specifically for real estate field prospecting, so it is more visual and team-focused than spreadsheets or scattered notes.',
+      'Using another tool: Totally. A lot of tools are general canvassing platforms. WolfGrid is focused on real estate teams: territories, agent accountability, neighbourhood coverage, and lead follow-up.',
     ],
   },
 ];
@@ -124,7 +124,7 @@ export function HelpMeSellFlyrDialog({ open, onOpenChange }: HelpMeSellFlyrDialo
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[min(88vh,720px)] overflow-hidden p-0 sm:max-w-3xl">
         <DialogHeader className="border-b border-border px-5 py-4 pr-12">
-          <DialogTitle>Help Me Sell FLYR</DialogTitle>
+          <DialogTitle>Help Me Sell WolfGrid</DialogTitle>
           <DialogDescription>
             Quick 30-second answers reps can use without rambling.
           </DialogDescription>

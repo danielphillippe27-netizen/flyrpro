@@ -20,7 +20,7 @@ const FUB_OAUTH_TOKEN_URL =
   process.env.FUB_OAUTH_TOKEN_URL ?? 'https://app.followupboss.com/oauth/token';
 const OAUTH_STATE_SECRET = getOAuthStateSecret();
 const OAUTH_STATE_TTL_SECONDS = 10 * 60;
-const DEFAULT_APP_ORIGIN = 'https://www.flyrpro.app';
+const DEFAULT_APP_ORIGIN = 'https://wolfgrid.app';
 
 function base64UrlEncode(input: string | Buffer): string {
   return Buffer.from(input)
@@ -45,8 +45,8 @@ function resolveAppOrigin(origin?: string): string {
   const raw = origin || process.env.NEXT_PUBLIC_APP_URL || DEFAULT_APP_ORIGIN;
   try {
     const parsed = new URL(raw);
-    if (parsed.hostname.toLowerCase() === 'flyrpro.app') {
-      parsed.hostname = 'www.flyrpro.app';
+    if (parsed.hostname.toLowerCase() === 'wolfgrid.app') {
+      parsed.hostname = 'wolfgrid.app';
     }
     return parsed.origin;
   } catch {

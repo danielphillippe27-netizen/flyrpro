@@ -18,6 +18,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_partner_offers_vanity_slug
   WHERE vanity_slug IS NOT NULL;
 
 COMMENT ON COLUMN public.partner_offers.vanity_slug IS
-  'Optional branded public path segment such as flyr.software/acme-realty-group.';
+  'Optional branded public path segment such as wolfgrid.app/acme-realty-group.';
 
 COMMIT;

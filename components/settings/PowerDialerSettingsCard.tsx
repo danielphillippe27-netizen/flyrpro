@@ -565,7 +565,7 @@ export function PowerDialerSettingsCard({ mode = 'workspace' }: PowerDialerSetti
                     className="h-10 min-w-0 border-0 focus-visible:ring-0"
                   />
                   <span className="flex h-10 shrink-0 items-center border-l border-input px-3 text-sm text-gray-500 dark:text-gray-400">
-                    @{dialerSettingsStatus?.salesperson?.demoEmailDomain ?? 'flyr.software'}
+                    @{dialerSettingsStatus?.salesperson?.demoEmailDomain ?? 'wolfgrid.app'}
                   </span>
                 </div>
                 <Input
@@ -587,7 +587,7 @@ export function PowerDialerSettingsCard({ mode = 'workspace' }: PowerDialerSetti
                 </Button>
               </div>
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                Sends from {demoEmailHandle || 'demo'}@{dialerSettingsStatus?.salesperson?.demoEmailDomain ?? 'flyr.software'}, saves replies in FLYR Inbox, and forwards replies to {demoEmailReplyTo || 'the rep email'}.
+                Sends from {demoEmailHandle || 'demo'}@{dialerSettingsStatus?.salesperson?.demoEmailDomain ?? 'wolfgrid.app'}, saves replies in WolfGrid Inbox, and forwards replies to {demoEmailReplyTo || 'the rep email'}.
               </p>
             </div> : null}
 

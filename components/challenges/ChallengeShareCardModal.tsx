@@ -88,7 +88,7 @@ export function ChallengeShareCardModal({
           <div className="space-y-4">
             <div className="overflow-hidden rounded-2xl border border-border/60 bg-black">
               <img
-                alt="FLYR share card preview"
+                alt="WolfGrid share card preview"
                 src={imageUrl}
                 className="block h-auto w-full"
               />

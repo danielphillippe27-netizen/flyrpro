@@ -14,7 +14,7 @@ type InviteValidationResponse = {
   email?: string | null;
 };
 
-const DEFAULT_APP_ORIGIN = 'https://www.flyrpro.app';
+const DEFAULT_APP_ORIGIN = 'https://wolfgrid.app';
 type AuthMode = 'sign-in' | 'recovery';
 
 function resolveAppOrigin(origin: string): string {
@@ -22,8 +22,8 @@ function resolveAppOrigin(origin: string): string {
 
   try {
     const parsed = new URL(raw);
-    if (parsed.hostname.toLowerCase() === 'flyrpro.app') {
-      parsed.hostname = 'www.flyrpro.app';
+    if (parsed.hostname.toLowerCase() === 'wolfgrid.app') {
+      parsed.hostname = 'wolfgrid.app';
     }
     return parsed.origin;
   } catch {
@@ -43,7 +43,7 @@ function normalizeInviteEmail(value: string | null | undefined): string | null {
 function isListingOnboardingResume(nextPath: string | null): boolean {
   if (!nextPath?.startsWith('/')) return false;
   try {
-    const parsed = new URL(nextPath, 'https://flyrpro.app');
+    const parsed = new URL(nextPath, 'https://wolfgrid.app');
     return (
       parsed.pathname === '/onboarding' &&
       parsed.searchParams.get('resume') === 'complete' &&
@@ -418,8 +418,8 @@ export default function LoginPage() {
         <div className="text-center space-y-2">
           <div className="flex justify-center">
             <Image
-              src="/flyr-logo-wide-light.svg"
-              alt="FLYR"
+              src="/brand/wolfgrid-logo-text.svg"
+              alt="WolfGrid"
               width={480}
               height={128}
               className="h-32 w-auto"

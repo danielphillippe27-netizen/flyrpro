@@ -16,7 +16,7 @@ type SalespersonInboxRouteRow = {
 
 type ResendEmailReceivedEvent = Extract<WebhookEventPayload, { type: 'email.received' }>;
 
-const INBOUND_DOMAIN = 'flyr.software';
+const INBOUND_DOMAIN = 'wolfgrid.app';
 
 function getEnv(name: string): string | null {
   const value = process.env[name];
@@ -108,12 +108,12 @@ function getAppOrigin(): string {
   return (
     getEnv('APP_BASE_URL') ||
     getEnv('NEXT_PUBLIC_APP_URL') ||
-    'https://flyrpro.app'
+    'https://wolfgrid.app'
   ).replace(/\/$/, '');
 }
 
 function getForwardFromEmail(): string {
-  return getEnv('RESEND_INBOUND_FORWARD_FROM') || getEnv('RESEND_FROM_EMAIL') || 'FLYR Inbox <inbox@flyr.software>';
+  return getEnv('RESEND_INBOUND_FORWARD_FROM') || getEnv('RESEND_FROM_EMAIL') || 'WolfGrid Inbox <inbox@wolfgrid.app>';
 }
 
 function shouldForwardToAddress(forwardTo: string | null, routableAddresses: string[], fromEmail: string | null): forwardTo is string {
@@ -192,13 +192,13 @@ async function forwardInboundEmail(context: {
   if (!shouldForwardToAddress(forwardTo, context.routableAddresses, context.fromEmail)) return;
 
   const resend = new Resend(apiKey);
-  const originalRecipient = context.routableAddresses[0] ?? 'the FLYR inbox';
+  const originalRecipient = context.routableAddresses[0] ?? 'the WolfGrid inbox';
   const inboxUrl = `${getAppOrigin()}/inbox`;
   const subject = context.subject.startsWith('Fwd:') ? context.subject : `Fwd: ${context.subject}`;
   const fromLabel = context.fromLabel || context.fromEmail || 'Unknown sender';
   const body = context.body || context.preview || '';
   const text = [
-    `FLYR received a reply for ${originalRecipient}.`,
+    `WolfGrid received a reply for ${originalRecipient}.`,
     '',
     `From: ${fromLabel}${context.fromEmail && context.fromEmail !== fromLabel ? ` <${context.fromEmail}>` : ''}`,
     `To: ${originalRecipient}`,
@@ -206,7 +206,7 @@ async function forwardInboundEmail(context: {
     `Subject: ${context.subject}`,
     '',
     'Reply directly to this email to respond to the sender.',
-    `Open in FLYR: ${inboxUrl}`,
+    `Open in WolfGrid: ${inboxUrl}`,
     '',
     '--- Original message ---',
     body,
@@ -216,18 +216,18 @@ async function forwardInboundEmail(context: {
     <div style="margin:0;padding:28px 18px;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#111827;">
       <div style="max-width:640px;margin:0 auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;">
         <div style="padding:22px 24px;border-bottom:1px solid #e5e7eb;">
-          <div style="font-size:13px;font-weight:800;letter-spacing:.08em;color:#6b7280;text-transform:uppercase;">FLYR Inbox</div>
+          <div style="font-size:13px;font-weight:800;letter-spacing:.08em;color:#6b7280;text-transform:uppercase;">WolfGrid Inbox</div>
           <h1 style="margin:8px 0 0;font-size:21px;line-height:1.3;color:#111827;">${escapeHtml(context.subject)}</h1>
         </div>
         <div style="padding:22px 24px;">
-          <p style="margin:0 0 14px;font-size:14px;line-height:1.6;color:#4b5563;">FLYR received a reply for <strong style="color:#111827;">${escapeHtml(originalRecipient)}</strong>.</p>
+          <p style="margin:0 0 14px;font-size:14px;line-height:1.6;color:#4b5563;">WolfGrid received a reply for <strong style="color:#111827;">${escapeHtml(originalRecipient)}</strong>.</p>
           <div style="margin:0 0 18px;padding:12px 14px;border-radius:10px;background:#f3f4f6;border:1px solid #e5e7eb;font-size:14px;line-height:1.6;color:#374151;">
             <div><strong>From:</strong> ${escapeHtml(fromLabel)}${context.fromEmail && context.fromEmail !== fromLabel ? ` &lt;${escapeHtml(context.fromEmail)}&gt;` : ''}</div>
             <div><strong>To:</strong> ${escapeHtml(originalRecipient)}</div>
             <div><strong>Received:</strong> ${escapeHtml(new Date(context.occurredAt).toLocaleString())}</div>
           </div>
           <p style="margin:0 0 18px;">
-            <a href="${escapeHtml(inboxUrl)}" style="display:inline-block;background:#111827;color:#ffffff;text-decoration:none;padding:11px 16px;border-radius:9px;font-size:14px;font-weight:700;">Open in FLYR</a>
+            <a href="${escapeHtml(inboxUrl)}" style="display:inline-block;background:#111827;color:#ffffff;text-decoration:none;padding:11px 16px;border-radius:9px;font-size:14px;font-weight:700;">Open in WolfGrid</a>
           </p>
           <div style="margin:0;padding:16px;border-left:3px solid #d1d5db;background:#fafafa;color:#1f2937;font-size:15px;line-height:1.65;white-space:pre-wrap;">${escapeHtml(body)}</div>
         </div>

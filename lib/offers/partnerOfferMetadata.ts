@@ -4,7 +4,7 @@ import { isJustListedDmOffer } from '@/components/offers/partnerOfferUtils';
 import type { PublicPartnerOfferRow } from '@/lib/offers/publicPartnerOffer';
 
 function fallbackOrigin() {
-  return 'https://flyr.software';
+  return 'https://wolfgrid.app';
 }
 
 async function getRequestOrigin() {
@@ -64,7 +64,7 @@ export async function buildPartnerOfferMetadata(
           url: imageUrl,
           width: 1200,
           height: 630,
-          alt: 'FLYR just listed preview card',
+          alt: 'WolfGrid just listed preview card',
         },
       ],
     },

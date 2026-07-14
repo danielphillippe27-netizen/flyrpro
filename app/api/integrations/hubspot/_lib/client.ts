@@ -230,7 +230,7 @@ export class HubSpotAPIClient {
         body: JSON.stringify({
           properties: compactRecord({
             hs_timestamp: dueDateTime,
-            hs_task_subject: task.title?.trim() || 'FLYR Follow-up',
+            hs_task_subject: task.title?.trim() || 'WolfGrid Follow-up',
             hs_task_body: cleanedValue(task.body),
             hs_task_status: 'NOT_STARTED',
             hs_task_priority: 'HIGH',
@@ -266,7 +266,7 @@ export class HubSpotAPIClient {
     }
 
     const endDateTime = new Date(new Date(startDateTime).getTime() + 60 * 60 * 1000).toISOString();
-    const appointmentName = appointment.title?.trim() || 'FLYR Appointment';
+    const appointmentName = appointment.title?.trim() || 'WolfGrid Appointment';
     const res = await this.requestJson(
       HUBSPOT_APPOINTMENTS_URL,
       {
@@ -464,7 +464,7 @@ function buildHubSpotAppointmentNote(
   endDateTime: string
 ): string | null {
   const lines = [
-    appointment.title?.trim() ? `Appointment: ${appointment.title.trim()}` : 'Appointment: FLYR Appointment',
+    appointment.title?.trim() ? `Appointment: ${appointment.title.trim()}` : 'Appointment: WolfGrid Appointment',
     `Start: ${startDateTime}`,
     `End: ${endDateTime}`,
     appointment.location?.trim() ? `Location: ${appointment.location.trim()}` : null,

@@ -40,7 +40,7 @@ export const REAL_ESTATE_INTEGRATIONS: IntegrationCatalogEntry[] = [
   {
     id: 'zapier',
     displayName: 'Zapier',
-    description: 'Route FLYR leads anywhere with a Zapier Catch Hook.',
+    description: 'Route WolfGrid leads anywhere with a Zapier Catch Hook.',
     industryGroup: 'real_estate',
     authModes: ['webhook'],
     preferredAuthMode: 'webhook',
@@ -49,7 +49,7 @@ export const REAL_ESTATE_INTEGRATIONS: IntegrationCatalogEntry[] = [
   {
     id: 'hubspot',
     displayName: 'HubSpot',
-    description: 'Sync FLYR leads into HubSpot contacts.',
+    description: 'Sync WolfGrid leads into HubSpot contacts.',
     industryGroup: 'real_estate',
     authModes: ['oauth'],
     preferredAuthMode: 'oauth',
@@ -58,7 +58,7 @@ export const REAL_ESTATE_INTEGRATIONS: IntegrationCatalogEntry[] = [
   {
     id: 'boldtrail',
     displayName: 'BoldTrail / kvCORE',
-    description: 'Token-based BoldTrail lead sync from FLYR.',
+    description: 'Token-based BoldTrail lead sync from WolfGrid.',
     industryGroup: 'real_estate',
     authModes: ['api_key'],
     preferredAuthMode: 'api_key',
@@ -69,7 +69,7 @@ export const REAL_ESTATE_INTEGRATIONS: IntegrationCatalogEntry[] = [
   {
     id: 'monday',
     displayName: 'Monday.com',
-    description: 'Sync FLYR leads into a selected monday.com board.',
+    description: 'Sync WolfGrid leads into a selected monday.com board.',
     industryGroup: 'real_estate',
     authModes: ['oauth'],
     preferredAuthMode: 'oauth',
@@ -81,7 +81,7 @@ export const CONTRACTOR_INTEGRATIONS: IntegrationCatalogEntry[] = [
   {
     id: 'jobnimbus',
     displayName: 'JobNimbus',
-    description: 'Create contacts or jobs in JobNimbus from FLYR leads.',
+    description: 'Create contacts or jobs in JobNimbus from WolfGrid leads.',
     industryGroup: 'contractor',
     authModes: ['api_key'],
     preferredAuthMode: 'api_key',
@@ -92,7 +92,7 @@ export const CONTRACTOR_INTEGRATIONS: IntegrationCatalogEntry[] = [
   {
     id: 'companycam',
     displayName: 'CompanyCam',
-    description: 'Create CompanyCam projects from FLYR lead addresses.',
+    description: 'Create CompanyCam projects from WolfGrid lead addresses.',
     industryGroup: 'contractor',
     authModes: ['oauth', 'api_key'],
     preferredAuthMode: 'oauth',
@@ -103,7 +103,7 @@ export const CONTRACTOR_INTEGRATIONS: IntegrationCatalogEntry[] = [
   {
     id: 'jobber',
     displayName: 'Jobber',
-    description: 'Create Jobber clients from FLYR lead records.',
+    description: 'Create Jobber clients from WolfGrid lead records.',
     industryGroup: 'contractor',
     authModes: ['oauth'],
     preferredAuthMode: 'oauth',
@@ -112,7 +112,7 @@ export const CONTRACTOR_INTEGRATIONS: IntegrationCatalogEntry[] = [
   {
     id: 'acculynx',
     displayName: 'AccuLynx',
-    description: 'Send FLYR leads into AccuLynx for roofing sales workflows.',
+    description: 'Send WolfGrid leads into AccuLynx for roofing sales workflows.',
     industryGroup: 'contractor',
     authModes: ['api_key'],
     preferredAuthMode: 'api_key',
@@ -123,7 +123,7 @@ export const CONTRACTOR_INTEGRATIONS: IntegrationCatalogEntry[] = [
   {
     id: 'sumoquote',
     displayName: 'SumoQuote',
-    description: 'Create SumoQuote projects from FLYR lead opportunities.',
+    description: 'Create SumoQuote projects from WolfGrid lead opportunities.',
     industryGroup: 'contractor',
     authModes: ['oauth', 'api_key'],
     preferredAuthMode: 'oauth',
@@ -134,7 +134,7 @@ export const CONTRACTOR_INTEGRATIONS: IntegrationCatalogEntry[] = [
   {
     id: 'rooflink',
     displayName: 'RoofLink',
-    description: 'Create RoofLink jobs from FLYR lead records.',
+    description: 'Create RoofLink jobs from WolfGrid lead records.',
     industryGroup: 'contractor',
     authModes: ['api_key'],
     preferredAuthMode: 'api_key',

@@ -132,7 +132,7 @@ export function ChallengesPageView() {
             {visibleGlobals.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 No global challenges yet. Run the latest database migration to seed &quot;Your First 30 Days on
-                FLYR&quot;.
+                WolfGrid&quot;.
               </p>
             ) : null}
 

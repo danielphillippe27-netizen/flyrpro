@@ -10,7 +10,7 @@ export type MetaOAuthStatePayload = {
 };
 
 const OAUTH_STATE_TTL_SECONDS = 10 * 60;
-const DEFAULT_APP_ORIGIN = 'https://www.flyrpro.app';
+const DEFAULT_APP_ORIGIN = 'https://wolfgrid.app';
 const META_AUTHORIZE_HOST = 'https://www.facebook.com';
 const META_GRAPH_HOST = 'https://graph.facebook.com';
 
@@ -39,8 +39,8 @@ function resolveAppOrigin(origin?: string): string {
   const raw = origin || process.env.NEXT_PUBLIC_APP_URL || DEFAULT_APP_ORIGIN;
   try {
     const parsed = new URL(raw);
-    if (parsed.hostname.toLowerCase() === 'flyrpro.app') {
-      parsed.hostname = 'www.flyrpro.app';
+    if (parsed.hostname.toLowerCase() === 'wolfgrid.app') {
+      parsed.hostname = 'wolfgrid.app';
     }
     return parsed.origin;
   } catch {

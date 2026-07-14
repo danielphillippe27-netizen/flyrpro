@@ -123,7 +123,7 @@ export async function POST(
         contact_id: contact.id,
         lead_state: 'converted',
         last_touch_at: now,
-        last_touch_summary: 'Converted to FLYR customer contact',
+        last_touch_summary: 'Converted to WolfGrid customer contact',
         updated_at: now,
       })
       .eq('id', lead.id)
@@ -139,7 +139,7 @@ export async function POST(
       sales_contact_id: lead.sales_contact_id ?? null,
       actor_user_id: user.id,
       activity_type: 'converted',
-      note: 'Converted to FLYR customer contact.',
+      note: 'Converted to WolfGrid customer contact.',
       occurred_at: now,
       metadata: {
         convertedContactId: contact.id,

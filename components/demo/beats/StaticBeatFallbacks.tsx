@@ -27,8 +27,7 @@ function resolveCtaHref(value: string) {
 export function StaticBeat1Fallback({ copy }: { copy: BeatCopy }) {
   return (
     <section id="b1" className="in">
-      <div className="wordmark">
-        FLYR <b>PRO</b>
+      <div className="wordmark">WolfGrid<b>PRO</b>
       </div>
       <div className="eyebrow">Beat 01 · Cold open</div>
       <h1 className="h-mega">{renderLines(copy.b1Headline)}</h1>
@@ -116,7 +115,7 @@ export function StaticBeat6Fallback({
         <a className="btn" href={resolveCtaHref(ctaUrl)}>
           {copy.ctaPrimary}
         </a>
-        <a className="btn ghost" href="https://flyrpro.app">
+        <a className="btn ghost" href="https://wolfgrid.app">
           {copy.ctaSecondary}
         </a>
       </div>

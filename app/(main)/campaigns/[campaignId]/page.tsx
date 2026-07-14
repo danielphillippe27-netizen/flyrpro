@@ -1004,7 +1004,7 @@ export default function CampaignDetailPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             campaignId,
-            baseUrl: `${typeof window !== 'undefined' ? window.location.origin : 'https://flyrpro.app'}/api/scan`,
+            baseUrl: `${typeof window !== 'undefined' ? window.location.origin : 'https://wolfgrid.app'}/api/scan`,
             rows,
           }),
         });

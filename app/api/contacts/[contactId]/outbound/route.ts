@@ -191,7 +191,7 @@ async function sendText(
     if (insertError) {
       console.error('[contacts/outbound] failed to save text follow-up', insertError);
       return NextResponse.json(
-        { sent: true, warning: 'Text sent, but FLYR could not save the text record.' },
+        { sent: true, warning: 'Text sent, but WolfGrid could not save the text record.' },
         { status: 201 }
       );
     }

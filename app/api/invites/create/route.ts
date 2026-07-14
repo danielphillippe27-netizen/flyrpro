@@ -4,7 +4,7 @@ import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 
 const DEFAULT_INVITE_TTL_DAYS = 30;
-const DEFAULT_PUBLIC_JOIN_ORIGIN = 'https://www.flyrpro.app';
+const DEFAULT_PUBLIC_JOIN_ORIGIN = 'https://wolfgrid.app';
 const PUBLIC_INVITE_EMAIL_DOMAIN = 'invite.flyr.invalid';
 
 type CreateInviteBody = {
@@ -81,18 +81,18 @@ function buildInviteOrigin(request: NextRequest): string {
 
   if (configuredOrigin) {
     const normalized = new URL(configuredOrigin);
-    if (normalized.hostname.toLowerCase() === 'flyrpro.app') {
-      normalized.hostname = 'www.flyrpro.app';
+    if (normalized.hostname.toLowerCase() === 'wolfgrid.app') {
+      normalized.hostname = 'wolfgrid.app';
     }
     return normalized.origin;
   }
 
   const requestOrigin = request.nextUrl.origin;
   const requestHost = request.nextUrl.hostname.toLowerCase();
-  if (requestHost === 'flyrpro.app') {
-    return 'https://www.flyrpro.app';
+  if (requestHost === 'wolfgrid.app') {
+    return 'https://wolfgrid.app';
   }
-  if (requestHost === 'www.flyrpro.app') {
+  if (requestHost === 'wolfgrid.app') {
     return requestOrigin;
   }
 
@@ -109,14 +109,14 @@ function buildShareMessage(inviteURL: string, campaignTitle?: string | null): st
   const trimmedTitle = campaignTitle?.trim();
   if (trimmedTitle) {
     return [
-      "I'm live in FLYR right now.",
+      "I'm live in WolfGrid right now.",
       `Open this link to join my live session in ${trimmedTitle}.`,
       inviteURL,
     ].join('\n\n');
   }
 
   return [
-    "I'm live in FLYR right now.",
+    "I'm live in WolfGrid right now.",
     'Open this link to join my live session.',
     inviteURL,
   ].join('\n\n');

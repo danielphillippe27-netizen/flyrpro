@@ -293,7 +293,7 @@ function buildCreateEndpoint(provider: ContractorProviderId): {
 function buildCreatePayload(provider: ContractorProviderId, lead: ContractorLeadPayload): Record<string, unknown> {
   const { firstName, lastName } = splitFullName(lead.name);
   const base = {
-    source: lead.source ?? 'FLYR',
+    source: lead.source ?? 'WolfGrid',
     external_id: lead.id ?? undefined,
     notes: lead.notes ?? undefined,
   };
@@ -313,7 +313,7 @@ function buildCreatePayload(provider: ContractorProviderId, lead: ContractorLead
       });
     case 'companycam':
       return compactRecord({
-        name: lead.address || lead.name || 'FLYR Project',
+        name: lead.address || lead.name || 'WolfGridject',
         address: lead.address,
         primary_contact: compactRecord({
           name: lead.name,
@@ -325,7 +325,7 @@ function buildCreatePayload(provider: ContractorProviderId, lead: ContractorLead
     case 'acculynx':
       return compactRecord({
         ...base,
-        jobName: lead.name || lead.address || 'FLYR Lead',
+        jobName: lead.name || lead.address || 'WolfGrid Lead',
         customer: compactRecord({
           firstName,
           lastName,
@@ -337,7 +337,7 @@ function buildCreatePayload(provider: ContractorProviderId, lead: ContractorLead
     case 'sumoquote':
       return compactRecord({
         ...base,
-        name: lead.name || lead.address || 'FLYR Project',
+        name: lead.name || lead.address || 'WolfGridject',
         customerName: lead.name,
         customerEmail: lead.email,
         customerPhone: lead.phone,
@@ -350,7 +350,7 @@ function buildCreatePayload(provider: ContractorProviderId, lead: ContractorLead
         customer_email: lead.email,
         customer_phone: lead.phone,
         address: lead.address,
-        job_name: lead.name || lead.address || 'FLYR Job',
+        job_name: lead.name || lead.address || 'WolfGrid Job',
       });
     case 'jobber':
       return compactRecord(base);
@@ -600,7 +600,7 @@ export function getContractorWebResultUrl(result: 'connected' | 'error', provide
 
 function ensureOAuthConfig(provider: ContractorProviderId): OAuthConfig {
   const oauth = providerConfigs[provider].oauth;
-  if (!oauth) throw new Error(`${getContractorDisplayName(provider)} does not support OAuth in FLYR.`);
+  if (!oauth) throw new Error(`${getContractorDisplayName(provider)} does not support OAuth in WolfGrid.`);
   if (!process.env[oauth.clientIdEnv] || !process.env[oauth.clientSecretEnv]) {
     throw new Error(`${getContractorDisplayName(provider)} OAuth client credentials are not configured.`);
   }
@@ -611,13 +611,13 @@ function ensureOAuthConfig(provider: ContractorProviderId): OAuthConfig {
 }
 
 function resolveAppOrigin(origin?: string): string {
-  const raw = origin || process.env.NEXT_PUBLIC_APP_URL || 'https://www.flyrpro.app';
+  const raw = origin || process.env.NEXT_PUBLIC_APP_URL || 'https://wolfgrid.app';
   try {
     const parsed = new URL(raw);
-    if (parsed.hostname.toLowerCase() === 'flyrpro.app') parsed.hostname = 'www.flyrpro.app';
+    if (parsed.hostname.toLowerCase() === 'wolfgrid.app') parsed.hostname = 'wolfgrid.app';
     return parsed.origin;
   } catch {
-    return 'https://www.flyrpro.app';
+    return 'https://wolfgrid.app';
   }
 }
 

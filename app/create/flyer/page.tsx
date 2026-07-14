@@ -102,7 +102,7 @@ export default function CreateAIFlyerPage() {
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center">
         <div className="mb-4 h-10 w-10 rounded-full border-4 border-gray-300 border-t-black animate-spin" />
-        <h1 className="text-2xl font-semibold mb-2">Generating FLYR using AI…</h1>
+        <h1 className="text-2xl font-semibold mb-2">Generating WolfGrid using AI…</h1>
         <p className="text-gray-500 text-center max-w-md">
           We&apos;re designing a custom flyer layout, placing your listing details, and preparing a
           print-ready design. This usually takes just a few seconds.

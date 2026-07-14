@@ -29,7 +29,7 @@ function shouldBypassWorkspaceGate(next: string | null): boolean {
 function shouldResumeOnboardingCompletion(next: string | null): boolean {
   if (!next) return false;
   try {
-    const nextURL = new URL(next, 'https://flyrpro.app');
+    const nextURL = new URL(next, 'https://wolfgrid.app');
     return nextURL.pathname.startsWith('/onboarding') && nextURL.searchParams.get('resume') === 'complete';
   } catch {
     return false;
@@ -56,7 +56,7 @@ function extractInviteTokenFromNext(next: string | null | undefined): string | n
   if (!normalizedNext) return null;
 
   try {
-    const nextURL = new URL(normalizedNext, 'https://flyrpro.app');
+    const nextURL = new URL(normalizedNext, 'https://wolfgrid.app');
     if (nextURL.pathname !== '/join') {
       return null;
     }

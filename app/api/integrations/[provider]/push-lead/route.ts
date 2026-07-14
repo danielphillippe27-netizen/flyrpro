@@ -69,7 +69,7 @@ export async function POST(
       phone: lead.phone,
       address: lead.address,
       notes: lead.notes,
-      source: lead.source ?? 'FLYR',
+      source: lead.source ?? 'WolfGrid',
       campaignId: lead.campaignId,
       createdAt: lead.createdAt,
     });

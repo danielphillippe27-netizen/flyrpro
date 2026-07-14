@@ -3,7 +3,7 @@ import { headers } from 'next/headers';
 import { resolvePayloadForSlug } from '@/lib/demo/resolvePayload';
 
 export const runtime = 'edge';
-export const alt = 'FLYR PRO demo';
+export const alt = 'WolfGrid demo';
 export const size = {
   width: 1200,
   height: 630,
@@ -73,7 +73,7 @@ export default async function DemoOpenGraphImage({ params }: DemoOgImageProps) {
     }),
   ]);
   const city = titleCaseCity(payload.city);
-  const company = payload.company?.trim() || 'FLYR PRO';
+  const company = payload.company?.trim() || 'WolfGrid';
 
   return new ImageResponse(
     (
@@ -202,7 +202,7 @@ export default async function DemoOpenGraphImage({ params }: DemoOgImageProps) {
                 textTransform: 'uppercase',
               }}
             >
-              <span>FLYR&nbsp;</span>
+              <span>WolfGrid&nbsp;</span>
               <span style={{ color: ORANGE }}>PRO</span>
             </div>
             <div

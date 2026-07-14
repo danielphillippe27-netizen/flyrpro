@@ -6,7 +6,7 @@ import crypto from 'crypto';
 import { getCrmEncryptionKey } from '../_lib/env';
 import { FUB_CONNECTION_PROVIDER, FUB_CONNECTION_PROVIDERS } from '../_lib/provider';
 
-const FUB_SYSTEM_NAME = process.env.FUB_SYSTEM_NAME || 'FLYR';
+const FUB_SYSTEM_NAME = process.env.FUB_SYSTEM_NAME || 'WolfGrid';
 const FUB_SYSTEM_KEY = process.env.FUB_SYSTEM_KEY;
 
 // Encrypt API key using AES-256-GCM

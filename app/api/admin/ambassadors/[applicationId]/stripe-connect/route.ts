@@ -158,7 +158,7 @@ export async function POST(
     let accountId = application.stripe_connect_account_id;
     const businessProfile = buildConnectBusinessProfilePrefill({
       origin: request.nextUrl.origin,
-      productDescription: 'FLYR ambassador commissions and creator partnership payouts',
+      productDescription: 'WolfGrid ambassador commissions and creator partnership payouts',
     });
 
     const createAccount = async () => {

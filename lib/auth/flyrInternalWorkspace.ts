@@ -54,7 +54,7 @@ export async function hasFlyrDemoAdminAccess(
 }
 
 /**
- * Server-only guard for internal FLYR demo tooling.
+ * Server-only guard for internal WolfGrid demo tooling.
  * Unauthenticated users go to login; authenticated non-salespeople/non-founders get a 404.
  */
 export async function requireFlyrDemoAdminAccess(): Promise<{ user: User }> {

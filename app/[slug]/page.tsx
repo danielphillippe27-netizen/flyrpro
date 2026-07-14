@@ -35,10 +35,10 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
     const ambassadorLanding = await loadPublicAmbassadorLandingBySlug(admin, slug);
     if (ambassadorLanding) {
       return {
-        title: ambassadorLanding.headline || 'FLYR Partner Offer',
+        title: ambassadorLanding.headline || 'WolfGrid Partner Offer',
         description:
           ambassadorLanding.intro_message ||
-          'Start with one included campaign through a FLYR ambassador link.',
+          'Start with one included campaign through a WolfGrid ambassador link.',
       };
     }
 
@@ -123,7 +123,7 @@ export default async function PartnerOfferVanityPage({ params, searchParams }: P
             </CardDescription>
           </CardHeader>
           <CardContent className="text-sm text-slate-600">
-            If you expected access, contact your FLYR point of contact for a fresh private link.
+            If you expected access, contact your WolfGrid point of contact for a fresh private link.
           </CardContent>
         </Card>
       </main>

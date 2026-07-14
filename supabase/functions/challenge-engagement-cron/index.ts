@@ -115,7 +115,7 @@ serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-    const appBaseUrl = Deno.env.get("APP_BASE_URL") ?? "https://www.flyrpro.app";
+    const appBaseUrl = Deno.env.get("APP_BASE_URL") ?? "https://wolfgrid.app";
     if (!supabaseUrl || !serviceKey) {
       return json({ error: "Server misconfigured" }, 500);
     }

@@ -1400,7 +1400,7 @@ async function getSourceVersion(
       if (sourceVersion) return sourceVersion;
     }
   } catch {
-    // FLYR-PRO deployments can run before the canonical source-version RPC exists.
+    // WolfGrid Web deployments can run before the canonical source-version RPC exists.
   }
 
   const counts = fallbackBundle?.counts && typeof fallbackBundle.counts === 'object'

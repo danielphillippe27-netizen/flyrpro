@@ -11,18 +11,18 @@ const listClass = "list-disc space-y-2 pl-5 text-zinc-700";
 const linkClass = "font-medium text-red-600 underline underline-offset-4 hover:text-red-700";
 
 export const metadata: Metadata = {
-  title: "Terms of Service | FLYR",
+  title: "Terms of Service | WolfGrid",
   description:
-    "Terms of Service for FLYR and FLYR Pro, including subscriptions, included campaign access, billing, acceptable use, and contact information.",
+    "Terms of Service for WolfGrid and WolfGrid, including subscriptions, included campaign access, billing, acceptable use, and contact information.",
   alternates: {
     canonical: "/terms",
   },
   openGraph: {
-    title: "Terms of Service | FLYR",
+    title: "Terms of Service | WolfGrid",
     description:
-      "Read the Terms of Service for FLYR and FLYR Pro.",
-    url: "https://www.flyrpro.app/terms",
-    siteName: "FLYR",
+      "Read the Terms of Service for WolfGrid and WolfGrid.",
+    url: "https://wolfgrid.app/terms",
+    siteName: "WolfGrid",
     type: "website",
   },
   robots: {
@@ -36,7 +36,7 @@ export default function TermsPage() {
     <LegalPageLayout
       currentPage="terms"
       title="Terms of Service"
-      description="These Terms govern your access to and use of the FLYR websites, mobile applications, and related services."
+      description="These Terms govern your access to and use of the WolfGrid websites, mobile applications, and related services."
       effectiveDate={EFFECTIVE_DATE}
     >
       <section className="space-y-4">
@@ -50,7 +50,7 @@ export default function TermsPage() {
         <h2 className={sectionTitleClass}>Overview</h2>
         <p className={paragraphClass}>
           These Terms of Service (&quot;Terms&quot;) form a binding agreement between you and
-          FLYR, doing business as FLYR and FLYR Pro (&quot;FLYR,&quot;
+          WolfGrid, doing business as WolfGrid and WolfGrid (&quot;WolfGrid,&quot;
           &quot;we,&quot; &quot;our,&quot; or &quot;us&quot;), regarding your use of our websites,
           software, mobile applications, and related services (collectively, the
           &quot;Services&quot;).
@@ -174,7 +174,7 @@ export default function TermsPage() {
         <h2 className={sectionTitleClass}>Intellectual Property</h2>
         <p className={paragraphClass}>
           The Services, including our software, designs, text, graphics, trademarks, logos,
-          and other content, are owned by or licensed to FLYR and are protected by
+          and other content, are owned by or licensed to WolfGrid and are protected by
           intellectual property laws. Subject to these Terms, we grant you a limited,
           non-exclusive, non-transferable, revocable right to use the Services for your
           internal business or personal use.
@@ -254,7 +254,7 @@ export default function TermsPage() {
       <section className="space-y-4">
         <h2 className={sectionTitleClass}>Limitation of Liability</h2>
         <p className={paragraphClass}>
-          To the fullest extent permitted by law, FLYR and its affiliates, licensors,
+          To the fullest extent permitted by law, WolfGrid and its affiliates, licensors,
           service providers, and personnel will not be liable for any indirect, incidental,
           special, consequential, exemplary, or punitive damages, or for any loss of profits,
           revenues, data, goodwill, or business interruption arising out of or related to the
@@ -271,7 +271,7 @@ export default function TermsPage() {
       <section className="space-y-4">
         <h2 className={sectionTitleClass}>Indemnification</h2>
         <p className={paragraphClass}>
-          You agree to defend, indemnify, and hold harmless FLYR, its affiliates, and their
+          You agree to defend, indemnify, and hold harmless WolfGrid, its affiliates, and their
           respective officers, directors, employees, contractors, and agents from and against
           any claims, losses, liabilities, damages, judgments, costs, and expenses, including
           reasonable legal fees, arising out of or related to your User Data, your misuse of
@@ -315,17 +315,17 @@ export default function TermsPage() {
           If you have questions about these Terms or need to send a legal notice, contact:
         </p>
         <div className="rounded-3xl border border-zinc-200 bg-zinc-50 p-5 text-zinc-700">
-          <p className="font-semibold text-zinc-950">FLYR</p>
+          <p className="font-semibold text-zinc-950">WolfGrid</p>
           <p>
-            <a href="mailto:flyrpro@gmail.com" className={linkClass}>
-              flyrpro@gmail.com
+            <a href="mailto:support@wolfgrid.app" className={linkClass}>
+              support@wolfgrid.app
             </a>
           </p>
           <p>5900 Main St Orono ON L0B 1M0</p>
           <p>
             Privacy questions:{" "}
-            <a href="mailto:privacy@flyrpro.app" className={linkClass}>
-              privacy@flyrpro.app
+            <a href="mailto:privacy@wolfgrid.app" className={linkClass}>
+              privacy@wolfgrid.app
             </a>
           </p>
         </div>

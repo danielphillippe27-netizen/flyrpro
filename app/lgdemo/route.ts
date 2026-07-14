@@ -3,7 +3,7 @@ const html = `<!doctype html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>LG StanbyME Demo | FLYR</title>
+  <title>LG StanbyME Demo | WolfGrid</title>
   <style>
     * { box-sizing: border-box; }
     html, body {
@@ -181,8 +181,8 @@ const html = `<!doctype html>
   </style>
 </head>
 <body>
-  <main class="stage" aria-label="FLYR LG demo slideshow">
-    <img class="slide active" data-slide-a alt="FLYR demo slide" />
+  <main class="stage" aria-label="WolfGrid LG demo slideshow">
+    <img class="slide active" data-slide-a alt="WolfGrid demo slide" />
     <img class="slide" data-slide-b alt="" aria-hidden="true" />
     <div class="missing" data-missing></div>
   </main>

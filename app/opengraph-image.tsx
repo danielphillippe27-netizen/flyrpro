@@ -1,14 +1,12 @@
 import { ImageResponse } from 'next/og';
 
-export const alt = 'FLYR 3D prospecting map';
+export const alt = 'WolfGrid 3D prospecting map';
 export const size = {
   width: 1200,
   height: 630,
 };
 
 export const contentType = 'image/png';
-
-const logoUrl = new URL('/flyr-logo-wide-dark.svg', 'https://www.flyrpro.app').toString();
 
 export default function OpenGraphImage() {
   return new ImageResponse(
@@ -34,15 +32,17 @@ export default function OpenGraphImage() {
             gap: '26px',
           }}
         >
-          <img
-            src={logoUrl}
-            alt="FLYR logo"
-            width="430"
-            height="204"
+          <div
             style={{
-              objectFit: 'contain',
+              fontSize: 96,
+              fontWeight: 800,
+              letterSpacing: 0,
+              lineHeight: 1,
+              color: '#ffffff',
             }}
-          />
+          >
+            WolfGrid
+          </div>
           <div
             style={{
               fontSize: 34,

@@ -81,9 +81,7 @@ export function renderShareCard(data: ShareCardRenderData) {
             fontWeight: 800,
             letterSpacing: 2,
           }}
-        >
-          FLYR
-        </div>
+        >WolfGrid</div>
         <div
           style={{
             fontSize: 24,
@@ -207,9 +205,7 @@ export function renderAccountabilityCard(data: AccountabilityCardRenderData) {
             fontSize: 24,
             color: "rgba(255,255,255,0.48)",
           }}
-        >
-          FLYR
-        </div>
+        >WolfGrid</div>
       </div>
 
       <div

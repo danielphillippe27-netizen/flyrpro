@@ -228,7 +228,7 @@ async function emailGeneratedTeamReport(params: {
   if (membersRes.error) throw new Error(membersRes.error.message);
   if (reportsRes.error) throw new Error(reportsRes.error.message);
 
-  const workspaceName = workspaceRes.data?.name?.trim() || 'FLYR team';
+  const workspaceName = workspaceRes.data?.name?.trim() || 'WolfGrid team';
   const members = (membersRes.data ?? []) as WorkspaceMemberRow[];
   const leadIds = members
     .filter((member) => member.role === 'owner' || member.role === 'admin')

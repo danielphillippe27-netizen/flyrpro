@@ -61,12 +61,12 @@ export async function POST(request: NextRequest) {
 
     const testLead = {
       id: `zapier-test-${Date.now()}`,
-      name: 'FLYR Zapier Test Lead',
+      name: 'WolfGrid Zapier Test Lead',
       email: `zapier-test-${Date.now()}@example.com`,
       phone: '(555) 123-4567',
       address: '123 Test Street',
-      notes: 'Manual integration test from the FLYR settings page.',
-      source: 'FLYR Zapier Test',
+      notes: 'Manual integration test from the WolfGrid settings page.',
+      source: 'WolfGrid Zapier Test',
       createdAt: now,
     };
 

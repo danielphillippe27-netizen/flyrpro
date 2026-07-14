@@ -56,14 +56,14 @@ assert.equal(stripBase64Prefix(''), '');
 assert.equal(stripBase64Prefix('data:image/png;base64,a b\nc'), 'a b\nc');
 
 assert.deepEqual(
-  addressesNeedingQr([{ qr_code_base64: 'existing', purl: 'https://flyrpro.app/api/scan?id=1' }], true),
-  [{ qr_code_base64: 'existing', purl: 'https://flyrpro.app/api/scan?id=1' }]
+  addressesNeedingQr([{ qr_code_base64: 'existing', purl: 'https://wolfgrid.app/api/scan?id=1' }], true),
+  [{ qr_code_base64: 'existing', purl: 'https://wolfgrid.app/api/scan?id=1' }]
 );
 assert.deepEqual(addressesNeedingQr([{ qr_code_base64: null, purl: null }], true), [
   { qr_code_base64: null, purl: null },
 ]);
 assert.deepEqual(
-  addressesNeedingQr([{ qr_code_base64: 'existing', purl: 'https://flyrpro.app/api/scan?id=1' }], false),
+  addressesNeedingQr([{ qr_code_base64: 'existing', purl: 'https://wolfgrid.app/api/scan?id=1' }], false),
   []
 );
 assert.deepEqual(addressesNeedingQr([{ qr_code_base64: 'existing', purl: null }], false), [

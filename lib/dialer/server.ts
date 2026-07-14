@@ -94,7 +94,7 @@ export function buildPublicTwilioWebhookUrl(request: NextRequest, path: string):
     normalizeBaseUrl(process.env.APP_BASE_URL) ||
     normalizeBaseUrl(process.env.VERCEL_URL) ||
     normalizeBaseUrl(request.nextUrl.origin) ||
-    'https://flyrpro.app';
+    'https://wolfgrid.app';
 
   return new URL(path, baseUrl);
 }

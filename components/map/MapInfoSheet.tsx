@@ -117,7 +117,7 @@ export function MapInfoSheet({
             <div>
               <h3 className="text-xs font-semibold text-foreground">Map style</h3>
               <p className="text-[11px] text-muted-foreground">
-                Change the basemap preset across FLYR map views.
+                Change the basemap preset across WolfGrid map views.
               </p>
             </div>
             <Button

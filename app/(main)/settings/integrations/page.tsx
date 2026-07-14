@@ -1336,7 +1336,7 @@ export default function IntegrationsPage() {
                         <p className="font-medium mb-1">Secure Connection</p>
                         <p>
                           Connect with OAuth. You will sign in to Follow Up Boss and approve access.
-                          FLYR stores tokens securely on the backend.
+                          WolfGrid stores tokens securely on the backend.
                         </p>
                       </div>
                     </div>
@@ -1345,8 +1345,8 @@ export default function IntegrationsPage() {
                   <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4 text-sm text-gray-600 dark:text-gray-300 space-y-1">
                     <p>1. Click Connect Follow Up Boss</p>
                     <p>2. Sign in to Follow Up Boss</p>
-                    <p>3. Approve FLYR access</p>
-                    <p>4. Return to FLYR automatically</p>
+                    <p>3. Approve WolfGrid access</p>
+                    <p>4. Return to WolfGrid automatically</p>
                   </div>
 
                   <Button
@@ -1372,7 +1372,7 @@ export default function IntegrationsPage() {
                   <div>
                     <CardTitle>Zapier</CardTitle>
                     <CardDescription>
-                      Send each FLYR lead to a Zapier Catch Hook so you can route it anywhere
+                      Send each WolfGrid lead to a Zapier Catch Hook so you can route it anywhere
                     </CardDescription>
                   </div>
                 </div>
@@ -1446,7 +1446,7 @@ export default function IntegrationsPage() {
                       <div className="text-sm text-orange-800 dark:text-orange-200">
                         <p className="font-medium mb-1">Webhook-Based Delivery</p>
                         <p>
-                          Paste a Zapier Catch Hook URL, test it with a sample lead, and FLYR will post
+                          Paste a Zapier Catch Hook URL, test it with a sample lead, and WolfGrid will post
                           leads to that webhook from the shared CRM sync workflow.
                         </p>
                       </div>
@@ -1455,7 +1455,7 @@ export default function IntegrationsPage() {
 
                   <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4 text-sm text-gray-600 dark:text-gray-300 space-y-1">
                     <p>1. Create a Zap with Webhooks by Zapier using Catch Hook</p>
-                    <p>2. Copy the `hooks.zapier.com` URL into FLYR</p>
+                    <p>2. Copy the `hooks.zapier.com` URL into WolfGrid</p>
                     <p>3. Send a test payload and confirm Zapier catches it</p>
                     <p>4. Save the webhook and start syncing leads</p>
                   </div>
@@ -1482,7 +1482,7 @@ export default function IntegrationsPage() {
                   <div>
                     <CardTitle>HubSpot</CardTitle>
                     <CardDescription>
-                      Connect with OAuth and sync FLYR leads directly into HubSpot contacts
+                      Connect with OAuth and sync WolfGrid leads directly into HubSpot contacts
                     </CardDescription>
                   </div>
                 </div>
@@ -1567,7 +1567,7 @@ export default function IntegrationsPage() {
                       <div className="text-sm text-orange-700 dark:text-orange-300">
                         <p className="font-medium mb-1">OAuth Sign-In</p>
                         <p>
-                          Sign in to HubSpot, approve the contact scopes, and FLYR will store the
+                          Sign in to HubSpot, approve the contact scopes, and WolfGrid will store the
                           OAuth tokens securely on the backend like Follow Up Boss.
                         </p>
                       </div>
@@ -1577,8 +1577,8 @@ export default function IntegrationsPage() {
                   <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4 text-sm text-gray-600 dark:text-gray-300 space-y-1">
                     <p>1. Click Connect HubSpot</p>
                     <p>2. Sign in to HubSpot</p>
-                    <p>3. Approve contact read/write access for FLYR</p>
-                    <p>4. Return to FLYR automatically</p>
+                    <p>3. Approve contact read/write access for WolfGrid</p>
+                    <p>4. Return to WolfGrid automatically</p>
                   </div>
 
                   <Button
@@ -1604,7 +1604,7 @@ export default function IntegrationsPage() {
                   <div>
                     <CardTitle>BoldTrail / kvCORE</CardTitle>
                     <CardDescription>
-                      Token-based BoldTrail lead sync from FLYR into your CRM
+                      Token-based BoldTrail lead sync from WolfGrid into your CRM
                     </CardDescription>
                   </div>
                 </div>
@@ -1679,7 +1679,7 @@ export default function IntegrationsPage() {
                         <p className="font-medium mb-1">Secure Token Storage</p>
                         <p>
                           Paste your BoldTrail or kvCORE API token, test it, and save it securely on
-                          the backend before FLYR starts syncing leads.
+                          the backend before WolfGrid starts syncing leads.
                         </p>
                       </div>
                     </div>
@@ -1687,9 +1687,9 @@ export default function IntegrationsPage() {
 
                   <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4 text-sm text-gray-600 dark:text-gray-300 space-y-1">
                     <p>1. Generate an API token in BoldTrail or kvCORE</p>
-                    <p>2. Paste it into FLYR and test the connection</p>
+                    <p>2. Paste it into WolfGrid and test the connection</p>
                     <p>3. Save the token once validation succeeds</p>
-                    <p>4. FLYR syncs contacts from the CRM sync workflow</p>
+                    <p>4. WolfGrid syncs contacts from the CRM sync workflow</p>
                   </div>
 
                   <Button
@@ -1714,7 +1714,7 @@ export default function IntegrationsPage() {
                   <div>
                     <CardTitle>Monday.com</CardTitle>
                     <CardDescription>
-                      Connect a monday account, choose one board, and sync FLYR leads into board items
+                      Connect a monday account, choose one board, and sync WolfGrid leads into board items
                     </CardDescription>
                   </div>
                 </div>
@@ -1790,7 +1790,7 @@ export default function IntegrationsPage() {
 
                   {showMondayBoards && (
                     <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4 space-y-3">
-                      <div className="text-sm font-medium dark:text-white">Choose a board for FLYR sync</div>
+                      <div className="text-sm font-medium dark:text-white">Choose a board for WolfGrid sync</div>
                       {mondayBoards.length === 0 ? (
                         <p className="text-sm text-gray-500 dark:text-gray-400">No boards available.</p>
                       ) : (
@@ -1822,7 +1822,7 @@ export default function IntegrationsPage() {
                       <div className="text-sm text-yellow-700 dark:text-yellow-300">
                         <p className="font-medium mb-1">OAuth + Board Selection</p>
                         <p>
-                          Connect your monday account, then choose one board for FLYR lead sync. Notes,
+                          Connect your monday account, then choose one board for WolfGrid lead sync. Notes,
                           follow-ups, and appointments stay on the same item for this MVP.
                         </p>
                       </div>
@@ -1832,8 +1832,8 @@ export default function IntegrationsPage() {
                   <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4 text-sm text-gray-600 dark:text-gray-300 space-y-1">
                     <p>1. Click Connect Monday.com</p>
                     <p>2. Sign in to monday and approve access</p>
-                    <p>3. Pick a board for FLYR sync</p>
-                    <p>4. FLYR creates or updates one item per lead</p>
+                    <p>3. Pick a board for WolfGrid sync</p>
+                    <p>4. WolfGrid creates or updates one item per lead</p>
                   </div>
 
                   <Button
@@ -1958,8 +1958,8 @@ export default function IntegrationsPage() {
                       <div className="space-y-4">
                         <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4 text-sm text-gray-600 dark:text-gray-300 space-y-1">
                           <p>1. Connect with OAuth when available, or paste a vendor API key</p>
-                          <p>2. FLYR validates the credential from the backend</p>
-                          <p>3. Leads sync one-way from FLYR into {provider.displayName}</p>
+                          <p>2. WolfGrid validates the credential from the backend</p>
+                          <p>3. Leads sync one-way from WolfGrid into {provider.displayName}</p>
                         </div>
 
                         <div className="flex flex-col gap-3">
@@ -2088,7 +2088,7 @@ export default function IntegrationsPage() {
             <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4 text-sm text-gray-600 dark:text-gray-300 space-y-1">
               <p className="font-medium text-gray-900 dark:text-white">MVP sync scope</p>
               <p>1. Secure storage of one Zapier Catch Hook per workspace</p>
-              <p>2. One-way FLYR to Zapier lead delivery</p>
+              <p>2. One-way WolfGrid to Zapier lead delivery</p>
               <p>3. Test payloads fire your Zap immediately, so use a safe test step in Zapier</p>
             </div>
 
@@ -2216,7 +2216,7 @@ export default function IntegrationsPage() {
             <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4 text-sm text-gray-600 dark:text-gray-300 space-y-1">
               <p className="font-medium text-gray-900 dark:text-white">MVP sync scope</p>
               <p>1. Secure token validation and backend storage</p>
-              <p>2. One-way FLYR to BoldTrail contact sync</p>
+              <p>2. One-way WolfGrid to BoldTrail contact sync</p>
               <p>3. Stored remote contact IDs for later updates</p>
             </div>
 
@@ -2342,7 +2342,7 @@ export default function IntegrationsPage() {
             <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4 text-sm text-gray-600 dark:text-gray-300 space-y-1">
               <p className="font-medium text-gray-900 dark:text-white">V1 sync scope</p>
               <p>1. Secure backend credential validation and storage</p>
-              <p>2. One-way FLYR lead push into {activeContractorProvider?.displayName ?? 'this provider'}</p>
+              <p>2. One-way WolfGrid lead push into {activeContractorProvider?.displayName ?? 'this provider'}</p>
               <p>3. Remote IDs stored so later syncs do not duplicate known leads</p>
             </div>
 

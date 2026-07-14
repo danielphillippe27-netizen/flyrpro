@@ -3,9 +3,9 @@ import type { MetadataRoute } from 'next';
 export default function manifest(): MetadataRoute.Manifest {
   return {
     id: '/',
-    name: 'FLYR',
-    short_name: 'FLYR',
-    description: 'Door-to-door software',
+    name: 'WolfGrid',
+    short_name: 'WolfGrid',
+    description: 'Field prospecting and territory mapping software',
     start_url: '/',
     scope: '/',
     display: 'standalone',

@@ -1,7 +1,7 @@
 import { Resend } from 'resend';
 
-const DEFAULT_FROM_EMAIL = 'Daniel Phillippe <daniel@flyr.software>';
-const DEFAULT_REPLY_TO = 'daniel@flyr.software';
+const DEFAULT_FROM_EMAIL = 'Daniel Phillippe <daniel@wolfgrid.app>';
+const DEFAULT_REPLY_TO = 'daniel@wolfgrid.app';
 
 function getEnv(name: string): string | null {
   const value = process.env[name];

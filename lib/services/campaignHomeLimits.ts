@@ -3,7 +3,7 @@ export const MAX_APP_HOMES = 2000;
 export const APP_LIMIT_SCAN_COUNT = MAX_APP_HOMES + 1;
 
 export const CAMPAIGN_HOME_LIMIT_MESSAGE =
-  'FLYR currently supports up to 1,000 homes per campaign. Draw a smaller block.';
+  'WolfGrid currently supports up to 1,000 homes per campaign. Draw a smaller block.';
 
 export const CAMPAIGN_TOO_LARGE_FOR_APP_MESSAGE =
   'This area has more than 2,000 homes, which is too big for the app. Draw a much smaller block.';

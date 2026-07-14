@@ -821,7 +821,7 @@ export function SalespeopleDashboard({ stripeNotice }: { stripeNotice: string | 
           <div>
             <h1 className="text-2xl font-bold text-foreground">Salespeople</h1>
             <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-              Manage direct FLYR sellers, Stripe Connect payout setup, referral codes,
+              Manage direct WolfGrid sellers, Stripe Connect payout setup, referral codes,
               and commission settings separately from ambassadors.
             </p>
           </div>

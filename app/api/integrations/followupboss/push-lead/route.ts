@@ -158,10 +158,10 @@ export async function POST(request: NextRequest) {
       sourceUrl?: string;
       metadata?: Record<string, unknown>;
     } = {
-      source: leadData.source || 'FLYR',
-      system: 'FLYR',
+      source: leadData.source || 'WolfGrid',
+      system: 'WolfGrid',
       type: 'General Inquiry',
-      message: leadData.message || `Lead from FLYR campaign${leadData.campaignId ? ` ${leadData.campaignId}` : ''}`,
+      message: leadData.message || `Lead from WolfGrid campaign${leadData.campaignId ? ` ${leadData.campaignId}` : ''}`,
       person,
     };
 
@@ -289,7 +289,7 @@ export async function POST(request: NextRequest) {
               headers: authHeaders,
               body: JSON.stringify({
                 personId: fubPersonId,
-                subject: 'FLYR Note',
+                subject: 'WolfGrid Note',
                 body: noteBody,
               }),
             });
@@ -371,7 +371,7 @@ export async function POST(request: NextRequest) {
                 method: 'POST',
                 headers: authHeaders,
                 body: JSON.stringify({
-                  title: leadData.appointment?.title?.trim() || 'FLYR Appointment',
+                  title: leadData.appointment?.title?.trim() || 'WolfGrid Appointment',
                   start: startDate.toISOString(),
                   end: endDate.toISOString(),
                   ...(leadData.appointment?.notes?.trim()

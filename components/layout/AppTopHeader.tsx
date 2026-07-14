@@ -395,17 +395,17 @@ export default function AppTopHeader() {
               </Button>
             ) : null}
             <Image
-              src="/flyr-logo-wide-light.svg"
-              alt="FLYR"
-              width={72}
-              height={28}
+              src="/brand/wolfgrid-logo-text.svg"
+              alt="WolfGrid"
+              width={120}
+              height={60}
               className="h-6 w-auto shrink-0 dark:hidden"
             />
             <Image
-              src="/flyr-logo-wide-dark.svg"
-              alt="FLYR"
-              width={72}
-              height={28}
+              src="/brand/wolfgrid-logo-white.svg"
+              alt="WolfGrid"
+              width={120}
+              height={60}
               className="hidden h-6 w-auto shrink-0 dark:block"
             />
 
@@ -461,10 +461,10 @@ export default function AppTopHeader() {
                 size="sm"
                 onClick={() => setSalesHelpOpen(true)}
                 className="px-2 sm:px-3"
-                aria-label="Help me sell FLYR"
-                title="Help me sell FLYR"
+                aria-label="Help me sell WolfGrid"
+                title="Help me sell WolfGrid"
               >
-                <span className="hidden lg:inline">Help Me Sell FLYR</span>
+                <span className="hidden lg:inline">Help Me Sell WolfGrid</span>
               </Button>
             ) : null}
 

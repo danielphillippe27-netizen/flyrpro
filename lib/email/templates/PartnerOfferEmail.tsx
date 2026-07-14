@@ -48,7 +48,7 @@ export function PartnerOfferEmailTemplate({
       <p style={{ margin: 0 }}>
         <img
           src={PARTNER_OFFER_EMAIL_LOGO_URL}
-          alt="FLYR"
+          alt="WolfGrid"
           width={120}
           style={{ display: 'block', border: 0, maxWidth: '140px', height: 'auto' }}
         />
@@ -60,5 +60,5 @@ export function PartnerOfferEmailTemplate({
 export const partnerOfferEmailPreviewProps: PartnerOfferEmailTemplateProps = {
   recipientGreetingFirstName: 'Sarah',
   offerMessage: PARTNER_OFFER_EMAIL_BODY_HOOK,
-  privateOfferLink: 'https://flyr.software/partner-offer/example',
+  privateOfferLink: 'https://wolfgrid.app/partner-offer/example',
 };

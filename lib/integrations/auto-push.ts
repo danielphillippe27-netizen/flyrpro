@@ -194,12 +194,12 @@ export async function pushLeadToConnectedCrms(
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...auth.headers },
             body: JSON.stringify({
-              source: 'FLYR',
-              system: 'FLYR',
+              source: 'WolfGrid',
+              system: 'WolfGrid',
               type: 'General Inquiry',
               message: contact.notes
-                ? `FLYR lead${contact.campaign_id ? ` (campaign ${contact.campaign_id})` : ''}: ${contact.notes}`
-                : `Lead from FLYR${contact.campaign_id ? ` campaign ${contact.campaign_id}` : ''}`,
+                ? `WolfGrid lead${contact.campaign_id ? ` (campaign ${contact.campaign_id})` : ''}: ${contact.notes}`
+                : `Lead from WolfGrid${contact.campaign_id ? ` campaign ${contact.campaign_id}` : ''}`,
               person,
             }),
           }),
@@ -242,7 +242,7 @@ export async function pushLeadToConnectedCrms(
 
         const leadPayload = {
           id: contact.id, name: contact.full_name, phone: contact.phone,
-          email: contact.email, address: contact.address, notes: contact.notes, source: 'FLYR',
+          email: contact.email, address: contact.address, notes: contact.notes, source: 'WolfGrid',
         };
         const result = existingId
           ? await withTimeout(hubSpotClient.updateContact(token, existingId, leadPayload), 5000)
@@ -279,7 +279,7 @@ export async function pushLeadToConnectedCrms(
 
         const contactPayload = {
           id: contact.id, name: contact.full_name, phone: contact.phone,
-          email: contact.email, address: contact.address, source: 'FLYR', notes: contact.notes,
+          email: contact.email, address: contact.address, source: 'WolfGrid', notes: contact.notes,
         };
 
         const existingId = await findExistingRemoteId(supabase, userId, contact.id, 'boldtrail');
@@ -326,7 +326,7 @@ export async function pushLeadToConnectedCrms(
           zapierClient.sendLead(webhookUrl, workspaceId, {
             id: contact.id, name: contact.full_name, email: contact.email,
             phone: contact.phone, address: contact.address, notes: contact.notes,
-            source: 'FLYR', campaignId: contact.campaign_id,
+            source: 'WolfGrid', campaignId: contact.campaign_id,
           }),
           5000
         );
@@ -354,7 +354,7 @@ export async function pushLeadToConnectedCrms(
       try {
         const accessToken = String(mondayRow.access_token);
         const boardId = String(mondayRow.selected_board_id);
-        const boardName = mondayRow.selected_board_name ? String(mondayRow.selected_board_name) : 'FLYR Leads';
+        const boardName = mondayRow.selected_board_name ? String(mondayRow.selected_board_name) : 'WolfGrid Leads';
 
         const boards = await fetchMondayBoards(accessToken);
         const board = boards.find((b) => b.id === boardId);
@@ -364,7 +364,7 @@ export async function pushLeadToConnectedCrms(
         const providerConfig = mondayRow.provider_config as { columnMapping?: Record<string, MondayColumnMappingEntry> } | null;
         const mapping = resolveMondayColumnMapping(board.columns, providerConfig?.columnMapping ?? null);
 
-        const itemName = contact.full_name?.trim() || contact.email?.trim() || contact.phone?.trim() || 'FLYR Lead';
+        const itemName = contact.full_name?.trim() || contact.email?.trim() || contact.phone?.trim() || 'WolfGrid Lead';
         const columnValues = buildMondayColumnValues(
           { phone: contact.phone, email: contact.email, address: contact.address, notes: contact.notes },
           board.columns,
@@ -415,7 +415,7 @@ export async function pushLeadToConnectedCrms(
           pushContractorLead(p, auth, {
             id: contact.id, name: contact.full_name, email: contact.email,
             phone: contact.phone, address: contact.address, notes: contact.notes,
-            source: 'FLYR', campaignId: contact.campaign_id,
+            source: 'WolfGrid', campaignId: contact.campaign_id,
           }),
           5000
         );

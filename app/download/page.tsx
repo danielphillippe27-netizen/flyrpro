@@ -11,15 +11,15 @@ export default function DownloadPage() {
       <main className="px-5 py-14 md:px-8 md:py-16">
         <div className="mx-auto max-w-4xl text-center">
           <Image
-            src="/flyr-download-icon.png"
-            alt="FLYR app icon"
+            src="/wolfgrid-icon-1024.png"
+            alt="WolfGrid app icon"
             width={164}
             height={164}
             className="mx-auto"
             priority
           />
 
-          <h1 className="mt-8 text-5xl font-black tracking-tight text-zinc-900 md:text-6xl">Download FLYR</h1>
+          <h1 className="mt-8 text-5xl font-black tracking-tight text-zinc-900 md:text-6xl">Download WolfGrid</h1>
           <p className="mx-auto mt-3 max-w-2xl text-xl text-zinc-600">
             Ready to turn prospecting into a system?
           </p>

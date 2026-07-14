@@ -16,17 +16,17 @@ const DEMO_THREE_CTA_AT_SECONDS =
     : 135;
 
 export const metadata: Metadata = {
-  title: 'FLYR: Campaign creation demo',
-  description: 'Watch the FLYR campaign creation demo and start with one campaign included. No credit card.',
+  title: 'WolfGrid: Campaign creation demo',
+  description: 'Watch the WolfGrid campaign creation demo and start with one campaign included. No credit card.',
   openGraph: {
-    title: 'FLYR: Campaign creation demo',
+    title: 'WolfGrid: Campaign creation demo',
     description: 'Watch the campaign creation demo and start with one campaign included. No credit card.',
-    url: 'https://www.flyrpro.app/demo-3',
+    url: 'https://wolfgrid.app/demo-3',
     images: ['/opengraph-image'],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'FLYR: Campaign creation demo',
+    title: 'WolfGrid: Campaign creation demo',
     description: 'Watch the campaign creation demo and start with one campaign included. No credit card.',
     images: ['/twitter-image'],
   },
@@ -77,12 +77,12 @@ export default async function DemoThreePage({ searchParams }: DemoThreePageProps
       customerCode={DEMO_THREE_STREAM_CUSTOMER_CODE}
       videoUid={DEMO_THREE_STREAM_VIDEO_UID}
       posterUrl={process.env.NEXT_PUBLIC_DEMO_THREE_STREAM_POSTER_URL}
-      videoTitle="FLYR campaign creation demo"
+      videoTitle="WolfGrid campaign creation demo"
       redirectAtSeconds={DEMO_THREE_CTA_AT_SECONDS}
       onboardingHref={await buildOnboardingHref(searchParams)}
-      primaryCtaLabel="Build FREE FLYR Map"
+      primaryCtaLabel="Build FREE WolfGrid Map"
       founderCallHref={FOUNDER_CALL_HREF}
-      endCtaEyebrow="Try FLYR for free today"
+      endCtaEyebrow="Try WolfGrid for free today"
       endCtaTitle="Build your first 3D prospecting map"
       showFounderCallButton={false}
       referralCode={tracking.referralCode}

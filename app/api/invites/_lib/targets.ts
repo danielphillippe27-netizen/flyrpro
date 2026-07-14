@@ -171,7 +171,7 @@ export function buildInviteRedirectPath(options: {
     return '/home';
   }
 
-  const redirectURL = new URL(`/campaigns/${campaignId}`, 'https://www.flyrpro.app');
+  const redirectURL = new URL(`/campaigns/${campaignId}`, 'https://wolfgrid.app');
   const sessionId = options.sessionId?.trim() ?? '';
   if (sessionId) {
     redirectURL.searchParams.set('session_id', sessionId);

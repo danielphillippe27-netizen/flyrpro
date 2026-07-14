@@ -117,7 +117,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Generate CSV manifest
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_BASE_URL || 'https://flyrpro.app';
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_BASE_URL || 'https://wolfgrid.app';
     
     // Parse address components
     const parseAddress = (formatted: string) => {

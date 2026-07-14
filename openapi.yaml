@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
-  title: FLYR PRO API
+  title: WolfGrid API
   description: |
-    REST API for the FLYR PRO web application — a field prospecting platform for real estate agents.
+    REST API for the WolfGrid web application — a field prospecting platform for real estate agents.
 
     ## Important notes for contributors
 
@@ -28,9 +28,9 @@ info:
     name: Harry Brown
 
 servers:
-  - url: https://flyrpro.app
+  - url: https://wolfgrid.app
     description: Production
-  - url: https://www.flyrpro.app
+  - url: https://wolfgrid.app
     description: Production (www)
   - url: http://localhost:3000
     description: Local development
@@ -242,7 +242,7 @@ components:
           description: 8-character alphanumeric short ID
         qr_url:
           type: string
-          description: Full short URL e.g. https://flyrpro.app/q/{slug}
+          description: Full short URL e.g. https://wolfgrid.app/q/{slug}
         destination_type:
           type: string
           enum: [landingPage, directLink]

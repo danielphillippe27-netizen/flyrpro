@@ -3,7 +3,7 @@ import { refreshOAuthToken } from './oauth';
 import { getCrmEncryptionKey } from './env';
 import { FUB_CONNECTION_PROVIDERS } from './provider';
 
-const FUB_SYSTEM_NAME = process.env.FUB_SYSTEM_NAME || 'FLYR';
+const FUB_SYSTEM_NAME = process.env.FUB_SYSTEM_NAME || 'WolfGrid';
 const FUB_SYSTEM_KEY = process.env.FUB_SYSTEM_KEY;
 const OAUTH_EXPIRY_SKEW_SECONDS = 90;
 

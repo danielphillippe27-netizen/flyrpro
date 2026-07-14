@@ -1,34 +1,34 @@
 export const PARTNER_OFFER_EMAIL_CLOSING_LINE = 'Happy to answer any questions,';
 
 /** Served from production so embedded images work in Gmail (not localhost). */
-export const PARTNER_OFFER_EMAIL_LOGO_URL = 'https://flyr.software/flyr-download-icon.png';
+export const PARTNER_OFFER_EMAIL_LOGO_URL = 'https://wolfgrid.app/wolfgrid-icon-1024.png';
 
 /** Default subject when the Subject field is left on auto (uses Company field). */
 export function partnerOfferEmailDefaultSubject(companyName: string): string {
   const co = companyName.trim();
-  return co ? `FLYR is Built for ${co}` : 'FLYR is Built for your team';
+  return co ? `WolfGrid is Built for ${co}` : 'WolfGrid is Built for your team';
 }
 
 /** Default editable body (link line is added by the template after this). */
 export const PARTNER_OFFER_EMAIL_BODY_HOOK =
-  'FLYR is built for teams that prospect door-to-door. It automatically tracks every door knocked, syncs leads to your CRM, and gives managers the accountability metrics to coach what\'s actually happening in the field.\n\n' +
+  'WolfGrid is built for teams that prospect door-to-door. It automatically tracks every door knocked, syncs leads to your CRM, and gives managers the accountability metrics to coach what\'s actually happening in the field.\n\n' +
   'I put this invite together specifically for your team — it\'s not publicly listed.';
 
 /** Subject field value meaning “use auto subject” (matches empty-company default). */
-export const PARTNER_OFFER_EMAIL_SUBJECT_SENTINEL = 'FLYR is Built for your team';
+export const PARTNER_OFFER_EMAIL_SUBJECT_SENTINEL = 'WolfGrid is Built for your team';
 
 function shouldUseAutoPartnerSubject(trimmedSubject: string): boolean {
   if (!trimmedSubject) return true;
   const legacy = new Set([
     PARTNER_OFFER_EMAIL_SUBJECT_SENTINEL,
-    'Private FLYR page',
+    'Private WolfGrid page',
     'Exclusive Team Offer',
-    'Exclusive FLYR Partner Offer',
-    'Private FLYR page for your team',
+    'Exclusive WolfGrid Partner Offer',
+    'Private WolfGrid page for your team',
   ]);
   if (legacy.has(trimmedSubject)) return true;
-  if (/^Private FLYR page for .+/.test(trimmedSubject)) return true;
-  if (/^FLYR is Built for .+/.test(trimmedSubject)) return true;
+  if (/^Private WolfGrid page for .+/.test(trimmedSubject)) return true;
+  if (/^WolfGrid is Built for .+/.test(trimmedSubject)) return true;
   return false;
 }
 

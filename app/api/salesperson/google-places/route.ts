@@ -397,7 +397,7 @@ async function saveScraperResults(params: {
     }];
   });
 
-  // Sales/prospecting imports must stay out of regular FLYR contacts.
+  // Sales/prospecting imports must stay out of regular WolfGrid contacts.
   contactsToInsert.length = 0;
 
   if (contactsToInsert.length > 0) {

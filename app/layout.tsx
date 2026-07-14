@@ -14,25 +14,25 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://www.flyrpro.app"),
+  metadataBase: new URL("https://wolfgrid.app"),
   manifest: '/manifest.webmanifest',
   title: {
-    default: "FLYR",
-    template: "%s | FLYR",
+    default: "WolfGrid",
+    template: "%s | WolfGrid",
   },
   description: "3D prospecting map",
   icons: {
-    icon: "/favicon.ico",
+    icon: "/favicon.png",
     apple: "/apple-touch-icon.png",
   },
   openGraph: {
-    title: "FLYR",
+    title: "WolfGrid",
     description: "3D prospecting map",
     images: ["/opengraph-image"],
   },
   twitter: {
     card: "summary_large_image",
-    title: "FLYR",
+    title: "WolfGrid",
     description: "3D prospecting map",
     images: ["/twitter-image"],
   },

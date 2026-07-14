@@ -78,7 +78,7 @@ const JUST_LISTED_DM_DEFAULTS = {
   title: 'Use this listing to win the neighbourhood.',
   primaryMessage: "You've already got the listing.",
   secondaryMessage:
-    'Now use FLYR to turn it into more exposure, more conversations, and your next client.',
+    'Now use WolfGrid to turn it into more exposure, more conversations, and your next client.',
   tertiaryMessage:
     'Use flyers and doorknocking around your listing to create local buzz, uncover buyers, and meet nearby sellers before this window closes.',
   primaryCta: 'See the listing play',
@@ -126,9 +126,7 @@ function JustListedDmOfferLanding({
       <header className="sticky top-0 z-50 border-b border-white/10 bg-black/55 backdrop-blur-md">
         <div className="mx-auto flex w-full max-w-5xl items-center justify-between px-4 py-3 sm:px-6">
           <Link href="/" className="flex items-end">
-            <span className="text-3xl font-black leading-none tracking-tight text-red-500 sm:text-4xl">
-              FLYR
-            </span>
+            <span className="text-3xl font-black leading-none tracking-tight text-red-500 sm:text-4xl">WolfGrid</span>
           </Link>
           <div className="inline-flex items-center rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-red-200">
             Door-to-door software
@@ -177,7 +175,7 @@ function JustListedDmOfferLanding({
                 Quick look
               </p>
               <h2 className="mt-2 text-2xl font-black tracking-[-0.03em] text-white sm:text-[2rem]">
-                See how FLYR helps you find your next client
+                See how WolfGrid helps you find your next client
               </h2>
               <p className="mt-2 text-sm leading-6 text-zinc-400 sm:text-[15px]">
                 Use one listing to power a smarter local campaign with flyers, doorknocking, tracking, and follow-up built in.
@@ -285,9 +283,7 @@ export function PartnerOfferLanding({
       >
         <div className="mx-auto flex w-full max-w-5xl items-center justify-between px-4 py-3 md:px-6">
           <Link href="/" className="flex items-end">
-            <span className="text-3xl font-black leading-none tracking-tight text-red-500 sm:text-4xl md:text-5xl">
-              FLYR
-            </span>
+            <span className="text-3xl font-black leading-none tracking-tight text-red-500 sm:text-4xl md:text-5xl">WolfGrid</span>
           </Link>
 
           <div className="flex items-center gap-4 md:gap-6">
@@ -411,7 +407,7 @@ export function PartnerOfferLanding({
                       Quick look
                     </p>
                     <h2 className="mt-2 text-2xl font-black tracking-[-0.03em] text-white sm:text-[2rem]">
-                      See how FLYR helps you find your next client
+                      See how WolfGrid helps you find your next client
                     </h2>
                     <p className="mt-2 text-sm leading-6 text-zinc-400 sm:text-[15px]">
                       Use one listing to power a smarter local campaign with flyers, doorknocking, tracking, and follow-up built in.
@@ -432,10 +428,10 @@ export function PartnerOfferLanding({
           ) : (
             <div className="mx-auto w-full max-w-7xl px-5 md:px-8">
               <h2 className="text-center text-3xl font-black leading-tight text-zinc-900 md:text-4xl">
-                See FLYR in action
+                See WolfGrid in action
               </h2>
               <p className="mt-3 text-center text-lg text-zinc-500">
-                The same FLYR platform, with exclusive terms for your team.
+                The same WolfGrid platform, with exclusive terms for your team.
               </p>
               <div className="mx-auto mt-8 w-full max-w-6xl overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
                 <ExclusiveOfferArcadeEmbed variant="default" />

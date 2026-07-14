@@ -63,7 +63,7 @@ export default async function PartnerOfferPage({ params }: Params) {
             </CardDescription>
           </CardHeader>
           <CardContent className="text-sm text-slate-600">
-            If you expected access, contact your FLYR point of contact for a fresh private link.
+            If you expected access, contact your WolfGrid point of contact for a fresh private link.
           </CardContent>
         </Card>
       </main>

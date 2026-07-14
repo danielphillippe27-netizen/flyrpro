@@ -63,7 +63,7 @@ export function PublicAmbassadorLanding({
       <section className="mx-auto flex min-h-screen max-w-5xl flex-col justify-center gap-8 px-5 py-10 md:px-8">
         <div className="space-y-3">
           <p className="text-sm font-semibold uppercase tracking-[0.08em] text-red-400">
-            FLYR Partner / {displayName}
+            WolfGrid Partner / {displayName}
           </p>
           <h1 className="max-w-4xl text-4xl font-semibold tracking-normal md:text-6xl">
             {headline}
@@ -80,7 +80,7 @@ export function PublicAmbassadorLanding({
             ) : isVideoUrl(mediaUrl) ? (
               <iframe
                 src={mediaUrl}
-                title="FLYR demo"
+                title="WolfGrid demo"
                 className="aspect-video w-full"
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                 allowFullScreen
@@ -89,14 +89,14 @@ export function PublicAmbassadorLanding({
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={mediaUrl}
-                alt="FLYR partner media"
+                alt="WolfGrid partner media"
                 className="aspect-video w-full object-cover"
               />
             )
           ) : (
             <div className="flex aspect-video items-center justify-center px-8 text-center">
               <div>
-                <p className="text-2xl font-semibold">FLYR field prospecting</p>
+                <p className="text-2xl font-semibold">WolfGrid field prospecting</p>
                 <p className="mt-3 max-w-md text-sm leading-6 text-zinc-400">
                   Map territories, track doors, organize follow-up, and make field activity measurable.
                 </p>

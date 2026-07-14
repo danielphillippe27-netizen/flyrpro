@@ -224,7 +224,7 @@ export default function BillingPage() {
               </div>
               <p className="text-sm text-muted-foreground">
                 {entitlement?.isAmbassador
-                  ? 'You have Pro-level access through the FLYR Ambassador Program.'
+                  ? 'You have Pro-level access through the WolfGrid Ambassador Program.'
                   : entitlement?.is_active
                   ? 'You have access to Pro features.'
                   : 'Upgrade to Pro for more features.'}

@@ -3,7 +3,7 @@ import path from 'node:path';
 
 function workspaceRoot() {
   const cwd = process.cwd();
-  return path.basename(cwd) === 'FLYR-PRO' ? path.dirname(cwd) : cwd;
+  return path.basename(cwd) === 'WolfGrid Web' ? path.dirname(cwd) : cwd;
 }
 
 export const CAMPAIGN_POLYGON_PARITY_REPORT_ROOT = path.join(

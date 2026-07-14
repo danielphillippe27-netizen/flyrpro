@@ -15,7 +15,7 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const viewerName = payload.share?.viewer_label?.trim();
 
   return {
-    title: viewerName ? `${viewerName} Beacon` : 'FLYR Beacon',
+    title: viewerName ? `${viewerName} Beacon` : 'WolfGrid Beacon',
     robots: {
       index: false,
       follow: false,

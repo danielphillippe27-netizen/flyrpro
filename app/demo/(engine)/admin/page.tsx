@@ -157,7 +157,7 @@ export default async function DemoAdminPage() {
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 18, alignItems: 'baseline', marginBottom: 28 }}>
         <div>
           <div style={{ color: 'var(--orange)', fontSize: 12, fontWeight: 700, letterSpacing: '.22em' }}>
-            FLYR PRO · DEMO SENSOR
+            WolfGrid · DEMO SENSOR
           </div>
           <h1
             style={{

@@ -90,9 +90,7 @@ const MAP_BUILDINGS = [
 function FlyrWordmark() {
   return (
     <div className="pointer-events-none absolute left-0 right-0 top-0 z-20 flex justify-center px-6 pt-[max(18px,env(safe-area-inset-top))]">
-      <div className="rounded-sm border border-white/10 px-2.5 py-1 text-[11px] font-black uppercase tracking-[0.28em] text-white/55">
-        FLYR
-      </div>
+      <div className="rounded-sm border border-white/10 px-2.5 py-1 text-[11px] font-black uppercase tracking-[0.28em] text-white/55">WolfGrid</div>
     </div>
   );
 }
@@ -407,7 +405,7 @@ export function DemoFunnel() {
 
   const steps: FunnelStep[] = [
     {
-      eyebrow: 'See what FLYR does in 90 seconds',
+      eyebrow: 'See what WolfGrid does in 90 seconds',
       headline: 'Your field team, finally visible.',
       body: 'Launch campaigns, guide reps, track every door, and move leads into follow-up without the end-of-day scramble.',
       cta: 'Watch the demo →',
@@ -415,7 +413,7 @@ export function DemoFunnel() {
     },
     {
       headline: 'The field breaks when the CRM depends on memory.',
-      body: 'FLYR removes the manual gaps that make canvassing teams hard to manage.',
+      body: 'WolfGrid removes the manual gaps that make canvassing teams hard to manage.',
       cta: 'Sound familiar? →',
       render: () => <ProblemCards />,
     },
@@ -429,7 +427,7 @@ export function DemoFunnel() {
     {
       eyebrow: 'Step 2 of 3',
       headline: 'Hit every door. Miss nothing.',
-      body: 'Reps work from the phone while FLYR records coverage, proximity, outcomes, and CRM-ready follow-up.',
+      body: 'Reps work from the phone while WolfGrid records coverage, proximity, outcomes, and CRM-ready follow-up.',
       cta: 'See the results →',
       render: () => (
         <div className="space-y-4">
@@ -447,13 +445,13 @@ export function DemoFunnel() {
     },
     {
       headline: 'Your team, fully in view.',
-      body: 'Tap a card to see what FLYR gives team leads the moment reps start working.',
+      body: 'Tap a card to see what WolfGrid gives team leads the moment reps start working.',
       cta: "Here's the offer →",
       render: () => <DashboardGrid />,
     },
     {
       headline: 'We built this for you.',
-      body: 'FLYR is built for teams that need real field accountability without adding more admin work. Start with a guided trial and see the workflow with your team.',
+      body: 'WolfGrid is built for teams that need real field accountability without adding more admin work. Start with a guided trial and see the workflow with your team.',
       cta: 'Claim my included campaign →',
       render: () => (
         <div className="space-y-4">
@@ -463,7 +461,7 @@ export function DemoFunnel() {
       ),
     },
     {
-      headline: 'Try FLYR free.',
+      headline: 'Try WolfGrid free.',
       body: "No credit card. We'll onboard you personally.",
       cta: '',
       render: () => <TrialForm onSubmit={handleFormSubmit} />,

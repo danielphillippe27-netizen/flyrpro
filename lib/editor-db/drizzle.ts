@@ -1,7 +1,7 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 
-// Use FLYR's Supabase database connection
+// Use WolfGrid's Supabase database connection
 // DATABASE_URL should be set in environment variables
 // Format: postgresql://postgres:[PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres
 

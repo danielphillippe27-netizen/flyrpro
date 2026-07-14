@@ -80,7 +80,7 @@ export function Beat6({ copy, ctaVariant, ctaUrl }: Beat6Props) {
           </a>
           <a
             className="btn ghost"
-            href="https://flyrpro.app"
+            href="https://wolfgrid.app"
             onClick={() => track('cta_click', 6, { variant: ctaVariant, target: 'secondary' })}
           >
             {copy.ctaSecondary}
@@ -90,7 +90,7 @@ export function Beat6({ copy, ctaVariant, ctaUrl }: Beat6Props) {
       </section>
 
       <footer>
-        <span>FLYR PRO · Field operations, verified</span>
+        <span>WolfGrid · Field operations, verified</span>
         <span>CA · US · UK · AU · NZ · ZA</span>
       </footer>
     </>

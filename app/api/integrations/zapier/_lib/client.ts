@@ -56,7 +56,7 @@ function buildZapierRequestBody(args: {
 }) {
   return {
     event: args.event,
-    source: 'FLYR',
+    source: 'WolfGrid',
     test: args.test,
     sentAt: new Date().toISOString(),
     workspaceId: args.workspaceId,
@@ -67,7 +67,7 @@ function buildZapierRequestBody(args: {
       phone: args.lead.phone ?? null,
       address: args.lead.address ?? null,
       notes: args.lead.notes ?? null,
-      source: args.lead.source ?? 'FLYR',
+      source: args.lead.source ?? 'WolfGrid',
       campaignId: args.lead.campaignId ?? null,
       createdAt: args.lead.createdAt ?? null,
     },
@@ -112,7 +112,7 @@ export class ZapierWebhookClient {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': 'FLYR-Zapier-Integration/1.0',
+        'User-Agent': 'WolfGrid-Zapier-Integration/1.0',
       },
       body: JSON.stringify(payload),
     });

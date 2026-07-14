@@ -61,9 +61,9 @@ type LandingPagePayload = {
 const brandingBlocks = [
   {
     title: 'Quick Pitch',
-    use: 'Use this when someone asks what FLYR is.',
+    use: 'Use this when someone asks what WolfGrid is.',
     body:
-      'FLYR is a field prospecting app built for real estate agents, roofers, solar reps, and door-to-door sales teams. It helps users map their territory, track doors, organize follow-up, and prove their prospecting activity.',
+      'WolfGrid is a field prospecting app built for real estate agents, roofers, solar reps, and door-to-door sales teams. It helps users map their territory, track doors, organize follow-up, and prove their prospecting activity.',
   },
   {
     title: 'Approved Talking Points',
@@ -87,31 +87,31 @@ const brandingBlocks = [
     title: 'Caption Template 1',
     use: 'Use this for Instagram, LinkedIn, or Facebook.',
     body:
-      'Door knocking is still one of the most underrated ways to build a local business, but only if you track it.\n\nThat is why I have been using FLYR.\n\nIt helps you map your territory, track every door, organize conversations, and actually see the work you are putting in.\n\nUse my link to check it out.',
+      'Door knocking is still one of the most underrated ways to build a local business, but only if you track it.\n\nThat is why I have been using WolfGrid.\n\nIt helps you map your territory, track every door, organize conversations, and actually see the work you are putting in.\n\nUse my link to check it out.',
   },
   {
     title: 'Caption Template 2',
     use: 'Use this for a short product endorsement.',
     body:
-      'Most people quit prospecting because they cannot see progress.\n\nFLYR fixes that.\n\nYou can see your doors, your conversations, your follow-ups, and your territory all in one place.\n\nIf you are serious about field sales, this is worth checking out.',
+      'Most people quit prospecting because they cannot see progress.\n\nWolfGrid fixes that.\n\nYou can see your doors, your conversations, your follow-ups, and your territory all in one place.\n\nIf you are serious about field sales, this is worth checking out.',
   },
   {
     title: "Dos and Don'ts",
     use: 'Use this before publishing content.',
     body:
-      'Do:\nShow the app in real prospecting situations\nTalk about organization, consistency, and accountability\nExplain how FLYR helps with door knocking and field sales\nUse your own honest experience\nUse your referral link or landing page\n\nDo not:\nPromise guaranteed leads or income\nClaim FLYR replaces legal, brokerage, or CRM compliance requirements\nMisrepresent pricing or commissions\nUse fake results\nMake unsupported claims about conversion rates',
+      'Do:\nShow the app in real prospecting situations\nTalk about organization, consistency, and accountability\nExplain how WolfGrid helps with door knocking and field sales\nUse your own honest experience\nUse your referral link or landing page\n\nDo not:\nPromise guaranteed leads or income\nClaim WolfGrid replaces legal, brokerage, or CRM compliance requirements\nMisrepresent pricing or commissions\nUse fake results\nMake unsupported claims about conversion rates',
   },
 ];
 
 const logoAssets = [
   {
     name: 'Black logo PNG',
-    src: '/brand/flyr-logo-black.png',
+    src: '/brand/wolfgrid-logo-text.svg',
     previewClassName: 'bg-white',
   },
   {
     name: 'White logo PNG',
-    src: '/brand/flyr-logo-white.png',
+    src: '/brand/wolfgrid-logo-white.svg',
     previewClassName: 'bg-[#101317]',
   },
 ];
@@ -278,7 +278,7 @@ export function AmbassadorPartnerPortal() {
             <Card>
               <CardHeader>
                 <CardTitle>Share Links</CardTitle>
-                <CardDescription>Copy these when promoting FLYR.</CardDescription>
+                <CardDescription>Copy these when promoting WolfGrid.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
                 {[
@@ -374,7 +374,7 @@ export function AmbassadorPartnerPortal() {
             <CardHeader>
               <CardTitle>Branding Kit</CardTitle>
               <CardDescription>
-                Use these approved assets and talking points when creating content for FLYR. Keep your content honest,
+                Use these approved assets and talking points when creating content for WolfGrid. Keep your content honest,
                 practical, and based on your real experience.
               </CardDescription>
             </CardHeader>

@@ -24,9 +24,7 @@ export function LegalPageLayout({
       <main className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-4 py-6 sm:px-6 sm:py-10 lg:px-8">
         <div className="flex flex-col gap-4 rounded-[28px] border border-black/10 bg-white/90 p-4 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur sm:p-6">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <Link href="/" className="text-3xl font-black tracking-tight text-black sm:text-4xl">
-              FLYR
-            </Link>
+            <Link href="/" className="text-3xl font-black tracking-tight text-black sm:text-4xl">WolfGrid</Link>
             <nav
               aria-label="Legal navigation"
               className="flex flex-wrap items-center gap-2 text-zinc-600"
@@ -76,7 +74,7 @@ export function LegalPageLayout({
 
         <footer className="rounded-[24px] border border-zinc-200 bg-white px-5 py-6 text-sm text-zinc-600 shadow-[0_12px_40px_rgba(15,23,42,0.04)] sm:px-6">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <p>Public legal information for FLYR and FLYR Pro.</p>
+            <p>Public legal information for WolfGrid.</p>
             <div className="flex flex-wrap items-center gap-4">
               <Link href="/terms" className="font-medium text-zinc-900 underline underline-offset-4">
                 Terms of Service
@@ -85,10 +83,10 @@ export function LegalPageLayout({
                 Privacy Policy
               </Link>
               <a
-                href="https://www.flyrpro.app"
+                href="https://wolfgrid.app"
                 className="font-medium text-zinc-900 underline underline-offset-4"
               >
-                flyrpro.app
+                wolfgrid.app
               </a>
             </div>
           </div>

@@ -168,8 +168,8 @@ function formatRecordingDuration(totalSeconds: number | null | undefined): strin
 }
 
 function buildTextDropBody(lead: DiallerLead, repName: string): string {
-  const rep = repName || 'your FLYR rep';
-  return `Hey there, its ${rep} with FLYR can you give me a call back when you get a chance !`;
+  const rep = repName || 'your WolfGrid rep';
+  return `Hey there, its ${rep} with WolfGrid can you give me a call back when you get a chance !`;
 }
 
 function inferDemoAudience(lead: DiallerLead | null | undefined): DemoAudience {
@@ -2050,7 +2050,7 @@ export function PowerDialerPage() {
                     value={textBody}
                     onChange={(event) => handleTextBodyChange(event.target.value)}
                     disabled={!hasActiveLead || sendingText || saving}
-                    placeholder={activeLead ? 'Write a text message...' : `Hey there, its ${repFirstName || 'your FLYR rep'} with FLYR can you give me a call back when you get a chance !`}
+                    placeholder={activeLead ? 'Write a text message...' : `Hey there, its ${repFirstName || 'your WolfGrid rep'} with WolfGrid can you give me a call back when you get a chance !`}
                     rows={3}
                     className="min-h-[72px] w-full resize-y overflow-y-auto border-0 bg-transparent p-0 py-2 text-base leading-6 text-foreground outline-none placeholder:text-muted-foreground focus:ring-0 disabled:cursor-not-allowed disabled:text-muted-foreground disabled:opacity-100"
                   />

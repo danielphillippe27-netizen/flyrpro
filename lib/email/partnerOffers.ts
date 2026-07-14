@@ -7,8 +7,8 @@ import {
   partnerOfferGreetingFirstName,
 } from '@/lib/email/partnerOfferEmailCopy';
 
-const DEFAULT_FROM_EMAIL = 'Daniel Phillippe <daniel@flyr.software>';
-const OFFER_REPLY_TO = 'daniel@flyr.software';
+const DEFAULT_FROM_EMAIL = 'Daniel Phillippe <daniel@wolfgrid.app>';
+const OFFER_REPLY_TO = 'daniel@wolfgrid.app';
 
 function getEnv(name: string): string | null {
   const value = process.env[name];
@@ -46,8 +46,8 @@ export function getPartnerOfferMailerConfigError(): string | null {
     return 'Offer was created, but the email sender is invalid.';
   }
 
-  if (address !== 'daniel@flyr.software') {
-    return 'Offer email sender must be Daniel Phillippe <daniel@flyr.software>. Update RESEND_FROM_EMAIL to match.';
+  if (address !== 'daniel@wolfgrid.app') {
+    return 'Offer email sender must be Daniel Phillippe <daniel@wolfgrid.app>. Update RESEND_FROM_EMAIL to match.';
   }
 
   return null;
@@ -99,7 +99,7 @@ function buildPartnerOfferEmailHtml(props: PartnerOfferEmailTemplateProps): stri
       <p style="margin:0 0 22px;">${escapeHtml(PARTNER_OFFER_EMAIL_CLOSING_LINE)}</p>
       <p style="margin:0 0 4px;">Daniel Phillippe</p>
       <p style="margin:0 0 12px;color:#64748b;font-size:14px;">Founder</p>
-      <p style="margin:0;"><img src="${logo}" alt="FLYR" width="120" height="auto" style="display:block;border:0;max-width:140px;height:auto;" /></p>
+      <p style="margin:0;"><img src="${logo}" alt="WolfGrid" width="120" height="auto" style="display:block;border:0;max-width:140px;height:auto;" /></p>
     </div>
   `.trim();
 }
@@ -146,7 +146,7 @@ export async function sendPartnerOfferEmail(
     const message = error.message.trim() || 'Resend email request failed';
     if (/only send testing emails|verify a domain at resend\.com\/domains/i.test(message)) {
       throw new Error(
-        'Offer was created, but Resend is still in test mode for this sender. Verify flyr.software in Resend to deliver this email.'
+        'Offer was created, but Resend is still in test mode for this sender. Verify wolfgrid.app in Resend to deliver this email.'
       );
     }
 

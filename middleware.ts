@@ -5,7 +5,23 @@ import { getSupabaseAnonKey, getSupabaseUrl } from '@/lib/supabase/env';
 
 let loggedConfigError = false;
 
+const CANONICAL_HOST = 'wolfgrid.app';
+const LEGACY_HOSTS = new Set([
+  'flyrpro.app',
+  'www.flyrpro.app',
+  'www.wolfgrid.app',
+]);
+
 export async function middleware(req: NextRequest) {
+  const host = req.nextUrl.hostname.toLowerCase();
+  if (LEGACY_HOSTS.has(host)) {
+    const redirectURL = req.nextUrl.clone();
+    redirectURL.protocol = 'https:';
+    redirectURL.hostname = CANONICAL_HOST;
+    redirectURL.port = '';
+    return NextResponse.redirect(redirectURL, 308);
+  }
+
   const res = NextResponse.next();
   
   try {

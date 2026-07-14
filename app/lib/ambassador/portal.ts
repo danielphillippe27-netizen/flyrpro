@@ -1,14 +1,14 @@
 export const AMBASSADOR_LANDING_DEFAULTS = {
   headline: 'Door knocking and farm tracking built for serious prospectors.',
   subline:
-    'I use FLYR to organize field prospecting, track doors, and turn real-world activity into measurable results.',
+    'I use WolfGrid to organize field prospecting, track doors, and turn real-world activity into measurable results.',
   introMessage:
-    'I use FLYR to organize field prospecting, track doors, and turn real-world activity into measurable results.',
+    'I use WolfGrid to organize field prospecting, track doors, and turn real-world activity into measurable results.',
   ctaText: 'Start with one campaign included',
-  offerText: 'Use my link to get one workspace campaign included and see how FLYR tracks real field activity.',
+  offerText: 'Use my link to get one workspace campaign included and see how WolfGrid tracks real field activity.',
 } as const;
 
-export const FLYR_PUBLIC_ORIGIN = 'https://flyr.software';
+export const FLYR_PUBLIC_ORIGIN = 'https://wolfgrid.app';
 export const AMBASSADOR_RE_TEAM_SOURCE = 'ambassador';
 export const AMBASSADOR_RE_TEAM_CAMPAIGN = 're-team';
 export const AMBASSADOR_RE_TEAM_DEMO_VIDEO_URL =

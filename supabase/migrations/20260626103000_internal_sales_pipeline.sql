@@ -285,7 +285,7 @@ BEFORE INSERT OR UPDATE ON public.salesperson_lead_master
 FOR EACH ROW
 EXECUTE FUNCTION public.salesperson_lead_master_pipeline_defaults();
 
-COMMENT ON COLUMN public.salesperson_lead_master.seat_count IS 'Estimated paid seats for this internal FLYR sales lead. Pricing defaults to $40/mo per seat.';
+COMMENT ON COLUMN public.salesperson_lead_master.seat_count IS 'Estimated paid seats for this internal WolfGrid sales lead. Pricing defaults to $40/mo per seat.';
 COMMENT ON COLUMN public.salesperson_lead_master.match_confidence IS 'Best current app signup match confidence. Only strong matches should auto-update pipeline state.';
 COMMENT ON TABLE public.salesperson_lead_activities IS 'Internal sales lead timeline for notes, task changes, stage changes, demo opens, signups, and product usage milestones.';
 COMMENT ON TABLE public.salesperson_lead_app_matches IS 'Attribution history between internal sales leads and app signups/workspaces.';

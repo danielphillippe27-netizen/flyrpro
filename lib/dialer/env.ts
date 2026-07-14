@@ -187,7 +187,7 @@ export function getTwilioInboundForwardTo(): string | null {
 export function getTwilioInboundFallbackMessage(): string {
   return (
     optionalEnv('TWILIO_INBOUND_FALLBACK_MESSAGE') ||
-    'Thanks for calling FLYR. We are unavailable right now, so please leave a voicemail or try again shortly.'
+    'Thanks for calling WolfGrid. We are unavailable right now, so please leave a voicemail or try again shortly.'
   );
 }
 
@@ -202,7 +202,7 @@ export function getTwilioVoicemailDropAudioUrl(): string | null {
 export function getTwilioVoicemailDropMessage(): string {
   return (
     optionalEnv('TWILIO_VOICEMAIL_DROP_MESSAGE') ||
-    'Hi, this is FLYR. Sorry we missed you. Please give us a call back when you have a moment. Thank you.'
+    'Hi, this is WolfGrid. Sorry we missed you. Please give us a call back when you have a moment. Thank you.'
   );
 }
 
@@ -229,7 +229,7 @@ export function getTelnyxInboundForwardTo(): string | null {
 export function getTelnyxInboundFallbackMessage(): string {
   return (
     optionalEnv('TELNYX_INBOUND_FALLBACK_MESSAGE') ||
-    'Thanks for calling FLYR. We are unavailable right now, so please leave a voicemail or try again shortly.'
+    'Thanks for calling WolfGrid. We are unavailable right now, so please leave a voicemail or try again shortly.'
   );
 }
 
@@ -276,7 +276,7 @@ export function getTelnyxWebhookBaseUrl(): string | null {
 export function getTelnyxVoicemailDropMessage(): string {
   return (
     optionalEnv('TELNYX_VOICEMAIL_DROP_MESSAGE') ||
-    'Hi, this is FLYR. Sorry we missed you. Please give us a call back when you have a moment. Thank you.'
+    'Hi, this is WolfGrid. Sorry we missed you. Please give us a call back when you have a moment. Thank you.'
   );
 }
 

@@ -42,7 +42,7 @@ export async function GET(request: NextRequest) {
       firstName,
       lastName,
       email: data.email,
-      workspaceName: `FLYR / Salespeople / ${data.full_name}`,
+      workspaceName: `WolfGrid / Salespeople / ${data.full_name}`,
       completed: Boolean(data.workspace_id || data.onboarding_completed_at),
     });
   } catch (error) {

@@ -117,7 +117,7 @@ function applyRange<T>(
 function includesDemoSignal(body: string | null | undefined): boolean {
   const text = (body ?? '').toLowerCase();
   return (
-    text.includes('flyr.software/demo') ||
+    text.includes('wolfgrid.app/demo') ||
     text.includes('/demo-1') ||
     text.includes('90-second demo') ||
     text.includes('demo')

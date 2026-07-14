@@ -32,7 +32,7 @@ function getArcadeConfig(variant: 'default' | 'iphone', demo: 'team' | 'ig-dm') 
   if (variant === 'iphone') {
     return {
       src: 'https://demo.arcade.software/QugJLQYJyeeaM0JPVgZL?embed&embed_mobile=inline&embed_desktop=inline&show_copy_link=false',
-      title: 'FLYR iPhone demo',
+      title: 'WolfGrid iPhone demo',
       paddingBottom: 'calc(62.5% + 41px)',
     };
   }
@@ -40,14 +40,14 @@ function getArcadeConfig(variant: 'default' | 'iphone', demo: 'team' | 'ig-dm') 
   if (demo === 'ig-dm') {
     return {
       src: 'https://demo.arcade.software/8ccpKIGdJB6eW0WNy4W0?embed&embed_mobile=inline&embed_desktop=inline&show_copy_link=false',
-      title: 'FLYR IG DM onboarding demo',
+      title: 'WolfGrid IG DM onboarding demo',
       paddingBottom: 'calc(64.94708994708994% + 41px)',
     };
   }
 
   return {
     src: 'https://demo.arcade.software/nbvH4JKdrqCGt8a0O8pi?embed&embed_mobile=inline&embed_desktop=inline&show_copy_link=false',
-    title: 'FLYR team prospecting dashboard',
+    title: 'WolfGrid team prospecting dashboard',
     paddingBottom: 'calc(64.94708994708994% + 41px)',
   };
 }
@@ -132,7 +132,7 @@ function IphoneDemoPoster() {
           <div className="absolute left-1/2 top-3 h-1.5 w-16 -translate-x-1/2 rounded-full bg-white/10" />
           <div className="absolute left-5 right-5 top-5 flex items-center justify-between text-[10px] font-semibold text-white/75">
             <span>9:41</span>
-            <span>FLYR</span>
+            <span>WolfGrid</span>
           </div>
 
           <div className="flex h-full flex-col justify-between rounded-[30px] border border-white/8 bg-[linear-gradient(180deg,_#020203_0%,_#07070a_55%,_#0c1220_100%)] px-4 pb-5 pt-14">
@@ -144,7 +144,7 @@ function IphoneDemoPoster() {
 
             <div className="space-y-4 text-center">
               <div className="mx-auto inline-flex rounded-md border-2 border-red-500/80 px-3 py-1 shadow-[0_0_24px_rgba(239,68,68,0.18)]">
-                <span className="text-4xl font-black tracking-tight text-white sm:text-[2.75rem]">FLYR</span>
+                <span className="text-4xl font-black tracking-tight text-white sm:text-[2.75rem]">WolfGrid</span>
               </div>
               <p className="text-sm text-white/80">Creating campaign</p>
             </div>

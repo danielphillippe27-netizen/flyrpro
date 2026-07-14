@@ -11,7 +11,7 @@ const VERTICAL_COPY: Partial<Record<DemoVertical, Partial<BeatCopy>>> = {
   real_estate: {
     b1Headline: 'Your agents are on the doors',
     b1Sub:
-      'FLYR PRO runs real estate canvassing teams: farm maps, door routes, reps, and every knock — verified.',
+      'WolfGrid runs real estate canvassing teams: farm maps, door routes, reps, and every knock — verified.',
 
     b2Headline: "You're paying for prospecting\nyou can't see.",
     b2Sub:

@@ -64,7 +64,7 @@ export function buildConnectBusinessProfilePrefill(
     normalizePublicHttpsUrl(process.env.NEXT_PUBLIC_APP_URL) ??
     normalizePublicHttpsUrl(process.env.APP_BASE_URL) ??
     normalizePublicHttpsUrl(input.origin) ??
-    'https://flyrpro.app';
+    'https://wolfgrid.app';
 
   return {
     product_description: input.productDescription,

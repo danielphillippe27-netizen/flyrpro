@@ -48,10 +48,10 @@ export async function POST(request: NextRequest) {
 
     // Create a test lead
     const testLead = {
-      source: 'FLYR',
-      system: 'FLYR',
+      source: 'WolfGrid',
+      system: 'WolfGrid',
       type: 'General Inquiry',
-      message: '🧪 Test lead from FLYR Integration - This is a test to verify your connection is working',
+      message: '🧪 Test lead from WolfGrid Integration - This is a test to verify your connection is working',
       person: {
         firstName: 'Test',
         lastName: 'Lead',
@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
       metadata: {
         testLead: true,
         sentAt: new Date().toISOString(),
-        source: 'FLYR Integration Test',
+        source: 'WolfGrid Integration Test',
       },
     };
 

@@ -116,9 +116,9 @@ const SURFACES: Array<{
   label: string;
   icon: typeof Monitor;
 }> = [
-  { id: 'flyr_pro', label: 'FLYR-PRO Web', icon: Monitor },
-  { id: 'ios_wire', label: 'FLYR iOS', icon: Smartphone },
-  { id: 'android_wire', label: 'FLYR Android', icon: TabletSmartphone },
+  { id: 'flyr_pro', label: 'WolfGrid Web Web', icon: Monitor },
+  { id: 'ios_wire', label: 'WolfGrid iOS', icon: Smartphone },
+  { id: 'android_wire', label: 'WolfGrid Android', icon: TabletSmartphone },
 ];
 
 const FIXTURES = [

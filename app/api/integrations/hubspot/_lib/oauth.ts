@@ -32,7 +32,7 @@ const HUBSPOT_OAUTH_INTROSPECT_URL =
   process.env.HUBSPOT_OAUTH_INTROSPECT_URL ?? 'https://api.hubspot.com/oauth/v3/token/introspect';
 const OAUTH_STATE_SECRET = getOAuthStateSecret();
 const OAUTH_STATE_TTL_SECONDS = 10 * 60;
-const DEFAULT_APP_ORIGIN = 'https://www.flyrpro.app';
+const DEFAULT_APP_ORIGIN = 'https://wolfgrid.app';
 
 function base64UrlEncode(input: string | Buffer): string {
   return Buffer.from(input)
@@ -57,8 +57,8 @@ function resolveAppOrigin(origin?: string): string {
   const raw = origin || process.env.NEXT_PUBLIC_APP_URL || DEFAULT_APP_ORIGIN;
   try {
     const parsed = new URL(raw);
-    if (parsed.hostname.toLowerCase() === 'flyrpro.app') {
-      parsed.hostname = 'www.flyrpro.app';
+    if (parsed.hostname.toLowerCase() === 'wolfgrid.app') {
+      parsed.hostname = 'wolfgrid.app';
     }
     return parsed.origin;
   } catch {

@@ -40,7 +40,7 @@ export type GeneratedDemoLink = {
   vertical: DemoVertical;
 };
 
-const DEMO_ORIGIN = 'https://flyr.software';
+const DEMO_ORIGIN = 'https://wolfgrid.app';
 const DEFAULT_CITY = 'Palo Alto, CA';
 const DEFAULT_CENTER: [number, number] = [-122.1430, 37.4419];
 

@@ -71,7 +71,7 @@ export function PartnerOfferEmailPreview({
           <p className="mb-4 text-sm text-slate-600">Founder</p>
           <img
             src={PARTNER_OFFER_EMAIL_LOGO_URL}
-            alt="FLYR"
+            alt="WolfGrid"
             width={120}
             className="block h-auto max-w-[140px] border-0"
           />

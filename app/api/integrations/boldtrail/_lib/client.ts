@@ -183,8 +183,8 @@ export function buildBoldTrailContactPayload(
     email: cleanedValue(lead.email),
     cell_phone_1: cleanedValue(lead.phone),
     primary_address: cleanedValue(lead.address),
-    source: cleanedValue(lead.source) || 'FLYR',
-    capture_method: 'FLYR',
+    source: cleanedValue(lead.source) || 'WolfGrid',
+    capture_method: 'WolfGrid',
     external_vendor_id: cleanedValue(lead.id),
   });
 }

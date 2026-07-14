@@ -101,7 +101,7 @@ export default function NewDemoLinkPage() {
   return (
     <main style={styles.page}>
       <section style={styles.panel} aria-labelledby="demo-admin-title">
-        <div style={styles.eyebrow}>FLYR PRO · DEMO ADMIN</div>
+        <div style={styles.eyebrow}>WolfGrid · DEMO ADMIN</div>
         <h1 id="demo-admin-title" style={styles.title}>
           Create demo link
         </h1>

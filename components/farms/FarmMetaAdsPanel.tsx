@@ -260,7 +260,7 @@ export function FarmMetaAdsPanel({ farmId, workspaceId }: FarmMetaAdsPanelProps)
   };
 
   const handleDisconnect = async () => {
-    if (!window.confirm('Disconnect Meta Ads from FLYR? Historical farm metrics will remain.')) return;
+    if (!window.confirm('Disconnect Meta Ads from WolfGrid? Historical farm metrics will remain.')) return;
     setError(null);
     try {
       const response = await fetch('/api/meta/disconnect', {
@@ -431,7 +431,7 @@ export function FarmMetaAdsPanel({ farmId, workspaceId }: FarmMetaAdsPanelProps)
                     ) : null}
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    Meta ad results are imported from your connected ad account. FLYR does not create or edit ads yet.
+                    Meta ad results are imported from your connected ad account. WolfGrid does not create or edit ads yet.
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">

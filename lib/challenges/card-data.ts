@@ -266,7 +266,7 @@ export async function getAccountabilityCardData(params: {
     conversationsThisWeek,
     appointmentsThisWeek: appointmentIds.size,
     nextWeekGoal,
-    hashtags: '#FLYR #doortodoor #realestate #toronto',
+    hashtags: '#WolfGrid #doortodoor #realestate #toronto',
     displayName: displayNameFromParts({
       first_name: profile?.first_name ?? null,
       last_name: profile?.last_name ?? null,

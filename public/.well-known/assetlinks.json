@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "software.flyr.app",
+      "sha256_cert_fingerprints": [
+        "AB:5A:21:D5:0D:75:67:84:7D:BF:4D:D2:80:C0:94:41:9A:36:D1:02:4A:2A:F6:29:40:6D:53:EF:E1:D5:8F:0B"
+      ]
+    }
+  }
+]

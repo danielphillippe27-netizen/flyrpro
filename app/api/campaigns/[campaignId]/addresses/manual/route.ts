@@ -239,7 +239,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       }
     }
 
-    // Build address insert matching FLYR-PRO schema
+    // Build address insert matching WolfGrid Web schema
     // Use raw SQL to properly insert PostGIS geometry using ST_GeomFromGeoJSON
     const geoJsonPoint = pointGeoJSON(longitude, latitude);
     

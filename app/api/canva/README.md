@@ -29,7 +29,7 @@ Generates QR codes for Canva Bulk Create and returns a CSV with ImageURL column.
 ```json
 {
   "campaignId": "uuid-of-campaign",
-  "baseUrl": "https://flyrpro.app/q/abc123",
+  "baseUrl": "https://wolfgrid.app/q/abc123",
   "rows": [
     {
       "AddressLine": "123 Main St",
@@ -127,7 +127,7 @@ curl -X POST http://localhost:3000/api/canva/generate \
   -H "Cookie: supabase-auth-token=YOUR_TOKEN" \
   -d '{
     "campaignId": "test-campaign",
-    "baseUrl": "https://flyrpro.app/q/test",
+    "baseUrl": "https://wolfgrid.app/q/test",
     "rows": [
       {
         "AddressLine": "123 Test St",
@@ -168,7 +168,7 @@ function MyPage() {
   return (
     <CanvaQRGenerator
       campaignId="my-campaign-uuid"
-      baseUrl="https://flyrpro.app/q/abc123"
+      baseUrl="https://wolfgrid.app/q/abc123"
       addresses={addresses}
       onSuccess={() => toast.success('CSV generated!')}
     />
@@ -187,7 +187,7 @@ function MyComponent() {
   const handleGenerate = async () => {
     const result = await generateCSV({
       campaignId: 'uuid',
-      baseUrl: 'https://flyrpro.app/q/xyz',
+      baseUrl: 'https://wolfgrid.app/q/xyz',
       rows: addresses,
     });
 

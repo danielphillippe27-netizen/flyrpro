@@ -620,7 +620,7 @@ async function main() {
 
   // ── Section 6: Zapier ────────────────────────────────────────────────────
 
-  await test('Zapier: webhook delivery → synced, payload contains FLYR fields', async () => {
+  await test('Zapier: webhook delivery → synced, payload contains WolfGrid fields', async () => {
     const webhookUrl = 'https://hooks.zapier.com/hooks/catch/12345/abcdef/';
     const fetchCalls: Array<{ url: string; body: Record<string, unknown> }> = [];
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -642,7 +642,7 @@ async function main() {
     const zapCall = fetchCalls.find((c) => c.url.startsWith('https://hooks.zapier.com'));
     assert.ok(zapCall, 'Zapier webhook URL should have been called');
     assert.equal(zapCall!.body['event'], 'lead_sync');
-    assert.equal(zapCall!.body['source'], 'FLYR');
+    assert.equal(zapCall!.body['source'], 'WolfGrid');
     const lead = zapCall!.body['lead'] as Record<string, unknown>;
     assert.equal(lead?.['name'], CONTACT.full_name);
     assert.equal(lead?.['email'], CONTACT.email);
@@ -678,7 +678,7 @@ async function main() {
           data: {
             boards: [{
               id: 'board-001',
-              name: 'FLYR Leads',
+              name: 'WolfGrid Leads',
               state: 'active',
               workspace: null,
               columns: [
@@ -705,7 +705,7 @@ async function main() {
         monday: {
           access_token: 'monday-access-token',
           selected_board_id: 'board-001',
-          selected_board_name: 'FLYR Leads',
+          selected_board_name: 'WolfGrid Leads',
           provider_config: null,
         },
       },
@@ -744,7 +744,7 @@ async function main() {
         monday: {
           access_token: 'monday-access-token',
           selected_board_id: 'board-001', // Doesn't match 'board-WRONG'
-          selected_board_name: 'FLYR Leads',
+          selected_board_name: 'WolfGrid Leads',
           provider_config: null,
         },
       },

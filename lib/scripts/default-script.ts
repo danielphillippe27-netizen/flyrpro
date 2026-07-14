@@ -1,4 +1,4 @@
-export const STARTER_SCRIPT_NAME = "FLYR Sales Call Flow";
+export const STARTER_SCRIPT_NAME = "WolfGrid Sales Call Flow";
 export const STARTER_SCRIPT_ID = "starter-flyr-sales-call-flow";
 export const REAL_ESTATE_QUICK_DEMO_SCRIPT_NAME =
   "Real Estate Teams - quick demo";
@@ -147,7 +147,7 @@ export const STARTER_SCRIPT_FLOW: StarterScriptFlowNode[] = [
     label: "Start",
     kind: "start",
     title: "Open with permission",
-    say: "Hey [Name], it's [Rep Name] with FLYR. Did I catch you with 30 seconds?",
+    say: "Hey [Name], it's [Rep Name] with WolfGrid. Did I catch you with 30 seconds?",
     coach:
       "Keep the opener short. The first goal is permission, not a full pitch.",
     options: [
@@ -162,7 +162,7 @@ export const STARTER_SCRIPT_FLOW: StarterScriptFlowNode[] = [
     label: "Intro",
     kind: "objection",
     title: "Quick intro",
-    say: "FLYR helps real estate team leads track door knocking, agent activity, and leads from the field.",
+    say: "WolfGrid helps real estate team leads track door knocking, agent activity, and leads from the field.",
     coach:
       "Answer directly, then get back to a question. Do not list every feature.",
     options: [
@@ -175,7 +175,7 @@ export const STARTER_SCRIPT_FLOW: StarterScriptFlowNode[] = [
     label: "Busy",
     kind: "objection",
     title: "If they are busy",
-    say: "No worries. I will be quick. FLYR helps real estate team leads track door knocking, agent activity, and leads from the field. Would it be okay if I emailed you a 90-second demo?",
+    say: "No worries. I will be quick. WolfGrid helps real estate team leads track door knocking, agent activity, and leads from the field. Would it be okay if I emailed you a 90-second demo?",
     coach:
       "Do not keep selling. Convert the call into permission to send the demo or a callback.",
     options: [
@@ -244,7 +244,7 @@ export const STARTER_SCRIPT_FLOW: StarterScriptFlowNode[] = [
     label: "Pain match",
     kind: "question",
     title: "Manual or no tracking",
-    say: "That's exactly why we built FLYR. It gives team leads a live map of agent activity, completed doors, territory coverage, leads, and follow-ups in one place.",
+    say: "That's exactly why we built WolfGrid. It gives team leads a live map of agent activity, completed doors, territory coverage, leads, and follow-ups in one place.",
     coach: "Keep it simple. This is the strongest fit path.",
     options: [
       { label: "Ask to send demo", nextId: "demo-ask" },
@@ -257,9 +257,9 @@ export const STARTER_SCRIPT_FLOW: StarterScriptFlowNode[] = [
     label: "Existing",
     kind: "question",
     title: "They already track it",
-    say: "Makes sense. Most teams have some kind of system. FLYR is built specifically for real estate field prospecting, so it is more visual and team-focused than spreadsheets or scattered notes.",
+    say: "Makes sense. Most teams have some kind of system. WolfGrid is built specifically for real estate field prospecting, so it is more visual and team-focused than spreadsheets or scattered notes.",
     coach:
-      "Respect what they already have. Position FLYR as focused, visual, and team-based.",
+      "Respect what they already have. Position WolfGrid as focused, visual, and team-based.",
     options: [
       { label: "Ask to send demo", nextId: "demo-ask" },
       { label: "They ask pricing", nextId: "pricing" },
@@ -271,7 +271,7 @@ export const STARTER_SCRIPT_FLOW: StarterScriptFlowNode[] = [
     label: "Other tool",
     kind: "question",
     title: "They use another tool",
-    say: "Totally. A lot of tools are general canvassing platforms. FLYR is focused on real estate teams: territories, agent accountability, neighbourhood coverage, and lead follow-up.",
+    say: "Totally. A lot of tools are general canvassing platforms. WolfGrid is focused on real estate teams: territories, agent accountability, neighbourhood coverage, and lead follow-up.",
     coach:
       "Do not attack the other tool. Create contrast around real estate team workflows.",
     options: [
@@ -285,7 +285,7 @@ export const STARTER_SCRIPT_FLOW: StarterScriptFlowNode[] = [
     label: "Pricing",
     kind: "objection",
     title: "Answer pricing",
-    say: "FLYR is currently available with early access pricing. Teams can start at $30 USD per user/month, which is about $40 CAD. If FLYR helps your team create even one extra deal, it more than pays for itself.",
+    say: "WolfGrid is currently available with early access pricing. Teams can start at $30 USD per user/month, which is about $40 CAD. If WolfGrid helps your team create even one extra deal, it more than pays for itself.",
     coach: "Answer clearly, then return to the demo ask.",
     options: [
       { label: "Ask to send demo", nextId: "demo-ask" },
@@ -338,7 +338,7 @@ export const STARTER_SCRIPT_FLOW: StarterScriptFlowNode[] = [
     label: "Book demo",
     kind: "close",
     title: "Book the follow-up",
-    say: "The easiest next step is 10 minutes where I can show you how FLYR would work for your team. Does [Time 1] or [Time 2] work better?",
+    say: "The easiest next step is 10 minutes where I can show you how WolfGrid would work for your team. Does [Time 1] or [Time 2] work better?",
     coach: "Offer two times. Keep the commitment small.",
     options: [
       { label: "Booked", nextId: "done" },
@@ -364,7 +364,7 @@ export const STARTER_SCRIPT_FLOW: StarterScriptFlowNode[] = [
     label: "No fit",
     kind: "close",
     title: "No field activity right now",
-    say: "Got it. Sounds like this may not be a fit right now. If you ever add field prospecting, FLYR could help track it.",
+    say: "Got it. Sounds like this may not be a fit right now. If you ever add field prospecting, WolfGrid could help track it.",
     coach: "Do not force the pitch. Mark the outcome cleanly.",
     options: [
       { label: "Ask to send concept demo", nextId: "demo-ask" },
@@ -392,10 +392,10 @@ export const STARTER_SCRIPT_FLOW: StarterScriptFlowNode[] = [
   },
 ];
 
-export const STARTER_SCRIPT_BODY = `FLYR Sales Call Flow
+export const STARTER_SCRIPT_BODY = `WolfGrid Sales Call Flow
 
 START:
-Hey [Name], it's [Rep Name] with FLYR. Did I catch you with 30 seconds?
+Hey [Name], it's [Rep Name] with WolfGrid. Did I catch you with 30 seconds?
 
 QUALIFY:
 Do you have agents on your team doing any door knocking, flyer drops, open house follow-up, or neighbourhood prospecting?
@@ -405,13 +405,13 @@ Are you currently tracking which doors were hit, which agents are active, and wh
 
 PAIN MATCH:
 If manual or not really:
-That's exactly why we built FLYR. It gives team leads a live map of agent activity, completed doors, territory coverage, leads, and follow-ups in one place.
+That's exactly why we built WolfGrid. It gives team leads a live map of agent activity, completed doors, territory coverage, leads, and follow-ups in one place.
 
 If they already track it:
-Makes sense. Most teams have some kind of system. FLYR is built specifically for real estate field prospecting, so it is more visual and team-focused than spreadsheets or scattered notes.
+Makes sense. Most teams have some kind of system. WolfGrid is built specifically for real estate field prospecting, so it is more visual and team-focused than spreadsheets or scattered notes.
 
 If they use another tool:
-Totally. A lot of tools are general canvassing platforms. FLYR is focused on real estate teams: territories, agent accountability, neighbourhood coverage, and lead follow-up.
+Totally. A lot of tools are general canvassing platforms. WolfGrid is focused on real estate teams: territories, agent accountability, neighbourhood coverage, and lead follow-up.
 
 MICRO-CLOSE:
 Would it be okay if I emailed you a 90-second demo? You'll know pretty quickly if it makes sense for your team.
@@ -429,11 +429,11 @@ export const REAL_ESTATE_INDIVIDUAL_AGENT_SCRIPT_FLOW: StarterScriptFlowNode[] =
     label: "Opening",
     kind: "start",
     title: "Founder opener",
-    say: "Hey [Name], it's Daniel. Reason for the call today is I'm the founder of a software company called FLYR. We help Realtors get more listing appointments using more of an old-school approach.\n\nI'd love to share a little more about the company, but first, how's business treating you so far this year?",
+    say: "Hey [Name], it's Daniel. Reason for the call today is I'm the founder of a software company called WolfGrid. We help Realtors get more listing appointments using more of an old-school approach.\n\nI'd love to share a little more about the company, but first, how's business treating you so far this year?",
     lines: [
       {
         speaker: "rep",
-        text: "Hey [Name], it's Daniel. Reason for the call today is I'm the founder of a software company called FLYR. We help Realtors get more listing appointments using more of an old-school approach.\n\nI'd love to share a little more about the company, but first, how's business treating you so far this year?",
+        text: "Hey [Name], it's Daniel. Reason for the call today is I'm the founder of a software company called WolfGrid. We help Realtors get more listing appointments using more of an old-school approach.\n\nI'd love to share a little more about the company, but first, how's business treating you so far this year?",
       },
     ],
     coach:
@@ -451,11 +451,11 @@ export const REAL_ESTATE_INDIVIDUAL_AGENT_SCRIPT_FLOW: StarterScriptFlowNode[] =
     label: "Intro",
     kind: "objection",
     title: "Quick intro",
-    say: "Totally. I'm Daniel, the founder of FLYR. We help individual Realtors create more seller conversations and turn those into listing appointments using an old-school, relationship-based prospecting approach.",
+    say: "Totally. I'm Daniel, the founder of WolfGrid. We help individual Realtors create more seller conversations and turn those into listing appointments using an old-school, relationship-based prospecting approach.",
     lines: [
       {
         speaker: "rep",
-        text: "Totally. I'm Daniel, the founder of FLYR. We help individual Realtors create more seller conversations and turn those into listing appointments using an old-school, relationship-based prospecting approach.",
+        text: "Totally. I'm Daniel, the founder of WolfGrid. We help individual Realtors create more seller conversations and turn those into listing appointments using an old-school, relationship-based prospecting approach.",
       },
     ],
     coach:
@@ -470,11 +470,11 @@ export const REAL_ESTATE_INDIVIDUAL_AGENT_SCRIPT_FLOW: StarterScriptFlowNode[] =
     label: "Busy",
     kind: "objection",
     title: "If they are busy",
-    say: "No worries, I can be quick. FLYR helps Realtors create more listing appointments through a simple field-prospecting system. Before I let you go, are you currently looking for more seller conversations, or are you covered right now?",
+    say: "No worries, I can be quick. WolfGrid helps Realtors create more listing appointments through a simple field-prospecting system. Before I let you go, are you currently looking for more seller conversations, or are you covered right now?",
     lines: [
       {
         speaker: "rep",
-        text: "No worries, I can be quick. FLYR helps Realtors create more listing appointments through a simple field-prospecting system. Before I let you go, are you currently looking for more seller conversations, or are you covered right now?",
+        text: "No worries, I can be quick. WolfGrid helps Realtors create more listing appointments through a simple field-prospecting system. Before I let you go, are you currently looking for more seller conversations, or are you covered right now?",
       },
     ],
     coach:
@@ -499,7 +499,7 @@ export const REAL_ESTATE_INDIVIDUAL_AGENT_SCRIPT_FLOW: StarterScriptFlowNode[] =
       },
     ],
     coach:
-      "Do not argue. Try to learn whether the issue is timing, listings, or FLYR specifically.",
+      "Do not argue. Try to learn whether the issue is timing, listings, or WolfGrid specifically.",
     options: [
       { label: "Not growing listings", nextId: "not-growing-listings" },
       { label: "Already covered", nextId: "covered-right-now" },
@@ -519,7 +519,7 @@ export const REAL_ESTATE_INDIVIDUAL_AGENT_SCRIPT_FLOW: StarterScriptFlowNode[] =
       },
     ],
     coach:
-      "Separate lead volume from seller appointment quality. FLYR is strongest when listings are the gap.",
+      "Separate lead volume from seller appointment quality. WolfGrid is strongest when listings are the gap.",
     options: [
       { label: "Listing appointments", nextId: "seller-conversations" },
       { label: "Leads in general", nextId: "current-lead-source" },
@@ -582,7 +582,7 @@ export const REAL_ESTATE_INDIVIDUAL_AGENT_SCRIPT_FLOW: StarterScriptFlowNode[] =
       },
     ],
     coach:
-      "Do not position against referrals. Position FLYR as a consistent second channel.",
+      "Do not position against referrals. Position WolfGrid as a consistent second channel.",
     options: [
       { label: "Needs another channel", nextId: "position-flyr" },
       { label: "Referrals enough", nextId: "covered-right-now" },
@@ -634,11 +634,11 @@ export const REAL_ESTATE_INDIVIDUAL_AGENT_SCRIPT_FLOW: StarterScriptFlowNode[] =
     label: "Field work",
     kind: "question",
     title: "Already doing old-school prospecting",
-    say: "That's exactly the lane FLYR is built for. Are you tracking the homes you visit, who you spoke with, who needs follow-up, and which conversations could turn into listing appointments?",
+    say: "That's exactly the lane WolfGrid is built for. Are you tracking the homes you visit, who you spoke with, who needs follow-up, and which conversations could turn into listing appointments?",
     lines: [
       {
         speaker: "rep",
-        text: "That's exactly the lane FLYR is built for. Are you tracking the homes you visit, who you spoke with, who needs follow-up, and which conversations could turn into listing appointments?",
+        text: "That's exactly the lane WolfGrid is built for. Are you tracking the homes you visit, who you spoke with, who needs follow-up, and which conversations could turn into listing appointments?",
       },
     ],
     coach:
@@ -673,15 +673,15 @@ export const REAL_ESTATE_INDIVIDUAL_AGENT_SCRIPT_FLOW: StarterScriptFlowNode[] =
     label: "Existing system",
     kind: "objection",
     title: "They already track it",
-    say: "Makes sense. Most agents have something they use. FLYR is built specifically for old-school real estate prospecting, so the difference is that it maps the territory, keeps the follow-up organized, and helps turn conversations into listing appointments.",
+    say: "Makes sense. Most agents have something they use. WolfGrid is built specifically for old-school real estate prospecting, so the difference is that it maps the territory, keeps the follow-up organized, and helps turn conversations into listing appointments.",
     lines: [
       {
         speaker: "rep",
-        text: "Makes sense. Most agents have something they use. FLYR is built specifically for old-school real estate prospecting, so the difference is that it maps the territory, keeps the follow-up organized, and helps turn conversations into listing appointments.",
+        text: "Makes sense. Most agents have something they use. WolfGrid is built specifically for old-school real estate prospecting, so the difference is that it maps the territory, keeps the follow-up organized, and helps turn conversations into listing appointments.",
       },
     ],
     coach:
-      "Respect their current system. Position FLYR as the cleaner field layer.",
+      "Respect their current system. Position WolfGrid as the cleaner field layer.",
     options: [
       { label: "Ask for quick look", nextId: "demo-ask" },
       { label: "Asks price", nextId: "pricing" },
@@ -692,12 +692,12 @@ export const REAL_ESTATE_INDIVIDUAL_AGENT_SCRIPT_FLOW: StarterScriptFlowNode[] =
     id: "position-flyr",
     label: "Position",
     kind: "question",
-    title: "Position FLYR",
-    say: "That is exactly why I reached out. FLYR helps individual Realtors create a repeatable way to get in front of homeowners, track the conversations, and turn the right ones into listing appointments. It is more old-school and relationship-based than just chasing internet leads.",
+    title: "Position WolfGrid",
+    say: "That is exactly why I reached out. WolfGrid helps individual Realtors create a repeatable way to get in front of homeowners, track the conversations, and turn the right ones into listing appointments. It is more old-school and relationship-based than just chasing internet leads.",
     lines: [
       {
         speaker: "rep",
-        text: "That is exactly why I reached out. FLYR helps individual Realtors create a repeatable way to get in front of homeowners, track the conversations, and turn the right ones into listing appointments. It is more old-school and relationship-based than just chasing internet leads.",
+        text: "That is exactly why I reached out. WolfGrid helps individual Realtors create a repeatable way to get in front of homeowners, track the conversations, and turn the right ones into listing appointments. It is more old-school and relationship-based than just chasing internet leads.",
       },
     ],
     coach:
@@ -713,11 +713,11 @@ export const REAL_ESTATE_INDIVIDUAL_AGENT_SCRIPT_FLOW: StarterScriptFlowNode[] =
     label: "How it works",
     kind: "question",
     title: "Simple explanation",
-    say: "The simple version is: you choose the area you want to build listing inventory in, FLYR helps you work that area consistently, track every homeowner conversation, and make sure follow-up does not fall through the cracks.",
+    say: "The simple version is: you choose the area you want to build listing inventory in, WolfGrid helps you work that area consistently, track every homeowner conversation, and make sure follow-up does not fall through the cracks.",
     lines: [
       {
         speaker: "rep",
-        text: "The simple version is: you choose the area you want to build listing inventory in, FLYR helps you work that area consistently, track every homeowner conversation, and make sure follow-up does not fall through the cracks.",
+        text: "The simple version is: you choose the area you want to build listing inventory in, WolfGrid helps you work that area consistently, track every homeowner conversation, and make sure follow-up does not fall through the cracks.",
       },
     ],
     coach:
@@ -733,11 +733,11 @@ export const REAL_ESTATE_INDIVIDUAL_AGENT_SCRIPT_FLOW: StarterScriptFlowNode[] =
     label: "Pricing",
     kind: "objection",
     title: "Answer pricing",
-    say: "FLYR starts at $30 USD per user/month, which is about $40 CAD. The way I would think about it is simple: if it helps create even one extra listing appointment, it more than pays for itself.",
+    say: "WolfGrid starts at $30 USD per user/month, which is about $40 CAD. The way I would think about it is simple: if it helps create even one extra listing appointment, it more than pays for itself.",
     lines: [
       {
         speaker: "rep",
-        text: "FLYR starts at $30 USD per user/month, which is about $40 CAD. The way I would think about it is simple: if it helps create even one extra listing appointment, it more than pays for itself.",
+        text: "WolfGrid starts at $30 USD per user/month, which is about $40 CAD. The way I would think about it is simple: if it helps create even one extra listing appointment, it more than pays for itself.",
       },
     ],
     coach:
@@ -849,11 +849,11 @@ export const REAL_ESTATE_INDIVIDUAL_AGENT_SCRIPT_FLOW: StarterScriptFlowNode[] =
     label: "Call later",
     kind: "close",
     title: "Schedule callback",
-    say: "No problem. I can call you back at [Time]. I will keep it focused on how you are creating seller conversations and whether FLYR could help.",
+    say: "No problem. I can call you back at [Time]. I will keep it focused on how you are creating seller conversations and whether WolfGrid could help.",
     lines: [
       {
         speaker: "rep",
-        text: "No problem. I can call you back at [Time]. I will keep it focused on how you are creating seller conversations and whether FLYR could help.",
+        text: "No problem. I can call you back at [Time]. I will keep it focused on how you are creating seller conversations and whether WolfGrid could help.",
       },
     ],
     coach:
@@ -894,7 +894,7 @@ export const REAL_ESTATE_INDIVIDUAL_AGENT_SCRIPT_FLOW: StarterScriptFlowNode[] =
 export const REAL_ESTATE_INDIVIDUAL_AGENT_SCRIPT_BODY = `Real Estate Individual Agents - listing appointments
 
 OPENING:
-Hey [Name], it's Daniel. Reason for the call today is I'm the founder of a software company called FLYR. We help Realtors get more listing appointments using more of an old-school approach.
+Hey [Name], it's Daniel. Reason for the call today is I'm the founder of a software company called WolfGrid. We help Realtors get more listing appointments using more of an old-school approach.
 
 I'd love to share a little more about the company, but first, how's business treating you so far this year?
 
@@ -904,8 +904,8 @@ Are most of your opportunities coming from referrals, your database, online lead
 SELLER CONVERSATION QUESTION:
 What are you currently doing to create seller conversations or generate new listing opportunities?
 
-POSITION FLYR:
-That is exactly why I reached out. FLYR helps individual Realtors create a repeatable way to get in front of homeowners, track the conversations, and turn the right ones into listing appointments. It is more old-school and relationship-based than just chasing internet leads.
+POSITION WolfGrid:
+That is exactly why I reached out. WolfGrid helps individual Realtors create a repeatable way to get in front of homeowners, track the conversations, and turn the right ones into listing appointments. It is more old-school and relationship-based than just chasing internet leads.
 
 CLOSE:
 Would it be worth taking 10 or 15 minutes so I can show you how it works and see if it makes sense for your market?
@@ -913,7 +913,7 @@ Would it be worth taking 10 or 15 minutes so I can show you how it works and see
 REP RULES:
 1. Lead with curiosity before pitching.
 2. Keep the focus on seller conversations and listing appointments.
-3. Do not position against referrals; position FLYR as another consistent channel.
+3. Do not position against referrals; position WolfGrid as another consistent channel.
 4. If they are covered, ask permission to send the quick demo or close cleanly.
 5. Always end with a next step: book demo, send demo, set callback, or mark not interested.`;
 
@@ -923,11 +923,11 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
     label: "Opener",
     kind: "start",
     title: "Quick opener",
-    say: "Hey [Name], this is Daniel calling from FLYR. How are you?",
+    say: "Hey [Name], this is Daniel calling from WolfGrid. How are you?",
     lines: [
       {
         speaker: "rep",
-        text: "Hey [Name], this is Daniel calling from FLYR. How are you?",
+        text: "Hey [Name], this is Daniel calling from WolfGrid. How are you?",
       },
     ],
     coach:
@@ -945,11 +945,11 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
     label: "Intro",
     kind: "objection",
     title: "If they ask who is calling",
-    say: "It's Daniel from FLYR. I built software for real estate agents to help turn a current listing into the next listing nearby.",
+    say: "It's Daniel from WolfGrid. I built software for real estate agents to help turn a current listing into the next listing nearby.",
     lines: [
       {
         speaker: "rep",
-        text: "It's Daniel from FLYR. I built software for real estate agents to help turn a current listing into the next listing nearby.",
+        text: "It's Daniel from WolfGrid. I built software for real estate agents to help turn a current listing into the next listing nearby.",
       },
     ],
     coach:
@@ -964,7 +964,7 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
     label: "Busy",
     kind: "objection",
     title: "If they are busy",
-    say: "FLYR isn't really for when business is dead.\n\nIt's for when business is moving - because every listing you sell creates attention, curiosity, and warm conversations around it.\n\nThe problem is most agents are so focused on getting the deal closed that they miss the business sitting around the listing.\n\nThen 30, 60, 90 days later, they're back looking for the next deal from scratch.\n\nFLYR helps make sure the listing you just worked hard to sell actually feeds your pipeline instead of becoming a one-and-done transaction.\n\nSo it's not \"go door knock because you're not busy.\"\n\nIt's \"you're already creating attention - let's make sure you don't waste it.\"\n\nWould it be worth a quick look if I sent you the demo?",
+    say: "WolfGrid isn't really for when business is dead.\n\nIt's for when business is moving - because every listing you sell creates attention, curiosity, and warm conversations around it.\n\nThe problem is most agents are so focused on getting the deal closed that they miss the business sitting around the listing.\n\nThen 30, 60, 90 days later, they're back looking for the next deal from scratch.\n\nWolfGrid helps make sure the listing you just worked hard to sell actually feeds your pipeline instead of becoming a one-and-done transaction.\n\nSo it's not \"go door knock because you're not busy.\"\n\nIt's \"you're already creating attention - let's make sure you don't waste it.\"\n\nWould it be worth a quick look if I sent you the demo?",
     lines: [
       {
         speaker: "person",
@@ -972,7 +972,7 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
       },
       {
         speaker: "rep",
-        text: "FLYR isn't really for when business is dead.\n\nIt's for when business is moving - because every listing you sell creates attention, curiosity, and warm conversations around it.\n\nThe problem is most agents are so focused on getting the deal closed that they miss the business sitting around the listing.\n\nThen 30, 60, 90 days later, they're back looking for the next deal from scratch.\n\nFLYR helps make sure the listing you just worked hard to sell actually feeds your pipeline instead of becoming a one-and-done transaction.\n\nSo it's not \"go door knock because you're not busy.\"\n\nIt's \"you're already creating attention - let's make sure you don't waste it.\"\n\nWould it be worth a quick look if I sent you the demo?",
+        text: "WolfGrid isn't really for when business is dead.\n\nIt's for when business is moving - because every listing you sell creates attention, curiosity, and warm conversations around it.\n\nThe problem is most agents are so focused on getting the deal closed that they miss the business sitting around the listing.\n\nThen 30, 60, 90 days later, they're back looking for the next deal from scratch.\n\nWolfGrid helps make sure the listing you just worked hard to sell actually feeds your pipeline instead of becoming a one-and-done transaction.\n\nSo it's not \"go door knock because you're not busy.\"\n\nIt's \"you're already creating attention - let's make sure you don't waste it.\"\n\nWould it be worth a quick look if I sent you the demo?",
       },
     ],
     coach:
@@ -989,11 +989,11 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
     label: "Flyers",
     kind: "question",
     title: "They use flyers",
-    say: "That is awesome.\n\nHave you considered the opportunity to speak to the homeowners around the listing?\n\nFLYR turns that same listing area into a trackable campaign, so the map, flyer drops, conversations, and follow-up all stay organized in one place.\n\nWould it be worth a quick look if I sent you the demo?",
+    say: "That is awesome.\n\nHave you considered the opportunity to speak to the homeowners around the listing?\n\nWolfGrid turns that same listing area into a trackable campaign, so the map, flyer drops, conversations, and follow-up all stay organized in one place.\n\nWould it be worth a quick look if I sent you the demo?",
     lines: [
       {
         speaker: "rep",
-        text: "That is awesome.\n\nHave you considered the opportunity to speak to the homeowners around the listing?\n\nFLYR turns that same listing area into a trackable campaign, so the map, flyer drops, conversations, and follow-up all stay organized in one place.\n\nWould it be worth a quick look if I sent you the demo?",
+        text: "That is awesome.\n\nHave you considered the opportunity to speak to the homeowners around the listing?\n\nWolfGrid turns that same listing area into a trackable campaign, so the map, flyer drops, conversations, and follow-up all stay organized in one place.\n\nWould it be worth a quick look if I sent you the demo?",
       },
     ],
     coach:
@@ -1012,11 +1012,11 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
     label: "Social media",
     kind: "question",
     title: "They use social media",
-    say: "That is awesome.\n\nHave you considered the opportunity to speak to the homeowners around the listing?\n\nFLYR gives you the map and pipeline around the listing, so the attention from social can turn into actual homeowner conversations.\n\nWould it be worth a quick look if I sent you the demo?",
+    say: "That is awesome.\n\nHave you considered the opportunity to speak to the homeowners around the listing?\n\nWolfGrid gives you the map and pipeline around the listing, so the attention from social can turn into actual homeowner conversations.\n\nWould it be worth a quick look if I sent you the demo?",
     lines: [
       {
         speaker: "rep",
-        text: "That is awesome.\n\nHave you considered the opportunity to speak to the homeowners around the listing?\n\nFLYR gives you the map and pipeline around the listing, so the attention from social can turn into actual homeowner conversations.\n\nWould it be worth a quick look if I sent you the demo?",
+        text: "That is awesome.\n\nHave you considered the opportunity to speak to the homeowners around the listing?\n\nWolfGrid gives you the map and pipeline around the listing, so the attention from social can turn into actual homeowner conversations.\n\nWould it be worth a quick look if I sent you the demo?",
       },
     ],
     coach:
@@ -1043,7 +1043,7 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
       },
     ],
     coach:
-      "This is the strongest fit path. Reinforce the work they already do and make FLYR the system around it.",
+      "This is the strongest fit path. Reinforce the work they already do and make WolfGrid the system around it.",
     options: [
       { label: "Send demo", nextId: "close" },
       { label: "They ask how it works", nextId: "how-it-works" },
@@ -1124,15 +1124,15 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
     label: "Field fit",
     kind: "question",
     title: "They already prospect around listings",
-    say: "That is exactly where FLYR fits. If you are already talking to people around the listing, the software gives you the map, tracks each door and conversation, and keeps the follow-up organized so none of that activity disappears.",
+    say: "That is exactly where WolfGrid fits. If you are already talking to people around the listing, the software gives you the map, tracks each door and conversation, and keeps the follow-up organized so none of that activity disappears.",
     lines: [
       {
         speaker: "rep",
-        text: "That is exactly where FLYR fits. If you are already talking to people around the listing, the software gives you the map, tracks each door and conversation, and keeps the follow-up organized so none of that activity disappears.",
+        text: "That is exactly where WolfGrid fits. If you are already talking to people around the listing, the software gives you the map, tracks each door and conversation, and keeps the follow-up organized so none of that activity disappears.",
       },
     ],
     coach:
-      "Connect FLYR to what they already do. Make it feel like leverage, not a new job.",
+      "Connect WolfGrid to what they already do. Make it feel like leverage, not a new job.",
     options: [
       { label: "Close for text", nextId: "close" },
       { label: "They ask how it works", nextId: "how-it-works" },
@@ -1148,11 +1148,11 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
     label: "Bridge",
     kind: "question",
     title: "Respond naturally, then bridge",
-    say: "That makes sense. Most agents are doing pieces of it already - signs, open houses, social posts, maybe a few conversations nearby. FLYR just makes the neighbourhood around the listing visible and trackable so you can turn that listing into a repeatable source of new conversations.",
+    say: "That makes sense. Most agents are doing pieces of it already - signs, open houses, social posts, maybe a few conversations nearby. WolfGrid just makes the neighbourhood around the listing visible and trackable so you can turn that listing into a repeatable source of new conversations.",
     lines: [
       {
         speaker: "rep",
-        text: "That makes sense. Most agents are doing pieces of it already - signs, open houses, social posts, maybe a few conversations nearby. FLYR just makes the neighbourhood around the listing visible and trackable so you can turn that listing into a repeatable source of new conversations.",
+        text: "That makes sense. Most agents are doing pieces of it already - signs, open houses, social posts, maybe a few conversations nearby. WolfGrid just makes the neighbourhood around the listing visible and trackable so you can turn that listing into a repeatable source of new conversations.",
       },
     ],
     coach:
@@ -1173,11 +1173,11 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
     label: "How it works",
     kind: "question",
     title: "Simple product explanation",
-    say: "The simple version is: you pick the listing, FLYR maps the surrounding homes in 3D, you work the doors or conversations around it, and the app tracks who you spoke to, what happened, and who needs follow-up.",
+    say: "The simple version is: you pick the listing, WolfGrid maps the surrounding homes in 3D, you work the doors or conversations around it, and the app tracks who you spoke to, what happened, and who needs follow-up.",
     lines: [
       {
         speaker: "rep",
-        text: "The simple version is: you pick the listing, FLYR maps the surrounding homes in 3D, you work the doors or conversations around it, and the app tracks who you spoke to, what happened, and who needs follow-up.",
+        text: "The simple version is: you pick the listing, WolfGrid maps the surrounding homes in 3D, you work the doors or conversations around it, and the app tracks who you spoke to, what happened, and who needs follow-up.",
       },
     ],
     coach:
@@ -1196,11 +1196,11 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
     label: "Product",
     kind: "question",
     title: "Product info snippet",
-    say: "Quick product example: on the web, you create a campaign by drawing the territory around your listing. FLYR then creates a 3D map of the homes in that area, with different colours for different states.\n\nThen on the iOS app, when you're walking the neighbourhood, you can update each home as you go: not home, answered, lead, follow-up, or whatever state makes sense for your process. So the map becomes the system for organizing every conversation around the listing.\n\nTwo cool things worth mentioning: FLYR automatically tracks every house you hit using GPS, so you don't have to pull out your phone as much, and it has auto-recorded notes so you can keep detailed notes fast without writing messy notes in a spreadsheet.\n\nWould it be worth a quick look if I sent you the demo?",
+    say: "Quick product example: on the web, you create a campaign by drawing the territory around your listing. WolfGrid then creates a 3D map of the homes in that area, with different colours for different states.\n\nThen on the iOS app, when you're walking the neighbourhood, you can update each home as you go: not home, answered, lead, follow-up, or whatever state makes sense for your process. So the map becomes the system for organizing every conversation around the listing.\n\nTwo cool things worth mentioning: WolfGrid automatically tracks every house you hit using GPS, so you don't have to pull out your phone as much, and it has auto-recorded notes so you can keep detailed notes fast without writing messy notes in a spreadsheet.\n\nWould it be worth a quick look if I sent you the demo?",
     lines: [
       {
         speaker: "rep",
-        text: "Quick product example: on the web, you create a campaign by drawing the territory around your listing. FLYR then creates a 3D map of the homes in that area, with different colours for different states.\n\nThen on the iOS app, when you're walking the neighbourhood, you can update each home as you go: not home, answered, lead, follow-up, or whatever state makes sense for your process. So the map becomes the system for organizing every conversation around the listing.\n\nTwo cool things worth mentioning: FLYR automatically tracks every house you hit using GPS, so you don't have to pull out your phone as much, and it has auto-recorded notes so you can keep detailed notes fast without writing messy notes in a spreadsheet.\n\nWould it be worth a quick look if I sent you the demo?",
+        text: "Quick product example: on the web, you create a campaign by drawing the territory around your listing. WolfGrid then creates a 3D map of the homes in that area, with different colours for different states.\n\nThen on the iOS app, when you're walking the neighbourhood, you can update each home as you go: not home, answered, lead, follow-up, or whatever state makes sense for your process. So the map becomes the system for organizing every conversation around the listing.\n\nTwo cool things worth mentioning: WolfGrid automatically tracks every house you hit using GPS, so you don't have to pull out your phone as much, and it has auto-recorded notes so you can keep detailed notes fast without writing messy notes in a spreadsheet.\n\nWould it be worth a quick look if I sent you the demo?",
       },
     ],
     coach:
@@ -1217,11 +1217,11 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
     label: "Price",
     kind: "objection",
     title: "If they ask pricing",
-    say: "Totally fair question.\n\nRight now we're giving agents one included campaign so they can actually see it before making a decision.\n\nBut before we get to price, can I ask: if one listing campaign helped you create one listing, on average what would that be worth in terms of commission?\n\nOk cool. Well, I'm not a mathematician, but with FLYR costing $300 for the year, if it brings one listing it will pay itself off for the next 3 decades, right?\n\nRight. The scary part is if you implement this, you'll see much more than one listing per year. It will go down as the single best return on investment you'll ever make.\n\nDo you want to see the included campaign?",
+    say: "Totally fair question.\n\nRight now we're giving agents one included campaign so they can actually see it before making a decision.\n\nBut before we get to price, can I ask: if one listing campaign helped you create one listing, on average what would that be worth in terms of commission?\n\nOk cool. Well, I'm not a mathematician, but with WolfGrid costing $300 for the year, if it brings one listing it will pay itself off for the next 3 decades, right?\n\nRight. The scary part is if you implement this, you'll see much more than one listing per year. It will go down as the single best return on investment you'll ever make.\n\nDo you want to see the included campaign?",
     lines: [
       {
         speaker: "rep",
-        text: "Totally fair question.\n\nRight now we're giving agents one included campaign so they can actually see it before making a decision.\n\nBut before we get to price, can I ask: if one listing campaign helped you create one listing, on average what would that be worth in terms of commission?\n\nOk cool. Well, I'm not a mathematician, but with FLYR costing $300 for the year, if it brings one listing it will pay itself off for the next 3 decades, right?\n\nRight. The scary part is if you implement this, you'll see much more than one listing per year. It will go down as the single best return on investment you'll ever make.\n\nDo you want to see the included campaign?",
+        text: "Totally fair question.\n\nRight now we're giving agents one included campaign so they can actually see it before making a decision.\n\nBut before we get to price, can I ask: if one listing campaign helped you create one listing, on average what would that be worth in terms of commission?\n\nOk cool. Well, I'm not a mathematician, but with WolfGrid costing $300 for the year, if it brings one listing it will pay itself off for the next 3 decades, right?\n\nRight. The scary part is if you implement this, you'll see much more than one listing per year. It will go down as the single best return on investment you'll ever make.\n\nDo you want to see the included campaign?",
       },
     ],
     coach:
@@ -1238,7 +1238,7 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
     label: "Time",
     kind: "objection",
     title: "We don't have time",
-    say: "Totally hear you - most agents don't have extra time.\n\nBut let me ask you this: when you do have limited time to prospect, would you rather spend it randomly, or around a listing where the neighbours are already paying attention?\n\nExactly.\n\nThat's the whole reason we built FLYR. Most agents know the area around a listing is one of the warmest places to create conversations, but it usually gets missed because there's no simple system to execute it.\n\nFLYR turns the listing into a visual 3D campaign, shows you every home nearby, tracks the outreach, and keeps the follow-up organized. So it's not about adding more work - it's about making the work you already should be doing easier to execute.\n\nWould it be worth a quick look if I sent you the demo?",
+    say: "Totally hear you - most agents don't have extra time.\n\nBut let me ask you this: when you do have limited time to prospect, would you rather spend it randomly, or around a listing where the neighbours are already paying attention?\n\nExactly.\n\nThat's the whole reason we built WolfGrid. Most agents know the area around a listing is one of the warmest places to create conversations, but it usually gets missed because there's no simple system to execute it.\n\nWolfGrid turns the listing into a visual 3D campaign, shows you every home nearby, tracks the outreach, and keeps the follow-up organized. So it's not about adding more work - it's about making the work you already should be doing easier to execute.\n\nWould it be worth a quick look if I sent you the demo?",
     lines: [
       {
         speaker: "person",
@@ -1246,7 +1246,7 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
       },
       {
         speaker: "rep",
-        text: "Totally hear you - most agents don't have extra time.\n\nBut let me ask you this: when you do have limited time to prospect, would you rather spend it randomly, or around a listing where the neighbours are already paying attention?\n\nExactly.\n\nThat's the whole reason we built FLYR. Most agents know the area around a listing is one of the warmest places to create conversations, but it usually gets missed because there's no simple system to execute it.\n\nFLYR turns the listing into a visual 3D campaign, shows you every home nearby, tracks the outreach, and keeps the follow-up organized. So it's not about adding more work - it's about making the work you already should be doing easier to execute.\n\nWould it be worth a quick look if I sent you the demo?",
+        text: "Totally hear you - most agents don't have extra time.\n\nBut let me ask you this: when you do have limited time to prospect, would you rather spend it randomly, or around a listing where the neighbours are already paying attention?\n\nExactly.\n\nThat's the whole reason we built WolfGrid. Most agents know the area around a listing is one of the warmest places to create conversations, but it usually gets missed because there's no simple system to execute it.\n\nWolfGrid turns the listing into a visual 3D campaign, shows you every home nearby, tracks the outreach, and keeps the follow-up organized. So it's not about adding more work - it's about making the work you already should be doing easier to execute.\n\nWould it be worth a quick look if I sent you the demo?",
       },
     ],
     coach:
@@ -1263,7 +1263,7 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
     label: "Belief",
     kind: "objection",
     title: "Does this actually work?",
-    say: "Totally fair.\n\nLet me ask you this: when a home sells in a neighbourhood, do you think the surrounding homeowners notice?\n\nExactly.\n\nThey see the sign, the open house, the sold sign, and they naturally start thinking about what their own home might be worth. Speaking to homeowners at that time makes sense. The issue is most agents don't have a system to actually capitalize on that attention.\n\nThat's what FLYR gives you. A 3D prospecting map around the listing, door tracking, notes, conversations, and follow-up - all organized in one place. So it's not magic. It's just helping agents execute a strategy they already know works.\n\nWould it be worth a quick look if I sent you the demo?",
+    say: "Totally fair.\n\nLet me ask you this: when a home sells in a neighbourhood, do you think the surrounding homeowners notice?\n\nExactly.\n\nThey see the sign, the open house, the sold sign, and they naturally start thinking about what their own home might be worth. Speaking to homeowners at that time makes sense. The issue is most agents don't have a system to actually capitalize on that attention.\n\nThat's what WolfGrid gives you. A 3D prospecting map around the listing, door tracking, notes, conversations, and follow-up - all organized in one place. So it's not magic. It's just helping agents execute a strategy they already know works.\n\nWould it be worth a quick look if I sent you the demo?",
     lines: [
       {
         speaker: "person",
@@ -1271,11 +1271,11 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
       },
       {
         speaker: "rep",
-        text: "Totally fair.\n\nLet me ask you this: when a home sells in a neighbourhood, do you think the surrounding homeowners notice?\n\nExactly.\n\nThey see the sign, the open house, the sold sign, and they naturally start thinking about what their own home might be worth. Speaking to homeowners at that time makes sense. The issue is most agents don't have a system to actually capitalize on that attention.\n\nThat's what FLYR gives you. A 3D prospecting map around the listing, door tracking, notes, conversations, and follow-up - all organized in one place. So it's not magic. It's just helping agents execute a strategy they already know works.\n\nWould it be worth a quick look if I sent you the demo?",
+        text: "Totally fair.\n\nLet me ask you this: when a home sells in a neighbourhood, do you think the surrounding homeowners notice?\n\nExactly.\n\nThey see the sign, the open house, the sold sign, and they naturally start thinking about what their own home might be worth. Speaking to homeowners at that time makes sense. The issue is most agents don't have a system to actually capitalize on that attention.\n\nThat's what WolfGrid gives you. A 3D prospecting map around the listing, door tracking, notes, conversations, and follow-up - all organized in one place. So it's not magic. It's just helping agents execute a strategy they already know works.\n\nWould it be worth a quick look if I sent you the demo?",
       },
     ],
     coach:
-      "Make the strategy feel obvious. FLYR is the execution system, not a magic promise.",
+      "Make the strategy feel obvious. WolfGrid is the execution system, not a magic promise.",
     options: [
       { label: "Send demo", nextId: "close" },
       { label: "They ask price", nextId: "price" },
@@ -1288,7 +1288,7 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
     label: "Priority",
     kind: "objection",
     title: "We're not focused on that right now",
-    say: "Totally hear you.\n\nLet me ask you this - after you sell a listing, do you think that street is colder or warmer than it was before the sale?\n\nExactly.\n\nThat is the whole opportunity.\n\nYou already did the hard part. You won the listing, marketed it, got the result, and created curiosity in the neighbourhood.\n\nRight after the sale is when the community is paying the most attention. Homeowners nearby are wondering what their place is worth, who else might sell, and whether the market is moving.\n\nThose are some of the warmest listing conversations an agent can have.\n\nBut most agents miss that window. They sell the home, move on, and start prospecting from scratch again.\n\nThat is what FLYR helps with.\n\nIt turns every listing into a 3D prospecting campaign, maps every home nearby, tracks the outreach, and keeps the follow-up organized. Whether you door knock, call, mail, or have your team work the area, the point is having a system to capitalize on the attention your listing already created.\n\nWould it be worth a quick look if I sent you the demo?",
+    say: "Totally hear you.\n\nLet me ask you this - after you sell a listing, do you think that street is colder or warmer than it was before the sale?\n\nExactly.\n\nThat is the whole opportunity.\n\nYou already did the hard part. You won the listing, marketed it, got the result, and created curiosity in the neighbourhood.\n\nRight after the sale is when the community is paying the most attention. Homeowners nearby are wondering what their place is worth, who else might sell, and whether the market is moving.\n\nThose are some of the warmest listing conversations an agent can have.\n\nBut most agents miss that window. They sell the home, move on, and start prospecting from scratch again.\n\nThat is what WolfGrid helps with.\n\nIt turns every listing into a 3D prospecting campaign, maps every home nearby, tracks the outreach, and keeps the follow-up organized. Whether you door knock, call, mail, or have your team work the area, the point is having a system to capitalize on the attention your listing already created.\n\nWould it be worth a quick look if I sent you the demo?",
     lines: [
       {
         speaker: "person",
@@ -1296,7 +1296,7 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
       },
       {
         speaker: "rep",
-        text: "Totally hear you.\n\nLet me ask you this - after you sell a listing, do you think that street is colder or warmer than it was before the sale?\n\nExactly.\n\nThat is the whole opportunity.\n\nYou already did the hard part. You won the listing, marketed it, got the result, and created curiosity in the neighbourhood.\n\nRight after the sale is when the community is paying the most attention. Homeowners nearby are wondering what their place is worth, who else might sell, and whether the market is moving.\n\nThose are some of the warmest listing conversations an agent can have.\n\nBut most agents miss that window. They sell the home, move on, and start prospecting from scratch again.\n\nThat is what FLYR helps with.\n\nIt turns every listing into a 3D prospecting campaign, maps every home nearby, tracks the outreach, and keeps the follow-up organized. Whether you door knock, call, mail, or have your team work the area, the point is having a system to capitalize on the attention your listing already created.\n\nWould it be worth a quick look if I sent you the demo?",
+        text: "Totally hear you.\n\nLet me ask you this - after you sell a listing, do you think that street is colder or warmer than it was before the sale?\n\nExactly.\n\nThat is the whole opportunity.\n\nYou already did the hard part. You won the listing, marketed it, got the result, and created curiosity in the neighbourhood.\n\nRight after the sale is when the community is paying the most attention. Homeowners nearby are wondering what their place is worth, who else might sell, and whether the market is moving.\n\nThose are some of the warmest listing conversations an agent can have.\n\nBut most agents miss that window. They sell the home, move on, and start prospecting from scratch again.\n\nThat is what WolfGrid helps with.\n\nIt turns every listing into a 3D prospecting campaign, maps every home nearby, tracks the outreach, and keeps the follow-up organized. Whether you door knock, call, mail, or have your team work the area, the point is having a system to capitalize on the attention your listing already created.\n\nWould it be worth a quick look if I sent you the demo?",
       },
     ],
     coach:
@@ -1313,7 +1313,7 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
     label: "Interrupting homeowners",
     kind: "objection",
     title: "Interrupting homeowners",
-    say: "Totally hear you - nobody wants to feel like they're bothering people at the door.\n\nBut the way I look at it is this:\n\nYou're not interrupting them with something random.\n\nYou just sold a house in their neighbourhood - and for most homeowners, their home is their most valuable asset.\n\nThey work every day, pay down the mortgage, build equity, and a sale on their street directly affects what their own home could be worth.\n\nSo when a property nearby sells, there is already natural curiosity.\n\nThey want to know what happened, what it sold for, how many buyers were interested, and what it could mean for their home.\n\nThe problem is most agents assume they're bothering people, so they never start the conversation.\n\nFLYR helps you turn that listing into a simple neighbourhood campaign so you can approach those homeowners with context, track who you spoke with, and follow up properly.\n\nIt's not just door knocking.\n\nIt's using the attention your listing already created to start relevant conversations.\n\nWould it be worth a quick look if I sent you the demo?",
+    say: "Totally hear you - nobody wants to feel like they're bothering people at the door.\n\nBut the way I look at it is this:\n\nYou're not interrupting them with something random.\n\nYou just sold a house in their neighbourhood - and for most homeowners, their home is their most valuable asset.\n\nThey work every day, pay down the mortgage, build equity, and a sale on their street directly affects what their own home could be worth.\n\nSo when a property nearby sells, there is already natural curiosity.\n\nThey want to know what happened, what it sold for, how many buyers were interested, and what it could mean for their home.\n\nThe problem is most agents assume they're bothering people, so they never start the conversation.\n\nWolfGrid helps you turn that listing into a simple neighbourhood campaign so you can approach those homeowners with context, track who you spoke with, and follow up properly.\n\nIt's not just door knocking.\n\nIt's using the attention your listing already created to start relevant conversations.\n\nWould it be worth a quick look if I sent you the demo?",
     lines: [
       {
         speaker: "person",
@@ -1321,7 +1321,7 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
       },
       {
         speaker: "rep",
-        text: "Totally hear you - nobody wants to feel like they're bothering people at the door.\n\nBut the way I look at it is this:\n\nYou're not interrupting them with something random.\n\nYou just sold a house in their neighbourhood - and for most homeowners, their home is their most valuable asset.\n\nThey work every day, pay down the mortgage, build equity, and a sale on their street directly affects what their own home could be worth.\n\nSo when a property nearby sells, there is already natural curiosity.\n\nThey want to know what happened, what it sold for, how many buyers were interested, and what it could mean for their home.\n\nThe problem is most agents assume they're bothering people, so they never start the conversation.\n\nFLYR helps you turn that listing into a simple neighbourhood campaign so you can approach those homeowners with context, track who you spoke with, and follow up properly.\n\nIt's not just door knocking.\n\nIt's using the attention your listing already created to start relevant conversations.\n\nWould it be worth a quick look if I sent you the demo?",
+        text: "Totally hear you - nobody wants to feel like they're bothering people at the door.\n\nBut the way I look at it is this:\n\nYou're not interrupting them with something random.\n\nYou just sold a house in their neighbourhood - and for most homeowners, their home is their most valuable asset.\n\nThey work every day, pay down the mortgage, build equity, and a sale on their street directly affects what their own home could be worth.\n\nSo when a property nearby sells, there is already natural curiosity.\n\nThey want to know what happened, what it sold for, how many buyers were interested, and what it could mean for their home.\n\nThe problem is most agents assume they're bothering people, so they never start the conversation.\n\nWolfGrid helps you turn that listing into a simple neighbourhood campaign so you can approach those homeowners with context, track who you spoke with, and follow up properly.\n\nIt's not just door knocking.\n\nIt's using the attention your listing already created to start relevant conversations.\n\nWould it be worth a quick look if I sent you the demo?",
       },
     ],
     coach:
@@ -1338,7 +1338,7 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
     label: "Dont doorknock",
     kind: "objection",
     title: "I don't door knock",
-    say: "Totally hear you.\n\nLet me ask you this: when you sell a listing, do you think talking to homeowners around that property will create more listing opportunities?\n\nExactly. It's less about door knocking and more about not wasting the attention your listing already created.\n\nMost agents know talking to the neighbourhood after a sale can create more business. The reason they don't is because they don't have a simple system to execute it.\n\nThat's what FLYR is. It helps you turn every listing into a 3D prospecting campaign, map every home nearby, track the outreach, and follow up properly. So whether you door knock, call, mail, or have your team work the area - the point is having a system around the listing.\n\nWould it be worth a quick look if I sent you the demo?",
+    say: "Totally hear you.\n\nLet me ask you this: when you sell a listing, do you think talking to homeowners around that property will create more listing opportunities?\n\nExactly. It's less about door knocking and more about not wasting the attention your listing already created.\n\nMost agents know talking to the neighbourhood after a sale can create more business. The reason they don't is because they don't have a simple system to execute it.\n\nThat's what WolfGrid is. It helps you turn every listing into a 3D prospecting campaign, map every home nearby, track the outreach, and follow up properly. So whether you door knock, call, mail, or have your team work the area - the point is having a system around the listing.\n\nWould it be worth a quick look if I sent you the demo?",
     lines: [
       {
         speaker: "person",
@@ -1346,7 +1346,7 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
       },
       {
         speaker: "rep",
-        text: "Totally hear you.\n\nLet me ask you this: when you sell a listing, do you think talking to homeowners around that property will create more listing opportunities?\n\nExactly. It's less about door knocking and more about not wasting the attention your listing already created.\n\nMost agents know talking to the neighbourhood after a sale can create more business. The reason they don't is because they don't have a simple system to execute it.\n\nThat's what FLYR is. It helps you turn every listing into a 3D prospecting campaign, map every home nearby, track the outreach, and follow up properly. So whether you door knock, call, mail, or have your team work the area - the point is having a system around the listing.\n\nWould it be worth a quick look if I sent you the demo?",
+        text: "Totally hear you.\n\nLet me ask you this: when you sell a listing, do you think talking to homeowners around that property will create more listing opportunities?\n\nExactly. It's less about door knocking and more about not wasting the attention your listing already created.\n\nMost agents know talking to the neighbourhood after a sale can create more business. The reason they don't is because they don't have a simple system to execute it.\n\nThat's what WolfGrid is. It helps you turn every listing into a 3D prospecting campaign, map every home nearby, track the outreach, and follow up properly. So whether you door knock, call, mail, or have your team work the area - the point is having a system around the listing.\n\nWould it be worth a quick look if I sent you the demo?",
       },
     ],
     coach:
@@ -1363,7 +1363,7 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
     label: "CRM",
     kind: "objection",
     title: "I already use a CRM",
-    say: "Let me ask you this though: does your CRM tell you which homes around your listing haven't been talked to yet, or does it just store leads after you already have them?\n\nExactly.\n\nThat's the difference. FLYR isn't competing with your CRM - it's what feeds it. Your CRM organizes leads you already have. FLYR is what finds and tracks the leads around your listing before they exist anywhere else.\n\nWould it be worth a quick look if I sent you the demo?",
+    say: "Let me ask you this though: does your CRM tell you which homes around your listing haven't been talked to yet, or does it just store leads after you already have them?\n\nExactly.\n\nThat's the difference. WolfGrid isn't competing with your CRM - it's what feeds it. Your CRM organizes leads you already have. WolfGrid is what finds and tracks the leads around your listing before they exist anywhere else.\n\nWould it be worth a quick look if I sent you the demo?",
     lines: [
       {
         speaker: "person",
@@ -1371,11 +1371,11 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
       },
       {
         speaker: "rep",
-        text: "Let me ask you this though: does your CRM tell you which homes around your listing haven't been talked to yet, or does it just store leads after you already have them?\n\nExactly.\n\nThat's the difference. FLYR isn't competing with your CRM - it's what feeds it. Your CRM organizes leads you already have. FLYR is what finds and tracks the leads around your listing before they exist anywhere else.\n\nWould it be worth a quick look if I sent you the demo?",
+        text: "Let me ask you this though: does your CRM tell you which homes around your listing haven't been talked to yet, or does it just store leads after you already have them?\n\nExactly.\n\nThat's the difference. WolfGrid isn't competing with your CRM - it's what feeds it. Your CRM organizes leads you already have. WolfGrid is what finds and tracks the leads around your listing before they exist anywhere else.\n\nWould it be worth a quick look if I sent you the demo?",
       },
     ],
     coach:
-      "Do not compete with the CRM. Position FLYR as the pre-lead field layer that feeds the CRM.",
+      "Do not compete with the CRM. Position WolfGrid as the pre-lead field layer that feeds the CRM.",
     options: [
       { label: "Send demo", nextId: "close" },
       { label: "They ask price", nextId: "price" },
@@ -1542,7 +1542,7 @@ export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_FLOW: StarterScriptFlowN
 export const INDIVIDUAL_REALTOR_LISTING_LEVERAGE_SCRIPT_BODY = `Individual Realtors - listing leverage campaign
 
 OPENER:
-Hey [Name], this is Daniel calling from FLYR. How are you?
+Hey [Name], this is Daniel calling from WolfGrid. How are you?
 
 VALUE STATEMENT:
 Reason I'm calling - I built a software for real estate agents that creates a 3D map of every house around your listing and automatically tracks the doors and conversations you have so you can leverage your current listing to find your next one.
@@ -1558,11 +1558,11 @@ CLOSE:
 What's the best number to text that demo and included campaign to?
 
 PRODUCT INFO SNIPPET:
-Quick product example: on the web, you create a campaign by drawing the territory around your listing. FLYR then creates a 3D map of the homes in that area, with different colours for different states.
+Quick product example: on the web, you create a campaign by drawing the territory around your listing. WolfGrid then creates a 3D map of the homes in that area, with different colours for different states.
 
 Then on the iOS app, when you're walking the neighbourhood, you can update each home as you go: not home, answered, lead, follow-up, or whatever state makes sense for your process. So the map becomes the system for organizing every conversation around the listing.
 
-Two cool things worth mentioning: FLYR automatically tracks every house you hit using GPS, so you don't have to pull out your phone as much, and it has auto-recorded notes so you can keep detailed notes fast without writing messy notes in a spreadsheet.
+Two cool things worth mentioning: WolfGrid automatically tracks every house you hit using GPS, so you don't have to pull out your phone as much, and it has auto-recorded notes so you can keep detailed notes fast without writing messy notes in a spreadsheet.
 
 Would it be worth a quick look if I sent you the demo?
 
@@ -1571,16 +1571,16 @@ Time:
 Totally hear you - most agents don't have extra time. When you do have limited time to prospect, would you rather spend it randomly, or around a listing where the neighbours are already paying attention?
 
 Money:
-Right now we're giving agents one included campaign so they can actually see it before making a decision. If one listing campaign helped you create one listing, what would that be worth in commission? FLYR costs $300 for the year, so one listing pays it off for years.
+Right now we're giving agents one included campaign so they can actually see it before making a decision. If one listing campaign helped you create one listing, what would that be worth in commission? WolfGrid costs $300 for the year, so one listing pays it off for years.
 
 Belief:
-When a home sells in a neighbourhood, the surrounding homeowners notice. FLYR is not magic; it helps agents execute a strategy they already know works with a 3D map, door tracking, notes, conversations, and follow-up.
+When a home sells in a neighbourhood, the surrounding homeowners notice. WolfGrid is not magic; it helps agents execute a strategy they already know works with a 3D map, door tracking, notes, conversations, and follow-up.
 
 Priority:
-It is less about door knocking and more about not wasting the attention your listing already created. FLYR gives you a system around the listing whether you knock, call, mail, or have your team work the area.
+It is less about door knocking and more about not wasting the attention your listing already created. WolfGrid gives you a system around the listing whether you knock, call, mail, or have your team work the area.
 
 CRM overlap:
-Your CRM organizes leads you already have. FLYR finds and tracks the leads around your listing before they exist anywhere else.
+Your CRM organizes leads you already have. WolfGrid finds and tracks the leads around your listing before they exist anywhere else.
 
 Authority:
 Let me send you the demo now so you have something concrete to show your team or broker.
@@ -1601,13 +1601,13 @@ export const REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW: StarterScriptFlowNode[] = [
     label: "Opening",
     kind: "start",
     title: "Warm opener",
-    say: "Hey [Name], how are you today?\nGood, how are you?\nGreat! My name is [Rep Name] with FLYR. We are a door-to-door software built to help real estate teams track, manage, and organize their field prospecting.\nDoes your team currently hand out flyers or door knock?",
+    say: "Hey [Name], how are you today?\nGood, how are you?\nGreat! My name is [Rep Name] with WolfGrid. We are a door-to-door software built to help real estate teams track, manage, and organize their field prospecting.\nDoes your team currently hand out flyers or door knock?",
     lines: [
       { speaker: "rep", text: "Hey [Name], how are you today?" },
       { speaker: "person", text: "Good, how are you?" },
       {
         speaker: "rep",
-        text: "Great! My name is [Rep Name] with FLYR. We are a door-to-door software built to help real estate teams track, manage, and organize their field prospecting.\n\nDoes your team currently hand out flyers or door knock?",
+        text: "Great! My name is [Rep Name] with WolfGrid. We are a door-to-door software built to help real estate teams track, manage, and organize their field prospecting.\n\nDoes your team currently hand out flyers or door knock?",
       },
     ],
     coach:
@@ -1630,7 +1630,7 @@ export const REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW: StarterScriptFlowNode[] = [
       },
     ],
     coach:
-      "Keep the tone curious. The goal is to understand the blocker before positioning FLYR.",
+      "Keep the tone curious. The goal is to understand the blocker before positioning WolfGrid.",
     options: [
       { label: "Scared / uncomfortable", nextId: "objection-scared" },
       { label: "Does not work", nextId: "objection-does-not-work" },
@@ -1665,15 +1665,15 @@ export const REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW: StarterScriptFlowNode[] = [
     label: "Scared",
     kind: "objection",
     title: "They do not know what to say",
-    say: "I don't know what to say.\nThat's exactly what FLYR solves. You open the app before you knock and it tells you exactly what to say based on who lives there and where they are in your follow-up sequence. You're never winging it.",
+    say: "I don't know what to say.\nThat's exactly what WolfGrid solves. You open the app before you knock and it tells you exactly what to say based on who lives there and where they are in your follow-up sequence. You're never winging it.",
     lines: [
       { speaker: "person", text: "I don't know what to say." },
       {
         speaker: "rep",
-        text: "That's exactly what FLYR solves. You open the app before you knock and it tells you exactly what to say based on who lives there and where they are in your follow-up sequence. You're never winging it.",
+        text: "That's exactly what WolfGrid solves. You open the app before you knock and it tells you exactly what to say based on who lives there and where they are in your follow-up sequence. You're never winging it.",
       },
     ],
-    coach: "Position FLYR as preparation and confidence before the knock.",
+    coach: "Position WolfGrid as preparation and confidence before the knock.",
     options: [{ label: "Close", nextId: "objection-scared-close" }],
   },
   {
@@ -1681,12 +1681,12 @@ export const REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW: StarterScriptFlowNode[] = [
     label: "Scared",
     kind: "objection",
     title: "Showing up feels weird",
-    say: "It just feels weird showing up.\nThe first time always does. But here's the reframe - you're not a stranger selling something. You're the local expert checking in on your neighbourhood. FLYR tracks every visit so by the third knock, you're a familiar face. Familiarity is what converts.",
+    say: "It just feels weird showing up.\nThe first time always does. But here's the reframe - you're not a stranger selling something. You're the local expert checking in on your neighbourhood. WolfGrid tracks every visit so by the third knock, you're a familiar face. Familiarity is what converts.",
     lines: [
       { speaker: "person", text: "It just feels weird showing up." },
       {
         speaker: "rep",
-        text: "The first time always does. But here's the reframe - you're not a stranger selling something. You're the local expert checking in on your neighbourhood. FLYR tracks every visit so by the third knock, you're a familiar face. Familiarity is what converts.",
+        text: "The first time always does. But here's the reframe - you're not a stranger selling something. You're the local expert checking in on your neighbourhood. WolfGrid tracks every visit so by the third knock, you're a familiar face. Familiarity is what converts.",
       },
     ],
     coach: "Reframe the visit as local presence, not a cold interruption.",
@@ -1765,11 +1765,11 @@ export const REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW: StarterScriptFlowNode[] = [
     label: "Does not work",
     kind: "close",
     title: "Close the method objection",
-    say: "FLYR isn't door knocking software. It's a farm ownership system. The knocking is just the touchpoint. The CRM behind it is what turns a street into a territory.",
+    say: "WolfGrid isn't door knocking software. It's a farm ownership system. The knocking is just the touchpoint. The CRM behind it is what turns a street into a territory.",
     lines: [
       {
         speaker: "rep",
-        text: "FLYR isn't door knocking software. It's a farm ownership system. The knocking is just the touchpoint. The CRM behind it is what turns a street into a territory.",
+        text: "WolfGrid isn't door knocking software. It's a farm ownership system. The knocking is just the touchpoint. The CRM behind it is what turns a street into a territory.",
       },
     ],
     coach: "Anchor the value in system and territory ownership.",
@@ -1800,12 +1800,12 @@ export const REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW: StarterScriptFlowNode[] = [
     label: "No time",
     kind: "objection",
     title: "Most time goes to clients",
-    say: "Most of my time is serving clients.\nThat's the trap most successful agents fall into. Business is great right now - but what happens in 90 days when the current deals close and nothing's coming in behind them? A farm is the fix. And it doesn't take hours. Ten doors, three days a week. FLYR routes you, logs the visit, and tracks follow-ups automatically. We're talking 45 minutes.",
+    say: "Most of my time is serving clients.\nThat's the trap most successful agents fall into. Business is great right now - but what happens in 90 days when the current deals close and nothing's coming in behind them? A farm is the fix. And it doesn't take hours. Ten doors, three days a week. WolfGrid routes you, logs the visit, and tracks follow-ups automatically. We're talking 45 minutes.",
     lines: [
       { speaker: "person", text: "Most of my time is serving clients." },
       {
         speaker: "rep",
-        text: "That's the trap most successful agents fall into. Business is great right now - but what happens in 90 days when the current deals close and nothing's coming in behind them? A farm is the fix. And it doesn't take hours. Ten doors, three days a week. FLYR routes you, logs the visit, and tracks follow-ups automatically. We're talking 45 minutes.",
+        text: "That's the trap most successful agents fall into. Business is great right now - but what happens in 90 days when the current deals close and nothing's coming in behind them? A farm is the fix. And it doesn't take hours. Ten doors, three days a week. WolfGrid routes you, logs the visit, and tracks follow-ups automatically. We're talking 45 minutes.",
       },
     ],
     coach: "Connect time pressure to pipeline risk, then make the action small.",
@@ -1839,7 +1839,7 @@ export const REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW: StarterScriptFlowNode[] = [
         text: "The goal isn't to add to your plate. It's to replace the most expensive thing you're already doing - chasing cold leads - with something that builds compounding value every single week.",
       },
     ],
-    coach: "Make FLYR feel like replacement, not additional workload.",
+    coach: "Make WolfGrid feel like replacement, not additional workload.",
     options: QUICK_DEMO_CLOSE_OPTIONS,
   },
   {
@@ -1883,12 +1883,12 @@ export const REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW: StarterScriptFlowNode[] = [
     label: "Referral",
     kind: "objection",
     title: "Referrals are up and down",
-    say: "Honestly it's a bit up and down.\nThat's the thing with referrals - you can't control the timing. A farm fixes that. It's a consistent touchpoint with a defined group of homeowners who start to see you as their agent before they even decide to sell. FLYR makes that manageable without it taking over your week.",
+    say: "Honestly it's a bit up and down.\nThat's the thing with referrals - you can't control the timing. A farm fixes that. It's a consistent touchpoint with a defined group of homeowners who start to see you as their agent before they even decide to sell. WolfGrid makes that manageable without it taking over your week.",
     lines: [
       { speaker: "person", text: "Honestly it's a bit up and down." },
       {
         speaker: "rep",
-        text: "That's the thing with referrals - you can't control the timing. A farm fixes that. It's a consistent touchpoint with a defined group of homeowners who start to see you as their agent before they even decide to sell. FLYR makes that manageable without it taking over your week.",
+        text: "That's the thing with referrals - you can't control the timing. A farm fixes that. It's a consistent touchpoint with a defined group of homeowners who start to see you as their agent before they even decide to sell. WolfGrid makes that manageable without it taking over your week.",
       },
     ],
     coach: "Tie unpredictability to the need for a controlled channel.",
@@ -1934,12 +1934,12 @@ export const REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW: StarterScriptFlowNode[] = [
     label: "No system",
     kind: "objection",
     title: "They do not know where to start",
-    say: "I don't know where to start.\nThat's exactly what FLYR is built for. You pick a neighbourhood - we help you with that too if you need it - and the app builds your farm automatically. It pulls the address data, maps your route, and gives you a knock sequence. You're not figuring anything out. You just show up and follow the app.",
+    say: "I don't know where to start.\nThat's exactly what WolfGrid is built for. You pick a neighbourhood - we help you with that too if you need it - and the app builds your farm automatically. It pulls the address data, maps your route, and gives you a knock sequence. You're not figuring anything out. You just show up and follow the app.",
     lines: [
       { speaker: "person", text: "I don't know where to start." },
       {
         speaker: "rep",
-        text: "That's exactly what FLYR is built for. You pick a neighbourhood - we help you with that too if you need it - and the app builds your farm automatically. It pulls the address data, maps your route, and gives you a knock sequence. You're not figuring anything out. You just show up and follow the app.",
+        text: "That's exactly what WolfGrid is built for. You pick a neighbourhood - we help you with that too if you need it - and the app builds your farm automatically. It pulls the address data, maps your route, and gives you a knock sequence. You're not figuring anything out. You just show up and follow the app.",
       },
     ],
     coach: "Remove the setup friction and make starting feel simple.",
@@ -2001,12 +2001,12 @@ export const REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW: StarterScriptFlowNode[] = [
     label: "Too salesy",
     kind: "objection",
     title: "They do not want to bother people",
-    say: "I just don't want to bother people.\nYou're not bothering them - you're introducing yourself as the person who knows their street better than anyone. No pitch. No close. Just a face, a name, and a reason to remember you. FLYR even gives you conversation starters based on local market data so you're always showing up with something valuable.",
+    say: "I just don't want to bother people.\nYou're not bothering them - you're introducing yourself as the person who knows their street better than anyone. No pitch. No close. Just a face, a name, and a reason to remember you. WolfGrid even gives you conversation starters based on local market data so you're always showing up with something valuable.",
     lines: [
       { speaker: "person", text: "I just don't want to bother people." },
       {
         speaker: "rep",
-        text: "You're not bothering them - you're introducing yourself as the person who knows their street better than anyone. No pitch. No close. Just a face, a name, and a reason to remember you. FLYR even gives you conversation starters based on local market data so you're always showing up with something valuable.",
+        text: "You're not bothering them - you're introducing yourself as the person who knows their street better than anyone. No pitch. No close. Just a face, a name, and a reason to remember you. WolfGrid even gives you conversation starters based on local market data so you're always showing up with something valuable.",
       },
     ],
     coach: "Make the interaction useful and low-pressure.",
@@ -2033,11 +2033,11 @@ export const REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW: StarterScriptFlowNode[] = [
     label: "Too salesy",
     kind: "close",
     title: "Close the salesy objection",
-    say: "Nobody buys at the door. The door is just the introduction. The sale happens six months later when they remember your face and your name is the first one they call. FLYR tracks every single one of those introductions so you never lose the thread.",
+    say: "Nobody buys at the door. The door is just the introduction. The sale happens six months later when they remember your face and your name is the first one they call. WolfGrid tracks every single one of those introductions so you never lose the thread.",
     lines: [
       {
         speaker: "rep",
-        text: "Nobody buys at the door. The door is just the introduction. The sale happens six months later when they remember your face and your name is the first one they call. FLYR tracks every single one of those introductions so you never lose the thread.",
+        text: "Nobody buys at the door. The door is just the introduction. The sale happens six months later when they remember your face and your name is the first one they call. WolfGrid tracks every single one of those introductions so you never lose the thread.",
       },
     ],
     coach: "Make the door a relationship start, not a sales moment.",
@@ -2048,11 +2048,11 @@ export const REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW: StarterScriptFlowNode[] = [
     label: "Tracking",
     kind: "question",
     title: "Ask how they track it",
-    say: "That is great. FLYR is designed specifically for team leaders who want better visibility into what their agents are doing in the field.\nAre you currently tracking your door-to-door prospecting in any way?",
+    say: "That is great. WolfGrid is designed specifically for team leaders who want better visibility into what their agents are doing in the field.\nAre you currently tracking your door-to-door prospecting in any way?",
     lines: [
       {
         speaker: "rep",
-        text: "That is great. FLYR is designed specifically for team leaders who want better visibility into what their agents are doing in the field.\n\nAre you currently tracking your door-to-door prospecting in any way?",
+        text: "That is great. WolfGrid is designed specifically for team leaders who want better visibility into what their agents are doing in the field.\n\nAre you currently tracking your door-to-door prospecting in any way?",
       },
     ],
     coach:
@@ -2105,11 +2105,11 @@ export const REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW: StarterScriptFlowNode[] = [
     label: "Tracking",
     kind: "close",
     title: "Close the manual tracking gap",
-    say: "That's exactly the gap FLYR closes. Every door is logged in two taps, your follow-up sequence runs automatically, and you can see your whole farm on a live map. No spreadsheet, no notes, nothing lost.",
+    say: "That's exactly the gap WolfGrid closes. Every door is logged in two taps, your follow-up sequence runs automatically, and you can see your whole farm on a live map. No spreadsheet, no notes, nothing lost.",
     lines: [
       {
         speaker: "rep",
-        text: "That's exactly the gap FLYR closes. Every door is logged in two taps, your follow-up sequence runs automatically, and you can see your whole farm on a live map. No spreadsheet, no notes, nothing lost.",
+        text: "That's exactly the gap WolfGrid closes. Every door is logged in two taps, your follow-up sequence runs automatically, and you can see your whole farm on a live map. No spreadsheet, no notes, nothing lost.",
       },
     ],
     coach: "Tie the pain directly to speed, automation, and visibility.",
@@ -2129,22 +2129,22 @@ export const REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW: StarterScriptFlowNode[] = [
       },
     ],
     coach: "Stay curious. Let them explain the system, then look for the missing field layer.",
-    options: [{ label: "Position FLYR", nextId: "tracking-crm-close" }],
+    options: [{ label: "Position WolfGrid", nextId: "tracking-crm-close" }],
   },
   {
     id: "tracking-crm-close",
     label: "Tracking",
     kind: "close",
     title: "Close the software tracking gap",
-    say: "That makes sense. FLYR can sit beside whatever you're using and handle the field layer: mapped territory, door outcomes, agent activity, and follow-up prompts before it becomes an actual lead.",
+    say: "That makes sense. WolfGrid can sit beside whatever you're using and handle the field layer: mapped territory, door outcomes, agent activity, and follow-up prompts before it becomes an actual lead.",
     lines: [
       {
         speaker: "rep",
-        text: "That makes sense. FLYR can sit beside whatever you're using and handle the field layer: mapped territory, door outcomes, agent activity, and follow-up prompts before it becomes an actual lead.",
+        text: "That makes sense. WolfGrid can sit beside whatever you're using and handle the field layer: mapped territory, door outcomes, agent activity, and follow-up prompts before it becomes an actual lead.",
       },
     ],
     coach:
-      "Position FLYR as the missing field-prospecting layer instead of a replacement for tools they already like.",
+      "Position WolfGrid as the missing field-prospecting layer instead of a replacement for tools they already like.",
     options: QUICK_DEMO_CLOSE_OPTIONS,
   },
   {
@@ -2152,11 +2152,11 @@ export const REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW: StarterScriptFlowNode[] = [
     label: "Pain",
     kind: "question",
     title: "Connect the pain",
-    say: "Totally fair. A lot of teams are in the same position.\nMost teams are putting in effort door knocking or handing out flyers, but they do not really have clear data on what is working, where their agents have been, or which leads need follow-up.\nThat is exactly why we built FLYR.\nIt gives team leaders real numbers on field activity, agent performance, territories covered, and leads generated.\nIf I could show you how your team could track all of that in one place, would that be worth taking a quick look at?\nYes.",
+    say: "Totally fair. A lot of teams are in the same position.\nMost teams are putting in effort door knocking or handing out flyers, but they do not really have clear data on what is working, where their agents have been, or which leads need follow-up.\nThat is exactly why we built WolfGrid.\nIt gives team leaders real numbers on field activity, agent performance, territories covered, and leads generated.\nIf I could show you how your team could track all of that in one place, would that be worth taking a quick look at?\nYes.",
     lines: [
       {
         speaker: "rep",
-        text: "Totally fair. A lot of teams are in the same position.\n\nMost teams are putting in effort door knocking or handing out flyers, but they do not really have clear data on what is working, where their agents have been, or which leads need follow-up.\n\nThat is exactly why we built FLYR.\n\nIt gives team leaders real numbers on field activity, agent performance, territories covered, and leads generated.\n\nIf I could show you how your team could track all of that in one place, would that be worth taking a quick look at?",
+        text: "Totally fair. A lot of teams are in the same position.\n\nMost teams are putting in effort door knocking or handing out flyers, but they do not really have clear data on what is working, where their agents have been, or which leads need follow-up.\n\nThat is exactly why we built WolfGrid.\n\nIt gives team leaders real numbers on field activity, agent performance, territories covered, and leads generated.\n\nIf I could show you how your team could track all of that in one place, would that be worth taking a quick look at?",
       },
       { speaker: "person", text: "Yes." },
     ],
@@ -2177,10 +2177,10 @@ export const REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW: StarterScriptFlowNode[] = [
       },
     ],
     coach:
-      "This splits 'not interested in farming' from 'not interested in FLYR specifically.' Do not close the call without learning which one it is.",
+      "This splits 'not interested in farming' from 'not interested in WolfGrid specifically.' Do not close the call without learning which one it is.",
     options: [
       { label: "Farming is not for me", nextId: "fallback-not-convinced-farming" },
-      { label: "Not sure about FLYR / timing", nextId: "fallback-not-convinced-flyr" },
+      { label: "Not sure about WolfGrid / timing", nextId: "fallback-not-convinced-flyr" },
       { label: "Asks price", nextId: "price-objection" },
     ],
   },
@@ -2205,7 +2205,7 @@ export const REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW: StarterScriptFlowNode[] = [
     id: "fallback-not-convinced-flyr",
     label: "Hesitation",
     kind: "close",
-    title: "Unsure about FLYR or timing",
+    title: "Unsure about WolfGrid or timing",
     say: "Just not sure about doing it with you right now.\nThat's fair, and honestly a smart way to think about it. What would actually need to be true for this to make sense - timing, proof it works, seeing the app first?\nRather than trying to book you into anything now, I can email the short demo video so you can check it out on your own time.",
     lines: [
       { speaker: "person", text: "Just not sure about doing it with you right now." },
@@ -2276,12 +2276,12 @@ export const REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW: StarterScriptFlowNode[] = [
     label: "Price",
     kind: "objection",
     title: "They do not track spend",
-    say: "I don't really track that, or not much.\nThat's actually common - most agents don't realize how much unattributed spend goes into staying visible. FLYR is a flat monthly cost that replaces a lot of that guesswork with something you can point to: doors knocked, contacts logged, listings sourced from the farm.",
+    say: "I don't really track that, or not much.\nThat's actually common - most agents don't realize how much unattributed spend goes into staying visible. WolfGrid is a flat monthly cost that replaces a lot of that guesswork with something you can point to: doors knocked, contacts logged, listings sourced from the farm.",
     lines: [
       { speaker: "person", text: "I don't really track that, or not much." },
       {
         speaker: "rep",
-        text: "That's actually common - most agents don't realize how much unattributed spend goes into staying visible.\n\nFLYR is a flat monthly cost that replaces a lot of that guesswork with something you can point to: doors knocked, contacts logged, listings sourced from the farm.",
+        text: "That's actually common - most agents don't realize how much unattributed spend goes into staying visible.\n\nWolfGrid is a flat monthly cost that replaces a lot of that guesswork with something you can point to: doors knocked, contacts logged, listings sourced from the farm.",
       },
     ],
     coach:
@@ -2293,12 +2293,12 @@ export const REAL_ESTATE_QUICK_DEMO_SCRIPT_FLOW: StarterScriptFlowNode[] = [
     label: "Price",
     kind: "objection",
     title: "They already spend on lead gen",
-    say: "I spend a fair amount already.\nThen this is probably going to feel cheap by comparison. FLYR starts at $30 USD per user per month, which is about $40 CAD.\nIf you're already spending on lead gen, the question is really whether this gives you cleaner tracking and better follow-up for less than what you're already paying.",
+    say: "I spend a fair amount already.\nThen this is probably going to feel cheap by comparison. WolfGrid starts at $30 USD per user per month, which is about $40 CAD.\nIf you're already spending on lead gen, the question is really whether this gives you cleaner tracking and better follow-up for less than what you're already paying.",
     lines: [
       { speaker: "person", text: "I spend a fair amount already." },
       {
         speaker: "rep",
-        text: "Then this is probably going to feel cheap by comparison.\n\nFLYR starts at $30 USD per user per month, which is about $40 CAD.\n\nIf you're already spending on lead gen, the question is really whether this gives you cleaner tracking and better follow-up for less than what you're already paying.",
+        text: "Then this is probably going to feel cheap by comparison.\n\nWolfGrid starts at $30 USD per user per month, which is about $40 CAD.\n\nIf you're already spending on lead gen, the question is really whether this gives you cleaner tracking and better follow-up for less than what you're already paying.",
       },
     ],
     coach:
