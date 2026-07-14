@@ -5,11 +5,11 @@ import { getSupabaseAnonKey, getSupabaseUrl } from '@/lib/supabase/env';
 
 let loggedConfigError = false;
 
-const CANONICAL_HOST = 'wolfgrid.app';
+const CANONICAL_HOST = 'www.wolfgrid.app';
 const LEGACY_HOSTS = new Set([
   'flyrpro.app',
   'www.flyrpro.app',
-  'www.wolfgrid.app',
+  'wolfgrid.app',
 ]);
 
 export async function middleware(req: NextRequest) {
