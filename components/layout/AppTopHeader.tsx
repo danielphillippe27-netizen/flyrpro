@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import Image from 'next/image';
-import { Bell, CheckCheck, Moon, Sun, Maximize2, Minimize2, Menu } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Bell, CheckCheck, Moon, Sun, Maximize2, Minimize2, Menu, LogOut, UserRound } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -22,6 +23,14 @@ import { ProfileEditDialog } from '@/components/profile/ProfileEditDialog';
 import { useMainLayoutNav } from '@/components/layout/MainLayoutNavContext';
 import { countryCodeToFlag } from '@/lib/countries';
 import { HelpMeSellFlyrDialog } from '@/components/scripts/HelpMeSellFlyrDialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 type UserProfileLite = {
   email: string | null;
@@ -70,6 +79,7 @@ function formatNotificationTime(value: string): string {
 }
 
 export default function AppTopHeader() {
+  const router = useRouter();
   const { theme, toggleTheme } = useTheme();
   const { isFullscreen, toggle: toggleFullscreen } = useFullscreen();
   const {
@@ -93,12 +103,27 @@ export default function AppTopHeader() {
   const [feedbackSuccess, setFeedbackSuccess] = useState<string | null>(null);
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
   const [profileEditOpen, setProfileEditOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [notificationsLoading, setNotificationsLoading] = useState(false);
   const [notificationsError, setNotificationsError] = useState<string | null>(null);
   const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
+  const [notificationActionBusyId, setNotificationActionBusyId] = useState<string | null>(null);
   const mainLayoutNav = useMainLayoutNav();
+
+  const handleSignOut = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
+    try {
+      const supabase = await getClientAsync();
+      await supabase.auth.signOut();
+      router.replace('/login');
+      router.refresh();
+    } catch {
+      setSigningOut(false);
+    }
+  };
 
   const refreshProfile = useCallback(() => {
     getClientAsync()
@@ -261,6 +286,15 @@ export default function AppTopHeader() {
   }, [currentWorkspace?.id, loadNotifications]);
 
   useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('notifications') !== '1') return;
+    setNotificationsOpen(true);
+    void loadNotifications();
+    const url = new URL(window.location.href);
+    url.searchParams.delete('notifications');
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+  }, [loadNotifications]);
+
+  useEffect(() => {
     const openFeedback = () => {
       setFeedbackError(null);
       setFeedbackSuccess(null);
@@ -324,6 +358,35 @@ export default function AppTopHeader() {
       void loadNotifications();
     }
   }, [currentWorkspace?.id, loadNotifications, notificationUnreadCount]);
+
+  const respondToCampaignAssignment = useCallback(
+    async (notification: AppNotification, action: 'accept' | 'decline') => {
+      const assignmentId = notification.data?.assignmentId;
+      if (typeof assignmentId !== 'string' || !assignmentId) return;
+      setNotificationActionBusyId(notification.id);
+      setNotificationsError(null);
+      try {
+        const response = await fetch('/api/campaign-assignments/status', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ assignmentId, action }),
+        });
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        if (!response.ok) {
+          setNotificationsError(payload?.error ?? 'Could not update assignment.');
+          return;
+        }
+        await loadNotifications();
+        router.refresh();
+      } catch {
+        setNotificationsError('Could not update assignment.');
+      } finally {
+        setNotificationActionBusyId(null);
+      }
+    },
+    [loadNotifications, router]
+  );
 
   const currentRole = useMemo(() => {
     if (!currentWorkspace) return null;
@@ -395,18 +458,18 @@ export default function AppTopHeader() {
               </Button>
             ) : null}
             <Image
-              src="/brand/wolfgrid-logo-text.svg"
+              src="/brand/wolfgrid-header-light.svg"
               alt="WolfGrid"
               width={120}
               height={60}
-              className="h-6 w-auto shrink-0 dark:hidden"
+              className="h-20 w-auto max-w-[min(58vw,360px)] shrink-0 object-contain object-left dark:hidden"
             />
             <Image
-              src="/brand/wolfgrid-logo-white.svg"
+              src="/brand/wolfgrid-header-dark.svg"
               alt="WolfGrid"
               width={120}
               height={60}
-              className="hidden h-6 w-auto shrink-0 dark:block"
+              className="hidden h-20 w-auto max-w-[min(58vw,360px)] shrink-0 object-contain object-left dark:block"
             />
 
             {accessLevel === 'salesperson' ? (
@@ -509,30 +572,51 @@ export default function AppTopHeader() {
               {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </Button>
 
-            <button
-              type="button"
-              onClick={() => setProfileEditOpen(true)}
-              className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border bg-muted text-xs font-semibold text-foreground transition hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-              title={profile.fullName ?? profile.email ?? 'Edit profile'}
-              aria-label="Edit profile"
-            >
-              {profile.avatarUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={profile.avatarUrl}
-                  alt="Profile"
-                  className="h-full w-full rounded-full object-cover"
-                  referrerPolicy="no-referrer"
-                />
-              ) : (
-                <span>{initialsFromName(profile.fullName ?? profile.email)}</span>
-              )}
-              {profileFlag ? (
-                <span className="absolute -bottom-1 -right-1 rounded-full bg-background text-[13px] leading-none">
-                  {profileFlag}
-                </span>
-              ) : null}
-            </button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border bg-muted text-xs font-semibold text-foreground transition hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                  title={profile.fullName ?? profile.email ?? 'Profile menu'}
+                  aria-label="Open profile menu"
+                >
+                  {profile.avatarUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={profile.avatarUrl}
+                      alt="Profile"
+                      className="h-full w-full rounded-full object-cover"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <span>{initialsFromName(profile.fullName ?? profile.email)}</span>
+                  )}
+                  {profileFlag ? (
+                    <span className="absolute -bottom-1 -right-1 rounded-full bg-background text-[13px] leading-none">
+                      {profileFlag}
+                    </span>
+                  ) : null}
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuLabel className="min-w-0">
+                  <span className="block truncate">{profile.fullName ?? 'Your profile'}</span>
+                  {profile.email ? (
+                    <span className="block truncate text-xs font-normal text-muted-foreground">{profile.email}</span>
+                  ) : null}
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => setProfileEditOpen(true)}>
+                  <UserRound />
+                  Edit profile
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem variant="destructive" disabled={signingOut} onSelect={() => void handleSignOut()}>
+                  <LogOut />
+                  {signingOut ? 'Signing out…' : 'Sign out'}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
         <div className="h-px w-full bg-border/90" />
@@ -632,6 +716,10 @@ export default function AppTopHeader() {
                   const link = notificationLink(notification.data);
                   const label = notificationLabel(notification.data);
                   const isUnread = !notification.read_at;
+                  const isActionableAssignment =
+                    notification.type === 'campaign_assigned' &&
+                    isUnread &&
+                    typeof notification.data?.assignmentId === 'string';
                   const className = [
                     'block w-full rounded-lg border p-3 text-left transition hover:bg-muted/60',
                     isUnread
@@ -652,10 +740,31 @@ export default function AppTopHeader() {
                       <p className="mt-2 text-xs text-muted-foreground">
                         {formatNotificationTime(notification.created_at)}
                       </p>
+                      {isActionableAssignment ? (
+                        <div className="mt-3 flex gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            disabled={notificationActionBusyId === notification.id}
+                            onClick={() => void respondToCampaignAssignment(notification, 'accept')}
+                          >
+                            Accept
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={notificationActionBusyId === notification.id}
+                            onClick={() => void respondToCampaignAssignment(notification, 'decline')}
+                          >
+                            Decline
+                          </Button>
+                        </div>
+                      ) : null}
                     </>
                   );
 
-                  return link ? (
+                  return link && !isActionableAssignment ? (
                     <a
                       key={notification.id}
                       href={link}
@@ -667,6 +776,10 @@ export default function AppTopHeader() {
                     >
                       {content}
                     </a>
+                  ) : isActionableAssignment ? (
+                    <div key={notification.id} className={className}>
+                      {content}
+                    </div>
                   ) : (
                     <button
                       key={notification.id}

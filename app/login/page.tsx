@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import Image from 'next/image';
+import { resolvePublicAppOrigin } from '@/lib/auth/public-origin';
 
 type InviteValidationResponse = {
   valid?: boolean;
@@ -14,22 +15,7 @@ type InviteValidationResponse = {
   email?: string | null;
 };
 
-const DEFAULT_APP_ORIGIN = 'https://wolfgrid.app';
 type AuthMode = 'sign-in' | 'recovery';
-
-function resolveAppOrigin(origin: string): string {
-  const raw = process.env.NEXT_PUBLIC_APP_URL?.trim() || origin;
-
-  try {
-    const parsed = new URL(raw);
-    if (parsed.hostname.toLowerCase() === 'wolfgrid.app') {
-      parsed.hostname = 'wolfgrid.app';
-    }
-    return parsed.origin;
-  } catch {
-    return origin || DEFAULT_APP_ORIGIN;
-  }
-}
 
 function normalizeInviteEmail(value: string | null | undefined): string | null {
   if (typeof value !== 'string') return null;
@@ -147,7 +133,7 @@ export default function LoginPage() {
         ? 'Create an account to access your dashboard and finish onboarding'
         : 'Sign in or create an account to access your dashboard or onboarding';
   const buildAuthCallbackURL = () => {
-    const callbackURL = new URL('/auth/callback', window.location.origin);
+    const callbackURL = new URL('/auth/callback', resolvePublicAppOrigin(window.location.origin));
     callbackURL.searchParams.set('next', normalizedNext);
     if (inviteToken?.trim()) {
       callbackURL.searchParams.set('token', inviteToken.trim());
@@ -158,7 +144,7 @@ export default function LoginPage() {
     return callbackURL.toString();
   };
   const buildPasswordRecoveryURL = () => {
-    return new URL('/reset-password', resolveAppOrigin(window.location.origin)).toString();
+    return new URL('/reset-password', resolvePublicAppOrigin(window.location.origin)).toString();
   };
 
   useEffect(() => {
@@ -418,7 +404,7 @@ export default function LoginPage() {
         <div className="text-center space-y-2">
           <div className="flex justify-center">
             <Image
-              src="/brand/wolfgrid-logo-text.svg"
+              src="/brand/wolfgrid-auth-light.svg"
               alt="WolfGrid"
               width={480}
               height={128}
@@ -490,6 +476,20 @@ export default function LoginPage() {
                 : emailSubmitLabel}
           </Button>
         </form>
+
+        {message && (
+          <div
+            role={message.type === 'error' ? 'alert' : 'status'}
+            aria-live="polite"
+            className={`mt-4 rounded-lg p-4 text-base ${
+              message.type === 'success'
+                ? 'border border-emerald-200 bg-emerald-50 text-emerald-800'
+                : 'border border-red-200 bg-red-50 text-red-600'
+            }`}
+          >
+            {message.text}
+          </div>
+        )}
 
         {authMode === 'recovery' ? (
           <div className="mt-4 text-center">
@@ -564,18 +564,6 @@ export default function LoginPage() {
             </div>
           </>
         ) : null}
-
-        {message && (
-          <div
-            className={`mt-6 p-4 rounded-lg text-base ${
-              message.type === 'success'
-                ? 'border border-emerald-200 bg-emerald-50 text-emerald-800'
-                : 'border border-red-200 bg-red-50 text-red-600'
-            }`}
-          >
-            {message.text}
-          </div>
-        )}
 
         <p className="mt-5 text-center text-sm font-semibold text-[#7b7f89]">
           By continuing, you agree to our Terms of Service and Privacy Policy

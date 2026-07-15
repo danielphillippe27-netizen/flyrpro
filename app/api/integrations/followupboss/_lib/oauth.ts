@@ -78,7 +78,7 @@ export function buildIosResultUrl(result: 'success' | 'error', message?: string)
     status: result,
   });
   if (message) params.set('message', message);
-  return `flyr://oauth?${params.toString()}`;
+  return `wolfgrid://oauth?${params.toString()}`;
 }
 
 export function ensureOAuthConfig() {

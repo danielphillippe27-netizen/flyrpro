@@ -157,7 +157,7 @@ export function renderShareCard(data: ShareCardRenderData) {
         }}
       >
         <div>Keep knocking. Keep climbing.</div>
-        <div>flyr.app</div>
+        <div>wolfgrid.app</div>
       </div>
     </div>
   );

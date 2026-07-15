@@ -78,7 +78,7 @@ function buildText(input: CampaignAssignmentEmailInput): string {
   if (input.dueAt) lines.push(`Due: ${new Date(input.dueAt).toLocaleDateString('en-US')}`);
   if (input.notes) lines.push('', `Notes: ${input.notes}`);
 
-  lines.push('', `Open campaign: ${input.campaignUrl}`, '', 'Daniel Phillippe', 'Founder');
+  lines.push('', `Review assignment: ${input.campaignUrl}`, '', 'Daniel Phillippe', 'Founder');
   return lines.join('\n');
 }
 
@@ -101,7 +101,7 @@ function buildHtml(input: CampaignAssignmentEmailInput): string {
         ${due ? `<p style="margin:0;"><strong>Due:</strong> ${escapeHtml(due)}</p>` : ''}
       </div>
       ${input.notes ? `<p style="margin:0 0 18px;"><strong>Notes:</strong> ${escapeHtml(input.notes)}</p>` : ''}
-      <p style="margin:0 0 22px;"><a href="${escapeHtml(input.campaignUrl)}" style="color:#0f172a;text-decoration:underline;">Open campaign</a></p>
+      <p style="margin:0 0 22px;"><a href="${escapeHtml(input.campaignUrl)}" style="display:inline-block;padding:11px 18px;border-radius:8px;background:#dc2626;color:#ffffff;text-decoration:none;font-weight:700;">Review assignment</a></p>
       <p style="margin:0 0 4px;">Daniel Phillippe</p>
       <p style="margin:0;color:#64748b;font-size:14px;">Founder</p>
     </div>

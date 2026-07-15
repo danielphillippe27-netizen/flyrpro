@@ -17,7 +17,7 @@ type InviteInfo = {
   role: string;
 };
 
-const PENDING_INVITE_PROFILE_KEY = 'flyr.pendingInviteProfile';
+const PENDING_INVITE_PROFILE_KEY = 'wolfgrid.pendingInviteProfile';
 
 function tryOpenInviteInApp(options: {
   token: string;
@@ -31,7 +31,7 @@ function tryOpenInviteInApp(options: {
     return false;
   }
 
-  const appURL = `flyr://join?token=${encodeURIComponent(options.token)}`;
+  const appURL = `wolfgrid://join?token=${encodeURIComponent(options.token)}`;
   const startedAt = Date.now();
 
   window.setTimeout(() => {

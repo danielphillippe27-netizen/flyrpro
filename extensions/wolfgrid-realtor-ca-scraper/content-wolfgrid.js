@@ -1,11 +1,11 @@
-if (!globalThis.__flyrRealtorCaptureReceiverInstalled) {
-  globalThis.__flyrRealtorCaptureReceiverInstalled = true;
+if (!globalThis.__wolfGridRealtorCaptureReceiverInstalled) {
+  globalThis.__wolfGridRealtorCaptureReceiverInstalled = true;
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message?.type !== 'FLYR_DELIVER_REALTOR_CAPTURE') return false;
+    if (!['WOLFGRID_DELIVER_REALTOR_CAPTURE', 'FLYR_DELIVER_REALTOR_CAPTURE'].includes(message?.type)) return false;
 
     const payload = {
-      type: 'FLYR_REALTOR_CA_CAPTURE',
+      type: 'WOLFGRID_REALTOR_CA_CAPTURE',
       payload: message.payload,
     };
 

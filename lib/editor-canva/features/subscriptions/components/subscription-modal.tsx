@@ -26,10 +26,11 @@ export const SubscriptionModal = () => {
       <DialogContent>
         <DialogHeader className="flex items-center space-y-4">
           <Image
-            src="/logo.svg"
+            src="/brand/wolfgrid-text-light.svg"
             alt="Logo"
-            width={36}
-            height={36}
+            width={120}
+            height={60}
+            className="h-10 w-auto"
           />
           <DialogTitle className="text-center">
             Upgrade to a paid plan

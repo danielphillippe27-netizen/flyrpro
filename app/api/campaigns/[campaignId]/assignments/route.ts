@@ -52,6 +52,28 @@ type ProfileRow = {
   last_name: string | null;
 };
 
+type CampaignHomeEventRow = {
+  campaign_address_id: string;
+  user_id: string;
+  action_type: string;
+  created_at: string;
+};
+
+const CONVERSATION_STATUSES = new Set([
+  'talked', 'lead', 'interested', 'appointment', 'follow_up', 'appointment_set',
+  'callback_requested', 'future_seller', 'hot_lead',
+]);
+const WORKED_STATUSES = new Set([
+  'delivered', 'talked', 'lead', 'interested', 'appointment', 'follow_up',
+  'appointment_set', 'callback_requested', 'do_not_knock', 'future_seller',
+  'hot_lead', 'no_answer', 'not_home',
+]);
+const LEAD_STATUSES = new Set([
+  'lead', 'interested', 'appointment', 'follow_up', 'appointment_set',
+  'callback_requested', 'future_seller', 'hot_lead',
+]);
+const APPOINTMENT_STATUSES = new Set(['appointment', 'appointment_set']);
+
 function asMode(value: unknown): CampaignAssignmentMode | null {
   return value === 'zone_split' || value === 'whole_team' ? value : null;
 }
@@ -130,7 +152,7 @@ async function loadAssignmentsForResponse(params: {
     .select('id, campaign_id, workspace_id, assigned_to_user_id, assigned_by_user_id, mode, goal_homes, zone_index, status, due_at, notes, created_at, updated_at')
     .eq('campaign_id', campaignId)
     .eq('workspace_id', workspaceId)
-    .in('status', ['assigned', 'in_progress'])
+    .in('status', ['assigned', 'accepted', 'in_progress'])
     .order('zone_index', { ascending: true, nullsFirst: false })
     .order('created_at', { ascending: true });
 
@@ -145,6 +167,27 @@ async function loadAssignmentsForResponse(params: {
   const assignmentIds = rows.map((row) => row.id);
   const assigneeIds = Array.from(new Set(rows.map((row) => row.assigned_to_user_id)));
   const profiles = await loadProfiles(admin, assigneeIds);
+
+  const earliestAssignmentCreatedAt = rows
+    .map((row) => row.created_at)
+    .sort((a, b) => Date.parse(a) - Date.parse(b))[0];
+  const homeEvents: CampaignHomeEventRow[] = [];
+  if (assigneeIds.length > 0 && earliestAssignmentCreatedAt) {
+    const pageSize = 1000;
+    for (let from = 0; ; from += pageSize) {
+      const { data: eventPage, error: eventError } = await admin
+        .from('campaign_home_events')
+        .select('campaign_address_id, user_id, action_type, created_at')
+        .eq('campaign_id', campaignId)
+        .in('user_id', assigneeIds)
+        .gte('created_at', earliestAssignmentCreatedAt)
+        .order('created_at', { ascending: false })
+        .range(from, from + pageSize - 1);
+      if (eventError) throw new Error(eventError.message || 'Failed to load assignment activity');
+      homeEvents.push(...((eventPage ?? []) as CampaignHomeEventRow[]));
+      if (!eventPage || eventPage.length < pageSize) break;
+    }
+  }
 
   let homesByAssignmentId = new Map<string, Array<{ campaign_address_id: string; sequence: number }>>();
   if (assignmentIds.length > 0) {
@@ -165,14 +208,42 @@ async function loadAssignmentsForResponse(params: {
     );
   }
 
-  return rows.map((row) => ({
-    ...row,
-    assignee: {
-      user_id: row.assigned_to_user_id,
-      display_name: displayName(profiles.get(row.assigned_to_user_id), row.assigned_to_user_id.slice(0, 8)),
-    },
-    homes: homesByAssignmentId.get(row.id) ?? [],
-  }));
+  return rows.map((row) => {
+    const homes = homesByAssignmentId.get(row.id) ?? [];
+    const assignedHomeIds = row.mode === 'zone_split'
+      ? new Set(homes.map((home) => home.campaign_address_id))
+      : null;
+    const latestEventByHome = new Map<string, CampaignHomeEventRow>();
+
+    for (const event of homeEvents) {
+      if (event.user_id !== row.assigned_to_user_id) continue;
+      if (Date.parse(event.created_at) < Date.parse(row.created_at)) continue;
+      if (assignedHomeIds && !assignedHomeIds.has(event.campaign_address_id)) continue;
+      // Events are newest first, so the first event is this user's latest outcome for the home.
+      if (!latestEventByHome.has(event.campaign_address_id)) {
+        latestEventByHome.set(event.campaign_address_id, event);
+      }
+    }
+
+    const statuses = Array.from(
+      latestEventByHome.values(),
+      (event) => event.action_type.trim().toLowerCase()
+    ).filter((status) => WORKED_STATUSES.has(status));
+    return {
+      ...row,
+      assignee: {
+        user_id: row.assigned_to_user_id,
+        display_name: displayName(profiles.get(row.assigned_to_user_id), row.assigned_to_user_id.slice(0, 8)),
+      },
+      homes,
+      activity: {
+        worked_homes: statuses.length,
+        conversations: statuses.filter((status) => CONVERSATION_STATUSES.has(status)).length,
+        leads: statuses.filter((status) => LEAD_STATUSES.has(status)).length,
+        appointments: statuses.filter((status) => APPOINTMENT_STATUSES.has(status)).length,
+      },
+    };
+  });
 }
 
 export async function GET(request: NextRequest, context: RouteContext) {
@@ -294,7 +365,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       .update({ status: 'cancelled', updated_at: now })
       .eq('campaign_id', campaignId)
       .eq('workspace_id', workspaceId)
-      .in('status', ['assigned', 'in_progress']);
+      .in('status', ['assigned', 'accepted', 'in_progress']);
     if (cancelError) {
       return NextResponse.json({ error: cancelError.message || 'Failed to cancel previous assignments' }, { status: 500 });
     }
@@ -364,7 +435,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const profiles = await loadProfiles(admin, memberIds);
     const emails = await loadEmails(admin, memberIds);
     const campaignName = campaignRow.name?.trim() || 'Campaign';
-    const campaignUrl = `${request.nextUrl.origin}/campaigns/${campaignId}`;
+    const campaignUrl = `${request.nextUrl.origin}/?notifications=1`;
 
     const notificationRows = createdAssignments.map((assignment) => {
       const zoneLabel =
@@ -387,7 +458,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
           goalHomes: assignment.goal_homes,
           zoneIndex: assignment.zone_index,
           label: zoneLabel ?? 'Assigned',
-          link: `/campaigns/${campaignId}`,
+          link: `/?notifications=1`,
         },
       };
     });

@@ -72,7 +72,7 @@ const EMPTY_FEATURE_COLLECTION: FeatureCollection = {
   features: [],
 };
 
-export const MAP_BUNDLE_RENDER_VERSION = '2026-06-01-strict-pmtiles-building-scope-v1';
+export const MAP_BUNDLE_RENDER_VERSION = '2026-07-15-field-manual-pins-v1';
 const MIN_RENDERABLE_BUILDING_AREA_SQM = 30;
 const PARCEL_LABEL_OFFSET_METERS = 4;
 const SCOPED_GEOMETRY_CACHE_TTL_MS = 30_000;
@@ -99,6 +99,89 @@ async function measure<T>(
 
 function stableHash(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+}
+
+async function fetchFieldManualPinAddressIds(
+  supabase: SupabaseClient,
+  campaignId: string
+): Promise<Set<string>> {
+  const { data, error } = await supabase
+    .from('campaign_addresses')
+    .select('id')
+    .eq('campaign_id', campaignId)
+    .eq('match_source', 'field_manual_pin');
+
+  if (error) {
+    throw new Error(`Failed to load field manual pins: ${error.message}`);
+  }
+
+  return new Set(
+    ((data ?? []) as Array<{ id?: string | null }>)
+      .map((row) => row.id?.trim().toLowerCase())
+      .filter((id): id is string => Boolean(id))
+  );
+}
+
+function appendFieldManualPinsToBuildings(
+  addresses: FeatureCollection,
+  buildings: FeatureCollection,
+  pinAddressIds: Set<string>
+): { addresses: FeatureCollection; buildings: FeatureCollection } {
+  if (pinAddressIds.size === 0) return { addresses, buildings };
+
+  const pinFeatures: GeoJSON.Feature[] = [];
+  const decoratedAddresses: FeatureCollection = {
+    ...addresses,
+    features: addresses.features.map((feature) => {
+      const properties = (feature.properties ?? {}) as JsonRecord;
+      const rawId = stringValue(properties.address_id ?? properties.id ?? feature.id);
+      const isManualPin =
+        feature.geometry?.type === 'Point' &&
+        Boolean(rawId && pinAddressIds.has(rawId.toLowerCase()));
+      if (!isManualPin) return feature;
+
+      const decorated: GeoJSON.Feature = {
+        ...feature,
+        id: feature.id ?? rawId ?? undefined,
+        properties: {
+          ...properties,
+          id: properties.id ?? rawId,
+          address_id: properties.address_id ?? rawId,
+          gers_id: properties.gers_id ?? rawId,
+          source: 'manual',
+          feature_type: 'manual_pin',
+          feature_status: 'manual_pin',
+          render_kind: 'manual_pin',
+          match_method: 'field_manual_pin',
+        },
+      };
+      pinFeatures.push(decorated);
+      return decorated;
+    }),
+  };
+
+  const existingIds = new Set(
+    buildings.features.flatMap((feature) => {
+      const properties = (feature.properties ?? {}) as JsonRecord;
+      const id = stringValue(properties.address_id ?? properties.id ?? feature.id);
+      return id ? [id.toLowerCase()] : [];
+    })
+  );
+
+  return {
+    addresses: decoratedAddresses,
+    buildings: {
+      ...buildings,
+      features: [
+        ...buildings.features,
+        ...pinFeatures.filter((feature) => {
+          const properties = (feature.properties ?? {}) as JsonRecord;
+          const id = stringValue(properties.address_id ?? properties.id ?? feature.id);
+          return Boolean(id && !existingIds.has(id.toLowerCase()));
+        }),
+      ],
+    },
+  };
 }
 
 function normalizeBbox(value: unknown): [number, number, number, number] | null {
@@ -224,8 +307,18 @@ function bundleRenderVersion(row: CurrentCampaignMapBundleRow | null): string | 
   return typeof value === 'string' && value.trim() ? value : null;
 }
 
+function campaignMapBundleIsExpired(row: CurrentCampaignMapBundleRow | null): boolean {
+  if (!row?.expires_at) return false;
+  const expiresAt = Date.parse(row.expires_at);
+  return Number.isFinite(expiresAt) && expiresAt <= Date.now();
+}
+
 export function campaignMapBundleNeedsRebuild(row: CurrentCampaignMapBundleRow | null): boolean {
-  return !row || bundleRenderVersion(row) !== MAP_BUNDLE_RENDER_VERSION;
+  return (
+    !row ||
+    bundleRenderVersion(row) !== MAP_BUNDLE_RENDER_VERSION ||
+    campaignMapBundleIsExpired(row)
+  );
 }
 
 function normalizedWorkflowStatus(value: unknown): string {
@@ -1639,7 +1732,7 @@ export async function prebuildCampaignMapBundle(
   if (
     !options?.scopedGeometry &&
     currentBundle?.source_version === sourceVersion &&
-    bundleRenderVersion(currentBundle) === MAP_BUNDLE_RENDER_VERSION
+    !campaignMapBundleNeedsRebuild(currentBundle)
   ) {
     recordTiming?.('current_bundle_reused', 0);
     return responseFromCampaignMapBundleRow(currentBundle, recordTiming);
@@ -1692,6 +1785,14 @@ export async function prebuildCampaignMapBundle(
     buildings: renderableBuildings,
     links,
   });
+  const fieldManualPinIds = await measure('field_manual_pins', recordTiming, () =>
+    fetchFieldManualPinAddressIds(supabase, campaignId)
+  );
+  const manualPinsApplied = appendFieldManualPinsToBuildings(
+    enriched.addresses,
+    enriched.buildings,
+    fieldManualPinIds
+  );
   const isPendingProvisionBundle = normalizedWorkflowStatus(options?.linksStatusOverride) === 'pending_provision';
   const parcelOwnership = isPendingProvisionBundle
     ? []
@@ -1707,12 +1808,12 @@ export async function prebuildCampaignMapBundle(
     );
   }
   const ownershipApplied = applyAddressParcelOwnership({
-    addresses: enriched.addresses,
+    addresses: manualPinsApplied.addresses,
     parcels,
     ownership: parcelOwnership,
   });
   const addresses = ownershipApplied.addresses;
-  const buildings = enriched.buildings;
+  const buildings = manualPinsApplied.buildings;
   const ownedParcels = ownershipApplied.parcels;
   const buildingOrphans = enriched.buildingOrphans;
   const computedLinksStatus = 'ready';

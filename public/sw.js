@@ -2,7 +2,7 @@
  * Minimal offline fallback only. Do not precache HTML — after a deploy, a stale
  * cached document breaks Next.js chunk loading (client-side exception).
  */
-const CACHE_NAME = 'flyr-nav-fallback-v2';
+const CACHE_NAME = 'wolfgrid-nav-fallback-v1';
 
 self.addEventListener('install', (event) => {
   event.waitUntil(self.skipWaiting());

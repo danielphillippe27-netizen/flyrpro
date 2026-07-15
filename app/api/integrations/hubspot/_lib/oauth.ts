@@ -90,7 +90,7 @@ export function buildHubSpotIosResultUrl(result: 'success' | 'error', message?: 
     status: result,
   });
   if (message) params.set('message', message);
-  return `flyr://oauth?${params.toString()}`;
+  return `wolfgrid://oauth?${params.toString()}`;
 }
 
 export function ensureHubSpotOAuthConfig() {

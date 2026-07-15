@@ -75,7 +75,7 @@ function parcelTimingHeader(
 function timingHeaders(value: string) {
   return {
     'Server-Timing': value,
-    'X-FLYR-Server-Timing': value,
+    'X-WolfGrid-Server-Timing': value,
   };
 }
 
@@ -222,8 +222,8 @@ export async function GET(
         'Content-Type': 'application/json',
         'Cache-Control': 'private, max-age=60',
         ...timingHeaders(parcelTimingHeader(routeTimings, undefined, 'hit')),
-        'X-FLYR-Parcels-Cache': 'final-hit',
-        'X-FLYR-Parcels-Features': String(cachedFinalResponse.featureCount),
+        'X-WolfGrid-Parcels-Cache': 'final-hit',
+        'X-WolfGrid-Parcels-Features': String(cachedFinalResponse.featureCount),
       },
     });
   }
@@ -235,7 +235,7 @@ export async function GET(
       headers: {
         'Cache-Control': 'private, max-age=60',
         ...timingHeaders(parcelTimingHeader(routeTimings)),
-        'X-FLYR-Parcels-Suppressed': 'cached-failure',
+        'X-WolfGrid-Parcels-Suppressed': 'cached-failure',
       },
     });
   }
@@ -251,9 +251,9 @@ export async function GET(
         'Content-Type': 'application/json',
         'Cache-Control': 'private, max-age=60',
         ...timingHeaders(parcelTimingHeader(routeTimings, scoped, 'miss')),
-        'X-FLYR-Parcels-Cache': scoped.cacheStatus,
-        'X-FLYR-Parcels-Tiles': String(scoped.timings.tileCount),
-        'X-FLYR-Parcels-Features': String(scoped.timings.featureCount),
+        'X-WolfGrid-Parcels-Cache': scoped.cacheStatus,
+        'X-WolfGrid-Parcels-Tiles': String(scoped.timings.tileCount),
+        'X-WolfGrid-Parcels-Features': String(scoped.timings.featureCount),
       },
     });
   } catch (error) {
@@ -269,7 +269,7 @@ export async function GET(
         headers: {
           'Cache-Control': 'private, max-age=60',
           ...timingHeaders(parcelTimingHeader(routeTimings)),
-          'X-FLYR-Parcels-Suppressed': 'access-denied',
+          'X-WolfGrid-Parcels-Suppressed': 'access-denied',
         },
       });
     }

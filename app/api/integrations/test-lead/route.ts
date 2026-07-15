@@ -48,6 +48,7 @@ type ProviderResult = {
   success: boolean;
   error?: string;
   warning?: string;
+  skipped?: boolean;
 };
 
 const boldTrailClient = new BoldTrailAPIClient();
@@ -398,7 +399,12 @@ export async function POST(request: NextRequest) {
       try {
         const auth = await getContractorAuthForWorkspace(supabase, userId, targetWorkspaceId, provider);
         if (!auth) {
-          throw new Error(`${getContractorDisplayName(provider)} auth not found`);
+          details[provider] = {
+            success: true,
+            skipped: true,
+            warning: `Skipped: reconnect ${getContractorDisplayName(provider)} for this WolfGrid account.`,
+          };
+          continue;
         }
         await pushContractorLead(provider, auth, {
           ...testLead,
@@ -431,7 +437,7 @@ export async function POST(request: NextRequest) {
     }
 
     const succeeded = Object.entries(details)
-      .filter(([, result]) => result.success)
+      .filter(([, result]) => result.success && !result.skipped)
       .map(([provider]) => humanizeProvider(provider));
 
     const warnings = Object.entries(details)

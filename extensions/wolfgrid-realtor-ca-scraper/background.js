@@ -1,4 +1,4 @@
-const DEFAULT_FLYR_URL = 'https://www.flyrpro.app/scraper';
+const DEFAULT_WOLFGRID_URL = 'https://wolfgrid.app/scraper';
 
 async function getActiveRealtorTab() {
   const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -26,37 +26,37 @@ async function waitForTabComplete(tabId) {
   });
 }
 
-async function findOrOpenFlyrTab(flyrUrl) {
-  const url = new URL(flyrUrl);
+async function findOrOpenWolfGridTab(wolfgridUrl) {
+  const url = new URL(wolfgridUrl);
   const matches = await chrome.tabs.query({});
   const existing = matches.find((tab) => (tab.url || '').startsWith(url.origin) && (tab.url || '').includes('/scraper'));
   if (existing?.id) {
-    await chrome.tabs.update(existing.id, { active: true, url: flyrUrl });
+    await chrome.tabs.update(existing.id, { active: true, url: wolfgridUrl });
     await waitForTabComplete(existing.id);
     return existing.id;
   }
 
-  const tab = await chrome.tabs.create({ url: flyrUrl, active: true });
-  if (!tab.id) throw new Error('Could not open FLYR.');
+  const tab = await chrome.tabs.create({ url: wolfgridUrl, active: true });
+  if (!tab.id) throw new Error('Could not open WolfGrid.');
   await waitForTabComplete(tab.id);
   return tab.id;
 }
 
-async function sendToFlyr(flyrUrl, payload) {
-  const flyrTabId = await findOrOpenFlyrTab(flyrUrl);
+async function sendToWolfGrid(wolfgridUrl, payload) {
+  const wolfgridTabId = await findOrOpenWolfGridTab(wolfgridUrl);
   const message = {
-    type: 'FLYR_DELIVER_REALTOR_CAPTURE',
+    type: 'WOLFGRID_DELIVER_REALTOR_CAPTURE',
     payload,
   };
 
   try {
-    await chrome.tabs.sendMessage(flyrTabId, message);
+    await chrome.tabs.sendMessage(wolfgridTabId, message);
   } catch {
     await chrome.scripting.executeScript({
-      target: { tabId: flyrTabId },
-      files: ['content-flyr.js'],
+      target: { tabId: wolfgridTabId },
+      files: ['content-wolfgrid.js'],
     });
-    await chrome.tabs.sendMessage(flyrTabId, message);
+    await chrome.tabs.sendMessage(wolfgridTabId, message);
   }
 }
 
@@ -73,7 +73,7 @@ async function sendToRealtorTab(tabId, message) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message?.type !== 'FLYR_START_REALTOR_SCRAPE') return false;
+  if (!['WOLFGRID_START_REALTOR_SCRAPE', 'FLYR_START_REALTOR_SCRAPE'].includes(message?.type)) return false;
 
   (async () => {
     const realtorTab = await getActiveRealtorTab();
@@ -82,13 +82,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     const scrapeResponse = await sendToRealtorTab(realtorTab.id, {
-      type: 'FLYR_SCRAPE_REALTOR_CA',
+      type: 'WOLFGRID_SCRAPE_REALTOR_CA',
       options: message.options,
     });
     if (!scrapeResponse?.ok) throw new Error(scrapeResponse?.error || 'REALTOR.ca scrape failed.');
 
     await chrome.storage.local.set({ lastRealtorCapture: scrapeResponse.payload });
-    await sendToFlyr(message.options.flyrUrl || DEFAULT_FLYR_URL, scrapeResponse.payload);
+    await sendToWolfGrid(message.options.wolfgridUrl || message.options.flyrUrl || DEFAULT_WOLFGRID_URL, scrapeResponse.payload);
     sendResponse({
       ok: true,
       count: scrapeResponse.payload?.leads?.length ?? 0,

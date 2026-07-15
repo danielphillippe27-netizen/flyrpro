@@ -16,6 +16,8 @@ import { Check, ChevronDown, User, Users, Building2, Plus, Minus } from 'lucide-
 import { ExclusiveOfferArcadeEmbed } from '@/components/landing/ExclusiveOfferArcadeEmbed';
 import { getClientAsync } from '@/lib/supabase/client';
 import { COUNTRY_OPTIONS } from '@/lib/countries';
+import { resolvePublicAppOrigin } from '@/lib/auth/public-origin';
+import { WolfGridLogo } from '@/components/brand/WolfGridLogo';
 
 type BrokerageSuggestion = { id: string; name: string };
 type SalespersonInviteHint = {
@@ -64,9 +66,12 @@ const SOLO_SEATS = 1;
 const TEAM_MIN_SEATS = 2;
 const MAX_SEATS = 200;
 const FINAL_ONBOARDING_STEP = 5;
-const EXCLUSIVE_ONBOARDING_AUTH_DRAFT_KEY = 'flyr.exclusiveOnboardingAuthDraft';
-const ONBOARDING_DRAFT_KEY = 'flyr.onboardingDraft';
-const SELF_SERVE_CAMPAIGN_DRAFT_KEY = 'flyr.selfServeCampaignDraft';
+const EXCLUSIVE_ONBOARDING_AUTH_DRAFT_KEY = 'wolfgrid.exclusiveOnboardingAuthDraft';
+const ONBOARDING_DRAFT_KEY = 'wolfgrid.onboardingDraft';
+const SELF_SERVE_CAMPAIGN_DRAFT_KEY = 'wolfgrid.selfServeCampaignDraft';
+const LEGACY_EXCLUSIVE_ONBOARDING_AUTH_DRAFT_KEY = 'flyr.exclusiveOnboardingAuthDraft';
+const LEGACY_ONBOARDING_DRAFT_KEY = 'flyr.onboardingDraft';
+const LEGACY_SELF_SERVE_CAMPAIGN_DRAFT_KEY = 'flyr.selfServeCampaignDraft';
 const MOBILE_RETURN_URL_PARAMS = [
   'returnUrl',
   'return_url',
@@ -138,7 +143,9 @@ function normalizeReferralCodeInput(value: string): string {
 function readOnboardingDraft(): OnboardingDraft | null {
   if (typeof window === 'undefined') return null;
   try {
-    const raw = window.localStorage.getItem(ONBOARDING_DRAFT_KEY);
+    const raw =
+      window.localStorage.getItem(ONBOARDING_DRAFT_KEY) ||
+      window.localStorage.getItem(LEGACY_ONBOARDING_DRAFT_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<OnboardingDraft>;
     const firstName = typeof parsed.firstName === 'string' ? parsed.firstName : '';
@@ -184,7 +191,9 @@ function readOnboardingDraft(): OnboardingDraft | null {
 function readSelfServeCampaignDraft(): SelfServeCampaignDraft | null {
   if (typeof window === 'undefined') return null;
   try {
-    const raw = window.localStorage.getItem(SELF_SERVE_CAMPAIGN_DRAFT_KEY);
+    const raw =
+      window.localStorage.getItem(SELF_SERVE_CAMPAIGN_DRAFT_KEY) ||
+      window.localStorage.getItem(LEGACY_SELF_SERVE_CAMPAIGN_DRAFT_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<SelfServeCampaignDraft>;
     if (!parsed.name || parsed.polygon?.type !== 'Polygon' || !Array.isArray(parsed.polygon.coordinates)) return null;
@@ -202,7 +211,7 @@ function mobileReturnUrlFromSearchParams(searchParams: URLSearchParams): string 
   for (const param of MOBILE_RETURN_URL_PARAMS) {
     const value = searchParams.get(param)?.trim();
     if (!value) continue;
-    if (value.startsWith('flyr://')) return value;
+    if (value.startsWith('wolfgrid://') || value.startsWith('flyr://')) return value;
   }
   return null;
 }
@@ -581,7 +590,9 @@ function OnboardingContent() {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       try {
-        const storedDraft = window.localStorage.getItem(EXCLUSIVE_ONBOARDING_AUTH_DRAFT_KEY);
+        const storedDraft =
+          window.localStorage.getItem(EXCLUSIVE_ONBOARDING_AUTH_DRAFT_KEY) ||
+          window.localStorage.getItem(LEGACY_EXCLUSIVE_ONBOARDING_AUTH_DRAFT_KEY);
         if (storedDraft) {
           const parsed = JSON.parse(storedDraft) as {
             firstName?: unknown;
@@ -771,6 +782,7 @@ function OnboardingContent() {
         checkoutUseCase,
       };
       window.localStorage.setItem(ONBOARDING_DRAFT_KEY, JSON.stringify(draft));
+      window.localStorage.removeItem(LEGACY_ONBOARDING_DRAFT_KEY);
     },
     [
       brokerage,
@@ -808,10 +820,11 @@ function OnboardingContent() {
         workEmail: normalizedWorkEmail,
       })
     );
+    window.localStorage.removeItem(LEGACY_EXCLUSIVE_ONBOARDING_AUTH_DRAFT_KEY);
   }, [countryCode, firstName, requiresOnboardingAuth, lastName, normalizedWorkEmail]);
 
   const buildExclusiveAuthCallbackURL = useCallback(() => {
-    const callbackUrl = new URL('/auth/callback', window.location.origin);
+    const callbackUrl = new URL('/auth/callback', resolvePublicAppOrigin(window.location.origin));
     const nextPath = `${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ''}`;
     callbackUrl.searchParams.set('next', nextPath);
     return callbackUrl.toString();
@@ -1035,8 +1048,11 @@ function OnboardingContent() {
     if (mobileReturnUrl) {
       if (typeof window !== 'undefined') {
         window.localStorage.removeItem(EXCLUSIVE_ONBOARDING_AUTH_DRAFT_KEY);
+        window.localStorage.removeItem(LEGACY_EXCLUSIVE_ONBOARDING_AUTH_DRAFT_KEY);
         window.localStorage.removeItem(ONBOARDING_DRAFT_KEY);
+        window.localStorage.removeItem(LEGACY_ONBOARDING_DRAFT_KEY);
         window.localStorage.removeItem(SELF_SERVE_CAMPAIGN_DRAFT_KEY);
+        window.localStorage.removeItem(LEGACY_SELF_SERVE_CAMPAIGN_DRAFT_KEY);
         window.location.href = mobileReturnUrl;
       }
       return;
@@ -1045,8 +1061,11 @@ function OnboardingContent() {
     if (!destination) return;
     if (typeof window !== 'undefined') {
       window.localStorage.removeItem(EXCLUSIVE_ONBOARDING_AUTH_DRAFT_KEY);
+      window.localStorage.removeItem(LEGACY_EXCLUSIVE_ONBOARDING_AUTH_DRAFT_KEY);
       window.localStorage.removeItem(ONBOARDING_DRAFT_KEY);
+      window.localStorage.removeItem(LEGACY_ONBOARDING_DRAFT_KEY);
       window.localStorage.removeItem(SELF_SERVE_CAMPAIGN_DRAFT_KEY);
+      window.localStorage.removeItem(LEGACY_SELF_SERVE_CAMPAIGN_DRAFT_KEY);
       window.location.href = destination;
     }
   };
@@ -1288,7 +1307,7 @@ function OnboardingContent() {
         }
       }
       const onboardingNext = `${onboardingEntryPath}?${nextQs.toString()}`;
-      const callbackUrl = new URL('/auth/callback', window.location.origin);
+      const callbackUrl = new URL('/auth/callback', resolvePublicAppOrigin(window.location.origin));
       callbackUrl.searchParams.set('next', onboardingNext);
 
       const signUpResult = await supabase.auth.signUp({
@@ -1485,6 +1504,9 @@ function OnboardingContent() {
           step === FINAL_ONBOARDING_STEP ? 'max-w-[1120px]' : 'max-w-[720px]'
         }`}
       >
+        <div className="mb-6 flex justify-center">
+          <WolfGridLogo kind="auth" className="h-20 w-auto sm:h-24" priority />
+        </div>
         <div className={step === FINAL_ONBOARDING_STEP ? 'mb-10 text-center' : 'mb-8 text-center'}>
           <div className="space-y-3">
             <h1 className={step === FINAL_ONBOARDING_STEP ? 'text-4xl font-bold leading-tight tracking-normal sm:text-5xl' : 'text-3xl font-bold leading-tight tracking-normal sm:text-4xl'}>

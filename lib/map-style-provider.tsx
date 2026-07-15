@@ -11,7 +11,8 @@ interface MapStyleContextType {
   setPreset: (preset: MapStylePreset) => void;
 }
 
-const MAP_STYLE_STORAGE_KEY = 'flyr-map-style-preset';
+const MAP_STYLE_STORAGE_KEY = 'wolfgrid-map-style-preset';
+const LEGACY_MAP_STYLE_STORAGE_KEY = 'flyr-map-style-preset';
 
 const MapStyleContext = createContext<MapStyleContextType | undefined>(undefined);
 
@@ -21,7 +22,8 @@ export function MapStyleProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     setMounted(true);
-    const savedPreset = localStorage.getItem(MAP_STYLE_STORAGE_KEY) as MapStylePreset | null;
+    const savedPreset = (localStorage.getItem(MAP_STYLE_STORAGE_KEY) ||
+      localStorage.getItem(LEGACY_MAP_STYLE_STORAGE_KEY)) as MapStylePreset | null;
     if (savedPreset && savedPreset in MAP_STYLE_PRESET_META) {
       setPresetState(savedPreset);
     }
@@ -30,6 +32,7 @@ export function MapStyleProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!mounted) return;
     localStorage.setItem(MAP_STYLE_STORAGE_KEY, preset);
+    localStorage.removeItem(LEGACY_MAP_STYLE_STORAGE_KEY);
   }, [mounted, preset]);
 
   const setPreset = (nextPreset: MapStylePreset) => {

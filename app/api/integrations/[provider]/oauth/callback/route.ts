@@ -52,7 +52,7 @@ export async function GET(
     });
 
     const now = new Date().toISOString();
-    await supabase.from('user_integrations').upsert(
+    const { error: integrationError } = await supabase.from('user_integrations').upsert(
       {
         user_id: verifiedState.userId,
         provider: provider.id,
@@ -66,6 +66,9 @@ export async function GET(
       },
       { onConflict: 'user_id,provider' }
     );
+    if (integrationError) {
+      throw integrationError;
+    }
 
     const { data: existing } = await supabase
       .from('crm_connections')
@@ -78,14 +81,13 @@ export async function GET(
       user_id: verifiedState.userId,
       workspace_id: verifiedState.workspaceId,
       provider: provider.id,
-      api_key_encrypted: null,
+      // crm_connections predates OAuth and still requires this column. OAuth
+      // tokens are stored in user_integrations, so use an empty sentinel here.
+      api_key_encrypted: '',
       status: 'connected',
       last_tested_at: now,
       last_error: null,
       updated_at: now,
-      metadata: {
-        authMode: 'oauth',
-      },
     };
 
     const { error: connectionError } = existing?.id
@@ -98,10 +100,17 @@ export async function GET(
 
     return NextResponse.redirect(getContractorWebResultUrl('connected', provider.id, origin));
   } catch (err) {
+    const diagnostic = err instanceof Error
+      ? err.message
+      : typeof err === 'object' && err !== null
+        ? JSON.stringify(err)
+        : `${getContractorDisplayName(provider.id)} OAuth failed.`;
+    const message = err instanceof Error ? err.message : `${getContractorDisplayName(provider.id)} OAuth failed.`;
+    console.error(`[integrations] ${provider.id} OAuth callback failed: ${diagnostic}`);
     return redirectForError(
       provider.id,
       origin,
-      err instanceof Error ? err.message : `${getContractorDisplayName(provider.id)} OAuth failed.`
+      message
     );
   }
 }

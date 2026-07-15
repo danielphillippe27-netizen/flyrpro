@@ -401,7 +401,7 @@ export async function GET(
   const routeStarted = performance.now();
   const timingHeaders = (source: string) => ({
     'Server-Timing': `source;desc="${source}", total;dur=${Math.round((performance.now() - routeStarted) * 100) / 100}`,
-    'X-FLYR-Server-Timing': `source;desc="${source}", total;dur=${Math.round((performance.now() - routeStarted) * 100) / 100}`,
+    'X-WolfGrid-Server-Timing': `source;desc="${source}", total;dur=${Math.round((performance.now() - routeStarted) * 100) / 100}`,
   });
   try {
     const { campaignId } = await params;
@@ -455,6 +455,9 @@ export async function GET(
             id: address.id,
             formatted: address.formatted || address.address || '',
             visited: address.visited || false,
+            match_source: address.match_source ?? null,
+            feature_type: address.match_source === 'field_manual_pin' ? 'manual_pin' : 'address_point',
+            address_provenance: address.match_source ?? null,
             house_bearing: address.house_bearing || 0,
             road_bearing: address.road_bearing || 0,
           },

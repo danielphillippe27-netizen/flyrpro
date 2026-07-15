@@ -4,12 +4,12 @@ import Image from "next/image";
 export const Logo = () => {
   return (
     <Link href="/">
-      <div className="size-8 relative shrink-0">
+      <div className="relative h-8 w-24 shrink-0">
         <Image
-          src="/logo.svg"
+          src="/brand/wolfgrid-text-light.svg"
           fill
-          alt="The Canvas"
-          className="shrink-0 hover:opacity-75 transition"
+          alt="WolfGrid"
+          className="shrink-0 object-contain hover:opacity-75 transition"
         />
       </div>
     </Link>

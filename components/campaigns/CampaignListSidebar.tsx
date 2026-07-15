@@ -3,13 +3,19 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Plus, Search, ChevronsLeft, ChevronsRight, Trash2 } from 'lucide-react';
+import { Plus, Search, ChevronsLeft, ChevronsRight, Trash2, ChevronDown } from 'lucide-react';
 import { CampaignsService } from '@/lib/services/CampaignsService';
 import type { CampaignV2 } from '@/types/database';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { getClientAsync } from '@/lib/supabase/client';
 import { useWorkspace } from '@/lib/workspace-context';
@@ -25,6 +31,12 @@ import {
 } from '@/components/ui/dialog';
 
 type StatusTab = 'active' | 'completed';
+
+type CampaignMember = {
+  user_id: string;
+  display_name: string;
+  color?: string;
+};
 
 const ACTIVE_STATUSES: CampaignV2['status'][] = ['draft', 'active', 'paused'];
 
@@ -95,6 +107,9 @@ export function CampaignListSidebar({
   const [assignmentLabelsByCampaignId, setAssignmentLabelsByCampaignId] = useState<Record<string, CampaignAssignmentListLabel>>({});
   const [search, setSearch] = useState('');
   const [statusTab, setStatusTab] = useState<StatusTab>('active');
+  const [workspaceRole, setWorkspaceRole] = useState<string | null>(null);
+  const [members, setMembers] = useState<CampaignMember[]>([]);
+  const [memberIds, setMemberIds] = useState<string[]>([]);
 
   const handleDeleteCampaign = useCallback(
     async (id: string) => {
@@ -143,6 +158,19 @@ export function CampaignListSidebar({
       }
       setCampaigns(Array.from(campaignById.values()));
       const role = typeof assignmentsPayload?.role === 'string' ? assignmentsPayload.role : null;
+      setWorkspaceRole(role);
+      if (role === 'owner' && currentWorkspaceId) {
+        const rosterPayload = await fetch(
+          `/api/team/roster?workspaceId=${encodeURIComponent(currentWorkspaceId)}`,
+          { credentials: 'include' }
+        )
+          .then((response) => response.ok ? response.json() : null)
+          .catch(() => null);
+        setMembers(Array.isArray(rosterPayload?.members) ? rosterPayload.members : []);
+      } else {
+        setMembers([]);
+        setMemberIds([]);
+      }
       const canManageAssignments = role === 'owner' || role === 'admin';
       const groupedAssignments = assignmentRows.reduce((map, assignment) => {
         const list = map.get(assignment.campaign_id) ?? [];
@@ -181,6 +209,10 @@ export function CampaignListSidebar({
   }, [currentWorkspaceId]);
 
   useEffect(() => {
+    setMemberIds([]);
+  }, [currentWorkspaceId]);
+
+  useEffect(() => {
     void loadCampaigns();
     window.addEventListener('flyr-campaigns-refresh', loadCampaigns);
     return () => {
@@ -188,11 +220,27 @@ export function CampaignListSidebar({
     };
   }, [loadCampaigns]);
 
+  const memberFilteredCampaigns = useMemo(() => {
+    if (memberIds.length === 0) return campaigns;
+    return campaigns.filter((campaign) => memberIds.includes(campaign.owner_id));
+  }, [campaigns, memberIds]);
+
   const byStatus = useMemo(() => {
-    const active = campaigns.filter((c) => ACTIVE_STATUSES.includes(c.status));
-    const completed = campaigns.filter((c) => c.status === 'completed');
+    const active = memberFilteredCampaigns.filter((c) => ACTIVE_STATUSES.includes(c.status));
+    const completed = memberFilteredCampaigns.filter((c) => c.status === 'completed');
     return { active, completed };
-  }, [campaigns]);
+  }, [memberFilteredCampaigns]);
+
+  const toggleMember = useCallback((memberId: string) => {
+    setMemberIds((current) => {
+      if (current.length === 0) return [memberId];
+      if (current.includes(memberId)) {
+        const next = current.filter((id) => id !== memberId);
+        return next.length === 0 ? [] : next;
+      }
+      return [...current, memberId];
+    });
+  }, []);
 
   const filtered = useMemo(() => {
     const list = statusTab === 'active' ? byStatus.active : byStatus.completed;
@@ -240,6 +288,41 @@ export function CampaignListSidebar({
             <ChevronsLeft className="w-3.5 h-3.5" />
           </button>
         </div>
+        {workspaceRole === 'owner' && members.length > 0 ? (
+          <div className="mb-2 flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">Members:</span>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="h-8 min-w-20 justify-between gap-1 px-2.5 text-xs">
+                  {memberIds.length === 0 ? 'All' : `${memberIds.length} selected`}
+                  <ChevronDown className="h-3.5 w-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-56">
+                <DropdownMenuCheckboxItem
+                  checked={memberIds.length === 0}
+                  onCheckedChange={() => setMemberIds([])}
+                >
+                  All
+                </DropdownMenuCheckboxItem>
+                {members.map((member) => (
+                  <DropdownMenuCheckboxItem
+                    key={member.user_id}
+                    checked={memberIds.length === 0 || memberIds.includes(member.user_id)}
+                    onCheckedChange={() => toggleMember(member.user_id)}
+                  >
+                    <span
+                      className="mr-2 inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: member.color ?? '#3B82F6' }}
+                      aria-hidden
+                    />
+                    {member.display_name || 'Member'}
+                  </DropdownMenuCheckboxItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        ) : null}
         <div className="flex gap-1.5">
           <div className="relative flex-1 min-w-0">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />

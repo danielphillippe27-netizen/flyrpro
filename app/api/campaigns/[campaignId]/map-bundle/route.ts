@@ -71,7 +71,7 @@ function noStoreHeaders(spans: ServerTimingSpan[], extra?: Record<string, string
   const timing = serverTimingValue(spans);
   if (timing) {
     headers.set('Server-Timing', timing);
-    headers.set('X-FLYR-Server-Timing', timing);
+    headers.set('X-WolfGrid-Server-Timing', timing);
   }
   return headers;
 }
@@ -180,7 +180,7 @@ export async function GET(
         startedAt,
         extraHeaders: {
           ETag: etagForSignature(current.asset_signature),
-          'X-FLYR-Map-Bundle-Cache': 'not-modified',
+          'X-WolfGrid-Map-Bundle-Cache': 'not-modified',
         },
       });
     }
@@ -195,7 +195,7 @@ export async function GET(
         startedAt,
         extraHeaders: {
           ETag: etagForSignature(current.asset_signature),
-          'X-FLYR-Map-Bundle-Cache': 'hit',
+          'X-WolfGrid-Map-Bundle-Cache': 'hit',
         },
       });
     }
@@ -222,7 +222,7 @@ export async function GET(
           startedAt,
           extraHeaders: {
             ETag: etagForSignature(rebuilt.asset_signature),
-            'X-FLYR-Map-Bundle-Cache': 'rebuilt',
+            'X-WolfGrid-Map-Bundle-Cache': 'rebuilt',
           },
         });
       } catch (buildError) {
@@ -243,7 +243,7 @@ export async function GET(
         startedAt,
         extraHeaders: {
           ETag: etagForSignature(current.asset_signature),
-          'X-FLYR-Map-Bundle-Cache': 'stale-hit',
+          'X-WolfGrid-Map-Bundle-Cache': 'stale-hit',
         },
       });
     }
@@ -253,7 +253,7 @@ export async function GET(
       spans,
       startedAt,
       extraHeaders: {
-        'X-FLYR-Map-Bundle-Cache': 'pending',
+        'X-WolfGrid-Map-Bundle-Cache': 'pending',
       },
     });
   } catch (error) {

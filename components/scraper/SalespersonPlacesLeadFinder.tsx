@@ -474,14 +474,15 @@ function splitCanadianAddress(address: string): {
 }
 
 function buildRealtorCaCaptureBookmarklet(): string {
-  const flyrOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://wolfgrid.app';
+  const wolfgridOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://wolfgrid.app';
   const script = `(async () => {
     const compact = (value) => String(value ?? '').replace(/\\s+/g, ' ').trim();
     const phoneRe = /(?:\\+?1[\\s.-]?)?\\(?\\d{3}\\)?[\\s.-]?\\d{3}[\\s.-]?\\d{4}/;
     const postcodeRe = /\\b[A-Z]\\d[A-Z]\\s?\\d[A-Z]\\d\\b/i;
     const roleRe = /\\b(salesperson|broker|broker of record|associate broker|representative|realtor)\\b/i;
     const ignored = /^(email|website|realtor.? website|office website|brokerage|contact)$/i;
-    const storageKey = 'flyr.realtor.ca.browser.capture.v1';
+    const storageKey = 'wolfgrid.realtor.ca.browser.capture.v1';
+    const legacyStorageKey = 'flyr.realtor.ca.browser.capture.v1';
     const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     const linesFrom = (text) => String(text ?? '')
       .replace(/\\r\\n/g, '\\n')
@@ -618,7 +619,7 @@ function buildRealtorCaCaptureBookmarklet(): string {
       window.scrollTo(0, 0);
       await wait(600);
     };
-    const existing = JSON.parse(localStorage.getItem(storageKey) || '{"leads":[]}');
+    const existing = JSON.parse(localStorage.getItem(storageKey) || localStorage.getItem(legacyStorageKey) || '{"leads":[]}');
     const capturedPages = [];
     await goToPage(1);
     let totalPages = inferTotalPages();
@@ -651,7 +652,7 @@ function buildRealtorCaCaptureBookmarklet(): string {
     const leads = Array.from(byKey.values());
     const payload = {
       source: 'realtor.ca',
-      mode: 'flyr_browser_capture_auto',
+      mode: 'wolfgrid_browser_capture_auto',
       pageUrl: location.href,
       capturedAt: new Date().toISOString(),
       allPages: true,
@@ -660,17 +661,17 @@ function buildRealtorCaCaptureBookmarklet(): string {
     };
     localStorage.setItem(storageKey, JSON.stringify(payload));
     const json = JSON.stringify(payload, null, 2);
-    const notifyFlyr = () => {
+    const notifyWolfGrid = () => {
       try {
         if (window.opener && !window.opener.closed) {
-          window.opener.postMessage({ type: 'FLYR_REALTOR_CA_CAPTURE', payload }, ${JSON.stringify(flyrOrigin)});
+          window.opener.postMessage({ type: 'WOLFGRID_REALTOR_CA_CAPTURE', payload }, ${JSON.stringify(wolfgridOrigin)});
           return true;
         }
       } catch {}
       return false;
     };
     const done = () => {
-      const sent = notifyFlyr();
+      const sent = notifyWolfGrid();
       alert('WolfGrid captured ' + payload.leads.length + ' total agents across ' + capturedPages.length + ' page(s). ' + (sent ? 'WolfGrid is importing it now.' : 'Return to WolfGrid and the list will populate automatically.'));
     };
     const fallback = () => {
@@ -1435,7 +1436,7 @@ export function SalespersonPlacesLeadFinder() {
       const isRealtorCaMessage = /^https:\/\/([^/]+\.)?realtor\.ca$/i.test(event.origin);
       if (!isSameWindowMessage && !isRealtorCaMessage) return;
       const data = event.data as { type?: unknown; payload?: BrowserCapturePayload } | null;
-      if (!data || data.type !== 'FLYR_REALTOR_CA_CAPTURE') return;
+      if (!data || !['WOLFGRID_REALTOR_CA_CAPTURE', 'FLYR_REALTOR_CA_CAPTURE'].includes(String(data.type))) return;
       const payload = data.payload;
       if (!payload || !Array.isArray(payload.leads)) return;
 

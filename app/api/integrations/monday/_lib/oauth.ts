@@ -72,7 +72,7 @@ export function buildMondayIosResultUrl(result: 'success' | 'error', message?: s
     status: result,
   });
   if (message) params.set('message', message);
-  return `flyr://oauth?${params.toString()}`;
+  return `wolfgrid://oauth?${params.toString()}`;
 }
 
 export function ensureMondayOAuthConfig() {

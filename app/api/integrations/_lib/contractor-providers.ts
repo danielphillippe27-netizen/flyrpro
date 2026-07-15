@@ -51,6 +51,7 @@ type ProviderConfig = {
   apiBaseEnv: string;
   defaultApiBase: string;
   apiKeyHeader: (token: string) => Record<string, string>;
+  apiHeaders?: () => Record<string, string>;
   test: {
     method?: 'GET' | 'POST';
     path: string;
@@ -92,6 +93,9 @@ const providerConfigs: Record<ContractorProviderId, ProviderConfig> = {
     apiBaseEnv: 'JOBBER_API_BASE',
     defaultApiBase: 'https://api.getjobber.com/api/graphql',
     apiKeyHeader: bearerHeader,
+    apiHeaders: () => ({
+      'X-JOBBER-GRAPHQL-VERSION': process.env.JOBBER_API_VERSION ?? '2025-04-16',
+    }),
     test: {
       method: 'POST',
       path: '',
@@ -405,6 +409,7 @@ async function requestProviderJson(
       Accept: 'application/json',
       'Content-Type': 'application/json',
       ...config.apiKeyHeader(auth.token),
+      ...(config.apiHeaders?.() ?? {}),
       ...(init.headers ?? {}),
     },
   });
@@ -614,7 +619,17 @@ function resolveAppOrigin(origin?: string): string {
   const raw = origin || process.env.NEXT_PUBLIC_APP_URL || 'https://wolfgrid.app';
   try {
     const parsed = new URL(raw);
-    if (parsed.hostname.toLowerCase() === 'wolfgrid.app') parsed.hostname = 'wolfgrid.app';
+    const hostname = parsed.hostname.toLowerCase();
+    if (
+      hostname === 'wolfgrid.app' ||
+      hostname === 'www.wolfgrid.app' ||
+      hostname === 'flyrpro.app' ||
+      hostname === 'www.flyrpro.app' ||
+      hostname === 'flyr.software' ||
+      hostname === 'www.flyr.software'
+    ) {
+      return 'https://wolfgrid.app';
+    }
     return parsed.origin;
   } catch {
     return 'https://wolfgrid.app';

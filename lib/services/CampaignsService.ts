@@ -46,6 +46,7 @@ type CampaignAddressBaseState = {
   visited: boolean;
   scans: number;
   last_scanned_at: string | null;
+  match_source: string | null;
 };
 
 type CampaignAddressStatusRow = {
@@ -323,7 +324,7 @@ export class CampaignsService {
       const baseState = await fetchAllInPages(async (from, to) => {
         let query = this.client
           .from('campaign_addresses')
-          .select('id, building_id, building_gers_id, gers_id, source_id, visited, scans, last_scanned_at')
+          .select('id, building_id, building_gers_id, gers_id, source_id, visited, scans, last_scanned_at, match_source')
           .eq('campaign_id', campaignId);
         if (scopedAddressIds) query = query.in('id', scopedAddressIds);
         return await query
@@ -361,6 +362,7 @@ export class CampaignsService {
             visited: Boolean((row as { visited?: boolean | null }).visited),
             scans: Number((row as { scans?: number | null }).scans ?? 0),
             last_scanned_at: (row as { last_scanned_at?: string | null }).last_scanned_at ?? null,
+            match_source: (row as { match_source?: string | null }).match_source ?? null,
           },
         ])
       );

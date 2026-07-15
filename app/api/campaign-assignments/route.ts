@@ -25,6 +25,12 @@ type CampaignRow = {
   status: string | null;
 };
 
+type ProfileRow = {
+  id: string;
+  full_name: string | null;
+  email: string | null;
+};
+
 export async function GET(request: NextRequest) {
   try {
     const requestUser = await resolveUserFromRequest(request);
@@ -43,7 +49,7 @@ export async function GET(request: NextRequest) {
       .from('campaign_assignments')
       .select('id, campaign_id, workspace_id, assigned_to_user_id, assigned_by_user_id, mode, goal_homes, zone_index, status, due_at, notes, created_at, updated_at')
       .eq('workspace_id', workspaceId)
-      .in('status', ['assigned', 'in_progress'])
+      .in('status', ['assigned', 'accepted', 'in_progress'])
       .order('updated_at', { ascending: false })
       .limit(300);
 
@@ -56,7 +62,9 @@ export async function GET(request: NextRequest) {
 
     const assignments = (data ?? []) as AssignmentRow[];
     const campaignIds = Array.from(new Set(assignments.map((row) => row.campaign_id)));
+    const assigneeIds = Array.from(new Set(assignments.map((row) => row.assigned_to_user_id)));
     let campaignById = new Map<string, CampaignRow>();
+    let profileById = new Map<string, ProfileRow>();
     if (campaignIds.length > 0) {
       const { data: campaigns, error: campaignError } = await admin
         .from('campaigns')
@@ -67,11 +75,19 @@ export async function GET(request: NextRequest) {
       }
       campaignById = new Map(((campaigns ?? []) as CampaignRow[]).map((row) => [row.id, row]));
     }
+    if (assigneeIds.length > 0) {
+      const { data: profiles } = await admin
+        .from('profiles')
+        .select('id, full_name, email')
+        .in('id', assigneeIds);
+      profileById = new Map(((profiles ?? []) as ProfileRow[]).map((row) => [row.id, row]));
+    }
 
     return NextResponse.json({
       assignments: assignments.map((assignment) => ({
         ...assignment,
         campaign: campaignById.get(assignment.campaign_id) ?? null,
+        assignee: profileById.get(assignment.assigned_to_user_id) ?? null,
       })),
       role,
     });

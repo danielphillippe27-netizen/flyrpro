@@ -105,7 +105,7 @@ async function assignedAddressIds(
     .select('id, mode, assigned_to_user_id')
     .eq('campaign_id', campaignId)
     .eq('assigned_to_user_id', userId)
-    .in('status', ['assigned', 'in_progress']);
+    .in('status', ['accepted', 'in_progress']);
 
   if (assignmentError) {
     return {

@@ -8,6 +8,7 @@ import type {
   FilterSpecification,
   LineLayerSpecification,
   Map as MapboxMap,
+  ModelLayerSpecification,
 } from 'mapbox-gl';
 import mapboxgl from 'mapbox-gl';
 import { createClient } from '@/lib/supabase/client';
@@ -92,6 +93,21 @@ const POLYGON_GEOMETRY_FILTER: FilterSpecification = [
   false,
 ] as FilterSpecification;
 const POINT_GEOMETRY_FILTER: FilterSpecification = ['==', ['geometry-type'], 'Point'];
+const MANUAL_PIN_FILTER: FilterSpecification = [
+  'all',
+  POINT_GEOMETRY_FILTER,
+  ['==', ['get', 'feature_type'], 'manual_pin'],
+];
+const NON_MANUAL_POINT_FILTER: FilterSpecification = [
+  'all',
+  POINT_GEOMETRY_FILTER,
+  ['!=', ['get', 'feature_type'], 'manual_pin'],
+];
+const MANUAL_PIN_BASE_MODEL_ID = 'wolfgrid-manual-pin-base-model';
+const MANUAL_PIN_TOP_MODEL_ID = 'wolfgrid-manual-pin-top-model';
+const MANUAL_PIN_BASE_LAYER_ID = 'map-buildings-manual-pin-base';
+const MANUAL_PIN_TOP_LAYER_ID = 'map-buildings-manual-pin-top';
+const MANUAL_PIN_HIT_LAYER_ID = 'map-buildings-manual-pin-hit-target';
 const SELECTED_ASSIGNMENT_FILTER: FilterSpecification = ['==', ['get', 'assignment_selected'], true];
 const ASSIGNMENT_SELECTED_COLOR = '#050505';
 const ASSIGNMENT_SELECTED_STROKE_COLOR = '#ffffff';
@@ -1013,6 +1029,9 @@ export function MapBuildingsLayer({
       circleLeadGlowLayerId,
       circleLayerId,
       selectedCircleLayerId,
+      MANUAL_PIN_HIT_LAYER_ID,
+      MANUAL_PIN_BASE_LAYER_ID,
+      MANUAL_PIN_TOP_LAYER_ID,
     ]) {
       try {
         if (map?.getLayer(id)) {
@@ -1030,6 +1049,9 @@ export function MapBuildingsLayer({
   const cleanupRenderedLayers = useCallback(() => {
     if (!map) return;
     safeRemoveLayer(map, addressLabelLayerId);
+    safeRemoveLayer(map, MANUAL_PIN_TOP_LAYER_ID);
+    safeRemoveLayer(map, MANUAL_PIN_BASE_LAYER_ID);
+    safeRemoveLayer(map, MANUAL_PIN_HIT_LAYER_ID);
     safeRemoveLayer(map, selectedCircleLayerId);
     safeRemoveLayer(map, circleLayerId);
     safeRemoveLayer(map, circleLeadGlowLayerId);
@@ -1268,8 +1290,19 @@ export function MapBuildingsLayer({
         }
 
         // Deep-clone geometry ONCE here so we never mutate the source data.
+        const manualPinKind = String(
+          props.feature_type ??
+            getStringRecordValue(propsRecord, 'render_kind') ??
+            getStringRecordValue(propsRecord, 'match_method') ??
+            ''
+        )
+          .trim()
+          .toLowerCase();
+        const isManualPin =
+          geom?.type === 'Point' &&
+          (manualPinKind === 'manual_pin' || manualPinKind === 'field_manual_pin');
         const generatedHomeFootprint =
-          geom?.type === 'Point'
+          geom?.type === 'Point' && !isManualPin
             ? pointToGeneratedHomeFootprint(geom.coordinates, propsRecord)
             : null;
         const scaledGeom =
@@ -1324,7 +1357,7 @@ export function MapBuildingsLayer({
 
         return [{
           ...f,
-          geometry: (scaledGeom ?? geom) as GeoJSON.Polygon,
+          geometry: (scaledGeom ?? geom) as GeoJSON.Geometry,
           properties: {
             ...props,
             address_count: Math.max(existingAddressCount, inferredAddresses.length),
@@ -1982,6 +2015,73 @@ export function MapBuildingsLayer({
           }
 
           safeRemoveLayer(map, outlineLayerId);
+
+          // Give the 3D model a generous but invisible screen-space hit area.
+          // This keeps manual pins as easy to click as building footprints without
+          // drawing a circle beneath the pin.
+          if (!map.getLayer(MANUAL_PIN_HIT_LAYER_ID)) {
+            map.addLayer({
+              id: MANUAL_PIN_HIT_LAYER_ID,
+              type: 'circle',
+              source: sourceId,
+              minzoom: CAMPAIGN_BUILDING_MIN_ZOOM,
+              filter: getScopedGeometryFilter(MANUAL_PIN_FILTER, filterExpr),
+              paint: {
+                'circle-radius': 18,
+                'circle-color': '#000000',
+                'circle-opacity': 0,
+                'circle-stroke-width': 0,
+              },
+            });
+          }
+
+          try {
+            if (!map.hasModel(MANUAL_PIN_BASE_MODEL_ID)) {
+              map.addModel(MANUAL_PIN_BASE_MODEL_ID, '/map-assets/PushPinBase.glb');
+            }
+            if (!map.hasModel(MANUAL_PIN_TOP_MODEL_ID)) {
+              map.addModel(MANUAL_PIN_TOP_MODEL_ID, '/map-assets/PushPinTop.glb');
+            }
+
+            const pinPaint: NonNullable<ModelLayerSpecification['paint']> = {
+              'model-type': 'common-3d',
+              'model-scale': [2, 2, 2],
+              'model-rotation': [0, 0, 0],
+              'model-translation': [0, 0, 0],
+              'model-opacity': 1,
+              'model-emissive-strength': 0.22,
+              'model-cast-shadows': false,
+              'model-receive-shadows': false,
+            };
+            if (!map.getLayer(MANUAL_PIN_BASE_LAYER_ID)) {
+              map.addLayer({
+                id: MANUAL_PIN_BASE_LAYER_ID,
+                type: 'model',
+                source: sourceId,
+                minzoom: CAMPAIGN_BUILDING_MIN_ZOOM,
+                filter: getScopedGeometryFilter(MANUAL_PIN_FILTER, filterExpr),
+                layout: { 'model-id': MANUAL_PIN_BASE_MODEL_ID },
+                paint: pinPaint,
+              });
+            }
+            if (!map.getLayer(MANUAL_PIN_TOP_LAYER_ID)) {
+              map.addLayer({
+                id: MANUAL_PIN_TOP_LAYER_ID,
+                type: 'model',
+                source: sourceId,
+                minzoom: CAMPAIGN_BUILDING_MIN_ZOOM,
+                filter: getScopedGeometryFilter(MANUAL_PIN_FILTER, filterExpr),
+                layout: { 'model-id': MANUAL_PIN_TOP_MODEL_ID },
+                paint: {
+                  ...pinPaint,
+                  'model-color': getFootprintFillColor(),
+                  'model-color-mix-intensity': 1,
+                },
+              });
+            }
+          } catch (error) {
+            console.warn('[MapBuildingsLayer] Unable to attach 3D manual pin models:', error);
+          }
           
           // Add circle layer for Point geometries (addresses without building polygons)
           if (!map.getLayer(circleLeadGlowLayerId)) {
@@ -1990,7 +2090,7 @@ export function MapBuildingsLayer({
               type: 'circle' as const,
               source: sourceId,
               minzoom: CAMPAIGN_BUILDING_MIN_ZOOM,
-              filter: getScopedGeometryFilter(POINT_GEOMETRY_FILTER, filterExpr),
+              filter: getScopedGeometryFilter(NON_MANUAL_POINT_FILTER, filterExpr),
               paint: {
                 'circle-radius': 14,
                 'circle-color': MAP_STATUS_CONFIG.LEADS.color,
@@ -2006,7 +2106,7 @@ export function MapBuildingsLayer({
               type: 'circle',
               source: sourceId,
               minzoom: CAMPAIGN_BUILDING_MIN_ZOOM,
-              filter: getScopedGeometryFilter(POINT_GEOMETRY_FILTER, filterExpr),
+              filter: getScopedGeometryFilter(NON_MANUAL_POINT_FILTER, filterExpr),
               paint: {
                 'circle-radius': 5,
                 'circle-color': getFootprintFillColor(),
@@ -2341,6 +2441,9 @@ export function MapBuildingsLayer({
             if (!map.isStyleLoaded()) return layers;
             if (map.getLayer(layerId)) layers.push(layerId);
             if (map.getLayer(circleLayerId)) layers.push(circleLayerId);
+            if (map.getLayer(MANUAL_PIN_HIT_LAYER_ID)) layers.push(MANUAL_PIN_HIT_LAYER_ID);
+            if (map.getLayer(MANUAL_PIN_TOP_LAYER_ID)) layers.push(MANUAL_PIN_TOP_LAYER_ID);
+            if (map.getLayer(MANUAL_PIN_BASE_LAYER_ID)) layers.push(MANUAL_PIN_BASE_LAYER_ID);
           } catch {
             return [];
           }
@@ -2407,6 +2510,80 @@ export function MapBuildingsLayer({
           map.setPaintProperty(layerId, 'fill-extrusion-vertical-gradient', getFootprintVerticalGradient());
           map.setPaintProperty(layerId, 'fill-extrusion-emissive-strength', getFootprintEmissiveStrength());
           map.setFilter(layerId, getScopedGeometryFilter(POLYGON_GEOMETRY_FILTER, filterExpr));
+
+          // The building source/layer often exists before the canonical bundle
+          // finishes loading. Ensure manual-pin layers in this update path too;
+          // otherwise Point pins are filtered out of the generic circle layer
+          // and never receive their dedicated renderer.
+          const manualPinFilter = getScopedGeometryFilter(MANUAL_PIN_FILTER, filterExpr);
+          if (!map.getLayer(MANUAL_PIN_HIT_LAYER_ID)) {
+            map.addLayer({
+              id: MANUAL_PIN_HIT_LAYER_ID,
+              type: 'circle',
+              source: sourceId,
+              minzoom: CAMPAIGN_BUILDING_MIN_ZOOM,
+              filter: manualPinFilter,
+              paint: {
+                'circle-radius': 18,
+                'circle-color': '#000000',
+                'circle-opacity': 0,
+                'circle-stroke-width': 0,
+              },
+            });
+          } else {
+            map.setFilter(MANUAL_PIN_HIT_LAYER_ID, manualPinFilter);
+          }
+
+          try {
+            if (!map.hasModel(MANUAL_PIN_BASE_MODEL_ID)) {
+              map.addModel(MANUAL_PIN_BASE_MODEL_ID, '/map-assets/PushPinBase.glb');
+            }
+            if (!map.hasModel(MANUAL_PIN_TOP_MODEL_ID)) {
+              map.addModel(MANUAL_PIN_TOP_MODEL_ID, '/map-assets/PushPinTop.glb');
+            }
+            const pinPaint: NonNullable<ModelLayerSpecification['paint']> = {
+              'model-type': 'common-3d',
+              'model-scale': [2, 2, 2],
+              'model-rotation': [0, 0, 0],
+              'model-translation': [0, 0, 0],
+              'model-opacity': 1,
+              'model-emissive-strength': 0.22,
+              'model-cast-shadows': false,
+              'model-receive-shadows': false,
+            };
+            if (!map.getLayer(MANUAL_PIN_BASE_LAYER_ID)) {
+              map.addLayer({
+                id: MANUAL_PIN_BASE_LAYER_ID,
+                type: 'model',
+                source: sourceId,
+                minzoom: CAMPAIGN_BUILDING_MIN_ZOOM,
+                filter: manualPinFilter,
+                layout: { 'model-id': MANUAL_PIN_BASE_MODEL_ID },
+                paint: pinPaint,
+              });
+            } else {
+              map.setFilter(MANUAL_PIN_BASE_LAYER_ID, manualPinFilter);
+            }
+            if (!map.getLayer(MANUAL_PIN_TOP_LAYER_ID)) {
+              map.addLayer({
+                id: MANUAL_PIN_TOP_LAYER_ID,
+                type: 'model',
+                source: sourceId,
+                minzoom: CAMPAIGN_BUILDING_MIN_ZOOM,
+                filter: manualPinFilter,
+                layout: { 'model-id': MANUAL_PIN_TOP_MODEL_ID },
+                paint: {
+                  ...pinPaint,
+                  'model-color': getFootprintFillColor(),
+                  'model-color-mix-intensity': 1,
+                },
+              });
+            } else {
+              map.setFilter(MANUAL_PIN_TOP_LAYER_ID, manualPinFilter);
+            }
+          } catch (error) {
+            console.warn('[MapBuildingsLayer] Unable to attach 3D manual pin models:', error);
+          }
 
           const selectedPolygonFilter = getScopedGeometryFilter(
             POLYGON_GEOMETRY_FILTER,
@@ -2523,6 +2700,9 @@ export function MapBuildingsLayer({
               if (!map.isStyleLoaded()) return layers;
               if (map.getLayer(layerId)) layers.push(layerId);
               if (map.getLayer(circleLayerId)) layers.push(circleLayerId);
+              if (map.getLayer(MANUAL_PIN_HIT_LAYER_ID)) layers.push(MANUAL_PIN_HIT_LAYER_ID);
+              if (map.getLayer(MANUAL_PIN_TOP_LAYER_ID)) layers.push(MANUAL_PIN_TOP_LAYER_ID);
+              if (map.getLayer(MANUAL_PIN_BASE_LAYER_ID)) layers.push(MANUAL_PIN_BASE_LAYER_ID);
             } catch {
               return [];
             }
@@ -2643,13 +2823,13 @@ export function MapBuildingsLayer({
       safeRemoveLayer(map, outlineLayerId);
       if (map.getLayer(circleLeadGlowLayerId)) {
         map.setPaintProperty(circleLeadGlowLayerId, 'circle-opacity', getLeadGlowOpacityExpression());
-        map.setFilter(circleLeadGlowLayerId, getScopedGeometryFilter(POINT_GEOMETRY_FILTER, filterExpr));
+        map.setFilter(circleLeadGlowLayerId, getScopedGeometryFilter(NON_MANUAL_POINT_FILTER, filterExpr));
       }
       if (map.getLayer(circleLayerId)) {
         map.setPaintProperty(circleLayerId, 'circle-color', colorExpr);
         map.setPaintProperty(circleLayerId, 'circle-opacity', getCircleOpacity());
         map.setPaintProperty(circleLayerId, 'circle-stroke-color', footprintStatusColors ? '#ffffff' : NEUTRAL_OUTLINE_COLOR);
-        map.setFilter(circleLayerId, getScopedGeometryFilter(POINT_GEOMETRY_FILTER, filterExpr));
+        map.setFilter(circleLayerId, getScopedGeometryFilter(NON_MANUAL_POINT_FILTER, filterExpr));
       }
       if (map.getLayer(selectedCircleLayerId)) {
         map.setFilter(
@@ -2682,7 +2862,7 @@ export function MapBuildingsLayer({
           );
         }
         if (map.getLayer(circleLayerId)) {
-          map.setFilter(circleLayerId, getScopedGeometryFilter(POINT_GEOMETRY_FILTER, filterExpr));
+          map.setFilter(circleLayerId, getScopedGeometryFilter(NON_MANUAL_POINT_FILTER, filterExpr));
         }
         if (map.getLayer(selectedCircleLayerId)) {
           map.setFilter(

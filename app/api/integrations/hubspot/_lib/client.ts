@@ -274,10 +274,8 @@ export class HubSpotAPIClient {
         body: JSON.stringify({
           properties: compactRecord({
             hs_appointment_name: appointmentName,
-            hs_timestamp: startDateTime,
             hs_appointment_start: startDateTime,
             hs_appointment_end: endDateTime,
-            hs_appointment_status: 'SCHEDULED',
           }),
           associations: [buildHubSpotAssociation(contactId, HUBSPOT_APPOINTMENT_TO_CONTACT_ASSOCIATION_TYPE_ID)],
         }),

@@ -26,7 +26,7 @@ export default function DownloadPage() {
 
           <div className="mt-10 flex flex-wrap items-center justify-center gap-4">
             <a
-              href="https://apps.apple.com/ca/app/flyr/id6755614702"
+              href="https://apps.apple.com/ca/app/wolfgrid/id6755614702"
               target="_blank"
               rel="noreferrer"
               className="inline-flex h-12 items-center rounded-xl bg-red-600 px-6 text-base font-semibold text-white shadow-sm transition hover:bg-red-500"

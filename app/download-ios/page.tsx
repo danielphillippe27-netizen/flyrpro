@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { ExternalLink } from 'lucide-react';
 
 const IOS_APP_STORE_URL =
-  'https://apps.apple.com/ca/app/flyr/id6755614702';
+  'https://apps.apple.com/ca/app/wolfgrid/id6755614702';
 
 type DownloadStage = 'pre-onboarding' | 'post-onboarding';
 

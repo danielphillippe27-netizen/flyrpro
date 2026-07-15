@@ -1,4 +1,4 @@
-# FLYR PRO - Direct Mail Campaign Management
+# WolfGrid Web
 
 A Next.js 15 application for managing direct mail campaigns with QR code tracking, built with Supabase and Stripe.
 
@@ -49,7 +49,7 @@ Required environment variables:
 - `STRIPE_SECRET_KEY`: Your Stripe secret key
 - `STRIPE_WEBHOOK_SECRET`: Your Stripe webhook signing secret
 - `APP_BASE_URL`: Your app URL (http://localhost:3000 for development)
-- `NEXT_PUBLIC_EDITOR_URL`: URL of your deployed Canva clone editor (e.g., `https://flyr-editor-yourname.vercel.app`)
+- `NEXT_PUBLIC_EDITOR_URL`: URL of your deployed Canva clone editor (e.g., `https://wolfgrid-editor-yourname.vercel.app`)
 
 ### HubSpot OAuth
 
@@ -70,7 +70,7 @@ The default HubSpot scope set includes:
 - `crm.schemas.appointments.read`
 - `crm.schemas.appointments.write`
 
-FLYR creates HubSpot appointments with the `appointments` CRM object, then adds the appointment details as a contact timeline note. This avoids relying on older non-searchable meeting scope names in the OAuth install URL.
+WolfGrid creates HubSpot appointments with the `appointments` CRM object, then adds the appointment details as a contact timeline note. This avoids relying on older non-searchable meeting scope names in the OAuth install URL.
 
 If HubSpot shows a scope-mismatch error during connect, make sure the scopes enabled in the HubSpot developer app match `HUBSPOT_OAUTH_SCOPE`. If you already set `HUBSPOT_OAUTH_SCOPE` in production, update that env var directly because the code default is only used when the env var is unset.
 
@@ -158,7 +158,7 @@ Open [http://localhost:3000](http://localhost:3000) to view the app.
 ## File Structure
 
 ```
-FLYR-PRO/
+Wolfgrid-WEB/
 ├── app/
 │   ├── (auth)/
 │   │   ├── login/
@@ -310,4 +310,4 @@ MIT
 ## Support
 
 For issues or questions, please open an issue on GitHub.
-# FLYR PRO - Sun Oct 12 00:42:14 EDT 2025
+# WolfGrid Web - Sun Oct 12 00:42:14 EDT 2025

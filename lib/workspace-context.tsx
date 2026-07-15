@@ -13,9 +13,13 @@ import {
 import { getClientAsync } from '@/lib/supabase/client';
 import type { DashboardAccessLevel } from '@/app/api/_utils/workspace';
 
-const CURRENT_WORKSPACE_STORAGE_KEY = 'flyr.currentWorkspaceId';
+const CURRENT_WORKSPACE_STORAGE_KEY = 'wolfgrid.currentWorkspaceId';
+const LEGACY_CURRENT_WORKSPACE_STORAGE_KEY = 'flyr.currentWorkspaceId';
 function workspaceStorageKeyForUser(userId: string): string {
   return `${CURRENT_WORKSPACE_STORAGE_KEY}:${userId}`;
+}
+function legacyWorkspaceStorageKeyForUser(userId: string): string {
+  return `${LEGACY_CURRENT_WORKSPACE_STORAGE_KEY}:${userId}`;
 }
 
 export type WorkspaceRole = 'owner' | 'admin' | 'member';
@@ -240,7 +244,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
         if (typeof window !== 'undefined' && userId) {
           window.localStorage.setItem(workspaceStorageKeyForUser(userId), workspaceId);
+          window.localStorage.removeItem(legacyWorkspaceStorageKeyForUser(userId));
           window.localStorage.removeItem(CURRENT_WORKSPACE_STORAGE_KEY);
+          window.localStorage.removeItem(LEGACY_CURRENT_WORKSPACE_STORAGE_KEY);
         }
 
         return true;
@@ -361,10 +367,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
       const validIds = new Set(sortedWorkspaceRows.map((ws) => ws.id));
       const namespacedKey = workspaceStorageKeyForUser(user.id);
+      const legacyNamespacedKey = legacyWorkspaceStorageKeyForUser(user.id);
       const storedWorkspaceId =
         typeof window !== 'undefined'
           ? window.localStorage.getItem(namespacedKey) ||
-            window.localStorage.getItem(CURRENT_WORKSPACE_STORAGE_KEY)
+            window.localStorage.getItem(legacyNamespacedKey) ||
+            window.localStorage.getItem(CURRENT_WORKSPACE_STORAGE_KEY) ||
+            window.localStorage.getItem(LEGACY_CURRENT_WORKSPACE_STORAGE_KEY)
           : null;
       const nextWorkspaceId =
         (storedWorkspaceId && validIds.has(storedWorkspaceId) ? storedWorkspaceId : null) ||
@@ -375,9 +384,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       if (typeof window !== 'undefined') {
         if (nextWorkspaceId) {
           window.localStorage.setItem(namespacedKey, nextWorkspaceId);
+          window.localStorage.removeItem(legacyNamespacedKey);
           window.localStorage.removeItem(CURRENT_WORKSPACE_STORAGE_KEY);
+          window.localStorage.removeItem(LEGACY_CURRENT_WORKSPACE_STORAGE_KEY);
         } else {
           window.localStorage.removeItem(namespacedKey);
+          window.localStorage.removeItem(legacyNamespacedKey);
         }
       }
       applyAccessState(await accessStatePromise);
@@ -444,6 +456,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setCurrentWorkspaceIdState(workspaceId);
     if (typeof window !== 'undefined' && currentUserId) {
       window.localStorage.setItem(workspaceStorageKeyForUser(currentUserId), workspaceId);
+      window.localStorage.removeItem(legacyWorkspaceStorageKeyForUser(currentUserId));
     }
 
     void fetch('/api/profile', {

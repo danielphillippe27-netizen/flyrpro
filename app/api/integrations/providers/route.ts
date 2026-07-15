@@ -79,6 +79,11 @@ export async function GET(request: NextRequest) {
     getIntegrationsForIndustry(industry).map((provider) => ({
       id: provider.id,
       displayName: provider.displayName,
+      description: provider.description,
+      authModes: provider.authModes,
+      preferredAuthMode: provider.preferredAuthMode,
+      tokenLabel: provider.tokenLabel ?? null,
+      tokenPlaceholder: provider.tokenPlaceholder ?? null,
       connected: connected.has(provider.id),
     }))
   );

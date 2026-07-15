@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/server';
 import { resolveWorkspaceIdForUser, type MinimalSupabaseClient } from '@/app/api/_utils/workspace';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { FUB_CONNECTION_PROVIDERS } from '../_lib/provider';
+import { getFubAuthForUserWorkspace } from '../_lib/auth';
 
 export async function GET(request: NextRequest) {
   try {
@@ -44,6 +45,23 @@ export async function GET(request: NextRequest) {
         status: 'disconnected',
       });
     }
+
+    // The workspace record alone only says that FUB was connected at some point.
+    // OAuth tokens are user-scoped, so make sure the currently signed-in member
+    // actually has credentials before reporting the CRM as ready to receive leads.
+    const auth = await getFubAuthForUserWorkspace(supabase, userId, targetWorkspaceId);
+    if (!auth) {
+      return NextResponse.json({
+        connected: false,
+        status: 'disconnected',
+        createdAt: connection.created_at,
+        updatedAt: connection.updated_at,
+        lastTestedAt: connection.last_tested_at,
+        lastPushAt: connection.last_push_at,
+        lastError: 'Reconnect Follow Up Boss for this WolfGrid account.',
+      });
+    }
+
     return NextResponse.json({
       connected: connection.status === 'connected',
       status: connection.status,

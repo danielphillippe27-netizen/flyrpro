@@ -7,6 +7,7 @@ import { getClientAsync } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { resolvePublicAppOrigin } from '@/lib/auth/public-origin';
 
 type ResetState = 'checking' | 'ready' | 'invalid';
 
@@ -51,7 +52,7 @@ export default function ResetPasswordPage() {
           verifyUrl.searchParams.set('type', 'recovery');
           verifyUrl.searchParams.set(
             'redirect_to',
-            new URL('/reset-password', window.location.origin).toString()
+            new URL('/reset-password', resolvePublicAppOrigin(window.location.origin)).toString()
           );
 
           window.location.replace(verifyUrl.toString());
@@ -191,7 +192,7 @@ export default function ResetPasswordPage() {
         <div className="text-center space-y-2">
           <div className="flex justify-center">
             <Image
-              src="/brand/wolfgrid-logo-white.svg"
+              src="/brand/wolfgrid-auth-dark.svg"
               alt="WolfGrid"
               width={480}
               height={128}

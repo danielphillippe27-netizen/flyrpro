@@ -179,7 +179,7 @@ function buildingTimingHeaders(startedAt: number, source: string) {
   return {
     'Cache-Control': 'private, max-age=30, stale-while-revalidate=60',
     'Server-Timing': `source;desc="${source}", total;dur=${total}`,
-    'X-FLYR-Server-Timing': `source;desc="${source}", total;dur=${total}`,
+    'X-WolfGrid-Server-Timing': `source;desc="${source}", total;dur=${total}`,
   };
 }
 

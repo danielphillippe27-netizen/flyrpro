@@ -51,7 +51,7 @@ export async function ensureCampaignAccess(
     .select('id')
     .eq('campaign_id', campaignId)
     .eq('assigned_to_user_id', userId)
-    .neq('status', 'cancelled')
+    .in('status', ['accepted', 'in_progress'])
     .maybeSingle();
 
   if (assignment) {

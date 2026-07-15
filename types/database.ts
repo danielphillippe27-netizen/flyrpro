@@ -300,6 +300,7 @@ export interface CampaignAddress {
   source_id?: string | null;
   gers_id?: string | null; // Overture GERS ID or other source identifier - UUID v4 format (128-bit)
   building_id?: string | null;
+  match_source?: string | null;
   seq?: number; // Sequence number for ordering
   visited?: boolean;
   coordinate?: {

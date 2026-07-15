@@ -287,3 +287,52 @@
 .animate-hero-word-in {
   animation: hero-word-in 0.5s ease-out forwards;
 }
+
+/* Compact, unified integration directory. Connection details stay available in
+   the existing management dialogs instead of making every card oversized. */
+.integrations-page [data-slot="card"] {
+  gap: 1rem;
+  min-width: 0;
+  padding-block: 1.125rem;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.integrations-page [data-slot="card"]:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in oklab, var(--primary) 28%, var(--border));
+  box-shadow: 0 12px 30px -22px color-mix(in oklab, var(--foreground) 35%, transparent);
+}
+
+.integrations-page [data-slot="card-header"],
+.integrations-page [data-slot="card-content"] {
+  padding-inline: 1.125rem;
+}
+
+.integrations-page [data-slot="card-header"] > div {
+  align-items: flex-start;
+}
+
+.integrations-page [data-slot="card-header"] [data-slot="card-description"] {
+  margin-top: 0.2rem;
+  line-height: 1.35rem;
+}
+
+.integrations-page [data-slot="card-content"] {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+.integrations-page [data-slot="card-content"] > div {
+  flex: 1;
+}
+
+.integrations-page [data-slot="card-content"] > .space-y-4 > .rounded-lg.border,
+.integrations-page [data-slot="card-content"] > .space-y-5 > .rounded-lg.border,
+.integrations-page [data-slot="card-content"] > .space-y-6 > .rounded-lg.border {
+  display: none;
+}
+
+.integrations-page [data-slot="card-content"] button {
+  min-height: 2.5rem;
+}

@@ -167,7 +167,7 @@ export async function pushLeadToConnectedCrms(
   const hasBoldTrail = connectedProviders.has('boldtrail');
   const hasHubSpot = connectedProviders.has('hubspot');
   const hasZapier = connectedProviders.has('zapier');
-  const hasMonday = !!mondayRow?.access_token && !!mondayRow?.selected_board_id;
+  const hasMonday = false;
   const contractorProviders = CONTRACTOR_PROVIDER_IDS.filter((p) =>
     connectedProviders.has(p)
   ) as ContractorProviderId[];

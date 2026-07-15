@@ -1,11 +1,11 @@
-const flyrUrlInput = document.getElementById('flyrUrl');
+const wolfgridUrlInput = document.getElementById('wolfgridUrl');
 const scrapeButton = document.getElementById('scrape');
 const statusEl = document.getElementById('status');
-const DEFAULT_FLYR_URL = 'https://www.flyrpro.app/scraper';
+const DEFAULT_WOLFGRID_URL = 'https://wolfgrid.app/scraper';
 
-function normalizeFlyrUrl(value) {
+function normalizeWolfGridUrl(value) {
   const candidate = String(value || '').trim();
-  if (!candidate) return DEFAULT_FLYR_URL;
+  if (!candidate) return DEFAULT_WOLFGRID_URL;
 
   try {
     const url = new URL(candidate);
@@ -13,51 +13,54 @@ function normalizeFlyrUrl(value) {
       url.hostname === 'localhost' ||
       url.hostname === '127.0.0.1' ||
       url.hostname === 'flyr.software' ||
-      url.hostname === 'www.flyr.software'
+      url.hostname === 'www.flyr.software' ||
+      url.hostname === 'flyrpro.app' ||
+      url.hostname === 'www.flyrpro.app'
     ) {
-      return DEFAULT_FLYR_URL;
+      return DEFAULT_WOLFGRID_URL;
     }
     return url.toString();
   } catch {
-    return DEFAULT_FLYR_URL;
+    return DEFAULT_WOLFGRID_URL;
   }
 }
 
 async function loadSettings() {
   const settings = await chrome.storage.sync.get({
-    flyrUrl: DEFAULT_FLYR_URL,
+    wolfgridUrl: DEFAULT_WOLFGRID_URL,
+    flyrUrl: null,
   });
-  const flyrUrl = normalizeFlyrUrl(settings.flyrUrl);
-  flyrUrlInput.value = flyrUrl;
-  if (flyrUrl !== settings.flyrUrl) {
-    await chrome.storage.sync.set({ flyrUrl });
+  const wolfgridUrl = normalizeWolfGridUrl(settings.wolfgridUrl || settings.flyrUrl);
+  wolfgridUrlInput.value = wolfgridUrl;
+  if (wolfgridUrl !== settings.wolfgridUrl) {
+    await chrome.storage.sync.set({ wolfgridUrl });
   }
 }
 
 async function saveSettings() {
-  const flyrUrl = normalizeFlyrUrl(flyrUrlInput.value);
-  flyrUrlInput.value = flyrUrl;
+  const wolfgridUrl = normalizeWolfGridUrl(wolfgridUrlInput.value);
+  wolfgridUrlInput.value = wolfgridUrl;
   await chrome.storage.sync.set({
-    flyrUrl,
+    wolfgridUrl,
   });
-  return flyrUrl;
+  return wolfgridUrl;
 }
 
 scrapeButton.addEventListener('click', async () => {
   scrapeButton.disabled = true;
   statusEl.textContent = 'Scraping all REALTOR.ca pages...';
-  const flyrUrl = await saveSettings();
+  const wolfgridUrl = await saveSettings();
 
   try {
     const response = await chrome.runtime.sendMessage({
-      type: 'FLYR_START_REALTOR_SCRAPE',
+      type: 'WOLFGRID_START_REALTOR_SCRAPE',
       options: {
-        flyrUrl,
+        wolfgridUrl,
       },
     });
 
     if (!response?.ok) throw new Error(response?.error || 'Scrape failed.');
-    statusEl.textContent = `Sent ${response.count} leads from ${response.pages} page(s) to FLYR.`;
+    statusEl.textContent = `Sent ${response.count} leads from ${response.pages} page(s) to WolfGrid.`;
   } catch (error) {
     statusEl.textContent = error instanceof Error ? error.message : 'Scrape failed.';
   } finally {

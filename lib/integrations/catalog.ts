@@ -2,13 +2,11 @@ export type IntegrationProviderId =
   | 'followupboss'
   | 'boldtrail'
   | 'hubspot'
-  | 'monday'
   | 'zapier'
   | 'jobnimbus'
   | 'companycam'
   | 'jobber'
   | 'acculynx'
-  | 'sumoquote'
   | 'rooflink';
 
 export type IntegrationAuthMode = 'oauth' | 'api_key' | 'webhook';
@@ -66,15 +64,6 @@ export const REAL_ESTATE_INTEGRATIONS: IntegrationCatalogEntry[] = [
     tokenPlaceholder: 'Paste your BoldTrail API token',
     accent: 'emerald',
   },
-  {
-    id: 'monday',
-    displayName: 'Monday.com',
-    description: 'Sync WolfGrid leads into a selected monday.com board.',
-    industryGroup: 'real_estate',
-    authModes: ['oauth'],
-    preferredAuthMode: 'oauth',
-    accent: 'yellow',
-  },
 ];
 
 export const CONTRACTOR_INTEGRATIONS: IntegrationCatalogEntry[] = [
@@ -121,17 +110,6 @@ export const CONTRACTOR_INTEGRATIONS: IntegrationCatalogEntry[] = [
     accent: 'violet',
   },
   {
-    id: 'sumoquote',
-    displayName: 'SumoQuote',
-    description: 'Create SumoQuote projects from WolfGrid lead opportunities.',
-    industryGroup: 'contractor',
-    authModes: ['oauth', 'api_key'],
-    preferredAuthMode: 'oauth',
-    tokenLabel: 'API Key',
-    tokenPlaceholder: 'Paste your SumoQuote API key',
-    accent: 'rose',
-  },
-  {
     id: 'rooflink',
     displayName: 'RoofLink',
     description: 'Create RoofLink jobs from WolfGrid lead records.',
@@ -154,7 +132,6 @@ export const CONTRACTOR_PROVIDER_IDS = [
   'companycam',
   'jobber',
   'acculynx',
-  'sumoquote',
   'rooflink',
 ] as const satisfies readonly IntegrationProviderId[];
 
@@ -175,12 +152,10 @@ export function normalizeIntegrationProvider(value: string | null | undefined): 
   if (!provider) return null;
   if (provider === 'fub' || provider === 'followupboss') return 'followupboss';
   if (provider === 'boldtrail' || provider === 'kvcore') return 'boldtrail';
-  if (provider === 'monday' || provider === 'mondaycom') return 'monday';
   if (provider === 'companycam' || provider === 'companycamera') return 'companycam';
   if (provider === 'jobnimbus') return 'jobnimbus';
   if (provider === 'jobber') return 'jobber';
   if (provider === 'acculynx') return 'acculynx';
-  if (provider === 'sumoquote') return 'sumoquote';
   if (provider === 'rooflink') return 'rooflink';
   if (provider === 'hubspot') return 'hubspot';
   if (provider === 'zapier') return 'zapier';

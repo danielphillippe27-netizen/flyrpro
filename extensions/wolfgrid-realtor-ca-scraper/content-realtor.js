@@ -285,7 +285,7 @@ async function scrapeRealtorCa() {
   const locationParts = readLocationFromUrl();
   return {
     source: 'realtor.ca',
-    mode: 'flyr_chrome_extension',
+    mode: 'wolfgrid_chrome_extension',
     city: locationParts.city,
     provinceCode: locationParts.provinceCode,
     pageUrl: location.href,
@@ -297,11 +297,11 @@ async function scrapeRealtorCa() {
   };
 }
 
-if (!globalThis.__flyrRealtorScraperInstalled) {
-  globalThis.__flyrRealtorScraperInstalled = true;
+if (!globalThis.__wolfGridRealtorScraperInstalled) {
+  globalThis.__wolfGridRealtorScraperInstalled = true;
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message?.type !== 'FLYR_SCRAPE_REALTOR_CA') return false;
+    if (!['WOLFGRID_SCRAPE_REALTOR_CA', 'FLYR_SCRAPE_REALTOR_CA'].includes(message?.type)) return false;
 
     scrapeRealtorCa(message.options)
       .then((payload) => sendResponse({ ok: true, payload }))

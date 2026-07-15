@@ -3,6 +3,15 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ALL_INTEGRATIONS, CONTRACTOR_PROVIDER_IDS } from '@/lib/integrations/catalog';
 import {
+  buildIosResultUrl,
+  getFubOAuthRedirectUri,
+} from '@/app/api/integrations/followupboss/_lib/oauth';
+import {
+  buildHubSpotIosResultUrl,
+  getHubSpotOAuthRedirectUri,
+} from '@/app/api/integrations/hubspot/_lib/oauth';
+import {
+  getContractorOAuthRedirectUri,
   pushContractorLead,
   testContractorConnection,
   type ContractorProviderId,
@@ -10,13 +19,6 @@ import {
 import { BoldTrailAPIClient, BoldTrailTokenValidator } from '@/app/api/integrations/boldtrail/_lib/client';
 import { HubSpotAPIClient, HubSpotTokenValidator } from '@/app/api/integrations/hubspot/_lib/client';
 import { ZapierWebhookClient, validateZapierWebhookUrl } from '@/app/api/integrations/zapier/_lib/client';
-import {
-  buildMondayColumnValues,
-  createMondayItem,
-  fetchMondayBoards,
-  resolveMondayColumnMapping,
-  validateMondayBoardSelection,
-} from '@/app/api/integrations/monday/_lib/client';
 
 type TestResult = {
   provider: string;
@@ -42,7 +44,7 @@ const sampleLead = {
   phone: '(555) 123-4567',
   address: '123 Test Street',
   notes: 'CRM smoke test',
-  source: 'FLYR CRM Smoke Test',
+  source: 'WolfGrid CRM Smoke Test',
   campaignId: 'campaign-smoke',
   createdAt: new Date('2026-01-01T12:00:00.000Z').toISOString(),
 };
@@ -161,57 +163,6 @@ async function testHubSpot() {
   assert(validateCalled && createCalled, 'HubSpot validation/create paths did not both run');
 }
 
-async function testMonday() {
-  let boardFetchCalled = false;
-  let boardValidationCalled = false;
-  let createCalled = false;
-
-  setFetch((url, init) => {
-    assert(url === 'https://api.monday.com/v2', `Unexpected Monday URL ${url}`);
-    assert(init?.method === 'POST', 'Monday should use POST GraphQL requests');
-    const body = JSON.parse(String(init?.body ?? '{}')) as { query?: string };
-    if (body.query?.includes('boards(limit: 100)')) {
-      boardFetchCalled = true;
-      return response({
-        data: {
-          boards: [
-            {
-              id: 'board-1',
-              name: 'Leads',
-              state: 'active',
-              columns: [
-                { id: 'phone', title: 'Phone', type: 'phone' },
-                { id: 'email', title: 'Email', type: 'email' },
-                { id: 'address', title: 'Address', type: 'text' },
-                { id: 'notes', title: 'Notes', type: 'long_text' },
-              ],
-            },
-          ],
-        },
-      });
-    }
-    if (body.query?.includes('items_page(limit: 1)')) {
-      boardValidationCalled = true;
-      return response({ data: { boards: [{ items_page: { items: [{ id: 'item-0' }] } }] } });
-    }
-    if (body.query?.includes('create_item')) {
-      createCalled = true;
-      return response({ data: { create_item: { id: 'monday-1' } } });
-    }
-    throw new Error(`Unexpected Monday GraphQL query ${body.query}`);
-  });
-
-  const boards = await fetchMondayBoards('smoke-token');
-  assert(boards.length === 1, 'Monday board list was not parsed');
-  await validateMondayBoardSelection('smoke-token', boards[0].id);
-  const mapping = resolveMondayColumnMapping(boards[0].columns);
-  const values = buildMondayColumnValues(sampleLead, boards[0].columns, mapping);
-  assert(Object.keys(values).length >= 3, 'Monday column values were not built');
-  const itemId = await createMondayItem('smoke-token', boards[0].id, sampleLead.name, values);
-  assert(itemId === 'monday-1', 'Monday item ID was not extracted');
-  assert(boardFetchCalled && boardValidationCalled && createCalled, 'Monday fetch/validate/create paths did not all run');
-}
-
 async function testZapier() {
   const webhookUrl = validateZapierWebhookUrl('https://hooks.zapier.com/hooks/catch/123/abc/');
   let called = false;
@@ -271,25 +222,45 @@ async function main() {
   const uniqueProviderIds = new Set(providerIds);
   assert(providerIds.length === uniqueProviderIds.size, 'Integration catalog has duplicate providers');
 
+  await run('oauth', 'wolfgrid.app callback defaults', () => {
+    assert(
+      getFubOAuthRedirectUri() === 'https://wolfgrid.app/api/integrations/fub/oauth/callback',
+      'Follow Up Boss callback is not on wolfgrid.app'
+    );
+    assert(
+      getHubSpotOAuthRedirectUri() === 'https://wolfgrid.app/api/integrations/hubspot/oauth/callback',
+      'HubSpot callback is not on wolfgrid.app'
+    );
+    for (const provider of ['companycam', 'jobber', 'sumoquote'] as const) {
+      assert(
+        getContractorOAuthRedirectUri(provider) ===
+          `https://wolfgrid.app/api/integrations/${provider}/oauth/callback`,
+        `${provider} callback is not on wolfgrid.app`
+      );
+    }
+  });
+
+  await run('oauth', 'wolfgrid iOS return scheme', () => {
+    assert(buildIosResultUrl('success').startsWith('wolfgrid://oauth?'), 'FUB iOS return uses a legacy scheme');
+    assert(
+      buildHubSpotIosResultUrl('success').startsWith('wolfgrid://oauth?'),
+      'HubSpot iOS return uses a legacy scheme'
+    );
+  });
+
   for (const provider of providerIds) {
     if (CONTRACTOR_PROVIDER_IDS.includes(provider as ContractorProviderId)) {
       assertRoute(provider, `app/api/integrations/[provider]/test/route.ts`);
       assertRoute(provider, `app/api/integrations/[provider]/push-lead/route.ts`);
-    } else if (provider === 'monday') {
-      assertRoute(provider, 'app/api/integrations/monday/boards/route.ts');
-      assertRoute(provider, 'app/api/integrations/test-lead/route.ts');
     } else {
       assertRoute(provider, `app/api/integrations/${provider}/test/route.ts`);
-      if (provider !== 'monday') {
-        assertRoute(provider, `app/api/integrations/${provider}/push-lead/route.ts`);
-      }
+      assertRoute(provider, `app/api/integrations/${provider}/push-lead/route.ts`);
     }
   }
 
   await run('followupboss', 'mock connection test', testFollowUpBoss);
   await run('boldtrail', 'mock connection + push', testBoldTrail);
   await run('hubspot', 'mock connection + push', testHubSpot);
-  await run('monday', 'mock boards + push', testMonday);
   await run('zapier', 'mock webhook test', testZapier);
 
   for (const provider of CONTRACTOR_PROVIDER_IDS) {

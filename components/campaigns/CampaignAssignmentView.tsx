@@ -79,6 +79,12 @@ type AssignmentRow = {
     display_name: string;
   };
   homes?: Array<{ campaign_address_id: string; sequence: number }>;
+  activity?: {
+    worked_homes: number;
+    conversations: number;
+    leads: number;
+    appointments: number;
+  };
 };
 
 type CampaignAssignmentViewProps = {
@@ -94,7 +100,20 @@ type AssignmentAddress = BuildRouteAddress & {
   sequence: number;
 };
 
-const COLORS = ['#ef4444', '#14b8a6', '#3b82f6', '#8b5cf6', '#d946ef', '#f97316'];
+const MEMBER_COLORS = [
+  '#ef4444',
+  '#14b8a6',
+  '#3b82f6',
+  '#8b5cf6',
+  '#d946ef',
+  '#f97316',
+  '#84cc16',
+  '#06b6d4',
+  '#eab308',
+  '#ec4899',
+  '#6366f1',
+  '#10b981',
+];
 const SELF_SERVE_DEMO_MEMBERS: TeamMember[] = [
   { user_id: 'demo-maya', display_name: 'Maya', role: 'member' },
   { user_id: 'demo-leo', display_name: 'Leo', role: 'member' },
@@ -248,6 +267,17 @@ function deterministicColorIndex(seed: string, paletteLength: number): number {
     hash = (hash * 31 + seed.charCodeAt(index)) >>> 0;
   }
   return hash % paletteLength;
+}
+
+function memberColor(index: number): string {
+  if (index < MEMBER_COLORS.length) return MEMBER_COLORS[index];
+
+  // Keep every additional member distinct instead of wrapping to an existing
+  // colour. The golden-angle step also keeps neighbouring entries far apart.
+  const hue = ((index - MEMBER_COLORS.length) * 137.508 + 32) % 360;
+  const saturation = 68 + ((index - MEMBER_COLORS.length) % 3) * 7;
+  const lightness = 42 + ((index - MEMBER_COLORS.length) % 2) * 12;
+  return `hsl(${hue.toFixed(3)} ${saturation}% ${lightness}%)`;
 }
 
 function easeInOutCubic(progress: number): number {
@@ -2163,8 +2193,8 @@ function AssignmentMapEditorDialog({
     () => new Set(assignmentAddresses.map((address) => address.id)),
     [assignmentAddresses]
   );
-  const addressIdByMapIdentifier = useMemo(() => {
-    const identifiers = new Map<string, string>();
+  const addressIdsByMapIdentifier = useMemo(() => {
+    const identifiers = new Map<string, string[]>();
     assignmentAddresses.forEach((address) => {
       const mapAddress = address as AssignmentAddress & Partial<CampaignAddress>;
       [
@@ -2175,7 +2205,9 @@ function AssignmentMapEditorDialog({
         mapAddress.source_id,
       ].forEach((value) => {
         const key = stringValue(value);
-        if (key) identifiers.set(key, address.id);
+        if (!key) return;
+        const addressIds = identifiers.get(key) ?? [];
+        if (!addressIds.includes(address.id)) identifiers.set(key, [...addressIds, address.id]);
       });
     });
     return identifiers;
@@ -2195,7 +2227,7 @@ function AssignmentMapEditorDialog({
   const [selectionTool, setSelectionTool] = useState<AssignmentEditorSelectionTool>('click');
   const lassoCoordinatesRef = useRef<[number, number][]>([]);
   const lassoScreenPointsRef = useRef<Array<{ x: number; y: number }>>([]);
-  const lastSelectionClickRef = useRef<{ addressId: string; at: number } | null>(null);
+  const lastSelectionClickRef = useRef<{ selectionKey: string; at: number } | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -2276,14 +2308,15 @@ function AssignmentMapEditorDialog({
     })
   ), []);
 
-  const resolveFeatureAddressId = useCallback((feature: mapboxgl.MapboxGeoJSONFeature): string | null => {
+  const resolveFeatureAddressIds = useCallback((feature: mapboxgl.MapboxGeoJSONFeature): string[] => {
     const props = feature.properties ?? {};
     const directAddressId =
       stringValue(props.address_id) ??
       stringValue(props.campaign_address_id) ??
       stringValue(props.feature_id);
-    if (directAddressId && assignmentAddressIdSet.has(directAddressId)) return directAddressId;
+    if (directAddressId && assignmentAddressIdSet.has(directAddressId)) return [directAddressId];
 
+    const resolvedAddressIds = new Set<string>();
     for (const value of [
       props.address_id,
       props.campaign_address_id,
@@ -2295,24 +2328,27 @@ function AssignmentMapEditorDialog({
     ]) {
       const key = stringValue(value);
       if (!key) continue;
-      const addressId = addressIdByMapIdentifier.get(key);
-      if (addressId) return addressId;
+      (addressIdsByMapIdentifier.get(key) ?? []).forEach((addressId) => resolvedAddressIds.add(addressId));
     }
 
-    return null;
-  }, [addressIdByMapIdentifier, assignmentAddressIdSet]);
+    return Array.from(resolvedAddressIds);
+  }, [addressIdsByMapIdentifier, assignmentAddressIdSet]);
 
-  const toggleSelectedAddressId = useCallback((addressId: string) => {
-    if (!assignmentAddressIdSet.has(addressId)) return;
+  const toggleSelectedAddressIds = useCallback((addressIds: string[]) => {
+    const validAddressIds = Array.from(new Set(addressIds.filter((id) => assignmentAddressIdSet.has(id))));
+    if (validAddressIds.length === 0) return;
 
     const now = Date.now();
+    const selectionKey = [...validAddressIds].sort().join('|');
     const lastClick = lastSelectionClickRef.current;
-    if (lastClick?.addressId === addressId && now - lastClick.at < 120) return;
-    lastSelectionClickRef.current = { addressId, at: now };
+    if (lastClick?.selectionKey === selectionKey && now - lastClick.at < 120) return;
+    lastSelectionClickRef.current = { selectionKey, at: now };
 
     setSelectedAddressIds((current) => {
-      const exists = current.includes(addressId);
-      return exists ? current.filter((id) => id !== addressId) : [...current, addressId];
+      const selectedSet = new Set(current);
+      const allSelected = validAddressIds.every((id) => selectedSet.has(id));
+      validAddressIds.forEach((id) => allSelected ? selectedSet.delete(id) : selectedSet.add(id));
+      return Array.from(selectedSet);
     });
   }, [assignmentAddressIdSet]);
 
@@ -2339,34 +2375,43 @@ function AssignmentMapEditorDialog({
 
     const selectedIds = new Set<string>();
     features.forEach((feature) => {
-      const addressId = resolveFeatureAddressId(feature);
-      if (!addressId) return;
+      const addressIds = resolveFeatureAddressIds(feature);
+      if (addressIds.length === 0) return;
 
       const center = geometryCenterPoint(feature.geometry);
       if (!center) return;
 
-      let projected: mapboxgl.Point;
+      const geometryPositions: Array<[number, number]> = [];
+      if (feature.geometry.type !== 'GeometryCollection') {
+        collectGeometryPositions(feature.geometry.coordinates, geometryPositions);
+      }
+      let projectedPoints: Array<{ x: number; y: number }>;
       try {
-        projected = map.project(center);
+        projectedPoints = [center, ...geometryPositions].map((position) => {
+          const projected = map.project(position);
+          return { x: projected.x, y: projected.y };
+        });
       } catch {
         return;
       }
-      const projectedPoint = { x: projected.x, y: projected.y };
-      const insideDrawnPolygon =
-        screenPolygon.length >= 3 && screenPointInPolygon(projectedPoint, screenPolygon);
-      const insideDrawnBounds =
-        projectedPoint.x >= minX &&
-        projectedPoint.x <= maxX &&
-        projectedPoint.y >= minY &&
-        projectedPoint.y <= maxY;
+      const intersectsDrawnSelection = projectedPoints.some((projectedPoint) => {
+        const insideDrawnPolygon =
+          screenPolygon.length >= 3 && screenPointInPolygon(projectedPoint, screenPolygon);
+        const insideDrawnBounds =
+          projectedPoint.x >= minX &&
+          projectedPoint.x <= maxX &&
+          projectedPoint.y >= minY &&
+          projectedPoint.y <= maxY;
+        return insideDrawnPolygon || insideDrawnBounds;
+      });
 
-      if (insideDrawnPolygon || insideDrawnBounds) {
-        selectedIds.add(addressId);
+      if (intersectsDrawnSelection) {
+        addressIds.forEach((addressId) => selectedIds.add(addressId));
       }
     });
 
     return Array.from(selectedIds);
-  }, [getEditorBuildingLayers, resolveFeatureAddressId]);
+  }, [getEditorBuildingLayers, resolveFeatureAddressIds]);
 
   useEffect(() => {
     if (buildingRenderState?.hasVisibleFeatures) {
@@ -2606,13 +2651,26 @@ function AssignmentMapEditorDialog({
       let features: mapboxgl.MapboxGeoJSONFeature[] = [];
       try {
         features = map.queryRenderedFeatures(point, { layers });
+        if (features.length === 0) {
+          const screenPoint = Array.isArray(point)
+            ? { x: Number(point[0]), y: Number(point[1]) }
+            : point as { x: number; y: number };
+          const tolerance = 10;
+          features = map.queryRenderedFeatures(
+            [
+              [screenPoint.x - tolerance, screenPoint.y - tolerance],
+              [screenPoint.x + tolerance, screenPoint.y + tolerance],
+            ],
+            { layers }
+          );
+        }
       } catch {
         return;
       }
 
-      const addressId = features.map(resolveFeatureAddressId).find((id): id is string => Boolean(id));
-      if (addressId) {
-        toggleSelectedAddressId(addressId);
+      const addressIds = features.map(resolveFeatureAddressIds).find((ids) => ids.length > 0) ?? [];
+      if (addressIds.length > 0) {
+        toggleSelectedAddressIds(addressIds);
       }
     };
 
@@ -2647,10 +2705,10 @@ function AssignmentMapEditorDialog({
     editable,
     getEditorBuildingLayers,
     mapLoaded,
-    resolveFeatureAddressId,
+    resolveFeatureAddressIds,
     selectMode,
     selectionTool,
-    toggleSelectedAddressId,
+    toggleSelectedAddressIds,
   ]);
 
   useEffect(() => {
@@ -2956,16 +3014,6 @@ function AssignmentMapEditorDialog({
     onOpenChange(false);
   };
 
-  const handleBuildingClick = useCallback((
-    _buildingId: string,
-    addressId?: string
-  ) => {
-    if (!selectMode) return;
-    if (selectionTool !== 'click') return;
-    if (!addressId || !assignmentAddressIdSet.has(addressId)) return;
-    toggleSelectedAddressId(addressId);
-  }, [assignmentAddressIdSet, selectMode, selectionTool, toggleSelectedAddressId]);
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -3099,7 +3147,6 @@ function AssignmentMapEditorDialog({
                 footprintStatusColors
                 isDarkMap={theme === 'dark'}
                 selectionOnly={editable}
-                onBuildingClick={editable ? handleBuildingClick : undefined}
                 onRenderStateChange={setBuildingRenderState}
               />
             </>
@@ -3309,7 +3356,7 @@ export function CampaignAssignmentView({
       selectedMembers.map((member, index) => ({
         user_id: member.user_id,
         display_name: member.display_name,
-        color: COLORS[index % COLORS.length],
+        color: memberColor(index),
       })),
     [selectedMembers]
   );
@@ -3330,13 +3377,20 @@ export function CampaignAssignmentView({
           .filter((address): address is CampaignAddress => Boolean(address));
         const scopedHomes = assignmentHomes.length > 0 || assignment.mode === 'zone_split' ? assignmentHomes : addresses;
         const assignedHomes = assignment.goal_homes || scopedHomes.length;
-        const metrics = buildMetrics(scopedHomes);
+        const metrics = assignment.activity
+          ? {
+              workedHomes: assignment.activity.worked_homes,
+              conversations: assignment.activity.conversations,
+              leads: assignment.activity.leads,
+              appointments: assignment.activity.appointments,
+            }
+          : buildMetrics(scopedHomes);
         const selectedIndex = selectedMemberIds.indexOf(assignment.assigned_to_user_id);
 
         return {
           id: assignment.id,
           name: assignment.assignee?.display_name ?? assignment.assigned_to_user_id.slice(0, 8),
-          color: COLORS[(selectedIndex >= 0 ? selectedIndex : index) % COLORS.length],
+          color: memberColor(selectedIndex >= 0 ? selectedIndex : selectedMemberIds.length + index),
           zoneLabel: assignment.mode === 'zone_split' && assignment.zone_index !== null
             ? `Zone ${assignment.zone_index + 1}`
             : 'Shared map',
@@ -3362,7 +3416,7 @@ export function CampaignAssignmentView({
       return {
         id: member.user_id,
         name: member.display_name,
-        color: COLORS[index % COLORS.length],
+        color: memberColor(index),
         zoneLabel: mode === 'zone_split' ? `Zone ${index + 1}` : 'Shared map',
         sent: false,
         assignedHomes: zoneHomes.length,
@@ -3578,7 +3632,7 @@ export function CampaignAssignmentView({
                       <span className="flex min-w-0 items-center gap-2">
                         <span
                           className="h-2.5 w-2.5 shrink-0 rounded-full border border-border"
-                          style={{ backgroundColor: COLORS[index % COLORS.length] }}
+                          style={{ backgroundColor: memberColor(index) }}
                         />
                         <span className="truncate">{member.display_name}</span>
                       </span>

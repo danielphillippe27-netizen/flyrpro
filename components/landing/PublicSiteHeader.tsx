@@ -15,22 +15,22 @@ function getNavLinkClass(isActive: boolean) {
 export function PublicSiteHeader({ active, showAmbassador = true }: PublicSiteHeaderProps) {
   return (
     <header className="sticky top-0 z-50 border-b border-zinc-200/80 bg-zinc-50/90 backdrop-blur-sm dark:border-white/10 dark:bg-zinc-950/90">
-      <div className="flex w-full items-center justify-between px-4 py-3 md:px-6">
-        <Link href="/" className="flex items-center" aria-label="WolfGrid home">
+      <div className="flex w-full items-center justify-between px-4 md:px-6">
+        <Link href="/" className="flex h-24 items-start overflow-hidden" aria-label="WolfGrid home">
           <Image
-            src="/brand/wolfgrid-logo-text.svg"
+            src="/brand/wolfgrid-header-light.svg"
             alt="WolfGrid"
             width={210}
             height={105}
-            className="h-14 w-auto dark:hidden"
+            className="h-48 w-auto max-w-[min(62vw,420px)] -translate-y-5 object-contain object-left dark:hidden"
             priority
           />
           <Image
-            src="/brand/wolfgrid-logo-white.svg"
+            src="/brand/wolfgrid-header-dark.svg"
             alt="WolfGrid"
             width={210}
             height={105}
-            className="hidden h-14 w-auto dark:block"
+            className="hidden h-48 w-auto max-w-[min(62vw,420px)] -translate-y-5 object-contain object-left dark:block"
             priority
           />
         </Link>

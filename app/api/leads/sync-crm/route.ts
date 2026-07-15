@@ -118,7 +118,7 @@ export async function POST(request: NextRequest) {
     const hasBoldTrail = wantsProvider('boldtrail') && (connections ?? []).some((connection) => connection.provider === 'boldtrail');
     const hasHubSpot = wantsProvider('hubspot') && (connections ?? []).some((connection) => connection.provider === 'hubspot');
     const hasZapier = wantsProvider('zapier') && (connections ?? []).some((connection) => connection.provider === 'zapier');
-    const hasMonday = wantsProvider('monday') && !!mondayIntegration?.access_token;
+    const hasMonday = false;
     const contractorProviders = CONTRACTOR_PROVIDER_IDS.filter((provider) =>
       wantsProvider(provider) &&
       (connections ?? []).some((connection) => connection.provider === provider)

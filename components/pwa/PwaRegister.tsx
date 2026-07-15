@@ -23,7 +23,7 @@ export function PwaRegister() {
           const keys = await caches.keys();
           await Promise.all(
             keys
-              .filter((key) => key.startsWith('flyr-') || key.includes('nav-fallback'))
+              .filter((key) => key.startsWith('wolfgrid-') || key.startsWith('flyr-') || key.includes('nav-fallback'))
               .map((key) => caches.delete(key))
           );
         }

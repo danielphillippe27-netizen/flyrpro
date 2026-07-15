@@ -106,7 +106,7 @@ async function assignedCampaignIdsForUser(
     .from('campaign_assignments')
     .select('campaign_id')
     .eq('assigned_to_user_id', userId)
-    .neq('status', 'cancelled')
+    .in('status', ['accepted', 'in_progress'])
     .limit(1000);
 
   if (workspaceId) {

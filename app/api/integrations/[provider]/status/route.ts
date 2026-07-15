@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { resolveWorkspaceIdForUser, type MinimalSupabaseClient } from '@/app/api/_utils/workspace';
 import { createAdminClient } from '@/lib/supabase/server';
-import { getContractorProvider } from '@/app/api/integrations/_lib/contractor-providers';
+import {
+  getContractorAuthForWorkspace,
+  getContractorProvider,
+} from '@/app/api/integrations/_lib/contractor-providers';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -46,6 +49,25 @@ export async function GET(
     return NextResponse.json({
       connected: false,
       status: 'disconnected',
+      authMode: null,
+    });
+  }
+
+  const auth = await getContractorAuthForWorkspace(
+    supabase,
+    requestUser.id,
+    workspaceResolution.workspaceId,
+    provider.id
+  );
+  if (!auth) {
+    return NextResponse.json({
+      connected: false,
+      status: 'disconnected',
+      createdAt: connection.created_at,
+      updatedAt: connection.updated_at,
+      lastTestedAt: connection.last_tested_at,
+      lastPushAt: connection.last_push_at,
+      lastError: `Reconnect ${provider.displayName} for this WolfGrid account.`,
       authMode: null,
     });
   }

@@ -16,9 +16,7 @@ import {
   KeyRound,
   Eye,
   EyeOff,
-  Clipboard,
-  Building2,
-  Wrench
+  Clipboard
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -29,7 +27,6 @@ import { Label } from '@/components/ui/label';
 import { useWorkspace } from '@/lib/workspace-context';
 import {
   CONTRACTOR_INTEGRATIONS,
-  isRealEstateIndustry,
   type IntegrationCatalogEntry,
   type IntegrationProviderId,
 } from '@/lib/integrations/catalog';
@@ -61,9 +58,10 @@ interface MondayBoard {
   workspaceName?: string | null;
 }
 
-type IntegrationGroup = 'real_estate' | 'trades';
-
 const inFlightIntegrations = new Set<string>();
+const VISIBLE_CONTRACTOR_INTEGRATIONS = CONTRACTOR_INTEGRATIONS.filter(
+  (provider) => provider.id !== 'companycam'
+);
 
 export default function IntegrationsPage() {
   const integrationLogoContainerClass = 'w-10 h-10 rounded-lg flex items-center justify-center';
@@ -72,12 +70,6 @@ export default function IntegrationsPage() {
   const searchParams = useSearchParams();
   const isOnboarding = searchParams.get('onboarding') === '1';
   const { currentWorkspaceId, currentWorkspace } = useWorkspace();
-  const defaultIntegrationGroup: IntegrationGroup =
-    !currentWorkspace?.industry || isRealEstateIndustry(currentWorkspace.industry)
-      ? 'real_estate'
-      : 'trades';
-  const [integrationGroup, setIntegrationGroup] = useState<IntegrationGroup>(defaultIntegrationGroup);
-  const isRealEstate = integrationGroup === 'real_estate';
   const [loading, setLoading] = useState(true);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus | null>(null);
   const [isStartingOAuth, setIsStartingOAuth] = useState(false);
@@ -139,7 +131,7 @@ export default function IntegrationsPage() {
     !!trimmedZapierWebhookUrl &&
     lastZapierTestSucceeded &&
     lastZapierTestedWebhookUrl === trimmedZapierWebhookUrl;
-  const activeContractorProvider = CONTRACTOR_INTEGRATIONS.find(
+  const activeContractorProvider = VISIBLE_CONTRACTOR_INTEGRATIONS.find(
     (provider) => provider.id === contractorDialogProvider
   );
   const activeContractorStatus = contractorDialogProvider
@@ -152,10 +144,6 @@ export default function IntegrationsPage() {
     !!trimmedContractorToken &&
     lastContractorTestSucceeded &&
     lastContractorTestedToken === `${activeContractorProvider.id}:${trimmedContractorToken}`;
-
-  useEffect(() => {
-    setIntegrationGroup(defaultIntegrationGroup);
-  }, [currentWorkspaceId, defaultIntegrationGroup]);
 
   useEffect(() => {
     const loadData = async () => {
@@ -172,17 +160,13 @@ export default function IntegrationsPage() {
         // Get user
         const { data: { user: authUser } } = await supabase.auth.getUser();
         if (authUser) {
-          if (isRealEstate) {
-            await Promise.all([
-              loadConnectionStatus(currentWorkspaceId ?? undefined),
-              loadBoldTrailStatus(currentWorkspaceId ?? undefined),
-              loadHubSpotStatus(currentWorkspaceId ?? undefined),
-              loadZapierStatus(currentWorkspaceId ?? undefined),
-              loadMondayStatus(),
-            ]);
-          } else {
-            await loadContractorStatuses(currentWorkspaceId ?? undefined);
-          }
+          await Promise.all([
+            loadConnectionStatus(currentWorkspaceId ?? undefined),
+            loadBoldTrailStatus(currentWorkspaceId ?? undefined),
+            loadHubSpotStatus(currentWorkspaceId ?? undefined),
+            loadZapierStatus(currentWorkspaceId ?? undefined),
+            loadContractorStatuses(currentWorkspaceId ?? undefined),
+          ]);
         } else {
           router.push('/login');
         }
@@ -193,7 +177,7 @@ export default function IntegrationsPage() {
     };
 
     loadData();
-  }, [router, currentWorkspaceId, isRealEstate]);
+  }, [router, currentWorkspaceId]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -201,7 +185,7 @@ export default function IntegrationsPage() {
     const hubspot = params.get('hubspot');
     const monday = params.get('monday');
     const callbackMessage = params.get('message');
-    const contractorCallback = CONTRACTOR_INTEGRATIONS.find(
+    const contractorCallback = VISIBLE_CONTRACTOR_INTEGRATIONS.find(
       (provider) => params.get(provider.id) === 'connected' || params.get(provider.id) === 'error'
     );
     if (fub === 'connected') {
@@ -307,7 +291,7 @@ export default function IntegrationsPage() {
   const loadContractorStatuses = async (workspaceId?: string) => {
     const qs = workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : '';
     const entries = await Promise.all(
-      CONTRACTOR_INTEGRATIONS.map(async (provider) => {
+      VISIBLE_CONTRACTOR_INTEGRATIONS.map(async (provider) => {
         try {
           const response = await fetch(`/api/integrations/${provider.id}/status${qs}`);
           if (!response.ok) return [provider.id, { connected: false, status: 'disconnected' }] as const;
@@ -327,6 +311,11 @@ export default function IntegrationsPage() {
     setMessage(null);
 
     try {
+      if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        window.location.assign('https://wolfgrid.app/settings/integrations');
+        return;
+      }
+
       const params = new URLSearchParams({ platform: 'web' });
       if (currentWorkspaceId) {
         params.set('workspaceId', currentWorkspaceId);
@@ -1043,14 +1032,15 @@ export default function IntegrationsPage() {
     }
   };
 
-  const handleDisconnectContractor = async () => {
-    if (!activeContractorProvider) return;
-    if (!confirm(`Are you sure you want to disconnect from ${activeContractorProvider.displayName}?`)) return;
+  const handleDisconnectContractor = async (providerOverride?: IntegrationCatalogEntry) => {
+    const targetProvider = providerOverride ?? activeContractorProvider;
+    if (!targetProvider) return;
+    if (!confirm(`Are you sure you want to disconnect from ${targetProvider.displayName}?`)) return;
     setIsDisconnectingContractor(true);
     setContractorDialogMessage(null);
 
     try {
-      const response = await fetch(`/api/integrations/${activeContractorProvider.id}/disconnect`, {
+      const response = await fetch(`/api/integrations/${targetProvider.id}/disconnect`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ workspaceId: currentWorkspaceId }),
@@ -1059,7 +1049,7 @@ export default function IntegrationsPage() {
       if (response.ok) {
         setMessage({
           type: 'success',
-          text: data.message || `${activeContractorProvider.displayName} disconnected successfully.`,
+          text: data.message || `${targetProvider.displayName} disconnected successfully.`,
         });
         setContractorDialogProvider(null);
         resetContractorDialog();
@@ -1067,7 +1057,7 @@ export default function IntegrationsPage() {
       } else {
         setContractorDialogMessage({
           type: 'error',
-          text: data.error || `Failed to disconnect ${activeContractorProvider.displayName}.`,
+          text: data.error || `Failed to disconnect ${targetProvider.displayName}.`,
         });
       }
     } catch {
@@ -1144,7 +1134,7 @@ export default function IntegrationsPage() {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-background">
       <header className="bg-white dark:bg-card border-b border-border sticky top-0 z-10">
-        <div className="mx-auto w-full max-w-4xl px-4 sm:px-6 lg:px-8 py-4">
+        <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-4">
           {isOnboarding ? (
             <div className="flex items-center justify-between">
               <div>
@@ -1177,35 +1167,41 @@ export default function IntegrationsPage() {
         </div>
       </header>
       
-      <main className="mx-auto w-full max-w-4xl px-4 sm:px-6 lg:px-8 py-6">
+      <main className="integrations-page mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
         <div className="space-y-6">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="inline-flex w-full rounded-lg border border-border bg-card p-1 sm:w-auto">
-              <Button
-                type="button"
-                variant={integrationGroup === 'real_estate' ? 'default' : 'ghost'}
-                onClick={() => setIntegrationGroup('real_estate')}
-                aria-pressed={integrationGroup === 'real_estate'}
-                className="h-10 flex-1 gap-2 rounded-md sm:flex-none"
-              >
-                <Building2 className="w-4 h-4" />
-                Real Estate
-              </Button>
-              <Button
-                type="button"
-                variant={integrationGroup === 'trades' ? 'default' : 'ghost'}
-                onClick={() => setIntegrationGroup('trades')}
-                aria-pressed={integrationGroup === 'trades'}
-                className="h-10 flex-1 gap-2 rounded-md sm:flex-none"
-              >
-                <Wrench className="w-4 h-4" />
-                Trades
-              </Button>
+          <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+            <div className="flex flex-col gap-5 p-5 sm:flex-row sm:items-end sm:justify-between sm:p-6">
+              <div className="max-w-2xl">
+                <Badge variant="secondary" className="mb-3 gap-1.5">
+                  <Plug className="h-3.5 w-3.5" />
+                  CRM &amp; workflow connections
+                </Badge>
+                <h2 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
+                  Every integration, one place
+                </h2>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground sm:text-base">
+                  Connect your tools, review their status, and verify lead delivery from a single page.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <span className="rounded-full bg-emerald-500/10 px-3 py-1.5 font-medium text-emerald-700 dark:text-emerald-300">
+                  {[
+                    connectionStatus,
+                    boldTrailStatus,
+                    hubSpotStatus,
+                    zapierStatus,
+                    ...Object.values(contractorStatuses),
+                  ].filter((status) => status?.connected).length} connected
+                </span>
+                <span className="rounded-full bg-muted px-3 py-1.5 font-medium">
+                  {4 + VISIBLE_CONTRACTOR_INTEGRATIONS.length} available
+                </span>
+              </div>
             </div>
             {currentWorkspace?.industry && (
-              <Badge variant="outline" className="w-fit">
-                Workspace: {currentWorkspace.industry}
-              </Badge>
+              <div className="border-t border-border bg-muted/35 px-5 py-2.5 text-xs font-medium text-muted-foreground sm:px-6">
+                Workspace: <span className="text-foreground">{currentWorkspace.industry}</span>
+              </div>
             )}
           </div>
 
@@ -1224,8 +1220,7 @@ export default function IntegrationsPage() {
             </div>
           )}
 
-          {isRealEstate ? (
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {/* Follow Up Boss Integration */}
           <Card>
             <CardHeader>
@@ -1704,7 +1699,8 @@ export default function IntegrationsPage() {
             </CardContent>
           </Card>
 
-          <Card>
+          {/* monday.com support was removed from WolfGrid. */}
+          {false && <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -1847,31 +1843,9 @@ export default function IntegrationsPage() {
                 </div>
               )}
             </CardContent>
-          </Card>
+          </Card>}
 
-          {/* Future integrations placeholder */}
-          <Card className="order-6 opacity-60">
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className={`${integrationLogoContainerClass} bg-gray-100 dark:bg-gray-800`}>
-                    <Plug className={`${integrationLogoIconClass} text-gray-400`} />
-                  </div>
-                  <div>
-                    <CardTitle className="text-gray-500">More Integrations</CardTitle>
-                    <CardDescription>
-                      Additional CRM integrations coming soon
-                    </CardDescription>
-                  </div>
-                </div>
-                <Badge variant="outline">Coming Soon</Badge>
-              </div>
-            </CardHeader>
-          </Card>
-          </div>
-          ) : (
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-            {CONTRACTOR_INTEGRATIONS.map((provider) => {
+            {VISIBLE_CONTRACTOR_INTEGRATIONS.map((provider) => {
               const status = contractorStatuses[provider.id];
               const connected = !!status?.connected;
               const supportsOAuth = provider.authModes.includes('oauth');
@@ -1946,11 +1920,28 @@ export default function IntegrationsPage() {
                         <div className="flex flex-wrap gap-3">
                           <Button
                             variant="outline"
-                            onClick={() => handleOpenContractorDialog(provider)}
+                            onClick={() =>
+                              supportsOAuth && !supportsApiKey
+                                ? handleStartContractorOAuth(provider)
+                                : handleOpenContractorDialog(provider)
+                            }
                             className="gap-2"
                           >
-                            <KeyRound className="w-4 h-4" />
-                            Manage
+                            {supportsOAuth && !supportsApiKey ? (
+                              <Plug className="w-4 h-4" />
+                            ) : (
+                              <KeyRound className="w-4 h-4" />
+                            )}
+                            {supportsOAuth && !supportsApiKey ? 'Reconnect' : 'Manage'}
+                          </Button>
+                          <Button
+                            variant="destructive"
+                            onClick={() => handleDisconnectContractor(provider)}
+                            disabled={isDisconnectingContractor}
+                            className="gap-2"
+                          >
+                            <XCircle className="w-4 h-4" />
+                            {isDisconnectingContractor ? 'Disconnecting...' : 'Disconnect'}
                           </Button>
                         </div>
                       </div>
@@ -1990,7 +1981,6 @@ export default function IntegrationsPage() {
               );
             })}
           </div>
-          )}
 
           <Card>
             <CardHeader>

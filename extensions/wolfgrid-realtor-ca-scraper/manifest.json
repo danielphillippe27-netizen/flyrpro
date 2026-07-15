@@ -1,12 +1,14 @@
 {
   "manifest_version": 3,
-  "name": "FLYR REALTOR.ca Scraper",
+  "name": "WolfGrid REALTOR.ca Scraper",
   "version": "0.1.1",
-  "description": "Capture REALTOR.ca agent leads from your normal Chrome session and send them to FLYR.",
+  "description": "Capture REALTOR.ca agent leads from your normal Chrome session and send them to WolfGrid.",
   "permissions": ["activeTab", "scripting", "storage", "tabs"],
   "host_permissions": [
     "https://www.realtor.ca/*",
     "https://realtor.ca/*",
+    "https://wolfgrid.app/*",
+    "https://*.wolfgrid.app/*",
     "https://flyrpro.app/*",
     "https://*.flyrpro.app/*",
     "https://flyr.software/*",
@@ -29,6 +31,8 @@
     },
     {
       "matches": [
+        "https://wolfgrid.app/*",
+        "https://*.wolfgrid.app/*",
         "https://flyrpro.app/*",
         "https://*.flyrpro.app/*",
         "https://flyr.software/*",
@@ -36,7 +40,7 @@
         "http://localhost/*",
         "http://127.0.0.1/*"
       ],
-      "js": ["content-flyr.js"],
+      "js": ["content-wolfgrid.js"],
       "run_at": "document_idle"
     }
   ]
