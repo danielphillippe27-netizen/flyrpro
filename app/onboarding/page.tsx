@@ -1522,6 +1522,7 @@ function OnboardingContent() {
             kind="auth"
             className="h-44 w-auto sm:h-52"
             priority
+            surface="light"
           />
         </div>
         <div className={step === 1 ? 'mb-4 text-center' : step === FINAL_ONBOARDING_STEP ? 'mb-6 text-center' : 'mb-5 text-center'}>

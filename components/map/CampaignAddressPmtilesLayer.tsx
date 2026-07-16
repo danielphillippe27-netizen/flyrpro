@@ -93,6 +93,7 @@ function buildAddressStatusColorExpression(statusFilters: StatusFilters, isDarkM
   ];
   const getScansTotal = () => ['to-number', ['coalesce', ['feature-state', 'scans_total'], ['get', 'scans_total'], ['get', 'scans'], 0], 0];
   const getQrScanned = () => ['coalesce', ['feature-state', 'qr_scanned'], ['get', 'qr_scanned'], false];
+  const getTeammateOwned = () => ['coalesce', ['feature-state', 'teammate_owned'], ['get', 'teammate_owned'], false];
   const isQrScanned = ['any', ['==', getQrScanned(), true], ['==', getQrScanned(), 'true'], ['>', getScansTotal(), 0]];
   const isHotLead = ['in', getAddressStatus(), ['literal', HOT_LEAD_ADDRESS_STATUSES]];
   const isLead = ['in', getAddressStatus(), ['literal', LEAD_ADDRESS_STATUSES]];
@@ -104,6 +105,8 @@ function buildAddressStatusColorExpression(statusFilters: StatusFilters, isDarkM
 
   return [
     'case',
+    ['any', ['==', getTeammateOwned(), true], ['==', getTeammateOwned(), 'true']],
+    '#166534',
     ['all', isQrScanned, statusFilters.QR_SCANNED],
     MAP_STATUS_CONFIG.QR_SCANNED.color,
     ['all', isHotLead, statusFilters.HOT_LEADS],
@@ -189,6 +192,7 @@ function getStatusState(address: CampaignAddress) {
     address_status: getCampaignAddressMapStatus(address),
     scans_total: scansTotal,
     qr_scanned: scansTotal > 0 || Boolean(address.last_scanned_at),
+    teammate_owned: Boolean(address.is_teammate_owned),
   };
 }
 
@@ -383,6 +387,7 @@ function buildFallbackAddressFeatureCollection(
         address_status: statusState.address_status,
         scans_total: statusState.scans_total,
         qr_scanned: statusState.qr_scanned,
+        teammate_owned: statusState.teammate_owned,
       };
 
       return [
@@ -947,6 +952,35 @@ export function CampaignAddressPmtilesLayer({
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map, manifestSource, visible, deletedAddressSet, renderAddresses, campaignAddressIds, addressColorExpression]);
+
+  useEffect(() => {
+    if (!map || !visible || !map.getSource(SOURCE_ID)) return;
+
+    for (const address of renderAddresses) {
+      const state = getStatusState(address);
+      const candidateIds = Array.from(new Set([
+        address.id,
+        address.source_id,
+        address.gers_id,
+        address.building_gers_id,
+      ].map((value) => String(value ?? '').trim()).filter(Boolean)));
+
+      for (const id of candidateIds) {
+        try {
+          map.setFeatureState(
+            {
+              source: SOURCE_ID,
+              ...(manifestSource ? { sourceLayer: manifestSource.sourceLayer } : {}),
+              id,
+            },
+            state
+          );
+        } catch {
+          // The tile/source may not be loaded yet; the next render/idle refresh retries.
+        }
+      }
+    }
+  }, [map, manifestSource, renderAddresses, styleKey, visible]);
 
   return null;
 }

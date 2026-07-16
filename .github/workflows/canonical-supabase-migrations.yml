@@ -1,0 +1,34 @@
+name: Canonical Supabase migrations
+
+on:
+  pull_request:
+    paths:
+      - 'supabase/migrations/**'
+      - 'supabase/tests/**'
+      - '.github/workflows/canonical-supabase-migrations.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/migrations/**'
+      - 'supabase/tests/**'
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Initialize ephemeral local project
+        run: supabase init
+      - name: Start temporary database
+        run: supabase start -x studio,imgproxy,inbucket,edge-runtime,logflare,vector,supavisor
+      - name: Rebuild from canonical migrations
+        run: supabase db reset --local
+      - name: Run collaboration database contracts
+        run: supabase test db
+      - name: Stop temporary database
+        if: always()
+        run: supabase stop --no-backup

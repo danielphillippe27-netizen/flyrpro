@@ -670,10 +670,7 @@ export default function CampaignDetailPage() {
       });
 
     const addressesRequest = assignmentScopeRequest
-      .then((scope) => {
-        const addressIds = scope?.scopedToAssignedZone ? scope.addressIds ?? [] : null;
-        return CampaignsService.fetchAddresses(campaignId, { addressIds });
-      })
+      .then(() => CampaignsService.fetchAddresses(campaignId))
       .then((addressesData) => {
         setAddresses(addressesData);
       })
@@ -1546,7 +1543,7 @@ export default function CampaignDetailPage() {
                 campaignId={campaignId}
                 addresses={addresses}
                 campaign={campaign}
-                visibleAddressIds={assignmentScope?.scopedToAssignedZone ? assignmentScope.addressIds ?? [] : undefined}
+                visibleAddressIds={undefined}
                 onSnapComplete={loadData}
                 onContactCreated={loadSecondaryData}
                 buildingPendingOverlay={{

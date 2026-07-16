@@ -505,7 +505,7 @@ function Beat3Map({
               'fill-extrusion-base': 0,
               'fill-extrusion-vertical-gradient': true,
               'fill-extrusion-emissive-strength': 0.45,
-              'fill-extrusion-rounded-roof': true,
+              'fill-extrusion-rounded-roof': false,
             },
           });
           map.addLayer({
@@ -523,7 +523,7 @@ function Beat3Map({
               'fill-extrusion-base': 0,
               'fill-extrusion-vertical-gradient': true,
               'fill-extrusion-emissive-strength': 0.65,
-              'fill-extrusion-rounded-roof': true,
+              'fill-extrusion-rounded-roof': false,
             },
           });
 

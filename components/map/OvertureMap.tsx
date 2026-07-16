@@ -250,7 +250,7 @@ export function OvertureMap() {
                 'fill-extrusion-height': ['get', 'height'],
                 'fill-extrusion-base': ['get', 'min_height'],
                 'fill-extrusion-vertical-gradient': true,
-                'fill-extrusion-rounded-roof': true,
+                'fill-extrusion-rounded-roof': false,
               },
             });
           }

@@ -47,6 +47,13 @@ type CampaignAddressBaseState = {
   scans: number;
   last_scanned_at: string | null;
   match_source: string | null;
+  assignment_id: string | null;
+  created_by: string | null;
+  updated_by: string | null;
+  origin_platform: string | null;
+  revision: number;
+  updated_at: string | null;
+  deleted_at: string | null;
 };
 
 type CampaignAddressStatusRow = {
@@ -54,6 +61,9 @@ type CampaignAddressStatusRow = {
   address_id?: string | null;
   status?: string | null;
   updated_at?: string | null;
+  source_occurred_at?: string | null;
+  last_action_by?: string | null;
+  revision?: number | null;
 };
 
 type CampaignAddressFetchOptions = {
@@ -329,8 +339,9 @@ export class CampaignsService {
       const baseState = await fetchAllInPages(async (from, to) => {
         let query = this.client
           .from('campaign_addresses')
-          .select('id, building_id, building_gers_id, gers_id, source_id, visited, scans, last_scanned_at, match_source')
-          .eq('campaign_id', campaignId);
+          .select('id, building_id, building_gers_id, gers_id, source_id, visited, scans, last_scanned_at, match_source, assignment_id, created_by, updated_by, origin_platform, revision, updated_at, deleted_at')
+          .eq('campaign_id', campaignId)
+          .is('deleted_at', null);
         if (scopedAddressIds) query = query.in('id', scopedAddressIds);
         return await query
           .order('id', { ascending: true })
@@ -339,7 +350,7 @@ export class CampaignsService {
       const statusRows = await fetchAllInPages(async (from, to) => {
         let query = this.client
           .from('address_statuses')
-          .select('campaign_address_id, status, updated_at')
+          .select('campaign_address_id, status, updated_at, source_occurred_at, last_action_by, revision')
           .eq('campaign_id', campaignId);
         if (scopedAddressIds) query = query.in('campaign_address_id', scopedAddressIds);
         return await query
@@ -347,12 +358,12 @@ export class CampaignsService {
           .range(from, to);
       });
 
-      const statusByAddressId = new Map<string, string>();
+      const statusByAddressId = new Map<string, CampaignAddressStatusRow>();
       for (const row of (statusRows || []) as CampaignAddressStatusRow[]) {
         const addressId = row.campaign_address_id ?? row.address_id ?? null;
         const status = row.status?.trim();
         if (addressId && status && !statusByAddressId.has(addressId)) {
-          statusByAddressId.set(addressId, status);
+          statusByAddressId.set(addressId, row);
         }
       }
 
@@ -368,21 +379,34 @@ export class CampaignsService {
             scans: Number((row as { scans?: number | null }).scans ?? 0),
             last_scanned_at: (row as { last_scanned_at?: string | null }).last_scanned_at ?? null,
             match_source: (row as { match_source?: string | null }).match_source ?? null,
+            assignment_id: (row as { assignment_id?: string | null }).assignment_id ?? null,
+            created_by: (row as { created_by?: string | null }).created_by ?? null,
+            updated_by: (row as { updated_by?: string | null }).updated_by ?? null,
+            origin_platform: (row as { origin_platform?: string | null }).origin_platform ?? null,
+            revision: Number((row as { revision?: number | null }).revision ?? 0),
+            updated_at: (row as { updated_at?: string | null }).updated_at ?? null,
+            deleted_at: (row as { deleted_at?: string | null }).deleted_at ?? null,
           },
         ])
       );
 
-      return ((data || []) as Array<CampaignAddress & { building_id?: string | null }>).map((row) => {
+      return ((data || []) as Array<CampaignAddress & { building_id?: string | null }>).flatMap((row) => {
         const state = stateById.get(row.id);
+        if (!state) return [];
         const merged: CampaignAddress = {
           ...row,
           ...(state ?? {}),
         };
-        const addressStatus = statusByAddressId.get(row.id) ?? row.address_status;
+        const statusState = statusByAddressId.get(row.id);
+        const addressStatus = statusState?.status ?? row.address_status;
         if (addressStatus !== undefined) {
           merged.address_status = addressStatus;
         }
-        return merged;
+        merged.status_revision = Number(statusState?.revision ?? 0);
+        merged.status_updated_at = statusState?.updated_at ?? null;
+        merged.status_occurred_at = statusState?.source_occurred_at ?? null;
+        merged.last_action_by = statusState?.last_action_by ?? null;
+        return [merged];
       });
     } catch (error) {
       console.error('Error fetching addresses, returning empty array:', formatError(error));
