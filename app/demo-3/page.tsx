@@ -8,7 +8,7 @@ const FOUNDER_CALL_HREF =
 const DEMO_THREE_STREAM_CUSTOMER_CODE = process.env.NEXT_PUBLIC_CLOUDFLARE_STREAM_CUSTOMER_CODE;
 const DEMO_THREE_STREAM_VIDEO_UID =
   process.env.NEXT_PUBLIC_DEMO_THREE_STREAM_VIDEO_UID ||
-  '08905148255d0a8205c8c5d57825577f';
+  'efb7769ec5cdce81732b3d3f669bc30e';
 const configuredDemoThreeCtaAtSeconds = Number(process.env.NEXT_PUBLIC_DEMO_THREE_VIDEO_CTA_AT_SECONDS);
 const DEMO_THREE_CTA_AT_SECONDS =
   Number.isFinite(configuredDemoThreeCtaAtSeconds) && configuredDemoThreeCtaAtSeconds > 0

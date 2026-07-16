@@ -271,6 +271,8 @@ export interface CampaignV2 {
   data_quality?: CampaignDataQuality | null;
   standard_mode_recommended?: boolean | null;
   data_quality_reason?: string | null;
+  home_limit_applied?: boolean;
+  discovered_home_count?: number | null;
   seed_query?: string;
   description?: string;
   video_url?: string; // Optional video URL to redirect to when QR code is scanned

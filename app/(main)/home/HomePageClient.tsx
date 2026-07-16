@@ -16,8 +16,10 @@ type HomePageClientProps = {
 export function HomePageClient({ accessLevel }: HomePageClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { accessLevel: workspaceAccessLevel } = useWorkspace();
+  const { accessLevel: workspaceAccessLevel, currentWorkspaceId, membershipsByWorkspaceId } = useWorkspace();
   const resolvedAccessLevel = workspaceAccessLevel ?? accessLevel;
+  const currentRole = currentWorkspaceId ? membershipsByWorkspaceId[currentWorkspaceId] : null;
+  const isWorkspaceManager = currentRole === 'owner' || currentRole === 'admin';
   const showSelfServeTeamDemo =
     searchParams.get('source') === 'self-serve-demo' &&
     (searchParams.get('tab') === 'map' ||
@@ -33,7 +35,7 @@ export function HomePageClient({ accessLevel }: HomePageClientProps) {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-background">
-      {showSelfServeTeamDemo || resolvedAccessLevel === 'team_leader' ? (
+      {showSelfServeTeamDemo || isWorkspaceManager || resolvedAccessLevel === 'team_leader' || resolvedAccessLevel === 'solo_owner' ? (
         <TeamOwnerDashboardView />
       ) : resolvedAccessLevel === 'salesperson' ? (
         <SalespersonCallHomeView />

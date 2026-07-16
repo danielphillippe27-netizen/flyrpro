@@ -208,6 +208,8 @@ export default function LoginPage() {
       });
     } else if (error === 'auth_failed' || error === 'callback_error') {
       setMessage({ type: 'error', text: 'Sign-in failed. Please try again.' });
+    } else if (error === 'invalid_credentials') {
+      setMessage({ type: 'error', text: 'Invalid email or password.' });
     }
   }, []);
 
@@ -300,7 +302,7 @@ export default function LoginPage() {
       });
 
       if (!signInError && signInData?.session) {
-        router.replace(gatePath);
+        window.location.assign(gatePath);
         return;
       }
 
@@ -335,8 +337,16 @@ export default function LoginPage() {
         return;
       }
 
+      // Supabase deliberately returns an obfuscated user with no identities when
+      // signUp is attempted for an existing account. Treat that as a bad login
+      // instead of telling the user that a confirmation email was sent.
+      if (signUpData?.user && (signUpData.user.identities?.length ?? 0) === 0) {
+        setMessage({ type: 'error', text: 'Invalid email or password.' });
+        return;
+      }
+
       if (signUpData?.session) {
-        router.replace(gatePath);
+        window.location.assign(gatePath);
         return;
       }
 
@@ -402,13 +412,13 @@ export default function LoginPage() {
     <div className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-white p-4 text-[#17181c]">
       <div className="relative w-full max-w-xl rounded-2xl border border-[#d9dce2] bg-white px-10 py-7 shadow-[0_24px_70px_rgba(0,0,0,0.08),0_10px_30px_rgba(0,0,0,0.06)]">
         <div className="text-center space-y-2">
-          <div className="flex justify-center">
+          <div className="mb-4 flex justify-center overflow-hidden">
             <Image
               src="/brand/wolfgrid-auth-light.svg"
               alt="WolfGrid"
-              width={480}
-              height={128}
-              className="h-32 w-auto"
+              width={2000}
+              height={1000}
+              className="-my-6 h-auto w-[92%] max-w-md"
               priority
             />
           </div>
@@ -417,11 +427,18 @@ export default function LoginPage() {
           </p>
         </div>
 
-        <form onSubmit={handleEmailSubmit} className="mt-6 space-y-4">
+        <form
+          action="/api/auth/password"
+          method="post"
+          onSubmit={handleEmailSubmit}
+          className="mt-6 space-y-4"
+        >
+          <input type="hidden" name="redirect" value={gatePath} />
           <div className="space-y-1.5">
             <Label htmlFor="email" className="text-base font-semibold text-[#1f2024]">Email</Label>
             <Input
               id="email"
+              name="email"
               type="email"
               placeholder="you@example.com"
               value={email}
@@ -450,6 +467,7 @@ export default function LoginPage() {
               </div>
               <Input
                 id="password"
+                name="password"
                 type="password"
                 placeholder="Enter your password"
                 value={password}

@@ -7,6 +7,7 @@ import {
   MAX_APP_HOMES,
   MAX_CAMPAIGN_HOMES,
   campaignHomeLimitErrorPayload,
+  campaignHomeCapNotice,
   validateCampaignHomeCount,
 } from '../services/campaignHomeLimits';
 
@@ -44,6 +45,10 @@ function assertFails(
 }
 
 assert.equal(APP_LIMIT_SCAN_COUNT, MAX_APP_HOMES + 1);
+assert.equal(
+  campaignHomeCapNotice(1234),
+  'Campaign home limit applied: This area contains 1,234 homes. We drew the first 1,000 homes. For future reference, campaigns have a 1,000-home limit.'
+);
 assertPasses(0);
 assertPasses(1);
 assertPasses(MAX_CAMPAIGN_HOMES);

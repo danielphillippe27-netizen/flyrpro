@@ -251,10 +251,11 @@ export class ContactsService {
     try {
       let legacyQuery = this.client.from('field_leads').select('*');
 
+      // Leads are scoped by both their owner and the selected workspace.
+      // Neither dimension may substitute for the other.
+      legacyQuery = legacyQuery.eq('user_id', userId);
       if (workspaceId) {
         legacyQuery = legacyQuery.eq('workspace_id', workspaceId);
-      } else {
-        legacyQuery = legacyQuery.eq('user_id', userId);
       }
 
       if (filters?.campaignId) {

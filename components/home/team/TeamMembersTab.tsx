@@ -82,18 +82,6 @@ type SeatUsage = {
   seatsRemaining: number;
 };
 
-type BillingEntitlement = {
-  is_active: boolean;
-  source: 'none' | 'stripe' | 'apple';
-  upgrade_price_id?: string;
-};
-
-type BillingMutationResponse = {
-  error?: string;
-  url?: string;
-  maxSeats?: number;
-};
-
 type RosterResponse = {
   workspace?: {
     trialActive?: boolean;
@@ -143,7 +131,6 @@ export function TeamMembersTab(props: TeamMembersTabProps) {
   const [analyticsByUserId, setAnalyticsByUserId] = useState<Record<string, AnalyticsRow>>({});
   const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
   const [seatUsage, setSeatUsage] = useState<SeatUsage | null>(null);
-  const [isTrialActive, setIsTrialActive] = useState(false);
   const [actorRole, setActorRole] = useState<'owner' | 'admin'>('owner');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -152,14 +139,10 @@ export function TeamMembersTab(props: TeamMembersTabProps) {
   const [removeMembersDialogOpen, setRemoveMembersDialogOpen] = useState(false);
   const [selectedRemoveMemberIds, setSelectedRemoveMemberIds] = useState<string[]>([]);
   const [inviteError, setInviteError] = useState<string | null>(null);
-  const [billingError, setBillingError] = useState<string | null>(null);
-  const [openingBilling, setOpeningBilling] = useState(false);
   const [actionKey, setActionKey] = useState<string | null>(null);
   const attentionSummary =
     seatUsage
-      ? isTrialActive
-        ? `${seatUsage.pendingInvites} invite${seatUsage.pendingInvites === 1 ? '' : 's'} pending • ${seatUsage.activeMembers} member${seatUsage.activeMembers === 1 ? '' : 's'} active • trial active`
-        : `${seatUsage.pendingInvites} invite${seatUsage.pendingInvites === 1 ? '' : 's'} pending • ${seatUsage.activeMembers} member${seatUsage.activeMembers === 1 ? '' : 's'} active • ${seatUsage.seatsRemaining} paid seat${seatUsage.seatsRemaining === 1 ? '' : 's'} remaining`
+      ? `${seatUsage.pendingInvites} invite${seatUsage.pendingInvites === 1 ? '' : 's'} pending • ${seatUsage.activeMembers} member${seatUsage.activeMembers === 1 ? '' : 's'} active`
       : null;
   const removableMembers = rosterMembers.filter(
     (member) =>
@@ -222,7 +205,6 @@ export function TeamMembersTab(props: TeamMembersTabProps) {
       }
 
       setActorRole(rosterData.actorRole);
-      setIsTrialActive(Boolean(rosterData.workspace?.trialActive));
       setSeatUsage(rosterData.seatUsage);
       setRosterMembers(rosterData.members ?? []);
       setPendingInvites(nextPendingInvites);
@@ -234,7 +216,6 @@ export function TeamMembersTab(props: TeamMembersTabProps) {
       setRosterMembers([]);
       setPendingInvites([]);
       setSeatUsage(null);
-      setIsTrialActive(false);
       setAnalyticsByUserId({});
     } finally {
       setLoading(false);
@@ -273,123 +254,16 @@ export function TeamMembersTab(props: TeamMembersTabProps) {
     setNotice(noticeMessage);
   }, []);
 
-  const handleAdjustSeats = useCallback(async (
-    seatDelta = 1,
-    options?: { showNotice?: boolean }
-  ): Promise<'updated' | 'redirected' | 'failed'> => {
-    if (actorRole !== 'owner') return 'failed';
-
-    setBillingError(null);
-    setOpeningBilling(true);
-    try {
-      const entitlementRes = await fetch('/api/billing/entitlement', {
-        credentials: 'include',
-      });
-      const entitlement = (await entitlementRes.json().catch(() => null)) as BillingEntitlement | { error?: string } | null;
-      if (!entitlementRes.ok) {
-        throw new Error(
-          (entitlement && 'error' in entitlement && entitlement.error) || 'Failed to load billing details'
-        );
-      }
-      if (!entitlement || 'error' in entitlement) {
-        throw new Error('Failed to load billing details');
-      }
-
-      const requestedSeatDelta = Math.trunc(seatDelta);
-      if (!Number.isFinite(requestedSeatDelta) || requestedSeatDelta === 0) {
-        return 'failed';
-      }
-      const currentSeats = Math.max(1, seatUsage?.maxSeats ?? 1);
-      const targetSeats = Math.max(1, currentSeats + requestedSeatDelta);
-      const seatsChangedBy = targetSeats - currentSeats;
-      if (seatsChangedBy === 0) {
-        setBillingError('Paid seats cannot go below 1.');
-        return 'failed';
-      }
-      const openStripeRoute = async (
-        endpoint: '/api/billing/stripe/checkout' | '/api/billing/stripe/seats',
-        body?: Record<string, unknown>
-      ) => {
-        const response = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify(body ?? {}),
-        });
-        const payload = (await response.json().catch(() => null)) as { error?: string; url?: string } | null;
-        if (!response.ok || !payload?.url) {
-          throw new Error(payload?.error ?? 'Failed to open billing');
-        }
-        window.location.href = payload.url;
-      };
-
-      if ('source' in entitlement && entitlement.source === 'stripe' && entitlement.is_active) {
-        const response = await fetch('/api/billing/stripe/seats', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ seats: targetSeats }),
-        });
-        const payload = (await response.json().catch(() => null)) as BillingMutationResponse | null;
-        if (!response.ok) {
-          throw new Error(payload?.error ?? 'Failed to update paid seats');
-        }
-        if (payload?.url) {
-          window.location.href = payload.url;
-          return 'redirected';
-        }
-        if (options?.showNotice !== false) {
-          const updatedSeats = payload?.maxSeats ?? targetSeats;
-          setNotice(
-            `Paid seats updated from ${currentSeats} to ${updatedSeats}. Admins remain free.`
-          );
-        }
-        await fetchMembers();
-        return 'updated';
-      }
-
-      if ('source' in entitlement && entitlement.source === 'apple' && entitlement.is_active) {
-        throw new Error('Seat changes for Apple billing are not supported here yet.');
-      }
-
-      if ('upgrade_price_id' in entitlement && entitlement.upgrade_price_id) {
-        await openStripeRoute('/api/billing/stripe/checkout', {
-          priceId: entitlement.upgrade_price_id,
-          seats: targetSeats,
-        });
-        return 'redirected';
-      }
-
-      window.location.href = `/subscribe?seats=${encodeURIComponent(String(targetSeats))}`;
-      return 'redirected';
-    } catch (err) {
-      setBillingError(err instanceof Error ? err.message : 'Failed to open billing');
-      return 'failed';
-    } finally {
-      setOpeningBilling(false);
-    }
-  }, [actorRole, fetchMembers, seatUsage?.maxSeats]);
-
   const handleCreateInvite = useCallback(async ({
     emails,
     role,
-    additionalSeats,
   }: {
     emails: string[];
     role: 'admin' | 'member';
-    additionalSeats: number;
   }) => {
     if (!currentWorkspaceId) return;
     setInviteError(null);
-    setBillingError(null);
     try {
-      if (!isTrialActive && role === 'member' && additionalSeats > 0) {
-        const seatUpdateResult = await handleAdjustSeats(additionalSeats, { showNotice: false });
-        if (seatUpdateResult !== 'updated') {
-          return;
-        }
-      }
-
       await runAction('invite:create', async () => {
         const uniqueEmails: string[] = [];
         const seen = new Set<string>();
@@ -477,7 +351,7 @@ export function TeamMembersTab(props: TeamMembersTabProps) {
       setInviteError(message);
       setError(message);
     }
-  }, [copyInviteLink, currentWorkspaceId, fetchMembers, handleAdjustSeats, isTrialActive, runAction]);
+  }, [copyInviteLink, currentWorkspaceId, fetchMembers, runAction]);
 
   const handleResendInvite = useCallback(async (inviteId: string) => {
     if (!currentWorkspaceId) return;
@@ -634,16 +508,11 @@ export function TeamMembersTab(props: TeamMembersTabProps) {
           setInviteDialogOpen(open);
           if (!open) {
             setInviteError(null);
-            setBillingError(null);
           }
         }}
         actorRole={actorRole}
-        seatsRemaining={seatUsage?.seatsRemaining ?? 0}
-        isTrialActive={isTrialActive}
         isSubmitting={actionKey === 'invite:create'}
-        isOpeningBilling={openingBilling}
         error={inviteError}
-        billingError={billingError}
         onSubmit={handleCreateInvite}
       />
       <Dialog
@@ -724,6 +593,23 @@ export function TeamMembersTab(props: TeamMembersTabProps) {
           <CardContent className="py-3 text-sm">
             <span className="font-medium">Needs attention:</span>{' '}
             <span className="text-muted-foreground">{attentionSummary}</span>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {rosterMembers.every((member) => member.is_current_user) && pendingInvites.length === 0 ? (
+        <Card className="border-dashed">
+          <CardContent className="flex flex-col items-start justify-between gap-4 py-6 sm:flex-row sm:items-center">
+            <div>
+              <p className="font-semibold">Build your team</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Invite teammates to collaborate on your shared campaign. Teammates are included at no extra cost.
+              </p>
+            </div>
+            <Button type="button" onClick={() => setInviteDialogOpen(true)}>
+              <MailPlus className="mr-2 h-4 w-4" />
+              Invite teammates
+            </Button>
           </CardContent>
         </Card>
       ) : null}
@@ -863,9 +749,9 @@ export function TeamMembersTab(props: TeamMembersTabProps) {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-4">
           <div>
-            <CardTitle className="text-base">Seats</CardTitle>
+            <CardTitle className="text-base">Team access</CardTitle>
             <p className="mt-1 text-sm text-muted-foreground">
-              Paid seats apply to members only. Admins are free.
+              Invite and manage teammates at no additional cost.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -890,25 +776,19 @@ export function TeamMembersTab(props: TeamMembersTabProps) {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap gap-2">
-            <Badge variant="secondary">
-              {seatUsage?.seatsUsed ?? 0} seats used
-            </Badge>
             <Badge variant="outline">
               {seatUsage?.pendingInvites ?? 0} pending invites
             </Badge>
             <Badge variant="outline">
               {seatUsage?.activeMembers ?? 0} active members
             </Badge>
-            <Badge variant="outline">
-              {seatUsage?.activeAdmins ?? 0} admin seats
-            </Badge>
+            <Badge variant="outline">{seatUsage?.activeAdmins ?? 0} admins</Badge>
           </div>
           <p className="text-xs text-muted-foreground">
-            {seatUsage?.seatsRemaining ?? 0} paid seat{(seatUsage?.seatsRemaining ?? 0) === 1 ? '' : 's'} remaining
+            Teammates are included with this workspace
             {' • '}
             {seatUsage?.pendingAdminInvites ?? 0} admin invite{(seatUsage?.pendingAdminInvites ?? 0) === 1 ? '' : 's'} pending
           </p>
-          {billingError ? <p className="text-sm text-destructive">{billingError}</p> : null}
         </CardContent>
       </Card>
 

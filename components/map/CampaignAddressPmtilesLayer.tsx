@@ -589,6 +589,9 @@ export function CampaignAddressPmtilesLayer({
         source: SOURCE_ID,
         minzoom: 12,
         filter: getLayerFilter('Polygon'),
+        layout: {
+          'fill-extrusion-edge-radius': 0.2,
+        },
         paint: {
           'fill-extrusion-color': addressColorExpression,
           'fill-extrusion-opacity': 0.96,
@@ -596,6 +599,7 @@ export function CampaignAddressPmtilesLayer({
           'fill-extrusion-base': 0,
           'fill-extrusion-vertical-gradient': true,
           'fill-extrusion-emissive-strength': 0.45,
+          'fill-extrusion-rounded-roof': true,
         },
       } as mapboxgl.AnyLayer);
 
@@ -719,6 +723,9 @@ export function CampaignAddressPmtilesLayer({
         'source-layer': source.sourceLayer,
         minzoom: source.minzoom,
         filter: getLayerFilter('Polygon'),
+        layout: {
+          'fill-extrusion-edge-radius': 0.2,
+        },
         paint: {
           'fill-extrusion-color': addressColorExpression,
           'fill-extrusion-opacity': 0.96,
@@ -726,6 +733,7 @@ export function CampaignAddressPmtilesLayer({
           'fill-extrusion-base': 0,
           'fill-extrusion-vertical-gradient': true,
           'fill-extrusion-emissive-strength': 0.45,
+          'fill-extrusion-rounded-roof': true,
         },
       } as mapboxgl.AnyLayer);
 

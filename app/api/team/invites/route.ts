@@ -6,8 +6,6 @@ import {
   buildJoinUrl,
   createWorkspaceInviteRecord,
   findPendingWorkspaceInviteByEmail,
-  getSeatUsage,
-  getWorkspaceTrialState,
   listPendingWorkspaceInvites,
   normalizeInviteEmail,
   normalizePendingInviteRole,
@@ -16,18 +14,6 @@ import {
 } from '@/app/api/team/_lib/manage';
 
 const INVITE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
-
-function isSeatLimitError(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false;
-  const maybeError = error as { message?: string; details?: string; code?: string };
-  return (
-    maybeError.code === 'P0001' ||
-    (typeof maybeError.message === 'string' &&
-      maybeError.message.toLowerCase().includes('workspace paid seat limit reached')) ||
-    (typeof maybeError.details === 'string' &&
-      maybeError.details.toLowerCase().includes('max_seats'))
-  );
-}
 
 function isMissingWorkspaceMemberEmailFunction(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
@@ -90,34 +76,6 @@ async function workspaceAlreadyHasMemberEmail(
       typeof authUser?.email === 'string' &&
       authUser.email.trim().toLowerCase() === normalizedTargetEmail
   );
-}
-
-async function ensureInviteWithinSeatLimit(
-  admin: ReturnType<typeof createAdminClient>,
-  workspaceId: string,
-  role: 'admin' | 'member',
-  inviteId: string,
-  options?: { skipSeatLimit?: boolean }
-): Promise<{ ok: true } | { ok: false; message: string }> {
-  if (role === 'admin' || options?.skipSeatLimit) {
-    return { ok: true };
-  }
-
-  const seatUsage = await getSeatUsage(admin, workspaceId);
-  if (seatUsage.seatsUsed <= seatUsage.maxSeats) {
-    return { ok: true };
-  }
-
-  await updateWorkspaceInviteRecord(admin, inviteId, {
-    status: 'canceled',
-    updated_at: new Date().toISOString(),
-  });
-
-  return {
-    ok: false,
-    message:
-      'All paid seats are currently allocated. Increase seats before inviting another member.',
-  };
 }
 
 async function getWorkspaceName(
@@ -224,20 +182,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const trialState = await getWorkspaceTrialState(admin, context.workspaceId);
-    const seatUsage = await getSeatUsage(admin, context.workspaceId);
-    const inviteConsumesPaidSeat = requestedRole !== 'admin';
-    if (
-      inviteConsumesPaidSeat &&
-      !trialState.isTrialActive &&
-      seatUsage.seatsUsed >= seatUsage.maxSeats
-    ) {
-      return NextResponse.json(
-        { error: 'All paid seats are currently allocated. Increase seats before inviting another member.' },
-        { status: 409 }
-      );
-    }
-
     const now = new Date();
     const { data: existingInvite, error: existingInviteError } =
       await findPendingWorkspaceInviteByEmail(
@@ -316,27 +260,7 @@ export async function POST(request: NextRequest) {
 
       if (refreshError || !refreshedInvite) {
         console.error('[team/invites] refresh stale invite error:', refreshError);
-        if (isSeatLimitError(refreshError)) {
-          return NextResponse.json(
-            {
-              error:
-                'All paid seats are currently allocated. Increase seats before inviting another member.',
-            },
-            { status: 409 }
-          );
-        }
         return NextResponse.json({ error: 'Failed to create invite' }, { status: 500 });
-      }
-
-      const refreshedSeatCheck = await ensureInviteWithinSeatLimit(
-        admin,
-        context.workspaceId,
-        requestedRole,
-        refreshedInvite.id,
-        { skipSeatLimit: trialState.isTrialActive }
-      );
-      if (!refreshedSeatCheck.ok) {
-        return NextResponse.json({ error: refreshedSeatCheck.message }, { status: 409 });
       }
 
       const joinUrl = refreshedInvite.token ? buildJoinUrl(request, refreshedInvite.token) : '';
@@ -393,27 +317,7 @@ export async function POST(request: NextRequest) {
 
     if (error || !invite) {
       console.error('[team/invites] create error:', error);
-      if (isSeatLimitError(error)) {
-        return NextResponse.json(
-          {
-            error:
-              'All paid seats are currently allocated. Increase seats before inviting another member.',
-          },
-          { status: 409 }
-        );
-      }
       return NextResponse.json({ error: 'Failed to create invite' }, { status: 500 });
-    }
-
-    const seatCheck = await ensureInviteWithinSeatLimit(
-      admin,
-      context.workspaceId,
-      requestedRole,
-      invite.id,
-      { skipSeatLimit: trialState.isTrialActive }
-    );
-    if (!seatCheck.ok) {
-      return NextResponse.json({ error: seatCheck.message }, { status: 409 });
     }
 
     const joinUrl = invite.token ? buildJoinUrl(request, invite.token) : '';

@@ -71,7 +71,23 @@ export default function IntegrationsPage() {
   const isOnboarding = searchParams.get('onboarding') === '1';
   const { currentWorkspaceId, currentWorkspace } = useWorkspace();
   const [loading, setLoading] = useState(true);
+  const [canUseIntegrations, setCanUseIntegrations] = useState<boolean | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetch('/api/access/state', { credentials: 'include' })
+      .then((response) => response.json())
+      .then((payload) => {
+        if (active) setCanUseIntegrations(payload?.features?.integrations !== false);
+      })
+      .catch(() => {
+        if (active) setCanUseIntegrations(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [currentWorkspaceId]);
   const [isStartingOAuth, setIsStartingOAuth] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [isTestPushing, setIsTestPushing] = useState(false);
@@ -1127,6 +1143,27 @@ export default function IntegrationsPage() {
         <div className="text-center">
           <div className="text-gray-600 dark:text-foreground/80">Loading...</div>
         </div>
+      </div>
+    );
+  }
+
+  if (!isOnboarding && canUseIntegrations === false) {
+    return (
+      <div className="min-h-screen bg-gray-50 px-4 py-10 dark:bg-background">
+        <Card className="mx-auto max-w-2xl">
+          <CardHeader>
+            <Badge className="mb-2 w-fit">Pro</Badge>
+            <CardTitle>Integrations are included with Pro</CardTitle>
+            <CardDescription>
+              Upgrade your workspace for CRM connections, automations, advanced reporting, and unlimited campaigns. Your whole team is included.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button onClick={() => router.push('/subscribe?reason=integrations')}>
+              View Pro workspace plans
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     );
   }

@@ -107,10 +107,12 @@ async function createSelfServeCampaignFallback(params: {
   const existingCampaignId = await findFirstWorkspaceCampaign(params.admin, params.workspaceId);
   if (existingCampaignId) return existingCampaignId;
 
-  const campaignName =
-    typeof params.name === 'string' && params.name.trim()
-      ? `${params.name.trim()} Campaign`
-      : SELF_SERVE_CAMPAIGN_NAME;
+  const requestedName = typeof params.name === 'string' ? params.name.trim() : '';
+  const campaignName = requestedName
+    ? /campaign$/i.test(requestedName)
+      ? requestedName
+      : `${requestedName} Campaign`
+    : SELF_SERVE_CAMPAIGN_NAME;
   const basePayload = {
     owner_id: params.userId,
     workspace_id: params.workspaceId,
@@ -168,6 +170,17 @@ async function createSelfServeCampaignFallback(params: {
   }
 
   if (error || !campaign?.id) {
+    // Onboarding completion can be retried, and two requests may race after auth
+    // redirects. If another request created the included campaign first, treat
+    // that campaign as the successful result instead of failing the whole flow.
+    const recoveredCampaignId = await findFirstWorkspaceCampaign(params.admin, params.workspaceId);
+    if (recoveredCampaignId) {
+      console.warn(
+        '[onboarding/complete] campaign insert failed after a campaign was already created; recovering existing campaign:',
+        error
+      );
+      return recoveredCampaignId;
+    }
     console.error('[onboarding/complete] self-serve fallback campaign insert failed:', error);
     throw new Error('Failed to create starter campaign.');
   }
@@ -1120,6 +1133,7 @@ export async function POST(request: NextRequest) {
     }
 
     const ownerInviteMembersPath = '/settings/integrations?onboarding=1';
+    const hasAccess = isSelfServeDemoCompletion || isValidPartnerExclusiveOffer;
     const nextPath = hasAccess ? ownerInviteMembersPath : '/subscribe';
     const openAppAfterCompletion = body?.openAppAfterCompletion === true;
     const openCampaignCreateAfterCompletion = body?.openCampaignCreateAfterCompletion === true;

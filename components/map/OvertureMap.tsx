@@ -241,12 +241,16 @@ export function OvertureMap() {
               source: sourceId,
               minzoom: 13,
               filter: ['==', '$type', 'Polygon'],
+              layout: {
+                'fill-extrusion-edge-radius': 0.6,
+              },
               paint: {
                 'fill-extrusion-color': '#6b7280', // Gray
                 'fill-extrusion-opacity': 0.9,
                 'fill-extrusion-height': ['get', 'height'],
                 'fill-extrusion-base': ['get', 'min_height'],
                 'fill-extrusion-vertical-gradient': true,
+                'fill-extrusion-rounded-roof': true,
               },
             });
           }

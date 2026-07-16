@@ -86,6 +86,21 @@ export async function GET(request: NextRequest) {
         isAmbassador,
         ambassadorApplicationId: approvedAmbassador?.id ?? null,
         plan: isAmbassador ? 'ambassador' : 'free',
+        campaignLimit: isAmbassador ? null : 1,
+        campaignCount: 0,
+        features: {
+          teamInvites: true,
+          roles: true,
+          assignments: true,
+          sharedMap: true,
+          leadCapture: true,
+          mobileApps: true,
+          basicPerformance: true,
+          advancedReporting: isAmbassador,
+          automations: isAmbassador,
+          integrations: isAmbassador,
+          unlimitedCampaigns: isAmbassador,
+        },
         planBadgeLabel: isAmbassador ? 'AMBASSADOR' : null,
         isSalesperson,
         salesperson,
@@ -114,6 +129,21 @@ export async function GET(request: NextRequest) {
         isAmbassador,
         ambassadorApplicationId: approvedAmbassador?.id ?? null,
         plan: isAmbassador ? 'ambassador' : 'free',
+        campaignLimit: isAmbassador ? null : 1,
+        campaignCount: 0,
+        features: {
+          teamInvites: true,
+          roles: true,
+          assignments: true,
+          sharedMap: true,
+          leadCapture: true,
+          mobileApps: true,
+          basicPerformance: true,
+          advancedReporting: isAmbassador,
+          automations: isAmbassador,
+          integrations: isAmbassador,
+          unlimitedCampaigns: isAmbassador,
+        },
         planBadgeLabel: isAmbassador ? 'AMBASSADOR' : null,
         isSalesperson,
         salesperson,
@@ -152,6 +182,14 @@ export async function GET(request: NextRequest) {
       : paidWorkspaceAccess
         ? 'pro'
         : 'free';
+    const hasProFeatures = access.isFounder || isAmbassador || paidWorkspaceAccess;
+    const { count: campaignCount, error: campaignCountError } = await admin
+      .from('campaigns')
+      .select('id', { count: 'exact', head: true })
+      .eq('workspace_id', workspace.id);
+    if (campaignCountError) {
+      console.warn('[access/state] campaign count lookup failed', campaignCountError);
+    }
 
     return NextResponse.json({
       userId: requestUser.id,
@@ -164,6 +202,21 @@ export async function GET(request: NextRequest) {
       billableSeats: Math.max(1, workspace.max_seats ?? 1, billableSeats),
       hasAccess,
       plan,
+      campaignLimit: hasProFeatures ? null : 1,
+      campaignCount: campaignCount ?? 0,
+      features: {
+        teamInvites: true,
+        roles: true,
+        assignments: true,
+        sharedMap: true,
+        leadCapture: true,
+        mobileApps: true,
+        basicPerformance: true,
+        advancedReporting: hasProFeatures,
+        automations: hasProFeatures,
+        integrations: hasProFeatures,
+        unlimitedCampaigns: hasProFeatures,
+      },
       subscriptionStatus: status,
       trialEndsAt: workspace.trial_ends_at ?? null,
       trialDaysRemaining: null,

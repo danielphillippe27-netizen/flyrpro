@@ -462,35 +462,35 @@ export default function AppTopHeader() {
               alt="WolfGrid"
               width={120}
               height={60}
-              className="h-20 w-auto max-w-[min(58vw,360px)] shrink-0 object-contain object-left dark:hidden"
+              className="h-9 w-auto max-w-[min(58vw,162px)] shrink-0 object-contain object-left dark:hidden"
             />
             <Image
               src="/brand/wolfgrid-header-dark.svg"
               alt="WolfGrid"
               width={120}
               height={60}
-              className="hidden h-20 w-auto max-w-[min(58vw,360px)] shrink-0 object-contain object-left dark:block"
+              className="hidden h-9 w-auto max-w-[min(58vw,162px)] shrink-0 object-contain object-left dark:block"
             />
 
             {accessLevel === 'salesperson' ? (
               <div className="hidden min-w-0 text-sm font-medium text-foreground md:flex md:items-center">
-                <span className="mr-2 text-muted-foreground">/</span>
+                <span className="mr-3 text-muted-foreground">/</span>
                 <span className="truncate align-middle">Salesperson</span>
-                <span className="mx-2 text-muted-foreground">/</span>
+                <span className="mx-3 text-muted-foreground">/</span>
                 <span className="truncate text-muted-foreground">{displayName}</span>
               </div>
             ) : isFounder ? (
               <div className="hidden min-w-0 text-sm font-medium text-foreground md:flex md:items-center">
-                <span className="mr-2 text-muted-foreground">/</span>
+                <span className="mr-3 text-muted-foreground">/</span>
                 <span className="truncate align-middle">{currentWorkspace?.name ?? 'Workspace'}</span>
-                <span className="mx-2 text-muted-foreground">/</span>
+                <span className="mx-3 text-muted-foreground">/</span>
                 <span className="capitalize text-muted-foreground">Founder</span>
               </div>
             ) : currentWorkspace && currentRole ? (
               <div className="hidden min-w-0 text-sm font-medium text-foreground md:flex md:items-center">
-                <span className="mr-2 text-muted-foreground">/</span>
+                <span className="mr-3 text-muted-foreground">/</span>
                 <span className="truncate align-middle">{currentWorkspace?.name ?? 'Workspace'}</span>
-                <span className="mx-2 text-muted-foreground">/</span>
+                <span className="mx-3 text-muted-foreground">/</span>
                 <span className="capitalize text-muted-foreground">{currentRole}</span>
               </div>
             ) : null}
@@ -511,8 +511,10 @@ export default function AppTopHeader() {
                 variant="outline"
                 size="sm"
                 onClick={() => setFeedbackOpen(true)}
-                className="px-2 sm:px-3"
+                className="px-2 transition-shadow sm:px-3 data-[feedback-guided=true]:ring-4 data-[feedback-guided=true]:ring-red-400/60 data-[feedback-guided=true]:ring-offset-2 motion-safe:data-[feedback-guided=true]:animate-pulse dark:data-[feedback-guided=true]:ring-red-500/70 dark:data-[feedback-guided=true]:ring-offset-background"
                 data-self-serve-demo-flow="true"
+                data-feedback-trigger="true"
+                data-feedback-guided="false"
               >
                 <span>Feedback ?</span>
               </Button>

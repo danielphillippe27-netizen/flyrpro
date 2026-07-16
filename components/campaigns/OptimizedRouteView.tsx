@@ -1108,6 +1108,9 @@ export function OptimizedRouteView({ campaignId, campaignName, addresses }: Opti
         type: 'fill-extrusion',
         source: 'route-footprints-source',
         minzoom: 12,
+        layout: {
+          'fill-extrusion-edge-radius': 0.6,
+        },
         paint: {
           'fill-extrusion-color': ['get', 'color'],
           'fill-extrusion-height': 7.5,
@@ -1115,6 +1118,7 @@ export function OptimizedRouteView({ campaignId, campaignName, addresses }: Opti
           'fill-extrusion-opacity': 1,
           'fill-extrusion-vertical-gradient': true,
           'fill-extrusion-emissive-strength': 0.85,
+          'fill-extrusion-rounded-roof': true,
         },
       });
       m.on('click', 'route-footprints', handleTapSelection);

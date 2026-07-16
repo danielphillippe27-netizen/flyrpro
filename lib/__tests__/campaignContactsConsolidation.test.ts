@@ -262,6 +262,30 @@ await test('ContactsService.fetchContacts: applies workspaceId filter', async ()
   assert.ok(hasWorkspaceFilter, 'Expected workspace_id eq filter on contacts query');
 });
 
+await test('ContactsService.fetchContacts: applies user and workspace filters to every lead source', async () => {
+  const mock = makeMockClient([makeContact()]);
+  injectClient(ContactsService, mock);
+
+  await ContactsService.fetchContacts('u-1', 'ws-42');
+
+  for (const table of ['contacts', 'field_leads']) {
+    const calls = mock.calls.filter((call) => call.table === table);
+    assert.ok(calls.length > 0, `Expected a query to ${table}`);
+    assert.ok(
+      calls.some((call) =>
+        call.ops.some((op) => op.type === 'eq' && op.args[0] === 'user_id' && op.args[1] === 'u-1')
+      ),
+      `Expected user_id eq filter on ${table}`
+    );
+    assert.ok(
+      calls.some((call) =>
+        call.ops.some((op) => op.type === 'eq' && op.args[0] === 'workspace_id' && op.args[1] === 'ws-42')
+      ),
+      `Expected workspace_id eq filter on ${table}`
+    );
+  }
+});
+
 await test('ContactsService.fetchContacts: returns empty array on empty result', async () => {
   const mock = makeMockClient([]);
   injectClient(ContactsService, mock);

@@ -84,6 +84,7 @@ function isWorkspaceCampaignLimitResponse(payload: unknown): boolean {
   if (!payload || typeof payload !== 'object') return false;
   const candidate = payload as { code?: unknown; error?: unknown; message?: unknown };
   return (
+    candidate.code === 'campaign_limit_reached' ||
     candidate.code === 'workspace_campaign_limit_reached' ||
     (typeof candidate.error === 'string' && candidate.error.includes('included campaign')) ||
     (typeof candidate.message === 'string' && candidate.message.includes('workspace_campaign_limit_reached'))

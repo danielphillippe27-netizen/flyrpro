@@ -170,8 +170,11 @@ async function createSelfServeCampaignIfNeeded(params: {
 
   if (existingCampaign?.id) return existingCampaign.id;
 
-  const campaignName = params.draft.name?.trim()
-    ? `${params.draft.name.trim()} Campaign`
+  const requestedName = params.draft.name?.trim() ?? '';
+  const campaignName = requestedName
+    ? /campaign$/i.test(requestedName)
+      ? requestedName
+      : `${requestedName} Campaign`
     : SELF_SERVE_CAMPAIGN_NAME;
 
   const { data: campaign, error } = await params.admin

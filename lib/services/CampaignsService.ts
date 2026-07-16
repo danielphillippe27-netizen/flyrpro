@@ -83,6 +83,11 @@ function normalizeAddressIdFilter(addressIds: string[] | null | undefined): stri
   );
 }
 
+function normalizeCampaignName(value: unknown): string {
+  const name = String(value || 'Unnamed Campaign').trim();
+  return /^first campaign campaign$/i.test(name) ? 'FIRST CAMPAIGN' : name;
+}
+
 export class CampaignsService {
   private static client = createClient();
 
@@ -95,7 +100,7 @@ export class CampaignsService {
     return {
       ...campaign,
       owner_id: String(campaign.owner_id || campaign.user_id || ''),
-      name: String(campaign.title || campaign.name || 'Unnamed Campaign'),
+      name: normalizeCampaignName(campaign.title || campaign.name),
       type: (campaign.type || 'flyer') as CampaignV2['type'],
       progress,
       progress_pct: progressPct,

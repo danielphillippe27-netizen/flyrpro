@@ -277,23 +277,21 @@ export function CampaignListSidebar({
       className="shrink-0 flex flex-col border-r border-border bg-white dark:bg-sidebar transition-[width] duration-200 ease-out overflow-hidden"
       style={{ width }}
     >
-      <div className="p-3 pb-3 border-b border-border">
-        <div className="flex items-center justify-end gap-2 mb-2">
-          <button
-            onClick={onToggleCollapse}
-            className="flex items-center justify-center w-[18px] h-[18px] rounded-sm bg-transparent hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0 ml-auto"
-            aria-label="Hide campaign list"
-            title="Hide campaign list"
-          >
-            <ChevronsLeft className="w-3.5 h-3.5" />
-          </button>
-        </div>
+      <div className="relative p-3 border-b border-border">
+        <button
+          onClick={onToggleCollapse}
+          className="absolute right-3 top-1 flex h-[18px] w-[18px] items-center justify-center rounded-sm bg-transparent text-muted-foreground transition-colors hover:bg-muted hover:text-foreground cursor-pointer"
+          aria-label="Hide campaign list"
+          title="Hide campaign list"
+        >
+          <ChevronsLeft className="w-3.5 h-3.5" />
+        </button>
         {workspaceRole === 'owner' && members.length > 0 ? (
-          <div className="mb-2 flex items-center gap-2">
+          <div className="mb-2 flex items-center gap-2 pr-[38px]">
             <span className="text-xs text-muted-foreground">Members:</span>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="h-8 min-w-20 justify-between gap-1 px-2.5 text-xs">
+                <Button variant="outline" size="sm" className="h-8 min-w-20 flex-1 justify-between gap-1 px-2.5 text-xs">
                   {memberIds.length === 0 ? 'All' : `${memberIds.length} selected`}
                   <ChevronDown className="h-3.5 w-3.5" />
                 </Button>
@@ -354,7 +352,7 @@ export function CampaignListSidebar({
         ) : null}
       </div>
 
-      <div className="flex-1 flex flex-col min-h-0 px-2 pt-2">
+      <div className="flex-1 flex flex-col min-h-0 px-3 pt-2">
         <Tabs value={statusTab} onValueChange={(v) => setStatusTab(v as StatusTab)} className="flex flex-col flex-1 min-h-0 w-full">
           <TabsList className="w-full grid grid-cols-2 h-8 bg-muted/50 dark:bg-muted/30 p-0.5 rounded-lg">
             <TabsTrigger value="active" className="text-xs font-medium rounded-md">

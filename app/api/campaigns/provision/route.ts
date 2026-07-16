@@ -54,6 +54,7 @@ import {
   APP_LIMIT_SCAN_COUNT,
   CampaignHomeLimitError,
   MAX_CAMPAIGN_HOMES,
+  campaignHomeCapNotice,
   campaignHomeLimitErrorPayload,
 } from '@/lib/services/campaignHomeLimits';
 
@@ -1499,13 +1500,15 @@ export async function POST(request: NextRequest) {
           let snapshot = rawSnapshot;
           let addressesToInsert = resolvedAddresses;
           const homeCapNotice = resolvedHomeCount > MAX_CAMPAIGN_HOMES
-            ? `This territory has more than ${MAX_CAMPAIGN_HOMES.toLocaleString()} homes. The free demo loaded the first ${MAX_CAMPAIGN_HOMES.toLocaleString()} homes so your map opens quickly.`
+            ? campaignHomeCapNotice(resolvedHomeCount)
             : null;
 
           await updateCampaignProvision(supabase, campaignId!, {
             provision_source: dbProvisionSource(addressSource),
             provision_phase: 'source_probed',
             data_quality_reason: homeCapNotice,
+            home_limit_applied: resolvedHomeCount > MAX_CAMPAIGN_HOMES,
+            discovered_home_count: resolvedHomeCount,
           });
 
           let finalAddressCount = existingAddressCount;

@@ -8,6 +8,17 @@ export const CAMPAIGN_HOME_LIMIT_MESSAGE =
 export const CAMPAIGN_TOO_LARGE_FOR_APP_MESSAGE =
   'This area has more than 2,000 homes, which is too big for the app. Draw a much smaller block.';
 
+export const CAMPAIGN_HOME_CAP_NOTICE_PREFIX = 'Campaign home limit applied:';
+
+export function campaignHomeCapNotice(homeCount?: number): string {
+  const countDetail =
+    typeof homeCount === 'number' && Number.isFinite(homeCount)
+      ? ` This area contains ${Math.floor(homeCount).toLocaleString()} homes.`
+      : '';
+
+  return `${CAMPAIGN_HOME_CAP_NOTICE_PREFIX}${countDetail} We drew the first ${MAX_CAMPAIGN_HOMES.toLocaleString()} homes. For future reference, campaigns have a ${MAX_CAMPAIGN_HOMES.toLocaleString()}-home limit.`;
+}
+
 export type CampaignHomeLimitCode =
   | 'campaign_home_limit_exceeded'
   | 'campaign_too_large_for_app';

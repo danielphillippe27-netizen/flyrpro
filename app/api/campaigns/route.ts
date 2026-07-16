@@ -317,7 +317,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           error: 'This workspace already has its included campaign. Upgrade to create more campaigns.',
-          code: 'workspace_campaign_limit_reached',
+          code: 'campaign_limit_reached',
+          reason: 'workspace_campaign_limit_reached',
         },
         { status: 403 }
       );
@@ -407,7 +408,8 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(
           {
             error: 'This workspace already has its included campaign. Upgrade to create more campaigns.',
-            code: 'workspace_campaign_limit_reached',
+            code: 'campaign_limit_reached',
+            reason: 'workspace_campaign_limit_reached',
           },
           { status: 403 }
         );

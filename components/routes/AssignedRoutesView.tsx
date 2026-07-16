@@ -625,6 +625,9 @@ export function AssignedRoutesView({
         type: 'fill-extrusion',
         source: 'assigned-routes-footprints-source',
         minzoom: 12,
+        layout: {
+          'fill-extrusion-edge-radius': 0.6,
+        },
         paint: {
           'fill-extrusion-color': footprintColorExpression,
           'fill-extrusion-height': 7.5,
@@ -632,6 +635,7 @@ export function AssignedRoutesView({
           'fill-extrusion-opacity': 1,
           'fill-extrusion-vertical-gradient': true,
           'fill-extrusion-emissive-strength': 0.85,
+          'fill-extrusion-rounded-roof': true,
         },
       });
     }
@@ -649,6 +653,9 @@ export function AssignedRoutesView({
         type: 'fill-extrusion',
         source: 'assigned-routes-address-cylinders-source',
         minzoom: 12,
+        layout: {
+          'fill-extrusion-edge-radius': 0.2,
+        },
         paint: {
           'fill-extrusion-color': footprintColorExpression,
           'fill-extrusion-height': ADDRESS_CYLINDER_HEIGHT_M,
@@ -656,6 +663,7 @@ export function AssignedRoutesView({
           'fill-extrusion-opacity': 1,
           'fill-extrusion-vertical-gradient': true,
           'fill-extrusion-emissive-strength': 0.85,
+          'fill-extrusion-rounded-roof': true,
         },
       });
     }

@@ -46,6 +46,10 @@ import {
   parseLegacyCampaignText,
 } from '@/lib/campaignLegacyFields';
 import { useTheme } from '@/lib/theme-provider';
+import {
+  CAMPAIGN_HOME_CAP_NOTICE_PREFIX,
+  campaignHomeCapNotice as buildCampaignHomeCapNotice,
+} from '@/lib/services/campaignHomeLimits';
 
 const FLYER_MAX_SIZE_MB = 10;
 
@@ -1347,10 +1351,11 @@ export default function CampaignDetailPage() {
     };
   });
   const hasGeneratedAdvancedQr = formattedRecipients.some((recipient) => Boolean(recipient.qr_code_base64));
-  const selfServeHomeCapNotice =
-    isSelfServeDemo &&
-    typeof campaign?.data_quality_reason === 'string' &&
-    campaign.data_quality_reason.includes('free demo loaded')
+  const campaignHomeCapNotice =
+    campaign?.home_limit_applied
+      ? buildCampaignHomeCapNotice(campaign.discovered_home_count ?? undefined)
+      : typeof campaign?.data_quality_reason === 'string' &&
+          campaign.data_quality_reason.startsWith(CAMPAIGN_HOME_CAP_NOTICE_PREFIX)
       ? campaign.data_quality_reason
       : null;
   const demoNextStep = SELF_SERVE_DEMO_NEXT_STEPS[demoNextStepIndex] ?? SELF_SERVE_DEMO_NEXT_STEPS[0];
@@ -1372,6 +1377,17 @@ export default function CampaignDetailPage() {
       )}
 
       <main className="w-full px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+        {campaignHomeCapNotice ? (
+          <div
+            role="status"
+            className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100"
+          >
+            <p className="text-sm font-semibold">This campaign area was over the home limit</p>
+            <p className="mt-1 text-sm leading-5">
+              {campaignHomeCapNotice.slice(CAMPAIGN_HOME_CAP_NOTICE_PREFIX.length).trim()}
+            </p>
+          </div>
+        ) : null}
         <StatsHeader stats={campaignStats} />
         {isSelfServeDemo ? (
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 shadow-sm dark:border-border dark:bg-card">
@@ -1496,16 +1512,6 @@ export default function CampaignDetailPage() {
                   <ArrowRight className="h-4 w-4" />
                 </Button>
               )}
-            </div>
-          </div>
-        ) : null}
-        {selfServeHomeCapNotice ? (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
-            <div className="flex flex-wrap items-start gap-3">
-              <Badge variant="outline" className="border-amber-300 bg-white text-amber-900 dark:border-amber-800 dark:bg-background dark:text-amber-100">
-                Free demo
-              </Badge>
-              <p className="min-w-0 flex-1">{selfServeHomeCapNotice}</p>
             </div>
           </div>
         ) : null}

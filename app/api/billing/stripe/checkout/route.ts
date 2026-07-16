@@ -16,7 +16,6 @@ import {
   isStripeNoSuchCustomerError,
 } from '@/app/lib/billing/stripe-errors';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
-import { getSeatUsage } from '@/app/api/team/_lib/manage';
 
 export async function POST(request: NextRequest) {
   try {
@@ -31,7 +30,6 @@ export async function POST(request: NextRequest) {
     let priceId = body?.priceId as string | undefined;
     const plan = body?.plan as 'annual' | 'monthly' | undefined;
     const currency = body?.currency as 'USD' | 'CAD' | undefined;
-    const requestedSeatsRaw = body?.seats;
 
     if (plan && currency) {
       const resolved = getProPriceId(plan, currency);
@@ -61,25 +59,13 @@ export async function POST(request: NextRequest) {
       .limit(1)
       .maybeSingle();
 
-    let workspaceSeats = 1;
-    let minimumBillableSeats = 1;
     let workspaceReferralCode: string | null = null;
     if (ownerMembership?.workspace_id) {
       const { data: workspace } = await admin
         .from('workspaces')
-        .select('max_seats, referral_code_used')
+        .select('referral_code_used')
         .eq('id', ownerMembership.workspace_id)
         .maybeSingle();
-      const workspaceMaxSeats = Math.max(1, workspace?.max_seats ?? 1);
-      minimumBillableSeats = await getSeatUsage(admin, ownerMembership.workspace_id, {
-        maxSeats: workspace?.max_seats ?? null,
-      })
-        .then((seatUsage) => Math.max(1, seatUsage.seatsUsed))
-        .catch((error) => {
-          console.warn('[billing/stripe/checkout] seat usage lookup failed; falling back to workspace max seats', error);
-          return workspaceMaxSeats;
-        });
-      workspaceSeats = Math.max(workspaceMaxSeats, minimumBillableSeats);
       workspaceReferralCode =
         typeof workspace?.referral_code_used === 'string' &&
         workspace.referral_code_used.trim().length > 0
@@ -87,20 +73,8 @@ export async function POST(request: NextRequest) {
           : null;
     }
 
-    const parsedRequestedSeats =
-      typeof requestedSeatsRaw === 'number' && Number.isFinite(requestedSeatsRaw)
-        ? Math.trunc(requestedSeatsRaw)
-        : NaN;
-    const quantity = Number.isFinite(parsedRequestedSeats) && parsedRequestedSeats > 0
-      ? Math.min(100, Math.max(minimumBillableSeats, parsedRequestedSeats))
-      : Math.min(100, workspaceSeats);
-    const seatDelta = quantity - workspaceSeats;
-    const seatSummaryMessage =
-      seatDelta > 0
-        ? `You are paying for ${quantity} total seat${quantity === 1 ? '' : 's'} (${workspaceSeats} current + ${seatDelta} added).`
-        : seatDelta < 0
-          ? `You are paying for ${quantity} total seat${quantity === 1 ? '' : 's'} (${workspaceSeats} current - ${Math.abs(seatDelta)} removed).`
-          : `You are paying for ${quantity} total seat${quantity === 1 ? '' : 's'}.`;
+    const quantity = 1;
+    const workspaceSummaryMessage = 'Your subscription covers one workspace and includes all teammates.';
 
     const entitlement = await getEntitlementForUser(userId);
     let customerId = entitlement.stripe_customer_id;
@@ -136,11 +110,6 @@ export async function POST(request: NextRequest) {
           {
             price: priceId,
             quantity,
-            adjustable_quantity: {
-              enabled: true,
-              minimum: minimumBillableSeats,
-              maximum: 100,
-            },
           },
         ],
         mode: 'subscription',
@@ -148,14 +117,15 @@ export async function POST(request: NextRequest) {
         cancel_url: `${appUrl}/subscribe`,
         metadata: {
           user_id: userId,
-          seats: String(quantity),
+          seats: '1',
+          billing_model: 'workspace',
           ...(workspaceReferralCode ? { referral_code: workspaceReferralCode } : {}),
         },
         custom_text: {
           submit: {
             message: isUsd
-              ? `${seatSummaryMessage} Amount charged in **USD**.`
-              : seatSummaryMessage,
+              ? `${workspaceSummaryMessage} Amount charged in **USD**.`
+              : workspaceSummaryMessage,
           },
         },
       };

@@ -114,6 +114,30 @@ const ASSIGNMENT_SELECTED_STROKE_COLOR = '#ffffff';
 const INFERRED_BUILDING_LINK_MAX_DISTANCE_M = 45;
 const EMPTY_SELECTED_ADDRESS_IDS: string[] = [];
 
+function applyBuildingSceneLighting(map: MapboxMap, isDarkMap: boolean) {
+  map.setLights([
+    {
+      id: 'wolfgrid-ambient-light',
+      type: 'ambient',
+      properties: {
+        color: isDarkMap ? '#9fb0c8' : '#dce8f5',
+        intensity: isDarkMap ? 0.38 : 0.5,
+      },
+    },
+    {
+      id: 'wolfgrid-sun-light',
+      type: 'directional',
+      properties: {
+        color: isDarkMap ? '#d8e4f2' : '#fff5df',
+        intensity: isDarkMap ? 0.72 : 0.8,
+        direction: [210, 38],
+        'cast-shadows': true,
+        'shadow-intensity': isDarkMap ? 0.62 : 0.48,
+      },
+    },
+  ]);
+}
+
 function describeRequestError(error: unknown): string {
   if (error instanceof Error) return `${error.name}: ${error.message}`;
   return String(error);
@@ -1009,16 +1033,16 @@ export function MapBuildingsLayer({
   const NEUTRAL_OUTLINE_COLOR = '#111827';
   const NEUTRAL_EXTRUSION_OPACITY = 1;
   const NEUTRAL_CIRCLE_OPACITY = 0.88;
-  const NEUTRAL_EXTRUSION_EMISSIVE_STRENGTH = 1;
+  const NEUTRAL_EXTRUSION_EMISSIVE_STRENGTH = 0.08;
   const getFootprintFillColor = (): string | ExpressionSpecification =>
     footprintStatusColors ? getColorExpression() : NEUTRAL_FOOTPRINT_COLOR;
   const getFootprintFillOpacity = (): number =>
     footprintStatusColors ? 1 : NEUTRAL_EXTRUSION_OPACITY;
   const getCircleOpacity = (): number =>
     footprintStatusColors ? 0.9 : NEUTRAL_CIRCLE_OPACITY;
-  const getFootprintVerticalGradient = (): boolean => false;
+  const getFootprintVerticalGradient = (): boolean => true;
   const getFootprintEmissiveStrength = (): number =>
-    footprintStatusColors ? 0.85 : NEUTRAL_EXTRUSION_EMISSIVE_STRENGTH;
+    footprintStatusColors ? 0.14 : NEUTRAL_EXTRUSION_EMISSIVE_STRENGTH;
   const forceBuildingLayerVisibility = () => {
     for (const id of [
       surfaceLayerId,
@@ -1956,6 +1980,9 @@ export function MapBuildingsLayer({
             source: sourceId,
             minzoom: CAMPAIGN_BUILDING_MIN_ZOOM,
             filter: getScopedGeometryFilter(polygonFilter, filterExpr),
+            layout: {
+              'fill-extrusion-edge-radius': 0.6,
+            },
             paint: {
               'fill-extrusion-color': getFootprintFillColor(),
               'fill-extrusion-vertical-gradient': getFootprintVerticalGradient(),
@@ -1963,6 +1990,12 @@ export function MapBuildingsLayer({
               'fill-extrusion-base': 0,
               'fill-extrusion-opacity': getFootprintFillOpacity(),
               'fill-extrusion-emissive-strength': getFootprintEmissiveStrength(),
+              'fill-extrusion-cast-shadows': true,
+              'fill-extrusion-ambient-occlusion-intensity': 0.35,
+              'fill-extrusion-ambient-occlusion-wall-radius': 3,
+              'fill-extrusion-ambient-occlusion-ground-radius': 4,
+              'fill-extrusion-ambient-occlusion-ground-attenuation': 0.65,
+              'fill-extrusion-rounded-roof': true,
             },
           };
           
@@ -2200,15 +2233,9 @@ export function MapBuildingsLayer({
 
         // Outline layer removed to eliminate dark shadow effect underneath buildings
 
-        // Set map lighting for 3D depth visualization
-        // Use 'map' anchor instead of 'viewport' to avoid lighting warnings and ensure consistent 3D depth
+        // Set ambient + directional scene lighting so extrusions can shade and cast shadows.
         try {
-          map.setLight({
-            anchor: 'map',
-            color: '#cfd8e3',
-            intensity: 0.35,
-            position: [1.15, 210, 30]
-          });
+          applyBuildingSceneLighting(map, Boolean(isDarkMap));
           ensure3dBuildingCamera(map);
         } catch (lightErr) {
           console.warn('[MapBuildingsLayer] Error setting map lighting:', lightErr);
@@ -2894,12 +2921,7 @@ export function MapBuildingsLayer({
     const applyLightingAndColors = () => {
       try {
         // Apply lighting for 3D depth
-        map.setLight({
-          anchor: 'map', // Use 'map' anchor to avoid viewport anchor warnings
-          color: '#cfd8e3',
-          intensity: 0.35,
-          position: [1.15, 210, 30]
-        });
+        applyBuildingSceneLighting(map, Boolean(isDarkMap));
 
         // Refresh colors after style change (ensures they're applied correctly)
         if (map.getLayer(layerId)) {
@@ -3133,6 +3155,36 @@ export function MapBuildingsLayer({
 
     return () => {
       supabase.removeChannel(channel);
+    };
+  }, [map, campaignId, getSupabase, fetchCampaignData, isCanonicalBundleControlled]);
+
+  // Campaign maps that own their data internally also need to refetch when a
+  // standalone field pin is created from Android or iOS.
+  useEffect(() => {
+    if (!map || !campaignId || isCanonicalBundleControlled) return;
+
+    const supabase = getSupabase();
+    const channel = supabase
+      .channel(createRealtimeChannelTopic(`manual-pins-realtime-${campaignId}`))
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'campaign_addresses',
+          filter: `campaign_id=eq.${campaignId}`,
+        },
+        (payload) => {
+          const inserted = toRecord(payload.new);
+          if (getStringRecordValue(inserted, 'match_source') !== 'field_manual_pin') return;
+          campaignDataLoadedRef.current = null;
+          void fetchCampaignData();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
     };
   }, [map, campaignId, getSupabase, fetchCampaignData, isCanonicalBundleControlled]);
 

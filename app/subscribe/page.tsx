@@ -53,6 +53,7 @@ const formatPrice = (amount: number, currency: 'USD' | 'CAD') => {
 function isCampaignLimitReason(reason: string | null | undefined): boolean {
   return (
     reason === 'campaign-limit' ||
+    reason === 'campaign_limit_reached' ||
     reason === 'workspace-campaign-limit' ||
     reason === 'workspace_campaign_limit_reached'
   );
@@ -63,7 +64,6 @@ function SubscribeContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const reason = searchParams.get('reason');
-  const requestedSeatsFromQuery = Number.parseInt(searchParams.get('seats') ?? '', 10);
   const [state, setState] = useState<AccessState | null>(null);
   const [loading, setLoading] = useState(true);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
@@ -72,10 +72,7 @@ function SubscribeContent() {
   const [plan, setPlan] = useState<'annual' | 'monthly'>('annual');
   const [currency, setCurrency] = useState<'USD' | 'CAD'>('USD');
   const [referralPreview, setReferralPreview] = useState<ReferralPreview | null>(null);
-  const [additionalSeats, setAdditionalSeats] = useState(0);
-  const [seatSelectionInitialized, setSeatSelectionInitialized] = useState(false);
-  const paidSeats = Math.max(1, state?.billableSeats ?? state?.maxSeats ?? 1);
-  const seats = paidSeats + additionalSeats;
+  const seats = 1;
 
   const annualBase = currency === 'CAD' ? 400 : 300;
   const annualRetailBase = annualBase * 2;
@@ -119,15 +116,6 @@ function SubscribeContent() {
       .catch(() => {});
     return () => { mounted = false; };
   }, [searchParams]);
-
-  useEffect(() => {
-    if (!state || seatSelectionInitialized) return;
-    const requestedSeats = Number.isFinite(requestedSeatsFromQuery) && requestedSeatsFromQuery > 0
-      ? requestedSeatsFromQuery
-      : paidSeats;
-    setAdditionalSeats(Math.max(0, requestedSeats - paidSeats));
-    setSeatSelectionInitialized(true);
-  }, [paidSeats, requestedSeatsFromQuery, seatSelectionInitialized, state]);
 
   const handleSignOut = async () => {
     setSigningOut(true);
@@ -314,49 +302,11 @@ function SubscribeContent() {
         )}
 
         <div className="relative z-10 mt-6 space-y-2.5">
-          <div className="rounded-2xl border border-white/12 bg-white/[0.04] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-sm font-semibold text-white">Seat summary</p>
-                <p className="mt-1 text-xs text-[#B2B2B2]">
-                  You are paying for {paidSeats} seat{paidSeats === 1 ? '' : 's'} now.
-                  Admins are free and do not count toward paid seats.
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setAdditionalSeats((value) => Math.max(0, value - 1))}
-                  className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-white/[0.04] text-white transition hover:bg-white/[0.08]"
-                  aria-label="Remove paid seat"
-                >
-                  -
-                </button>
-                <div className="min-w-24 text-center">
-                  <p className="text-xs uppercase tracking-[0.2em] text-[#8F8F8F]">Add</p>
-                  <p className="text-xl font-semibold text-white">{additionalSeats}</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setAdditionalSeats((value) => value + 1)}
-                  className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-white/[0.04] text-white transition hover:bg-white/[0.08]"
-                  aria-label="Add paid seat"
-                >
-                  +
-                </button>
-              </div>
-            </div>
-            <div className="mt-3 flex flex-wrap gap-2 text-xs text-[#C7C7C7]">
-              <span className="rounded-full border border-white/12 px-3 py-1">
-                {paidSeats} current paid
-              </span>
-              <span className="rounded-full border border-white/12 px-3 py-1">
-                +{additionalSeats} adding
-              </span>
-              <span className="rounded-full border border-red-400/35 bg-red-500/10 px-3 py-1 text-white">
-                {seats} billed seats total
-              </span>
-            </div>
+          <div className="rounded-2xl border border-white/12 bg-white/[0.04] p-4 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+            <p className="text-sm font-semibold text-white">One workspace. Your whole team.</p>
+            <p className="mt-1 text-xs text-[#B2B2B2]">
+              Invite teammates at no additional cost. Upgrade for unlimited campaigns and advanced tools.
+            </p>
           </div>
 
           <button
@@ -372,7 +322,7 @@ function SubscribeContent() {
             <div className="relative z-10">
               <p className="font-semibold text-white">Annual</p>
               <p className="text-xs text-[#B2B2B2]">
-                Billed at {formatPrice(annualTotal, currency)}/year for {seats} seat{seats === 1 ? '' : 's'}
+                Billed at {formatPrice(annualTotal, currency)}/workspace/year
               </p>
             </div>
             <div className="relative z-10 text-right">
@@ -403,7 +353,7 @@ function SubscribeContent() {
             <div className="relative z-10">
               <p className="font-semibold text-white">Monthly</p>
               <p className="text-xs text-[#B2B2B2]">
-                Billed at {formatPrice(monthlyTotal, currency)}/month for {seats} seat{seats === 1 ? '' : 's'}
+                Billed at {formatPrice(monthlyTotal, currency)}/workspace/month
               </p>
             </div>
             <div className="relative z-10 text-right">

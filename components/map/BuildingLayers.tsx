@@ -241,6 +241,9 @@ export function BuildingLayers({
               'source-layer': manifestBuildingLayer,
               minzoom: manifest.minzoom ?? 13,
               filter: ['==', '$type', 'Polygon'],
+              layout: {
+                'fill-extrusion-edge-radius': 0.6,
+              },
               paint: {
                 'fill-extrusion-color': [
                   'case',
@@ -264,6 +267,7 @@ export function BuildingLayers({
                   0,
                 ],
                 'fill-extrusion-vertical-gradient': true,
+                'fill-extrusion-rounded-roof': true,
               },
             });
           }

@@ -873,6 +873,7 @@ export function CampaignDetailMapView({
     mapReadyKey,
     optimizedKey,
     parcelsProcessing ? parcelEnrichmentStatus : '',
+    mapRefreshKey,
   ].join(':');
   const lottieSrc = useMemo(() => (theme === 'dark' ? '/loading/white.json' : '/loading/black.json'), [theme]);
 
@@ -1235,6 +1236,39 @@ export function CampaignDetailMapView({
       cancelled = true;
     };
   }, [campaignId, mapBundleLoadKey, parcelsProcessing]);
+
+  // Mobile field pins are persisted as campaign address points. The map bundle is
+  // invalidated server-side, but this controlled map keeps its current bundle in
+  // memory until explicitly refreshed. Listen for the insert so Android/iOS pins
+  // appear without requiring a browser reload.
+  useEffect(() => {
+    if (!campaignId) return;
+
+    const supabase = createClient();
+    const channel = supabase
+      .channel(`campaign-manual-pins-${campaignId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'campaign_addresses',
+          filter: `campaign_id=eq.${campaignId}`,
+        },
+        (payload) => {
+          const inserted = payload.new as { match_source?: unknown } | null;
+          if (inserted?.match_source !== 'field_manual_pin') return;
+          mapBundleSignatureRef.current = null;
+          lastMapBundleLoadKeyRef.current = null;
+          setMapRefreshKey((previous) => previous + 1);
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [campaignId]);
 
   useEffect(() => {
     if ((!SHOW_PARCEL_VIEW || !parcelsReady) && showParcelsOverlay) {
@@ -3218,7 +3252,7 @@ export function CampaignDetailMapView({
               </div>
             </div>
           ) : null}
-          {/* View switcher: Buildings | Addresses, with parcels as an overlay */}
+          {/* View switcher: parcel rendering remains available internally, but is not a user-facing web mode. */}
           <div className="pointer-events-none absolute top-4 right-4 z-20 flex flex-col items-end gap-2">
             <div className="pointer-events-auto flex items-center gap-2">
               <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 bg-white/90 dark:bg-black/80 backdrop-blur-sm shadow-sm overflow-hidden">
@@ -3236,22 +3270,6 @@ export function CampaignDetailMapView({
                 >
                   Addresses
                 </button>
-                {SHOW_PARCEL_VIEW && parcelsReady ? (
-                  <button
-                    type="button"
-                    onClick={() => setShowParcelsOverlay((current) => !current)}
-                    className={`px-3 py-2 text-sm font-medium transition-colors ${
-                      showParcelsOverlay
-                        ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
-                        : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
-                    }`}
-                    aria-pressed={showParcelsOverlay}
-                    title={`${parcels.length} parcel${parcels.length !== 1 ? 's' : ''} linked in the campaign map bundle`}
-                  >
-                    Parcels
-                    <span className="ml-1 text-xs opacity-60">({parcels.length})</span>
-                  </button>
-                ) : null}
               </div>
               {movieMapControlsEnabled ? (
                 <button

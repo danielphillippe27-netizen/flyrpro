@@ -12,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Check, ChevronDown, User, Users, Building2, Plus, Minus } from 'lucide-react';
+import { Check, ChevronDown, User, Users, Building2, Plus } from 'lucide-react';
 import { ExclusiveOfferArcadeEmbed } from '@/components/landing/ExclusiveOfferArcadeEmbed';
 import { getClientAsync } from '@/lib/supabase/client';
 import { COUNTRY_OPTIONS } from '@/lib/countries';
@@ -61,6 +61,13 @@ const INDUSTRIES_REST = [
   'Pool Service',
   'Other',
 ];
+
+const ONBOARDING_COUNTRY_CODES = ['CA', 'US', 'AU', 'NZ', 'ZA'] as const;
+const ONBOARDING_COUNTRY_OPTIONS = ONBOARDING_COUNTRY_CODES.map((code) => {
+  const country = COUNTRY_OPTIONS.find((option) => option.code === code);
+  if (!country) throw new Error(`Missing onboarding country option: ${code}`);
+  return country;
+});
 
 const SOLO_SEATS = 1;
 const TEAM_MIN_SEATS = 2;
@@ -696,29 +703,25 @@ function OnboardingContent() {
   const canStep1 =
     firstName.trim().length > 0 &&
     lastName.trim().length > 0 &&
-    (isSelfServeDemoOnboarding || countryCode.length > 0) &&
+    (isSelfServeDemoOnboarding || ONBOARDING_COUNTRY_CODES.some((code) => code === countryCode)) &&
     (!requiresStepOneAuth ||
       hasAuthenticatedOnboardingSession ||
       (normalizedWorkEmail.length > 0 && accountPassword.trim().length >= 6));
   const canStep3 =
     workspaceName.trim().length > 0 &&
     industry.length > 0 &&
-    (!isSelfServeDemoOnboarding || countryCode.length > 0);
-  const selectedCountry = COUNTRY_OPTIONS.find((country) => country.code === countryCode);
+    (!isSelfServeDemoOnboarding || ONBOARDING_COUNTRY_CODES.some((code) => code === countryCode));
+  const selectedCountry = ONBOARDING_COUNTRY_OPTIONS.find((country) => country.code === countryCode);
   const filteredCountries = useMemo(() => {
     const query = countrySearchQuery.trim().toLowerCase();
-    if (!query) return COUNTRY_OPTIONS;
-    return COUNTRY_OPTIONS.filter((country) =>
+    if (!query) return ONBOARDING_COUNTRY_OPTIONS;
+    return ONBOARDING_COUNTRY_OPTIONS.filter((country) =>
       `${country.label} ${country.name} ${country.code}`.toLowerCase().includes(query)
     );
   }, [countrySearchQuery]);
   const billingCurrency = getBillingCurrency();
   const seatPricing = getSeatPricing();
-  const normalizedTeamInviteEmails = normalizeEmailList(teamInviteEmails);
-  const selectedSeatCount =
-    useCase === 'team'
-      ? Math.max(TEAM_MIN_SEATS, seats, normalizedTeamInviteEmails.length + 1)
-      : SOLO_SEATS;
+  const selectedSeatCount = SOLO_SEATS;
   const pricingCards = [
     {
       id: 'free',
@@ -728,7 +731,14 @@ function OnboardingContent() {
       priceSuffix: '',
       billingLabel: 'No credit card required.',
       description: '1 free campaign to build your first map and try WolfGrid.',
-      features: ['1 free campaign', 'Campaign planning', 'Route preview', 'Lead follow-up'],
+      features: [
+        '1 Free campaign',
+        'Invite team',
+        'iOS and Android mobile apps',
+        'Lead capture',
+        'Track performance',
+        '3D prospecting map',
+      ],
       buttonLabel: 'Start free',
       showLaunchPricing: false,
     },
@@ -737,8 +747,8 @@ function OnboardingContent() {
       title: 'WolfGrid',
       seatCount: selectedSeatCount,
       priceLabel: formatPlanPrice(seatPricing.seatMonthlyDisplay, billingCurrency),
-      priceSuffix: '/seat/month',
-      billingLabel: `${selectedSeatCount} seat${selectedSeatCount === 1 ? '' : 's'} selected. Billed monthly.`,
+      priceSuffix: '/workspace/month',
+      billingLabel: 'Your whole team is included. Billed monthly.',
       description: 'Unlimited campaigns to run your team, track routes, and follow up with leads.',
       features: [
         'Unlimited campaigns',
@@ -964,7 +974,10 @@ function OnboardingContent() {
       const sessionResult = await getClientAsync()
         .then((supabase) => supabase.auth.getSession())
         .catch(() => null);
-      const accessToken = onboardingAccessTokenRef.current ?? sessionResult?.data.session?.access_token ?? null;
+      // OAuth/account creation can rotate the session token while onboarding is
+      // open. Always prefer the current session over the cached token so the
+      // final completion request does not incorrectly reset the user to step 1.
+      const accessToken = sessionResult?.data.session?.access_token ?? onboardingAccessTokenRef.current ?? null;
       onboardingAccessTokenRef.current = accessToken;
       const res = await fetch('/api/onboarding/complete', {
         method: 'POST',
@@ -1498,17 +1511,21 @@ function OnboardingContent() {
   }
 
   return (
-    <div className="min-h-screen bg-white text-[#17181c] flex flex-col items-center justify-center overflow-x-hidden px-5 py-10">
+    <div className="min-h-screen bg-white text-[#17181c] flex flex-col items-center justify-start overflow-x-hidden px-5 py-0">
       <main
         className={`w-full min-w-0 ${
           step === FINAL_ONBOARDING_STEP ? 'max-w-[1120px]' : 'max-w-[720px]'
         }`}
       >
-        <div className="mb-6 flex justify-center">
-          <WolfGridLogo kind="auth" className="h-20 w-auto sm:h-24" priority />
+        <div className="-mt-5 flex justify-center">
+          <WolfGridLogo
+            kind="auth"
+            className="h-44 w-auto sm:h-52"
+            priority
+          />
         </div>
-        <div className={step === FINAL_ONBOARDING_STEP ? 'mb-10 text-center' : 'mb-8 text-center'}>
-          <div className="space-y-3">
+        <div className={step === 1 ? 'mb-4 text-center' : step === FINAL_ONBOARDING_STEP ? 'mb-6 text-center' : 'mb-5 text-center'}>
+          <div className={step === 1 ? 'space-y-2' : 'space-y-3'}>
             <h1 className={step === FINAL_ONBOARDING_STEP ? 'text-4xl font-bold leading-tight tracking-normal sm:text-5xl' : 'text-3xl font-bold leading-tight tracking-normal sm:text-4xl'}>
               {heading}
             </h1>
@@ -1548,7 +1565,7 @@ function OnboardingContent() {
         <section className={step === FINAL_ONBOARDING_STEP ? '' : 'mx-auto max-w-[720px]'}>
           {step === 1 && (
             <form
-              className="space-y-5"
+              className="space-y-3 [&_input]:!h-12 [&_input]:min-h-12"
               onSubmit={async (e) => {
                 e.preventDefault();
                 if (!canStep1) return;
@@ -1561,7 +1578,7 @@ function OnboardingContent() {
                 setStep((s) => s + 1);
               }}
             >
-              <div className="grid gap-5 sm:grid-cols-2">
+              <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="firstName" className={labelClass}>First name</Label>
                   <Input
@@ -1650,7 +1667,7 @@ function OnboardingContent() {
                 </div>
               ) : null}
               {requiresStepOneAuth ? (
-                <div className="space-y-5">
+                <div className="space-y-3">
                   <div className="space-y-2">
                     <Label htmlFor="workEmail" className={labelClass}>
                       {isSelfServeDemoOnboarding ? 'Email' : 'Work email'}
@@ -1914,44 +1931,6 @@ function OnboardingContent() {
                   )}
                 </div>
               )}
-              {useCase === 'team' && (
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <Label id="teamSeatsLabel" htmlFor="teamSeats" className={labelClass}>Members</Label>
-                    <div
-                      className="grid h-14 min-h-14 grid-cols-[3.5rem_1fr_3.5rem] overflow-hidden rounded-xl border border-[#d9dce2] bg-white"
-                      role="group"
-                      aria-labelledby="teamSeatsLabel"
-                    >
-                      <Button
-                        type="button"
-                        aria-label="Decrease members"
-                        disabled={seats <= TEAM_MIN_SEATS}
-                        onClick={() => setSeats((current) => Math.max(TEAM_MIN_SEATS, current - 1))}
-                        className="h-full rounded-none border-0 border-r border-[#d9dce2] bg-white p-0 text-[#17181c] shadow-none hover:bg-[#f5f6f8] hover:text-[#17181c] disabled:opacity-40"
-                      >
-                        <Minus className="h-5 w-5" />
-                      </Button>
-                      <div
-                        id="teamSeats"
-                        className="flex h-full items-center justify-center px-4 text-center text-lg font-bold tabular-nums text-[#17181c]"
-                        aria-live="polite"
-                      >
-                        {seats}
-                      </div>
-                      <Button
-                        type="button"
-                        aria-label="Increase members"
-                        disabled={seats >= MAX_SEATS}
-                        onClick={() => setSeats((current) => Math.min(MAX_SEATS, current + 1))}
-                        className="h-full rounded-none border-0 border-l border-[#d9dce2] bg-white p-0 text-[#17181c] shadow-none hover:bg-[#f5f6f8] hover:text-[#17181c] disabled:opacity-40"
-                      >
-                        <Plus className="h-5 w-5" />
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
           )}
 
@@ -1998,23 +1977,23 @@ function OnboardingContent() {
                   return (
                     <div
                       key={card.id}
-                      className="flex min-h-[520px] flex-col rounded-[26px] border border-[#d9dce2] bg-white p-8 shadow-[0_18px_45px_rgba(0,0,0,0.08)]"
+                      className="flex min-h-[440px] flex-col rounded-[26px] border border-[#d9dce2] bg-white p-6 shadow-[0_18px_45px_rgba(0,0,0,0.08)]"
                     >
-                      <h2 className="text-3xl font-bold text-[#17181c]">{card.title}</h2>
+                      <h2 className="text-2xl font-bold text-[#17181c]">{card.title}</h2>
                       {card.showLaunchPricing ? (
-                        <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+                        <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5">
                           <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-700">
                             50% off launch pricing
                           </p>
                           <p className="mt-1 text-sm font-semibold text-[#17181c]">
                             Normally{' '}
                             <span className="text-[#8c919c] line-through">
-                              {formatPlanPrice(seatPricing.originalSeatMonthlyDisplay, billingCurrency)} /seat/month
+                              {formatPlanPrice(seatPricing.originalSeatMonthlyDisplay, billingCurrency)} /workspace/month
                             </span>
                           </p>
                         </div>
                       ) : (
-                        <div className="mt-5 rounded-xl border border-[#d9dce2] bg-[#fafafa] px-4 py-3">
+                        <div className="mt-3 rounded-xl border border-[#d9dce2] bg-[#fafafa] px-4 py-2.5">
                           <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#6f7480]">
                             Starter plan
                           </p>
@@ -2023,21 +2002,21 @@ function OnboardingContent() {
                           </p>
                         </div>
                       )}
-                      <div className="mt-7">
-                        <span className="text-5xl font-bold text-[#050505]">
+                      <div className="mt-4">
+                        <span className="text-4xl font-bold text-[#050505]">
                           {card.priceLabel}
                         </span>
                         {card.priceSuffix ? (
-                          <span className="text-2xl font-medium text-[#17181c]">{card.priceSuffix}</span>
+                          <span className="text-xl font-medium text-[#17181c]">{card.priceSuffix}</span>
                         ) : null}
                       </div>
                       <p className="mt-2 text-sm font-semibold text-[#7b7f89]">
                         {card.billingLabel}
                       </p>
-                      <p className="mt-6 text-lg font-semibold leading-7 text-[#7b7f89]">
+                      <p className="mt-4 text-base font-semibold leading-6 text-[#7b7f89]">
                         {card.description}
                       </p>
-                      <ul className="mt-7 space-y-4">
+                      <ul className="mt-5 space-y-2.5">
                         {card.features.map((feature) => (
                           <li key={feature} className="flex items-center gap-3 text-base font-semibold text-[#17181c]">
                             <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#17181c] text-white">
@@ -2058,7 +2037,7 @@ function OnboardingContent() {
                           }
                           await handleContinueToApp(card.seatCount);
                         }}
-                        className="mt-8 h-12 w-full rounded-xl border-[#d9dce2] bg-[#09090b] text-base font-bold text-white hover:bg-[#27272a] hover:text-white dark:border-[#09090b] dark:bg-[#09090b] dark:text-white dark:hover:bg-[#27272a] dark:hover:text-white"
+                        className="mt-5 h-11 w-full rounded-xl border-[#d9dce2] bg-[#09090b] text-sm font-bold text-white hover:bg-[#27272a] hover:text-white dark:border-[#09090b] dark:bg-[#09090b] dark:text-white dark:hover:bg-[#27272a] dark:hover:text-white"
                       >
                         {loading ? 'Opening...' : card.buttonLabel}
                       </Button>
@@ -2073,7 +2052,7 @@ function OnboardingContent() {
           {authError ? <p className="mt-5 text-center text-sm font-semibold text-red-600">{authError}</p> : null}
           {checkoutError ? <p className="mt-5 text-center text-sm font-semibold text-red-600">{checkoutError}</p> : null}
 
-          <div className="mt-10 flex items-center justify-center gap-14 sm:gap-24">
+          <div className={`${step === 1 ? 'mt-4' : 'mt-6'} flex items-center justify-center gap-14 sm:gap-24`}>
             {step > 1 ? (
               <Button
                 type="button"
@@ -2142,7 +2121,13 @@ function OnboardingContent() {
         </section>
       </main>
 
-      <div className="fixed bottom-7 left-0 right-0 z-20 flex justify-center gap-2 pointer-events-none px-4">
+      <div
+        className={
+          step === FINAL_ONBOARDING_STEP
+            ? 'mt-3 mb-3 flex justify-center gap-2 pointer-events-none px-4'
+            : 'fixed bottom-7 left-0 right-0 z-20 flex justify-center gap-2 pointer-events-none px-4'
+        }
+      >
         {Array.from({ length: onboardingFinalStep }, (_, index) => (
           <span key={index} className={index + 1 === step ? activeDotClass : inactiveDotClass} />
         ))}
