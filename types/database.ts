@@ -303,6 +303,13 @@ export interface CampaignAddress {
   gers_id?: string | null; // Overture GERS ID or other source identifier - UUID v4 format (128-bit)
   building_id?: string | null;
   match_source?: string | null;
+  assignment_id?: string | null;
+  created_by?: string | null;
+  updated_by?: string | null;
+  origin_platform?: string | null;
+  revision?: number;
+  updated_at?: string | null;
+  deleted_at?: string | null;
   seq?: number; // Sequence number for ordering
   visited?: boolean;
   coordinate?: {
@@ -336,6 +343,13 @@ export interface CampaignAddress {
   distance_m?: number | null; // Walking distance from depot to this stop
   // Address map status (from address_statuses): none | no_answer | delivered | talked | lead | appointment | follow_up | do_not_knock | future_seller | hot_lead
   address_status?: string;
+  status_revision?: number;
+  status_updated_at?: string | null;
+  status_occurred_at?: string | null;
+  last_action_by?: string | null;
+  last_action_actor_name?: string | null;
+  editable?: boolean;
+  is_teammate_owned?: boolean;
 }
 
 export interface CampaignContact {

@@ -844,8 +844,10 @@ export function MapBuildingsLayer({
         address.id,
         {
           status: getCampaignBuildingStatus(address),
+          address_status: address.address_status ?? 'none',
           scans_total: Number(address.scans ?? 0),
           qr_scanned: Number(address.scans ?? 0) > 0 || Boolean(address.last_scanned_at),
+          teammate_owned: Boolean(address.is_teammate_owned),
           assignment_color: assignmentColorByAddressId?.[address.id],
         },
       ])
@@ -855,8 +857,10 @@ export function MapBuildingsLayer({
       string,
       {
         status: 'not_visited' | 'visited' | 'hot' | 'lead' | 'hot_lead' | 'no_answer' | 'do_not_knock';
+        address_status: string;
         scans_total: number;
         qr_scanned: boolean;
+        teammate_owned: boolean;
         assignment_color?: string;
       }
     >();
@@ -872,8 +876,10 @@ export function MapBuildingsLayer({
 
       const nextState = {
         status: getCampaignBuildingStatus(address),
+        address_status: address.address_status ?? 'none',
         scans_total: Number(address.scans ?? 0),
         qr_scanned: Number(address.scans ?? 0) > 0 || Boolean(address.last_scanned_at),
+        teammate_owned: Boolean(address.is_teammate_owned),
         assignment_color: assignmentColorByAddressId?.[address.id],
       };
       const currentState = buildingStateById.get(buildingId);
@@ -883,13 +889,13 @@ export function MapBuildingsLayer({
         continue;
       }
 
+      const nextWins = statusRank[nextState.status] > statusRank[currentState.status];
       buildingStateById.set(buildingId, {
-        status:
-          statusRank[nextState.status] > statusRank[currentState.status]
-            ? nextState.status
-            : currentState.status,
+        status: nextWins ? nextState.status : currentState.status,
+        address_status: nextWins ? nextState.address_status : currentState.address_status,
         scans_total: currentState.scans_total + nextState.scans_total,
         qr_scanned: currentState.qr_scanned || nextState.qr_scanned,
+        teammate_owned: nextWins ? nextState.teammate_owned : currentState.teammate_owned,
         assignment_color: currentState.assignment_color ?? nextState.assignment_color,
       });
     }
@@ -965,6 +971,7 @@ export function MapBuildingsLayer({
     // Helper expressions - check feature-state first (real-time), then source properties (initial load)
     const getAssignmentColor = () => ['coalesce', ['feature-state', 'assignment_color'], ['get', 'assignment_color'], ''];
     const getAssignmentSelected = () => ['coalesce', ['feature-state', 'assignment_selected'], ['get', 'assignment_selected'], false];
+    const getTeammateOwned = () => ['coalesce', ['feature-state', 'teammate_owned'], ['get', 'teammate_owned'], false];
     const getStatusValue = () => ['downcase', ['to-string', ['coalesce', ['feature-state', 'status'], ['get', 'status'], 'not_visited']]];
     const getAddressStatus = () => ['downcase', ['to-string', ['coalesce', ['feature-state', 'address_status'], ['get', 'address_status'], 'none']]];
     const getScansTotal = () => ['to-number', ['coalesce', ['feature-state', 'scans_total'], ['get', 'scans_total'], 0], 0];
@@ -986,6 +993,9 @@ export function MapBuildingsLayer({
       'case',
       ['any', ['==', getAssignmentSelected(), true], ['==', getAssignmentSelected(), 'true']],
       ASSIGNMENT_SELECTED_COLOR,
+
+      ['any', ['==', getTeammateOwned(), true], ['==', getTeammateOwned(), 'true']],
+      '#166534',
 
       ['!=', getAssignmentColor(), ''],
       getAssignmentColor(),
@@ -1405,6 +1415,7 @@ export function MapBuildingsLayer({
                 : null,
             street_name: props.street_name ?? primaryInferredAddress?.street_name ?? null,
             address_status: props.address_status ?? primaryInferredAddress?.address_status ?? null,
+            teammate_owned: Boolean(propsRecord.teammate_owned) || inferredAddresses.some((address) => address.is_teammate_owned),
             feature_status: props.feature_status ?? (inferredAddresses.length > 0 ? 'matched' : undefined),
             match_method: props.match_method ?? (inferredAddresses.length > 0 ? 'visual_inferred' : undefined),
             status: props.status ?? inferredStatus ?? 'not_visited',
@@ -1995,7 +2006,7 @@ export function MapBuildingsLayer({
               'fill-extrusion-ambient-occlusion-wall-radius': 3,
               'fill-extrusion-ambient-occlusion-ground-radius': 4,
               'fill-extrusion-ambient-occlusion-ground-attenuation': 0.65,
-              'fill-extrusion-rounded-roof': true,
+              'fill-extrusion-rounded-roof': false,
             },
           };
           

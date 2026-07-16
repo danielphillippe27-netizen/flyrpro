@@ -109,7 +109,8 @@ async function fetchFieldManualPinAddressIds(
     .from('campaign_addresses')
     .select('id')
     .eq('campaign_id', campaignId)
-    .eq('match_source', 'field_manual_pin');
+    .eq('match_source', 'field_manual_pin')
+    .is('deleted_at', null);
 
   if (error) {
     throw new Error(`Failed to load field manual pins: ${error.message}`);

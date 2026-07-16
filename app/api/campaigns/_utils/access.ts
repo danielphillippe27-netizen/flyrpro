@@ -5,58 +5,35 @@ export async function ensureCampaignAccess(
   campaignId: string,
   userId: string
 ): Promise<boolean> {
-  const { data: campaign, error: campaignError } = await supabase
-    .from('campaigns')
-    .select('id, owner_id, workspace_id')
-    .eq('id', campaignId)
-    .maybeSingle();
+  const { data, error } = await supabase.rpc('can_view_campaign', {
+    p_campaign_id: campaignId,
+    p_user_id: userId,
+  });
+  return !error && data === true;
+}
 
-  if (campaignError || !campaign) {
-    return false;
-  }
+export async function ensureCampaignAddressMutationAccess(
+  supabase: SupabaseClient,
+  campaignId: string,
+  addressId: string,
+  userId: string
+): Promise<boolean> {
+  const { data, error } = await supabase.rpc('can_mutate_campaign_address', {
+    p_campaign_id: campaignId,
+    p_campaign_address_id: addressId,
+    p_user_id: userId,
+  });
+  return !error && data === true;
+}
 
-  const row = campaign as { owner_id: string; workspace_id: string | null };
-  if (row.owner_id === userId) {
-    return true;
-  }
-
-  if (!row.workspace_id) {
-    return false;
-  }
-
-  const { data: workspace } = await supabase
-    .from('workspaces')
-    .select('owner_id')
-    .eq('id', row.workspace_id)
-    .maybeSingle();
-
-  if (workspace && (workspace as { owner_id: string }).owner_id === userId) {
-    return true;
-  }
-
-  const { data: manager } = await supabase
-    .from('workspace_members')
-    .select('role')
-    .eq('workspace_id', row.workspace_id)
-    .eq('user_id', userId)
-    .maybeSingle();
-
-  const managerRole = String((manager as { role?: string | null } | null)?.role ?? '').toLowerCase();
-  if (managerRole === 'owner' || managerRole === 'admin') {
-    return true;
-  }
-
-  const { data: assignment } = await supabase
-    .from('campaign_assignments')
-    .select('id')
-    .eq('campaign_id', campaignId)
-    .eq('assigned_to_user_id', userId)
-    .in('status', ['accepted', 'in_progress'])
-    .maybeSingle();
-
-  if (assignment) {
-    return true;
-  }
-
-  return false;
+export async function ensureCampaignManagerAccess(
+  supabase: SupabaseClient,
+  campaignId: string,
+  userId: string
+): Promise<boolean> {
+  const { data, error } = await supabase.rpc('can_manage_campaign', {
+    p_campaign_id: campaignId,
+    p_user_id: userId,
+  });
+  return !error && data === true;
 }

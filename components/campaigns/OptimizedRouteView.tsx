@@ -1118,7 +1118,7 @@ export function OptimizedRouteView({ campaignId, campaignName, addresses }: Opti
           'fill-extrusion-opacity': 1,
           'fill-extrusion-vertical-gradient': true,
           'fill-extrusion-emissive-strength': 0.85,
-          'fill-extrusion-rounded-roof': true,
+          'fill-extrusion-rounded-roof': false,
         },
       });
       m.on('click', 'route-footprints', handleTapSelection);

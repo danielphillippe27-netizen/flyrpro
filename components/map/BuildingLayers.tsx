@@ -267,7 +267,7 @@ export function BuildingLayers({
                   0,
                 ],
                 'fill-extrusion-vertical-gradient': true,
-                'fill-extrusion-rounded-roof': true,
+                'fill-extrusion-rounded-roof': false,
               },
             });
           }

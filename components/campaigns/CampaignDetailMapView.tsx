@@ -313,15 +313,20 @@ function mergeBundleAddressesWithLiveState(
     }
   }
 
-  return bundleAddresses.map((address) => {
+  const matchedLiveIds = new Set<string>();
+  const mergedBundle = bundleAddresses.map((address) => {
     const liveAddress = addressIdentityKeys(address)
       .map((key) => liveAddressByKey.get(key))
       .find(Boolean);
 
     if (!liveAddress) return address;
+    matchedLiveIds.add(liveAddress.id);
 
     return {
       ...address,
+      ...liveAddress,
+      coordinate: liveAddress.coordinate ?? address.coordinate,
+      geom: liveAddress.geom ?? address.geom,
       visited: liveAddress.visited ?? address.visited,
       scans: liveAddress.scans ?? address.scans,
       last_scanned_at: liveAddress.last_scanned_at ?? address.last_scanned_at,
@@ -329,6 +334,12 @@ function mergeBundleAddressesWithLiveState(
       qr_code_base64: liveAddress.qr_code_base64 ?? address.qr_code_base64,
     };
   });
+
+  // Manual pins are dynamic overlays and may not exist in the cold-start bundle yet.
+  return [
+    ...mergedBundle,
+    ...liveAddresses.filter((address) => !matchedLiveIds.has(address.id)),
+  ];
 }
 
 function mapBundleParcelsToCampaignParcels(
@@ -825,6 +836,8 @@ export function CampaignDetailMapView({
   const [mapRefreshKey, setMapRefreshKey] = useState(0);
   const [optimisticallyHiddenBuildingIds, setOptimisticallyHiddenBuildingIds] = useState<string[]>([]);
   const [optimisticallyDeletedAddressIds, setOptimisticallyDeletedAddressIds] = useState<string[]>([]);
+  const [collaborationAddresses, setCollaborationAddresses] = useState<CampaignAddress[]>(addresses);
+  const [editableAddressIds, setEditableAddressIds] = useState<Set<string>>(new Set());
 
   // Create Contact Dialog state
   const [createContactOpen, setCreateContactOpen] = useState(false);
@@ -904,11 +917,11 @@ export function CampaignDetailMapView({
   }, [visibleAddressIds]);
   const visibleAddresses = useMemo(
     () =>
-      addresses.filter((address) => {
+      collaborationAddresses.filter((address) => {
         if (optimisticallyDeletedAddressIds.includes(address.id)) return false;
         return !visibleAddressIdSet || visibleAddressIdSet.has(address.id);
       }),
-    [addresses, optimisticallyDeletedAddressIds, visibleAddressIdSet],
+    [collaborationAddresses, optimisticallyDeletedAddressIds, visibleAddressIdSet],
   );
   const bundleAddresses = useMemo(() => {
     const mappedAddresses = mapBundleAddressesToCampaignAddresses(campaignId, mapBundle?.addresses);
@@ -916,8 +929,21 @@ export function CampaignDetailMapView({
     return mappedAddresses.filter((address) => visibleAddressIdSet.has(address.id));
   }, [campaignId, mapBundle?.addresses, visibleAddressIdSet]);
   const mapAddresses = useMemo(
-    () => mergeBundleAddressesWithLiveState(bundleAddresses, visibleAddresses),
-    [bundleAddresses, visibleAddresses],
+    () => mergeBundleAddressesWithLiveState(bundleAddresses, visibleAddresses).map((address) => {
+      const statusActor = Number(address.status_revision ?? 0) > 0
+        ? address.last_action_by ?? null
+        : null;
+      const pinActor = address.match_source === 'field_manual_pin'
+        ? address.updated_by ?? address.created_by ?? null
+        : null;
+      const actor = statusActor ?? pinActor;
+      return {
+        ...address,
+        editable: editableAddressIds.has(address.id),
+        is_teammate_owned: Boolean(userId && actor && actor !== userId),
+      };
+    }),
+    [bundleAddresses, editableAddressIds, userId, visibleAddresses],
   );
   const demoAddressColorOverrides = useMemo(() => {
     if (!movieMapControlsEnabled) return undefined;
@@ -1111,6 +1137,45 @@ export function CampaignDetailMapView({
   }, []);
 
   useEffect(() => {
+    setCollaborationAddresses((current) => {
+      if (current.some((address) => address.campaign_id !== campaignId)) {
+        return addresses;
+      }
+      const currentById = new Map(current.map((address) => [address.id, address]));
+      const incomingIds = new Set(addresses.map((address) => address.id));
+      const merged = addresses.map((incoming) => {
+        const existing = currentById.get(incoming.id);
+        if (!existing) return incoming;
+
+        const incomingPinRevision = Number(incoming.revision ?? 0);
+        const existingPinRevision = Number(existing.revision ?? 0);
+        const pinState = existingPinRevision > incomingPinRevision ? existing : incoming;
+        const incomingStatusRevision = Number(incoming.status_revision ?? 0);
+        const existingStatusRevision = Number(existing.status_revision ?? 0);
+        const statusState = existingStatusRevision > incomingStatusRevision ? existing : incoming;
+
+        return {
+          ...pinState,
+          address_status: statusState.address_status,
+          status_revision: statusState.status_revision,
+          status_updated_at: statusState.status_updated_at,
+          status_occurred_at: statusState.status_occurred_at,
+          last_action_by: statusState.last_action_by,
+          last_action_actor_name: statusState.last_action_actor_name,
+        };
+      });
+
+      // Preserve live manual pins that have not reached the parent/cold-start query yet.
+      for (const existing of current) {
+        if (existing.match_source === 'field_manual_pin' && !incomingIds.has(existing.id) && !existing.deleted_at) {
+          merged.push(existing);
+        }
+      }
+      return merged;
+    });
+  }, [addresses, campaignId]);
+
+  useEffect(() => {
     if (!buildingPendingOverlay) return;
 
     let cancelled = false;
@@ -1155,6 +1220,7 @@ export function CampaignDetailMapView({
     setMapRefreshKey(0);
     setOptimisticallyHiddenBuildingIds([]);
     setOptimisticallyDeletedAddressIds([]);
+    setEditableAddressIds(new Set());
     setMapViewMode(resolvedInitialMapViewMode);
     setShowParcelsOverlay(resolvedInitialParcelOverlay);
     setParcels([]);
@@ -1237,35 +1303,178 @@ export function CampaignDetailMapView({
     };
   }, [campaignId, mapBundleLoadKey, parcelsProcessing]);
 
-  // Mobile field pins are persisted as campaign address points. The map bundle is
-  // invalidated server-side, but this controlled map keeps its current bundle in
-  // memory until explicitly refreshed. Listen for the insert so Android/iOS pins
-  // appear without requiring a browser reload.
+  // Subscribe first, then fetch a repair snapshot. Static bundles provide cold-start
+  // geometry; statuses and field pins remain revisioned dynamic overlays.
   useEffect(() => {
     if (!campaignId) return;
 
     const supabase = createClient();
+    let cancelled = false;
+    let snapshotReady = false;
+    let snapshotInFlight = false;
+    const queuedEvents: Array<() => void> = [];
+    const actorNames = new Map<string, string>();
+
+    const recordValue = (row: Record<string, unknown>, key: string): string | null => {
+      const value = row[key];
+      return typeof value === 'string' && value.trim() ? value.trim() : null;
+    };
+
+    const applyPinRow = (row: Record<string, unknown>) => {
+      const id = recordValue(row, 'id');
+      if (!id || recordValue(row, 'campaign_id') !== campaignId) return;
+      const deletedAt = recordValue(row, 'deleted_at');
+
+      setCollaborationAddresses((current) => {
+        const existing = current.find((address) => address.id === id);
+        const incomingRevision = Number(row.revision ?? 0);
+        if (existing && Number(existing.revision ?? 0) > incomingRevision) return current;
+        if (deletedAt) return current.filter((address) => address.id !== id);
+        if (recordValue(row, 'match_source') !== 'field_manual_pin') return current;
+
+        const rawCoordinate = row.coordinate as { lat?: unknown; lon?: unknown } | null;
+        const rawGeometry = row.geom as { coordinates?: unknown } | string | null;
+        const coordinates = typeof rawGeometry === 'object' && rawGeometry
+          ? rawGeometry.coordinates
+          : null;
+        const coordinate = rawCoordinate && Number.isFinite(Number(rawCoordinate.lat)) && Number.isFinite(Number(rawCoordinate.lon))
+          ? { lat: Number(rawCoordinate.lat), lon: Number(rawCoordinate.lon) }
+          : Array.isArray(coordinates) && coordinates.length >= 2
+            ? { lat: Number(coordinates[1]), lon: Number(coordinates[0]) }
+            : existing?.coordinate;
+        const formatted = recordValue(row, 'formatted') ?? recordValue(row, 'address') ?? existing?.formatted ?? id;
+        const next = {
+          ...(existing ?? {}),
+          id,
+          campaign_id: campaignId,
+          address: recordValue(row, 'address') ?? formatted,
+          formatted,
+          postal_code: recordValue(row, 'postal_code') ?? undefined,
+          source: (recordValue(row, 'source') ?? 'manual') as CampaignAddress['source'],
+          source_id: recordValue(row, 'source_id'),
+          gers_id: recordValue(row, 'gers_id'),
+          building_id: recordValue(row, 'building_id'),
+          building_gers_id: recordValue(row, 'building_gers_id'),
+          match_source: 'field_manual_pin',
+          assignment_id: recordValue(row, 'assignment_id'),
+          created_by: recordValue(row, 'created_by'),
+          updated_by: recordValue(row, 'updated_by'),
+          origin_platform: recordValue(row, 'origin_platform'),
+          revision: incomingRevision,
+          updated_at: recordValue(row, 'updated_at'),
+          deleted_at: null,
+          coordinate,
+          geom: typeof rawGeometry === 'string'
+            ? rawGeometry
+            : rawGeometry
+              ? JSON.stringify(rawGeometry)
+              : existing?.geom,
+          created_at: recordValue(row, 'created_at') ?? existing?.created_at ?? new Date().toISOString(),
+          house_number: recordValue(row, 'house_number') ?? undefined,
+          street_name: recordValue(row, 'street_name') ?? undefined,
+          locality: recordValue(row, 'locality') ?? undefined,
+          region: recordValue(row, 'region') ?? undefined,
+          visited: Boolean(row.visited ?? existing?.visited ?? false),
+        } satisfies CampaignAddress;
+
+        return existing
+          ? current.map((address) => address.id === id ? next : address)
+          : [...current, next];
+      });
+    };
+
+    const applyStatusRow = (row: Record<string, unknown>) => {
+      const addressId = recordValue(row, 'campaign_address_id') ?? recordValue(row, 'address_id');
+      if (!addressId || recordValue(row, 'campaign_id') !== campaignId) return;
+      const incomingRevision = Number(row.revision ?? 0);
+      const actorId = recordValue(row, 'last_action_by');
+
+      setCollaborationAddresses((current) => current.map((address) => {
+        if (address.id !== addressId || Number(address.status_revision ?? 0) > incomingRevision) {
+          return address;
+        }
+        return {
+          ...address,
+          address_status: recordValue(row, 'status') ?? 'none',
+          status_revision: incomingRevision,
+          status_updated_at: recordValue(row, 'updated_at'),
+          status_occurred_at: recordValue(row, 'source_occurred_at'),
+          last_action_by: actorId,
+          last_action_actor_name: actorId ? actorNames.get(actorId) ?? null : null,
+          visited: (recordValue(row, 'status') ?? 'none') !== 'none',
+        };
+      }));
+    };
+
+    const queueOrApply = (operation: () => void) => {
+      if (snapshotReady) operation();
+      else queuedEvents.push(operation);
+    };
+
     const channel = supabase
-      .channel(`campaign-manual-pins-${campaignId}`)
+      .channel(`campaign-collaboration-${campaignId}`)
       .on(
         'postgres_changes',
         {
-          event: 'INSERT',
+          event: '*',
           schema: 'public',
           table: 'campaign_addresses',
           filter: `campaign_id=eq.${campaignId}`,
         },
         (payload) => {
-          const inserted = payload.new as { match_source?: unknown } | null;
-          if (inserted?.match_source !== 'field_manual_pin') return;
-          mapBundleSignatureRef.current = null;
-          lastMapBundleLoadKeyRef.current = null;
-          setMapRefreshKey((previous) => previous + 1);
+          const row = (payload.new && Object.keys(payload.new).length > 0 ? payload.new : payload.old) as Record<string, unknown>;
+          queueOrApply(() => applyPinRow(row));
         },
       )
-      .subscribe();
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'address_statuses',
+          filter: `campaign_id=eq.${campaignId}`,
+        },
+        (payload) => {
+          const row = (payload.new && Object.keys(payload.new).length > 0 ? payload.new : payload.old) as Record<string, unknown>;
+          queueOrApply(() => applyStatusRow(row));
+        },
+      )
+      .subscribe((status) => {
+        if (status !== 'SUBSCRIBED' || cancelled || snapshotInFlight) return;
+        snapshotInFlight = true;
+        snapshotReady = false;
+
+        void Promise.all([
+          supabase.rpc('rpc_get_campaign_collaboration_state', { p_campaign_id: campaignId }),
+          supabase.rpc('rpc_get_campaign_member_directory', { p_campaign_id: campaignId }),
+        ]).then(([snapshotResult, directoryResult]) => {
+          if (cancelled) return;
+          for (const member of (directoryResult.data ?? []) as Array<Record<string, unknown>>) {
+            const id = recordValue(member, 'user_id');
+            const name = recordValue(member, 'display_name');
+            if (id && name) actorNames.set(id, name);
+          }
+
+          const snapshot = (snapshotResult.data ?? {}) as {
+            manual_pins?: Array<Record<string, unknown>>;
+            statuses?: Array<Record<string, unknown>>;
+            editable_address_ids?: string[];
+          };
+          for (const pin of snapshot.manual_pins ?? []) applyPinRow(pin);
+          for (const statusRow of snapshot.statuses ?? []) applyStatusRow(statusRow);
+          setEditableAddressIds(new Set(snapshot.editable_address_ids ?? []));
+        }).catch((error) => {
+          console.warn('[CampaignDetailMapView] Collaboration repair snapshot failed:', error);
+        }).finally(() => {
+          if (cancelled) return;
+          snapshotReady = true;
+          snapshotInFlight = false;
+          queuedEvents.splice(0).forEach((operation) => operation());
+        });
+      });
 
     return () => {
+      cancelled = true;
       void supabase.removeChannel(channel);
     };
   }, [campaignId]);
