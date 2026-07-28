@@ -7,6 +7,7 @@ import {
   neighborhoodContextForCandidate,
   normalizedAddressIdentity,
   isBuildingAvailableForCivicAssignment,
+  parseMapboxReverseResult,
   scoreReconciliationCandidate,
   shouldAutoHideAuxiliary,
   shouldAutoHideOverlappingDuplicate,
@@ -42,6 +43,36 @@ assert(source1777 !== source1799, '1777 and 1799 must never normalize to the sam
 assert(
   source1777 === reverse1777,
   'postal spacing and case must not prevent reuse of the existing 1777 address'
+);
+const mapboxV6CanadianReverse = parseMapboxReverseResult('cache-key', {
+  features: [{
+    geometry: { type: 'Point', coordinates: [-79.71375, 43.586683] },
+    properties: {
+      feature_type: 'address',
+      full_address: '5819 Riverside Place, Mississauga, Ontario L5M 4X1, Canada',
+      coordinates: {
+        longitude: -79.71375,
+        latitude: 43.586683,
+        accuracy: 'rooftop',
+      },
+      context: {
+        address: {
+          address_number: '5819',
+          street_name: 'Riverside Place',
+        },
+        postcode: { name: 'L5M 4X1' },
+        place: { name: 'Mississauga' },
+        region: { name: 'Ontario', region_code: 'ON' },
+        country: { name: 'Canada', country_code: 'CA' },
+      },
+    },
+  }],
+});
+assert(
+  mapboxV6CanadianReverse?.houseNumber === '5819' &&
+  mapboxV6CanadianReverse.streetName === 'Riverside Place' &&
+  mapboxV6CanadianReverse.accuracy === 'rooftop',
+  'Mapbox v6 Canadian reverse responses must read civic fields from context.address'
 );
 const occupiedBy1799 = new Set(['building-1799']);
 assert(

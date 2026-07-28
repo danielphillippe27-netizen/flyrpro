@@ -11,7 +11,7 @@ import { CampaignMapModeService } from './CampaignMapModeService';
 import { TownhouseSplitterService, type BuildingFeature as TownhouseBuildingFeature } from './TownhouseSplitterService';
 import { uuidV5 } from './TownhouseUnitIdentity';
 
-export const MAP_RECONCILIATION_ALGORITHM_VERSION = 'map-reconciliation-v2-reverse-source';
+export const MAP_RECONCILIATION_ALGORITHM_VERSION = 'map-reconciliation-v3-mapbox-v6-source';
 const AUTO_LINK_SCORE = 0.92;
 const AUTO_LINK_MARGIN = 0.15;
 const REVIEW_SCORE = 0.70;
@@ -77,7 +77,7 @@ type ReconciliationDecision = {
   proposed_state: JsonRecord;
 };
 
-type ReverseResult = {
+export type ReverseResult = {
   cacheKey: string;
   formatted: string;
   houseNumber: string;
@@ -211,6 +211,58 @@ export function normalizedAddressIdentity(input: {
     regionAliases[normalizedRegion] ?? normalizedRegion,
     normalizeText(input.postalCode).replaceAll(' ', ''),
   ].join('|');
+}
+
+export function parseMapboxReverseResult(
+  cacheKey: string,
+  payload: JsonRecord
+): ReverseResult | null {
+  const feature = asRecord(asArray(payload.features)[0]);
+  const properties = asRecord(feature.properties);
+  const context = asRecord(properties.context);
+  const addressContext = asRecord(context.address);
+  const streetContext = asRecord(context.street);
+  const coordinatesMetadata = asRecord(properties.coordinates);
+  const geometry = asRecord(feature.geometry);
+  const coordinates = asArray<number>(geometry.coordinates);
+  const houseNumber = stringValue(
+    properties.address_number ??
+    addressContext.address_number
+  );
+  const streetName = stringValue(
+    properties.street ??
+    properties.street_name ??
+    addressContext.street_name ??
+    streetContext.name
+  );
+  const longitude = numberValue(coordinatesMetadata.longitude ?? coordinates[0]);
+  const latitude = numberValue(coordinatesMetadata.latitude ?? coordinates[1]);
+  if (!houseNumber || !streetName || longitude === null || latitude === null) return null;
+  const locality = stringValue(asRecord(context.place).name ?? asRecord(context.locality).name);
+  const postalCode = stringValue(asRecord(context.postcode).name);
+  const region = stringValue(asRecord(context.region).region_code ?? asRecord(context.region).name);
+  const country = stringValue(asRecord(context.country).country_code ?? asRecord(context.country).name);
+  const accuracy = normalizeText(coordinatesMetadata.accuracy ?? properties.accuracy);
+  const identity = normalizedAddressIdentity({ houseNumber, streetName, locality, region, postalCode });
+  return {
+    cacheKey,
+    formatted: stringValue(
+      properties.full_address ??
+      properties.name ??
+      feature.place_name
+    ) ?? `${houseNumber} ${streetName}`,
+    houseNumber,
+    streetName,
+    locality,
+    region,
+    postalCode,
+    country,
+    longitude,
+    latitude,
+    accuracy,
+    identity,
+    raw: payload,
+  };
 }
 
 function featureId(feature: BundleFeature): string | null {
@@ -2090,38 +2142,7 @@ export class CampaignMapReconciliationService {
   }
 
   private parseReverseResult(cacheKey: string, payload: JsonRecord): ReverseResult | null {
-    const feature = asRecord(asArray(payload.features)[0]);
-    const properties = asRecord(feature.properties);
-    const context = asRecord(properties.context);
-    const coordinatesMetadata = asRecord(properties.coordinates);
-    const geometry = asRecord(feature.geometry);
-    const coordinates = asArray<number>(geometry.coordinates);
-    const houseNumber = stringValue(properties.address_number);
-    const streetName = stringValue(properties.street);
-    const longitude = numberValue(coordinates[0]);
-    const latitude = numberValue(coordinates[1]);
-    if (!houseNumber || !streetName || longitude === null || latitude === null) return null;
-    const locality = stringValue(asRecord(context.place).name ?? asRecord(context.locality).name);
-    const postalCode = stringValue(asRecord(context.postcode).name);
-    const region = stringValue(asRecord(context.region).region_code ?? asRecord(context.region).name);
-    const country = stringValue(asRecord(context.country).country_code ?? asRecord(context.country).name);
-    const accuracy = normalizeText(coordinatesMetadata.accuracy ?? properties.accuracy);
-    const identity = normalizedAddressIdentity({ houseNumber, streetName, locality, region, postalCode });
-    return {
-      cacheKey,
-      formatted: stringValue(properties.full_address ?? properties.name ?? feature.place_name) ?? `${houseNumber} ${streetName}`,
-      houseNumber,
-      streetName,
-      locality,
-      region,
-      postalCode,
-      country,
-      longitude,
-      latitude,
-      accuracy,
-      identity,
-      raw: payload,
-    };
+    return parseMapboxReverseResult(cacheKey, payload);
   }
 
   private labelAdjustmentDecisions(input: {
