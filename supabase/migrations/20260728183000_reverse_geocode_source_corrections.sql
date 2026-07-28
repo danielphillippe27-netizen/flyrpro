@@ -11,10 +11,13 @@ ALTER TABLE public.building_address_links
     match_type IN (
       'containment_verified',
       'containment_suspect',
+      'containment',
       'point_on_surface',
       'parcel_verified',
+      'parcel_bridge',
       'proximity_verified',
       'proximity_fallback',
+      'nearest_building_15m',
       'manual',
       'orphan',
       'reconciliation'
