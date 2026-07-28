@@ -5,6 +5,7 @@ import {
   assessReverseOrphanCorrection,
   buildLinkedNeighborhoodEvidence,
   neighborhoodContextForCandidate,
+  normalizedCivicAddressIdentity,
   normalizedAddressIdentity,
   isBuildingAvailableForCivicAssignment,
   parseMapboxReverseResult,
@@ -59,6 +60,16 @@ assert(
     postalCode: 'L5M 4X1',
   }),
   'street suffix aliases must prevent duplicate synthetic addresses'
+);
+assert(
+  normalizedCivicAddressIdentity({
+    houseNumber: '5564',
+    streetName: 'Leisure CRT',
+  }) === normalizedCivicAddressIdentity({
+    houseNumber: '5564',
+    streetName: 'Leisure Court',
+  }),
+  'an orphan source without locality metadata must still match the same normalized civic address'
 );
 const mapboxV6CanadianReverse = parseMapboxReverseResult('cache-key', {
   features: [{

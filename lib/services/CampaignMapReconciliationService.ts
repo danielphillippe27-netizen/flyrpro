@@ -11,7 +11,7 @@ import { CampaignMapModeService } from './CampaignMapModeService';
 import { TownhouseSplitterService, type BuildingFeature as TownhouseBuildingFeature } from './TownhouseSplitterService';
 import { uuidV5 } from './TownhouseUnitIdentity';
 
-export const MAP_RECONCILIATION_ALGORITHM_VERSION = 'map-reconciliation-v4-orphan-priority';
+export const MAP_RECONCILIATION_ALGORITHM_VERSION = 'map-reconciliation-v5-civic-context';
 const AUTO_LINK_SCORE = 0.92;
 const AUTO_LINK_MARGIN = 0.15;
 const REVIEW_SCORE = 0.70;
@@ -169,17 +169,9 @@ function unitIdentityFromFormatted(value: unknown): string | null {
   return match?.[1] ?? null;
 }
 
-export function normalizedAddressIdentity(input: {
-  houseNumber?: unknown;
-  houseSuffix?: unknown;
-  streetName?: unknown;
-  locality?: unknown;
-  region?: unknown;
-  postalCode?: unknown;
-  unit?: unknown;
-}): string {
-  const normalizedRegion = normalizeText(input.region);
-  const regionAliases: Record<string, string> = {
+function normalizedRegion(value: unknown): string {
+  const region = normalizeText(value);
+  const aliases: Record<string, string> = {
     ontario: 'on',
     quebec: 'qc',
     'new brunswick': 'nb',
@@ -192,13 +184,35 @@ export function normalizedAddressIdentity(input: {
     newfoundland: 'nl',
     'newfoundland and labrador': 'nl',
   };
-  const street = normalizeStreet(input.streetName);
+  return aliases[region] ?? region;
+}
+
+export function normalizedCivicAddressIdentity(input: {
+  houseNumber?: unknown;
+  houseSuffix?: unknown;
+  streetName?: unknown;
+  unit?: unknown;
+}): string {
   return [
     `${normalizeText(input.houseNumber)}${normalizeText(input.houseSuffix)}`,
-    street,
+    normalizeStreet(input.streetName),
     normalizeText(input.unit),
+  ].join('|');
+}
+
+export function normalizedAddressIdentity(input: {
+  houseNumber?: unknown;
+  houseSuffix?: unknown;
+  streetName?: unknown;
+  locality?: unknown;
+  region?: unknown;
+  postalCode?: unknown;
+  unit?: unknown;
+}): string {
+  return [
+    normalizedCivicAddressIdentity(input),
     normalizeText(input.locality),
-    regionAliases[normalizedRegion] ?? normalizedRegion,
+    normalizedRegion(input.region),
     normalizeText(input.postalCode).replaceAll(' ', ''),
   ].join('|');
 }
@@ -315,6 +329,41 @@ function addressIdentityFromFeature(feature: BundleFeature): string {
       properties.unit_number ??
       unitIdentityFromFormatted(properties.formatted ?? properties.full_address),
   });
+}
+
+function civicIdentityFromFeature(feature: BundleFeature): string {
+  const properties = asRecord(feature.properties);
+  return normalizedCivicAddressIdentity({
+    houseNumber: properties.house_number ?? properties.street_number,
+    houseSuffix: properties.house_suffix,
+    streetName: properties.street_name ?? properties.street,
+    unit:
+      properties.unit ??
+      properties.unit_number ??
+      unitIdentityFromFormatted(properties.formatted ?? properties.full_address),
+  });
+}
+
+function addressContextMatchesReverse(
+  feature: BundleFeature,
+  result: ReverseResult
+): boolean {
+  const properties = asRecord(feature.properties);
+  const locality = normalizeText(
+    properties.locality ?? properties.municipality ?? properties.city
+  );
+  const resultLocality = normalizeText(result.locality);
+  if (locality && resultLocality && locality !== resultLocality) return false;
+  const region = normalizedRegion(
+    properties.region ?? properties.province ?? properties.state
+  );
+  const resultRegion = normalizedRegion(result.region);
+  if (region && resultRegion && region !== resultRegion) return false;
+  const postal = normalizeText(
+    properties.postal_code ?? properties.postalCode ?? properties.zip
+  ).replaceAll(' ', '');
+  const resultPostal = normalizeText(result.postalCode).replaceAll(' ', '');
+  return !(postal && resultPostal && postal !== resultPostal);
 }
 
 function normalizeStreet(value: unknown): string {
@@ -1711,7 +1760,7 @@ export class CampaignMapReconciliationService {
     const orphanAddressesByIdentity = new Map<string, BundleFeature[]>();
     for (const feature of input.addresses) {
       const id = addressId(feature);
-      const identity = addressIdentityFromFeature(feature);
+      const identity = civicIdentityFromFeature(feature);
       if (!id || !identity.replaceAll('|', '')) continue;
       allAddressesByIdentity.set(identity, [
         ...(allAddressesByIdentity.get(identity) ?? []),
@@ -1731,7 +1780,12 @@ export class CampaignMapReconciliationService {
       .map((feature) => normalizeText(asRecord(feature.properties).locality))
       .filter(Boolean));
     const campaignRegions = new Set(input.addresses
-      .map((feature) => normalizeText(asRecord(feature.properties).region))
+      .map((feature) => {
+        const properties = asRecord(feature.properties);
+        return normalizedRegion(
+          properties.region ?? properties.province ?? properties.state
+        );
+      })
       .filter(Boolean));
     const campaignPostals = new Set(input.addresses
       .map((feature) => normalizeText(asRecord(feature.properties).postal_code).replaceAll(' ', ''))
@@ -1829,8 +1883,16 @@ export class CampaignMapReconciliationService {
       const { building, result, spatialDistance, buildingAnchor } = candidate;
       const buildingIdValue = featureId(building);
       if (!buildingIdValue || !result.houseNumber || !result.streetName) return null;
-      const orphanIdentityMatches = orphanAddressesByIdentity.get(result.identity) ?? [];
-      const allIdentityMatches = allAddressesByIdentity.get(result.identity) ?? [];
+      const reverseCivicIdentity = normalizedCivicAddressIdentity({
+        houseNumber: result.houseNumber,
+        streetName: result.streetName,
+      });
+      const orphanIdentityMatches = (
+        orphanAddressesByIdentity.get(reverseCivicIdentity) ?? []
+      ).filter((feature) => addressContextMatchesReverse(feature, result));
+      const allIdentityMatches = (
+        allAddressesByIdentity.get(reverseCivicIdentity) ?? []
+      ).filter((feature) => addressContextMatchesReverse(feature, result));
       const existingAddress = orphanIdentityMatches.length === 1 ? orphanIdentityMatches[0] : null;
       const existingAddressId = existingAddress ? addressId(existingAddress) : null;
       const sourcePoint = existingAddress ? featurePoint(existingAddress) : null;
@@ -1839,7 +1901,9 @@ export class CampaignMapReconciliationService {
           accuracy: result.accuracy,
           reversePointDistanceMeters: spatialDistance,
           sourcePointDistanceMeters: pointToGeometryDistanceMeters(sourcePoint, building.geometry),
-          addressIdentityMatches: addressIdentityFromFeature(existingAddress) === result.identity,
+          addressIdentityMatches:
+            civicIdentityFromFeature(existingAddress) === reverseCivicIdentity &&
+            addressContextMatchesReverse(existingAddress, result),
           uniqueAddressIdentity: orphanIdentityMatches.length === 1,
           uniqueBuildingIdentity,
           addressIsOrphan: input.orphanAddressIds.has(existingAddressId.toLowerCase()),
