@@ -150,8 +150,17 @@ const PARCEL_BRIDGE_CONFIDENCE = 0.95;
 const PROXIMITY_CONFIDENCE = 0.80;
 const FOOTPRINT_EDGE_GRACE_CONFIDENCE = 0.90;
 const FOOTPRINT_EDGE_GRACE_METERS = 10;
+// Detached-neighbourhood safety policy:
+//   <= 10 m: eligible for automatic semantic proximity linking
+//   10-12 m: retain as an orphan/review candidate
+//   > 12 m: retain as an orphan for reconciliation/reverse geocoding
+// Containment and same-parcel evidence remain authoritative outside this band.
+export const DETACHED_AUTO_LINK_MAX_METERS = 10;
+export const DETACHED_REVIEW_MAX_METERS = 12;
+// Candidate discovery stays broad so parcel and known multi-unit evidence can
+// still resolve legitimate large parcels/row buildings. It is not an auto-link radius.
 const FALLBACK_RADIUS_METERS = 75;
-const PROXIMITY_RADIUS_METERS = 60;
+const PROXIMITY_RADIUS_METERS = DETACHED_AUTO_LINK_MAX_METERS;
 const MULTI_ADDRESS_NEARBY_RADIUS_METERS = 25;
 const MINIMUM_SEMANTIC_PROXIMITY_SCORE = 0.65;
 
@@ -543,8 +552,13 @@ export class StableLinkerService {
     const inferredMultiNearby = nearby
       .filter((candidate) => (
         candidate.distance <= MULTI_ADDRESS_NEARBY_RADIUS_METERS &&
-        inferredMultiAddressBuildingIds.has(this.buildingPublicId(candidate.building).toLowerCase())
+        this.canAcceptMultipleAddresses(candidate.building, inferredMultiAddressBuildingIds)
       ))
+      .map((candidate) => ({
+        ...candidate,
+        matchType: 'proximity_verified',
+        confidence: PROXIMITY_CONFIDENCE,
+      } satisfies MatchCandidate))
       .sort((a, b) => this.rankMatches(a, b))[0];
     if (inferredMultiNearby) return this.matchFromCandidate(address, inferredMultiNearby);
 

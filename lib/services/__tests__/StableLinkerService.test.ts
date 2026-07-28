@@ -356,7 +356,7 @@ async function run() {
     assertEqual(match.buildingId, 'building-3');
   });
 
-  test('Canonical proximity: same-street distance can reach the 45m band', () => {
+  test('Canonical proximity: same-street distance beyond 12m stays orphan', () => {
     const service = createStableLinkerHarness();
     const building = makeBuilding(
       'building-45m-band',
@@ -367,10 +367,7 @@ async function run() {
 
     const match = service.matchAddressToBuilding(address, [building]);
 
-    assertEqual(match.matchType, 'proximity_verified');
-    assertEqual(match.buildingId, 'building-45m-band');
-    assertTrue(match.distanceMeters > 30, 'Expected fixture to sit beyond the old 30m limit');
-    assertTrue(match.distanceMeters <= 45, 'Expected fixture to sit inside the former 45m distance limit');
+    assertEqual(match.matchType, 'orphan');
   });
 
   test('Canonical building filter removes tiny/proxy footprints and keeps manual exceptions', () => {
@@ -655,11 +652,11 @@ async function run() {
       inferred
     );
 
-    assertEqual(match.matchType, 'proximity_fallback');
+    assertEqual(match.matchType, 'proximity_verified');
     assertEqual(match.buildingId, 'moyse-row');
   });
 
-  test('Nearby same-street address: distance past 45m still links when footprint is large', () => {
+  test('Detached same-street address beyond 12m stays orphan for reverse-geocode reconciliation', () => {
     const service = new StableLinkerService({} as any);
     const building = makeBuilding(
       'nearby-home',
@@ -673,9 +670,7 @@ async function run() {
       [building]
     );
 
-    assertEqual(match.matchType, 'proximity_verified');
-    assertEqual(match.buildingId, 'nearby-home');
-    assertTrue(match.distanceMeters > 45, 'Expected fixture to sit beyond 45m');
+    assertEqual(match.matchType, 'orphan');
   });
 
   test('Right-outside footprint address: footprint distance links even when centroid is far', () => {
@@ -695,6 +690,36 @@ async function run() {
     assertEqual(match.matchType, 'proximity_verified');
     assertEqual(match.buildingId, 'wide-building');
     assertTrue(match.distanceMeters < 10, 'Expected footprint distance under 10m');
+  });
+
+  test('Detached exact-address match inside 10m auto-links', () => {
+    const service = new StableLinkerService({} as any);
+    const building = makeBuilding(
+      'ten-meter-home',
+      rectangle(-79.05020, 43.05000, -79.05000, 43.05020),
+      { primaryStreet: 'Crane Court', houseNumber: '5350' }
+    );
+    const address = makeAddress('5350', -79.04994, 43.05010, 'Crane Court');
+
+    const match = (service as any).matchAddressToBuilding(address, [building]);
+
+    assertEqual(match.matchType, 'proximity_verified');
+    assertEqual(match.buildingId, 'ten-meter-home');
+    assertTrue(match.distanceMeters <= 10, 'Expected fixture inside the automatic band');
+  });
+
+  test('Detached exact-address match from 10m through 12m stays orphan for review', () => {
+    const service = new StableLinkerService({} as any);
+    const building = makeBuilding(
+      'review-band-home',
+      rectangle(-79.06020, 43.06000, -79.06000, 43.06020),
+      { primaryStreet: 'Crane Court', houseNumber: '5352' }
+    );
+    const address = makeAddress('5352', -79.05986, 43.06010, 'Crane Court');
+
+    const match = (service as any).matchAddressToBuilding(address, [building]);
+
+    assertEqual(match.matchType, 'orphan');
   });
 
   test('Right-outside footprint address: no usable street signal stays orphan', () => {
