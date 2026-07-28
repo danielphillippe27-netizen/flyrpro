@@ -229,10 +229,14 @@ async function main(): Promise<void> {
   });
   if (campaignInsert.error) throw new Error(`Failed to create optimized campaign: ${campaignInsert.error.message}`);
 
-  await insertChunks(supabase, 'campaign_addresses', (addresses.data ?? []).map((row) => ({
-    ...remapDeep(row, idMap) as JsonRecord,
-    campaign_id: targetCampaignId,
-  })));
+  await insertChunks(supabase, 'campaign_addresses', (addresses.data ?? []).map((row) => {
+    const clone = {
+      ...remapDeep(row, idMap) as JsonRecord,
+      campaign_id: targetCampaignId,
+    };
+    delete clone.seq;
+    return clone;
+  }));
   await insertChunks(supabase, 'building_address_links', (links.data ?? []).map((row) => ({
     ...remapDeep(row, idMap) as JsonRecord,
     campaign_id: targetCampaignId,
