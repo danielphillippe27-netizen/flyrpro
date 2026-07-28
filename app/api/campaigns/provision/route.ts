@@ -30,6 +30,7 @@ import { CampaignLinkQualityService } from '@/lib/services/CampaignLinkQualitySe
 import {
   CampaignMapModeService,
 } from '@/lib/services/CampaignMapModeService';
+import { CampaignMapReconciliationService } from '@/lib/services/CampaignMapReconciliationService';
 import {
   prebuildCampaignMapBundle,
   resolveScopedCampaignMapGeometry,
@@ -1138,6 +1139,9 @@ async function runCampaignPostProcessing(params: {
         addresses: effectiveInsertedCount,
       });
       await prewarmCanonicalMapBundle(supabase, campaignId, scopedGeometry);
+      await timedStage('queue_map_reconciliation', () =>
+        new CampaignMapReconciliationService(supabase).enqueue(campaignId)
+      );
       return;
     }
 
@@ -1285,6 +1289,9 @@ async function runCampaignPostProcessing(params: {
     await timedStage('prewarm_map_bundle_optimized', () =>
       prewarmCanonicalMapBundle(supabase, campaignId)
     );
+    const reconciliationRun = await timedStage('queue_map_reconciliation', () =>
+      new CampaignMapReconciliationService(supabase).enqueue(campaignId)
+    );
 
     console.log('[Provision] Background post-processing complete:', {
       campaignId,
@@ -1292,6 +1299,8 @@ async function runCampaignPostProcessing(params: {
       unitsCreated: townhouseSummary.units_created,
       mapMode: optimizedMapModeAssessment.mapMode,
       addresses: effectiveInsertedCount,
+      reconciliationRunId: reconciliationRun?.id ?? null,
+      reconciliationMode: reconciliationRun?.mode ?? 'off',
       timings: {
         ...stageTimings,
         total_ms: Math.round(performance.now() - postprocessStarted),

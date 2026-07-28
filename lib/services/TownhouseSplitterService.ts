@@ -15,6 +15,15 @@
 
 import { SupabaseClient } from '@supabase/supabase-js';
 import { isUnitPersistenceEnabled } from '../config/features';
+import {
+  canonicalAddressIdentity,
+  canonicalizePolygonRing,
+  deterministicTownhouseUnitId,
+  orderTownhouseAddressesAlongAxis,
+  TOWNHOUSE_SPLIT_VERSION,
+  townhouseSplitSignature,
+  townhouseUnitStableKey,
+} from './TownhouseUnitIdentity';
 
 // Types
 export interface BuildingFeature {
@@ -64,6 +73,7 @@ export interface SplitUnit {
   address_id: string;
   unit_geometry: GeoJSON.Polygon;
   unit_number: string;
+  unit_index: number;
   validation: 'passed' | 'warning' | 'failed';
   area_sqm: number;
 }
@@ -82,6 +92,7 @@ export interface SplitResult {
   units?: SplitUnit[];
   parent_type: 'townhouse' | 'apartment' | 'duplex' | 'triplex' | 'small_multifamily';
   split_method: 'obb_linear' | 'weighted' | 'apartment_placeholder';
+  split_signature?: string;
   error_type?: string;
   error_message?: string;
 }
@@ -581,11 +592,16 @@ export class TownhouseSplitterService {
     console.log(`[TownhouseSplitter] Splitting ${building_id} into ${nUnits} units`);
 
     try {
-      const coords = building.geometry.coordinates[0];
+      const coords = canonicalizePolygonRing(building.geometry.coordinates[0]);
+      const canonicalGeometry: GeoJSON.Polygon = {
+        type: 'Polygon',
+        coordinates: [coords],
+      };
       
       // Find the street-facing edge (most addresses near it)
       let bestEdgeIndex = 0;
       let bestEdgeScore = -Infinity;
+      let bestEdgeKey = '';
       
       for (let i = 0; i < coords.length - 1; i++) {
         const p1 = coords[i];
@@ -599,32 +615,42 @@ export class TownhouseSplitterService {
           }
         }
         
-        if (score > bestEdgeScore) {
+        const edgeKey = [p1, p2]
+          .sort((a, b) => a[0] - b[0] || a[1] - b[1])
+          .map(([lon, lat]) => `${lon.toFixed(8)},${lat.toFixed(8)}`)
+          .join('|');
+        if (
+          score > bestEdgeScore + Number.EPSILON ||
+          (Math.abs(score - bestEdgeScore) <= Number.EPSILON && (!bestEdgeKey || edgeKey < bestEdgeKey))
+        ) {
           bestEdgeScore = score;
           bestEdgeIndex = i;
+          bestEdgeKey = edgeKey;
         }
       }
 
-      const streetEdgeP1 = coords[bestEdgeIndex] as [number, number];
-      const streetEdgeP2 = coords[bestEdgeIndex + 1] as [number, number];
+      let streetEdgeP1 = coords[bestEdgeIndex] as [number, number];
+      let streetEdgeP2 = coords[bestEdgeIndex + 1] as [number, number];
+      if (
+        streetEdgeP1[0] > streetEdgeP2[0] ||
+        (streetEdgeP1[0] === streetEdgeP2[0] && streetEdgeP1[1] > streetEdgeP2[1])
+      ) {
+        [streetEdgeP1, streetEdgeP2] = [streetEdgeP2, streetEdgeP1];
+      }
 
       // Order addresses along the street edge
-      const edgeVec = [streetEdgeP2[0] - streetEdgeP1[0], streetEdgeP2[1] - streetEdgeP1[1]];
-      const edgeLen = Math.sqrt(edgeVec[0] * edgeVec[0] + edgeVec[1] * edgeVec[1]);
-      const edgeUnit = [edgeVec[0] / edgeLen, edgeVec[1] / edgeLen];
-      
-      const orderedAddrs = [...addresses].sort((a, b) => {
-        const da = (a.lon - streetEdgeP1[0]) * edgeUnit[0] + (a.lat - streetEdgeP1[1]) * edgeUnit[1];
-        const db = (b.lon - streetEdgeP1[0]) * edgeUnit[0] + (b.lat - streetEdgeP1[1]) * edgeUnit[1];
-        return da - db;
-      });
+      const orderedAddrs = orderTownhouseAddressesAlongAxis(
+        addresses,
+        streetEdgeP1,
+        streetEdgeP2
+      );
 
       // Create units using proper polygon clipping
       const units: SplitUnit[] = [];
       
       for (let i = 0; i < nUnits; i++) {
         const unitGeometry = createUnitPolygon(
-          building.geometry,
+          canonicalGeometry,
           orderedAddrs,
           i,
           streetEdgeP1,
@@ -656,6 +682,7 @@ export class TownhouseSplitterService {
           address_id: addr.id,
           unit_geometry: unitGeometry,
           unit_number: addr.house_number || String(i + 1),
+          unit_index: i,
           validation,
           area_sqm: area,
         });
@@ -678,6 +705,12 @@ export class TownhouseSplitterService {
         units,
         parent_type: analysis.classification === 'townhouse' ? 'townhouse' : 'small_multifamily',
         split_method: 'obb_linear',
+        split_signature: townhouseSplitSignature({
+          parentBuildingId: building_id,
+          ring: coords,
+          orderedAddresses: orderedAddrs,
+          splitMethod: 'obb_linear',
+        }),
       };
 
     } catch (error) {
@@ -707,13 +740,17 @@ export class TownhouseSplitterService {
 
     const centroid = this.calculateCentroid(building.geometry.coordinates[0]);
     
-    const units: SplitUnit[] = addresses.map((addr, i) => {
+    const orderedAddresses = [...addresses].sort((a, b) =>
+      canonicalAddressIdentity(a).localeCompare(canonicalAddressIdentity(b))
+    );
+    const units: SplitUnit[] = orderedAddresses.map((addr, i) => {
       const circle = this.createCirclePolygon([addr.lon, addr.lat], 2);
       
       return {
         address_id: addr.id,
         unit_geometry: circle,
         unit_number: addr.house_number || `Unit ${i + 1}`,
+        unit_index: i,
         validation: 'passed',
         area_sqm: Math.PI * 2 * 2,
       };
@@ -725,6 +762,12 @@ export class TownhouseSplitterService {
       units,
       parent_type: 'apartment',
       split_method: 'apartment_placeholder',
+      split_signature: townhouseSplitSignature({
+        parentBuildingId: building_id,
+        ring: canonicalizePolygonRing(building.geometry.coordinates[0]),
+        orderedAddresses,
+        splitMethod: 'apartment_placeholder',
+      }),
     };
 
     await this.saveUnits(campaignId, result, overtureRelease);
@@ -795,22 +838,41 @@ export class TownhouseSplitterService {
   private async saveUnits(
     campaignId: string,
     result: SplitResult,
-    overtureRelease: string
+    _overtureRelease: string
   ): Promise<boolean> {
     if (!result.units || result.units.length === 0) return false;
 
-    const records = result.units.map(u => ({
+    const records = result.units.map((u) => ({
+      id: deterministicTownhouseUnitId({
+        campaignId,
+        parentBuildingId: result.building_id,
+        unitIndex: u.unit_index,
+      }),
       campaign_id: campaignId,
       parent_building_id: result.building_id,
       address_id: u.address_id,
       unit_number: u.unit_number,
+      unit_index: u.unit_index,
+      stable_key: townhouseUnitStableKey({
+        parentBuildingId: result.building_id,
+        unitIndex: u.unit_index,
+      }),
+      split_version: TOWNHOUSE_SPLIT_VERSION,
+      split_signature: result.split_signature,
+      lifecycle_state: 'active',
+      superseded_at: null,
       unit_geometry: u.unit_geometry,
+      parent_building_area: u.area_sqm,
       split_method: result.split_method,
       parent_type: result.parent_type,
       validation_status: u.validation,
     }));
 
-    const { error } = await this.supabase.from('building_units').insert(records);
+    const { error } = await this.supabase.rpc('upsert_building_units_deterministic', {
+      p_campaign_id: campaignId,
+      p_parent_building_id: result.building_id,
+      p_units: records,
+    });
 
     if (error) {
       console.error('[TownhouseSplitter] Error saving units:', error.message);
@@ -840,11 +902,46 @@ export class TownhouseSplitterService {
       throw new Error(fetchError?.message || 'Split error not found');
     }
 
-    const records = units.map((unit) => ({
+    const orderedUnits = [...units].sort((a, b) =>
+      `${a.address_id}|${a.unit_number}`.localeCompare(`${b.address_id}|${b.unit_number}`)
+    );
+    const splitSignature = townhouseSplitSignature({
+      parentBuildingId: splitError.building_id,
+      ring: [],
+      orderedAddresses: orderedUnits.map((unit, index) => ({
+        id: unit.address_id,
+        lon: unit.unit_geometry.coordinates[0]?.[0]?.[0] ?? index,
+        lat: unit.unit_geometry.coordinates[0]?.[0]?.[1] ?? 0,
+        house_number: unit.unit_number,
+      })),
+      splitMethod: 'manual',
+      manualOverrides: orderedUnits.map((unit) => ({
+        address_id: unit.address_id,
+        unit_number: unit.unit_number,
+        unit_geometry: unit.unit_geometry,
+        area_sqm: unit.area_sqm ?? null,
+        validation: unit.validation ?? 'manual_override',
+      })),
+    });
+    const records = orderedUnits.map((unit, unitIndex) => ({
+      id: deterministicTownhouseUnitId({
+        campaignId: splitError.campaign_id,
+        parentBuildingId: splitError.building_id,
+        unitIndex,
+      }),
       campaign_id: splitError.campaign_id,
       parent_building_id: splitError.building_id,
       address_id: unit.address_id,
       unit_number: unit.unit_number,
+      unit_index: unitIndex,
+      stable_key: townhouseUnitStableKey({
+        parentBuildingId: splitError.building_id,
+        unitIndex,
+      }),
+      split_version: TOWNHOUSE_SPLIT_VERSION,
+      split_signature: splitSignature,
+      lifecycle_state: 'active',
+      superseded_at: null,
       unit_geometry: unit.unit_geometry,
       parent_building_area: unit.area_sqm ?? null,
       split_method: 'manual',
@@ -852,18 +949,17 @@ export class TownhouseSplitterService {
       validation_status: unit.validation ?? 'manual_override',
     }));
 
-    const { data: insertedUnits, error: insertError } = await this.supabase
-      .from('building_units')
-      .insert(records)
-      .select('id');
+    const { error: insertError } = await this.supabase.rpc('upsert_building_units_deterministic', {
+      p_campaign_id: splitError.campaign_id,
+      p_parent_building_id: splitError.building_id,
+      p_units: records,
+    });
 
     if (insertError) {
       throw new Error(`Failed to create manual split units: ${insertError.message}`);
     }
 
-    const createdUnitIds = (insertedUnits ?? [])
-      .map((unit: { id?: string | null }) => unit.id)
-      .filter((id): id is string => typeof id === 'string');
+    const createdUnitIds = records.map((unit) => unit.id);
 
     const { error: updateError } = await this.supabase
       .from('building_split_errors')

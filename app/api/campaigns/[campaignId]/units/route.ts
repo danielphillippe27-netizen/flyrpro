@@ -151,7 +151,8 @@ export async function POST(
       .from('building_units')
       .update(updates)
       .eq('id', unitId)
-      .eq('campaign_id', campaignId);
+      .eq('campaign_id', campaignId)
+      .eq('lifecycle_state', 'active');
     
     if (updateError) {
       throw new Error(`Failed to update unit: ${updateError.message}`);

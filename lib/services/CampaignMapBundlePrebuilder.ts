@@ -48,6 +48,9 @@ export type CurrentCampaignMapBundleRow = {
   links?: unknown;
   address_orphans?: unknown;
   building_orphans?: unknown;
+  building_units?: unknown;
+  reconciliation?: unknown;
+  reconciliation_report?: unknown;
   display_mode_hint?: unknown;
   counts?: unknown;
   layer_fetched_at?: unknown;
@@ -72,7 +75,7 @@ const EMPTY_FEATURE_COLLECTION: FeatureCollection = {
   features: [],
 };
 
-export const MAP_BUNDLE_RENDER_VERSION = '2026-07-15-field-manual-pins-v1';
+export const MAP_BUNDLE_RENDER_VERSION = '2026-07-24-reconciliation-v1';
 const MIN_RENDERABLE_BUILDING_AREA_SQM = 30;
 const PARCEL_LABEL_OFFSET_METERS = 4;
 const SCOPED_GEOMETRY_CACHE_TTL_MS = 30_000;
@@ -787,6 +790,12 @@ type CanonicalLinkRow = {
   unit_count?: number | null;
   unit_arrangement?: string | null;
   linker_version?: number | null;
+  reconciliation_decision_id?: string | null;
+  evidence_codes?: string[] | null;
+  link_state?: string | null;
+  user_confirmed?: boolean | null;
+  locked?: boolean | null;
+  reconciliation_version?: string | null;
 };
 
 function canonicalLinkPriority(matchType: unknown): number {
@@ -854,11 +863,167 @@ export function dedupeCanonicalBuildingLinksForBundle(links: JsonRecord[]): Json
   });
 }
 
+type BundleReconciliationSnapshot = {
+  status: 'not_started' | 'queued' | 'matching' | 'geocoding' | 'applying' | 'review_needed' | 'completed' | 'failed';
+  run_id?: string;
+  algorithm_version?: string;
+  mode?: 'apply_high_confidence';
+  queued_at?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  applied_bundle_signature?: string | null;
+  report?: JsonRecord;
+};
+
+async function fetchBundleReconciliation(
+  supabase: SupabaseClient,
+  campaignId: string
+): Promise<BundleReconciliationSnapshot> {
+  const { data, error } = await supabase
+    .from('map_reconciliation_runs')
+    .select('id, status, mode, algorithm_version, queued_at, started_at, completed_at, applied_bundle_signature, report')
+    .eq('campaign_id', campaignId)
+    .order('queued_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error || !data || data.mode === 'shadow' || data.status === 'superseded') {
+    return { status: 'not_started' };
+  }
+
+  const allowedStatuses = new Set([
+    'queued', 'matching', 'geocoding', 'applying', 'review_needed', 'completed', 'failed',
+  ]);
+  return {
+    status: allowedStatuses.has(data.status) ? data.status as BundleReconciliationSnapshot['status'] : 'not_started',
+    run_id: data.id,
+    algorithm_version: data.algorithm_version,
+    mode: 'apply_high_confidence',
+    queued_at: data.queued_at,
+    started_at: data.started_at,
+    completed_at: data.completed_at,
+    applied_bundle_signature: data.applied_bundle_signature,
+    report: data.report && typeof data.report === 'object' ? data.report as JsonRecord : {},
+  };
+}
+
+type AddressAdjustmentRow = {
+  address_id: string;
+  label_anchor_lon: number | null;
+  label_anchor_lat: number | null;
+  access_lon: number | null;
+  access_lat: number | null;
+  updated_at: string | null;
+};
+
+async function fetchAddressAdjustments(
+  supabase: SupabaseClient,
+  campaignId: string
+): Promise<AddressAdjustmentRow[]> {
+  const { data, error } = await supabase
+    .from('campaign_address_adjustments')
+    .select('address_id, label_anchor_lon, label_anchor_lat, access_lon, access_lat, updated_at')
+    .eq('campaign_id', campaignId);
+  if (error) return [];
+  return (data ?? []) as AddressAdjustmentRow[];
+}
+
+type BuildingResolutionRow = {
+  building_id: string;
+  resolution_status: 'active' | 'hidden_duplicate' | 'hidden_auxiliary';
+  canonical_building_id: string | null;
+  reason: string | null;
+  confidence: number | null;
+  updated_at: string | null;
+};
+
+async function fetchBuildingResolutions(
+  supabase: SupabaseClient,
+  campaignId: string
+): Promise<BuildingResolutionRow[]> {
+  const { data, error } = await supabase
+    .from('campaign_building_resolutions')
+    .select('building_id, resolution_status, canonical_building_id, reason, confidence, updated_at')
+    .eq('campaign_id', campaignId);
+  if (error) return [];
+  return (data ?? []) as BuildingResolutionRow[];
+}
+
+async function fetchActiveBuildingUnits(
+  supabase: SupabaseClient,
+  campaignId: string
+): Promise<JsonRecord[]> {
+  const { data, error } = await supabase
+    .from('building_units')
+    .select('id, parent_building_id, address_id, unit_number, unit_index, stable_key, split_version, split_signature, lifecycle_state, unit_geometry, split_method, parent_type, validation_status')
+    .eq('campaign_id', campaignId)
+    .eq('lifecycle_state', 'active')
+    .order('parent_building_id', { ascending: true })
+    .order('unit_index', { ascending: true });
+  if (error) return [];
+  return (data ?? []) as JsonRecord[];
+}
+
+function applyAddressAdjustments(
+  collection: FeatureCollection,
+  adjustments: AddressAdjustmentRow[]
+): FeatureCollection {
+  const byAddressId = new Map(adjustments.map((row) => [row.address_id.toLowerCase(), row]));
+  return {
+    ...collection,
+    features: collection.features.map((feature) => {
+      const properties = (feature.properties ?? {}) as JsonRecord;
+      const id = stringValue(properties.address_id ?? properties.id ?? feature.id)?.toLowerCase();
+      const adjustment = id ? byAddressId.get(id) : null;
+      const source = stringValue(properties.source);
+      return {
+        ...feature,
+        properties: {
+          ...properties,
+          origin: source ?? null,
+          provisional: source === 'derived_reverse_geocode',
+          ...(adjustment ? {
+            label_anchor_lon: adjustment.label_anchor_lon,
+            label_anchor_lat: adjustment.label_anchor_lat,
+            access_lon: adjustment.access_lon,
+            access_lat: adjustment.access_lat,
+          } : {}),
+        },
+      };
+    }),
+  };
+}
+
+function applyBuildingResolutions(
+  collection: FeatureCollection,
+  resolutions: BuildingResolutionRow[]
+): FeatureCollection {
+  const byBuildingId = new Map(resolutions.map((row) => [row.building_id.toLowerCase(), row]));
+  return {
+    ...collection,
+    features: collection.features.flatMap((feature) => {
+      const identifiers = featureIdentifierCandidates(feature).map((id) => id.toLowerCase());
+      const resolution = identifiers.map((id) => byBuildingId.get(id)).find(Boolean);
+      if (resolution?.resolution_status === 'hidden_duplicate' || resolution?.resolution_status === 'hidden_auxiliary') {
+        return [];
+      }
+      return [{
+        ...feature,
+        properties: {
+          ...(feature.properties ?? {}),
+          resolution_status: resolution?.resolution_status ?? 'active',
+          canonical_building_id: resolution?.canonical_building_id ?? null,
+        },
+      }];
+    }),
+  };
+}
+
 async function fetchCanonicalLinks(supabase: SupabaseClient, campaignId: string): Promise<JsonRecord[]> {
   const rows = await fetchAllInPages<CanonicalLinkRow>(async (from, to) =>
     await supabase
       .from('building_address_links')
-      .select('id, building_id, address_id, match_type, confidence, distance_meters, street_match_score, is_multi_unit, unit_count, unit_arrangement, linker_version')
+      .select('id, building_id, address_id, match_type, confidence, distance_meters, street_match_score, is_multi_unit, unit_count, unit_arrangement, linker_version, reconciliation_decision_id, evidence_codes, link_state, user_confirmed, locked, reconciliation_version')
       .eq('campaign_id', campaignId)
       .order('address_id', { ascending: true })
       .range(from, to)
@@ -884,6 +1049,12 @@ async function fetchCanonicalLinks(supabase: SupabaseClient, campaignId: string)
       unit_count: Math.max(1, Math.floor(numberValue(row.unit_count) ?? 1)),
       unit_arrangement: stringValue(row.unit_arrangement) ?? 'single',
       linker_version: numberValue(row.linker_version) ?? 1,
+      decision_id: stringValue(row.reconciliation_decision_id),
+      evidence_codes: Array.isArray(row.evidence_codes) ? row.evidence_codes : [],
+      link_state: stringValue(row.link_state) ?? 'active',
+      user_confirmed: row.user_confirmed === true,
+      locked: row.locked === true,
+      reconciliation_version: stringValue(row.reconciliation_version),
     }];
   });
 
@@ -1563,6 +1734,13 @@ export function responseFromCampaignMapBundleRow(row: CurrentCampaignMapBundleRo
   recordTiming?.('links', elapsedMs(linkStarted));
 
   const roads = asFeatureCollection(row.roads_geojson);
+  const buildingUnits = asArray(row.building_units);
+  const reconciliation = row.reconciliation && typeof row.reconciliation === 'object'
+    ? row.reconciliation as JsonRecord
+    : { status: 'not_started' };
+  const reconciliationReport = row.reconciliation_report && typeof row.reconciliation_report === 'object'
+    ? row.reconciliation_report as JsonRecord
+    : {};
   const counts = row.counts && typeof row.counts === 'object' ? row.counts as JsonRecord : {};
   const linksStatus = normalizedWorkflowStatus(counts.links_status ?? row.links_status);
 
@@ -1582,6 +1760,9 @@ export function responseFromCampaignMapBundleRow(row: CurrentCampaignMapBundleRo
     links,
     address_orphans: asArray(row.address_orphans),
     building_orphans: asArray(row.building_orphans),
+    building_units: buildingUnits,
+    reconciliation,
+    reconciliation_report: reconciliationReport,
     counts: {
       ...counts,
       addresses: Number(counts.addresses ?? addresses.features.length),
@@ -1589,6 +1770,7 @@ export function responseFromCampaignMapBundleRow(row: CurrentCampaignMapBundleRo
       parcels: Number(counts.parcels ?? parcels.features.length),
       roads: Number(counts.roads ?? roads.features.length),
       links: Number(counts.links ?? links.length),
+      building_units: Number(counts.building_units ?? buildingUnits.length),
       source_version: row.source_version,
       asset_signature: row.asset_signature,
       links_status: linksStatus,
@@ -1614,12 +1796,16 @@ export function pendingCampaignMapBundleResponse(campaignId: string) {
     links: [],
     address_orphans: [],
     building_orphans: [],
+    building_units: [],
+    reconciliation: { status: 'not_started' },
+    reconciliation_report: {},
     counts: {
       addresses: 0,
       buildings: 0,
       parcels: 0,
       roads: 0,
       links: 0,
+      building_units: 0,
     },
   };
 }
@@ -1637,6 +1823,9 @@ async function upsertCanonicalBundle(
     links: unknown[];
     addressOrphans: unknown[];
     buildingOrphans: unknown[];
+    buildingUnits: JsonRecord[];
+    reconciliation: BundleReconciliationSnapshot;
+    reconciliationReport: JsonRecord;
     linksStatus: string;
     displayModeHint: 'buildings' | 'addresses';
     counts: JsonRecord;
@@ -1664,27 +1853,41 @@ async function upsertCanonicalBundle(
     p_expires_at: payload.expiresAt,
   };
   const latest = await supabase.rpc('rpc_upsert_campaign_map_bundle', latestArgs);
-  if (!latest.error) return;
+  if (latest.error) {
+    const legacyArgs = {
+      p_campaign_id: payload.campaignId,
+      p_asset_signature: payload.assetSignature,
+      p_source_version: payload.sourceVersion,
+      p_buildings_geojson: payload.buildings,
+      p_addresses_geojson: payload.addresses,
+      p_parcels_geojson: payload.parcels,
+      p_roads_geojson: payload.roads,
+      p_links: payload.links,
+      p_display_mode_hint: payload.displayModeHint,
+      p_counts: payload.counts,
+      p_layer_fetched_at: payload.layerFetchedAt,
+      p_links_status: payload.linksStatus,
+      p_built_at: payload.builtAt,
+      p_expires_at: payload.expiresAt,
+    };
+    const legacy = await supabase.rpc('rpc_upsert_campaign_map_bundle', legacyArgs);
+    if (legacy.error) {
+      throw new Error(`Failed to persist campaign map bundle: ${legacy.error.message}`);
+    }
+  }
 
-  const legacyArgs = {
-    p_campaign_id: payload.campaignId,
-    p_asset_signature: payload.assetSignature,
-    p_source_version: payload.sourceVersion,
-    p_buildings_geojson: payload.buildings,
-    p_addresses_geojson: payload.addresses,
-    p_parcels_geojson: payload.parcels,
-    p_roads_geojson: payload.roads,
-    p_links: payload.links,
-    p_display_mode_hint: payload.displayModeHint,
-    p_counts: payload.counts,
-    p_layer_fetched_at: payload.layerFetchedAt,
-    p_links_status: payload.linksStatus,
-    p_built_at: payload.builtAt,
-    p_expires_at: payload.expiresAt,
-  };
-  const legacy = await supabase.rpc('rpc_upsert_campaign_map_bundle', legacyArgs);
-  if (legacy.error) {
-    throw new Error(`Failed to persist campaign map bundle: ${legacy.error.message}`);
+  const { error: metadataError } = await supabase
+    .from('campaign_map_bundles')
+    .update({
+      building_units: payload.buildingUnits,
+      reconciliation: payload.reconciliation,
+      reconciliation_report: payload.reconciliationReport,
+    })
+    .eq('campaign_id', payload.campaignId)
+    .eq('asset_signature', payload.assetSignature)
+    .eq('is_current', true);
+  if (metadataError) {
+    throw new Error(`Failed to persist reconciliation bundle metadata: ${metadataError.message}`);
   }
 }
 
@@ -1696,9 +1899,18 @@ export async function prebuildCampaignMapBundle(
     scopedGeometry?: PrehydratedScopedMapGeometry | null;
     linksStatusOverride?: string | null;
     parcelDisplayMode?: 'filtered' | 'raw';
+    forceRebuild?: boolean;
   }
 ) {
-  const [{ data: snapshot }, { data: campaignRow }, currentBundle] = await Promise.all([
+  const [
+    { data: snapshot },
+    { data: campaignRow },
+    currentBundle,
+    reconciliation,
+    addressAdjustments,
+    buildingResolutions,
+    buildingUnits,
+  ] = await Promise.all([
     measure('snapshot', recordTiming, async () =>
       await supabase
         .from('campaign_snapshots')
@@ -1716,6 +1928,18 @@ export async function prebuildCampaignMapBundle(
     measure('current_bundle', recordTiming, () =>
       readCurrentCampaignMapBundle(supabase, campaignId)
     ),
+    measure('reconciliation', recordTiming, () =>
+      fetchBundleReconciliation(supabase, campaignId)
+    ),
+    measure('address_adjustments', recordTiming, () =>
+      fetchAddressAdjustments(supabase, campaignId)
+    ),
+    measure('building_resolutions', recordTiming, () =>
+      fetchBuildingResolutions(supabase, campaignId)
+    ),
+    measure('building_units', recordTiming, () =>
+      fetchActiveBuildingUnits(supabase, campaignId)
+    ),
   ]);
 
   const { data, error } = await measure('addresses', recordTiming, async () =>
@@ -1729,10 +1953,33 @@ export async function prebuildCampaignMapBundle(
   const sourceVersion = await measure('signature', recordTiming, () =>
     getSourceVersion(supabase, campaignId, bundle)
   );
+  const reconciliationRevision = stableHash({
+    reconciliation: {
+      ...reconciliation,
+      // This value points at the signature being computed below, so it must
+      // not itself participate in that signature.
+      applied_bundle_signature: undefined,
+    },
+    address_adjustments: addressAdjustments,
+    building_resolutions: buildingResolutions,
+    building_units: buildingUnits.map((unit) => ({
+      id: unit.id,
+      parent_building_id: unit.parent_building_id,
+      address_id: unit.address_id,
+      unit_index: unit.unit_index,
+      split_signature: unit.split_signature,
+      lifecycle_state: unit.lifecycle_state,
+    })),
+  });
+  const currentCounts = currentBundle?.counts && typeof currentBundle.counts === 'object'
+    ? currentBundle.counts as JsonRecord
+    : {};
 
   if (
+    !options?.forceRebuild &&
     !options?.scopedGeometry &&
     currentBundle?.source_version === sourceVersion &&
+    currentCounts.reconciliation_revision === reconciliationRevision &&
     !campaignMapBundleNeedsRebuild(currentBundle)
   ) {
     recordTiming?.('current_bundle_reused', 0);
@@ -1776,7 +2023,10 @@ export async function prebuildCampaignMapBundle(
     : scopedGeometry?.parcels?.features.length
       ? scopedGeometry.parcels
       : filteredBaseParcels;
-  const renderableBuildings = filterRenderableBuildingCollection(campaignId, rawBuildings);
+  const renderableBuildings = applyBuildingResolutions(
+    filterRenderableBuildingCollection(campaignId, rawBuildings),
+    buildingResolutions
+  );
   const links = await measure('links', recordTiming, () => fetchCanonicalLinks(supabase, campaignId));
   const addressOrphans = await measure('address_orphans', recordTiming, () =>
     fetchCanonicalAddressOrphans(supabase, campaignId)
@@ -1813,7 +2063,7 @@ export async function prebuildCampaignMapBundle(
     parcels,
     ownership: parcelOwnership,
   });
-  const addresses = ownershipApplied.addresses;
+  const addresses = applyAddressAdjustments(ownershipApplied.addresses, addressAdjustments);
   const buildings = manualPinsApplied.buildings;
   const ownedParcels = ownershipApplied.parcels;
   const buildingOrphans = enriched.buildingOrphans;
@@ -1828,10 +2078,12 @@ export async function prebuildCampaignMapBundle(
 	    parcels: featureCollectionCount(ownedParcels),
 	    roads: featureCollectionCount(roads),
 	    links: links.length,
+	    building_units: buildingUnits.length,
 	    link_classification: links.length > 0 ? 'linked' : 'no_links_needed',
 	    parcel_links: parcelOwnership.length,
     source_version: sourceVersion,
     render_version: MAP_BUNDLE_RENDER_VERSION,
+    reconciliation_revision: reconciliationRevision,
     label_version: 'parcel-owned-house-number-label-v2',
   };
   const assetSignature = stableHash({
@@ -1843,7 +2095,12 @@ export async function prebuildCampaignMapBundle(
     building_orphans: buildingOrphans.length,
     links_status: linksStatus,
     parcel_links: parcelOwnership.length,
+    reconciliation_revision: reconciliationRevision,
+    unit_split_signatures: buildingUnits.map((unit) => unit.split_signature),
   });
+  const reconciliationForBundle = ['completed', 'review_needed'].includes(reconciliation.status)
+    ? { ...reconciliation, applied_bundle_signature: assetSignature }
+    : reconciliation;
   counts.asset_signature = assetSignature;
   counts.links_status = linksStatus;
 
@@ -1869,6 +2126,9 @@ export async function prebuildCampaignMapBundle(
       links,
       addressOrphans,
       buildingOrphans,
+      buildingUnits,
+      reconciliation: reconciliationForBundle,
+      reconciliationReport: reconciliationForBundle.report ?? {},
       linksStatus,
       displayModeHint,
       counts,
@@ -1890,6 +2150,9 @@ export async function prebuildCampaignMapBundle(
     links,
     address_orphans: addressOrphans,
     building_orphans: buildingOrphans,
+    building_units: buildingUnits,
+    reconciliation: reconciliationForBundle,
+    reconciliation_report: reconciliationForBundle.report ?? {},
     counts,
     layer_fetched_at: layerFetchedAt,
     built_at: nowIso,
