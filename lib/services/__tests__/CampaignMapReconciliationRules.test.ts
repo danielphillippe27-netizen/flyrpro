@@ -2,6 +2,7 @@
  * Run with: npx tsx lib/services/__tests__/CampaignMapReconciliationRules.test.ts
  */
 import {
+  assessReverseOrphanCorrection,
   buildLinkedNeighborhoodEvidence,
   neighborhoodContextForCandidate,
   normalizedAddressIdentity,
@@ -208,6 +209,104 @@ assert(
     outbuildingPlacement: true,
   }),
   'an ADU or laneway home with unique history must remain visible'
+);
+
+const strongRooftopCorrection = assessReverseOrphanCorrection({
+  accuracy: 'rooftop',
+  reversePointDistanceMeters: 2.5,
+  sourcePointDistanceMeters: 41,
+  addressIdentityMatches: true,
+  uniqueAddressIdentity: true,
+  uniqueBuildingIdentity: true,
+  addressIsOrphan: true,
+  buildingIsOrphan: true,
+  localityMatches: true,
+  regionMatches: true,
+  postalMatches: true,
+  protectedHistory: false,
+  explicitNonResidentialType: false,
+});
+assert(
+  strongRooftopCorrection.eligible &&
+  strongRooftopCorrection.moveSource &&
+  strongRooftopCorrection.score >= 0.99,
+  'a unique rooftop-confirmed orphan pair should move the campaign source point'
+);
+
+assert(
+  !assessReverseOrphanCorrection({
+    accuracy: 'interpolated',
+    reversePointDistanceMeters: 0,
+    sourcePointDistanceMeters: 20,
+    addressIdentityMatches: true,
+    uniqueAddressIdentity: true,
+    uniqueBuildingIdentity: true,
+    addressIsOrphan: true,
+    buildingIsOrphan: true,
+    localityMatches: true,
+    regionMatches: true,
+    postalMatches: true,
+    protectedHistory: false,
+    explicitNonResidentialType: false,
+  }).eligible,
+  'interpolated reverse geocodes must never move source geometry'
+);
+
+assert(
+  !assessReverseOrphanCorrection({
+    accuracy: 'rooftop',
+    reversePointDistanceMeters: 1,
+    sourcePointDistanceMeters: 25,
+    addressIdentityMatches: true,
+    uniqueAddressIdentity: false,
+    uniqueBuildingIdentity: true,
+    addressIsOrphan: true,
+    buildingIsOrphan: true,
+    localityMatches: true,
+    regionMatches: true,
+    postalMatches: true,
+    protectedHistory: false,
+    explicitNonResidentialType: false,
+  }).eligible,
+  'duplicate orphan address identities must remain unresolved'
+);
+
+assert(
+  !assessReverseOrphanCorrection({
+    accuracy: 'rooftop',
+    reversePointDistanceMeters: 1,
+    sourcePointDistanceMeters: 25,
+    addressIdentityMatches: true,
+    uniqueAddressIdentity: true,
+    uniqueBuildingIdentity: true,
+    addressIsOrphan: true,
+    buildingIsOrphan: true,
+    localityMatches: true,
+    regionMatches: true,
+    postalMatches: true,
+    protectedHistory: true,
+    explicitNonResidentialType: false,
+  }).eligible,
+  'field history must block source-coordinate movement'
+);
+
+assert(
+  !assessReverseOrphanCorrection({
+    accuracy: 'parcel',
+    reversePointDistanceMeters: 3,
+    sourcePointDistanceMeters: 20,
+    addressIdentityMatches: true,
+    uniqueAddressIdentity: true,
+    uniqueBuildingIdentity: true,
+    addressIsOrphan: true,
+    buildingIsOrphan: true,
+    localityMatches: true,
+    regionMatches: true,
+    postalMatches: true,
+    protectedHistory: false,
+    explicitNonResidentialType: false,
+  }).eligible,
+  'parcel accuracy may move source geometry only when the provider point is inside the footprint'
 );
 
 console.log('✓ map reconciliation rule regression tests passed');
