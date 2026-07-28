@@ -779,7 +779,8 @@ export class CampaignMapReconciliationService {
     reviewerId: string,
     outcome: 'approve' | 'reject',
     reason?: string,
-    rebuildBundle = true
+    rebuildBundle = true,
+    options?: { preserveSourceCoordinates?: boolean }
   ): Promise<JsonRecord> {
     const { data, error } = await this.supabase
       .from('map_reconciliation_decisions')
@@ -818,6 +819,31 @@ export class CampaignMapReconciliationService {
     }
 
     decision.status = 'proposed';
+    if (
+      options?.preserveSourceCoordinates === true &&
+      decision.action === 'link_address' &&
+      decision.proposed_state.move_source === true
+    ) {
+      decision.proposed_state = {
+        ...decision.proposed_state,
+        move_source: false,
+        coordinate_policy: 'preserve_source',
+      };
+      decision.evidence_codes = [
+        ...decision.evidence_codes.filter((code) => code !== 'source_move_with_rollback'),
+        'source_coordinate_preserved_by_policy',
+      ];
+      const override = await this.supabase
+        .from('map_reconciliation_decisions')
+        .update({
+          proposed_state: decision.proposed_state,
+          evidence_codes: decision.evidence_codes,
+        })
+        .eq('id', decision.id);
+      if (override.error) {
+        throw new Error(`Failed to preserve source coordinates: ${override.error.message}`);
+      }
+    }
     const applied = await this.applyDecision(decision);
     await this.supabase
       .from('map_reconciliation_decisions')
@@ -932,7 +958,21 @@ export class CampaignMapReconciliationService {
               link_state: 'active',
               reconciliation_decision_id: null,
               reconciliation_version: null,
+          }, { onConflict: 'campaign_id,address_id' });
+        }
+      } else {
+        const orphanSnapshot = asRecord(decision.before_state.address_orphan);
+        if (Object.keys(orphanSnapshot).length > 0) {
+          const restore = await this.supabase
+            .from('address_orphans')
+            .upsert({
+              ...orphanSnapshot,
+              campaign_id: decision.campaign_id,
+              address_id: decision.address_id,
             }, { onConflict: 'campaign_id,address_id' });
+          if (restore.error) {
+            throw new Error(`Failed to restore address orphan: ${restore.error.message}`);
+          }
         }
       }
     } else if (decision.action === 'create_synthetic_address' && decision.address_id) {
@@ -2375,6 +2415,28 @@ export class CampaignMapReconciliationService {
         }
         decision.status = 'applied';
         return true;
+      }
+      const orphanSnapshot = await this.supabase
+        .from('address_orphans')
+        .select('*')
+        .eq('campaign_id', decision.campaign_id)
+        .eq('address_id', decision.address_id)
+        .maybeSingle();
+      if (orphanSnapshot.error) {
+        throw new Error(`Failed to snapshot address orphan: ${orphanSnapshot.error.message}`);
+      }
+      if (orphanSnapshot.data) {
+        decision.before_state = {
+          ...decision.before_state,
+          address_orphan: orphanSnapshot.data,
+        };
+        const snapshotUpdate = await this.supabase
+          .from('map_reconciliation_decisions')
+          .update({ before_state: decision.before_state })
+          .eq('id', decision.id);
+        if (snapshotUpdate.error) {
+          throw new Error(`Failed to store address orphan snapshot: ${snapshotUpdate.error.message}`);
+        }
       }
       const { error } = await this.supabase
         .from('building_address_links')

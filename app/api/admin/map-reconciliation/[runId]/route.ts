@@ -122,7 +122,10 @@ export async function POST(
           auth.user.id,
           action,
           typeof body.reason === 'string' ? body.reason : undefined,
-          false
+          false,
+          {
+            preserveSourceCoordinates: body.preserve_source_coordinates === true,
+          }
         ));
       } else if (action === 'rollback') {
         results.push(await service.rollbackDecision(
