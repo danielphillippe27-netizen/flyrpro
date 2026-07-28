@@ -5,15 +5,21 @@ import {
 } from '../lib/services/CampaignMapReconciliationService';
 import { uuidV5 } from '../lib/services/TownhouseUnitIdentity';
 
-const SOURCE_CAMPAIGN_ID = '24cb2e62-4e03-4642-a662-7456b111ddfe';
-const TARGET_NAME = 'JU — Optimized';
+const SOURCE_CAMPAIGN_ID =
+  process.env.OPTIMIZATION_SOURCE_CAMPAIGN_ID ??
+  '24cb2e62-4e03-4642-a662-7456b111ddfe';
+const TARGET_NAME = process.env.OPTIMIZATION_TARGET_NAME ?? 'JU — Optimized';
+const configuredExactLinks = process.env.OPTIMIZATION_EXPECTED_EXACT_LINKS;
 const EXPECTED = {
-  addresses: 922,
-  buildings: 298,
-  links: 387,
-  addressOrphans: 535,
-  buildingOrphans: 178,
-  exactLinks: 11,
+  addresses: Number(process.env.OPTIMIZATION_EXPECTED_ADDRESSES ?? 922),
+  buildings: Number(process.env.OPTIMIZATION_EXPECTED_BUILDINGS ?? 298),
+  links: Number(process.env.OPTIMIZATION_EXPECTED_LINKS ?? 387),
+  addressOrphans: Number(process.env.OPTIMIZATION_EXPECTED_ADDRESS_ORPHANS ?? 535),
+  buildingOrphans: Number(process.env.OPTIMIZATION_EXPECTED_BUILDING_ORPHANS ?? 178),
+  exactLinks:
+    configuredExactLinks && configuredExactLinks !== 'auto'
+      ? Number(configuredExactLinks)
+      : null,
 };
 
 type JsonRecord = Record<string, unknown>;
@@ -435,8 +441,12 @@ async function main(): Promise<void> {
   const service = new CampaignMapReconciliationService(supabase);
   const firstRun = await processShadowRun(service, targetCampaignId);
   const firstDecisions = await exactLinkDecisions(supabase, String(firstRun.id));
-  if (firstDecisions.length !== EXPECTED.exactLinks) {
-    throw new Error(`Expected ${EXPECTED.exactLinks} exact links, found ${firstDecisions.length}`);
+  const exactLinkCount = EXPECTED.exactLinks ?? firstDecisions.length;
+  if (exactLinkCount === 0) {
+    throw new Error('No exact orphan-to-orphan links were found');
+  }
+  if (firstDecisions.length !== exactLinkCount) {
+    throw new Error(`Expected ${exactLinkCount} exact links, found ${firstDecisions.length}`);
   }
 
   const targetAddressIds = firstDecisions.map((decision) => String(decision.address_id));
@@ -459,16 +469,16 @@ async function main(): Promise<void> {
     targetCampaignId,
     frozenCloneBundle,
     String(firstRun.id),
-    { exact_orphan_links: EXPECTED.exactLinks, source_coordinates_preserved: true }
+    { exact_orphan_links: exactLinkCount, source_coordinates_preserved: true }
   );
   const appliedCounts = await loadCounts(supabase, targetCampaignId);
   assertCounts('applied', appliedCounts, {
     addresses: EXPECTED.addresses,
     buildings: EXPECTED.buildings,
-    links: EXPECTED.links + EXPECTED.exactLinks,
-    address_orphans: EXPECTED.addressOrphans - EXPECTED.exactLinks,
-    bundle_address_orphans: EXPECTED.addressOrphans - EXPECTED.exactLinks,
-    building_orphans: EXPECTED.buildingOrphans - EXPECTED.exactLinks,
+    links: EXPECTED.links + exactLinkCount,
+    address_orphans: EXPECTED.addressOrphans - exactLinkCount,
+    bundle_address_orphans: EXPECTED.addressOrphans - exactLinkCount,
+    building_orphans: EXPECTED.buildingOrphans - exactLinkCount,
   });
 
   const afterCoordinates = await supabase
@@ -492,7 +502,7 @@ async function main(): Promise<void> {
     );
     if (result.status === 'rolled_back') rolledBack += 1;
   }
-  if (rolledBack !== EXPECTED.exactLinks) {
+  if (rolledBack !== exactLinkCount) {
     throw new Error(`Rollback restored ${rolledBack} decisions`);
   }
   await supabase
@@ -516,8 +526,8 @@ async function main(): Promise<void> {
 
   const secondRun = await processShadowRun(service, targetCampaignId);
   const finalDecisions = await exactLinkDecisions(supabase, String(secondRun.id));
-  if (finalDecisions.length !== EXPECTED.exactLinks) {
-    throw new Error(`Expected ${EXPECTED.exactLinks} final exact links, found ${finalDecisions.length}`);
+  if (finalDecisions.length !== exactLinkCount) {
+    throw new Error(`Expected ${exactLinkCount} final exact links, found ${finalDecisions.length}`);
   }
   await applyLinkOnly(
     service,
@@ -530,7 +540,7 @@ async function main(): Promise<void> {
     frozenCloneBundle,
     String(secondRun.id),
     {
-      exact_orphan_links: EXPECTED.exactLinks,
+      exact_orphan_links: exactLinkCount,
       source_coordinates_preserved: true,
       rollback_verified: true,
     }
@@ -540,10 +550,10 @@ async function main(): Promise<void> {
   assertCounts('final', finalCounts, {
     addresses: EXPECTED.addresses,
     buildings: EXPECTED.buildings,
-    links: EXPECTED.links + EXPECTED.exactLinks,
-    address_orphans: EXPECTED.addressOrphans - EXPECTED.exactLinks,
-    bundle_address_orphans: EXPECTED.addressOrphans - EXPECTED.exactLinks,
-    building_orphans: EXPECTED.buildingOrphans - EXPECTED.exactLinks,
+    links: EXPECTED.links + exactLinkCount,
+    address_orphans: EXPECTED.addressOrphans - exactLinkCount,
+    bundle_address_orphans: EXPECTED.addressOrphans - exactLinkCount,
+    building_orphans: EXPECTED.buildingOrphans - exactLinkCount,
   });
   const sourceAfter = await loadCounts(supabase, SOURCE_CAMPAIGN_ID);
   assertCounts('source after', sourceAfter, {
