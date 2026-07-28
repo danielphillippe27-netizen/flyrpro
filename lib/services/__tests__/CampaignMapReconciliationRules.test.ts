@@ -44,6 +44,22 @@ assert(
   source1777 === reverse1777,
   'postal spacing and case must not prevent reuse of the existing 1777 address'
 );
+assert(
+  normalizedAddressIdentity({
+    houseNumber: '5819',
+    streetName: 'Riverside PL',
+    locality: 'MISSISSAUGA',
+    region: 'ON',
+    postalCode: 'L5M4X1',
+  }) === normalizedAddressIdentity({
+    houseNumber: '5819',
+    streetName: 'Riverside Place',
+    locality: 'Mississauga',
+    region: 'Ontario',
+    postalCode: 'L5M 4X1',
+  }),
+  'street suffix aliases must prevent duplicate synthetic addresses'
+);
 const mapboxV6CanadianReverse = parseMapboxReverseResult('cache-key', {
   features: [{
     geometry: { type: 'Point', coordinates: [-79.71375, 43.586683] },

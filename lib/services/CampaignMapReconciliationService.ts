@@ -11,7 +11,7 @@ import { CampaignMapModeService } from './CampaignMapModeService';
 import { TownhouseSplitterService, type BuildingFeature as TownhouseBuildingFeature } from './TownhouseSplitterService';
 import { uuidV5 } from './TownhouseUnitIdentity';
 
-export const MAP_RECONCILIATION_ALGORITHM_VERSION = 'map-reconciliation-v3-mapbox-v6-source';
+export const MAP_RECONCILIATION_ALGORITHM_VERSION = 'map-reconciliation-v4-orphan-priority';
 const AUTO_LINK_SCORE = 0.92;
 const AUTO_LINK_MARGIN = 0.15;
 const REVIEW_SCORE = 0.70;
@@ -192,17 +192,7 @@ export function normalizedAddressIdentity(input: {
     newfoundland: 'nl',
     'newfoundland and labrador': 'nl',
   };
-  const street = normalizeText(input.streetName)
-    .replace(/\bst\b/g, 'street')
-    .replace(/\brd\b/g, 'road')
-    .replace(/\bave\b/g, 'avenue')
-    .replace(/\bdr\b/g, 'drive')
-    .replace(/\bblvd\b/g, 'boulevard')
-    .replace(/\bcrt\b/g, 'court')
-    .replace(/\bct\b/g, 'court')
-    .replace(/\bcr\b/g, 'crescent')
-    .replace(/\bcres\b/g, 'crescent')
-    .replace(/\bhwy\b/g, 'highway');
+  const street = normalizeStreet(input.streetName);
   return [
     `${normalizeText(input.houseNumber)}${normalizeText(input.houseSuffix)}`,
     street,
@@ -338,6 +328,16 @@ function normalizeStreet(value: unknown): string {
     .replace(/\bct\b/g, 'court')
     .replace(/\bcr\b/g, 'crescent')
     .replace(/\bcres\b/g, 'crescent')
+    .replace(/\bpl\b/g, 'place')
+    .replace(/\bln\b/g, 'lane')
+    .replace(/\btrl\b/g, 'trail')
+    .replace(/\bter\b/g, 'terrace')
+    .replace(/\bcir\b/g, 'circle')
+    .replace(/\bpkwy\b/g, 'parkway')
+    .replace(/\brdg\b/g, 'ridge')
+    .replace(/\bgrv\b/g, 'grove')
+    .replace(/\bhts\b/g, 'heights')
+    .replace(/\bsq\b/g, 'square')
     .replace(/\bhwy\b/g, 'highway');
 }
 
@@ -1707,13 +1707,17 @@ export class CampaignMapReconciliationService {
     if (process.env.MAP_RECONCILIATION_ENABLE_REVERSE_GEOCODE !== 'true') return [];
     const maxGeocodes = Math.max(0, Math.min(500, Number(process.env.MAP_RECONCILIATION_MAX_GEOCODES_PER_RUN ?? 100)));
     if (maxGeocodes === 0) return [];
+    const allAddressesByIdentity = new Map<string, BundleFeature[]>();
     const orphanAddressesByIdentity = new Map<string, BundleFeature[]>();
     for (const feature of input.addresses) {
       const id = addressId(feature);
       const identity = addressIdentityFromFeature(feature);
+      if (!id || !identity.replaceAll('|', '')) continue;
+      allAddressesByIdentity.set(identity, [
+        ...(allAddressesByIdentity.get(identity) ?? []),
+        feature,
+      ]);
       if (
-        !id ||
-        !identity.replaceAll('|', '') ||
         input.linkedAddressIds.has(id.toLowerCase()) ||
         input.protectedAddressIds.has(id.toLowerCase()) ||
         (input.orphanAddressIds.size > 0 && !input.orphanAddressIds.has(id.toLowerCase()))
@@ -1742,15 +1746,34 @@ export class CampaignMapReconciliationService {
       postalMatches: boolean;
     }> = [];
     let geocodeCursor = 0;
-    for (const building of input.buildings) {
+    const orphanAddressPoints = input.addresses.flatMap((feature): Point[] => {
+      const id = addressId(feature);
+      const point = id && input.orphanAddressIds.has(id.toLowerCase())
+        ? featurePoint(feature)
+        : null;
+      return point ? [point] : [];
+    });
+    const eligibleBuildings = input.buildings
+      .filter((building) => {
+        const id = featureId(building);
+        return Boolean(
+          id &&
+          !input.linkedBuildingIds.has(id.toLowerCase()) &&
+          !input.protectedBuildingIds.has(id.toLowerCase()) &&
+          (input.orphanBuildingIds.size === 0 || input.orphanBuildingIds.has(id.toLowerCase())) &&
+          !isExplicitNonResidentialBuilding(building)
+        );
+      })
+      .map((building) => ({
+        building,
+        orphanDistance: orphanAddressPoints.reduce((minimum, point) =>
+          Math.min(minimum, pointToGeometryDistanceMeters(point, building.geometry)),
+        Number.POSITIVE_INFINITY),
+      }))
+      .sort((left, right) => left.orphanDistance - right.orphanDistance);
+    for (const { building } of eligibleBuildings) {
       const id = featureId(building);
-      if (
-        !id ||
-        input.linkedBuildingIds.has(id.toLowerCase()) ||
-        input.protectedBuildingIds.has(id.toLowerCase()) ||
-        (input.orphanBuildingIds.size > 0 && !input.orphanBuildingIds.has(id.toLowerCase())) ||
-        isExplicitNonResidentialBuilding(building)
-      ) continue;
+      if (!id) continue;
       if (geocodeCursor >= maxGeocodes) break;
       geocodeCursor += 1;
       if (geocodeCursor === 1 || geocodeCursor % 10 === 0) {
@@ -1807,6 +1830,7 @@ export class CampaignMapReconciliationService {
       const buildingIdValue = featureId(building);
       if (!buildingIdValue || !result.houseNumber || !result.streetName) return null;
       const orphanIdentityMatches = orphanAddressesByIdentity.get(result.identity) ?? [];
+      const allIdentityMatches = allAddressesByIdentity.get(result.identity) ?? [];
       const existingAddress = orphanIdentityMatches.length === 1 ? orphanIdentityMatches[0] : null;
       const existingAddressId = existingAddress ? addressId(existingAddress) : null;
       const sourcePoint = existingAddress ? featurePoint(existingAddress) : null;
@@ -1876,7 +1900,7 @@ export class CampaignMapReconciliationService {
 
       const strongAccuracy = result.accuracy === 'rooftop' || result.accuracy === 'parcel';
       if (
-        orphanIdentityMatches.length > 0 ||
+        allIdentityMatches.length > 0 ||
         !uniqueBuildingIdentity ||
         !strongAccuracy ||
         isExplicitNonResidentialBuilding(building)
