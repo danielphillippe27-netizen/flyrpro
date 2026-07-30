@@ -2,7 +2,9 @@
  * Run with: npx tsx lib/services/__tests__/CampaignMapReconciliationRules.test.ts
  */
 import {
+  addressContextMatchesReverse,
   assessReverseOrphanCorrection,
+  buildingHasAuthoritativeMultiUnitMetadata,
   buildLinkedNeighborhoodEvidence,
   configuredReverseGeocodingStorageMode,
   neighborhoodContextForCandidate,
@@ -11,6 +13,7 @@ import {
   isBuildingAvailableForCivicAssignment,
   parseMapboxReverseResult,
   scoreReconciliationCandidate,
+  solveGlobalOneToOneAssignment,
   shouldAutoHideAuxiliary,
   shouldAutoHideOverlappingDuplicate,
 } from '../CampaignMapReconciliationService';
@@ -27,6 +30,107 @@ assert(
   configuredReverseGeocodingStorageMode('permanent') === 'permanent' &&
     configuredReverseGeocodingStorageMode(undefined) === 'permanent',
   'permanent storage must remain the default'
+);
+
+const globalAssignment = solveGlobalOneToOneAssignment([
+  { buildingId: 'building-a', addressId: 'address-1', weight: 10 },
+  { buildingId: 'building-a', addressId: 'address-2', weight: 9 },
+  { buildingId: 'building-b', addressId: 'address-1', weight: 8 },
+]);
+assert(
+  globalAssignment.some((pair) =>
+    pair.buildingId === 'building-a' && pair.addressId === 'address-2'
+  ) &&
+    globalAssignment.some((pair) =>
+      pair.buildingId === 'building-b' && pair.addressId === 'address-1'
+    ),
+  'global assignment must preserve maximum cardinality across a reassignment chain'
+);
+
+const candidateAddress: GeoJSON.Feature<GeoJSON.Point> = {
+  type: 'Feature',
+  geometry: { type: 'Point', coordinates: [-79.7, 43.6] },
+  properties: {
+    house_number: '123',
+    street_name: 'Example Street',
+    locality: 'Mississauga',
+    region: 'ON',
+    postal_code: 'L5M 1A1',
+  },
+};
+assert(
+  addressContextMatchesReverse(candidateAddress, {
+    cacheKey: 'temporary',
+    formatted: '123 Example Street',
+    houseNumber: '123',
+    streetName: 'Example Street',
+    locality: 'Mississauga',
+    region: 'ON',
+    postalCode: 'L5M 1A1',
+    country: 'CA',
+    longitude: -79.7,
+    latitude: 43.6,
+    accuracy: 'rooftop',
+    identity: '123|example street|mississauga|on|l5m1a1',
+    raw: {},
+  }),
+  'reverse postal context must be compared with the candidate address'
+);
+assert(
+  !addressContextMatchesReverse(candidateAddress, {
+    cacheKey: 'temporary',
+    formatted: '123 Example Street',
+    houseNumber: '123',
+    streetName: 'Example Street',
+    locality: 'Mississauga',
+    region: 'ON',
+    postalCode: 'L5M 9Z9',
+    country: 'CA',
+    longitude: -79.7,
+    latitude: 43.6,
+    accuracy: 'rooftop',
+    identity: '123|example street|mississauga|on|l5m9z9',
+    raw: {},
+  }),
+  'a different candidate postal code must reject the reverse match'
+);
+assert(
+  !buildingHasAuthoritativeMultiUnitMetadata({
+    type: 'Feature',
+    geometry: {
+      type: 'Polygon',
+      coordinates: [[
+        [-79.7, 43.6],
+        [-79.6999, 43.6],
+        [-79.6999, 43.6001],
+        [-79.7, 43.6001],
+        [-79.7, 43.6],
+      ]],
+    },
+    properties: {
+      address_count: 4,
+      inferred_from_nearby_addresses: true,
+      building_type: 'detached',
+    },
+  }),
+  'nearby-address counts must not create multi-unit capacity in parcel-less detached mode'
+);
+assert(
+  buildingHasAuthoritativeMultiUnitMetadata({
+    type: 'Feature',
+    geometry: {
+      type: 'Polygon',
+      coordinates: [[
+        [-79.7, 43.6],
+        [-79.6999, 43.6],
+        [-79.6999, 43.6001],
+        [-79.7, 43.6001],
+        [-79.7, 43.6],
+      ]],
+    },
+    properties: { building_type: 'townhouse' },
+  }),
+  'explicit townhouse metadata must retain multi-unit capacity'
 );
 
 const source1777 = normalizedAddressIdentity({

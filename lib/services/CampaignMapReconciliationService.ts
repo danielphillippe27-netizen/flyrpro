@@ -11,7 +11,7 @@ import { CampaignMapModeService } from './CampaignMapModeService';
 import { TownhouseSplitterService, type BuildingFeature as TownhouseBuildingFeature } from './TownhouseSplitterService';
 import { uuidV5 } from './TownhouseUnitIdentity';
 
-export const MAP_RECONCILIATION_ALGORITHM_VERSION = 'map-reconciliation-v6-orphan-reverse-only';
+export const MAP_RECONCILIATION_ALGORITHM_VERSION = 'map-reconciliation-v7-global-reverse-assignment';
 const AUTO_LINK_SCORE = 0.92;
 const AUTO_LINK_MARGIN = 0.15;
 const REVIEW_SCORE = 0.70;
@@ -137,6 +137,107 @@ export type ReverseOrphanCorrectionAssessment = {
   evidenceCodes: string[];
   rejectionReason?: string;
 };
+
+export type GlobalAssignmentEdge = {
+  buildingId: string;
+  addressId: string;
+  weight: number;
+};
+
+/**
+ * Maximum-cardinality, maximum-weight one-to-one assignment. Dummy columns
+ * allow buildings to remain unresolved; real edges receive a cardinality
+ * bonus so an extra valid match always beats any collection of weight gains.
+ */
+export function solveGlobalOneToOneAssignment(
+  edges: GlobalAssignmentEdge[]
+): Array<{ buildingId: string; addressId: string }> {
+  const buildingIds = [...new Set(edges.map((edge) => edge.buildingId))].sort();
+  const addressIds = [...new Set(edges.map((edge) => edge.addressId))].sort();
+  if (buildingIds.length === 0 || addressIds.length === 0) return [];
+
+  const rowByBuilding = new Map(buildingIds.map((id, index) => [id, index] as const));
+  const columnByAddress = new Map(addressIds.map((id, index) => [id, index] as const));
+  const columnCount = addressIds.length + buildingIds.length;
+  const forbiddenCost = 1_000_000_000;
+  const cardinalityBonus = 1_000_000;
+  const costs: number[][] = Array.from({ length: buildingIds.length }, () =>
+    Array.from({ length: columnCount }, (_, column) =>
+      column < addressIds.length ? forbiddenCost : 0
+    )
+  );
+  for (const edge of edges) {
+    const row = rowByBuilding.get(edge.buildingId);
+    const column = columnByAddress.get(edge.addressId);
+    if (row === undefined || column === undefined) continue;
+    costs[row][column] = Math.min(
+      costs[row][column],
+      -(cardinalityBonus + Math.round(edge.weight * 1_000))
+    );
+  }
+
+  // Hungarian algorithm for a rectangular matrix where rows <= columns.
+  const rowCount = buildingIds.length;
+  const potentialRows = Array(rowCount + 1).fill(0);
+  const potentialColumns = Array(columnCount + 1).fill(0);
+  const matchedRowForColumn = Array(columnCount + 1).fill(0);
+  const predecessor = Array(columnCount + 1).fill(0);
+  for (let row = 1; row <= rowCount; row += 1) {
+    matchedRowForColumn[0] = row;
+    let column0 = 0;
+    const minimum = Array(columnCount + 1).fill(Number.POSITIVE_INFINITY);
+    const used = Array(columnCount + 1).fill(false);
+    do {
+      used[column0] = true;
+      const currentRow = matchedRowForColumn[column0];
+      let delta = Number.POSITIVE_INFINITY;
+      let column1 = 0;
+      for (let column = 1; column <= columnCount; column += 1) {
+        if (used[column]) continue;
+        const currentCost =
+          costs[currentRow - 1][column - 1] -
+          potentialRows[currentRow] -
+          potentialColumns[column];
+        if (currentCost < minimum[column]) {
+          minimum[column] = currentCost;
+          predecessor[column] = column0;
+        }
+        if (minimum[column] < delta) {
+          delta = minimum[column];
+          column1 = column;
+        }
+      }
+      for (let column = 0; column <= columnCount; column += 1) {
+        if (used[column]) {
+          potentialRows[matchedRowForColumn[column]] += delta;
+          potentialColumns[column] -= delta;
+        } else {
+          minimum[column] -= delta;
+        }
+      }
+      column0 = column1;
+    } while (matchedRowForColumn[column0] !== 0);
+    do {
+      const column1 = predecessor[column0];
+      matchedRowForColumn[column0] = matchedRowForColumn[column1];
+      column0 = column1;
+    } while (column0 !== 0);
+  }
+
+  const assignments: Array<{ buildingId: string; addressId: string }> = [];
+  for (let column = 1; column <= addressIds.length; column += 1) {
+    const row = matchedRowForColumn[column];
+    if (row === 0 || costs[row - 1][column - 1] >= forbiddenCost) continue;
+    assignments.push({
+      buildingId: buildingIds[row - 1],
+      addressId: addressIds[column - 1],
+    });
+  }
+  return assignments.sort((left, right) =>
+    left.buildingId.localeCompare(right.buildingId) ||
+    left.addressId.localeCompare(right.addressId)
+  );
+}
 
 function asRecord(value: unknown): JsonRecord {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as JsonRecord : {};
@@ -350,7 +451,7 @@ function civicIdentityFromFeature(feature: BundleFeature): string {
   });
 }
 
-function addressContextMatchesReverse(
+export function addressContextMatchesReverse(
   feature: BundleFeature,
   result: ReverseResult
 ): boolean {
@@ -595,6 +696,22 @@ export function buildingAllowsMultipleAddresses(building: BundleFeature): boolea
   return (
     properties.is_townhouse === true ||
     Number(properties.address_count ?? properties.unit_count ?? 0) > 1 ||
+    ['townhouse', 'row house', 'terrace', 'apartment', 'multi family', 'multiplex']
+      .some((candidate) => type.includes(candidate))
+  );
+}
+
+export function buildingHasAuthoritativeMultiUnitMetadata(building: BundleFeature): boolean {
+  const properties = asRecord(building.properties);
+  const type = normalizeText(
+    properties.subtype ??
+    properties.building_type ??
+    properties.class ??
+    properties.type
+  );
+  return (
+    properties.is_townhouse === true ||
+    Number(properties.authoritative_unit_count ?? properties.source_unit_count ?? 0) > 1 ||
     ['townhouse', 'row house', 'terrace', 'apartment', 'multi family', 'multiplex']
       .some((candidate) => type.includes(candidate))
   );
@@ -893,6 +1010,42 @@ export class CampaignMapReconciliationService {
       return { decision_id: decision.id, status: 'rolled_back', unchanged: true };
     }
     if (decision.status !== 'applied') throw new Error('Only applied decisions can be rolled back');
+
+    if (
+      (decision.action === 'link_address' || decision.action === 'reassign_address') &&
+      decision.proposed_state.global_assignment === true
+    ) {
+      const rollback = await this.supabase.rpc('rollback_global_reverse_assignment', {
+        p_run_id: decision.run_id,
+      });
+      if (rollback.error) {
+        throw new Error(`Failed to roll back global reverse assignment: ${rollback.error.message}`);
+      }
+      if (rollback.data !== true) {
+        throw new Error('Global reverse assignment is no longer safe to roll back');
+      }
+      const rolledBackAt = new Date().toISOString();
+      await this.supabase
+        .from('map_reconciliation_decisions')
+        .update({
+          reviewed_at: rolledBackAt,
+          reviewed_by: reviewerId,
+          review_reason: reason ?? 'Global assignment rolled back',
+        })
+        .eq('run_id', decision.run_id)
+        .eq('status', 'rolled_back');
+      if (rebuildBundle) {
+        await prebuildCampaignMapBundle(this.supabase, decision.campaign_id, undefined, {
+          forceRebuild: true,
+        });
+      }
+      return {
+        decision_id: decision.id,
+        run_id: decision.run_id,
+        status: 'rolled_back',
+        batch: true,
+      };
+    }
 
     if (
       decision.action === 'link_address' &&
@@ -1214,8 +1367,13 @@ export class CampaignMapReconciliationService {
       report.coverage_before = addresses.length > 0 ? round(links.length / addresses.length * 100, 2) : 100;
 
       const protectedState = await this.loadProtectedState(run.campaign_id);
-      if (MAP_RECONCILIATION_ALGORITHM_VERSION.endsWith('orphan-reverse-only')) {
-        await this.processOrphanReverseOnly({
+      const hasUsableParcels =
+        asArray<BundleFeature>(asRecord(bundle.parcels).features).length > 0;
+      if (
+        MAP_RECONCILIATION_ALGORITHM_VERSION.endsWith('global-reverse-assignment') &&
+        !hasUsableParcels
+      ) {
+        await this.processGlobalReverseAssignment({
           run,
           addresses,
           buildings,
@@ -1701,7 +1859,7 @@ export class CampaignMapReconciliationService {
     return { addressIds, buildingIds };
   }
 
-  private async processOrphanReverseOnly(input: {
+  private async processGlobalReverseAssignment(input: {
     run: ReconciliationRunRow;
     addresses: BundleFeature[];
     buildings: BundleFeature[];
@@ -1727,9 +1885,12 @@ export class CampaignMapReconciliationService {
       .map((orphan) => stringValue(orphan.building_id ?? orphan.buildingId)?.toLowerCase())
       .filter((id): id is string => Boolean(id)));
 
-    input.report.unlinked_buildings_examined = orphanBuildingIds.size;
+    input.report.unlinked_buildings_examined = input.buildings.length;
+    input.report.coverage_before = input.buildings.length > 0
+      ? round(linkedBuildingIds.size / input.buildings.length * 100, 2)
+      : 100;
     await this.updateRun(input.run.id, 'geocoding', 'geocoding');
-    const decisions = await this.reverseGeocodeDecisions({
+    const decisions = await this.globalReverseGeocodeDecisions({
       run: input.run,
       buildings: input.buildings,
       addresses: input.addresses,
@@ -1751,7 +1912,17 @@ export class CampaignMapReconciliationService {
     let appliedCount = 0;
     if (input.run.mode === 'apply_high_confidence') {
       await this.updateRun(input.run.id, 'applying', 'applying');
-      for (const decision of decisions) {
+      const globalAssignments = decisions.filter((decision) =>
+        decision.status === 'proposed' &&
+        (decision.action === 'link_address' || decision.action === 'reassign_address') &&
+        decision.proposed_state.global_assignment === true
+      );
+      if (globalAssignments.length > 0) {
+        appliedCount += await this.applyGlobalAssignmentBatch(input.run, globalAssignments);
+      }
+      for (const decision of decisions.filter((candidate) =>
+        candidate.proposed_state.global_assignment !== true
+      )) {
         if (decision.status === 'proposed' && await this.applyDecision(decision)) {
           appliedCount += 1;
         }
@@ -1769,36 +1940,76 @@ export class CampaignMapReconciliationService {
     input.report.orphan_addresses_reused = decisions.filter((decision) =>
       decision.action === 'link_address' && countsDecision(decision)
     ).length;
+    input.report.links_reassigned = decisions.filter((decision) =>
+      decision.action === 'reassign_address' && countsDecision(decision)
+    ).length;
     input.report.provisional_addresses_created = decisions.filter((decision) =>
       decision.action === 'create_synthetic_address' && countsDecision(decision)
     ).length;
-    input.report.reverse_geocodes_matched =
-      input.report.orphan_addresses_reused + input.report.provisional_addresses_created;
-    input.report.unresolved_buildings = Math.max(
-      0,
-      input.report.building_orphans_before - input.report.reverse_geocodes_matched
-    );
+    input.report.review_needed = decisions.filter((decision) =>
+      decision.status === 'requires_review'
+    ).length;
 
     // Preserve the established additive report contract for older clients.
     input.report.addresses_linked = input.report.orphan_addresses_reused;
     input.report.synthetic_addresses_created = input.report.provisional_addresses_created;
-    input.report.address_orphans_after = Math.max(
-      0,
-      input.report.address_orphans_before - input.report.orphan_addresses_reused
-    );
-    input.report.building_orphans_after = input.report.unresolved_buildings;
     const resultingAddressCount = input.addresses.length + input.report.provisional_addresses_created;
-    input.report.coverage_after = resultingAddressCount > 0
-      ? round(
-          Math.min(
-            resultingAddressCount,
-            input.links.length +
-              input.report.orphan_addresses_reused +
-              input.report.provisional_addresses_created
-          ) / resultingAddressCount * 100,
-          2
-        )
-      : 100;
+    if (input.run.mode === 'apply_high_confidence') {
+      const [linksAfter, addressOrphansAfter] = await Promise.all([
+        this.supabase
+          .from('building_address_links')
+          .select('address_id, building_id')
+          .eq('campaign_id', input.run.campaign_id)
+          .eq('link_state', 'active'),
+        this.supabase
+          .from('address_orphans')
+          .select('id', { count: 'exact', head: true })
+          .eq('campaign_id', input.run.campaign_id)
+          .in('status', ['pending', 'pending_review', 'ambiguous_match']),
+      ]);
+      const linkedBuildingCount = new Set((linksAfter.data ?? [])
+        .map((link) => stringValue(link.building_id)?.toLowerCase())
+        .filter((id): id is string => Boolean(id))).size;
+      input.report.address_orphans_after = addressOrphansAfter.count ?? Math.max(
+        0,
+        resultingAddressCount - (linksAfter.data?.length ?? 0)
+      );
+      input.report.building_orphans_after = Math.max(
+        0,
+        input.buildings.length - linkedBuildingCount
+      );
+      input.report.unresolved_buildings = input.report.building_orphans_after;
+      input.report.reverse_geocodes_matched = Math.max(
+        0,
+        linkedBuildingCount - (input.buildings.length - input.report.building_orphans_before)
+      ) + input.report.links_reassigned;
+      input.report.coverage_after = input.buildings.length > 0
+        ? round(linkedBuildingCount / input.buildings.length * 100, 2)
+        : 100;
+    } else {
+      const proposedBuildingIds = new Set(decisions
+        .filter((decision) => decision.status === 'proposed' && decision.building_id)
+        .map((decision) => decision.building_id!.toLowerCase()));
+      const projectedLinkedBuildingIds = new Set([
+        ...linkedBuildingIds,
+        ...proposedBuildingIds,
+      ]);
+      input.report.building_orphans_after = Math.max(
+        0,
+        input.buildings.length - projectedLinkedBuildingIds.size
+      );
+      input.report.unresolved_buildings = input.report.building_orphans_after;
+      input.report.reverse_geocodes_matched = proposedBuildingIds.size;
+      input.report.address_orphans_after = Math.max(
+        0,
+        input.report.address_orphans_before -
+          input.report.orphan_addresses_reused +
+          input.report.links_reassigned
+      );
+      input.report.coverage_after = input.buildings.length > 0
+        ? round(projectedLinkedBuildingIds.size / input.buildings.length * 100, 2)
+        : 100;
+    }
 
     const completedAt = new Date().toISOString();
     await this.supabase
@@ -1959,6 +2170,368 @@ export class CampaignMapReconciliationService {
       }
     }
     return decisions;
+  }
+
+  private async globalReverseGeocodeDecisions(input: {
+    run: ReconciliationRunRow;
+    buildings: BundleFeature[];
+    addresses: BundleFeature[];
+    linkedBuildingIds: Set<string>;
+    linkedAddressIds: Set<string>;
+    orphanBuildingIds: Set<string>;
+    orphanAddressIds: Set<string>;
+    protectedAddressIds: Set<string>;
+    protectedBuildingIds: Set<string>;
+  }): Promise<ReconciliationDecision[]> {
+    if (process.env.MAP_RECONCILIATION_ENABLE_REVERSE_GEOCODE !== 'true') return [];
+    const maxGeocodes = Math.max(
+      0,
+      Math.min(500, Number(process.env.MAP_RECONCILIATION_MAX_GEOCODES_PER_RUN ?? 500))
+    );
+    if (maxGeocodes === 0) return [];
+
+    const addressesById = new Map<string, BundleFeature>();
+    const addressesByCivicIdentity = new Map<string, BundleFeature[]>();
+    for (const address of input.addresses) {
+      const id = addressId(address);
+      if (!id) continue;
+      addressesById.set(id.toLowerCase(), address);
+      const identity = civicIdentityFromFeature(address);
+      if (!identity.replaceAll('|', '')) continue;
+      addressesByCivicIdentity.set(identity, [
+        ...(addressesByCivicIdentity.get(identity) ?? []),
+        address,
+      ]);
+    }
+
+    const currentLinkByAddress = new Map<string, JsonRecord>();
+    const currentAddressIdsByBuilding = new Map<string, string[]>();
+    const currentLinks = asArray<JsonRecord>(
+      (await readCurrentCampaignMapBundle(this.supabase, input.run.campaign_id))
+        ?.links
+    );
+    // The source bundle is authoritative for this run. Falling back to the
+    // current row above keeps direct method tests and retried workers safe.
+    const linkRows: JsonRecord[] = currentLinks.length > 0
+      ? currentLinks
+      : ((await this.supabase
+          .from('building_address_links')
+          .select('address_id, building_id, match_type, confidence, user_confirmed, locked')
+          .eq('campaign_id', input.run.campaign_id)).data ?? []) as JsonRecord[];
+    for (const link of linkRows) {
+      const addressIdValue = stringValue(link.address_id ?? link.addressId);
+      const buildingIdValue = stringValue(link.building_id ?? link.buildingId);
+      if (!addressIdValue || !buildingIdValue) continue;
+      currentLinkByAddress.set(addressIdValue.toLowerCase(), link);
+      currentAddressIdsByBuilding.set(buildingIdValue.toLowerCase(), [
+        ...(currentAddressIdsByBuilding.get(buildingIdValue.toLowerCase()) ?? []),
+        addressIdValue,
+      ]);
+    }
+
+    const geocoded: Array<{
+      building: BundleFeature;
+      buildingId: string;
+      anchor: Point;
+      result: ReverseResult;
+      spatialDistance: number;
+      strong: boolean;
+      multipleAddressesAllowed: boolean;
+    }> = [];
+    const orderedBuildings = input.buildings
+      .filter((building) => !isExplicitNonResidentialBuilding(building))
+      .sort((left, right) => (featureId(left) ?? '').localeCompare(featureId(right) ?? ''));
+    for (const building of orderedBuildings.slice(0, maxGeocodes)) {
+      const buildingIdValue = featureId(building);
+      if (!buildingIdValue) continue;
+      try {
+        const anchor = turf.pointOnFeature(building as GeoJSON.Feature).geometry.coordinates as Point;
+        const result = await this.reverseGeocode(anchor);
+        if (!result || !result.houseNumber || !result.streetName) continue;
+        const spatialDistance = pointToGeometryDistanceMeters(
+          [result.longitude, result.latitude],
+          building.geometry
+        );
+        if (!Number.isFinite(spatialDistance) || spatialDistance > 12) continue;
+        geocoded.push({
+          building,
+          buildingId: buildingIdValue,
+          anchor,
+          result,
+          spatialDistance,
+          strong: result.accuracy === 'rooftop' || result.accuracy === 'parcel',
+          multipleAddressesAllowed: buildingHasAuthoritativeMultiUnitMetadata(building),
+        });
+        if (geocoded.length === 1 || geocoded.length % 10 === 0) {
+          await this.heartbeatRun(input.run.id, {
+            phase: 'geocoding',
+            building_index: geocoded.length,
+            building_count: orderedBuildings.length,
+          });
+        }
+      } catch {
+        // Invalid geometry or a provider miss remains visible for review.
+      }
+    }
+
+    const reverseIdentityCounts = new Map<string, number>();
+    for (const item of geocoded) {
+      reverseIdentityCounts.set(
+        item.result.identity,
+        (reverseIdentityCounts.get(item.result.identity) ?? 0) + 1
+      );
+    }
+
+    const edges: GlobalAssignmentEdge[] = [];
+    const edgeEvidence = new Map<string, {
+      item: typeof geocoded[number];
+      address: BundleFeature;
+    }>();
+    const reviewDecisions: ReconciliationDecision[] = [];
+    const syntheticDecisions: ReconciliationDecision[] = [];
+
+    for (const item of geocoded) {
+      const buildingKey = item.buildingId.toLowerCase();
+      const civicIdentity = normalizedCivicAddressIdentity({
+        houseNumber: item.result.houseNumber,
+        streetName: item.result.streetName,
+      });
+      const civicMatches = addressesByCivicIdentity.get(civicIdentity) ?? [];
+      const contextMatches = civicMatches.filter((address) =>
+        addressContextMatchesReverse(address, item.result)
+      );
+      const currentAddressIds = currentAddressIdsByBuilding.get(buildingKey) ?? [];
+      const currentExactAddress = currentAddressIds.find((id) => {
+        const address = addressesById.get(id.toLowerCase());
+        return Boolean(
+          address &&
+          civicIdentityFromFeature(address) === civicIdentity &&
+          addressContextMatchesReverse(address, item.result)
+        );
+      });
+
+      if (
+        input.protectedBuildingIds.has(buildingKey) ||
+        (currentExactAddress && input.protectedAddressIds.has(currentExactAddress.toLowerCase()))
+      ) {
+        continue;
+      }
+
+      if (item.multipleAddressesAllowed) {
+        const beforeState = {
+          building_id: item.buildingId,
+          current_address_ids: currentAddressIds,
+        };
+        reviewDecisions.push({
+          id: decisionId(input.run.id, 'leave_unresolved', null, item.buildingId),
+          run_id: input.run.id,
+          campaign_id: input.run.campaign_id,
+          action: 'leave_unresolved',
+          status: 'requires_review',
+          address_id: null,
+          building_id: item.buildingId,
+          secondary_building_id: null,
+          unit_id: null,
+          parent_building_id: null,
+          unit_index: null,
+          address_identity: item.result.identity,
+          split_signature: null,
+          evidence_codes: [
+            'global_reverse_geocode',
+            'authoritative_multi_unit_capacity',
+            'multi_unit_review',
+          ],
+          score: REVIEW_SCORE,
+          runner_up_margin: null,
+          precondition_hash: stableHash(beforeState),
+          before_state: beforeState,
+          proposed_state: {
+            formatted: item.result.formatted,
+            accuracy: item.result.accuracy,
+          },
+        });
+        continue;
+      }
+
+      if (!item.strong) {
+        const beforeState = {
+          building_id: item.buildingId,
+          current_address_ids: currentAddressIds,
+        };
+        reviewDecisions.push({
+          id: decisionId(input.run.id, 'leave_unresolved', null, item.buildingId),
+          run_id: input.run.id,
+          campaign_id: input.run.campaign_id,
+          action: 'leave_unresolved',
+          status: 'requires_review',
+          address_id: null,
+          building_id: item.buildingId,
+          secondary_building_id: null,
+          unit_id: null,
+          parent_building_id: null,
+          unit_index: null,
+          address_identity: item.result.identity,
+          split_signature: null,
+          evidence_codes: [
+            'global_reverse_geocode',
+            `accuracy_${item.result.accuracy || 'unknown'}`,
+            'weak_accuracy_review',
+          ],
+          score: REVIEW_SCORE,
+          runner_up_margin: null,
+          precondition_hash: stableHash(beforeState),
+          before_state: beforeState,
+          proposed_state: {
+            formatted: item.result.formatted,
+            accuracy: item.result.accuracy,
+            spatial_distance_m: round(item.spatialDistance, 1),
+          },
+        });
+        continue;
+      }
+
+      for (const address of contextMatches) {
+        const addressIdValue = addressId(address);
+        if (!addressIdValue || input.protectedAddressIds.has(addressIdValue.toLowerCase())) continue;
+        const sourcePoint = featurePoint(address);
+        const sourceDistance = sourcePoint
+          ? pointToGeometryDistanceMeters(sourcePoint, item.building.geometry)
+          : 100;
+        const currentBuildingId = stringValue(
+          currentLinkByAddress.get(addressIdValue.toLowerCase())?.building_id
+        );
+        const weight =
+          100 +
+          (currentBuildingId?.toLowerCase() === buildingKey ? 10 : 0) +
+          Math.max(0, 100 - Math.min(sourceDistance, 100)) / 1_000;
+        edges.push({
+          buildingId: item.buildingId,
+          addressId: addressIdValue,
+          weight,
+        });
+        edgeEvidence.set(`${buildingKey}:${addressIdValue.toLowerCase()}`, { item, address });
+      }
+
+      if (
+        contextMatches.length === 0 &&
+        civicMatches.length === 0 &&
+        reverseIdentityCounts.get(item.result.identity) === 1 &&
+        currentAddressIds.length === 0
+      ) {
+        const beforeState = { address_identity: item.result.identity, exists: false };
+        syntheticDecisions.push({
+          id: decisionId(input.run.id, 'create_synthetic_address', null, item.buildingId),
+          run_id: input.run.id,
+          campaign_id: input.run.campaign_id,
+          action: 'create_synthetic_address',
+          status: 'proposed',
+          address_id: null,
+          building_id: item.buildingId,
+          secondary_building_id: null,
+          unit_id: null,
+          parent_building_id: null,
+          unit_index: null,
+          address_identity: item.result.identity,
+          split_signature: null,
+          evidence_codes: [
+            'global_reverse_geocode',
+            `accuracy_${item.result.accuracy}`,
+            'unique_reverse_building_identity',
+            'no_equivalent_campaign_address',
+          ],
+          score: SYNTHETIC_SCORE,
+          runner_up_margin: SYNTHETIC_MARGIN,
+          precondition_hash: stableHash(beforeState),
+          before_state: beforeState,
+          proposed_state: {
+            formatted: item.result.formatted,
+            house_number: item.result.houseNumber,
+            street_name: item.result.streetName,
+            locality: item.result.locality,
+            region: item.result.region,
+            postal_code: item.result.postalCode,
+            country: item.result.country,
+            longitude: item.anchor[0],
+            latitude: item.anchor[1],
+            accuracy: item.result.accuracy,
+            spatial_distance_m: round(item.spatialDistance, 1),
+            source: 'derived_reverse_geocode',
+          },
+        });
+      }
+    }
+
+    const assignments = solveGlobalOneToOneAssignment(edges);
+    const assignmentDecisions = assignments.flatMap(({ buildingId, addressId: addressIdValue }) => {
+      const evidence = edgeEvidence.get(`${buildingId.toLowerCase()}:${addressIdValue.toLowerCase()}`);
+      if (!evidence) return [];
+      const currentLink = currentLinkByAddress.get(addressIdValue.toLowerCase());
+      const currentBuildingId = stringValue(currentLink?.building_id ?? currentLink?.buildingId);
+      if (currentBuildingId?.toLowerCase() === buildingId.toLowerCase()) {
+        return [];
+      }
+      const action: DecisionAction = currentBuildingId ? 'reassign_address' : 'link_address';
+      const candidateProperties = asRecord(evidence.address.properties);
+      const candidatePostal = normalizeText(
+        candidateProperties.postal_code ??
+        candidateProperties.postalCode ??
+        candidateProperties.zip
+      ).replaceAll(' ', '');
+      const reversePostal = normalizeText(evidence.item.result.postalCode).replaceAll(' ', '');
+      const beforeState = currentBuildingId
+        ? {
+            address_id: addressIdValue,
+            building_id: UUID_PATTERN.test(currentBuildingId) ? currentBuildingId : null,
+            building_gers_id: currentBuildingId,
+            link: currentLink,
+          }
+        : { link: null, address_id: addressIdValue };
+      return [{
+        id: decisionId(input.run.id, action, addressIdValue, buildingId),
+        run_id: input.run.id,
+        campaign_id: input.run.campaign_id,
+        action,
+        status: 'proposed' as const,
+        address_id: addressIdValue,
+        building_id: buildingId,
+        secondary_building_id: currentBuildingId,
+        unit_id: null,
+        parent_building_id: null,
+        unit_index: null,
+        address_identity: evidence.item.result.identity,
+        split_signature: null,
+        evidence_codes: [
+          'global_reverse_geocode',
+          `accuracy_${evidence.item.result.accuracy}`,
+          'normalized_civic_identity',
+          'candidate_context_match',
+          candidatePostal && reversePostal
+            ? 'candidate_postal_match'
+            : 'candidate_postal_unavailable',
+          'global_one_to_one',
+          'building_capacity_one',
+        ],
+        score: 0.995,
+        runner_up_margin: SYNTHETIC_MARGIN,
+        precondition_hash: stableHash(beforeState),
+        before_state: beforeState,
+        proposed_state: {
+          building_id: buildingId,
+          previous_building_id: currentBuildingId,
+          move_source: false,
+          accuracy: evidence.item.result.accuracy,
+          spatial_distance_m: round(evidence.item.spatialDistance, 1),
+          source: 'reconciliation_reverse_geocode',
+          global_assignment: true,
+        },
+      } satisfies ReconciliationDecision];
+    });
+
+    return [
+      ...assignmentDecisions,
+      ...syntheticDecisions,
+      ...reviewDecisions,
+    ];
   }
 
   private async reverseGeocodeDecisions(input: {
@@ -2545,6 +3118,38 @@ export class CampaignMapReconciliationService {
       });
     }
     return decisions;
+  }
+
+  private async applyGlobalAssignmentBatch(
+    run: ReconciliationRunRow,
+    decisions: ReconciliationDecision[]
+  ): Promise<number> {
+    const assignments = decisions.flatMap((decision) =>
+      decision.address_id && decision.building_id
+        ? [{
+            decision_id: decision.id,
+            address_id: decision.address_id,
+            building_id: decision.building_id,
+            score: decision.score,
+            evidence_codes: decision.evidence_codes,
+          }]
+        : []
+    );
+    if (assignments.length === 0) return 0;
+    const { data, error } = await this.supabase.rpc('apply_global_reverse_assignment', {
+      p_campaign_id: run.campaign_id,
+      p_run_id: run.id,
+      p_assignments: assignments,
+      p_algorithm_version: MAP_RECONCILIATION_ALGORITHM_VERSION,
+    });
+    if (error) {
+      throw new Error(`Failed to apply global reverse assignment: ${error.message}`);
+    }
+    const applied = Math.max(0, Number(data ?? 0));
+    for (const decision of decisions) {
+      decision.status = applied > 0 ? 'applied' : 'stale';
+    }
+    return applied;
   }
 
   private async applyDecision(decision: ReconciliationDecision): Promise<boolean> {
