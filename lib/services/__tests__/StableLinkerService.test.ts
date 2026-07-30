@@ -585,7 +585,7 @@ async function run() {
       rectangle(-79.00420, 43.00400, -79.00405, 43.00415),
       { primaryStreet: 'Highland Avenue', unitsCount: 2 }
     );
-    const address = makeAddress('324', -79.00418, 43.00430, 'Highland Avenue');
+    const address = makeAddress('324', -79.00418, 43.00422, 'Highland Avenue');
 
     const match = service.matchAddressToBuilding(
       address,
@@ -634,11 +634,12 @@ async function run() {
     const service = createStableLinkerHarness();
     const rowBuilding = makeBuilding(
       'moyse-row',
-      rectangle(-79.00600, 43.00600, -79.00580, 43.00612)
+      rectangle(-79.00600, 43.00600, -79.00580, 43.00612),
+      { primaryStreet: 'Moyse Drive' }
     );
     const addresses = [
-      makeAddress('45', -79.00590, 43.00620, 'Moyse Drive'),
-      makeAddress('47', -79.00584, 43.00621, 'Moyse Drive'),
+      makeAddress('45', -79.00590, 43.00618, 'Moyse Drive'),
+      makeAddress('47', -79.00584, 43.00619, 'Moyse Drive'),
     ];
     const inferred = service.inferMultiAddressBuildingIds(addresses, [rowBuilding], []);
 
@@ -654,6 +655,46 @@ async function run() {
 
     assertEqual(match.matchType, 'proximity_verified');
     assertEqual(match.buildingId, 'moyse-row');
+  });
+
+  test('Known multi-address building without parcels cannot bypass the 10m proximity cap', () => {
+    const service = createStableLinkerHarness();
+    const rowBuilding = makeBuilding(
+      'parcel-less-row',
+      rectangle(-79.02020, 43.02000, -79.02000, 43.02020),
+      { primaryStreet: 'Crane Court', unitsCount: 4 }
+    );
+    const address = makeAddress('5350', -79.01984, 43.02010, 'Crane Court');
+
+    const match = service.matchAddressToBuilding(
+      address,
+      [rowBuilding],
+      [],
+      new Set(),
+      new Set()
+    );
+
+    assertEqual(match.matchType, 'orphan');
+    assertTrue(match.distanceMeters === 0, 'Orphan results must not persist a speculative distance link');
+  });
+
+  test('Parcel-backed match remains eligible beyond the detached 10m cap', () => {
+    const service = createStableLinkerHarness();
+    const building = makeBuilding(
+      'large-parcel-home',
+      rectangle(-79.03030, 43.03000, -79.03010, 43.03020),
+      { primaryStreet: 'Crane Court' }
+    );
+    const address = makeAddress('5352', -79.02990, 43.03010, 'Crane Court');
+    const parcels = service.prepareParcels([
+      makeParcel('parcel-5352', rectangle(-79.03040, 43.02990, -79.02980, 43.03030)),
+    ]);
+
+    const match = service.matchAddressToBuilding(address, [building], parcels);
+
+    assertEqual(match.matchType, 'parcel_verified');
+    assertEqual(match.buildingId, 'large-parcel-home');
+    assertTrue(match.distanceMeters > 10, 'Expected parcel fixture beyond the detached cap');
   });
 
   test('Detached same-street address beyond 12m stays orphan for reverse-geocode reconciliation', () => {

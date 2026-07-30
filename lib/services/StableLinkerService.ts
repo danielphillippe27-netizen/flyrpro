@@ -161,7 +161,9 @@ export const DETACHED_REVIEW_MAX_METERS = 12;
 // still resolve legitimate large parcels/row buildings. It is not an auto-link radius.
 const FALLBACK_RADIUS_METERS = 75;
 const PROXIMITY_RADIUS_METERS = DETACHED_AUTO_LINK_MAX_METERS;
-const MULTI_ADDRESS_NEARBY_RADIUS_METERS = 25;
+// A building being multi-address is not parcel evidence. Without an actual
+// parcel bridge, every distance-only match is subject to the same 10 m cap.
+const MULTI_ADDRESS_NEARBY_RADIUS_METERS = DETACHED_AUTO_LINK_MAX_METERS;
 const MINIMUM_SEMANTIC_PROXIMITY_SCORE = 0.65;
 
 interface ParcelFeature {
