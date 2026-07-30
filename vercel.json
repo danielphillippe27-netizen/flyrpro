@@ -16,6 +16,10 @@
     {
       "path": "/api/cron/map-reconciliation",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/territory-iq",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

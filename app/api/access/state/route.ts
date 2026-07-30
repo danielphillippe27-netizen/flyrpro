@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
     const { data: workspaceRows } = workspaceIds.length
       ? await admin
         .from('workspaces')
-          .select('id, name, industry, subscription_status, trial_ends_at, max_seats, onboarding_completed_at, referral_code_used')
+          .select('id, name, industry, subscription_status, trial_ends_at, max_seats, onboarding_completed_at, referral_code_used, territory_iq_enabled')
           .in('id', workspaceIds)
       : { data: [] };
     const workspaceOptions = (workspaceRows ?? []).map((workspace) => {
@@ -198,6 +198,7 @@ export async function GET(request: NextRequest) {
       workspace_id: workspace.id,
       workspaceName: workspace.name,
       industry: workspace.industry ?? null,
+      territoryIQEnabled: workspace.territory_iq_enabled === true,
       maxSeats: workspace.max_seats ?? 1,
       billableSeats: Math.max(1, workspace.max_seats ?? 1, billableSeats),
       hasAccess,
