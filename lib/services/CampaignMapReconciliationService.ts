@@ -1207,6 +1207,8 @@ export class CampaignMapReconciliationService {
           run,
           addresses,
           buildings,
+          sourceBuildings: bundle.buildings as GeoJSON.FeatureCollection,
+          sourceParcels: bundle.parcels as GeoJSON.FeatureCollection,
           links,
           addressOrphans,
           buildingOrphans,
@@ -1691,6 +1693,8 @@ export class CampaignMapReconciliationService {
     run: ReconciliationRunRow;
     addresses: BundleFeature[];
     buildings: BundleFeature[];
+    sourceBuildings: GeoJSON.FeatureCollection;
+    sourceParcels: GeoJSON.FeatureCollection;
     links: JsonRecord[];
     addressOrphans: JsonRecord[];
     buildingOrphans: JsonRecord[];
@@ -1801,6 +1805,7 @@ export class CampaignMapReconciliationService {
           coverage_percent: input.report.coverage_before,
         },
         report: input.report,
+        error_message: null,
         lease_owner: null,
         lease_expires_at: null,
         completed_at: completedAt,
@@ -1812,7 +1817,13 @@ export class CampaignMapReconciliationService {
       this.supabase,
       input.run.campaign_id,
       undefined,
-      { forceRebuild: true }
+      {
+        forceRebuild: true,
+        scopedGeometry: {
+          buildings: input.sourceBuildings,
+          parcels: input.sourceParcels,
+        },
+      }
     );
     await this.supabase
       .from('map_reconciliation_runs')
