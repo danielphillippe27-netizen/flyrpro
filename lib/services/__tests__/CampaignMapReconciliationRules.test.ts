@@ -7,6 +7,7 @@ import {
   buildingHasAuthoritativeMultiUnitMetadata,
   canCreateSyntheticAfterGlobalAssignment,
   buildLinkedNeighborhoodEvidence,
+  configuredMaxReverseGeocodes,
   configuredReverseGeocodingStorageMode,
   neighborhoodContextForCandidate,
   normalizedCivicAddressIdentity,
@@ -34,6 +35,12 @@ assert(
 assert(
   configuredReverseGeocodingStorageMode(undefined) === 'temporary',
   'temporary Mapbox reverse geocoding must be the safe default'
+);
+assert(
+  configuredMaxReverseGeocodes('') === 100 &&
+    configuredMaxReverseGeocodes('not-a-number') === 100 &&
+    configuredMaxReverseGeocodes('0') === 0,
+  'blank or invalid reverse-geocode limits must use the fallback while explicit zero disables calls'
 );
 
 const globalAssignment = solveGlobalOneToOneAssignment([

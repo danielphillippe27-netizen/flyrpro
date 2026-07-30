@@ -11,7 +11,7 @@ import { CampaignMapModeService } from './CampaignMapModeService';
 import { TownhouseSplitterService, type BuildingFeature as TownhouseBuildingFeature } from './TownhouseSplitterService';
 import { uuidV5 } from './TownhouseUnitIdentity';
 
-export const MAP_RECONCILIATION_ALGORITHM_VERSION = 'map-reconciliation-v14-parcel-orphan-temporary-reverse';
+export const MAP_RECONCILIATION_ALGORITHM_VERSION = 'map-reconciliation-v15-parcel-orphan-temporary-reverse';
 const AUTO_LINK_SCORE = 0.92;
 const AUTO_LINK_MARGIN = 0.15;
 const REVIEW_SCORE = 0.70;
@@ -941,6 +941,16 @@ export function configuredReverseGeocodingStorageMode(
   configured = process.env.MAPBOX_GEOCODING_STORAGE_MODE
 ): ReverseGeocodingStorageMode {
   return normalizeText(configured) === 'permanent' ? 'permanent' : 'temporary';
+}
+
+export function configuredMaxReverseGeocodes(
+  configured = process.env.MAP_RECONCILIATION_MAX_GEOCODES_PER_RUN,
+  fallback = 100
+): number {
+  const raw = String(configured ?? '').trim();
+  const parsed = raw === '' ? fallback : Number(raw);
+  const safe = Number.isFinite(parsed) ? parsed : fallback;
+  return Math.max(0, Math.min(500, Math.floor(safe)));
 }
 
 export class CampaignMapReconciliationService {
@@ -2253,9 +2263,9 @@ export class CampaignMapReconciliationService {
     protectedBuildingIds: Set<string>;
   }): Promise<ReconciliationDecision[]> {
     if (process.env.MAP_RECONCILIATION_ENABLE_REVERSE_GEOCODE !== 'true') return [];
-    const maxGeocodes = Math.max(
-      0,
-      Math.min(500, Number(process.env.MAP_RECONCILIATION_MAX_GEOCODES_PER_RUN ?? 500))
+    const maxGeocodes = configuredMaxReverseGeocodes(
+      process.env.MAP_RECONCILIATION_MAX_GEOCODES_PER_RUN,
+      500
     );
     if (maxGeocodes === 0) return [];
 
@@ -2633,7 +2643,7 @@ export class CampaignMapReconciliationService {
     protectedBuildingIds: Set<string>;
   }): Promise<ReconciliationDecision[]> {
     if (process.env.MAP_RECONCILIATION_ENABLE_REVERSE_GEOCODE !== 'true') return [];
-    const maxGeocodes = Math.max(0, Math.min(500, Number(process.env.MAP_RECONCILIATION_MAX_GEOCODES_PER_RUN ?? 100)));
+    const maxGeocodes = configuredMaxReverseGeocodes();
     if (maxGeocodes === 0) return [];
     const allAddressesByIdentity = new Map<string, BundleFeature[]>();
     const orphanAddressesByIdentity = new Map<string, BundleFeature[]>();
